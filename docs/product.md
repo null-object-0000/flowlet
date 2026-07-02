@@ -6,6 +6,8 @@ Flowlet 是一个桌面优先的本地 AI 请求路由客户端。
 
 当前阶段采用 **LongCat + DeepSeek first** 策略：先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口、多账号管理、Claude Code 接入、请求日志和 Token / 成本分析做完整，再扩展更多渠道。详细阶段需求见 [LongCat-first 需求整理](./longcat-first.md) 和 [DeepSeek 首发渠道需求整理](./deepseek-first.md)。相关官方文档：LongCat [快速开始](https://longcat.chat/platform/docs/zh/)、[API 概述](https://longcat.chat/platform/docs/zh/APIDocs.html)、[Claude Code 配置](https://longcat.chat/platform/docs/zh/ClaudeCode.html)；DeepSeek [API 文档](https://api-docs.deepseek.com/zh-cn/)、[价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)、[Claude Code](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/claude_code)、[Anthropic API](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)、[余额查询](https://api-docs.deepseek.com/zh-cn/api/get-user-balance)。
 
+Flowlet 尚未发布第一个可用版本，因此第一版正式实现允许破坏式重构：不做旧 Provider 原型兼容，不做旧 SQLite 表迁移，直接以 Channel / Account / Model 作为正式数据模型。详细策略见 [破坏式重构策略](./breaking-refactor.md)。
+
 它让 Claude Code、Cursor、Cline、Open WebUI、Cherry Studio、Continue 等 AI 工具统一接入一个本地入口，并在不做协议转换、不改写响应内容的前提下，实现开箱即用渠道配置、虚拟模型路由、请求日志和 Token 成本分析。
 
 Flowlet 不是 LiteLLM Desktop、New API Desktop，也不是 Helicone / Portkey 这类服务端 AI Gateway。它的核心定位是：

@@ -4,6 +4,8 @@ Flowlet 是一个桌面优先的本地 AI 请求路由客户端。
 
 Flowlet 当前阶段采用 LongCat + DeepSeek first 策略：先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口、多账号管理、Claude Code 接入、请求日志和 Token / 成本分析做完整，再扩展更多渠道。
 
+项目尚未发布第一个可用版本，因此第一版正式实现允许破坏式重构：不兼容旧 Provider 原型、不做旧 SQLite 表迁移，直接以 Channel / Account / Model 作为正式数据模型。
+
 ## 产品原则
 
 - 支持多协议透明转发，但不做跨协议转换
@@ -71,6 +73,8 @@ Flowlet 当前阶段采用 LongCat + DeepSeek first 策略：先把 LongCat 和 
 - 继续验证透明转发、fallback、SSE 透传和构建流程
 
 详细阶段需求见 [docs/longcat-first.md](docs/longcat-first.md) 和 [docs/deepseek-first.md](docs/deepseek-first.md)。相关 LongCat 官方文档：[快速开始](https://longcat.chat/platform/docs/zh/)、[API 概述](https://longcat.chat/platform/docs/zh/APIDocs.html)、[Claude Code 配置](https://longcat.chat/platform/docs/zh/ClaudeCode.html)。相关 DeepSeek 官方文档：[API 文档](https://api-docs.deepseek.com/zh-cn/)、[价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)、[Claude Code](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/claude_code)、[Anthropic API](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)、[余额查询](https://api-docs.deepseek.com/zh-cn/api/get-user-balance)。
+
+破坏式重构策略见 [docs/breaking-refactor.md](docs/breaking-refactor.md)。
 
 ## 当前透明转发边界
 

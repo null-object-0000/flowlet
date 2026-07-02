@@ -4,6 +4,8 @@
 
 Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议透明转发的 AI 请求路由客户端。当前阶段采用 LongCat + DeepSeek first 策略，优先把 LongCat / DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口做完整，并以 Claude Code 接入作为核心验证场景。
 
+第一版正式实现采用破坏式重构策略。当前 Provider 原型、旧 SQLite 表和 `provider_id = default` 逻辑不需要兼容迁移，直接重建为 Channel / Account / Model 架构。
+
 产品重心是开箱即用的本地 AI 请求路由体验：普通用户选择渠道模板、填写 API Key、选择模型即可接入；高级用户再展开自定义 Base URL、Header、模型名、价格和错误识别规则。
 
 架构设计必须服务于以下边界：
@@ -39,6 +41,8 @@ Flowlet Desktop
 ```
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
+
+因为第一版尚未发布，SQLite 可以直接重建为新版最小表集合，不保留旧 `providers`、`provider_profiles` 或旧二段价格结构。
 
 ## 当前阶段核心模型
 

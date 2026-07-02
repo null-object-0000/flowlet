@@ -1,6 +1,19 @@
 # Roadmap
 
-## 当前进度
+## 当前判断
+
+Flowlet 已经完成桌面端和本地透明代理的基础雏形，但还不是稳定可用版本。当前阶段路线调整为 LongCat + DeepSeek first：先把 LongCat / DeepSeek OpenAI-compatible、Anthropic-compatible、Claude Code 接入、多账号管理、余额和账号级统计做完整。
+
+最关键的产品原则：
+
+```text
+Flowlet 不应该让普通用户维护 base_url 和模型名。
+普通用户应该选择渠道模板，填写 API Key，选择模型；自定义渠道只是高级能力。
+Flowlet 应该支持多协议透明转发，但不做跨协议转换；Claude Code 需要通过 Anthropic-compatible 入口接入。
+LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，一个账号只对应一个 API Key。
+```
+
+## 已完成基础雏形
 
 - [x] 创建 `README.md`
 - [x] 创建 `docs/product.md`
@@ -20,109 +33,134 @@
 - [x] 补充网络失败请求 metadata 日志
 - [x] 补充上游错误响应的日志细节
 - [x] 完成 unknown token 离线分析雏形
-- [x] 完成普通 JSON 响应的 response.usage 旁路提取
+- [x] 完成普通 JSON 响应的 `response.usage` 旁路提取
 - [x] 完成基于已知 token 的成本计算结构
 - [x] 完成请求日志 metadata 列表雏形
 - [x] 完成桌面端 UI MVP 页面
+
+这些项目代表“骨架和雏形完成”，后续仍需回归验证、产品化交互和异常场景补强。
 
 ## 当前阻塞记录
 
 - 2026-07-02：`src-tauri/tauri.conf.json` identifier 调整后，计划再次运行 `cargo check` 复验；当前环境提升权限额度限制导致命令未能执行。下一步恢复权限后优先运行 `cargo check`、`cargo test` 和 `bun run tauri build --debug`。
 
-## 阶段一：项目初始化与文档
+## Milestone 0：需求校准与文档更新
 
-- [x] 创建 README.md
-- [x] 创建 docs/product.md
-- [x] 创建 docs/roadmap.md
-- [x] 创建 docs/architecture.md
-- [x] 明确产品定位、核心原则、MVP 范围、第一阶段不做什么、后续路线
-- [x] 所有文档使用中文
+- [x] 更新 README，明确 LongCat + DeepSeek first
+- [x] 更新 `docs/product.md`，补充 LongCat + DeepSeek first / Channel / Account / Model
+- [x] 更新 `docs/architecture.md`，补充 Channel / Account / Model 和多协议入口
+- [x] 更新 `docs/roadmap.md`，区分“已完成雏形”和“待产品化”
+- [x] 修复 `docs/product.md` Markdown 代码块问题
+- [x] 新增 `docs/provider-presets.md`
+- [x] 新增 `docs/provider-capabilities.md`
+- [x] 调整产品边界：LongCat + DeepSeek first，多协议透明转发，不做跨协议转换
+- [x] 新增 `docs/longcat-first.md`
+- [x] 新增 `docs/deepseek-first.md`
+- [x] 调整当前阶段策略为 LongCat + DeepSeek first
 
-## 阶段二：桌面端技术骨架
+## Milestone 1：LongCat OpenAI-compatible 透明转发
 
-- [x] Tauri 2 桌面项目
-- [x] React + TypeScript + Vite 前端
-- [x] Rust 后端 Core
-- [x] 基础目录结构
-- [x] 基础开发脚本
-- [x] Vite 本地启动验证
-- [x] Tauri debug 构建验证
+- [ ] 运行 `bun run check`
+- [ ] 运行 `bun run build`
+- [ ] 运行 `cargo fmt`
+- [ ] 运行 `cargo test`
+- [ ] 运行 `cargo check`
+- [ ] 验证 `/health`
+- [ ] 支持 LongCat OpenAI base_url
+- [ ] 验证 `/v1/*` OpenAI-compatible 透明转发
+- [ ] 支持 `/openai/v1/chat/completions`
+- [ ] 支持 LongCat API Key 替换
+- [ ] 记录 `channel_id` / `account_id`
+- [ ] 验证 400 不 fallback
+- [ ] 验证 429 / 5xx fallback
+- [ ] 验证 SSE 不解析、不改写
+- [ ] 复验日志旁路失败不影响主请求链路
 
-## 阶段三：本地代理 Core MVP
+## Milestone 2：LongCat Anthropic-compatible 透明转发
 
-- [x] 默认监听 `127.0.0.1:11434`
-- [x] 支持 `/health`
-- [x] 支持 `/v1/*` 路径透明转发雏形
-- [x] 支持配置一个 OpenAI-compatible Provider
-- [x] 请求侧替换上游 base_url 和 Authorization Header
-- [x] 流式响应使用上游字节流返回，不缓存完整响应
-- [x] 补充 `auto` 路由和受限降级单元测试
-- [x] 补充透明转发集成回归测试
-- [x] 增加成功请求日志旁路事件，不影响主链路
-- [x] 增加网络失败请求日志旁路事件，不影响主链路
+- [ ] Anthropic-compatible Gateway
+- [ ] 支持 `/anthropic/v1/messages` 透明转发
+- [ ] 支持 `/anthropic/v1/models` 透明转发
+- [ ] 支持 Anthropic 请求头透传
+- [ ] 支持 Claude Code 请求
+- [ ] 不做 Anthropic <-> OpenAI 协议转换
 
-## 阶段四：配置与数据存储
+## Milestone 3：LongCat 多账号管理
 
-- [x] 使用 SQLite 保存基础配置
-- [x] providers
-- [x] clients
-- [x] virtual_models
-- [x] virtual_model_routes
-- [x] request_logs
-- [x] usage_records
-- [x] model_prices
-- [x] API Key 字段预留加密能力
-- [x] Provider 基础管理 Tauri command
-- [x] 虚拟模型 auto 路由基础管理 Tauri command
-- [x] Client Token 基础管理 Tauri command
-- [x] 价格表管理 Tauri command
+- [ ] 内置 LongCat Channel Preset
+- [ ] LongCat 下可新增多个账号
+- [ ] 一个账号只对应一个 API Key
+- [ ] 账号支持启用 / 停用
+- [ ] 账号支持优先级
+- [ ] 按账号优先级路由
+- [ ] 失败后 fallback 到下一个账号
+- [ ] 账号禁用后不参与路由
 
-## 阶段五：虚拟模型 auto
+## Milestone 3.5：DeepSeek 首发渠道支持
 
-- [x] 对外模型名 `auto`
-- [x] `auto` 映射到一个或多个上游模型候选
-- [x] 第一版顺序路由
-- [x] 429、5xx、network error 尝试下一个候选
-- [x] 400、参数错误、协议不匹配、上下文超长不自动降级
-- [x] 日志记录 public_model、upstream_model、provider、fallback_count、route_reason
-- [x] quota exceeded 文本识别
-- [x] timeout fallback 雏形
-- [x] timeout UI 配置
+- [ ] 内置 DeepSeek Channel Preset
+- [ ] 支持 DeepSeek OpenAI base_url `https://api.deepseek.com`
+- [ ] 支持 DeepSeek Anthropic base_url `https://api.deepseek.com/anthropic`
+- [ ] 支持 `deepseek-v4-flash`
+- [ ] 支持 `deepseek-v4-pro`
+- [ ] 支持 DeepSeek 模型列表同步
+- [ ] 支持 DeepSeek 余额查询
+- [ ] 支持 DeepSeek 三段价格预设
+- [ ] 支持 DeepSeek Claude Code 接入向导
+- [ ] DeepSeek 402 / 429 / 500 / 503 支持账号级 fallback
+- [ ] DeepSeek 400 / 401 / 422 不自动 fallback
 
-## 阶段六：日志与离线分析
+## Milestone 4：Claude Code 接入向导
 
-- 成功请求默认 metadata 日志
-- 失败请求默认 metadata 日志
-- 完整请求/响应日志结构预留
-- [x] 离线 response.usage 提取雏形
-- [x] unknown token 标记
-- [x] 基础用量统计查询
-- [x] 基础成本统计结构
-- [x] response.usage 成本落库雏形
+- [ ] Claude Code 接入向导
+- [ ] 生成 Claude Code `settings.json`
+- [ ] 支持一键复制
+- [ ] 提供 `ANTHROPIC_BASE_URL=http://127.0.0.1:11434/anthropic` 配置提示
+- [ ] Client Token 支持 `Authorization: Bearer ...`
+- [ ] Client Token 支持 `X-Api-Key: ...`
+- [ ] Claude Code 使用 Flowlet Client Token
+- [ ] Flowlet 转发时替换 LongCat API Key
 
-## 阶段七：桌面端 UI MVP
+## Milestone 5：LongCat 模型与价格
 
-- 首页展示代理服务状态
-- 启动 / 停止本地代理
-- Provider 管理页
-- Client Token 管理页雏形
-- 虚拟模型管理页
-- 请求日志页 metadata 雏形
-- 基础用量统计页雏形
-- 一键复制 Base URL
-- 一键复制 Client Token
+- [ ] 内置 LongCat-2.0
+- [ ] 支持模型列表同步
+- [ ] 支持模型详情同步
+- [ ] 支持 LongCat 价格预设
+- [ ] 支持 `input_uncached_price`
+- [ ] 支持 `input_cached_price`
+- [ ] 支持 `output_price`
+- [ ] 支持 HTTP 200 成功请求成本估算
+- [ ] 失败请求不计入成本
+
+## Milestone 6：LongCat 余额与资源包快照
+
+- [ ] 支持账号余额手动登记
+- [ ] 支持 Token 资源包手动登记
+- [ ] 支持资源包过期时间
+- [ ] 支持账号维度余额 / 资源包展示
+- [ ] 后续再接入官方查询接口
+
+## Milestone 7：多账号成本与稳定性统计
+
+- [ ] 按账号统计请求数
+- [ ] 按账号统计 Token
+- [ ] 按账号统计成本
+- [ ] 按账号统计失败率
+- [ ] 按账号统计 fallback 次数
+- [ ] 展示最近错误
 
 ## 后续阶段：Docker / Web Console
 
-- Core 支持 headless 运行
-- Web Console
-- Docker Compose
-- Volume 持久化
-- 基础访问鉴权
+- [ ] Core 支持 headless 运行
+- [ ] Web Console
+- [ ] Docker Compose
+- [ ] Volume 持久化
+- [ ] 基础访问鉴权
 
 ## 后续阶段：智能路由
 
-- 规则路由
-- 请求类型识别
-- 小模型路由判断
-- 成本 / 延迟 / 成功率综合调度
+- [ ] 规则路由
+- [ ] 请求类型识别
+- [ ] 小模型路由判断
+- [ ] 成本 / 延迟 / 成功率综合调度

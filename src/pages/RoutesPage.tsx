@@ -46,7 +46,9 @@ export function RoutesPage({
 }) {
   const exposedModels = Array.from(
     routes
-      .reduce((groups, route, index) => {
+      .map((route, index) => ({ route, index }))
+      .filter(({ route }) => route.channel_id && route.account_id && route.upstream_model)
+      .reduce((groups, { route, index }) => {
         const key = `${route.channel_id}:${route.upstream_model}`;
         const current = groups.get(key) ?? {
           publicModel: route.upstream_model,

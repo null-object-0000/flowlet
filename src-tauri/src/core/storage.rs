@@ -1510,6 +1510,9 @@ impl Storage {
             "#,
         )?;
 
+        normalize_legacy_virtual_model_routes_schema(&connection)?;
+        normalize_legacy_model_prices_schema(&connection)?;
+
         add_column_if_missing(
             &connection,
             "channel_presets",
@@ -1521,6 +1524,121 @@ impl Storage {
             "channel_presets",
             "anthropic_auth",
             "TEXT NOT NULL DEFAULT 'bearer'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "virtual_model_id",
+            "TEXT NOT NULL DEFAULT 'auto'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "channel_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "account_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "upstream_model",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "client_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "priority",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "enabled",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "created_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "updated_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "channel_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "upstream_model",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "input_uncached_price",
+            "REAL NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "input_cached_price",
+            "REAL NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "output_price",
+            "REAL NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "currency",
+            "TEXT NOT NULL DEFAULT 'CNY'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "unit",
+            "TEXT NOT NULL DEFAULT '1M tokens'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "source",
+            "TEXT NOT NULL DEFAULT 'preset'",
+        )?;
+        add_column_if_missing(&connection, "model_prices", "synced_at", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "created_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "model_prices",
+            "updated_at",
+            "TEXT NOT NULL DEFAULT ''",
         )?;
 
         // 写入 schema 版本
@@ -1553,10 +1671,145 @@ fn add_column_if_missing(
     Ok(())
 }
 
+fn table_has_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, StorageError> {
+    let exists: i64 = connection.query_row(
+        &format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+        [column],
+        |row| row.get(0),
+    )?;
+    Ok(exists > 0)
+}
+
+fn normalize_legacy_virtual_model_routes_schema(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if !table_has_column(connection, "virtual_model_routes", "provider_name")? {
+        return Ok(());
+    }
+
+    connection.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS virtual_model_routes_legacy_migrate;
+        ALTER TABLE virtual_model_routes RENAME TO virtual_model_routes_legacy_migrate;
+        CREATE TABLE virtual_model_routes (
+            id               TEXT PRIMARY KEY,
+            virtual_model_id TEXT NOT NULL,
+            channel_id       TEXT NOT NULL,
+            account_id       TEXT NOT NULL,
+            upstream_model   TEXT NOT NULL,
+            client_protocol  TEXT NOT NULL,
+            priority         INTEGER NOT NULL,
+            enabled          INTEGER NOT NULL DEFAULT 1,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL
+        );
+        DROP TABLE virtual_model_routes_legacy_migrate;
+        "#,
+    )?;
+    Ok(())
+}
+
+fn normalize_legacy_model_prices_schema(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_column(connection, "model_prices", "provider_id")? {
+        return Ok(());
+    }
+
+    connection.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS model_prices_legacy_migrate;
+        ALTER TABLE model_prices RENAME TO model_prices_legacy_migrate;
+        CREATE TABLE model_prices (
+            id                    TEXT PRIMARY KEY,
+            channel_id            TEXT NOT NULL,
+            upstream_model        TEXT NOT NULL,
+            input_uncached_price  REAL NOT NULL DEFAULT 0,
+            input_cached_price    REAL NOT NULL DEFAULT 0,
+            output_price          REAL NOT NULL DEFAULT 0,
+            currency              TEXT NOT NULL,
+            unit                  TEXT NOT NULL,
+            source                TEXT NOT NULL DEFAULT 'preset',
+            synced_at             TEXT,
+            created_at            TEXT NOT NULL,
+            updated_at            TEXT NOT NULL
+        );
+        DROP TABLE model_prices_legacy_migrate;
+        "#,
+    )?;
+    Ok(())
+}
+
 fn parse_auth_strategy(value: &str) -> AuthStrategy {
     match value {
         "x_api_key" => AuthStrategy::XApiKey,
         _ => AuthStrategy::Bearer,
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn migrates_legacy_route_and_price_tables() {
+        let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE virtual_model_routes (
+                    id TEXT PRIMARY KEY,
+                    provider_name TEXT NOT NULL
+                );
+                CREATE TABLE model_prices (
+                    id TEXT PRIMARY KEY,
+                    provider_id TEXT NOT NULL
+                );
+                "#,
+            )
+            .expect("create legacy tables");
+        let storage = Storage {
+            connection: Arc::new(Mutex::new(connection)),
+        };
+
+        storage.migrate().expect("migrate legacy schema");
+
+        assert!(storage.list_route_candidates().is_ok());
+        assert!(storage.list_model_prices().is_ok());
+
+        let now = chrono::Utc::now().to_rfc3339();
+        storage
+            .save_route_candidates(&[RouteCandidate {
+                id: "route-test".to_string(),
+                virtual_model_id: "LongCat-2.0".to_string(),
+                channel_id: "longcat".to_string(),
+                account_id: "account-test".to_string(),
+                upstream_model: "LongCat-2.0".to_string(),
+                client_protocol: ProtocolType::OpenAi,
+                priority: 0,
+                enabled: true,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            }])
+            .expect("save route candidates after migration");
+        storage
+            .save_model_prices(&[ModelPrice {
+                id: "price-test".to_string(),
+                channel_id: "longcat".to_string(),
+                upstream_model: "LongCat-2.0".to_string(),
+                input_uncached_price: 0.0,
+                input_cached_price: 0.0,
+                output_price: 0.0,
+                currency: "CNY".to_string(),
+                unit: "1M tokens".to_string(),
+                source: crate::core::config::PriceSource::Preset,
+                synced_at: None,
+                created_at: now.clone(),
+                updated_at: now,
+            }])
+            .expect("save model prices after migration");
     }
 }
 

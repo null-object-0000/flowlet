@@ -784,11 +784,33 @@ pub fn run() {
         virtual_models
     };
 
-    // 路由必须由用户显式创建或在创建账号后确认生成。
+    // 清理旧版本遗留的默认路由和已经无法服务的孤儿路由。
     let mut routes = storage.list_route_candidates().expect("读取路由配置失败");
     let cleaned_routes: Vec<RouteCandidate> = routes
         .iter()
-        .filter(|route| route.id != "route-auto-default" && route.account_id != "account-default")
+        .filter(|route| {
+            if route.id == "route-auto-default" || route.account_id == "account-default" {
+                return false;
+            }
+            if !route.enabled {
+                return true;
+            }
+            if route.upstream_model.trim().is_empty()
+                || route.channel_id.trim().is_empty()
+                || route.account_id.trim().is_empty()
+            {
+                return false;
+            }
+            if !channels.iter().any(|channel| channel.id == route.channel_id) {
+                return false;
+            }
+            accounts.iter().any(|account| {
+                account.id == route.account_id
+                    && account.channel_id == route.channel_id
+                    && account.enabled
+                    && !account.api_key.trim().is_empty()
+            })
+        })
         .cloned()
         .collect();
     if cleaned_routes.len() != routes.len() {

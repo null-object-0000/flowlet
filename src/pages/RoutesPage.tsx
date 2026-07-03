@@ -5,7 +5,8 @@ import {
   ProtocolType,
   RouteCandidate,
   RouteRule,
-  VirtualModel
+  VirtualModel,
+  protocolLabels
 } from "../domain";
 
 export function RoutesPage({
@@ -19,7 +20,6 @@ export function RoutesPage({
   onSave,
   onRegenerateDefaultRoutes,
   getChannelName,
-  getAccountName,
   routeRules,
   onAddRouteRule,
   onUpdateRouteRule,
@@ -37,7 +37,6 @@ export function RoutesPage({
   onSave: () => void;
   onRegenerateDefaultRoutes: () => void;
   getChannelName: (channelId: string) => string;
-  getAccountName: (accountId: string) => string;
   routeRules: RouteRule[];
   onAddRouteRule: () => void;
   onUpdateRouteRule: (index: number, patch: Partial<RouteRule>) => void;
@@ -45,52 +44,133 @@ export function RoutesPage({
   onSaveRouteRules: () => void;
   clients: ClientConfig[];
 }) {
-  const enabledRoutes = routes.filter((route) => route.enabled);
+  const exposedModels = Array.from(
+    routes
+      .reduce((groups, route, index) => {
+        const key = `${route.channel_id}:${route.upstream_model}`;
+        const current = groups.get(key) ?? {
+          publicModel: route.upstream_model,
+          channelId: route.channel_id,
+          accountId: route.account_id,
+          routeIndexes: [] as number[],
+          protocols: [] as ProtocolType[],
+          enabled: false,
+        };
+        current.routeIndexes.push(index);
+        if (!current.protocols.includes(route.client_protocol)) {
+          current.protocols.push(route.client_protocol);
+        }
+        current.enabled = current.enabled || route.enabled;
+        groups.set(key, current);
+        return groups;
+      }, new Map<string, {
+        publicModel: string;
+        channelId: string;
+        accountId: string;
+        routeIndexes: number[];
+        protocols: ProtocolType[];
+        enabled: boolean;
+      }>())
+      .values()
+  ).sort((a, b) => a.publicModel.localeCompare(b.publicModel));
+
+  function setModelEnabled(routeIndexes: number[], enabled: boolean) {
+    routeIndexes.forEach((routeIndex) => onUpdate(routeIndex, { enabled }));
+  }
+
+  function switchModelAccount(routeIndexes: number[], accountId: string) {
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account) return;
+    routeIndexes.forEach((routeIndex) =>
+      onUpdate(routeIndex, { account_id: account.id, channel_id: account.channel_id })
+    );
+  }
 
   return (
     <>
       <section className="panel">
         <div className="panel-title">
-          <h3>高级路由</h3>
+          <h3>模型服务</h3>
           <div className="actions">
-            <button onClick={onRegenerateDefaultRoutes}>重新生成默认路由</button>
+            <button onClick={onRegenerateDefaultRoutes}>重新生成默认开放模型</button>
+            <button onClick={() => void onSave()}>保存模型服务</button>
           </div>
         </div>
-        {enabledRoutes.length === 0 ? (
+        {exposedModels.length === 0 ? (
           <div className="empty-state">
-            <p>当前没有启用的 auto 路由。</p>
-            <p>普通用户建议回到首页使用快速配置，或点击上方按钮重新生成默认路由。</p>
+            <p>当前没有对外开放模型。</p>
+            <p>请先在“渠道账号”添加并启用账号，系统会自动开放该渠道默认模型。</p>
           </div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>协议</th>
+                  <th>状态</th>
+                  <th>对外模型名</th>
                   <th>渠道</th>
-                  <th>账号</th>
-                  <th>上游模型</th>
-                  <th>优先级</th>
+                  <th>默认账号</th>
+                  <th>协议</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {enabledRoutes.map((route) => (
-                  <tr key={route.id}>
-                    <td>{route.client_protocol}</td>
-                    <td>{getChannelName(route.channel_id)}</td>
-                    <td>{getAccountName(route.account_id)}</td>
-                    <td>{route.upstream_model}</td>
-                    <td>{route.priority}</td>
+                {exposedModels.map((model) => (
+                  <tr key={`${model.channelId}:${model.publicModel}`}>
+                    <td>
+                      <span className={model.enabled ? "status running" : "status"}>
+                        {model.enabled ? "已开放" : "已关闭"}
+                      </span>
+                    </td>
+                    <td>{model.publicModel}</td>
+                    <td>{getChannelName(model.channelId)}</td>
+                    <td>
+                      <select
+                        value={model.accountId}
+                        onChange={(event) =>
+                          switchModelAccount(model.routeIndexes, event.target.value)
+                        }
+                      >
+                        {accounts
+                          .filter((account) => account.channel_id === model.channelId)
+                          .map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.name}
+                            </option>
+                          ))}
+                      </select>
+                    </td>
+                    <td>
+                      <div className="channel-protocols">
+                        {model.protocols.map((protocol) => (
+                          <span className="protocol-badge" key={protocol}>
+                            {protocolLabels[protocol]}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="actions">
+                        <button
+                          onClick={() => setModelEnabled(model.routeIndexes, !model.enabled)}
+                        >
+                          {model.enabled ? "关闭" : "开放"}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+        <p className="hint">
+          对外模型名默认等于上游模型名；默认使用该渠道最先添加且启用的账号，不自动轮询或 fallback。
+        </p>
       </section>
 
       <details className="panel advanced-panel">
-        <summary>手动编辑 route candidate</summary>
+        <summary>高级：模型映射与 route candidate</summary>
         <div className="panel-title">
           <h3>Route Candidates</h3>
           <div className="actions">

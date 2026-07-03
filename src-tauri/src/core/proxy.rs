@@ -320,14 +320,12 @@ async fn forward_request(
             status: Some(404),
             latency_ms: Some(started_at.elapsed().as_millis() as i64),
             is_stream: false,
-            error_message: Some("no matching route candidate".to_string()),
+            error_message: Some("model not exposed by Flowlet".to_string()),
             fallback_count: 0,
             route_reason: Some("no_route".to_string()),
         };
         record_request_log(state.storage, log);
-        let mut response = Response::new(Body::from(
-            "no matching route candidate for the requested model",
-        ));
+        let mut response = Response::new(Body::from("model not exposed by Flowlet"));
         *response.status_mut() = StatusCode::NOT_FOUND;
         return Ok(response);
     }
@@ -684,7 +682,7 @@ fn match_candidates(
     let virtual_model = match public_model {
         Some("auto") => "auto",
         Some(model) if !model.trim().is_empty() => {
-            // 直接模型请求，查找第一个匹配 channel_model 的候选
+            // 直接模型请求只匹配已开放模型，不回退到 auto。
             return find_direct_candidate(routes, model, protocol, accounts);
         }
         _ => return Vec::new(),
@@ -797,7 +795,6 @@ fn find_direct_candidate(
     protocol: &ProtocolType,
     accounts: &[ChannelAccount],
 ) -> Vec<RouteCandidate> {
-    // 对直接模型请求，查找第一个 channel 下 enabled 的 account 构造候选
     for route in routes {
         if route.client_protocol != *protocol {
             continue;
@@ -811,17 +808,7 @@ fn find_direct_candidate(
             }
         }
     }
-    // fallback: 用 auto 路由
-    match_candidates(
-        routes,
-        &[],
-        &[],
-        Some("auto"),
-        protocol,
-        None,
-        accounts,
-        &[],
-    )
+    Vec::new()
 }
 
 fn is_streaming_response(headers: &HeaderMap) -> bool {

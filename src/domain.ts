@@ -177,7 +177,6 @@ export type AccountStatsRow = {
 export type View =
   | "overview"
   | "channels"
-  | "claude"
   | "clients"
   | "routes"
   | "logs"
@@ -187,18 +186,26 @@ export type View =
 export const views: Array<{ id: View; label: string }> = [
   { id: "overview", label: "概览" },
   { id: "channels", label: "渠道账号" },
-  { id: "claude", label: "Claude Code" },
-  { id: "clients", label: "客户端 Token" },
-  { id: "routes", label: "高级路由" },
-  { id: "stats", label: "账号统计" },
+  { id: "routes", label: "模型服务" },
+  { id: "clients", label: "客户端接入" },
   { id: "logs", label: "请求日志" },
   { id: "usage", label: "用量统计" },
+  { id: "stats", label: "高级设置" },
 ];
 
 export const protocolLabels: Record<ProtocolType, string> = {
   openai: "OpenAI-compatible",
   anthropic: "Anthropic-compatible",
 };
+
+export const defaultExposedModelsByChannel: Record<string, string[]> = {
+  longcat: ["LongCat-2.0"],
+  deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
+};
+
+export function getDefaultExposedModels(channel: ChannelPreset): string[] {
+  return defaultExposedModelsByChannel[channel.id] ?? [channel.default_model].filter(Boolean);
+}
 
 export function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

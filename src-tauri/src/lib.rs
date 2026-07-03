@@ -550,7 +550,7 @@ fn validate_config_values(
         errors.push("请先新增并启用至少一个渠道账号".to_string());
     }
     if enabled_routes.is_empty() {
-        errors.push("请先配置并启用至少一条路由".to_string());
+        errors.push("请至少开放一个模型".to_string());
     }
 
     for account in enabled_accounts {
@@ -567,27 +567,36 @@ fn validate_config_values(
 
     for route in enabled_routes {
         if !channels.iter().any(|c| c.id == route.channel_id) {
-            errors.push(format!("路由 '{}' 引用了不存在的渠道", route.id));
+            errors.push(format!(
+                "对外开放模型 '{}' 找不到可用渠道",
+                route.upstream_model
+            ));
         }
         match accounts.iter().find(|a| a.id == route.account_id) {
             Some(account) => {
                 if !account.enabled {
                     errors.push(format!(
-                        "路由 '{}' 引用了未启用的账号 '{}'",
-                        route.id, account.name
+                        "对外开放模型 '{}' 使用的账号 '{}' 未启用",
+                        route.upstream_model, account.name
                     ));
                 }
                 if account.api_key.trim().is_empty() {
                     errors.push(format!(
-                        "路由 '{}' 引用的账号 '{}' 未配置 API Key",
-                        route.id, account.name
+                        "对外开放模型 '{}' 使用的账号 '{}' 未配置 API Key",
+                        route.upstream_model, account.name
                     ));
                 }
                 if account.channel_id != route.channel_id {
-                    errors.push(format!("路由 '{}' 的渠道与账号所属渠道不一致", route.id));
+                    errors.push(format!(
+                        "对外开放模型 '{}' 的来源渠道与账号所属渠道不一致",
+                        route.upstream_model
+                    ));
                 }
             }
-            None => errors.push(format!("路由 '{}' 引用了不存在的账号", route.id)),
+            None => errors.push(format!(
+                "对外开放模型 '{}' 找不到可用账号",
+                route.upstream_model
+            )),
         }
     }
 

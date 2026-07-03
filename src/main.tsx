@@ -20,11 +20,11 @@ import {
   createModelPrice,
   createRouteCandidate,
   genId,
+  getDefaultExposedModels,
   views,
 } from "./domain";
 import {
   ChannelsPage,
-  ClaudeCodePage,
   ClientsPage,
   LogsPage,
   OverviewPage,
@@ -143,16 +143,11 @@ function App() {
     setAccounts(filtered);
     setMessage("渠道账号已保存");
 
-    const enabledRouteExists = routes.some((route) => route.enabled);
-    const routeAccount = filtered.find((account) => account.enabled && account.api_key.trim());
-    if (!enabledRouteExists && routeAccount) {
-      const ok = window.confirm("是否将该账号加入 auto 路由？");
-      if (ok) {
-        const nextRoutes = [...routes, createAutoRouteForAccount(routeAccount, routes.length)];
-        setRoutes(nextRoutes);
-        await invoke("save_route_candidates", { routes: nextRoutes });
-        setMessage("渠道账号已保存，并已加入 auto 路由");
-      }
+    const nextRoutes = ensureDefaultExposedRoutes(filtered, routes);
+    if (nextRoutes.length !== routes.length) {
+      setRoutes(nextRoutes);
+      await invoke("save_route_candidates", { routes: nextRoutes });
+      setMessage("渠道账号已保存，并已自动开放默认模型");
     }
   }
 
@@ -182,11 +177,7 @@ function App() {
     setMessage("价格表已保存");
   }
 
-  async function quickSetup(
-    channelId: string,
-    apiKey: string,
-    scenario: "openai" | "claude" | "both"
-  ) {
+  async function quickSetup(channelId: string, apiKey: string) {
     if (!apiKey.trim()) {
       setMessage("请先填写 API Key");
       return;
@@ -203,28 +194,14 @@ function App() {
       api_key: apiKey.trim(),
       enabled: true,
     };
-    const protocols =
-      scenario === "both" ? (["openai", "anthropic"] as const) : scenario === "claude" ? (["anthropic"] as const) : (["openai"] as const);
     const nextAccounts = [...accounts, account];
-    const nextRoutes = [
-      ...routes.filter((route) => route.account_id !== account.id),
-      ...protocols.map((protocol, index) =>
-        createRouteCandidate(
-          "auto",
-          channelId,
-          account.id,
-          channel.default_model,
-          protocol,
-          routes.length + index
-        )
-      ),
-    ];
+    const nextRoutes = ensureDefaultExposedRoutes(nextAccounts, routes);
 
     await invoke("save_channel_accounts", { accounts: nextAccounts });
     await invoke("save_route_candidates", { routes: nextRoutes });
     setAccounts(nextAccounts);
     setRoutes(nextRoutes);
-    setMessage("快速配置已保存，可以启动代理");
+    setMessage("渠道账号已保存，默认模型已开放，可以启动代理");
   }
 
   async function regenerateDefaultRoutes() {
@@ -233,23 +210,10 @@ function App() {
       setMessage("请先新增并启用至少一个已填写 API Key 的账号");
       return;
     }
-    const nextRoutes = enabledAccounts.flatMap((account, accountIndex) => {
-      const channel = channels.find((c) => c.id === account.channel_id);
-      if (!channel) return [];
-      return channel.supported_protocols.map((protocol, protocolIndex) =>
-        createRouteCandidate(
-          "auto",
-          channel.id,
-          account.id,
-          channel.default_model,
-          protocol,
-          accountIndex * 10 + protocolIndex
-        )
-      );
-    });
+    const nextRoutes = buildDefaultExposedRoutes(enabledAccounts);
     await invoke("save_route_candidates", { routes: nextRoutes });
     setRoutes(nextRoutes);
-    setMessage("默认 auto 路由已重新生成");
+    setMessage("默认开放模型已重新生成");
   }
 
   async function refreshUsage() {
@@ -273,16 +237,63 @@ function App() {
     setAccounts((current) => [...current, createAccount(channelId, existing.length)]);
   }
 
-  function createAutoRouteForAccount(account: ChannelAccount, priority: number): RouteCandidate {
-    const channel = channels.find((c) => c.id === account.channel_id);
-    return createRouteCandidate(
-      "auto",
-      account.channel_id,
-      account.id,
-      channel?.default_model ?? "",
-      "openai",
-      priority
-    );
+  function buildDefaultExposedRoutes(sourceAccounts: ChannelAccount[]): RouteCandidate[] {
+    const enabledAccounts = sourceAccounts
+      .filter((account) => account.enabled && account.api_key.trim())
+      .sort((a, b) => a.priority - b.priority);
+    const firstAccountByChannel = new Map<string, ChannelAccount>();
+    for (const account of enabledAccounts) {
+      if (!firstAccountByChannel.has(account.channel_id)) {
+        firstAccountByChannel.set(account.channel_id, account);
+      }
+    }
+    let priority = 0;
+    return channels.flatMap((channel) => {
+      const account = firstAccountByChannel.get(channel.id);
+      if (!account) return [];
+      return getDefaultExposedModels(channel).flatMap((model) =>
+        channel.supported_protocols.map((protocol) =>
+          createRouteCandidate(model, channel.id, account.id, model, protocol, priority++)
+        )
+      );
+    });
+  }
+
+  function ensureDefaultExposedRoutes(
+    sourceAccounts: ChannelAccount[],
+    currentRoutes: RouteCandidate[]
+  ): RouteCandidate[] {
+    const nextRoutes = [...currentRoutes];
+    const enabledAccounts = sourceAccounts
+      .filter((account) => account.enabled && account.api_key.trim())
+      .sort((a, b) => a.priority - b.priority);
+    for (const channel of channels) {
+      const firstAccount = enabledAccounts.find((account) => account.channel_id === channel.id);
+      if (!firstAccount) continue;
+      for (const model of getDefaultExposedModels(channel)) {
+        for (const protocol of channel.supported_protocols) {
+          const exists = nextRoutes.some(
+            (route) =>
+              route.upstream_model === model &&
+              route.client_protocol === protocol &&
+              route.channel_id === channel.id
+          );
+          if (!exists) {
+            nextRoutes.push(
+              createRouteCandidate(
+                model,
+                channel.id,
+                firstAccount.id,
+                model,
+                protocol,
+                nextRoutes.length
+              )
+            );
+          }
+        }
+      }
+    }
+    return nextRoutes;
   }
 
   async function testConnection(accountId: string) {
@@ -574,7 +585,7 @@ function App() {
             channels={channels}
             hasEnabledAccount={accounts.some((account) => account.enabled && account.api_key.trim())}
             hasEnabledRoute={routes.some((route) => route.enabled)}
-            onQuickSetup={(channelId, apiKey, scenario) => void quickSetup(channelId, apiKey, scenario)}
+            onQuickSetup={(channelId, apiKey) => void quickSetup(channelId, apiKey)}
           />
         ) : null}
 
@@ -595,10 +606,6 @@ function App() {
             balanceSnapshots={balanceSnapshots}
             getAccountName={getAccountName}
           />
-        ) : null}
-
-        {view === "claude" ? (
-          <ClaudeCodePage clients={clients} onCopy={copy} />
         ) : null}
 
         {view === "clients" ? (
@@ -624,7 +631,6 @@ function App() {
             onSave={() => void saveRouteCandidates()}
             onRegenerateDefaultRoutes={() => void regenerateDefaultRoutes()}
             getChannelName={getChannelName}
-            getAccountName={getAccountName}
             routeRules={routeRules}
             onAddRouteRule={addRouteRule}
             onUpdateRouteRule={updateRouteRule}

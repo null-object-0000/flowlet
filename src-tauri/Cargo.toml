@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "本地 AI 请求路由客户端"
 authors = ["Flowlet"]
 edition = "2021"
+default-run = "flowlet"
 
 [lib]
 name = "flowlet_lib"

@@ -36,11 +36,10 @@ export function OverviewPage({
   channels: ChannelPreset[];
   hasEnabledAccount: boolean;
   hasEnabledRoute: boolean;
-  onQuickSetup: (channelId: string, apiKey: string, scenario: "openai" | "claude" | "both") => void;
+  onQuickSetup: (channelId: string, apiKey: string) => void;
 }) {
   const [wizardChannelId, setWizardChannelId] = React.useState("longcat");
   const [wizardApiKey, setWizardApiKey] = React.useState("");
-  const [wizardScenario, setWizardScenario] = React.useState<"openai" | "claude" | "both">("openai");
   const today = new Date().toISOString().slice(0, 10);
   const todayRows = usageRows.filter((r) => r.date === today);
   const todayRequests = todayRows.reduce((sum, r) => sum + r.request_count, 0);
@@ -78,31 +77,18 @@ export function OverviewPage({
                 onChange={(event) => setWizardApiKey(event.target.value)}
               />
             </label>
-            <label>
-              使用场景
-              <select
-                value={wizardScenario}
-                onChange={(event) =>
-                  setWizardScenario(event.target.value as "openai" | "claude" | "both")
-                }
-              >
-                <option value="openai">OpenAI-compatible</option>
-                <option value="claude">Claude Code</option>
-                <option value="both">两者都要</option>
-              </select>
-            </label>
           </div>
           <div className="actions">
             <button
               onClick={() => {
-                onQuickSetup(wizardChannelId, wizardApiKey, wizardScenario);
+                onQuickSetup(wizardChannelId, wizardApiKey);
                 setWizardApiKey("");
               }}
             >
               保存快速配置
             </button>
           </div>
-          <p className="hint">保存后会自动创建渠道账号和默认 auto 路由，随后即可启动代理。</p>
+          <p className="hint">保存后会自动创建渠道账号，并开放该渠道默认模型的 OpenAI-compatible 与 Anthropic-compatible 入口。</p>
         </section>
       ) : null}
       <section className="panel">

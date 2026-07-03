@@ -142,6 +142,18 @@ function App() {
     await invoke("save_channel_accounts", { accounts: filtered });
     setAccounts(filtered);
     setMessage("渠道账号已保存");
+
+    const enabledRouteExists = routes.some((route) => route.enabled);
+    const routeAccount = filtered.find((account) => account.enabled && account.api_key.trim());
+    if (!enabledRouteExists && routeAccount) {
+      const ok = window.confirm("是否将该账号加入 auto 路由？");
+      if (ok) {
+        const nextRoutes = [...routes, createAutoRouteForAccount(routeAccount, routes.length)];
+        setRoutes(nextRoutes);
+        await invoke("save_route_candidates", { routes: nextRoutes });
+        setMessage("渠道账号已保存，并已加入 auto 路由");
+      }
+    }
   }
 
   async function saveRouteCandidates() {
@@ -189,6 +201,18 @@ function App() {
   function addAccount(channelId: string) {
     const existing = accounts.filter((a) => a.channel_id === channelId);
     setAccounts((current) => [...current, createAccount(channelId, existing.length)]);
+  }
+
+  function createAutoRouteForAccount(account: ChannelAccount, priority: number): RouteCandidate {
+    const channel = channels.find((c) => c.id === account.channel_id);
+    return createRouteCandidate(
+      "auto",
+      account.channel_id,
+      account.id,
+      channel?.default_model ?? "",
+      "openai",
+      priority
+    );
   }
 
   async function testConnection(accountId: string) {
@@ -311,7 +335,23 @@ function App() {
 
   function updateRoute(index: number, patch: Partial<RouteCandidate>) {
     setRoutes((current) =>
-      current.map((r, i) => (i === index ? { ...r, ...patch, updated_at: new Date().toISOString() } : r))
+      current.map((r, i) => {
+        if (i !== index) return r;
+        const next = { ...r, ...patch, updated_at: new Date().toISOString() };
+        if (patch.channel_id && patch.channel_id !== r.channel_id) {
+          const channel = channels.find((c) => c.id === patch.channel_id);
+          const account = accounts.find((a) => a.channel_id === patch.channel_id);
+          next.account_id = account?.id ?? "";
+          next.upstream_model = channel?.default_model ?? "";
+        }
+        if (patch.account_id) {
+          const account = accounts.find((a) => a.id === patch.account_id);
+          const channel = channels.find((c) => c.id === account?.channel_id);
+          next.channel_id = account?.channel_id ?? next.channel_id;
+          next.upstream_model = channel?.default_model ?? next.upstream_model;
+        }
+        return next;
+      })
     );
   }
 

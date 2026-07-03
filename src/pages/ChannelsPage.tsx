@@ -44,11 +44,75 @@ export function ChannelsPage({
   const [snapshotBalance, setSnapshotBalance] = React.useState("");
   const [snapshotCurrency, setSnapshotCurrency] = React.useState("CNY");
   const [snapshotTokenTotal, setSnapshotTokenTotal] = React.useState("");
+  const [snapshotTokenUsed, setSnapshotTokenUsed] = React.useState("");
+  const [snapshotTokenRemaining, setSnapshotTokenRemaining] = React.useState("");
   const [snapshotTokenExpire, setSnapshotTokenExpire] = React.useState("");
   const [snapshotRemark, setSnapshotRemark] = React.useState("");
 
   const totalAccounts = accounts.length;
   const enabledAccounts = accounts.filter((a) => a.enabled).length;
+  const snapshotAccount = accounts.find((account) => account.id === snapshotAccountId);
+  const isLongCatSnapshot = snapshotAccount?.channel_id === "longcat";
+
+  function resetSnapshotForm() {
+    setSnapshotAccountId(null);
+    setSnapshotBalance("");
+    setSnapshotCurrency("CNY");
+    setSnapshotTokenTotal("");
+    setSnapshotTokenUsed("");
+    setSnapshotTokenRemaining("");
+    setSnapshotTokenExpire("");
+    setSnapshotRemark("");
+  }
+
+  function parseToken(value: string): number | null {
+    if (!value.trim()) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null;
+  }
+
+  function setTokenTotal(value: string) {
+    setSnapshotTokenTotal(value);
+    const total = parseToken(value);
+    const used = parseToken(snapshotTokenUsed);
+    const remaining = parseToken(snapshotTokenRemaining);
+    if (total == null) return;
+    if (used != null) {
+      setSnapshotTokenRemaining(Math.max(0, total - used).toString());
+    } else if (remaining != null) {
+      setSnapshotTokenUsed(Math.max(0, total - remaining).toString());
+    }
+  }
+
+  function setTokenUsed(value: string) {
+    setSnapshotTokenUsed(value);
+    const total = parseToken(snapshotTokenTotal);
+    const used = parseToken(value);
+    if (total != null && used != null) {
+      setSnapshotTokenRemaining(Math.max(0, total - used).toString());
+    }
+  }
+
+  function setTokenRemaining(value: string) {
+    setSnapshotTokenRemaining(value);
+    const total = parseToken(snapshotTokenTotal);
+    const remaining = parseToken(value);
+    if (total != null && remaining != null) {
+      setSnapshotTokenUsed(Math.max(0, total - remaining).toString());
+    }
+  }
+
+  function snapshotSummary(account: ChannelAccount): string | null {
+    const snapshot = getBalanceForAccount(account.id);
+    if (!snapshot) return null;
+    if (account.channel_id === "longcat" && snapshot.token_pack_remaining != null) {
+      return `资源包剩余：${snapshot.token_pack_remaining.toLocaleString()} Tokens`;
+    }
+    if (snapshot.balance != null) {
+      return `余额：${snapshot.balance} ${snapshot.currency ?? ""}`.trim();
+    }
+    return null;
+  }
 
   return (
     <>
@@ -73,6 +137,11 @@ export function ChannelsPage({
                   </span>
                 ))}
               </div>
+              <button
+                onClick={() => onAddAccount(channel.id)}
+              >
+                新增{channel.name}账号
+              </button>
               <button
                 className="link-button"
                 onClick={() =>
@@ -143,11 +212,30 @@ export function ChannelsPage({
         </div>
         <div className="account-list">
           {accounts.length === 0 ? (
-            <p>暂无账号，请先新增</p>
+            <div className="empty-state">
+              <p>你还没有配置渠道账号。</p>
+              <p>请选择 LongCat 或 DeepSeek，并填写 API Key 后开始使用。</p>
+              <div className="actions">
+                {channels.map((channel) => (
+                  <button key={channel.id} onClick={() => onAddAccount(channel.id)}>
+                    新增{channel.name}账号
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : (
             accounts.map((account, index) => (
               <div className="account-row" key={account.id}>
-                <span className="account-channel">{getChannelName(account.channel_id)}</span>
+                <select
+                  value={account.channel_id}
+                  onChange={(e) => onUpdateAccount(index, { channel_id: e.target.value })}
+                >
+                  {channels.map((channel) => (
+                    <option key={channel.id} value={channel.id}>
+                      {channel.name}
+                    </option>
+                  ))}
+                </select>
                 <input
                   value={account.name}
                   placeholder="账号名称"
@@ -168,6 +256,11 @@ export function ChannelsPage({
                     onUpdateAccount(index, { priority: Math.max(0, Number(e.target.value) || 0) })
                   }
                 />
+                <input
+                  value={account.remark ?? ""}
+                  placeholder="备注"
+                  onChange={(e) => onUpdateAccount(index, { remark: e.target.value })}
+                />
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -177,6 +270,9 @@ export function ChannelsPage({
                   启用
                 </label>
                 <div className="account-actions">
+                  {snapshotSummary(account) ? (
+                    <span className="account-snapshot">{snapshotSummary(account)}</span>
+                  ) : null}
                   {account.channel_id === "deepseek" ? (
                     <button onClick={() => void onTestConnection(account.id)} title="查询余额">
                       余额
@@ -195,11 +291,21 @@ export function ChannelsPage({
                         setSnapshotBalance(bal.balance?.toString() ?? "");
                         setSnapshotCurrency(bal.currency ?? "CNY");
                         setSnapshotTokenTotal(bal.token_pack_total?.toString() ?? "");
+                        setSnapshotTokenUsed(bal.token_pack_used?.toString() ?? "");
+                        setSnapshotTokenRemaining(bal.token_pack_remaining?.toString() ?? "");
                         setSnapshotTokenExpire(bal.token_pack_expire_at ?? "");
                         setSnapshotRemark(bal.remark ?? "");
+                      } else {
+                        setSnapshotBalance("");
+                        setSnapshotCurrency("CNY");
+                        setSnapshotTokenTotal("");
+                        setSnapshotTokenUsed("");
+                        setSnapshotTokenRemaining("");
+                        setSnapshotTokenExpire("");
+                        setSnapshotRemark("");
                       }
                     }}
-                    title="登记余额快照"
+                    title={account.channel_id === "longcat" ? "登记 Token 资源包快照" : "登记余额快照"}
                   >
                     登记
                   </button>
@@ -214,49 +320,77 @@ export function ChannelsPage({
       {snapshotAccountId ? (
         <section className="panel">
           <div className="panel-title">
-            <h3>登记余额 / 资源包快照</h3>
+            <h3>{isLongCatSnapshot ? "登记 Token 资源包快照" : "登记余额快照"}</h3>
             <div className="actions">
-              <button onClick={() => setSnapshotAccountId(null)}>取消</button>
+              <button onClick={resetSnapshotForm}>取消</button>
             </div>
           </div>
           <div className="form-grid">
-            <label>
-              余额数值
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={snapshotBalance}
-                placeholder="例如 100.50"
-                onChange={(e) => setSnapshotBalance(e.target.value)}
-              />
-            </label>
-            <label>
-              货币
-              <input
-                value={snapshotCurrency}
-                placeholder="CNY"
-                onChange={(e) => setSnapshotCurrency(e.target.value)}
-              />
-            </label>
-            <label>
-              Token 资源包总量
-              <input
-                type="number"
-                min="0"
-                value={snapshotTokenTotal}
-                placeholder="可选，例如 1000000"
-                onChange={(e) => setSnapshotTokenTotal(e.target.value)}
-              />
-            </label>
-            <label>
-              资源包过期时间
-              <input
-                type="date"
-                value={snapshotTokenExpire}
-                onChange={(e) => setSnapshotTokenExpire(e.target.value)}
-              />
-            </label>
+            {!isLongCatSnapshot ? (
+              <>
+                <label>
+                  余额数值
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={snapshotBalance}
+                    placeholder="例如 100.50"
+                    onChange={(e) => setSnapshotBalance(e.target.value)}
+                  />
+                </label>
+                <label>
+                  货币
+                  <input
+                    value={snapshotCurrency}
+                    placeholder="CNY"
+                    onChange={(e) => setSnapshotCurrency(e.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+            {isLongCatSnapshot ? (
+              <>
+                <label>
+                  Token 资源包总量
+                  <input
+                    type="number"
+                    min="0"
+                    value={snapshotTokenTotal}
+                    placeholder="可选，例如 1000000"
+                    onChange={(e) => setTokenTotal(e.target.value)}
+                  />
+                </label>
+                <label>
+                  已消耗 Token
+                  <input
+                    type="number"
+                    min="0"
+                    value={snapshotTokenUsed}
+                    placeholder="例如 250000"
+                    onChange={(e) => setTokenUsed(e.target.value)}
+                  />
+                </label>
+                <label>
+                  剩余 Token
+                  <input
+                    type="number"
+                    min="0"
+                    value={snapshotTokenRemaining}
+                    placeholder="例如 750000"
+                    onChange={(e) => setTokenRemaining(e.target.value)}
+                  />
+                </label>
+                <label>
+                  资源包过期时间
+                  <input
+                    type="date"
+                    value={snapshotTokenExpire}
+                    onChange={(e) => setSnapshotTokenExpire(e.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
             <label>
               备注
               <input
@@ -271,24 +405,30 @@ export function ChannelsPage({
               onClick={() => {
                 const balance = snapshotBalance.trim() ? Number(snapshotBalance) : null;
                 const total = snapshotTokenTotal.trim() ? Number(snapshotTokenTotal) : null;
+                const used = snapshotTokenUsed.trim() ? Number(snapshotTokenUsed) : null;
+                const remaining = snapshotTokenRemaining.trim()
+                  ? Number(snapshotTokenRemaining)
+                  : null;
+                if (
+                  [total, used, remaining].some((value) => value != null && value < 0) ||
+                  (total != null && used != null && used > total) ||
+                  (total != null && remaining != null && remaining > total)
+                ) {
+                  return;
+                }
                 onAddBalanceSnapshot({
                   account_id: snapshotAccountId,
-                  balance,
-                  currency: snapshotCurrency.trim() || null,
-                  token_pack_total: total,
-                  token_pack_used: null,
-                  token_pack_remaining: total,
-                  token_pack_expire_at: snapshotTokenExpire || null,
+                  balance: isLongCatSnapshot ? null : balance,
+                  currency: isLongCatSnapshot ? null : snapshotCurrency.trim() || null,
+                  token_pack_total: isLongCatSnapshot ? total : null,
+                  token_pack_used: isLongCatSnapshot ? used : null,
+                  token_pack_remaining: isLongCatSnapshot ? remaining : null,
+                  token_pack_expire_at: isLongCatSnapshot ? snapshotTokenExpire || null : null,
                   source: "manual",
-                  synced_at: null,
+                  synced_at: new Date().toISOString(),
                   remark: snapshotRemark.trim() || null,
                 });
-                setSnapshotAccountId(null);
-                setSnapshotBalance("");
-                setSnapshotCurrency("CNY");
-                setSnapshotTokenTotal("");
-                setSnapshotTokenExpire("");
-                setSnapshotRemark("");
+                resetSnapshotForm();
               }}
             >
               保存快照
@@ -308,9 +448,11 @@ export function ChannelsPage({
                 <tr>
                   <th>账号</th>
                   <th>余额</th>
-                  <th>Token 资源包</th>
+                  <th>资源包剩余</th>
+                  <th>已消耗</th>
+                  <th>总量</th>
                   <th>过期时间</th>
-                  <th>登记时间</th>
+                  <th>更新时间</th>
                 </tr>
               </thead>
               <tbody>
@@ -324,11 +466,21 @@ export function ChannelsPage({
                     </td>
                     <td>
                       {snap.token_pack_remaining != null
-                        ? `${snap.token_pack_remaining.toLocaleString()} tokens`
+                        ? `${snap.token_pack_remaining.toLocaleString()} Tokens`
+                        : "-"}
+                    </td>
+                    <td>
+                      {snap.token_pack_used != null
+                        ? `${snap.token_pack_used.toLocaleString()} Tokens`
+                        : "-"}
+                    </td>
+                    <td>
+                      {snap.token_pack_total != null
+                        ? `${snap.token_pack_total.toLocaleString()} Tokens`
                         : "-"}
                     </td>
                     <td>{snap.token_pack_expire_at ?? "-"}</td>
-                    <td>{snap.created_at}</td>
+                    <td>{snap.synced_at ?? snap.updated_at}</td>
                   </tr>
                 ))}
               </tbody>

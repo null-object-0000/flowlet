@@ -540,22 +540,20 @@ fn validate_config_values(
     if channels.is_empty() {
         errors.push("至少需要一个渠道".to_string());
     }
-    if accounts.is_empty() {
-        errors.push("至少需要一个账号".to_string());
+
+    let enabled_accounts: Vec<&ChannelAccount> =
+        accounts.iter().filter(|account| account.enabled).collect();
+    let enabled_routes: Vec<&RouteCandidate> =
+        routes.iter().filter(|route| route.enabled).collect();
+
+    if enabled_accounts.is_empty() {
+        errors.push("请先新增并启用至少一个渠道账号".to_string());
+    }
+    if enabled_routes.is_empty() {
+        errors.push("请先配置并启用至少一条路由".to_string());
     }
 
-    // 检查渠道是否有对应账号
-    for channel in channels.iter() {
-        let has_account = accounts
-            .iter()
-            .any(|a| a.channel_id == channel.id && a.enabled);
-        if !has_account {
-            errors.push(format!("渠道 '{}' 没有启用的账号", channel.name));
-        }
-    }
-
-    // 检查账号 API Key
-    for account in accounts.iter().filter(|a| a.enabled) {
+    for account in enabled_accounts {
         if account.api_key.trim().is_empty() {
             errors.push(format!("账号 '{}' 未配置 API Key", account.name));
         }
@@ -567,13 +565,29 @@ fn validate_config_values(
         }
     }
 
-    // 检查路由引用有效性
-    for route in routes.iter().filter(|r| r.enabled) {
+    for route in enabled_routes {
         if !channels.iter().any(|c| c.id == route.channel_id) {
             errors.push(format!("路由 '{}' 引用了不存在的渠道", route.id));
         }
-        if !accounts.iter().any(|a| a.id == route.account_id) {
-            errors.push(format!("路由 '{}' 引用了不存在的账号", route.id));
+        match accounts.iter().find(|a| a.id == route.account_id) {
+            Some(account) => {
+                if !account.enabled {
+                    errors.push(format!(
+                        "路由 '{}' 引用了未启用的账号 '{}'",
+                        route.id, account.name
+                    ));
+                }
+                if account.api_key.trim().is_empty() {
+                    errors.push(format!(
+                        "路由 '{}' 引用的账号 '{}' 未配置 API Key",
+                        route.id, account.name
+                    ));
+                }
+                if account.channel_id != route.channel_id {
+                    errors.push(format!("路由 '{}' 的渠道与账号所属渠道不一致", route.id));
+                }
+            }
+            None => errors.push(format!("路由 '{}' 引用了不存在的账号", route.id)),
         }
     }
 
@@ -725,31 +739,19 @@ pub fn run() {
         channels
     };
 
-    // 初始化账号
-    let accounts = storage.list_channel_accounts().expect("读取账号配置失败");
-    let accounts = if accounts.is_empty() {
-        let now = chrono::Utc::now().to_rfc3339();
-        let default_account = ChannelAccount {
-            id: "account-default".to_string(),
-            channel_id: "longcat".to_string(),
-            name: "默认账号".to_string(),
-            api_key: String::new(),
-            enabled: false,
-            priority: 0,
-            remark: Some("请编辑账号并填入 LongCat API Key".to_string()),
-            last_used_at: None,
-            last_error: None,
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        let accounts = vec![default_account];
+    // 账号必须由用户自行创建。清理早期版本生成的空默认账号。
+    let mut accounts = storage.list_channel_accounts().expect("读取账号配置失败");
+    let cleaned_accounts: Vec<ChannelAccount> = accounts
+        .iter()
+        .filter(|account| !(account.id == "account-default" && account.api_key.trim().is_empty()))
+        .cloned()
+        .collect();
+    if cleaned_accounts.len() != accounts.len() {
         storage
-            .save_channel_accounts(accounts.as_slice())
-            .expect("保存默认账号失败");
-        accounts
-    } else {
-        accounts
-    };
+            .save_channel_accounts(cleaned_accounts.as_slice())
+            .expect("清理默认账号失败");
+        accounts = cleaned_accounts;
+    }
 
     // 初始化虚拟模型
     let virtual_models = storage.list_virtual_models().expect("读取虚拟模型失败");
@@ -773,30 +775,19 @@ pub fn run() {
         virtual_models
     };
 
-    // 初始化路由候选
-    let routes = storage.list_route_candidates().expect("读取路由配置失败");
-    let routes = if routes.is_empty() {
-        let now = chrono::Utc::now().to_rfc3339();
-        let default_route = RouteCandidate {
-            id: "route-auto-default".to_string(),
-            virtual_model_id: "auto".to_string(),
-            channel_id: "longcat".to_string(),
-            account_id: "account-default".to_string(),
-            upstream_model: "LongCat-2.0".to_string(),
-            client_protocol: ProtocolType::OpenAi,
-            priority: 0,
-            enabled: true,
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        let routes = vec![default_route];
+    // 路由必须由用户显式创建或在创建账号后确认生成。
+    let mut routes = storage.list_route_candidates().expect("读取路由配置失败");
+    let cleaned_routes: Vec<RouteCandidate> = routes
+        .iter()
+        .filter(|route| route.id != "route-auto-default" && route.account_id != "account-default")
+        .cloned()
+        .collect();
+    if cleaned_routes.len() != routes.len() {
         storage
-            .save_route_candidates(routes.as_slice())
-            .expect("保存默认路由失败");
-        routes
-    } else {
-        routes
-    };
+            .save_route_candidates(cleaned_routes.as_slice())
+            .expect("清理默认路由失败");
+        routes = cleaned_routes;
+    }
 
     // 初始化客户端
     let clients = storage.list_clients().expect("读取客户端配置失败");
@@ -1035,9 +1026,6 @@ async fn start_proxy_internal(
 
     if channels.is_empty() {
         return Err("请先配置至少一个渠道".to_string());
-    }
-    if accounts.is_empty() {
-        return Err("请先配置至少一个账号".to_string());
     }
 
     let validation_errors = validate_config_values(&channels, &accounts, &routes, &clients);

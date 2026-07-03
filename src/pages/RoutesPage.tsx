@@ -54,8 +54,6 @@ export function RoutesPage({
   onSaveRouteRules: () => void;
   clients: ClientConfig[];
 }) {
-  const autoVirtualModel = virtualModels.find((v) => v.name === "auto");
-
   return (
     <>
       <section className="panel">
@@ -68,11 +66,28 @@ export function RoutesPage({
         </div>
         <div className="route-list">
           {routes.length === 0 ? (
-            <p>暂无路由候选</p>
+            <div className="empty-state">
+              <p>你还没有配置路由。</p>
+              <p>请先新增渠道账号，然后将账号加入 auto 路由。</p>
+              <div className="actions">
+                <button onClick={onAdd}>新增路由</button>
+              </div>
+            </div>
           ) : (
             routes.map((route, index) => (
               <div className="route-card" key={route.id}>
                 <span className="route-priority">{index + 1}</span>
+                <select
+                  value={route.virtual_model_id}
+                  onChange={(e) => onUpdate(index, { virtual_model_id: e.target.value })}
+                >
+                  {virtualModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                  {virtualModels.length === 0 ? <option value="auto">auto</option> : null}
+                </select>
                 <select
                   value={route.channel_id}
                   onChange={(e) => onUpdate(index, { channel_id: e.target.value })}
@@ -87,6 +102,7 @@ export function RoutesPage({
                   value={route.account_id}
                   onChange={(e) => onUpdate(index, { account_id: e.target.value })}
                 >
+                  <option value="">请选择账号</option>
                   {accounts
                     .filter((a) => a.channel_id === route.channel_id)
                     .map((a) => (

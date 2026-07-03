@@ -200,6 +200,15 @@ nav {
   gap: 10px;
 }
 
+.empty-state {
+  border: 1px dashed #cbd6dc;
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  background: #f7fafb;
+}
+
 .channel-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -288,7 +297,7 @@ nav {
 
 .account-row {
   display: grid;
-  grid-template-columns: minmax(80px, 0.6fr) minmax(100px, 0.8fr) minmax(180px, 1.2fr) 72px 60px minmax(160px, auto);
+  grid-template-columns: minmax(110px, 0.8fr) minmax(110px, 0.8fr) minmax(180px, 1.2fr) 72px minmax(120px, 0.8fr) 60px minmax(160px, auto);
   align-items: center;
   gap: 10px;
 }
@@ -297,12 +306,21 @@ nav {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .account-actions button {
   padding: 0 8px;
   height: 32px;
   font-size: 12px;
+}
+
+.account-snapshot {
+  color: #50616a;
+  font-size: 12px;
+  background: #f0f4f6;
+  border-radius: 4px;
+  padding: 5px 8px;
 }
 
 .client-row {
@@ -314,7 +332,7 @@ nav {
 
 .route-card {
   display: grid;
-  grid-template-columns: 34px minmax(100px, 0.8fr) minmax(100px, 0.8fr) minmax(140px, 1fr) minmax(130px, 0.8fr) 60px 60px;
+  grid-template-columns: 34px minmax(90px, 0.7fr) minmax(110px, 0.8fr) minmax(110px, 0.8fr) minmax(140px, 1fr) minmax(130px, 0.8fr) 60px 60px;
   align-items: center;
   gap: 10px;
 }

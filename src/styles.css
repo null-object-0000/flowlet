@@ -17,7 +17,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -29,11 +30,21 @@ button {
   height: 36px;
   padding: 0 12px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+button.link-button {
+  border: none;
+  background: transparent;
+  color: #2b7cda;
+  padding: 0;
+  height: auto;
+  text-decoration: underline;
 }
 
 .app-shell {
@@ -156,6 +167,18 @@ nav {
   line-height: 1.7;
 }
 
+.panel p.hint {
+  font-size: 13px;
+  color: #7a8b94;
+}
+
+.panel code {
+  background: #f0f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
 .actions {
   display: flex;
   gap: 10px;
@@ -169,43 +192,134 @@ nav {
   gap: 14px;
 }
 
-.route-list {
-  display: grid;
-  gap: 10px;
-}
-
-.client-list {
-  display: grid;
-  gap: 10px;
-}
-
+.route-list,
+.account-list,
+.client-list,
 .price-list {
   display: grid;
   gap: 10px;
 }
 
+.channel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.channel-card {
+  border: 1px solid #e4ebef;
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.channel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.channel-vendor {
+  font-size: 12px;
+  color: #7a8b94;
+  background: #f0f4f6;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.channel-protocols {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.protocol-badge {
+  font-size: 11px;
+  background: #e8f4fd;
+  color: #1a6fb5;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.request-type-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.request-type-chat {
+  background: #e8f4fd;
+  color: #1a6fb5;
+}
+
+.request-type-code {
+  background: #fef3e2;
+  color: #b5761a;
+}
+
+.request-type-reasoning {
+  background: #f3e8fd;
+  color: #7c1ab5;
+}
+
+.request-type-long_context {
+  background: #fde8e8;
+  color: #b51a1a;
+}
+
+.request-type-tool_use {
+  background: #e8fde8;
+  color: #1a7b1a;
+}
+
+.request-type-unknown {
+  background: #f0f4f6;
+  color: #50616a;
+}
+
+.channel-detail {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e4ebef;
+}
+
+.account-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.6fr) minmax(100px, 0.8fr) minmax(180px, 1.2fr) 72px 60px minmax(160px, auto);
+  align-items: center;
+  gap: 10px;
+}
+
+.account-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.account-actions button {
+  padding: 0 8px;
+  height: 32px;
+  font-size: 12px;
+}
+
 .client-row {
   display: grid;
-  grid-template-columns: minmax(130px, 0.7fr) minmax(220px, 1.4fr) 72px 72px;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(220px, 1.4fr) minmax(120px, 0.8fr) 72px 72px;
   align-items: center;
   gap: 10px;
 }
 
-.price-row {
+.route-card {
   display: grid;
-  grid-template-columns: minmax(160px, 1.2fr) minmax(110px, 0.8fr) minmax(110px, 0.8fr) 84px 72px;
+  grid-template-columns: 34px minmax(100px, 0.8fr) minmax(100px, 0.8fr) minmax(140px, 1fr) minmax(130px, 0.8fr) 60px 60px;
   align-items: center;
   gap: 10px;
 }
 
-.route-row {
-  display: grid;
-  grid-template-columns: 34px 1fr 72px;
-  align-items: center;
-  gap: 10px;
-}
-
-.route-row span {
+.route-priority {
   width: 28px;
   height: 28px;
   display: inline-grid;
@@ -214,6 +328,28 @@ nav {
   background: #eef3f5;
   color: #50616a;
   font-size: 13px;
+}
+
+.price-row-3 {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) 60px;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #50616a;
+  height: 36px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
+  height: auto;
+  min-width: 0;
 }
 
 .table-wrap {
@@ -244,7 +380,9 @@ th {
 
 @media (max-width: 900px) {
   .client-row,
-  .price-row {
+  .price-row-3,
+  .account-row,
+  .route-card {
     grid-template-columns: 1fr;
   }
 }
@@ -256,7 +394,8 @@ label {
   font-size: 13px;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-width: 0;
   height: 38px;
@@ -280,6 +419,8 @@ input[readonly] {
   color: #ffffff;
   padding: 12px 14px;
   box-shadow: 0 12px 28px rgba(23, 32, 38, 0.2);
+  max-width: 320px;
+  z-index: 1000;
 }
 
 @media (max-width: 760px) {

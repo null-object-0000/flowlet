@@ -1,10 +1,10 @@
-use super::config::ChannelAccount;
+use super::config::{ChannelAccount, ChannelModel, ProtocolType};
 use super::presets::{BalanceQueryResult, ModelSyncResult};
 use reqwest::Client;
 use serde::Deserialize;
 
 const DEEPSEEK_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
-const DEEPSEEK_MODELS_URL: &str = "https://api.deepseek.com/v1/models";
+const DEEPSEEK_MODELS_URL: &str = "https://api.deepseek.com/models";
 
 #[derive(Debug, Deserialize)]
 struct DeepSeekBalanceResponse {
@@ -39,6 +39,8 @@ pub struct DeepSeekModelEntry {
     pub id: String,
     #[serde(default)]
     object: String,
+    #[serde(default)]
+    owned_by: Option<String>,
 }
 
 /// 查询 DeepSeek 余额
@@ -149,6 +151,7 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
     if account.api_key.trim().is_empty() {
         return ModelSyncResult {
             models_synced: 0,
+            models: Vec::new(),
             errors: vec!["API Key 未配置".to_string()],
         };
     }
@@ -161,6 +164,7 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
         Err(err) => {
             return ModelSyncResult {
                 models_synced: 0,
+                models: Vec::new(),
                 errors: vec![format!("创建 HTTP 客户端失败: {err}")],
             }
         }
@@ -181,6 +185,7 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
         Err(err) => {
             return ModelSyncResult {
                 models_synced: 0,
+                models: Vec::new(),
                 errors: vec![format!("请求失败: {err}")],
             }
         }
@@ -192,6 +197,7 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
         Err(err) => {
             return ModelSyncResult {
                 models_synced: 0,
+                models: Vec::new(),
                 errors: vec![format!("读取响应失败: {err}")],
             }
         }
@@ -200,6 +206,7 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
     if !status.is_success() {
         return ModelSyncResult {
             models_synced: 0,
+            models: Vec::new(),
             errors: vec![format!("HTTP {}: {}", status.as_u16(), body)],
         };
     }
@@ -211,15 +218,40 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
                 .into_iter()
                 .filter(|m| !m.id.trim().is_empty())
                 .collect();
+            let synced_at = chrono::Utc::now().to_rfc3339();
+            let channel_models = models
+                .into_iter()
+                .map(|model| deepseek_channel_model(model.id, &synced_at))
+                .collect::<Vec<_>>();
             ModelSyncResult {
-                models_synced: models.len(),
+                models_synced: channel_models.len(),
+                models: channel_models,
                 errors: Vec::new(),
             }
         }
         Err(err) => ModelSyncResult {
             models_synced: 0,
+            models: Vec::new(),
             errors: vec![format!("解析响应失败: {err}")],
         },
+    }
+}
+
+fn deepseek_channel_model(model: String, synced_at: &str) -> ChannelModel {
+    ChannelModel {
+        id: format!("deepseek-{model}"),
+        channel_id: "deepseek".to_string(),
+        display_name: Some(model.clone()),
+        model,
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        context_window: Some(1_000_000),
+        max_output_tokens: Some(384_000),
+        supports_stream: true,
+        enabled: true,
+        source: "synced".to_string(),
+        synced_at: Some(synced_at.to_string()),
+        created_at: synced_at.to_string(),
+        updated_at: synced_at.to_string(),
     }
 }
 
@@ -247,13 +279,13 @@ mod tests {
     fn parse_deepseek_models_response() {
         let json = r#"{
             "data": [
-                {"id": "deepseek-chat", "object": "model"},
-                {"id": "deepseek-reasoner", "object": "model"}
+                {"id": "deepseek-v4-flash", "object": "model", "owned_by": "deepseek"},
+                {"id": "deepseek-v4-pro", "object": "model", "owned_by": "deepseek"}
             ]
         }"#;
         let data: DeepSeekModelsResponse = serde_json::from_str(json).unwrap();
         assert_eq!(data.data.len(), 2);
-        assert_eq!(data.data[0].id, "deepseek-chat");
+        assert_eq!(data.data[0].id, "deepseek-v4-flash");
     }
 
     #[test]

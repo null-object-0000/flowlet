@@ -206,6 +206,25 @@ impl ProtocolType {
     }
 }
 
+// ─── Auth Strategy ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthStrategy {
+    #[default]
+    Bearer,
+    XApiKey,
+}
+
+impl AuthStrategy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Bearer => "bearer",
+            Self::XApiKey => "x_api_key",
+        }
+    }
+}
+
 // ─── Price Source ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -227,6 +246,8 @@ pub struct ChannelPreset {
     pub supported_protocols: Vec<ProtocolType>,
     pub openai_base_url: String,
     pub anthropic_base_url: String,
+    pub openai_auth: AuthStrategy,
+    pub anthropic_auth: AuthStrategy,
     pub default_model: String,
     pub small_model: Option<String>,
     pub timeout_seconds: Option<u64>,
@@ -249,6 +270,8 @@ impl Default for ChannelPreset {
             supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
             openai_base_url: "https://api.longcat.chat/openai".to_string(),
             anthropic_base_url: "https://api.longcat.chat/anthropic".to_string(),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::Bearer,
             default_model: "LongCat-2.0".to_string(),
             small_model: None,
             timeout_seconds: None,
@@ -282,8 +305,10 @@ impl ChannelPreset {
             supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
             openai_base_url: "https://api.deepseek.com".to_string(),
             anthropic_base_url: "https://api.deepseek.com/anthropic".to_string(),
-            default_model: "deepseek-chat".to_string(),
-            small_model: Some("deepseek-v4-flash".to_string()),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::XApiKey,
+            default_model: "deepseek-v4-pro".to_string(),
+            small_model: None,
             supports_model_list: true,
             supports_model_detail: false,
             supports_price_sync: false,
@@ -298,6 +323,13 @@ impl ChannelPreset {
         match protocol {
             ProtocolType::OpenAi => &self.openai_base_url,
             ProtocolType::Anthropic => &self.anthropic_base_url,
+        }
+    }
+
+    pub fn auth_strategy_for(&self, protocol: &ProtocolType) -> &AuthStrategy {
+        match protocol {
+            ProtocolType::OpenAi => &self.openai_auth,
+            ProtocolType::Anthropic => &self.anthropic_auth,
         }
     }
 }

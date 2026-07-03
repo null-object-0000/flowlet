@@ -42,7 +42,7 @@ Flowlet 当前阶段采用 LongCat + DeepSeek first 策略：先把 LongCat 和 
 
 ## 当前状态
 
-Flowlet 已完成全部规划里程碑，具备完整的生产就绪能力。
+Flowlet 当前处于 Channel / Account / Model 重构雏形阶段，还不是生产就绪版本。当前分支的目标是先验证 LongCat / DeepSeek 双协议透明转发、多账号优先级 fallback、Claude Code 接入、日志和成本统计这条 MVP 主链路。
 
 ### 已完成能力
 
@@ -61,24 +61,21 @@ Flowlet 已完成全部规划里程碑，具备完整的生产就绪能力。
 - DeepSeek（OpenAI + Anthropic + 模型同步 + 余额查询）
 
 **路由能力**
-- 规则路由（按客户端/模型/协议匹配）
-- 请求类型识别（chat / code / reasoning / long_context / tool_use）
-- 小模型路由（短聊天自动使用便宜模型）
-- 综合调度（成本/延迟/成功率评分排序）
+- 显式 `auto` 候选顺序路由
+- 账号优先级 fallback
 - 429/5xx/402 fallback、400/401 不降级
+- 请求类型识别仅用于日志，不参与自动换模型
 
 **部署方式**
-- 桌面端（Tauri + 系统托盘 + 开机自启动）
-- 无头服务器（`cargo run --bin headless`）
-- Web 控制台（嵌入式暗色主题仪表板）
-- Docker Compose（一键部署 + Volume 持久化 + Bearer Token 鉴权）
+- 桌面端（Tauri）
+- 系统托盘 / 开机自启动仍需实机回归
+- Docker、Web Console、无头服务器作为后续阶段验证，不作为当前 MVP 完成项
 
 **可观测性**
 - 请求日志（channel/account/protocol/request_type 维度）
 - Token / 成本分析（response.usage 旁路提取）
 - 账号统计（请求数/失败率/fallback/成本）
-- 余额快照（手动登记 + 过期时间）
-- 智能路由评分（延迟/成功率/成本）
+- 余额快照（手动登记 + DeepSeek 查询后自动记录）
 
 ## 快速开始
 
@@ -87,21 +84,6 @@ Flowlet 已完成全部规划里程碑，具备完整的生产就绪能力。
 ```bash
 bun install
 bun run tauri:dev
-```
-
-### Docker 部署
-
-```bash
-FLOWLET_ADMIN_TOKEN=my-secret-token docker compose up -d
-# 代理: http://localhost:11434
-# 控制台: http://localhost:8080
-```
-
-### 无头模式
-
-```bash
-cd src-tauri
-cargo run --bin headless
 ```
 
 详细文档见 [docs/](docs/) 目录。

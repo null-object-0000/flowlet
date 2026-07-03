@@ -1,7 +1,7 @@
 use super::config::{
-    AccountBalanceSnapshot, ChannelAccount, ChannelModel, ChannelPreset, ClientConfig,
-    ConfigBundle, ModelPrice, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
-    UsageSummaryRow, VirtualModel,
+    AccountBalanceSnapshot, AuthStrategy, ChannelAccount, ChannelModel, ChannelPreset,
+    ClientConfig, ConfigBundle, ModelPrice, ProtocolType, RequestLogInput, RouteCandidate,
+    UsageRecordInput, UsageSummaryRow, VirtualModel,
 };
 use rusqlite::{params, Connection};
 use std::{
@@ -49,10 +49,10 @@ impl Storage {
                 r#"
                 INSERT INTO channel_presets (
                     id, name, vendor, supported_protocols, openai_base_url, anthropic_base_url,
-                    default_model, small_model, timeout_seconds, supports_model_list,
+                    openai_auth, anthropic_auth, default_model, small_model, timeout_seconds, supports_model_list,
                     supports_model_detail, supports_price_sync, supports_balance_query,
                     supports_quota_query, supports_usage_query, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
                 "#,
                 params![
                     preset.id,
@@ -61,6 +61,8 @@ impl Storage {
                     protocols,
                     preset.openai_base_url,
                     preset.anthropic_base_url,
+                    preset.openai_auth.as_str(),
+                    preset.anthropic_auth.as_str(),
                     preset.default_model,
                     preset.small_model,
                     preset.timeout_seconds,
@@ -86,7 +88,7 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT id, name, vendor, supported_protocols, openai_base_url, anthropic_base_url,
-                    default_model, small_model, timeout_seconds, supports_model_list,
+                    openai_auth, anthropic_auth, default_model, small_model, timeout_seconds, supports_model_list,
                     supports_model_detail, supports_price_sync, supports_balance_query,
                     supports_quota_query, supports_usage_query, created_at, updated_at
              FROM channel_presets ORDER BY id ASC",
@@ -102,17 +104,19 @@ impl Storage {
                 supported_protocols: protocols,
                 openai_base_url: row.get(4)?,
                 anthropic_base_url: row.get(5)?,
-                default_model: row.get(6)?,
-                small_model: row.get(7)?,
-                timeout_seconds: row.get(8)?,
-                supports_model_list: row.get::<_, i64>(9)? != 0,
-                supports_model_detail: row.get::<_, i64>(10)? != 0,
-                supports_price_sync: row.get::<_, i64>(11)? != 0,
-                supports_balance_query: row.get::<_, i64>(12)? != 0,
-                supports_quota_query: row.get::<_, i64>(13)? != 0,
-                supports_usage_query: row.get::<_, i64>(14)? != 0,
-                created_at: row.get(15)?,
-                updated_at: row.get(16)?,
+                openai_auth: parse_auth_strategy(row.get::<_, String>(6)?.as_str()),
+                anthropic_auth: parse_auth_strategy(row.get::<_, String>(7)?.as_str()),
+                default_model: row.get(8)?,
+                small_model: row.get(9)?,
+                timeout_seconds: row.get(10)?,
+                supports_model_list: row.get::<_, i64>(11)? != 0,
+                supports_model_detail: row.get::<_, i64>(12)? != 0,
+                supports_price_sync: row.get::<_, i64>(13)? != 0,
+                supports_balance_query: row.get::<_, i64>(14)? != 0,
+                supports_quota_query: row.get::<_, i64>(15)? != 0,
+                supports_usage_query: row.get::<_, i64>(16)? != 0,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         })?;
         let mut presets = Vec::new();
@@ -1305,6 +1309,8 @@ impl Storage {
                 supported_protocols TEXT NOT NULL,
                 openai_base_url TEXT NOT NULL,
                 anthropic_base_url TEXT NOT NULL,
+                openai_auth    TEXT NOT NULL DEFAULT 'bearer',
+                anthropic_auth TEXT NOT NULL DEFAULT 'bearer',
                 default_model   TEXT NOT NULL,
                 small_model     TEXT,
                 timeout_seconds INTEGER,
@@ -1484,6 +1490,19 @@ impl Storage {
             "#,
         )?;
 
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "openai_auth",
+            "TEXT NOT NULL DEFAULT 'bearer'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "anthropic_auth",
+            "TEXT NOT NULL DEFAULT 'bearer'",
+        )?;
+
         // 写入 schema 版本
         connection.execute(
             "INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.01', datetime('now'))",
@@ -1491,6 +1510,33 @@ impl Storage {
         )?;
 
         Ok(())
+    }
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), StorageError> {
+    let exists: i64 = connection.query_row(
+        &format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+        [column],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        connection.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn parse_auth_strategy(value: &str) -> AuthStrategy {
+    match value {
+        "x_api_key" => AuthStrategy::XApiKey,
+        _ => AuthStrategy::Bearer,
     }
 }
 

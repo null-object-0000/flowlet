@@ -1,6 +1,6 @@
 use super::config::{
-    classify_request, ChannelAccount, ChannelPreset, ClientConfig, ProtocolType, RequestLogInput,
-    RequestType, RouteCandidate, RouteRule, UsageRecordInput,
+    classify_request, AuthStrategy, ChannelAccount, ChannelPreset, ClientConfig, ProtocolType,
+    RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
@@ -357,12 +357,7 @@ async fn forward_request(
         };
 
         // 小模型路由判断：简单短聊天请求使用渠道配置的小模型
-        let effective_model = resolve_small_model(
-            &request_type,
-            &body_bytes,
-            &candidate.upstream_model,
-            channel,
-        );
+        let effective_model = resolve_small_model(&candidate.upstream_model);
         let routed_body = rewrite_model(&body_bytes, &effective_model, &detected_protocol);
 
         let upstream_url = build_upstream_url(
@@ -383,6 +378,7 @@ async fn forward_request(
             &parts.headers,
             &account.api_key,
             &detected_protocol,
+            channel.auth_strategy_for(&detected_protocol),
         );
 
         // 为当前候选准备日志上下文
@@ -694,7 +690,7 @@ fn match_candidates(
         _ => return Vec::new(),
     };
 
-    let mut matched: Vec<RouteCandidate> = routes
+    let matched: Vec<RouteCandidate> = routes
         .iter()
         .filter(|c| {
             c.enabled && c.virtual_model_id == virtual_model && c.client_protocol == *protocol
@@ -703,8 +699,8 @@ fn match_candidates(
         .cloned()
         .collect();
 
-    // 2. 综合调度排序（成本/延迟/成功率）
-    rank_candidates_by_score(&mut matched, scores);
+    // MVP 阶段只按候选优先级排序，综合调度先保留为后续能力。
+    let _ = scores;
     matched
 }
 
@@ -752,6 +748,7 @@ fn find_matching_rule(
 
 /// 综合调度：根据成本、延迟、成功率对候选进行排序
 /// scores: Vec<(account_id, channel_id, avg_latency_ms, success_rate, cost_per_1k)]
+#[allow(dead_code)]
 fn rank_candidates_by_score(
     candidates: &mut Vec<RouteCandidate>,
     scores: &[(String, String, f64, f64, f64)],
@@ -790,44 +787,7 @@ fn rank_candidates_by_score(
 }
 
 /// 判断是否应该使用小模型，返回最终使用的上游模型名
-fn resolve_small_model(
-    request_type: &RequestType,
-    body_bytes: &[u8],
-    original_model: &str,
-    channel: &ChannelPreset,
-) -> String {
-    // 只有 chat 类型且渠道配置了小模型才考虑
-    let small_model = match &channel.small_model {
-        Some(m) if !m.trim().is_empty() => m.clone(),
-        _ => return original_model.to_string(),
-    };
-
-    if *request_type != RequestType::Chat {
-        return original_model.to_string();
-    }
-
-    // 简单请求判断：总字符数 < 5000 且消息数 <= 3
-    if let Ok(json) = serde_json::from_slice::<serde_json::Value>(body_bytes) {
-        let messages = json
-            .get("messages")
-            .and_then(|m| m.as_array())
-            .map(|a| a.as_slice())
-            .unwrap_or_default();
-
-        if messages.len() > 3 {
-            return original_model.to_string();
-        }
-
-        let total_chars: usize = messages
-            .iter()
-            .filter_map(|m| m.get("content").and_then(|c| c.as_str()).map(|s| s.len()))
-            .sum();
-
-        if total_chars < 5000 {
-            return small_model;
-        }
-    }
-
+fn resolve_small_model(original_model: &str) -> String {
     original_model.to_string()
 }
 
@@ -902,6 +862,7 @@ fn apply_request_headers(
     headers: &HeaderMap,
     api_key: &str,
     protocol: &ProtocolType,
+    auth_strategy: &AuthStrategy,
 ) -> reqwest::RequestBuilder {
     for (name, value) in headers {
         if is_hop_by_hop(name.as_str())
@@ -915,16 +876,17 @@ fn apply_request_headers(
     }
 
     if !api_key.trim().is_empty() {
-        match protocol {
-            ProtocolType::OpenAi => {
+        match auth_strategy {
+            AuthStrategy::Bearer => {
                 builder = builder.bearer_auth(api_key.trim());
             }
-            ProtocolType::Anthropic => {
+            AuthStrategy::XApiKey => {
                 builder = builder.header("x-api-key", api_key.trim());
             }
         }
     }
 
+    let _ = protocol;
     builder
 }
 
@@ -1565,6 +1527,8 @@ mod tests {
                 supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
                 openai_base_url: format!("http://{upstream_addr}"),
                 anthropic_base_url: format!("http://{upstream_addr}"),
+                openai_auth: AuthStrategy::Bearer,
+                anthropic_auth: AuthStrategy::Bearer,
                 default_model: "LongCat-2.0".to_string(),
                 small_model: None,
                 timeout_seconds: None,
@@ -1651,64 +1615,9 @@ mod tests {
     }
 
     #[test]
-    fn small_model_used_for_short_chat() {
-        let channel = ChannelPreset {
-            id: "deepseek".to_string(),
-            name: "DeepSeek".to_string(),
-            small_model: Some("deepseek-v4-flash".to_string()),
-            ..Default::default()
-        };
-        let body = br#"{"messages":[{"role":"user","content":"Hello"}]}"#;
-        let result = resolve_small_model(&RequestType::Chat, body, "deepseek-chat", &channel);
-        assert_eq!(result, "deepseek-v4-flash");
-    }
-
-    #[test]
-    fn small_model_not_used_for_long_chat() {
-        let channel = ChannelPreset {
-            id: "deepseek".to_string(),
-            name: "DeepSeek".to_string(),
-            small_model: Some("deepseek-v4-flash".to_string()),
-            ..Default::default()
-        };
-        let long_text = "a".repeat(6000);
-        let body = format!(
-            r#"{{"messages":[{{"role":"user","content":"{}"}}]}}"#,
-            long_text
-        );
-        let result = resolve_small_model(
-            &RequestType::Chat,
-            body.as_bytes(),
-            "deepseek-chat",
-            &channel,
-        );
-        assert_eq!(result, "deepseek-chat");
-    }
-
-    #[test]
-    fn small_model_not_used_for_code_request() {
-        let channel = ChannelPreset {
-            id: "deepseek".to_string(),
-            name: "DeepSeek".to_string(),
-            small_model: Some("deepseek-v4-flash".to_string()),
-            ..Default::default()
-        };
-        let body = br#"{"messages":[{"role":"user","content":"Hello"}]}"#;
-        let result = resolve_small_model(&RequestType::Code, body, "deepseek-chat", &channel);
-        assert_eq!(result, "deepseek-chat");
-    }
-
-    #[test]
-    fn small_model_not_used_when_not_configured() {
-        let channel = ChannelPreset {
-            id: "longcat".to_string(),
-            name: "LongCat".to_string(),
-            small_model: None,
-            ..Default::default()
-        };
-        let body = br#"{"messages":[{"role":"user","content":"Hello"}]}"#;
-        let result = resolve_small_model(&RequestType::Chat, body, "LongCat-2.0", &channel);
-        assert_eq!(result, "LongCat-2.0");
+    fn small_model_routing_is_disabled_for_mvp() {
+        let result = resolve_small_model("deepseek-v4-pro");
+        assert_eq!(result, "deepseek-v4-pro");
     }
 
     #[test]

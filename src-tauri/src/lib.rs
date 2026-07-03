@@ -1,9 +1,9 @@
 pub mod core;
 
 use core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelPreset, ClientConfig,
-    ModelPrice, ProtocolType, RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow,
-    VirtualModel,
+    AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
+    ClientConfig, ModelPrice, ProtocolType, RequestLogRow, RouteCandidate, RouteRule,
+    UsageSummaryRow, VirtualModel,
 };
 use core::presets::{builtin_model_prices, BalanceQueryResult, ModelSyncResult};
 use core::proxy::{ProxyController, ProxyStatus};
@@ -30,60 +30,65 @@ struct AppState {
     tray: Arc<Mutex<Option<TrayIcon>>>,
 }
 
+struct ProxyStartupConfig {
+    channels: Vec<ChannelPreset>,
+    accounts: Vec<ChannelAccount>,
+    routes: Vec<RouteCandidate>,
+    clients: Vec<ClientConfig>,
+    rules: Vec<RouteRule>,
+    storage: Storage,
+    timeout: u64,
+}
+
+impl AppState {
+    fn proxy_startup_config(&self) -> Result<ProxyStartupConfig, String> {
+        let channels = self
+            .channels
+            .lock()
+            .map_err(|_| "读取渠道配置失败".to_string())?
+            .clone();
+        let accounts = self
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号配置失败".to_string())?
+            .clone();
+        let routes = self
+            .routes
+            .lock()
+            .map_err(|_| "读取路由配置失败".to_string())?
+            .clone();
+        let clients = self
+            .clients
+            .lock()
+            .map_err(|_| "读取客户端配置失败".to_string())?
+            .clone();
+        let rules = self
+            .rules
+            .lock()
+            .map_err(|_| "读取路由规则失败".to_string())?
+            .clone();
+
+        Ok(ProxyStartupConfig {
+            channels,
+            accounts,
+            routes,
+            clients,
+            rules,
+            storage: self.storage.clone(),
+            timeout: self.upstream_timeout_seconds,
+        })
+    }
+
+    async fn start_configured_proxy(&self) -> Result<(), String> {
+        start_proxy_internal(self.proxy.clone(), self.proxy_startup_config()?).await
+    }
+}
+
 // ─── Proxy Commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
 async fn start_proxy(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let channels = state
-        .channels
-        .lock()
-        .map_err(|_| "读取渠道配置失败".to_string())?
-        .clone();
-    let accounts = state
-        .accounts
-        .lock()
-        .map_err(|_| "读取账号配置失败".to_string())?
-        .clone();
-    let routes = state
-        .routes
-        .lock()
-        .map_err(|_| "读取路由配置失败".to_string())?
-        .clone();
-    let clients = state
-        .clients
-        .lock()
-        .map_err(|_| "读取客户端配置失败".to_string())?
-        .clone();
-
-    if channels.is_empty() {
-        return Err("请先配置至少一个渠道".to_string());
-    }
-    if accounts.is_empty() {
-        return Err("请先配置至少一个账号".to_string());
-    }
-
-    let rules = state
-        .rules
-        .lock()
-        .map_err(|_| "读取规则失败".to_string())?
-        .clone();
-    let scores = state.storage.account_routing_scores().unwrap_or_default();
-    state
-        .proxy
-        .start(
-            channels,
-            accounts,
-            clients,
-            routes,
-            rules,
-            scores,
-            state.storage.clone(),
-            state.upstream_timeout_seconds,
-        )
-        .await
-        .map_err(|err| err.to_string())?;
-
-    // 更新托盘 tooltip
+    state.start_configured_proxy().await?;
     update_tray_tooltip(&app, true);
     Ok(())
 }
@@ -246,6 +251,14 @@ fn save_model_prices(
     Ok(())
 }
 
+#[tauri::command]
+fn list_channel_models(state: tauri::State<'_, AppState>) -> Result<Vec<ChannelModel>, String> {
+    state
+        .storage
+        .list_channel_models()
+        .map_err(|err| err.to_string())
+}
+
 // ─── Virtual Models Commands ────────────────────────────────────────────────
 
 #[tauri::command]
@@ -346,6 +359,28 @@ async fn query_balance(
     // 更新账号最后错误信息
     if let Some(ref err) = result.error {
         let _ = state.storage.update_account_last_error(&account_id, err);
+    } else {
+        let now = chrono::Utc::now().to_rfc3339();
+        let snapshot = AccountBalanceSnapshot {
+            id: format!("balance-{}-{}", account_id, uuid::Uuid::new_v4()),
+            account_id: account_id.clone(),
+            balance: result.balance,
+            currency: result.currency.clone(),
+            token_pack_total: None,
+            token_pack_used: None,
+            token_pack_remaining: None,
+            token_pack_expire_at: None,
+            source: "sync".to_string(),
+            synced_at: Some(now.clone()),
+            remark: Some("DeepSeek /user/balance 自动同步".to_string()),
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        state
+            .storage
+            .save_balance_snapshot(&snapshot)
+            .map_err(|err| err.to_string())?;
+        let _ = state.storage.update_account_last_used(&account_id);
     }
 
     Ok(result)
@@ -371,9 +406,11 @@ async fn sync_models(
     if account.channel_id != "deepseek" {
         return Ok(ModelSyncResult {
             models_synced: 0,
+            models: Vec::new(),
             errors: vec!["当前仅 DeepSeek 支持模型列表同步".to_string()],
         });
     }
+    let channel_id = account.channel_id.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -386,6 +423,18 @@ async fn sync_models(
     .map_err(|e| format!("任务执行失败: {e}"))?;
 
     if result.errors.is_empty() {
+        let mut models = state
+            .storage
+            .list_channel_models()
+            .map_err(|err| err.to_string())?
+            .into_iter()
+            .filter(|model| model.channel_id != channel_id)
+            .collect::<Vec<_>>();
+        models.extend(result.models.clone());
+        state
+            .storage
+            .save_channel_models(&models)
+            .map_err(|err| err.to_string())?;
         let _ = state.storage.update_account_last_used(&account_id);
     } else if let Some(first_err) = result.errors.first() {
         let _ = state
@@ -470,12 +519,23 @@ fn save_route_rules(
 
 #[tauri::command]
 fn validate_config(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
-    let mut errors = Vec::new();
-
     let channels = state.channels.lock().map_err(|_| "锁失败".to_string())?;
     let accounts = state.accounts.lock().map_err(|_| "锁失败".to_string())?;
     let routes = state.routes.lock().map_err(|_| "锁失败".to_string())?;
     let clients = state.clients.lock().map_err(|_| "锁失败".to_string())?;
+
+    Ok(validate_config_values(
+        &channels, &accounts, &routes, &clients,
+    ))
+}
+
+fn validate_config_values(
+    channels: &[ChannelPreset],
+    accounts: &[ChannelAccount],
+    routes: &[RouteCandidate],
+    clients: &[ClientConfig],
+) -> Vec<String> {
+    let mut errors = Vec::new();
 
     if channels.is_empty() {
         errors.push("至少需要一个渠道".to_string());
@@ -524,7 +584,7 @@ fn validate_config(state: tauri::State<'_, AppState>) -> Result<Vec<String>, Str
         }
     }
 
-    Ok(errors)
+    errors
 }
 
 // ─── Maintenance Commands ─────────────────────────────────────────────────
@@ -674,7 +734,7 @@ pub fn run() {
             channel_id: "longcat".to_string(),
             name: "默认账号".to_string(),
             api_key: String::new(),
-            enabled: true,
+            enabled: false,
             priority: 0,
             remark: Some("请编辑账号并填入 LongCat API Key".to_string()),
             last_used_at: None,
@@ -846,22 +906,10 @@ pub fn run() {
                     }
                     "start_proxy" => {
                         if let Some(state) = app.try_state::<AppState>() {
-                            let proxy = state.proxy.clone();
-                            let channels = state.channels.clone();
-                            let accounts = state.accounts.clone();
-                            let routes = state.routes.clone();
-                            let clients = state.clients.clone();
-                            let rules = state.rules.clone();
-                            let storage = state.storage.clone();
-                            let timeout = state.upstream_timeout_seconds;
+                            let state = state.inner().clone();
                             let app_clone = app.clone();
                             tauri::async_runtime::spawn(async move {
-                                match start_proxy_internal(
-                                    proxy, channels, accounts, routes, clients, rules, storage,
-                                    timeout,
-                                )
-                                .await
-                                {
+                                match state.start_configured_proxy().await {
                                     Ok(()) => update_tray_tooltip(&app_clone, true),
                                     Err(_) => update_tray_tooltip(&app_clone, false),
                                 }
@@ -924,6 +972,7 @@ pub fn run() {
             save_clients,
             list_model_prices,
             save_model_prices,
+            list_channel_models,
             list_virtual_models,
             save_virtual_models,
             analyze_usage,
@@ -971,41 +1020,29 @@ fn update_tray_tooltip(app: &AppHandle, running: bool) {
 /// 内部启动代理逻辑（供托盘菜单调用）
 async fn start_proxy_internal(
     proxy: ProxyController,
-    channels: Arc<Mutex<Vec<ChannelPreset>>>,
-    accounts: Arc<Mutex<Vec<ChannelAccount>>>,
-    routes: Arc<Mutex<Vec<RouteCandidate>>>,
-    clients: Arc<Mutex<Vec<ClientConfig>>>,
-    rules: Arc<Mutex<Vec<RouteRule>>>,
-    storage: Storage,
-    timeout: u64,
+    config: ProxyStartupConfig,
 ) -> Result<(), String> {
-    let channels = channels
-        .lock()
-        .map_err(|_| "读取渠道配置失败".to_string())?
-        .clone();
-    let accounts = accounts
-        .lock()
-        .map_err(|_| "读取账号配置失败".to_string())?
-        .clone();
-    let routes = routes
-        .lock()
-        .map_err(|_| "读取路由配置失败".to_string())?
-        .clone();
-    let clients = clients
-        .lock()
-        .map_err(|_| "读取客户端配置失败".to_string())?
-        .clone();
-    let rules = rules
-        .lock()
-        .map_err(|_| "读取路由规则失败".to_string())?
-        .clone();
-    let scores = storage.account_routing_scores().unwrap_or_default();
+    let ProxyStartupConfig {
+        channels,
+        accounts,
+        routes,
+        clients,
+        rules,
+        storage,
+        timeout,
+    } = config;
+    let scores = Vec::new();
 
     if channels.is_empty() {
         return Err("请先配置至少一个渠道".to_string());
     }
     if accounts.is_empty() {
         return Err("请先配置至少一个账号".to_string());
+    }
+
+    let validation_errors = validate_config_values(&channels, &accounts, &routes, &clients);
+    if !validation_errors.is_empty() {
+        return Err(validation_errors.join("\n"));
     }
 
     proxy

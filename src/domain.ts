@@ -189,7 +189,7 @@ export const views: Array<{ id: View; label: string }> = [
   { id: "channels", label: "渠道账号" },
   { id: "claude", label: "Claude Code" },
   { id: "clients", label: "客户端 Token" },
-  { id: "routes", label: "路由配置" },
+  { id: "routes", label: "高级路由" },
   { id: "stats", label: "账号统计" },
   { id: "logs", label: "请求日志" },
   { id: "usage", label: "用量统计" },

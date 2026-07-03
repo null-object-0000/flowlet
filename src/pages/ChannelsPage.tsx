@@ -118,88 +118,6 @@ export function ChannelsPage({
     <>
       <section className="panel">
         <div className="panel-title">
-          <h3>渠道模板</h3>
-          <div className="actions">
-            <button onClick={() => void onSaveChannels()}>保存渠道</button>
-          </div>
-        </div>
-        <div className="channel-grid">
-          {channels.map((channel) => (
-            <div className="channel-card" key={channel.id}>
-              <div className="channel-header">
-                <strong>{channel.name}</strong>
-                <span className="channel-vendor">{channel.vendor}</span>
-              </div>
-              <div className="channel-protocols">
-                {channel.supported_protocols.map((p) => (
-                  <span className="protocol-badge" key={p}>
-                    {protocolLabels[p]}
-                  </span>
-                ))}
-              </div>
-              <button
-                onClick={() => onAddAccount(channel.id)}
-              >
-                新增{channel.name}账号
-              </button>
-              <button
-                className="link-button"
-                onClick={() =>
-                  setEditingChannel(editingChannel === channel.id ? null : channel.id)
-                }
-              >
-                {editingChannel === channel.id ? "收起详情" : "查看配置"}
-              </button>
-              {editingChannel === channel.id ? (
-                <div className="channel-detail">
-                  <label>
-                    OpenAI Base URL
-                    <input
-                      value={channel.openai_base_url}
-                      onChange={(e) => {
-                        const idx = channels.findIndex((c) => c.id === channel.id);
-                        if (idx >= 0) {
-                          const updated = [...channels];
-                          updated[idx] = { ...updated[idx], openai_base_url: e.target.value };
-                          // State update handled by parent
-                        }
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Anthropic Base URL
-                    <input value={channel.anthropic_base_url} readOnly />
-                  </label>
-                  <label>
-                    默认模型
-                    <input value={channel.default_model} readOnly />
-                  </label>
-                  <label>
-                    小模型（简单请求自动路由）
-                    <input
-                      value={channel.small_model ?? ""}
-                      placeholder="留空则不使用小模型路由"
-                      onChange={(e) => {
-                        const idx = channels.findIndex((c) => c.id === channel.id);
-                        if (idx >= 0) {
-                          const updated = [...channels];
-                          updated[idx] = {
-                            ...updated[idx],
-                            small_model: e.target.value || null,
-                          };
-                          // State update handled by parent
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      </section>
-      <section className="panel">
-        <div className="panel-title">
           <h3>
             渠道账号 ({enabledAccounts}/{totalAccounts})
           </h3>
@@ -316,6 +234,67 @@ export function ChannelsPage({
           )}
         </div>
       </section>
+
+      <details className="panel advanced-panel">
+        <summary>高级设置：渠道模板</summary>
+        <div className="panel-title">
+          <h3>渠道模板</h3>
+          <div className="actions">
+            <button onClick={() => void onSaveChannels()}>保存渠道</button>
+          </div>
+        </div>
+        <div className="channel-grid">
+          {channels.map((channel) => (
+            <div className="channel-card" key={channel.id}>
+              <div className="channel-header">
+                <strong>{channel.name}</strong>
+                <span className="channel-vendor">{channel.vendor}</span>
+              </div>
+              <div className="channel-protocols">
+                {channel.supported_protocols.map((p) => (
+                  <span className="protocol-badge" key={p}>
+                    {protocolLabels[p]}
+                  </span>
+                ))}
+              </div>
+              <button onClick={() => onAddAccount(channel.id)}>新增{channel.name}账号</button>
+              <button
+                className="link-button"
+                onClick={() =>
+                  setEditingChannel(editingChannel === channel.id ? null : channel.id)
+                }
+              >
+                {editingChannel === channel.id ? "收起详情" : "查看配置"}
+              </button>
+              {editingChannel === channel.id ? (
+                <div className="channel-detail">
+                  <label>
+                    OpenAI Base URL
+                    <input
+                      value={channel.openai_base_url}
+                      onChange={() => {
+                        // 渠道模板编辑在后续高级设置中统一完善。
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Anthropic Base URL
+                    <input value={channel.anthropic_base_url} readOnly />
+                  </label>
+                  <label>
+                    默认模型
+                    <input value={channel.default_model} readOnly />
+                  </label>
+                  <label>
+                    小模型（简单请求自动路由）
+                    <input value={channel.small_model ?? ""} placeholder="留空则不使用小模型路由" readOnly />
+                  </label>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </details>
 
       {snapshotAccountId ? (
         <section className="panel">

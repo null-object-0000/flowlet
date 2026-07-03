@@ -762,6 +762,26 @@ impl Storage {
         Ok(snapshots)
     }
 
+    pub fn cleanup_orphan_balance_snapshots(&self) -> Result<usize, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let deleted = connection.execute(
+            r#"
+            DELETE FROM account_balance_snapshots
+            WHERE account_id = 'account-default'
+               OR NOT EXISTS (
+                   SELECT 1
+                   FROM channel_accounts
+                   WHERE channel_accounts.id = account_balance_snapshots.account_id
+               )
+            "#,
+            [],
+        )?;
+        Ok(deleted)
+    }
+
     // ─── Request Logs ────────────────────────────────────────────────────────
 
     pub fn insert_request_log(&self, log: &RequestLogInput) -> Result<(), StorageError> {

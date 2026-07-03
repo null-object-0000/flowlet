@@ -1,7 +1,9 @@
 import {
+  ChannelPreset,
   ProxyStatus,
   UsageSummaryRow
 } from "../domain";
+import React from "react";
 
 export function OverviewPage({
   status,
@@ -15,6 +17,10 @@ export function OverviewPage({
   onRefreshAll,
   dbStats,
   onCleanupLogs,
+  channels,
+  hasEnabledAccount,
+  hasEnabledRoute,
+  onQuickSetup,
 }: {
   status: ProxyStatus & { channels: number; accounts: number; clients: number };
   usageRows: UsageSummaryRow[];
@@ -27,15 +33,78 @@ export function OverviewPage({
   onRefreshAll: () => void;
   dbStats: [number, number, number] | null;
   onCleanupLogs: (keepDays: number) => void;
+  channels: ChannelPreset[];
+  hasEnabledAccount: boolean;
+  hasEnabledRoute: boolean;
+  onQuickSetup: (channelId: string, apiKey: string, scenario: "openai" | "claude" | "both") => void;
 }) {
+  const [wizardChannelId, setWizardChannelId] = React.useState("longcat");
+  const [wizardApiKey, setWizardApiKey] = React.useState("");
+  const [wizardScenario, setWizardScenario] = React.useState<"openai" | "claude" | "both">("openai");
   const today = new Date().toISOString().slice(0, 10);
   const todayRows = usageRows.filter((r) => r.date === today);
   const todayRequests = todayRows.reduce((sum, r) => sum + r.request_count, 0);
   const todayTokens = todayRows.reduce((sum, r) => sum + r.known_tokens, 0);
   const todayCost = todayRows.reduce((sum, r) => sum + r.estimated_cost, 0);
+  const needsSetup = !hasEnabledAccount || !hasEnabledRoute;
 
   return (
     <>
+      {needsSetup ? (
+        <section className="panel quick-setup">
+          <div className="panel-title">
+            <h3>快速配置</h3>
+          </div>
+          <div className="form-grid">
+            <label>
+              选择渠道
+              <select
+                value={wizardChannelId}
+                onChange={(event) => setWizardChannelId(event.target.value)}
+              >
+                {channels.map((channel) => (
+                  <option key={channel.id} value={channel.id}>
+                    {channel.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              API Key
+              <input
+                type="password"
+                value={wizardApiKey}
+                placeholder="粘贴你的渠道 API Key"
+                onChange={(event) => setWizardApiKey(event.target.value)}
+              />
+            </label>
+            <label>
+              使用场景
+              <select
+                value={wizardScenario}
+                onChange={(event) =>
+                  setWizardScenario(event.target.value as "openai" | "claude" | "both")
+                }
+              >
+                <option value="openai">OpenAI-compatible</option>
+                <option value="claude">Claude Code</option>
+                <option value="both">两者都要</option>
+              </select>
+            </label>
+          </div>
+          <div className="actions">
+            <button
+              onClick={() => {
+                onQuickSetup(wizardChannelId, wizardApiKey, wizardScenario);
+                setWizardApiKey("");
+              }}
+            >
+              保存快速配置
+            </button>
+          </div>
+          <p className="hint">保存后会自动创建渠道账号和默认 auto 路由，随后即可启动代理。</p>
+        </section>
+      ) : null}
       <section className="panel">
         <div className="panel-title">
           <h3>接入信息</h3>

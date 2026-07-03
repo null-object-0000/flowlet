@@ -158,6 +158,21 @@ nav {
   gap: 8px;
 }
 
+.quick-setup {
+  border-color: #9bc4ea;
+  background: #fbfdff;
+}
+
+.advanced-panel {
+  gap: 14px;
+}
+
+.advanced-panel summary {
+  cursor: pointer;
+  color: #50616a;
+  font-weight: 600;
+}
+
 .panel h3 {
   font-size: 18px;
 }
@@ -350,9 +365,20 @@ nav {
 
 .price-row-3 {
   display: grid;
-  grid-template-columns: minmax(100px, 0.7fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) 60px;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) 60px;
   align-items: center;
   gap: 10px;
+}
+
+.price-preview {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  color: #50616a;
+  background: #f0f4f6;
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 13px;
 }
 
 .checkbox-label {

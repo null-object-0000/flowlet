@@ -182,6 +182,76 @@ function App() {
     setMessage("价格表已保存");
   }
 
+  async function quickSetup(
+    channelId: string,
+    apiKey: string,
+    scenario: "openai" | "claude" | "both"
+  ) {
+    if (!apiKey.trim()) {
+      setMessage("请先填写 API Key");
+      return;
+    }
+    const channel = channels.find((c) => c.id === channelId);
+    if (!channel) {
+      setMessage("请选择有效渠道");
+      return;
+    }
+    const existing = accounts.filter((account) => account.channel_id === channelId);
+    const account: ChannelAccount = {
+      ...createAccount(channelId, existing.length),
+      name: `${channel.name} 账号`,
+      api_key: apiKey.trim(),
+      enabled: true,
+    };
+    const protocols =
+      scenario === "both" ? (["openai", "anthropic"] as const) : scenario === "claude" ? (["anthropic"] as const) : (["openai"] as const);
+    const nextAccounts = [...accounts, account];
+    const nextRoutes = [
+      ...routes.filter((route) => route.account_id !== account.id),
+      ...protocols.map((protocol, index) =>
+        createRouteCandidate(
+          "auto",
+          channelId,
+          account.id,
+          channel.default_model,
+          protocol,
+          routes.length + index
+        )
+      ),
+    ];
+
+    await invoke("save_channel_accounts", { accounts: nextAccounts });
+    await invoke("save_route_candidates", { routes: nextRoutes });
+    setAccounts(nextAccounts);
+    setRoutes(nextRoutes);
+    setMessage("快速配置已保存，可以启动代理");
+  }
+
+  async function regenerateDefaultRoutes() {
+    const enabledAccounts = accounts.filter((account) => account.enabled && account.api_key.trim());
+    if (enabledAccounts.length === 0) {
+      setMessage("请先新增并启用至少一个已填写 API Key 的账号");
+      return;
+    }
+    const nextRoutes = enabledAccounts.flatMap((account, accountIndex) => {
+      const channel = channels.find((c) => c.id === account.channel_id);
+      if (!channel) return [];
+      return channel.supported_protocols.map((protocol, protocolIndex) =>
+        createRouteCandidate(
+          "auto",
+          channel.id,
+          account.id,
+          channel.default_model,
+          protocol,
+          accountIndex * 10 + protocolIndex
+        )
+      );
+    });
+    await invoke("save_route_candidates", { routes: nextRoutes });
+    setRoutes(nextRoutes);
+    setMessage("默认 auto 路由已重新生成");
+  }
+
   async function refreshUsage() {
     const rows = await invoke<UsageSummaryRow[]>("usage_summary");
     setUsageRows(rows);
@@ -501,6 +571,10 @@ function App() {
                 })
                 .catch((err: unknown) => setMessage(`清理失败: ${String(err)}`));
             }}
+            channels={channels}
+            hasEnabledAccount={accounts.some((account) => account.enabled && account.api_key.trim())}
+            hasEnabledRoute={routes.some((route) => route.enabled)}
+            onQuickSetup={(channelId, apiKey, scenario) => void quickSetup(channelId, apiKey, scenario)}
           />
         ) : null}
 
@@ -548,13 +622,9 @@ function App() {
             onUpdate={updateRoute}
             onRemove={removeRoute}
             onSave={() => void saveRouteCandidates()}
+            onRegenerateDefaultRoutes={() => void regenerateDefaultRoutes()}
             getChannelName={getChannelName}
             getAccountName={getAccountName}
-            prices={prices}
-            onAddPrice={addPrice}
-            onUpdatePrice={updatePrice}
-            onRemovePrice={removePrice}
-            onSavePrices={() => void savePrices()}
             routeRules={routeRules}
             onAddRouteRule={addRouteRule}
             onUpdateRouteRule={updateRouteRule}
@@ -583,6 +653,12 @@ function App() {
             rows={usageRows}
             onAnalyze={() => void analyzeUsage()}
             onRefresh={() => void refreshUsage()}
+            prices={prices}
+            channels={channels}
+            onAddPrice={addPrice}
+            onUpdatePrice={updatePrice}
+            onRemovePrice={removePrice}
+            onSavePrices={() => void savePrices()}
           />
         ) : null}
 

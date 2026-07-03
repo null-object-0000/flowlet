@@ -788,6 +788,9 @@ pub fn run() {
             .expect("清理默认路由失败");
         routes = cleaned_routes;
     }
+    storage
+        .cleanup_orphan_balance_snapshots()
+        .expect("清理孤儿余额快照失败");
 
     // 初始化客户端
     let clients = storage.list_clients().expect("读取客户端配置失败");

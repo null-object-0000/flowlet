@@ -2,7 +2,6 @@ import {
   ChannelAccount,
   ChannelPreset,
   ClientConfig,
-  ModelPrice,
   ProtocolType,
   RouteCandidate,
   RouteRule,
@@ -18,13 +17,9 @@ export function RoutesPage({
   onUpdate,
   onRemove,
   onSave,
+  onRegenerateDefaultRoutes,
   getChannelName,
   getAccountName,
-  prices,
-  onAddPrice,
-  onUpdatePrice,
-  onRemovePrice,
-  onSavePrices,
   routeRules,
   onAddRouteRule,
   onUpdateRouteRule,
@@ -40,13 +35,9 @@ export function RoutesPage({
   onUpdate: (index: number, patch: Partial<RouteCandidate>) => void;
   onRemove: (index: number) => void;
   onSave: () => void;
+  onRegenerateDefaultRoutes: () => void;
   getChannelName: (channelId: string) => string;
   getAccountName: (accountId: string) => string;
-  prices: ModelPrice[];
-  onAddPrice: () => void;
-  onUpdatePrice: (index: number, patch: Partial<ModelPrice>) => void;
-  onRemovePrice: (index: number) => void;
-  onSavePrices: () => void;
   routeRules: RouteRule[];
   onAddRouteRule: () => void;
   onUpdateRouteRule: (index: number, patch: Partial<RouteRule>) => void;
@@ -54,11 +45,54 @@ export function RoutesPage({
   onSaveRouteRules: () => void;
   clients: ClientConfig[];
 }) {
+  const enabledRoutes = routes.filter((route) => route.enabled);
+
   return (
     <>
       <section className="panel">
         <div className="panel-title">
-          <h3>路由配置 (虚拟模型: auto)</h3>
+          <h3>高级路由</h3>
+          <div className="actions">
+            <button onClick={onRegenerateDefaultRoutes}>重新生成默认路由</button>
+          </div>
+        </div>
+        {enabledRoutes.length === 0 ? (
+          <div className="empty-state">
+            <p>当前没有启用的 auto 路由。</p>
+            <p>普通用户建议回到首页使用快速配置，或点击上方按钮重新生成默认路由。</p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>协议</th>
+                  <th>渠道</th>
+                  <th>账号</th>
+                  <th>上游模型</th>
+                  <th>优先级</th>
+                </tr>
+              </thead>
+              <tbody>
+                {enabledRoutes.map((route) => (
+                  <tr key={route.id}>
+                    <td>{route.client_protocol}</td>
+                    <td>{getChannelName(route.channel_id)}</td>
+                    <td>{getAccountName(route.account_id)}</td>
+                    <td>{route.upstream_model}</td>
+                    <td>{route.priority}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <details className="panel advanced-panel">
+        <summary>手动编辑 route candidate</summary>
+        <div className="panel-title">
+          <h3>Route Candidates</h3>
           <div className="actions">
             <button onClick={onAdd}>新增候选</button>
             <button onClick={() => void onSave()}>保存配置</button>
@@ -66,13 +100,7 @@ export function RoutesPage({
         </div>
         <div className="route-list">
           {routes.length === 0 ? (
-            <div className="empty-state">
-              <p>你还没有配置路由。</p>
-              <p>请先新增渠道账号，然后将账号加入 auto 路由。</p>
-              <div className="actions">
-                <button onClick={onAdd}>新增路由</button>
-              </div>
-            </div>
+            <p>暂无路由候选。</p>
           ) : (
             routes.map((route, index) => (
               <div className="route-card" key={route.id}>
@@ -138,71 +166,10 @@ export function RoutesPage({
             ))
           )}
         </div>
-      </section>
-      <section className="panel">
-        <div className="panel-title">
-          <h3>模型价格表（三段价格）</h3>
-          <div className="actions">
-            <button onClick={onAddPrice}>新增价格</button>
-            <button onClick={() => void onSavePrices()}>保存价格</button>
-          </div>
-        </div>
-        <div className="price-list">
-          {prices.length === 0 ? (
-            <p>暂无模型价格</p>
-          ) : (
-            prices.map((price, index) => (
-              <div className="price-row-3" key={price.id}>
-                <select
-                  value={price.channel_id}
-                  onChange={(e) => onUpdatePrice(index, { channel_id: e.target.value })}
-                >
-                  {channels.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  value={price.upstream_model}
-                  placeholder="模型名"
-                  onChange={(e) => onUpdatePrice(index, { upstream_model: e.target.value })}
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.000001"
-                  value={price.input_uncached_price}
-                  placeholder="输入(未命中缓存)"
-                  onChange={(e) =>
-                    onUpdatePrice(index, { input_uncached_price: Number(e.target.value) })
-                  }
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.000001"
-                  value={price.input_cached_price}
-                  placeholder="输入(命中缓存)"
-                  onChange={(e) =>
-                    onUpdatePrice(index, { input_cached_price: Number(e.target.value) })
-                  }
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.000001"
-                  value={price.output_price}
-                  placeholder="输出"
-                  onChange={(e) => onUpdatePrice(index, { output_price: Number(e.target.value) })}
-                />
-                <button onClick={() => onRemovePrice(index)}>删除</button>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-      <section className="panel">
+      </details>
+
+      <details className="panel advanced-panel">
+        <summary>实验功能：规则路由</summary>
         <div className="panel-title">
           <h3>规则路由（优先于自动路由）</h3>
           <div className="actions">
@@ -307,7 +274,7 @@ export function RoutesPage({
             ))
           )}
         </div>
-      </section>
+      </details>
     </>
   );
 }

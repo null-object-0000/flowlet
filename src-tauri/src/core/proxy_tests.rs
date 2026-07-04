@@ -6,6 +6,7 @@ use axum::{
 use super::proxy_routing::rank_candidates_by_score;
 use crate::core::config::AuthStrategy;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 #[test]
 fn protocol_type_from_path_identifies_anthropic() {
@@ -322,63 +323,65 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
 
     let storage = Storage::open(temp_db_path()).unwrap();
     let state = ProxyAppState {
-        channels: vec![ChannelPreset {
-            id: "longcat".to_string(),
-            name: "LongCat".to_string(),
-            vendor: "longcat".to_string(),
-            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
-            openai_base_url: format!("http://{upstream_addr}"),
-            anthropic_base_url: format!("http://{upstream_addr}"),
-            openai_auth: AuthStrategy::Bearer,
-            anthropic_auth: AuthStrategy::Bearer,
-            default_model: "LongCat-2.0".to_string(),
-            small_model: None,
-            timeout_seconds: None,
-            supports_model_list: false,
-            supports_model_detail: false,
-            supports_price_sync: false,
-            supports_balance_query: false,
-            supports_quota_query: false,
-            supports_usage_query: false,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }],
-        accounts: vec![ChannelAccount {
-            id: "acc-1".to_string(),
-            channel_id: "longcat".to_string(),
-            name: "主账号".to_string(),
-            api_key: "upstream-secret".to_string(),
-            enabled: true,
-            priority: 0,
-            remark: None,
-            last_used_at: None,
-            last_error: None,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }],
-        clients: vec![ClientConfig {
-            id: "client-test".to_string(),
-            name: "测试客户端".to_string(),
-            token: "client-token".to_string(),
-            app_type: "test".to_string(),
-            enabled: true,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }],
-        rules: vec![],
-        scores: vec![],
-        routes: vec![RouteCandidate {
-            id: "route-1".to_string(),
-            virtual_model_id: "auto".to_string(),
-            channel_id: "longcat".to_string(),
-            account_id: "acc-1".to_string(),
-            upstream_model: "gpt-test".to_string(),
-            client_protocol: ProtocolType::OpenAi,
-            priority: 0,
-            enabled: true,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }],
+        shared: ProxySharedConfig {
+            channels: Arc::new(Mutex::new(vec![ChannelPreset {
+                id: "longcat".to_string(),
+                name: "LongCat".to_string(),
+                vendor: "longcat".to_string(),
+                supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+                openai_base_url: format!("http://{upstream_addr}"),
+                anthropic_base_url: format!("http://{upstream_addr}"),
+                openai_auth: AuthStrategy::Bearer,
+                anthropic_auth: AuthStrategy::Bearer,
+                default_model: "LongCat-2.0".to_string(),
+                small_model: None,
+                timeout_seconds: None,
+                supports_model_list: false,
+                supports_model_detail: false,
+                supports_price_sync: false,
+                supports_balance_query: false,
+                supports_quota_query: false,
+                supports_usage_query: false,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }])),
+            accounts: Arc::new(Mutex::new(vec![ChannelAccount {
+                id: "acc-1".to_string(),
+                channel_id: "longcat".to_string(),
+                name: "主账号".to_string(),
+                api_key: "upstream-secret".to_string(),
+                enabled: true,
+                priority: 0,
+                remark: None,
+                last_used_at: None,
+                last_error: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }])),
+            clients: Arc::new(Mutex::new(vec![ClientConfig {
+                id: "client-test".to_string(),
+                name: "测试客户端".to_string(),
+                token: "client-token".to_string(),
+                app_type: "test".to_string(),
+                enabled: true,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }])),
+            routes: Arc::new(Mutex::new(vec![RouteCandidate {
+                id: "route-1".to_string(),
+                virtual_model_id: "auto".to_string(),
+                channel_id: "longcat".to_string(),
+                account_id: "acc-1".to_string(),
+                upstream_model: "gpt-test".to_string(),
+                client_protocol: ProtocolType::OpenAi,
+                priority: 0,
+                enabled: true,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }])),
+            rules: Arc::new(Mutex::new(vec![])),
+            scores: Arc::new(Mutex::new(vec![])),
+        },
         client: Client::new(),
         storage,
         upstream_timeout_seconds: 120,
@@ -637,11 +640,13 @@ async fn model_list_response_exposes_enabled_route_models() {
     let accounts = vec![
         ChannelAccount {
             id: "acc-enabled".to_string(),
+            name: "LongCat 主账号".to_string(),
             enabled: true,
             ..Default::default()
         },
         ChannelAccount {
             id: "acc-disabled".to_string(),
+            name: "disabled".to_string(),
             enabled: false,
             ..Default::default()
         },
@@ -658,15 +663,86 @@ async fn model_list_response_exposes_enabled_route_models() {
         .await
         .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // OpenAI 风格：object=list, data 内每个模型含 id/object/created/owned_by
+    assert_eq!(value["object"], "list");
+    // 当前只返回 virtual_model_id（不回漏 upstream_model）
     let ids: Vec<&str> = value["data"]
         .as_array()
         .unwrap()
         .iter()
         .map(|item| item["id"].as_str().unwrap())
         .collect();
+    assert_eq!(ids, vec!["auto"]);
 
-    assert_eq!(ids, vec!["auto", "gpt-test"]);
+    // owned_by 应取 account name，而不是 hardcode "flowlet"
+    let first = &value["data"][0];
+    assert_eq!(first["object"], "model");
+    assert_eq!(first["owned_by"], "LongCat 主账号");
 }
+
+#[tokio::test]
+async fn model_list_response_anthropic_uses_anthropic_schema() {
+    let routes = vec![
+        RouteCandidate {
+            id: "route-a".to_string(),
+            virtual_model_id: "claude-sonnet-4-20250514".to_string(),
+            channel_id: "anthropic".to_string(),
+            account_id: "acc-anthropic".to_string(),
+            upstream_model: "claude-sonnet-4-20250514".to_string(),
+            client_protocol: ProtocolType::Anthropic,
+            priority: 0,
+            enabled: true,
+            created_at: "2025-05-14T00:00:00Z".to_string(),
+            updated_at: String::new(),
+        },
+        RouteCandidate {
+            id: "route-b".to_string(),
+            virtual_model_id: "claude-opus-4".to_string(),
+            channel_id: "anthropic".to_string(),
+            account_id: "acc-anthropic".to_string(),
+            upstream_model: "claude-opus-4".to_string(),
+            client_protocol: ProtocolType::Anthropic,
+            priority: 1,
+            enabled: true,
+            created_at: String::new(), // 老数据兜底
+            updated_at: String::new(),
+        },
+    ];
+    let accounts = vec![ChannelAccount {
+        id: "acc-anthropic".to_string(),
+        name: "Anthropic Official".to_string(),
+        enabled: true,
+        ..Default::default()
+    }];
+
+    let response = build_model_list_response(&routes, &accounts, &ProtocolType::Anthropic);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Anthropic 风格：没有 object=list，而是 data + has_more + first_id + last_id
+    assert!(value.get("object").is_none());
+    assert_eq!(value["has_more"], false);
+    // BTreeSet 按字典序排列：claude-opus-4 < claude-sonnet-4-20250514
+    assert_eq!(value["first_id"], "claude-opus-4");
+    assert_eq!(value["last_id"], "claude-sonnet-4-20250514");
+
+    let data = value["data"].as_array().unwrap();
+    assert_eq!(data.len(), 2);
+    // 每个模型对象：type=model, id, display_name, created_at
+    assert_eq!(data[0]["type"], "model");
+    assert_eq!(data[0]["id"], "claude-opus-4");
+    assert_eq!(data[0]["display_name"], "claude-opus-4");
+    // 空 created_at 应被替换为 epoch 起点
+    assert_eq!(data[0]["created_at"], "1970-01-01T00:00:00Z");
+    // 非空 RFC 3339 应原样保留
+    assert_eq!(data[1]["created_at"], "2025-05-14T00:00:00Z");
+}
+
 #[test]
 fn cors_preflight_allows_browser_requests() {
     let request = Request::builder()

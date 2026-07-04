@@ -29,49 +29,23 @@ struct AppState {
 }
 
 struct ProxyStartupConfig {
-    channels: Vec<ChannelPreset>,
-    accounts: Vec<ChannelAccount>,
-    routes: Vec<RouteCandidate>,
-    clients: Vec<ClientConfig>,
-    rules: Vec<RouteRule>,
+    shared: core::proxy::ProxySharedConfig,
     storage: Storage,
     timeout: u64,
 }
 
 impl AppState {
     fn proxy_startup_config(&self) -> Result<ProxyStartupConfig, String> {
-        let channels = self
-            .channels
-            .lock()
-            .map_err(|_| "读取渠道配置失败".to_string())?
-            .clone();
-        let accounts = self
-            .accounts
-            .lock()
-            .map_err(|_| "读取账号配置失败".to_string())?
-            .clone();
-        let routes = self
-            .routes
-            .lock()
-            .map_err(|_| "读取路由配置失败".to_string())?
-            .clone();
-        let clients = self
-            .clients
-            .lock()
-            .map_err(|_| "读取客户端配置失败".to_string())?
-            .clone();
-        let rules = self
-            .rules
-            .lock()
-            .map_err(|_| "读取路由规则失败".to_string())?
-            .clone();
-
+        // 启动时传入 Arc 引用，而非 clone 数据副本 — 代理运行中与 UI 共享同一份配置
         Ok(ProxyStartupConfig {
-            channels,
-            accounts,
-            routes,
-            clients,
-            rules,
+            shared: core::proxy::ProxySharedConfig {
+                channels: Arc::clone(&self.channels),
+                accounts: Arc::clone(&self.accounts),
+                clients: Arc::clone(&self.clients),
+                routes: Arc::clone(&self.routes),
+                rules: Arc::clone(&self.rules),
+                scores: Arc::new(Mutex::new(Vec::new())),
+            },
             storage: self.storage.clone(),
             timeout: self.upstream_timeout_seconds,
         })
@@ -537,29 +511,25 @@ async fn start_proxy_internal(
     config: ProxyStartupConfig,
 ) -> Result<(), String> {
     let ProxyStartupConfig {
-        channels,
-        accounts,
-        routes,
-        clients,
-        rules,
+        shared,
         storage,
         timeout,
     } = config;
-    let scores = Vec::new();
 
-    if channels.is_empty() {
-        return Err("请先配置至少一个渠道".to_string());
-    }
+    // 校验当前配置是否合法
+    let channels = shared.channels.lock().map_err(|_| "锁失败".to_string())?.clone();
+    let accounts = shared.accounts.lock().map_err(|_| "锁失败".to_string())?.clone();
+    let routes = shared.routes.lock().map_err(|_| "锁失败".to_string())?.clone();
+    let clients = shared.clients.lock().map_err(|_| "锁失败".to_string())?.clone();
 
     let validation_errors = validate_config_values(&channels, &accounts, &routes, &clients);
     if !validation_errors.is_empty() {
         return Err(validation_errors.join("\n"));
     }
 
+    // 传入 shared（持有 Arc 引用），代理运行中会锁定读取最新配置
     proxy
-        .start(
-            channels, accounts, clients, routes, rules, scores, storage, timeout,
-        )
+        .start(shared, storage, timeout)
         .await
         .map_err(|err| err.to_string())
 }

@@ -58,12 +58,29 @@ pub(super) fn build_model_list_response(
     accounts: &[ChannelAccount],
     protocol: &ProtocolType,
 ) -> Response {
+    let entries = collect_model_entries(routes, accounts, protocol);
+
+    match protocol {
+        ProtocolType::OpenAi => build_openai_model_list(&entries, accounts),
+        ProtocolType::Anthropic => build_anthropic_model_list(&entries),
+    }
+}
+
+/// 从 routes 中按 protocol+enabled 过滤后，收集 (model_id, account_id, created_at)
+/// BTreeSet 保证按模型名字典序排列且去重。
+fn collect_model_entries(
+    routes: &[RouteCandidate],
+    accounts: &[ChannelAccount],
+    protocol: &ProtocolType,
+) -> Vec<(String, String, String)> {
     let enabled_accounts: BTreeSet<&str> = accounts
         .iter()
-        .filter(|account| account.enabled)
-        .map(|account| account.id.as_str())
+        .filter(|a| a.enabled)
+        .map(|a| a.id.as_str())
         .collect();
-    let mut model_ids = BTreeSet::new();
+
+    let mut result: Vec<(String, String, String)> = Vec::new();
+    let mut seen = BTreeSet::new();
 
     for route in routes {
         if !route.enabled
@@ -72,34 +89,105 @@ pub(super) fn build_model_list_response(
         {
             continue;
         }
-
-        if !route.virtual_model_id.trim().is_empty() {
-            model_ids.insert(route.virtual_model_id.clone());
+        // 只返回对外模型名（virtual_model_id），不回漏 upstream_model
+        let id = route.virtual_model_id.trim();
+        if id.is_empty() || !seen.insert(id.to_string()) {
+            continue;
         }
-        if !route.upstream_model.trim().is_empty() {
-            model_ids.insert(route.upstream_model.clone());
-        }
+        result.push((
+            id.to_string(),
+            route.account_id.clone(),
+            route.created_at.clone(),
+        ));
     }
+    // 按 model_id 字典序稳定排序，保证 first_id/last_id 和输出顺序确定
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    result
+}
 
-    let data: Vec<serde_json::Value> = model_ids
-        .into_iter()
-        .map(|id| {
+fn build_openai_model_list(
+    entries: &[(String, String, String)],
+    accounts: &[ChannelAccount],
+) -> Response {
+    let account_name: std::collections::HashMap<&str, &str> = accounts
+        .iter()
+        .map(|a| (a.id.as_str(), a.name.as_str()))
+        .collect();
+
+    let parse_unix_seconds = |raw: &str| -> i64 {
+        if raw.is_empty() {
+            return 0;
+        }
+        // 优先尝试直接解析为 Unix 时间戳（纯数字）
+        if let Ok(ts) = raw.parse::<i64>() {
+            return ts;
+        }
+        // 否则尝试按 RFC 3339 / ISO 8601 解析
+        chrono::DateTime::parse_from_rfc3339(raw)
+            .map(|dt| dt.timestamp())
+            .unwrap_or(0)
+    };
+
+    let data: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|(id, account_id, created_at)| {
+            let owned_by = account_name
+                .get(account_id.as_str())
+                .filter(|name| !name.is_empty())
+                .copied()
+                .unwrap_or("flowlet");
             serde_json::json!({
                 "id": id,
                 "object": "model",
-                "created": 0,
-                "owned_by": "flowlet"
+                "created": parse_unix_seconds(created_at),
+                "owned_by": owned_by
             })
         })
         .collect();
 
-    let mut response = Response::new(Body::from(
-        serde_json::json!({
-            "object": "list",
-            "data": data
+    json_response(serde_json::json!({
+        "object": "list",
+        "data": data
+    }))
+}
+
+fn build_anthropic_model_list(entries: &[(String, String, String)]) -> Response {
+    // Anthropic GET /v1/models 官方 schema（参考 docs.claude.com）：
+    // { "data": [{ "id": "...", "type": "model", "display_name": "...", "created_at": "RFC3339" }],
+    //   "has_more": false, "first_id": "...", "last_id": "..." }
+    //
+    // 上游 created_at 在数据库中以 RFC 3339 存储（如 "2026-01-01T00:00:00Z"）。
+    // 若为空字符串（老数据兜底），返回 epoch 起点。
+    let data: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|(id, _account_id, created_at)| {
+            let created_at = if created_at.is_empty() {
+                "1970-01-01T00:00:00Z"
+            } else {
+                created_at.as_str()
+            };
+            serde_json::json!({
+                "id": id,
+                "type": "model",
+                "display_name": id,
+                "created_at": created_at
+            })
         })
-        .to_string(),
-    ));
+        .collect();
+
+    let first_id = data.first().and_then(|v| v["id"].as_str()).unwrap_or("");
+    let last_id = data.last().and_then(|v| v["id"].as_str()).unwrap_or("");
+
+    json_response(serde_json::json!({
+        "data": data,
+        "has_more": false,
+        "first_id": first_id,
+        "last_id": last_id
+    }))
+}
+
+fn json_response(value: serde_json::Value) -> Response {
+    let mut response = Response::new(Body::from(value.to_string()));
     *response.status_mut() = StatusCode::OK;
     response.headers_mut().insert(
         header::CONTENT_TYPE,

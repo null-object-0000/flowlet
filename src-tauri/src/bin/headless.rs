@@ -2,11 +2,11 @@
 //! Run without Tauri GUI: `cargo run --bin headless`
 
 use flowlet_lib::core::metrics::Metrics;
-use flowlet_lib::core::proxy::ProxyController;
+use flowlet_lib::core::proxy::{ProxyController, ProxySharedConfig};
 use flowlet_lib::core::rate_limiter::RateLimiter;
 use flowlet_lib::core::storage::Storage;
 use flowlet_lib::core::web::{create_web_router, WebState};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 #[tokio::main]
@@ -58,14 +58,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proxy_running = Arc::new(RwLock::new(true));
     let proxy = ProxyController::default();
     let rate_limiter = RateLimiter::new(600); // 600 请求/分钟/客户端
+    let shared = ProxySharedConfig {
+        channels: Arc::new(Mutex::new(channels)),
+        accounts: Arc::new(Mutex::new(accounts)),
+        clients: Arc::new(Mutex::new(clients)),
+        routes: Arc::new(Mutex::new(routes)),
+        rules: Arc::new(Mutex::new(rules)),
+        scores: Arc::new(Mutex::new(scores)),
+    };
     proxy
         .start_with_bind(
-            channels,
-            accounts,
-            clients,
-            routes,
-            rules,
-            scores,
+            shared,
             storage.clone(),
             120,
             &bind_addr,

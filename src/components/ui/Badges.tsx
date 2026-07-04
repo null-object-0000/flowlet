@@ -5,9 +5,10 @@ export function StatusPill({ running, children }: { running: boolean; children: 
 }
 
 export function ProtocolBadges({ protocols }: { protocols: ProtocolType[] }) {
+  const valid = protocols.filter((p): p is ProtocolType => p in protocolLabels);
   return (
     <div className="channel-protocols">
-      {protocols.map((protocol) => (
+      {valid.map((protocol) => (
         <span className="protocol-badge" key={protocol}>
           {protocolLabels[protocol]}
         </span>

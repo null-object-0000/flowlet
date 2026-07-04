@@ -24,6 +24,19 @@ use std::{
 use thiserror::Error;
 use tokio::sync::oneshot;
 
+// ─── Shared Config (hot-reloadable) ─────────────────────────────────────────
+// 代理运行中与 AppState 共用这些 Arc<Mutex<_>>，UI 保存配置后代理无需重启即可生效。
+
+#[derive(Clone)]
+pub struct ProxySharedConfig {
+    pub channels: Arc<Mutex<Vec<ChannelPreset>>>,
+    pub accounts: Arc<Mutex<Vec<ChannelAccount>>>,
+    pub clients: Arc<Mutex<Vec<ClientConfig>>>,
+    pub routes: Arc<Mutex<Vec<RouteCandidate>>>,
+    pub rules: Arc<Mutex<Vec<RouteRule>>>,
+    pub scores: Arc<Mutex<Vec<(String, String, f64, f64, f64)>>>,
+}
+
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
 const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
 
@@ -80,12 +93,7 @@ struct ProxyRuntime {
 
 #[derive(Clone)]
 struct ProxyAppState {
-    pub channels: Vec<ChannelPreset>,
-    pub accounts: Vec<ChannelAccount>,
-    pub clients: Vec<ClientConfig>,
-    pub routes: Vec<RouteCandidate>,
-    pub rules: Vec<RouteRule>,
-    pub scores: Vec<(String, String, f64, f64, f64)>,
+    pub shared: ProxySharedConfig,
     pub client: Client,
     pub storage: Storage,
     #[allow(dead_code)]
@@ -93,25 +101,16 @@ struct ProxyAppState {
     pub rate_limiter: RateLimiter,
 }
 
+
 impl ProxyController {
     pub async fn start(
         &self,
-        channels: Vec<ChannelPreset>,
-        accounts: Vec<ChannelAccount>,
-        clients: Vec<ClientConfig>,
-        routes: Vec<RouteCandidate>,
-        rules: Vec<RouteRule>,
-        scores: Vec<(String, String, f64, f64, f64)>,
+        shared: ProxySharedConfig,
         storage: Storage,
         upstream_timeout_seconds: u64,
     ) -> Result<(), ProxyError> {
         self.start_with_bind(
-            channels,
-            accounts,
-            clients,
-            routes,
-            rules,
-            scores,
+            shared,
             storage,
             upstream_timeout_seconds,
             DEFAULT_BIND_ADDR,
@@ -123,20 +122,21 @@ impl ProxyController {
     /// 启动代理并指定监听地址
     pub async fn start_with_bind(
         &self,
-        channels: Vec<ChannelPreset>,
-        accounts: Vec<ChannelAccount>,
-        clients: Vec<ClientConfig>,
-        routes: Vec<RouteCandidate>,
-        rules: Vec<RouteRule>,
-        scores: Vec<(String, String, f64, f64, f64)>,
+        shared: ProxySharedConfig,
         storage: Storage,
         upstream_timeout_seconds: u64,
         bind_addr_str: &str,
         rate_limiter: RateLimiter,
     ) -> Result<(), ProxyError> {
-        if channels.is_empty() {
+        // 启动时做一次基本校验：至少有一个渠道
+        let channels_guard = shared
+            .channels
+            .lock()
+            .map_err(|_| ProxyError::StartFailed("渠道配置锁定失败".to_string()))?;
+        if channels_guard.is_empty() {
             return Err(ProxyError::StartFailed("没有可用渠道".to_string()));
         }
+        drop(channels_guard);
 
         let mut runtime = self
             .inner
@@ -167,12 +167,7 @@ impl ProxyController {
             .route("/openai/v1/{*path}", any(forward_openai_compatible))
             .route("/anthropic/v1/{*path}", any(forward_anthropic_compatible))
             .with_state(ProxyAppState {
-                channels,
-                accounts,
-                clients,
-                routes,
-                rules,
-                scores,
+                shared,
                 client: Client::builder()
                     .timeout(Duration::from_secs(upstream_timeout_seconds))
                     .build()
@@ -300,16 +295,21 @@ async fn forward_request(
         .unwrap_or_else(|| "/".to_string());
 
     let method = parts.method.to_string();
+
+    // 热更新：从共享锁读取最新配置
+    let routes = state.shared.routes.lock().unwrap().clone();
+    let accounts = state.shared.accounts.lock().unwrap().clone();
+    let channels = state.shared.channels.lock().unwrap().clone();
+    let clients_shared = state.shared.clients.lock().unwrap().clone();
+    let rules = state.shared.rules.lock().unwrap().clone();
+    let scores = state.shared.scores.lock().unwrap().clone();
+
     if is_model_list_request(&parts.method, &path) {
-        return Ok(build_model_list_response(
-            &state.routes,
-            &state.accounts,
-            &detected_protocol,
-        ));
+        return Ok(build_model_list_response(&routes, &accounts, &detected_protocol));
     }
 
     let public_model = extract_model(&body_bytes, &detected_protocol);
-    let client_info = identify_client(&parts.headers, &state.clients);
+    let client_info = identify_client(&parts.headers, &clients_shared);
     let client_id = client_info.as_ref().map(|(id, _)| id.clone());
     let client_name = client_info.as_ref().map(|(_, name)| name.clone());
 
@@ -333,14 +333,14 @@ async fn forward_request(
 
     // 匹配路由候选
     let candidates = match_candidates(
-        &state.routes,
-        &state.rules,
-        &state.scores,
+        &routes,
+        &rules,
+        &scores,
         public_model.as_deref(),
         &detected_protocol,
         client_id.as_deref(),
-        &state.accounts,
-        &state.channels,
+        &accounts,
+        &channels,
     );
 
     // 识别请求类型
@@ -379,9 +379,7 @@ async fn forward_request(
     let mut last_network_error: Option<reqwest::Error> = None;
     let mut fallback_count = 0;
 
-    // 提前 clone 所有需要在循环中重复使用的字段
-    let accounts = state.accounts.clone();
-    let channels = state.channels.clone();
+    // accounts / channels 已在上面从共享锁 clone，直接复用
     let storage = state.storage.clone();
     let http_client = state.client.clone();
     let protocol_str = detected_protocol.as_str().to_string();

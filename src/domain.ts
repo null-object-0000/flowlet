@@ -31,6 +31,7 @@ export type ChannelAccount = {
   enabled: boolean;
   priority: number;
   remark?: string;
+  base_url_override?: string | null;
   last_used_at?: string;
   last_error?: string;
   created_at: string;
@@ -255,6 +256,7 @@ export function createAccount(channelId: string, index: number): ChannelAccount 
     enabled: true,
     priority: index,
     remark: "",
+    base_url_override: null,
     last_used_at: undefined,
     last_error: undefined,
     created_at: now,

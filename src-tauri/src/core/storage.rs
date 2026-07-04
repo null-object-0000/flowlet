@@ -464,6 +464,14 @@ impl Storage {
             "TEXT NOT NULL DEFAULT ''",
         )?;
 
+        // 渠道账号：补充 Base URL 覆盖字段
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "base_url_override",
+            "TEXT",
+        )?;
+
         // 请求日志：补充详情字段（TTFB、耗时、尝试序号、请求/响应头部与 body、流式摘要）
         add_column_if_missing(&connection, "request_logs", "ttfb_ms", "INTEGER")?;
         add_column_if_missing(&connection, "request_logs", "duration_ms", "INTEGER")?;

@@ -114,7 +114,7 @@ export function ModelSyncPanel({
         </div>
       )}
       <p className="hint">
-        同步结果将更新可开放模型列表。LongCat 同步失败时保留内置 LongCat-2.0 作为兜底。
+        同步结果将更新可开放模型列表。DeepSeek 与 LongCat 均支持同步；LongCat 同步失败时自动以内置 LongCat-2.0 兜底。
       </p>
     </Panel>
   );

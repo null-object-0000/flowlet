@@ -112,8 +112,8 @@ impl Storage {
                 r#"
                 INSERT INTO channel_accounts (
                     id, channel_id, name, api_key, enabled, priority,
-                    remark, last_used_at, last_error, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                    remark, base_url_override, last_used_at, last_error, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                 "#,
                 params![
                     account.id,
@@ -123,6 +123,7 @@ impl Storage {
                     account.enabled as i64,
                     account.priority,
                     account.remark,
+                    account.base_url_override,
                     account.last_used_at,
                     account.last_error,
                     account.created_at,
@@ -141,7 +142,7 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT id, channel_id, name, api_key, enabled, priority,
-                    remark, last_used_at, last_error, created_at, updated_at
+                    remark, base_url_override, last_used_at, last_error, created_at, updated_at
              FROM channel_accounts ORDER BY channel_id ASC, priority ASC, id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -153,10 +154,11 @@ impl Storage {
                 enabled: row.get::<_, i64>(4)? != 0,
                 priority: row.get(5)?,
                 remark: row.get(6)?,
-                last_used_at: row.get(7)?,
-                last_error: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                base_url_override: row.get(7)?,
+                last_used_at: row.get(8)?,
+                last_error: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
         let mut accounts = Vec::new();

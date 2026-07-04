@@ -44,8 +44,8 @@ export default function App() {
   const {
     startProxy,
     stopProxy,
+    restartProxy,
     copy,
-    saveChannels,
     saveAccounts,
     saveRouteCandidates,
     saveRouteRules,
@@ -131,11 +131,12 @@ export default function App() {
             onAddAccount={addAccount}
             onUpdateAccount={updateAccount}
             onRemoveAccount={removeAccount}
-            onSaveChannels={() => void saveChannels()}
             onSaveAccounts={() => void saveAccounts()}
             onTestConnection={(id) => void testConnection(id)}
             getBalanceForAccount={getBalanceForAccount}
             onAddBalanceSnapshot={(s) => void addBalanceSnapshot(s)}
+            proxyRunning={status.running}
+            onRestartProxy={() => void restartProxy()}
           />
         ) : null}
 

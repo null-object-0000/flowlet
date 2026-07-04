@@ -9,7 +9,7 @@ export function createRouteActions({ data, setMessage }: ActionContext) {
   async function saveRouteCandidates() {
     await runCommand("save_route_candidates", { routes });
     // 热更新：代理运行中自动读取最新配置，无需重启
-    setMessage("路由配置已保存");
+    setMessage("模型服务配置已保存，代理已热更新");
   }
 
   async function saveRouteRules() {
@@ -29,7 +29,7 @@ export function createRouteActions({ data, setMessage }: ActionContext) {
     await runCommand("save_route_candidates", { routes: nextRoutes });
     setRoutes(nextRoutes);
     // 热更新：代理运行中自动读取最新配置，无需重启
-    setMessage("默认开放模型已重新生成");
+    setMessage("默认开放模型已重新生成，代理已热更新");
   }
 
   function createRouteRule(): RouteRule {

@@ -362,6 +362,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 enabled: true,
                 priority: 0,
                 remark: None,
+                base_url_override: None,
                 last_used_at: None,
                 last_error: None,
                 created_at: String::new(),

@@ -6,22 +6,17 @@ import { ActionContext } from "./types";
 export function createChannelActions({ data, setMessage }: ActionContext) {
   const { channels, accounts, setAccounts, routes, setRoutes, balanceSnapshots, refreshAll } = data;
 
-  async function saveChannels() {
-    await runCommand("save_channel_presets", { presets: channels });
-    setMessage("渠道模板已保存");
-  }
-
   async function saveAccounts() {
     const filtered = accounts.filter((a) => a.name.trim() && a.channel_id.trim());
     await runCommand("save_channel_accounts", { accounts: filtered });
     setAccounts(filtered);
-    setMessage("渠道账号已保存");
+    setMessage("渠道账号已保存，代理配置已热更新");
 
     const nextRoutes = ensureDefaultExposedRoutes(channels, filtered, routes);
     if (nextRoutes.length !== routes.length) {
       setRoutes(nextRoutes);
       await runCommand("save_route_candidates", { routes: nextRoutes });
-      setMessage("渠道账号已保存，并已自动开放默认模型");
+      setMessage("渠道账号已保存，已自动开放默认模型，代理配置已热更新");
     }
   }
 
@@ -130,7 +125,6 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
   }
 
   return {
-    saveChannels,
     saveAccounts,
     quickSetup,
     addAccount,

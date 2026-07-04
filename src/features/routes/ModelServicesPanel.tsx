@@ -109,7 +109,7 @@ export function ModelServicesPanel({ routes, accounts, onUpdate, onSave, onRegen
           </table>
         </div>
       )}
-      <p className="hint">对外模型名默认等于上游模型名；默认使用该渠道最先添加且启用的账号，不自动轮询或 fallback。</p>
+      <p className="hint">模型开放/关闭、账号切换保存后代理自动热更新，无需重启。</p>
     </Panel>
   );
 }

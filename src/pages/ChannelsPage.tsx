@@ -12,11 +12,12 @@ type ChannelsPageProps = {
   onAddAccount: (channelId: string) => void;
   onUpdateAccount: (index: number, patch: Partial<ChannelAccount>) => void;
   onRemoveAccount: (index: number) => void;
-  onSaveChannels: () => void;
   onSaveAccounts: () => void;
   onTestConnection: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
+  proxyRunning: boolean;
+  onRestartProxy: () => void;
 };
 
 export function ChannelsPage({
@@ -25,11 +26,12 @@ export function ChannelsPage({
   onAddAccount,
   onUpdateAccount,
   onRemoveAccount,
-  onSaveChannels,
   onSaveAccounts,
   onTestConnection,
   getBalanceForAccount,
   onAddBalanceSnapshot,
+  proxyRunning,
+  onRestartProxy,
 }: ChannelsPageProps) {
   const [snapshotAccountId, setSnapshotAccountId] = React.useState<string | null>(null);
   const totalAccounts = accounts.length;
@@ -39,6 +41,12 @@ export function ChannelsPage({
   function saveBalanceSnapshot(snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) {
     onAddBalanceSnapshot(snapshot);
     setSnapshotAccountId(null);
+  }
+
+  function getBaseUrl(channelId: string): string {
+    const channel = channels.find((c) => c.id === channelId);
+    if (!channel) return "";
+    return channel.openai_base_url;
   }
 
   return (
@@ -51,8 +59,12 @@ export function ChannelsPage({
           <Actions>
             {channels.length > 0 ? <button onClick={() => onAddAccount(channels[0].id)}>新增账号</button> : null}
             <button onClick={() => void onSaveAccounts()}>保存账号</button>
+            {proxyRunning ? <button onClick={() => void onRestartProxy()}>重启代理</button> : null}
           </Actions>
         </PanelHeader>
+        <p className="hint">
+          保存账号后代理自动热更新配置。若修改未生效，可点击「重启代理」。
+        </p>
         <div className="account-list">
           {accounts.length === 0 ? (
             <EmptyState>
@@ -78,6 +90,7 @@ export function ChannelsPage({
                 onTestConnection={onTestConnection}
                 getBalanceForAccount={getBalanceForAccount}
                 onEditSnapshot={setSnapshotAccountId}
+                getBaseUrl={getBaseUrl}
               />
             ))
           )}

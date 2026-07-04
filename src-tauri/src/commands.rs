@@ -437,9 +437,49 @@ pub(super) async fn sync_models(
         let _ = state
             .storage
             .update_account_last_error(&account_id, first_err);
+        // LongCat 同步失败时，以内置 LongCat-2.0 兜底
+        if channel_id == "longcat" {
+            ensure_longcat_fallback(&state, &account_id)?;
+        }
     }
 
     Ok(result)
+}
+
+/// LongCat 同步失败时，确保内置 LongCat-2.0 模型存在
+fn ensure_longcat_fallback(state: &AppState, account_id: &str) -> Result<(), String> {
+    let mut models = state
+        .storage
+        .list_channel_models()
+        .map_err(|err| err.to_string())?;
+    let has_longcat = models.iter().any(|m| m.channel_id == "longcat" && m.model == "LongCat-2.0");
+    if !has_longcat {
+        let now = chrono::Utc::now().to_rfc3339();
+        models.push(crate::core::config::ChannelModel {
+            id: "longcat-LongCat-2.0".to_string(),
+            channel_id: "longcat".to_string(),
+            model: "LongCat-2.0".to_string(),
+            display_name: Some("LongCat-2.0".to_string()),
+            supported_protocols: vec![
+                crate::core::config::ProtocolType::OpenAi,
+                crate::core::config::ProtocolType::Anthropic,
+            ],
+            context_window: None,
+            max_output_tokens: None,
+            supports_stream: true,
+            enabled: true,
+            source: "fallback".to_string(),
+            synced_at: Some(now.clone()),
+            created_at: now.clone(),
+            updated_at: now,
+        });
+        state
+            .storage
+            .save_channel_models(&models)
+            .map_err(|err| err.to_string())?;
+    }
+    let _ = account_id;
+    Ok(())
 }
 
 // ─── Balance Snapshot Commands ──────────────────────────────────────────────

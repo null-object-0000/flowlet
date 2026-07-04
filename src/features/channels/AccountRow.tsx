@@ -1,3 +1,4 @@
+import React from "react";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../../domain";
 
 type AccountRowProps = {
@@ -9,6 +10,7 @@ type AccountRowProps = {
   onTestConnection: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onEditSnapshot: (accountId: string) => void;
+  getBaseUrl: (channelId: string) => string;
 };
 
 function snapshotSummary(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): string | null {
@@ -31,12 +33,15 @@ export function AccountRow({
   onTestConnection,
   getBalanceForAccount,
   onEditSnapshot,
+  getBaseUrl,
 }: AccountRowProps) {
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
   const summary = snapshotSummary(account, getBalanceForAccount(account.id));
+  const hasOverride = account.base_url_override != null && account.base_url_override.trim().length > 0;
 
   return (
     <div className="account-row">
-      <select value={account.channel_id} onChange={(e) => onUpdate(index, { channel_id: e.target.value })}>
+      <select value={account.channel_id} onChange={(e) => onUpdate(index, { channel_id: e.target.value })} aria-label="渠道">
         {channels.map((channel) => (
           <option key={channel.id} value={channel.id}>
             {channel.name}
@@ -50,18 +55,6 @@ export function AccountRow({
         placeholder="API Key"
         onChange={(e) => onUpdate(index, { api_key: e.target.value })}
       />
-      <input
-        type="number"
-        min="0"
-        value={account.priority}
-        placeholder="优先级"
-        onChange={(e) => onUpdate(index, { priority: Math.max(0, Number(e.target.value) || 0) })}
-      />
-      <input
-        value={account.remark ?? ""}
-        placeholder="备注"
-        onChange={(e) => onUpdate(index, { remark: e.target.value })}
-      />
       <label className="checkbox-label">
         <input type="checkbox" checked={account.enabled} onChange={(e) => onUpdate(index, { enabled: e.target.checked })} />
         启用
@@ -69,20 +62,44 @@ export function AccountRow({
       <div className="account-actions">
         {summary ? <span className="account-snapshot">{summary}</span> : null}
         {account.channel_id === "deepseek" ? (
-          <button onClick={() => void onTestConnection(account.id)} title="自动同步余额">
+          <button type="button" onClick={() => void onTestConnection(account.id)} title="自动同步余额">
             余额
           </button>
         ) : null}
         {account.channel_id === "longcat" ? (
-          <button
+          <button type="button"
             onClick={() => onEditSnapshot(account.id)}
             title="登记 Token 资源包快照"
           >
             登记资源包
           </button>
         ) : null}
-        <button onClick={() => onRemove(index)}>删除</button>
+        <button type="button"
+          className={hasOverride ? "active" : ""}
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          title="账号高级配置（Base URL）"
+        >
+          高级配置
+        </button>
+        <button type="button" onClick={() => onRemove(index)}>删除</button>
       </div>
+      {showAdvanced ? (
+        <div className="account-advanced">
+          <label>
+            Base URL 覆盖（留空则使用渠道默认）
+            <input
+              value={account.base_url_override ?? ""}
+              placeholder={getBaseUrl(account.channel_id)}
+              onChange={(e) => onUpdate(index, { base_url_override: e.target.value || null })}
+            />
+          </label>
+          {hasOverride ? (
+            <button type="button" className="link-button" onClick={() => onUpdate(index, { base_url_override: null })}>
+              恢复渠道默认
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,4 +1,6 @@
-use crate::core::config::{AuthStrategy, ChannelAccount, ClientConfig, ProtocolType, RouteCandidate};
+use crate::core::config::{
+    AuthStrategy, ChannelAccount, ClientConfig, ProtocolType, RouteCandidate, UaClientRule,
+};
 use axum::{
     body::Body,
     http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
@@ -288,6 +290,8 @@ pub(super) fn is_hop_by_hop(name: &str) -> bool {
 
 // ─── Client Identification ──────────────────────────────────────────────────
 
+/// 通过鉴权 token（Authorization Bearer 或 X-Api-Key）识别客户端。
+/// 结果用于鉴权、路由匹配和限流 key。
 pub(super) fn identify_client(headers: &HeaderMap, clients: &[ClientConfig]) -> Option<(String, String)> {
     // 1. 先检查 Authorization Bearer
     if let Some(token) = headers
@@ -313,6 +317,44 @@ pub(super) fn identify_client(headers: &HeaderMap, clients: &[ClientConfig]) -> 
     }
 
     None
+}
+
+/// 通过请求 User-Agent 子串匹配独立的客户端身份规则。
+///
+/// 与鉴权 token 无关，仅决定日志/用量中的客户端归属。返回命中的
+/// UaClientRule 的 (id, name)；无任何命中时返回 None。
+pub(super) fn identify_client_by_ua(
+    headers: &HeaderMap,
+    rules: &[UaClientRule],
+) -> Option<(String, String)> {
+    let ua = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok())?;
+    rules
+        .iter()
+        .find(|r| r.enabled && !r.pattern.is_empty() && ua.contains(&r.pattern))
+        .map(|r| (r.id.clone(), r.name.clone()))
+}
+
+/// 默认 UA 客户端规则（编译自项目根目录 `ua_rules.json`）。
+/// OpenCode 单条 `opencode/` 覆盖 local / 1.17.13 等所有变体。
+const DEFAULT_UA_RULES_JSON: &str = include_str!("ua_rules.json");
+
+/// 确保 UA 规则文件存在：若不存在则从内置默认（OpenCode）写入。
+pub(super) fn ensure_ua_rules_file(path: &std::path::Path) {
+    if path.exists() {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, DEFAULT_UA_RULES_JSON);
+}
+
+/// 从本地 JSON 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。
+pub(super) fn load_ua_rules(path: &std::path::Path) -> Vec<UaClientRule> {
+    let Ok(json) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&json).unwrap_or_default()
 }
 
 // ─── Model Rewriting ─────────────────────────────────────────────────────────

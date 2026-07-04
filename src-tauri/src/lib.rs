@@ -27,6 +27,7 @@ struct AppState {
     upstream_timeout_seconds: u64,
     capture: Arc<Mutex<LogCaptureConfig>>,
     tray: Arc<Mutex<Option<TrayIcon>>>,
+    ua_rules_path: std::path::PathBuf,
 }
 
 struct ProxyStartupConfig {
@@ -34,6 +35,7 @@ struct ProxyStartupConfig {
     storage: Storage,
     timeout: u64,
     capture: LogCaptureConfig,
+    ua_rules_path: std::path::PathBuf,
 }
 
 impl AppState {
@@ -56,6 +58,7 @@ impl AppState {
             storage: self.storage.clone(),
             timeout: self.upstream_timeout_seconds,
             capture,
+            ua_rules_path: self.ua_rules_path.clone(),
         })
     }
 
@@ -150,7 +153,8 @@ fn validate_config_values(
 // ─── App Entry ──────────────────────────────────────────────────────────────
 
 fn build_app_state(db_path: std::path::PathBuf) -> AppState {
-    let storage = Storage::open(db_path).expect("初始化 SQLite 存储失败");
+    let ua_rules_path = db_path.parent().unwrap_or(db_path.as_ref()).join("ua_rules.json");
+    let storage = Storage::open(&db_path).expect("初始化 SQLite 存储失败");
 
     // 初始化渠道模板
     let channels = storage.list_channel_presets().expect("读取渠道模板失败");
@@ -310,6 +314,7 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         upstream_timeout_seconds: 120,
         capture: Arc::new(Mutex::new(capture)),
         tray: Arc::new(Mutex::new(None)),
+        ua_rules_path,
     }
 }
 
@@ -391,10 +396,11 @@ pub fn run() {
             let quit = MenuItem::with_id(app_handle, "quit", "退出 Flowlet", true, None::<&str>)?;
             let menu = Menu::with_items(app_handle, &[&toggle, &start_item, &stop_item, &quit])?;
 
-            // 创建系统托盘
+            // 创建系统托盘（使用项目 icons/tray.png，与 tauri.conf.json trayIcon.iconPath 一致）
+            let tray_icon = tauri::include_image!("icons/tray.png");
             let tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("Flowlet - 代理已停止 ⏹")
-                .icon(app_handle.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app: &AppHandle, event| match event.id().as_ref() {
@@ -533,6 +539,7 @@ async fn start_proxy_internal(
         storage,
         timeout,
         capture,
+        ua_rules_path,
     } = config;
 
     // 校验当前配置是否合法
@@ -548,7 +555,7 @@ async fn start_proxy_internal(
 
     // 传入 shared（持有 Arc 引用），代理运行中会锁定读取最新配置
     proxy
-        .start_with_capture(shared, storage, timeout, capture)
+        .start_with_capture(shared, storage, timeout, capture, ua_rules_path)
         .await
         .map_err(|err| err.to_string())
 }

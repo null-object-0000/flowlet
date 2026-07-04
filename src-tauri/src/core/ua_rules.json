@@ -1,0 +1,8 @@
+[
+  {
+    "id": "opencode",
+    "pattern": "opencode/",
+    "name": "OpenCode",
+    "enabled": true
+  }
+]

@@ -221,8 +221,8 @@ export type View =
 export const views: Array<{ id: View; label: string }> = [
   { id: "overview", label: "概览" },
   { id: "channels", label: "渠道账号" },
+  { id: "clients", label: "鉴权 Token" },
   { id: "routes", label: "模型服务" },
-  { id: "clients", label: "客户端接入" },
   { id: "logs", label: "请求日志" },
   { id: "usage", label: "用量统计" },
   { id: "stats", label: "高级设置" },

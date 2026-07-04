@@ -48,9 +48,9 @@ mod proxy_routing;
 
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
-    copy_response_headers, cors_preflight_response, encode_body_base64, extract_model,
-    identify_client, is_model_list_request, is_streaming_response, rewrite_model,
-    sanitize_headers,
+    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_ua_rules_file,
+    extract_model, identify_client, identify_client_by_ua, is_model_list_request,
+    is_streaming_response, load_ua_rules, rewrite_model, sanitize_headers,
 };
 use proxy_routing::{
     body_contains_quota_exceeded, enrich_upstream_error_log, match_candidates,
@@ -102,6 +102,8 @@ struct ProxyAppState {
     pub upstream_timeout_seconds: u64,
     pub rate_limiter: RateLimiter,
     pub capture: LogCaptureConfig,
+    /// 本地 UA 客户端规则 JSON 文件路径，每次请求热读
+    pub ua_rules_path: std::path::PathBuf,
 }
 
 
@@ -111,6 +113,7 @@ impl ProxyController {
         shared: ProxySharedConfig,
         storage: Storage,
         upstream_timeout_seconds: u64,
+        ua_rules_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
         self.start_with_bind(
             shared,
@@ -119,6 +122,7 @@ impl ProxyController {
             LogCaptureConfig::default(),
             DEFAULT_BIND_ADDR,
             RateLimiter::new(600), // 默认 600 请求/分钟
+            ua_rules_path,
         )
         .await
     }
@@ -129,6 +133,7 @@ impl ProxyController {
         storage: Storage,
         upstream_timeout_seconds: u64,
         capture: LogCaptureConfig,
+        ua_rules_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
         self.start_with_bind(
             shared,
@@ -137,6 +142,7 @@ impl ProxyController {
             capture,
             DEFAULT_BIND_ADDR,
             RateLimiter::new(600),
+            ua_rules_path,
         )
         .await
     }
@@ -150,6 +156,7 @@ impl ProxyController {
         capture: LogCaptureConfig,
         bind_addr_str: &str,
         rate_limiter: RateLimiter,
+        ua_rules_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
         // 启动时做一次基本校验：至少有一个渠道
         let channels_guard = shared
@@ -180,6 +187,9 @@ impl ProxyController {
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|err| ProxyError::StartFailed(err.to_string()))?;
 
+        // 首次启动时写入默认 UA 规则文件（OpenCode），用户可直接编辑
+        ensure_ua_rules_file(&ua_rules_path);
+
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         runtime.shutdown = Some(shutdown_tx);
         drop(runtime);
@@ -199,6 +209,7 @@ impl ProxyController {
                 upstream_timeout_seconds,
                 rate_limiter,
                 capture,
+                ua_rules_path,
             });
 
         tokio::spawn(async move {
@@ -332,12 +343,20 @@ async fn forward_request(
     }
 
     let public_model = extract_model(&body_bytes, &detected_protocol);
-    let client_info = identify_client(&parts.headers, &clients_shared);
-    let client_id = client_info.as_ref().map(|(id, _)| id.clone());
-    let client_name = client_info.as_ref().map(|(_, name)| name.clone());
 
-    // 速率限制检查
-    if let Some(ref cid) = client_id {
+    // token 身份：仅用于鉴权、路由匹配、限流 key，不再写日志/用量
+    let token_client = identify_client(&parts.headers, &clients_shared);
+    let token_client_id = token_client.as_ref().map(|(id, _)| id.clone());
+
+    // 客户端身份：仅由本地 ua_rules.json 决定，与 token 解耦；不命中即"未知"，不降级
+    let ua_rules = load_ua_rules(&state.ua_rules_path);
+    let (client_id, client_name) = match identify_client_by_ua(&parts.headers, &ua_rules) {
+        Some((id, name)) => (Some(id), Some(name)),
+        None => (None, Some("未知".to_string()))
+    };
+
+    // 速率限制检查（key 仍用 token 身份，避免多 UA 共用一 token 时互相影响）
+    if let Some(ref cid) = token_client_id {
         if !state.rate_limiter.try_consume(cid).await {
             let retry_after = state.rate_limiter.retry_after(cid).await;
             let mut response = Response::new(Body::from(
@@ -354,14 +373,14 @@ async fn forward_request(
         }
     }
 
-    // 匹配路由候选
+    // 匹配路由候选（用 token 身份，保证现有多 UA 共用一 token 的规则不破坏）
     let candidates = match_candidates(
         &routes,
         &rules,
         &scores,
         public_model.as_deref(),
         &detected_protocol,
-        client_id.as_deref(),
+        token_client_id.as_deref(),
         &accounts,
         &channels,
     );

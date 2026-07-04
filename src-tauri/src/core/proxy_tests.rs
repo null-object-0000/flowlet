@@ -1,10 +1,10 @@
 use super::*;
+use super::proxy_routing::rank_candidates_by_score;
+use crate::core::config::{AuthStrategy, UaClientRule};
 use axum::{
     http::{header, HeaderValue, Uri},
     routing::post,
 };
-use super::proxy_routing::rank_candidates_by_score;
-use crate::core::config::AuthStrategy;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -190,6 +190,66 @@ fn identifies_client_from_x_api_key() {
         identify_client(&headers, &clients),
         Some(("client-x".to_string(), "客户端 X".to_string()))
     );
+}
+
+#[test]
+fn identifies_client_by_ua_substring() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("opencode/local foo"),
+    );
+    let rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/local".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    assert_eq!(
+        identify_client_by_ua(&headers, &rules),
+        Some(("opencode".to_string(), "OpenCode".to_string()))
+    );
+}
+
+#[test]
+fn ua_no_match_returns_none() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("completely-unknown-ua"),
+    );
+    let rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/local".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    // None 由调用方映射为 "未知"
+    assert_eq!(identify_client_by_ua(&headers, &rules), None);
+}
+
+#[test]
+fn ua_skip_disabled_and_empty_pattern() {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::USER_AGENT, HeaderValue::from_static("anything"));
+    let rules = vec![
+        UaClientRule {
+            id: "disabled".to_string(),
+            pattern: "anything".to_string(),
+            name: "禁用".to_string(),
+            enabled: false,
+        },
+        UaClientRule {
+            id: "empty".to_string(),
+            pattern: String::new(),
+            name: "空模式".to_string(),
+            enabled: true,
+        },
+    ];
+
+    assert_eq!(identify_client_by_ua(&headers, &rules), None);
 }
 
 #[test]
@@ -397,6 +457,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
         upstream_timeout_seconds: 120,
         rate_limiter: RateLimiter::new(600),
         capture: LogCaptureConfig::default(),
+        ua_rules_path: std::path::PathBuf::from("/tmp/flowlet_test_ua_rules.json"),
     };
 
     let request = Request::builder()

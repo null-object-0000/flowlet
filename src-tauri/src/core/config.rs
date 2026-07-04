@@ -415,6 +415,16 @@ pub struct ClientConfig {
     pub updated_at: String,
 }
 
+/// 基于 User-Agent 子串的客户端身份识别规则。
+/// 独立于鉴权 token，仅决定日志/用量中的客户端归属。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UaClientRule {
+    pub id: String,
+    pub pattern: String,
+    pub name: String,
+    pub enabled: bool,
+}
+
 // ─── Virtual Model ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

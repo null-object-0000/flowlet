@@ -318,7 +318,7 @@ pub async fn sync_longcat_models(account: &ChannelAccount) -> ModelSyncResult {
     // 3) 逐个拉取详情
     let synced_at = chrono::Utc::now().to_rfc3339();
     let mut channel_models: Vec<ChannelModel> = Vec::new();
-    let mut errors: Vec<String> = Vec::new();
+    let errors: Vec<String> = Vec::new();
 
     for entry in &entries {
         if let Some(detail) = fetch_longcat_detail(&client, account, &entry.id).await {
@@ -352,6 +352,7 @@ pub async fn sync_longcat_models(account: &ChannelAccount) -> ModelSyncResult {
 }
 
 struct LongCatListResponse {
+    #[allow(dead_code)]
     status: reqwest::StatusCode,
     body: String,
 }

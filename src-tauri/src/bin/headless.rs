@@ -2,6 +2,7 @@
 //! Run without Tauri GUI: `cargo run --bin headless`
 
 use flowlet_lib::core::metrics::Metrics;
+use flowlet_lib::core::config::LogCaptureConfig;
 use flowlet_lib::core::proxy::{ProxyController, ProxySharedConfig};
 use flowlet_lib::core::rate_limiter::RateLimiter;
 use flowlet_lib::core::storage::Storage;
@@ -71,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             shared,
             storage.clone(),
             120,
+            LogCaptureConfig::default(),
             &bind_addr,
             rate_limiter,
         )

@@ -2,8 +2,8 @@ mod commands;
 pub mod core;
 
 use core::config::{
-    ChannelAccount, ChannelPreset, ClientConfig, ModelPrice, ProtocolType, RouteCandidate,
-    RouteRule, VirtualModel,
+    ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ModelPrice, ProtocolType,
+    RouteCandidate, RouteRule, VirtualModel,
 };
 use core::presets::builtin_model_prices;
 use core::proxy::ProxyController;
@@ -25,6 +25,7 @@ struct AppState {
     rules: Arc<Mutex<Vec<RouteRule>>>,
     storage: Storage,
     upstream_timeout_seconds: u64,
+    capture: Arc<Mutex<LogCaptureConfig>>,
     tray: Arc<Mutex<Option<TrayIcon>>>,
 }
 
@@ -32,11 +33,17 @@ struct ProxyStartupConfig {
     shared: core::proxy::ProxySharedConfig,
     storage: Storage,
     timeout: u64,
+    capture: LogCaptureConfig,
 }
 
 impl AppState {
     fn proxy_startup_config(&self) -> Result<ProxyStartupConfig, String> {
         // 启动时传入 Arc 引用，而非 clone 数据副本 — 代理运行中与 UI 共享同一份配置
+        let capture = self
+            .capture
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
         Ok(ProxyStartupConfig {
             shared: core::proxy::ProxySharedConfig {
                 channels: Arc::clone(&self.channels),
@@ -48,6 +55,7 @@ impl AppState {
             },
             storage: self.storage.clone(),
             timeout: self.upstream_timeout_seconds,
+            capture,
         })
     }
 
@@ -283,6 +291,12 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     // 初始化路由规则
     let rules = storage.list_route_rules().expect("读取路由规则失败");
 
+    let capture = storage
+        .get_app_meta("log_capture_config")
+        .unwrap_or_default()
+        .and_then(|json| serde_json::from_str::<LogCaptureConfig>(&json).ok())
+        .unwrap_or_default();
+
     AppState {
         proxy: ProxyController::default(),
         channels: Arc::new(Mutex::new(channels)),
@@ -294,6 +308,7 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         rules: Arc::new(Mutex::new(rules)),
         storage,
         upstream_timeout_seconds: 120,
+        capture: Arc::new(Mutex::new(capture)),
         tray: Arc::new(Mutex::new(None)),
     }
 }
@@ -467,6 +482,9 @@ pub fn run() {
             commands::analyze_usage,
             commands::usage_summary,
             commands::list_request_logs,
+            commands::get_request_log_detail,
+            commands::get_log_capture_config,
+            commands::set_log_capture_config,
             commands::query_balance,
             commands::sync_models,
             commands::save_balance_snapshot,
@@ -514,6 +532,7 @@ async fn start_proxy_internal(
         shared,
         storage,
         timeout,
+        capture,
     } = config;
 
     // 校验当前配置是否合法
@@ -529,7 +548,7 @@ async fn start_proxy_internal(
 
     // 传入 shared（持有 Arc 引用），代理运行中会锁定读取最新配置
     proxy
-        .start(shared, storage, timeout)
+        .start_with_capture(shared, storage, timeout, capture)
         .await
         .map_err(|err| err.to_string())
 }

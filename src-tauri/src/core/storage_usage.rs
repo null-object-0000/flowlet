@@ -157,10 +157,13 @@ impl Storage {    pub fn save_balance_snapshot(
                 account_id, account_name, client_protocol, upstream_protocol,
                 virtual_model, public_model, upstream_model, request_type, method, path,
                 status, latency_ms, is_stream, error_message, fallback_count,
-                route_reason, created_at
+                route_reason, created_at,
+                ttfb_ms, duration_ms, attempt_seq, req_headers_json, req_body_b64,
+                res_headers_json, res_body_b64, stream_summary, is_last_attempt
             ) VALUES (
                 lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, datetime('now')
+                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, datetime('now'),
+                ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30
             )
             "#,
             params![
@@ -185,6 +188,15 @@ impl Storage {    pub fn save_balance_snapshot(
                 log.error_message,
                 log.fallback_count,
                 log.route_reason,
+                log.ttfb_ms,
+                log.duration_ms,
+                log.attempt_seq,
+                log.req_headers_json,
+                log.req_body_b64,
+                log.res_headers_json,
+                log.res_body_b64,
+                log.stream_summary,
+                log.is_last_attempt as i64,
             ],
         )?;
         Ok(())
@@ -202,8 +214,12 @@ impl Storage {    pub fn save_balance_snapshot(
                 account_id, account_name, client_protocol, upstream_protocol,
                 virtual_model, public_model, upstream_model, request_type, method, path,
                 status, latency_ms, is_stream, error_message, fallback_count,
-                route_reason, created_at
+                route_reason, created_at,
+                ttfb_ms, duration_ms, attempt_seq,
+                req_headers_json, req_body_b64, res_headers_json, res_body_b64,
+                stream_summary, is_last_attempt
             FROM request_logs
+            WHERE is_last_attempt = 1
             ORDER BY created_at DESC
             LIMIT 100
             "#,
@@ -233,6 +249,15 @@ impl Storage {    pub fn save_balance_snapshot(
                 fallback_count: row.get(20)?,
                 route_reason: row.get(21)?,
                 created_at: row.get(22)?,
+                ttfb_ms: row.get(23)?,
+                duration_ms: row.get(24)?,
+                attempt_seq: row.get(25)?,
+                req_headers_json: row.get(26)?,
+                req_body_b64: row.get(27)?,
+                res_headers_json: row.get(28)?,
+                res_body_b64: row.get(29)?,
+                stream_summary: row.get(30)?,
+                is_last_attempt: row.get::<_, i64>(31)? != 0,
             })
         })?;
         let mut logs = Vec::new();
@@ -240,6 +265,139 @@ impl Storage {    pub fn save_balance_snapshot(
             logs.push(row?);
         }
         Ok(logs)
+    }
+
+    pub fn list_request_logs_by_request_id(
+        &self,
+        request_id: &str,
+    ) -> Result<Vec<RequestLogRow>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut stmt = connection.prepare(
+            r#"
+            SELECT
+                id, request_id, client_id, client_name, channel_id, channel_name,
+                account_id, account_name, client_protocol, upstream_protocol,
+                virtual_model, public_model, upstream_model, request_type, method, path,
+                status, latency_ms, is_stream, error_message, fallback_count,
+                route_reason, created_at,
+                ttfb_ms, duration_ms, attempt_seq,
+                req_headers_json, req_body_b64, res_headers_json, res_body_b64,
+                stream_summary, is_last_attempt
+            FROM request_logs
+            WHERE request_id = ?1
+            ORDER BY attempt_seq ASC, created_at ASC
+            "#,
+        )?;
+        let rows = stmt.query_map([request_id], |row| {
+            Ok(RequestLogRow {
+                id: row.get(0)?,
+                request_id: row.get(1)?,
+                client_id: row.get(2)?,
+                client_name: row.get(3)?,
+                channel_id: row.get(4)?,
+                channel_name: row.get(5)?,
+                account_id: row.get(6)?,
+                account_name: row.get(7)?,
+                client_protocol: row.get(8)?,
+                upstream_protocol: row.get(9)?,
+                virtual_model: row.get(10)?,
+                public_model: row.get(11)?,
+                upstream_model: row.get(12)?,
+                request_type: row.get(13)?,
+                method: row.get(14)?,
+                path: row.get(15)?,
+                status: row.get(16)?,
+                latency_ms: row.get(17)?,
+                is_stream: row.get::<_, i64>(18)? != 0,
+                error_message: row.get(19)?,
+                fallback_count: row.get(20)?,
+                route_reason: row.get(21)?,
+                created_at: row.get(22)?,
+                ttfb_ms: row.get(23)?,
+                duration_ms: row.get(24)?,
+                attempt_seq: row.get(25)?,
+                req_headers_json: row.get(26)?,
+                req_body_b64: row.get(27)?,
+                res_headers_json: row.get(28)?,
+                res_body_b64: row.get(29)?,
+                stream_summary: row.get(30)?,
+                is_last_attempt: row.get::<_, i64>(31)? != 0,
+            })
+        })?;
+        let mut logs = Vec::new();
+        for row in rows {
+            logs.push(row?);
+        }
+        Ok(logs)
+    }
+
+    pub fn update_request_log_timing(
+        &self,
+        request_id: &str,
+        ttfb_ms: i64,
+        duration_ms: i64,
+        res_headers_json: Option<String>,
+        res_body_b64: Option<String>,
+        stream_summary: Option<String>,
+        protocol_str: &str,
+    ) -> Result<(), StorageError> {
+        let _ = protocol_str;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection.execute(
+            r#"
+            UPDATE request_logs
+            SET ttfb_ms = ?2,
+                duration_ms = ?3,
+                res_headers_json = ?4,
+                res_body_b64 = ?5,
+                stream_summary = ?6
+            WHERE request_id = ?1
+              AND is_last_attempt = 1
+              AND is_stream = 1
+            "#,
+            params![
+                request_id,
+                ttfb_ms,
+                duration_ms,
+                res_headers_json,
+                res_body_b64,
+                stream_summary,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_app_meta(&self, key: &str) -> Result<Option<String>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut stmt =
+            connection.prepare("SELECT value FROM app_meta WHERE key = ?1")?;
+        let mut rows = stmt.query_map([key], |row| row.get::<_, String>(0))?;
+        Ok(rows.next().transpose()?)
+    }
+
+    pub fn set_app_meta(&self, key: &str, value: &str) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection.execute(
+            r#"
+            INSERT INTO app_meta (key, value, updated_at)
+            VALUES (?1, ?2, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+            "#,
+            [key, value],
+        )?;
+        Ok(())
     }
 
     // ─── Usage Records ───────────────────────────────────────────────────────

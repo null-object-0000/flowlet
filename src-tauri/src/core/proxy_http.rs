@@ -4,7 +4,8 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::Response,
 };
-use std::collections::BTreeSet;
+use base64::Engine;
+use std::collections::{BTreeSet, HashMap};
 
 pub(super) fn cors_preflight_response(request_headers: &HeaderMap) -> Response {
     let mut response = Response::new(Body::empty());
@@ -327,6 +328,97 @@ pub(super) fn extract_model(body: &[u8], protocol: &ProtocolType) -> Option<Stri
             .get("model")
             .and_then(|v| v.as_str())
             .map(String::from),
+    }
+}
+
+// ─── Header Sanitization + Body Encoding ─────────────────────────────────────
+
+/// Serialize HTTP headers to a JSON object, redacting sensitive values.
+///
+/// 1. Hop-by-hop headers are skipped (reuses
+///    [`is_hop_by_hop`]).
+/// 2. Header names in `redact` are lower-cased and replaced with
+///    `"[redacted]"`. This prevents leakage of Authorization tokens,
+///    x-api-key values, and cookies into the request log payload.
+pub(super) fn sanitize_headers(headers: &HeaderMap, redact: &[&str]) -> serde_json::Value {
+    let redact_lower: std::collections::HashSet<String> =
+        redact.iter().map(|key| key.to_ascii_lowercase()).collect();
+    let mut map = serde_json::Map::new();
+    for (name, value) in headers {
+        if is_hop_by_hop(name.as_str()) {
+            continue;
+        }
+        let key = name.as_str().to_string();
+        let value = if redact_lower.contains(&key.to_ascii_lowercase()) {
+            serde_json::Value::String("[redacted]".to_string())
+        } else {
+            value
+                .to_str()
+                .map(|v| serde_json::Value::String(v.to_string()))
+                .unwrap_or_else(|_| serde_json::Value::String("[non-ascii]".to_string()))
+        };
+        map.insert(key, value);
+    }
+    serde_json::Value::Object(map)
+}
+
+pub(super) fn encode_body_base64(body: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(body)
+}
+
+pub(super) fn truncate_utf8(body: &mut Vec<u8>, max: usize) {
+    if body.len() <= max {
+        return;
+    }
+    let mut cut = max;
+    // 回退到最近的 UTF-8 字符边界（UTF-8 续字节以 10xxxxxx 开头）
+    while cut > 0 && (body[cut] & 0b1100_0000) == 0b1000_0000 {
+        cut -= 1;
+    }
+    body.truncate(cut);
+}
+
+/// Build the textual "首尾片段" summary that we persist in the
+/// `stream_summary` column for captured streaming responses.
+pub(super) fn summarize_stream_fragment(fragment: &str) -> Option<String> {
+    let non_empty: Vec<&str> = fragment.lines().filter(|line| !line.is_empty()).collect();
+    if non_empty.is_empty() {
+        return None;
+    }
+    let head = non_empty[0];
+    let tail = non_empty[non_empty.len() - 1];
+    let body = if head == tail || non_empty.len() == 1 {
+        head.to_string()
+    } else {
+        format!("{}\n...\n{}", head, tail)
+    };
+    Some(format!(
+        "chunks: {}\nfirst: {}\nlast:  {}",
+        non_empty.len(),
+        head,
+        tail
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_headers_redacts_bearer() {
+        let mut map = HeaderMap::new();
+        map.insert("authorization", HeaderValue::from_static("Bearer abc"));
+        map.insert("content-type", HeaderValue::from_static("application/json"));
+        let redacted = sanitize_headers(&map, &["authorization"]);
+        let obj = redacted.as_object().unwrap();
+        assert_eq!(obj["authorization"], "[redacted]");
+        assert_eq!(obj["content-type"], "application/json");
+    }
+
+    #[test]
+    fn encode_body_roundtrips_string() {
+        let encoded = encode_body_base64(b"hello");
+        assert_eq!(encoded, "aGVsbG8=");
     }
 }
 

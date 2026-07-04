@@ -1,6 +1,6 @@
 use super::config::{
-    classify_request, ChannelAccount, ChannelPreset, ClientConfig, ProtocolType,
-    RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
+    classify_request, ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig,
+    ProtocolType, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
@@ -18,6 +18,7 @@ use reqwest::Client;
 use serde::Serialize;
 use std::{
     net::SocketAddr,
+    pin::Pin,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -47,8 +48,9 @@ mod proxy_routing;
 
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
-    copy_response_headers, cors_preflight_response, extract_model, identify_client,
-    is_model_list_request, is_streaming_response, rewrite_model,
+    copy_response_headers, cors_preflight_response, encode_body_base64, extract_model,
+    identify_client, is_model_list_request, is_streaming_response, rewrite_model,
+    sanitize_headers,
 };
 use proxy_routing::{
     body_contains_quota_exceeded, enrich_upstream_error_log, match_candidates,
@@ -99,6 +101,7 @@ struct ProxyAppState {
     #[allow(dead_code)]
     pub upstream_timeout_seconds: u64,
     pub rate_limiter: RateLimiter,
+    pub capture: LogCaptureConfig,
 }
 
 
@@ -113,8 +116,27 @@ impl ProxyController {
             shared,
             storage,
             upstream_timeout_seconds,
+            LogCaptureConfig::default(),
             DEFAULT_BIND_ADDR,
             RateLimiter::new(600), // 默认 600 请求/分钟
+        )
+        .await
+    }
+
+    pub async fn start_with_capture(
+        &self,
+        shared: ProxySharedConfig,
+        storage: Storage,
+        upstream_timeout_seconds: u64,
+        capture: LogCaptureConfig,
+    ) -> Result<(), ProxyError> {
+        self.start_with_bind(
+            shared,
+            storage,
+            upstream_timeout_seconds,
+            capture,
+            DEFAULT_BIND_ADDR,
+            RateLimiter::new(600),
         )
         .await
     }
@@ -125,6 +147,7 @@ impl ProxyController {
         shared: ProxySharedConfig,
         storage: Storage,
         upstream_timeout_seconds: u64,
+        capture: LogCaptureConfig,
         bind_addr_str: &str,
         rate_limiter: RateLimiter,
     ) -> Result<(), ProxyError> {
@@ -175,6 +198,7 @@ impl ProxyController {
                 storage,
                 upstream_timeout_seconds,
                 rate_limiter,
+                capture,
             });
 
         tokio::spawn(async move {
@@ -281,7 +305,6 @@ async fn forward_request(
     request: Request,
     detected_protocol: ProtocolType,
 ) -> Result<Response, reqwest::Error> {
-    let started_at = Instant::now();
     let request_id = uuid::Uuid::new_v4().to_string();
     let (parts, body) = request.into_parts();
     let body_bytes = axum::body::to_bytes(body, usize::MAX)
@@ -364,17 +387,40 @@ async fn forward_request(
             method,
             path,
             status: Some(404),
-            latency_ms: Some(started_at.elapsed().as_millis() as i64),
+            latency_ms: Some(0),
             is_stream: false,
             error_message: Some("model not exposed by Flowlet".to_string()),
             fallback_count: 0,
             route_reason: Some("no_route".to_string()),
+            ttfb_ms: None,
+            duration_ms: None,
+            attempt_seq: 0,
+            req_headers_json: None,
+            req_body_b64: None,
+            res_headers_json: None,
+            res_body_b64: None,
+            stream_summary: None,
+            is_last_attempt: true,
         };
         record_request_log(state.storage, log);
         let mut response = Response::new(Body::from("model not exposed by Flowlet"));
         *response.status_mut() = StatusCode::NOT_FOUND;
         return Ok(response);
     }
+
+    // 循环外一次性捕获请求级 head/body，各候选共享
+    let req_headers_json = if state.capture.capture_req_headers {
+        Some(sanitize_headers(&parts.headers, LogCaptureConfig::redacted_header_keys()).to_string())
+    } else {
+        None
+    };
+    let req_body_b64 = if state.capture.capture_req_body && !body_bytes.is_empty() {
+        let mut bytes: Vec<u8> = body_bytes.to_vec();
+        proxy_http::truncate_utf8(&mut bytes, state.capture.max_body_bytes);
+        Some(encode_body_base64(&bytes))
+    } else {
+        None
+    };
 
     let mut last_network_error: Option<reqwest::Error> = None;
     let mut fallback_count = 0;
@@ -387,8 +433,8 @@ async fn forward_request(
     let path_clone = path.clone();
     let public_model_for_routing = public_model.clone();
     let request_id_for_routing = request_id.clone();
-    let client_id_for_routing = client_id.clone();
-    let client_name_for_routing = client_name.clone();
+    let client_id_for_routing = client_id;
+    let client_name_for_routing = client_name;
     let request_type_str = request_type.as_str().to_string();
 
     for (index, candidate) in candidates.iter().enumerate() {
@@ -423,7 +469,7 @@ async fn forward_request(
             channel.auth_strategy_for(&detected_protocol),
         );
 
-        // 为当前候选准备日志上下文
+        // 为当前候选准备日志上下文（send_at = 此刻，T0 真实起点）
         let log_context = RouteLogContext {
             client_id: client_id_for_routing.clone(),
             client_name: client_name_for_routing.clone(),
@@ -439,11 +485,15 @@ async fn forward_request(
             path: path_clone.clone(),
             client_protocol: protocol_str.clone(),
             upstream_protocol: protocol_str.clone(),
-            latency_ms: started_at.elapsed().as_millis() as i64,
+            send_at: Instant::now(),
+            req_headers_json: req_headers_json.clone(),
+            req_body_b64: req_body_b64.clone(),
         };
 
         match builder.body(routed_body).send().await {
             Ok(upstream_response) => {
+                // send() 返回即表明收到响应头；此时可记录真实 TTFB
+                let ttfb_ms = log_context.send_at.elapsed().as_millis() as i64;
                 let status = upstream_response.status();
                 let channel_vendor = channel.vendor.clone();
 
@@ -451,78 +501,93 @@ async fn forward_request(
                     fallback_count += 1;
                     record_request_log(
                         storage.clone(),
-                        log_context.to_log_input(
+                        log_context.log_fallback(
                             uuid::Uuid::new_v4().to_string(),
                             Some(status.as_u16() as i64),
                             Some(format!("retryable_status_{}", status.as_u16())),
                             fallback_count,
                             "retryable_status".to_string(),
-                            false,
                         ),
                     );
                     continue;
                 }
 
+                let route_reason = if fallback_count > 0 {
+                    "fallback_success".to_string()
+                } else if public_model_for_routing.as_deref() == Some("auto") {
+                    "auto".to_string()
+                } else {
+                    "direct".to_string()
+                };
+                let attempt_seq = fallback_count;
+                let is_last = index + 1 == candidates.len();
+
                 if should_check_quota_body_status(status) && index + 1 < candidates.len() {
                     let headers = upstream_response.headers().clone();
                     let body = upstream_response.bytes().await?;
+                    let duration_ms = log_context.send_at.elapsed().as_millis() as i64;
                     if body_contains_quota_exceeded(&body) {
                         fallback_count += 1;
                         record_request_log(
                             storage.clone(),
-                            log_context.to_log_input(
+                            log_context.log_fallback(
                                 uuid::Uuid::new_v4().to_string(),
                                 Some(status.as_u16() as i64),
                                 Some("quota exceeded".to_string()),
                                 fallback_count,
                                 "quota_exceeded".to_string(),
-                                false,
                             ),
                         );
                         continue;
                     }
 
-                    return build_buffered_response(
-                        storage.clone(),
-                        status,
-                        headers,
-                        body,
-                        log_context.to_log_input(
-                            request_id_for_routing.clone(),
-                            Some(status.as_u16() as i64),
-                            None,
-                            fallback_count,
-                            if fallback_count > 0 {
-                                "fallback_success".to_string()
-                            } else if public_model_for_routing.as_deref() == Some("auto") {
-                                "auto".to_string()
-                            } else {
-                                "direct".to_string()
-                            },
-                            false,
-                        ),
-                        &detected_protocol,
+                    // 非 2xx 不会 fallback 的 buffered 分支
+                    let res_headers_json = if state.capture.capture_res_headers {
+                        Some(
+                            sanitize_headers(&headers, LogCaptureConfig::redacted_header_keys())
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    };
+                    let mut body_for_log: Vec<u8> = body.to_vec();
+                    let res_body_b64 = if state.capture.capture_res_body {
+                        proxy_http::truncate_utf8(&mut body_for_log, state.capture.max_body_bytes);
+                        Some(encode_body_base64(&body_for_log))
+                    } else {
+                        None
+                    };
+
+                    let mut log = log_context.log_success_base(
+                        request_id_for_routing.clone(),
+                        status.as_u16() as i64,
+                        fallback_count,
+                        route_reason,
+                        attempt_seq,
+                        is_last,
                     );
+                    log.ttfb_ms = Some(ttfb_ms);
+                    log.duration_ms = Some(duration_ms);
+                    log.res_headers_json = res_headers_json;
+                    log.res_body_b64 = res_body_b64;
+
+                    return build_buffered_response(storage.clone(), status, headers, body, log, &detected_protocol);
                 }
 
+                // 默认路径：流式 or 短响应交给 build_response
                 return build_response(
                     storage.clone(),
                     upstream_response,
-                    log_context.to_log_input(
-                        request_id_for_routing.clone(),
-                        Some(status.as_u16() as i64),
-                        None,
-                        fallback_count,
-                        if fallback_count > 0 {
-                            "fallback_success".to_string()
-                        } else if public_model_for_routing.as_deref() == Some("auto") {
-                            "auto".to_string()
-                        } else {
-                            "direct".to_string()
-                        },
-                        false,
-                    ),
+                    log_context,
+                    ttfb_ms,
+                    status.as_u16() as i64,
+                    attempt_seq,
+                    is_last,
+                    request_id_for_routing.clone(),
+                    fallback_count,
+                    route_reason,
                     &detected_protocol,
+                    &state.capture,
                 )
                 .await;
             }
@@ -534,13 +599,12 @@ async fn forward_request(
                     fallback_count += 1;
                     record_request_log(
                         storage.clone(),
-                        log_context.to_log_input(
+                        log_context.log_fallback(
                             uuid::Uuid::new_v4().to_string(),
                             None,
                             Some(error_msg),
                             fallback_count,
                             format!("{route_reason}_fallback"),
-                            false,
                         ),
                     );
                     continue;
@@ -548,13 +612,11 @@ async fn forward_request(
 
                 record_request_log(
                     storage.clone(),
-                    log_context.to_log_input(
-                        uuid::Uuid::new_v4().to_string(),
-                        Some(StatusCode::BAD_GATEWAY.as_u16() as i64),
-                        Some(error_msg),
+                    log_context.log_final_network_error(
+                        request_id_for_routing.clone(),
+                        error_msg,
                         fallback_count,
                         route_reason.to_string(),
-                        false,
                     ),
                 );
                 last_network_error = Some(err);
@@ -566,6 +628,12 @@ async fn forward_request(
 }
 
 // ─── Route Log Context ──────────────────────────────────────────────────────
+//
+// Timing: send_at 是「开始向上游发请求」的 Instant。真正的 TTFB 在 send()
+// 返回后计算（= send_at.elapsed()），真正的 duration 在 body 收齐后计算
+// （buffered 的 bytes().await 之后；streaming 的 stream 结束回调之后）。
+// 不再把 constructed 时刻的 elapsed() 作为 latency_ms——那只是代理本地排队
+// 耗时而非上游往返耗时。
 
 struct RouteLogContext {
     client_id: Option<String>,
@@ -582,18 +650,23 @@ struct RouteLogContext {
     path: String,
     client_protocol: String,
     upstream_protocol: String,
-    latency_ms: i64,
+    /// 本次候选 send 开始的时刻，用于后续计算 TTFB 与 duration
+    send_at: Instant,
+    /// 请求级头部（在请求循环外一次性捕获）
+    req_headers_json: Option<String>,
+    req_body_b64: Option<String>,
 }
 
 impl RouteLogContext {
-    fn to_log_input(
+    fn base_log_input(
         &self,
         request_id: String,
         status: Option<i64>,
+        latency_ms: Option<i64>,
+        is_stream: bool,
         error_message: Option<String>,
         fallback_count: i64,
         route_reason: String,
-        is_stream: bool,
     ) -> RequestLogInput {
         RequestLogInput {
             request_id,
@@ -612,13 +685,96 @@ impl RouteLogContext {
             method: self.method.clone(),
             path: self.path.clone(),
             status,
-            latency_ms: Some(self.latency_ms),
+            latency_ms,
             is_stream,
             error_message,
             fallback_count,
             route_reason: Some(route_reason),
+            ttfb_ms: None,
+            duration_ms: None,
+            attempt_seq: 0,
+            req_headers_json: self.req_headers_json.clone(),
+            req_body_b64: self.req_body_b64.clone(),
+            res_headers_json: None,
+            res_body_b64: None,
+            stream_summary: None,
+            is_last_attempt: true,
         }
     }
+
+    /// 构建日志项（retryable_status / quota_exceeded / network_error_fallback）：
+    /// ttfb=duration=attempt_elapsed 仍然视为该 attempt 的代理耗时兜底，
+    /// 真实 TTFB 由 Ok(send) 路径填充。
+    fn log_fallback(
+        &self,
+        request_id: String,
+        status: Option<i64>,
+        error_message: Option<String>,
+        fallback_count: i64,
+        route_reason: String,
+    ) -> RequestLogInput {
+        let elapsed = self.send_at.elapsed();
+        let ms = Some(elapsed.as_millis() as i64);
+        let mut log = self.base_log_input(
+            request_id,
+            status,
+            ms,
+            false,
+            error_message,
+            fallback_count,
+            route_reason,
+        );
+        log.ttfb_ms = ms;
+        log.duration_ms = ms;
+        log.attempt_seq = fallback_count;
+        log.is_last_attempt = false;
+        log
+    }
+
+    /// 构建失败（最后一次 network_error）的日志项。
+    fn log_final_network_error(
+        &self,
+        request_id: String,
+        error_message: String,
+        fallback_count: i64,
+        route_reason: String,
+    ) -> RequestLogInput {
+        let elapsed = self.send_at.elapsed();
+        let ms = Some(elapsed.as_millis() as i64);
+        let mut log = self.base_log_input(
+            request_id,
+            Some(StatusCode::BAD_GATEWAY.as_u16() as i64),
+            ms,
+            false,
+            Some(error_message),
+            fallback_count,
+            route_reason,
+        );
+        // 网络错误下 TTFB 无意义（send 都没成功返回），duration 用代理侧耗时占位
+        log.ttfb_ms = None;
+        log.duration_ms = ms;
+        log.attempt_seq = fallback_count;
+        log
+    }
+
+    /// 构建 success 调用的低层日志项入口，
+    /// 由 response builder 进一步回填 ttfb/duration/res_*。
+    fn log_success_base(
+        &self,
+        request_id: String,
+        status: i64,
+        fallback_count: i64,
+        route_reason: String,
+        attempt_seq: i64,
+        is_last: bool,
+    ) -> RequestLogInput {
+        let mut log =
+            self.base_log_input(request_id, Some(status), None, false, None, fallback_count, route_reason);
+        log.attempt_seq = attempt_seq;
+        log.is_last_attempt = is_last;
+        log
+    }
+
 }
 
 // ─── Response Builders ──────────────────────────────────────────────────────
@@ -626,35 +782,86 @@ impl RouteLogContext {
 async fn build_response(
     storage: Storage,
     upstream_response: reqwest::Response,
-    mut log: RequestLogInput,
+    log_context: RouteLogContext,
+    ttfb_ms: i64,
+    status_code: i64,
+    attempt_seq: i64,
+    is_last: bool,
+    // 由调用方持有的逐请求信息（不在 log_context 里因为 log_context 是 per-candidate 的副本）
+    request_id: String,
+    fallback_count: i64,
+    route_reason: String,
     protocol: &ProtocolType,
+    capture: &LogCaptureConfig,
 ) -> Result<Response, reqwest::Error> {
     let status = upstream_response.status();
     let headers = upstream_response.headers().clone();
     let is_stream = is_streaming_response(&headers);
-    log.is_stream = is_stream;
 
-    let usage_capture = (!is_stream).then(|| UsageCapture {
-        storage: storage.clone(),
-        request_id: log.request_id.clone(),
-        client_id: log.client_id.clone(),
-        client_name: log.client_name.clone(),
-        channel_id: log.channel_id.clone(),
-        channel_name: log.channel_name.clone(),
-        account_id: log.account_id.clone(),
-        account_name: log.account_name.clone(),
-        client_protocol: protocol.as_str().to_string(),
-        upstream_protocol: protocol.as_str().to_string(),
-        virtual_model: log.virtual_model.clone(),
-        upstream_model: log.upstream_model.clone(),
-        enabled: true,
-        body: Vec::new(),
-    });
+    let res_headers_json = if capture.capture_res_headers {
+        Some(sanitize_headers(&headers, LogCaptureConfig::redacted_header_keys()).to_string())
+    } else {
+        None
+    };
+
+    let mut log = log_context.log_success_base(
+        request_id.clone(),
+        status_code,
+        fallback_count,
+        route_reason,
+        attempt_seq,
+        is_last,
+    );
+    log.is_stream = is_stream;
+    log.ttfb_ms = Some(ttfb_ms);
+    log.res_headers_json = res_headers_json.clone();
+    log.res_body_b64 = None;
+    log.stream_summary = None;
+
+    if is_stream {
+        // 流式：直接记录日志并透传 stream（duration 暂按 ttfb 兜底）
+        log.duration_ms = log.duration_ms.or(Some(ttfb_ms));
+        record_request_log(storage.clone(), log);
+
+        let stream = upstream_response.bytes_stream();
+        let mut response = Response::new(Body::from_stream(stream));
+        *response.status_mut() = status;
+        copy_response_headers(&headers, response.headers_mut());
+        return Ok(response);
+    }
+
+    // 非流式（走 streaming 判断但非 SSE）— 视为 buffered，收完 body 计 duration
+    let body = upstream_response.bytes().await?;
+    let duration_ms = log_context.send_at.elapsed().as_millis() as i64;
+    log.duration_ms = Some(duration_ms);
+    let mut body_for_log: Vec<u8> = body.to_vec();
+    if capture.capture_res_body {
+        proxy_http::truncate_utf8(&mut body_for_log, capture.max_body_bytes);
+        log.res_body_b64 = Some(encode_body_base64(&body_for_log));
+    }
 
     enrich_upstream_error_log(status, &mut log);
-    record_request_log(storage, log);
-    let stream = capture_usage_stream(upstream_response.bytes_stream(), usage_capture);
-    let mut response = Response::new(Body::from_stream(stream));
+    record_request_log(storage.clone(), log);
+
+    let usage_capture = UsageCapture {
+        storage: storage.clone(),
+        request_id,
+        client_id: log_context.client_id.clone(),
+        client_name: log_context.client_name.clone(),
+        channel_id: Some(log_context.channel_id.clone()),
+        channel_name: Some(log_context.channel_name.clone()),
+        account_id: Some(log_context.account_id.clone()),
+        account_name: Some(log_context.account_name.clone()),
+        client_protocol: protocol.as_str().to_string(),
+        upstream_protocol: protocol.as_str().to_string(),
+        virtual_model: log_context.virtual_model.clone(),
+        upstream_model: Some(log_context.upstream_model.clone()),
+        enabled: body.len() <= MAX_USAGE_CAPTURE_BYTES,
+        body: body.to_vec(),
+    };
+    record_response_usage(usage_capture);
+
+    let mut response = Response::new(Body::from(body));
     *response.status_mut() = status;
     copy_response_headers(&headers, response.headers_mut());
     Ok(response)

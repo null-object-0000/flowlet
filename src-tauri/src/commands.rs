@@ -1,12 +1,12 @@
 use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    ClientConfig, ModelPrice, RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow,
-    VirtualModel,
+    ClientConfig, LogCaptureConfig, ModelPrice, RequestLogRow, RouteCandidate, RouteRule,
+    UsageSummaryRow, VirtualModel,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
-use crate::core::sync::{query_deepseek_balance, sync_deepseek_models};
+use crate::core::sync::{query_deepseek_balance, sync_deepseek_models, sync_longcat_models};
 use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
 
@@ -264,6 +264,44 @@ pub(super) fn list_request_logs(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+pub(super) fn get_request_log_detail(
+    state: tauri::State<'_, AppState>,
+    request_id: String,
+) -> Result<Vec<RequestLogRow>, String> {
+    state
+        .storage
+        .list_request_logs_by_request_id(&request_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn get_log_capture_config(
+    state: tauri::State<'_, AppState>,
+) -> Result<LogCaptureConfig, String> {
+    state
+        .capture
+        .lock()
+        .map(|guard| guard.clone())
+        .map_err(|_| "锁失败".to_string())
+}
+
+#[tauri::command]
+pub(super) fn set_log_capture_config(
+    state: tauri::State<'_, AppState>,
+    config: LogCaptureConfig,
+) -> Result<(), String> {
+    let json = serde_json::to_string(&config).map_err(|err| err.to_string())?;
+    state
+        .storage
+        .set_app_meta("log_capture_config", &json)
+        .map_err(|err| err.to_string())?;
+    if let Ok(mut guard) = state.capture.lock() {
+        *guard = config;
+    }
+    Ok(())
+}
+
 // ─── Sync Commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -351,24 +389,35 @@ pub(super) async fn sync_models(
             .clone()
     };
 
-    if account.channel_id != "deepseek" {
-        return Ok(ModelSyncResult {
-            models_synced: 0,
-            models: Vec::new(),
-            errors: vec!["当前仅 DeepSeek 支持模型列表同步".to_string()],
-        });
-    }
     let channel_id = account.channel_id.clone();
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap_or_else(|_| panic!("创建运行时失败"));
-        rt.block_on(sync_deepseek_models(&account))
-    })
-    .await
-    .map_err(|e| format!("任务执行失败: {e}"))?;
+    let result = match channel_id.as_str() {
+        "deepseek" => tauri::async_runtime::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|_| panic!("创建运行时失败"));
+            rt.block_on(sync_deepseek_models(&account))
+        })
+        .await
+        .map_err(|e| format!("任务执行失败: {e}"))?,
+        "longcat" => tauri::async_runtime::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|_| panic!("创建运行时失败"));
+            rt.block_on(sync_longcat_models(&account))
+        })
+        .await
+        .map_err(|e| format!("任务执行失败: {e}"))?,
+        _ => {
+            return Ok(ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("当前仅 DeepSeek 和 LongCat 支持模型列表同步")],
+            });
+        }
+    };
 
     if result.errors.is_empty() {
         let mut models = state

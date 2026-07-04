@@ -303,6 +303,8 @@ impl ChannelPreset {
             id: "longcat".to_string(),
             name: "LongCat".to_string(),
             vendor: "longcat".to_string(),
+            supports_model_list: true,
+            supports_model_detail: true,
             ..Default::default()
         }
     }
@@ -593,6 +595,15 @@ pub struct RequestLogRow {
     pub fallback_count: i64,
     pub route_reason: Option<String>,
     pub created_at: String,
+    pub ttfb_ms: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub attempt_seq: i64,
+    pub req_headers_json: Option<String>,
+    pub req_body_b64: Option<String>,
+    pub res_headers_json: Option<String>,
+    pub res_body_b64: Option<String>,
+    pub stream_summary: Option<String>,
+    pub is_last_attempt: bool,
 }
 
 // ─── Usage Record Row ────────────────────────────────────────────────────────
@@ -792,4 +803,44 @@ pub struct RequestLogInput {
     pub error_message: Option<String>,
     pub fallback_count: i64,
     pub route_reason: Option<String>,
+    pub ttfb_ms: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub attempt_seq: i64,
+    pub req_headers_json: Option<String>,
+    pub req_body_b64: Option<String>,
+    pub res_headers_json: Option<String>,
+    pub res_body_b64: Option<String>,
+    pub stream_summary: Option<String>,
+    pub is_last_attempt: bool,
+}
+
+// ─── Log Capture Configuration ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogCaptureConfig {
+    pub capture_req_headers: bool,
+    pub capture_req_body: bool,
+    pub capture_res_headers: bool,
+    pub capture_res_body: bool,
+    pub stream_summary_max_bytes: usize,
+    pub max_body_bytes: usize,
+}
+
+impl Default for LogCaptureConfig {
+    fn default() -> Self {
+        Self {
+            capture_req_headers: true,
+            capture_req_body: true,
+            capture_res_headers: true,
+            capture_res_body: true,
+            stream_summary_max_bytes: 16 * 1024,
+            max_body_bytes: 1024 * 1024,
+        }
+    }
+}
+
+impl LogCaptureConfig {
+    pub const fn redacted_header_keys() -> &'static [&'static str] {
+        &["authorization", "x-api-key", "cookie", "set-cookie", "x-auth-token"]
+    }
 }

@@ -464,6 +464,27 @@ impl Storage {
             "TEXT NOT NULL DEFAULT ''",
         )?;
 
+        // 请求日志：补充详情字段（TTFB、耗时、尝试序号、请求/响应头部与 body、流式摘要）
+        add_column_if_missing(&connection, "request_logs", "ttfb_ms", "INTEGER")?;
+        add_column_if_missing(&connection, "request_logs", "duration_ms", "INTEGER")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "attempt_seq",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "req_headers_json", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "req_body_b64", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "res_headers_json", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "res_body_b64", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "stream_summary", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "is_last_attempt",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+
         // 写入 schema 版本
         connection.execute(
             "INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.01', datetime('now'))",

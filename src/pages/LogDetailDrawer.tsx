@@ -64,7 +64,7 @@ export function LogDetailDrawer({
                 <h4 className="section-title">基础信息</h4>
                 <dl className="kv-grid">
                   <dt>时间</dt>
-                  <dd>{finalRow.created_at}</dd>
+                  <dd>{formatTimestamp(finalRow.created_at)}</dd>
                   <dt>客户端</dt>
                   <dd>{finalRow.client_name || finalRow.client_id || "-"}</dd>
                   <dt>协议</dt>
@@ -174,6 +174,30 @@ function fmtMs(ms: number | null | undefined): string {
   return `${ms} ms`;
 }
 
+/// SQLite 的 datetime('now') 返回 UTC（如 2026-07-04 03:07:23）。
+/// 附加 'Z' 让浏览器按 UTC 解析，再用本地时间展示。
+function formatTimestamp(created: string | null): string {
+  if (!created) return "-";
+  try {
+    const iso = created.includes("T") || created.endsWith("Z")
+      ? created
+      : `${created.replace(" ", "T")}Z`;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return created;
+    return d.toLocaleString("zh-CN", {
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return created;
+  }
+}
+
 function formatJson(s: string | null): string {
   if (!s) return "— （未捕获）";
   try {
@@ -183,18 +207,23 @@ function formatJson(s: string | null): string {
   }
 }
 
+/// base64 解码：先用 atob 转为 Latin-1 字节串，再用 TextDecoder
+/// 按 UTF-8 解码，避免多字节中文出现乱码。
 function formatBody(b64: string | null): string {
   if (!b64) return "— （未捕获）";
   try {
-    if (typeof atob === "function") {
-      const decoded = atob(b64);
-      try {
-        return JSON.stringify(JSON.parse(decoded), null, 2);
-      } catch {
-        return decoded;
-      }
+    if (typeof atob !== "function") return b64;
+    const latin1 = atob(b64);
+    const bytes = new Uint8Array(latin1.length);
+    for (let i = 0; i < latin1.length; i++) {
+      bytes[i] = latin1.charCodeAt(i);
     }
-    return b64;
+    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      return text;
+    }
   } catch {
     return b64;
   }

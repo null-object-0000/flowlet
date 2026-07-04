@@ -54,7 +54,7 @@ export function LogsPage({
               ) : (
                 logs.map((row) => (
                   <tr key={`${row.created_at}-${row.path}-${row.id}`}>
-                    <td>{row.created_at}</td>
+                    <td>{formatTimestamp(row.created_at)}</td>
                     <td>{row.client_name || row.client_id || "未知"}</td>
                     <td>{row.channel_name || row.channel_id || "-"}</td>
                     <td>{row.account_name || row.account_id || "-"}</td>
@@ -102,4 +102,27 @@ export function LogsPage({
 function formatMs(ms: number | null): string {
   if (ms == null) return "-";
   return `${ms} ms`;
+}
+
+/// SQLite datetime('now') 返回 UTC；前端转本地时间展示。
+function formatTimestamp(created: string | null): string {
+  if (!created) return "-";
+  try {
+    const iso = created.includes("T") || created.endsWith("Z")
+      ? created
+      : `${created.replace(" ", "T")}Z`;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return created;
+    return d.toLocaleString("zh-CN", {
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return created;
+  }
 }

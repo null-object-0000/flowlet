@@ -57,7 +57,7 @@ function validateConfigData({ channels, accounts, routes, clients }: FlowletData
 }
 
 export function createConfigActions({ data, setMessage }: ActionContext) {
-  const { autostartEnabled, setAutostartEnabled, refreshAll } = data;
+  const { autostartEnabled, setAutostartEnabled, proxyBindConfig, setProxyBindConfig, status, refreshStatus, refreshAll } = data;
 
   function toggleAutostart() {
     const fn = autostartEnabled ? "disable_autostart" : "enable_autostart";
@@ -116,6 +116,29 @@ export function createConfigActions({ data, setMessage }: ActionContext) {
     }
   }
 
+
+  function saveProxyBindConfig(nextAllowLan: boolean) {
+    const next = {
+      host: nextAllowLan ? "0.0.0.0" : "127.0.0.1",
+      port: proxyBindConfig.port || 18640,
+      allow_lan: nextAllowLan,
+    };
+    runCommand("set_proxy_bind_config", { config: next })
+      .then(async () => {
+        setProxyBindConfig(next);
+        if (status.running) {
+          setMessage("代理监听配置已保存，正在重启代理...");
+          await runCommand("stop_proxy");
+          await runCommand("start_proxy");
+          await refreshStatus().catch(() => undefined);
+          setMessage("代理监听配置已保存，代理已按新地址重启");
+          return;
+        }
+        await refreshStatus().catch(() => undefined);
+        setMessage("代理监听配置已保存");
+      })
+      .catch((err: unknown) => setMessage(`保存代理监听配置失败: ${String(err)}`));
+  }
   function cleanupLogs(keepDays: number) {
     runCommand<[number, number]>("cleanup_old_logs", { keepDays })
       .then(([logs, usage]) => {
@@ -125,5 +148,7 @@ export function createConfigActions({ data, setMessage }: ActionContext) {
       .catch((err: unknown) => setMessage(`清理失败: ${String(err)}`));
   }
 
-  return { toggleAutostart, exportConfig, importConfig, validateConfig, cleanupLogs };
+  return { toggleAutostart, saveProxyBindConfig, exportConfig, importConfig, validateConfig, cleanupLogs };
 }
+
+

@@ -8,6 +8,7 @@ import {
   ClientConfig,
   LogCaptureConfig,
   ModelPrice,
+  ProxyBindConfig,
   ProxyStatus,
   RequestLogRow,
   RouteCandidate,
@@ -35,6 +36,11 @@ export function useFlowletData() {
   const [routingScores, setRoutingScores] = React.useState<Array<[string, string, number, number, number]>>([]);
   const [dbStats, setDbStats] = React.useState<[number, number, number] | null>(null);
   const [autostartEnabled, setAutostartEnabled] = React.useState(false);
+  const [proxyBindConfig, setProxyBindConfig] = React.useState<ProxyBindConfig>({
+    host: "127.0.0.1",
+    port: 18640,
+    allow_lan: false,
+  });
   const [status, setStatus] = React.useState<ProxyStatus>({
     running: false,
     bind_addr: "127.0.0.1:18640",
@@ -80,6 +86,9 @@ export function useFlowletData() {
     runCommand<boolean>("is_autostart_enabled")
       .then(setAutostartEnabled)
       .catch(() => setAutostartEnabled(false));
+    runCommand<ProxyBindConfig>("get_proxy_bind_config")
+      .then(setProxyBindConfig)
+      .catch(() => undefined);
 
     setChannels(ch);
     setAccounts(ac);
@@ -126,6 +135,8 @@ export function useFlowletData() {
     dbStats,
     autostartEnabled,
     setAutostartEnabled,
+    proxyBindConfig,
+    setProxyBindConfig,
     status,
     refreshStatus,
     refreshAll,
@@ -133,3 +144,7 @@ export function useFlowletData() {
     refreshLogCaptureConfig,
   };
 }
+
+
+
+

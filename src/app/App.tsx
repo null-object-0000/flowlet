@@ -35,6 +35,7 @@ export default function App() {
     dbStats,
     autostartEnabled,
     status,
+    proxyBindConfig,
     refreshStatus,
     refreshAll,
     refreshChannelModels,
@@ -82,6 +83,7 @@ export default function App() {
     addBalanceSnapshot,
     toggleAutostart,
     exportConfig,
+    saveProxyBindConfig,
     importConfig,
     validateConfig,
     cleanupLogs,
@@ -110,6 +112,8 @@ export default function App() {
             usageRows={usageRows}
             onCopy={copy}
             autostartEnabled={autostartEnabled}
+            proxyBindConfig={proxyBindConfig}
+            onToggleProxyLanAccess={saveProxyBindConfig}
             onToggleAutostart={toggleAutostart}
             onExportConfig={exportConfig}
             onImportConfig={importConfig}
@@ -214,6 +218,9 @@ export default function App() {
     </main>
   );
 }
+
+
+
 
 
 

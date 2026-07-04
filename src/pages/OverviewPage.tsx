@@ -1,6 +1,6 @@
 import React from "react";
 import { Actions, Panel, PanelHeader } from "../components/ui";
-import { ChannelPreset, ProxyStatus, UsageSummaryRow } from "../domain";
+import { ChannelPreset, ProxyBindConfig, ProxyStatus, UsageSummaryRow } from "../domain";
 
 export function OverviewPage({
   status,
@@ -8,6 +8,8 @@ export function OverviewPage({
   onCopy,
   autostartEnabled,
   onToggleAutostart,
+  proxyBindConfig,
+  onToggleProxyLanAccess,
   onExportConfig,
   onImportConfig,
   onValidateConfig,
@@ -24,6 +26,8 @@ export function OverviewPage({
   onCopy: (text: string, done: string) => Promise<void>;
   autostartEnabled: boolean;
   onToggleAutostart: () => void;
+  proxyBindConfig: ProxyBindConfig;
+  onToggleProxyLanAccess: (allowLan: boolean) => void;
   onExportConfig: () => void;
   onImportConfig: () => void;
   onValidateConfig: () => void;
@@ -43,6 +47,10 @@ export function OverviewPage({
   const todayTokens = todayRows.reduce((sum, r) => sum + r.known_tokens, 0);
   const todayCost = todayRows.reduce((sum, r) => sum + r.estimated_cost, 0);
   const needsSetup = !hasEnabledAccount || !hasEnabledRoute;
+  const listenAddress = status.bind_addr || `${proxyBindConfig.host}:${proxyBindConfig.port}`;
+  const [, listenPort = String(proxyBindConfig.port || 18640)] = listenAddress.split(":");
+  const endpointHost = "127.0.0.1";
+  const proxyBaseUrl = `http://${endpointHost}:${listenPort}`;
 
   return (
     <>
@@ -72,15 +80,15 @@ export function OverviewPage({
         <PanelHeader>
           <h3>接入信息</h3>
           <Actions>
-            <button onClick={() => void onCopy("http://127.0.0.1:18640/v1", "OpenAI Base URL 已复制")}>复制 OpenAI Base URL</button>
-            <button onClick={() => void onCopy("http://127.0.0.1:18640/anthropic", "Anthropic Base URL 已复制")}>复制 Anthropic Base URL</button>
+            <button onClick={() => void onCopy(`${proxyBaseUrl}/v1`, "OpenAI Base URL 已复制")}>复制 OpenAI Base URL</button>
+            <button onClick={() => void onCopy(`${proxyBaseUrl}/anthropic`, "Anthropic Base URL 已复制")}>复制 Anthropic Base URL</button>
             <button onClick={() => void onCopy("Bearer flowlet-local-token", "Client Token 已复制")}>复制 Client Token</button>
           </Actions>
         </PanelHeader>
         <div className="info-grid">
-          <label>OpenAI-compatible 入口<input readOnly value="http://127.0.0.1:18640/v1" /></label>
-          <label>Anthropic-compatible 入口<input readOnly value="http://127.0.0.1:18640/anthropic" /></label>
-          <label>健康检查<input readOnly value="http://127.0.0.1:18640/health" /></label>
+          <label>OpenAI-compatible 入口<input readOnly value={`${proxyBaseUrl}/v1`} /></label>
+          <label>Anthropic-compatible 入口<input readOnly value={`${proxyBaseUrl}/anthropic`} /></label>
+          <label>健康检查<input readOnly value={`${proxyBaseUrl}/health`} /></label>
           <label>客户端 Token<input readOnly value="Bearer flowlet-local-token" /></label>
         </div>
       </Panel>
@@ -97,6 +105,11 @@ export function OverviewPage({
           <input type="checkbox" checked={autostartEnabled} onChange={onToggleAutostart} />
           开机自启动 Flowlet
         </label>
+        <label className="checkbox-label">
+          <input type="checkbox" checked={proxyBindConfig.allow_lan} onChange={(event) => onToggleProxyLanAccess(event.target.checked)} />
+          允许局域网设备访问代理
+        </label>
+        <p className="hint">当前监听: {listenAddress}。开启局域网访问后会监听 0.0.0.0；局域网设备接入时把 127.0.0.1 替换为本机内网 IP。请确保客户端 Token 已配置。</p>
       </Panel>
 
       <Panel className="compact">
@@ -124,3 +137,8 @@ export function OverviewPage({
     </>
   );
 }
+
+
+
+
+

@@ -88,9 +88,18 @@ impl Default for ProxyController {
     }
 }
 
-#[derive(Default)]
 struct ProxyRuntime {
     shutdown: Option<oneshot::Sender<()>>,
+    bind_addr: String,
+}
+
+impl Default for ProxyRuntime {
+    fn default() -> Self {
+        Self {
+            shutdown: None,
+            bind_addr: DEFAULT_BIND_ADDR.to_string(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -191,6 +200,7 @@ impl ProxyController {
         ensure_ua_rules_file(&ua_rules_path);
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        runtime.bind_addr = bind_addr_str.to_string();
         runtime.shutdown = Some(shutdown_tx);
         drop(runtime);
 
@@ -235,16 +245,13 @@ impl ProxyController {
     }
 
     pub fn status(&self) -> ProxyStatus {
-        let running = self
+        let (running, bind_addr) = self
             .inner
             .lock()
-            .map(|runtime| runtime.shutdown.is_some())
-            .unwrap_or(false);
+            .map(|runtime| (runtime.shutdown.is_some(), runtime.bind_addr.clone()))
+            .unwrap_or_else(|_| (false, DEFAULT_BIND_ADDR.to_string()));
 
-        ProxyStatus {
-            running,
-            bind_addr: DEFAULT_BIND_ADDR.to_string(),
-        }
+        ProxyStatus { running, bind_addr }
     }
 }
 
@@ -1257,6 +1264,9 @@ fn update_stream_log(
 #[cfg(test)]
 #[path = "proxy_tests.rs"]
 mod proxy_tests;
+
+
+
 
 
 

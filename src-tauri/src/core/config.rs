@@ -826,6 +826,43 @@ pub struct RequestLogInput {
     pub is_last_attempt: bool,
 }
 
+
+// ─── Proxy Bind Configuration ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyBindConfig {
+    pub host: String,
+    pub port: u16,
+    pub allow_lan: bool,
+}
+
+impl Default for ProxyBindConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 18640,
+            allow_lan: false,
+        }
+    }
+}
+
+impl ProxyBindConfig {
+    pub fn normalized(mut self) -> Self {
+        self.host = if self.allow_lan {
+            "0.0.0.0".to_string()
+        } else {
+            "127.0.0.1".to_string()
+        };
+        if self.port == 0 {
+            self.port = 18640;
+        }
+        self
+    }
+
+    pub fn bind_addr(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+}
 // ─── Log Capture Configuration ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -856,3 +893,4 @@ impl LogCaptureConfig {
         &["authorization", "x-api-key", "cookie", "set-cookie", "x-auth-token"]
     }
 }
+

@@ -1,7 +1,7 @@
 use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    ClientConfig, LogCaptureConfig, ModelPrice, RequestLogRow, RouteCandidate, RouteRule,
+    ClientConfig, LogCaptureConfig, ModelPrice, ProxyBindConfig, RequestLogRow, RouteCandidate, RouteRule,
     UsageSummaryRow, VirtualModel,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
@@ -35,9 +35,46 @@ pub(super) async fn stop_proxy(
 
 #[tauri::command]
 pub(super) fn proxy_status(state: tauri::State<'_, AppState>) -> ProxyStatus {
-    state.proxy.status()
+    let mut status = state.proxy.status();
+    if !status.running {
+        if let Ok(config) = state.bind_config.lock() {
+            status.bind_addr = config.clone().normalized().bind_addr();
+        }
+    }
+    status
 }
 
+#[tauri::command]
+pub(super) fn get_proxy_bind_config(
+    state: tauri::State<'_, AppState>,
+) -> Result<ProxyBindConfig, String> {
+    state
+        .bind_config
+        .lock()
+        .map(|guard| guard.clone().normalized())
+        .map_err(|_| "读取代理监听配置失败".to_string())
+}
+
+#[tauri::command]
+pub(super) fn set_proxy_bind_config(
+    state: tauri::State<'_, AppState>,
+    config: ProxyBindConfig,
+) -> Result<(), String> {
+    let config = config.normalized();
+    config
+        .bind_addr()
+        .parse::<std::net::SocketAddr>()
+        .map_err(|_| "代理监听地址无效".to_string())?;
+    let json = serde_json::to_string(&config).map_err(|err| err.to_string())?;
+    state
+        .storage
+        .set_app_meta("proxy_bind_config", &json)
+        .map_err(|err| err.to_string())?;
+    if let Ok(mut guard) = state.bind_config.lock() {
+        *guard = config;
+    }
+    Ok(())
+}
 // ─── Channel Presets Commands ────────────────────────────────────────────────
 
 #[tauri::command]
@@ -666,3 +703,5 @@ pub(super) fn disable_autostart(app: AppHandle) -> Result<(), String> {
         .disable()
         .map_err(|e| format!("禁用自启动失败: {e}"))
 }
+
+

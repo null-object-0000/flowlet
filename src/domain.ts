@@ -6,6 +6,12 @@ export type ProxyStatus = {
   bind_addr: string;
 };
 
+
+export type ProxyBindConfig = {
+  host: string;
+  port: number;
+  allow_lan: boolean;
+};
 export type ChannelPreset = {
   id: string;
   name: string;
@@ -317,3 +323,4 @@ export function createRouteCandidate(
     updated_at: now,
   };
 }
+

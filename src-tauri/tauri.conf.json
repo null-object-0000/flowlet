@@ -18,17 +18,12 @@
         "minWidth": 900,
         "minHeight": 620,
         "hiddenTitle": true,
-        "titleBarStyle": "Overlay"
+        "titleBarStyle": "Overlay",
+        "visible": false
       }
     ],
     "security": {
       "csp": null
-    },
-    "trayIcon": {
-      "iconPath": "icons/tray.png",
-      "iconAsTemplate": true,
-      "title": "Flowlet",
-      "tooltip": "Flowlet - 本地 AI 请求路由"
     }
   },
   "bundle": {

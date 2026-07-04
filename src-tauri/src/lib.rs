@@ -3,6 +3,7 @@ pub mod core;
 
 use core::config::{
     ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ModelPrice, ProtocolType,
+    ProxyBindConfig,
     RouteCandidate, RouteRule, VirtualModel,
 };
 use core::presets::builtin_model_prices;
@@ -26,6 +27,7 @@ struct AppState {
     storage: Storage,
     upstream_timeout_seconds: u64,
     capture: Arc<Mutex<LogCaptureConfig>>,
+    bind_config: Arc<Mutex<ProxyBindConfig>>,
     tray: Arc<Mutex<Option<TrayIcon>>>,
     ua_rules_path: std::path::PathBuf,
 }
@@ -35,6 +37,7 @@ struct ProxyStartupConfig {
     storage: Storage,
     timeout: u64,
     capture: LogCaptureConfig,
+    bind_addr: String,
     ua_rules_path: std::path::PathBuf,
 }
 
@@ -46,6 +49,11 @@ impl AppState {
             .lock()
             .map(|guard| guard.clone())
             .unwrap_or_default();
+        let bind_addr = self
+            .bind_config
+            .lock()
+            .map(|guard| guard.clone().normalized().bind_addr())
+            .unwrap_or_else(|_| ProxyBindConfig::default().bind_addr());
         Ok(ProxyStartupConfig {
             shared: core::proxy::ProxySharedConfig {
                 channels: Arc::clone(&self.channels),
@@ -58,6 +66,7 @@ impl AppState {
             storage: self.storage.clone(),
             timeout: self.upstream_timeout_seconds,
             capture,
+            bind_addr,
             ua_rules_path: self.ua_rules_path.clone(),
         })
     }
@@ -300,6 +309,12 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         .unwrap_or_default()
         .and_then(|json| serde_json::from_str::<LogCaptureConfig>(&json).ok())
         .unwrap_or_default();
+    let bind_config = storage
+        .get_app_meta("proxy_bind_config")
+        .unwrap_or_default()
+        .and_then(|json| serde_json::from_str::<ProxyBindConfig>(&json).ok())
+        .unwrap_or_default()
+        .normalized();
 
     AppState {
         proxy: ProxyController::default(),
@@ -313,6 +328,7 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         storage,
         upstream_timeout_seconds: 120,
         capture: Arc::new(Mutex::new(capture)),
+        bind_config: Arc::new(Mutex::new(bind_config)),
         tray: Arc::new(Mutex::new(None)),
         ua_rules_path,
     }
@@ -361,6 +377,7 @@ fn migrate_legacy_database(db_path: &std::path::Path) {
 }
 
 pub fn run() {
+    let start_hidden = std::env::args().any(|arg| arg == "--hidden" || arg == "--minimized");
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -373,8 +390,13 @@ pub fn run() {
 
             let app_handle = app.handle();
 
-            // 关闭窗口时隐藏到托盘，而非退出
+            // 关闭窗口时隐藏到托盘，而非退出。自启动传入 --hidden 时保持后台托盘模式。
             if let Some(window) = app.get_webview_window("main") {
+                if !start_hidden {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+
                 let window_label = window.label().to_string();
                 let app_handle_for_window = app_handle.clone();
                 window.on_window_event(move |event| {
@@ -396,7 +418,7 @@ pub fn run() {
             let quit = MenuItem::with_id(app_handle, "quit", "退出 Flowlet", true, None::<&str>)?;
             let menu = Menu::with_items(app_handle, &[&toggle, &start_item, &stop_item, &quit])?;
 
-            // 创建系统托盘（使用项目 icons/tray.png，与 tauri.conf.json trayIcon.iconPath 一致）
+            // 创建系统托盘（使用项目 icons/tray.png，保留菜单与点击事件）
             let tray_icon = tauri::include_image!("icons/tray.png");
             let tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("Flowlet - 代理已停止 ⏹")
@@ -472,6 +494,8 @@ pub fn run() {
             commands::start_proxy,
             commands::stop_proxy,
             commands::proxy_status,
+            commands::get_proxy_bind_config,
+            commands::set_proxy_bind_config,
             commands::list_channel_presets,
             commands::save_channel_presets,
             commands::list_channel_accounts,
@@ -539,6 +563,7 @@ async fn start_proxy_internal(
         storage,
         timeout,
         capture,
+        bind_addr,
         ua_rules_path,
     } = config;
 
@@ -555,7 +580,20 @@ async fn start_proxy_internal(
 
     // 传入 shared（持有 Arc 引用），代理运行中会锁定读取最新配置
     proxy
-        .start_with_capture(shared, storage, timeout, capture, ua_rules_path)
+        .start_with_bind(
+            shared,
+            storage,
+            timeout,
+            capture,
+            &bind_addr,
+            core::rate_limiter::RateLimiter::new(600),
+            ua_rules_path,
+        )
         .await
         .map_err(|err| err.to_string())
 }
+
+
+
+
+

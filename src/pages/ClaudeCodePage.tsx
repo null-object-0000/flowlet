@@ -4,12 +4,15 @@ import { ClientConfig } from "../domain";
 export function ClaudeCodePage({
   clients,
   onCopy,
+  baseUrl = "http://127.0.0.1:18640",
 }: {
   clients: ClientConfig[];
   onCopy: (text: string, done: string) => Promise<void>;
+  baseUrl?: string;
 }) {
   const defaultClient = clients.find((c) => c.id === "client-default") ?? clients[0];
   const token = defaultClient?.token ?? "flowlet-local-token";
+  const anthropicBaseUrl = `${baseUrl}/anthropic`;
 
   return (
     <Panel>
@@ -20,7 +23,7 @@ export function ClaudeCodePage({
       <div className="info-grid">
         <label>
           ANTHROPIC_BASE_URL
-          <input readOnly value="http://127.0.0.1:18640/anthropic" />
+          <input readOnly value={anthropicBaseUrl} />
         </label>
         <label>
           ANTHROPIC_AUTH_TOKEN
@@ -28,12 +31,12 @@ export function ClaudeCodePage({
         </label>
       </div>
       <Actions>
-        <button onClick={() => void onCopy("export ANTHROPIC_BASE_URL=http://127.0.0.1:18640/anthropic", "已复制 BASE_URL")}>复制 BASE_URL</button>
+        <button onClick={() => void onCopy(`export ANTHROPIC_BASE_URL=${anthropicBaseUrl}`, "已复制 BASE_URL")}>复制 BASE_URL</button>
         <button onClick={() => void onCopy(`export ANTHROPIC_AUTH_TOKEN=${token}`, "已复制 AUTH_TOKEN")}>复制 AUTH_TOKEN</button>
         <button
           onClick={() =>
             void onCopy(
-              `export ANTHROPIC_BASE_URL=http://127.0.0.1:18640/anthropic\nexport ANTHROPIC_AUTH_TOKEN=${token}`,
+              `export ANTHROPIC_BASE_URL=${anthropicBaseUrl}\nexport ANTHROPIC_AUTH_TOKEN=${token}`,
               "已复制完整配置"
             )
           }
@@ -47,3 +50,5 @@ export function ClaudeCodePage({
     </Panel>
   );
 }
+
+

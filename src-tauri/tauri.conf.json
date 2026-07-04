@@ -27,7 +27,13 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all"
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "src/core/ua_rules.json"
+    ]
   }
 }

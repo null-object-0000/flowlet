@@ -4,5 +4,11 @@
     "pattern": "opencode/",
     "name": "OpenCode",
     "enabled": true
+  },
+  {
+    "id": "claude-code",
+    "pattern": "claude-cli/",
+    "name": "Claude Code",
+    "enabled": true
   }
 ]

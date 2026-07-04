@@ -334,19 +334,70 @@ pub(super) fn identify_client_by_ua(
         .map(|r| (r.id.clone(), r.name.clone()))
 }
 
-/// 默认 UA 客户端规则（编译自项目根目录 `ua_rules.json`）。
-/// OpenCode 单条 `opencode/` 覆盖 local / 1.17.13 等所有变体。
-const DEFAULT_UA_RULES_JSON: &str = include_str!("ua_rules.json");
+/// 候选的默认 UA 规则 JSON 资源路径（打包时作为资源文件分发，不在二进制内）。
+/// 顺序：可执行文件同级 → macOS Resources/ → 当前工作目录 → src-tauri 源码目录。
+fn candidate_default_ua_rules_paths() -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
 
-/// 确保 UA 规则文件存在：若不存在则从内置默认（OpenCode）写入。
+    // 1) 可执行文件同级目录（Windows/Linux 打包 / headless）
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join("ua_rules.json"));
+            // macOS 打包：../Resources/ua_rules.json
+            if let Some(resources) = exe_dir.parent().map(|p| p.join("Resources")) {
+                candidates.push(resources.join("ua_rules.json"));
+            }
+        }
+    }
+
+    // 2) 当前工作目录（headless 直接启动 / 部分开发场景）
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("ua_rules.json"));
+        // 3) 开发模式：项目根目录下运行 `cargo tauri dev`
+        candidates.push(cwd.join("src-tauri").join("src").join("core").join("ua_rules.json"));
+    }
+
+    candidates
+}
+
+/// 硬编码的最后保底规则（仅在打包资源也找不到时使用）。
+/// 与 `src-tauri/src/core/ua_rules.json` 保持同步。
+const FALLBACK_UA_RULES_JSON: &str = r#"[
+  {
+    "id": "opencode",
+    "pattern": "opencode/",
+    "name": "OpenCode",
+    "enabled": true
+  },
+  {
+    "id": "claude-code",
+    "pattern": "claude-cli/",
+    "name": "Claude Code",
+    "enabled": true
+  }
+]"#;
+
+/// 加载默认 UA 规则 JSON 内容。依次尝试候选路径，全部失败时回退到硬编码内容。
+fn load_default_ua_rules_json() -> Option<String> {
+    for path in candidate_default_ua_rules_paths() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            return Some(content);
+        }
+    }
+    Some(FALLBACK_UA_RULES_JSON.to_string())
+}
+
+/// 确保 UA 规则文件存在：若不存在则从打包资源写入默认内容。
 pub(super) fn ensure_ua_rules_file(path: &std::path::Path) {
     if path.exists() {
         return;
     }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Some(content) = load_default_ua_rules_json() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, content);
     }
-    let _ = std::fs::write(path, DEFAULT_UA_RULES_JSON);
 }
 
 /// 从本地 JSON 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。

@@ -334,8 +334,27 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     }
 }
 
+/// 检测是否为便携模式：可执行文件旁边有 `portable.tag` 空文件即视为便携版。
+/// 便携模式下数据目录退回程序旁，不与本机调试数据共享。
+fn is_portable_mode() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("portable.tag")))
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
 fn app_database_path(app: &tauri::App) -> std::path::PathBuf {
-    let app_data_dir = app.path().app_data_dir().expect("获取应用数据目录失败");
+    let app_data_dir = if is_portable_mode() {
+        // 便携模式：数据目录 = 可执行文件所在目录
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .expect("获取可执行文件目录失败")
+    } else {
+        app.path().app_data_dir().expect("获取应用数据目录失败")
+    };
+
     std::fs::create_dir_all(&app_data_dir).expect("创建应用数据目录失败");
 
     let db_path = app_data_dir.join("flowlet.sqlite");

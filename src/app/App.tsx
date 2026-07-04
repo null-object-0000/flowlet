@@ -27,6 +27,7 @@ export default function App() {
     virtualModels,
     usageRows,
     requestLogs,
+    logCaptureConfig,
     balanceSnapshots,
     routeRules,
     accountStats,
@@ -54,6 +55,9 @@ export default function App() {
     regenerateDefaultRoutes,
     refreshUsage,
     refreshLogs,
+    fetchLogDetail,
+    refreshLogCaptureConfig,
+    saveLogCaptureConfig,
     analyzeUsage,
     addAccount,
     testConnection,
@@ -86,7 +90,8 @@ export default function App() {
   React.useEffect(() => {
     refreshStatus().catch(() => setMessage("读取代理状态失败"));
     refreshAll().catch(() => setMessage("初始化数据加载失败"));
-  }, [refreshStatus, refreshAll]);
+    refreshLogCaptureConfig().catch(() => setMessage("读取日志捕获配置失败"));
+  }, [refreshStatus, refreshAll, refreshLogCaptureConfig]);
 
   return (
     <main className="app-shell">
@@ -176,11 +181,17 @@ export default function App() {
             routingScores={routingScores}
             getAccountName={getAccountName}
             getChannelName={getChannelName}
+            logCaptureConfig={logCaptureConfig}
+            onSaveLogCaptureConfig={(cfg) => void saveLogCaptureConfig(cfg)}
           />
         ) : null}
 
         {view === "logs" ? (
-          <LogsPage logs={requestLogs} onRefresh={() => void refreshLogs()} />
+          <LogsPage
+            logs={requestLogs}
+            onRefresh={() => void refreshLogs()}
+            onOpenDetail={(requestId) => void fetchLogDetail(requestId)}
+          />
         ) : null}
 
         {view === "usage" ? (

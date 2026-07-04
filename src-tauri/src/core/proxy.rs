@@ -18,7 +18,6 @@ use reqwest::Client;
 use serde::Serialize;
 use std::{
     net::SocketAddr,
-    pin::Pin,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -923,6 +922,7 @@ struct UsageCapture {
     body: Vec<u8>,
 }
 
+#[allow(dead_code)]
 fn capture_usage_stream(
     stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
     capture: Option<UsageCapture>,

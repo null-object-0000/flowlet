@@ -6,6 +6,7 @@ import {
   ChannelModel,
   ChannelPreset,
   ClientConfig,
+  LogCaptureConfig,
   ModelPrice,
   ProxyStatus,
   RequestLogRow,
@@ -26,6 +27,8 @@ export function useFlowletData() {
   const [virtualModels, setVirtualModels] = React.useState<VirtualModel[]>([]);
   const [usageRows, setUsageRows] = React.useState<UsageSummaryRow[]>([]);
   const [requestLogs, setRequestLogs] = React.useState<RequestLogRow[]>([]);
+  const [logDetail, setLogDetail] = React.useState<RequestLogRow[] | null>(null);
+  const [logCaptureConfig, setLogCaptureConfig] = React.useState<LogCaptureConfig | null>(null);
   const [balanceSnapshots, setBalanceSnapshots] = React.useState<AccountBalanceSnapshot[]>([]);
   const [routeRules, setRouteRules] = React.useState<RouteRule[]>([]);
   const [accountStats, setAccountStats] = React.useState<AccountStatsRow[]>([]);
@@ -45,6 +48,11 @@ export function useFlowletData() {
   const refreshChannelModels = React.useCallback(async () => {
     const models = await runCommand<ChannelModel[]>("list_channel_models").catch(() => [] as ChannelModel[]);
     setChannelModels(models);
+  }, []);
+
+  const refreshLogCaptureConfig = React.useCallback(async () => {
+    const cfg = await runCommand<LogCaptureConfig>("get_log_capture_config").catch(() => null);
+    setLogCaptureConfig(cfg);
   }, []);
 
   const refreshAll = React.useCallback(async () => {
@@ -106,6 +114,10 @@ export function useFlowletData() {
     setUsageRows,
     requestLogs,
     setRequestLogs,
+    logDetail,
+    setLogDetail,
+    logCaptureConfig,
+    setLogCaptureConfig,
     balanceSnapshots,
     routeRules,
     setRouteRules,
@@ -118,5 +130,6 @@ export function useFlowletData() {
     refreshStatus,
     refreshAll,
     refreshChannelModels,
+    refreshLogCaptureConfig,
   };
 }

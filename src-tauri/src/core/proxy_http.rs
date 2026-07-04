@@ -5,7 +5,7 @@ use axum::{
     response::Response,
 };
 use base64::Engine;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 pub(super) fn cors_preflight_response(request_headers: &HeaderMap) -> Response {
     let mut response = Response::new(Body::empty());
@@ -380,6 +380,7 @@ pub(super) fn truncate_utf8(body: &mut Vec<u8>, max: usize) {
 
 /// Build the textual "首尾片段" summary that we persist in the
 /// `stream_summary` column for captured streaming responses.
+#[allow(dead_code)]
 pub(super) fn summarize_stream_fragment(fragment: &str) -> Option<String> {
     let non_empty: Vec<&str> = fragment.lines().filter(|line| !line.is_empty()).collect();
     if non_empty.is_empty() {
@@ -387,11 +388,6 @@ pub(super) fn summarize_stream_fragment(fragment: &str) -> Option<String> {
     }
     let head = non_empty[0];
     let tail = non_empty[non_empty.len() - 1];
-    let body = if head == tail || non_empty.len() == 1 {
-        head.to_string()
-    } else {
-        format!("{}\n...\n{}", head, tail)
-    };
     Some(format!(
         "chunks: {}\nfirst: {}\nlast:  {}",
         non_empty.len(),

@@ -1,9 +1,24 @@
-import { ModelPrice, RequestLogRow, UsageSummaryRow, createModelPrice } from "../../domain";
+import {
+  LogCaptureConfig,
+  ModelPrice,
+  RequestLogRow,
+  UsageSummaryRow,
+  createModelPrice,
+} from "../../domain";
 import { runCommand } from "../../services/flowletApi";
 import { ActionContext } from "./types";
 
 export function createUsageActions({ data, setMessage }: ActionContext) {
-  const { channels, prices, setPrices, setUsageRows, setRequestLogs } = data;
+  const {
+    channels,
+    prices,
+    setPrices,
+    setUsageRows,
+    setRequestLogs,
+    setLogDetail,
+    setLogCaptureConfig,
+    logCaptureConfig,
+  } = data;
 
   async function savePrices() {
     const filtered = prices.filter((p) => p.upstream_model.trim() && p.channel_id.trim());
@@ -20,6 +35,28 @@ export function createUsageActions({ data, setMessage }: ActionContext) {
   async function refreshLogs() {
     const rows = await runCommand<RequestLogRow[]>("list_request_logs");
     setRequestLogs(rows);
+  }
+
+  async function fetchLogDetail(requestId: string) {
+    const rows = await runCommand<RequestLogRow[]>("get_request_log_detail", {
+      request_id: requestId,
+    });
+    setLogDetail(rows);
+  }
+
+  function clearLogDetail() {
+    setLogDetail(null);
+  }
+
+  async function refreshLogCaptureConfig() {
+    const cfg = await runCommand<LogCaptureConfig>("get_log_capture_config");
+    setLogCaptureConfig(cfg);
+  }
+
+  async function saveLogCaptureConfig(next: LogCaptureConfig) {
+    await runCommand<null>("set_log_capture_config", { config: next });
+    setLogCaptureConfig(next);
+    setMessage("日志捕获配置已保存（重启代理后生效）");
   }
 
   async function analyzeUsage() {
@@ -43,5 +80,17 @@ export function createUsageActions({ data, setMessage }: ActionContext) {
     setPrices((current) => current.filter((_, i) => i !== index));
   }
 
-  return { savePrices, refreshUsage, refreshLogs, analyzeUsage, addPrice, updatePrice, removePrice };
+  return {
+    savePrices,
+    refreshUsage,
+    refreshLogs,
+    analyzeUsage,
+    addPrice,
+    updatePrice,
+    removePrice,
+    fetchLogDetail,
+    clearLogDetail,
+    refreshLogCaptureConfig,
+    saveLogCaptureConfig,
+  };
 }

@@ -124,6 +124,24 @@ export type RequestLogRow = {
   fallback_count: number;
   route_reason: string | null;
   created_at: string;
+  ttfb_ms: number | null;
+  duration_ms: number | null;
+  attempt_seq: number;
+  req_headers_json: string | null;
+  req_body_b64: string | null;
+  res_headers_json: string | null;
+  res_body_b64: string | null;
+  stream_summary: string | null;
+  is_last_attempt: boolean;
+};
+
+export type LogCaptureConfig = {
+  capture_req_headers: boolean;
+  capture_req_body: boolean;
+  capture_res_headers: boolean;
+  capture_res_body: boolean;
+  stream_summary_max_bytes: number;
+  max_body_bytes: number;
 };
 
 export type ChannelModel = {

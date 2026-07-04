@@ -342,9 +342,7 @@ impl Storage {    pub fn save_balance_snapshot(
         res_headers_json: Option<String>,
         res_body_b64: Option<String>,
         stream_summary: Option<String>,
-        protocol_str: &str,
     ) -> Result<(), StorageError> {
-        let _ = protocol_str;
         let connection = self
             .connection
             .lock()

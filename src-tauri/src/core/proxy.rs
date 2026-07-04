@@ -18,6 +18,7 @@ use reqwest::Client;
 use serde::Serialize;
 use std::{
     net::SocketAddr,
+    pin::Pin,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -447,8 +448,14 @@ async fn forward_request(
         let effective_model = resolve_small_model(&candidate.upstream_model);
         let routed_body = rewrite_model(&body_bytes, &effective_model, &detected_protocol);
 
+        // 账号级 Base URL 覆盖：如果账号配置了 base_url_override 则优先使用
+        let base_url = account
+            .base_url_override
+            .as_deref()
+            .filter(|url| !url.trim().is_empty())
+            .unwrap_or_else(|| channel.base_url_for(&detected_protocol));
         let upstream_url = build_upstream_url(
-            channel.base_url_for(&detected_protocol),
+            base_url,
             &parts.uri,
             &detected_protocol,
         );
@@ -818,11 +825,38 @@ async fn build_response(
     log.stream_summary = None;
 
     if is_stream {
-        // 流式：直接记录日志并透传 stream（duration 暂按 ttfb 兜底）
+        // 流式：先发一条日志（duration 暂按 ttfb 兜底），再注册 stream 结束回调
+        // 补 duration / res_body_b64 / stream_summary。
         log.duration_ms = log.duration_ms.or(Some(ttfb_ms));
         record_request_log(storage.clone(), log);
 
-        let stream = upstream_response.bytes_stream();
+        let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
+        let stream = capture_timed_stream(
+            upstream_response.bytes_stream(),
+            tx_done,
+            capture,
+        );
+
+        let request_id_for_update = request_id.clone();
+        let ttfb_for_update = ttfb_ms;
+        let res_headers_for_update = res_headers_json;
+        tokio::spawn(async move {
+            let done = rx_done.await.unwrap_or(StreamDone {
+                duration_ms: ttfb_for_update,
+                res_body_b64: None,
+                stream_summary: None,
+            });
+            update_stream_log(
+                storage,
+                request_id_for_update,
+                ttfb_for_update,
+                done.duration_ms,
+                res_headers_for_update,
+                done.res_body_b64,
+                done.stream_summary,
+            );
+        });
+
         let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
         copy_response_headers(&headers, response.headers_mut());
@@ -1053,6 +1087,148 @@ fn record_request_log(storage: Storage, log: RequestLogInput) {
     tokio::task::spawn_blocking(move || {
         if let Err(err) = storage.insert_request_log(&log) {
             tracing::warn!("写入请求日志失败: {err}");
+        }
+    });
+}
+
+// ─── Streaming response body capture ────────────────────────────────────────
+
+#[derive(Debug)]
+struct StreamDone {
+    pub duration_ms: i64,
+    pub res_body_b64: Option<String>,
+    pub stream_summary: Option<String>,
+}
+
+/// 包装上游 body 字节流：捕获最多 capture.max_body_bytes 的响应体字节
+/// 与 SSE 首尾片段文本摘要；流结束时通过 tx_done 回写 StreamDone。
+fn capture_timed_stream(
+    inner: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+    tx_done: tokio::sync::oneshot::Sender<StreamDone>,
+    capture: &LogCaptureConfig,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
+    let inner = Box::pin(inner);
+    let state = TimedStreamState {
+        inner,
+        done_sent: false,
+        started_at: Instant::now(),
+        res_body_buf: Vec::new(),
+        res_body_max: capture.max_body_bytes,
+        capture_res_body: capture.capture_res_body,
+        first_line: None,
+        last_line: None,
+        line_count: 0,
+    };
+    let tx_done = std::sync::Arc::new(std::sync::Mutex::new(Some(tx_done)));
+    futures_util::stream::unfold((state, tx_done), move |(mut state, tx_done)| async move {
+        match state.inner.next().await {
+            Some(Ok(bytes)) => {
+                if state.capture_res_body
+                    && state
+                        .res_body_buf
+                        .len()
+                        .saturating_add(bytes.len())
+                        <= state.res_body_max
+                {
+                    state.res_body_buf.extend_from_slice(&bytes);
+                }
+                let piece = String::from_utf8_lossy(&bytes);
+                for line in piece.split('\n') {
+                    let trimmed = line.trim_end_matches('\r');
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if state.first_line.is_none() {
+                        state.first_line = Some(trimmed.to_string());
+                    }
+                    state.last_line = Some(trimmed.to_string());
+                    state.line_count += 1;
+                }
+                Some((Ok(bytes), (state, tx_done)))
+            }
+            Some(Err(err)) => {
+                send_stream_done(&mut state, &tx_done, false);
+                Some((Err(std::io::Error::other(err)), (state, tx_done)))
+            }
+            None => {
+                send_stream_done(&mut state, &tx_done, true);
+                None
+            }
+        }
+    })
+}
+
+fn send_stream_done(
+    state: &mut TimedStreamState,
+    tx_done: &std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<StreamDone>>>>,
+    _success: bool,
+) {
+    if state.done_sent {
+        return;
+    }
+    state.done_sent = true;
+    let duration_ms = state.started_at.elapsed().as_millis() as i64;
+    let res_body_b64 = if state.res_body_buf.is_empty() || !state.capture_res_body {
+        None
+    } else {
+        Some(encode_body_base64(&state.res_body_buf))
+    };
+    let stream_summary = build_stream_summary(
+        state.first_line.as_deref(),
+        state.last_line.as_deref(),
+        state.line_count,
+    );
+    let _ = tx_done.lock().unwrap().take().map(|tx| {
+        tx.send(StreamDone {
+            duration_ms,
+            res_body_b64,
+            stream_summary,
+        })
+    });
+}
+
+struct TimedStreamState {
+    inner: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
+    done_sent: bool,
+    started_at: Instant,
+    res_body_buf: Vec<u8>,
+    res_body_max: usize,
+    capture_res_body: bool,
+    first_line: Option<String>,
+    last_line: Option<String>,
+    line_count: usize,
+}
+
+fn build_stream_summary(first: Option<&str>, last: Option<&str>, line_count: usize) -> Option<String> {
+    let first = first?;
+    let last = last.unwrap_or(first);
+    if first == last {
+        return Some(format!("lines: {}\n{}", line_count, first));
+    }
+    Some(format!("lines: {}\nfirst: {}\nlast:  {}", line_count, first, last))
+}
+
+/// 流式响应结束后由 spawn task 调用，补写 duration / res_body_b64 / stream_summary
+/// 到最近一条 is_last_attempt=1 且 is_stream=1 的日志行。
+fn update_stream_log(
+    storage: Storage,
+    request_id: String,
+    ttfb_ms: i64,
+    duration_ms: i64,
+    res_headers_json: Option<String>,
+    res_body_b64: Option<String>,
+    stream_summary: Option<String>,
+) {
+    tokio::task::spawn_blocking(move || {
+        if let Err(err) = storage.update_request_log_timing(
+            &request_id,
+            ttfb_ms,
+            duration_ms,
+            res_headers_json,
+            res_body_b64,
+            stream_summary,
+        ) {
+            tracing::warn!("补写流式请求日志失败: {err}");
         }
     });
 }

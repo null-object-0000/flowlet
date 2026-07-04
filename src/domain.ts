@@ -126,6 +126,22 @@ export type RequestLogRow = {
   created_at: string;
 };
 
+export type ChannelModel = {
+  id: string;
+  channel_id: string;
+  model: string;
+  display_name?: string | null;
+  supported_protocols: ProtocolType[];
+  context_window?: number | null;
+  max_output_tokens?: number | null;
+  supports_stream: boolean;
+  enabled: boolean;
+  source: string;
+  synced_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AccountBalanceSnapshot = {
   id: string;
   account_id: string;

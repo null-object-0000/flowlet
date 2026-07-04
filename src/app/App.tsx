@@ -23,6 +23,7 @@ export default function App() {
     routes,
     clients,
     prices,
+    channelModels,
     virtualModels,
     usageRows,
     requestLogs,
@@ -35,6 +36,7 @@ export default function App() {
     status,
     refreshStatus,
     refreshAll,
+    refreshChannelModels,
   } = flowlet;
   const [view, setView] = React.useState<View>("overview");
   const [message, setMessage] = React.useState("");
@@ -127,12 +129,8 @@ export default function App() {
             onSaveChannels={() => void saveChannels()}
             onSaveAccounts={() => void saveAccounts()}
             onTestConnection={(id) => void testConnection(id)}
-            onSyncModels={(id) => void syncModels(id)}
-            getChannelName={getChannelName}
             getBalanceForAccount={getBalanceForAccount}
             onAddBalanceSnapshot={(s) => void addBalanceSnapshot(s)}
-            balanceSnapshots={balanceSnapshots}
-            getAccountName={getAccountName}
           />
         ) : null}
 
@@ -152,12 +150,15 @@ export default function App() {
             routes={routes}
             channels={channels}
             accounts={accounts}
+            channelModels={channelModels}
             virtualModels={virtualModels}
             onAdd={addRoute}
             onUpdate={updateRoute}
             onRemove={removeRoute}
             onSave={() => void saveRouteCandidates()}
             onRegenerateDefaultRoutes={() => void regenerateDefaultRoutes()}
+            onSyncModels={(accountId) => void syncModels(accountId)}
+            onRefreshChannelModels={() => void refreshChannelModels()}
             getChannelName={getChannelName}
             routeRules={routeRules}
             onAddRouteRule={addRouteRule}

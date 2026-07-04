@@ -3,9 +3,7 @@ import { Actions, EmptyState, Panel, PanelHeader } from "../components/ui";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../domain";
 import {
   AccountRow,
-  BalanceOverviewTable,
   BalanceSnapshotEditor,
-  ChannelTemplatesPanel,
 } from "../features/channels";
 
 type ChannelsPageProps = {
@@ -17,12 +15,8 @@ type ChannelsPageProps = {
   onSaveChannels: () => void;
   onSaveAccounts: () => void;
   onTestConnection: (accountId: string) => void;
-  onSyncModels: (accountId: string) => void;
-  getChannelName: (channelId: string) => string;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
-  balanceSnapshots: AccountBalanceSnapshot[];
-  getAccountName: (accountId: string) => string;
 };
 
 export function ChannelsPage({
@@ -34,11 +28,8 @@ export function ChannelsPage({
   onSaveChannels,
   onSaveAccounts,
   onTestConnection,
-  onSyncModels,
   getBalanceForAccount,
   onAddBalanceSnapshot,
-  balanceSnapshots,
-  getAccountName,
 }: ChannelsPageProps) {
   const [snapshotAccountId, setSnapshotAccountId] = React.useState<string | null>(null);
   const totalAccounts = accounts.length;
@@ -85,7 +76,6 @@ export function ChannelsPage({
                 onUpdate={onUpdateAccount}
                 onRemove={onRemoveAccount}
                 onTestConnection={onTestConnection}
-                onSyncModels={onSyncModels}
                 getBalanceForAccount={getBalanceForAccount}
                 onEditSnapshot={setSnapshotAccountId}
               />
@@ -93,8 +83,6 @@ export function ChannelsPage({
           )}
         </div>
       </Panel>
-
-      <ChannelTemplatesPanel channels={channels} onAddAccount={onAddAccount} onSaveChannels={onSaveChannels} />
 
       {snapshotAccount ? (
         <BalanceSnapshotEditor
@@ -104,8 +92,6 @@ export function ChannelsPage({
           onSave={saveBalanceSnapshot}
         />
       ) : null}
-
-      <BalanceOverviewTable balanceSnapshots={balanceSnapshots} getAccountName={getAccountName} />
     </>
   );
 }

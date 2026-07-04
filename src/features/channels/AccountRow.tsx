@@ -7,7 +7,6 @@ type AccountRowProps = {
   onUpdate: (index: number, patch: Partial<ChannelAccount>) => void;
   onRemove: (index: number) => void;
   onTestConnection: (accountId: string) => void;
-  onSyncModels: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onEditSnapshot: (accountId: string) => void;
 };
@@ -30,7 +29,6 @@ export function AccountRow({
   onUpdate,
   onRemove,
   onTestConnection,
-  onSyncModels,
   getBalanceForAccount,
   onEditSnapshot,
 }: AccountRowProps) {
@@ -71,21 +69,18 @@ export function AccountRow({
       <div className="account-actions">
         {summary ? <span className="account-snapshot">{summary}</span> : null}
         {account.channel_id === "deepseek" ? (
-          <button onClick={() => void onTestConnection(account.id)} title="查询余额">
+          <button onClick={() => void onTestConnection(account.id)} title="自动同步余额">
             余额
           </button>
         ) : null}
-        {account.channel_id === "deepseek" ? (
-          <button onClick={() => void onSyncModels(account.id)} title="同步模型列表">
-            同步
+        {account.channel_id === "longcat" ? (
+          <button
+            onClick={() => onEditSnapshot(account.id)}
+            title="登记 Token 资源包快照"
+          >
+            登记资源包
           </button>
         ) : null}
-        <button
-          onClick={() => onEditSnapshot(account.id)}
-          title={account.channel_id === "longcat" ? "登记 Token 资源包快照" : "登记余额快照"}
-        >
-          登记
-        </button>
         <button onClick={() => onRemove(index)}>删除</button>
       </div>
     </div>

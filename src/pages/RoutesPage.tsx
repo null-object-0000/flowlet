@@ -1,23 +1,32 @@
 import {
   ChannelAccount,
+  ChannelModel,
   ChannelPreset,
   ClientConfig,
   RouteCandidate,
   RouteRule,
   VirtualModel,
 } from "../domain";
-import { ModelServicesPanel, RouteCandidatesPanel, RouteRulesPanel } from "../features/routes";
+import {
+  ModelServicesPanel,
+  ModelSyncPanel,
+  RouteCandidatesPanel,
+  RouteRulesPanel,
+} from "../features/routes";
 
 type RoutesPageProps = {
   routes: RouteCandidate[];
   channels: ChannelPreset[];
   accounts: ChannelAccount[];
+  channelModels: ChannelModel[];
   virtualModels: VirtualModel[];
   onAdd: () => void;
   onUpdate: (index: number, patch: Partial<RouteCandidate>) => void;
   onRemove: (index: number) => void;
   onSave: () => void;
   onRegenerateDefaultRoutes: () => void;
+  onSyncModels: (accountId: string) => void;
+  onRefreshChannelModels: () => void;
   getChannelName: (channelId: string) => string;
   routeRules: RouteRule[];
   onAddRouteRule: () => void;
@@ -31,12 +40,15 @@ export function RoutesPage({
   routes,
   channels,
   accounts,
+  channelModels,
   virtualModels,
   onAdd,
   onUpdate,
   onRemove,
   onSave,
   onRegenerateDefaultRoutes,
+  onSyncModels,
+  onRefreshChannelModels,
   getChannelName,
   routeRules,
   onAddRouteRule,
@@ -53,6 +65,14 @@ export function RoutesPage({
         onUpdate={onUpdate}
         onSave={onSave}
         onRegenerateDefaultRoutes={onRegenerateDefaultRoutes}
+        getChannelName={getChannelName}
+      />
+      <ModelSyncPanel
+        channels={channels}
+        accounts={accounts}
+        channelModels={channelModels}
+        onSyncModels={onSyncModels}
+        onRefreshChannelModels={onRefreshChannelModels}
         getChannelName={getChannelName}
       />
       <RouteCandidatesPanel

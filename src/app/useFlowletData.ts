@@ -3,6 +3,7 @@ import {
   AccountBalanceSnapshot,
   AccountStatsRow,
   ChannelAccount,
+  ChannelModel,
   ChannelPreset,
   ClientConfig,
   ModelPrice,
@@ -21,6 +22,7 @@ export function useFlowletData() {
   const [routes, setRoutes] = React.useState<RouteCandidate[]>([]);
   const [clients, setClients] = React.useState<ClientConfig[]>([]);
   const [prices, setPrices] = React.useState<ModelPrice[]>([]);
+  const [channelModels, setChannelModels] = React.useState<ChannelModel[]>([]);
   const [virtualModels, setVirtualModels] = React.useState<VirtualModel[]>([]);
   const [usageRows, setUsageRows] = React.useState<UsageSummaryRow[]>([]);
   const [requestLogs, setRequestLogs] = React.useState<RequestLogRow[]>([]);
@@ -40,13 +42,19 @@ export function useFlowletData() {
     setStatus(next);
   }, []);
 
+  const refreshChannelModels = React.useCallback(async () => {
+    const models = await runCommand<ChannelModel[]>("list_channel_models").catch(() => [] as ChannelModel[]);
+    setChannelModels(models);
+  }, []);
+
   const refreshAll = React.useCallback(async () => {
-    const [ch, ac, ro, cl, pr, vm, usage, logs, snapshots, stats, rules, scores, db] = await Promise.all([
+    const [ch, ac, ro, cl, pr, cm, vm, usage, logs, snapshots, stats, rules, scores, db] = await Promise.all([
       runCommand<ChannelPreset[]>("list_channel_presets").catch(() => [] as ChannelPreset[]),
       runCommand<ChannelAccount[]>("list_channel_accounts").catch(() => [] as ChannelAccount[]),
       runCommand<RouteCandidate[]>("list_route_candidates").catch(() => [] as RouteCandidate[]),
       runCommand<ClientConfig[]>("list_clients").catch(() => [] as ClientConfig[]),
       runCommand<ModelPrice[]>("list_model_prices").catch(() => [] as ModelPrice[]),
+      runCommand<ChannelModel[]>("list_channel_models").catch(() => [] as ChannelModel[]),
       runCommand<VirtualModel[]>("list_virtual_models").catch(() => [] as VirtualModel[]),
       runCommand<UsageSummaryRow[]>("usage_summary").catch(() => [] as UsageSummaryRow[]),
       runCommand<RequestLogRow[]>("list_request_logs").catch(() => [] as RequestLogRow[]),
@@ -70,6 +78,7 @@ export function useFlowletData() {
     setRoutes(ro);
     setClients(cl);
     setPrices(pr);
+    setChannelModels(cm);
     setVirtualModels(vm);
     setUsageRows(usage);
     setRequestLogs(logs);
@@ -91,6 +100,7 @@ export function useFlowletData() {
     setClients,
     prices,
     setPrices,
+    channelModels,
     virtualModels,
     usageRows,
     setUsageRows,
@@ -107,5 +117,6 @@ export function useFlowletData() {
     status,
     refreshStatus,
     refreshAll,
+    refreshChannelModels,
   };
 }

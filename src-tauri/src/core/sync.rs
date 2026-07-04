@@ -237,6 +237,117 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
     }
 }
 
+const LONGCAT_MODELS_URL: &str = "https://api.longcat.chat/openai/v1/models";
+
+/// 同步 LongCat 模型列表
+pub async fn sync_longcat_models(account: &ChannelAccount) -> ModelSyncResult {
+    if account.api_key.trim().is_empty() {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec!["API Key 未配置".to_string()],
+        };
+    }
+
+    let client = match Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("创建 HTTP 客户端失败: {err}")],
+            };
+        }
+    };
+
+    let response = client
+        .get(LONGCAT_MODELS_URL)
+        .header(
+            "Authorization",
+            format!("Bearer {}", account.api_key.trim()),
+        )
+        .header("Accept", "application/json")
+        .send()
+        .await;
+
+    let response = match response {
+        Ok(r) => r,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("请求失败: {err}")],
+            };
+        }
+    };
+
+    let status = response.status();
+    let body = match response.text().await {
+        Ok(b) => b,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("读取响应失败: {err}")],
+            };
+        }
+    };
+
+    if !status.is_success() {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec![format!("HTTP {}: {}", status.as_u16(), body)],
+        };
+    }
+
+    match serde_json::from_str::<DeepSeekModelsResponse>(&body) {
+        Ok(data) => {
+            let models: Vec<DeepSeekModelEntry> = data
+                .data
+                .into_iter()
+                .filter(|m| !m.id.trim().is_empty())
+                .collect();
+            let synced_at = chrono::Utc::now().to_rfc3339();
+            let channel_models = models
+                .into_iter()
+                .map(|model| longcat_channel_model(model.id, &synced_at))
+                .collect::<Vec<_>>();
+            ModelSyncResult {
+                models_synced: channel_models.len(),
+                models: channel_models,
+                errors: Vec::new(),
+            }
+        }
+        Err(err) => ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec![format!("解析响应失败: {err}")],
+        },
+    }
+}
+
+fn longcat_channel_model(model: String, synced_at: &str) -> ChannelModel {
+    ChannelModel {
+        id: format!("longcat-{model}"),
+        channel_id: "longcat".to_string(),
+        display_name: Some(model.clone()),
+        model,
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        context_window: None,
+        max_output_tokens: None,
+        supports_stream: true,
+        enabled: true,
+        source: "synced".to_string(),
+        synced_at: Some(synced_at.to_string()),
+        created_at: synced_at.to_string(),
+        updated_at: synced_at.to_string(),
+    }
+}
+
 fn deepseek_channel_model(model: String, synced_at: &str) -> ChannelModel {
     ChannelModel {
         id: format!("deepseek-{model}"),

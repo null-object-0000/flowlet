@@ -100,13 +100,13 @@ LongCat 支持 OpenAI API 格式，对话补全接口为：
 Flowlet 应提供本地 OpenAI-compatible 入口，例如：
 
 ```text
-http://127.0.0.1:11434/openai/v1/chat/completions
+http://127.0.0.1:18640/openai/v1/chat/completions
 ```
 
 或继续兼容当前已有的：
 
 ```text
-http://127.0.0.1:11434/v1/chat/completions
+http://127.0.0.1:18640/v1/chat/completions
 ```
 
 第一版可以先保留现有 `/v1/*` 入口，但需求文档中要明确：这是 OpenAI-compatible 入口。
@@ -122,7 +122,7 @@ LongCat 支持 Anthropic Claude API 格式，消息接口为：
 Flowlet 应提供本地 Anthropic-compatible 入口，例如：
 
 ```text
-http://127.0.0.1:11434/anthropic/v1/messages
+http://127.0.0.1:18640/anthropic/v1/messages
 ```
 
 这个入口用于支持 Claude Code、Anthropic SDK、以及其他 Anthropic-compatible 客户端。
@@ -154,7 +154,7 @@ Flowlet 接入 Claude Code 时，用户不应该直接把 LongCat API Key 暴露
 {
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "flowlet-client-token",
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:11434/anthropic",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18640/anthropic",
     "ANTHROPIC_MODEL": "LongCat-2.0",
     "ANTHROPIC_SMALL_FAST_MODEL": "LongCat-2.0",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "LongCat-2.0",
@@ -585,7 +585,7 @@ Credential 管理
 
 ```text
 ANTHROPIC_AUTH_TOKEN=flowlet-client-token
-ANTHROPIC_BASE_URL=http://127.0.0.1:11434/anthropic
+ANTHROPIC_BASE_URL=http://127.0.0.1:18640/anthropic
 ANTHROPIC_MODEL=LongCat-2.0
 ANTHROPIC_SMALL_FAST_MODEL=LongCat-2.0
 ANTHROPIC_DEFAULT_SONNET_MODEL=LongCat-2.0

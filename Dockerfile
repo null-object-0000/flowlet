@@ -18,12 +18,12 @@ RUN apt-get update && apt-get install -y \
 
 COPY --from=builder /app/target/release/headless /usr/local/bin/headless
 
-ENV FLOWLET_BIND_ADDR=0.0.0.0:11434
+ENV FLOWLET_BIND_ADDR=0.0.0.0:18640
 ENV FLOWLET_WEB_ADDR=0.0.0.0:8080
 ENV FLOWLET_DB_PATH=/data/flowlet.sqlite
 ENV RUST_LOG=info
 
 VOLUME ["/data"]
-EXPOSE 11434 8080
+EXPOSE 18640 8080
 
 ENTRYPOINT ["headless"]

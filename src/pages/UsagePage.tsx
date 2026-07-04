@@ -1,8 +1,5 @@
-import {
-  ChannelPreset,
-  ModelPrice,
-  UsageSummaryRow
-} from "../domain";
+import { Actions, DetailsPanel, Panel, PanelHeader } from "../components/ui";
+import { ChannelPreset, ModelPrice, UsageSummaryRow } from "../domain";
 
 export function UsagePage({
   rows,
@@ -37,14 +34,14 @@ export function UsagePage({
 
   return (
     <>
-      <section className="panel">
-        <div className="panel-title">
+      <Panel>
+        <PanelHeader>
           <h3>用量统计</h3>
-          <div className="actions">
+          <Actions>
             <button onClick={() => void onAnalyze()}>执行离线分析</button>
             <button onClick={() => void onRefresh()}>刷新</button>
-          </div>
-        </div>
+          </Actions>
+        </PanelHeader>
         <div className="table-wrap">
           <table>
             <thead>
@@ -62,14 +59,10 @@ export function UsagePage({
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={9}>暂无用量数据</td>
-                </tr>
+                <tr><td colSpan={9}>暂无用量数据</td></tr>
               ) : (
                 rows.map((row, index) => (
-                  <tr
-                    key={`${row.date}-${row.channel_id}-${row.account_id}-${row.upstream_model}-${index}`}
-                  >
+                  <tr key={`${row.date}-${row.channel_id}-${row.account_id}-${row.upstream_model}-${index}`}>
                     <td>{row.date}</td>
                     <td>{row.client_name || row.client_id || "未知"}</td>
                     <td>{row.channel_name || row.channel_id || "-"}</td>
@@ -85,73 +78,36 @@ export function UsagePage({
             </tbody>
           </table>
         </div>
-      </section>
+      </Panel>
 
-      <details className="panel advanced-panel">
-        <summary>成本设置</summary>
-        <div className="panel-title">
+      <DetailsPanel summary="成本设置">
+        <PanelHeader>
           <h3>模型价格表（三段价格）</h3>
-          <div className="actions">
+          <Actions>
             <button onClick={onAddPrice}>新增价格</button>
             <button onClick={() => void onSavePrices()}>保存价格</button>
-          </div>
-        </div>
+          </Actions>
+        </PanelHeader>
         <div className="price-list">
           {prices.length === 0 ? (
             <p>暂无模型价格</p>
           ) : (
             prices.map((price, index) => (
               <div className="price-row-3" key={price.id}>
-                <select
-                  value={price.channel_id}
-                  onChange={(e) => onUpdatePrice(index, { channel_id: e.target.value })}
-                >
-                  {channels.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
+                <select value={price.channel_id} onChange={(e) => onUpdatePrice(index, { channel_id: e.target.value })}>
+                  {channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
-                <input
-                  value={price.upstream_model}
-                  placeholder="模型名"
-                  onChange={(e) => onUpdatePrice(index, { upstream_model: e.target.value })}
-                />
+                <input value={price.upstream_model} placeholder="模型名" onChange={(e) => onUpdatePrice(index, { upstream_model: e.target.value })} />
                 <span className="price-preview">{formatPrice(price)}</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.000001"
-                  value={price.input_uncached_price}
-                  placeholder="输入(未命中缓存)"
-                  onChange={(e) =>
-                    onUpdatePrice(index, { input_uncached_price: Number(e.target.value) })
-                  }
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.000001"
-                  value={price.input_cached_price}
-                  placeholder="输入(命中缓存)"
-                  onChange={(e) =>
-                    onUpdatePrice(index, { input_cached_price: Number(e.target.value) })
-                  }
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.000001"
-                  value={price.output_price}
-                  placeholder="输出"
-                  onChange={(e) => onUpdatePrice(index, { output_price: Number(e.target.value) })}
-                />
+                <input type="number" min="0" step="0.000001" value={price.input_uncached_price} placeholder="输入(未命中缓存)" onChange={(e) => onUpdatePrice(index, { input_uncached_price: Number(e.target.value) })} />
+                <input type="number" min="0" step="0.000001" value={price.input_cached_price} placeholder="输入(命中缓存)" onChange={(e) => onUpdatePrice(index, { input_cached_price: Number(e.target.value) })} />
+                <input type="number" min="0" step="0.000001" value={price.output_price} placeholder="输出" onChange={(e) => onUpdatePrice(index, { output_price: Number(e.target.value) })} />
                 <button onClick={() => onRemovePrice(index)}>删除</button>
               </div>
             ))
           )}
         </div>
-      </details>
+      </DetailsPanel>
     </>
   );
 }

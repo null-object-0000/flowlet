@@ -1,5 +1,5 @@
 use super::config::{
-    classify_request, AuthStrategy, ChannelAccount, ChannelPreset, ClientConfig, ProtocolType,
+    classify_request, ChannelAccount, ChannelPreset, ClientConfig, ProtocolType,
     RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
 use super::rate_limiter::RateLimiter;
@@ -7,9 +7,9 @@ use super::storage::Storage;
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
-    response::{IntoResponse, Response},
-    routing::{any, get},
+    http::{HeaderMap, Method, StatusCode},
+    response::Response,
+    routing::any,
     Router,
 };
 use bytes::Bytes;
@@ -24,9 +24,24 @@ use std::{
 use thiserror::Error;
 use tokio::sync::oneshot;
 
-const DEFAULT_BIND_ADDR: &str = "127.0.0.1:11434";
+const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
 const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
 
+#[path = "proxy_http.rs"]
+mod proxy_http;
+#[path = "proxy_routing.rs"]
+mod proxy_routing;
+
+use proxy_http::{
+    add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
+    copy_response_headers, cors_preflight_response, extract_model, identify_client,
+    is_model_list_request, is_streaming_response, rewrite_model,
+};
+use proxy_routing::{
+    body_contains_quota_exceeded, enrich_upstream_error_log, match_candidates,
+    network_error_route_reason, resolve_small_model,
+    should_check_quota_body_status, should_try_next_status,
+};
 #[derive(Debug, Error)]
 pub enum ProxyError {
     #[error("代理服务已经在运行")]
@@ -147,7 +162,7 @@ impl ProxyController {
         drop(runtime);
 
         let app = Router::new()
-            .route("/health", get(health))
+            .route("/health", any(health))
             .route("/v1/{*path}", any(forward_openai_compatible))
             .route("/openai/v1/{*path}", any(forward_openai_compatible))
             .route("/anthropic/v1/{*path}", any(forward_anthropic_compatible))
@@ -205,8 +220,15 @@ impl ProxyController {
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 
-async fn health() -> impl IntoResponse {
-    (StatusCode::OK, "ok")
+async fn health(request: Request) -> Response {
+    if request.method() == Method::OPTIONS {
+        return cors_preflight_response(request.headers());
+    }
+
+    let mut response = Response::new(Body::from("ok"));
+    *response.status_mut() = StatusCode::OK;
+    add_cors_headers(response.headers_mut(), None);
+    response
 }
 
 // ─── OpenAI-compatible Forward ──────────────────────────────────────────────
@@ -215,11 +237,19 @@ async fn forward_openai_compatible(
     State(state): State<ProxyAppState>,
     request: Request,
 ) -> Response {
+    if request.method() == Method::OPTIONS {
+        return cors_preflight_response(request.headers());
+    }
+
     match forward_request(state, request, ProtocolType::OpenAi).await {
-        Ok(response) => response,
+        Ok(mut response) => {
+            add_cors_headers(response.headers_mut(), None);
+            response
+        }
         Err(err) => {
             let mut response = Response::new(Body::from(err.to_string()));
             *response.status_mut() = StatusCode::BAD_GATEWAY;
+            add_cors_headers(response.headers_mut(), None);
             response
         }
     }
@@ -231,11 +261,19 @@ async fn forward_anthropic_compatible(
     State(state): State<ProxyAppState>,
     request: Request,
 ) -> Response {
+    if request.method() == Method::OPTIONS {
+        return cors_preflight_response(request.headers());
+    }
+
     match forward_request(state, request, ProtocolType::Anthropic).await {
-        Ok(response) => response,
+        Ok(mut response) => {
+            add_cors_headers(response.headers_mut(), None);
+            response
+        }
         Err(err) => {
             let mut response = Response::new(Body::from(err.to_string()));
             *response.status_mut() = StatusCode::BAD_GATEWAY;
+            add_cors_headers(response.headers_mut(), None);
             response
         }
     }
@@ -262,6 +300,14 @@ async fn forward_request(
         .unwrap_or_else(|| "/".to_string());
 
     let method = parts.method.to_string();
+    if is_model_list_request(&parts.method, &path) {
+        return Ok(build_model_list_response(
+            &state.routes,
+            &state.accounts,
+            &detected_protocol,
+        ));
+    }
+
     let public_model = extract_model(&body_bytes, &detected_protocol);
     let client_info = identify_client(&parts.headers, &state.clients);
     let client_id = client_info.as_ref().map(|(id, _)| id.clone());
@@ -653,384 +699,6 @@ fn build_buffered_response(
 
 // ─── Routing ────────────────────────────────────────────────────────────────
 
-fn match_candidates(
-    routes: &[RouteCandidate],
-    rules: &[RouteRule],
-    scores: &[(String, String, f64, f64, f64)],
-    public_model: Option<&str>,
-    protocol: &ProtocolType,
-    client_id: Option<&str>,
-    accounts: &[ChannelAccount],
-    _channels: &[ChannelPreset],
-) -> Vec<RouteCandidate> {
-    // 1. 优先检查规则路由
-    if let Some(rule) = find_matching_rule(rules, client_id, public_model, protocol, accounts) {
-        return vec![RouteCandidate {
-            id: format!("rule-{}", rule.id),
-            virtual_model_id: "auto".to_string(),
-            channel_id: rule.target_channel_id,
-            account_id: rule.target_account_id,
-            upstream_model: rule.target_upstream_model,
-            client_protocol: protocol.clone(),
-            priority: rule.priority,
-            enabled: true,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }];
-    }
-
-    let virtual_model = match public_model {
-        Some("auto") => "auto",
-        Some(model) if !model.trim().is_empty() => {
-            // 直接模型请求只匹配已开放模型，不回退到 auto。
-            return find_direct_candidate(routes, model, protocol, accounts);
-        }
-        _ => return Vec::new(),
-    };
-
-    let matched: Vec<RouteCandidate> = routes
-        .iter()
-        .filter(|c| {
-            c.enabled && c.virtual_model_id == virtual_model && c.client_protocol == *protocol
-        })
-        .filter(|c| accounts.iter().any(|a| a.id == c.account_id && a.enabled))
-        .cloned()
-        .collect();
-
-    // MVP 阶段只按候选优先级排序，综合调度先保留为后续能力。
-    let _ = scores;
-    matched
-}
-
-/// 查找第一个匹配的规则
-fn find_matching_rule(
-    rules: &[RouteRule],
-    client_id: Option<&str>,
-    model: Option<&str>,
-    protocol: &ProtocolType,
-    accounts: &[ChannelAccount],
-) -> Option<RouteRule> {
-    let mut sorted_rules: Vec<RouteRule> = rules.iter().filter(|r| r.enabled).cloned().collect();
-    sorted_rules.sort_by_key(|r| (r.priority, r.id.clone()));
-
-    for rule in &sorted_rules {
-        // 检查 client_id 匹配
-        if let Some(ref match_client) = rule.match_client_id {
-            if client_id != Some(match_client.as_str()) {
-                continue;
-            }
-        }
-        // 检查 model 匹配
-        if let Some(ref match_model) = rule.match_model {
-            if model != Some(match_model.as_str()) {
-                continue;
-            }
-        }
-        // 检查 protocol 匹配
-        if let Some(ref match_proto) = rule.match_protocol {
-            if match_proto != protocol {
-                continue;
-            }
-        }
-        // 检查目标账号是否有效且启用
-        if !accounts
-            .iter()
-            .any(|a| a.id == rule.target_account_id && a.enabled)
-        {
-            continue;
-        }
-        return Some(rule.clone());
-    }
-    None
-}
-
-/// 综合调度：根据成本、延迟、成功率对候选进行排序
-/// scores: Vec<(account_id, channel_id, avg_latency_ms, success_rate, cost_per_1k)]
-#[allow(dead_code)]
-fn rank_candidates_by_score(
-    candidates: &mut Vec<RouteCandidate>,
-    scores: &[(String, String, f64, f64, f64)],
-) {
-    if candidates.len() <= 1 || scores.is_empty() {
-        return;
-    }
-
-    let max_cost = scores.iter().map(|s| s.4).fold(0.0f64, f64::max).max(1.0);
-    let max_latency = scores.iter().map(|s| s.2).fold(0.0f64, f64::max).max(1.0);
-
-    let mut scored: Vec<(f64, RouteCandidate)> = candidates
-        .drain(..)
-        .map(|c| {
-            let score = scores
-                .iter()
-                .find(|(acc, ch, _, _, _)| acc == &c.account_id && ch == &c.channel_id)
-                .map(|(_, _, latency, success_rate, cost)| {
-                    let norm_cost = cost / max_cost;
-                    let norm_latency = latency / max_latency;
-                    let failure_rate = (100.0 - success_rate) / 100.0;
-                    0.4 * norm_cost + 0.3 * norm_latency + 0.3 * failure_rate
-                })
-                .unwrap_or(0.5);
-            (score, c)
-        })
-        .collect();
-
-    scored.sort_by(|(a, ca), (b, cb)| {
-        a.partial_cmp(b)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| ca.priority.cmp(&cb.priority))
-    });
-
-    candidates.extend(scored.into_iter().map(|(_, c)| c));
-}
-
-/// 判断是否应该使用小模型，返回最终使用的上游模型名
-fn resolve_small_model(original_model: &str) -> String {
-    original_model.to_string()
-}
-
-fn find_direct_candidate(
-    routes: &[RouteCandidate],
-    model: &str,
-    protocol: &ProtocolType,
-    accounts: &[ChannelAccount],
-) -> Vec<RouteCandidate> {
-    for route in routes {
-        if route.client_protocol != *protocol {
-            continue;
-        }
-        if route.upstream_model == model {
-            if accounts
-                .iter()
-                .any(|a| a.id == route.account_id && a.enabled)
-            {
-                return vec![route.clone()];
-            }
-        }
-    }
-    Vec::new()
-}
-
-fn is_streaming_response(headers: &HeaderMap) -> bool {
-    headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.contains("text/event-stream"))
-        .unwrap_or(false)
-}
-
-// ─── URL Building ────────────────────────────────────────────────────────────
-
-fn build_upstream_url(base_url: &str, original_uri: &Uri, protocol: &ProtocolType) -> String {
-    let base = base_url.trim_end_matches('/');
-    let path = original_uri
-        .path_and_query()
-        .map(|value| value.as_str())
-        .unwrap_or("/");
-
-    match protocol {
-        ProtocolType::OpenAi => {
-            // 保留 /v1 和 /openai/v1 前缀，因为 base_url 已经包含了 /openai 或 /v1 的入口前缀
-            let path = path.trim_start_matches("/openai");
-            format!("{base}{path}")
-        }
-        ProtocolType::Anthropic => {
-            // 保留 /v1 前缀，只去掉 /anthropic 入口前缀
-            let path = path.trim_start_matches("/anthropic");
-            format!("{base}{path}")
-        }
-    }
-}
-
-// ─── Header Handling ────────────────────────────────────────────────────────
-
-fn apply_request_headers(
-    mut builder: reqwest::RequestBuilder,
-    headers: &HeaderMap,
-    api_key: &str,
-    protocol: &ProtocolType,
-    auth_strategy: &AuthStrategy,
-) -> reqwest::RequestBuilder {
-    for (name, value) in headers {
-        if is_hop_by_hop(name.as_str())
-            || name == header::HOST
-            || name == header::AUTHORIZATION
-            || name.as_str() == "x-api-key"
-        {
-            continue;
-        }
-        builder = builder.header(name, value);
-    }
-
-    if !api_key.trim().is_empty() {
-        match auth_strategy {
-            AuthStrategy::Bearer => {
-                builder = builder.bearer_auth(api_key.trim());
-            }
-            AuthStrategy::XApiKey => {
-                builder = builder.header("x-api-key", api_key.trim());
-            }
-        }
-    }
-
-    let _ = protocol;
-    builder
-}
-
-fn copy_response_headers(source: &HeaderMap, target: &mut HeaderMap<HeaderValue>) {
-    for (name, value) in source {
-        if is_hop_by_hop(name.as_str()) {
-            continue;
-        }
-        target.append(name, value.clone());
-    }
-}
-
-fn is_hop_by_hop(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "connection"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    )
-}
-
-// ─── Client Identification ──────────────────────────────────────────────────
-
-fn identify_client(headers: &HeaderMap, clients: &[ClientConfig]) -> Option<(String, String)> {
-    // 1. 先检查 Authorization Bearer
-    if let Some(token) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::trim)
-    {
-        if let Some(client) = clients.iter().find(|c| c.enabled && c.token == token) {
-            return Some((client.id.clone(), client.name.clone()));
-        }
-    }
-
-    // 2. 再检查 X-Api-Key
-    if let Some(token) = headers
-        .get("x-api-key")
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-    {
-        if let Some(client) = clients.iter().find(|c| c.enabled && c.token == token) {
-            return Some((client.id.clone(), client.name.clone()));
-        }
-    }
-
-    None
-}
-
-// ─── Model Rewriting ─────────────────────────────────────────────────────────
-
-fn extract_model(body: &[u8], protocol: &ProtocolType) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
-    match protocol {
-        ProtocolType::OpenAi => value
-            .get("model")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        ProtocolType::Anthropic => value
-            .get("model")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-    }
-}
-
-fn rewrite_model(body: &[u8], upstream_model: &str, _protocol: &ProtocolType) -> Vec<u8> {
-    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return body.to_vec();
-    };
-
-    let Some(model_field) = value.get_mut("model") else {
-        return body.to_vec();
-    };
-
-    if model_field.as_str() != Some("auto") {
-        return body.to_vec();
-    }
-
-    *model_field = serde_json::Value::String(upstream_model.to_string());
-
-    // 使用 serde_json::to_vec 会改变字段顺序，改用手动替换保持原始 body 结构
-    // 对于 {"model":"auto",...} 替换为 {"model":"upstream_model",...}
-    let body_str = String::from_utf8_lossy(body);
-    let search = r#""model":"auto""#;
-    let replace = format!(r#""model":"{upstream_model}""#);
-    if let Some(pos) = body_str.find(search) {
-        let mut result = body_str.into_owned();
-        result.replace_range(pos..pos + search.len(), &replace);
-        result.into_bytes()
-    } else {
-        // 尝试带空格的变体
-        let search = r#""model": "auto""#;
-        let replace = format!(r#""model": "{upstream_model}""#);
-        if let Some(pos) = body_str.find(search) {
-            let mut result = body_str.into_owned();
-            result.replace_range(pos..pos + search.len(), &replace);
-            result.into_bytes()
-        } else {
-            serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
-        }
-    }
-}
-
-// ─── Fallback Rules ─────────────────────────────────────────────────────────
-
-fn should_try_next_status(status: reqwest::StatusCode, channel_vendor: &str) -> bool {
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-        return true;
-    }
-    // DeepSeek 402 余额不足
-    if channel_vendor == "deepseek" && status == reqwest::StatusCode::PAYMENT_REQUIRED {
-        return true;
-    }
-    false
-}
-
-fn should_check_quota_body_status(status: reqwest::StatusCode) -> bool {
-    status == reqwest::StatusCode::PAYMENT_REQUIRED || status == reqwest::StatusCode::FORBIDDEN
-}
-
-fn body_contains_quota_exceeded(body: &[u8]) -> bool {
-    let text = String::from_utf8_lossy(body).to_ascii_lowercase();
-    text.contains("quota exceeded")
-        || text.contains("insufficient quota")
-        || text.contains("exceeded your current quota")
-        || text.contains("billing quota")
-        || text.contains("balance insufficient")
-}
-
-fn network_error_route_reason(err: &reqwest::Error) -> &'static str {
-    if err.is_timeout() {
-        "timeout"
-    } else {
-        "network_error"
-    }
-}
-
-fn enrich_upstream_error_log(status: reqwest::StatusCode, log: &mut RequestLogInput) {
-    if !status.is_client_error() && !status.is_server_error() {
-        return;
-    }
-
-    if log.error_message.is_none() {
-        log.error_message = Some(format!("upstream status {}", status.as_u16()));
-    }
-    if log.route_reason.as_deref() == Some("direct") || log.route_reason.as_deref() == Some("auto")
-    {
-        log.route_reason = Some("upstream_error".to_string());
-    }
-}
-
 // ─── Usage Capture ──────────────────────────────────────────────────────────
 
 struct UsageCapture {
@@ -1187,600 +855,9 @@ fn record_request_log(storage: Storage, log: RequestLogInput) {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::routing::post;
-    use std::path::PathBuf;
+#[path = "proxy_tests.rs"]
+mod proxy_tests;
 
-    #[test]
-    fn protocol_type_from_path_identifies_anthropic() {
-        assert_eq!(
-            ProtocolType::from_path("/anthropic/v1/messages"),
-            Some(ProtocolType::Anthropic)
-        );
-        assert_eq!(
-            ProtocolType::from_path("/anthropic/v1/models"),
-            Some(ProtocolType::Anthropic)
-        );
-    }
 
-    #[test]
-    fn protocol_type_from_path_identifies_openai() {
-        assert_eq!(
-            ProtocolType::from_path("/v1/chat/completions"),
-            Some(ProtocolType::OpenAi)
-        );
-        assert_eq!(
-            ProtocolType::from_path("/openai/v1/chat/completions"),
-            Some(ProtocolType::OpenAi)
-        );
-    }
 
-    #[test]
-    fn protocol_type_from_path_returns_none_for_health() {
-        assert_eq!(ProtocolType::from_path("/health"), None);
-    }
 
-    #[test]
-    fn rewrite_model_only_changes_auto_openai() {
-        let body = br#"{"model":"auto","messages":[]}"#;
-        let rewritten = rewrite_model(body, "qwen-plus", &ProtocolType::OpenAi);
-        let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
-        assert_eq!(value["model"], "qwen-plus");
-        assert_eq!(value["messages"], serde_json::json!([]));
-    }
-
-    #[test]
-    fn rewrite_model_only_changes_auto_anthropic() {
-        let body = br#"{"model":"auto","max_tokens":100,"messages":[]}"#;
-        let rewritten = rewrite_model(body, "claude-sonnet-4-20250514", &ProtocolType::Anthropic);
-        let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
-        assert_eq!(value["model"], "claude-sonnet-4-20250514");
-    }
-
-    #[test]
-    fn rewrite_model_keeps_non_auto_body() {
-        let body = br#"{"model":"deepseek-chat","messages":[]}"#;
-        let rewritten = rewrite_model(body, "qwen-plus", &ProtocolType::OpenAi);
-        assert_eq!(rewritten, body);
-    }
-
-    #[test]
-    fn should_try_next_status_handles_deepseek_402() {
-        assert!(should_try_next_status(
-            reqwest::StatusCode::PAYMENT_REQUIRED,
-            "deepseek"
-        ));
-        assert!(!should_try_next_status(
-            reqwest::StatusCode::PAYMENT_REQUIRED,
-            "longcat"
-        ));
-    }
-
-    #[test]
-    fn should_try_next_status_for_rate_limit_and_server_errors() {
-        assert!(should_try_next_status(
-            reqwest::StatusCode::TOO_MANY_REQUESTS,
-            "longcat"
-        ));
-        assert!(should_try_next_status(
-            reqwest::StatusCode::BAD_GATEWAY,
-            "longcat"
-        ));
-        assert!(should_try_next_status(
-            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            "longcat"
-        ));
-        assert!(should_try_next_status(
-            reqwest::StatusCode::SERVICE_UNAVAILABLE,
-            "longcat"
-        ));
-    }
-
-    #[test]
-    fn should_not_try_next_for_client_errors() {
-        assert!(!should_try_next_status(
-            reqwest::StatusCode::BAD_REQUEST,
-            "longcat"
-        ));
-        assert!(!should_try_next_status(
-            reqwest::StatusCode::UNAUTHORIZED,
-            "longcat"
-        ));
-        assert!(!should_try_next_status(
-            reqwest::StatusCode::PAYLOAD_TOO_LARGE,
-            "longcat"
-        ));
-    }
-
-    #[test]
-    fn checks_quota_body_only_for_quota_candidate_statuses() {
-        assert!(should_check_quota_body_status(
-            reqwest::StatusCode::PAYMENT_REQUIRED
-        ));
-        assert!(should_check_quota_body_status(
-            reqwest::StatusCode::FORBIDDEN
-        ));
-        assert!(!should_check_quota_body_status(
-            reqwest::StatusCode::BAD_REQUEST
-        ));
-    }
-
-    #[test]
-    fn detects_quota_exceeded_messages() {
-        assert!(body_contains_quota_exceeded(
-            br#"{"error":{"message":"You exceeded your current quota"}}"#
-        ));
-        assert!(body_contains_quota_exceeded(
-            br#"{"error":"insufficient quota"}"#
-        ));
-        assert!(body_contains_quota_exceeded(
-            br#"{"error":"balance insufficient"}"#
-        ));
-        assert!(!body_contains_quota_exceeded(
-            br#"{"error":"context length exceeded"}"#
-        ));
-    }
-
-    #[test]
-    fn identifies_client_from_bearer_token() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_static("Bearer token-a"),
-        );
-        let clients = vec![
-            ClientConfig {
-                id: "client-a".to_string(),
-                name: "客户端 A".to_string(),
-                token: "token-a".to_string(),
-                app_type: "test".to_string(),
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            },
-            ClientConfig {
-                id: "client-b".to_string(),
-                name: "客户端 B".to_string(),
-                token: "token-b".to_string(),
-                app_type: "test".to_string(),
-                enabled: false,
-                created_at: String::new(),
-                updated_at: String::new(),
-            },
-        ];
-
-        assert_eq!(
-            identify_client(&headers, &clients),
-            Some(("client-a".to_string(), "客户端 A".to_string()))
-        );
-    }
-
-    #[test]
-    fn identifies_client_from_x_api_key() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-api-key", HeaderValue::from_static("token-x"));
-        let clients = vec![ClientConfig {
-            id: "client-x".to_string(),
-            name: "客户端 X".to_string(),
-            token: "token-x".to_string(),
-            app_type: "claude-code".to_string(),
-            enabled: true,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }];
-
-        assert_eq!(
-            identify_client(&headers, &clients),
-            Some(("client-x".to_string(), "客户端 X".to_string()))
-        );
-    }
-
-    #[test]
-    fn extracts_openai_usage() {
-        let usage = extract_response_usage(
-            br#"{"id":"chatcmpl","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            usage,
-            ResponseUsage {
-                input_tokens: Some(11),
-                output_tokens: Some(7),
-                total_tokens: Some(18),
-            }
-        );
-    }
-
-    #[test]
-    fn extracts_input_output_usage_and_computes_total() {
-        let usage =
-            extract_response_usage(br#"{"usage":{"input_tokens":5,"output_tokens":8}}"#).unwrap();
-
-        assert_eq!(
-            usage,
-            ResponseUsage {
-                input_tokens: Some(5),
-                output_tokens: Some(8),
-                total_tokens: Some(13),
-            }
-        );
-    }
-
-    #[test]
-    fn ignores_response_without_usage() {
-        assert!(extract_response_usage(br#"{"id":"chatcmpl"}"#).is_none());
-    }
-
-    #[test]
-    fn build_upstream_url_preserves_v1_prefix_for_openai() {
-        let uri: Uri = "/v1/chat/completions".parse().unwrap();
-        let url = build_upstream_url(
-            "https://api.longcat.chat/openai",
-            &uri,
-            &ProtocolType::OpenAi,
-        );
-        assert_eq!(url, "https://api.longcat.chat/openai/v1/chat/completions");
-    }
-
-    #[test]
-    fn build_upstream_url_strips_openai_entry_prefix() {
-        let uri: Uri = "/openai/v1/chat/completions".parse().unwrap();
-        let url = build_upstream_url(
-            "https://api.longcat.chat/openai",
-            &uri,
-            &ProtocolType::OpenAi,
-        );
-        assert_eq!(url, "https://api.longcat.chat/openai/v1/chat/completions");
-    }
-
-    #[test]
-    fn build_upstream_url_strips_anthropic_entry_prefix() {
-        let uri: Uri = "/anthropic/v1/messages".parse().unwrap();
-        let url = build_upstream_url(
-            "https://api.longcat.chat/anthropic",
-            &uri,
-            &ProtocolType::Anthropic,
-        );
-        assert_eq!(url, "https://api.longcat.chat/anthropic/v1/messages");
-    }
-
-    #[test]
-    fn enriches_final_upstream_error_metadata_without_body_rewrite() {
-        let mut log = RequestLogInput {
-            request_id: "req".to_string(),
-            client_id: Some("client-default".to_string()),
-            client_name: None,
-            channel_id: Some("longcat".to_string()),
-            channel_name: None,
-            account_id: Some("acc-1".to_string()),
-            account_name: None,
-            client_protocol: "openai".to_string(),
-            upstream_protocol: "openai".to_string(),
-            virtual_model: Some("gpt-test".to_string()),
-            public_model: Some("gpt-test".to_string()),
-            upstream_model: Some("gpt-test".to_string()),
-            request_type: "chat".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/chat/completions".to_string(),
-            status: Some(400),
-            latency_ms: Some(1),
-            is_stream: false,
-            error_message: None,
-            fallback_count: 0,
-            route_reason: Some("direct".to_string()),
-        };
-
-        enrich_upstream_error_log(reqwest::StatusCode::BAD_REQUEST, &mut log);
-
-        assert_eq!(log.error_message, Some("upstream status 400".to_string()));
-        assert_eq!(log.route_reason, Some("upstream_error".to_string()));
-    }
-
-    #[tokio::test]
-    async fn forwards_status_headers_body_and_replaces_authorization() {
-        let captured_auth = Arc::new(Mutex::new(None::<String>));
-        let captured_auth_state = captured_auth.clone();
-        let upstream = Router::new()
-            .route(
-                "/v1/chat/completions",
-                post(
-                    |State(captured): State<Arc<Mutex<Option<String>>>>,
-                     headers: HeaderMap,
-                     body: Bytes| async move {
-                        let auth = headers
-                            .get(header::AUTHORIZATION)
-                            .and_then(|value| value.to_str().ok())
-                            .map(|value| value.to_string());
-                        *captured.lock().unwrap() = auth;
-                        (StatusCode::CREATED, [("x-upstream", "ok")], body)
-                    },
-                ),
-            )
-            .with_state(captured_auth_state);
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let upstream_addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, upstream).await.unwrap();
-        });
-
-        let storage = Storage::open(temp_db_path()).unwrap();
-        let state = ProxyAppState {
-            channels: vec![ChannelPreset {
-                id: "longcat".to_string(),
-                name: "LongCat".to_string(),
-                vendor: "longcat".to_string(),
-                supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
-                openai_base_url: format!("http://{upstream_addr}"),
-                anthropic_base_url: format!("http://{upstream_addr}"),
-                openai_auth: AuthStrategy::Bearer,
-                anthropic_auth: AuthStrategy::Bearer,
-                default_model: "LongCat-2.0".to_string(),
-                small_model: None,
-                timeout_seconds: None,
-                supports_model_list: false,
-                supports_model_detail: false,
-                supports_price_sync: false,
-                supports_balance_query: false,
-                supports_quota_query: false,
-                supports_usage_query: false,
-                created_at: String::new(),
-                updated_at: String::new(),
-            }],
-            accounts: vec![ChannelAccount {
-                id: "acc-1".to_string(),
-                channel_id: "longcat".to_string(),
-                name: "主账号".to_string(),
-                api_key: "upstream-secret".to_string(),
-                enabled: true,
-                priority: 0,
-                remark: None,
-                last_used_at: None,
-                last_error: None,
-                created_at: String::new(),
-                updated_at: String::new(),
-            }],
-            clients: vec![ClientConfig {
-                id: "client-test".to_string(),
-                name: "测试客户端".to_string(),
-                token: "client-token".to_string(),
-                app_type: "test".to_string(),
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            }],
-            rules: vec![],
-            scores: vec![],
-            routes: vec![RouteCandidate {
-                id: "route-1".to_string(),
-                virtual_model_id: "auto".to_string(),
-                channel_id: "longcat".to_string(),
-                account_id: "acc-1".to_string(),
-                upstream_model: "gpt-test".to_string(),
-                client_protocol: ProtocolType::OpenAi,
-                priority: 0,
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            }],
-            client: Client::new(),
-            storage,
-            upstream_timeout_seconds: 120,
-            rate_limiter: RateLimiter::new(600),
-        };
-
-        let request = Request::builder()
-            .method("POST")
-            .uri("/v1/chat/completions")
-            .header(header::AUTHORIZATION, "Bearer client-token")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(r#"{"model":"auto","messages":[]}"#))
-            .unwrap();
-
-        let response = forward_request(state, request, ProtocolType::OpenAi)
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::CREATED);
-        assert_eq!(
-            response
-                .headers()
-                .get("x-upstream")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "ok"
-        );
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        assert_eq!(body, r#"{"model":"gpt-test","messages":[]}"#);
-        assert_eq!(
-            captured_auth.lock().unwrap().as_deref(),
-            Some("Bearer upstream-secret")
-        );
-    }
-
-    #[test]
-    fn small_model_routing_is_disabled_for_mvp() {
-        let result = resolve_small_model("deepseek-v4-pro");
-        assert_eq!(result, "deepseek-v4-pro");
-    }
-
-    #[test]
-    fn rank_candidates_prefers_cheaper_account() {
-        let mut candidates = vec![
-            RouteCandidate {
-                id: "route-1".to_string(),
-                virtual_model_id: "auto".to_string(),
-                channel_id: "deepseek".to_string(),
-                account_id: "acc-expensive".to_string(),
-                upstream_model: "deepseek-chat".to_string(),
-                client_protocol: ProtocolType::OpenAi,
-                priority: 0,
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            },
-            RouteCandidate {
-                id: "route-2".to_string(),
-                virtual_model_id: "auto".to_string(),
-                channel_id: "deepseek".to_string(),
-                account_id: "acc-cheap".to_string(),
-                upstream_model: "deepseek-v4-flash".to_string(),
-                client_protocol: ProtocolType::OpenAi,
-                priority: 0,
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            },
-        ];
-
-        // acc-cheap has lower cost, better latency, higher success rate
-        let scores = vec![
-            (
-                "acc-expensive".to_string(),
-                "deepseek".to_string(),
-                500.0,
-                95.0,
-                10.0,
-            ),
-            (
-                "acc-cheap".to_string(),
-                "deepseek".to_string(),
-                200.0,
-                99.0,
-                2.0,
-            ),
-        ];
-
-        rank_candidates_by_score(&mut candidates, &scores);
-
-        // acc-cheap should be first (lower score = better)
-        assert_eq!(candidates[0].account_id, "acc-cheap");
-        assert_eq!(candidates[1].account_id, "acc-expensive");
-    }
-
-    #[test]
-    fn rank_candidates_no_scores_keeps_priority() {
-        let mut candidates = vec![
-            RouteCandidate {
-                id: "route-1".to_string(),
-                virtual_model_id: "auto".to_string(),
-                channel_id: "deepseek".to_string(),
-                account_id: "acc-a".to_string(),
-                upstream_model: "deepseek-chat".to_string(),
-                client_protocol: ProtocolType::OpenAi,
-                priority: 0,
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            },
-            RouteCandidate {
-                id: "route-2".to_string(),
-                virtual_model_id: "auto".to_string(),
-                channel_id: "deepseek".to_string(),
-                account_id: "acc-b".to_string(),
-                upstream_model: "deepseek-chat".to_string(),
-                client_protocol: ProtocolType::OpenAi,
-                priority: 1,
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            },
-        ];
-
-        // No scores → should keep original order
-        let scores: Vec<(String, String, f64, f64, f64)> = vec![];
-        rank_candidates_by_score(&mut candidates, &scores);
-        assert_eq!(candidates[0].account_id, "acc-a");
-        assert_eq!(candidates[1].account_id, "acc-b");
-    }
-
-    #[test]
-    fn export_import_config_roundtrip() {
-        let path = temp_db_path();
-        let storage = Storage::open(&path).unwrap();
-
-        // 创建测试数据
-        let preset = ChannelPreset::deepseek();
-        storage.save_channel_presets(&[preset.clone()]).unwrap();
-        let account = ChannelAccount {
-            id: "acc-test".to_string(),
-            channel_id: "deepseek".to_string(),
-            name: "测试账号".to_string(),
-            api_key: "sk-test".to_string(),
-            ..Default::default()
-        };
-        storage.save_channel_accounts(&[account.clone()]).unwrap();
-
-        // 导出
-        let json = storage.export_config().unwrap();
-        assert!(json.contains("deepseek"));
-        assert!(json.contains("acc-test"));
-
-        // 清空
-        storage.save_channel_presets(&[]).unwrap();
-        storage.save_channel_accounts(&[]).unwrap();
-        assert!(storage.list_channel_presets().unwrap().is_empty());
-
-        // 导入
-        storage.import_config(&json).unwrap();
-        assert_eq!(storage.list_channel_presets().unwrap().len(), 1);
-        assert_eq!(storage.list_channel_accounts().unwrap().len(), 1);
-        assert_eq!(storage.list_channel_accounts().unwrap()[0].id, "acc-test");
-
-        // 清理
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn cleanup_old_logs_works() {
-        let path = temp_db_path();
-        {
-            let storage = Storage::open(&path).unwrap();
-
-            // 插入一条测试日志（手动设置 created_at 为 1 天前）
-            storage
-                .insert_request_log(&RequestLogInput {
-                    request_id: "old-req".to_string(),
-                    client_id: None,
-                    client_name: None,
-                    channel_id: None,
-                    channel_name: None,
-                    account_id: None,
-                    account_name: None,
-                    client_protocol: "openai".to_string(),
-                    upstream_protocol: "openai".to_string(),
-                    virtual_model: None,
-                    public_model: None,
-                    upstream_model: None,
-                    request_type: "chat".to_string(),
-                    method: "POST".to_string(),
-                    path: "/v1/chat/completions".to_string(),
-                    status: Some(200),
-                    latency_ms: Some(100),
-                    is_stream: false,
-                    error_message: None,
-                    fallback_count: 0,
-                    route_reason: None,
-                })
-                .unwrap();
-
-            // 手动将 created_at 更新为 1 天前
-            storage.test_set_logs_created_at_days_ago(1).unwrap();
-
-            assert_eq!(storage.list_request_logs().unwrap().len(), 1);
-
-            // 清理 0 天前的（即全部清理，因为日志是 1 天前的）
-            let (deleted, _) = storage.cleanup_old_logs(0).unwrap();
-            assert!(deleted >= 1);
-            assert!(storage.list_request_logs().unwrap().is_empty());
-        }
-        let _ = std::fs::remove_file(&path);
-    }
-
-    fn temp_db_path() -> PathBuf {
-        std::env::temp_dir().join(format!("flowlet-test-{}.sqlite", uuid::Uuid::new_v4()))
-    }
-}

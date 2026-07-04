@@ -136,7 +136,7 @@ export CLAUDE_CODE_EFFORT_LEVEL=max
 Flowlet 接入时，Claude Code 不直接保存 DeepSeek API Key，而是保存 Flowlet Client Token：
 
 ```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:11434/anthropic
+export ANTHROPIC_BASE_URL=http://127.0.0.1:18640/anthropic
 export ANTHROPIC_AUTH_TOKEN=flowlet-client-token
 export ANTHROPIC_MODEL=deepseek-v4-pro[1m]
 export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]

@@ -236,6 +236,16 @@ pub enum PriceSource {
     Manual,
 }
 
+impl PriceSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Preset => "preset",
+            Self::Synced => "synced",
+            Self::Manual => "manual",
+        }
+    }
+}
+
 // ─── Channel Preset ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

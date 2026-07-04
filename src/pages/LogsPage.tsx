@@ -1,22 +1,15 @@
-import {
-  RequestLogRow
-} from "../domain";
+import { Actions, Panel, PanelHeader } from "../components/ui";
+import { RequestLogRow } from "../domain";
 
-export function LogsPage({
-  logs,
-  onRefresh,
-}: {
-  logs: RequestLogRow[];
-  onRefresh: () => void;
-}) {
+export function LogsPage({ logs, onRefresh }: { logs: RequestLogRow[]; onRefresh: () => void }) {
   return (
-    <section className="panel">
-      <div className="panel-title">
+    <Panel>
+      <PanelHeader>
         <h3>请求日志</h3>
-        <div className="actions">
+        <Actions>
           <button onClick={() => void onRefresh()}>刷新</button>
-        </div>
-      </div>
+        </Actions>
+      </PanelHeader>
       <div className="table-wrap">
         <table>
           <thead>
@@ -38,7 +31,7 @@ export function LogsPage({
           <tbody>
             {logs.length === 0 ? (
               <tr>
-                <td colSpan={11}>暂无请求日志</td>
+                <td colSpan={12}>暂无请求日志</td>
               </tr>
             ) : (
               logs.map((row) => (
@@ -48,11 +41,7 @@ export function LogsPage({
                   <td>{row.channel_name || row.channel_id || "-"}</td>
                   <td>{row.account_name || row.account_id || "-"}</td>
                   <td>{row.client_protocol}</td>
-                  <td>
-                    <span className={`request-type-badge request-type-${row.request_type}`}>
-                      {row.request_type}
-                    </span>
-                  </td>
+                  <td><span className={`request-type-badge request-type-${row.request_type}`}>{row.request_type}</span></td>
                   <td>{row.public_model || "-"}</td>
                   <td>{row.upstream_model || "-"}</td>
                   <td>{row.status ?? "-"}</td>
@@ -65,6 +54,6 @@ export function LogsPage({
           </tbody>
         </table>
       </div>
-    </section>
+    </Panel>
   );
 }

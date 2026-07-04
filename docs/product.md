@@ -191,7 +191,7 @@ Gemini CLI
 用户在 AI 工具中统一配置 Flowlet 的本地地址：
 
 ```text
-http://127.0.0.1:11434/v1
+http://127.0.0.1:18640/v1
 ```
 
 AI 工具不再直接请求各个 Provider，而是先请求 Flowlet。
@@ -351,7 +351,7 @@ Claude Code 主要使用 Anthropic API / Claude Code Gateway 接入方式。Flow
 推荐用户配置：
 
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:11434"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:18640"
 export ANTHROPIC_AUTH_TOKEN="flowlet-client-token"
 ```
 
@@ -583,7 +583,7 @@ Tauri Desktop App
   ├─ 开机自启
   ├─ 启停 Core
   └─ Core 内置 / sidecar
-        ├─ 127.0.0.1:11434 代理端口
+        ├─ 127.0.0.1:18640 代理端口
         └─ 127.0.0.1:11435 管理 API
 ```
 
@@ -592,7 +592,7 @@ Tauri Desktop App
 ```text
 Cursor / Cline / Open WebUI
         ↓
-http://127.0.0.1:11434/v1/*
+http://127.0.0.1:18640/v1/*
         ↓
 Flowlet Local Proxy
         ↓
@@ -600,7 +600,7 @@ OpenAI-compatible Provider
 
 Claude Code
         ↓
-ANTHROPIC_BASE_URL=http://127.0.0.1:11434
+ANTHROPIC_BASE_URL=http://127.0.0.1:18640
         ↓
 Flowlet Local Proxy
         ↓
@@ -614,7 +614,7 @@ Anthropic-compatible Provider / Claude Gateway
 ```text
 Docker Container
   ├─ Reverse Proxy Core
-  │   ├─ 0.0.0.0:11434
+  │   ├─ 0.0.0.0:18640
   │   └─ 0.0.0.0:11435
   ├─ Web Console
   │   └─ 0.0.0.0:3000
@@ -639,7 +639,7 @@ Web Console 通过管理 API 控制 Core
 
 ```text
 1. 桌面客户端
-2. 本地代理端口 127.0.0.1:11434
+2. 本地代理端口 127.0.0.1:18640
 3. LongCat Channel Preset
 4. LongCat Account 管理
 5. Client Token 配置

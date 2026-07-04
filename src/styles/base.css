@@ -1,0 +1,71 @@
+:root {
+  font-family:
+    "Microsoft YaHei",
+    "PingFang SC",
+    "Segoe UI",
+    sans-serif;
+  color: #172026;
+  background: #f5f7f8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 1px solid #cbd6dc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #172026;
+  height: 36px;
+  padding: 0 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button.link-button {
+  border: none;
+  background: transparent;
+  color: #2b7cda;
+  padding: 0;
+  height: auto;
+  text-decoration: underline;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: #50616a;
+  font-size: 13px;
+}
+
+input,
+select {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  border: 1px solid #cbd6dc;
+  border-radius: 6px;
+  padding: 0 10px;
+  color: #172026;
+  background: #ffffff;
+}
+
+input[readonly] {
+  background: #f7fafb;
+}

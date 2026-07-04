@@ -47,7 +47,7 @@ Flowlet
 ┌─────────────────────────────────────────┐
 │  Flowlet                     [启动][停止] │
 ├─────────────────────────────────────────┤
-│  Base URL: http://127.0.0.1:11434/v1    │
+│  Base URL: http://127.0.0.1:18640/v1    │
 │  Client Token: Bearer xxx               │
 ├─────────────────────────────────────────┤
 │  渠道: 2   账号: 3   客户端: 1          │
@@ -104,7 +104,7 @@ Flowlet
 3. 生成配置：
 
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:11434/anthropic"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:18640/anthropic"
 export ANTHROPIC_AUTH_TOKEN="flowlet-client-token"
 ```
 
@@ -209,7 +209,7 @@ export ANTHROPIC_AUTH_TOKEN="flowlet-client-token"
 
 ### 代理设置
 
-- 监听地址（默认 127.0.0.1:11434）
+- 监听地址（默认 127.0.0.1:18640）
 - 上游超时秒数
 - 日志级别
 

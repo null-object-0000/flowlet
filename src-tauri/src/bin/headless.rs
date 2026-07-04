@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db_path = std::env::var("FLOWLET_DB_PATH").unwrap_or_else(|_| "flowlet.sqlite".to_string());
     let bind_addr =
-        std::env::var("FLOWLET_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:11434".to_string());
+        std::env::var("FLOWLET_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:18640".to_string());
     let web_addr =
         std::env::var("FLOWLET_WEB_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let admin_token = std::env::var("FLOWLET_ADMIN_TOKEN").ok();

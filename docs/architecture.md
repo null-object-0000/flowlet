@@ -71,7 +71,7 @@ Channel + Account + Protocol + Model
 ## 运行时端口
 
 ```text
-127.0.0.1:11434  多协议透明代理端口
+127.0.0.1:18640  多协议透明代理端口
 ```
 
 后续如需要管理 API，优先通过 Tauri command 给桌面 UI 使用；Docker / Web Console 阶段再引入独立管理端口。
@@ -115,7 +115,7 @@ OpenAI 请求 -> 转成 Anthropic 请求
 ```text
 Cursor / Cline / Open WebUI / Cherry Studio / Continue
         ↓
-http://127.0.0.1:11434/v1/*
+http://127.0.0.1:18640/v1/*
         ↓
 Flowlet OpenAI-compatible Gateway
         ↓
@@ -123,7 +123,7 @@ OpenAI-compatible Provider
 
 Claude Code
         ↓
-ANTHROPIC_BASE_URL=http://127.0.0.1:11434
+ANTHROPIC_BASE_URL=http://127.0.0.1:18640
         ↓
 Flowlet Anthropic-compatible Gateway
         ↓

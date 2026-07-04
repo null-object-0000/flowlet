@@ -84,6 +84,7 @@ dist
 src-tauri/target/
 src-tauri/gen/schemas/
 flowlet.sqlite
+src-tauri/flowlet.sqlite*
 .output
 
 # Gatsby files

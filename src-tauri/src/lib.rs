@@ -1,19 +1,17 @@
+mod commands;
 pub mod core;
 
 use core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    ClientConfig, ModelPrice, ProtocolType, RequestLogRow, RouteCandidate, RouteRule,
-    UsageSummaryRow, VirtualModel,
+    ChannelAccount, ChannelPreset, ClientConfig, ModelPrice, ProtocolType, RouteCandidate,
+    RouteRule, VirtualModel,
 };
-use core::presets::{builtin_model_prices, BalanceQueryResult, ModelSyncResult};
-use core::proxy::{ProxyController, ProxyStatus};
+use core::presets::builtin_model_prices;
+use core::proxy::ProxyController;
 use core::storage::Storage;
-use core::sync::{query_deepseek_balance, sync_deepseek_models};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_autostart::ManagerExt;
 
 #[derive(Clone)]
 struct AppState {
@@ -84,450 +82,7 @@ impl AppState {
     }
 }
 
-// ─── Proxy Commands ──────────────────────────────────────────────────────────
-
-#[tauri::command]
-async fn start_proxy(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.start_configured_proxy().await?;
-    update_tray_tooltip(&app, true);
-    Ok(())
-}
-
-#[tauri::command]
-async fn stop_proxy(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.proxy.stop().await.map_err(|err| err.to_string())?;
-    // 更新托盘 tooltip
-    update_tray_tooltip(&app, false);
-    Ok(())
-}
-
-#[tauri::command]
-fn proxy_status(state: tauri::State<'_, AppState>) -> ProxyStatus {
-    state.proxy.status()
-}
-
-// ─── Channel Presets Commands ────────────────────────────────────────────────
-
-#[tauri::command]
-fn list_channel_presets(state: tauri::State<'_, AppState>) -> Result<Vec<ChannelPreset>, String> {
-    state
-        .channels
-        .lock()
-        .map(|channels| channels.clone())
-        .map_err(|_| "读取渠道模板失败".to_string())
-}
-
-#[tauri::command]
-fn save_channel_presets(
-    state: tauri::State<'_, AppState>,
-    presets: Vec<ChannelPreset>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_channel_presets(&presets)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .channels
-        .lock()
-        .map_err(|_| "保存渠道模板失败".to_string())?;
-    *current = presets;
-    Ok(())
-}
-
-// ─── Channel Accounts Commands ──────────────────────────────────────────────
-
-#[tauri::command]
-fn list_channel_accounts(state: tauri::State<'_, AppState>) -> Result<Vec<ChannelAccount>, String> {
-    state
-        .accounts
-        .lock()
-        .map(|accounts| accounts.clone())
-        .map_err(|_| "读取账号配置失败".to_string())
-}
-
-#[tauri::command]
-fn save_channel_accounts(
-    state: tauri::State<'_, AppState>,
-    accounts: Vec<ChannelAccount>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_channel_accounts(&accounts)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .accounts
-        .lock()
-        .map_err(|_| "保存账号配置失败".to_string())?;
-    *current = accounts;
-    Ok(())
-}
-
-// ─── Route Candidates Commands ──────────────────────────────────────────────
-
-#[tauri::command]
-fn list_route_candidates(state: tauri::State<'_, AppState>) -> Result<Vec<RouteCandidate>, String> {
-    state
-        .routes
-        .lock()
-        .map(|routes| routes.clone())
-        .map_err(|_| "读取路由配置失败".to_string())
-}
-
-#[tauri::command]
-fn save_route_candidates(
-    state: tauri::State<'_, AppState>,
-    routes: Vec<RouteCandidate>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_route_candidates(&routes)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .routes
-        .lock()
-        .map_err(|_| "保存路由配置失败".to_string())?;
-    *current = routes;
-    Ok(())
-}
-
-// ─── Clients Commands ────────────────────────────────────────────────────────
-
-#[tauri::command]
-fn list_clients(state: tauri::State<'_, AppState>) -> Result<Vec<ClientConfig>, String> {
-    state
-        .clients
-        .lock()
-        .map(|clients| clients.clone())
-        .map_err(|_| "读取客户端配置失败".to_string())
-}
-
-#[tauri::command]
-fn save_clients(
-    state: tauri::State<'_, AppState>,
-    clients: Vec<ClientConfig>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_clients(&clients)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .clients
-        .lock()
-        .map_err(|_| "保存客户端配置失败".to_string())?;
-    *current = clients;
-    Ok(())
-}
-
-// ─── Model Prices Commands ──────────────────────────────────────────────────
-
-#[tauri::command]
-fn list_model_prices(state: tauri::State<'_, AppState>) -> Result<Vec<ModelPrice>, String> {
-    state
-        .prices
-        .lock()
-        .map(|prices| prices.clone())
-        .map_err(|_| "读取价格配置失败".to_string())
-}
-
-#[tauri::command]
-fn save_model_prices(
-    state: tauri::State<'_, AppState>,
-    prices: Vec<ModelPrice>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_model_prices(&prices)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .prices
-        .lock()
-        .map_err(|_| "保存价格配置失败".to_string())?;
-    *current = prices;
-    Ok(())
-}
-
-#[tauri::command]
-fn list_channel_models(state: tauri::State<'_, AppState>) -> Result<Vec<ChannelModel>, String> {
-    state
-        .storage
-        .list_channel_models()
-        .map_err(|err| err.to_string())
-}
-
-// ─── Virtual Models Commands ────────────────────────────────────────────────
-
-#[tauri::command]
-fn list_virtual_models(state: tauri::State<'_, AppState>) -> Result<Vec<VirtualModel>, String> {
-    state
-        .virtual_models
-        .lock()
-        .map(|models| models.clone())
-        .map_err(|_| "读取虚拟模型失败".to_string())
-}
-
-#[tauri::command]
-fn save_virtual_models(
-    state: tauri::State<'_, AppState>,
-    models: Vec<VirtualModel>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_virtual_models(&models)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .virtual_models
-        .lock()
-        .map_err(|_| "保存虚拟模型失败".to_string())?;
-    *current = models;
-    Ok(())
-}
-
-// ─── Usage & Logs Commands ──────────────────────────────────────────────────
-
-#[tauri::command]
-fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
-    let inserted = state
-        .storage
-        .analyze_unknown_usage()
-        .map_err(|err| err.to_string())?;
-    state
-        .storage
-        .recalculate_usage_costs()
-        .map_err(|err| err.to_string())?;
-    Ok(inserted)
-}
-
-#[tauri::command]
-fn usage_summary(state: tauri::State<'_, AppState>) -> Result<Vec<UsageSummaryRow>, String> {
-    state.storage.usage_summary().map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-fn list_request_logs(state: tauri::State<'_, AppState>) -> Result<Vec<RequestLogRow>, String> {
-    state
-        .storage
-        .list_request_logs()
-        .map_err(|err| err.to_string())
-}
-
-// ─── Sync Commands ──────────────────────────────────────────────────────────
-
-#[tauri::command]
-async fn query_balance(
-    state: tauri::State<'_, AppState>,
-    account_id: String,
-) -> Result<BalanceQueryResult, String> {
-    let account = {
-        let accounts = state
-            .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        accounts
-            .iter()
-            .find(|a| a.id == account_id)
-            .ok_or("账号不存在")?
-            .clone()
-    };
-
-    // 目前仅支持 DeepSeek 余额查询
-    if account.channel_id != "deepseek" {
-        return Ok(BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some("当前仅 DeepSeek 支持余额查询".to_string()),
-        });
-    }
-
-    // 在 spawn_blocking 中执行 HTTP 调用，避免 Send 问题
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap_or_else(|_| panic!("创建运行时失败"));
-        rt.block_on(query_deepseek_balance(&account))
-    })
-    .await
-    .map_err(|e| format!("任务执行失败: {e}"))?;
-
-    // 更新账号最后错误信息
-    if let Some(ref err) = result.error {
-        let _ = state.storage.update_account_last_error(&account_id, err);
-    } else {
-        let now = chrono::Utc::now().to_rfc3339();
-        let snapshot = AccountBalanceSnapshot {
-            id: format!("balance-{}-{}", account_id, uuid::Uuid::new_v4()),
-            account_id: account_id.clone(),
-            balance: result.balance,
-            currency: result.currency.clone(),
-            token_pack_total: None,
-            token_pack_used: None,
-            token_pack_remaining: None,
-            token_pack_expire_at: None,
-            source: "sync".to_string(),
-            synced_at: Some(now.clone()),
-            remark: Some("DeepSeek /user/balance 自动同步".to_string()),
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        state
-            .storage
-            .save_balance_snapshot(&snapshot)
-            .map_err(|err| err.to_string())?;
-        let _ = state.storage.update_account_last_used(&account_id);
-    }
-
-    Ok(result)
-}
-
-#[tauri::command]
-async fn sync_models(
-    state: tauri::State<'_, AppState>,
-    account_id: String,
-) -> Result<ModelSyncResult, String> {
-    let account = {
-        let accounts = state
-            .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        accounts
-            .iter()
-            .find(|a| a.id == account_id)
-            .ok_or("账号不存在")?
-            .clone()
-    };
-
-    if account.channel_id != "deepseek" {
-        return Ok(ModelSyncResult {
-            models_synced: 0,
-            models: Vec::new(),
-            errors: vec!["当前仅 DeepSeek 支持模型列表同步".to_string()],
-        });
-    }
-    let channel_id = account.channel_id.clone();
-
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap_or_else(|_| panic!("创建运行时失败"));
-        rt.block_on(sync_deepseek_models(&account))
-    })
-    .await
-    .map_err(|e| format!("任务执行失败: {e}"))?;
-
-    if result.errors.is_empty() {
-        let mut models = state
-            .storage
-            .list_channel_models()
-            .map_err(|err| err.to_string())?
-            .into_iter()
-            .filter(|model| model.channel_id != channel_id)
-            .collect::<Vec<_>>();
-        models.extend(result.models.clone());
-        state
-            .storage
-            .save_channel_models(&models)
-            .map_err(|err| err.to_string())?;
-        let _ = state.storage.update_account_last_used(&account_id);
-    } else if let Some(first_err) = result.errors.first() {
-        let _ = state
-            .storage
-            .update_account_last_error(&account_id, first_err);
-    }
-
-    Ok(result)
-}
-
-// ─── Balance Snapshot Commands ──────────────────────────────────────────────
-
-#[tauri::command]
-fn save_balance_snapshot(
-    state: tauri::State<'_, AppState>,
-    snapshot: AccountBalanceSnapshot,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_balance_snapshot(&snapshot)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-fn list_balance_snapshots(
-    state: tauri::State<'_, AppState>,
-    account_id: String,
-) -> Result<Vec<AccountBalanceSnapshot>, String> {
-    state
-        .storage
-        .list_balance_snapshots(&account_id)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-fn latest_balance_snapshots(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<AccountBalanceSnapshot>, String> {
-    state
-        .storage
-        .latest_balance_snapshots()
-        .map_err(|err| err.to_string())
-}
-
-// ─── Account Stats Commands ────────────────────────────────────────────────
-
-#[tauri::command]
-fn account_stats(state: tauri::State<'_, AppState>) -> Result<Vec<AccountStatsRow>, String> {
-    state.storage.account_stats().map_err(|err| err.to_string())
-}
-
-// ─── Route Rules Commands ──────────────────────────────────────────────────
-
-#[tauri::command]
-fn list_route_rules(state: tauri::State<'_, AppState>) -> Result<Vec<RouteRule>, String> {
-    state
-        .rules
-        .lock()
-        .map(|rules| rules.clone())
-        .map_err(|_| "读取路由规则失败".to_string())
-}
-
-#[tauri::command]
-fn save_route_rules(
-    state: tauri::State<'_, AppState>,
-    rules: Vec<RouteRule>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_route_rules(&rules)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .rules
-        .lock()
-        .map_err(|_| "保存路由规则失败".to_string())?;
-    *current = rules;
-    Ok(())
-}
-
 // ─── Config Validation ────────────────────────────────────────────────────
-
-#[tauri::command]
-fn validate_config(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
-    let channels = state.channels.lock().map_err(|_| "锁失败".to_string())?;
-    let accounts = state.accounts.lock().map_err(|_| "锁失败".to_string())?;
-    let routes = state.routes.lock().map_err(|_| "锁失败".to_string())?;
-    let clients = state.clients.lock().map_err(|_| "锁失败".to_string())?;
-
-    Ok(validate_config_values(
-        &channels, &accounts, &routes, &clients,
-    ))
-}
 
 fn validate_config_values(
     channels: &[ChannelPreset],
@@ -610,123 +165,9 @@ fn validate_config_values(
     errors
 }
 
-// ─── Maintenance Commands ─────────────────────────────────────────────────
-
-#[tauri::command]
-fn db_stats(state: tauri::State<'_, AppState>) -> Result<(i64, i64, i64), String> {
-    state.storage.db_stats().map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-fn cleanup_old_logs(
-    state: tauri::State<'_, AppState>,
-    keep_days: i64,
-) -> Result<(usize, usize), String> {
-    state
-        .storage
-        .cleanup_old_logs(keep_days)
-        .map_err(|err| err.to_string())
-}
-
-// ─── Config Import/Export Commands ────────────────────────────────────────
-
-#[tauri::command]
-fn export_config(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.storage.export_config().map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-fn import_config(state: tauri::State<'_, AppState>, json: String) -> Result<(), String> {
-    state
-        .storage
-        .import_config(&json)
-        .map_err(|err| err.to_string())?;
-
-    // 重新加载内存状态
-    let channels = state
-        .storage
-        .list_channel_presets()
-        .map_err(|e| e.to_string())?;
-    let accounts = state
-        .storage
-        .list_channel_accounts()
-        .map_err(|e| e.to_string())?;
-    let routes = state
-        .storage
-        .list_route_candidates()
-        .map_err(|e| e.to_string())?;
-    let clients = state.storage.list_clients().map_err(|e| e.to_string())?;
-    let rules = state
-        .storage
-        .list_route_rules()
-        .map_err(|e| e.to_string())?;
-    let prices = state
-        .storage
-        .list_model_prices()
-        .map_err(|e| e.to_string())?;
-    let virtual_models = state
-        .storage
-        .list_virtual_models()
-        .map_err(|e| e.to_string())?;
-
-    *state.channels.lock().map_err(|_| "锁失败".to_string())? = channels;
-    *state.accounts.lock().map_err(|_| "锁失败".to_string())? = accounts;
-    *state.routes.lock().map_err(|_| "锁失败".to_string())? = routes;
-    *state.clients.lock().map_err(|_| "锁失败".to_string())? = clients;
-    *state.rules.lock().map_err(|_| "锁失败".to_string())? = rules;
-    *state.prices.lock().map_err(|_| "锁失败".to_string())? = prices;
-    *state
-        .virtual_models
-        .lock()
-        .map_err(|_| "锁失败".to_string())? = virtual_models;
-
-    Ok(())
-}
-
-// ─── Smart Routing Commands ───────────────────────────────────────────────
-
-#[tauri::command]
-fn account_routing_scores(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<(String, String, f64, f64, f64)>, String> {
-    state
-        .storage
-        .account_routing_scores()
-        .map_err(|err| err.to_string())
-}
-
-// ─── Auto-start Commands ───────────────────────────────────────────────────
-
-#[tauri::command]
-fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
-    let autostart = app.autolaunch();
-    autostart
-        .is_enabled()
-        .map_err(|e| format!("检查自启动状态失败: {e}"))
-}
-
-#[tauri::command]
-fn enable_autostart(app: AppHandle) -> Result<(), String> {
-    let autostart = app.autolaunch();
-    autostart
-        .enable()
-        .map_err(|e| format!("启用自启动失败: {e}"))
-}
-
-#[tauri::command]
-fn disable_autostart(app: AppHandle) -> Result<(), String> {
-    let autostart = app.autolaunch();
-    autostart
-        .disable()
-        .map_err(|e| format!("禁用自启动失败: {e}"))
-}
-
 // ─── App Entry ──────────────────────────────────────────────────────────────
 
-pub fn run() {
-    let db_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("flowlet.sqlite");
+fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     let storage = Storage::open(db_path).expect("初始化 SQLite 存储失败");
 
     // 初始化渠道模板
@@ -801,7 +242,10 @@ pub fn run() {
             {
                 return false;
             }
-            if !channels.iter().any(|channel| channel.id == route.channel_id) {
+            if !channels
+                .iter()
+                .any(|channel| channel.id == route.channel_id)
+            {
                 return false;
             }
             accounts.iter().any(|account| {
@@ -865,7 +309,7 @@ pub fn run() {
     // 初始化路由规则
     let rules = storage.list_route_rules().expect("读取路由规则失败");
 
-    let state = AppState {
+    AppState {
         proxy: ProxyController::default(),
         channels: Arc::new(Mutex::new(channels)),
         accounts: Arc::new(Mutex::new(accounts)),
@@ -877,16 +321,62 @@ pub fn run() {
         storage,
         upstream_timeout_seconds: 120,
         tray: Arc::new(Mutex::new(None)),
-    };
+    }
+}
 
+fn app_database_path(app: &tauri::App) -> std::path::PathBuf {
+    let app_data_dir = app.path().app_data_dir().expect("获取应用数据目录失败");
+    std::fs::create_dir_all(&app_data_dir).expect("创建应用数据目录失败");
+
+    let db_path = app_data_dir.join("flowlet.sqlite");
+    migrate_legacy_database(&db_path);
+    db_path
+}
+
+fn migrate_legacy_database(db_path: &std::path::Path) {
+    if db_path.exists() {
+        return;
+    }
+
+    let legacy_db_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("flowlet.sqlite");
+    if !legacy_db_path.exists() {
+        return;
+    }
+
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).expect("创建数据库迁移目录失败");
+    }
+
+    std::fs::copy(&legacy_db_path, db_path).expect("迁移 SQLite 数据库失败");
+    for suffix in ["-wal", "-shm"] {
+        let legacy_sidecar = legacy_db_path.with_file_name(format!(
+            "{}{}",
+            legacy_db_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("flowlet.sqlite"),
+            suffix
+        ));
+        if legacy_sidecar.exists() {
+            let target_sidecar = db_path.with_file_name(format!("flowlet.sqlite{}", suffix));
+            let _ = std::fs::copy(legacy_sidecar, target_sidecar);
+        }
+    }
+}
+
+pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_opener::init())
-        .manage(state.clone())
         .setup(move |app| {
+            let state = build_app_state(app_database_path(app));
+            app.manage(state.clone());
+
             let app_handle = app.handle();
 
             // 关闭窗口时隐藏到托盘，而非退出
@@ -984,42 +474,41 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            start_proxy,
-            stop_proxy,
-            proxy_status,
-            list_channel_presets,
-            save_channel_presets,
-            list_channel_accounts,
-            save_channel_accounts,
-            list_route_candidates,
-            save_route_candidates,
-            list_clients,
-            save_clients,
-            list_model_prices,
-            save_model_prices,
-            list_channel_models,
-            list_virtual_models,
-            save_virtual_models,
-            analyze_usage,
-            usage_summary,
-            list_request_logs,
-            query_balance,
-            sync_models,
-            save_balance_snapshot,
-            list_balance_snapshots,
-            latest_balance_snapshots,
-            account_stats,
-            is_autostart_enabled,
-            enable_autostart,
-            disable_autostart,
-            list_route_rules,
-            save_route_rules,
-            account_routing_scores,
-            export_config,
-            import_config,
-            validate_config,
-            db_stats,
-            cleanup_old_logs,
+            commands::start_proxy,
+            commands::stop_proxy,
+            commands::proxy_status,
+            commands::list_channel_presets,
+            commands::save_channel_presets,
+            commands::list_channel_accounts,
+            commands::save_channel_accounts,
+            commands::list_route_candidates,
+            commands::save_route_candidates,
+            commands::list_clients,
+            commands::save_clients,
+            commands::list_model_prices,
+            commands::save_model_prices,
+            commands::list_channel_models,
+            commands::list_virtual_models,
+            commands::save_virtual_models,
+            commands::analyze_usage,
+            commands::usage_summary,
+            commands::list_request_logs,
+            commands::query_balance,
+            commands::sync_models,
+            commands::save_balance_snapshot,
+            commands::list_balance_snapshots,
+            commands::latest_balance_snapshots,
+            commands::account_stats,
+            commands::is_autostart_enabled,
+            commands::enable_autostart,
+            commands::disable_autostart,
+            commands::list_route_rules,
+            commands::save_route_rules,
+            commands::account_routing_scores,
+            commands::export_config,
+            commands::import_config,
+            commands::db_stats,
+            commands::cleanup_old_logs,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet 失败");

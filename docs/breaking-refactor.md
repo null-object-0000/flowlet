@@ -160,7 +160,7 @@ DeepSeek
 本地代理端口仍然使用：
 
 ```text
-127.0.0.1:11434
+127.0.0.1:18640
 ```
 
 协议入口：
@@ -275,7 +275,7 @@ DeepSeek 特化规则：
 Flowlet 应提供 Anthropic-compatible 本地入口：
 
 ```text
-ANTHROPIC_BASE_URL=http://127.0.0.1:11434/anthropic
+ANTHROPIC_BASE_URL=http://127.0.0.1:18640/anthropic
 ```
 
 Claude Code 不直接保存 LongCat / DeepSeek API Key，而是保存 Flowlet Client Token：

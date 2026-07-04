@@ -4,12 +4,12 @@ services:
     container_name: flowlet
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "18640:18640"
       - "8080:8080"
     volumes:
       - flowlet-data:/data
     environment:
-      - FLOWLET_BIND_ADDR=0.0.0.0:11434
+      - FLOWLET_BIND_ADDR=0.0.0.0:18640
       - FLOWLET_WEB_ADDR=0.0.0.0:8080
       - FLOWLET_DB_PATH=/data/flowlet.sqlite
       - FLOWLET_ADMIN_TOKEN=${FLOWLET_ADMIN_TOKEN:-}

@@ -19,7 +19,7 @@ export function LogDetailDrawer({
     let cancelled = false;
     setStatus("loading");
     setError(null);
-    runCommand<RequestLogRow[]>("get_request_log_detail", { request_id: requestId })
+    runCommand<RequestLogRow[]>("get_request_log_detail", { requestId })
       .then((result) => {
         if (cancelled) return;
         setRows(result);

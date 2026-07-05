@@ -36,7 +36,7 @@ pub(super) fn match_candidates(
         _ => return Vec::new(),
     };
 
-    let matched: Vec<RouteCandidate> = routes
+    let mut matched: Vec<RouteCandidate> = routes
         .iter()
         .filter(|c| {
             c.enabled && c.virtual_model_id == virtual_model && c.client_protocol == *protocol
@@ -45,7 +45,10 @@ pub(super) fn match_candidates(
         .cloned()
         .collect();
 
-    // MVP 阶段只按候选优先级排序，综合调度先保留为后续能力。
+    // 默认账号选择按 created_at 升序（先添加优先），priority 仅作高级路由 / fallback 策略。
+    matched.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+
+    // 综合调度保留能力（暂不使用）。
     let _ = scores;
     matched
 }
@@ -145,20 +148,19 @@ pub(super) fn find_direct_candidate(
     protocol: &ProtocolType,
     accounts: &[ChannelAccount],
 ) -> Vec<RouteCandidate> {
-    for route in routes {
-        if route.client_protocol != *protocol {
-            continue;
-        }
-        if route.upstream_model == model {
-            if accounts
-                .iter()
-                .any(|a| a.id == route.account_id && a.enabled)
-            {
-                return vec![route.clone()];
-            }
-        }
-    }
-    Vec::new()
+    // 直接模型请求必须匹配 route.virtual_model_id（对外模型名）。
+    // upstream_model 仅在 rewrite_model 阶段用于转发前的模型名替换。
+    // 同一 virtual_model_id 多个候选时，按 created_at 升序（先添加优先）。
+    let mut candidates: Vec<&RouteCandidate> = routes
+        .iter()
+        .filter(|route| {
+            route.client_protocol == *protocol
+                && route.virtual_model_id == model
+                && accounts.iter().any(|a| a.id == route.account_id && a.enabled)
+        })
+        .collect();
+    candidates.sort_by_key(|r| r.created_at.as_str());
+    candidates.first().map(|r| vec![(*r).clone()]).unwrap_or_default()
 }
 
 // ─── Fallback Rules ─────────────────────────────────────────────────────────

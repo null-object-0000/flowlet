@@ -29,7 +29,6 @@ export default function App() {
     usageRows,
     requestLogs,
     logMeta,
-    logCaptureConfig,
     balanceSnapshots,
     routeRules,
     accountStats,
@@ -41,7 +40,6 @@ export default function App() {
     refreshStatus,
     refreshAll,
     refreshChannelModels,
-    refreshLogCaptureConfig,
   } = flowlet;
   const [view, setView] = React.useState<View>("overview");
   const [message, setMessage] = React.useState("");
@@ -60,7 +58,6 @@ export default function App() {
     refreshUsage,
     refreshLogs,
     fetchLogDetail,
-    saveLogCaptureConfig,
     analyzeUsage,
     addAccount,
     testConnection,
@@ -114,7 +111,7 @@ export default function App() {
         return;
       }
 
-      await Promise.allSettled([refreshStatus(), refreshAll(), refreshLogCaptureConfig()]);
+      await Promise.allSettled([refreshStatus(), refreshAll()]);
 
       // 已经有更新的 init 发起 => 丢弃本次过期结果
       if (seq !== initSeq.current) return;
@@ -124,7 +121,7 @@ export default function App() {
       enableFrontendLogging();
     }
     void doInit();
-  }, [refreshStatus, refreshAll, refreshLogCaptureConfig]);
+  }, [refreshStatus, refreshAll]);
 
   if (initializing) {
     return (
@@ -167,8 +164,6 @@ export default function App() {
             usageRows={usageRows}
             onCopy={copy}
             autostartEnabled={autostartEnabled}
-            proxyBindConfig={proxyBindConfig}
-            onToggleProxyLanAccess={saveProxyBindConfig}
             onToggleAutostart={toggleAutostart}
             onExportConfig={exportConfig}
             onImportConfig={importConfig}
@@ -241,8 +236,6 @@ export default function App() {
             routingScores={routingScores}
             getAccountName={getAccountName}
             getChannelName={getChannelName}
-            logCaptureConfig={logCaptureConfig}
-            onSaveLogCaptureConfig={(cfg) => void saveLogCaptureConfig(cfg)}
           />
         ) : null}
 

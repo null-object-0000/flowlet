@@ -1,5 +1,6 @@
 use crate::core::config::{
-    AuthStrategy, ChannelAccount, ClientConfig, ProtocolType, RouteCandidate, UaClientRule,
+    AuthStrategy, ChannelAccount, ChannelPreset, ClientConfig, ProtocolType, RouteCandidate,
+    UaClientRule,
 };
 use axum::{
     body::Body,
@@ -59,12 +60,13 @@ pub(super) fn is_model_list_request(method: &Method, path: &str) -> bool {
 pub(super) fn build_model_list_response(
     routes: &[RouteCandidate],
     accounts: &[ChannelAccount],
+    channels: &[ChannelPreset],
     protocol: &ProtocolType,
 ) -> Response {
     let entries = collect_model_entries(routes, accounts, protocol);
 
     match protocol {
-        ProtocolType::OpenAi => build_openai_model_list(&entries, accounts),
+        ProtocolType::OpenAi => build_openai_model_list(&entries, accounts, channels),
         ProtocolType::Anthropic => build_anthropic_model_list(&entries),
     }
 }
@@ -111,21 +113,32 @@ fn collect_model_entries(
 fn build_openai_model_list(
     entries: &[(String, String, String)],
     accounts: &[ChannelAccount],
+    channels: &[ChannelPreset],
 ) -> Response {
-    let account_name: std::collections::HashMap<&str, &str> = accounts
+    // owned_by 优先使用 channel vendor（如 longcat/deepseek），其次 channel name。
+    // 不用 account name 是因为它含用户私有信息，不应暴露给客户端。
+    let channel_vendor: std::collections::HashMap<&str, &str> = channels
         .iter()
-        .map(|a| (a.id.as_str(), a.name.as_str()))
+        .map(|c| (c.id.as_str(), c.vendor.as_str()))
+        .collect();
+    let channel_name: std::collections::HashMap<&str, &str> = channels
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str()))
+        .collect();
+    let account_channel: std::collections::HashMap<&str, &str> = accounts
+        .iter()
+        .map(|a| (a.id.as_str(), a.channel_id.as_str()))
         .collect();
 
+    // 先尝试从 upstream_model 取 owned_by（由 resolve_small_model 之类的逻辑前置），
+    // 没有则回退到 channel vendor/name。
     let parse_unix_seconds = |raw: &str| -> i64 {
         if raw.is_empty() {
             return 0;
         }
-        // 优先尝试直接解析为 Unix 时间戳（纯数字）
         if let Ok(ts) = raw.parse::<i64>() {
             return ts;
         }
-        // 否则尝试按 RFC 3339 / ISO 8601 解析
         chrono::DateTime::parse_from_rfc3339(raw)
             .map(|dt| dt.timestamp())
             .unwrap_or(0)
@@ -134,10 +147,12 @@ fn build_openai_model_list(
     let data: Vec<serde_json::Value> = entries
         .iter()
         .map(|(id, account_id, created_at)| {
-            let owned_by = account_name
-                .get(account_id.as_str())
-                .filter(|name| !name.is_empty())
-                .copied()
+            let channel_id = account_channel.get(account_id.as_str()).copied();
+            let owned_by = channel_id
+                .and_then(|cid| channel_vendor.get(cid).copied())
+                .filter(|v| !v.is_empty())
+                .or_else(|| channel_id.and_then(|cid| channel_name.get(cid).copied()))
+                .filter(|v| !v.is_empty())
                 .unwrap_or("flowlet");
             serde_json::json!({
                 "id": id,
@@ -333,6 +348,46 @@ fn extract_ua_rules(value: serde_json::Value) -> Vec<UaClientRule> {
     Vec::new()
 }
 
+/// 从 config.json 顶层对象解析 log_capture 配置。缺失任何字段时使用默认值。
+pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::LogCaptureConfig {
+    use crate::core::config::LogCaptureConfig;
+    if let Some(obj) = value.as_object() {
+        if let Some(lc) = obj.get("log_capture").and_then(|v| v.as_object()) {
+            return LogCaptureConfig {
+                capture_req_headers: lc
+                    .get("capture_req_headers")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                capture_req_body: lc
+                    .get("capture_req_body")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                capture_res_headers: lc
+                    .get("capture_res_headers")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                capture_res_body: lc
+                    .get("capture_res_body")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                stream_summary_max_bytes: lc
+                    .get("stream_summary_max_bytes")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(16 * 1024) as usize,
+                max_body_bytes: lc
+                    .get("max_body_bytes")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1024 * 1024) as usize,
+                redact_sensitive_headers: lc
+                    .get("redact_sensitive_headers")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            };
+        }
+    }
+    LogCaptureConfig::default()
+}
+
 /// 通过请求 User-Agent 子串匹配独立的客户端身份规则。
 ///
 /// 与鉴权 token 无关，仅决定日志/用量中的客户端归属。返回命中的
@@ -430,13 +485,6 @@ pub(super) fn load_config_ua_rules(path: &std::path::Path) -> Vec<UaClientRule> 
 // 向后兼容：旧代码里 load_ua_rules(...) 仍然可用
 pub(super) use load_config_ua_rules as load_ua_rules;
 
-/// 把 config.json 当字符串整体读取（前端编辑用）。
-/// 实际逻辑在 proxy.rs 里声明为 `pub fn`，通过 `crate::read_config_raw` 暴露给 commands.rs。
-pub use super::read_config_raw;
-
-/// 把字符串整体写回 config.json（前端编辑用）。
-/// 实际逻辑在 proxy.rs 里声明为 `pub fn`，通过 `crate::write_config_raw` 暴露给 commands.rs。
-pub use super::write_config_raw;
 
 
 // ─── Model Rewriting ─────────────────────────────────────────────────────────

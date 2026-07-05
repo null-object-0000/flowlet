@@ -1,5 +1,4 @@
 import {
-  LogCaptureConfig,
   LogFilter,
   LogMeta,
   LogPage,
@@ -20,8 +19,6 @@ export function createUsageActions({ data, setMessage }: ActionContext) {
     setRequestLogs,
     setLogMeta,
     setLogDetail,
-    setLogCaptureConfig,
-    logCaptureConfig,
   } = data;
 
   async function savePrices() {
@@ -68,17 +65,6 @@ export function createUsageActions({ data, setMessage }: ActionContext) {
     setLogDetail(null);
   }
 
-  async function refreshLogCaptureConfig() {
-    const cfg = await runCommand<LogCaptureConfig>("get_log_capture_config");
-    setLogCaptureConfig(cfg);
-  }
-
-  async function saveLogCaptureConfig(next: LogCaptureConfig) {
-    await runCommand<null>("set_log_capture_config", { config: next });
-    setLogCaptureConfig(next);
-    setMessage("日志捕获配置已保存（重启代理后生效）");
-  }
-
   async function analyzeUsage() {
     const count = await runCommand<number>("analyze_usage");
     await refreshUsage();
@@ -111,7 +97,5 @@ export function createUsageActions({ data, setMessage }: ActionContext) {
     removePrice,
     fetchLogDetail,
     clearLogDetail,
-    refreshLogCaptureConfig,
-    saveLogCaptureConfig,
   };
 }

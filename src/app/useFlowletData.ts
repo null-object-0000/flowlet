@@ -6,7 +6,6 @@ import {
   ChannelModel,
   ChannelPreset,
   ClientConfig,
-  LogCaptureConfig,
   LogMeta,
   ModelPrice,
   ProxyBindConfig,
@@ -36,7 +35,6 @@ export function useFlowletData() {
     lastFetchedAt: 0,
   });
   const [logDetail, setLogDetail] = React.useState<RequestLogRow[] | null>(null);
-  const [logCaptureConfig, setLogCaptureConfig] = React.useState<LogCaptureConfig | null>(null);
   const [balanceSnapshots, setBalanceSnapshots] = React.useState<AccountBalanceSnapshot[]>([]);
   const [routeRules, setRouteRules] = React.useState<RouteRule[]>([]);
   const [accountStats, setAccountStats] = React.useState<AccountStatsRow[]>([]);
@@ -63,11 +61,6 @@ export function useFlowletData() {
     setChannelModels(models);
   }, []);
 
-  const refreshLogCaptureConfig = React.useCallback(async () => {
-    const cfg = await runCommand<LogCaptureConfig>("get_log_capture_config").catch(() => null);
-    setLogCaptureConfig(cfg);
-  }, []);
-
   // 并发防护 token。用「最新版本号」避免老请求覆盖新请求的结果。
   // 在 React 18 + Tauri 的 mount 阶段时有概率因 StrictMode 或重连触发两次 refreshAll，
   // 不加防护会导致 race condition：后发的请求先回、先发请求后回时覆盖 => 用户刚加的 account 行消失。
@@ -87,7 +80,7 @@ export function useFlowletData() {
       runCommand<{ rows: RequestLogRow[]; total: number; page: number; pageSize: number }>(
         "list_request_logs",
         {
-          filter: { page: 1, pageSize: 50, status: "all", clientId: "", channelId: "", search: "" },
+          filter: { page: 1, page_size: 50, status: "all", client_id: "", channel_id: "", search: "" },
         }
       ).catch(() => ({ rows: [], total: 0, page: 1, pageSize: 50 })),
       runCommand<AccountBalanceSnapshot[]>("latest_balance_snapshots").catch(
@@ -154,8 +147,6 @@ export function useFlowletData() {
     setLogMeta,
     logDetail,
     setLogDetail,
-    logCaptureConfig,
-    setLogCaptureConfig,
     balanceSnapshots,
     routeRules,
     setRouteRules,
@@ -170,7 +161,6 @@ export function useFlowletData() {
     refreshStatus,
     refreshAll,
     refreshChannelModels,
-    refreshLogCaptureConfig,
   };
 }
 

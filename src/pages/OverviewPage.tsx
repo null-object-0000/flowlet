@@ -1,6 +1,7 @@
 import React from "react";
 import { Actions, Panel, PanelHeader } from "../components/ui";
 import { ChannelPreset, ProxyBindConfig, ProxyStatus, UsageSummaryRow } from "../domain";
+import { runCommand } from "../services/flowletApi";
 
 export function OverviewPage({
   status,
@@ -8,8 +9,6 @@ export function OverviewPage({
   onCopy,
   autostartEnabled,
   onToggleAutostart,
-  proxyBindConfig,
-  onToggleProxyLanAccess,
   onExportConfig,
   onImportConfig,
   onValidateConfig,
@@ -26,8 +25,6 @@ export function OverviewPage({
   onCopy: (text: string, done: string) => Promise<void>;
   autostartEnabled: boolean;
   onToggleAutostart: () => void;
-  proxyBindConfig: ProxyBindConfig;
-  onToggleProxyLanAccess: (allowLan: boolean) => void;
   onExportConfig: () => void;
   onImportConfig: () => void;
   onValidateConfig: () => void;
@@ -41,16 +38,28 @@ export function OverviewPage({
 }) {
   const [wizardChannelId, setWizardChannelId] = React.useState("longcat");
   const [wizardApiKey, setWizardApiKey] = React.useState("");
+  const [bindConfig, setBindConfig] = React.useState<ProxyBindConfig>({ host: "127.0.0.1", port: 18640, allow_lan: false });
   const today = new Date().toISOString().slice(0, 10);
   const todayRows = usageRows.filter((r) => r.date === today);
   const todayRequests = todayRows.reduce((sum, r) => sum + r.request_count, 0);
   const todayTokens = todayRows.reduce((sum, r) => sum + r.known_tokens, 0);
   const todayCost = todayRows.reduce((sum, r) => sum + r.estimated_cost, 0);
   const needsSetup = !hasEnabledAccount || !hasEnabledRoute;
-  const listenAddress = status.bind_addr || `${proxyBindConfig.host}:${proxyBindConfig.port}`;
-  const [, listenPort = String(proxyBindConfig.port || 18640)] = listenAddress.split(":");
-  const endpointHost = "127.0.0.1";
-  const proxyBaseUrl = `http://${endpointHost}:${listenPort}`;
+
+  React.useEffect(() => {
+    runCommand<string>("read_config")
+      .then((json) => {
+        const parsed = JSON.parse(json);
+        if (parsed.bind) {
+          setBindConfig({ host: parsed.bind.host || "127.0.0.1", port: parsed.bind.port || 18640, allow_lan: parsed.bind.host === "0.0.0.0" });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const listenAddress = bindConfig.host === "0.0.0.0" ? `0.0.0.0:${bindConfig.port}` : `${bindConfig.host}:${bindConfig.port}`;
+  const endpointHost = bindConfig.host === "0.0.0.0" ? "<LAN-IP>" : "127.0.0.1";
+  const proxyBaseUrl = `http://${endpointHost}:${bindConfig.port}`;
 
   return (
     <>
@@ -94,22 +103,12 @@ export function OverviewPage({
       </Panel>
 
       <Panel className="compact">
-        <h3>当前阶段</h3>
-        <p>已建立 Channel / Account / Model 三层架构，支持 LongCat + DeepSeek 双渠道、OpenAI-compatible 与 Anthropic-compatible 双协议透明转发。</p>
-        <p>渠道: {status.channels} | 账号: {status.accounts} | 客户端: {status.clients} | 今日请求: {todayRequests} | Token: {todayTokens} | 成本: ${todayCost.toFixed(6)}</p>
-      </Panel>
-
-      <Panel className="compact">
         <PanelHeader><h3>系统设置</h3></PanelHeader>
         <label className="checkbox-label">
           <input type="checkbox" checked={autostartEnabled} onChange={onToggleAutostart} />
           开机自启动 Flowlet
         </label>
-        <label className="checkbox-label">
-          <input type="checkbox" checked={proxyBindConfig.allow_lan} onChange={(event) => onToggleProxyLanAccess(event.target.checked)} />
-          允许局域网设备访问代理
-        </label>
-        <p className="hint">当前监听: {listenAddress}。开启局域网访问后会监听 0.0.0.0；局域网设备接入时把 127.0.0.1 替换为本机内网 IP。请确保客户端 Token 已配置。</p>
+        <p className="hint">当前监听: {listenAddress}。是否允许局域网访问、端口等配置请编辑 config.json。</p>
       </Panel>
 
       <Panel className="compact">

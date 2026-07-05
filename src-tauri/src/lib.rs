@@ -326,17 +326,41 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     let rules = storage.list_route_rules().expect("读取路由规则失败");
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = rules.len(), "step: rules loaded");
 
-    let capture = storage
-        .get_app_meta("log_capture_config")
-        .unwrap_or_default()
-        .and_then(|json| serde_json::from_str::<LogCaptureConfig>(&json).ok())
-        .unwrap_or_default();
-    let bind_config = storage
-        .get_app_meta("proxy_bind_config")
-        .unwrap_or_default()
-        .and_then(|json| serde_json::from_str::<ProxyBindConfig>(&json).ok())
-        .unwrap_or_default()
-        .normalized();
+    // 从 config.json 顶层 log_capture 读取
+    let capture = if let Some(json_str) = core::proxy::read_config_raw(&config_path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            core::proxy::extract_log_capture(&value)
+        } else {
+            LogCaptureConfig::default()
+        }
+    } else {
+        LogCaptureConfig::default()
+    };
+    // 优先从 config.json 顶层 bind 读取；缺失时回退到 SQLite app_meta 旧配置
+    let bind_config = if let Some(json_str) = core::proxy::read_config_raw(&config_path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            if let Some(obj) = value.as_object() {
+                if let Some(bind) = obj.get("bind").and_then(|v| v.as_object()) {
+                    let host = bind
+                        .get("host")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("127.0.0.1")
+                        .to_string();
+                    let port = bind.get("port").and_then(|v| v.as_u64()).unwrap_or(18640) as u16;
+                    let allow_lan = host == "0.0.0.0";
+                    ProxyBindConfig { host, port, allow_lan }.normalized()
+                } else {
+                    load_bind_config_from_sqlite(&storage)
+                }
+            } else {
+                load_bind_config_from_sqlite(&storage)
+            }
+        } else {
+            load_bind_config_from_sqlite(&storage)
+        }
+    } else {
+        load_bind_config_from_sqlite(&storage)
+    };
 
     let state = AppState {
         proxy: ProxyController::default(),
@@ -356,6 +380,15 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     };
     tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "build_app_state 全部完成");
     state
+}
+
+fn load_bind_config_from_sqlite(storage: &Storage) -> ProxyBindConfig {
+    storage
+        .get_app_meta("proxy_bind_config")
+        .unwrap_or_default()
+        .and_then(|json| serde_json::from_str::<ProxyBindConfig>(&json).ok())
+        .unwrap_or_default()
+        .normalized()
 }
 
 /// 数据库路径：始终放在 exe 同级目录下，与程序完全自包含。

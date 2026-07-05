@@ -722,18 +722,26 @@ async fn model_list_response_exposes_enabled_route_models() {
         ChannelAccount {
             id: "acc-enabled".to_string(),
             name: "LongCat 主账号".to_string(),
+            channel_id: "longcat".to_string(),
             enabled: true,
             ..Default::default()
         },
         ChannelAccount {
             id: "acc-disabled".to_string(),
             name: "disabled".to_string(),
+            channel_id: "longcat".to_string(),
             enabled: false,
             ..Default::default()
         },
     ];
+    let channels = vec![ChannelPreset {
+        id: "longcat".to_string(),
+        name: "LongCat".to_string(),
+        vendor: "longcat".to_string(),
+        ..Default::default()
+    }];
 
-    let response = build_model_list_response(&routes, &accounts, &ProtocolType::OpenAi);
+    let response = build_model_list_response(&routes, &accounts, &channels, &ProtocolType::OpenAi);
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -756,10 +764,10 @@ async fn model_list_response_exposes_enabled_route_models() {
         .collect();
     assert_eq!(ids, vec!["auto"]);
 
-    // owned_by 应取 account name，而不是 hardcode "flowlet"
+    // owned_by 应取 channel vendor（不暴露用户 account name）
     let first = &value["data"][0];
     assert_eq!(first["object"], "model");
-    assert_eq!(first["owned_by"], "LongCat 主账号");
+    assert_eq!(first["owned_by"], "longcat");
 }
 
 #[tokio::test]
@@ -793,11 +801,18 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
     let accounts = vec![ChannelAccount {
         id: "acc-anthropic".to_string(),
         name: "Anthropic Official".to_string(),
+        channel_id: "anthropic".to_string(),
         enabled: true,
         ..Default::default()
     }];
+    let channels = vec![ChannelPreset {
+        id: "anthropic".to_string(),
+        name: "Anthropic".to_string(),
+        vendor: "anthropic".to_string(),
+        ..Default::default()
+    }];
 
-    let response = build_model_list_response(&routes, &accounts, &ProtocolType::Anthropic);
+    let response = build_model_list_response(&routes, &accounts, &channels, &ProtocolType::Anthropic);
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)

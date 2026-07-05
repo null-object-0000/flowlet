@@ -1,6 +1,6 @@
 import React from "react";
 import { Actions, Panel, PanelHeader } from "../components/ui";
-import { AccountStatsRow, LogCaptureConfig } from "../domain";
+import { AccountStatsRow } from "../domain";
 
 const KB = 1024;
 
@@ -10,77 +10,15 @@ export function StatsPage({
   routingScores,
   getAccountName,
   getChannelName,
-  logCaptureConfig,
-  onSaveLogCaptureConfig,
 }: {
   rows: AccountStatsRow[];
   onRefresh: () => void;
   routingScores: Array<[string, string, number, number, number]>;
   getAccountName: (accountId: string) => string;
   getChannelName: (channelId: string) => string;
-  logCaptureConfig: LogCaptureConfig | null;
-  onSaveLogCaptureConfig: (next: LogCaptureConfig) => void;
 }) {
-  const cfg = logCaptureConfig ?? {
-    capture_req_headers: true,
-    capture_req_body: true,
-    capture_res_headers: true,
-    capture_res_body: true,
-    stream_summary_max_bytes: 16 * KB,
-    max_body_bytes: KB * KB,
-  };
-
-  const set = <K extends keyof LogCaptureConfig>(key: K, value: LogCaptureConfig[K]) => {
-    onSaveLogCaptureConfig({ ...cfg, [key]: value });
-  };
-
   return (
     <>
-      <Panel>
-        <PanelHeader>
-          <h3>日志记录</h3>
-          <Actions>
-            <span className="muted">设置生效需要重启代理</span>
-          </Actions>
-        </PanelHeader>
-        <p className="hint">控制请求日志中是否捕获 Headers / Body，以及最大捕获体积。敏感 Header（Authorization、x-api-key 等）会自动脱敏为 <code>[redacted]</code>。</p>
-        <div className="capture-settings">
-          <Checkbox
-            label="捕获请求 Headers"
-            checked={cfg.capture_req_headers}
-            onChange={(v) => set("capture_req_headers", v)}
-          />
-          <Checkbox
-            label="捕获请求 Body"
-            checked={cfg.capture_req_body}
-            onChange={(v) => set("capture_req_body", v)}
-          />
-          < KilobytesInput
-            label="请求 Body 上限"
-            value={Math.max(1, Math.floor(cfg.max_body_bytes / KB))}
-            onChange={(v) => set("max_body_bytes", v * KB)}
-          />
-          <Checkbox
-            label="捕获响应 Headers"
-            checked={cfg.capture_res_headers}
-            onChange={(v) => set("capture_res_headers", v)}
-          />
-          <Checkbox
-            label="捕获响应 Body"
-            checked={cfg.capture_res_body}
-            onChange={(v) => set("capture_res_body", v)}
-          />
-          <KilobytesInput
-            label="响应 Body / 流式摘要上限"
-            value={Math.max(1, Math.floor(cfg.stream_summary_max_bytes / KB))}
-            onChange={(v) => set("stream_summary_max_bytes", v * KB)}
-          />
-        </div>
-        <ul className="muted" style={{ marginTop: 8, paddingLeft: 18 }}>
-          <li>流式请求（SSE）仅记录首尾片段摘要与最多前 N 字节。</li>
-          <li>记录过的请求日志不受影响：本次设置仅对后续新请求生效。</li>
-        </ul>
-      </Panel>
       <Panel>
         <PanelHeader>
           <h3>账号成本与稳定性统计</h3>
@@ -88,6 +26,9 @@ export function StatsPage({
             <button onClick={() => void onRefresh()}>刷新</button>
           </Actions>
         </PanelHeader>
+        <p className="hint">
+          日志捕获配置（Headers / Body / 脱敏 / 体积上限）已移至 <code>config.json</code>，可直接用编辑器修改。
+        </p>
         <div className="table-wrap">
           <table>
             <thead>
@@ -174,53 +115,5 @@ export function StatsPage({
         )}
       </Panel>
     </>
-  );
-}
-
-function Checkbox({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="checkbox-label">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      {label}
-    </label>
-  );
-}
-
-function KilobytesInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="kb-input">
-      <span>{label} (KB)</span>
-      <div className="kb-input-row">
-        <input
-          type="number"
-          min={1}
-          value={value}
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            if (!Number.isNaN(n) && n >= 1) onChange(n);
-          }}
-        />
-      </div>
-    </label>
   );
 }

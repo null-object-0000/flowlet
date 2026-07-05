@@ -43,8 +43,10 @@ const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
 
 #[path = "proxy_http.rs"]
 mod proxy_http;
+// Re-export 给 lib.rs 用（proxy_http mod 本身是私有的，需要手动暴露）
+pub use proxy_http::extract_log_capture;
 
-// 暴露给 commands.rs 调用（config.json 读写）
+// config.json 读写 — 暴露给 commands.rs / lib.rs 调用
 pub fn read_config_raw(path: &std::path::Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
@@ -58,6 +60,7 @@ pub fn write_config_raw(path: &std::path::Path, content: &str) -> Result<(), Str
     std::fs::write(path, content).map_err(|e| format!("写入失败: {e}"))?;
     Ok(())
 }
+
 #[path = "proxy_routing.rs"]
 mod proxy_routing;
 
@@ -361,7 +364,12 @@ async fn forward_request(
     let scores = state.shared.scores.lock().unwrap().clone();
 
     if is_model_list_request(&parts.method, &path) {
-        return Ok(build_model_list_response(&routes, &accounts, &detected_protocol));
+        return Ok(build_model_list_response(
+            &routes,
+            &accounts,
+            &channels,
+            &detected_protocol,
+        ));
     }
 
     let public_model = extract_model(&body_bytes, &detected_protocol);
@@ -451,7 +459,12 @@ async fn forward_request(
 
     // 循环外一次性捕获请求级 head/body，各候选共享
     let req_headers_json = if state.capture.capture_req_headers {
-        Some(sanitize_headers(&parts.headers, LogCaptureConfig::redacted_header_keys()).to_string())
+        let keys = if state.capture.redact_sensitive_headers {
+            LogCaptureConfig::redacted_header_keys()
+        } else {
+            &[]
+        };
+        Some(sanitize_headers(&parts.headers, keys).to_string())
     } else {
         None
     };
@@ -590,10 +603,12 @@ async fn forward_request(
 
                     // 非 2xx 不会 fallback 的 buffered 分支
                     let res_headers_json = if state.capture.capture_res_headers {
-                        Some(
-                            sanitize_headers(&headers, LogCaptureConfig::redacted_header_keys())
-                                .to_string(),
-                        )
+                        let keys = if state.capture.redact_sensitive_headers {
+                            LogCaptureConfig::redacted_header_keys()
+                        } else {
+                            &[]
+                        };
+                        Some(sanitize_headers(&headers, keys).to_string())
                     } else {
                         None
                     };
@@ -846,7 +861,12 @@ async fn build_response(
     let is_stream = is_streaming_response(&headers);
 
     let res_headers_json = if capture.capture_res_headers {
-        Some(sanitize_headers(&headers, LogCaptureConfig::redacted_header_keys()).to_string())
+        let keys = if capture.redact_sensitive_headers {
+            LogCaptureConfig::redacted_header_keys()
+        } else {
+            &[]
+        };
+        Some(sanitize_headers(&headers, keys).to_string())
     } else {
         None
     };

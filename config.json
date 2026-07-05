@@ -12,5 +12,18 @@
       "name": "Claude Code",
       "enabled": true
     }
-  ]
+  ],
+  "log_capture": {
+    "capture_req_headers": true,
+    "capture_req_body": true,
+    "capture_res_headers": true,
+    "capture_res_body": true,
+    "stream_summary_max_bytes": 16384,
+    "max_body_bytes": 1048576,
+    "redact_sensitive_headers": false
+  },
+  "bind": {
+    "host": "127.0.0.1",
+    "port": 18640
+  }
 }

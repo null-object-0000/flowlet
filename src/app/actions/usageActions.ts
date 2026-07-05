@@ -1,5 +1,8 @@
 import {
   LogCaptureConfig,
+  LogFilter,
+  LogMeta,
+  LogPage,
   ModelPrice,
   RequestLogRow,
   UsageSummaryRow,
@@ -15,6 +18,7 @@ export function createUsageActions({ data, setMessage }: ActionContext) {
     setPrices,
     setUsageRows,
     setRequestLogs,
+    setLogMeta,
     setLogDetail,
     setLogCaptureConfig,
     logCaptureConfig,
@@ -32,9 +36,25 @@ export function createUsageActions({ data, setMessage }: ActionContext) {
     setUsageRows(rows);
   }
 
-  async function refreshLogs() {
-    const rows = await runCommand<RequestLogRow[]>("list_request_logs");
-    setRequestLogs(rows);
+  async function refreshLogs(filter?: LogFilter) {
+    const f = filter ?? { page: 1, pageSize: 50, status: "all", client: "", channel: "", search: "" };
+    const page = await runCommand<LogPage>("list_request_logs", {
+      filter: {
+        page: f.page,
+        page_size: f.pageSize,
+        status: f.status,
+        client_id: f.client,
+        channel_id: f.channel,
+        search: f.search,
+      },
+    });
+    setRequestLogs(page.rows);
+    setLogMeta({
+      total: page.total,
+      page: page.page,
+      pageSize: page.pageSize,
+      lastFetchedAt: Date.now(),
+    });
   }
 
   async function fetchLogDetail(requestId: string) {
@@ -84,6 +104,7 @@ export function createUsageActions({ data, setMessage }: ActionContext) {
     savePrices,
     refreshUsage,
     refreshLogs,
+    refreshLogsWithFilter: refreshLogs,
     analyzeUsage,
     addPrice,
     updatePrice,

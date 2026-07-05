@@ -1,7 +1,7 @@
 use super::{Storage, StorageError};
 use crate::core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, RequestLogInput, RequestLogRow, UsageRecordInput,
-    UsageSummaryRow,
+    AccountBalanceSnapshot, AccountStatsRow, LogsFilter, LogsPageResult, RequestLogInput,
+    RequestLogRow, UsageRecordInput, UsageSummaryRow,
 };
 use rusqlite::params;
 
@@ -443,28 +443,46 @@ impl Storage {    pub fn save_balance_snapshot(
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
+        // 成本在 upsert 当场算掉，避免每次请求都全表 recalc（O(n·m) → O(1)）。
+        // 仅在 model_prices 有匹配价格时写 estimated_cost，否则留 NULL 稍后由
+        // recalculate_usage_costs()（analyze_usage 触发）统一填补。
+        let estimated_cost_expr = r#"
+            (
+                SELECT
+                    coalesce(?14, ?12, 0) * mp.input_uncached_price  / 1000000.0
+                  + coalesce(?13, 0)     * mp.input_cached_price    / 1000000.0
+                  + coalesce(?15, 0)     * mp.output_price          / 1000000.0
+                FROM model_prices mp
+                WHERE mp.channel_id = ?4 AND mp.upstream_model = ?11
+                LIMIT 1
+            )
+        "#;
+
         let updated = connection.execute(
-            r#"
-            UPDATE usage_records
-            SET
-                client_id = ?2,
-                client_name = ?3,
-                channel_id = ?4,
-                channel_name = ?5,
-                account_id = ?6,
-                account_name = ?7,
-                client_protocol = ?8,
-                upstream_protocol = ?9,
-                virtual_model = ?10,
-                upstream_model = ?11,
-                input_tokens = ?12,
-                input_cached_tokens = ?13,
-                input_uncached_tokens = ?14,
-                output_tokens = ?15,
-                total_tokens = ?16,
-                analyzed_at = datetime('now')
-            WHERE request_id = ?1
-            "#,
+            &format!(
+                r#"
+                UPDATE usage_records
+                SET
+                    client_id = ?2,
+                    client_name = ?3,
+                    channel_id = ?4,
+                    channel_name = ?5,
+                    account_id = ?6,
+                    account_name = ?7,
+                    client_protocol = ?8,
+                    upstream_protocol = ?9,
+                    virtual_model = ?10,
+                    upstream_model = ?11,
+                    input_tokens = ?12,
+                    input_cached_tokens = ?13,
+                    input_uncached_tokens = ?14,
+                    output_tokens = ?15,
+                    total_tokens = ?16,
+                    estimated_cost = {estimated_cost_expr},
+                    analyzed_at = datetime('now')
+                WHERE request_id = ?1
+                "#,
+            ),
             params![
                 usage.request_id,
                 usage.client_id,
@@ -487,17 +505,22 @@ impl Storage {    pub fn save_balance_snapshot(
 
         if updated == 0 {
             connection.execute(
-                r#"
-                INSERT INTO usage_records (
-                    id, request_id, client_id, client_name, channel_id, channel_name,
-                    account_id, account_name, client_protocol, upstream_protocol,
-                    virtual_model, upstream_model, input_tokens, input_cached_tokens,
-                    input_uncached_tokens, output_tokens, total_tokens, estimated_cost, analyzed_at, created_at
-                ) VALUES (
-                    lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                    ?10, ?11, ?12, ?13, ?14, ?15, ?16, NULL, datetime('now'), datetime('now')
-                )
-                "#,
+                &format!(
+                    r#"
+                    INSERT INTO usage_records (
+                        id, request_id, client_id, client_name, channel_id, channel_name,
+                        account_id, account_name, client_protocol, upstream_protocol,
+                        virtual_model, upstream_model, input_tokens, input_cached_tokens,
+                        input_uncached_tokens, output_tokens, total_tokens,
+                        estimated_cost, analyzed_at, created_at
+                    ) VALUES (
+                        lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                        {estimated_cost_expr},
+                        datetime('now'), datetime('now')
+                    )
+                    "#,
+                ),
                 params![
                     usage.request_id,
                     usage.client_id,
@@ -519,8 +542,6 @@ impl Storage {    pub fn save_balance_snapshot(
             )?;
         }
 
-        drop(connection);
-        self.recalculate_usage_costs()?;
         Ok(())
     }
 
@@ -727,6 +748,173 @@ impl Storage {    pub fn save_balance_snapshot(
             results.push(row?);
         }
         Ok(results)
+    }
+
+    /// 分页 + 筛选查询请求日志（仅最后一条尝试记录）。返回分页结果 + 总数。
+    ///
+    /// 注意：列表查询有意排除 `req_headers_json` / `req_body_b64` / `res_headers_json` / `res_body_b64`
+    /// 四个大字段（单条最多 1MB+），避免首次加载数百毫秒 ～ 数秒的卡顿。这些大字段仅在详情抽屉
+    /// 通过 `list_request_logs_by_request_id` 单独拉取。
+    pub fn list_request_logs_page(&self, filter: LogsFilter) -> Result<LogsPageResult, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+
+        let page = filter.page.max(1);
+        let page_size = filter.page_size.clamp(10, 200);
+
+        // 收集筛选条件 + 查询参数（用 Vec<&dyn ToSql> 避免 Clone 问题）
+        let mut raw_params: Vec<String> = Vec::new(); // 持有字符串生命周期（LIKE）
+        let mut refs: Vec<&(dyn rusqlite::ToSql)> = Vec::new();
+
+        let status_clause = match filter.status.as_str() {
+            "success" => Some("(status >= 200 AND status < 400)"),
+            "error" => Some("(status IS NULL OR status >= 400 OR error_message IS NOT NULL)"),
+            _ => None,
+        };
+
+        let client_clause = if filter.client_id.is_empty() {
+            None
+        } else {
+            refs.push(&filter.client_id);
+            Some("client_id = ?")
+        };
+
+        let channel_clause = if filter.channel_id.is_empty() {
+            None
+        } else {
+            refs.push(&filter.channel_id);
+            Some("channel_id = ?")
+        };
+
+        let search_clause = if filter.search.is_empty() {
+            None
+        } else {
+            let like = format!("%{}%", filter.search);
+            raw_params.push(like.clone()); // LIKE for path
+            raw_params.push(filter.search.clone()); // exact request_id
+            raw_params.push(like.clone()); // LIKE for error_message
+            let base = raw_params.len() - 3;
+            refs.push(&raw_params[base]);
+            refs.push(&raw_params[base + 1]);
+            refs.push(&raw_params[base + 2]);
+            Some("(path LIKE ? OR request_id = ? OR error_message LIKE ?)")
+        };
+
+        let mut clauses: Vec<&str> = vec!["is_last_attempt = 1"];
+        if let Some(c) = status_clause {
+            clauses.push(c);
+        }
+        if let Some(c) = client_clause {
+            clauses.push(c);
+        }
+        if let Some(c) = channel_clause {
+            clauses.push(c);
+        }
+        if let Some(c) = search_clause {
+            clauses.push(c);
+        }
+
+        let where_sql = format!("WHERE {}", clauses.join(" AND "));
+
+        // COUNT
+        let count_sql = format!("SELECT COUNT(*) FROM request_logs {where_sql}");
+        let count_start = std::time::Instant::now();
+        let total: i64 =
+            connection.query_row(&count_sql, rusqlite::params_from_iter(refs.iter()), |row| {
+                row.get(0)
+            })?;
+        let count_ms = count_start.elapsed().as_millis();
+        if count_ms > 200 {
+            tracing::warn!(count_ms, total, "request_logs COUNT 慢查询");
+        }
+
+        // 分页查询
+        let offset = (page as i64 - 1) * page_size as i64;
+        let page_psize = page_size as i64;
+
+        let list_sql = format!(
+            r#"
+            SELECT
+                id, request_id, client_id, client_name, channel_id, channel_name,
+                account_id, account_name, client_protocol, upstream_protocol,
+                virtual_model, public_model, upstream_model, request_type, method, path,
+                status, latency_ms, is_stream, error_message, fallback_count,
+                route_reason, created_at,
+                ttfb_ms, duration_ms, attempt_seq,
+                stream_summary, is_last_attempt
+            FROM request_logs
+            {where_sql}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            "#,
+        );
+
+        let mut stmt = connection.prepare(&list_sql)?;
+
+        // 追加 LIMIT/OFFSET
+        let mut list_refs = refs.clone();
+        list_refs.push(&page_psize);
+        list_refs.push(&offset);
+
+        let list_start = std::time::Instant::now();
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(list_refs.iter()),
+            |row| {
+                Ok(RequestLogRow {
+                    id: row.get(0)?,
+                    request_id: row.get(1)?,
+                    client_id: row.get(2)?,
+                    client_name: row.get(3)?,
+                    channel_id: row.get(4)?,
+                    channel_name: row.get(5)?,
+                    account_id: row.get(6)?,
+                    account_name: row.get(7)?,
+                    client_protocol: row.get(8)?,
+                    upstream_protocol: row.get(9)?,
+                    virtual_model: row.get(10)?,
+                    public_model: row.get(11)?,
+                    upstream_model: row.get(12)?,
+                    request_type: row.get(13)?,
+                    method: row.get(14)?,
+                    path: row.get(15)?,
+                    status: row.get(16)?,
+                    latency_ms: row.get(17)?,
+                    is_stream: row.get::<_, i64>(18)? != 0,
+                    error_message: row.get(19)?,
+                    fallback_count: row.get(20)?,
+                    route_reason: row.get(21)?,
+                    created_at: row.get(22)?,
+                    ttfb_ms: row.get(23)?,
+                    duration_ms: row.get(24)?,
+                    attempt_seq: row.get(25)?,
+                    // 列表不拉四个大字段 — 详情抽屉用 list_request_logs_by_request_id 单独拉
+                    req_headers_json: None,
+                    req_body_b64: None,
+                    res_headers_json: None,
+                    res_body_b64: None,
+                    stream_summary: row.get(26)?,
+                    is_last_attempt: row.get::<_, i64>(27)? != 0,
+                })
+            },
+        )?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        let list_ms = list_start.elapsed().as_millis();
+        if list_ms > 500 {
+            tracing::warn!(list_ms, row_count = results.len(), "request_logs 分页查询慢");
+        }
+
+        Ok(LogsPageResult {
+            rows: results,
+            total,
+            page,
+            page_size,
+        })
     }
 }
 

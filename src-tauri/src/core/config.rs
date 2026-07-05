@@ -618,6 +618,32 @@ pub struct RequestLogRow {
     pub is_last_attempt: bool,
 }
 
+// ─── Request Log Page (paginated + filtered) ─────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LogsFilter {
+    /// 1-based 页码
+    pub page: u32,
+    /// 每页条数（建议 25 / 50 / 100）
+    pub page_size: u32,
+    /// 状态筛选: "all" | "success" (2xx/3xx) | "error" (4xx/5xx/无状态码/有错误)
+    pub status: String,
+    /// 客户端 ID 筛选（空串 = 不过滤）
+    pub client_id: String,
+    /// 渠道 ID 筛选（空串 = 不过滤）
+    pub channel_id: String,
+    /// 路径 / request_id / error_message 模糊搜索
+    pub search: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LogsPageResult {
+    pub rows: Vec<RequestLogRow>,
+    pub total: i64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
 // ─── Usage Record Row ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

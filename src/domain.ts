@@ -142,6 +142,29 @@ export type RequestLogRow = {
   is_last_attempt: boolean;
 };
 
+export type LogFilter = {
+  page: number;        // 1-based
+  pageSize: number;
+  status: "all" | "success" | "error";
+  client: string;      // "" = 不过滤
+  channel: string;     // "" = 不过滤
+  search: string;      // 模糊匹配 path / request_id / error_message
+};
+
+export type LogPage = {
+  rows: RequestLogRow[];
+  total: number;
+  page: number;        // 1-based
+  pageSize: number;
+};
+
+export type LogMeta = {
+  total: number;
+  page: number;
+  pageSize: number;
+  lastFetchedAt: number; // 用于判断是否脏
+};
+
 export type LogCaptureConfig = {
   capture_req_headers: boolean;
   capture_req_body: boolean;

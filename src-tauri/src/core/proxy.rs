@@ -43,12 +43,27 @@ const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
 
 #[path = "proxy_http.rs"]
 mod proxy_http;
+
+// 暴露给 commands.rs 调用（config.json 读写）
+pub fn read_config_raw(path: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(path).ok()
+}
+
+pub fn write_config_raw(path: &std::path::Path, content: &str) -> Result<(), String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(content).map_err(|e| format!("JSON 解析失败: {e}"))?;
+    if !(parsed.is_object() || parsed.is_array()) {
+        return Err("config.json 顶层必须是对象或数组".to_string());
+    }
+    std::fs::write(path, content).map_err(|e| format!("写入失败: {e}"))?;
+    Ok(())
+}
 #[path = "proxy_routing.rs"]
 mod proxy_routing;
 
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
-    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_ua_rules_file,
+    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file as ensure_ua_rules_file,
     extract_model, identify_client, identify_client_by_ua, is_model_list_request,
     is_streaming_response, load_ua_rules, rewrite_model, sanitize_headers,
 };
@@ -111,8 +126,8 @@ struct ProxyAppState {
     pub upstream_timeout_seconds: u64,
     pub rate_limiter: RateLimiter,
     pub capture: LogCaptureConfig,
-    /// 本地 UA 客户端规则 JSON 文件路径，每次请求热读
-    pub ua_rules_path: std::path::PathBuf,
+    /// 本地 config.json 文件路径，每次请求热读 UA rules 用
+    pub config_path: std::path::PathBuf,
 }
 
 
@@ -122,7 +137,7 @@ impl ProxyController {
         shared: ProxySharedConfig,
         storage: Storage,
         upstream_timeout_seconds: u64,
-        ua_rules_path: std::path::PathBuf,
+        config_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
         self.start_with_bind(
             shared,
@@ -131,7 +146,7 @@ impl ProxyController {
             LogCaptureConfig::default(),
             DEFAULT_BIND_ADDR,
             RateLimiter::new(600), // 默认 600 请求/分钟
-            ua_rules_path,
+            config_path,
         )
         .await
     }
@@ -142,7 +157,7 @@ impl ProxyController {
         storage: Storage,
         upstream_timeout_seconds: u64,
         capture: LogCaptureConfig,
-        ua_rules_path: std::path::PathBuf,
+        config_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
         self.start_with_bind(
             shared,
@@ -151,7 +166,7 @@ impl ProxyController {
             capture,
             DEFAULT_BIND_ADDR,
             RateLimiter::new(600),
-            ua_rules_path,
+            config_path,
         )
         .await
     }
@@ -165,7 +180,7 @@ impl ProxyController {
         capture: LogCaptureConfig,
         bind_addr_str: &str,
         rate_limiter: RateLimiter,
-        ua_rules_path: std::path::PathBuf,
+        config_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
         // 启动时做一次基本校验：至少有一个渠道
         let channels_guard = shared
@@ -196,8 +211,8 @@ impl ProxyController {
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|err| ProxyError::StartFailed(err.to_string()))?;
 
-        // 首次启动时写入默认 UA 规则文件（OpenCode），用户可直接编辑
-        ensure_ua_rules_file(&ua_rules_path);
+        // 首次启动时写入默认 config.json（UA 识别规则），用户可直接编辑
+        ensure_ua_rules_file(&config_path);
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         runtime.bind_addr = bind_addr_str.to_string();
@@ -219,7 +234,7 @@ impl ProxyController {
                 upstream_timeout_seconds,
                 rate_limiter,
                 capture,
-                ua_rules_path,
+                config_path,
             });
 
         tokio::spawn(async move {
@@ -355,8 +370,8 @@ async fn forward_request(
     let token_client = identify_client(&parts.headers, &clients_shared);
     let token_client_id = token_client.as_ref().map(|(id, _)| id.clone());
 
-    // 客户端身份：仅由本地 ua_rules.json 决定，与 token 解耦；不命中即"未知"，不降级
-    let ua_rules = load_ua_rules(&state.ua_rules_path);
+    // 客户端身份：仅由本地 config.json 决定，与 token 解耦；不命中即"未知"，不降级
+    let ua_rules = load_ua_rules(&state.config_path);
     let (client_id, client_name) = match identify_client_by_ua(&parts.headers, &ua_rules) {
         Some((id, name)) => (Some(id), Some(name)),
         None => (None, Some("未知".to_string()))

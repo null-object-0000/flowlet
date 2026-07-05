@@ -7,6 +7,7 @@ import {
   ChannelPreset,
   ClientConfig,
   LogCaptureConfig,
+  LogMeta,
   ModelPrice,
   ProxyBindConfig,
   ProxyStatus,
@@ -28,6 +29,12 @@ export function useFlowletData() {
   const [virtualModels, setVirtualModels] = React.useState<VirtualModel[]>([]);
   const [usageRows, setUsageRows] = React.useState<UsageSummaryRow[]>([]);
   const [requestLogs, setRequestLogs] = React.useState<RequestLogRow[]>([]);
+  const [logMeta, setLogMeta] = React.useState<LogMeta>({
+    total: 0,
+    page: 1,
+    pageSize: 50,
+    lastFetchedAt: 0,
+  });
   const [logDetail, setLogDetail] = React.useState<RequestLogRow[] | null>(null);
   const [logCaptureConfig, setLogCaptureConfig] = React.useState<LogCaptureConfig | null>(null);
   const [balanceSnapshots, setBalanceSnapshots] = React.useState<AccountBalanceSnapshot[]>([]);
@@ -61,7 +68,13 @@ export function useFlowletData() {
     setLogCaptureConfig(cfg);
   }, []);
 
+  // 并发防护 token。用「最新版本号」避免老请求覆盖新请求的结果。
+  // 在 React 18 + Tauri 的 mount 阶段时有概率因 StrictMode 或重连触发两次 refreshAll，
+  // 不加防护会导致 race condition：后发的请求先回、先发请求后回时覆盖 => 用户刚加的 account 行消失。
+  const refreshTokenRef = React.useRef(0);
+
   const refreshAll = React.useCallback(async () => {
+    const token = ++refreshTokenRef.current;
     const [ch, ac, ro, cl, pr, cm, vm, usage, logs, snapshots, stats, rules, scores, db] = await Promise.all([
       runCommand<ChannelPreset[]>("list_channel_presets").catch(() => [] as ChannelPreset[]),
       runCommand<ChannelAccount[]>("list_channel_accounts").catch(() => [] as ChannelAccount[]),
@@ -71,7 +84,12 @@ export function useFlowletData() {
       runCommand<ChannelModel[]>("list_channel_models").catch(() => [] as ChannelModel[]),
       runCommand<VirtualModel[]>("list_virtual_models").catch(() => [] as VirtualModel[]),
       runCommand<UsageSummaryRow[]>("usage_summary").catch(() => [] as UsageSummaryRow[]),
-      runCommand<RequestLogRow[]>("list_request_logs").catch(() => [] as RequestLogRow[]),
+      runCommand<{ rows: RequestLogRow[]; total: number; page: number; pageSize: number }>(
+        "list_request_logs",
+        {
+          filter: { page: 1, pageSize: 50, status: "all", clientId: "", channelId: "", search: "" },
+        }
+      ).catch(() => ({ rows: [], total: 0, page: 1, pageSize: 50 })),
       runCommand<AccountBalanceSnapshot[]>("latest_balance_snapshots").catch(
         () => [] as AccountBalanceSnapshot[]
       ),
@@ -82,6 +100,9 @@ export function useFlowletData() {
       ),
       runCommand<[number, number, number]>("db_stats").catch(() => [0, 0, 0] as [number, number, number]),
     ]);
+
+    // 已有更新的 refreshAll 发起 => 丢弃本次过期结果
+    if (token !== refreshTokenRef.current) return;
 
     runCommand<boolean>("is_autostart_enabled")
       .then(setAutostartEnabled)
@@ -98,7 +119,13 @@ export function useFlowletData() {
     setChannelModels(cm);
     setVirtualModels(vm);
     setUsageRows(usage);
-    setRequestLogs(logs);
+    setRequestLogs(logs.rows);
+    setLogMeta({
+      total: logs.total,
+      page: logs.page,
+      pageSize: logs.pageSize,
+      lastFetchedAt: Date.now(),
+    });
     setBalanceSnapshots(snapshots);
     setAccountStats(stats);
     setRouteRules(rules);
@@ -123,6 +150,8 @@ export function useFlowletData() {
     setUsageRows,
     requestLogs,
     setRequestLogs,
+    logMeta,
+    setLogMeta,
     logDetail,
     setLogDetail,
     logCaptureConfig,

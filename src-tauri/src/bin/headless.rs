@@ -67,9 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rules: Arc::new(Mutex::new(rules)),
         scores: Arc::new(Mutex::new(scores)),
     };
-    let ua_rules_path = std::env::current_dir()
+    let config_path = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("ua_rules.json");
+        .join("config.json");
     proxy
         .start_with_bind(
             shared,
@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             LogCaptureConfig::default(),
             &bind_addr,
             rate_limiter,
-            ua_rules_path,
+            config_path,
         )
         .await?;
 

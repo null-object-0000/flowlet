@@ -33,7 +33,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "src/core/ua_rules.json"
+      "../config.json"
     ]
   }
 }

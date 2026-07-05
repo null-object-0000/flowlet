@@ -319,6 +319,20 @@ pub(super) fn identify_client(headers: &HeaderMap, clients: &[ClientConfig]) -> 
     None
 }
 
+/// 从 config.json 加载时只要 ua_rules 数组。
+/// config.json 顶层既可以是 { "ua_rules": [...] }（新格式），也可以是旧格式的 [...]。
+fn extract_ua_rules(value: serde_json::Value) -> Vec<UaClientRule> {
+    if let Some(arr) = value.as_array() {
+        return serde_json::from_value::<Vec<UaClientRule>>(serde_json::Value::Array(arr.to_vec()))
+            .unwrap_or_default();
+    }
+    if let Some(arr) = value.pointer("/ua_rules").and_then(|v| v.as_array()) {
+        return serde_json::from_value::<Vec<UaClientRule>>(serde_json::Value::Array(arr.to_vec()))
+            .unwrap_or_default();
+    }
+    Vec::new()
+}
+
 /// 通过请求 User-Agent 子串匹配独立的客户端身份规则。
 ///
 /// 与鉴权 token 无关，仅决定日志/用量中的客户端归属。返回命中的
@@ -334,65 +348,67 @@ pub(super) fn identify_client_by_ua(
         .map(|r| (r.id.clone(), r.name.clone()))
 }
 
-/// 候选的默认 UA 规则 JSON 资源路径（打包时作为资源文件分发，不在二进制内）。
-/// 顺序：可执行文件同级 → macOS Resources/ → 当前工作目录 → src-tauri 源码目录。
-fn candidate_default_ua_rules_paths() -> Vec<std::path::PathBuf> {
+/// config.json 候选路径（打包时作为资源文件分发，不在二进制内）。
+/// 顺序：可执行文件同级 → macOS Resources/ → 当前工作目录 → 项目根目录。
+fn candidate_config_paths() -> Vec<std::path::PathBuf> {
     let mut candidates = Vec::new();
 
     // 1) 可执行文件同级目录（Windows/Linux 打包 / headless）
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join("ua_rules.json"));
-            // macOS 打包：../Resources/ua_rules.json
+            candidates.push(exe_dir.join("config.json"));
+            // macOS 打包：../Resources/config.json
             if let Some(resources) = exe_dir.parent().map(|p| p.join("Resources")) {
-                candidates.push(resources.join("ua_rules.json"));
+                candidates.push(resources.join("config.json"));
             }
         }
     }
 
     // 2) 当前工作目录（headless 直接启动 / 部分开发场景）
     if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("ua_rules.json"));
-        // 3) 开发模式：项目根目录下运行 `cargo tauri dev`
-        candidates.push(cwd.join("src-tauri").join("src").join("core").join("ua_rules.json"));
+        candidates.push(cwd.join("config.json"));
+        // 3) 开发模式：项目根目录
+        candidates.push(cwd.join("config.json"));
     }
 
     candidates
 }
 
-/// 硬编码的最后保底规则（仅在打包资源也找不到时使用）。
-/// 与 `src-tauri/src/core/ua_rules.json` 保持同步。
-const FALLBACK_UA_RULES_JSON: &str = r#"[
-  {
-    "id": "opencode",
-    "pattern": "opencode/",
-    "name": "OpenCode",
-    "enabled": true
-  },
-  {
-    "id": "claude-code",
-    "pattern": "claude-cli/",
-    "name": "Claude Code",
-    "enabled": true
-  }
-]"#;
+/// 硬编码的最后保底 config（仅在打包资源也找不到时使用）。
+/// 与项目根目录 `config.json` 保持同步。
+const FALLBACK_CONFIG_JSON: &str = r#"{
+  "ua_rules": [
+    {
+      "id": "opencode",
+      "pattern": "opencode/",
+      "name": "OpenCode",
+      "enabled": true
+    },
+    {
+      "id": "claude-code",
+      "pattern": "claude-cli/",
+      "name": "Claude Code",
+      "enabled": true
+    }
+  ]
+}"#;
 
-/// 加载默认 UA 规则 JSON 内容。依次尝试候选路径，全部失败时回退到硬编码内容。
-fn load_default_ua_rules_json() -> Option<String> {
-    for path in candidate_default_ua_rules_paths() {
+/// 加载默认 config JSON 内容。依次尝试候选路径，全部失败时回退到硬编码内容。
+fn load_default_config_json() -> Option<String> {
+    for path in candidate_config_paths() {
         if let Ok(content) = std::fs::read_to_string(&path) {
             return Some(content);
         }
     }
-    Some(FALLBACK_UA_RULES_JSON.to_string())
+    Some(FALLBACK_CONFIG_JSON.to_string())
 }
 
-/// 确保 UA 规则文件存在：若不存在则从打包资源写入默认内容。
-pub(super) fn ensure_ua_rules_file(path: &std::path::Path) {
+/// 确保 config.json 存在：若不存在则从打包资源写入默认内容。
+pub(super) fn ensure_config_file(path: &std::path::Path) {
     if path.exists() {
         return;
     }
-    if let Some(content) = load_default_ua_rules_json() {
+    if let Some(content) = load_default_config_json() {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -400,13 +416,28 @@ pub(super) fn ensure_ua_rules_file(path: &std::path::Path) {
     }
 }
 
-/// 从本地 JSON 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。
-pub(super) fn load_ua_rules(path: &std::path::Path) -> Vec<UaClientRule> {
+/// 从本地 config.json 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。
+pub(super) fn load_config_ua_rules(path: &std::path::Path) -> Vec<UaClientRule> {
     let Ok(json) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    serde_json::from_str(&json).unwrap_or_default()
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return Vec::new();
+    };
+    extract_ua_rules(value)
 }
+
+// 向后兼容：旧代码里 load_ua_rules(...) 仍然可用
+pub(super) use load_config_ua_rules as load_ua_rules;
+
+/// 把 config.json 当字符串整体读取（前端编辑用）。
+/// 实际逻辑在 proxy.rs 里声明为 `pub fn`，通过 `crate::read_config_raw` 暴露给 commands.rs。
+pub use super::read_config_raw;
+
+/// 把字符串整体写回 config.json（前端编辑用）。
+/// 实际逻辑在 proxy.rs 里声明为 `pub fn`，通过 `crate::write_config_raw` 暴露给 commands.rs。
+pub use super::write_config_raw;
+
 
 // ─── Model Rewriting ─────────────────────────────────────────────────────────
 

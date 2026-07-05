@@ -91,8 +91,9 @@ impl Storage {
             [],
         )?;
 
-        // 回收空间
-        connection.execute_batch("VACUUM")?;
+        // 注意：不再在此处执行 VACUUM。VACUUM 会重写整个 DB 文件，大库清理时
+        // 会冻结数秒。 SQLite WAL + 空闲页复用已足够回收空间；如需压缩磁盘
+        // 可在程序空闲时由外部 sqlite3 命令行手动执行 VACUUM。
 
         Ok((deleted_logs, deleted_usage))
     }
@@ -143,6 +144,7 @@ impl Storage {
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
+        tracing::debug!("migrate: 建表");
         connection.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS channel_presets (
@@ -493,12 +495,30 @@ impl Storage {
             "INTEGER NOT NULL DEFAULT 1",
         )?;
 
-        // 写入 schema 版本
+        // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
+        // usage_summary / recalculate_usage_costs / cleanup_old_logs 等热点查询
+        connection.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_request_logs_created_at       ON request_logs(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_request_id       ON request_logs(request_id);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_is_last_attempt  ON request_logs(is_last_attempt);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_client           ON request_logs(client_id);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_account          ON request_logs(account_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_records_request_id     ON usage_records(request_id);
+            CREATE INDEX IF NOT EXISTS idx_usage_records_created_at     ON usage_records(created_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_channel_upstream_model ON usage_records(channel_id, upstream_model);
+            CREATE INDEX IF NOT EXISTS idx_model_prices_channel_model   ON model_prices(channel_id, upstream_model);
+            "#,
+        )?;
+        tracing::info!("migrate: 建表完成, 开始建索引");
+
+        // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
         connection.execute(
-            "INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.01', datetime('now'))",
+            "INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.04', datetime('now'))",
             [],
         )?;
 
+        tracing::info!("migrate: 完成");
         Ok(())
     }
 }

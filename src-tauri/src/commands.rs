@@ -1,8 +1,8 @@
 use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    ClientConfig, LogCaptureConfig, ModelPrice, ProxyBindConfig, RequestLogRow, RouteCandidate, RouteRule,
-    UsageSummaryRow, VirtualModel,
+    ClientConfig, LogCaptureConfig, LogsFilter, LogsPageResult, ModelPrice, ProxyBindConfig,
+    RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
@@ -294,10 +294,11 @@ pub(super) fn usage_summary(
 #[tauri::command]
 pub(super) fn list_request_logs(
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<RequestLogRow>, String> {
+    filter: LogsFilter,
+) -> Result<LogsPageResult, String> {
     state
         .storage
-        .list_request_logs()
+        .list_request_logs_page(filter)
         .map_err(|err| err.to_string())
 }
 
@@ -598,6 +599,42 @@ pub(super) fn save_route_rules(
 #[tauri::command]
 pub(super) fn db_stats(state: tauri::State<'_, AppState>) -> Result<(i64, i64, i64), String> {
     state.storage.db_stats().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn read_config(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let path = &state.config_path;
+    crate::core::proxy::read_config_raw(path).ok_or_else(|| "config.json 不存在或读取失败".to_string())
+}
+
+#[tauri::command]
+pub(super) fn write_config(state: tauri::State<'_, AppState>, content: String) -> Result<(), String> {
+    let path = &state.config_path;
+    crate::core::proxy::write_config_raw(path, &content)
+}
+
+/// 烟雾测试用：验证前端 IPC 能连上后端。返回当前进程环境摘要。
+#[tauri::command]
+pub(super) fn ipc_ping() -> serde_json::Value {
+    tracing::info!(pid = std::process::id(), "ipc_ping received");
+    serde_json::json!({
+        "ok": true,
+        "pid": std::process::id(),
+        "exe": std::env::current_exe().ok().map(|p| p.display().to_string()),
+    })
+}
+
+/// 前端日志落盘。JS 通过这个 Tauri 命令把 console 内容写到同一份文件日志里，
+/// 这样 Rust + JS 在 portable 模式下都能集中排查。
+#[tauri::command]
+pub(super) fn log_from_frontend(level: String, message: String) {
+    let target = "flowlet_frontend";
+    match level.as_str() {
+        "error" => tracing::error!(target, message),
+        "warn" => tracing::warn!(target, message),
+        "debug" => tracing::debug!(target, message),
+        _ => tracing::info!(target, message),
+    }
 }
 
 #[tauri::command]

@@ -9,6 +9,7 @@ use core::config::{
 use core::presets::builtin_model_prices;
 use core::proxy::ProxyController;
 use core::storage::Storage;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -29,7 +30,7 @@ struct AppState {
     capture: Arc<Mutex<LogCaptureConfig>>,
     bind_config: Arc<Mutex<ProxyBindConfig>>,
     tray: Arc<Mutex<Option<TrayIcon>>>,
-    ua_rules_path: std::path::PathBuf,
+    config_path: std::path::PathBuf,
 }
 
 struct ProxyStartupConfig {
@@ -38,7 +39,7 @@ struct ProxyStartupConfig {
     timeout: u64,
     capture: LogCaptureConfig,
     bind_addr: String,
-    ua_rules_path: std::path::PathBuf,
+    config_path: std::path::PathBuf,
 }
 
 impl AppState {
@@ -67,7 +68,7 @@ impl AppState {
             timeout: self.upstream_timeout_seconds,
             capture,
             bind_addr,
-            ua_rules_path: self.ua_rules_path.clone(),
+            config_path: self.config_path.clone(),
         })
     }
 
@@ -162,11 +163,26 @@ fn validate_config_values(
 // ─── App Entry ──────────────────────────────────────────────────────────────
 
 fn build_app_state(db_path: std::path::PathBuf) -> AppState {
-    let ua_rules_path = db_path.parent().unwrap_or(db_path.as_ref()).join("ua_rules.json");
-    let storage = Storage::open(&db_path).expect("初始化 SQLite 存储失败");
+    // 尽可能早地启用文件日志，这样 Storage::open / migrate 过程中的 tracing 也能落盘
+    crate::core::logging::init_file_logging();
+    let _t0 = std::time::Instant::now();
+
+    let config_path = db_path.parent().unwrap_or(db_path.as_ref()).join("config.json");
+    tracing::info!(db_path = %db_path.display(), t_ms = _t0.elapsed().as_millis() as u64, "初始化 Storage");
+
+    let storage = match Storage::open(&db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "Storage::open 失败");
+            panic!("初始化 SQLite 存储失败: {e}");
+        }
+    };
+
+    tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "Storage 初始化完成, 开始加载渠道模板");
 
     // 初始化渠道模板
     let channels = storage.list_channel_presets().expect("读取渠道模板失败");
+    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = channels.len(), "渠道模板加载完成");
     let channels = if channels.is_empty() {
         let now = chrono::Utc::now().to_rfc3339();
         let mut longcat = ChannelPreset::longcat();
@@ -261,9 +277,11 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     storage
         .cleanup_orphan_balance_snapshots()
         .expect("清理孤儿余额快照失败");
+    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: routes + balance cleanup");
 
     // 初始化客户端
     let clients = storage.list_clients().expect("读取客户端配置失败");
+    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = clients.len(), "step: clients loaded");
     let clients = if clients.is_empty() {
         let now = chrono::Utc::now().to_rfc3339();
         let default_client = ClientConfig {
@@ -285,7 +303,9 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     };
 
     // 初始化价格预设
+    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: loading prices");
     let prices = storage.list_model_prices().expect("读取价格配置失败");
+    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = prices.len(), "step: prices loaded");
     let prices = if prices.is_empty() {
         let all_prices: Vec<ModelPrice> = channels
             .iter()
@@ -302,7 +322,9 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     };
 
     // 初始化路由规则
+    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: loading rules");
     let rules = storage.list_route_rules().expect("读取路由规则失败");
+    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = rules.len(), "step: rules loaded");
 
     let capture = storage
         .get_app_meta("log_capture_config")
@@ -316,7 +338,7 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         .unwrap_or_default()
         .normalized();
 
-    AppState {
+    let state = AppState {
         proxy: ProxyController::default(),
         channels: Arc::new(Mutex::new(channels)),
         accounts: Arc::new(Mutex::new(accounts)),
@@ -330,31 +352,21 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         capture: Arc::new(Mutex::new(capture)),
         bind_config: Arc::new(Mutex::new(bind_config)),
         tray: Arc::new(Mutex::new(None)),
-        ua_rules_path,
-    }
-}
-
-/// 检测是否为便携模式：可执行文件旁边有 `portable.tag` 空文件即视为便携版。
-/// 便携模式下数据目录退回程序旁，不与本机调试数据共享。
-fn is_portable_mode() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("portable.tag")))
-        .map(|p| p.exists())
-        .unwrap_or(false)
-}
-
-fn app_database_path(app: &tauri::App) -> std::path::PathBuf {
-    let app_data_dir = if is_portable_mode() {
-        // 便携模式：数据目录 = 可执行文件所在目录
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .expect("获取可执行文件目录失败")
-    } else {
-        app.path().app_data_dir().expect("获取应用数据目录失败")
+        config_path,
     };
+    tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "build_app_state 全部完成");
+    state
+}
 
+/// 数据库路径：始终放在 exe 同级目录下，与程序完全自包含。
+/// 不再区分「安装/便携」模式 — 所有数据（SQLite / logs / ua_rules.json）都在 exe 旁。
+fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let app_data_dir = exe_dir;
     std::fs::create_dir_all(&app_data_dir).expect("创建应用数据目录失败");
 
     let db_path = app_data_dir.join("flowlet.sqlite");
@@ -396,6 +408,7 @@ fn migrate_legacy_database(db_path: &std::path::Path) {
 }
 
 pub fn run() {
+    crate::core::logging::init_file_logging();
     let start_hidden = std::env::args().any(|arg| arg == "--hidden" || arg == "--minimized");
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
@@ -404,8 +417,13 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
+            let setup_t0 = std::time::Instant::now();
+            tracing::info!("tauri setup 开始");
+
             let state = build_app_state(app_database_path(app));
             app.manage(state.clone());
+            let state_for_tray = state.clone();
+            tracing::info!(t_ms = setup_t0.elapsed().as_millis() as u64, "setup: state managed");
 
             let app_handle = app.handle();
 
@@ -503,9 +521,11 @@ pub fn run() {
                 .build(app_handle)?;
 
             // 保存 tray 引用到 state
-            if let Ok(mut tray_guard) = state.tray.lock() {
+            if let Ok(mut tray_guard) = state_for_tray.tray.lock() {
                 *tray_guard = Some(tray);
             }
+
+            tracing::info!(t_ms = setup_t0.elapsed().as_millis() as u64, "✅ setup 完成 — invoke_handler + Tauri event loop 接管");
 
             Ok(())
         })
@@ -550,6 +570,10 @@ pub fn run() {
             commands::import_config,
             commands::db_stats,
             commands::cleanup_old_logs,
+            commands::read_config,
+            commands::write_config,
+            commands::ipc_ping,
+            commands::log_from_frontend,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet 失败");
@@ -583,7 +607,7 @@ async fn start_proxy_internal(
         timeout,
         capture,
         bind_addr,
-        ua_rules_path,
+        config_path,
     } = config;
 
     // 校验当前配置是否合法
@@ -606,7 +630,7 @@ async fn start_proxy_internal(
             capture,
             &bind_addr,
             core::rate_limiter::RateLimiter::new(600),
-            ua_rules_path,
+            config_path,
         )
         .await
         .map_err(|err| err.to_string())

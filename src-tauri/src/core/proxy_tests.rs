@@ -457,7 +457,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
         upstream_timeout_seconds: 120,
         rate_limiter: RateLimiter::new(600),
         capture: LogCaptureConfig::default(),
-        ua_rules_path: std::path::PathBuf::from("/tmp/flowlet_test_ua_rules.json"),
+        config_path: std::path::PathBuf::from("/tmp/flowlet_test_config.json"),
     };
 
     let request = Request::builder()

@@ -314,3 +314,159 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+/* ─── Logs filter bar + pagination (2026-07-04) ──────────────────────────── */
+
+.logs-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 8px;
+  padding: 10px;
+  background: #f7fafb;
+  border: 1px solid #e4ebef;
+  border-radius: 6px;
+}
+
+.logs-filter-bar select,
+.logs-filter-bar input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #cbd6dc;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  color: #33414b;
+  background: #fff;
+}
+
+.logs-filter-bar .logs-search {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.logs-filter-bar button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid #3b82f6;
+  background: #3b82f6;
+  color: #fff;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.logs-filter-bar button.link-button {
+  background: transparent;
+  border-color: transparent;
+  color: #3b82f6;
+}
+
+.logs-filter-bar button:hover {
+  opacity: 0.85;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 0;
+  justify-content: center;
+}
+
+.pagination button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid #cbd6dc;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination span.pagination-info {
+  font-size: 13px;
+  color: #5b6b74;
+}
+
+.pagination select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #cbd6dc;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+
+/* ─── Boot splash (initialization gate) ──────────────────────────────────── */
+
+.app-boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}
+
+.boot-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  color: #33414b;
+}
+
+.boot-screen .boot-logo {
+  font-size: 56px;
+  line-height: 1;
+}
+
+.boot-screen h1 {
+  font-size: 24px;
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.boot-hint {
+  font-size: 13px;
+  color: #7a8b94;
+  margin: 0;
+}
+
+.boot-spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid #e4ebef;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: boot-spin 0.7s linear infinite;
+  margin-top: 4px;
+}
+
+@keyframes boot-spin {
+  to { transform: rotate(360deg); }
+}
+
+.config-editor {
+  width: 100%;
+  min-height: 400px;
+  margin-top: 10px;
+  font-family: "SF Mono", "Cascadia Mono", Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px;
+  border: 1px solid #cbd6dc;
+  border-radius: 6px;
+  resize: vertical;
+  white-space: pre;
+  overflow: auto;
+  background: #fafafa;
+}

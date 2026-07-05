@@ -21,7 +21,7 @@ const SRC_TAURI = join(PROJECT_ROOT, "src-tauri");
 const RELEASE_DIR = join(SRC_TAURI, "target", "release");
 const BUNDLE_DIR = join(RELEASE_DIR, "bundle");
 const PORTABLE_BUNDLE_DIR = join(BUNDLE_DIR, "portable");
-const UA_RULES_SRC = join(SRC_TAURI, "src", "core", "ua_rules.json");
+const CONFIG_SRC = join(PROJECT_ROOT, "config.json");
 
 const PKG_JSON = join(PROJECT_ROOT, "package.json");
 const version = JSON.parse(readFileSync(PKG_JSON, "utf8")).version;
@@ -77,10 +77,10 @@ function copyRequired() {
     copyFileSync(dllPath, join(PORTABLE_DIR, "flowlet_lib.dll"));
   }
 
-  if (existsSync(UA_RULES_SRC)) {
-    copyFileSync(UA_RULES_SRC, join(PORTABLE_DIR, "ua_rules.json"));
+  if (existsSync(CONFIG_SRC)) {
+    copyFileSync(CONFIG_SRC, join(PORTABLE_DIR, "config.json"));
   } else {
-    console.warn("警告：未找到 src-tauri/src/core/ua_rules.json");
+    console.warn("警告：未找到项目根目录 config.json");
   }
 
   // 便携标记：有这个文件时，app_database_path() 会把数据目录切到程序旁边，不与本机共享

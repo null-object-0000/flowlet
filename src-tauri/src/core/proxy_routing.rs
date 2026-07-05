@@ -124,9 +124,11 @@ pub(super) fn rank_candidates_by_score(
         .collect();
 
     scored.sort_by(|(a, ca), (b, cb)| {
+        // 评分相同时：按 created_at（添加时间）升序 — 越早添加的越优先。
+        // priority 仅在高级模式下由 score 计算外生效，不再作为主要排序 key。
         a.partial_cmp(b)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| ca.priority.cmp(&cb.priority))
+            .then_with(|| ca.created_at.cmp(&cb.created_at))
     });
 
     candidates.extend(scored.into_iter().map(|(_, c)| c));

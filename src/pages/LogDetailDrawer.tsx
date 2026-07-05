@@ -46,7 +46,7 @@ export function LogDetailDrawer({
             <h3>请求详情</h3>
             <div className="muted">{requestId}</div>
           </div>
-          <button className="link-button" onClick={onClose}>
+          <button type="button" className="link-button" onClick={onClose}>
             关闭 ✕
           </button>
         </header>

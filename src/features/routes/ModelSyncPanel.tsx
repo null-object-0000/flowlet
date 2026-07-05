@@ -64,7 +64,7 @@ export function ModelSyncPanel({
       <PanelHeader>
         <h3>模型同步</h3>
         <Actions>
-          <button onClick={() => onRefreshChannelModels()}>刷新状态</button>
+          <button type="button" onClick={() => onRefreshChannelModels()}>刷新状态</button>
         </Actions>
       </PanelHeader>
       {channels.length === 0 ? (
@@ -97,7 +97,7 @@ export function ModelSyncPanel({
                     <td>{status?.model_count ?? 0}</td>
                     <td>
                       <Actions>
-                        <button
+                        <button type="button"
                           disabled={!hasAccount || syncingId === channel.id}
                           onClick={() => syncChannel(channel.id)}
                           title={hasAccount ? "同步模型列表" : "请先添加并启用一个已填写 API Key 的账号"}

@@ -18,14 +18,12 @@ export function LogsPage({
   channels,
   clients,
   onRefresh,
-  onOpenDetail,
 }: {
   logs: RequestLogRow[];
   logMeta: LogMeta;
   channels: ChannelPreset[];
   clients: ClientConfig[];
   onRefresh: (filter?: LogFilter, page?: number) => void;
-  onOpenDetail: (requestId: string) => void;
 }) {
   const [filter, setFilter] = React.useState<LogFilter>(DEFAULT_FILTER);
   const [draft, setDraft] = React.useState<LogFilter>(DEFAULT_FILTER);
@@ -64,7 +62,7 @@ export function LogsPage({
         <PanelHeader>
           <h3>请求日志</h3>
           <Actions>
-            <button onClick={refresh}>刷新</button>
+            <button type="button" onClick={refresh}>刷新</button>
           </Actions>
         </PanelHeader>
 
@@ -112,9 +110,9 @@ export function LogsPage({
               if (e.key === "Enter") applyFilter({ search: draft.search, page: 1 });
             }}
           />
-          <button onClick={() => applyFilter({ search: draft.search, page: 1 })}>搜索</button>
+          <button type="button" onClick={() => applyFilter({ search: draft.search, page: 1 })}>搜索</button>
           {(filter.status !== "all" || filter.client || filter.channel || filter.search) && (
-            <button className="link-button" onClick={resetFilter}>
+            <button type="button" className="link-button" onClick={resetFilter}>
               重置筛选
             </button>
           )}
@@ -172,12 +170,9 @@ export function LogsPage({
                     <td>{row.fallback_count}</td>
                     <td>{row.route_reason || row.error_message || "-"}</td>
                     <td>
-                      <button
+                      <button type="button"
                         className="link-button"
-                        onClick={() => {
-                          setSelectedRequestId(row.request_id);
-                          onOpenDetail(row.request_id);
-                        }}
+                        onClick={() => setSelectedRequestId(row.request_id)}
                       >
                         详情
                       </button>
@@ -192,7 +187,7 @@ export function LogsPage({
         {/* 分页栏 */}
         {logMeta.total > 0 && (
           <div className="pagination">
-            <button
+            <button type="button"
               disabled={logMeta.page <= 1}
               onClick={() => goToPage(logMeta.page - 1)}
             >
@@ -201,7 +196,7 @@ export function LogsPage({
             <span className="pagination-info">
               {logMeta.page} / {pageCount} （{startItem}–{endItem} / 共 {logMeta.total} 条）
             </span>
-            <button
+            <button type="button"
               disabled={logMeta.page >= pageCount}
               onClick={() => goToPage(logMeta.page + 1)}
             >

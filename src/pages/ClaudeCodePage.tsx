@@ -31,9 +31,9 @@ export function ClaudeCodePage({
         </label>
       </div>
       <Actions>
-        <button onClick={() => void onCopy(`export ANTHROPIC_BASE_URL=${anthropicBaseUrl}`, "已复制 BASE_URL")}>复制 BASE_URL</button>
-        <button onClick={() => void onCopy(`export ANTHROPIC_AUTH_TOKEN=${token}`, "已复制 AUTH_TOKEN")}>复制 AUTH_TOKEN</button>
-        <button
+        <button type="button" onClick={() => void onCopy(`export ANTHROPIC_BASE_URL=${anthropicBaseUrl}`, "已复制 BASE_URL")}>复制 BASE_URL</button>
+        <button type="button" onClick={() => void onCopy(`export ANTHROPIC_AUTH_TOKEN=${token}`, "已复制 AUTH_TOKEN")}>复制 AUTH_TOKEN</button>
+        <button type="button"
           onClick={() =>
             void onCopy(
               `export ANTHROPIC_BASE_URL=${anthropicBaseUrl}\nexport ANTHROPIC_AUTH_TOKEN=${token}`,

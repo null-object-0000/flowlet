@@ -766,7 +766,7 @@ impl Storage {    pub fn save_balance_snapshot(
 
         // 收集筛选条件 + 查询参数（用 Vec<&dyn ToSql> 避免 Clone 问题）
         let mut raw_params: Vec<String> = Vec::new(); // 持有字符串生命周期（LIKE）
-        let mut refs: Vec<&(dyn rusqlite::ToSql)> = Vec::new();
+        let mut refs: Vec<&dyn rusqlite::ToSql> = Vec::new();
 
         let status_clause = match filter.status.as_str() {
             "success" => Some("(status >= 200 AND status < 400)"),

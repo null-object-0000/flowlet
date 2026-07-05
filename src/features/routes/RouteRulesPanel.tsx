@@ -18,8 +18,8 @@ export function RouteRulesPanel({ routeRules, channels, accounts, clients, onAdd
       <PanelHeader>
         <h3>规则路由（优先于自动路由）</h3>
         <Actions>
-          <button onClick={onAddRouteRule}>新增规则</button>
-          <button onClick={() => void onSaveRouteRules()}>保存规则</button>
+          <button type="button" onClick={onAddRouteRule}>新增规则</button>
+          <button type="button" onClick={() => void onSaveRouteRules()}>保存规则</button>
         </Actions>
       </PanelHeader>
       <p className="hint">当请求匹配规则条件时，强制路由到指定渠道账号。规则按优先级排序，首个匹配的规则生效。</p>
@@ -52,7 +52,7 @@ export function RouteRulesPanel({ routeRules, channels, accounts, clients, onAdd
                 <input type="checkbox" checked={rule.enabled} onChange={(e) => onUpdateRouteRule(index, { enabled: e.target.checked })} />
                 启用
               </label>
-              <button onClick={() => onRemoveRouteRule(index)}>删除</button>
+              <button type="button" onClick={() => onRemoveRouteRule(index)}>删除</button>
             </div>
           ))
         )}

@@ -38,8 +38,8 @@ export function UsagePage({
         <PanelHeader>
           <h3>用量统计</h3>
           <Actions>
-            <button onClick={() => void onAnalyze()}>执行离线分析</button>
-            <button onClick={() => void onRefresh()}>刷新</button>
+            <button type="button" onClick={() => void onAnalyze()}>执行离线分析</button>
+            <button type="button" onClick={() => void onRefresh()}>刷新</button>
           </Actions>
         </PanelHeader>
         <div className="table-wrap">
@@ -84,8 +84,8 @@ export function UsagePage({
         <PanelHeader>
           <h3>模型价格表（三段价格）</h3>
           <Actions>
-            <button onClick={onAddPrice}>新增价格</button>
-            <button onClick={() => void onSavePrices()}>保存价格</button>
+            <button type="button" onClick={onAddPrice}>新增价格</button>
+            <button type="button" onClick={() => void onSavePrices()}>保存价格</button>
           </Actions>
         </PanelHeader>
         <div className="price-list">
@@ -102,7 +102,7 @@ export function UsagePage({
                 <input type="number" min="0" step="0.000001" value={price.input_uncached_price} placeholder="输入(未命中缓存)" onChange={(e) => onUpdatePrice(index, { input_uncached_price: Number(e.target.value) })} />
                 <input type="number" min="0" step="0.000001" value={price.input_cached_price} placeholder="输入(命中缓存)" onChange={(e) => onUpdatePrice(index, { input_cached_price: Number(e.target.value) })} />
                 <input type="number" min="0" step="0.000001" value={price.output_price} placeholder="输出" onChange={(e) => onUpdatePrice(index, { output_price: Number(e.target.value) })} />
-                <button onClick={() => onRemovePrice(index)}>删除</button>
+                <button type="button" onClick={() => onRemovePrice(index)}>删除</button>
               </div>
             ))
           )}

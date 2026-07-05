@@ -80,7 +80,7 @@ export function BalanceSnapshotEditor({ account, initialSnapshot, onCancel, onSa
       <PanelHeader>
         <h3>{isLongCatSnapshot ? "登记 Token 资源包快照" : "登记余额快照"}</h3>
         <Actions>
-          <button onClick={onCancel}>取消</button>
+          <button type="button" onClick={onCancel}>取消</button>
         </Actions>
       </PanelHeader>
       <div className="form-grid">
@@ -122,7 +122,7 @@ export function BalanceSnapshotEditor({ account, initialSnapshot, onCancel, onSa
         </label>
       </div>
       <Actions>
-        <button onClick={saveSnapshot}>保存快照</button>
+        <button type="button" onClick={saveSnapshot}>保存快照</button>
       </Actions>
     </Panel>
   );

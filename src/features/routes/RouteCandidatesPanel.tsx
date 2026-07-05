@@ -18,8 +18,8 @@ export function RouteCandidatesPanel({ routes, channels, accounts, virtualModels
       <PanelHeader>
         <h3>Route Candidates</h3>
         <Actions>
-          <button onClick={onAdd}>新增候选</button>
-          <button onClick={() => void onSave()}>保存配置</button>
+          <button type="button" onClick={onAdd}>新增候选</button>
+          <button type="button" onClick={() => void onSave()}>保存配置</button>
         </Actions>
       </PanelHeader>
       <div className="route-list">
@@ -49,7 +49,7 @@ export function RouteCandidatesPanel({ routes, channels, accounts, virtualModels
                 <input type="checkbox" checked={route.enabled} onChange={(e) => onUpdate(index, { enabled: e.target.checked })} />
                 启用
               </label>
-              <button onClick={() => onRemove(index)}>删除</button>
+              <button type="button" onClick={() => onRemove(index)}>删除</button>
             </div>
           ))
         )}

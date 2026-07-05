@@ -21,8 +21,8 @@ export function ClientsPage({
       <PanelHeader>
         <h3>客户端 Token</h3>
         <Actions>
-          <button onClick={onAdd}>新增客户端</button>
-          <button onClick={() => void onSave()}>保存 Token</button>
+          <button type="button" onClick={onAdd}>新增客户端</button>
+          <button type="button" onClick={() => void onSave()}>保存 Token</button>
         </Actions>
       </PanelHeader>
       <div className="client-list">
@@ -43,8 +43,8 @@ export function ClientsPage({
                 <option value="continue">Continue</option>
                 <option value="custom">自定义</option>
               </select>
-              <button onClick={() => void onCopy(`Bearer ${client.token}`, "Client Token 已复制")}>复制</button>
-              <button onClick={() => onRemove(index)}>删除</button>
+              <button type="button" onClick={() => void onCopy(`Bearer ${client.token}`, "Client Token 已复制")}>复制</button>
+              <button type="button" onClick={() => onRemove(index)}>删除</button>
             </div>
           ))
         )}

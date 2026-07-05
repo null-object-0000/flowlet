@@ -23,7 +23,7 @@ export function StatsPage({
         <PanelHeader>
           <h3>账号成本与稳定性统计</h3>
           <Actions>
-            <button onClick={() => void onRefresh()}>刷新</button>
+            <button type="button" onClick={() => void onRefresh()}>刷新</button>
           </Actions>
         </PanelHeader>
         <p className="hint">

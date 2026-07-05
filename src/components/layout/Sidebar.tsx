@@ -14,7 +14,7 @@ export function Sidebar({ view, onViewChange }: SidebarProps) {
       </div>
       <nav>
         {views.map((item) => (
-          <button
+          <button type="button"
             className={view === item.id ? "nav-item active" : "nav-item"}
             key={item.id}
             onClick={() => onViewChange(item.id)}

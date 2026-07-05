@@ -79,7 +79,7 @@ export function OverviewPage({
             </label>
           </div>
           <Actions>
-            <button onClick={() => { onQuickSetup(wizardChannelId, wizardApiKey); setWizardApiKey(""); }}>保存快速配置</button>
+            <button type="button" onClick={() => { onQuickSetup(wizardChannelId, wizardApiKey); setWizardApiKey(""); }}>保存快速配置</button>
           </Actions>
           <p className="hint">保存后会自动创建渠道账号，并开放该渠道默认模型的 OpenAI-compatible 与 Anthropic-compatible 入口。</p>
         </Panel>
@@ -89,9 +89,9 @@ export function OverviewPage({
         <PanelHeader>
           <h3>接入信息</h3>
           <Actions>
-            <button onClick={() => void onCopy(`${proxyBaseUrl}/v1`, "OpenAI Base URL 已复制")}>复制 OpenAI Base URL</button>
-            <button onClick={() => void onCopy(`${proxyBaseUrl}/anthropic`, "Anthropic Base URL 已复制")}>复制 Anthropic Base URL</button>
-            <button onClick={() => void onCopy("Bearer flowlet-local-token", "Client Token 已复制")}>复制 Client Token</button>
+            <button type="button" onClick={() => void onCopy(`${proxyBaseUrl}/v1`, "OpenAI Base URL 已复制")}>复制 OpenAI Base URL</button>
+            <button type="button" onClick={() => void onCopy(`${proxyBaseUrl}/anthropic`, "Anthropic Base URL 已复制")}>复制 Anthropic Base URL</button>
+            <button type="button" onClick={() => void onCopy("Bearer flowlet-local-token", "Client Token 已复制")}>复制 Client Token</button>
           </Actions>
         </PanelHeader>
         <div className="info-grid">
@@ -114,9 +114,9 @@ export function OverviewPage({
       <Panel className="compact">
         <PanelHeader><h3>配置管理</h3></PanelHeader>
         <Actions>
-          <button onClick={() => void onValidateConfig()}>验证配置</button>
-          <button onClick={() => void onExportConfig()}>导出配置</button>
-          <button onClick={() => void onImportConfig()}>导入配置</button>
+          <button type="button" onClick={() => void onValidateConfig()}>验证配置</button>
+          <button type="button" onClick={() => void onExportConfig()}>导出配置</button>
+          <button type="button" onClick={() => void onImportConfig()}>导入配置</button>
         </Actions>
         <p className="hint">验证配置完整性（渠道、账号、API Key、路由引用），导出为 JSON 文件备份，或从文件导入。</p>
       </Panel>
@@ -129,8 +129,8 @@ export function OverviewPage({
           <p>加载中...</p>
         )}
         <Actions>
-          <button onClick={() => { if (confirm("清理 30 天前的日志？此操作不可撤销。")) onCleanupLogs(30); }}>清理 30 天前日志</button>
-          <button onClick={() => void onRefreshAll()}>刷新统计</button>
+          <button type="button" onClick={() => { if (confirm("清理 30 天前的日志？此操作不可撤销。")) onCleanupLogs(30); }}>清理 30 天前日志</button>
+          <button type="button" onClick={() => void onRefreshAll()}>刷新统计</button>
         </Actions>
       </Panel>
     </>

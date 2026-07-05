@@ -57,7 +57,6 @@ export default function App() {
     regenerateDefaultRoutes,
     refreshUsage,
     refreshLogs,
-    fetchLogDetail,
     analyzeUsage,
     addAccount,
     testConnection,
@@ -251,7 +250,6 @@ export default function App() {
                 : undefined;
               void refreshLogs(next);
             }}
-            onOpenDetail={(requestId) => void fetchLogDetail(requestId)}
           />
         ) : null}
 

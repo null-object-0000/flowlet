@@ -1,15 +1,12 @@
 import React from "react";
-import { ProxyTopbar, Sidebar } from "../components/layout";
+import { Sidebar } from "../components/layout";
 import { useFlowletActions } from "./useFlowletActions";
 import { useFlowletData } from "./useFlowletData";
 import { runCommand, enableFrontendLogging, disableFrontendLogging } from "../services/flowletApi";
 import { LogFilter, View } from "../domain";
 import {
-  ChannelsPage,
-  ClientsPage,
   LogsPage,
   OverviewPage,
-  RoutesPage,
   StatsPage,
   UsagePage,
 } from "../pages";
@@ -24,22 +21,17 @@ export default function App() {
     routes,
     clients,
     prices,
-    channelModels,
     virtualModels,
     usageRows,
     requestLogs,
     logMeta,
-    balanceSnapshots,
     routeRules,
     accountStats,
     routingScores,
-    dbStats,
-    autostartEnabled,
     status,
     proxyBindConfig,
     refreshStatus,
     refreshAll,
-    refreshChannelModels,
   } = flowlet;
   const [view, setView] = React.useState<View>("overview");
   const [message, setMessage] = React.useState("");
@@ -53,14 +45,12 @@ export default function App() {
     saveRouteRules,
     saveClientTokens,
     savePrices,
-    quickSetup,
     regenerateDefaultRoutes,
     refreshUsage,
     refreshLogs,
     analyzeUsage,
     addAccount,
     testConnection,
-    syncModels,
     updateAccount,
     removeAccount,
     addClient,
@@ -79,12 +69,6 @@ export default function App() {
     getAccountName,
     getBalanceForAccount,
     addBalanceSnapshot,
-    toggleAutostart,
-    exportConfig,
-    saveProxyBindConfig,
-    importConfig,
-    validateConfig,
-    cleanupLogs,
   } = useFlowletActions(flowlet, setMessage);
 
   const [initializing, setInitializing] = React.useState(true);
@@ -126,7 +110,7 @@ export default function App() {
     return (
       <main className="app-shell app-boot">
         <div className="boot-screen">
-          <div className="boot-logo">⏳</div>
+          <div className="boot-logo">F</div>
           <h1>Flowlet</h1>
           <p className="boot-hint">正在初始化代理配置…</p>
           <div className="boot-spinner" />
@@ -148,85 +132,41 @@ export default function App() {
   }
   return (
     <main className="app-shell">
-      <Sidebar view={view} onViewChange={setView} />
+      <Sidebar view={view} status={status} onViewChange={setView} />
 
       <section className="content">
-        <ProxyTopbar
-          status={status}
-          onStart={() => void startProxy()}
-          onStop={() => void stopProxy()}
-        />
-
         {view === "overview" ? (
           <OverviewPage
-            status={{ ...status, channels: channels.length, accounts: accounts.length, clients: clients.length }}
-            usageRows={usageRows}
-            onCopy={copy}
-            autostartEnabled={autostartEnabled}
-            onToggleAutostart={toggleAutostart}
-            onExportConfig={exportConfig}
-            onImportConfig={importConfig}
-            onValidateConfig={validateConfig}
-            onRefreshAll={() => void refreshAll()}
-            dbStats={dbStats}
-            onCleanupLogs={cleanupLogs}
-            channels={channels}
-            hasEnabledAccount={accounts.some((account) => account.enabled && account.api_key.trim())}
-            hasEnabledRoute={routes.some((route) => route.enabled)}
-            onQuickSetup={(channelId, apiKey) => void quickSetup(channelId, apiKey)}
-          />
-        ) : null}
-
-        {view === "channels" ? (
-          <ChannelsPage
+            status={status}
+            bindConfig={proxyBindConfig}
             channels={channels}
             accounts={accounts}
+            clients={clients}
+            routes={routes}
+            onCopy={copy}
+            onRefreshAll={() => void refreshAll()}
+            onStartProxy={() => void startProxy()}
+            onStopProxy={() => void stopProxy()}
+            onRestartProxy={() => void restartProxy()}
             onAddAccount={addAccount}
             onUpdateAccount={updateAccount}
             onRemoveAccount={removeAccount}
             onSaveAccounts={() => void saveAccounts()}
             onTestConnection={(id) => void testConnection(id)}
             getBalanceForAccount={getBalanceForAccount}
-            onAddBalanceSnapshot={(s) => void addBalanceSnapshot(s)}
-            proxyRunning={status.running}
-            onRestartProxy={() => void restartProxy()}
-          />
-        ) : null}
-
-        {view === "clients" ? (
-          <ClientsPage
-            clients={clients}
-            onAdd={addClient}
-            onUpdate={updateClient}
-            onRemove={removeClient}
-            onSave={() => void saveClientTokens()}
-            onCopy={copy}
-          />
-        ) : null}
-
-        {view === "routes" ? (
-          <RoutesPage
-            routes={routes}
-            channels={channels}
-            accounts={accounts}
-            channelModels={channelModels}
-            virtualModels={virtualModels}
-            onAdd={addRoute}
-            onUpdate={updateRoute}
-            onRemove={removeRoute}
-            onSave={() => void saveRouteCandidates()}
-            onRegenerateDefaultRoutes={() => void regenerateDefaultRoutes()}
-            onSyncModels={(accountId) => void syncModels(accountId)}
-            onRefreshChannelModels={() => void refreshChannelModels()}
+            onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}
+            onAddClient={addClient}
+            onUpdateClient={updateClient}
+            onRemoveClient={removeClient}
+            onSaveClients={() => void saveClientTokens()}
+            onUpdateRoute={updateRoute}
+            onSaveRoutes={() => void saveRouteCandidates()}
+            onSyncModels={() => void regenerateDefaultRoutes()}
+            onOpenAdvancedSettings={() => setView("stats")}
             getChannelName={getChannelName}
-            routeRules={routeRules}
-            onAddRouteRule={addRouteRule}
-            onUpdateRouteRule={updateRouteRule}
-            onRemoveRouteRule={removeRouteRule}
-            onSaveRouteRules={() => void saveRouteRules()}
-            clients={clients}
           />
         ) : null}
+
 
         {view === "stats" ? (
           <StatsPage
@@ -235,6 +175,20 @@ export default function App() {
             routingScores={routingScores}
             getAccountName={getAccountName}
             getChannelName={getChannelName}
+            routes={routes}
+            channels={channels}
+            accounts={accounts}
+            virtualModels={virtualModels}
+            onAddRoute={addRoute}
+            onUpdateRoute={updateRoute}
+            onRemoveRoute={removeRoute}
+            onSaveRoutes={() => void saveRouteCandidates()}
+            routeRules={routeRules}
+            clients={clients}
+            onAddRouteRule={addRouteRule}
+            onUpdateRouteRule={updateRouteRule}
+            onRemoveRouteRule={removeRouteRule}
+            onSaveRouteRules={() => void saveRouteRules()}
           />
         ) : null}
 

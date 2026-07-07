@@ -6,8 +6,9 @@ import { ActionContext } from "./types";
 export function createChannelActions({ data, setMessage }: ActionContext) {
   const { channels, accounts, setAccounts, routes, setRoutes, balanceSnapshots, refreshAll } = data;
 
-  async function saveAccounts() {
-    const filtered = accounts.filter((a) => a.name.trim() && a.channel_id.trim());
+  async function saveAccounts(nextAccounts?: ChannelAccount[]) {
+    const sourceAccounts = nextAccounts ?? accounts;
+    const filtered = sourceAccounts.filter((a) => a.name.trim() && a.channel_id.trim());
     await runCommand("save_channel_accounts", { accounts: filtered });
     setAccounts(filtered);
     setMessage("渠道账号已保存，代理配置已热更新");

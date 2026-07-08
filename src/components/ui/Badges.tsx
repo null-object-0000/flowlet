@@ -1,18 +1,25 @@
+import type React from "react";
+import { Badge, Group } from "@mantine/core";
 import { ProtocolType, protocolLabels } from "../../domain";
 
 export function StatusPill({ running, children }: { running: boolean; children: React.ReactNode }) {
-  return <span className={running ? "status running" : "status"}>{children}</span>;
+  return (
+    <Badge className={running ? "status running" : "status"} color={running ? "green" : "gray"} variant="light" size="sm">
+      {children}
+    </Badge>
+  );
 }
 
 export function ProtocolBadges({ protocols }: { protocols: ProtocolType[] }) {
   const valid = protocols.filter((p): p is ProtocolType => p in protocolLabels);
   return (
-    <div className="channel-protocols">
+    <Group className="channel-protocols" gap={4} wrap="wrap">
       {valid.map((protocol) => (
-        <span className="protocol-badge" key={protocol}>
+        <Badge className="protocol-badge" key={protocol} color="blue" variant="light" size="xs">
           {protocolLabels[protocol]}
-        </span>
+        </Badge>
       ))}
-    </div>
+    </Group>
   );
 }
+

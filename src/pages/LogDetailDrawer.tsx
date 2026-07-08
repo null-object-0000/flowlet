@@ -1,4 +1,6 @@
 import React from "react";
+import { Button, Drawer } from "@mantine/core";
+import { TableContainer } from "../components/ui";
 import { runCommand } from "../services/flowletApi";
 import { RequestLogRow } from "../domain";
 
@@ -38,17 +40,12 @@ export function LogDetailDrawer({
   const finalRow = rows.length === 0 ? null : rows[rows.length - 1];
 
   return (
-    <>
-      <div className="detail-backdrop" onClick={onClose} />
-      <aside className="detail-drawer" role="dialog" aria-label="请求日志详情">
+    <Drawer opened onClose={onClose} title="请求详情" position="right" size="min(960px, 92vw)" padding="lg" className="detail-drawer-root">
         <header className="detail-header">
           <div>
-            <h3>请求详情</h3>
             <div className="muted">{requestId}</div>
           </div>
-          <button type="button" className="link-button" onClick={onClose}>
-            关闭 ✕
-          </button>
+          <Button type="button" variant="subtle" color="gray" onClick={onClose}>关闭</Button>
         </header>
 
         <div className="detail-body">
@@ -93,7 +90,7 @@ export function LogDetailDrawer({
               {rows.length > 1 ? (
                 <section className="section">
                   <h4 className="section-title">尝试链路（{rows.length} 次尝试）</h4>
-                  <div className="table-wrap">
+                  <TableContainer>
                     <table>
                       <thead>
                         <tr>
@@ -128,7 +125,7 @@ export function LogDetailDrawer({
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                  </TableContainer>
                 </section>
               ) : null}
 
@@ -164,8 +161,7 @@ export function LogDetailDrawer({
             </>
           ) : null}
         </div>
-      </aside>
-    </>
+    </Drawer>
   );
 }
 
@@ -228,3 +224,5 @@ function formatBody(b64: string | null): string {
     return b64;
   }
 }
+
+

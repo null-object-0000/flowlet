@@ -1,5 +1,7 @@
 import React from "react";
-import { Sidebar } from "../components/layout";
+import { AppShell, Loader } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import { ProxyTopbar, Sidebar } from "../components/layout";
 import { useFlowletActions } from "./useFlowletActions";
 import { useFlowletData } from "./useFlowletData";
 import { runCommand, enableFrontendLogging, disableFrontendLogging } from "../services/flowletApi";
@@ -35,6 +37,7 @@ export default function App() {
   } = flowlet;
   const [view, setView] = React.useState<View>("overview");
   const [message, setMessage] = React.useState("");
+  const [navbarCollapsed, setNavbarCollapsed] = React.useState(false);
   const {
     startProxy,
     stopProxy,
@@ -79,6 +82,13 @@ export default function App() {
   const initSeq = React.useRef(0);
 
   React.useEffect(() => {
+    if (!message) return;
+    notifications.show({ message, color: "dark", autoClose: 2600 });
+    const timer = window.setTimeout(() => setMessage(""), 2800);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  React.useEffect(() => {
     const seq = ++initSeq.current;
     setInitializing(true);
     setInitError(null);
@@ -113,7 +123,7 @@ export default function App() {
           <div className="boot-logo">F</div>
           <h1>Flowlet</h1>
           <p className="boot-hint">正在初始化代理配置…</p>
-          <div className="boot-spinner" />
+          <Loader size="sm" />
         </div>
       </main>
     );
@@ -131,10 +141,35 @@ export default function App() {
     );
   }
   return (
-    <main className="app-shell">
-      <Sidebar view={view} status={status} onViewChange={setView} />
+    <AppShell
+      className="app-shell"
+      header={{ height: 52 }}
+      navbar={{
+        width: navbarCollapsed ? 72 : 240,
+        breakpoint: "xs",
+        collapsed: { mobile: false },
+      }}
+      padding={0}
+      withBorder
+    >
+      <AppShell.Header className="app-header">
+        <ProxyTopbar
+          status={status}
+          onStart={() => void startProxy()}
+          onStop={() => void stopProxy()}
+        />
+      </AppShell.Header>
+      <AppShell.Navbar className={navbarCollapsed ? "app-navbar collapsed" : "app-navbar"}>
+        <Sidebar
+          view={view}
+          status={status}
+          collapsed={navbarCollapsed}
+          onToggleCollapsed={() => setNavbarCollapsed((value) => !value)}
+          onViewChange={setView}
+        />
+      </AppShell.Navbar>
 
-      <section className="content">
+      <AppShell.Main className="content">
         {view === "overview" ? (
           <OverviewPage
             status={status}
@@ -221,11 +256,12 @@ export default function App() {
           />
         ) : null}
 
-        {message ? <div className="toast">{message}</div> : null}
-      </section>
-    </main>
+      </AppShell.Main>
+    </AppShell>
   );
 }
+
+
 
 
 

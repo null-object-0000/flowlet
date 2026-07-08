@@ -1,30 +1,35 @@
 import React from "react";
+import { Box, Group, Paper, Stack } from "@mantine/core";
 
 type PanelProps = React.PropsWithChildren<{
   className?: string;
 }>;
 
 export function Panel({ className = "", children }: PanelProps) {
-  return <section className={["panel", className].filter(Boolean).join(" ")}>{children}</section>;
+  return (
+    <Paper component="section" className={["panel", className].filter(Boolean).join(" ")} p="md">
+      {children}
+    </Paper>
+  );
 }
 
 export function DetailsPanel({ summary, children }: React.PropsWithChildren<{ summary: string }>) {
   return (
-    <details className="panel advanced-panel">
+    <Paper component="details" className="panel advanced-panel" p="md">
       <summary>{summary}</summary>
-      {children}
-    </details>
+      <Stack gap="md">{children}</Stack>
+    </Paper>
   );
 }
 
 export function PanelHeader({ children }: React.PropsWithChildren) {
-  return <div className="panel-title">{children}</div>;
+  return <Group className="panel-title" justify="space-between" align="center" wrap="wrap">{children}</Group>;
 }
 
 export function Actions({ children }: React.PropsWithChildren) {
-  return <div className="actions">{children}</div>;
+  return <Group className="actions" gap="xs" wrap="wrap">{children}</Group>;
 }
 
 export function EmptyState({ children }: React.PropsWithChildren) {
-  return <div className="empty-state">{children}</div>;
+  return <Box className="empty-state">{children}</Box>;
 }

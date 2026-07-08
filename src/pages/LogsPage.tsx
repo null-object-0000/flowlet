@@ -1,5 +1,6 @@
 import React from "react";
-import { Actions, Panel, PanelHeader } from "../components/ui";
+import { Button, Select, TextInput } from "@mantine/core";
+import { Actions, Panel, PanelHeader, TableContainer } from "../components/ui";
 import { ChannelPreset, ClientConfig, LogFilter, LogMeta, RequestLogRow } from "../domain";
 import { LogDetailDrawer } from "./LogDetailDrawer";
 
@@ -62,46 +63,38 @@ export function LogsPage({
         <PanelHeader>
           <h3>请求日志</h3>
           <Actions>
-            <button type="button" onClick={refresh}>刷新</button>
+            <Button type="button" variant="default" onClick={refresh}>刷新</Button>
           </Actions>
         </PanelHeader>
 
         {/* 筛选栏 */}
         <div className="logs-filter-bar">
-          <select
+          <Select
             value={filter.status}
-            onChange={(e) => applyFilter({ status: e.target.value as LogFilter["status"], page: 1 })}
-          >
-            <option value="all">全部状态</option>
-            <option value="success">成功 (2xx/3xx)</option>
-            <option value="error">错误 (4xx/5xx/无响应)</option>
-          </select>
+            onChange={(value) => applyFilter({ status: (value ?? "all") as LogFilter["status"], page: 1 })}
+            data={[
+              { value: "all", label: "全部状态" },
+              { value: "success", label: "成功 (2xx/3xx)" },
+              { value: "error", label: "错误 (4xx/5xx/无响应)" },
+            ]}
+            w={158}
+          />
 
-          <select
-            value={filter.client}
-            onChange={(e) => applyFilter({ client: e.target.value, page: 1 })}
-          >
-            <option value="">全部客户端</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name || c.id}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={filter.client || "__all_clients__"}
+            onChange={(value) => applyFilter({ client: value === "__all_clients__" || !value ? "" : value, page: 1 })}
+            data={[{ value: "__all_clients__", label: "全部客户端" }, ...clients.map((c) => ({ value: c.id, label: c.name || c.id }))]}
+            w={160}
+          />
 
-          <select
-            value={filter.channel}
-            onChange={(e) => applyFilter({ channel: e.target.value, page: 1 })}
-          >
-            <option value="">全部渠道</option>
-            {channels.map((ch) => (
-              <option key={ch.id} value={ch.id}>
-                {ch.name || ch.id}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={filter.channel || "__all_channels__"}
+            onChange={(value) => applyFilter({ channel: value === "__all_channels__" || !value ? "" : value, page: 1 })}
+            data={[{ value: "__all_channels__", label: "全部渠道" }, ...channels.map((ch) => ({ value: ch.id, label: ch.name || ch.id }))]}
+            w={150}
+          />
 
-          <input
+          <TextInput
             className="logs-search"
             placeholder="搜索路径 / 请求 ID / 错误信息"
             value={draft.search}
@@ -110,11 +103,9 @@ export function LogsPage({
               if (e.key === "Enter") applyFilter({ search: draft.search, page: 1 });
             }}
           />
-          <button type="button" onClick={() => applyFilter({ search: draft.search, page: 1 })}>搜索</button>
+          <Button type="button" onClick={() => applyFilter({ search: draft.search, page: 1 })}>搜索</Button>
           {(filter.status !== "all" || filter.client || filter.channel || filter.search) && (
-            <button type="button" className="link-button" onClick={resetFilter}>
-              重置筛选
-            </button>
+            <Button type="button" variant="subtle" color="gray" onClick={resetFilter}>重置筛选</Button>
           )}
         </div>
 
@@ -122,7 +113,7 @@ export function LogsPage({
           仅展示每次请求尝试的最终记录。点击「详情」查看完整尝试链路、请求/响应 Headers 与 Body（已脱敏）。
         </p>
 
-        <div className="table-wrap">
+        <TableContainer>
           <table>
             <thead>
               <tr>
@@ -182,26 +173,16 @@ export function LogsPage({
               )}
             </tbody>
           </table>
-        </div>
+        </TableContainer>
 
         {/* 分页栏 */}
         {logMeta.total > 0 && (
           <div className="pagination">
-            <button type="button"
-              disabled={logMeta.page <= 1}
-              onClick={() => goToPage(logMeta.page - 1)}
-            >
-              上一页
-            </button>
+            <Button type="button" variant="default" disabled={logMeta.page <= 1} onClick={() => goToPage(logMeta.page - 1)}>上一页</Button>
             <span className="pagination-info">
               {logMeta.page} / {pageCount} （{startItem}–{endItem} / 共 {logMeta.total} 条）
             </span>
-            <button type="button"
-              disabled={logMeta.page >= pageCount}
-              onClick={() => goToPage(logMeta.page + 1)}
-            >
-              下一页
-            </button>
+            <Button type="button" variant="default" disabled={logMeta.page >= pageCount} onClick={() => goToPage(logMeta.page + 1)}>下一页</Button>
             <select
               value={logMeta.pageSize}
               onChange={(e) => {
@@ -254,3 +235,6 @@ function formatTimestamp(created: string | null): string {
     return created;
   }
 }
+
+
+

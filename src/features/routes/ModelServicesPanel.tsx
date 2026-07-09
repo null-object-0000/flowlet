@@ -1,3 +1,4 @@
+import { Button, Select, Switch } from "@mantine/core";
 import { Actions, EmptyState, Panel, PanelHeader, ProtocolBadges, StatusPill } from "../../components/ui";
 import { ChannelAccount, RouteCandidate } from "../../domain";
 import { accountCountLabel, buildExposedModels } from "./exposedModels";
@@ -29,8 +30,8 @@ export function ModelServicesPanel({ routes, accounts, onUpdate, onSave, onRegen
       <PanelHeader>
         <h3>模型服务</h3>
         <Actions>
-          <button type="button" onClick={onRegenerateDefaultRoutes}>同步模型</button>
-          <button type="button" className="primary" onClick={() => void onSave()}>保存模型服务</button>
+          <Button type="button" variant="default" onClick={onRegenerateDefaultRoutes}>同步模型</Button>
+          <Button type="button" onClick={() => void onSave()}>保存模型服务</Button>
         </Actions>
       </PanelHeader>
       {exposedModels.length === 0 ? (
@@ -50,17 +51,16 @@ export function ModelServicesPanel({ routes, accounts, onUpdate, onSave, onRegen
                   <span className="muted">上游模型：{model.upstreamModel || "-"}</span>
                 </div>
                 <span>{getChannelName(model.channelId)}</span>
-                <select value={model.accountId} onChange={(event) => switchModelAccount(model.routeIndexes, event.target.value)}>
-                  {channelAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>{account.name}</option>
-                  ))}
-                </select>
+                <Select
+                  value={model.accountId}
+                  onChange={(value) => value && switchModelAccount(model.routeIndexes, value)}
+                  data={channelAccounts.map((account) => ({ value: account.id, label: account.name }))}
+                  placeholder="选择账号"
+                />
                 <span className="muted">{accountCountLabel(model.accountIds.length)}</span>
                 <ProtocolBadges protocols={model.protocols} />
                 <StatusPill running={model.enabled}>{stateLabel}</StatusPill>
-                <button type="button" onClick={() => setModelEnabled(model.routeIndexes, !model.enabled)}>
-                  {model.enabled ? "关闭" : "开放"}
-                </button>
+                <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
               </div>
             );
           })}

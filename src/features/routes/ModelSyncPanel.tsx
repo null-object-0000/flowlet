@@ -1,5 +1,6 @@
 import React from "react";
-import { Actions, Panel, PanelHeader, ProtocolBadges } from "../../components/ui";
+import { Button, Table } from "@mantine/core";
+import { Actions, Panel, PanelHeader, ProtocolBadges, TableContainer } from "../../components/ui";
 import { ChannelAccount, ChannelModel, ChannelPreset } from "../../domain";
 
 type ModelSyncPanelProps = {
@@ -64,54 +65,55 @@ export function ModelSyncPanel({
       <PanelHeader>
         <h3>模型同步</h3>
         <Actions>
-          <button type="button" onClick={() => onRefreshChannelModels()}>刷新状态</button>
+          <Button type="button" variant="default" onClick={() => onRefreshChannelModels()}>刷新状态</Button>
         </Actions>
       </PanelHeader>
       {channels.length === 0 ? (
         <p>暂无渠道配置。</p>
       ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>渠道</th>
-                <th>协议</th>
-                <th>同步来源</th>
-                <th>同步时间</th>
-                <th>已同步模型数</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
+        <TableContainer>
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>渠道</Table.Th>
+                <Table.Th>协议</Table.Th>
+                <Table.Th>同步来源</Table.Th>
+                <Table.Th>同步时间</Table.Th>
+                <Table.Th>已同步模型数</Table.Th>
+                <Table.Th>操作</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
               {channels.map((channel) => {
                 const status = statusMap.get(channel.id);
                 const hasAccount = accounts.some(
                   (a) => a.channel_id === channel.id && a.enabled && a.api_key.trim()
                 );
                 return (
-                  <tr key={channel.id}>
-                    <td>{getChannelName(channel.id)}</td>
-                    <td><ProtocolBadges protocols={channel.supported_protocols} /></td>
-                    <td>{status?.source ?? "-"}</td>
-                    <td>{status?.synced_at ? new Date(status.synced_at).toLocaleString() : "-"}</td>
-                    <td>{status?.model_count ?? 0}</td>
-                    <td>
+                  <Table.Tr key={channel.id}>
+                    <Table.Td>{getChannelName(channel.id)}</Table.Td>
+                    <Table.Td><ProtocolBadges protocols={channel.supported_protocols} /></Table.Td>
+                    <Table.Td>{status?.source ?? "-"}</Table.Td>
+                    <Table.Td>{status?.synced_at ? new Date(status.synced_at).toLocaleString() : "-"}</Table.Td>
+                    <Table.Td>{status?.model_count ?? 0}</Table.Td>
+                    <Table.Td>
                       <Actions>
-                        <button type="button"
+                        <Button type="button"
+                          variant="default"
                           disabled={!hasAccount || syncingId === channel.id}
                           onClick={() => syncChannel(channel.id)}
                           title={hasAccount ? "同步模型列表" : "请先添加并启用一个已填写 API Key 的账号"}
                         >
                           {syncingId === channel.id ? "同步中..." : "同步"}
-                        </button>
+                        </Button>
                       </Actions>
-                    </td>
-                  </tr>
+                    </Table.Td>
+                  </Table.Tr>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+            </Table.Tbody>
+          </Table>
+        </TableContainer>
       )}
       <p className="hint">
         同步结果将更新可开放模型列表。DeepSeek 与 LongCat 均支持同步；LongCat 同步失败时自动以内置 LongCat-2.0 兜底。

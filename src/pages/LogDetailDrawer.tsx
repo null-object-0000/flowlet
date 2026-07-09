@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Drawer } from "@mantine/core";
+import { Button, Drawer, Table } from "@mantine/core";
 import { TableContainer } from "../components/ui";
 import { runCommand } from "../services/flowletApi";
 import { RequestLogRow } from "../domain";
@@ -91,40 +91,40 @@ export function LogDetailDrawer({
                 <section className="section">
                   <h4 className="section-title">尝试链路（{rows.length} 次尝试）</h4>
                   <TableContainer>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th>渠道</th>
-                          <th>账号</th>
-                          <th>状态</th>
-                          <th>TTFB</th>
-                          <th>耗时</th>
-                          <th>原因</th>
-                          <th>错误</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table striped highlightOnHover>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>#</Table.Th>
+                          <Table.Th>渠道</Table.Th>
+                          <Table.Th>账号</Table.Th>
+                          <Table.Th>状态</Table.Th>
+                          <Table.Th>TTFB</Table.Th>
+                          <Table.Th>耗时</Table.Th>
+                          <Table.Th>原因</Table.Th>
+                          <Table.Th>错误</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
                         {rows.map((row, idx) => (
-                          <tr key={row.id} className="attempt-row">
-                            <td>{idx + 1}</td>
-                            <td>{row.channel_name || row.channel_id || "-"}</td>
-                            <td>{row.account_name || row.account_id || "-"}</td>
-                            <td>{row.status ?? "-"}</td>
-                            <td>{fmtMs(row.ttfb_ms)}</td>
-                            <td>{fmtMs(row.duration_ms)}</td>
-                            <td>{row.route_reason || "-"}</td>
-                            <td title={row.error_message ?? ""}>
+                          <Table.Tr key={row.id} className="attempt-row">
+                            <Table.Td>{idx + 1}</Table.Td>
+                            <Table.Td>{row.channel_name || row.channel_id || "-"}</Table.Td>
+                            <Table.Td>{row.account_name || row.account_id || "-"}</Table.Td>
+                            <Table.Td>{row.status ?? "-"}</Table.Td>
+                            <Table.Td>{fmtMs(row.ttfb_ms)}</Table.Td>
+                            <Table.Td>{fmtMs(row.duration_ms)}</Table.Td>
+                            <Table.Td>{row.route_reason || "-"}</Table.Td>
+                            <Table.Td title={row.error_message ?? ""}>
                               {row.error_message
                                 ? row.error_message.length > 40
                                   ? row.error_message.slice(0, 40) + "…"
                                   : row.error_message
                                 : "-"}
-                            </td>
-                          </tr>
+                            </Table.Td>
+                          </Table.Tr>
                         ))}
-                      </tbody>
-                    </table>
+                      </Table.Tbody>
+                    </Table>
                   </TableContainer>
                 </section>
               ) : null}

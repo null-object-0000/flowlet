@@ -36,39 +36,10 @@ textarea {
   font: inherit;
 }
 
-button:not(.mantine-Button-root):not(.mantine-ActionIcon-root):not(.mantine-NavLink-root):not(.mantine-CloseButton-root) {
-  min-height: 30px;
-  border: 1px solid #cfd7e3;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #26374d;
-  padding: 0 10px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-button:not(.mantine-Button-root):not(.mantine-ActionIcon-root):not(.mantine-NavLink-root):not(.mantine-CloseButton-root):hover:not(:disabled) {
-  background: #f6f8fb;
-  border-color: #b9c4d3;
-}
-
-button.primary,
-button:not(.mantine-Button-root).primary {
-  border-color: #2563eb;
-  background: #2563eb;
-  color: #ffffff;
-}
-
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 
-button.link-button,
 .list-link {
-  border: none !important;
-  background: transparent !important;
   color: #2563eb !important;
-  padding: 0 !important;
-  height: auto;
-  min-height: 0 !important;
   text-decoration: none;
   justify-self: start;
 }
@@ -80,18 +51,3 @@ label {
   font-size: 12px;
 }
 
-input,
-select,
-textarea {
-  width: 100%;
-  min-width: 0;
-  min-height: 32px;
-  border: 1px solid #cfd7e3;
-  border-radius: 6px;
-  padding: 0 9px;
-  color: var(--text);
-  background: #ffffff;
-}
-
-textarea { padding: 9px; }
-input[readonly] { background: #f6f8fb; }

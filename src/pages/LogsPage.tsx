@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Select, TextInput } from "@mantine/core";
+import { Badge, Button, Select, Table, TextInput } from "@mantine/core";
 import { Actions, Panel, PanelHeader, TableContainer } from "../components/ui";
 import { ChannelPreset, ClientConfig, LogFilter, LogMeta, RequestLogRow } from "../domain";
 import { LogDetailDrawer } from "./LogDetailDrawer";
@@ -114,65 +114,65 @@ export function LogsPage({
         </p>
 
         <TableContainer>
-          <table>
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>客户端</th>
-                <th>渠道</th>
-                <th>账号</th>
-                <th>协议</th>
-                <th>类型</th>
-                <th>对外模型</th>
-                <th>上游模型</th>
-                <th>状态</th>
-                <th>TTFB</th>
-                <th>耗时</th>
-                <th>降级</th>
-                <th>原因</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>时间</Table.Th>
+                <Table.Th>客户端</Table.Th>
+                <Table.Th>渠道</Table.Th>
+                <Table.Th>账号</Table.Th>
+                <Table.Th>协议</Table.Th>
+                <Table.Th>类型</Table.Th>
+                <Table.Th>对外模型</Table.Th>
+                <Table.Th>上游模型</Table.Th>
+                <Table.Th>状态</Table.Th>
+                <Table.Th>TTFB</Table.Th>
+                <Table.Th>耗时</Table.Th>
+                <Table.Th>降级</Table.Th>
+                <Table.Th>原因</Table.Th>
+                <Table.Th></Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
               {logs.length === 0 ? (
-                <tr>
-                  <td colSpan={14}>
+                <Table.Tr>
+                  <Table.Td colSpan={14}>
                     {logMeta.total === 0 ? "暂无请求日志" : "当前筛选条件下无匹配记录"}
-                  </td>
-                </tr>
+                  </Table.Td>
+                </Table.Tr>
               ) : (
                 logs.map((row) => (
-                  <tr key={`${row.created_at}-${row.path}-${row.id}`}>
-                    <td>{formatTimestamp(row.created_at)}</td>
-                    <td>{row.client_name || row.client_id || "未知"}</td>
-                    <td>{row.channel_name || row.channel_id || "-"}</td>
-                    <td>{row.account_name || row.account_id || "-"}</td>
-                    <td>{row.client_protocol}</td>
-                    <td>
-                      <span className={`request-type-badge request-type-${row.request_type}`}>
+                  <Table.Tr key={`${row.created_at}-${row.path}-${row.id}`}>
+                    <Table.Td>{formatTimestamp(row.created_at)}</Table.Td>
+                    <Table.Td>{row.client_name || row.client_id || "未知"}</Table.Td>
+                    <Table.Td>{row.channel_name || row.channel_id || "-"}</Table.Td>
+                    <Table.Td>{row.account_name || row.account_id || "-"}</Table.Td>
+                    <Table.Td>{row.client_protocol}</Table.Td>
+                    <Table.Td>
+                      <Badge variant="light" color={row.request_type === "error" ? "red" : "blue"} size="xs">
                         {row.request_type}
-                      </span>
-                    </td>
-                    <td>{row.public_model || "-"}</td>
-                    <td>{row.upstream_model || "-"}</td>
-                    <td>{row.status ?? "-"}</td>
-                    <td>{formatMs(row.ttfb_ms)}</td>
-                    <td>{formatMs(row.duration_ms ?? row.latency_ms)}</td>
-                    <td>{row.fallback_count}</td>
-                    <td>{row.route_reason || row.error_message || "-"}</td>
-                    <td>
-                      <button type="button"
-                        className="link-button"
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>{row.public_model || "-"}</Table.Td>
+                    <Table.Td>{row.upstream_model || "-"}</Table.Td>
+                    <Table.Td>{row.status ?? "-"}</Table.Td>
+                    <Table.Td>{formatMs(row.ttfb_ms)}</Table.Td>
+                    <Table.Td>{formatMs(row.duration_ms ?? row.latency_ms)}</Table.Td>
+                    <Table.Td>{row.fallback_count}</Table.Td>
+                    <Table.Td>{row.route_reason || row.error_message || "-"}</Table.Td>
+                    <Table.Td>
+                      <Button type="button"
+                        variant="subtle"
                         onClick={() => setSelectedRequestId(row.request_id)}
                       >
                         详情
-                      </button>
-                    </td>
-                  </tr>
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
                 ))
               )}
-            </tbody>
-          </table>
+            </Table.Tbody>
+          </Table>
         </TableContainer>
 
         {/* 分页栏 */}
@@ -183,17 +183,19 @@ export function LogsPage({
               {logMeta.page} / {pageCount} （{startItem}–{endItem} / 共 {logMeta.total} 条）
             </span>
             <Button type="button" variant="default" disabled={logMeta.page >= pageCount} onClick={() => goToPage(logMeta.page + 1)}>下一页</Button>
-            <select
-              value={logMeta.pageSize}
-              onChange={(e) => {
-                const size = Number(e.target.value);
+            <Select
+              value={String(logMeta.pageSize)}
+              onChange={(value) => {
+                const size = Number(value ?? 50);
                 applyFilter({ pageSize: size, page: 1 });
               }}
-            >
-              <option value={25}>25 条/页</option>
-              <option value={50}>50 条/页</option>
-              <option value={100}>100 条/页</option>
-            </select>
+              data={[
+                { value: "25", label: "25 条/页" },
+                { value: "50", label: "50 条/页" },
+                { value: "100", label: "100 条/页" },
+              ]}
+              w={110}
+            />
           </div>
         )}
       </Panel>

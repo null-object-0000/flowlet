@@ -242,14 +242,18 @@ export type AccountStatsRow = {
 
 export type View =
   | "overview"
+  | "routes"
+  | "accounts"
   | "logs"
   | "usage"
   | "stats";
 
 export const views: Array<{ id: View; label: string }> = [
   { id: "overview", label: "概览" },
+  { id: "routes", label: "模型服务" },
+  { id: "accounts", label: "渠道账号" },
   { id: "logs", label: "请求日志" },
-  { id: "usage", label: "用量统计" },
+  { id: "usage", label: "用量成本" },
   { id: "stats", label: "高级设置" },
 ];
 

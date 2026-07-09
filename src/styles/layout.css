@@ -216,15 +216,15 @@
   overflow-x: auto;
 }
 
-table {
+.table-wrap table {
   width: 100%;
   min-width: 720px;
   border-collapse: collapse;
   background: #ffffff;
 }
 
-th,
-td {
+.table-wrap th,
+.table-wrap td {
   border-bottom: 1px solid #e4e9f1;
   padding: 8px;
   text-align: left;
@@ -232,7 +232,7 @@ td {
   white-space: nowrap;
 }
 
-th {
+.table-wrap th {
   color: #64748b;
   font-weight: 700;
   background: #f8fafc;
@@ -273,13 +273,6 @@ th {
   background: #f8fafc;
   border: 1px solid #e4e9f1;
   border-radius: 7px;
-}
-
-.detail-backdrop,
-.detail-drawer,
-.drawer-backdrop,
-.console-drawer {
-  /* Kept for legacy selectors; Mantine Drawer is used for log details. */
 }
 
 @media (max-width: 760px) {

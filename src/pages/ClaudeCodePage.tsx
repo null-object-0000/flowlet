@@ -1,3 +1,4 @@
+import { Button, TextInput } from "@mantine/core";
 import { Actions, Panel, PanelHeader } from "../components/ui";
 import { ClientConfig } from "../domain";
 
@@ -23,17 +24,17 @@ export function ClaudeCodePage({
       <div className="info-grid">
         <label>
           ANTHROPIC_BASE_URL
-          <input readOnly value={anthropicBaseUrl} />
+          <TextInput readOnly value={anthropicBaseUrl} />
         </label>
         <label>
           ANTHROPIC_AUTH_TOKEN
-          <input readOnly value={token} />
+          <TextInput readOnly value={token} />
         </label>
       </div>
       <Actions>
-        <button type="button" onClick={() => void onCopy(`export ANTHROPIC_BASE_URL=${anthropicBaseUrl}`, "已复制 BASE_URL")}>复制 BASE_URL</button>
-        <button type="button" onClick={() => void onCopy(`export ANTHROPIC_AUTH_TOKEN=${token}`, "已复制 AUTH_TOKEN")}>复制 AUTH_TOKEN</button>
-        <button type="button"
+        <Button type="button" variant="default" onClick={() => void onCopy(`export ANTHROPIC_BASE_URL=${anthropicBaseUrl}`, "已复制 BASE_URL")}>复制 BASE_URL</Button>
+        <Button type="button" variant="default" onClick={() => void onCopy(`export ANTHROPIC_AUTH_TOKEN=${token}`, "已复制 AUTH_TOKEN")}>复制 AUTH_TOKEN</Button>
+        <Button type="button"
           onClick={() =>
             void onCopy(
               `export ANTHROPIC_BASE_URL=${anthropicBaseUrl}\nexport ANTHROPIC_AUTH_TOKEN=${token}`,
@@ -42,7 +43,7 @@ export function ClaudeCodePage({
           }
         >
           复制完整配置
-        </button>
+        </Button>
       </Actions>
       <p className="hint">
         X-Api-Key 方式：将 <code>ANTHROPIC_AUTH_TOKEN</code> 替换为 <code>ANTHROPIC_API_KEY</code>，Flowlet 同样支持。

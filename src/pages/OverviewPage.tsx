@@ -1,4 +1,6 @@
 import React from "react";
+import { ActionIcon, Button, Drawer, Group, PasswordInput, Select, Switch, TextInput } from "@mantine/core";
+import { IconExternalLink, IconX } from "@tabler/icons-react";
 import { Actions, Panel, PanelHeader, ProtocolBadges, StatusPill } from "../components/ui";
 import {
   AccountBalanceSnapshot,
@@ -359,7 +361,7 @@ export function OverviewPage({
           <h2>概览</h2>
           <p>Flowlet 状态总览与快速操作</p>
         </div>
-        <button type="button" className="primary" onClick={() => void onRefreshAll()}>刷新数据</button>
+        <Button type="button" onClick={() => void onRefreshAll()}>刷新数据</Button>
       </header>
 
       <section className="dashboard-grid top-cards">
@@ -367,9 +369,9 @@ export function OverviewPage({
           <PanelHeader>
             <h3><CardIcon name="status" />代理状态</h3>
             <Actions>
-              <button type="button" className="ghost-button" onClick={onStartProxy} disabled={status.running}>启动</button>
-              <button type="button" className="ghost-button" onClick={onStopProxy} disabled={!status.running}>停止</button>
-              <button type="button" className="ghost-button" onClick={onRestartProxy}>重启</button>
+              <Button type="button" variant="default" onClick={onStartProxy} disabled={status.running}>启动</Button>
+              <Button type="button" variant="default" onClick={onStopProxy} disabled={!status.running}>停止</Button>
+              <Button type="button" variant="default" onClick={onRestartProxy}>重启</Button>
             </Actions>
           </PanelHeader>
           <div className="status-card-body">
@@ -396,28 +398,28 @@ export function OverviewPage({
           <div className="endpoint-list">
             <div className="endpoint-row">
               <div><span>OpenAI 协议</span><strong>{baseUrl}/v1</strong></div>
-              <button type="button" onClick={() => void onCopy(`${baseUrl}/v1`, "OpenAI Base URL 已复制")}><span className="copy-icon" aria-hidden="true" />复制</button>
+              <Button type="button" variant="default" onClick={() => void onCopy(`${baseUrl}/v1`, "OpenAI Base URL 已复制")}>复制</Button>
             </div>
             <div className="endpoint-row">
               <div><span>Anthropic 协议</span><strong>{baseUrl}/anthropic</strong></div>
-              <button type="button" onClick={() => void onCopy(`${baseUrl}/anthropic`, "Anthropic Base URL 已复制")}><span className="copy-icon" aria-hidden="true" />复制</button>
+              <Button type="button" variant="default" onClick={() => void onCopy(`${baseUrl}/anthropic`, "Anthropic Base URL 已复制")}>复制</Button>
             </div>
           </div>
-          <button type="button" className="list-link" onClick={() => setDrawer("apis")}>查看所有 API</button>
+          <Button type="button" variant="subtle" onClick={() => setDrawer("apis")}>查看所有 API</Button>
         </Panel>
 
         <Panel className="dashboard-card token-card">
           <PanelHeader>
             <h3><CardIcon name="token" />客户端令牌</h3>
-            <button type="button" onClick={regenerateDefaultToken}>重新生成</button>
+            <Button type="button" variant="default" onClick={regenerateDefaultToken}>重新生成</Button>
           </PanelHeader>
           <div className="token-box">
             <span>当前默认 Token</span>
             <strong>{defaultClient?.name ?? "未创建客户端"}</strong>
             <code>{defaultClient ? `Bearer ${maskSecret(defaultClient.token)}` : "Bearer -"}</code>
-            <button type="button" disabled={!defaultClient} onClick={() => defaultClient && void onCopy(`Bearer ${defaultClient.token}`, "Bearer Token 已复制")}><span className="copy-icon" aria-hidden="true" />复制</button>
+            <Button type="button" variant="default" disabled={!defaultClient} onClick={() => defaultClient && void onCopy(`Bearer ${defaultClient.token}`, "Bearer Token 已复制")}>复制</Button>
           </div>
-          <button type="button" className="list-link" onClick={() => setDrawer("tokens")}>管理 Token</button>
+          <Button type="button" variant="subtle" onClick={() => setDrawer("tokens")}>管理 Token</Button>
         </Panel>
       </section>
 
@@ -425,7 +427,7 @@ export function OverviewPage({
         <Panel className="dashboard-card wide-card">
           <PanelHeader>
             <h3><CardIcon name="accounts" />上游账户</h3>
-            <button type="button" onClick={() => openCreateAccount()}>新增账号</button>
+            <Button type="button" variant="default" onClick={() => openCreateAccount()}>新增账号</Button>
           </PanelHeader>
           <div className="console-list">
             {accounts.length === 0 ? <p className="muted">暂无上游账号。请新增 LongCat 或 DeepSeek 账号。</p> : null}
@@ -439,23 +441,23 @@ export function OverviewPage({
                 <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountStatus(account)}</StatusPill>
                 <span className="muted">{accountModelCount(account)} 个模型</span>
                 <Actions>
-                  <button type="button" onClick={() => openEditAccount(index)}>编辑</button>
-                  {account.channel_id === "longcat" ? <button type="button" onClick={() => setSnapshotAccountId(account.id)}>登记资源包</button> : null}
-                  {account.channel_id === "deepseek" ? <button type="button" onClick={() => onTestConnection(account.id)}>同步余额</button> : null}
-                  <button type="button" onClick={() => setDrawer("accounts")}>更多</button>
+                  <Button type="button" variant="subtle" onClick={() => openEditAccount(index)}>编辑</Button>
+                  {account.channel_id === "longcat" ? <Button type="button" variant="subtle" onClick={() => setSnapshotAccountId(account.id)}>登记资源包</Button> : null}
+                  {account.channel_id === "deepseek" ? <Button type="button" variant="subtle" onClick={() => onTestConnection(account.id)}>同步余额</Button> : null}
+                  <Button type="button" variant="subtle" onClick={() => setDrawer("accounts")}>更多</Button>
                 </Actions>
               </div>
             ))}
           </div>
-          <div className="card-footer-line"><span>共 {accounts.length} 个账户</span><button type="button" className="list-link" onClick={() => setDrawer("accounts")}>查看全部</button></div>
+          <div className="card-footer-line"><span>共 {accounts.length} 个账户</span><Button type="button" variant="subtle" onClick={() => setDrawer("accounts")}>查看全部</Button></div>
         </Panel>
 
         <Panel className="dashboard-card wide-card">
           <PanelHeader>
             <h3><CardIcon name="models" />已暴露模型</h3>
             <Actions>
-              <button type="button" className="ghost-button" onClick={() => void onSyncModels()}>同步模型</button>
-              <button type="button" onClick={() => setDrawer("models")}>查看全部</button>
+              <Button type="button" variant="default" onClick={() => void onSyncModels()}>同步模型</Button>
+              <Button type="button" variant="default" onClick={() => setDrawer("models")}>查看全部</Button>
             </Actions>
           </PanelHeader>
           <div className="console-list">
@@ -468,19 +470,19 @@ export function OverviewPage({
                 </div>
                 <StatusPill running={model.enabled && model.hasAvailableAccount}>{modelState(model)}</StatusPill>
                 <span className="muted">{accountCountLabel(model.accountIds.length)}</span>
-                <button type="button" className="row-icon-button" onClick={() => setDrawer("models")} aria-label="操作">↗</button>
+                <ActionIcon variant="subtle" onClick={() => setDrawer("models")} aria-label="操作"><IconExternalLink size={16} /></ActionIcon>
               </div>
             ))}
           </div>
           <div className="card-footer-line">
             <span>共 {exposedModels.length} 个模型</span>
-            <button type="button" className="list-link" onClick={() => setDrawer("models")}>查看全部</button>
+            <Button type="button" variant="subtle" onClick={() => setDrawer("models")}>查看全部</Button>
           </div>
         </Panel>
       </section>
 
       <Panel className="dashboard-card quick-start-card">
-        <PanelHeader><h3><CardIcon name="quick" />快速开始</h3><button type="button" className="ghost-button">查看配置示例</button></PanelHeader>
+        <PanelHeader><h3><CardIcon name="quick" />快速开始</h3><Button type="button" variant="default">查看配置示例</Button></PanelHeader>
         <div className="steps-row">
           {[
             ["配置客户端", "将连接 URL 配置到您的 AI 客户端中"],
@@ -499,19 +501,23 @@ export function OverviewPage({
         </div>
       </Panel>
 
-      {drawer ? (
-        <div className="drawer-backdrop" onClick={() => setDrawer(null)}>
-          <aside className="console-drawer" onClick={(event) => event.stopPropagation()}>
-            <header>
-              <h3>{drawer === "apis" ? "所有可用 API" : drawer === "tokens" ? "管理 Token" : drawer === "accounts" ? "管理上游账户" : "管理已暴露模型"}</h3>
-              <button type="button" onClick={() => setDrawer(null)}>关闭</button>
-            </header>
+      <Drawer
+        opened={drawer != null}
+        onClose={() => setDrawer(null)}
+        title={drawer === "apis" ? "所有可用 API" : drawer === "tokens" ? "管理 Token" : drawer === "accounts" ? "管理上游账户" : drawer === "models" ? "管理已暴露模型" : ""}
+        position="right"
+        size="min(720px, 92vw)"
+        padding="md"
+        className="console-drawer-root"
+      >
+        {drawer ? (
+          <>
             {drawer === "apis" ? (
               <div className="drawer-list">
                 {apiItems.map(([label, url]) => (
                   <div className="endpoint-row" key={label}>
                     <div><span>{label}</span><strong>{url}</strong></div>
-                    <button type="button" onClick={() => void onCopy(url, `${label} 已复制`)}><span className="copy-icon" aria-hidden="true" />复制</button>
+                    <Button type="button" variant="default" onClick={() => void onCopy(url, `${label} 已复制`)}>复制</Button>
                   </div>
                 ))}
               </div>
@@ -519,25 +525,25 @@ export function OverviewPage({
             {drawer === "tokens" ? (
               <div className="drawer-list">
                 <Actions>
-                  <button type="button" onClick={onAddClient}>新增客户端</button>
-                  <button type="button" className="primary" onClick={() => void onSaveClients()}>保存 Token</button>
+                  <Button type="button" variant="default" onClick={onAddClient}>新增客户端</Button>
+                  <Button type="button" onClick={() => void onSaveClients()}>保存 Token</Button>
                 </Actions>
                 {clients.map((client, index) => (
                   <div className="editor-card" key={client.id}>
-                    <input value={client.name} onChange={(event) => onUpdateClient(index, { name: event.target.value })} />
-                    <input value={client.token} onChange={(event) => onUpdateClient(index, { token: event.target.value })} />
-                    <select value={client.app_type} onChange={(event) => onUpdateClient(index, { app_type: event.target.value })}>
-                      <option value="local">本机</option>
-                      <option value="claude-code">Claude Code</option>
-                      <option value="cursor">Cursor</option>
-                      <option value="cline">Cline</option>
-                      <option value="open-webui">Open WebUI</option>
-                      <option value="custom">自定义</option>
-                    </select>
+                    <TextInput value={client.name} onChange={(event) => onUpdateClient(index, { name: event.target.value })} />
+                    <TextInput value={client.token} onChange={(event) => onUpdateClient(index, { token: event.target.value })} />
+                    <Select value={client.app_type} onChange={(value) => value && onUpdateClient(index, { app_type: value })} data={[
+                      { value: "local", label: "本机" },
+                      { value: "claude-code", label: "Claude Code" },
+                      { value: "cursor", label: "Cursor" },
+                      { value: "cline", label: "Cline" },
+                      { value: "open-webui", label: "Open WebUI" },
+                      { value: "custom", label: "自定义" },
+                    ]} />
                     <Actions>
-                      <button type="button" onClick={() => void onCopy(`Bearer ${client.token}`, "Bearer Token 已复制")}><span className="copy-icon" aria-hidden="true" />复制</button>
-                      <button type="button" onClick={() => onUpdateClient(index, { token: tokenSeed() })}>重新生成</button>
-                      <button type="button" onClick={() => onRemoveClient(index)}>删除</button>
+                      <Button type="button" variant="default" onClick={() => void onCopy(`Bearer ${client.token}`, "Bearer Token 已复制")}>复制</Button>
+                      <Button type="button" variant="default" onClick={() => onUpdateClient(index, { token: tokenSeed() })}>重新生成</Button>
+                      <Button type="button" variant="subtle" color="red" onClick={() => onRemoveClient(index)}>删除</Button>
                     </Actions>
                   </div>
                 ))}
@@ -546,7 +552,7 @@ export function OverviewPage({
             {drawer === "accounts" ? (
               <div className="drawer-list">
                 <Actions>
-                  {channels.map((channel) => <button type="button" key={channel.id} onClick={() => openCreateAccount(channel.id)}>新增{channel.name}</button>)}
+                  {channels.map((channel) => <Button type="button" variant="default" key={channel.id} onClick={() => openCreateAccount(channel.id)}>新增{channel.name}</Button>)}
                 </Actions>
                 <div className="account-drawer-table">
                   {accounts.map((account, index) => {
@@ -566,7 +572,7 @@ export function OverviewPage({
                               ? `${formatAmount(snapshot.balance)} ${snapshot.currency ?? ""}`
                               : "-"}
                         </span>
-                        <button type="button" onClick={() => openEditAccount(index)}>编辑</button>
+                        <Button type="button" variant="default" onClick={() => openEditAccount(index)}>编辑</Button>
                       </div>
                     );
                   })}
@@ -576,43 +582,41 @@ export function OverviewPage({
             {drawer === "models" ? (
               <div className="drawer-list">
                 <Actions>
-                  <button type="button" onClick={() => void onSyncModels()}>同步模型</button>
-                  <button type="button" onClick={onOpenAdvancedSettings}>进入高级映射</button>
-                  <button type="button" className="primary" onClick={() => void onSaveRoutes()}>保存模型配置</button>
+                  <Button type="button" variant="default" onClick={() => void onSyncModels()}>同步模型</Button>
+                  <Button type="button" variant="default" onClick={onOpenAdvancedSettings}>进入模型服务</Button>
+                  <Button type="button" onClick={() => void onSaveRoutes()}>保存模型配置</Button>
                 </Actions>
                 {exposedModels.map((model) => {
                   const channelAccounts = accounts.filter((account) => account.channel_id === model.channelId);
                   return (
                     <div className="model-service-row drawer-model-row" key={`${model.channelId}:${model.publicModel}`}>
                       <div className="row-main"><strong>{model.publicModel}</strong><span>{getChannelName(model.channelId)} · {model.upstreamModel}</span></div>
-                      <select value={model.accountId} onChange={(event) => switchModelAccount(model.routeIndexes, event.target.value)}>
-                        {channelAccounts.map((account) => (
-                          <option key={account.id} value={account.id}>{account.name}</option>
-                        ))}
-                      </select>
+                      <Select value={model.accountId} onChange={(value) => value && switchModelAccount(model.routeIndexes, value)} data={channelAccounts.map((account) => ({ value: account.id, label: account.name }))} />
                       <ProtocolBadges protocols={model.protocols} />
                       <span>{accountCountLabel(model.accountIds.length)}</span>
                       <StatusPill running={model.enabled && model.hasAvailableAccount}>{modelState(model)}</StatusPill>
-                      <button type="button" onClick={() => setModelEnabled(model.routeIndexes, !model.enabled)}>{model.enabled ? "关闭" : "开放"}</button>
+                      <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
                     </div>
                   );
                 })}
               </div>
             ) : null}
-          </aside>
-        </div>
-      ) : null}
+          </>
+        ) : null}
+      </Drawer>
 
-      {accountEditor ? (
-        <div className="account-modal-backdrop" onClick={() => setAccountEditor(null)}>
-          <aside className="account-modal" onClick={(event) => event.stopPropagation()}>
-            <header className="account-modal-header">
-              <div>
-                <h3>{accountEditor.mode === "create" ? "新增上游账号" : "编辑上游账号"}</h3>
-                <p>{accountEditor.mode === "create" ? "添加 LongCat 或 DeepSeek 账号，用于上游模型转发" : "修改账号信息、启用状态与高级配置"}</p>
-              </div>
-              <button type="button" className="icon-close" onClick={() => setAccountEditor(null)} aria-label="关闭">×</button>
-            </header>
+      <Drawer
+        opened={accountEditor != null}
+        onClose={() => setAccountEditor(null)}
+        title={accountEditor?.mode === "create" ? "新增上游账号" : "编辑上游账号"}
+        position="right"
+        size="min(760px, 94vw)"
+        padding="md"
+        className="account-editor-drawer-root"
+      >
+        {accountEditor ? (
+          <>
+            <p className="hint">{accountEditor.mode === "create" ? "添加 LongCat 或 DeepSeek 账号，用于上游模型转发" : "修改账号信息、启用状态与高级配置"}</p>
 
             <div className="account-modal-body">
               <section className="account-form-section">
@@ -620,57 +624,53 @@ export function OverviewPage({
                 {accountEditor.mode === "create" ? (
                   <div className="channel-segment">
                     {channels.map((channel) => (
-                      <button
+                      <Button
                         type="button"
                         key={channel.id}
-                        className={accountEditor.draft.channel_id === channel.id ? "active" : ""}
+                        variant={accountEditor.draft.channel_id === channel.id ? "light" : "default"}
                         onClick={() => updateAccountDraft({ channel_id: channel.id })}
                       >
                         <span className={`provider-mark channel-${channel.id}`}>{channelLogo(channel.id)}</span>
                         {channel.name}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 ) : (
-                  <label>
-                    渠道
-                    <div className="select-with-mark">
-                      <span className={`provider-mark channel-${accountEditor.draft.channel_id}`}>{channelLogo(accountEditor.draft.channel_id)}</span>
-                      <select value={accountEditor.draft.channel_id} onChange={(event) => updateAccountDraft({ channel_id: event.target.value })}>
-                        {channels.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
-                      </select>
-                    </div>
-                  </label>
+                  <Group align="end" gap="xs" wrap="nowrap">
+                    <span className={`provider-mark channel-${accountEditor.draft.channel_id}`}>{channelLogo(accountEditor.draft.channel_id)}</span>
+                    <Select label="渠道" value={accountEditor.draft.channel_id} onChange={(value) => value && updateAccountDraft({ channel_id: value })} data={channels.map((channel) => ({ value: channel.id, label: channel.name }))} flex={1} />
+                  </Group>
                 )}
 
                 <label>
                   账号名称
-                  <input value={accountEditor.draft.name} placeholder="请输入账号名称" onChange={(event) => updateAccountDraft({ name: event.target.value })} />
+                  <TextInput value={accountEditor.draft.name} placeholder="请输入账号名称" onChange={(event) => updateAccountDraft({ name: event.target.value })} />
                   <small>便于识别和管理，支持中英文、数字、下划线。</small>
                 </label>
 
                 <label>
                   API Key
                   <div className="secret-input">
-                    <input
-                      type={accountEditor.apiKeyVisible ? "text" : "password"}
+                    <PasswordInput
+                      visible={accountEditor.apiKeyVisible}
                       value={accountEditor.draft.api_key}
                       placeholder="请输入 API Key"
                       onChange={(event) => updateAccountDraft({ api_key: event.target.value })}
                     />
-                    <button
+                    <Button
                       type="button"
+                      variant="default"
                       onClick={() => setAccountEditor((current) => current ? { ...current, apiKeyVisible: !current.apiKeyVisible } : current)}
                     >
                       {accountEditor.apiKeyVisible ? "隐藏" : "显示"}
-                    </button>
+                    </Button>
                   </div>
                   <small>创建后将加密存储，仅用于与上游服务通信。</small>
                 </label>
 
                 <label className="switch-row">
                   <span>启用状态</span>
-                  <input type="checkbox" checked={accountEditor.draft.enabled} onChange={(event) => updateAccountDraft({ enabled: event.target.checked })} />
+                  <Switch checked={accountEditor.draft.enabled} onChange={(event) => updateAccountDraft({ enabled: event.currentTarget.checked })} />
                   <strong>{accountEditor.draft.enabled ? "已开启" : "已关闭"}</strong>
                 </label>
               </section>
@@ -686,23 +686,24 @@ export function OverviewPage({
                     <div className="resource-grid">
                       <label>
                         资源包剩余
-                        <div className="unit-input"><input type="number" min="0" value={accountEditor.snapshotDraft.tokenRemaining} onChange={(event) => updateSnapshotDraft({ tokenRemaining: event.target.value })} /><span>Tokens</span></div>
+                        <div className="unit-input"><TextInput type="number" min="0" value={accountEditor.snapshotDraft.tokenRemaining} onChange={(event) => updateSnapshotDraft({ tokenRemaining: event.target.value })} /><span>Tokens</span></div>
                       </label>
                       <label>
                         已消耗
-                        <div className="unit-input"><input type="number" min="0" value={accountEditor.snapshotDraft.tokenUsed} onChange={(event) => updateSnapshotDraft({ tokenUsed: event.target.value })} /><span>Tokens</span></div>
+                        <div className="unit-input"><TextInput type="number" min="0" value={accountEditor.snapshotDraft.tokenUsed} onChange={(event) => updateSnapshotDraft({ tokenUsed: event.target.value })} /><span>Tokens</span></div>
                       </label>
                       <label>
                         资源包总量
-                        <div className="unit-input"><input type="number" min="0" value={accountEditor.snapshotDraft.tokenTotal} onChange={(event) => updateSnapshotDraft({ tokenTotal: event.target.value })} /><span>Tokens</span></div>
+                        <div className="unit-input"><TextInput type="number" min="0" value={accountEditor.snapshotDraft.tokenTotal} onChange={(event) => updateSnapshotDraft({ tokenTotal: event.target.value })} /><span>Tokens</span></div>
                       </label>
                       <label>
                         过期时间
-                        <input type="datetime-local" value={accountEditor.snapshotDraft.tokenExpire} onChange={(event) => updateSnapshotDraft({ tokenExpire: event.target.value })} />
+                        <TextInput type="datetime-local" value={accountEditor.snapshotDraft.tokenExpire} onChange={(event) => updateSnapshotDraft({ tokenExpire: event.target.value })} />
                       </label>
                     </div>
-                    <button
+                    <Button
                       type="button"
+                      variant="default"
                       className="outline-primary"
                       disabled={accountEditor.mode === "create"}
                       onClick={() => {
@@ -711,24 +712,24 @@ export function OverviewPage({
                       }}
                     >
                       登记资源包
-                    </button>
+                    </Button>
                   </>
                 ) : (
                   <div className="resource-grid">
                     <label>
                       余额
-                      <div className="unit-input"><input type="number" min="0" step="0.01" value={accountEditor.snapshotDraft.balance} onChange={(event) => updateSnapshotDraft({ balance: event.target.value })} /><span>{accountEditor.snapshotDraft.currency || "CNY"}</span></div>
+                      <div className="unit-input"><TextInput type="number" min="0" step="0.01" value={accountEditor.snapshotDraft.balance} onChange={(event) => updateSnapshotDraft({ balance: event.target.value })} /><span>{accountEditor.snapshotDraft.currency || "CNY"}</span></div>
                     </label>
                     <label>
                       货币
-                      <input value={accountEditor.snapshotDraft.currency} onChange={(event) => updateSnapshotDraft({ currency: event.target.value })} />
+                      <TextInput value={accountEditor.snapshotDraft.currency} onChange={(event) => updateSnapshotDraft({ currency: event.target.value })} />
                     </label>
                     <label>
                       最近更新时间
-                      <input readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} />
+                      <TextInput readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} />
                     </label>
                     <div className="field-action">
-                      <button type="button" className="outline-primary" disabled={accountEditor.mode === "create"} onClick={() => onTestConnection(accountEditor.draft.id)}>同步余额</button>
+                      <Button type="button" variant="default" disabled={accountEditor.mode === "create"} onClick={() => onTestConnection(accountEditor.draft.id)}>同步余额</Button>
                     </div>
                   </div>
                 )}
@@ -740,18 +741,18 @@ export function OverviewPage({
               </section>
 
               <section className={accountEditor.advancedOpen ? "account-form-section advanced open" : "account-form-section advanced"}>
-                <button type="button" className="advanced-toggle" onClick={() => setAccountEditor((current) => current ? { ...current, advancedOpen: !current.advancedOpen } : current)}>
+                <Button type="button" variant="subtle" className="advanced-toggle" onClick={() => setAccountEditor((current) => current ? { ...current, advancedOpen: !current.advancedOpen } : current)}>
                   <span>高级配置</span>
                   <span>{accountEditor.advancedOpen ? "⌃" : "⌄"}</span>
-                </button>
+                </Button>
                 {accountEditor.advancedOpen ? (
                   <div className="advanced-content">
                     <label>
                       Base URL 覆盖（可选）
-                      <input value={accountEditor.draft.base_url_override ?? ""} placeholder={editorChannel?.openai_base_url ?? "https://api.example.com/v1"} onChange={(event) => updateAccountDraft({ base_url_override: event.target.value || null })} />
+                    <TextInput value={accountEditor.draft.base_url_override ?? ""} placeholder={editorChannel?.openai_base_url ?? "https://api.example.com/v1"} onChange={(event) => updateAccountDraft({ base_url_override: event.target.value || null })} />
                     </label>
                     <div className="test-row">
-                      <button type="button" className="outline-primary" disabled={accountEditor.mode === "create"} onClick={() => onTestConnection(accountEditor.draft.id)}>测试连接</button>
+                      <Button type="button" variant="default" disabled={accountEditor.mode === "create"} onClick={() => onTestConnection(accountEditor.draft.id)}>测试连接</Button>
                       <span>上次测试：{formatIsoDateTime(accountEditor.draft.last_used_at)}</span>
                       {accountEditor.draft.last_error ? <strong>{accountEditor.draft.last_error}</strong> : null}
                     </div>
@@ -765,18 +766,18 @@ export function OverviewPage({
                     <strong>危险区域</strong>
                     <span>删除账号后将无法恢复，请谨慎操作</span>
                   </div>
-                  <button type="button" onClick={() => void removeEditingAccount()}>删除账号</button>
+                  <Button type="button" variant="subtle" color="red" onClick={() => void removeEditingAccount()}>删除账号</Button>
                 </section>
               ) : null}
             </div>
 
             <footer className="account-modal-footer">
-              <button type="button" onClick={() => setAccountEditor(null)}>取消</button>
-              <button type="button" className="primary" onClick={() => void saveAccountEditor()}>{accountEditor.mode === "create" ? "保存账号" : "保存修改"}</button>
+              <Button type="button" variant="default" onClick={() => setAccountEditor(null)}>取消</Button>
+              <Button type="button" onClick={() => void saveAccountEditor()}>{accountEditor.mode === "create" ? "保存账号" : "保存修改"}</Button>
             </footer>
-          </aside>
-        </div>
-      ) : null}
+          </>
+        ) : null}
+      </Drawer>
 
       {snapshotAccount ? (
         <BalanceSnapshotEditor

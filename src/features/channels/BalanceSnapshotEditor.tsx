@@ -1,4 +1,5 @@
 import React from "react";
+import { Button, TextInput } from "@mantine/core";
 import { Actions, Panel, PanelHeader } from "../../components/ui";
 import { AccountBalanceSnapshot, ChannelAccount } from "../../domain";
 
@@ -80,49 +81,28 @@ export function BalanceSnapshotEditor({ account, initialSnapshot, onCancel, onSa
       <PanelHeader>
         <h3>{isLongCatSnapshot ? "登记 Token 资源包快照" : "登记余额快照"}</h3>
         <Actions>
-          <button type="button" onClick={onCancel}>取消</button>
+          <Button type="button" variant="default" onClick={onCancel}>取消</Button>
         </Actions>
       </PanelHeader>
       <div className="form-grid">
         {!isLongCatSnapshot ? (
           <>
-            <label>
-              余额数值
-              <input type="number" min="0" step="0.01" value={balance} placeholder="例如 100.50" onChange={(e) => setBalance(e.target.value)} />
-            </label>
-            <label>
-              货币
-              <input value={currency} placeholder="CNY" onChange={(e) => setCurrency(e.target.value)} />
-            </label>
+            <TextInput type="number" label="余额数值" min="0" step="0.01" value={balance} placeholder="例如 100.50" onChange={(e) => setBalance(e.target.value)} />
+            <TextInput label="货币" value={currency} placeholder="CNY" onChange={(e) => setCurrency(e.target.value)} />
           </>
         ) : null}
         {isLongCatSnapshot ? (
           <>
-            <label>
-              Token 资源包总量
-              <input type="number" min="0" value={tokenTotal} placeholder="可选，例如 1000000" onChange={(e) => setTokenTotal(e.target.value)} />
-            </label>
-            <label>
-              已消耗 Token
-              <input type="number" min="0" value={tokenUsed} placeholder="例如 250000" onChange={(e) => setTokenUsed(e.target.value)} />
-            </label>
-            <label>
-              剩余 Token
-              <input type="number" min="0" value={tokenRemaining} placeholder="例如 750000" onChange={(e) => setTokenRemaining(e.target.value)} />
-            </label>
-            <label>
-              资源包过期时间
-              <input type="date" value={tokenExpire} onChange={(e) => setTokenExpire(e.target.value)} />
-            </label>
+            <TextInput type="number" label="Token 资源包总量" min="0" value={tokenTotal} placeholder="可选，例如 1000000" onChange={(e) => setTokenTotal(e.target.value)} />
+            <TextInput type="number" label="已消耗 Token" min="0" value={tokenUsed} placeholder="例如 250000" onChange={(e) => setTokenUsed(e.target.value)} />
+            <TextInput type="number" label="剩余 Token" min="0" value={tokenRemaining} placeholder="例如 750000" onChange={(e) => setTokenRemaining(e.target.value)} />
+            <TextInput type="date" label="资源包过期时间" value={tokenExpire} onChange={(e) => setTokenExpire(e.target.value)} />
           </>
         ) : null}
-        <label>
-          备注
-          <input value={remark} placeholder="可选备注" onChange={(e) => setRemark(e.target.value)} />
-        </label>
+        <TextInput label="备注" value={remark} placeholder="可选备注" onChange={(e) => setRemark(e.target.value)} />
       </div>
       <Actions>
-        <button type="button" onClick={saveSnapshot}>保存快照</button>
+        <Button type="button" onClick={saveSnapshot}>保存快照</Button>
       </Actions>
     </Panel>
   );

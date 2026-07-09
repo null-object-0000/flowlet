@@ -1,4 +1,5 @@
 import React from "react";
+import { Button } from "@mantine/core";
 import { Actions, EmptyState, Panel, PanelHeader } from "../components/ui";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../domain";
 import {
@@ -57,9 +58,9 @@ export function ChannelsPage({
             渠道账号 ({enabledAccounts}/{totalAccounts})
           </h3>
           <Actions>
-            {channels.length > 0 ? <button type="button" onClick={() => onAddAccount(channels[0].id)}>新增账号</button> : null}
-            <button type="button" onClick={() => void onSaveAccounts()}>保存账号</button>
-            {proxyRunning ? <button type="button" onClick={() => void onRestartProxy()}>重启代理</button> : null}
+            {channels.length > 0 ? <Button type="button" variant="default" onClick={() => onAddAccount(channels[0].id)}>新增账号</Button> : null}
+            <Button type="button" onClick={() => void onSaveAccounts()}>保存账号</Button>
+            {proxyRunning ? <Button type="button" variant="default" onClick={() => void onRestartProxy()}>重启代理</Button> : null}
           </Actions>
         </PanelHeader>
         <p className="hint">
@@ -72,9 +73,9 @@ export function ChannelsPage({
               <p>请选择 LongCat 或 DeepSeek，并填写 API Key 后开始使用。</p>
               <Actions>
                 {channels.map((channel) => (
-                  <button type="button" key={channel.id} onClick={() => onAddAccount(channel.id)}>
+                  <Button type="button" variant="default" key={channel.id} onClick={() => onAddAccount(channel.id)}>
                     新增{channel.name}账号
-                  </button>
+                  </Button>
                 ))}
               </Actions>
             </EmptyState>

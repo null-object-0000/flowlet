@@ -4,6 +4,8 @@ export type AuthStrategy = "bearer" | "x_api_key";
 export type ProxyStatus = {
   running: boolean;
   bind_addr: string;
+  /** 代理进程的真实启动时间（RFC3339），未运行时为 null。 */
+  started_at?: string | null;
 };
 
 

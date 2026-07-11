@@ -444,8 +444,8 @@
 
 .overview-status-layout {
   display: grid;
-  grid-template-columns: minmax(310px, 0.9fr) minmax(480px, 1.35fr) 78px;
-  gap: 24px;
+  grid-template-columns: minmax(290px, 0.85fr) minmax(360px, 1fr) 78px;
+  gap: 22px;
   align-items: center;
 }
 
@@ -456,8 +456,13 @@
   font-weight: 800;
 }
 
+.overview-status-intro {
+  display: grid;
+  gap: 26px;
+}
+
 .overview-state-text {
-  margin-top: 26px;
+  margin: 0;
   color: #e58900;
   font-weight: 700;
   font-size: 16px;
@@ -498,28 +503,42 @@
 
 .overview-status-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px 36px;
-  margin-top: 4px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
 }
 
-.overview-status-metrics div {
+.overview-status-metric {
   min-width: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 
-.overview-status-metrics span {
+.overview-status-metric > span {
   color: #667795;
   font-size: 12px;
 }
 
-.overview-status-metrics strong {
+.overview-metric-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.overview-metric-value > strong {
   color: #12213a;
   font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.overview-hint-icon {
+  color: #7a89a6;
+  cursor: help;
+}
+
+.overview-hint-icon:hover {
+  color: #0874f9;
 }
 
 .overview-onboarding-card {
@@ -699,34 +718,26 @@
   gap: 10px;
 }
 
-.overview-endpoints div {
+.overview-endpoint-row {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr) auto;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
 }
 
-.overview-endpoints span {
+.overview-endpoint-row > span {
   color: #344766;
   font-size: 13px;
 }
 
-.overview-endpoints code {
+.overview-endpoint-url {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 8px 12px;
-  border: 1px solid #e1e7f0;
-  border-radius: 7px;
   background: #f8fafc;
   color: #233554;
-}
-
-.overview-note {
-  margin: 0;
-  color: #7181a0;
-  font-size: 12px;
 }
 
 .overview-agent-grid {
@@ -790,10 +801,6 @@
 }
 
 @media (max-width: 1180px) {
-  .overview-status-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .overview-agent-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -803,16 +810,113 @@
   .overview-status-layout,
   .overview-account-row,
   .overview-model-row,
-  .overview-endpoints div {
+  .overview-endpoint-row {
     grid-template-columns: 1fr;
   }
 
-  .overview-status-metrics,
   .overview-agent-grid {
     grid-template-columns: 1fr;
+  }
+
+  .overview-status-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-status-intro {
+    gap: 14px;
   }
 }
 
 .overview-state-text.failed {
   color: #d64545;
+}
+
+.api-detail-drawer {
+  display: grid;
+  gap: 18px;
+}
+
+.api-detail-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #e5ebf4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.api-detail-section h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f1f3d;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-detail-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.api-detail-row-multiline {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.api-detail-stack {
+  min-width: 0;
+}
+
+.api-detail-stack .api-detail-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.api-detail-label {
+  color: #667795;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.api-detail-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f8fafc;
+  color: #233554;
+}
+
+.api-detail-security {
+  background: #fff8ec;
+  border-color: #f3e4c2;
+}
+
+.api-detail-warning-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #6f4a14;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.api-detail-warning-list .mantine-Code-root {
+  display: inline;
+  padding: 1px 6px;
+  background: #f8ebc8;
+  color: #7a4a0c;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .api-detail-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .api-detail-row-multiline {
+    grid-template-columns: 1fr;
+  }
 }

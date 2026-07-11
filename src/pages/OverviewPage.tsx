@@ -2,22 +2,30 @@ import React from "react";
 import {
   ActionIcon,
   Badge,
+  Box,
   Button,
+  Code,
   Drawer,
   Group,
   PasswordInput,
   Select,
   SimpleGrid,
+  Stack,
   Switch,
   Text,
   TextInput,
+  Tooltip,
   UnstyledButton,
 } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import {
   IconBrandOpenai,
+  IconCircleCheck,
+  IconCircleX,
   IconChevronRight,
   IconCopy,
   IconDotsVertical,
+  IconInfoCircle,
   IconPlayerPlay,
   IconRefresh,
   IconRobot,
@@ -95,6 +103,15 @@ function formatIsoDateTime(value?: string | null): string {
   if (!value) return "-";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
+
+/** RFC3339 字符串转换为 YYYY-MM-DD HH:mm:ss（与前端展示风格一致）。 */
+function formatRfc3339(value?: string | null): string {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  // 与 AGENTS.md / OverviewPage 现有格式保持一致。
   return parsed.toLocaleString();
 }
 
@@ -207,11 +224,24 @@ export function OverviewPage({
   const [accountEditor, setAccountEditor] = React.useState<AccountEditor | null>(null);
   const [observedStartedAt, setObservedStartedAt] = React.useState<Date | null>(status.running ? new Date() : null);
   const [, forceTick] = React.useState(0);
+  const [drawerOpened, setDrawerOpened] = React.useState(false);
+  const [healthChecking, setHealthChecking] = React.useState(false);
 
+  // 当后端回传的 running / started_at 状态变化时同步本地显示起点。
+  // 仅在后端尚未提供新启动时间时回退为本地「首次观察到 running」的时刻。
   React.useEffect(() => {
-    if (status.running && !observedStartedAt) setObservedStartedAt(new Date());
-    if (!status.running && observedStartedAt) setObservedStartedAt(null);
-  }, [status.running, observedStartedAt]);
+    if (status.running) {
+      // 后端补充了 started_at 时直接使用，否则回退并用当前渲染时刻近似。
+      const backendStamp = status.started_at;
+      if (backendStamp && observedStartedAt) {
+        const observedIso = observedStartedAt.toISOString();
+        if (observedIso !== backendStamp) setObservedStartedAt(new Date(backendStamp));
+      }
+      if (!observedStartedAt && !backendStamp) setObservedStartedAt(new Date());
+    } else {
+      if (observedStartedAt) setObservedStartedAt(null);
+    }
+  }, [status.running, status.started_at]); // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
     const timer = window.setInterval(() => forceTick((value) => value + 1), 30000);
@@ -230,14 +260,56 @@ export function OverviewPage({
   const snapshotAccount = accounts.find((account) => account.id === snapshotAccountId);
   const editorChannel = accountEditor ? channels.find((channel) => channel.id === accountEditor.draft.channel_id) : undefined;
   const editorSnapshot = accountEditor ? getBalanceForAccount(accountEditor.draft.id) : undefined;
-  const statusMetrics = [
-    ["监听地址", status.running ? bindConfig.host || "127.0.0.1" : "-"],
-    ["端口", String(port)],
-    ["运行时长", observedStartedAt ? formatDuration(Date.now() - observedStartedAt.getTime()) : "-"],
-    ["启动时间", formatDateTime(observedStartedAt)],
-    ["平均响应时间", "-"],
-    ["成功率", "-"],
+
+  // 启动时间：优先复用后端提供的真实启动时间（跨会话保持），回退本地观察到 running 的时刻。
+  const startedAtDate = status.started_at ? new Date(status.started_at) : observedStartedAt;
+  const statusMetrics: Array<{ label: string; value: string; hint?: string }> = [
+    { label: "监听地址", value: status.running ? bindConfig.host || "127.0.0.1" : "-" },
+    { label: "端口", value: String(port) },
+    {
+      label: "运行时长",
+      value: startedAtDate ? formatDuration(Date.now() - startedAtDate.getTime()) : "-",
+      hint: startedAtDate ? `启动时间：${formatRfc3339(startedAtDate.toISOString())}` : undefined,
+    },
   ];
+
+  async function checkHealth() {
+    if (healthChecking) return;
+    setHealthChecking(true);
+    // 健康检查独立提示，不走剪贴板写入路径。
+    // 直接复用项目已有的 Mantine notifications 反馈。
+    const timeoutMs = 5000;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${baseUrl}/health`, {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        notifications.show({ message: "代理服务健康检查正常", color: "green", autoClose: 2600 });
+      } else {
+        notifications.show({
+          message: `无法访问健康检查接口 (HTTP ${res.status})`,
+          color: "orange",
+          autoClose: 2600,
+        });
+      }
+    } catch (err) {
+      const reason = err instanceof Error && err.name === "AbortError"
+        ? "请求超时"
+        : err instanceof Error ? String(err.message || err) : String(err);
+      notifications.show({
+        message: `无法访问健康检查接口：${reason}`,
+        color: "red",
+        autoClose: 2600,
+      });
+    } finally {
+      window.clearTimeout(timer);
+      setHealthChecking(false);
+    }
+  }
   const proxyHint = proxyPhase === "failed"
     ? `错误原因：${proxyStartError}`
     : proxyPhase === "starting"
@@ -397,7 +469,7 @@ export function OverviewPage({
 
       <Panel className="overview-status-card">
         <div className="overview-status-layout">
-          <div>
+          <div className="overview-status-intro">
             <Group gap="xs">
               <h3>代理服务状态</h3>
               <Badge color={proxyPhase === "running" ? "green" : proxyPhase === "failed" ? "red" : "orange"} variant="light">
@@ -409,8 +481,20 @@ export function OverviewPage({
             </Text>
           </div>
           <div className="overview-status-metrics">
-            {statusMetrics.map(([label, value]) => (
-              <div key={label}><span>{label}</span><strong>{value}</strong></div>
+            {statusMetrics.map((item) => (
+              <div className="overview-status-metric" key={item.label}>
+                <span>{item.label}</span>
+                <div className="overview-metric-value">
+                  <strong>{item.value}</strong>
+                  {item.hint ? (
+                    <Tooltip label={item.hint} withArrow position="top">
+                      <ActionIcon className="overview-hint-icon" variant="transparent" size="xs" aria-label="启动时间提示">
+                        <IconInfoCircle size={13} />
+                      </ActionIcon>
+                    </Tooltip>
+                  ) : null}
+                </div>
+              </div>
             ))}
           </div>
           <StatusSignal running={status.running} />
@@ -504,22 +588,37 @@ export function OverviewPage({
               <PanelHeader>
                 <div>
                   <h3>客户端访问信息</h3>
-                  <Text size="sm" c="dimmed">使用以下地址在指定客户端中配置</Text>
                 </div>
+                <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={() => setDrawerOpened(true)}>查看接入详情</Button>
               </PanelHeader>
               <div className="overview-endpoints">
-                <div>
-                  <span>OpenAI 兼容端点</span>
-                  <code>{baseUrl}/v1</code>
-                  <Button variant="default" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/v1`, "OpenAI Base URL 已复制")}>复制</Button>
+                <div className="overview-endpoint-row">
+                  <span>OpenAI Base URL</span>
+                  <Code className="overview-endpoint-url">{baseUrl}/v1</Code>
+                  <Button variant="default" size="xs" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/v1`, "OpenAI Base URL 已复制")}>复制</Button>
                 </div>
-                <div>
-                  <span>Anthropic 兼容端点</span>
-                  <code>{baseUrl}/anthropic</code>
-                  <Button variant="default" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/anthropic`, "Anthropic Base URL 已复制")}>复制</Button>
+                <div className="overview-endpoint-row">
+                  <span>Anthropic Base URL</span>
+                  <Code className="overview-endpoint-url">{baseUrl}/anthropic</Code>
+                  <Button variant="default" size="xs" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/anthropic`, "Anthropic Base URL 已复制")}>复制</Button>
+                </div>
+                <div className="overview-endpoint-row">
+                  <span>健康检查地址</span>
+                  <Code className="overview-endpoint-url">{baseUrl}/health</Code>
+                  <Group gap="xs">
+                    <Button variant="default" size="xs" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/health`, "健康检查地址已复制")}>复制</Button>
+                    <Button
+                      variant="light"
+                      size="xs"
+                      loading={healthChecking}
+                      leftSection={healthChecking ? undefined : <IconCircleCheck size={14} />}
+                      onClick={() => void checkHealth()}
+                    >
+                      检测
+                    </Button>
+                  </Group>
                 </div>
               </div>
-              <Text className="overview-note">支持 OpenAI 与 Anthropic 兼容协议，可直接在各类客户端中配置使用。</Text>
             </Panel>
 
             <Panel className="overview-section-card">
@@ -673,6 +772,125 @@ export function OverviewPage({
             </footer>
           </>
         ) : null}
+      </Drawer>
+
+      <Drawer
+        opened={drawerOpened}
+        onClose={() => setDrawerOpened(false)}
+        title="API 接入详情"
+        position="right"
+        size="min(720px, 92vw)"
+        padding="md"
+      >
+        <Box className="api-detail-drawer">
+          <section className="api-detail-section">
+            <h4><span className="mini-section-icon">▣</span>服务信息</h4>
+            <div className="api-detail-row">
+              <span className="api-detail-label">服务基础地址</span>
+              <Code className="api-detail-value">{baseUrl}</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制服务基础地址" onClick={() => void onCopy(baseUrl, "服务基础地址已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+            <div className="api-detail-row">
+              <span className="api-detail-label">监听地址</span>
+              <Code className="api-detail-value">{status.running ? bindConfig.host || "127.0.0.1" : "-"}</Code>
+            </div>
+            <div className="api-detail-row">
+              <span className="api-detail-label">当前端口</span>
+              <Code className="api-detail-value">{String(port)}</Code>
+            </div>
+            <div className="api-detail-row">
+              <span className="api-detail-label">健康检查地址</span>
+              <Code className="api-detail-value">/health</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制健康检查地址" onClick={() => void onCopy(`${baseUrl}/health`, "健康检查地址已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+          </section>
+
+          <section className="api-detail-section">
+            <h4><span className="mini-section-icon">▤</span>OpenAI-compatible</h4>
+            <div className="api-detail-row">
+              <span className="api-detail-label">Base URL</span>
+              <Code className="api-detail-value">{baseUrl}/v1</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制 OpenAI Base URL" onClick={() => void onCopy(`${baseUrl}/v1`, "OpenAI Base URL 已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+            <div className="api-detail-row">
+              <span className="api-detail-label">模型列表</span>
+              <Code className="api-detail-value">GET /v1/models</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制模型列表地址" onClick={() => void onCopy(`${baseUrl}/v1/models`, "模型列表地址已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+            <div className="api-detail-row">
+              <span className="api-detail-label">对话接口</span>
+              <Code className="api-detail-value">POST /v1/chat/completions</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制对话接口地址" onClick={() => void onCopy(`${baseUrl}/v1/chat/completions`, "对话接口地址已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+            <div className="api-detail-row">
+              <span className="api-detail-label">鉴权 Header</span>
+              <Code className="api-detail-value">Authorization: Bearer &lt;Client Token&gt;</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制鉴权 Header" onClick={() => void onCopy("Authorization: Bearer <Client Token>", "鉴权 Header 已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+          </section>
+
+          <section className="api-detail-section">
+            <h4><span className="mini-section-icon">▤</span>Anthropic-compatible</h4>
+            <div className="api-detail-row">
+              <span className="api-detail-label">Base URL</span>
+              <Code className="api-detail-value">{baseUrl}/anthropic</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制 Anthropic Base URL" onClick={() => void onCopy(`${baseUrl}/anthropic`, "Anthropic Base URL 已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+            <div className="api-detail-row">
+              <span className="api-detail-label">模型列表</span>
+              <Code className="api-detail-value">GET /anthropic/v1/models</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制 Anthropic 模型列表地址" onClick={() => void onCopy(`${baseUrl}/anthropic/v1/models`, "Anthropic 模型列表地址已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+            <div className="api-detail-row">
+              <span className="api-detail-label">消息接口</span>
+              <Code className="api-detail-value">POST /anthropic/v1/messages</Code>
+              <ActionIcon variant="subtle" size="sm" aria-label="复制消息接口地址" onClick={() => void onCopy(`${baseUrl}/anthropic/v1/messages`, "消息接口地址已复制")}>
+                <IconCopy size={15} />
+              </ActionIcon>
+            </div>
+            <div className="api-detail-row api-detail-row-multiline">
+              <span className="api-detail-label">鉴权 Header</span>
+              <Stack gap={4} className="api-detail-stack">
+                <Group gap="xs" wrap="nowrap">
+                  <Code className="api-detail-value">Authorization: Bearer &lt;Client Token&gt;</Code>
+                  <ActionIcon variant="subtle" size="sm" aria-label="复制 Authorization Header" onClick={() => void onCopy("Authorization: Bearer <Client Token>", "Authorization Header 已复制")}>
+                    <IconCopy size={15} />
+                  </ActionIcon>
+                </Group>
+                <Group gap="xs" wrap="nowrap">
+                  <Code className="api-detail-value">X-Api-Key: &lt;Client Token&gt;</Code>
+                  <ActionIcon variant="subtle" size="sm" aria-label="复制 X-Api-Key Header" onClick={() => void onCopy("X-Api-Key: <Client Token>", "X-Api-Key Header 已复制")}>
+                    <IconCopy size={15} />
+                  </ActionIcon>
+                </Group>
+              </Stack>
+            </div>
+          </section>
+
+          <section className="api-detail-section api-detail-security">
+            <h4><span className="mini-section-icon">⚠</span>安全提示</h4>
+            <ul className="api-detail-warning-list">
+              <li>客户端应使用 <Code>Flowlet Client Token</Code>，不要在客户端中直接配置上游渠道的真实 API Key。</li>
+              <li>Flowlet 根据 Client Token 识别请求来源，并在转发时替换上游鉴权信息。</li>
+            </ul>
+          </section>
+        </Box>
       </Drawer>
 
       {snapshotAccount ? (

@@ -49,6 +49,7 @@ export function useFlowletData() {
   const [status, setStatus] = React.useState<ProxyStatus>({
     running: false,
     bind_addr: "127.0.0.1:18640",
+    started_at: null,
   });
 
   const refreshStatus = React.useCallback(async () => {

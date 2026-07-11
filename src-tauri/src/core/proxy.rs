@@ -1,6 +1,6 @@
 use super::config::{
-    classify_request, ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig,
-    ProtocolType, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
+    classify_request, ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ProtocolType,
+    RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
@@ -66,14 +66,15 @@ mod proxy_routing;
 
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
-    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file as ensure_ua_rules_file,
-    extract_model, identify_client, identify_client_by_ua, is_model_list_request,
-    is_streaming_response, load_ua_rules, rewrite_model, sanitize_headers,
+    copy_response_headers, cors_preflight_response, encode_body_base64,
+    ensure_config_file as ensure_ua_rules_file, extract_model, identify_client,
+    identify_client_by_ua, is_model_list_request, is_streaming_response, load_ua_rules,
+    rewrite_model, sanitize_headers,
 };
 use proxy_routing::{
     body_contains_quota_exceeded, enrich_upstream_error_log, match_candidates,
-    network_error_route_reason, resolve_small_model,
-    should_check_quota_body_status, should_try_next_status,
+    network_error_route_reason, resolve_small_model, should_check_quota_body_status,
+    should_try_next_status,
 };
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -87,10 +88,16 @@ pub enum ProxyError {
     StartFailed(String),
 }
 
+/// 代理服务当前状态。
+///
+/// `started_at` 为代理服务真实启动时间的 RFC3339 字符串，
+/// 仅在代理处于 `running` 状态时有效；`stopped` / `failed` 后为空。
 #[derive(Debug, Clone, Serialize)]
 pub struct ProxyStatus {
     pub running: bool,
     pub bind_addr: String,
+    /// 代理进程的真实启动时间（RFC3339），未运行时为 null。
+    pub started_at: Option<String>,
 }
 
 #[derive(Clone)]
@@ -109,6 +116,8 @@ impl Default for ProxyController {
 struct ProxyRuntime {
     shutdown: Option<oneshot::Sender<()>>,
     bind_addr: String,
+    /// 代理进程的真实启动时间，与 ProxyStatus.started_at 一一对应。
+    started_at: Option<String>,
 }
 
 impl Default for ProxyRuntime {
@@ -116,6 +125,7 @@ impl Default for ProxyRuntime {
         Self {
             shutdown: None,
             bind_addr: DEFAULT_BIND_ADDR.to_string(),
+            started_at: None,
         }
     }
 }
@@ -132,7 +142,6 @@ struct ProxyAppState {
     /// 本地 config.json 文件路径，每次请求热读 UA rules 用
     pub config_path: std::path::PathBuf,
 }
-
 
 impl ProxyController {
     pub async fn start(
@@ -207,8 +216,12 @@ impl ProxyController {
         // 首次启动时写入默认 config.json（UA 识别规则），用户可直接编辑
         ensure_ua_rules_file(&config_path);
 
+        // 代理即将进入 running 状态，记录真实的启动时间。
+        // 取端口监听成功后的时刻，避免与后续异步 serve 启动之间产生偏差。
+        let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         runtime.bind_addr = bind_addr_str.to_string();
+        runtime.started_at = Some(started_at);
         runtime.shutdown = Some(shutdown_tx);
         drop(runtime);
 
@@ -248,18 +261,30 @@ impl ProxyController {
             .lock()
             .map_err(|_| ProxyError::StartFailed("代理状态锁定失败".to_string()))?;
         let shutdown = runtime.shutdown.take().ok_or(ProxyError::NotRunning)?;
+        // 服务停止后清空启动时间，避免下次启动前的残留。
+        runtime.started_at = None;
         let _ = shutdown.send(());
         Ok(())
     }
 
     pub fn status(&self) -> ProxyStatus {
-        let (running, bind_addr) = self
+        let (running, bind_addr, started_at) = self
             .inner
             .lock()
-            .map(|runtime| (runtime.shutdown.is_some(), runtime.bind_addr.clone()))
-            .unwrap_or_else(|_| (false, DEFAULT_BIND_ADDR.to_string()));
+            .map(|runtime| {
+                (
+                    runtime.shutdown.is_some(),
+                    runtime.bind_addr.clone(),
+                    runtime.started_at.clone(),
+                )
+            })
+            .unwrap_or_else(|_| (false, DEFAULT_BIND_ADDR.to_string(), None));
 
-        ProxyStatus { running, bind_addr }
+        ProxyStatus {
+            running,
+            bind_addr,
+            started_at,
+        }
     }
 }
 
@@ -372,7 +397,7 @@ async fn forward_request(
     let ua_rules = load_ua_rules(&state.config_path);
     let (client_id, client_name) = match identify_client_by_ua(&parts.headers, &ua_rules) {
         Some((id, name)) => (Some(id), Some(name)),
-        None => (None, Some("未知".to_string()))
+        None => (None, Some("未知".to_string())),
     };
 
     // 速率限制检查（key 仍用 token 身份，避免多 UA 共用一 token 时互相影响）
@@ -421,11 +446,20 @@ async fn forward_request(
                 })
         });
         let (error_code, error_message) = if !has_available_account {
-            ("no_available_account", "No enabled account with a configured API key is available")
+            (
+                "no_available_account",
+                "No enabled account with a configured API key is available",
+            )
         } else if !has_exposed_model {
-            ("no_available_model", "No model is currently exposed by Flowlet")
+            (
+                "no_available_model",
+                "No model is currently exposed by Flowlet",
+            )
         } else {
-            ("model_not_exposed", "The requested model is not exposed by Flowlet")
+            (
+                "model_not_exposed",
+                "The requested model is not exposed by Flowlet",
+            )
         };
         let log = RequestLogInput {
             request_id: request_id.clone(),
@@ -528,11 +562,7 @@ async fn forward_request(
             .as_deref()
             .filter(|url| !url.trim().is_empty())
             .unwrap_or_else(|| channel.base_url_for(&detected_protocol));
-        let upstream_url = build_upstream_url(
-            base_url,
-            &parts.uri,
-            &detected_protocol,
-        );
+        let upstream_url = build_upstream_url(base_url, &parts.uri, &detected_protocol);
         let mut builder = http_client.request(parts.method.clone(), upstream_url);
 
         // 应用渠道级别超时（如果配置了的话）
@@ -653,7 +683,14 @@ async fn forward_request(
                     log.res_headers_json = res_headers_json;
                     log.res_body_b64 = res_body_b64;
 
-                    return build_buffered_response(storage.clone(), status, headers, body, log, &detected_protocol);
+                    return build_buffered_response(
+                        storage.clone(),
+                        status,
+                        headers,
+                        body,
+                        log,
+                        &detected_protocol,
+                    );
                 }
 
                 // 默认路径：流式 or 短响应交给 build_response
@@ -850,13 +887,19 @@ impl RouteLogContext {
         attempt_seq: i64,
         is_last: bool,
     ) -> RequestLogInput {
-        let mut log =
-            self.base_log_input(request_id, Some(status), None, false, None, fallback_count, route_reason);
+        let mut log = self.base_log_input(
+            request_id,
+            Some(status),
+            None,
+            false,
+            None,
+            fallback_count,
+            route_reason,
+        );
         log.attempt_seq = attempt_seq;
         log.is_last_attempt = is_last;
         log
     }
-
 }
 
 // ─── Response Builders ──────────────────────────────────────────────────────
@@ -912,11 +955,7 @@ async fn build_response(
         record_request_log(storage.clone(), log);
 
         let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
-        let stream = capture_timed_stream(
-            upstream_response.bytes_stream(),
-            tx_done,
-            capture,
-        );
+        let stream = capture_timed_stream(upstream_response.bytes_stream(), tx_done, capture);
 
         let request_id_for_update = request_id.clone();
         let ttfb_for_update = ttfb_ms;
@@ -1205,11 +1244,7 @@ fn capture_timed_stream(
         match state.inner.next().await {
             Some(Ok(bytes)) => {
                 if state.capture_res_body
-                    && state
-                        .res_body_buf
-                        .len()
-                        .saturating_add(bytes.len())
-                        <= state.res_body_max
+                    && state.res_body_buf.len().saturating_add(bytes.len()) <= state.res_body_max
                 {
                     state.res_body_buf.extend_from_slice(&bytes);
                 }
@@ -1280,13 +1315,20 @@ struct TimedStreamState {
     line_count: usize,
 }
 
-fn build_stream_summary(first: Option<&str>, last: Option<&str>, line_count: usize) -> Option<String> {
+fn build_stream_summary(
+    first: Option<&str>,
+    last: Option<&str>,
+    line_count: usize,
+) -> Option<String> {
     let first = first?;
     let last = last.unwrap_or(first);
     if first == last {
         return Some(format!("lines: {}\n{}", line_count, first));
     }
-    Some(format!("lines: {}\nfirst: {}\nlast:  {}", line_count, first, last))
+    Some(format!(
+        "lines: {}\nfirst: {}\nlast:  {}",
+        line_count, first, last
+    ))
 }
 
 /// 流式响应结束后由 spawn task 调用，补写 duration / res_body_b64 / stream_summary
@@ -1319,10 +1361,3 @@ fn update_stream_log(
 #[cfg(test)]
 #[path = "proxy_tests.rs"]
 mod proxy_tests;
-
-
-
-
-
-
-

@@ -17,7 +17,16 @@ pub(super) async fn start_proxy(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.start_configured_proxy().await?;
+    if state.proxy.status().running {
+        update_tray_tooltip(&app, true);
+        return Ok(());
+    }
+    tracing::info!("start_proxy: 开始启动本地代理");
+    state.start_configured_proxy().await.map_err(|err| {
+        tracing::error!(error = %err, "start_proxy: 启动失败");
+        err
+    })?;
+    tracing::info!("start_proxy: 本地代理启动成功");
     update_tray_tooltip(&app, true);
     Ok(())
 }

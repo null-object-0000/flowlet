@@ -812,3 +812,7 @@
     grid-template-columns: 1fr;
   }
 }
+
+.overview-state-text.failed {
+  color: #d64545;
+}

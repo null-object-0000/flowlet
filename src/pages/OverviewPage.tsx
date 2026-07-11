@@ -19,7 +19,6 @@ import {
   IconCopy,
   IconDotsVertical,
   IconPlayerPlay,
-  IconPlayerStop,
   IconRefresh,
   IconRobot,
 } from "@tabler/icons-react";
@@ -64,8 +63,10 @@ type OverviewPageProps = {
   routes: RouteCandidate[];
   onCopy: (text: string, done: string) => Promise<void>;
   onRefreshAll: () => void;
+  proxyStarting: boolean;
+  proxyStartError: string | null;
+  autoStartAttempted: boolean;
   onStartProxy: () => void;
-  onStopProxy: () => void;
   onRestartProxy: () => void;
   onSaveAccounts: (nextAccounts?: ChannelAccount[]) => Promise<void>;
   onTestConnection: (accountId: string) => void;
@@ -186,8 +187,10 @@ export function OverviewPage({
   routes,
   onCopy,
   onRefreshAll,
+  proxyStarting,
+  proxyStartError,
+  autoStartAttempted,
   onStartProxy,
-  onStopProxy,
   onRestartProxy,
   onSaveAccounts,
   onTestConnection,
@@ -219,25 +222,33 @@ export function OverviewPage({
   const baseUrl = `http://127.0.0.1:${port}`;
   const exposedModels = buildExposedModels(routes, accounts);
   const hasAccounts = accounts.length > 0;
+  const availableAccounts = accounts.filter((account) => account.enabled && !!account.api_key.trim());
+  const hasAvailableAccount = availableAccounts.length > 0;
+  const hasAvailableModel = exposedModels.some((model) => model.enabled && model.hasAvailableAccount);
+  const configurationStatus = !hasAvailableAccount ? "unconfigured" : hasAvailableModel ? "ready" : "no_models";
+  const proxyPhase = proxyStarting ? "starting" : proxyStartError ? "failed" : status.running ? "running" : "stopped";
   const snapshotAccount = accounts.find((account) => account.id === snapshotAccountId);
   const editorChannel = accountEditor ? channels.find((channel) => channel.id === accountEditor.draft.channel_id) : undefined;
   const editorSnapshot = accountEditor ? getBalanceForAccount(accountEditor.draft.id) : undefined;
-  const statusMetrics = hasAccounts
-    ? [
-        ["监听地址", status.running ? bindConfig.host || "127.0.0.1" : "-"],
-        ["端口", String(port)],
-        ["运行时长", observedStartedAt ? formatDuration(Date.now() - observedStartedAt.getTime()) : "-"],
-        ["启动时间", formatDateTime(observedStartedAt)],
-        ["平均响应时间", "-"],
-        ["成功率", "-"],
-      ]
-    : [
-        ["运行时长", observedStartedAt ? formatDuration(Date.now() - observedStartedAt.getTime()) : "-"],
-        ["启动时间", formatDateTime(observedStartedAt)],
-        ["成功率", "-"],
-        ["平均响应时间", "-"],
-      ];
-
+  const statusMetrics = [
+    ["监听地址", status.running ? bindConfig.host || "127.0.0.1" : "-"],
+    ["端口", String(port)],
+    ["运行时长", observedStartedAt ? formatDuration(Date.now() - observedStartedAt.getTime()) : "-"],
+    ["启动时间", formatDateTime(observedStartedAt)],
+    ["平均响应时间", "-"],
+    ["成功率", "-"],
+  ];
+  const proxyHint = proxyPhase === "failed"
+    ? `错误原因：${proxyStartError}`
+    : proxyPhase === "starting"
+      ? "正在启动本地代理服务…"
+      : proxyPhase === "stopped"
+        ? autoStartAttempted ? "代理服务已停止，可重新启动。" : "等待启动代理服务。"
+        : configurationStatus === "unconfigured"
+          ? "代理服务已启动，但尚未配置渠道账号，当前没有可用模型。"
+          : configurationStatus === "no_models"
+            ? "渠道账号已配置，请开放至少一个模型后开始使用。"
+            : "服务正在监听本地请求";
   const agentCards = [
     ["Claude Code", "官方 CLI 工具", `${baseUrl}/anthropic`],
     ["Cline", "VS Code 扩展", `${baseUrl}/v1`],
@@ -371,9 +382,15 @@ export function OverviewPage({
           <p>系统状态总览与接入引导</p>
         </div>
         <Actions>
-          <Button className="overview-action-button primary" leftSection={<IconPlayerPlay size={16} />} onClick={onStartProxy} disabled={status.running}>启动</Button>
-          <Button className="overview-action-button" leftSection={<IconPlayerStop size={16} />} variant="default" color="gray" onClick={onStopProxy} disabled={!status.running}>停止</Button>
-          <Button className="overview-action-button" leftSection={<IconRefresh size={16} />} variant="default" onClick={onRestartProxy} disabled={!hasAccounts}>重启</Button>
+          {proxyPhase === "running" ? (
+            <Button className="overview-action-button" leftSection={<IconRefresh size={16} />} variant="default" onClick={onRestartProxy}>重启服务</Button>
+          ) : proxyPhase === "starting" ? (
+            <Button className="overview-action-button" leftSection={<IconRefresh size={16} />} disabled>正在启动…</Button>
+          ) : (
+            <Button className="overview-action-button primary" leftSection={<IconPlayerPlay size={16} />} onClick={onStartProxy}>
+              {proxyPhase === "failed" ? "重新启动" : "启动服务"}
+            </Button>
+          )}
           <Button className="overview-action-button refresh" leftSection={<IconRefresh size={16} />} variant="default" onClick={() => void onRefreshAll()}>刷新数据</Button>
         </Actions>
       </header>
@@ -383,12 +400,13 @@ export function OverviewPage({
           <div>
             <Group gap="xs">
               <h3>代理服务状态</h3>
-              <Badge color={status.running ? "green" : "orange"} variant="light">{status.running ? "运行中" : "未运行"}</Badge>
+              <Badge color={proxyPhase === "running" ? "green" : proxyPhase === "failed" ? "red" : "orange"} variant="light">
+                {proxyPhase === "running" ? "运行中" : proxyPhase === "starting" ? "正在启动" : proxyPhase === "failed" ? "启动失败" : "已停止"}
+              </Badge>
             </Group>
-            <Text className={status.running ? "overview-state-text running" : "overview-state-text"}>
-              {status.running ? "服务正在监听本地请求" : hasAccounts ? "账号已配置，可以启动代理服务" : "未完全配置"}
+            <Text className={proxyPhase === "running" ? "overview-state-text running" : proxyPhase === "failed" ? "overview-state-text failed" : "overview-state-text"}>
+              {proxyHint}
             </Text>
-            {!hasAccounts ? <Text size="sm" c="dimmed">请先配置并启动代理服务以提供 API 访问。</Text> : null}
           </div>
           <div className="overview-status-metrics">
             {statusMetrics.map(([label, value]) => (

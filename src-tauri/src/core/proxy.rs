@@ -185,16 +185,6 @@ impl ProxyController {
         rate_limiter: RateLimiter,
         config_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
-        // 启动时做一次基本校验：至少有一个渠道
-        let channels_guard = shared
-            .channels
-            .lock()
-            .map_err(|_| ProxyError::StartFailed("渠道配置锁定失败".to_string()))?;
-        if channels_guard.is_empty() {
-            return Err(ProxyError::StartFailed("没有可用渠道".to_string()));
-        }
-        drop(channels_guard);
-
         let mut runtime = self
             .inner
             .lock()
@@ -419,6 +409,24 @@ async fn forward_request(
     let request_type = classify_request(&body_bytes, &detected_protocol);
 
     if candidates.is_empty() {
+        let has_available_account = accounts
+            .iter()
+            .any(|account| account.enabled && !account.api_key.trim().is_empty());
+        let has_exposed_model = routes.iter().any(|route| {
+            route.enabled
+                && accounts.iter().any(|account| {
+                    account.id == route.account_id
+                        && account.enabled
+                        && !account.api_key.trim().is_empty()
+                })
+        });
+        let (error_code, error_message) = if !has_available_account {
+            ("no_available_account", "No enabled account with a configured API key is available")
+        } else if !has_exposed_model {
+            ("no_available_model", "No model is currently exposed by Flowlet")
+        } else {
+            ("model_not_exposed", "The requested model is not exposed by Flowlet")
+        };
         let log = RequestLogInput {
             request_id: request_id.clone(),
             client_id,
@@ -438,9 +446,9 @@ async fn forward_request(
             status: Some(404),
             latency_ms: Some(0),
             is_stream: false,
-            error_message: Some("model not exposed by Flowlet".to_string()),
+            error_message: Some(format!("{error_code}: {error_message}")),
             fallback_count: 0,
-            route_reason: Some("no_route".to_string()),
+            route_reason: Some(error_code.to_string()),
             ttfb_ms: None,
             duration_ms: None,
             attempt_seq: 0,
@@ -452,11 +460,23 @@ async fn forward_request(
             is_last_attempt: true,
         };
         record_request_log(state.storage, log);
-        let mut response = Response::new(Body::from("model not exposed by Flowlet"));
+        let payload = match detected_protocol {
+            ProtocolType::OpenAi => serde_json::json!({
+                "error": { "message": error_message, "type": error_code, "code": error_code }
+            }),
+            ProtocolType::Anthropic => serde_json::json!({
+                "type": "error",
+                "error": { "type": error_code, "message": error_message }
+            }),
+        };
+        let mut response = Response::new(Body::from(payload.to_string()));
         *response.status_mut() = StatusCode::NOT_FOUND;
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
         return Ok(response);
     }
-
     // 循环外一次性捕获请求级 head/body，各候选共享
     let req_headers_json = if state.capture.capture_req_headers {
         let keys = if state.capture.redact_sensitive_headers {

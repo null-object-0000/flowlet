@@ -5,7 +5,7 @@ import { Sidebar, WindowControls } from "../components/layout";
 import { useFlowletActions } from "./useFlowletActions";
 import { useFlowletData } from "./useFlowletData";
 import { runCommand, enableFrontendLogging, disableFrontendLogging } from "../services/flowletApi";
-import { LogFilter, View } from "../domain";
+import { LogFilter, ProxyStatus, View } from "../domain";
 import {
   LogsPage,
   OverviewPage,
@@ -44,7 +44,6 @@ export default function App() {
   const [message, setMessage] = React.useState("");
   const {
     startProxy,
-    stopProxy,
     restartProxy,
     copy,
     saveAccounts,
@@ -81,6 +80,10 @@ export default function App() {
 
   const [initializing, setInitializing] = React.useState(true);
   const [initError, setInitError] = React.useState<string | null>(null);
+  const [autoStartAttempted, setAutoStartAttempted] = React.useState(false);
+  const [proxyStarting, setProxyStarting] = React.useState(false);
+  const [proxyStartError, setProxyStartError] = React.useState<string | null>(null);
+  const autoStartGuard = React.useRef(false);
 
   // 严格模式（React 18+ dev + Tauri 重连）下 useEffect 会被调多次。
   // 用递增 incarnation seq 确保只有一个 run 能 "获胜" — 最近一次 fire 的 run 结果才被应用。
@@ -111,6 +114,21 @@ export default function App() {
 
       await Promise.allSettled([refreshStatus(), refreshAll()]);
 
+      const currentStatus = await runCommand<ProxyStatus>("proxy_status").catch(() => null);
+      if (!currentStatus?.running && !autoStartGuard.current) {
+        autoStartGuard.current = true;
+        setAutoStartAttempted(true);
+        setProxyStarting(true);
+        setProxyStartError(null);
+        try {
+          await startProxy();
+        } catch (err) {
+          setProxyStartError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setProxyStarting(false);
+        }
+      }
+
       // 已经有更新的 init 发起 => 丢弃本次过期结果
       if (seq !== initSeq.current) return;
 
@@ -121,6 +139,36 @@ export default function App() {
     void doInit();
   }, [refreshStatus, refreshAll]);
 
+  React.useEffect(() => {
+    if (initializing || initError) return;
+    const timer = window.setInterval(() => void refreshStatus().catch(() => undefined), 3000);
+    return () => window.clearInterval(timer);
+  }, [initializing, initError, refreshStatus]);
+  async function handleStartProxy() {
+    setAutoStartAttempted(true);
+    setProxyStarting(true);
+    setProxyStartError(null);
+    try {
+      await startProxy();
+    } catch (err) {
+      setProxyStartError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setProxyStarting(false);
+    }
+  }
+
+  async function handleRestartProxy() {
+    setProxyStarting(true);
+    setProxyStartError(null);
+    try {
+      await restartProxy();
+      await refreshStatus();
+    } catch (err) {
+      setProxyStartError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setProxyStarting(false);
+    }
+  }
   if (initializing) {
     return (
       <main className="app-shell app-boot">
@@ -176,10 +224,12 @@ export default function App() {
               clients={clients}
               routes={routes}
               onCopy={copy}
-              onRefreshAll={() => void refreshAll()}
-              onStartProxy={() => void startProxy()}
-              onStopProxy={() => void stopProxy()}
-              onRestartProxy={() => void restartProxy()}
+              onRefreshAll={() => void Promise.all([refreshAll(), refreshStatus()])}
+              proxyStarting={proxyStarting}
+              proxyStartError={proxyStartError}
+              autoStartAttempted={autoStartAttempted}
+              onStartProxy={() => void handleStartProxy()}
+              onRestartProxy={() => void handleRestartProxy()}
               onSaveAccounts={saveAccounts}
               onTestConnection={(id) => void testConnection(id)}
               getBalanceForAccount={getBalanceForAccount}

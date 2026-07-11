@@ -723,6 +723,7 @@ async fn model_list_response_exposes_enabled_route_models() {
             id: "acc-enabled".to_string(),
             name: "LongCat 主账号".to_string(),
             channel_id: "longcat".to_string(),
+            api_key: "test-key".to_string(),
             enabled: true,
             ..Default::default()
         },
@@ -802,6 +803,7 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
         id: "acc-anthropic".to_string(),
         name: "Anthropic Official".to_string(),
         channel_id: "anthropic".to_string(),
+        api_key: "test-key".to_string(),
         enabled: true,
         ..Default::default()
     }];
@@ -894,3 +896,92 @@ fn temp_db_path() -> PathBuf {
 }
 
 
+
+#[tokio::test]
+async fn empty_openai_model_list_is_valid() {
+    let response = build_model_list_response(&[], &[], &[], &ProtocolType::OpenAi);
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value, serde_json::json!({"object": "list", "data": []}));
+}
+
+#[tokio::test]
+async fn empty_anthropic_model_list_is_valid() {
+    let response = build_model_list_response(&[], &[], &[], &ProtocolType::Anthropic);
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["data"], serde_json::json!([]));
+    assert_eq!(value["has_more"], false);
+    assert_eq!(value["first_id"], "");
+    assert_eq!(value["last_id"], "");
+}
+#[tokio::test]
+async fn proxy_starts_without_accounts_or_routes() {
+    let db_path = temp_db_path();
+    let config_path = db_path.with_extension("json");
+    let storage = Storage::open(&db_path).unwrap();
+    let shared = ProxySharedConfig {
+        channels: Arc::new(Mutex::new(vec![])),
+        accounts: Arc::new(Mutex::new(vec![])),
+        clients: Arc::new(Mutex::new(vec![])),
+        routes: Arc::new(Mutex::new(vec![])),
+        rules: Arc::new(Mutex::new(vec![])),
+        scores: Arc::new(Mutex::new(vec![])),
+    };
+    let proxy = ProxyController::default();
+    proxy
+        .start_with_bind(
+            shared,
+            storage,
+            30,
+            LogCaptureConfig::default(),
+            "127.0.0.1:0",
+            RateLimiter::new(600),
+            config_path.clone(),
+        )
+        .await
+        .unwrap();
+    assert!(proxy.status().running);
+    proxy.stop().await.unwrap();
+    assert!(!proxy.status().running);
+    let _ = std::fs::remove_file(db_path);
+    let _ = std::fs::remove_file(config_path);
+}
+#[tokio::test]
+async fn missing_account_returns_structured_error_and_log() {
+    let db_path = temp_db_path();
+    let storage = Storage::open(&db_path).unwrap();
+    let state = ProxyAppState {
+        shared: ProxySharedConfig {
+            channels: Arc::new(Mutex::new(vec![])),
+            accounts: Arc::new(Mutex::new(vec![])),
+            clients: Arc::new(Mutex::new(vec![])),
+            routes: Arc::new(Mutex::new(vec![])),
+            rules: Arc::new(Mutex::new(vec![])),
+            scores: Arc::new(Mutex::new(vec![])),
+        },
+        client: Client::new(),
+        storage: storage.clone(),
+        upstream_timeout_seconds: 30,
+        rate_limiter: RateLimiter::new(600),
+        capture: LogCaptureConfig::default(),
+        config_path: db_path.with_extension("json"),
+    };
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"model":"missing","messages":[]}"#))
+        .unwrap();
+    let response = forward_request(state, request, ProtocolType::OpenAi).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["error"]["code"], "no_available_account");
+    let logs = storage.list_request_logs().unwrap();
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].route_reason.as_deref(), Some("no_available_account"));
+    let _ = std::fs::remove_file(db_path);
+}

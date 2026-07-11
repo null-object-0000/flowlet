@@ -77,89 +77,6 @@ impl AppState {
     }
 }
 
-// ─── Config Validation ────────────────────────────────────────────────────
-
-fn validate_config_values(
-    channels: &[ChannelPreset],
-    accounts: &[ChannelAccount],
-    routes: &[RouteCandidate],
-    clients: &[ClientConfig],
-) -> Vec<String> {
-    let mut errors = Vec::new();
-
-    if channels.is_empty() {
-        errors.push("至少需要一个渠道".to_string());
-    }
-
-    let enabled_accounts: Vec<&ChannelAccount> =
-        accounts.iter().filter(|account| account.enabled).collect();
-    let enabled_routes: Vec<&RouteCandidate> =
-        routes.iter().filter(|route| route.enabled).collect();
-
-    if enabled_accounts.is_empty() {
-        errors.push("请先新增并启用至少一个渠道账号".to_string());
-    }
-    if enabled_routes.is_empty() {
-        errors.push("请至少开放一个模型".to_string());
-    }
-
-    for account in enabled_accounts {
-        if account.api_key.trim().is_empty() {
-            errors.push(format!("账号 '{}' 未配置 API Key", account.name));
-        }
-        if !channels.iter().any(|c| c.id == account.channel_id) {
-            errors.push(format!(
-                "账号 '{}' 引用了不存在的渠道 '{}'",
-                account.name, account.channel_id
-            ));
-        }
-    }
-
-    for route in enabled_routes {
-        if !channels.iter().any(|c| c.id == route.channel_id) {
-            errors.push(format!(
-                "对外开放模型 '{}' 找不到可用渠道",
-                route.upstream_model
-            ));
-        }
-        match accounts.iter().find(|a| a.id == route.account_id) {
-            Some(account) => {
-                if !account.enabled {
-                    errors.push(format!(
-                        "对外开放模型 '{}' 使用的账号 '{}' 未启用",
-                        route.upstream_model, account.name
-                    ));
-                }
-                if account.api_key.trim().is_empty() {
-                    errors.push(format!(
-                        "对外开放模型 '{}' 使用的账号 '{}' 未配置 API Key",
-                        route.upstream_model, account.name
-                    ));
-                }
-                if account.channel_id != route.channel_id {
-                    errors.push(format!(
-                        "对外开放模型 '{}' 的来源渠道与账号所属渠道不一致",
-                        route.upstream_model
-                    ));
-                }
-            }
-            None => errors.push(format!(
-                "对外开放模型 '{}' 找不到可用账号",
-                route.upstream_model
-            )),
-        }
-    }
-
-    // 检查客户端 Token
-    for client in clients.iter().filter(|c| c.enabled) {
-        if client.token.trim().is_empty() {
-            errors.push(format!("客户端 '{}' 未配置 Token", client.name));
-        }
-    }
-
-    errors
-}
-
 // ─── App Entry ──────────────────────────────────────────────────────────────
 
 fn build_app_state(db_path: std::path::PathBuf) -> AppState {
@@ -482,9 +399,9 @@ pub fn run() {
             // 构建托盘菜单
             let toggle = MenuItem::with_id(app_handle, "toggle", "显示/隐藏", true, None::<&str>)?;
             let start_item =
-                MenuItem::with_id(app_handle, "start_proxy", "启动代理", true, None::<&str>)?;
+                MenuItem::with_id(app_handle, "start_proxy", "重启代理服务", true, None::<&str>)?;
             let stop_item =
-                MenuItem::with_id(app_handle, "stop_proxy", "停止代理", true, None::<&str>)?;
+                MenuItem::with_id(app_handle, "stop_proxy", "暂停代理服务", true, None::<&str>)?;
             let quit = MenuItem::with_id(app_handle, "quit", "退出 Flowlet", true, None::<&str>)?;
             let menu = Menu::with_items(app_handle, &[&toggle, &start_item, &stop_item, &quit])?;
 
@@ -511,6 +428,9 @@ pub fn run() {
                             let state = state.inner().clone();
                             let app_clone = app.clone();
                             tauri::async_runtime::spawn(async move {
+                                if state.proxy.status().running {
+                                    let _ = state.proxy.stop().await;
+                                }
                                 match state.start_configured_proxy().await {
                                     Ok(()) => update_tray_tooltip(&app_clone, true),
                                     Err(_) => update_tray_tooltip(&app_clone, false),
@@ -529,7 +449,14 @@ pub fn run() {
                         }
                     }
                     "quit" => {
-                        app.exit(0);
+                        let app_clone = app.clone();
+                        let proxy = app.try_state::<AppState>().map(|state| state.proxy.clone());
+                        tauri::async_runtime::spawn(async move {
+                            if let Some(proxy) = proxy {
+                                let _ = proxy.stop().await;
+                            }
+                            app_clone.exit(0);
+                        });
                     }
                     _ => {}
                 })
@@ -643,16 +570,6 @@ async fn start_proxy_internal(
         config_path,
     } = config;
 
-    // 校验当前配置是否合法
-    let channels = shared.channels.lock().map_err(|_| "锁失败".to_string())?.clone();
-    let accounts = shared.accounts.lock().map_err(|_| "锁失败".to_string())?.clone();
-    let routes = shared.routes.lock().map_err(|_| "锁失败".to_string())?.clone();
-    let clients = shared.clients.lock().map_err(|_| "锁失败".to_string())?.clone();
-
-    let validation_errors = validate_config_values(&channels, &accounts, &routes, &clients);
-    if !validation_errors.is_empty() {
-        return Err(validation_errors.join("\n"));
-    }
 
     // 传入 shared（持有 Arc 引用），代理运行中会锁定读取最新配置
     proxy

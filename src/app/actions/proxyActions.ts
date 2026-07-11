@@ -10,7 +10,10 @@ export function createProxyActions({ data, setMessage }: ActionContext) {
         await refreshStatus();
         setMessage("本地代理已启动");
       })
-      .catch((err: unknown) => setMessage(`启动失败: ${String(err)}`));
+      .catch((err: unknown) => {
+        setMessage(`启动失败: ${String(err)}`);
+        throw err;
+      });
   }
 
   function stopProxy() {
@@ -31,6 +34,7 @@ export function createProxyActions({ data, setMessage }: ActionContext) {
       setMessage("代理已重启，配置已生效");
     } catch (err: unknown) {
       setMessage(`重启失败: ${String(err)}`);
+      throw err;
     }
   }
 

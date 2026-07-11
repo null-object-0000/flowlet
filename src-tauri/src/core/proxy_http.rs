@@ -80,7 +80,7 @@ fn collect_model_entries(
 ) -> Vec<(String, String, String)> {
     let enabled_accounts: BTreeSet<&str> = accounts
         .iter()
-        .filter(|a| a.enabled)
+        .filter(|a| a.enabled && !a.api_key.trim().is_empty())
         .map(|a| a.id.as_str())
         .collect();
 

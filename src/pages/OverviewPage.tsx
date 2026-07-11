@@ -435,22 +435,21 @@ export function OverviewPage({
                   <h3>渠道账号</h3>
                   <Text size="sm" c="dimmed">已添加 {accounts.length} 个渠道账号</Text>
                 </div>
+                <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={onOpenAccounts}>查看全部</Button>
               </PanelHeader>
               <div className="overview-list">
                 {accounts.slice(0, 3).map((account, index) => (
-                  <div className="overview-account-row" key={account.id}>
-                    <span className={`provider-mark channel-${account.channel_id}`}>{channelLogo(account.channel_id)}</span>
-                    <div className="row-main">
-                      <strong>{getChannelName(account.channel_id)}</strong>
-                      <span>{account.name} · {maskSecret(account.api_key)}</span>
+                  <div className="overview-account-card" key={account.id}>
+                    <div className="overview-card-main">
+                      <span className={`provider-mark channel-${account.channel_id}`}>{channelLogo(account.channel_id)}</span>
+                      <div className="row-main"><strong>{account.name || getChannelName(account.channel_id)}</strong><span>账号: {maskSecret(account.api_key)}</span></div>
+                      <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
+                      <ActionIcon variant="subtle" onClick={() => openEditAccount(index)} aria-label="编辑账号"><IconDotsVertical size={17} /></ActionIcon>
                     </div>
-                    <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
-                    <span className="overview-resource">{accountResource(account)}</span>
-                    <ActionIcon variant="subtle" onClick={() => openEditAccount(index)} aria-label="编辑账号"><IconDotsVertical size={17} /></ActionIcon>
+                    <div className="overview-card-meta"><span>余额: {account.channel_id === "longcat" ? "-" : accountResource(account)}</span><span>资源包: {account.channel_id === "longcat" ? accountResource(account) : "-"}</span><span>有效期: {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span></div>
                   </div>
                 ))}
               </div>
-              <Button variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={onOpenAccounts}>查看全部渠道账号</Button>
             </Panel>
 
             <Panel className="overview-section-card">
@@ -459,31 +458,26 @@ export function OverviewPage({
                   <h3>开放模型</h3>
                   <Text size="sm" c="dimmed">已开放 {exposedModels.filter((model) => model.enabled).length} 个模型</Text>
                 </div>
-                <Button variant="default" onClick={() => void onSyncModels()}>同步模型</Button>
+                <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={onOpenModelServices}>查看全部</Button>
               </PanelHeader>
               <div className="overview-list">
                 {exposedModels.length === 0 ? <Text c="dimmed">暂无模型。请同步或进入模型服务生成默认模型。</Text> : null}
                 {exposedModels.slice(0, 3).map((model) => {
                   const channelAccounts = accounts.filter((account) => account.channel_id === model.channelId);
                   return (
-                    <div className="overview-model-row" key={`${model.channelId}:${model.publicModel}`}>
-                      <span className={`provider-mark channel-${model.channelId}`}>{channelLogo(model.channelId)}</span>
-                      <div className="row-main">
-                        <strong>{model.publicModel}</strong>
-                        <span>{getChannelName(model.channelId)} · {model.upstreamModel}</span>
+                    <div className="overview-model-card" key={`${model.channelId}:${model.publicModel}`}>
+                      <div className="overview-card-main model">
+                        <span className={`provider-mark channel-${model.channelId}`}>{channelLogo(model.channelId)}</span>
+                        <div className="row-main"><strong>{model.publicModel}</strong><span>模型: {model.upstreamModel}</span></div>
+                        <Select value={model.accountId} onChange={(value) => value && switchModelAccount(model.routeIndexes, value)} data={channelAccounts.map((account) => ({ value: account.id, label: account.name }))} />
+                        <StatusPill running={model.enabled && model.hasAvailableAccount}>{modelState(model)}</StatusPill>
+                        <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
                       </div>
-                      <Select
-                        value={model.accountId}
-                        onChange={(value) => value && switchModelAccount(model.routeIndexes, value)}
-                        data={channelAccounts.map((account) => ({ value: account.id, label: account.name }))}
-                      />
-                      <StatusPill running={model.enabled && model.hasAvailableAccount}>{modelState(model)}</StatusPill>
-                      <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
+                      <div className="overview-card-meta"><span>上下文: 128K</span><span>计费: 按量计费</span><span>状态: {model.hasAvailableAccount ? "正常" : "不可用"}</span></div>
                     </div>
                   );
                 })}
               </div>
-              <Button variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={onOpenModelServices}>查看全部模型</Button>
             </Panel>
           </SimpleGrid>
 
@@ -531,7 +525,6 @@ export function OverviewPage({
                   </UnstyledButton>
                 ))}
               </div>
-              <Button variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={() => void onCopy(`${baseUrl}/v1`, "接入地址已复制")}>查看接入指南</Button>
             </Panel>
           </SimpleGrid>
         </>

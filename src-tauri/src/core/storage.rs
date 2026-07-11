@@ -474,6 +474,75 @@ impl Storage {
             "TEXT",
         )?;
 
+        // 旧版本 request_logs 只记录了少量字段；后续索引和日志页面依赖这些基础列。
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "request_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "client_id", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "client_name", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "channel_id", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "channel_name", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "account_id", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "account_name", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "client_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "upstream_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "virtual_model", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "public_model", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "upstream_model", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "request_type",
+            "TEXT NOT NULL DEFAULT 'unknown'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "method",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "path",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "status", "INTEGER")?;
+        add_column_if_missing(&connection, "request_logs", "latency_ms", "INTEGER")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "is_stream",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "error_message", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "fallback_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "route_reason", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "created_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+
         // 请求日志：补充详情字段（TTFB、耗时、尝试序号、请求/响应头部与 body、流式摘要）
         add_column_if_missing(&connection, "request_logs", "ttfb_ms", "INTEGER")?;
         add_column_if_missing(&connection, "request_logs", "duration_ms", "INTEGER")?;
@@ -493,6 +562,47 @@ impl Storage {
             "request_logs",
             "is_last_attempt",
             "INTEGER NOT NULL DEFAULT 1",
+        )?;
+
+        // 旧版本 usage_records 同样可能缺少账号、渠道和模型字段。
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "request_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(&connection, "usage_records", "client_id", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "client_name", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "channel_id", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "channel_name", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "account_id", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "account_name", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "client_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "upstream_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(&connection, "usage_records", "virtual_model", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "upstream_model", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "input_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "input_cached_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "input_uncached_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "output_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "total_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "estimated_cost", "REAL")?;
+        add_column_if_missing(&connection, "usage_records", "analyzed_at", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "created_at",
+            "TEXT NOT NULL DEFAULT ''",
         )?;
 
         // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /

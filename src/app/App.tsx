@@ -1,7 +1,7 @@
 import React from "react";
 import { AppShell, Loader } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { ProxyTopbar, Sidebar } from "../components/layout";
+import { Sidebar, WindowControls } from "../components/layout";
 import { useFlowletActions } from "./useFlowletActions";
 import { useFlowletData } from "./useFlowletData";
 import { runCommand, enableFrontendLogging, disableFrontendLogging } from "../services/flowletApi";
@@ -42,7 +42,6 @@ export default function App() {
   } = flowlet;
   const [view, setView] = React.useState<View>("overview");
   const [message, setMessage] = React.useState("");
-  const [navbarCollapsed, setNavbarCollapsed] = React.useState(false);
   const {
     startProxy,
     stopProxy,
@@ -147,66 +146,52 @@ export default function App() {
     );
   }
   return (
-    <AppShell
-      className="app-shell"
-      header={{ height: 52 }}
-      navbar={{
-        width: navbarCollapsed ? 72 : 240,
-        breakpoint: "xs",
-        collapsed: { mobile: false },
-      }}
-      padding={0}
-      withBorder
-    >
-      <AppShell.Header className="app-header">
-        <ProxyTopbar
-          status={status}
-          onStart={() => void startProxy()}
-          onStop={() => void stopProxy()}
-        />
-      </AppShell.Header>
-      <AppShell.Navbar className={navbarCollapsed ? "app-navbar collapsed" : "app-navbar"}>
-        <Sidebar
-          view={view}
-          status={status}
-          collapsed={navbarCollapsed}
-          onToggleCollapsed={() => setNavbarCollapsed((value) => !value)}
-          onViewChange={setView}
-        />
-      </AppShell.Navbar>
-
-      <AppShell.Main className="content">
-        {view === "overview" ? (
-          <OverviewPage
+    <>
+      <WindowControls />
+      <AppShell
+        className="app-shell"
+        navbar={{
+          width: 168,
+          breakpoint: "xs",
+          collapsed: { mobile: false },
+        }}
+        padding={0}
+        withBorder
+      >
+        <AppShell.Navbar className="app-navbar">
+          <Sidebar
+            view={view}
             status={status}
-            bindConfig={proxyBindConfig}
-            channels={channels}
-            accounts={accounts}
-            clients={clients}
-            routes={routes}
-            onCopy={copy}
-            onRefreshAll={() => void refreshAll()}
-            onStartProxy={() => void startProxy()}
-            onStopProxy={() => void stopProxy()}
-            onRestartProxy={() => void restartProxy()}
-            onAddAccount={addAccount}
-            onUpdateAccount={updateAccount}
-            onRemoveAccount={removeAccount}
-            onSaveAccounts={saveAccounts}
-            onTestConnection={(id) => void testConnection(id)}
-            getBalanceForAccount={getBalanceForAccount}
-            onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}
-            onAddClient={addClient}
-            onUpdateClient={updateClient}
-            onRemoveClient={removeClient}
-            onSaveClients={() => void saveClientTokens()}
-            onUpdateRoute={updateRoute}
-            onSaveRoutes={() => void saveRouteCandidates()}
-            onSyncModels={() => void regenerateDefaultRoutes()}
-            onOpenAdvancedSettings={() => setView("routes")}
-            getChannelName={getChannelName}
+            onViewChange={setView}
           />
-        ) : null}
+        </AppShell.Navbar>
+
+        <AppShell.Main className="content">
+          {view === "overview" ? (
+            <OverviewPage
+              status={status}
+              bindConfig={proxyBindConfig}
+              channels={channels}
+              accounts={accounts}
+              clients={clients}
+              routes={routes}
+              onCopy={copy}
+              onRefreshAll={() => void refreshAll()}
+              onStartProxy={() => void startProxy()}
+              onStopProxy={() => void stopProxy()}
+              onRestartProxy={() => void restartProxy()}
+              onSaveAccounts={saveAccounts}
+              onTestConnection={(id) => void testConnection(id)}
+              getBalanceForAccount={getBalanceForAccount}
+              onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}
+              onUpdateRoute={updateRoute}
+              onSaveRoutes={() => void saveRouteCandidates()}
+              onSyncModels={() => void regenerateDefaultRoutes()}
+              onOpenAccounts={() => setView("accounts")}
+              onOpenModelServices={() => setView("routes")}
+              getChannelName={getChannelName}
+            />
+          ) : null}
 
         {view === "routes" ? (
           <RoutesPage
@@ -297,8 +282,9 @@ export default function App() {
           />
         ) : null}
 
-      </AppShell.Main>
-    </AppShell>
+        </AppShell.Main>
+      </AppShell>
+    </>
   );
 }
 

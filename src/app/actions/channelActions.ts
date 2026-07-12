@@ -1,10 +1,10 @@
-import { AccountBalanceSnapshot, ChannelAccount, createAccount, genId } from "../../domain";
+import { AccountBalanceSnapshot, ChannelAccount, ChannelModel, createAccount, genId } from "../../domain";
 import { runCommand } from "../../services/flowletApi";
 import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext } from "./types";
 
 export function createChannelActions({ data, setMessage }: ActionContext) {
-  const { channels, accounts, setAccounts, routes, setRoutes, balanceSnapshots, refreshAll } = data;
+  const { channels, accounts, setAccounts, routes, setRoutes, channelModels, balanceSnapshots, refreshAll } = data;
 
   async function saveAccounts(nextAccounts?: ChannelAccount[]) {
     const sourceAccounts = nextAccounts ?? accounts;
@@ -13,7 +13,7 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
     setAccounts(filtered);
     setMessage("渠道账号已保存，代理配置已热更新");
 
-    const nextRoutes = ensureDefaultExposedRoutes(channels, filtered, routes);
+    const nextRoutes = ensureDefaultExposedRoutes(channels, filtered, routes, channelModels);
     if (nextRoutes.length !== routes.length) {
       setRoutes(nextRoutes);
       await runCommand("save_route_candidates", { routes: nextRoutes });
@@ -39,15 +39,21 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
       enabled: true,
     };
     const nextAccounts = [...accounts, account];
-    const nextRoutes = ensureDefaultExposedRoutes(channels, nextAccounts, routes);
+    const nextRoutes = ensureDefaultExposedRoutes(channels, nextAccounts, routes, channelModels);
 
     await runCommand("save_channel_accounts", { accounts: nextAccounts });
     await runCommand("save_route_candidates", { routes: nextRoutes });
     setAccounts(nextAccounts);
     setRoutes(nextRoutes);
-    setMessage("渠道账号已保存，默认模型已开放，可以启动代理");
+    setMessage("渠道账号已保存，Flowlet Pro / Flash 模型池已自动更新");
   }
 
+  async function toggleAccountEnabled(accountId: string, enabled: boolean) {
+    const nextAccounts = accounts.map((account) =>
+      account.id === accountId ? { ...account, enabled, updated_at: new Date().toISOString() } : account
+    );
+    await saveAccounts(nextAccounts);
+  }
   function addAccount(channelId: string) {
     const existing = accounts.filter((a) => a.channel_id === channelId);
     setAccounts((current) => [...current, createAccount(channelId, existing.length)]);
@@ -79,11 +85,18 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
   async function syncModels(accountId: string) {
     setMessage("正在同步模型列表...");
     try {
-      const result = await runCommand<{ models_synced: number; errors: string[] }>("sync_models", { accountId });
+      const result = await runCommand<{ models_synced: number; errors: string[]; models: ChannelModel[] }>("sync_models", { accountId });
       if (result.errors.length > 0) {
         setMessage(`同步失败: ${result.errors[0]}`);
       } else {
-        setMessage(`同步成功，获取 ${result.models_synced} 个模型`);
+        const account = accounts.find((item) => item.id === accountId);
+        const mergedModels = account
+          ? [...channelModels.filter((model) => model.channel_id !== account.channel_id), ...result.models]
+          : channelModels;
+        const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, mergedModels);
+        await runCommand("save_route_candidates", { routes: nextRoutes });
+        setRoutes(nextRoutes);
+        setMessage(`同步成功，获取 ${result.models_synced} 个模型，Flowlet 模型池已热更新`);
       }
     } catch (err: unknown) {
       setMessage(`同步失败: ${String(err)}`);
@@ -129,6 +142,7 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
     saveAccounts,
     quickSetup,
     addAccount,
+    toggleAccountEnabled,
     testConnection,
     syncModels,
     updateAccount,

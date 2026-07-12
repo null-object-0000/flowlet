@@ -1,4 +1,5 @@
 export type ProtocolType = "openai" | "anthropic";
+export type FlowletTier = "pro" | "flash" | "none";
 export type AuthStrategy = "bearer" | "x_api_key";
 
 export type ProxyStatus = {
@@ -269,6 +270,29 @@ export const defaultExposedModelsByChannel: Record<string, string[]> = {
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
 };
 
+export const flowletPublicModels = {
+  pro: { id: "flowlet-pro", name: "Flowlet Pro", description: "高质量，适合复杂任务" },
+  flash: { id: "flowlet-flash", name: "Flowlet Flash", description: "响应快，适合日常任务" },
+} as const;
+
+const defaultFlowletTierByModel: Record<string, FlowletTier> = {
+  "deepseek-v4-pro": "pro",
+  "deepseek-v4-flash": "flash",
+  "longcat-2.0": "pro",
+};
+
+export function getFlowletTier(channelId: string, model: string): FlowletTier {
+  const normalized = model.trim().toLowerCase();
+  const exact = defaultFlowletTierByModel[normalized];
+  if (exact) return exact;
+  if (channelId === "deepseek" && normalized.includes("flash")) return "flash";
+  if (normalized.includes("pro") || (channelId === "longcat" && normalized === "longcat-2.0")) return "pro";
+  return "none";
+}
+
+export function flowletModelIdForTier(tier: FlowletTier): string | null {
+  return tier === "pro" ? flowletPublicModels.pro.id : tier === "flash" ? flowletPublicModels.flash.id : null;
+}
 export function getDefaultExposedModels(channel: ChannelPreset): string[] {
   return defaultExposedModelsByChannel[channel.id] ?? [channel.default_model].filter(Boolean);
 }

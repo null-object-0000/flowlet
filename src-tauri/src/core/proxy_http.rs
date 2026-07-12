@@ -63,7 +63,7 @@ pub(super) fn build_model_list_response(
     channels: &[ChannelPreset],
     protocol: &ProtocolType,
 ) -> Response {
-    let entries = collect_model_entries(routes, accounts, protocol);
+    let entries = collect_model_entries(routes, accounts, channels, protocol);
 
     match protocol {
         ProtocolType::OpenAi => build_openai_model_list(&entries, accounts, channels),
@@ -76,6 +76,7 @@ pub(super) fn build_model_list_response(
 fn collect_model_entries(
     routes: &[RouteCandidate],
     accounts: &[ChannelAccount],
+    channels: &[ChannelPreset],
     protocol: &ProtocolType,
 ) -> Vec<(String, String, String)> {
     let enabled_accounts: BTreeSet<&str> = accounts
@@ -84,11 +85,21 @@ fn collect_model_entries(
         .map(|a| a.id.as_str())
         .collect();
 
+    let dual_protocol_channels: BTreeSet<&str> = channels
+        .iter()
+        .filter(|channel| {
+            channel.supported_protocols.contains(&ProtocolType::OpenAi)
+                && channel.supported_protocols.contains(&ProtocolType::Anthropic)
+        })
+        .map(|channel| channel.id.as_str())
+        .collect();
     let mut result: Vec<(String, String, String)> = Vec::new();
     let mut seen = BTreeSet::new();
 
     for route in routes {
         if !route.enabled
+            || !matches!(route.virtual_model_id.as_str(), "flowlet-pro" | "flowlet-flash")
+            || !dual_protocol_channels.contains(route.channel_id.as_str())
             || route.client_protocol != *protocol
             || !enabled_accounts.contains(route.account_id.as_str())
         {
@@ -106,7 +117,7 @@ fn collect_model_entries(
         ));
     }
     // 按 model_id 字典序稳定排序，保证 first_id/last_id 和输出顺序确定
-    result.sort_by(|a, b| a.0.cmp(&b.0));
+    result.sort_by_key(|entry| if entry.0 == "flowlet-pro" { 0 } else { 1 });
     result
 }
 
@@ -594,38 +605,24 @@ pub(super) fn rewrite_model(body: &[u8], upstream_model: &str, _protocol: &Proto
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return body.to_vec();
     };
-
+    let Some(original_model) = value.get("model").and_then(|field| field.as_str()).map(str::to_string) else {
+        return body.to_vec();
+    };
     let Some(model_field) = value.get_mut("model") else {
         return body.to_vec();
     };
-
-    if model_field.as_str() != Some("auto") {
-        return body.to_vec();
-    }
-
     *model_field = serde_json::Value::String(upstream_model.to_string());
 
-    // 使用 serde_json::to_vec 会改变字段顺序，改用手动替换保持原始 body 结构
-    // 对于 {"model":"auto",...} 替换为 {"model":"upstream_model",...}
-    let body_str = String::from_utf8_lossy(body);
-    let search = r#""model":"auto""#;
-    let replace = format!(r#""model":"{upstream_model}""#);
-    if let Some(pos) = body_str.find(search) {
-        let mut result = body_str.into_owned();
-        result.replace_range(pos..pos + search.len(), &replace);
-        result.into_bytes()
-    } else {
-        // 尝试带空格的变体
-        let search = r#""model": "auto""#;
-        let replace = format!(r#""model": "{upstream_model}""#);
-        if let Some(pos) = body_str.find(search) {
-            let mut result = body_str.into_owned();
-            result.replace_range(pos..pos + search.len(), &replace);
-            result.into_bytes()
-        } else {
-            serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+    let body_text = String::from_utf8_lossy(body);
+    for (search, replacement) in [
+        (format!(r#""model":"{}""#, original_model), format!(r#""model":"{}""#, upstream_model)),
+        (format!(r#""model": "{}""#, original_model), format!(r#""model": "{}""#, upstream_model)),
+    ] {
+        if let Some(position) = body_text.find(&search) {
+            let mut result = body_text.clone().into_owned();
+            result.replace_range(position..position + search.len(), &replacement);
+            return result.into_bytes();
         }
     }
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
 }
-
-

@@ -38,7 +38,7 @@ fn protocol_type_from_path_returns_none_for_health() {
 }
 
 #[test]
-fn rewrite_model_only_changes_auto_openai() {
+fn rewrite_model_maps_openai_public_name() {
     let body = br#"{"model":"auto","messages":[]}"#;
     let rewritten = rewrite_model(body, "qwen-plus", &ProtocolType::OpenAi);
     let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
@@ -47,7 +47,7 @@ fn rewrite_model_only_changes_auto_openai() {
 }
 
 #[test]
-fn rewrite_model_only_changes_auto_anthropic() {
+fn rewrite_model_maps_anthropic_public_name() {
     let body = br#"{"model":"auto","max_tokens":100,"messages":[]}"#;
     let rewritten = rewrite_model(body, "claude-sonnet-4-20250514", &ProtocolType::Anthropic);
     let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
@@ -55,10 +55,11 @@ fn rewrite_model_only_changes_auto_anthropic() {
 }
 
 #[test]
-fn rewrite_model_keeps_non_auto_body() {
+fn rewrite_model_replaces_public_model_name() {
     let body = br#"{"model":"deepseek-chat","messages":[]}"#;
     let rewritten = rewrite_model(body, "qwen-plus", &ProtocolType::OpenAi);
-    assert_eq!(rewritten, body);
+    let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+    assert_eq!(value["model"], "qwen-plus");
 }
 
 #[test]
@@ -451,6 +452,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
             }])),
             rules: Arc::new(Mutex::new(vec![])),
             scores: Arc::new(Mutex::new(vec![])),
+                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
         },
         client: Client::new(),
         storage,
@@ -695,7 +697,7 @@ async fn model_list_response_exposes_enabled_route_models() {
     let routes = vec![
         RouteCandidate {
             id: "route-1".to_string(),
-            virtual_model_id: "auto".to_string(),
+            virtual_model_id: "flowlet-pro".to_string(),
             channel_id: "longcat".to_string(),
             account_id: "acc-enabled".to_string(),
             upstream_model: "gpt-test".to_string(),
@@ -739,6 +741,7 @@ async fn model_list_response_exposes_enabled_route_models() {
         id: "longcat".to_string(),
         name: "LongCat".to_string(),
         vendor: "longcat".to_string(),
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
         ..Default::default()
     }];
 
@@ -763,7 +766,7 @@ async fn model_list_response_exposes_enabled_route_models() {
         .iter()
         .map(|item| item["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["auto"]);
+    assert_eq!(ids, vec!["flowlet-pro"]);
 
     // owned_by 应取 channel vendor（不暴露用户 account name）
     let first = &value["data"][0];
@@ -776,7 +779,7 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
     let routes = vec![
         RouteCandidate {
             id: "route-a".to_string(),
-            virtual_model_id: "claude-sonnet-4-20250514".to_string(),
+            virtual_model_id: "flowlet-pro".to_string(),
             channel_id: "anthropic".to_string(),
             account_id: "acc-anthropic".to_string(),
             upstream_model: "claude-sonnet-4-20250514".to_string(),
@@ -788,7 +791,7 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
         },
         RouteCandidate {
             id: "route-b".to_string(),
-            virtual_model_id: "claude-opus-4".to_string(),
+            virtual_model_id: "flowlet-flash".to_string(),
             channel_id: "anthropic".to_string(),
             account_id: "acc-anthropic".to_string(),
             upstream_model: "claude-opus-4".to_string(),
@@ -811,6 +814,7 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
         id: "anthropic".to_string(),
         name: "Anthropic".to_string(),
         vendor: "anthropic".to_string(),
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
         ..Default::default()
     }];
 
@@ -826,19 +830,19 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
     assert!(value.get("object").is_none());
     assert_eq!(value["has_more"], false);
     // BTreeSet 按字典序排列：claude-opus-4 < claude-sonnet-4-20250514
-    assert_eq!(value["first_id"], "claude-opus-4");
-    assert_eq!(value["last_id"], "claude-sonnet-4-20250514");
+    assert_eq!(value["first_id"], "flowlet-pro");
+    assert_eq!(value["last_id"], "flowlet-flash");
 
     let data = value["data"].as_array().unwrap();
     assert_eq!(data.len(), 2);
     // 每个模型对象：type=model, id, display_name, created_at
     assert_eq!(data[0]["type"], "model");
-    assert_eq!(data[0]["id"], "claude-opus-4");
-    assert_eq!(data[0]["display_name"], "claude-opus-4");
+    assert_eq!(data[0]["id"], "flowlet-pro");
+    assert_eq!(data[0]["display_name"], "flowlet-pro");
     // 空 created_at 应被替换为 epoch 起点
-    assert_eq!(data[0]["created_at"], "1970-01-01T00:00:00Z");
+    assert_eq!(data[0]["created_at"], "2025-05-14T00:00:00Z");
     // 非空 RFC 3339 应原样保留
-    assert_eq!(data[1]["created_at"], "2025-05-14T00:00:00Z");
+    assert_eq!(data[1]["created_at"], "1970-01-01T00:00:00Z");
 }
 
 #[test]
@@ -929,6 +933,7 @@ async fn proxy_starts_without_accounts_or_routes() {
         routes: Arc::new(Mutex::new(vec![])),
         rules: Arc::new(Mutex::new(vec![])),
         scores: Arc::new(Mutex::new(vec![])),
+                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
     let proxy = ProxyController::default();
     proxy
@@ -961,6 +966,7 @@ async fn missing_account_returns_structured_error_and_log() {
             routes: Arc::new(Mutex::new(vec![])),
             rules: Arc::new(Mutex::new(vec![])),
             scores: Arc::new(Mutex::new(vec![])),
+                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
         },
         client: Client::new(),
         storage: storage.clone(),
@@ -980,8 +986,75 @@ async fn missing_account_returns_structured_error_and_log() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value["error"]["code"], "no_available_account");
-    let logs = storage.list_request_logs().unwrap();
+    let logs = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let logs = storage.list_request_logs().unwrap();
+            if !logs.is_empty() {
+                break logs;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].route_reason.as_deref(), Some("no_available_account"));
     let _ = std::fs::remove_file(db_path);
+}
+#[test]
+fn flowlet_pool_round_robins_accounts_before_next_model() {
+    let account = |id: &str, channel_id: &str, priority: i64, api_key: &str| ChannelAccount {
+        id: id.to_string(), channel_id: channel_id.to_string(), name: id.to_string(),
+        api_key: api_key.to_string(), enabled: true, priority,
+        ..Default::default()
+    };
+    let route = |id: &str, public: &str, channel: &str, account: &str, upstream: &str, priority: i64| RouteCandidate {
+        id: id.to_string(), virtual_model_id: public.to_string(), channel_id: channel.to_string(),
+        account_id: account.to_string(), upstream_model: upstream.to_string(),
+        client_protocol: ProtocolType::OpenAi, priority, enabled: true,
+        ..Default::default()
+    };
+    let channels = vec![
+        ChannelPreset { id: "deepseek".to_string(), supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic], ..Default::default() },
+        ChannelPreset { id: "longcat".to_string(), supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic], ..Default::default() },
+    ];
+    let accounts = vec![
+        account("a", "deepseek", 0, "key-a"),
+        account("b", "deepseek", 1, "key-b"),
+        account("c", "longcat", 0, "key-c"),
+        account("empty", "deepseek", 2, ""),
+    ];
+    let routes = vec![
+        route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", 0),
+        route("2", "flowlet-pro", "deepseek", "b", "deepseek-v4-pro", 0),
+        route("3", "flowlet-pro", "deepseek", "empty", "deepseek-v4-pro", 0),
+        route("4", "flowlet-pro", "longcat", "c", "LongCat-2.0", 10),
+        route("5", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", 0),
+    ];
+    let mut round_robin = std::collections::HashMap::new();
+    let first = match_candidates(&routes, &[], &[], Some("flowlet-pro"), &ProtocolType::OpenAi, None, &accounts, &channels, &mut round_robin);
+    assert_eq!(first.iter().map(|route| route.account_id.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c"]);
+    let second = match_candidates(&routes, &[], &[], Some("flowlet-pro"), &ProtocolType::OpenAi, None, &accounts, &channels, &mut round_robin);
+    assert_eq!(second.iter().map(|route| route.account_id.as_str()).collect::<Vec<_>>(), vec!["b", "a", "c"]);
+    assert!(second.iter().all(|route| route.virtual_model_id == "flowlet-pro"));
+}
+
+#[test]
+fn flowlet_pool_rejects_single_protocol_channels() {
+    let channels = vec![ChannelPreset {
+        id: "openai-only".to_string(),
+        supported_protocols: vec![ProtocolType::OpenAi],
+        ..Default::default()
+    }];
+    let accounts = vec![ChannelAccount {
+        id: "account".to_string(), channel_id: "openai-only".to_string(), api_key: "key".to_string(), enabled: true,
+        ..Default::default()
+    }];
+    let routes = vec![RouteCandidate {
+        virtual_model_id: "flowlet-pro".to_string(), channel_id: "openai-only".to_string(), account_id: "account".to_string(),
+        upstream_model: "model".to_string(), client_protocol: ProtocolType::OpenAi, enabled: true,
+        ..Default::default()
+    }];
+    let mut round_robin = std::collections::HashMap::new();
+    assert!(match_candidates(&routes, &[], &[], Some("flowlet-pro"), &ProtocolType::OpenAi, None, &accounts, &channels, &mut round_robin).is_empty());
 }

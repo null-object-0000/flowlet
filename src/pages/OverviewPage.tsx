@@ -30,7 +30,7 @@ import {
   IconRefresh,
   IconRobot,
 } from "@tabler/icons-react";
-import { Actions, Panel, PanelHeader, ProtocolBadges, StatusPill } from "../components/ui";
+import { Actions, Panel, PanelHeader, StatusPill } from "../components/ui";
 import {
   AccountBalanceSnapshot,
   ChannelAccount,
@@ -42,7 +42,7 @@ import {
   createAccount,
 } from "../domain";
 import { BalanceSnapshotEditor } from "../features/channels";
-import { accountCountLabel, buildExposedModels } from "../features/routes/exposedModels";
+import { buildExposedModels } from "../features/routes/exposedModels";
 
 type AccountEditor = {
   mode: "create" | "edit";
@@ -87,12 +87,6 @@ type OverviewPageProps = {
   onOpenModelServices: () => void;
   getChannelName: (channelId: string) => string;
 };
-
-function maskSecret(value: string): string {
-  if (!value) return "未配置";
-  if (value.length <= 8) return `${value.slice(0, 2)}******`;
-  return `${value.slice(0, 3)}-${"*".repeat(Math.min(18, value.length - 6))}${value.slice(-3)}`;
-}
 
 function formatDateTime(value: Date | null): string {
   if (!value) return "-";
@@ -440,12 +434,6 @@ export function OverviewPage({
     window.setTimeout(() => void onSaveRoutes(), 0);
   }
 
-  function switchModelAccount(routeIndexes: number[], accountId: string) {
-    const account = accounts.find((item) => item.id === accountId);
-    if (!account) return;
-    routeIndexes.forEach((routeIndex) => onUpdateRoute(routeIndex, { account_id: account.id, channel_id: account.channel_id }));
-  }
-
   return (
     <div className="overview-page overview-guide">
       <header className="page-header overview-guide-header">
@@ -544,7 +532,7 @@ export function OverviewPage({
                   <div className="overview-account-card" key={account.id}>
                     <div className="overview-card-main">
                       <span className={`provider-mark channel-${account.channel_id}`}>{channelLogo(account.channel_id)}</span>
-                      <div className="row-main"><strong>{account.name || getChannelName(account.channel_id)}</strong><span>账号: {maskSecret(account.api_key)}</span></div>
+                      <div className="row-main"><strong>{account.name || getChannelName(account.channel_id)}</strong><span>{getChannelName(account.channel_id)}</span></div>
                       <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
                       <ActionIcon variant="subtle" onClick={() => openEditAccount(index)} aria-label="编辑账号"><IconDotsVertical size={17} /></ActionIcon>
                     </div>
@@ -564,21 +552,24 @@ export function OverviewPage({
               </PanelHeader>
               <div className="overview-list">
                 {exposedModels.length === 0 ? <Text c="dimmed">暂无模型。请同步或进入模型服务生成默认模型。</Text> : null}
-                {exposedModels.slice(0, 3).map((model) => {
-                  const channelAccounts = accounts.filter((account) => account.channel_id === model.channelId);
-                  return (
-                    <div className="overview-model-card" key={`${model.channelId}:${model.publicModel}`}>
-                      <div className="overview-card-main model">
-                        <span className={`provider-mark channel-${model.channelId}`}>{channelLogo(model.channelId)}</span>
-                        <div className="row-main"><strong>{model.publicModel}</strong><span>模型: {model.upstreamModel}</span></div>
-                        <Select value={model.accountId} onChange={(value) => value && switchModelAccount(model.routeIndexes, value)} data={channelAccounts.map((account) => ({ value: account.id, label: account.name }))} />
-                        <StatusPill running={model.enabled && model.hasAvailableAccount}>{modelState(model)}</StatusPill>
-                        <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
+                {exposedModels.map((model) => (
+                  <div className="overview-model-card" key={model.publicModel}>
+                    <div className="overview-card-main model summary">
+                      <span className="provider-mark">FL</span>
+                      <div className="row-main">
+                        <strong>{model.publicModel === "flowlet-pro" ? "Flowlet Pro" : "Flowlet Flash"}</strong>
+                        <span>{model.publicModel}</span>
                       </div>
-                      <div className="overview-card-meta"><span>上下文: 128K</span><span>计费: 按量计费</span><span>状态: {model.hasAvailableAccount ? "正常" : "不可用"}</span></div>
+                      <StatusPill running={model.enabled && model.hasAvailableAccount}>{modelState(model)}</StatusPill>
+                      <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
                     </div>
-                  );
-                })}
+                    <div className="overview-card-meta">
+                      <span>底层模型: {model.underlyingModelCount}</span>
+                      <span>可用账号: {model.availableAccountCount}</span>
+                      <span>状态: {model.hasAvailableAccount ? "正常" : "不可用"}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </Panel>
           </SimpleGrid>

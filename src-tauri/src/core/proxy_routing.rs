@@ -9,50 +9,95 @@ pub(super) fn match_candidates(
     protocol: &ProtocolType,
     client_id: Option<&str>,
     accounts: &[ChannelAccount],
-    _channels: &[ChannelPreset],
+    channels: &[ChannelPreset],
+    round_robin: &mut std::collections::HashMap<String, usize>,
 ) -> Vec<RouteCandidate> {
-    // 1. 优先检查规则路由
-    if let Some(rule) = find_matching_rule(rules, client_id, public_model, protocol, accounts) {
-        return vec![RouteCandidate {
-            id: format!("rule-{}", rule.id),
-            virtual_model_id: "auto".to_string(),
-            channel_id: rule.target_channel_id,
-            account_id: rule.target_account_id,
-            upstream_model: rule.target_upstream_model,
-            client_protocol: protocol.clone(),
-            priority: rule.priority,
-            enabled: true,
-            created_at: String::new(),
-            updated_at: String::new(),
-        }];
+    let Some(public_model) = public_model.filter(|model| !model.trim().is_empty()) else {
+        return Vec::new();
+    };
+    let is_flowlet_model = matches!(public_model, "flowlet-pro" | "flowlet-flash");
+
+    // 高级规则保留给旧自定义模型；固定 Flowlet 档位始终使用隔离的模型池。
+    if !is_flowlet_model {
+        if let Some(rule) = find_matching_rule(rules, client_id, Some(public_model), protocol, accounts) {
+            return vec![RouteCandidate {
+                id: format!("rule-{}", rule.id),
+                virtual_model_id: public_model.to_string(),
+                channel_id: rule.target_channel_id,
+                account_id: rule.target_account_id,
+                upstream_model: rule.target_upstream_model,
+                client_protocol: protocol.clone(),
+                priority: rule.priority,
+                enabled: true,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }];
+        }
     }
 
-    let virtual_model = match public_model {
-        Some("auto") => "auto",
-        Some(model) if !model.trim().is_empty() => {
-            // 直接模型请求只匹配已开放模型，不回退到 auto。
-            return find_direct_candidate(routes, model, protocol, accounts);
-        }
-        _ => return Vec::new(),
-    };
+    let account_by_id: std::collections::HashMap<&str, &ChannelAccount> = accounts
+        .iter()
+        .filter(|account| account.enabled && !account.api_key.trim().is_empty())
+        .map(|account| (account.id.as_str(), account))
+        .collect();
+    let dual_protocol_channels: std::collections::HashSet<&str> = channels
+        .iter()
+        .filter(|channel| {
+            channel.supported_protocols.contains(&ProtocolType::OpenAi)
+                && channel.supported_protocols.contains(&ProtocolType::Anthropic)
+        })
+        .map(|channel| channel.id.as_str())
+        .collect();
 
     let mut matched: Vec<RouteCandidate> = routes
         .iter()
-        .filter(|c| {
-            c.enabled && c.virtual_model_id == virtual_model && c.client_protocol == *protocol
+        .filter(|route| {
+            route.enabled
+                && route.virtual_model_id == public_model
+                && route.client_protocol == *protocol
+                && account_by_id.contains_key(route.account_id.as_str())
+                && (!is_flowlet_model || dual_protocol_channels.contains(route.channel_id.as_str()))
         })
-        .filter(|c| accounts.iter().any(|a| a.id == c.account_id && a.enabled))
         .cloned()
         .collect();
 
-    // 默认账号选择按 created_at 升序（先添加优先），priority 仅作高级路由 / fallback 策略。
-    matched.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    matched.sort_by(|a, b| {
+        let account_a = account_by_id.get(a.account_id.as_str());
+        let account_b = account_by_id.get(b.account_id.as_str());
+        a.priority
+            .cmp(&b.priority)
+            .then_with(|| a.channel_id.cmp(&b.channel_id))
+            .then_with(|| a.upstream_model.cmp(&b.upstream_model))
+            .then_with(|| account_a.map(|account| account.priority).cmp(&account_b.map(|account| account.priority)))
+            .then_with(|| account_a.map(|account| account.created_at.as_str()).cmp(&account_b.map(|account| account.created_at.as_str())))
+    });
 
-    // 综合调度保留能力（暂不使用）。
+    // 每个“档位 + 协议 + 底层模型”的账号池独立轮询；模型池之间仍按 priority 固定 fallback。
+    let mut cursor = 0;
+    while cursor < matched.len() {
+        let group_priority = matched[cursor].priority;
+        let group_channel = matched[cursor].channel_id.clone();
+        let group_model = matched[cursor].upstream_model.clone();
+        let mut end = cursor + 1;
+        while end < matched.len()
+            && matched[end].priority == group_priority
+            && matched[end].channel_id == group_channel
+            && matched[end].upstream_model == group_model
+        {
+            end += 1;
+        }
+        let key = format!("{}:{}:{}:{}", public_model, protocol.as_str(), group_channel, group_model);
+        let next = round_robin.entry(key).or_insert(0);
+        let group_len = end - cursor;
+        matched[cursor..end].rotate_left(*next % group_len);
+        *next = (*next + 1) % group_len;
+        cursor = end;
+    }
+
+    // 动态评分本期不参与默认路由。
     let _ = scores;
     matched
 }
-
 /// 查找第一个匹配的规则
 pub(super) fn find_matching_rule(
     rules: &[RouteRule],
@@ -140,27 +185,6 @@ pub(super) fn rank_candidates_by_score(
 /// 判断是否应该使用小模型，返回最终使用的上游模型名
 pub(super) fn resolve_small_model(original_model: &str) -> String {
     original_model.to_string()
-}
-
-pub(super) fn find_direct_candidate(
-    routes: &[RouteCandidate],
-    model: &str,
-    protocol: &ProtocolType,
-    accounts: &[ChannelAccount],
-) -> Vec<RouteCandidate> {
-    // 直接模型请求必须匹配 route.virtual_model_id（对外模型名）。
-    // upstream_model 仅在 rewrite_model 阶段用于转发前的模型名替换。
-    // 同一 virtual_model_id 多个候选时，按 created_at 升序（先添加优先）。
-    let mut candidates: Vec<&RouteCandidate> = routes
-        .iter()
-        .filter(|route| {
-            route.client_protocol == *protocol
-                && route.virtual_model_id == model
-                && accounts.iter().any(|a| a.id == route.account_id && a.enabled)
-        })
-        .collect();
-    candidates.sort_by_key(|r| r.created_at.as_str());
-    candidates.first().map(|r| vec![(*r).clone()]).unwrap_or_default()
 }
 
 // ─── Fallback Rules ─────────────────────────────────────────────────────────

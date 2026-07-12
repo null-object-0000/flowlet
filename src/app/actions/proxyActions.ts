@@ -38,10 +38,29 @@ export function createProxyActions({ data, setMessage }: ActionContext) {
     }
   }
 
+  async function testModel(model: string) {
+    const { host, port } = data.proxyBindConfig;
+    const baseUrl = `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}`;
+    setMessage(`正在测试 ${model}...`);
+    try {
+      const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "Reply with OK." }], max_tokens: 8 }),
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `HTTP ${response.status}`);
+      }
+      setMessage(`${model} 测试成功`);
+    } catch (err) {
+      setMessage(`${model} 测试失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   async function copy(text: string, done: string) {
     await navigator.clipboard.writeText(text);
     setMessage(done);
   }
 
-  return { startProxy, stopProxy, restartProxy, copy };
+  return { startProxy, stopProxy, restartProxy, testModel, copy };
 }

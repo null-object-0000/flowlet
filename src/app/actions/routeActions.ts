@@ -1,10 +1,10 @@
 import { RouteCandidate, RouteRule, createRouteCandidate, genId } from "../../domain";
 import { runCommand } from "../../services/flowletApi";
-import { buildDefaultExposedRoutes } from "../routeHelpers";
+import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext } from "./types";
 
 export function createRouteActions({ data, setMessage }: ActionContext) {
-  const { channels, accounts, routes, setRoutes, routeRules, setRouteRules } = data;
+  const { channels, accounts, routes, setRoutes, channelModels, routeRules, setRouteRules } = data;
 
   async function saveRouteCandidates() {
     await runCommand("save_route_candidates", { routes });
@@ -25,7 +25,7 @@ export function createRouteActions({ data, setMessage }: ActionContext) {
       setMessage("请先新增并启用至少一个已填写 API Key 的账号");
       return;
     }
-    const nextRoutes = buildDefaultExposedRoutes(channels, enabledAccounts);
+    const nextRoutes = ensureDefaultExposedRoutes(channels, enabledAccounts, routes, channelModels);
     await runCommand("save_route_candidates", { routes: nextRoutes });
     setRoutes(nextRoutes);
     // 热更新：代理运行中自动读取最新配置，无需重启

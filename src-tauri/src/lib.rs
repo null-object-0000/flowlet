@@ -63,6 +63,7 @@ impl AppState {
                 routes: Arc::clone(&self.routes),
                 rules: Arc::clone(&self.rules),
                 scores: Arc::new(Mutex::new(Vec::new())),
+                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
             },
             storage: self.storage.clone(),
             timeout: self.upstream_timeout_seconds,
@@ -131,28 +132,25 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         accounts = cleaned_accounts;
     }
 
-    // 初始化虚拟模型
-    let virtual_models = storage.list_virtual_models().expect("读取虚拟模型失败");
-    let virtual_models = if virtual_models.is_empty() {
-        let now = chrono::Utc::now().to_rfc3339();
-        let auto_model = VirtualModel {
-            id: "auto".to_string(),
-            name: "auto".to_string(),
-            protocol_type: ProtocolType::OpenAi,
-            routing_strategy: "priority".to_string(),
-            enabled: true,
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        let models = vec![auto_model];
-        storage
-            .save_virtual_models(models.as_slice())
-            .expect("保存默认虚拟模型失败");
-        models
-    } else {
-        virtual_models
-    };
-
+    // 固定 Flowlet 对外模型；旧自定义模型保留供高级模式使用。
+    let mut virtual_models = storage.list_virtual_models().expect("读取虚拟模型失败");
+    let now = chrono::Utc::now().to_rfc3339();
+    for (id, name) in [("flowlet-pro", "Flowlet Pro"), ("flowlet-flash", "Flowlet Flash")] {
+        if !virtual_models.iter().any(|model| model.id == id) {
+            virtual_models.push(VirtualModel {
+                id: id.to_string(),
+                name: name.to_string(),
+                protocol_type: ProtocolType::OpenAi,
+                routing_strategy: "model_order_then_round_robin".to_string(),
+                enabled: true,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            });
+        }
+    }
+    storage
+        .save_virtual_models(virtual_models.as_slice())
+        .expect("保存固定 Flowlet 模型失败");
     // 清理旧版本遗留的默认路由和已经无法服务的孤儿路由。
     let mut routes = storage.list_route_candidates().expect("读取路由配置失败");
     let cleaned_routes: Vec<RouteCandidate> = routes

@@ -920,3 +920,134 @@
     grid-template-columns: 1fr;
   }
 }
+
+.flowlet-models-panel {
+  gap: 18px;
+}
+
+.flowlet-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.flowlet-tier-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #dfe7f2;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.flowlet-tier-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.flowlet-tier-card h4 {
+  margin: 0;
+  color: #12213a;
+  font-size: 18px;
+}
+
+.flowlet-tier-card code {
+  display: inline-block;
+  margin-top: 8px;
+  color: #1167f2;
+  font-weight: 700;
+}
+
+.flowlet-tier-card p {
+  margin: 6px 0 0;
+  color: #6c7c96;
+  font-size: 13px;
+}
+
+.flowlet-tier-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.flowlet-tier-stats span {
+  padding: 12px;
+  border-radius: 9px;
+  background: #f6f8fc;
+  color: #63728d;
+  font-size: 13px;
+}
+
+.flowlet-tier-stats strong {
+  color: #12213a;
+  font-size: 18px;
+}
+
+.flowlet-model-details {
+  border-top: 1px solid #e7edf5;
+  padding-top: 12px;
+}
+
+.flowlet-model-details summary,
+.advanced-routing-section > summary {
+  cursor: pointer;
+  color: #2c4265;
+  font-weight: 700;
+}
+
+.flowlet-underlying-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.flowlet-underlying-row > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.flowlet-underlying-row span {
+  color: #72819b;
+  font-size: 12px;
+}
+
+.advanced-routing-section {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #dce5f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.advanced-routing-section > :not(summary) {
+  margin-top: 14px;
+}
+
+.overview-card-main.model.summary {
+  grid-template-columns: 40px minmax(0, 1fr) auto 40px;
+}
+
+@media (max-width: 900px) {
+  .flowlet-tier-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.flowlet-related-accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.flowlet-related-accounts label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #f0f4fa;
+}

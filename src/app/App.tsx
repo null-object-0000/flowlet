@@ -6,6 +6,7 @@ import { useFlowletActions } from "./useFlowletActions";
 import { useFlowletData } from "./useFlowletData";
 import { runCommand, enableFrontendLogging, disableFrontendLogging } from "../services/flowletApi";
 import { LogFilter, ProxyStatus, View } from "../domain";
+import { ensureDefaultExposedRoutes } from "./routeHelpers";
 import {
   LogsPage,
   OverviewPage,
@@ -24,6 +25,7 @@ export default function App() {
     channels,
     accounts,
     routes,
+    setRoutes,
     clients,
     prices,
     channelModels,
@@ -45,6 +47,7 @@ export default function App() {
   const {
     startProxy,
     restartProxy,
+    testModel,
     copy,
     saveAccounts,
     saveRouteCandidates,
@@ -58,6 +61,7 @@ export default function App() {
     analyzeUsage,
     addAccount,
     testConnection,
+    toggleAccountEnabled,
     updateAccount,
     removeAccount,
     addClient,
@@ -84,6 +88,7 @@ export default function App() {
   const [proxyStarting, setProxyStarting] = React.useState(false);
   const [proxyStartError, setProxyStartError] = React.useState<string | null>(null);
   const autoStartGuard = React.useRef(false);
+  const autoRouteSyncSignature = React.useRef("");
 
   // 严格模式（React 18+ dev + Tauri 重连）下 useEffect 会被调多次。
   // 用递增 incarnation seq 确保只有一个 run 能 "获胜" — 最近一次 fire 的 run 结果才被应用。
@@ -144,6 +149,22 @@ export default function App() {
     const timer = window.setInterval(() => void refreshStatus().catch(() => undefined), 3000);
     return () => window.clearInterval(timer);
   }, [initializing, initError, refreshStatus]);
+  React.useEffect(() => {
+    if (initializing || initError) return;
+    const signature = JSON.stringify({
+      accounts: accounts.map(({ id, channel_id, enabled, api_key, priority }) => ({ id, channel_id, enabled, hasKey: !!api_key.trim(), priority })),
+      channels: channels.map(({ id, supported_protocols }) => ({ id, supported_protocols })),
+      models: channelModels.map(({ channel_id, model, enabled }) => ({ channel_id, model, enabled })),
+    });
+    if (autoRouteSyncSignature.current === signature) return;
+    autoRouteSyncSignature.current = signature;
+    const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, channelModels);
+    if (JSON.stringify(nextRoutes) === JSON.stringify(routes)) return;
+    setRoutes(nextRoutes);
+    void runCommand("save_route_candidates", { routes: nextRoutes }).catch((err) => {
+      setMessage(`自动更新 Flowlet 模型池失败: ${String(err)}`);
+    });
+  }, [initializing, initError, accounts, channels, channelModels, routes, setRoutes]);
   async function handleStartProxy() {
     setAutoStartAttempted(true);
     setProxyStarting(true);
@@ -257,6 +278,9 @@ export default function App() {
             onRegenerateDefaultRoutes={() => void regenerateDefaultRoutes()}
             onSyncModels={(accountId) => void syncModels(accountId)}
             onRefreshChannelModels={() => void refreshChannelModels()}
+            onCopyModel={(model) => void copy(model, model + " 已复制")}
+            onTestModel={(model) => void testModel(model)}
+            onToggleAccount={(accountId, enabled) => void toggleAccountEnabled(accountId, enabled)}
             getChannelName={getChannelName}
             routeRules={routeRules}
             onAddRouteRule={addRouteRule}

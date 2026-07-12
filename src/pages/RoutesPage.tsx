@@ -7,12 +7,7 @@ import {
   RouteRule,
   VirtualModel,
 } from "../domain";
-import {
-  ModelServicesPanel,
-  ModelSyncPanel,
-  RouteCandidatesPanel,
-  RouteRulesPanel,
-} from "../features/routes";
+import { ModelServicesPanel, ModelSyncPanel, RouteCandidatesPanel, RouteRulesPanel } from "../features/routes";
 
 type RoutesPageProps = {
   routes: RouteCandidate[];
@@ -27,6 +22,9 @@ type RoutesPageProps = {
   onRegenerateDefaultRoutes: () => void;
   onSyncModels: (accountId: string) => void;
   onRefreshChannelModels: () => void;
+  onCopyModel: (model: string) => void;
+  onTestModel: (model: string) => void;
+  onToggleAccount: (accountId: string, enabled: boolean) => void;
   getChannelName: (channelId: string) => string;
   routeRules: RouteRule[];
   onAddRouteRule: () => void;
@@ -49,6 +47,9 @@ export function RoutesPage({
   onRegenerateDefaultRoutes,
   onSyncModels,
   onRefreshChannelModels,
+  onCopyModel,
+  onTestModel,
+  onToggleAccount,
   getChannelName,
   routeRules,
   onAddRouteRule,
@@ -65,36 +66,41 @@ export function RoutesPage({
         onUpdate={onUpdate}
         onSave={onSave}
         onRegenerateDefaultRoutes={onRegenerateDefaultRoutes}
-        getChannelName={getChannelName}
+        onCopyModel={onCopyModel}
+        onTestModel={onTestModel}
+        onToggleAccount={onToggleAccount}
       />
-      <ModelSyncPanel
-        channels={channels}
-        accounts={accounts}
-        channelModels={channelModels}
-        onSyncModels={onSyncModels}
-        onRefreshChannelModels={onRefreshChannelModels}
-        getChannelName={getChannelName}
-      />
-      <RouteCandidatesPanel
-        routes={routes}
-        channels={channels}
-        accounts={accounts}
-        virtualModels={virtualModels}
-        onAdd={onAdd}
-        onUpdate={onUpdate}
-        onRemove={onRemove}
-        onSave={onSave}
-      />
-      <RouteRulesPanel
-        routeRules={routeRules}
-        channels={channels}
-        accounts={accounts}
-        clients={clients}
-        onAddRouteRule={onAddRouteRule}
-        onUpdateRouteRule={onUpdateRouteRule}
-        onRemoveRouteRule={onRemoveRouteRule}
-        onSaveRouteRules={onSaveRouteRules}
-      />
+      <details className="advanced-routing-section">
+        <summary>高级路由设置</summary>
+        <ModelSyncPanel
+          channels={channels}
+          accounts={accounts}
+          channelModels={channelModels}
+          onSyncModels={onSyncModels}
+          onRefreshChannelModels={onRefreshChannelModels}
+          getChannelName={getChannelName}
+        />
+        <RouteCandidatesPanel
+          routes={routes}
+          channels={channels}
+          accounts={accounts}
+          virtualModels={virtualModels}
+          onAdd={onAdd}
+          onUpdate={onUpdate}
+          onRemove={onRemove}
+          onSave={onSave}
+        />
+        <RouteRulesPanel
+          routeRules={routeRules}
+          channels={channels}
+          accounts={accounts}
+          clients={clients}
+          onAddRouteRule={onAddRouteRule}
+          onUpdateRouteRule={onUpdateRouteRule}
+          onRemoveRouteRule={onRemoveRouteRule}
+          onSaveRouteRules={onSaveRouteRules}
+        />
+      </details>
     </>
   );
 }

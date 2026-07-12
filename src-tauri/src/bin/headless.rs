@@ -66,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         routes: Arc::new(Mutex::new(routes)),
         rules: Arc::new(Mutex::new(rules)),
         scores: Arc::new(Mutex::new(scores)),
+                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
     let config_path = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))

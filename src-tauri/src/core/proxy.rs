@@ -17,6 +17,7 @@ use futures_util::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Serialize;
 use std::{
+    collections::HashMap,
     net::SocketAddr,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -36,6 +37,7 @@ pub struct ProxySharedConfig {
     pub routes: Arc<Mutex<Vec<RouteCandidate>>>,
     pub rules: Arc<Mutex<Vec<RouteRule>>>,
     pub scores: Arc<Mutex<Vec<(String, String, f64, f64, f64)>>>,
+    pub round_robin: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
@@ -419,16 +421,20 @@ async fn forward_request(
     }
 
     // 匹配路由候选（用 token 身份，保证现有多 UA 共用一 token 的规则不破坏）
-    let candidates = match_candidates(
-        &routes,
-        &rules,
-        &scores,
-        public_model.as_deref(),
-        &detected_protocol,
-        token_client_id.as_deref(),
-        &accounts,
-        &channels,
-    );
+    let candidates = {
+        let mut round_robin = state.shared.round_robin.lock().unwrap();
+        match_candidates(
+            &routes,
+            &rules,
+            &scores,
+            public_model.as_deref(),
+            &detected_protocol,
+            token_client_id.as_deref(),
+            &accounts,
+            &channels,
+            &mut round_robin,
+        )
+    };
 
     // 识别请求类型
     let request_type = classify_request(&body_bytes, &detected_protocol);
@@ -606,6 +612,15 @@ async fn forward_request(
                 let ttfb_ms = log_context.send_at.elapsed().as_millis() as i64;
                 let status = upstream_response.status();
                 let channel_vendor = channel.vendor.clone();
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    let message = "upstream returned 401; API Key may be invalid";
+                    let _ = storage.update_account_last_error(&account.id, message);
+                    if let Ok(mut shared_accounts) = state.shared.accounts.lock() {
+                        if let Some(shared_account) = shared_accounts.iter_mut().find(|item| item.id == account.id) {
+                            shared_account.last_error = Some(message.to_string());
+                        }
+                    }
+                }
 
                 if should_try_next_status(status, &channel_vendor) && index + 1 < candidates.len() {
                     fallback_count += 1;

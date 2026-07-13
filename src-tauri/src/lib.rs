@@ -527,6 +527,8 @@ pub fn run() {
             commands::export_config,
             commands::import_config,
             commands::db_stats,
+            commands::read_app_meta,
+            commands::write_app_meta,
             commands::cleanup_old_logs,
             commands::read_config,
             commands::write_config,

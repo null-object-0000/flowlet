@@ -132,18 +132,24 @@ pub(super) fn list_channel_accounts(
 pub(super) fn save_channel_accounts(
     state: tauri::State<'_, AppState>,
     accounts: Vec<ChannelAccount>,
-) -> Result<(), String> {
+) -> Result<Vec<ChannelAccount>, String> {
     state
         .storage
         .save_channel_accounts(&accounts)
+        .map_err(|err| err.to_string())?;
+
+    // 从数据库重新读取规范化后的账号列表（API Key 变化时 credential_status 已被重置）。
+    let normalized = state
+        .storage
+        .list_channel_accounts()
         .map_err(|err| err.to_string())?;
 
     let mut current = state
         .accounts
         .lock()
         .map_err(|_| "保存账号配置失败".to_string())?;
-    *current = accounts;
-    Ok(())
+    *current = normalized.clone();
+    Ok(normalized)
 }
 
 // ─── Route Candidates Commands ──────────────────────────────────────────────
@@ -391,13 +397,28 @@ pub(super) async fn query_balance(
 
     // 更新账号凭证状态与最后错误信息。
     // 测试连接成功 → 重置为 healthy；若返回 401 则标记为 invalid_key。
+    // 同时更新共享内存，保证 SQLite / 共享内存 / 前端状态一致，下一次路由立即生效。
     if result.error.is_none() {
         let _ = state.storage.mark_account_credential_healthy(&account_id);
+        if let Ok(mut shared) = state.accounts.lock() {
+            if let Some(shared_account) = shared.iter_mut().find(|item| item.id == account_id) {
+                shared_account.credential_status =
+                    crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+                shared_account.last_error = None;
+            }
+        }
     }
     if let Some(ref err) = result.error {
         let _ = state.storage.update_account_last_error(&account_id, err);
         if err.contains("HTTP 401") || err.contains("401") {
             let _ = state.storage.mark_account_credential_invalid(&account_id);
+            if let Ok(mut shared) = state.accounts.lock() {
+                if let Some(shared_account) = shared.iter_mut().find(|item| item.id == account_id) {
+                    shared_account.credential_status =
+                        crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
+                    shared_account.last_error = Some(err.clone());
+                }
+            }
         }
     } else {
         let now = chrono::Utc::now().to_rfc3339();
@@ -611,6 +632,31 @@ pub(super) fn save_route_rules(
 }
 
 // ─── Maintenance Commands ─────────────────────────────────────────────────
+
+// ─── App Meta (全局配置 KV) ────────────────────────────────────────────────
+
+#[tauri::command]
+pub(super) fn read_app_meta(
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    state
+        .storage
+        .get_app_meta(&key)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn write_app_meta(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    state
+        .storage
+        .set_app_meta(&key, &value)
+        .map_err(|err| err.to_string())
+}
 
 #[tauri::command]
 pub(super) fn db_stats(state: tauri::State<'_, AppState>) -> Result<(i64, i64, i64), String> {

@@ -7,6 +7,7 @@ import {
   ChannelPreset,
   ClientConfig,
   LogMeta,
+  ModelExposureMode,
   ModelPrice,
   ProxyBindConfig,
   ProxyStatus,
@@ -39,6 +40,7 @@ export function useFlowletData() {
   const [routeRules, setRouteRules] = React.useState<RouteRule[]>([]);
   const [accountStats, setAccountStats] = React.useState<AccountStatsRow[]>([]);
   const [routingScores, setRoutingScores] = React.useState<Array<[string, string, number, number, number]>>([]);
+  const [exposureMode, setExposureMode] = React.useState<ModelExposureMode>("all");
   const [dbStats, setDbStats] = React.useState<[number, number, number] | null>(null);
   const [autostartEnabled, setAutostartEnabled] = React.useState(false);
   const [proxyBindConfig, setProxyBindConfig] = React.useState<ProxyBindConfig>({
@@ -125,6 +127,10 @@ export function useFlowletData() {
     setRouteRules(rules);
     setRoutingScores(scores);
     setDbStats(db);
+    // 模型开放范围（默认全部开放）。缺失记录时保持 "all"。
+    runCommand<string>("read_app_meta", { key: "model_exposure_mode" })
+      .then((value) => setExposureMode((value ?? "all") as ModelExposureMode))
+      .catch(() => setExposureMode("all"));
   }, []);
 
   return {
@@ -156,6 +162,8 @@ export function useFlowletData() {
     dbStats,
     autostartEnabled,
     setAutostartEnabled,
+    exposureMode,
+    setExposureMode,
     proxyBindConfig,
     setProxyBindConfig,
     status,

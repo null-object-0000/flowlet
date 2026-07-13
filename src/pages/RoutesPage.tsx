@@ -3,6 +3,7 @@ import {
   ChannelModel,
   ChannelPreset,
   ClientConfig,
+  ModelExposureMode,
   RouteCandidate,
   RouteRule,
   VirtualModel,
@@ -15,6 +16,7 @@ type RoutesPageProps = {
   accounts: ChannelAccount[];
   channelModels: ChannelModel[];
   virtualModels: VirtualModel[];
+  exposureMode: ModelExposureMode;
   onAdd: () => void;
   onUpdate: (index: number, patch: Partial<RouteCandidate>) => void;
   onRemove: (index: number) => void;
@@ -24,7 +26,7 @@ type RoutesPageProps = {
   onRefreshChannelModels: () => void;
   onCopyModel: (model: string) => void;
   onTestModel: (model: string) => void;
-  onToggleAccount: (accountId: string, enabled: boolean) => void;
+  onChangeExposureMode: (mode: ModelExposureMode) => void;
   onOpenAccounts?: () => void;
   getChannelName: (channelId: string) => string;
   routeRules: RouteRule[];
@@ -41,6 +43,7 @@ export function RoutesPage({
   accounts,
   channelModels,
   virtualModels,
+  exposureMode,
   onAdd,
   onUpdate,
   onRemove,
@@ -50,7 +53,7 @@ export function RoutesPage({
   onRefreshChannelModels,
   onCopyModel,
   onTestModel,
-  onToggleAccount,
+  onChangeExposureMode,
   onOpenAccounts,
   getChannelName,
   routeRules,
@@ -65,12 +68,15 @@ export function RoutesPage({
       <ModelServicesPanel
         routes={routes}
         accounts={accounts}
+        channels={channels}
+        channelModels={channelModels}
+        exposureMode={exposureMode}
         onUpdate={onUpdate}
         onSave={onSave}
         onRegenerateDefaultRoutes={onRegenerateDefaultRoutes}
         onCopyModel={onCopyModel}
         onTestModel={onTestModel}
-        onToggleAccount={onToggleAccount}
+        onChangeExposureMode={onChangeExposureMode}
         onOpenAccounts={onOpenAccounts}
       />
       <details className="advanced-routing-section">

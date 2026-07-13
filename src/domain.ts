@@ -2,6 +2,9 @@ export type ProtocolType = "openai" | "anthropic";
 export type FlowletTier = "pro" | "flash" | "none";
 export type AuthStrategy = "bearer" | "x_api_key";
 
+// 模型开放范围（需求三）：全部开放（默认）/ 仅 Flowlet 模型 / 自定义。
+export type ModelExposureMode = "all" | "flowlet_only" | "custom";
+
 export type ProxyStatus = {
   running: boolean;
   bind_addr: string;
@@ -44,7 +47,7 @@ export type ChannelAccount = {
   last_used_at?: string;
   last_error?: string;
   // "healthy" 表示可参与路由；"invalid_key" 表示上游最近返回 401，应从候选池排除
-  credential_status?: "healthy" | "invalid_key";
+  credential_status: "healthy" | "invalid_key";
   created_at: string;
   updated_at: string;
 };
@@ -277,15 +280,22 @@ export const flowletPublicModels = {
   flash: { id: "flowlet-flash", name: "Flowlet Flash", description: "响应快，适合日常任务" },
 } as const;
 
-const defaultFlowletTierByModel: Record<string, FlowletTier> = {
-  "deepseek-v4-pro": "pro",
-  "deepseek-v4-flash": "flash",
-  "longcat-2.0": "pro",
+// 档位映射按渠道维护：channel_id + upstream_model → tier。
+// 未知组合默认 "none"（不参与聚合池，但仍可作为直接模型开放）。
+// 禁止通过 model 名称猜测（includes("pro")/includes("flash")）判定档位。
+const defaultFlowletTierByChannel: Record<string, Record<string, FlowletTier>> = {
+  deepseek: {
+    "deepseek-v4-pro": "pro",
+    "deepseek-v4-flash": "flash",
+  },
+  longcat: {
+    "longcat-2.0": "pro",
+  },
 };
 
-export function getFlowletTier(_channelId: string, model: string): FlowletTier {
+export function getFlowletTier(channelId: string, model: string): FlowletTier {
   const normalized = model.trim().toLowerCase();
-  return defaultFlowletTierByModel[normalized] ?? "none";
+  return defaultFlowletTierByChannel[channelId]?.[normalized] ?? "none";
 }
 
 export function flowletModelIdForTier(tier: FlowletTier): string | null {
@@ -312,6 +322,7 @@ export function createAccount(channelId: string, index: number): ChannelAccount 
     base_url_override: null,
     last_used_at: undefined,
     last_error: undefined,
+    credential_status: "healthy",
     created_at: now,
     updated_at: now,
   };

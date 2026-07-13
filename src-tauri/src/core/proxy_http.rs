@@ -1,6 +1,6 @@
 use crate::core::config::{
     AuthStrategy, ChannelAccount, ChannelPreset, ClientConfig, ProtocolType, RouteCandidate,
-    UaClientRule,
+    UaClientRule, ACCOUNT_CREDENTIAL_HEALTHY,
 };
 use axum::{
     body::Body,
@@ -71,17 +71,32 @@ pub(super) fn build_model_list_response(
     }
 }
 
-/// 从 routes 中按 protocol+enabled 过滤后，收集 (model_id, account_id, created_at)
-/// BTreeSet 保证按模型名字典序排列且去重。
+/// 单个对外模型的展示信息。owned_by 用于 OpenAI-compatible 模型列表。
+#[derive(Clone)]
+struct ModelEntry {
+    id: String,
+    owned_by: String,
+    created_at: String,
+}
+
+/// 从 routes 中按 protocol+enabled+healthy 过滤后，收集对外模型集合。
+/// 同时包含聚合模型（flowlet-pro/flash）与直接底层模型。
+/// 直接模型：virtual_model_id === upstream_model，以渠道 vendor 为 owned_by；
+/// 聚合模型：owned_by = "flowlet"。
 fn collect_model_entries(
     routes: &[RouteCandidate],
     accounts: &[ChannelAccount],
     channels: &[ChannelPreset],
     protocol: &ProtocolType,
-) -> Vec<(String, String, String)> {
-    let enabled_accounts: BTreeSet<&str> = accounts
+) -> Vec<ModelEntry> {
+    // 账号健康判断与路由候选池一致：必须 enabled + API Key 非空 + credential_status = healthy。
+    let healthy_accounts: BTreeSet<&str> = accounts
         .iter()
-        .filter(|a| a.enabled && !a.api_key.trim().is_empty())
+        .filter(|a| {
+            a.enabled
+                && !a.api_key.trim().is_empty()
+                && a.credential_status == ACCOUNT_CREDENTIAL_HEALTHY
+        })
         .map(|a| a.id.as_str())
         .collect();
 
@@ -93,37 +108,66 @@ fn collect_model_entries(
         })
         .map(|channel| channel.id.as_str())
         .collect();
-    let mut result: Vec<(String, String, String)> = Vec::new();
+
+    let vendor_by_channel: std::collections::HashMap<&str, &str> = channels
+        .iter()
+        .map(|channel| (channel.id.as_str(), channel.vendor.as_str()))
+        .collect();
+
+    let mut result: Vec<ModelEntry> = Vec::new();
     let mut seen = BTreeSet::new();
 
     for route in routes {
         if !route.enabled
-            || !matches!(route.virtual_model_id.as_str(), "flowlet-pro" | "flowlet-flash")
-            || !dual_protocol_channels.contains(route.channel_id.as_str())
             || route.client_protocol != *protocol
-            || !enabled_accounts.contains(route.account_id.as_str())
+            || !healthy_accounts.contains(route.account_id.as_str())
         {
             continue;
         }
-        // 只返回对外模型名（virtual_model_id），不回漏 upstream_model
+        let is_aggregate =
+            matches!(route.virtual_model_id.as_str(), "flowlet-pro" | "flowlet-flash");
+        // 聚合模型必须来自双协议渠道；直接模型按 client_protocol 自然兼容。
+        if is_aggregate && !dual_protocol_channels.contains(route.channel_id.as_str()) {
+            continue;
+        }
+        // 直接模型：对外模型名必须与上游模型名一致（不允许同名非直接路由混入）。
+        if !is_aggregate && route.virtual_model_id != route.upstream_model {
+            continue;
+        }
         let id = route.virtual_model_id.trim();
         if id.is_empty() || !seen.insert(id.to_string()) {
             continue;
         }
-        result.push((
-            id.to_string(),
-            route.account_id.clone(),
-            route.created_at.clone(),
-        ));
+        let owned_by = if is_aggregate {
+            "flowlet".to_string()
+        } else {
+            vendor_by_channel
+                .get(route.channel_id.as_str())
+                .copied()
+                .unwrap_or("flowlet")
+                .to_string()
+        };
+        result.push(ModelEntry {
+            id: id.to_string(),
+            owned_by,
+            created_at: route.created_at.clone(),
+        });
     }
-    // 按 model_id 字典序稳定排序，保证 first_id/last_id 和输出顺序确定
-    result.sort_by_key(|entry| if entry.0 == "flowlet-pro" { 0 } else { 1 });
+    // 排序固定：flowlet-pro → flowlet-flash → 其余按名字典序（需求八）。
+    result.sort_by(|a, b| rank_model(&a.id).cmp(&rank_model(&b.id)).then_with(|| a.id.cmp(&b.id)));
     result
 }
 
-fn build_openai_model_list(entries: &[(String, String, String)]) -> Response {
-    // Flowlet Pro / Flash 是 Flowlet 对外提供的统一虚拟模型，底层会路由到不同渠道，
-    // 因此 owned_by 固定为 "flowlet"，不随底层候选的渠道变化。
+fn rank_model(id: &str) -> u8 {
+    match id {
+        "flowlet-pro" => 0,
+        "flowlet-flash" => 1,
+        _ => 2,
+    }
+}
+
+fn build_openai_model_list(entries: &[ModelEntry]) -> Response {
+    // Flowlet 聚合模型的 owned_by 固定为 "flowlet"；直接模型使用其所属渠道 vendor。
     let parse_unix_seconds = |raw: &str| -> i64 {
         if raw.is_empty() {
             return 0;
@@ -138,13 +182,12 @@ fn build_openai_model_list(entries: &[(String, String, String)]) -> Response {
 
     let data: Vec<serde_json::Value> = entries
         .iter()
-        .map(|(id, _account_id, created_at)| {
-            let owned_by = "flowlet";
+        .map(|entry| {
             serde_json::json!({
-                "id": id,
+                "id": entry.id,
                 "object": "model",
-                "created": parse_unix_seconds(created_at),
-                "owned_by": owned_by
+                "created": parse_unix_seconds(&entry.created_at),
+                "owned_by": entry.owned_by
             })
         })
         .collect();
@@ -155,25 +198,22 @@ fn build_openai_model_list(entries: &[(String, String, String)]) -> Response {
     }))
 }
 
-fn build_anthropic_model_list(entries: &[(String, String, String)]) -> Response {
+fn build_anthropic_model_list(entries: &[ModelEntry]) -> Response {
     // Anthropic GET /v1/models 官方 schema（参考 docs.claude.com）：
     // { "data": [{ "id": "...", "type": "model", "display_name": "...", "created_at": "RFC3339" }],
     //   "has_more": false, "first_id": "...", "last_id": "..." }
-    //
-    // 上游 created_at 在数据库中以 RFC 3339 存储（如 "2026-01-01T00:00:00Z"）。
-    // 若为空字符串（老数据兜底），返回 epoch 起点。
     let data: Vec<serde_json::Value> = entries
         .iter()
-        .map(|(id, _account_id, created_at)| {
-            let created_at = if created_at.is_empty() {
+        .map(|entry| {
+            let created_at = if entry.created_at.is_empty() {
                 "1970-01-01T00:00:00Z"
             } else {
-                created_at.as_str()
+                entry.created_at.as_str()
             };
             serde_json::json!({
-                "id": id,
+                "id": entry.id,
                 "type": "model",
-                "display_name": id,
+                "display_name": entry.id,
                 "created_at": created_at
             })
         })

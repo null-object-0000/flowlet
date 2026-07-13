@@ -1,17 +1,28 @@
-import { ActionIcon, Badge, Button, Group, Switch, Text } from "@mantine/core";
+import { ActionIcon, Badge, Box, Button, Group, Radio, Switch, Table, Text } from "@mantine/core";
 import { IconArrowDown, IconArrowUp, IconCopy, IconPlayerPlay, IconSettings } from "@tabler/icons-react";
 import { Actions, Panel, PanelHeader } from "../../components/ui";
-import { ChannelAccount, RouteCandidate, flowletPublicModels } from "../../domain";
+import {
+  ChannelAccount,
+  ChannelModel,
+  ChannelPreset,
+  ModelExposureMode,
+  RouteCandidate,
+  flowletPublicModels,
+} from "../../domain";
+import { buildExposedModels, ExposedModel } from "./exposedModels";
 
 type ModelServicesPanelProps = {
   routes: RouteCandidate[];
   accounts: ChannelAccount[];
+  channels?: ChannelPreset[];
+  channelModels?: ChannelModel[];
+  exposureMode: ModelExposureMode;
   onUpdate: (index: number, patch: Partial<RouteCandidate>) => void;
   onSave: () => void;
   onRegenerateDefaultRoutes: () => void;
   onCopyModel: (model: string) => void;
   onTestModel: (model: string) => void;
-  onToggleAccount: (accountId: string, enabled: boolean) => void;
+  onChangeExposureMode: (mode: ModelExposureMode) => void;
   onOpenAccounts?: () => void;
 };
 
@@ -30,12 +41,15 @@ const TIERS = [flowletPublicModels.pro, flowletPublicModels.flash];
 export function ModelServicesPanel({
   routes,
   accounts,
+  channels = [],
+  channelModels = [],
+  exposureMode,
   onUpdate,
   onSave,
   onRegenerateDefaultRoutes,
   onCopyModel,
   onTestModel,
-  onToggleAccount,
+  onChangeExposureMode,
   onOpenAccounts,
 }: ModelServicesPanelProps) {
   const availableAccountIds = new Set(
@@ -44,8 +58,16 @@ export function ModelServicesPanel({
       .map((account) => account.id)
   );
 
+  const exposedModels = buildExposedModels(routes, accounts, channels, channelModels);
+  const aggregateModels = exposedModels.filter((model) => model.kind === "aggregate");
+  const directModels = exposedModels.filter((model) => model.kind === "direct");
+
   function updateRoutes(indexes: number[], patch: Partial<RouteCandidate>) {
     indexes.forEach((index) => onUpdate(index, patch));
+  }
+
+  function toggleDirectModel(model: ExposedModel, enabled: boolean) {
+    updateRoutes(model.routeIndexes, { enabled });
   }
 
   return (
@@ -53,14 +75,38 @@ export function ModelServicesPanel({
       <PanelHeader>
         <div>
           <h3>模型服务</h3>
-          <Text size="sm" c="dimmed">客户端只需使用 Flowlet Pro 或 Flowlet Flash，底层模型和账号由 Flowlet 自动管理。</Text>
+          <Text size="sm" c="dimmed">
+            {exposureMode === "flowlet_only"
+              ? "当前仅对外开放 Flowlet Pro / Flash 聚合模型。"
+              : "Flowlet 聚合模型与直接底层模型均对外开放，可在「自定义」模式下单独控制。"}
+          </Text>
         </div>
         <Actions>
-          <Button type="button" variant="default" onClick={onRegenerateDefaultRoutes}>重新识别模型池</Button>
-          <Button type="button" onClick={() => void onSave()}>保存更改</Button>
+          <Button type="button" variant="default" onClick={onRegenerateDefaultRoutes}>
+            重新识别模型池
+          </Button>
+          <Button type="button" onClick={() => void onSave()}>
+            保存更改
+          </Button>
         </Actions>
       </PanelHeader>
 
+      {/* 顶部：模型开放范围 */}
+      <Box className="flowlet-exposure-mode">
+        <Text size="sm" fw={600} mb="xs">模型开放范围</Text>
+        <Radio.Group value={exposureMode} onChange={(value) => onChangeExposureMode(value as ModelExposureMode)}>
+          <Group gap="lg">
+            <Radio value="all" label="全部开放（推荐）" />
+            <Radio value="flowlet_only" label="仅 Flowlet 模型" />
+            <Radio value="custom" label="自定义" />
+          </Group>
+        </Radio.Group>
+        {exposureMode === "all" ? (
+          <Text size="xs" c="dimmed" mt={4}>所有聚合模型与底层模型均开放。如需单独控制，请切换至「自定义」。</Text>
+        ) : null}
+      </Box>
+
+      {/* 区域一：Flowlet 智能模型 */}
       <div className="flowlet-tier-grid">
         {TIERS.map((tier) => {
           const tierRouteEntries = routes
@@ -160,6 +206,70 @@ export function ModelServicesPanel({
           );
         })}
       </div>
+
+      {/* 区域二：直接模型 */}
+      <Box className="flowlet-direct-models" mt="lg">
+        <Text size="sm" fw={600} mb="xs">直接模型</Text>
+        {exposureMode === "flowlet_only" ? (
+          <Text size="sm" c="dimmed">当前为「仅 Flowlet 模型」模式，直接底层模型不对外开放。</Text>
+        ) : directModels.length === 0 ? (
+          <Text size="sm" c="dimmed">接入渠道账号后自动发现底层模型。</Text>
+        ) : (
+          <Table striped highlightOnHover withTableBorder withColumnBorders>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>模型</Table.Th>
+                <Table.Th>渠道</Table.Th>
+                <Table.Th>可用账号</Table.Th>
+                <Table.Th>对外开放</Table.Th>
+                <Table.Th>操作</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {directModels.map((model) => {
+                const disabledByMode = exposureMode === "all"; // 全部开放模式下直接模型开关只读，需切自定义
+                return (
+                  <Table.Tr key={model.publicModel}>
+                    <Table.Td>
+                      <code>{model.publicModel}</code>
+                      {model.hasAvailableAccount ? (
+                        <Badge color="green" variant="light" size="xs" ml={6}>可用</Badge>
+                      ) : (
+                        <Badge color="gray" variant="light" size="xs" ml={6}>不可用</Badge>
+                      )}
+                    </Table.Td>
+                    <Table.Td>{model.channelName ?? model.channelId ?? "-"}</Table.Td>
+                    <Table.Td>{model.availableAccountCount}</Table.Td>
+                    <Table.Td>
+                      <Switch
+                        checked={model.enabled}
+                        disabled={disabledByMode}
+                        aria-label={`${model.publicModel} 对外开放`}
+                        onChange={(event) => toggleDirectModel(model, event.currentTarget.checked)}
+                      />
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap={4}>
+                        <ActionIcon variant="subtle" aria-label="复制模型名" onClick={() => onCopyModel(model.publicModel)}>
+                          <IconCopy size={16} />
+                        </ActionIcon>
+                        <ActionIcon
+                          variant="subtle"
+                          disabled={!model.hasAvailableAccount}
+                          aria-label="测试直接模型"
+                          onClick={() => onTestModel(model.publicModel)}
+                        >
+                          <IconPlayerPlay size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
+        )}
+      </Box>
     </Panel>
   );
 }

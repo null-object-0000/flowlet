@@ -41,6 +41,7 @@ export default function App() {
     refreshStatus,
     refreshAll,
     refreshChannelModels,
+    exposureMode,
   } = flowlet;
   const [view, setView] = React.useState<View>("overview");
   const [message, setMessage] = React.useState("");
@@ -61,7 +62,7 @@ export default function App() {
     analyzeUsage,
     addAccount,
     testConnection,
-    toggleAccountEnabled,
+    changeExposureMode,
     updateAccount,
     removeAccount,
     addClient,
@@ -158,7 +159,7 @@ export default function App() {
     });
     if (autoRouteSyncSignature.current === signature) return;
     autoRouteSyncSignature.current = signature;
-    const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, channelModels);
+    const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, channelModels, exposureMode);
     if (JSON.stringify(nextRoutes) === JSON.stringify(routes)) return;
     setRoutes(nextRoutes);
     void runCommand("save_route_candidates", { routes: nextRoutes }).catch((err) => {
@@ -280,7 +281,8 @@ export default function App() {
             onRefreshChannelModels={() => void refreshChannelModels()}
             onCopyModel={(model) => void copy(model, model + " 已复制")}
             onTestModel={(model) => void testModel(model)}
-            onToggleAccount={(accountId, enabled) => void toggleAccountEnabled(accountId, enabled)}
+            exposureMode={exposureMode}
+            onChangeExposureMode={(mode) => void changeExposureMode(mode)}
             onOpenAccounts={() => setView("accounts")}
             getChannelName={getChannelName}
             routeRules={routeRules}

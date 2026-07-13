@@ -355,6 +355,11 @@ pub type AccountCredentialStatus = String;
 pub const ACCOUNT_CREDENTIAL_HEALTHY: &str = "healthy";
 pub const ACCOUNT_CREDENTIAL_INVALID_KEY: &str = "invalid_key";
 
+/// 旧配置导入兼容：缺失 credential_status 时默认为 healthy。
+fn default_credential_status() -> AccountCredentialStatus {
+    ACCOUNT_CREDENTIAL_HEALTHY.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelAccount {
     pub id: String,
@@ -367,6 +372,7 @@ pub struct ChannelAccount {
     pub base_url_override: Option<String>,
     pub last_used_at: Option<String>,
     pub last_error: Option<String>,
+    #[serde(default = "default_credential_status")]
     pub credential_status: AccountCredentialStatus,
     pub created_at: String,
     pub updated_at: String,

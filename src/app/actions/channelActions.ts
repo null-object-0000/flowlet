@@ -4,17 +4,19 @@ import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext } from "./types";
 
 export function createChannelActions({ data, setMessage }: ActionContext) {
-  const { channels, accounts, setAccounts, routes, setRoutes, channelModels, balanceSnapshots, refreshAll } = data;
+  const { channels, accounts, setAccounts, routes, setRoutes, channelModels, balanceSnapshots, refreshAll, exposureMode } = data;
 
   async function saveAccounts(nextAccounts?: ChannelAccount[]) {
     const sourceAccounts = nextAccounts ?? accounts;
     const filtered = sourceAccounts.filter((a) => a.name.trim() && a.channel_id.trim());
-    await runCommand("save_channel_accounts", { accounts: filtered });
-    setAccounts(filtered);
+    // 后端返回规范化后的账号列表（API Key 变化时 credential_status 已被重置为 healthy），
+    // 以此作为状态真源，保证 SQLite / 共享内存 / React State 一致。
+    const saved = await runCommand<ChannelAccount[]>("save_channel_accounts", { accounts: filtered });
+    setAccounts(saved);
     setMessage("渠道账号已保存，代理配置已热更新");
 
-    const nextRoutes = ensureDefaultExposedRoutes(channels, filtered, routes, channelModels);
-    if (nextRoutes.length !== routes.length) {
+    const nextRoutes = ensureDefaultExposedRoutes(channels, saved, routes, channelModels, exposureMode);
+    if (JSON.stringify(nextRoutes) !== JSON.stringify(routes)) {
       setRoutes(nextRoutes);
       await runCommand("save_route_candidates", { routes: nextRoutes });
       setMessage("渠道账号已保存，已自动开放默认模型，代理配置已热更新");
@@ -37,23 +39,18 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
       name: `${channel.name} 账号`,
       api_key: apiKey.trim(),
       enabled: true,
+      credential_status: "healthy",
     };
     const nextAccounts = [...accounts, account];
-    const nextRoutes = ensureDefaultExposedRoutes(channels, nextAccounts, routes, channelModels);
+    const nextRoutes = ensureDefaultExposedRoutes(channels, nextAccounts, routes, channelModels, exposureMode);
 
-    await runCommand("save_channel_accounts", { accounts: nextAccounts });
+    const saved = await runCommand<ChannelAccount[]>("save_channel_accounts", { accounts: nextAccounts });
     await runCommand("save_route_candidates", { routes: nextRoutes });
-    setAccounts(nextAccounts);
+    setAccounts(saved);
     setRoutes(nextRoutes);
     setMessage("渠道账号已保存，Flowlet Pro / Flash 模型池已自动更新");
   }
 
-  async function toggleAccountEnabled(accountId: string, enabled: boolean) {
-    const nextAccounts = accounts.map((account) =>
-      account.id === accountId ? { ...account, enabled, updated_at: new Date().toISOString() } : account
-    );
-    await saveAccounts(nextAccounts);
-  }
   function addAccount(channelId: string) {
     const existing = accounts.filter((a) => a.channel_id === channelId);
     setAccounts((current) => [...current, createAccount(channelId, existing.length)]);
@@ -77,6 +74,8 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
       } else {
         setMessage("连接失败：请检查 API Key 是否正确");
       }
+      // 测试连接会修改 credential_status，刷新账号列表以保持前端状态与后端一致。
+      await refreshAll();
     } catch (err: unknown) {
       setMessage(`测试失败: ${String(err)}`);
     }
@@ -93,7 +92,7 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
         const mergedModels = account
           ? [...channelModels.filter((model) => model.channel_id !== account.channel_id), ...result.models]
           : channelModels;
-        const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, mergedModels);
+        const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, mergedModels, exposureMode);
         await runCommand("save_route_candidates", { routes: nextRoutes });
         setRoutes(nextRoutes);
         setMessage(`同步成功，获取 ${result.models_synced} 个模型，Flowlet 模型池已热更新`);
@@ -142,7 +141,6 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
     saveAccounts,
     quickSetup,
     addAccount,
-    toggleAccountEnabled,
     testConnection,
     syncModels,
     updateAccount,

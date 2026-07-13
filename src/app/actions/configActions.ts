@@ -1,4 +1,5 @@
 import { runCommand } from "../../services/flowletApi";
+import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext, FlowletData } from "./types";
 
 function validateConfigData({ channels, accounts, routes, clients }: FlowletData): string[] {
@@ -57,7 +58,22 @@ function validateConfigData({ channels, accounts, routes, clients }: FlowletData
 }
 
 export function createConfigActions({ data, setMessage }: ActionContext) {
-  const { autostartEnabled, setAutostartEnabled, proxyBindConfig, setProxyBindConfig, status, refreshStatus, refreshAll } = data;
+  const {
+    autostartEnabled,
+    setAutostartEnabled,
+    proxyBindConfig,
+    setProxyBindConfig,
+    status,
+    refreshStatus,
+    refreshAll,
+    exposureMode,
+    setExposureMode,
+    channels,
+    accounts,
+    routes,
+    setRoutes,
+    channelModels,
+  } = data;
 
   function toggleAutostart() {
     const fn = autostartEnabled ? "disable_autostart" : "enable_autostart";
@@ -148,7 +164,39 @@ export function createConfigActions({ data, setMessage }: ActionContext) {
       .catch((err: unknown) => setMessage(`清理失败: ${String(err)}`));
   }
 
-  return { toggleAutostart, saveProxyBindConfig, exportConfig, importConfig, validateConfig, cleanupLogs };
+  // 切换模型开放范围并持久化。切换后按新模式重新生成路由并保存，代理热加载。
+  async function changeExposureMode(mode: typeof exposureMode) {
+    setExposureMode(mode);
+    await runCommand("write_app_meta", { key: "model_exposure_mode", value: mode });
+    const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, channelModels, mode);
+    if (JSON.stringify(nextRoutes) !== JSON.stringify(routes)) {
+      setRoutes(nextRoutes);
+      await runCommand("save_route_candidates", { routes: nextRoutes });
+    }
+    setMessage(`已切换为「${modeLabel(mode)}」`);
+  }
+
+  return {
+    toggleAutostart,
+    saveProxyBindConfig,
+    exportConfig,
+    importConfig,
+    validateConfig,
+    cleanupLogs,
+    changeExposureMode,
+    exposureMode,
+  };
+}
+
+function modeLabel(mode: string): string {
+  switch (mode) {
+    case "flowlet_only":
+      return "仅 Flowlet 模型";
+    case "custom":
+      return "自定义开放";
+    default:
+      return "全部开放";
+  }
 }
 
 

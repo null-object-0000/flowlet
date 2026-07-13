@@ -1,6 +1,4 @@
 use serde::Deserialize;
-use std::path::PathBuf;
-
 use super::config::{AuthStrategy, ChannelPreset, ModelPrice, PriceSource, ProtocolType};
 
 /// 编译时随应用固化的默认配置。
@@ -9,44 +7,6 @@ use super::config::{AuthStrategy, ChannelPreset, ModelPrice, PriceSource, Protoc
 /// `channels_config` 或打包资源路径异常时，避免桌面进程在创建窗口和托盘前退出。
 pub const DEFAULT_CONFIG_JSON: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config.json"));
-
-/// 查找配置文件路径。
-/// 搜索顺序：exe 目录 → 向上 1~4 级（dev 模式 target/debug/ → 项目根目录）→ CARGO_MANIFEST_DIR
-pub fn find_config_file(name: &str) -> Option<PathBuf> {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))?;
-
-    // 1. exe 所在目录（bundle.resources 复制后的位置）
-    let path = exe_dir.join(name);
-    if path.exists() {
-        return Some(path);
-    }
-
-    // 2. 向上搜索 1~4 级目录（兼容 dev 模式 target/debug/ → 项目根目录）
-    let mut current = exe_dir.as_path();
-    for _ in 0..4 {
-        if let Some(parent) = current.parent() {
-            let path = parent.join(name);
-            if path.exists() {
-                return Some(path);
-            }
-            current = parent;
-        } else {
-            break;
-        }
-    }
-
-    // 3. CARGO_MANIFEST_DIR（编译时源码根目录）
-    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
-        let path = PathBuf::from(manifest_dir).join(name);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    None
-}
 
 // ─── JSON 反序列化结构 ─────────────────────────────────────────────────────
 
@@ -207,7 +167,6 @@ impl ChannelsConfig {
         &self,
         channel_id: &str,
         key: &str,
-        default: &str,
         fallback: F,
     ) -> String
     where
@@ -223,33 +182,33 @@ impl ChannelsConfig {
             .find(|c| c.id == channel_id)
             .map(fallback)
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| default.to_string())
+            .unwrap_or_default()
     }
 
     /// 获取 DeepSeek 余额端点
     pub fn balance_endpoint(&self) -> String {
-        self.endpoint_or("deepseek", "balance", "https://api.deepseek.com/user/balance", |c| {
+        self.endpoint_or("deepseek", "balance", |c| {
             format!("{}/user/balance", c.openai_base_url)
         })
     }
 
     /// 获取 LongCat 模型列表端点
     pub fn longcat_models_endpoint(&self) -> String {
-        self.endpoint_or("longcat", "models", "https://api.longcat.chat/openai/v1/models", |c| {
+        self.endpoint_or("longcat", "models", |c| {
             format!("{}/v1/models", c.openai_base_url)
         })
     }
 
     /// 获取 LongCat 模型详情端点模板
     pub fn longcat_model_detail_endpoint(&self) -> String {
-        self.endpoint_or("longcat", "model_detail", "https://api.longcat.chat/openai/v1/models/{id}", |c| {
+        self.endpoint_or("longcat", "model_detail", |c| {
             format!("{}/v1/models/{{id}}", c.openai_base_url)
         })
     }
 
     /// 获取 DeepSeek 模型列表端点
     pub fn deepseek_models_endpoint(&self) -> String {
-        self.endpoint_or("deepseek", "models", "https://api.deepseek.com/models", |c| {
+        self.endpoint_or("deepseek", "models", |c| {
             format!("{}/models", c.openai_base_url)
         })
     }

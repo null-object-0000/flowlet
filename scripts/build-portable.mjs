@@ -1,4 +1,4 @@
-// 构建便携版 ZIP：flowlet.exe + flowlet_lib.dll + ua_rules.json
+// 构建便携版 ZIP：flowlet.exe + flowlet_lib.dll + config.json
 // 用法：bun run tauri:portable
 //
 // 产物统一输出到 src-tauri/target/release/bundle/portable/，与 msi/nsis 并列。

@@ -429,53 +429,15 @@ pub(super) fn identify_client_by_ua(
         .map(|r| (r.id.clone(), r.name.clone()))
 }
 
-/// config.json 候选路径（打包时作为资源文件分发，不在二进制内）。
-/// 顺序：可执行文件同级 → macOS Resources/ → 当前工作目录 → 项目根目录。
-fn candidate_config_paths() -> Vec<std::path::PathBuf> {
-    let mut candidates = Vec::new();
-
-    // 1) 可执行文件同级目录（Windows/Linux 打包 / headless）
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join("config.json"));
-            // macOS 打包：../Resources/config.json
-            if let Some(resources) = exe_dir.parent().map(|p| p.join("Resources")) {
-                candidates.push(resources.join("config.json"));
-            }
-        }
-    }
-
-    // 2) 当前工作目录（headless 直接启动 / 部分开发场景）
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("config.json"));
-        // 3) 开发模式：项目根目录
-        candidates.push(cwd.join("config.json"));
-    }
-
-    candidates
-}
-
-/// 加载默认 config JSON 内容。依次尝试候选路径，全部失败时回退到编译时内置配置。
-fn load_default_config_json() -> Option<String> {
-    for path in candidate_config_paths() {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            return Some(content);
-        }
-    }
-    Some(crate::core::channels_config::DEFAULT_CONFIG_JSON.to_string())
-}
-
-/// 确保 config.json 存在：若不存在则从打包资源写入默认内容。
+/// 确保运行时 config.json 存在；缺失时写入编译时内置的完整默认配置。
 pub(super) fn ensure_config_file(path: &std::path::Path) {
     if path.exists() {
         return;
     }
-    if let Some(content) = load_default_config_json() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, content);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
     }
+    let _ = std::fs::write(path, crate::core::channels_config::DEFAULT_CONFIG_JSON);
 }
 
 /// 从本地 config.json 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。

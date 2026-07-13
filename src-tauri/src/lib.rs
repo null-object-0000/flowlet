@@ -1,7 +1,7 @@
 mod commands;
 pub mod core;
 
-use core::channels_config::{find_config_file, ChannelsConfig, DEFAULT_CONFIG_JSON};
+use core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use core::config::{
     ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ModelPrice, ProtocolType,
     ProxyBindConfig,
@@ -81,12 +81,9 @@ impl AppState {
 
 // ─── App Entry ──────────────────────────────────────────────────────────────
 
-fn build_app_state(db_path: std::path::PathBuf) -> AppState {
-    // 尽可能早地启用文件日志，这样 Storage::open / migrate 过程中的 tracing 也能落盘
-    crate::core::logging::init_file_logging();
+fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf) -> AppState {
     let _t0 = std::time::Instant::now();
 
-    let config_path = find_config_json_path();
     tracing::info!(db_path = %db_path.display(), t_ms = _t0.elapsed().as_millis() as u64, "初始化 Storage");
 
     // 从 config.json 顶层 channels_config 字段解析渠道配置
@@ -315,7 +312,7 @@ fn load_bind_config_from_sqlite(storage: &Storage) -> ProxyBindConfig {
 }
 
 /// 数据库路径：始终放在 exe 同级目录下，与程序完全自包含。
-/// 不再区分「安装/便携」模式 — 所有数据（SQLite / logs / ua_rules.json）都在 exe 旁。
+/// 不再区分「安装/便携」模式 — SQLite 和日志都在 exe 旁。
 fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
     let exe_dir = std::env::current_exe()
         .ok()
@@ -328,22 +325,6 @@ fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
     let db_path = app_data_dir.join("flowlet.sqlite");
     migrate_legacy_database(&db_path);
     db_path
-}
-
-/// 查找 config.json 路径。
-/// exe 目录优先（bundle.resources 复制后），若不存在则回退到项目根目录
-/// （dev 模式：target/debug/ → 项目根目录）。
-fn find_config_json_path() -> std::path::PathBuf {
-    if let Some(path) = find_config_file("config.json") {
-        return path;
-    }
-
-    // 都没有则使用 exe 目录（ensure_ua_rules_file 会在此创建）
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."));
-    exe_dir.join("config.json")
 }
 
 /// 从指定 config.json 文件解析其中的 channels_config 字段
@@ -445,7 +426,9 @@ fn migrate_legacy_database(db_path: &std::path::Path) {
 }
 
 pub fn run() {
-    crate::core::logging::init_file_logging();
+    // main.rs 会更早调用；保留这里可保证 flowlet_lib 被其他宿主直接调用时也有日志。
+    let _ = crate::core::logging::init_file_logging();
+    crate::core::logging::install_panic_hook();
     let start_hidden = std::env::args().any(|arg| arg == "--hidden" || arg == "--minimized");
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
@@ -457,7 +440,8 @@ pub fn run() {
             let setup_t0 = std::time::Instant::now();
             tracing::info!("tauri setup 开始");
 
-            let state = build_app_state(app_database_path(app));
+            let config_path = app.path().resource_dir()?.join("config.json");
+            let state = build_app_state(app_database_path(app), config_path);
             app.manage(state.clone());
             let state_for_tray = state.clone();
             tracing::info!(t_ms = setup_t0.elapsed().as_millis() as u64, "setup: state managed");

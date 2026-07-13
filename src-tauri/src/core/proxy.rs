@@ -68,9 +68,8 @@ mod proxy_routing;
 
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
-    copy_response_headers, cors_preflight_response, encode_body_base64,
-    ensure_config_file as ensure_ua_rules_file, extract_model, identify_client,
-    identify_client_by_ua, is_model_list_request, is_streaming_response, load_ua_rules,
+    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
+    extract_model, identify_client, identify_client_by_ua, is_model_list_request, is_streaming_response, load_ua_rules,
     rewrite_model, sanitize_headers,
 };
 use proxy_routing::{
@@ -215,8 +214,8 @@ impl ProxyController {
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|err| ProxyError::StartFailed(err.to_string()))?;
 
-        // 首次启动时写入默认 config.json（UA 识别规则），用户可直接编辑
-        ensure_ua_rules_file(&config_path);
+        // 首次启动时写入完整默认 config.json，用户可直接编辑
+        ensure_config_file(&config_path);
 
         // 代理即将进入 running 状态，记录真实的启动时间。
         // 取端口监听成功后的时刻，避免与后续异步 serve 启动之间产生偏差。

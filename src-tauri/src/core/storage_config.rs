@@ -101,6 +101,25 @@ impl Storage {
         Ok(presets)
     }
 
+    /// 为内置渠道模板补全 platform_url（升级迁移）。仅更新内置渠道且字段为空时写入。
+    pub fn ensure_preset_platform_urls(&self) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let updates: &[(&str, &str)] = &[
+            ("longcat", "https://longcat.chat/platform/api_keys"),
+            ("deepseek", "https://platform.deepseek.com/api_keys"),
+        ];
+        for (id, url) in updates {
+            connection.execute(
+                "UPDATE channel_presets SET platform_url = ?1 WHERE id = ?2 AND platform_url IS NULL",
+                params![url, id],
+            )?;
+        }
+        Ok(())
+    }
+
     // ─── Channel Accounts ────────────────────────────────────────────────────
 
     pub fn save_channel_accounts(&self, accounts: &[ChannelAccount]) -> Result<(), StorageError> {

@@ -213,6 +213,8 @@ export type AccountBalanceSnapshot = {
   token_pack_used: number | null;
   token_pack_remaining: number | null;
   token_pack_expire_at: string | null;
+  // LongCat 多资源包原始数据（JSON 字符串）
+  token_packs?: string | null;
   source: string;
   synced_at: string | null;
   remark: string | null;

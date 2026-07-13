@@ -17,9 +17,9 @@ impl Storage {    pub fn save_balance_snapshot(
             r#"
             INSERT INTO account_balance_snapshots (
                 id, account_id, balance, currency, token_pack_total, token_pack_used,
-                token_pack_remaining, token_pack_expire_at, source, synced_at, remark,
+                token_pack_remaining, token_pack_expire_at, token_packs, source, synced_at, remark,
                 created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             "#,
             params![
                 snapshot.id,
@@ -30,6 +30,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 snapshot.token_pack_used,
                 snapshot.token_pack_remaining,
                 snapshot.token_pack_expire_at,
+                snapshot.token_packs,
                 snapshot.source,
                 snapshot.synced_at,
                 snapshot.remark,
@@ -50,7 +51,7 @@ impl Storage {    pub fn save_balance_snapshot(
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT id, account_id, balance, currency, token_pack_total, token_pack_used,
-                    token_pack_remaining, token_pack_expire_at, source, synced_at, remark,
+                    token_pack_remaining, token_pack_expire_at, token_packs, source, synced_at, remark,
                     created_at, updated_at
              FROM account_balance_snapshots
              WHERE account_id = ?1
@@ -67,11 +68,12 @@ impl Storage {    pub fn save_balance_snapshot(
                 token_pack_used: row.get(5)?,
                 token_pack_remaining: row.get(6)?,
                 token_pack_expire_at: row.get(7)?,
-                source: row.get(8)?,
-                synced_at: row.get(9)?,
-                remark: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                token_packs: row.get(8)?,
+                source: row.get(9)?,
+                synced_at: row.get(10)?,
+                remark: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })?;
         let mut snapshots = Vec::new();
@@ -89,7 +91,7 @@ impl Storage {    pub fn save_balance_snapshot(
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT s.id, s.account_id, s.balance, s.currency, s.token_pack_total, s.token_pack_used,
-                    s.token_pack_remaining, s.token_pack_expire_at, s.source, s.synced_at, s.remark,
+                    s.token_pack_remaining, s.token_pack_expire_at, s.token_packs, s.source, s.synced_at, s.remark,
                     s.created_at, s.updated_at
              FROM account_balance_snapshots s
              INNER JOIN (
@@ -109,11 +111,12 @@ impl Storage {    pub fn save_balance_snapshot(
                 token_pack_used: row.get(5)?,
                 token_pack_remaining: row.get(6)?,
                 token_pack_expire_at: row.get(7)?,
-                source: row.get(8)?,
-                synced_at: row.get(9)?,
-                remark: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                token_packs: row.get(8)?,
+                source: row.get(9)?,
+                synced_at: row.get(10)?,
+                remark: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })?;
         let mut snapshots = Vec::new();

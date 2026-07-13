@@ -596,6 +596,8 @@ pub struct AccountBalanceSnapshot {
     pub token_pack_used: Option<i64>,
     pub token_pack_remaining: Option<i64>,
     pub token_pack_expire_at: Option<String>,
+    // LongCat 多资源包原始数据（JSON 数组），按消耗顺序排列。单资源包场景为 None。
+    pub token_packs: Option<String>,
     pub source: String,
     pub synced_at: Option<String>,
     pub remark: Option<String>,

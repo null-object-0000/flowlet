@@ -478,6 +478,9 @@ impl Storage {
         add_column_if_missing(&connection, "channel_presets", "platform_url", "TEXT")?;
         self.ensure_preset_platform_urls()?;
 
+        // 余额快照：补充 LongCat 多资源包原始数据（JSON 数组）
+        add_column_if_missing(&connection, "account_balance_snapshots", "token_packs", "TEXT")?;
+
         // 渠道账号：补充 Base URL 覆盖字段
         add_column_if_missing(
             &connection,

@@ -464,6 +464,7 @@ pub(super) async fn query_balance(
             token_pack_used: None,
             token_pack_remaining: None,
             token_pack_expire_at: None,
+            token_packs: None,
             source: "sync".to_string(),
             synced_at: Some(now.clone()),
             remark: Some("DeepSeek /user/balance 自动同步".to_string()),

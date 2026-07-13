@@ -412,6 +412,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 supports_balance_query: false,
                 supports_quota_query: false,
                 supports_usage_query: false,
+                platform_url: None,
                 created_at: String::new(),
                 updated_at: String::new(),
             }])),

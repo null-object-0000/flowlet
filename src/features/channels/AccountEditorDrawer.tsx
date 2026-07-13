@@ -1,9 +1,10 @@
 import React from "react";
 import { Anchor, Button, Drawer, PasswordInput, Switch, TextInput } from "@mantine/core";
-import { IconExternalLink, IconRefresh } from "@tabler/icons-react";
+import { IconDatabaseImport, IconExternalLink, IconRefresh } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount, ChannelPreset, createAccount } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
+import { LongCatPackImportDialog, summarizeLongCatLots, parseSnapshotTokenPacks } from "./LongCatPackImportDialog";
 
 export type AccountEditorRequest =
   | { mode: "create"; channelId: string }
@@ -16,6 +17,8 @@ type ResourceDraft = {
   tokenUsed: string;
   tokenRemaining: string;
   tokenExpire: string;
+  // LongCat 多资源包原始 JSON（导入后存储）
+  tokenPacks: string;
 };
 
 type AccountEditorDrawerProps = {
@@ -46,6 +49,7 @@ function snapshotDraft(account: ChannelAccount, snapshot?: AccountBalanceSnapsho
     tokenUsed: snapshot?.token_pack_used?.toString() ?? "",
     tokenRemaining: snapshot?.token_pack_remaining?.toString() ?? "",
     tokenExpire: toDateInput(snapshot?.token_pack_expire_at),
+    tokenPacks: snapshot?.token_packs ?? "",
   };
 }
 
@@ -96,6 +100,11 @@ export function AccountEditorDrawer({
     : optionalNumber(resource.tokenRemaining);
   const autoSyncBalance = channel?.supports_balance_query === true;
   const balanceSnapshot = getBalanceForAccount(draft.id);
+  const [importOpened, setImportOpened] = React.useState(false);
+  const importedPacks = React.useMemo(
+    () => parseSnapshotTokenPacks(resource.tokenPacks),
+    [resource.tokenPacks],
+  );
 
   function updateDraft(patch: Partial<ChannelAccount>) {
     setDraft((current) => ({ ...current, ...patch, updated_at: new Date().toISOString() }));
@@ -110,6 +119,19 @@ export function AccountEditorDrawer({
       base_url_override: null,
     });
     setResource(snapshotDraft({ ...draft, channel_id: channelId }));
+  }
+
+  function handleImportLongCatPacks(lots: Parameters<typeof summarizeLongCatLots>[0]) {
+    const summary = summarizeLongCatLots(lots);
+    setResource((current) => ({
+      ...current,
+      tokenTotal: summary.total > 0 ? String(summary.total) : current.tokenTotal,
+      tokenUsed: summary.used > 0 ? String(summary.used) : current.tokenUsed,
+      tokenRemaining: summary.remaining > 0 ? String(summary.remaining) : current.tokenRemaining,
+      tokenExpire: summary.expireAt ? toDateInput(summary.expireAt) : current.tokenExpire,
+      tokenPacks: summary.source || current.tokenPacks,
+    }));
+    setImportOpened(false);
   }
 
   async function save() {
@@ -145,6 +167,7 @@ export function AccountEditorDrawer({
             token_pack_expire_at: resourceMode === "token_pack" && resource.tokenExpire
               ? new Date(`${resource.tokenExpire}T00:00:00`).toISOString()
               : null,
+            token_packs: resourceMode === "token_pack" && resource.tokenPacks.trim() ? resource.tokenPacks.trim() : null,
             source: "manual",
             synced_at: new Date().toISOString(),
             remark: null,
@@ -281,9 +304,37 @@ export function AccountEditorDrawer({
               {resourceMode === "token_pack" ? (
                 <div className="account-resource-details">
                   <div className="account-resource-details-heading">
-                    <strong>资源包信息（手动维护）</strong>
+                    <strong>资源包信息</strong>
                     <span className="sync-badge warn">手动维护</span>
                   </div>
+                  {channel?.id === "longcat" ? (
+                    <div className="account-longcat-import">
+                      <Button
+                        type="button"
+                        variant="subtle"
+                        size="xs"
+                        leftSection={<IconDatabaseImport size={13} />}
+                        onClick={() => setImportOpened(true)}
+                      >
+                        导入 LongCat 资源包
+                      </Button>
+                      <small>从 F12 捕获的 /token-packs/summary 响应中导入，自动汇总多资源包。</small>
+                    </div>
+                  ) : null}
+                  {importedPacks.length > 0 ? (
+                    <div className="account-longcat-packs">
+                      <input type="hidden" data-token-packs={resource.tokenPacks} />
+                      <div className="account-longcat-packs-heading">
+                        <span>已导入 {importedPacks.length} 个资源包</span>
+                      </div>
+                      <div className="longcat-packs-summary">
+                        <span>总量 <strong>{formatTokens(tokenTotal)}</strong></span>
+                        <span>已消耗 <strong>{formatTokens(tokenUsed)}</strong></span>
+                        <span>剩余 <strong>{formatTokens(tokenRemaining)}</strong></span>
+                        <span>最早到期 <strong>{resource.tokenExpire || "-"}</strong></span>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="account-resource-grid longcat">
                     <label>资源包总量（Tokens）<TextInput type="number" min="0" value={resource.tokenTotal} onChange={(event) => setResource({ ...resource, tokenTotal: event.target.value })} /></label>
                     <label>已消耗（Tokens）<TextInput type="number" min="0" value={resource.tokenUsed} onChange={(event) => setResource({ ...resource, tokenUsed: event.target.value })} /></label>
@@ -320,6 +371,12 @@ export function AccountEditorDrawer({
           <section className="account-editor-danger"><div><strong>删除账号</strong><span>删除后将退出所有路由，且无法恢复</span></div><Button variant="subtle" color="red" onClick={() => void remove()}>删除</Button></section>
         ) : null}
       </div>
+
+      <LongCatPackImportDialog
+        opened={importOpened}
+        onClose={() => setImportOpened(false)}
+        onImport={(lots) => handleImportLongCatPacks(lots)}
+      />
 
       <footer className="account-editor-footer">
         <Button variant="default" onClick={onClose}>取消</Button>

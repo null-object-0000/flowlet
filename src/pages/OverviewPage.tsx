@@ -23,6 +23,7 @@ import {
   IconCircleX,
   IconChevronRight,
   IconCopy,
+  IconDatabaseImport,
   IconDotsVertical,
   IconExternalLink,
   IconInfoCircle,
@@ -42,7 +43,7 @@ import {
   RouteCandidate,
   createAccount,
 } from "../domain";
-import { AccountEditorDrawer, BalanceSnapshotEditor } from "../features/channels";
+import { AccountEditorDrawer, BalanceSnapshotEditor, LongCatPackImportDialog, summarizeLongCatLots, parseSnapshotTokenPacks } from "../features/channels";
 import { ChannelLogo } from "../components/ChannelLogo";
 import { buildExposedModels } from "../features/routes/exposedModels";
 
@@ -62,6 +63,7 @@ type ResourceSnapshotDraft = {
   tokenUsed: string;
   tokenRemaining: string;
   tokenExpire: string;
+  tokenPacks: string;
 };
 
 type OverviewPageProps = {
@@ -142,6 +144,7 @@ function snapshotDraftFrom(account: ChannelAccount, snapshot?: AccountBalanceSna
     tokenUsed: snapshot?.token_pack_used?.toString() ?? "",
     tokenRemaining: snapshot?.token_pack_remaining?.toString() ?? "",
     tokenExpire: toDatetimeLocal(snapshot?.token_pack_expire_at),
+    tokenPacks: snapshot?.token_packs ?? "",
   };
 }
 
@@ -251,6 +254,7 @@ export function OverviewPage({
   const snapshotAccount = accounts.find((account) => account.id === snapshotAccountId);
   const editorChannel = accountEditor ? channels.find((channel) => channel.id === accountEditor.draft.channel_id) : undefined;
   const editorSnapshot = accountEditor ? getBalanceForAccount(accountEditor.draft.id) : undefined;
+  const [inlineImportOpened, setInlineImportOpened] = React.useState(false);
 
   // 启动时间：优先复用后端提供的真实启动时间（跨会话保持），回退本地观察到 running 的时刻。
   const startedAtDate = status.started_at ? new Date(status.started_at) : observedStartedAt;
@@ -325,6 +329,25 @@ export function OverviewPage({
     setAccountEditor((current) => current ? { ...current, snapshotDraft: { ...current.snapshotDraft, ...patch } } : current);
   }
 
+  function handleInlineImportLongCat(lots: Parameters<typeof summarizeLongCatLots>[0]) {
+    const summary = summarizeLongCatLots(lots);
+    setAccountEditor((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        snapshotDraft: {
+          ...current.snapshotDraft,
+          tokenTotal: summary.total > 0 ? String(summary.total) : current.snapshotDraft.tokenTotal,
+          tokenUsed: summary.used > 0 ? String(summary.used) : current.snapshotDraft.tokenUsed,
+          tokenRemaining: summary.remaining > 0 ? String(summary.remaining) : current.snapshotDraft.tokenRemaining,
+          tokenExpire: summary.expireAt ? toDatetimeLocal(summary.expireAt) : current.snapshotDraft.tokenExpire,
+          tokenPacks: summary.source || current.snapshotDraft.tokenPacks,
+        },
+      };
+    });
+    setInlineImportOpened(false);
+  }
+
   async function saveAccountEditor() {
     if (!accountEditor) return;
     const draft = {
@@ -360,6 +383,7 @@ export function OverviewPage({
           token_pack_used: resourceMode === "token_pack" ? parseOptionalNumber(resource.tokenUsed) : null,
           token_pack_remaining: resourceMode === "token_pack" ? parseOptionalNumber(resource.tokenRemaining) : null,
           token_pack_expire_at: resourceMode === "token_pack" ? fromDatetimeLocal(resource.tokenExpire) : null,
+          token_packs: resourceMode === "token_pack" && resource.tokenPacks?.trim() ? resource.tokenPacks.trim() : null,
           source: "manual",
           synced_at: new Date().toISOString(),
           remark: null,
@@ -716,8 +740,11 @@ export function OverviewPage({
                     <AccountResourceForm
                       mode={accountEditor.draft.resource_mode ?? (accountEditor.draft.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")}
                       draft={accountEditor.snapshotDraft}
+                      channelId={accountEditor.draft.channel_id}
                       onChange={updateSnapshotDraft}
                       onSwitchMode={(mode) => updateAccountDraft({ resource_mode: mode })}
+                      onImportLongCat={() => setInlineImportOpened(true)}
+                      importedPackCount={parseSnapshotTokenPacks(accountEditor.snapshotDraft.tokenPacks).length}
                     />
                   </>
                 )}
@@ -750,6 +777,11 @@ export function OverviewPage({
                 </section>
               ) : null}
             </div>
+            <LongCatPackImportDialog
+              opened={inlineImportOpened}
+              onClose={() => setInlineImportOpened(false)}
+              onImport={(lots) => handleInlineImportLongCat(lots)}
+            />
             <footer className="account-modal-footer">
               <Button variant="default" onClick={() => setAccountEditor(null)}>取消</Button>
               <Button onClick={() => void saveAccountEditor()}>{accountEditor.mode === "create" ? "保存账号" : "保存修改"}</Button>
@@ -893,11 +925,24 @@ export function OverviewPage({
 type AccountResourceFormProps = {
   mode: AccountResourceMode;
   draft: ResourceSnapshotDraft;
+  channelId: string;
   onChange: (patch: Partial<ResourceSnapshotDraft>) => void;
   onSwitchMode: (mode: AccountResourceMode) => void;
+  onImportLongCat: () => void;
+  importedPackCount: number;
 };
 
-function AccountResourceForm({ mode, draft, onChange, onSwitchMode }: AccountResourceFormProps) {
+function formatToken(value: string): string {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "-";
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  return String(num);
+}
+
+function AccountResourceForm({ mode, draft, channelId, onChange, onSwitchMode, onImportLongCat, importedPackCount }: AccountResourceFormProps) {
+  const isLongCat = channelId === "longcat";
+  const hasImportedPacks = importedPackCount > 0;
   return (
     <>
       <div className="resource-mode-toggle">
@@ -917,11 +962,31 @@ function AccountResourceForm({ mode, draft, onChange, onSwitchMode }: AccountRes
         </button>
       </div>
       {mode === "token_pack" ? (
-        <div className="resource-grid">
-          <label>资源包总量（Tokens）<TextInput type="number" min="0" value={draft.tokenTotal} onChange={(event) => onChange({ tokenTotal: event.target.value })} /></label>
-          <label>已消耗（Tokens）<TextInput type="number" min="0" value={draft.tokenUsed} onChange={(event) => onChange({ tokenUsed: event.target.value })} /></label>
-          <label>过期时间<TextInput type="datetime-local" value={draft.tokenExpire} onChange={(event) => onChange({ tokenExpire: event.target.value })} /></label>
-        </div>
+        <>
+          {isLongCat ? (
+            <div className="longcat-import-bar">
+              <Button type="button" variant="subtle" size="xs" leftSection={<IconDatabaseImport size={13} />} onClick={onImportLongCat}>
+                导入 LongCat 资源包
+              </Button>
+              <small>从浏览器 F12 捕获 <code>/token-packs/summary</code> 响应导入多资源包。</small>
+            </div>
+          ) : null}
+          {hasImportedPacks ? (
+            <div className="longcat-imported-summary">
+              <span className="longcat-imported-badge">已导入 {importedPackCount} 个资源包</span>
+              <div className="longcat-summary-grid">
+                <span>总量<strong>{formatToken(draft.tokenTotal)}</strong></span>
+                <span>消耗<strong>{formatToken(draft.tokenUsed)}</strong></span>
+                <span>过期<strong>{draft.tokenExpire ? draft.tokenExpire.split("T")[0] : "-"}</strong></span>
+              </div>
+            </div>
+          ) : null}
+          <div className="resource-grid">
+            <label>资源包总量（Tokens）<TextInput type="number" min="0" disabled={hasImportedPacks} value={draft.tokenTotal} onChange={(event) => onChange({ tokenTotal: event.target.value })} /></label>
+            <label>已消耗（Tokens）<TextInput type="number" min="0" disabled={hasImportedPacks} value={draft.tokenUsed} onChange={(event) => onChange({ tokenUsed: event.target.value })} /></label>
+            <label>过期时间<TextInput type="datetime-local" value={draft.tokenExpire} onChange={(event) => onChange({ tokenExpire: event.target.value })} /></label>
+          </div>
+        </>
       ) : (
         <div className="resource-grid">
           <label>余额<div className="unit-input"><TextInput type="number" min="0" step="0.01" value={draft.balance} onChange={(event) => onChange({ balance: event.target.value })} /><span>{draft.currency || "CNY"}</span></div></label>

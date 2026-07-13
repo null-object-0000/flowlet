@@ -1054,6 +1054,113 @@
   font-size: 18px;
 }
 
+/* ─── LongCat 多资源包导入 ─────────────────────────────────────────────── */
+
+.account-longcat-import {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+
+.account-longcat-import small {
+  color: #7b8aa4;
+  font-size: 12px;
+}
+
+.account-longcat-packs {
+  border: 1px solid #dce5f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.account-longcat-packs-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #344766;
+  font-weight: 600;
+}
+
+.longcat-packs-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.longcat-packs-summary span {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  color: #697b99;
+}
+
+.longcat-packs-summary strong {
+  color: #14274b;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.longcat-imported-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  background: #f0f9ff;
+  border: 1px solid #c5e1fb;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.longcat-imported-badge {
+  color: #0b6bcb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.longcat-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, auto));
+  gap: 14px;
+  font-size: 12px;
+  color: #344766;
+}
+
+.longcat-summary-grid strong {
+  color: #14274b;
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.longcat-import-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+
+.longcat-import-bar small {
+  color: #7b8aa4;
+  font-size: 12px;
+}
+
+.longcat-import-bar small code {
+  background: #edf2f8;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.longcat-pack-import-dialog .longcat-pack-preview-table th,
+.longcat-pack-import-dialog .longcat-pack-preview-table td {
+  font-size: 12px;
+}
+
 .flowlet-model-details {
   border-top: 1px solid #e7edf5;
   padding-top: 12px;

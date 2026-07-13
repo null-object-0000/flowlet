@@ -170,6 +170,7 @@ export function AccountEditorDrawer({
       position="right"
       size="min(760px, 94vw)"
       padding={0}
+      zIndex={2000}
       classNames={{ root: "account-editor-drawer", header: "account-editor-header", body: "account-editor-body", title: "account-editor-title" }}
       title={
         <div>

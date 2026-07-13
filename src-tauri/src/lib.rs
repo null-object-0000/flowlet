@@ -2,6 +2,7 @@ mod commands;
 pub mod core;
 
 use core::channels_config::{find_config_file, ChannelsConfig};
+use serde_json::Value as JsonValue;
 use core::config::{
     ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ModelPrice, ProtocolType,
     ProxyBindConfig,
@@ -89,14 +90,14 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     let config_path = find_config_json_path();
     tracing::info!(db_path = %db_path.display(), t_ms = _t0.elapsed().as_millis() as u64, "初始化 Storage");
 
-    // 加载外部渠道配置文件 channels.json
-    let channels_config = match ChannelsConfig::load() {
+    // 从 config.json 顶层 channels_config 字段解析渠道配置
+    let channels_config = match load_channels_config_from(&config_path) {
         Ok(cfg) => {
-            tracing::info!(channels = cfg.presets.len(), prices = cfg.prices.len(), "从 channels.json 加载渠道配置");
+            tracing::info!(channels = cfg.presets.len(), prices = cfg.prices.len(), "从 config.json 加载渠道配置");
             Arc::new(cfg)
         }
         Err(e) => {
-            tracing::error!(error = %e, "加载 channels.json 失败");
+            tracing::error!(error = %e, "加载渠道配置失败");
             panic!("无法加载渠道配置: {e}");
         }
     };
@@ -111,7 +112,7 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
 
     tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "Storage 初始化完成, 开始加载渠道模板");
 
-    // 初始化渠道模板：优先从 channels.json 加载，SQLite 为空时写入
+    // 初始化渠道模板：优先从 config.json 加载，SQLite 为空时写入
     let channels = storage.list_channel_presets().expect("读取渠道模板失败");
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = channels.len(), "渠道模板加载完成");
     let channels = if channels.is_empty() {
@@ -223,7 +224,7 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         clients
     };
 
-    // 初始化价格预设：从 channels.json 加载
+    // 初始化价格预设：从 config.json 加载
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: loading prices");
     let prices = storage.list_model_prices().expect("读取价格配置失败");
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = prices.len(), "step: prices loaded");
@@ -340,6 +341,19 @@ fn find_config_json_path() -> std::path::PathBuf {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
     exe_dir.join("config.json")
+}
+
+/// 从指定 config.json 文件解析其中的 channels_config 字段
+fn load_channels_config_from(
+    config_path: &std::path::Path,
+) -> Result<ChannelsConfig, String> {
+    let content = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("读取 config.json 失败 ({}): {}", config_path.display(), e))?;
+
+    let json: JsonValue = serde_json::from_str(&content)
+        .map_err(|e| format!("解析 config.json 失败: {e}"))?;
+
+    ChannelsConfig::from_config_json(&json)
 }
 
 fn migrate_legacy_database(db_path: &std::path::Path) {

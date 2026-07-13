@@ -116,21 +116,14 @@ pub struct ChannelsConfig {
 }
 
 impl ChannelsConfig {
-    /// 加载 channels.json。文件必须存在，不存在则报错。
-    pub fn load() -> Result<Self, String> {
-        let path = find_config_file("channels.json")
-            .ok_or_else(|| "找不到 channels.json（已搜索: exe 目录, 项目根目录）".to_string())?;
+    /// 从 config.json 顶层对象的 `channels_config` 字段解析渠道配置。
+    pub fn from_config_json(config_json: &serde_json::Value) -> Result<Self, String> {
+        let channels_config = config_json
+            .get("channels_config")
+            .ok_or_else(|| "config.json 中缺少 channels_config 字段".to_string())?;
 
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("读取 channels.json 失败 ({}): {}", path.display(), e))?;
-
-        Self::parse(&content)
-    }
-
-    /// 从字符串解析配置
-    pub fn parse(content: &str) -> Result<Self, String> {
-        let json: ChannelConfigJson = serde_json::from_str(content)
-            .map_err(|e| format!("解析 channels.json 失败: {e}"))?;
+        let json: ChannelConfigJson = serde_json::from_value(channels_config.clone())
+            .map_err(|e| format!("解析 config.json > channels_config 失败: {e}"))?;
 
         let now = chrono::Utc::now().to_rfc3339();
 

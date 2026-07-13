@@ -55,10 +55,6 @@ type AccountEditor = {
 type ResourceSnapshotDraft = {
   balance: string;
   currency: string;
-  tokenTotal: string;
-  tokenUsed: string;
-  tokenRemaining: string;
-  tokenExpire: string;
 };
 
 type OverviewPageProps = {
@@ -113,31 +109,10 @@ function formatAmount(value: number | null | undefined, fallback = "-"): string 
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-function toDatetimeLocal(value?: string | null): string {
-  if (!value) return "";
-  const normalized = value.length === 10 ? `${value}T23:59` : value;
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) return "";
-  const offset = parsed.getTimezoneOffset();
-  const local = new Date(parsed.getTime() - offset * 60000);
-  return local.toISOString().slice(0, 16);
-}
-
-function fromDatetimeLocal(value: string): string | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString();
-}
-
 function snapshotDraftFrom(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): ResourceSnapshotDraft {
   return {
     balance: snapshot?.balance?.toString() ?? "",
     currency: snapshot?.currency ?? (account.channel_id === "longcat" ? "USD" : "CNY"),
-    tokenTotal: snapshot?.token_pack_total?.toString() ?? "",
-    tokenUsed: snapshot?.token_pack_used?.toString() ?? "",
-    tokenRemaining: snapshot?.token_pack_remaining?.toString() ?? "",
-    tokenExpire: toDatetimeLocal(snapshot?.token_pack_expire_at),
   };
 }
 
@@ -337,17 +312,16 @@ export function OverviewPage({
     await onSaveAccounts(nextAccounts);
 
     const resource = accountEditor.snapshotDraft;
-    const hasResourceData = [resource.balance, resource.tokenTotal, resource.tokenUsed, resource.tokenRemaining, resource.tokenExpire].some((value) => value.trim());
+    const hasResourceData = resource.balance.trim() || resource.currency.trim();
     if (hasResourceData) {
-      const isLongCat = draft.channel_id === "longcat";
       onAddBalanceSnapshot({
         account_id: draft.id,
-        balance: isLongCat ? null : parseOptionalNumber(resource.balance),
-        currency: isLongCat ? null : resource.currency.trim() || null,
-        token_pack_total: isLongCat ? parseOptionalNumber(resource.tokenTotal) : null,
-        token_pack_used: isLongCat ? parseOptionalNumber(resource.tokenUsed) : null,
-        token_pack_remaining: isLongCat ? parseOptionalNumber(resource.tokenRemaining) : null,
-        token_pack_expire_at: isLongCat ? fromDatetimeLocal(resource.tokenExpire) : null,
+        balance: parseOptionalNumber(resource.balance),
+        currency: resource.currency.trim() || null,
+        token_pack_total: null,
+        token_pack_used: null,
+        token_pack_remaining: null,
+        token_pack_expire_at: null,
         source: "manual",
         synced_at: new Date().toISOString(),
         remark: null,
@@ -370,9 +344,6 @@ export function OverviewPage({
 
   function accountResource(account: ChannelAccount): string {
     const snapshot = getBalanceForAccount(account.id);
-    if (account.channel_id === "longcat") {
-      return `${formatAmount(snapshot?.token_pack_remaining)} 上下文`;
-    }
     if (snapshot?.balance != null) {
       return `${formatAmount(snapshot.balance)} ${snapshot.currency ?? ""}`;
     }
@@ -491,7 +462,7 @@ export function OverviewPage({
                       <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
                       <ActionIcon variant="subtle" onClick={() => openEditAccount(index)} aria-label="编辑账号"><IconDotsVertical size={17} /></ActionIcon>
                     </div>
-                    <div className="overview-card-meta"><span>余额: {account.channel_id === "longcat" ? "-" : accountResource(account)}</span><span>资源包: {account.channel_id === "longcat" ? accountResource(account) : "-"}</span><span>有效期: {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span></div>
+                    <div className="overview-card-meta"><span>余额: {accountResource(account)}</span></div>
                   </div>
                 ))}
               </div>
@@ -663,30 +634,15 @@ export function OverviewPage({
 
               <section className="account-form-section">
                 <div className="section-headline">
-                  <h4><span className="mini-section-icon">▤</span>余额 / 资源包信息（手动维护）</h4>
-                  {accountEditor.draft.channel_id === "longcat" ? <span className="sync-badge warn">不支持自动同步</span> : <span className="sync-badge">支持自动同步</span>}
+                  <h4><span className="mini-section-icon">▤</span>余额信息（手动维护）</h4>
+                  <span className="sync-badge warn">手动维护</span>
                 </div>
 
-                {accountEditor.draft.channel_id === "longcat" ? (
-                  <>
-                    <div className="resource-grid">
-                      <label>资源包剩余<div className="unit-input"><TextInput type="number" min="0" value={accountEditor.snapshotDraft.tokenRemaining} onChange={(event) => updateSnapshotDraft({ tokenRemaining: event.target.value })} /><span>Tokens</span></div></label>
-                      <label>已消耗<div className="unit-input"><TextInput type="number" min="0" value={accountEditor.snapshotDraft.tokenUsed} onChange={(event) => updateSnapshotDraft({ tokenUsed: event.target.value })} /><span>Tokens</span></div></label>
-                      <label>资源包总量<div className="unit-input"><TextInput type="number" min="0" value={accountEditor.snapshotDraft.tokenTotal} onChange={(event) => updateSnapshotDraft({ tokenTotal: event.target.value })} /><span>Tokens</span></div></label>
-                      <label>过期时间<TextInput type="datetime-local" value={accountEditor.snapshotDraft.tokenExpire} onChange={(event) => updateSnapshotDraft({ tokenExpire: event.target.value })} /></label>
-                    </div>
-                    <Button variant="default" disabled={accountEditor.mode === "create"} onClick={() => { setAccountEditor(null); setSnapshotAccountId(accountEditor.draft.id); }}>
-                      登记资源包
-                    </Button>
-                  </>
-                ) : (
-                  <div className="resource-grid">
-                    <label>余额<div className="unit-input"><TextInput type="number" min="0" step="0.01" value={accountEditor.snapshotDraft.balance} onChange={(event) => updateSnapshotDraft({ balance: event.target.value })} /><span>{accountEditor.snapshotDraft.currency || "CNY"}</span></div></label>
-                    <label>货币<TextInput value={accountEditor.snapshotDraft.currency} onChange={(event) => updateSnapshotDraft({ currency: event.target.value })} /></label>
-                    <label>最近更新时间<TextInput readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} /></label>
-                    <div className="field-action"><Button variant="default" disabled={accountEditor.mode === "create"} onClick={() => onTestConnection(accountEditor.draft.id)}>同步余额</Button></div>
-                  </div>
-                )}
+                <div className="resource-grid">
+                  <label>余额<div className="unit-input"><TextInput type="number" min="0" step="0.01" value={accountEditor.snapshotDraft.balance} onChange={(event) => updateSnapshotDraft({ balance: event.target.value })} /><span>{accountEditor.snapshotDraft.currency || "CNY"}</span></div></label>
+                  <label>货币<TextInput value={accountEditor.snapshotDraft.currency} onChange={(event) => updateSnapshotDraft({ currency: event.target.value })} /></label>
+                  <label>最近更新时间<TextInput readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} /></label>
+                </div>
               </section>
 
               <section className={accountEditor.advancedOpen ? "account-form-section advanced open" : "account-form-section advanced"}>

@@ -321,7 +321,7 @@ export function createAccount(channelId: string, index: number): ChannelAccount 
     enabled: true,
     priority: index,
     remark: "",
-    resource_mode: channelId === "longcat" ? "token_pack" : "pay_as_you_go",
+    resource_mode: "pay_as_you_go",
     base_url_override: null,
     last_used_at: undefined,
     last_error: undefined,

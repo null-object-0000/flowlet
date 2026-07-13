@@ -20,10 +20,6 @@ export function BalanceOverviewTable({ balanceSnapshots, getAccountName }: Balan
               <Table.Tr>
                 <Table.Th>账号</Table.Th>
                 <Table.Th>余额</Table.Th>
-                <Table.Th>资源包剩余</Table.Th>
-                <Table.Th>已消耗</Table.Th>
-                <Table.Th>总量</Table.Th>
-                <Table.Th>过期时间</Table.Th>
                 <Table.Th>更新时间</Table.Th>
               </Table.Tr>
             </Table.Thead>
@@ -32,10 +28,6 @@ export function BalanceOverviewTable({ balanceSnapshots, getAccountName }: Balan
                 <Table.Tr key={snap.id}>
                   <Table.Td>{getAccountName(snap.account_id)}</Table.Td>
                   <Table.Td>{snap.balance != null ? `${snap.balance} ${snap.currency ?? ""}` : "-"}</Table.Td>
-                  <Table.Td>{snap.token_pack_remaining != null ? `${snap.token_pack_remaining.toLocaleString()} Tokens` : "-"}</Table.Td>
-                  <Table.Td>{snap.token_pack_used != null ? `${snap.token_pack_used.toLocaleString()} Tokens` : "-"}</Table.Td>
-                  <Table.Td>{snap.token_pack_total != null ? `${snap.token_pack_total.toLocaleString()} Tokens` : "-"}</Table.Td>
-                  <Table.Td>{snap.token_pack_expire_at ?? "-"}</Table.Td>
                   <Table.Td>{snap.synced_at ?? snap.updated_at}</Table.Td>
                 </Table.Tr>
               ))}

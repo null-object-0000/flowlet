@@ -15,11 +15,9 @@ type AccountRowProps = {
   onEdit: () => void;
 };
 
-function resourceSummary(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): string {
+function resourceSummary(_account: ChannelAccount, snapshot?: AccountBalanceSnapshot): string {
   if (!snapshot) return "暂无资源信息";
-  const resourceMode = account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go");
-  if (resourceMode === "token_pack") return `${snapshot.token_pack_remaining?.toLocaleString() ?? "-"} Tokens`;
-  return snapshot.balance == null ? "余额待同步" : `${snapshot.balance} ${snapshot.currency ?? ""}`.trim();
+  return snapshot.balance == null ? "余额待维护" : `${snapshot.balance} ${snapshot.currency ?? ""}`.trim();
 }
 
 export function AccountRow({ account, channel, snapshot, onEdit }: AccountRowProps) {

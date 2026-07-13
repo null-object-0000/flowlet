@@ -1,4 +1,4 @@
-import { runCommand } from "../../services/flowletApi";
+import { runCommand, logToRust } from "../../services/flowletApi";
 import { ActionContext } from "./types";
 
 export function createProxyActions({ data, setMessage }: ActionContext) {
@@ -33,7 +33,9 @@ export function createProxyActions({ data, setMessage }: ActionContext) {
       await refreshStatus();
       setMessage("代理已重启，配置已生效");
     } catch (err: unknown) {
-      setMessage(`重启失败: ${String(err)}`);
+      const msg = `重启失败: ${String(err)}`;
+      setMessage(msg);
+      logToRust("error", msg);
       throw err;
     }
   }
@@ -54,7 +56,9 @@ export function createProxyActions({ data, setMessage }: ActionContext) {
       }
       setMessage(`${model} 测试成功`);
     } catch (err) {
-      setMessage(`${model} 测试失败: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = `${model} 测试失败: ${err instanceof Error ? err.message : String(err)}`;
+      setMessage(msg);
+      logToRust("error", msg);
     }
   }
   async function copy(text: string, done: string) {

@@ -113,7 +113,9 @@ export default function App() {
         await runCommand<{ ok?: boolean; pid?: number }>("ipc_ping", undefined, 1_500);
       } catch (err) {
         if (seq !== initSeq.current) return;
-        setInitError(err instanceof Error ? err.message : String(err));
+        const msg = err instanceof Error ? err.message : String(err);
+        logToRust("error", `初始化 ping 失败: ${msg}`);
+        setInitError(msg);
         setInitializing(false);
         return;
       }
@@ -175,7 +177,9 @@ export default function App() {
     try {
       await startProxy();
     } catch (err) {
-      setProxyStartError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      logToRust("error", `启动代理失败: ${msg}`);
+      setProxyStartError(msg);
     } finally {
       setProxyStarting(false);
     }
@@ -188,7 +192,9 @@ export default function App() {
       await restartProxy();
       await refreshStatus();
     } catch (err) {
-      setProxyStartError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      logToRust("error", `重启代理失败: ${msg}`);
+      setProxyStartError(msg);
     } finally {
       setProxyStarting(false);
     }

@@ -70,7 +70,6 @@ fn deepseek_prices() -> Vec<ModelPrice> {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ModelSyncResult {
     pub models_synced: usize,
-    #[serde(skip_serializing)]
     pub models: Vec<ChannelModel>,
     pub errors: Vec<String>,
 }

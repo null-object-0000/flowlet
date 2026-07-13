@@ -91,7 +91,9 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
       // 测试连接会修改 credential_status，刷新账号列表以保持前端状态与后端一致。
       await refreshAll();
     } catch (err: unknown) {
-      setMessage(`测试失败: ${String(err)}`);
+      const msg = `测试失败: ${String(err)}`;
+      setMessage(msg);
+      logToRust("error", msg);
     }
   }
 
@@ -119,7 +121,9 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
         setMessage(`同步成功，获取 ${result.models_synced} 个模型，Flowlet 模型池已热更新`);
       }
     } catch (err: unknown) {
-      setMessage(`同步失败: ${String(err)}`);
+      const msg = `同步失败: ${String(err)}`;
+      setMessage(msg);
+      logToRust("error", msg);
     }
   }
 

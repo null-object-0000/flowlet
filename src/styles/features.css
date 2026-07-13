@@ -1050,3 +1050,345 @@
   border-radius: 999px;
   background: #f0f4fa;
 }
+
+/* Shared channel account editor used by Overview and Channels pages. */
+.account-editor-header {
+  min-height: 96px;
+  padding: 20px 28px;
+  border-bottom: 1px solid #e2e8f1;
+  align-items: flex-start;
+}
+
+.account-editor-title > div {
+  display: grid;
+  gap: 7px;
+}
+
+.account-editor-title strong {
+  color: #111d34;
+  font-size: 20px;
+}
+
+.account-editor-title span {
+  color: #6f7d94;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.account-editor-body {
+  height: calc(100vh - 96px);
+  padding: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.account-editor-content {
+  overflow-y: auto;
+  padding: 18px 28px 24px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.account-editor-section {
+  padding: 16px;
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  display: grid;
+  gap: 11px;
+  background: #fff;
+}
+
+.account-editor-section.basic {
+  padding: 0;
+  border: 0;
+}
+
+.account-editor-section h3,
+.account-section-heading h3 {
+  margin: 0;
+  color: #12203a;
+  font-size: 17px;
+}
+
+.account-editor-section > label,
+.account-resource-grid label,
+.account-advanced-content label {
+  color: #536178;
+  font-size: 13px;
+}
+
+.account-channel-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.account-channel-option {
+  min-height: 74px;
+  padding: 12px 14px;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  background: #fff;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  color: #17233a;
+  cursor: pointer;
+}
+
+.account-channel-option:hover,
+.account-channel-option.selected {
+  border-color: #2475ee;
+  background: #f7faff;
+}
+
+.account-channel-option > span:nth-child(2) {
+  display: grid;
+  gap: 5px;
+}
+
+.account-channel-option small {
+  color: #7b8799;
+  font-size: 12px;
+}
+
+.account-channel-option i {
+  width: 19px;
+  height: 19px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #1769ed;
+  color: #fff;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.account-channel-option i:empty {
+  background: transparent;
+}
+
+.account-name-input {
+  position: relative;
+}
+
+.account-name-input input {
+  padding-right: 64px;
+}
+
+.account-name-input > span {
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #8793a6;
+  font-size: 12px;
+}
+
+.account-enabled-row {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-enabled-row > div {
+  display: grid;
+  gap: 4px;
+}
+
+.account-enabled-row small,
+.account-section-heading small,
+.account-advanced-toggle small {
+  color: #8591a3;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.account-enabled-row > span {
+  color: #5e6b80;
+  font-size: 13px;
+}
+
+.account-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.account-section-heading > div {
+  display: grid;
+  gap: 5px;
+}
+
+.account-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.account-resource-grid.longcat {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.account-editor-section.advanced {
+  padding: 0;
+  overflow: hidden;
+}
+
+.account-advanced-toggle {
+  width: 100%;
+  min-height: 58px;
+  padding: 0 14px;
+  border: 0;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  color: #17233a;
+  cursor: pointer;
+}
+
+.account-advanced-toggle > span {
+  display: grid;
+  gap: 4px;
+}
+
+.account-advanced-content {
+  padding: 0 14px 16px;
+  border-top: 1px solid #edf1f5;
+  display: grid;
+  gap: 12px;
+}
+
+.account-advanced-content > label {
+  padding-top: 12px;
+}
+
+.account-advanced-content > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #7a879a;
+  font-size: 12px;
+}
+
+.account-editor-danger {
+  padding: 13px 15px;
+  border: 1px solid #ffd7d7;
+  border-radius: 9px;
+  background: #fff8f8;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.account-editor-danger > div {
+  display: grid;
+  gap: 4px;
+}
+
+.account-editor-danger strong { color: #c83232; }
+.account-editor-danger span { color: #dc6969; font-size: 12px; }
+
+.account-editor-footer {
+  min-height: 76px;
+  padding: 14px 28px;
+  border-top: 1px solid #e1e7ef;
+  background: #fff;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.16fr;
+  gap: 14px;
+}
+
+.account-editor-footer button { height: 40px; }
+
+.channel-account-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.channel-account-heading h2,
+.channel-account-heading p { margin: 0; }
+.channel-account-heading p { margin-top: 6px; color: #70809a; font-size: 13px; }
+
+.channel-account-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.channel-account-stats > div {
+  min-height: 100px;
+  padding: 17px 19px;
+  border: 1px solid #dfe6ef;
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.channel-account-stats span { color: #718097; font-size: 13px; }
+.channel-account-stats strong { color: #17233a; font-size: 25px; }
+.channel-account-stats small { color: #7d899b; font-size: 12px; font-weight: 400; }
+
+.channel-account-panel { padding: 0; overflow: hidden; }
+.channel-account-panel > .panel-title { padding: 14px; border-bottom: 1px solid #e7ebf1; }
+.channel-account-panel .mantine-TextInput-root { width: min(360px, 70%); }
+
+.account-summary-table { overflow-x: auto; }
+.account-summary-head,
+.account-summary-row {
+  min-width: 760px;
+  padding: 0 16px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1.35fr) minmax(110px, .7fr) minmax(150px, 1fr) 90px 64px;
+  gap: 14px;
+  align-items: center;
+}
+
+.account-summary-head {
+  min-height: 42px;
+  background: #f7f9fc;
+  color: #738198;
+  font-size: 12px;
+}
+
+.account-summary-row {
+  min-height: 76px;
+  border-top: 1px solid #edf1f5;
+  color: #536178;
+  font-size: 13px;
+}
+
+.account-summary-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-summary-name > div { display: grid; gap: 4px; }
+.account-summary-name strong { color: #17233a; }
+.account-summary-name small { color: #8a95a7; font-size: 11px; }
+
+@media (max-width: 720px) {
+  .account-channel-options,
+  .account-resource-grid,
+  .channel-account-stats,
+  .account-editor-footer {
+    grid-template-columns: 1fr;
+  }
+  .account-editor-header { padding: 18px; }
+  .account-editor-content { padding: 16px 18px; }
+  .account-editor-footer { padding: 12px 18px; }
+}

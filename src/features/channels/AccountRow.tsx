@@ -1,9 +1,7 @@
-import React from "react";
-import { Badge, Button, PasswordInput, Select, Switch, TextInput } from "@mantine/core";
+import { Badge, Button } from "@mantine/core";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../../domain";
 
-// 账号状态文案：结合 enabled 与 credential_status 展示给用户的状态。
-function accountStatusLabel(account: ChannelAccount): { label: string; color: "green" | "red" | "gray" } {
+function accountStatus(account: ChannelAccount): { label: string; color: "green" | "red" | "gray" } {
   if (!account.enabled) return { label: "已停用", color: "gray" };
   if (account.credential_status === "invalid_key") return { label: "API Key 无效", color: "red" };
   return { label: "正常", color: "green" };
@@ -11,106 +9,31 @@ function accountStatusLabel(account: ChannelAccount): { label: string; color: "g
 
 type AccountRowProps = {
   account: ChannelAccount;
-  index: number;
-  channels: ChannelPreset[];
-  onUpdate: (index: number, patch: Partial<ChannelAccount>) => void;
-  onRemove: (index: number) => void;
-  onTestConnection: (accountId: string) => void;
-  getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
-  onEditSnapshot: (accountId: string) => void;
-  getBaseUrl: (channelId: string) => string;
+  channel?: ChannelPreset;
+  snapshot?: AccountBalanceSnapshot;
+  onEdit: () => void;
 };
 
-function snapshotSummary(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): string | null {
-  if (!snapshot) return null;
-  if (account.channel_id === "longcat" && snapshot.token_pack_remaining != null) {
-    return `资源包剩余：${snapshot.token_pack_remaining.toLocaleString()} Tokens`;
-  }
-  if (snapshot.balance != null) {
-    return `余额：${snapshot.balance} ${snapshot.currency ?? ""}`.trim();
-  }
-  return null;
+function resourceSummary(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): string {
+  if (!snapshot) return "暂无资源信息";
+  if (account.channel_id === "longcat") return `${snapshot.token_pack_remaining?.toLocaleString() ?? "-"} Tokens`;
+  return snapshot.balance == null ? "余额待同步" : `${snapshot.balance} ${snapshot.currency ?? ""}`.trim();
 }
 
-export function AccountRow({
-  account,
-  index,
-  channels,
-  onUpdate,
-  onRemove,
-  onTestConnection,
-  getBalanceForAccount,
-  onEditSnapshot,
-  getBaseUrl,
-}: AccountRowProps) {
-  const [showAdvanced, setShowAdvanced] = React.useState(false);
-  const summary = snapshotSummary(account, getBalanceForAccount(account.id));
-  const hasOverride = account.base_url_override != null && account.base_url_override.trim().length > 0;
+export function AccountRow({ account, channel, snapshot, onEdit }: AccountRowProps) {
+  const status = accountStatus(account);
+  const mark = account.channel_id === "longcat" ? "LC" : account.channel_id === "deepseek" ? "DS" : account.channel_id.slice(0, 2).toUpperCase();
 
   return (
-    <div className="account-row">
-      <Select
-        value={account.channel_id}
-        onChange={(value) => value && onUpdate(index, { channel_id: value })}
-        data={channels.map((channel) => ({ value: channel.id, label: channel.name }))}
-        aria-label="渠道"
-      />
-      <TextInput value={account.name} placeholder="账号名称" onChange={(e) => onUpdate(index, { name: e.target.value })} />
-      <PasswordInput
-        value={account.api_key}
-        placeholder="API Key"
-        onChange={(e) => onUpdate(index, { api_key: e.target.value })}
-      />
-      <Switch label="启用" checked={account.enabled} onChange={(e) => onUpdate(index, { enabled: e.currentTarget.checked })} />
-      <Badge variant="light" color={accountStatusLabel(account).color} size="sm">{accountStatusLabel(account).label}</Badge>
-      <div className="account-actions">
-        {summary ? <span className="account-snapshot">{summary}</span> : null}
-        {account.channel_id === "deepseek" ? (
-          <Button type="button" variant="default" onClick={() => void onTestConnection(account.id)} title="自动同步余额">
-            余额
-          </Button>
-        ) : null}
-        {account.channel_id === "longcat" ? (
-          <Button type="button"
-            variant="default"
-            onClick={() => onEditSnapshot(account.id)}
-            title="登记 Token 资源包快照"
-          >
-            登记资源包
-          </Button>
-        ) : null}
-        <Button type="button"
-          variant={hasOverride ? "light" : "default"}
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          title="账号高级配置（Base URL）"
-        >
-          高级配置
-        </Button>
-        <Button type="button" variant="subtle" color="red" onClick={() => onRemove(index)}>删除</Button>
+    <div className="account-summary-row">
+      <div className="account-summary-name">
+        <span className={`provider-mark channel-${account.channel_id}`}>{mark}</span>
+        <div><strong>{account.name}</strong><small>{channel?.supported_protocols.join(" / ") ?? account.channel_id}</small></div>
       </div>
-      {showAdvanced ? (
-        <div className="account-advanced">
-          <TextInput
-            label="Base URL 覆盖（留空则使用渠道默认）"
-            value={account.base_url_override ?? ""}
-            placeholder={getBaseUrl(account.channel_id)}
-            onChange={(e) => onUpdate(index, { base_url_override: e.target.value || null })}
-          />
-          {hasOverride ? (
-            <Button type="button" variant="subtle" onClick={() => onUpdate(index, { base_url_override: null })}>
-              恢复渠道默认
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      {account.credential_status === "invalid_key" ? (
-        <p className="account-hint account-hint-error">
-          该账号最近返回 401，请更新 API Key 后重新测试。
-        </p>
-      ) : null}
-      {!account.enabled ? (
-        <p className="account-hint">关闭后，该账号将退出所有 Flowlet 模型服务和路由。</p>
-      ) : null}
+      <strong>{channel?.name ?? account.channel_id}</strong>
+      <span>{resourceSummary(account, snapshot)}</span>
+      <Badge variant="light" color={status.color} size="sm">{status.label}</Badge>
+      <Button variant="subtle" onClick={onEdit}>编辑</Button>
     </div>
   );
 }

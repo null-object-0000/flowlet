@@ -1,19 +1,13 @@
 import React from "react";
-import { Button } from "@mantine/core";
+import { Button, TextInput } from "@mantine/core";
 import { Actions, EmptyState, Panel, PanelHeader } from "../components/ui";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../domain";
-import {
-  AccountRow,
-  BalanceSnapshotEditor,
-} from "../features/channels";
+import { AccountEditorDrawer, AccountEditorRequest, AccountRow } from "../features/channels";
 
 type ChannelsPageProps = {
   channels: ChannelPreset[];
   accounts: ChannelAccount[];
-  onAddAccount: (channelId: string) => void;
-  onUpdateAccount: (index: number, patch: Partial<ChannelAccount>) => void;
-  onRemoveAccount: (index: number) => void;
-  onSaveAccounts: () => void;
+  onSaveAccounts: (accounts?: ChannelAccount[]) => Promise<void>;
   onTestConnection: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
@@ -24,9 +18,6 @@ type ChannelsPageProps = {
 export function ChannelsPage({
   channels,
   accounts,
-  onAddAccount,
-  onUpdateAccount,
-  onRemoveAccount,
   onSaveAccounts,
   onTestConnection,
   getBalanceForAccount,
@@ -34,76 +25,74 @@ export function ChannelsPage({
   proxyRunning,
   onRestartProxy,
 }: ChannelsPageProps) {
-  const [snapshotAccountId, setSnapshotAccountId] = React.useState<string | null>(null);
-  const totalAccounts = accounts.length;
-  const enabledAccounts = accounts.filter((a) => a.enabled).length;
-  const snapshotAccount = accounts.find((account) => account.id === snapshotAccountId);
+  const [editor, setEditor] = React.useState<AccountEditorRequest | null>(null);
+  const [search, setSearch] = React.useState("");
+  const enabledAccounts = accounts.filter((account) => account.enabled).length;
+  const filteredAccounts = accounts
+    .map((account, index) => ({ account, index }))
+    .filter(({ account }) => {
+      const channel = channels.find((item) => item.id === account.channel_id);
+      const keyword = search.trim().toLowerCase();
+      return !keyword || account.name.toLowerCase().includes(keyword) || channel?.name.toLowerCase().includes(keyword);
+    });
 
-  function saveBalanceSnapshot(snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) {
-    onAddBalanceSnapshot(snapshot);
-    setSnapshotAccountId(null);
-  }
-
-  function getBaseUrl(channelId: string): string {
-    const channel = channels.find((c) => c.id === channelId);
-    if (!channel) return "";
-    return channel.openai_base_url;
+  function openCreate(channelId = channels[0]?.id ?? "longcat") {
+    setEditor({ mode: "create", channelId });
   }
 
   return (
     <>
-      <Panel>
+      <section className="channel-account-heading">
+        <div><h2>渠道账号</h2><p>管理上游渠道账号，用于模型转发</p></div>
+        <Actions>
+          {proxyRunning ? <Button variant="default" onClick={() => void onRestartProxy()}>重启代理</Button> : null}
+          <Button onClick={() => openCreate()}>＋ 新增账号</Button>
+        </Actions>
+      </section>
+
+      <section className="channel-account-stats">
+        <div><span>账号总数</span><strong>{accounts.length}<small> 个</small></strong></div>
+        <div><span>启用中</span><strong>{enabledAccounts}<small> 个</small></strong></div>
+        <div><span>已接入渠道</span><strong>{new Set(accounts.map((account) => account.channel_id)).size}<small> 个</small></strong></div>
+      </section>
+
+      <Panel className="channel-account-panel">
         <PanelHeader>
-          <h3>
-            渠道账号 ({enabledAccounts}/{totalAccounts})
-          </h3>
-          <Actions>
-            {channels.length > 0 ? <Button type="button" variant="default" onClick={() => onAddAccount(channels[0].id)}>新增账号</Button> : null}
-            <Button type="button" onClick={() => void onSaveAccounts()}>保存账号</Button>
-            {proxyRunning ? <Button type="button" variant="default" onClick={() => void onRestartProxy()}>重启代理</Button> : null}
-          </Actions>
+          <TextInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索账号名称或渠道" aria-label="搜索账号" />
+          <span className="hint">共 {filteredAccounts.length} 条</span>
         </PanelHeader>
-        <p className="hint">
-          保存账号后代理自动热更新配置。若修改未生效，可点击「重启代理」。
-        </p>
-        <div className="account-list">
-          {accounts.length === 0 ? (
-            <EmptyState>
-              <p>你还没有配置渠道账号。</p>
-              <p>请选择 LongCat 或 DeepSeek，并填写 API Key 后开始使用。</p>
-              <Actions>
-                {channels.map((channel) => (
-                  <Button type="button" variant="default" key={channel.id} onClick={() => onAddAccount(channel.id)}>
-                    新增{channel.name}账号
-                  </Button>
-                ))}
-              </Actions>
-            </EmptyState>
-          ) : (
-            accounts.map((account, index) => (
+        {accounts.length === 0 ? (
+          <EmptyState>
+            <p>你还没有配置渠道账号。</p>
+            <p>选择 LongCat 或 DeepSeek，并在侧边栏中填写 API Key 后开始使用。</p>
+            <Actions>{channels.map((channel) => <Button variant="default" key={channel.id} onClick={() => openCreate(channel.id)}>新增{channel.name}账号</Button>)}</Actions>
+          </EmptyState>
+        ) : (
+          <div className="account-summary-table">
+            <div className="account-summary-head"><span>账号名称</span><span>渠道</span><span>资源状态</span><span>状态</span><span>操作</span></div>
+            {filteredAccounts.map(({ account, index }) => (
               <AccountRow
-                account={account}
-                index={index}
-                channels={channels}
                 key={account.id}
-                onUpdate={onUpdateAccount}
-                onRemove={onRemoveAccount}
-                onTestConnection={onTestConnection}
-                getBalanceForAccount={getBalanceForAccount}
-                onEditSnapshot={setSnapshotAccountId}
-                getBaseUrl={getBaseUrl}
+                account={account}
+                channel={channels.find((item) => item.id === account.channel_id)}
+                snapshot={getBalanceForAccount(account.id)}
+                onEdit={() => setEditor({ mode: "edit", index })}
               />
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </Panel>
 
-      {snapshotAccount ? (
-        <BalanceSnapshotEditor
-          account={snapshotAccount}
-          initialSnapshot={getBalanceForAccount(snapshotAccount.id)}
-          onCancel={() => setSnapshotAccountId(null)}
-          onSave={saveBalanceSnapshot}
+      {editor ? (
+        <AccountEditorDrawer
+          request={editor}
+          accounts={accounts}
+          channels={channels}
+          onClose={() => setEditor(null)}
+          onSaveAccounts={(next) => onSaveAccounts(next)}
+          onTestConnection={onTestConnection}
+          getBalanceForAccount={getBalanceForAccount}
+          onAddBalanceSnapshot={onAddBalanceSnapshot}
         />
       ) : null}
     </>

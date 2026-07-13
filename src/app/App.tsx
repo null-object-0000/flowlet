@@ -299,10 +299,7 @@ export default function App() {
             <ChannelsPage
               channels={channels}
               accounts={accounts}
-              onAddAccount={addAccount}
-              onUpdateAccount={updateAccount}
-              onRemoveAccount={removeAccount}
-              onSaveAccounts={() => void saveAccounts()}
+              onSaveAccounts={saveAccounts}
               onTestConnection={(id) => void testConnection(id)}
               getBalanceForAccount={getBalanceForAccount}
               onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}

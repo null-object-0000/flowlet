@@ -41,7 +41,7 @@ import {
   RouteCandidate,
   createAccount,
 } from "../domain";
-import { BalanceSnapshotEditor } from "../features/channels";
+import { AccountEditorDrawer, BalanceSnapshotEditor } from "../features/channels";
 import { buildExposedModels } from "../features/routes/exposedModels";
 
 type AccountEditor = {
@@ -638,8 +638,23 @@ export function OverviewPage({
         </>
       )}
 
+      {accountEditor ? (
+        <AccountEditorDrawer
+          request={accountEditor.mode === "create"
+            ? { mode: "create", channelId: accountEditor.draft.channel_id }
+            : { mode: "edit", index: accountEditor.index ?? 0 }}
+          accounts={accounts}
+          channels={channels}
+          onClose={() => setAccountEditor(null)}
+          onSaveAccounts={onSaveAccounts}
+          onTestConnection={onTestConnection}
+          getBalanceForAccount={getBalanceForAccount}
+          onAddBalanceSnapshot={onAddBalanceSnapshot}
+        />
+      ) : null}
+
       <Drawer
-        opened={accountEditor != null}
+        opened={false}
         onClose={() => setAccountEditor(null)}
         title={accountEditor?.mode === "create" ? "新增渠道账号" : "编辑渠道账号"}
         position="right"

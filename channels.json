@@ -51,9 +51,9 @@
     {
       "channel_id": "longcat",
       "upstream_model": "LongCat-2.0",
-      "input_uncached_price": 0.0,
-      "input_cached_price": 0.0,
-      "output_price": 0.0,
+      "input_uncached_price": 2.0,
+      "input_cached_price": 0.04,
+      "output_price": 8.0,
       "currency": "CNY",
       "unit": "1M tokens"
     },

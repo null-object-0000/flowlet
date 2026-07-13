@@ -101,20 +101,23 @@ impl Storage {
         Ok(presets)
     }
 
-    /// 为内置渠道模板补全 platform_url（升级迁移）。仅更新内置渠道且字段为空时写入。
-    pub fn ensure_preset_platform_urls(&self) -> Result<(), StorageError> {
+    /// 使用配置文件中的渠道模板补全 platform_url（升级迁移）。
+    /// 该方法必须在 `Storage::migrate` 释放连接锁之后调用。
+    pub fn ensure_preset_platform_urls(
+        &self,
+        presets: &[ChannelPreset],
+    ) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        let updates: &[(&str, &str)] = &[
-            ("longcat", "https://longcat.chat/platform/api_keys"),
-            ("deepseek", "https://platform.deepseek.com/api_keys"),
-        ];
-        for (id, url) in updates {
+        for preset in presets {
+            let Some(url) = preset.platform_url.as_deref().filter(|url| !url.is_empty()) else {
+                continue;
+            };
             connection.execute(
                 "UPDATE channel_presets SET platform_url = ?1 WHERE id = ?2 AND platform_url IS NULL",
-                params![url, id],
+                params![url, preset.id.as_str()],
             )?;
         }
         Ok(())

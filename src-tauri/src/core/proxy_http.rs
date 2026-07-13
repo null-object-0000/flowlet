@@ -455,33 +455,14 @@ fn candidate_config_paths() -> Vec<std::path::PathBuf> {
     candidates
 }
 
-/// 硬编码的最后保底 config（仅在打包资源也找不到时使用）。
-/// 与项目根目录 `config.json` 保持同步。
-const FALLBACK_CONFIG_JSON: &str = r#"{
-  "ua_rules": [
-    {
-      "id": "opencode",
-      "pattern": "opencode/",
-      "name": "OpenCode",
-      "enabled": true
-    },
-    {
-      "id": "claude-code",
-      "pattern": "claude-cli/",
-      "name": "Claude Code",
-      "enabled": true
-    }
-  ]
-}"#;
-
-/// 加载默认 config JSON 内容。依次尝试候选路径，全部失败时回退到硬编码内容。
+/// 加载默认 config JSON 内容。依次尝试候选路径，全部失败时回退到编译时内置配置。
 fn load_default_config_json() -> Option<String> {
     for path in candidate_config_paths() {
         if let Ok(content) = std::fs::read_to_string(&path) {
             return Some(content);
         }
     }
-    Some(FALLBACK_CONFIG_JSON.to_string())
+    Some(crate::core::channels_config::DEFAULT_CONFIG_JSON.to_string())
 }
 
 /// 确保 config.json 存在：若不存在则从打包资源写入默认内容。

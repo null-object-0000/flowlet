@@ -3,6 +3,13 @@ use std::path::PathBuf;
 
 use super::config::{AuthStrategy, ChannelPreset, ModelPrice, PriceSource, ProtocolType};
 
+/// 编译时随应用固化的默认配置。
+///
+/// 外部 config.json 仍然优先；这个副本只用于配置缺失、旧版本配置不含
+/// `channels_config` 或打包资源路径异常时，避免桌面进程在创建窗口和托盘前退出。
+pub const DEFAULT_CONFIG_JSON: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config.json"));
+
 /// 查找配置文件路径。
 /// 搜索顺序：exe 目录 → 向上 1~4 级（dev 模式 target/debug/ → 项目根目录）→ CARGO_MANIFEST_DIR
 pub fn find_config_file(name: &str) -> Option<PathBuf> {

@@ -35,8 +35,8 @@
     "icon": [
       "icons/icon.ico"
     ],
-    "resources": [
-      "../config.json"
-    ]
+    "resources": {
+      "../config.json": "config.json"
+    }
   }
 }

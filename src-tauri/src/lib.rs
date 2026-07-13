@@ -1,8 +1,7 @@
 mod commands;
 pub mod core;
 
-use core::channels_config::{find_config_file, ChannelsConfig};
-use serde_json::Value as JsonValue;
+use core::channels_config::{find_config_file, ChannelsConfig, DEFAULT_CONFIG_JSON};
 use core::config::{
     ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ModelPrice, ProtocolType,
     ProxyBindConfig,
@@ -109,6 +108,10 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
             panic!("初始化 SQLite 存储失败: {e}");
         }
     };
+
+    storage
+        .ensure_preset_platform_urls(&channels_config.presets)
+        .expect("补全渠道模板平台地址失败");
 
     tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "Storage 初始化完成, 开始加载渠道模板");
 
@@ -347,13 +350,65 @@ fn find_config_json_path() -> std::path::PathBuf {
 fn load_channels_config_from(
     config_path: &std::path::Path,
 ) -> Result<ChannelsConfig, String> {
-    let content = std::fs::read_to_string(config_path)
-        .map_err(|e| format!("读取 config.json 失败 ({}): {}", config_path.display(), e))?;
+    let external_result = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("读取 config.json 失败 ({}): {}", config_path.display(), e))
+        .and_then(|content| parse_channels_config(&content, &config_path.display().to_string()));
 
-    let json: JsonValue = serde_json::from_str(&content)
-        .map_err(|e| format!("解析 config.json 失败: {e}"))?;
+    match external_result {
+        Ok(config) => Ok(config),
+        Err(external_error) => {
+            tracing::warn!(
+                path = %config_path.display(),
+                error = %external_error,
+                "外部 config.json 无法提供渠道配置，回退到应用内置默认配置"
+            );
+            parse_channels_config(DEFAULT_CONFIG_JSON, "应用内置 config.json").map_err(
+                |fallback_error| {
+                    format!(
+                        "外部渠道配置不可用: {external_error}; 内置渠道配置也不可用: {fallback_error}"
+                    )
+                },
+            )
+        }
+    }
+}
 
+fn parse_channels_config(content: &str, source: &str) -> Result<ChannelsConfig, String> {
+    let json: serde_json::Value = serde_json::from_str(content)
+        .map_err(|e| format!("解析 {source} 失败: {e}"))?;
     ChannelsConfig::from_config_json(&json)
+}
+
+#[cfg(test)]
+mod app_config_tests {
+    use super::*;
+
+    #[test]
+    fn old_config_without_channels_uses_embedded_defaults() {
+        let path = std::env::temp_dir().join(format!(
+            "flowlet-old-config-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, r#"{"ua_rules": []}"#).unwrap();
+
+        let config = load_channels_config_from(&path).unwrap();
+        let _ = std::fs::remove_file(path);
+
+        assert!(config.presets.iter().any(|channel| channel.id == "longcat"));
+        assert!(config.presets.iter().any(|channel| channel.id == "deepseek"));
+    }
+
+    #[test]
+    fn missing_external_config_uses_embedded_defaults() {
+        let path = std::env::temp_dir().join(format!(
+            "flowlet-missing-config-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let config = load_channels_config_from(&path).unwrap();
+
+        assert!(!config.presets.is_empty());
+    }
 }
 
 fn migrate_legacy_database(db_path: &std::path::Path) {

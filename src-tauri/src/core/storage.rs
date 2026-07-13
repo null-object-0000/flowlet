@@ -354,6 +354,18 @@ impl Storage {
         )?;
         add_column_if_missing(
             &connection,
+            "channel_presets",
+            "small_model",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "timeout_seconds",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &connection,
             "virtual_model_routes",
             "virtual_model_id",
             "TEXT NOT NULL DEFAULT 'auto'",
@@ -474,9 +486,8 @@ impl Storage {
             "TEXT NOT NULL DEFAULT ''",
         )?;
 
-        // 渠道模板：补充平台查看地址（API Key 管理页跳转），并为内置渠道写入 URL
+        // 渠道模板：补充平台查看地址（API Key 管理页跳转）
         add_column_if_missing(&connection, "channel_presets", "platform_url", "TEXT")?;
-        self.ensure_preset_platform_urls()?;
 
         // 余额快照：补充 LongCat 多资源包原始数据（JSON 数组）
         add_column_if_missing(&connection, "account_balance_snapshots", "token_packs", "TEXT")?;
@@ -697,6 +708,57 @@ fn normalize_legacy_virtual_model_routes_schema(
         return Ok(());
     }
 
+    let column_or = |column: &str, default: &str| -> Result<String, StorageError> {
+        if table_has_column(connection, "virtual_model_routes", column)? {
+            Ok(format!("COALESCE({column}, {default})"))
+        } else {
+            Ok(default.to_string())
+        }
+    };
+    let provider_name_exists =
+        table_has_column(connection, "virtual_model_routes", "provider_name")?;
+    let provider_id_exists =
+        table_has_column(connection, "virtual_model_routes", "provider_id")?;
+    let virtual_model_id = if table_has_column(
+        connection,
+        "virtual_model_routes",
+        "virtual_model_id",
+    )? {
+        "COALESCE(virtual_model_id, 'auto')".to_string()
+    } else if provider_name_exists {
+        "COALESCE(provider_name, 'auto')".to_string()
+    } else {
+        "'auto'".to_string()
+    };
+    let channel_id = if table_has_column(connection, "virtual_model_routes", "channel_id")? {
+        "COALESCE(channel_id, '')".to_string()
+    } else if provider_id_exists {
+        "COALESCE(provider_id, '')".to_string()
+    } else {
+        "''".to_string()
+    };
+    let upstream_model = if table_has_column(
+        connection,
+        "virtual_model_routes",
+        "upstream_model",
+    )? {
+        "COALESCE(upstream_model, '')".to_string()
+    } else if provider_name_exists {
+        "COALESCE(provider_name, '')".to_string()
+    } else {
+        "''".to_string()
+    };
+    let account_id = column_or("account_id", "''")?;
+    let priority = column_or("priority", "0")?;
+    let enabled = column_or("enabled", "1")?;
+    let created_at = column_or("created_at", "NULL")?;
+    let updated_at = column_or("updated_at", "NULL")?;
+    let client_protocol = if table_has_column(connection, "virtual_model_routes", "client_protocol")? {
+        "CASE client_protocol WHEN 'anthropic' THEN 'anthropic' ELSE 'openai' END".to_string()
+    } else {
+        "'openai'".to_string()
+    };
+
     // 重建表并使用 INSERT…SELECT 保留已有的路由数据。
     // 旧 schema 的 channel_id / account_id / client_protocol 以 '' / 'openai' 为默认，
     // 这里按原样复制；client_protocol 若不是有效协议则回退为 openai。
@@ -724,15 +786,15 @@ fn normalize_legacy_virtual_model_routes_schema(
         )
         SELECT
             id,
-            '' || virtual_model_id,
-            '' || channel_id,
-            '' || account_id,
-            '' || upstream_model,
-            CASE client_protocol WHEN 'anthropic' THEN 'anthropic' ELSE 'openai' END,
-            COALESCE(priority, 0),
-            COALESCE(enabled, 1),
-            COALESCE(created_at, '{now}'),
-            COALESCE(updated_at, '{now}')
+            {virtual_model_id},
+            {channel_id},
+            {account_id},
+            {upstream_model},
+            {client_protocol},
+            {priority},
+            {enabled},
+            COALESCE({created_at}, '{now}'),
+            COALESCE({updated_at}, '{now}')
         FROM virtual_model_routes_legacy_migrate;
         DROP TABLE virtual_model_routes_legacy_migrate;
         "#,

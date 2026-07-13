@@ -153,6 +153,22 @@ export default function App() {
     const timer = window.setInterval(() => void refreshStatus().catch(() => undefined), 3000);
     return () => window.clearInterval(timer);
   }, [initializing, initError, refreshStatus]);
+
+  // 整点 +1 秒全量刷新：计算到下一分钟 01 刻的延迟，对齐分钟后 setInterval 保持节奏
+  React.useEffect(() => {
+    if (initializing || initError) return;
+    let timer = 0;
+    const scheduleNext = () => {
+      const now = new Date();
+      const msUntilNext = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds()) + 1000;
+      timer = window.setTimeout(async () => {
+        try { await Promise.all([refreshStatus(), refreshAll()]); } catch { /* noop */ }
+        scheduleNext();
+      }, msUntilNext % 60000 || 60000);
+    };
+    scheduleNext();
+    return () => window.clearTimeout(timer);
+  }, [initializing, initError, refreshStatus, refreshAll]);
   React.useEffect(() => {
     if (initializing || initError) return;
     const signature = JSON.stringify({

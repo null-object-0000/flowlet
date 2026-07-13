@@ -1,5 +1,5 @@
 import { RouteCandidate, RouteRule, createRouteCandidate, genId } from "../../domain";
-import { runCommand } from "../../services/flowletApi";
+import { runCommand, logToRust } from "../../services/flowletApi";
 import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext } from "./types";
 
@@ -7,7 +7,14 @@ export function createRouteActions({ data, setMessage }: ActionContext) {
   const { channels, accounts, routes, setRoutes, channelModels, routeRules, setRouteRules, exposureMode } = data;
 
   async function saveRouteCandidates() {
-    await runCommand("save_route_candidates", { routes });
+    try {
+      await runCommand("save_route_candidates", { routes });
+    } catch (err) {
+      const msg = `保存模型服务配置失败: ${String(err)}`;
+      logToRust("error", msg);
+      setMessage(msg);
+      return;
+    }
     // 热更新：代理运行中自动读取最新配置，无需重启
     setMessage("模型服务配置已保存，代理已热更新");
   }
@@ -26,7 +33,14 @@ export function createRouteActions({ data, setMessage }: ActionContext) {
       return;
     }
     const nextRoutes = ensureDefaultExposedRoutes(channels, enabledAccounts, routes, channelModels, exposureMode);
-    await runCommand("save_route_candidates", { routes: nextRoutes });
+    try {
+      await runCommand("save_route_candidates", { routes: nextRoutes });
+    } catch (err) {
+      const msg = `重新生成默认模型失败: ${String(err)}`;
+      logToRust("error", msg);
+      setMessage(msg);
+      return;
+    }
     setRoutes(nextRoutes);
     // 热更新：代理运行中自动读取最新配置，无需重启
     setMessage("默认开放模型已重新生成，代理已热更新");

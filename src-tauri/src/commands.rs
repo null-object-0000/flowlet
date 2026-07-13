@@ -173,12 +173,20 @@ pub(super) fn save_route_candidates(
     state
         .storage
         .save_route_candidates(&routes)
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| {
+            let msg = err.to_string();
+            tracing::error!(error = %msg, "保存路由候选失败");
+            msg
+        })?;
 
     let mut current = state
         .routes
         .lock()
-        .map_err(|_| "保存路由配置失败".to_string())?;
+        .map_err(|_| {
+            let msg = "保存路由配置失败".to_string();
+            tracing::error!("{}", msg);
+            msg
+        })?;
     *current = routes;
     Ok(())
 }

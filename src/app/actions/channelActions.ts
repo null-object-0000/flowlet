@@ -1,5 +1,5 @@
 import { AccountBalanceSnapshot, ChannelAccount, ChannelModel, createAccount, genId } from "../../domain";
-import { runCommand } from "../../services/flowletApi";
+import { runCommand, logToRust } from "../../services/flowletApi";
 import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext } from "./types";
 
@@ -18,7 +18,14 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
     const nextRoutes = ensureDefaultExposedRoutes(channels, saved, routes, channelModels, exposureMode);
     if (JSON.stringify(nextRoutes) !== JSON.stringify(routes)) {
       setRoutes(nextRoutes);
-      await runCommand("save_route_candidates", { routes: nextRoutes });
+      try {
+        await runCommand("save_route_candidates", { routes: nextRoutes });
+      } catch (err) {
+        const msg = `保存路由候选失败: ${String(err)}`;
+        logToRust("error", msg);
+        setMessage(msg);
+        return;
+      }
       setMessage("渠道账号已保存，已自动开放默认模型，代理配置已热更新");
     }
   }
@@ -45,7 +52,14 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
     const nextRoutes = ensureDefaultExposedRoutes(channels, nextAccounts, routes, channelModels, exposureMode);
 
     const saved = await runCommand<ChannelAccount[]>("save_channel_accounts", { accounts: nextAccounts });
-    await runCommand("save_route_candidates", { routes: nextRoutes });
+    try {
+      await runCommand("save_route_candidates", { routes: nextRoutes });
+    } catch (err) {
+      const msg = `保存路由候选失败: ${String(err)}`;
+      logToRust("error", msg);
+      setMessage(msg);
+      return;
+    }
     setAccounts(saved);
     setRoutes(nextRoutes);
     setMessage("渠道账号已保存，Flowlet Pro / Flash 模型池已自动更新");
@@ -93,7 +107,14 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
           ? [...channelModels.filter((model) => model.channel_id !== account.channel_id), ...result.models]
           : channelModels;
         const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, mergedModels, exposureMode);
-        await runCommand("save_route_candidates", { routes: nextRoutes });
+        try {
+          await runCommand("save_route_candidates", { routes: nextRoutes });
+        } catch (err) {
+          const msg = `保存路由候选失败: ${String(err)}`;
+          logToRust("error", msg);
+          setMessage(msg);
+          return;
+        }
         setRoutes(nextRoutes);
         setMessage(`同步成功，获取 ${result.models_synced} 个模型，Flowlet 模型池已热更新`);
       }

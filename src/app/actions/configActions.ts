@@ -1,4 +1,4 @@
-import { runCommand } from "../../services/flowletApi";
+import { runCommand, logToRust } from "../../services/flowletApi";
 import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext, FlowletData } from "./types";
 
@@ -171,7 +171,14 @@ export function createConfigActions({ data, setMessage }: ActionContext) {
     const nextRoutes = ensureDefaultExposedRoutes(channels, accounts, routes, channelModels, mode);
     if (JSON.stringify(nextRoutes) !== JSON.stringify(routes)) {
       setRoutes(nextRoutes);
-      await runCommand("save_route_candidates", { routes: nextRoutes });
+      try {
+        await runCommand("save_route_candidates", { routes: nextRoutes });
+      } catch (err) {
+        const msg = `切换模型开放范围后保存路由失败: ${String(err)}`;
+        logToRust("error", msg);
+        setMessage(msg);
+        return;
+      }
     }
     setMessage(`已切换为「${modeLabel(mode)}」`);
   }

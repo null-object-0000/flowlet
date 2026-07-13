@@ -683,29 +683,54 @@ fn table_has_column(
 fn normalize_legacy_virtual_model_routes_schema(
     connection: &Connection,
 ) -> Result<(), StorageError> {
-    if !table_has_column(connection, "virtual_model_routes", "provider_name")? {
+    // 旧 schema 可能含 provider_name 或 provider_id 列，任一存在即需迁移。
+    if !table_has_column(connection, "virtual_model_routes", "provider_name")?
+        && !table_has_column(connection, "virtual_model_routes", "provider_id")?
+    {
         return Ok(());
     }
 
-    connection.execute_batch(
+    // 重建表并使用 INSERT…SELECT 保留已有的路由数据。
+    // 旧 schema 的 channel_id / account_id / client_protocol 以 '' / 'openai' 为默认，
+    // 这里按原样复制；client_protocol 若不是有效协议则回退为 openai。
+    // 注意：execute_batch 不支持参数绑定，时间戳直接内联到 SQL 文本中。
+    let now = chrono::Utc::now().to_rfc3339();
+    let migration_sql = format!(
         r#"
         DROP TABLE IF EXISTS virtual_model_routes_legacy_migrate;
         ALTER TABLE virtual_model_routes RENAME TO virtual_model_routes_legacy_migrate;
         CREATE TABLE virtual_model_routes (
             id               TEXT PRIMARY KEY,
             virtual_model_id TEXT NOT NULL,
-            channel_id       TEXT NOT NULL,
-            account_id       TEXT NOT NULL,
+            channel_id       TEXT NOT NULL DEFAULT '',
+            account_id       TEXT NOT NULL DEFAULT '',
             upstream_model   TEXT NOT NULL,
-            client_protocol  TEXT NOT NULL,
-            priority         INTEGER NOT NULL,
+            client_protocol  TEXT NOT NULL DEFAULT 'openai',
+            priority         INTEGER NOT NULL DEFAULT 0,
             enabled          INTEGER NOT NULL DEFAULT 1,
             created_at       TEXT NOT NULL,
             updated_at       TEXT NOT NULL
         );
+        INSERT INTO virtual_model_routes (
+            id, virtual_model_id, channel_id, account_id, upstream_model,
+            client_protocol, priority, enabled, created_at, updated_at
+        )
+        SELECT
+            id,
+            '' || virtual_model_id,
+            '' || channel_id,
+            '' || account_id,
+            '' || upstream_model,
+            CASE client_protocol WHEN 'anthropic' THEN 'anthropic' ELSE 'openai' END,
+            COALESCE(priority, 0),
+            COALESCE(enabled, 1),
+            COALESCE(created_at, '{now}'),
+            COALESCE(updated_at, '{now}')
+        FROM virtual_model_routes_legacy_migrate;
         DROP TABLE virtual_model_routes_legacy_migrate;
         "#,
-    )?;
+    );
+    connection.execute_batch(&migration_sql)?;
     Ok(())
 }
 

@@ -4,7 +4,7 @@ import { notifications } from "@mantine/notifications";
 import { Sidebar, WindowControls } from "../components/layout";
 import { useFlowletActions } from "./useFlowletActions";
 import { useFlowletData } from "./useFlowletData";
-import { runCommand, enableFrontendLogging, disableFrontendLogging } from "../services/flowletApi";
+import { runCommand, enableFrontendLogging, disableFrontendLogging, logToRust } from "../services/flowletApi";
 import { LogFilter, ProxyStatus, View } from "../domain";
 import { ensureDefaultExposedRoutes } from "./routeHelpers";
 import {
@@ -163,7 +163,9 @@ export default function App() {
     if (JSON.stringify(nextRoutes) === JSON.stringify(routes)) return;
     setRoutes(nextRoutes);
     void runCommand("save_route_candidates", { routes: nextRoutes }).catch((err) => {
-      setMessage(`自动更新 Flowlet 模型池失败: ${String(err)}`);
+      const msg = `自动更新 Flowlet 模型池失败: ${String(err)}`;
+      setMessage(msg);
+      logToRust("error", msg);
     });
   }, [initializing, initError, accounts, channels, channelModels, routes, setRoutes]);
   async function handleStartProxy() {

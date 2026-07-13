@@ -13,7 +13,8 @@
     "tauri:portable": "node scripts/build-portable.mjs",
     "check": "tsc --noEmit"
   },
-"dependencies": {
+  "dependencies": {
+    "@lobehub/icons": "^5.11.0",
     "@mantine/core": "^9.4.1",
     "@mantine/hooks": "^9.4.1",
     "@mantine/notifications": "^9.4.1",

@@ -1,5 +1,6 @@
 import { Badge, Button } from "@mantine/core";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../../domain";
+import { ChannelLogo } from "../../components/ChannelLogo";
 
 function accountStatus(account: ChannelAccount): { label: string; color: "green" | "red" | "gray" } {
   if (!account.enabled) return { label: "已停用", color: "gray" };
@@ -22,15 +23,17 @@ function resourceSummary(account: ChannelAccount, snapshot?: AccountBalanceSnaps
 
 export function AccountRow({ account, channel, snapshot, onEdit }: AccountRowProps) {
   const status = accountStatus(account);
-  const mark = account.channel_id === "longcat" ? "LC" : account.channel_id === "deepseek" ? "DS" : account.channel_id.slice(0, 2).toUpperCase();
 
   return (
     <div className="account-summary-row">
       <div className="account-summary-name">
-        <span className={`provider-mark channel-${account.channel_id}`}>{mark}</span>
+        <ChannelLogo channelId={account.channel_id} channelName={channel?.name} size={24} variant="avatar" />
         <div><strong>{account.name}</strong><small>{channel?.supported_protocols.join(" / ") ?? account.channel_id}</small></div>
       </div>
-      <strong>{channel?.name ?? account.channel_id}</strong>
+      <span className="account-channel-cell">
+        <ChannelLogo channelId={account.channel_id} channelName={channel?.name} size={20} variant="color" />
+        <strong>{channel?.name ?? account.channel_id}</strong>
+      </span>
       <span>{resourceSummary(account, snapshot)}</span>
       <Badge variant="light" color={status.color} size="sm">{status.label}</Badge>
       <Button variant="subtle" onClick={onEdit}>编辑</Button>

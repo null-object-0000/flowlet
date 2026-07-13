@@ -42,6 +42,7 @@ import {
   createAccount,
 } from "../domain";
 import { AccountEditorDrawer, BalanceSnapshotEditor } from "../features/channels";
+import { ChannelLogo } from "../components/ChannelLogo";
 import { buildExposedModels } from "../features/routes/exposedModels";
 
 type AccountEditor = {
@@ -146,12 +147,6 @@ function parseOptionalNumber(value: string): number | null {
   if (!value.trim()) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function channelLogo(channelId: string): string {
-  if (channelId === "longcat") return "LC";
-  if (channelId === "deepseek") return "DS";
-  return channelId.slice(0, 2).toUpperCase();
 }
 
 function formatDuration(ms: number): string {
@@ -531,7 +526,7 @@ export function OverviewPage({
                 {accounts.slice(0, 3).map((account, index) => (
                   <div className="overview-account-card" key={account.id}>
                     <div className="overview-card-main">
-                      <span className={`provider-mark channel-${account.channel_id}`}>{channelLogo(account.channel_id)}</span>
+                      <ChannelLogo channelId={account.channel_id} channelName={getChannelName(account.channel_id)} size={32} variant="avatar" />
                       <div className="row-main"><strong>{account.name || getChannelName(account.channel_id)}</strong><span>{getChannelName(account.channel_id)}</span></div>
                       <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
                       <ActionIcon variant="subtle" onClick={() => openEditAccount(index)} aria-label="编辑账号"><IconDotsVertical size={17} /></ActionIcon>
@@ -676,14 +671,14 @@ export function OverviewPage({
                         variant={accountEditor.draft.channel_id === channel.id ? "light" : "default"}
                         onClick={() => updateAccountDraft({ channel_id: channel.id })}
                       >
-                        <span className={`provider-mark channel-${channel.id}`}>{channelLogo(channel.id)}</span>
+                        <ChannelLogo channelId={channel.id} channelName={channel.name} size={20} variant="color" />
                         {channel.name}
                       </Button>
                     ))}
                   </div>
                 ) : (
                   <Group align="end" gap="xs" wrap="nowrap">
-                    <span className={`provider-mark channel-${accountEditor.draft.channel_id}`}>{channelLogo(accountEditor.draft.channel_id)}</span>
+                    <ChannelLogo channelId={accountEditor.draft.channel_id} channelName={getChannelName(accountEditor.draft.channel_id)} size={24} variant="avatar" />
                     <Select label="渠道" value={accountEditor.draft.channel_id} onChange={(value) => value && updateAccountDraft({ channel_id: value })} data={channels.map((channel) => ({ value: channel.id, label: channel.name }))} flex={1} />
                   </Group>
                 )}

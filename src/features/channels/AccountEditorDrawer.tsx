@@ -2,6 +2,7 @@ import React from "react";
 import { Button, Drawer, PasswordInput, Switch, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset, createAccount } from "../../domain";
+import { ChannelLogo } from "../../components/ChannelLogo";
 
 export type AccountEditorRequest =
   | { mode: "create"; channelId: string }
@@ -169,7 +170,7 @@ export function AccountEditorDrawer({
                 className={draft.channel_id === item.id ? "account-channel-option selected" : "account-channel-option"}
                 onClick={() => selectChannel(item.id)}
               >
-                <span className={`provider-mark channel-${item.id}`}>{channelMark(item.id)}</span>
+                <span className="channel-logo-wrap"><ChannelLogo channelId={item.id} channelName={item.name} size={32} variant="avatar" /></span>
                 <span><strong>{item.name}</strong><small>{item.vendor || `${item.name} 大模型服务`}</small></span>
                 <i>{draft.channel_id === item.id ? "✓" : ""}</i>
               </button>

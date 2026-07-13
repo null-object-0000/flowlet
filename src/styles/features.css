@@ -233,6 +233,27 @@
   background: linear-gradient(135deg, #5574ff, #1540b8);
 }
 
+.channel-logo-wrap {
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.account-channel-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account-channel-cell strong {
+  color: #17233a;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .secret-input,
 .unit-input {
   position: relative;

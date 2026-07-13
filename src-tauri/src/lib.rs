@@ -1,7 +1,7 @@
 mod commands;
 pub mod core;
 
-use core::channels_config::ChannelsConfig;
+use core::channels_config::{find_config_file, ChannelsConfig};
 use core::config::{
     ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ModelPrice, ProtocolType,
     ProxyBindConfig,
@@ -86,11 +86,11 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     crate::core::logging::init_file_logging();
     let _t0 = std::time::Instant::now();
 
-    let config_path = db_path.parent().unwrap_or(db_path.as_ref()).join("config.json");
+    let config_path = find_config_json_path();
     tracing::info!(db_path = %db_path.display(), t_ms = _t0.elapsed().as_millis() as u64, "初始化 Storage");
 
     // 加载外部渠道配置文件 channels.json
-    let channels_config = match ChannelsConfig::load_from_exe_dir() {
+    let channels_config = match ChannelsConfig::load() {
         Ok(cfg) => {
             tracing::info!(channels = cfg.presets.len(), prices = cfg.prices.len(), "从 channels.json 加载渠道配置");
             Arc::new(cfg)
@@ -324,6 +324,22 @@ fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
     let db_path = app_data_dir.join("flowlet.sqlite");
     migrate_legacy_database(&db_path);
     db_path
+}
+
+/// 查找 config.json 路径。
+/// exe 目录优先（bundle.resources 复制后），若不存在则回退到项目根目录
+/// （dev 模式：target/debug/ → 项目根目录）。
+fn find_config_json_path() -> std::path::PathBuf {
+    if let Some(path) = find_config_file("config.json") {
+        return path;
+    }
+
+    // 都没有则使用 exe 目录（ensure_ua_rules_file 会在此创建）
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
+    exe_dir.join("config.json")
 }
 
 fn migrate_legacy_database(db_path: &std::path::Path) {

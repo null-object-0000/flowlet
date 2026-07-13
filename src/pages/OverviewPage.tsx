@@ -78,6 +78,7 @@ type OverviewPageProps = {
   onRestartProxy: () => void;
   onSaveAccounts: (nextAccounts?: ChannelAccount[]) => Promise<void>;
   onTestConnection: (accountId: string) => void;
+  onSyncBalance: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
   onUpdateRoute: (index: number, patch: Partial<RouteCandidate>) => void;
@@ -199,6 +200,7 @@ export function OverviewPage({
   onRestartProxy,
   onSaveAccounts,
   onTestConnection,
+  onSyncBalance,
   getBalanceForAccount,
   onAddBalanceSnapshot,
   onUpdateRoute,
@@ -676,12 +678,18 @@ export function OverviewPage({
                   <>
                     <div className="section-headline">
                       <h4><span className="mini-section-icon">▤</span>余额信息（自动同步）</h4>
-                      <span className="sync-badge">自动同步</span>
+                      {accountEditor.mode === "edit" ? (
+                        <ActionIcon variant="subtle" size="sm" aria-label="同步余额" onClick={() => onSyncBalance(accountEditor.draft.id)}>
+                          <IconRefresh size={15} />
+                        </ActionIcon>
+                      ) : (
+                        <span className="sync-badge">自动同步</span>
+                      )}
                     </div>
                     <div className="resource-grid">
-                      <label>账户余额<div className="static-field">保存后自动从上游同步</div></label>
-                      <label>货币<div className="static-field">跟随上游返回</div></label>
-                      <label>最近更新时间<TextInput readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} /></label>
+                      <label>账户余额<div className="static-field">{editorSnapshot != null && editorSnapshot.balance != null ? `${editorSnapshot.balance} ${editorSnapshot.currency ?? ""}` : "尚未同步"}</div></label>
+                      <label>货币<div className="static-field">{editorSnapshot?.currency ?? "跟随上游返回"}</div></label>
+                      <label>最近更新<TextInput readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} /></label>
                     </div>
                   </>
                 ) : (

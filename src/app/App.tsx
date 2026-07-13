@@ -62,6 +62,7 @@ export default function App() {
     analyzeUsage,
     addAccount,
     testConnection,
+    syncBalance,
     changeExposureMode,
     updateAccount,
     removeAccount,
@@ -262,6 +263,7 @@ export default function App() {
               onRestartProxy={() => void handleRestartProxy()}
               onSaveAccounts={saveAccounts}
               onTestConnection={(id) => void testConnection(id)}
+              onSyncBalance={(id) => void syncBalance(id)}
               getBalanceForAccount={getBalanceForAccount}
               onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}
               onUpdateRoute={updateRoute}

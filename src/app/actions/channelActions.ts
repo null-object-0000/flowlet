@@ -163,12 +163,37 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
     setMessage("余额快照已保存");
   }
 
+  async function syncBalance(accountId: string) {
+    setMessage("正在同步余额...");
+    try {
+      const result = await runCommand<{
+        balance: number | null;
+        currency: string | null;
+        is_available: boolean;
+        error: string | null;
+      }>("query_balance", { accountId });
+      if (result.error) {
+        setMessage(`余额同步失败: ${result.error}`);
+      } else if (result.balance !== null) {
+        setMessage(`余额已同步: ${result.balance} ${result.currency ?? ""}`);
+      } else {
+        setMessage("余额同步完成");
+      }
+      await refreshAll();
+    } catch (err: unknown) {
+      const msg = `余额同步失败: ${String(err)}`;
+      setMessage(msg);
+      logToRust("error", msg);
+    }
+  }
+
   return {
     saveAccounts,
     quickSetup,
     addAccount,
     testConnection,
     syncModels,
+    syncBalance,
     updateAccount,
     removeAccount,
     getChannelName,

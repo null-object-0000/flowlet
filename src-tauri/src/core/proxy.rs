@@ -615,9 +615,14 @@ async fn forward_request(
                 if status == reqwest::StatusCode::UNAUTHORIZED {
                     let message = "upstream returned 401; API Key may be invalid";
                     let _ = storage.update_account_last_error(&account.id, message);
+                    // 401 表示 API Key 无效：标记账号凭证状态，后续请求自动排除该账号。
+                    // 当前请求不 fallback，直接返回 401。
+                    let _ = storage.mark_account_credential_invalid(&account.id);
                     if let Ok(mut shared_accounts) = state.shared.accounts.lock() {
                         if let Some(shared_account) = shared_accounts.iter_mut().find(|item| item.id == account.id) {
                             shared_account.last_error = Some(message.to_string());
+                            shared_account.credential_status =
+                                crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
                         }
                     }
                 }

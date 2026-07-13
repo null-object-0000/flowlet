@@ -348,6 +348,13 @@ impl ChannelPreset {
 
 // ─── Channel Account ─────────────────────────────────────────────────────────
 
+/// 账号凭证状态：healthy 表示可参与路由；invalid_key 表示上游最近返回 401，
+/// 应从候选池中排除，直到用户修改 API Key 或测试连接成功。
+pub type AccountCredentialStatus = String;
+
+pub const ACCOUNT_CREDENTIAL_HEALTHY: &str = "healthy";
+pub const ACCOUNT_CREDENTIAL_INVALID_KEY: &str = "invalid_key";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelAccount {
     pub id: String,
@@ -360,6 +367,7 @@ pub struct ChannelAccount {
     pub base_url_override: Option<String>,
     pub last_used_at: Option<String>,
     pub last_error: Option<String>,
+    pub credential_status: AccountCredentialStatus,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -377,6 +385,7 @@ impl Default for ChannelAccount {
             base_url_override: None,
             last_used_at: None,
             last_error: None,
+            credential_status: ACCOUNT_CREDENTIAL_HEALTHY.to_string(),
             created_at: String::new(),
             updated_at: String::new(),
         }

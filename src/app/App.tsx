@@ -281,6 +281,7 @@ export default function App() {
             onCopyModel={(model) => void copy(model, model + " 已复制")}
             onTestModel={(model) => void testModel(model)}
             onToggleAccount={(accountId, enabled) => void toggleAccountEnabled(accountId, enabled)}
+            onOpenAccounts={() => setView("accounts")}
             getChannelName={getChannelName}
             routeRules={routeRules}
             onAddRouteRule={addRouteRule}

@@ -66,7 +66,7 @@ pub(super) fn build_model_list_response(
     let entries = collect_model_entries(routes, accounts, channels, protocol);
 
     match protocol {
-        ProtocolType::OpenAi => build_openai_model_list(&entries, accounts, channels),
+        ProtocolType::OpenAi => build_openai_model_list(&entries),
         ProtocolType::Anthropic => build_anthropic_model_list(&entries),
     }
 }
@@ -121,28 +121,9 @@ fn collect_model_entries(
     result
 }
 
-fn build_openai_model_list(
-    entries: &[(String, String, String)],
-    accounts: &[ChannelAccount],
-    channels: &[ChannelPreset],
-) -> Response {
-    // owned_by 优先使用 channel vendor（如 longcat/deepseek），其次 channel name。
-    // 不用 account name 是因为它含用户私有信息，不应暴露给客户端。
-    let channel_vendor: std::collections::HashMap<&str, &str> = channels
-        .iter()
-        .map(|c| (c.id.as_str(), c.vendor.as_str()))
-        .collect();
-    let channel_name: std::collections::HashMap<&str, &str> = channels
-        .iter()
-        .map(|c| (c.id.as_str(), c.name.as_str()))
-        .collect();
-    let account_channel: std::collections::HashMap<&str, &str> = accounts
-        .iter()
-        .map(|a| (a.id.as_str(), a.channel_id.as_str()))
-        .collect();
-
-    // 先尝试从 upstream_model 取 owned_by（由 resolve_small_model 之类的逻辑前置），
-    // 没有则回退到 channel vendor/name。
+fn build_openai_model_list(entries: &[(String, String, String)]) -> Response {
+    // Flowlet Pro / Flash 是 Flowlet 对外提供的统一虚拟模型，底层会路由到不同渠道，
+    // 因此 owned_by 固定为 "flowlet"，不随底层候选的渠道变化。
     let parse_unix_seconds = |raw: &str| -> i64 {
         if raw.is_empty() {
             return 0;
@@ -157,14 +138,8 @@ fn build_openai_model_list(
 
     let data: Vec<serde_json::Value> = entries
         .iter()
-        .map(|(id, account_id, created_at)| {
-            let channel_id = account_channel.get(account_id.as_str()).copied();
-            let owned_by = channel_id
-                .and_then(|cid| channel_vendor.get(cid).copied())
-                .filter(|v| !v.is_empty())
-                .or_else(|| channel_id.and_then(|cid| channel_name.get(cid).copied()))
-                .filter(|v| !v.is_empty())
-                .unwrap_or("flowlet");
+        .map(|(id, _account_id, created_at)| {
+            let owned_by = "flowlet";
             serde_json::json!({
                 "id": id,
                 "object": "model",

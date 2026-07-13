@@ -43,6 +43,8 @@ export type ChannelAccount = {
   base_url_override?: string | null;
   last_used_at?: string;
   last_error?: string;
+  // "healthy" 表示可参与路由；"invalid_key" 表示上游最近返回 401，应从候选池排除
+  credential_status?: "healthy" | "invalid_key";
   created_at: string;
   updated_at: string;
 };
@@ -281,13 +283,9 @@ const defaultFlowletTierByModel: Record<string, FlowletTier> = {
   "longcat-2.0": "pro",
 };
 
-export function getFlowletTier(channelId: string, model: string): FlowletTier {
+export function getFlowletTier(_channelId: string, model: string): FlowletTier {
   const normalized = model.trim().toLowerCase();
-  const exact = defaultFlowletTierByModel[normalized];
-  if (exact) return exact;
-  if (channelId === "deepseek" && normalized.includes("flash")) return "flash";
-  if (normalized.includes("pro") || (channelId === "longcat" && normalized === "longcat-2.0")) return "pro";
-  return "none";
+  return defaultFlowletTierByModel[normalized] ?? "none";
 }
 
 export function flowletModelIdForTier(tier: FlowletTier): string | null {

@@ -389,9 +389,16 @@ pub(super) async fn query_balance(
     .await
     .map_err(|e| format!("任务执行失败: {e}"))?;
 
-    // 更新账号最后错误信息
+    // 更新账号凭证状态与最后错误信息。
+    // 测试连接成功 → 重置为 healthy；若返回 401 则标记为 invalid_key。
+    if result.error.is_none() {
+        let _ = state.storage.mark_account_credential_healthy(&account_id);
+    }
     if let Some(ref err) = result.error {
         let _ = state.storage.update_account_last_error(&account_id, err);
+        if err.contains("HTTP 401") || err.contains("401") {
+            let _ = state.storage.mark_account_credential_invalid(&account_id);
+        }
     } else {
         let now = chrono::Utc::now().to_rfc3339();
         let snapshot = AccountBalanceSnapshot {

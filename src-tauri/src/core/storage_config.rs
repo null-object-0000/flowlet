@@ -1,7 +1,8 @@
 use super::{parse_auth_strategy, Storage, StorageError};
 use crate::core::config::{
     ChannelAccount, ChannelModel, ChannelPreset, ClientConfig, ModelPrice, ProtocolType,
-    RouteCandidate, RouteRule, VirtualModel,
+    RouteCandidate, RouteRule, VirtualModel, ACCOUNT_CREDENTIAL_HEALTHY,
+    ACCOUNT_CREDENTIAL_INVALID_KEY,
 };
 use rusqlite::params;
 
@@ -106,14 +107,40 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let tx = connection.transaction()?;
+
+        // 读取已有的 API Key，用于检测用户是否修改了密钥。
+        let mut prev_stmt =
+            tx.prepare("SELECT id, api_key, credential_status FROM channel_accounts")?;
+        let prev = prev_stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })?
+            .filter_map(|row| row.ok())
+            .collect::<Vec<(String, String, String)>>();
+        let previous: std::collections::HashMap<String, (String, String)> = prev
+            .into_iter()
+            .map(|(id, key, status)| (id, (key, status)))
+            .collect();
+        drop(prev_stmt);
+
         tx.execute("DELETE FROM channel_accounts", [])?;
         for account in accounts {
+            // 用户修改 API Key 后，原 invalid_key 状态不再适用，重置为 healthy 并清除错误。
+            let (credential_status, last_error) = match previous.get(&account.id) {
+                Some((old_key, old_status))
+                    if old_key == account.api_key.as_str()
+                        && old_status == ACCOUNT_CREDENTIAL_INVALID_KEY =>
+                {
+                    (ACCOUNT_CREDENTIAL_INVALID_KEY.to_string(), account.last_error.clone())
+                }
+                _ => (ACCOUNT_CREDENTIAL_HEALTHY.to_string(), None),
+            };
             tx.execute(
                 r#"
                 INSERT INTO channel_accounts (
                     id, channel_id, name, api_key, enabled, priority,
-                    remark, base_url_override, last_used_at, last_error, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                    remark, base_url_override, last_used_at, last_error, credential_status, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                 "#,
                 params![
                     account.id,
@@ -125,7 +152,8 @@ impl Storage {
                     account.remark,
                     account.base_url_override,
                     account.last_used_at,
-                    account.last_error,
+                    last_error,
+                    credential_status,
                     account.created_at,
                     account.updated_at,
                 ],
@@ -142,7 +170,7 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT id, channel_id, name, api_key, enabled, priority,
-                    remark, base_url_override, last_used_at, last_error, created_at, updated_at
+                    remark, base_url_override, last_used_at, last_error, credential_status, created_at, updated_at
              FROM channel_accounts ORDER BY channel_id ASC, priority ASC, id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -157,8 +185,9 @@ impl Storage {
                 base_url_override: row.get(7)?,
                 last_used_at: row.get(8)?,
                 last_error: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
+                credential_status: row.get::<_, String>(10).unwrap_or_else(|_| "healthy".to_string()),
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?;
         let mut accounts = Vec::new();
@@ -194,6 +223,41 @@ impl Storage {
             params![account_id, error],
         )?;
         Ok(())
+    }
+
+    /// 更新账号凭证状态。返回 true 表示账号存在且已更新。
+    pub fn update_account_credential_status(
+        &self,
+        account_id: &str,
+        credential_status: &str,
+    ) -> Result<bool, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let changed = connection.execute(
+            "UPDATE channel_accounts SET credential_status = ?2, updated_at = datetime('now') WHERE id = ?1",
+            params![account_id, credential_status],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// 重置账号凭证状态为 healthy（修改 API Key 或测试连接成功时调用）。
+    pub fn mark_account_credential_healthy(&self, account_id: &str) -> Result<(), StorageError> {
+        self.update_account_credential_status(
+            account_id,
+            crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY,
+        )
+        .map(|_| ())
+    }
+
+    /// 将账号标记为 invalid_key（上游 401 或测试连接认证失败时调用）。
+    pub fn mark_account_credential_invalid(&self, account_id: &str) -> Result<(), StorageError> {
+        self.update_account_credential_status(
+            account_id,
+            crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY,
+        )
+        .map(|_| ())
     }
 
     // ─── Channel Models ──────────────────────────────────────────────────────

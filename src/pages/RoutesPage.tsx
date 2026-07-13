@@ -25,6 +25,7 @@ type RoutesPageProps = {
   onCopyModel: (model: string) => void;
   onTestModel: (model: string) => void;
   onToggleAccount: (accountId: string, enabled: boolean) => void;
+  onOpenAccounts?: () => void;
   getChannelName: (channelId: string) => string;
   routeRules: RouteRule[];
   onAddRouteRule: () => void;
@@ -50,6 +51,7 @@ export function RoutesPage({
   onCopyModel,
   onTestModel,
   onToggleAccount,
+  onOpenAccounts,
   getChannelName,
   routeRules,
   onAddRouteRule,
@@ -69,6 +71,7 @@ export function RoutesPage({
         onCopyModel={onCopyModel}
         onTestModel={onTestModel}
         onToggleAccount={onToggleAccount}
+        onOpenAccounts={onOpenAccounts}
       />
       <details className="advanced-routing-section">
         <summary>高级路由设置</summary>

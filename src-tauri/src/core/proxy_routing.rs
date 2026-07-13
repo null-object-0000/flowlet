@@ -1,5 +1,6 @@
 use crate::core::config::{
     ChannelAccount, ChannelPreset, ProtocolType, RequestLogInput, RouteCandidate, RouteRule,
+    ACCOUNT_CREDENTIAL_HEALTHY,
 };
 pub(super) fn match_candidates(
     routes: &[RouteCandidate],
@@ -37,7 +38,11 @@ pub(super) fn match_candidates(
 
     let account_by_id: std::collections::HashMap<&str, &ChannelAccount> = accounts
         .iter()
-        .filter(|account| account.enabled && !account.api_key.trim().is_empty())
+        .filter(|account| {
+            account.enabled
+                && !account.api_key.trim().is_empty()
+                && account.credential_status.as_str() == ACCOUNT_CREDENTIAL_HEALTHY
+        })
         .map(|account| (account.id.as_str(), account))
         .collect();
     let dual_protocol_channels: std::collections::HashSet<&str> = channels

@@ -1,6 +1,13 @@
 import React from "react";
-import { Button, PasswordInput, Select, Switch, TextInput } from "@mantine/core";
+import { Badge, Button, PasswordInput, Select, Switch, TextInput } from "@mantine/core";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../../domain";
+
+// 账号状态文案：结合 enabled 与 credential_status 展示给用户的状态。
+function accountStatusLabel(account: ChannelAccount): { label: string; color: "green" | "red" | "gray" } {
+  if (!account.enabled) return { label: "已停用", color: "gray" };
+  if (account.credential_status === "invalid_key") return { label: "API Key 无效", color: "red" };
+  return { label: "正常", color: "green" };
+}
 
 type AccountRowProps = {
   account: ChannelAccount;
@@ -55,6 +62,7 @@ export function AccountRow({
         onChange={(e) => onUpdate(index, { api_key: e.target.value })}
       />
       <Switch label="启用" checked={account.enabled} onChange={(e) => onUpdate(index, { enabled: e.currentTarget.checked })} />
+      <Badge variant="light" color={accountStatusLabel(account).color} size="sm">{accountStatusLabel(account).label}</Badge>
       <div className="account-actions">
         {summary ? <span className="account-snapshot">{summary}</span> : null}
         {account.channel_id === "deepseek" ? (
@@ -94,6 +102,14 @@ export function AccountRow({
             </Button>
           ) : null}
         </div>
+      ) : null}
+      {account.credential_status === "invalid_key" ? (
+        <p className="account-hint account-hint-error">
+          该账号最近返回 401，请更新 API Key 后重新测试。
+        </p>
+      ) : null}
+      {!account.enabled ? (
+        <p className="account-hint">关闭后，该账号将退出所有 Flowlet 模型服务和路由。</p>
       ) : null}
     </div>
   );

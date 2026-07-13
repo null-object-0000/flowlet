@@ -170,17 +170,18 @@ impl Storage {
             );
 
             CREATE TABLE IF NOT EXISTS channel_accounts (
-                id           TEXT PRIMARY KEY,
-                channel_id   TEXT NOT NULL,
-                name         TEXT NOT NULL,
-                api_key      TEXT NOT NULL,
-                enabled      INTEGER NOT NULL DEFAULT 1,
-                priority     INTEGER NOT NULL DEFAULT 0,
-                remark       TEXT,
-                last_used_at TEXT,
-                last_error   TEXT,
-                created_at   TEXT NOT NULL,
-                updated_at   TEXT NOT NULL
+                id                TEXT PRIMARY KEY,
+                channel_id        TEXT NOT NULL,
+                name              TEXT NOT NULL,
+                api_key           TEXT NOT NULL,
+                enabled           INTEGER NOT NULL DEFAULT 1,
+                priority          INTEGER NOT NULL DEFAULT 0,
+                remark            TEXT,
+                last_used_at      TEXT,
+                last_error        TEXT,
+                credential_status TEXT NOT NULL DEFAULT 'healthy',
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS channel_models (
@@ -373,6 +374,12 @@ impl Storage {
             "virtual_model_routes",
             "upstream_model",
             "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "credential_status",
+            "TEXT NOT NULL DEFAULT 'healthy'",
         )?;
         add_column_if_missing(
             &connection,

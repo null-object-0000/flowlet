@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Button, Group, Switch, Text } from "@mantine/core";
-import { IconArrowDown, IconArrowUp, IconCopy, IconPlayerPlay } from "@tabler/icons-react";
+import { IconArrowDown, IconArrowUp, IconCopy, IconPlayerPlay, IconSettings } from "@tabler/icons-react";
 import { Actions, Panel, PanelHeader } from "../../components/ui";
 import { ChannelAccount, RouteCandidate, flowletPublicModels } from "../../domain";
 
@@ -12,7 +12,18 @@ type ModelServicesPanelProps = {
   onCopyModel: (model: string) => void;
   onTestModel: (model: string) => void;
   onToggleAccount: (accountId: string, enabled: boolean) => void;
+  onOpenAccounts?: () => void;
 };
+
+// 账号凭证状态 → 展示文案（用于模型详情中的只读状态）。
+function credentialStatusLabel(status: ChannelAccount["credential_status"]): string {
+  switch (status) {
+    case "invalid_key":
+      return "API Key 无效";
+    default:
+      return "已启用";
+  }
+}
 
 const TIERS = [flowletPublicModels.pro, flowletPublicModels.flash];
 
@@ -25,9 +36,12 @@ export function ModelServicesPanel({
   onCopyModel,
   onTestModel,
   onToggleAccount,
+  onOpenAccounts,
 }: ModelServicesPanelProps) {
   const availableAccountIds = new Set(
-    accounts.filter((account) => account.enabled && account.api_key.trim()).map((account) => account.id)
+    accounts
+      .filter((account) => account.enabled && account.api_key.trim() && account.credential_status !== "invalid_key")
+      .map((account) => account.id)
   );
 
   function updateRoutes(indexes: number[], patch: Partial<RouteCandidate>) {
@@ -94,8 +108,8 @@ export function ModelServicesPanel({
                 <Button variant="light" leftSection={<IconPlayerPlay size={15} />} disabled={!isAvailable} onClick={() => onTestModel(tier.id)}>测试请求</Button>
               </Group>
 
-              <details className="flowlet-model-details" open>
-                <summary>底层模型</summary>
+              <details className="flowlet-model-details">
+                <summary>查看模型池</summary>
                 {underlying.length === 0 ? <Text size="sm" c="dimmed">接入支持双协议的渠道账号后自动生成。</Text> : null}
                 {underlying.map((item, modelIndex) => {
                   const entries = tierRouteEntries.filter(({ route }) => route.channel_id === item.channelId && route.upstream_model === item.model);
@@ -112,10 +126,9 @@ export function ModelServicesPanel({
                         <span>{modelAccounts.size} 个可用账号 · {enabled ? "可用" : "已停用"}</span>
                         <div className="flowlet-related-accounts">
                           {relatedAccounts.map((account) => (
-                            <label key={account.id}>
-                              <span>{account.name}</span>
-                              <Switch size="xs" checked={account.enabled} onChange={(event) => onToggleAccount(account.id, event.currentTarget.checked)} aria-label={`${account.name} 启用状态`} />
-                            </label>
+                            <span key={account.id} className="flowlet-related-account">
+                              {account.name} · {account.enabled ? credentialStatusLabel(account.credential_status) : "已停用"}
+                            </span>
                           ))}
                         </div>
                       </div>
@@ -137,6 +150,11 @@ export function ModelServicesPanel({
                     </div>
                   );
                 })}
+                <div className="flowlet-model-details-footer">
+                  <Button variant="subtle" size="xs" leftSection={<IconSettings size={14} />} onClick={onOpenAccounts}>
+                    管理渠道账号
+                  </Button>
+                </div>
               </details>
             </section>
           );

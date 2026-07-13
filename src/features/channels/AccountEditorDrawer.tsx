@@ -1,7 +1,7 @@
 import React from "react";
 import { Button, Drawer, PasswordInput, Switch, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset, createAccount } from "../../domain";
+import { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount, ChannelPreset, createAccount } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
 
 export type AccountEditorRequest =
@@ -11,6 +11,10 @@ export type AccountEditorRequest =
 type ResourceDraft = {
   balance: string;
   currency: string;
+  tokenTotal: string;
+  tokenUsed: string;
+  tokenRemaining: string;
+  tokenExpire: string;
 };
 
 type AccountEditorDrawerProps = {
@@ -24,10 +28,22 @@ type AccountEditorDrawerProps = {
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
 };
 
+function toDateInput(value?: string | null): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
 function snapshotDraft(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): ResourceDraft {
   return {
     balance: snapshot?.balance?.toString() ?? "",
     currency: snapshot?.currency ?? (account.channel_id === "longcat" ? "USD" : "CNY"),
+    tokenTotal: snapshot?.token_pack_total?.toString() ?? "",
+    tokenUsed: snapshot?.token_pack_used?.toString() ?? "",
+    tokenRemaining: snapshot?.token_pack_remaining?.toString() ?? "",
+    tokenExpire: toDateInput(snapshot?.token_pack_expire_at),
   };
 }
 
@@ -35,6 +51,14 @@ function optionalNumber(value: string): number | null {
   if (!value.trim()) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatTokens(value: number | null): string {
+  return value == null ? "-" : Math.max(0, value).toLocaleString("en-US");
+}
+
+function defaultResourceMode(channelId: string): AccountResourceMode {
+  return channelId === "longcat" ? "token_pack" : "pay_as_you_go";
 }
 
 function createDraft(request: AccountEditorRequest, accounts: ChannelAccount[], channels: ChannelPreset[]): ChannelAccount {
@@ -61,6 +85,13 @@ export function AccountEditorDrawer({
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const channel = channels.find((item) => item.id === draft.channel_id);
+  const resourceMode = draft.resource_mode ?? defaultResourceMode(draft.channel_id);
+  const tokenTotal = optionalNumber(resource.tokenTotal);
+  const tokenUsed = optionalNumber(resource.tokenUsed);
+  const tokenRemaining = tokenTotal != null && tokenUsed != null
+    ? Math.max(0, tokenTotal - tokenUsed)
+    : optionalNumber(resource.tokenRemaining);
+  const autoSyncBalance = channel?.supports_balance_query === true;
 
   function updateDraft(patch: Partial<ChannelAccount>) {
     setDraft((current) => ({ ...current, ...patch, updated_at: new Date().toISOString() }));
@@ -70,7 +101,7 @@ export function AccountEditorDrawer({
     const nextChannel = channels.find((item) => item.id === channelId);
     updateDraft({
       channel_id: channelId,
-      resource_mode: "pay_as_you_go",
+      resource_mode: defaultResourceMode(channelId),
       name: request.mode === "create" ? `${nextChannel?.name ?? "渠道"} 主账号` : draft.name,
       base_url_override: null,
     });
@@ -94,20 +125,27 @@ export function AccountEditorDrawer({
     setSaving(true);
     try {
       await onSaveAccounts(nextAccounts);
-      const hasResource = Boolean(resource.balance.trim());
-      if (hasResource) {
-        onAddBalanceSnapshot({
-          account_id: nextDraft.id,
-          balance: optionalNumber(resource.balance),
-          currency: resource.currency.trim() || null,
-          token_pack_total: null,
-          token_pack_used: null,
-          token_pack_remaining: null,
-          token_pack_expire_at: null,
-          source: "manual",
-          synced_at: new Date().toISOString(),
-          remark: null,
-        });
+      // 支持余额自动同步的渠道（DeepSeek）不需要手动快照，保存时已自动同步
+      if (!autoSyncBalance) {
+        const hasResource = resourceMode === "token_pack"
+          ? Boolean(resource.tokenTotal.trim() || resource.tokenUsed.trim() || resource.tokenExpire.trim())
+          : Boolean(resource.balance.trim());
+        if (hasResource) {
+          onAddBalanceSnapshot({
+            account_id: nextDraft.id,
+            balance: resourceMode === "pay_as_you_go" ? optionalNumber(resource.balance) : null,
+            currency: resourceMode === "pay_as_you_go" ? resource.currency.trim() || null : null,
+            token_pack_total: resourceMode === "token_pack" ? tokenTotal : null,
+            token_pack_used: resourceMode === "token_pack" ? tokenUsed : null,
+            token_pack_remaining: resourceMode === "token_pack" ? tokenRemaining : null,
+            token_pack_expire_at: resourceMode === "token_pack" && resource.tokenExpire
+              ? new Date(`${resource.tokenExpire}T00:00:00`).toISOString()
+              : null,
+            source: "manual",
+            synced_at: new Date().toISOString(),
+            remark: null,
+          });
+        }
       }
       onClose();
     } finally {
@@ -171,24 +209,17 @@ export function AccountEditorDrawer({
           </div>
         </section>
 
-        {channel?.supports_balance_query !== true ? (
-          <section className="account-editor-section resource">
+        <section className="account-editor-section resource">
+          {autoSyncBalance ? (
             <div className="account-section-heading">
-              <div><h3>资源模式</h3><small>按量付费，手动维护余额信息</small></div>
+              <div><h3>资源模式</h3><small>按量付费，余额自动同步</small></div>
             </div>
-            <div className="account-resource-details payg">
-              <div className="account-resource-details-heading"><strong>按量付费信息</strong><span className="sync-badge">手动维护</span></div>
-              <div className="account-resource-grid">
-                <label>账户余额<TextInput type="number" min="0" step="0.01" placeholder="手动填写" value={resource.balance} onChange={(event) => setResource({ ...resource, balance: event.target.value })} /></label>
-                <label>货币<TextInput value={resource.currency} onChange={(event) => setResource({ ...resource, currency: event.target.value })} /></label>
-              </div>
-            </div>
-          </section>
-        ) : (
-          <section className="account-editor-section resource">
+          ) : (
             <div className="account-section-heading">
-              <div><h3>资源模式</h3><small>按量付费，保存后自动同步余额</small></div>
+              <div><h3>资源模式</h3><small>一个渠道仅支持一种资源模式，保存后按所选模式维护信息</small></div>
             </div>
+          )}
+          {autoSyncBalance ? (
             <div className="account-resource-details payg">
               <div className="account-resource-details-heading"><strong>按量付费信息</strong><span className="sync-badge">自动同步</span></div>
               <div className="account-resource-grid">
@@ -196,8 +227,53 @@ export function AccountEditorDrawer({
                 <label>货币<div className="static-field">跟随上游返回</div></label>
               </div>
             </div>
-          </section>
-        )}
+          ) : (
+            <>
+              <div className="account-resource-mode-options">
+                <button
+                  type="button"
+                  className={resourceMode === "token_pack" ? "account-resource-mode selected" : "account-resource-mode"}
+                  aria-pressed={resourceMode === "token_pack"}
+                  onClick={() => updateDraft({ resource_mode: "token_pack" })}
+                >
+                  <i aria-hidden="true" />
+                  <span><strong>Token 资源包</strong><small>预付费，手动维护资源包信息</small></span>
+                </button>
+                <button
+                  type="button"
+                  className={resourceMode === "pay_as_you_go" ? "account-resource-mode selected" : "account-resource-mode"}
+                  aria-pressed={resourceMode === "pay_as_you_go"}
+                  onClick={() => updateDraft({ resource_mode: "pay_as_you_go" })}
+                >
+                  <i aria-hidden="true" />
+                  <span><strong>API 按量付费</strong><small>后付费，手动维护余额</small></span>
+                </button>
+              </div>
+              {resourceMode === "token_pack" ? (
+                <div className="account-resource-details">
+                  <div className="account-resource-details-heading">
+                    <strong>资源包信息（手动维护）</strong>
+                    <span className="sync-badge warn">手动维护</span>
+                  </div>
+                  <div className="account-resource-grid longcat">
+                    <label>资源包总量（Tokens）<TextInput type="number" min="0" value={resource.tokenTotal} onChange={(event) => setResource({ ...resource, tokenTotal: event.target.value })} /></label>
+                    <label>已消耗（Tokens）<TextInput type="number" min="0" value={resource.tokenUsed} onChange={(event) => setResource({ ...resource, tokenUsed: event.target.value })} /></label>
+                    <label className="account-token-remaining">剩余（Tokens）<strong>{formatTokens(tokenRemaining)}</strong></label>
+                    <label className="account-token-expire">到期时间<TextInput type="date" value={resource.tokenExpire} onChange={(event) => setResource({ ...resource, tokenExpire: event.target.value })} /><small>到期后将无法使用，建议及时补充或更新资源包。</small></label>
+                  </div>
+                </div>
+              ) : (
+                <div className="account-resource-details payg">
+                  <div className="account-resource-details-heading"><strong>按量付费信息</strong><span className="sync-badge warn">手动维护</span></div>
+                  <div className="account-resource-grid">
+                    <label>账户余额<TextInput type="number" min="0" step="0.01" placeholder="手动填写" value={resource.balance} onChange={(event) => setResource({ ...resource, balance: event.target.value })} /></label>
+                    <label>货币<TextInput value={resource.currency} onChange={(event) => setResource({ ...resource, currency: event.target.value })} /></label>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </section>
 
         <section className="account-editor-section advanced">
           <button type="button" className="account-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)}>

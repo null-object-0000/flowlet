@@ -398,10 +398,8 @@ pub fn run() {
             let toggle = MenuItem::with_id(app_handle, "toggle", "显示/隐藏", true, None::<&str>)?;
             let start_item =
                 MenuItem::with_id(app_handle, "start_proxy", "重启代理服务", true, None::<&str>)?;
-            let stop_item =
-                MenuItem::with_id(app_handle, "stop_proxy", "暂停代理服务", true, None::<&str>)?;
             let quit = MenuItem::with_id(app_handle, "quit", "退出 Flowlet", true, None::<&str>)?;
-            let menu = Menu::with_items(app_handle, &[&toggle, &start_item, &stop_item, &quit])?;
+            let menu = Menu::with_items(app_handle, &[&toggle, &start_item, &quit])?;
 
             // 创建系统托盘（使用项目 icons/tray.png，保留菜单与点击事件）
             let tray_icon = tauri::include_image!("icons/tray.png");
@@ -412,14 +410,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app: &AppHandle, event| match event.id().as_ref() {
                     "toggle" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            if window.is_visible().unwrap_or(false) {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
+                        toggle_window_to_front(app);
                     }
                     "start_proxy" => {
                         if let Some(state) = app.try_state::<AppState>() {
@@ -433,16 +424,6 @@ pub fn run() {
                                     Ok(()) => update_tray_tooltip(&app_clone, true),
                                     Err(_) => update_tray_tooltip(&app_clone, false),
                                 }
-                            });
-                        }
-                    }
-                    "stop_proxy" => {
-                        if let Some(state) = app.try_state::<AppState>() {
-                            let proxy = state.proxy.clone();
-                            let app_clone = app.clone();
-                            tauri::async_runtime::spawn(async move {
-                                let _ = proxy.stop().await;
-                                update_tray_tooltip(&app_clone, false);
                             });
                         }
                     }
@@ -465,15 +446,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            if window.is_visible().unwrap_or(false) {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
+                        toggle_window_to_front(tray.app_handle());
                     }
                 })
                 .build(app_handle)?;
@@ -537,6 +510,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet 失败");
+}
+
+/// 切换主窗口显示/隐藏。显示时确保窗口被恢复到前台焦点状态。
+/// 仅 show + set_focus 可能无法把窗口带到前台，因此额外做 unminimize
+/// 和短暂置顶再取消的操作覆盖 Windows 等场景。
+fn toggle_window_to_front(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+            return;
+        }
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focus();
+        let _ = window.set_always_on_top(false);
+    }
 }
 
 /// 更新托盘 tooltip 显示代理状态

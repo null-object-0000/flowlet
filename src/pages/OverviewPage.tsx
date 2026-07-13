@@ -464,7 +464,7 @@ export function OverviewPage({
                 {proxyPhase === "running" ? "运行中" : proxyPhase === "starting" ? "正在启动" : proxyPhase === "failed" ? "启动失败" : "已停止"}
               </Badge>
             </Group>
-            <Text className={proxyPhase === "running" ? "overview-state-text running" : proxyPhase === "failed" ? "overview-state-text failed" : "overview-state-text"}>
+            <Text size="sm" className={proxyPhase === "running" ? "overview-state-text running" : proxyPhase === "failed" ? "overview-state-text failed" : "overview-state-text"}>
               {proxyHint}
             </Text>
           </div>

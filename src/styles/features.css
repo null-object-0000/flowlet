@@ -458,14 +458,13 @@
 
 .overview-status-intro {
   display: grid;
-  gap: 26px;
+  gap: 8px;
 }
 
 .overview-state-text {
   margin: 0;
   color: #e58900;
   font-weight: 700;
-  font-size: 16px;
 }
 
 .overview-state-text.running {

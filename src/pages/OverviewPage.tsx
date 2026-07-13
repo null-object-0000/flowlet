@@ -17,10 +17,8 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import {
   IconBrandOpenai,
-  IconCircleCheck,
   IconCircleX,
   IconChevronRight,
   IconCopy,
@@ -214,7 +212,6 @@ export function OverviewPage({
   const [observedStartedAt, setObservedStartedAt] = React.useState<Date | null>(status.running ? new Date() : null);
   const [, forceTick] = React.useState(0);
   const [drawerOpened, setDrawerOpened] = React.useState(false);
-  const [healthChecking, setHealthChecking] = React.useState(false);
 
   // 当后端回传的 running / started_at 状态变化时同步本地显示起点。
   // 仅在后端尚未提供新启动时间时回退为本地「首次观察到 running」的时刻。
@@ -262,43 +259,6 @@ export function OverviewPage({
     },
   ];
 
-  async function checkHealth() {
-    if (healthChecking) return;
-    setHealthChecking(true);
-    // 健康检查独立提示，不走剪贴板写入路径。
-    // 直接复用项目已有的 Mantine notifications 反馈。
-    const timeoutMs = 5000;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(`${baseUrl}/health`, {
-        method: "GET",
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      if (res.ok) {
-        notifications.show({ message: "代理服务健康检查正常", color: "green", autoClose: 2600 });
-      } else {
-        notifications.show({
-          message: `无法访问健康检查接口 (HTTP ${res.status})`,
-          color: "orange",
-          autoClose: 2600,
-        });
-      }
-    } catch (err) {
-      const reason = err instanceof Error && err.name === "AbortError"
-        ? "请求超时"
-        : err instanceof Error ? String(err.message || err) : String(err);
-      notifications.show({
-        message: `无法访问健康检查接口：${reason}`,
-        color: "red",
-        autoClose: 2600,
-      });
-    } finally {
-      window.clearTimeout(timer);
-      setHealthChecking(false);
-    }
-  }
   const proxyHint = proxyPhase === "failed"
     ? `错误原因：${proxyStartError}`
     : proxyPhase === "starting"
@@ -591,18 +551,7 @@ export function OverviewPage({
                 <div className="overview-endpoint-row">
                   <span>健康检查地址</span>
                   <Code className="overview-endpoint-url">{baseUrl}/health</Code>
-                  <Group gap="xs">
-                    <Button variant="default" size="xs" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/health`, "健康检查地址已复制")}>复制</Button>
-                    <Button
-                      variant="light"
-                      size="xs"
-                      loading={healthChecking}
-                      leftSection={healthChecking ? undefined : <IconCircleCheck size={14} />}
-                      onClick={() => void checkHealth()}
-                    >
-                      检测
-                    </Button>
-                  </Group>
+                  <Button variant="default" size="xs" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/health`, "健康检查地址已复制")}>复制</Button>
                 </div>
               </div>
             </Panel>

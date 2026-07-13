@@ -74,20 +74,54 @@ type RequestLogRow = {
 
 type View = "overview" | "provider" | "clients" | "models" | "logs" | "usage";
 
+type ChannelId = "longcat" | "deepseek";
+
+type ChannelPreset = {
+  id: ChannelId;
+  name: string;
+  mark: string;
+  description: string;
+  baseUrl: string;
+  defaultModel: string;
+};
+
 const views: Array<{ id: View; label: string }> = [
   { id: "overview", label: "概览" },
-  { id: "provider", label: "Provider" },
+  { id: "provider", label: "渠道账号" },
   { id: "clients", label: "Client Token" },
   { id: "models", label: "虚拟模型" },
   { id: "logs", label: "请求日志" },
   { id: "usage", label: "用量统计" },
 ];
 
+const channelPresets: ChannelPreset[] = [
+  {
+    id: "longcat",
+    name: "LongCat",
+    mark: "LC",
+    description: "LongCat 大模型服务",
+    baseUrl: "https://api.longcat.chat/openai",
+    defaultModel: "LongCat-2.0",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    mark: "DS",
+    description: "深度求索大模型服务",
+    baseUrl: "https://api.deepseek.com",
+    defaultModel: "deepseek-chat",
+  },
+];
+
+function channelForProvider(provider: ProviderConfig): ChannelPreset {
+  return provider.base_url.includes("deepseek") ? channelPresets[1] : channelPresets[0];
+}
+
 const 默认Provider: ProviderConfig = {
-  name: "OpenAI-compatible Provider",
-  base_url: "https://api.openai.com",
+  name: "LongCat 主账号",
+  base_url: "https://api.longcat.chat/openai",
   api_key: "",
-  default_model: "gpt-4o-mini",
+  default_model: "LongCat-2.0",
   upstream_timeout_seconds: 120,
   enabled: true,
 };
@@ -140,6 +174,8 @@ function App() {
   const [prices, setPrices] = React.useState<ModelPrice[]>([]);
   const [view, setView] = React.useState<View>("overview");
   const [message, setMessage] = React.useState("");
+  const [accountDraft, setAccountDraft] = React.useState<ProviderConfig | null>(null);
+  const [accountMode, setAccountMode] = React.useState<"add" | "edit">("add");
 
   const refreshStatus = React.useCallback(async () => {
     const next = await invoke<ProxyStatus>("proxy_status");
@@ -174,6 +210,36 @@ function App() {
     await invoke("start_proxy");
     await refreshStatus();
     setMessage("本地代理已启动");
+  }
+
+  function openAddAccount() {
+    const preset = channelPresets[0];
+    setAccountMode("add");
+    setAccountDraft({
+      ...默认Provider,
+      name: `${preset.name} 主账号`,
+      base_url: preset.baseUrl,
+      default_model: preset.defaultModel,
+      api_key: "",
+    });
+  }
+
+  function openEditAccount() {
+    setAccountMode("edit");
+    setAccountDraft({ ...provider });
+  }
+
+  async function saveAccount() {
+    if (!accountDraft) return;
+    if (!accountDraft.name.trim() || !accountDraft.api_key.trim()) {
+      setMessage("请填写账号名称和 API Key");
+      return;
+    }
+    await invoke("save_provider", { provider: accountDraft });
+    setProvider(accountDraft);
+    setRoutes((current) => normalizeRoutes(current, accountDraft.default_model));
+    setAccountDraft(null);
+    setMessage(accountMode === "add" ? "渠道账号已添加" : "渠道账号已更新");
   }
 
   async function stopProxy() {
@@ -396,64 +462,50 @@ function App() {
         ) : null}
 
         {view === "provider" ? (
-        <section className="panel">
-          <div className="panel-title">
-            <h3>OpenAI-compatible Provider</h3>
-            <div className="actions">
-              <button onClick={startProxy} disabled={status.running}>
-                启动
-              </button>
-              <button onClick={stopProxy} disabled={!status.running}>
-                停止
-              </button>
-            </div>
-          </div>
-          <div className="form-grid">
-            <label>
-              名称
-              <input
-                value={provider.name}
-                onChange={(event) => setProvider({ ...provider, name: event.target.value })}
-              />
-            </label>
-            <label>
-              Base URL
-              <input
-                value={provider.base_url}
-                onChange={(event) => setProvider({ ...provider, base_url: event.target.value })}
-              />
-            </label>
-            <label>
-              API Key
-              <input
-                type="password"
-                value={provider.api_key}
-                onChange={(event) => setProvider({ ...provider, api_key: event.target.value })}
-              />
-            </label>
-            <label>
-              默认模型
-              <input
-                value={provider.default_model}
-                onChange={(event) => setProvider({ ...provider, default_model: event.target.value })}
-              />
-            </label>
-            <label>
-              上游超时秒数
-              <input
-                type="number"
-                min="1"
-                value={provider.upstream_timeout_seconds}
-                onChange={(event) =>
-                  setProvider({
-                    ...provider,
-                    upstream_timeout_seconds: Math.max(1, Number(event.target.value) || 120),
-                  })
-                }
-              />
-            </label>
-          </div>
-        </section>
+          <>
+            <section className="account-heading">
+              <div>
+                <h2>渠道账号</h2>
+                <p>管理上游渠道账号，用于模型转发</p>
+              </div>
+              <button className="primary-button" onClick={openAddAccount}>＋ 新增账号</button>
+            </section>
+
+            <section className="account-stats">
+              <div className="stat-card">
+                <span>渠道总数</span>
+                <strong>1 <small>个</small></strong>
+              </div>
+              <div className="stat-card">
+                <span>启用中</span>
+                <strong>{provider.enabled ? 1 : 0} <small>个</small></strong>
+              </div>
+              <div className="stat-card stat-wide">
+                <span>当前上游</span>
+                <strong>{channelForProvider(provider).name}</strong>
+              </div>
+            </section>
+
+            <section className="account-table-card">
+              <div className="account-toolbar">
+                <div className="search-box">⌕ <input aria-label="搜索账号" placeholder="搜索账号名称或渠道" /></div>
+                <span>共 1 条</span>
+              </div>
+              <div className="account-table-head">
+                <span>账号名称</span><span>渠道</span><span>默认模型</span><span>状态</span><span>操作</span>
+              </div>
+              <div className="account-table-row">
+                <div className="account-name-cell">
+                  <span className={`channel-logo ${channelForProvider(provider).id}`}>{channelForProvider(provider).mark}</span>
+                  <div><strong>{provider.name}</strong><small>OpenAI-compatible</small></div>
+                </div>
+                <strong>{channelForProvider(provider).name}</strong>
+                <span>{provider.default_model}</span>
+                <span className={provider.enabled ? "enabled-pill" : "disabled-pill"}>{provider.enabled ? "启用" : "已停用"}</span>
+                <button className="text-button" onClick={openEditAccount}>编辑</button>
+              </div>
+            </section>
+          </>
         ) : null}
 
         {view === "models" ? (
@@ -483,7 +535,7 @@ function App() {
         </section>
         ) : null}
 
-        {view === "provider" ? (
+        {view === "models" ? (
         <section className="panel">
           <div className="panel-title">
             <h3>模型价格表</h3>
@@ -648,7 +700,115 @@ function App() {
 
         {message ? <div className="toast">{message}</div> : null}
       </section>
+
+      {accountDraft ? (
+        <AccountDrawer
+          mode={accountMode}
+          value={accountDraft}
+          onChange={setAccountDraft}
+          onClose={() => setAccountDraft(null)}
+          onSave={saveAccount}
+          onTest={() => setMessage("配置格式正确，保存并启动代理后即可验证连接")}
+        />
+      ) : null}
     </main>
+  );
+}
+
+type AccountDrawerProps = {
+  mode: "add" | "edit";
+  value: ProviderConfig;
+  onChange: (value: ProviderConfig) => void;
+  onClose: () => void;
+  onSave: () => void;
+  onTest: () => void;
+};
+
+function AccountDrawer({ mode, value, onChange, onClose, onSave, onTest }: AccountDrawerProps) {
+  const [showKey, setShowKey] = React.useState(false);
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
+  const activeChannel = channelForProvider(value);
+
+  function selectChannel(preset: ChannelPreset) {
+    onChange({
+      ...value,
+      name: mode === "add" ? `${preset.name} 主账号` : value.name,
+      base_url: preset.baseUrl,
+      default_model: preset.defaultModel,
+    });
+  }
+
+  return (
+    <div className="drawer-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <aside className="account-drawer" role="dialog" aria-modal="true" aria-labelledby="account-drawer-title">
+        <header className="drawer-header">
+          <div>
+            <h2 id="account-drawer-title">{mode === "add" ? "新增渠道账号" : "编辑渠道账号"}</h2>
+            <p>{mode === "add" ? "添加 LongCat 或 DeepSeek 账号，用于上游模型转发" : `更新 ${value.name} 的连接配置`}</p>
+          </div>
+          <button className="close-button" aria-label="关闭" onClick={onClose}>×</button>
+        </header>
+
+        <div className="drawer-body">
+          <section className="form-section">
+            <h3>基础信息</h3>
+            <label>选择渠道</label>
+            <div className="channel-options">
+              {channelPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  className={activeChannel.id === preset.id ? "channel-option selected" : "channel-option"}
+                  onClick={() => selectChannel(preset)}
+                >
+                  <span className={`channel-logo ${preset.id}`}>{preset.mark}</span>
+                  <span><strong>{preset.name}</strong><small>{preset.description}</small></span>
+                  <i>{activeChannel.id === preset.id ? "✓" : ""}</i>
+                </button>
+              ))}
+            </div>
+
+            <label htmlFor="account-name">账号名称</label>
+            <div className="input-with-count">
+              <input id="account-name" maxLength={50} value={value.name} onChange={(event) => onChange({ ...value, name: event.target.value })} />
+              <span>{value.name.length} / 50</span>
+            </div>
+
+            <label htmlFor="api-key">API Key</label>
+            <div className="secret-input">
+              <input id="api-key" type={showKey ? "text" : "password"} placeholder="请输入渠道 API Key" value={value.api_key} onChange={(event) => onChange({ ...value, api_key: event.target.value })} />
+              <button onClick={() => setShowKey((current) => !current)}>{showKey ? "隐藏" : "显示"}</button>
+              <button onClick={() => navigator.clipboard.readText().then((text) => onChange({ ...value, api_key: text }))}>粘贴</button>
+            </div>
+
+            <div className="switch-row">
+              <div><strong>启用状态</strong><small>停用后，该账号不会参与请求转发</small></div>
+              <button className={value.enabled ? "switch on" : "switch"} role="switch" aria-checked={value.enabled} onClick={() => onChange({ ...value, enabled: !value.enabled })}><span /></button>
+              <span>{value.enabled ? "已启用" : "已停用"}</span>
+            </div>
+          </section>
+
+          <section className="advanced-section">
+            <button className="advanced-toggle" onClick={() => setShowAdvanced((current) => !current)}>
+              <span><strong>高级设置</strong><small>自定义连接地址、模型和超时时间</small></span>
+              <b>{showAdvanced ? "⌃" : "⌄"}</b>
+            </button>
+            {showAdvanced ? (
+              <div className="advanced-fields">
+                <label>Base URL<input value={value.base_url} onChange={(event) => onChange({ ...value, base_url: event.target.value })} /></label>
+                <label>默认模型<input value={value.default_model} onChange={(event) => onChange({ ...value, default_model: event.target.value })} /></label>
+                <label>上游超时（秒）<input type="number" min="1" value={value.upstream_timeout_seconds} onChange={(event) => onChange({ ...value, upstream_timeout_seconds: Math.max(1, Number(event.target.value) || 120) })} /></label>
+              </div>
+            ) : null}
+          </section>
+        </div>
+
+        <footer className="drawer-footer">
+          <button onClick={onClose}>取消</button>
+          <button onClick={onTest}>⌁ 测试连接</button>
+          <button className="primary-button" onClick={onSave}>{mode === "add" ? "保存账号" : "保存修改"}</button>
+        </footer>
+      </aside>
+    </div>
   );
 }
 

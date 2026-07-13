@@ -27,11 +27,11 @@ pub struct ProviderConfig {
 impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
-            name: "OpenAI-compatible Provider".to_string(),
-            base_url: "https://api.openai.com".to_string(),
+            name: "LongCat 主账号".to_string(),
+            base_url: "https://api.longcat.chat/openai".to_string(),
             api_key: String::new(),
             api_key_storage: SecretStorage::Plaintext,
-            default_model: "gpt-4o-mini".to_string(),
+            default_model: "LongCat-2.0".to_string(),
             upstream_timeout_seconds: default_upstream_timeout_seconds(),
             enabled: true,
         }

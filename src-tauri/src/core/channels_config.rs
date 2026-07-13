@@ -78,18 +78,43 @@ pub struct ChannelsConfig {
 }
 
 impl ChannelsConfig {
-    /// 从 exe 目录加载 channels.json。文件必须存在，不存在则报错。
+    /// 加载 channels.json。
+    /// 搜索顺序：exe 目录 → exe 目录的上两级（dev 模式：target/debug/ → 项目根目录）
     pub fn load_from_exe_dir() -> Result<Self, String> {
         let exe_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|d| d.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."));
 
+        // 尝试 exe 目录（bundle.resources 复制后的位置）
         let config_path = exe_dir.join("channels.json");
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("读取渠道配置文件失败 ({}): {}", config_path.display(), e))?;
+        if let Ok(content) = std::fs::read_to_string(&config_path) {
+            return Self::parse(&content);
+        }
 
-        Self::parse(&content)
+        // 尝试向上两级（dev 模式：target/debug/ → 项目根目录）
+        let project_root = exe_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("channels.json"));
+        if let Some(path) = project_root {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                return Self::parse(&content);
+            }
+        }
+
+        // 最后尝试项目根目录（通过 CARGO_MANIFEST_DIR 环境变量）
+        if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+            let path = PathBuf::from(manifest_dir).join("channels.json");
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                return Self::parse(&content);
+            }
+        }
+
+        Err(format!(
+            "找不到 channels.json（已搜索: exe 目录 {:?}, 项目根目录）",
+            exe_dir.display()
+        ))
     }
 
     /// 从字符串解析配置

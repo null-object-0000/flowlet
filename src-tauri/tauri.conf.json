@@ -36,7 +36,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../config.json"
+      "../config.json",
+      "../channels.json"
     ]
   }
 }

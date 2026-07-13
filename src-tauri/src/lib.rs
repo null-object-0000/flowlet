@@ -464,6 +464,7 @@ pub fn run() {
             commands::start_proxy,
             commands::stop_proxy,
             commands::proxy_status,
+            commands::test_connection,
             commands::get_proxy_bind_config,
             commands::set_proxy_bind_config,
             commands::list_channel_presets,

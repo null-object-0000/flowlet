@@ -43,6 +43,49 @@ pub struct DeepSeekModelEntry {
     owned_by: Option<String>,
 }
 
+/// 测试渠道连接：仅验证 API Key 是否有效，不做余额读写。
+/// 通过访问模型列表端点实现轻量级鉴权验证。
+pub async fn test_channel_connection(account: &ChannelAccount) -> Result<(), String> {
+    if account.api_key.trim().is_empty() {
+        return Err("API Key 未配置".to_string());
+    }
+
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("创建 HTTP 客户端失败: {err}"))?;
+
+    // 根据渠道选择对应的轻量端点进行鉴权测试
+    let (url, auth_header) = match account.channel_id.as_str() {
+        "deepseek" => (
+            "https://api.deepseek.com/models".to_string(),
+            format!("Bearer {}", account.api_key.trim()),
+        ),
+        "longcat" => (
+            "https://api.longcat.chat/openai/v1/models".to_string(),
+            format!("Bearer {}", account.api_key.trim()),
+        ),
+        _ => return Err(format!("不支持测试连接的渠道: {}", account.channel_id)),
+    };
+
+    let response = client
+        .get(&url)
+        .header("Authorization", auth_header)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|err| format!("请求失败: {err}"))?;
+
+    let status = response.status();
+    if status.is_success() {
+        Ok(())
+    } else if status.as_u16() == 401 {
+        Err("API Key 无效 (HTTP 401)".to_string())
+    } else {
+        Err(format!("连接异常 (HTTP {})", status.as_u16()))
+    }
+}
+
 /// 查询 DeepSeek 余额
 pub async fn query_deepseek_balance(account: &ChannelAccount) -> BalanceQueryResult {
     if account.api_key.trim().is_empty() {

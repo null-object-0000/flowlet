@@ -6,7 +6,9 @@ use crate::core::config::{
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
-use crate::core::sync::{query_deepseek_balance, sync_deepseek_models, sync_longcat_models};
+use crate::core::sync::{
+    query_deepseek_balance, sync_deepseek_models, sync_longcat_models, test_channel_connection,
+};
 use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
 
@@ -51,6 +53,27 @@ pub(super) fn proxy_status(state: tauri::State<'_, AppState>) -> ProxyStatus {
         }
     }
     status
+}
+
+// ─── Connection Test ───────────────────────────────────────────────────────
+
+#[tauri::command]
+pub(super) async fn test_connection(
+    state: tauri::State<'_, AppState>,
+    account_id: String,
+) -> Result<(), String> {
+    let account = {
+        let accounts = state
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号失败".to_string())?;
+        accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .ok_or("账号不存在")?
+            .clone()
+    };
+    test_channel_connection(&account).await
 }
 
 #[tauri::command]

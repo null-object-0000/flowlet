@@ -89,27 +89,12 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
   async function testConnection(accountId: string) {
     setMessage("正在测试连接...");
     try {
-      const result = await runCommand<{
-        balance: number | null;
-        currency: string | null;
-        is_available: boolean;
-        error: string | null;
-      }>("query_balance", { accountId });
-      if (result.error) {
-        setMessage(`连接失败: ${result.error}`);
-      } else if (result.balance !== null) {
-        setMessage(`连接成功！余额: ${result.balance} ${result.currency ?? ""}`);
-      } else if (result.is_available) {
-        setMessage("连接成功！（无余额信息）");
-      } else {
-        setMessage("连接失败：请检查 API Key 是否正确");
-      }
-      // 测试连接会修改 credential_status，刷新账号列表以保持前端状态与后端一致。
-      await refreshAll();
+      await runCommand<void>("test_connection", { accountId });
+      setMessage("连接成功！API Key 有效");
     } catch (err: unknown) {
-      const msg = `测试失败: ${String(err)}`;
-      setMessage(msg);
-      logToRust("error", msg);
+      const msg = String(err);
+      setMessage(`连接失败: ${msg}`);
+      logToRust("error", `测试连接失败: ${msg}`);
     }
   }
 

@@ -309,23 +309,29 @@ export function OverviewPage({
         ? [...accounts, draft]
         : accounts.map((account, index) => (index === accountEditor.index ? draft : account));
 
+    const editorChannel = channels.find((item) => item.id === draft.channel_id);
+    const autoSyncBalance = editorChannel?.supports_balance_query === true;
+
     await onSaveAccounts(nextAccounts);
 
-    const resource = accountEditor.snapshotDraft;
-    const hasResourceData = resource.balance.trim() || resource.currency.trim();
-    if (hasResourceData) {
-      onAddBalanceSnapshot({
-        account_id: draft.id,
-        balance: parseOptionalNumber(resource.balance),
-        currency: resource.currency.trim() || null,
-        token_pack_total: null,
-        token_pack_used: null,
-        token_pack_remaining: null,
-        token_pack_expire_at: null,
-        source: "manual",
-        synced_at: new Date().toISOString(),
-        remark: null,
-      });
+    // 仅当渠道不支持余额自动同步时，才保存手动填写的余额快照
+    if (!autoSyncBalance) {
+      const resource = accountEditor.snapshotDraft;
+      const hasResourceData = resource.balance.trim() || resource.currency.trim();
+      if (hasResourceData) {
+        onAddBalanceSnapshot({
+          account_id: draft.id,
+          balance: parseOptionalNumber(resource.balance),
+          currency: resource.currency.trim() || null,
+          token_pack_total: null,
+          token_pack_used: null,
+          token_pack_remaining: null,
+          token_pack_expire_at: null,
+          source: "manual",
+          synced_at: new Date().toISOString(),
+          remark: null,
+        });
+      }
     }
     setAccountEditor(null);
   }
@@ -633,16 +639,31 @@ export function OverviewPage({
               </section>
 
               <section className="account-form-section">
-                <div className="section-headline">
-                  <h4><span className="mini-section-icon">▤</span>余额信息（手动维护）</h4>
-                  <span className="sync-badge warn">手动维护</span>
-                </div>
-
-                <div className="resource-grid">
-                  <label>余额<div className="unit-input"><TextInput type="number" min="0" step="0.01" value={accountEditor.snapshotDraft.balance} onChange={(event) => updateSnapshotDraft({ balance: event.target.value })} /><span>{accountEditor.snapshotDraft.currency || "CNY"}</span></div></label>
-                  <label>货币<TextInput value={accountEditor.snapshotDraft.currency} onChange={(event) => updateSnapshotDraft({ currency: event.target.value })} /></label>
-                  <label>最近更新时间<TextInput readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} /></label>
-                </div>
+                {editorChannel?.supports_balance_query === true ? (
+                  <>
+                    <div className="section-headline">
+                      <h4><span className="mini-section-icon">▤</span>余额信息（自动同步）</h4>
+                      <span className="sync-badge">自动同步</span>
+                    </div>
+                    <div className="resource-grid">
+                      <label>账户余额<div className="static-field">保存后自动从上游同步</div></label>
+                      <label>货币<div className="static-field">跟随上游返回</div></label>
+                      <label>最近更新时间<TextInput readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} /></label>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="section-headline">
+                      <h4><span className="mini-section-icon">▤</span>余额信息（手动维护）</h4>
+                      <span className="sync-badge warn">手动维护</span>
+                    </div>
+                    <div className="resource-grid">
+                      <label>余额<div className="unit-input"><TextInput type="number" min="0" step="0.01" value={accountEditor.snapshotDraft.balance} onChange={(event) => updateSnapshotDraft({ balance: event.target.value })} /><span>{accountEditor.snapshotDraft.currency || "CNY"}</span></div></label>
+                      <label>货币<TextInput value={accountEditor.snapshotDraft.currency} onChange={(event) => updateSnapshotDraft({ currency: event.target.value })} /></label>
+                      <label>更新时间<TextInput readOnly value={formatIsoDateTime(editorSnapshot?.synced_at)} /></label>
+                    </div>
+                  </>
+                )}
               </section>
 
               <section className={accountEditor.advancedOpen ? "account-form-section advanced open" : "account-form-section advanced"}>
@@ -802,6 +823,7 @@ export function OverviewPage({
       {snapshotAccount ? (
         <BalanceSnapshotEditor
           account={snapshotAccount}
+          channel={channels.find((c) => c.id === snapshotAccount.channel_id)}
           initialSnapshot={getBalanceForAccount(snapshotAccount.id)}
           onCancel={() => setSnapshotAccountId(null)}
           onSave={(snapshot) => { onAddBalanceSnapshot(snapshot); setSnapshotAccountId(null); }}

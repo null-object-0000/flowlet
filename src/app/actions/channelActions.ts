@@ -15,6 +15,22 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
     setAccounts(saved);
     setMessage("渠道账号已保存，代理配置已热更新");
 
+    // 对支持余额自动同步的渠道，保存后立即触发一次同步
+    const autoSyncAccounts = saved.filter((account) => {
+      const ch = channels.find((c) => c.id === account.channel_id);
+      return ch?.supports_balance_query === true;
+    });
+    for (const account of autoSyncAccounts) {
+      try {
+        await runCommand("query_balance", { accountId: account.id });
+      } catch (err) {
+        logToRust("warn", `自动同步余额失败 (${account.name}): ${String(err)}`);
+      }
+    }
+    if (autoSyncAccounts.length > 0) {
+      await refreshAll();
+    }
+
     const nextRoutes = ensureDefaultExposedRoutes(channels, saved, routes, channelModels, exposureMode);
     if (JSON.stringify(nextRoutes) !== JSON.stringify(routes)) {
       setRoutes(nextRoutes);

@@ -171,18 +171,33 @@ export function AccountEditorDrawer({
           </div>
         </section>
 
-        <section className="account-editor-section resource">
-          <div className="account-section-heading">
-            <div><h3>资源模式</h3><small>按量付费，手动维护余额信息</small></div>
-          </div>
-          <div className="account-resource-details payg">
-            <div className="account-resource-details-heading"><strong>按量付费信息</strong><span className="sync-badge">手动维护</span></div>
-            <div className="account-resource-grid">
-              <label>账户余额<TextInput type="number" min="0" step="0.01" placeholder="手动填写" value={resource.balance} onChange={(event) => setResource({ ...resource, balance: event.target.value })} /></label>
-              <label>货币<TextInput value={resource.currency} onChange={(event) => setResource({ ...resource, currency: event.target.value })} /></label>
+        {channel?.supports_balance_query !== true ? (
+          <section className="account-editor-section resource">
+            <div className="account-section-heading">
+              <div><h3>资源模式</h3><small>按量付费，手动维护余额信息</small></div>
             </div>
-          </div>
-        </section>
+            <div className="account-resource-details payg">
+              <div className="account-resource-details-heading"><strong>按量付费信息</strong><span className="sync-badge">手动维护</span></div>
+              <div className="account-resource-grid">
+                <label>账户余额<TextInput type="number" min="0" step="0.01" placeholder="手动填写" value={resource.balance} onChange={(event) => setResource({ ...resource, balance: event.target.value })} /></label>
+                <label>货币<TextInput value={resource.currency} onChange={(event) => setResource({ ...resource, currency: event.target.value })} /></label>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <section className="account-editor-section resource">
+            <div className="account-section-heading">
+              <div><h3>资源模式</h3><small>按量付费，保存后自动同步余额</small></div>
+            </div>
+            <div className="account-resource-details payg">
+              <div className="account-resource-details-heading"><strong>按量付费信息</strong><span className="sync-badge">自动同步</span></div>
+              <div className="account-resource-grid">
+                <label>账户余额<div className="static-field">保存后自动从上游同步</div></label>
+                <label>货币<div className="static-field">跟随上游返回</div></label>
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="account-editor-section advanced">
           <button type="button" className="account-advanced-toggle" onClick={() => setAdvancedOpen((value) => !value)}>

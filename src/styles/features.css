@@ -421,7 +421,7 @@
 
 .overview-guide {
   height: calc(100vh - 60px);
-  grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1.05fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
   min-width: 0;
   overflow: hidden;
@@ -681,13 +681,49 @@
 }
 
 .overview-section-card {
-  height: 100%;
   min-height: 0;
   align-content: start;
 }
 
+.overview-section-card--grow {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.overview-section-card--grow .overview-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #c4cdd9 transparent;
+}
+
+.overview-section-card--grow .overview-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.overview-section-card--grow .overview-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overview-section-card--grow .overview-list::-webkit-scrollbar-thumb {
+  background: #c4cdd9;
+  border-radius: 3px;
+}
+
+.overview-section-card--grow .overview-list::-webkit-scrollbar-thumb:hover {
+  background: #9aa6b8;
+}
+
 .overview-guide > .mantine-SimpleGrid-root {
   min-height: 0;
+}
+
+/* 底部行 SimpleGrid：对齐到顶部，避免浪费高度给渠道账号/开放模型 */
+.overview-guide > .mantine-SimpleGrid-root:last-child {
+  align-self: start;
+  align-items: start;
 }
 .overview-view-all { padding-inline: 4px; color: #0874f9; font-weight: 700; }
 .overview-account-card, .overview-model-card { display: grid; min-width: 0; }
@@ -767,11 +803,11 @@
 }
 
 .overview-agent-card {
-  min-height: 88px;
+  min-height: 72px;
   display: grid;
   justify-items: center;
-  gap: 5px;
-  padding: 12px 8px;
+  gap: 4px;
+  padding: 10px 8px;
   border: 1px solid #e1e7f0;
   border-radius: 8px;
   background: #ffffff;

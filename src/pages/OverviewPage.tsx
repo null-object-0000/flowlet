@@ -237,7 +237,7 @@ export function OverviewPage({
 
   const port = bindConfig.port || Number(status.bind_addr.split(":").pop()) || 18640;
   const baseUrl = `http://127.0.0.1:${port}`;
-  const exposedModels = buildExposedModels(routes, accounts);
+  const exposedModels = buildExposedModels(routes, accounts, channels).filter((model) => model.kind === "direct");
   const hasAccounts = accounts.length > 0;
   const availableAccounts = accounts.filter((account) => account.enabled && !!account.api_key.trim());
   const hasAvailableAccount = availableAccounts.length > 0;
@@ -484,7 +484,7 @@ export function OverviewPage({
       ) : (
         <>
           <SimpleGrid cols={{ base: 1, lg: 2 }} spacing={16}>
-            <Panel className="overview-section-card">
+            <Panel className="overview-section-card overview-section-card--grow">
               <PanelHeader>
                 <div>
                   <h3>渠道账号</h3>
@@ -493,7 +493,7 @@ export function OverviewPage({
                 <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={onOpenAccounts}>查看全部</Button>
               </PanelHeader>
               <div className="overview-list">
-                {accounts.slice(0, 3).map((account, index) => (
+                {accounts.map((account, index) => (
                   <div className="overview-account-card" key={account.id}>
                     <div className="overview-card-main">
                       <ChannelLogo channelId={account.channel_id} channelName={getChannelName(account.channel_id)} size={32} variant="avatar" />
@@ -507,7 +507,7 @@ export function OverviewPage({
               </div>
             </Panel>
 
-            <Panel className="overview-section-card">
+            <Panel className="overview-section-card overview-section-card--grow">
               <PanelHeader>
                 <div>
                   <h3>开放模型</h3>
@@ -520,16 +520,16 @@ export function OverviewPage({
                 {exposedModels.map((model) => (
                   <div className="overview-model-card" key={model.publicModel}>
                     <div className="overview-card-main model summary">
-                      <span className="provider-mark">FL</span>
+                      <ChannelLogo channelId={model.channelId ?? ""} channelName={model.channelName ?? ""} size={32} variant="avatar" />
                       <div className="row-main">
-                        <strong>{model.publicModel === "flowlet-pro" ? "Flowlet Pro" : "Flowlet Flash"}</strong>
-                        <span>{model.publicModel}</span>
+                        <strong>{model.publicModel}</strong>
+                        <span>{model.channelName ?? ""}</span>
                       </div>
                       <StatusPill running={model.enabled && model.hasAvailableAccount}>{modelState(model)}</StatusPill>
                       <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
                     </div>
                     <div className="overview-card-meta">
-                      <span>底层模型: {model.underlyingModelCount}</span>
+                      <span>渠道: {model.channelName ?? ""}</span>
                       <span>可用账号: {model.availableAccountCount}</span>
                       <span>状态: {model.hasAvailableAccount ? "正常" : "不可用"}</span>
                     </div>

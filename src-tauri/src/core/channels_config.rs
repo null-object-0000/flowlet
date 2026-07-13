@@ -87,6 +87,10 @@ pub struct ChannelJson {
     pub supports_quota_query: bool,
     #[serde(default)]
     pub supports_usage_query: bool,
+    /// 渠道级端点覆盖，key 例如 "models" / "model_detail" / "balance"。
+    /// 优先于此处的配置，缺失时回退到 openai_base_url 拼接逻辑。
+    #[serde(default)]
+    pub endpoints: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -113,6 +117,8 @@ pub struct ChannelsConfig {
     pub prices: Vec<ModelPrice>,
     pub default_exposed_models: std::collections::HashMap<String, Vec<String>>,
     pub flowlet_tiers: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    /// 每个渠道的端点覆盖，key 为 channel_id → (endpoint_key → url)
+    pub endpoints: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
 }
 
 impl ChannelsConfig {
@@ -126,6 +132,13 @@ impl ChannelsConfig {
             .map_err(|e| format!("解析 config.json > channels_config 失败: {e}"))?;
 
         let now = chrono::Utc::now().to_rfc3339();
+
+        // 必须先 borrow 出 endpoints（不能与下面的 into_iter 同周期 move）
+        let endpoints: std::collections::HashMap<String, std::collections::HashMap<String, String>> = json
+            .channels
+            .iter()
+            .map(|c| (c.id.clone(), c.endpoints.clone()))
+            .collect();
 
         let presets: Vec<ChannelPreset> = json.channels.into_iter().map(|c| {
             let protocols = parse_protocols(&c.supported_protocols);
@@ -170,44 +183,68 @@ impl ChannelsConfig {
             }
         }).collect();
 
+
+
         Ok(Self {
             presets,
             prices,
             default_exposed_models: json.default_exposed_models,
             flowlet_tiers: json.flowlet_tiers,
+            endpoints,
         })
+    }
+
+    /// 从指定渠道的 endpoints 覆盖中读取一个端点 URL，缺失时调用
+    /// fallback 基于 openai_base_url 拼接，再缺失则返回 default。
+    fn endpoint_or<F>(
+        &self,
+        channel_id: &str,
+        key: &str,
+        default: &str,
+        fallback: F,
+    ) -> String
+    where
+        F: FnOnce(&ChannelPreset) -> String,
+    {
+        if let Some(overrides) = self.endpoints.get(channel_id) {
+            if let Some(url) = overrides.get(key) {
+                return url.clone();
+            }
+        }
+        self.presets
+            .iter()
+            .find(|c| c.id == channel_id)
+            .map(fallback)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| default.to_string())
     }
 
     /// 获取 DeepSeek 余额端点
     pub fn balance_endpoint(&self) -> String {
-        self.presets.iter()
-            .find(|c| c.id == "deepseek")
-            .map(|c| c.openai_base_url.clone() + "/user/balance")
-            .unwrap_or_else(|| "https://api.deepseek.com/user/balance".to_string())
+        self.endpoint_or("deepseek", "balance", "https://api.deepseek.com/user/balance", |c| {
+            format!("{}/user/balance", c.openai_base_url)
+        })
     }
 
     /// 获取 LongCat 模型列表端点
     pub fn longcat_models_endpoint(&self) -> String {
-        self.presets.iter()
-            .find(|c| c.id == "longcat")
-            .map(|c| c.openai_base_url.clone() + "/v1/models")
-            .unwrap_or_else(|| "https://api.longcat.chat/openai/v1/models".to_string())
+        self.endpoint_or("longcat", "models", "https://api.longcat.chat/openai/v1/models", |c| {
+            format!("{}/v1/models", c.openai_base_url)
+        })
     }
 
     /// 获取 LongCat 模型详情端点模板
     pub fn longcat_model_detail_endpoint(&self) -> String {
-        self.presets.iter()
-            .find(|c| c.id == "longcat")
-            .map(|c| c.openai_base_url.clone() + "/v1/models/{id}")
-            .unwrap_or_else(|| "https://api.longcat.chat/openai/v1/models/{id}".to_string())
+        self.endpoint_or("longcat", "model_detail", "https://api.longcat.chat/openai/v1/models/{id}", |c| {
+            format!("{}/v1/models/{{id}}", c.openai_base_url)
+        })
     }
 
     /// 获取 DeepSeek 模型列表端点
     pub fn deepseek_models_endpoint(&self) -> String {
-        self.presets.iter()
-            .find(|c| c.id == "deepseek")
-            .map(|c| c.openai_base_url.clone() + "/models")
-            .unwrap_or_else(|| "https://api.deepseek.com/models".to_string())
+        self.endpoint_or("deepseek", "models", "https://api.deepseek.com/models", |c| {
+            format!("{}/models", c.openai_base_url)
+        })
     }
 
     /// 获取 Flowlet 档位
@@ -228,8 +265,16 @@ impl ChannelsConfig {
             .unwrap_or_default()
     }
 
-    /// 获取指定渠道的 models 端点 URL（用于测试连接）
+    /// 获取指定渠道的 models 端点 URL（用于测试连接）。
+    /// 优先使用配置中 endpoints["models"] 覆盖，缺失时按渠道拼接。
     pub fn models_endpoint_url(&self, channel_id: &str) -> Option<String> {
+        // 1. 配置的显式覆盖
+        if let Some(overrides) = self.endpoints.get(channel_id) {
+            if let Some(url) = overrides.get("models") {
+                return Some(url.clone());
+            }
+        }
+        // 2. 按老逻辑拼接
         self.presets.iter().find(|c| c.id == channel_id).map(|c| {
             if c.id == "deepseek" {
                 format!("{}/models", c.openai_base_url)
@@ -262,58 +307,71 @@ mod tests {
 
     #[test]
     fn parse_minimal_config() {
-        let json = r#"{
-            "channels": [{
-                "id": "test",
-                "name": "Test",
-                "vendor": "test"
-            }],
-            "model_prices": [],
-            "default_exposed_models": {},
-            "flowlet_tiers": {}
-        }"#;
-        let config = ChannelsConfig::parse(json).unwrap();
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "test",
+                    "name": "Test",
+                    "vendor": "test"
+                }],
+                "model_prices": [],
+                "default_exposed_models": {},
+                "flowlet_tiers": {}
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
         assert_eq!(config.presets.len(), 1);
         assert_eq!(config.presets[0].id, "test");
+        assert_eq!(config.endpoints.len(), 1);
     }
 
     #[test]
     fn parse_full_config() {
-        let json = r#"{
-            "channels": [{
-                "id": "deepseek",
-                "name": "DeepSeek",
-                "vendor": "deepseek",
-                "supported_protocols": ["openai", "anthropic"],
-                "openai_base_url": "https://api.deepseek.com",
-                "anthropic_base_url": "https://api.deepseek.com/anthropic",
-                "openai_auth": "bearer",
-                "anthropic_auth": "x_api_key",
-                "default_model": "deepseek-v4-pro",
-                "supports_model_list": true,
-                "supports_balance_query": true
-            }],
-            "model_prices": [{
-                "channel_id": "deepseek",
-                "upstream_model": "deepseek-v4-flash",
-                "input_uncached_price": 1.0,
-                "output_price": 2.0,
-                "currency": "CNY",
-                "unit": "1M tokens"
-            }],
-            "default_exposed_models": {
-                "deepseek": ["deepseek-v4-flash"]
-            },
-            "flowlet_tiers": {
-                "deepseek": {
-                    "deepseek-v4-flash": "flash"
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "deepseek",
+                    "name": "DeepSeek",
+                    "vendor": "deepseek",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "https://api.deepseek.com",
+                    "anthropic_base_url": "https://api.deepseek.com/anthropic",
+                    "openai_auth": "bearer",
+                    "anthropic_auth": "x_api_key",
+                    "default_model": "deepseek-v4-pro",
+                    "supports_model_list": true,
+                    "supports_balance_query": true,
+                    "endpoints": {
+                        "models": "https://api.deepseek.com/models",
+                        "balance": "https://api.deepseek.com/user/balance"
+                    }
+                }],
+                "model_prices": [{
+                    "channel_id": "deepseek",
+                    "upstream_model": "deepseek-v4-flash",
+                    "input_uncached_price": 1.0,
+                    "output_price": 2.0,
+                    "currency": "CNY",
+                    "unit": "1M tokens"
+                }],
+                "default_exposed_models": {
+                    "deepseek": ["deepseek-v4-flash"]
+                },
+                "flowlet_tiers": {
+                    "deepseek": {
+                        "deepseek-v4-flash": "flash"
+                    }
                 }
             }
-        }"#;
-        let config = ChannelsConfig::parse(json).unwrap();
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
         assert_eq!(config.presets.len(), 1);
         assert_eq!(config.prices.len(), 1);
         assert_eq!(config.default_exposed_models("deepseek"), vec!["deepseek-v4-flash".to_string()]);
         assert_eq!(config.flowlet_tier("deepseek", "deepseek-v4-flash"), "flash");
+        // 覆盖端点生效
+        assert_eq!(config.deepseek_models_endpoint(), "https://api.deepseek.com/models");
+        assert_eq!(config.balance_endpoint(), "https://api.deepseek.com/user/balance");
+        assert_eq!(config.models_endpoint_url("deepseek").as_deref(), Some("https://api.deepseek.com/models"));
     }
 }

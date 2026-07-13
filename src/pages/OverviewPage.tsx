@@ -606,6 +606,7 @@ export function OverviewPage({
           onClose={() => setAccountEditor(null)}
           onSaveAccounts={onSaveAccounts}
           onTestConnection={onTestConnection}
+          onSyncBalance={onSyncBalance}
           getBalanceForAccount={getBalanceForAccount}
           onAddBalanceSnapshot={onAddBalanceSnapshot}
         />

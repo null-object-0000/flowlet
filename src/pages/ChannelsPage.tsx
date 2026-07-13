@@ -9,6 +9,7 @@ type ChannelsPageProps = {
   accounts: ChannelAccount[];
   onSaveAccounts: (accounts?: ChannelAccount[]) => Promise<void>;
   onTestConnection: (accountId: string) => void;
+  onSyncBalance: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
   proxyRunning: boolean;
@@ -20,6 +21,7 @@ export function ChannelsPage({
   accounts,
   onSaveAccounts,
   onTestConnection,
+  onSyncBalance,
   getBalanceForAccount,
   onAddBalanceSnapshot,
   proxyRunning,
@@ -91,6 +93,7 @@ export function ChannelsPage({
           onClose={() => setEditor(null)}
           onSaveAccounts={(next) => onSaveAccounts(next)}
           onTestConnection={onTestConnection}
+          onSyncBalance={onSyncBalance}
           getBalanceForAccount={getBalanceForAccount}
           onAddBalanceSnapshot={onAddBalanceSnapshot}
         />

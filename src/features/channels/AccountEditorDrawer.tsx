@@ -1,6 +1,6 @@
 import React from "react";
 import { Anchor, Button, Drawer, PasswordInput, Switch, TextInput } from "@mantine/core";
-import { IconExternalLink } from "@tabler/icons-react";
+import { IconExternalLink, IconRefresh } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount, ChannelPreset, createAccount } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
@@ -25,6 +25,7 @@ type AccountEditorDrawerProps = {
   onClose: () => void;
   onSaveAccounts: (accounts: ChannelAccount[]) => Promise<void> | void;
   onTestConnection: (accountId: string) => void;
+  onSyncBalance: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
 };
@@ -77,6 +78,7 @@ export function AccountEditorDrawer({
   onClose,
   onSaveAccounts,
   onTestConnection,
+  onSyncBalance,
   getBalanceForAccount,
   onAddBalanceSnapshot,
 }: AccountEditorDrawerProps) {
@@ -93,6 +95,7 @@ export function AccountEditorDrawer({
     ? Math.max(0, tokenTotal - tokenUsed)
     : optionalNumber(resource.tokenRemaining);
   const autoSyncBalance = channel?.supports_balance_query === true;
+  const balanceSnapshot = getBalanceForAccount(draft.id);
 
   function updateDraft(patch: Partial<ChannelAccount>) {
     setDraft((current) => ({ ...current, ...patch, updated_at: new Date().toISOString() }));
@@ -236,11 +239,21 @@ export function AccountEditorDrawer({
           )}
           {autoSyncBalance ? (
             <div className="account-resource-details payg">
-              <div className="account-resource-details-heading"><strong>按量付费信息</strong><span className="sync-badge">自动同步</span></div>
-              <div className="account-resource-grid">
-                <label>账户余额<div className="static-field">保存后自动从上游同步</div></label>
-                <label>货币<div className="static-field">跟随上游返回</div></label>
+              <div className="account-resource-details-heading">
+                <strong>按量付费信息</strong>
+                <span className="sync-badge">自动同步</span>
               </div>
+              <div className="account-resource-grid">
+                <label>账户余额<div className="static-field">{balanceSnapshot?.balance != null ? `${balanceSnapshot.balance} ${balanceSnapshot.currency ?? ""}` : "尚未同步"}</div></label>
+                <label>货币<div className="static-field">{balanceSnapshot?.currency ?? "跟随上游返回"}</div></label>
+              </div>
+              {request.mode === "edit" ? (
+                <div className="resource-sync-action">
+                  <Button type="button" variant="subtle" size="xs" leftSection={<IconRefresh size={13} />} onClick={() => onSyncBalance(draft.id)}>
+                    刷新余额
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : (
             <>

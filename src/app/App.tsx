@@ -311,6 +311,7 @@ export default function App() {
               accounts={accounts}
               onSaveAccounts={saveAccounts}
               onTestConnection={(id) => void testConnection(id)}
+              onSyncBalance={(id) => void syncBalance(id)}
               getBalanceForAccount={getBalanceForAccount}
               onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}
               proxyRunning={status.running}

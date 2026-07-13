@@ -1,12 +1,12 @@
 mod commands;
 pub mod core;
 
+use core::channels_config::ChannelsConfig;
 use core::config::{
     ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ModelPrice, ProtocolType,
     ProxyBindConfig,
     RouteCandidate, RouteRule, VirtualModel,
 };
-use core::presets::builtin_model_prices;
 use core::proxy::ProxyController;
 use core::storage::Storage;
 use std::path::PathBuf;
@@ -31,6 +31,7 @@ struct AppState {
     bind_config: Arc<Mutex<ProxyBindConfig>>,
     tray: Arc<Mutex<Option<TrayIcon>>>,
     config_path: std::path::PathBuf,
+    channels_config: Arc<ChannelsConfig>,
 }
 
 struct ProxyStartupConfig {
@@ -88,6 +89,18 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
     let config_path = db_path.parent().unwrap_or(db_path.as_ref()).join("config.json");
     tracing::info!(db_path = %db_path.display(), t_ms = _t0.elapsed().as_millis() as u64, "初始化 Storage");
 
+    // 加载外部渠道配置文件 channels.json
+    let channels_config = match ChannelsConfig::load_from_exe_dir() {
+        Ok(cfg) => {
+            tracing::info!(channels = cfg.presets.len(), prices = cfg.prices.len(), "从 channels.json 加载渠道配置");
+            Arc::new(cfg)
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "加载 channels.json 失败");
+            panic!("无法加载渠道配置: {e}");
+        }
+    };
+
     let storage = match Storage::open(&db_path) {
         Ok(s) => s,
         Err(e) => {
@@ -98,18 +111,11 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
 
     tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "Storage 初始化完成, 开始加载渠道模板");
 
-    // 初始化渠道模板
+    // 初始化渠道模板：优先从 channels.json 加载，SQLite 为空时写入
     let channels = storage.list_channel_presets().expect("读取渠道模板失败");
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = channels.len(), "渠道模板加载完成");
     let channels = if channels.is_empty() {
-        let now = chrono::Utc::now().to_rfc3339();
-        let mut longcat = ChannelPreset::longcat();
-        longcat.created_at = now.clone();
-        longcat.updated_at = now.clone();
-        let mut deepseek = ChannelPreset::deepseek();
-        deepseek.created_at = now.clone();
-        deepseek.updated_at = now;
-        let presets = vec![longcat, deepseek];
+        let presets = channels_config.presets.clone();
         storage
             .save_channel_presets(presets.as_slice())
             .expect("保存默认渠道模板失败");
@@ -217,15 +223,12 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         clients
     };
 
-    // 初始化价格预设
+    // 初始化价格预设：从 channels.json 加载
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: loading prices");
     let prices = storage.list_model_prices().expect("读取价格配置失败");
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = prices.len(), "step: prices loaded");
     let prices = if prices.is_empty() {
-        let all_prices: Vec<ModelPrice> = channels
-            .iter()
-            .flat_map(|c| builtin_model_prices(&c.id))
-            .collect();
+        let all_prices = channels_config.prices.clone();
         if !all_prices.is_empty() {
             storage
                 .save_model_prices(all_prices.as_slice())
@@ -292,6 +295,7 @@ fn build_app_state(db_path: std::path::PathBuf) -> AppState {
         bind_config: Arc::new(Mutex::new(bind_config)),
         tray: Arc::new(Mutex::new(None)),
         config_path,
+        channels_config: Arc::clone(&channels_config),
     };
     tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "build_app_state 全部完成");
     state

@@ -73,7 +73,7 @@ pub(super) async fn test_connection(
             .ok_or("账号不存在")?
             .clone()
     };
-    test_channel_connection(&account).await
+    test_channel_connection(&account, &state.channels_config).await
 }
 
 #[tauri::command]
@@ -415,13 +415,15 @@ pub(super) async fn query_balance(
         });
     }
 
+    let config = state.channels_config.clone();
+
     // 在 spawn_blocking 中执行 HTTP 调用，避免 Send 问题
     let result = tauri::async_runtime::spawn_blocking(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap_or_else(|_| panic!("创建运行时失败"));
-        rt.block_on(query_deepseek_balance(&account))
+        rt.block_on(query_deepseek_balance(&account, &config))
     })
     .await
     .map_err(|e| format!("任务执行失败: {e}"))?;
@@ -496,6 +498,7 @@ pub(super) async fn sync_models(
     };
 
     let channel_id = account.channel_id.clone();
+    let config = state.channels_config.clone();
 
     let result = match channel_id.as_str() {
         "deepseek" => tauri::async_runtime::spawn_blocking(move || {
@@ -503,7 +506,7 @@ pub(super) async fn sync_models(
                 .enable_all()
                 .build()
                 .unwrap_or_else(|_| panic!("创建运行时失败"));
-            rt.block_on(sync_deepseek_models(&account))
+            rt.block_on(sync_deepseek_models(&account, &config))
         })
         .await
         .map_err(|e| format!("任务执行失败: {e}"))?,
@@ -512,7 +515,7 @@ pub(super) async fn sync_models(
                 .enable_all()
                 .build()
                 .unwrap_or_else(|_| panic!("创建运行时失败"));
-            rt.block_on(sync_longcat_models(&account))
+            rt.block_on(sync_longcat_models(&account, &config))
         })
         .await
         .map_err(|e| format!("任务执行失败: {e}"))?,

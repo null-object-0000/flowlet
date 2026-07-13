@@ -25,5 +25,6 @@
   "bind": {
     "host": "127.0.0.1",
     "port": 18640
-  }
+  },
+  "channels_config": "channels.json"
 }

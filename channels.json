@@ -1,0 +1,92 @@
+{
+  "channels": [
+    {
+      "id": "longcat",
+      "name": "LongCat",
+      "vendor": "longcat",
+      "platform_url": "https://longcat.chat/platform/api_keys",
+      "supported_protocols": ["openai", "anthropic"],
+      "openai_base_url": "https://api.longcat.chat/openai",
+      "anthropic_base_url": "https://api.longcat.chat/anthropic",
+      "openai_auth": "bearer",
+      "anthropic_auth": "bearer",
+      "default_model": "LongCat-2.0",
+      "small_model": null,
+      "supports_model_list": true,
+      "supports_model_detail": true,
+      "supports_price_sync": false,
+      "supports_balance_query": false,
+      "supports_quota_query": false,
+      "supports_usage_query": false,
+      "endpoints": {
+        "models": "https://api.longcat.chat/openai/v1/models",
+        "model_detail": "https://api.longcat.chat/openai/v1/models/{id}"
+      }
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "vendor": "deepseek",
+      "platform_url": "https://platform.deepseek.com/api_keys",
+      "supported_protocols": ["openai", "anthropic"],
+      "openai_base_url": "https://api.deepseek.com",
+      "anthropic_base_url": "https://api.deepseek.com/anthropic",
+      "openai_auth": "bearer",
+      "anthropic_auth": "x_api_key",
+      "default_model": "deepseek-v4-pro",
+      "small_model": null,
+      "supports_model_list": true,
+      "supports_model_detail": false,
+      "supports_price_sync": false,
+      "supports_balance_query": true,
+      "supports_quota_query": false,
+      "supports_usage_query": false,
+      "endpoints": {
+        "models": "https://api.deepseek.com/models",
+        "balance": "https://api.deepseek.com/user/balance"
+      }
+    }
+  ],
+  "model_prices": [
+    {
+      "channel_id": "longcat",
+      "upstream_model": "LongCat-2.0",
+      "input_uncached_price": 0.0,
+      "input_cached_price": 0.0,
+      "output_price": 0.0,
+      "currency": "CNY",
+      "unit": "1M tokens"
+    },
+    {
+      "channel_id": "deepseek",
+      "upstream_model": "deepseek-v4-flash",
+      "input_uncached_price": 1.0,
+      "input_cached_price": 0.02,
+      "output_price": 2.0,
+      "currency": "CNY",
+      "unit": "1M tokens"
+    },
+    {
+      "channel_id": "deepseek",
+      "upstream_model": "deepseek-v4-pro",
+      "input_uncached_price": 3.0,
+      "input_cached_price": 0.025,
+      "output_price": 6.0,
+      "currency": "CNY",
+      "unit": "1M tokens"
+    }
+  ],
+  "default_exposed_models": {
+    "longcat": ["LongCat-2.0"],
+    "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"]
+  },
+  "flowlet_tiers": {
+    "longcat": {
+      "longcat-2.0": "pro"
+    },
+    "deepseek": {
+      "deepseek-v4-pro": "pro",
+      "deepseek-v4-flash": "flash"
+    }
+  }
+}

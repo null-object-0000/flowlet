@@ -1,10 +1,8 @@
+use super::channels_config::ChannelsConfig;
 use super::config::{ChannelAccount, ChannelModel, ProtocolType};
 use super::presets::{BalanceQueryResult, ModelSyncResult};
 use reqwest::Client;
 use serde::Deserialize;
-
-const DEEPSEEK_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
-const DEEPSEEK_MODELS_URL: &str = "https://api.deepseek.com/models";
 
 #[derive(Debug, Deserialize)]
 struct DeepSeekBalanceResponse {
@@ -45,7 +43,7 @@ pub struct DeepSeekModelEntry {
 
 /// 测试渠道连接：仅验证 API Key 是否有效，不做余额读写。
 /// 通过访问模型列表端点实现轻量级鉴权验证。
-pub async fn test_channel_connection(account: &ChannelAccount) -> Result<(), String> {
+pub async fn test_channel_connection(account: &ChannelAccount, _config: &ChannelsConfig) -> Result<(), String> {
     if account.api_key.trim().is_empty() {
         return Err("API Key 未配置".to_string());
     }
@@ -55,18 +53,10 @@ pub async fn test_channel_connection(account: &ChannelAccount) -> Result<(), Str
         .build()
         .map_err(|err| format!("创建 HTTP 客户端失败: {err}"))?;
 
-    // 根据渠道选择对应的轻量端点进行鉴权测试
-    let (url, auth_header) = match account.channel_id.as_str() {
-        "deepseek" => (
-            "https://api.deepseek.com/models".to_string(),
-            format!("Bearer {}", account.api_key.trim()),
-        ),
-        "longcat" => (
-            "https://api.longcat.chat/openai/v1/models".to_string(),
-            format!("Bearer {}", account.api_key.trim()),
-        ),
-        _ => return Err(format!("不支持测试连接的渠道: {}", account.channel_id)),
-    };
+    // 根据渠道配置选择对应的轻量端点进行鉴权测试
+    let url = _config.models_endpoint_url(&account.channel_id)
+        .ok_or_else(|| format!("不支持测试连接的渠道: {}", account.channel_id))?;
+    let auth_header = format!("Bearer {}", account.api_key.trim());
 
     let response = client
         .get(&url)
@@ -87,7 +77,7 @@ pub async fn test_channel_connection(account: &ChannelAccount) -> Result<(), Str
 }
 
 /// 查询 DeepSeek 余额
-pub async fn query_deepseek_balance(account: &ChannelAccount) -> BalanceQueryResult {
+pub async fn query_deepseek_balance(account: &ChannelAccount, config: &ChannelsConfig) -> BalanceQueryResult {
     if account.api_key.trim().is_empty() {
         return BalanceQueryResult {
             balance: None,
@@ -113,7 +103,7 @@ pub async fn query_deepseek_balance(account: &ChannelAccount) -> BalanceQueryRes
     };
 
     let response = client
-        .get(DEEPSEEK_BALANCE_URL)
+        .get(&config.balance_endpoint())
         .header(
             "Authorization",
             format!("Bearer {}", account.api_key.trim()),
@@ -190,7 +180,7 @@ pub async fn query_deepseek_balance(account: &ChannelAccount) -> BalanceQueryRes
 }
 
 /// 同步 DeepSeek 模型列表
-pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
+pub async fn sync_deepseek_models(account: &ChannelAccount, config: &ChannelsConfig) -> ModelSyncResult {
     if account.api_key.trim().is_empty() {
         return ModelSyncResult {
             models_synced: 0,
@@ -214,7 +204,7 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
     };
 
     let response = client
-        .get(DEEPSEEK_MODELS_URL)
+        .get(&config.deepseek_models_endpoint())
         .header(
             "Authorization",
             format!("Bearer {}", account.api_key.trim()),
@@ -280,7 +270,6 @@ pub async fn sync_deepseek_models(account: &ChannelAccount) -> ModelSyncResult {
     }
 }
 
-const LONGCAT_MODELS_URL: &str = "https://api.longcat.chat/openai/v1/models";
 
 /// LongCat 单模型详情（GET /openai/v1/models/{id}）
 #[derive(Debug, Deserialize)]
@@ -312,7 +301,7 @@ pub struct LongCatArchitecture {
 }
 
 /// 同步 LongCat 模型列表，并对每个模型拉取详情获取 context_length / pricing
-pub async fn sync_longcat_models(account: &ChannelAccount) -> ModelSyncResult {
+pub async fn sync_longcat_models(account: &ChannelAccount, config: &ChannelsConfig) -> ModelSyncResult {
     if account.api_key.trim().is_empty() {
         return ModelSyncResult {
             models_synced: 0,
@@ -336,7 +325,7 @@ pub async fn sync_longcat_models(account: &ChannelAccount) -> ModelSyncResult {
     };
 
     // 1) 拉取列表
-    let list_response = match fetch_longcat_list(&client, account).await {
+    let list_response = match fetch_longcat_list(&client, account, config).await {
         Ok(r) => r,
         Err(result) => return result,
     };
@@ -364,7 +353,7 @@ pub async fn sync_longcat_models(account: &ChannelAccount) -> ModelSyncResult {
     let errors: Vec<String> = Vec::new();
 
     for entry in &entries {
-        if let Some(detail) = fetch_longcat_detail(&client, account, &entry.id).await {
+        if let Some(detail) = fetch_longcat_detail(&client, account, &entry.id, config).await {
             channel_models.push(longcat_channel_model(
                 entry.id.clone(),
                 detail,
@@ -403,9 +392,10 @@ struct LongCatListResponse {
 async fn fetch_longcat_list(
     client: &Client,
     account: &ChannelAccount,
+    config: &ChannelsConfig,
 ) -> Result<LongCatListResponse, ModelSyncResult> {
     let response = client
-        .get(LONGCAT_MODELS_URL)
+        .get(&config.longcat_models_endpoint())
         .header(
             "Authorization",
             format!("Bearer {}", account.api_key.trim()),
@@ -452,8 +442,10 @@ async fn fetch_longcat_detail(
     client: &Client,
     account: &ChannelAccount,
     model_id: &str,
+    config: &ChannelsConfig,
 ) -> Option<LongCatModelDetail> {
-    let url = format!("https://api.longcat.chat/openai/v1/models/{model_id}");
+    let template = config.longcat_model_detail_endpoint();
+    let url = template.replace("{id}", model_id);
     let response = client
         .get(&url)
         .header(

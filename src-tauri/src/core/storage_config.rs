@@ -20,12 +20,12 @@ impl Storage {
             let protocols = serde_json::to_string(&preset.supported_protocols).unwrap_or_default();
             tx.execute(
                 r#"
-                INSERT INTO channel_presets (
+                 INSERT INTO channel_presets (
                     id, name, vendor, supported_protocols, openai_base_url, anthropic_base_url,
                     openai_auth, anthropic_auth, default_model, small_model, timeout_seconds, supports_model_list,
                     supports_model_detail, supports_price_sync, supports_balance_query,
-                    supports_quota_query, supports_usage_query, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                    supports_quota_query, supports_usage_query, platform_url, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
                 "#,
                 params![
                     preset.id,
@@ -45,6 +45,7 @@ impl Storage {
                     preset.supports_balance_query as i64,
                     preset.supports_quota_query as i64,
                     preset.supports_usage_query as i64,
+                    preset.platform_url,
                     preset.created_at,
                     preset.updated_at,
                 ],
@@ -63,7 +64,7 @@ impl Storage {
             "SELECT id, name, vendor, supported_protocols, openai_base_url, anthropic_base_url,
                     openai_auth, anthropic_auth, default_model, small_model, timeout_seconds, supports_model_list,
                     supports_model_detail, supports_price_sync, supports_balance_query,
-                    supports_quota_query, supports_usage_query, created_at, updated_at
+                    supports_quota_query, supports_usage_query, platform_url, created_at, updated_at
              FROM channel_presets ORDER BY id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -88,8 +89,9 @@ impl Storage {
                 supports_balance_query: row.get::<_, i64>(14)? != 0,
                 supports_quota_query: row.get::<_, i64>(15)? != 0,
                 supports_usage_query: row.get::<_, i64>(16)? != 0,
-                created_at: row.get(17)?,
-                updated_at: row.get(18)?,
+                platform_url: row.get(17)?,
+                created_at: row.get(18)?,
+                updated_at: row.get(19)?,
             })
         })?;
         let mut presets = Vec::new();

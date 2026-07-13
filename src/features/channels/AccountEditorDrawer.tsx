@@ -1,5 +1,6 @@
 import React from "react";
-import { Button, Drawer, PasswordInput, Switch, TextInput } from "@mantine/core";
+import { Anchor, Button, Drawer, PasswordInput, Switch, TextInput } from "@mantine/core";
+import { IconExternalLink } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount, ChannelPreset, createAccount } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
@@ -199,7 +200,21 @@ export function AccountEditorDrawer({
             <span>{draft.name.length} / 50</span>
           </div>
 
-          <label>API Key</label>
+          <label>
+            API Key
+            {channel?.platform_url ? (
+              <Anchor
+                href={channel.platform_url}
+                target="_blank"
+                rel="noreferrer"
+                size="xs"
+                className="account-api-key-link"
+              >
+                <IconExternalLink size={12} />
+                前往查看
+              </Anchor>
+            ) : null}
+          </label>
           <PasswordInput value={draft.api_key} placeholder="请输入渠道 API Key" onChange={(event) => updateDraft({ api_key: event.target.value })} />
 
           <div className="account-enabled-row">

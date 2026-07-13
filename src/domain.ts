@@ -32,6 +32,8 @@ export type ChannelPreset = {
   supports_model_list: boolean;
   supports_balance_query: boolean;
   small_model: string | null;
+  // 渠道平台查看 API Key 的跳转地址（如控制台页面）
+  platform_url?: string | null;
   created_at: string;
   updated_at: string;
 };

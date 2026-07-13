@@ -474,6 +474,9 @@ impl Storage {
             "TEXT NOT NULL DEFAULT ''",
         )?;
 
+        // 渠道模板：补充平台查看地址（API Key 管理页跳转）
+        add_column_if_missing(&connection, "channel_presets", "platform_url", "TEXT")?;
+
         // 渠道账号：补充 Base URL 覆盖字段
         add_column_if_missing(
             &connection,

@@ -1,6 +1,7 @@
 import React from "react";
 import {
   ActionIcon,
+  Anchor,
   Badge,
   Box,
   Button,
@@ -23,6 +24,7 @@ import {
   IconChevronRight,
   IconCopy,
   IconDotsVertical,
+  IconExternalLink,
   IconInfoCircle,
   IconPlayerPlay,
   IconRefresh,
@@ -652,6 +654,18 @@ export function OverviewPage({
 
                 <label>
                   API Key
+                  {editorChannel?.platform_url ? (
+                    <Anchor
+                      href={editorChannel.platform_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      size="xs"
+                      className="account-api-key-link"
+                    >
+                      <IconExternalLink size={12} />
+                      前往查看
+                    </Anchor>
+                  ) : null}
                   <div className="secret-input">
                     <PasswordInput
                       visible={accountEditor.apiKeyVisible}

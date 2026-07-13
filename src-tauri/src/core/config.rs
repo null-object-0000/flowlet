@@ -267,6 +267,8 @@ pub struct ChannelPreset {
     pub supports_balance_query: bool,
     pub supports_quota_query: bool,
     pub supports_usage_query: bool,
+    // 渠道平台查看 API Key 的跳转地址（如控制台页面）
+    pub platform_url: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -291,6 +293,7 @@ impl Default for ChannelPreset {
             supports_balance_query: false,
             supports_quota_query: false,
             supports_usage_query: false,
+            platform_url: None,
             created_at: String::new(),
             updated_at: String::new(),
         }
@@ -305,6 +308,7 @@ impl ChannelPreset {
             vendor: "longcat".to_string(),
             supports_model_list: true,
             supports_model_detail: true,
+            platform_url: Some("https://longcat.chat/platform/api_keys".to_string()),
             ..Default::default()
         }
     }
@@ -314,6 +318,7 @@ impl ChannelPreset {
             id: "deepseek".to_string(),
             name: "DeepSeek".to_string(),
             vendor: "deepseek".to_string(),
+            platform_url: Some("https://platform.deepseek.com/api_keys".to_string()),
             supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
             openai_base_url: "https://api.deepseek.com".to_string(),
             anthropic_base_url: "https://api.deepseek.com/anthropic".to_string(),

@@ -4,24 +4,29 @@ use std::path::PathBuf;
 use super::config::{AuthStrategy, ChannelPreset, ModelPrice, PriceSource, ProtocolType};
 
 /// 查找配置文件路径。
-/// 搜索顺序：exe 目录 → exe 的上两级（dev 模式 target/debug/ → 项目根目录）→ CARGO_MANIFEST_DIR
+/// 搜索顺序：exe 目录 → 向上 1~4 级（dev 模式 target/debug/ → 项目根目录）→ CARGO_MANIFEST_DIR
 pub fn find_config_file(name: &str) -> Option<PathBuf> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))?;
 
-    // 1. exe 所在目录
+    // 1. exe 所在目录（bundle.resources 复制后的位置）
     let path = exe_dir.join(name);
     if path.exists() {
         return Some(path);
     }
 
-    // 2. 向上两级（dev 模式：target/debug/ → 项目根目录）
-    let project_root = exe_dir.parent().and_then(|p| p.parent());
-    if let Some(root) = project_root {
-        let path = root.join(name);
-        if path.exists() {
-            return Some(path);
+    // 2. 向上搜索 1~4 级目录（兼容 dev 模式 target/debug/ → 项目根目录）
+    let mut current = exe_dir.as_path();
+    for _ in 0..4 {
+        if let Some(parent) = current.parent() {
+            let path = parent.join(name);
+            if path.exists() {
+                return Some(path);
+            }
+            current = parent;
+        } else {
+            break;
         }
     }
 

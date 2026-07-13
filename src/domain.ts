@@ -1,6 +1,7 @@
 export type ProtocolType = "openai" | "anthropic";
 export type FlowletTier = "pro" | "flash" | "none";
 export type AuthStrategy = "bearer" | "x_api_key";
+export type AccountResourceMode = "token_pack" | "pay_as_you_go";
 
 // 模型开放范围（需求三）：全部开放（默认）/ 仅 Flowlet 模型 / 自定义。
 export type ModelExposureMode = "all" | "flowlet_only" | "custom";
@@ -43,6 +44,7 @@ export type ChannelAccount = {
   enabled: boolean;
   priority: number;
   remark?: string;
+  resource_mode?: AccountResourceMode | null;
   base_url_override?: string | null;
   last_used_at?: string;
   last_error?: string;
@@ -319,6 +321,7 @@ export function createAccount(channelId: string, index: number): ChannelAccount 
     enabled: true,
     priority: index,
     remark: "",
+    resource_mode: channelId === "longcat" ? "token_pack" : "pay_as_you_go",
     base_url_override: null,
     last_used_at: undefined,
     last_error: undefined,

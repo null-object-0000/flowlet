@@ -139,8 +139,8 @@ impl Storage {
                 r#"
                 INSERT INTO channel_accounts (
                     id, channel_id, name, api_key, enabled, priority,
-                    remark, base_url_override, last_used_at, last_error, credential_status, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                    remark, resource_mode, base_url_override, last_used_at, last_error, credential_status, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                 "#,
                 params![
                     account.id,
@@ -150,6 +150,7 @@ impl Storage {
                     account.enabled as i64,
                     account.priority,
                     account.remark,
+                    account.resource_mode,
                     account.base_url_override,
                     account.last_used_at,
                     last_error,
@@ -170,7 +171,7 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT id, channel_id, name, api_key, enabled, priority,
-                    remark, base_url_override, last_used_at, last_error, credential_status, created_at, updated_at
+                    remark, resource_mode, base_url_override, last_used_at, last_error, credential_status, created_at, updated_at
              FROM channel_accounts ORDER BY channel_id ASC, priority ASC, id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -182,12 +183,15 @@ impl Storage {
                 enabled: row.get::<_, i64>(4)? != 0,
                 priority: row.get(5)?,
                 remark: row.get(6)?,
-                base_url_override: row.get(7)?,
-                last_used_at: row.get(8)?,
-                last_error: row.get(9)?,
-                credential_status: row.get::<_, String>(10).unwrap_or_else(|_| "healthy".to_string()),
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                resource_mode: row.get(7)?,
+                base_url_override: row.get(8)?,
+                last_used_at: row.get(9)?,
+                last_error: row.get(10)?,
+                credential_status: row
+                    .get::<_, String>(11)
+                    .unwrap_or_else(|_| "healthy".to_string()),
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })?;
         let mut accounts = Vec::new();

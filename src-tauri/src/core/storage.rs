@@ -177,6 +177,7 @@ impl Storage {
                 enabled           INTEGER NOT NULL DEFAULT 1,
                 priority          INTEGER NOT NULL DEFAULT 0,
                 remark            TEXT,
+                resource_mode     TEXT,
                 last_used_at      TEXT,
                 last_error        TEXT,
                 credential_status TEXT NOT NULL DEFAULT 'healthy',
@@ -478,6 +479,12 @@ impl Storage {
             &connection,
             "channel_accounts",
             "base_url_override",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "resource_mode",
             "TEXT",
         )?;
 

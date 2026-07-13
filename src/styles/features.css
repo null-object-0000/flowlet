@@ -1248,6 +1248,99 @@
   gap: 5px;
 }
 
+.account-editor-section.resource {
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid #e3e8f0;
+  border-radius: 0;
+  gap: 14px;
+}
+
+.account-resource-mode-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.account-resource-mode {
+  min-height: 64px;
+  padding: 11px 14px;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  background: #fff;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: #526079;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.account-resource-mode:hover,
+.account-resource-mode.selected {
+  border-color: #2475ee;
+  background: #f7faff;
+}
+
+.account-resource-mode > i {
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid #c9d3e1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.account-resource-mode.selected > i {
+  border-color: #2475ee;
+}
+
+.account-resource-mode.selected > i::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2475ee;
+  content: "";
+}
+
+.account-resource-mode > span {
+  display: grid;
+  gap: 4px;
+}
+
+.account-resource-mode strong {
+  color: #44526b;
+  font-size: 14px;
+}
+
+.account-resource-mode.selected strong {
+  color: #1769ed;
+}
+
+.account-resource-mode small {
+  color: #8793a6;
+  font-size: 12px;
+}
+
+.account-resource-details {
+  padding: 14px;
+  border: 1px solid #dfe6f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  background: #fff;
+}
+
+.account-resource-details-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #273650;
+  font-size: 14px;
+}
+
 .account-resource-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1255,7 +1348,30 @@
 }
 
 .account-resource-grid.longcat {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.account-token-remaining {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.account-token-remaining strong {
+  color: #1769ed;
+  font-size: 18px;
+  line-height: 30px;
+}
+
+.account-token-expire {
+  grid-column: 1 / span 2;
+}
+
+.account-token-expire > small {
+  display: block;
+  margin-top: 6px;
+  color: #8a96a8;
+  font-size: 11px;
 }
 
 .account-editor-section.advanced {
@@ -1404,11 +1520,14 @@
 
 @media (max-width: 720px) {
   .account-channel-options,
+  .account-resource-mode-options,
   .account-resource-grid,
   .channel-account-stats,
   .account-editor-footer {
     grid-template-columns: 1fr;
   }
+  .account-resource-grid.longcat { grid-template-columns: 1fr; }
+  .account-token-expire { grid-column: auto; }
   .account-editor-header { padding: 18px; }
   .account-editor-content { padding: 16px 18px; }
   .account-editor-footer { padding: 12px 18px; }

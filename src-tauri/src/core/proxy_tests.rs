@@ -423,6 +423,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 enabled: true,
                 priority: 0,
                 remark: None,
+                resource_mode: None,
                 base_url_override: None,
                 last_used_at: None,
                 last_error: None,
@@ -603,6 +604,7 @@ fn export_import_config_roundtrip() {
         channel_id: "deepseek".to_string(),
         name: "测试账号".to_string(),
         api_key: "sk-test".to_string(),
+        resource_mode: Some("pay_as_you_go".to_string()),
         ..Default::default()
     };
     storage.save_channel_accounts(&[account.clone()]).unwrap();
@@ -622,6 +624,12 @@ fn export_import_config_roundtrip() {
     assert_eq!(storage.list_channel_presets().unwrap().len(), 1);
     assert_eq!(storage.list_channel_accounts().unwrap().len(), 1);
     assert_eq!(storage.list_channel_accounts().unwrap()[0].id, "acc-test");
+    assert_eq!(
+        storage.list_channel_accounts().unwrap()[0]
+            .resource_mode
+            .as_deref(),
+        Some("pay_as_you_go")
+    );
 
     // 清理
     let _ = std::fs::remove_file(&path);

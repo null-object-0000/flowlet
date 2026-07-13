@@ -369,6 +369,8 @@ pub struct ChannelAccount {
     pub enabled: bool,
     pub priority: i64,
     pub remark: Option<String>,
+    #[serde(default)]
+    pub resource_mode: Option<String>,
     pub base_url_override: Option<String>,
     pub last_used_at: Option<String>,
     pub last_error: Option<String>,
@@ -388,6 +390,7 @@ impl Default for ChannelAccount {
             enabled: true,
             priority: 0,
             remark: None,
+            resource_mode: None,
             base_url_override: None,
             last_used_at: None,
             last_error: None,

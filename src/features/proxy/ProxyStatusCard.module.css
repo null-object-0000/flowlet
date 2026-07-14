@@ -1,18 +1,18 @@
 .card {
-  min-height: 126px;
-  padding: 18px 20px;
+  min-height: 88px;
+  padding: 12px 16px;
 }
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(290px, 0.85fr) minmax(360px, 1fr) 78px;
-  gap: 22px;
+  grid-template-columns: minmax(230px, 0.85fr) minmax(280px, 1fr) 56px;
+  gap: 16px;
   align-items: center;
 }
 
 .layout h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 15px;
   color: #0f1f3d;
   font-weight: 800;
 }
@@ -37,11 +37,11 @@
 }
 
 .signal {
-  width: 76px;
-  height: 76px;
+  width: 52px;
+  height: 52px;
   display: grid;
   place-items: center;
-  border-radius: 11px;
+  border-radius: 10px;
   color: #667795;
   background: linear-gradient(180deg, #f6f8fc, #eef2f8);
   border: 1px solid #e1e7f0;
@@ -53,8 +53,8 @@
 }
 
 .signal svg {
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
 }
 
 .signal path {
@@ -68,7 +68,7 @@
 .metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  gap: 12px;
 }
 
 .metric {
@@ -92,8 +92,8 @@
 
 .metricValue > strong {
   color: #12213a;
-  font-size: 14px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .hintIcon {

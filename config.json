@@ -24,7 +24,6 @@
     "capture_req_body": true,
     "capture_res_headers": true,
     "capture_res_body": true,
-    "stream_summary_max_bytes": 16384,
     "max_body_bytes": 1048576,
     "redact_sensitive_headers": false
   },

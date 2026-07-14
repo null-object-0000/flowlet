@@ -514,7 +514,6 @@ impl Storage {
         add_column_if_missing(&connection, "request_logs", "req_body_b64", "TEXT")?;
         add_column_if_missing(&connection, "request_logs", "res_headers_json", "TEXT")?;
         add_column_if_missing(&connection, "request_logs", "res_body_b64", "TEXT")?;
-        add_column_if_missing(&connection, "request_logs", "stream_summary", "TEXT")?;
         add_column_if_missing(
             &connection,
             "request_logs",
@@ -584,6 +583,12 @@ impl Storage {
             "INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.04', datetime('now'))",
             [],
         )?;
+
+        // 删除已废弃的 stream_summary 列（流式摘要功能已移除）。
+        // DROP COLUMN 要求 SQLite ≥ 3.35；Tauri 自带的 libsqlite3 满足版本。
+        if table_has_column(&connection, "request_logs", "stream_summary")? {
+            connection.execute("ALTER TABLE request_logs DROP COLUMN stream_summary", [])?;
+        }
 
         tracing::info!("migrate: 完成");
         Ok(())

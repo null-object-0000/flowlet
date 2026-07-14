@@ -337,7 +337,6 @@ fn enriches_final_upstream_error_metadata_without_body_rewrite() {
         req_body_b64: None,
         res_headers_json: None,
         res_body_b64: None,
-        stream_summary: None,
         is_last_attempt: true,
     };
 
@@ -647,7 +646,6 @@ fn cleanup_old_logs_works() {
                 req_body_b64: None,
                 res_headers_json: None,
                 res_body_b64: None,
-                stream_summary: None,
                 is_last_attempt: true,
             })
             .unwrap();

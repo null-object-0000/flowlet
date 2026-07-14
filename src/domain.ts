@@ -137,7 +137,6 @@ export type RequestLogRow = {
   req_body_b64: string | null;
   res_headers_json: string | null;
   res_body_b64: string | null;
-  stream_summary: string | null;
   is_last_attempt: boolean;
 };
 
@@ -175,7 +174,6 @@ export type LogCaptureConfig = {
   capture_req_body: boolean;
   capture_res_headers: boolean;
   capture_res_body: boolean;
-  stream_summary_max_bytes: number;
   max_body_bytes: number;
   /** 默认 false（不脱敏），true 时敏感 Header 替换为 [redacted] */
   redact_sensitive_headers?: boolean;

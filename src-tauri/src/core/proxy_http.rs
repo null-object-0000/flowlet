@@ -399,10 +399,6 @@ pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::Lo
                     .get("capture_res_body")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true),
-                stream_summary_max_bytes: lc
-                    .get("stream_summary_max_bytes")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(16 * 1024) as usize,
                 max_body_bytes: lc
                     .get("max_body_bytes")
                     .and_then(|v| v.as_u64())
@@ -520,24 +516,6 @@ pub(super) fn truncate_utf8(body: &mut Vec<u8>, max: usize) {
         cut -= 1;
     }
     body.truncate(cut);
-}
-
-/// Build the textual "首尾片段" summary that we persist in the
-/// `stream_summary` column for captured streaming responses.
-#[allow(dead_code)]
-pub(super) fn summarize_stream_fragment(fragment: &str) -> Option<String> {
-    let non_empty: Vec<&str> = fragment.lines().filter(|line| !line.is_empty()).collect();
-    if non_empty.is_empty() {
-        return None;
-    }
-    let head = non_empty[0];
-    let tail = non_empty[non_empty.len() - 1];
-    Some(format!(
-        "chunks: {}\nfirst: {}\nlast:  {}",
-        non_empty.len(),
-        head,
-        tail
-    ))
 }
 
 #[cfg(test)]

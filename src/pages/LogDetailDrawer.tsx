@@ -151,12 +151,6 @@ export function LogDetailDrawer({
                 <code className="code-block">{formatJson(finalRow.res_headers_json)}</code>
                 <h5 className="block-title">Response Body</h5>
                 <code className="code-block">{formatBody(finalRow.res_body_b64)}</code>
-                {finalRow.stream_summary ? (
-                  <>
-                    <h5 className="block-title">流式摘要</h5>
-                    <pre className="code-block">{finalRow.stream_summary}</pre>
-                  </>
-                ) : null}
               </section>
             </>
           ) : null}

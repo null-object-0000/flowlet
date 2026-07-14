@@ -193,11 +193,11 @@ impl Storage {    pub fn save_balance_snapshot(
                 status, latency_ms, is_stream, error_message, fallback_count,
                 route_reason, created_at,
                 ttfb_ms, duration_ms, attempt_seq, req_headers_json, req_body_b64,
-                res_headers_json, res_body_b64, stream_summary, is_last_attempt
+                res_headers_json, res_body_b64, is_last_attempt
             ) VALUES (
                 lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                 ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, datetime('now'),
-                ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30
+                ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
             )
             "#,
             params![
@@ -229,7 +229,6 @@ impl Storage {    pub fn save_balance_snapshot(
                 log.req_body_b64,
                 log.res_headers_json,
                 log.res_body_b64,
-                log.stream_summary,
                 log.is_last_attempt as i64,
             ],
         )?;
@@ -251,7 +250,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 route_reason, created_at,
                 ttfb_ms, duration_ms, attempt_seq,
                 req_headers_json, req_body_b64, res_headers_json, res_body_b64,
-                stream_summary, is_last_attempt
+                is_last_attempt
             FROM request_logs
             WHERE is_last_attempt = 1
             ORDER BY created_at DESC
@@ -290,8 +289,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 req_body_b64: row.get(27)?,
                 res_headers_json: row.get(28)?,
                 res_body_b64: row.get(29)?,
-                stream_summary: row.get(30)?,
-                is_last_attempt: row.get::<_, i64>(31)? != 0,
+                is_last_attempt: row.get::<_, i64>(30)? != 0,
             })
         })?;
         let mut logs = Vec::new();
@@ -349,7 +347,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 route_reason, created_at,
                 ttfb_ms, duration_ms, attempt_seq,
                 req_headers_json, req_body_b64, res_headers_json, res_body_b64,
-                stream_summary, is_last_attempt
+                is_last_attempt
             FROM request_logs
             WHERE request_id = ?1
             ORDER BY attempt_seq ASC, created_at ASC
@@ -387,8 +385,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 req_body_b64: row.get(27)?,
                 res_headers_json: row.get(28)?,
                 res_body_b64: row.get(29)?,
-                stream_summary: row.get(30)?,
-                is_last_attempt: row.get::<_, i64>(31)? != 0,
+                is_last_attempt: row.get::<_, i64>(30)? != 0,
             })
         })?;
         let mut logs = Vec::new();
@@ -405,7 +402,6 @@ impl Storage {    pub fn save_balance_snapshot(
         duration_ms: i64,
         res_headers_json: Option<String>,
         res_body_b64: Option<String>,
-        stream_summary: Option<String>,
     ) -> Result<(), StorageError> {
         let connection = self
             .connection
@@ -417,8 +413,7 @@ impl Storage {    pub fn save_balance_snapshot(
             SET ttfb_ms = ?2,
                 duration_ms = ?3,
                 res_headers_json = ?4,
-                res_body_b64 = ?5,
-                stream_summary = ?6
+                res_body_b64 = ?5
             WHERE request_id = ?1
               AND is_last_attempt = 1
               AND is_stream = 1
@@ -429,7 +424,6 @@ impl Storage {    pub fn save_balance_snapshot(
                 duration_ms,
                 res_headers_json,
                 res_body_b64,
-                stream_summary,
             ],
         )?;
         Ok(())
@@ -943,7 +937,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 status, latency_ms, is_stream, error_message, fallback_count,
                 route_reason, created_at,
                 ttfb_ms, duration_ms, attempt_seq,
-                stream_summary, is_last_attempt
+                is_last_attempt
             FROM request_logs
             {where_sql}
             ORDER BY created_at DESC
@@ -994,8 +988,7 @@ impl Storage {    pub fn save_balance_snapshot(
                     req_body_b64: None,
                     res_headers_json: None,
                     res_body_b64: None,
-                    stream_summary: row.get(26)?,
-                    is_last_attempt: row.get::<_, i64>(27)? != 0,
+                    is_last_attempt: row.get::<_, i64>(26)? != 0,
                 })
             },
         )?;

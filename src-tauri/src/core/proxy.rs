@@ -500,7 +500,6 @@ async fn forward_request(
             req_body_b64: None,
             res_headers_json: None,
             res_body_b64: None,
-            stream_summary: None,
             is_last_attempt: true,
         };
         record_request_log(state.storage, log);
@@ -846,7 +845,6 @@ impl RouteLogContext {
             req_body_b64: self.req_body_b64.clone(),
             res_headers_json: None,
             res_body_b64: None,
-            stream_summary: None,
             is_last_attempt: true,
         }
     }
@@ -976,11 +974,10 @@ async fn build_response(
     log.ttfb_ms = Some(ttfb_ms);
     log.res_headers_json = res_headers_json.clone();
     log.res_body_b64 = None;
-    log.stream_summary = None;
 
     if is_stream {
         // 流式：先发一条日志（duration 暂按 ttfb 兜底），再注册 stream 结束回调
-        // 补 duration / res_body_b64 / stream_summary。
+        // 补 duration / res_body_b64。
         log.duration_ms = log.duration_ms.or(Some(ttfb_ms));
         record_request_log(storage.clone(), log);
 
@@ -994,7 +991,6 @@ async fn build_response(
             let done = rx_done.await.unwrap_or(StreamDone {
                 duration_ms: ttfb_for_update,
                 res_body_b64: None,
-                stream_summary: None,
             });
             update_stream_log(
                 storage,
@@ -1003,7 +999,6 @@ async fn build_response(
                 done.duration_ms,
                 res_headers_for_update,
                 done.res_body_b64,
-                done.stream_summary,
             );
         });
 
@@ -1248,7 +1243,6 @@ fn record_request_log(storage: Storage, log: RequestLogInput) {
 struct StreamDone {
     pub duration_ms: i64,
     pub res_body_b64: Option<String>,
-    pub stream_summary: Option<String>,
 }
 
 /// 包装上游 body 字节流：捕获最多 capture.max_body_bytes 的响应体字节
@@ -1320,16 +1314,10 @@ fn send_stream_done(
     } else {
         Some(encode_body_base64(&state.res_body_buf))
     };
-    let stream_summary = build_stream_summary(
-        state.first_line.as_deref(),
-        state.last_line.as_deref(),
-        state.line_count,
-    );
     let _ = tx_done.lock().unwrap().take().map(|tx| {
         tx.send(StreamDone {
             duration_ms,
             res_body_b64,
-            stream_summary,
         })
     });
 }
@@ -1346,23 +1334,7 @@ struct TimedStreamState {
     line_count: usize,
 }
 
-fn build_stream_summary(
-    first: Option<&str>,
-    last: Option<&str>,
-    line_count: usize,
-) -> Option<String> {
-    let first = first?;
-    let last = last.unwrap_or(first);
-    if first == last {
-        return Some(format!("lines: {}\n{}", line_count, first));
-    }
-    Some(format!(
-        "lines: {}\nfirst: {}\nlast:  {}",
-        line_count, first, last
-    ))
-}
-
-/// 流式响应结束后由 spawn task 调用，补写 duration / res_body_b64 / stream_summary
+/// 流式响应结束后由 spawn task 调用，补写 duration / res_body_b64
 /// 到最近一条 is_last_attempt=1 且 is_stream=1 的日志行。
 fn update_stream_log(
     storage: Storage,
@@ -1371,7 +1343,6 @@ fn update_stream_log(
     duration_ms: i64,
     res_headers_json: Option<String>,
     res_body_b64: Option<String>,
-    stream_summary: Option<String>,
 ) {
     tokio::task::spawn_blocking(move || {
         if let Err(err) = storage.update_request_log_timing(
@@ -1380,7 +1351,6 @@ fn update_stream_log(
             duration_ms,
             res_headers_json,
             res_body_b64,
-            stream_summary,
         ) {
             tracing::warn!("补写流式请求日志失败: {err}");
         }

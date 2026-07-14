@@ -614,7 +614,6 @@ pub struct RequestLogRow {
     pub req_body_b64: Option<String>,
     pub res_headers_json: Option<String>,
     pub res_body_b64: Option<String>,
-    pub stream_summary: Option<String>,
     pub is_last_attempt: bool,
 }
 
@@ -858,7 +857,6 @@ pub struct RequestLogInput {
     pub req_body_b64: Option<String>,
     pub res_headers_json: Option<String>,
     pub res_body_b64: Option<String>,
-    pub stream_summary: Option<String>,
     pub is_last_attempt: bool,
 }
 
@@ -915,7 +913,6 @@ pub struct LogCaptureConfig {
     pub capture_req_body: bool,
     pub capture_res_headers: bool,
     pub capture_res_body: bool,
-    pub stream_summary_max_bytes: usize,
     pub max_body_bytes: usize,
     /// 是否脱敏敏感 Header（默认 false — 明文记录）。
     /// 开启后，authorization / x-api-key / cookie / set-cookie / x-auth-token 会被替换为 [redacted]。
@@ -929,7 +926,6 @@ impl Default for LogCaptureConfig {
             capture_req_body: true,
             capture_res_headers: true,
             capture_res_body: true,
-            stream_summary_max_bytes: 16 * 1024,
             max_body_bytes: 1024 * 1024,
             redact_sensitive_headers: false,
         }

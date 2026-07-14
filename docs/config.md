@@ -100,7 +100,6 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
   "capture_req_body": true,          // 记录请求 Body
   "capture_res_headers": true,       // 记录响应 Header
   "capture_res_body": true,          // 记录响应 Body
-  "stream_summary_max_bytes": 16384, // 流式响应摘要最大字节数
   "max_body_bytes": 1048576,         // 单条 Body 最大字节数（1 MB）
   "redact_sensitive_headers": false  // 是否脱敏敏感 Header
 }
@@ -114,7 +113,6 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 | `capture_req_body` | `bool` | `true` | 是否记录请求 Body |
 | `capture_res_headers` | `bool` | `true` | 是否记录响应 Header |
 | `capture_res_body` | `bool` | `true` | 是否记录响应 Body |
-| `stream_summary_max_bytes` | `number` | `16384` | 流式响应中截取摘要的最大字节数 |
 | `max_body_bytes` | `number` | `1048576` | 单条 Body 截断上限（1 MB） |
 | `redact_sensitive_headers` | `bool` | `false` | 开启后，`authorization` / `x-api-key` / `cookie` / `set-cookie` / `x-auth-token` 会被替换为 `[redacted]` |
 

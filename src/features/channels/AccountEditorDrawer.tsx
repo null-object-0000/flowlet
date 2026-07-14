@@ -1,10 +1,10 @@
 import React from "react";
-import { Anchor, Button, Drawer, PasswordInput, Switch, TextInput } from "@mantine/core";
+import { Anchor, Button, Drawer, Group, Modal, PasswordInput, Stack, Switch, Text, TextInput } from "@mantine/core";
 import { IconDatabaseImport, IconExternalLink, IconRefresh } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount, ChannelPreset, createAccount } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
-import { LongCatPackImportDialog, summarizeLongCatLots, parseSnapshotTokenPacks } from "./LongCatPackImportDialog";
+import { LongCatPackImportDialog, summarizeLongCatLots, parseSnapshotTokenPacks, formatTokenCount } from "./LongCatPackImportDialog";
 
 export type AccountEditorRequest =
   | { mode: "create"; channelId: string }
@@ -27,7 +27,7 @@ type AccountEditorDrawerProps = {
   channels: ChannelPreset[];
   onClose: () => void;
   onSaveAccounts: (accounts: ChannelAccount[]) => Promise<void> | void;
-  onTestConnection: (accountId: string) => void;
+  onTestConnection: (channelId: string, apiKey: string, baseUrlOverride?: string | null) => void;
   onSyncBalance: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
@@ -60,7 +60,8 @@ function optionalNumber(value: string): number | null {
 }
 
 function formatTokens(value: number | null): string {
-  return value == null ? "-" : Math.max(0, value).toLocaleString("en-US");
+  if (value == null) return "-";
+  return `${formatTokenCount(Math.max(0, value))} Tokens`;
 }
 
 function defaultResourceMode(channelId: string): AccountResourceMode {
@@ -105,12 +106,15 @@ export function AccountEditorDrawer({
     () => parseSnapshotTokenPacks(resource.tokenPacks),
     [resource.tokenPacks],
   );
+  // 只要填写了 API Key 就允许测试连接，与新建/编辑模式无关
+  const canTestConnection = draft.api_key.trim().length > 0;
 
   function updateDraft(patch: Partial<ChannelAccount>) {
     setDraft((current) => ({ ...current, ...patch, updated_at: new Date().toISOString() }));
   }
 
   function selectChannel(channelId: string) {
+    if (request.mode === "edit") return;
     const nextChannel = channels.find((item) => item.id === channelId);
     updateDraft({
       channel_id: channelId,
@@ -180,7 +184,15 @@ export function AccountEditorDrawer({
     }
   }
 
-  async function remove() {
+  const [confirmOpened, setConfirmOpened] = React.useState(false);
+
+  function openRemoveConfirm() {
+    if (request.mode !== "edit") return;
+    setConfirmOpened(true);
+  }
+
+  async function confirmRemove() {
+    setConfirmOpened(false);
     if (request.mode !== "edit") return;
     await onSaveAccounts(accounts.filter((_, index) => index !== request.index));
     onClose();
@@ -205,12 +217,13 @@ export function AccountEditorDrawer({
       <div className="account-editor-content">
         <section className="account-editor-section basic">
           <h3>基础信息</h3>
-          <label>选择渠道</label>
+          <label><span className="account-key-label-row">选择渠道{request.mode === "edit" ? <small>（编辑时不可更改）</small> : null}</span></label>
           <div className="account-channel-options">
             {channels.map((item) => (
               <button
                 type="button"
                 key={item.id}
+                disabled={request.mode === "edit"}
                 className={draft.channel_id === item.id ? "account-channel-option selected" : "account-channel-option"}
                 onClick={() => selectChannel(item.id)}
               >
@@ -228,19 +241,21 @@ export function AccountEditorDrawer({
           </div>
 
           <label>
-            API Key
-            {channel?.platform_url ? (
-              <Anchor
-                href={channel.platform_url}
-                target="_blank"
-                rel="noreferrer"
-                size="xs"
-                className="account-api-key-link"
-              >
-                <IconExternalLink size={12} />
-                前往查看
-              </Anchor>
-            ) : null}
+            <span className="account-key-label-row">
+              API Key
+              {channel?.platform_url ? (
+                <Anchor
+                  href={channel.platform_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  size="xs"
+                  className="account-api-key-link"
+                >
+                  <IconExternalLink size={12} />
+                  前往查看
+                </Anchor>
+              ) : null}
+            </span>
           </label>
           <PasswordInput value={draft.api_key} placeholder="请输入渠道 API Key" onChange={(event) => updateDraft({ api_key: event.target.value })} />
 
@@ -362,14 +377,31 @@ export function AccountEditorDrawer({
           {advancedOpen ? (
             <div className="account-advanced-content">
               <label>Base URL 覆盖（可选）<TextInput value={draft.base_url_override ?? ""} placeholder={channel?.openai_base_url} onChange={(event) => updateDraft({ base_url_override: event.target.value || null })} /></label>
-              <div><Button variant="default" disabled={request.mode === "create"} onClick={() => onTestConnection(draft.id)}>测试连接</Button><span>{draft.last_error || "保存账号后可测试真实上游连接"}</span></div>
+              <div><Button variant="default" disabled={!canTestConnection} onClick={() => onTestConnection(draft.channel_id, draft.api_key, draft.base_url_override)}>测试连接</Button><span>{draft.last_error || "填写 API Key 后可测试真实上游连接"}</span></div>
             </div>
           ) : null}
         </section>
 
         {request.mode === "edit" ? (
-          <section className="account-editor-danger"><div><strong>删除账号</strong><span>删除后将退出所有路由，且无法恢复</span></div><Button variant="subtle" color="red" onClick={() => void remove()}>删除</Button></section>
+          <section className="account-editor-danger"><div><strong>删除账号</strong><span>删除后将退出所有路由，且无法恢复</span></div><Button variant="subtle" color="red" onClick={openRemoveConfirm}>删除</Button></section>
         ) : null}
+
+        <Modal
+          opened={confirmOpened}
+          onClose={() => setConfirmOpened(false)}
+          title="确认删除账号"
+          size="sm"
+          zIndex={2100}
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm">确定要删除账号「{draft.name}」吗？删除后将退出所有路由，且无法恢复。</Text>
+            <Group justify="flex-end">
+              <Button variant="subtle" onClick={() => setConfirmOpened(false)}>取消</Button>
+              <Button color="red" onClick={() => void confirmRemove()}>确认删除</Button>
+            </Group>
+          </Stack>
+        </Modal>
       </div>
 
       <LongCatPackImportDialog
@@ -380,7 +412,7 @@ export function AccountEditorDrawer({
 
       <footer className="account-editor-footer">
         <Button variant="default" onClick={onClose}>取消</Button>
-        <Button variant="default" disabled={request.mode === "create"} onClick={() => onTestConnection(draft.id)}>测试连接</Button>
+        <Button variant="default" disabled={!canTestConnection} onClick={() => onTestConnection(draft.channel_id, draft.api_key, draft.base_url_override)}>测试连接</Button>
         <Button loading={saving} onClick={() => void save()}>{request.mode === "create" ? "保存账号" : "保存修改"}</Button>
       </footer>
     </Drawer>

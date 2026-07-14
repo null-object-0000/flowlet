@@ -631,12 +631,13 @@ async fn forward_request(
                     }
                 }
 
+                // 可重试状态码 + 还有下一个候选 → fallback 到下一个
                 if should_try_next_status(status, &channel_vendor) && index + 1 < candidates.len() {
                     fallback_count += 1;
                     record_request_log(
                         storage.clone(),
                         log_context.log_fallback(
-                            uuid::Uuid::new_v4().to_string(),
+                            request_id_for_routing.clone(),
                             Some(status.as_u16() as i64),
                             Some(format!("retryable_status_{}", status.as_u16())),
                             fallback_count,
@@ -654,7 +655,10 @@ async fn forward_request(
                     "direct".to_string()
                 };
                 let attempt_seq = fallback_count;
-                let is_last = index + 1 == candidates.len();
+                // is_last_attempt 反映"是否还会继续尝试下一个候选"：
+                // 只有当当前候选是数组中最后一个，或者当前响应不可重试（终态）时，才是最后一次。
+                let is_last = index + 1 >= candidates.len()
+                    || !should_try_next_status(status, &channel_vendor);
 
                 if should_check_quota_body_status(status) && index + 1 < candidates.len() {
                     let headers = upstream_response.headers().clone();
@@ -665,7 +669,7 @@ async fn forward_request(
                         record_request_log(
                             storage.clone(),
                             log_context.log_fallback(
-                                uuid::Uuid::new_v4().to_string(),
+                                request_id_for_routing.clone(),
                                 Some(status.as_u16() as i64),
                                 Some("quota exceeded".to_string()),
                                 fallback_count,
@@ -694,8 +698,9 @@ async fn forward_request(
                         None
                     };
 
+                    let request_id_clone = request_id_for_routing.clone();
                     let mut log = log_context.log_success_base(
-                        request_id_for_routing.clone(),
+                        request_id_for_routing,
                         status.as_u16() as i64,
                         fallback_count,
                         route_reason,
@@ -713,6 +718,7 @@ async fn forward_request(
                         headers,
                         body,
                         log,
+                        request_id_clone,
                         &detected_protocol,
                     );
                 }
@@ -743,7 +749,7 @@ async fn forward_request(
                     record_request_log(
                         storage.clone(),
                         log_context.log_fallback(
-                            uuid::Uuid::new_v4().to_string(),
+                            request_id_for_routing.clone(),
                             None,
                             Some(error_msg),
                             fallback_count,
@@ -1050,13 +1056,14 @@ fn build_buffered_response(
     headers: HeaderMap,
     body: Bytes,
     mut log: RequestLogInput,
+    request_id: String,
     protocol: &ProtocolType,
 ) -> Result<Response, reqwest::Error> {
     log.is_stream = false;
     enrich_upstream_error_log(status, &mut log);
     let usage_capture = UsageCapture {
         storage: storage.clone(),
-        request_id: log.request_id.clone(),
+        request_id: request_id.clone(),
         client_id: log.client_id.clone(),
         client_name: log.client_name.clone(),
         channel_id: log.channel_id.clone(),

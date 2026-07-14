@@ -4,7 +4,9 @@ import { IconChevronRight, IconDotsVertical } from "@tabler/icons-react";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
 import { Panel, PanelHeader, StatusPill } from "../../components/ui";
-import { formatAmount, formatIsoDateTime, formatTokenCount } from "./formatters";
+import { formatAmount, formatIsoDateTime } from "./formatters";
+import { formatTokenCount } from "./LongCatPackImportDialog";
+import styles from "./ChannelAccountsPanel.module.css";
 
 type ChannelAccountsPanelProps = {
   accounts: ChannelAccount[];
@@ -56,22 +58,22 @@ export function ChannelAccountsPanel({
         {accounts.map((account, index) => (
           <button
             type="button"
-            className="overview-account-row"
+            className={styles.row}
             key={account.id}
-            onClick={() => onOpenManagementDrawer(index)}
-            aria-label={`管理账号 ${account.name || getChannelName(account.channel_id)}`}
+            onClick={() => onEditAccount(index)}
+            aria-label={`编辑账号 ${account.name || getChannelName(account.channel_id)}`}
           >
             <Tooltip label={getChannelName(account.channel_id)} withArrow position="top">
               <ChannelLogo channelId={account.channel_id} channelName={getChannelName(account.channel_id)} size={32} variant="avatar" />
             </Tooltip>
             <div className="row-main">
               <strong>{account.name || getChannelName(account.channel_id)}</strong>
-              <span className="row-resource">
+              <span className={styles.resourceLine}>
                 {account.channel_id === "longcat" ? `资源包 ${accountResource(account, getBalanceForAccount(account.id))}` : `余额 ${accountResource(account, getBalanceForAccount(account.id))}`}
                 {(account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack" && getBalanceForAccount(account.id)?.token_pack_expire_at ? (
                   <>　·　有效期至 {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</>
                 ) : null}
-                {!account.api_key.trim() ? <span className="warn">　·　未配置</span> : !account.enabled ? <span className="warn">　·　停用</span> : null}
+                {!account.api_key.trim() ? <span className={styles.warn}>　·　未配置</span> : !account.enabled ? <span className={styles.warn}>　·　停用</span> : null}
               </span>
             </div>
             <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>

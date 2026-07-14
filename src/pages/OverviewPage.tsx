@@ -73,7 +73,6 @@ type OverviewPageProps = {
   clients: ClientConfig[];
   routes: RouteCandidate[];
   onCopy: (text: string, done: string) => Promise<void>;
-  onRefreshAll: () => void;
   proxyStarting: boolean;
   proxyStartError: string | null;
   autoStartAttempted: boolean;
@@ -135,7 +134,6 @@ export function OverviewPage({
   clients,
   routes,
   onCopy,
-  onRefreshAll,
   proxyStarting,
   proxyStartError,
   autoStartAttempted,
@@ -314,7 +312,6 @@ export function OverviewPage({
               {proxyPhase === "failed" ? "重新启动" : "启动服务"}
             </Button>
           )}
-          <Button className="overview-action-button refresh" leftSection={<IconRefresh size={16} />} variant="outline" onClick={() => void onRefreshAll()}>刷新数据</Button>
         </Actions>
       </header>
 

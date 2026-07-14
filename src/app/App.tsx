@@ -271,7 +271,6 @@ export default function App() {
               clients={clients}
               routes={routes}
               onCopy={copy}
-              onRefreshAll={() => void Promise.all([refreshAll(), refreshStatus()])}
               proxyStarting={proxyStarting}
               proxyStartError={proxyStartError}
               autoStartAttempted={autoStartAttempted}

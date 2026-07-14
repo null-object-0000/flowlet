@@ -1,4 +1,5 @@
 import { Code, UnstyledButton } from "@mantine/core";
+import shared from "./clients.module.css";
 
 type ClientTokenRowProps = {
   defaultClientToken: string;
@@ -11,11 +12,11 @@ export function ClientTokenRow({ defaultClientToken, onCopy }: ClientTokenRowPro
   return (
     <UnstyledButton
       type="button"
-      className="overview-endpoint-row"
+      className={shared.endpointRow}
       onClick={() => void onCopy(`Bearer ${defaultClientToken}`, "Client Token 已复制")}
     >
       <span>默认客户端 Token</span>
-      <Code className="overview-endpoint-url">{defaultClientToken}</Code>
+      <Code className={shared.endpointUrl}>{defaultClientToken}</Code>
     </UnstyledButton>
   );
 }

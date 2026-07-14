@@ -1,0 +1,32 @@
+.endpoints {
+  display: grid;
+  gap: 10px;
+}
+
+.endpointRow {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.endpointRow > span {
+  color: #344766;
+  font-size: 13px;
+}
+
+.endpointUrl {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 8px 12px;
+  background: #f8fafc;
+  color: #233554;
+}
+
+@media (max-width: 760px) {
+  .endpointRow {
+    grid-template-columns: 1fr;
+  }
+}

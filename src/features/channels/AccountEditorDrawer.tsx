@@ -4,7 +4,7 @@ import { IconDatabaseImport, IconExternalLink, IconRefresh } from "@tabler/icons
 import { notifications } from "@mantine/notifications";
 import { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount, ChannelPreset, createAccount } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
-import { LongCatPackImportDialog, summarizeLongCatLots, parseSnapshotTokenPacks, formatTokenCount } from "./LongCatPackImportDialog";
+import { LongCatPackManager, summarizeLots, parseSnapshotTokenPacks, formatTokenCount, LongCatLot } from "./LongCatPackImportDialog";
 
 export type AccountEditorRequest =
   | { mode: "create"; channelId: string }
@@ -101,7 +101,7 @@ export function AccountEditorDrawer({
     : optionalNumber(resource.tokenRemaining);
   const autoSyncBalance = channel?.supports_balance_query === true;
   const balanceSnapshot = getBalanceForAccount(draft.id);
-  const [importOpened, setImportOpened] = React.useState(false);
+  const [packManagerOpened, setPackManagerOpened] = React.useState(false);
   const importedPacks = React.useMemo(
     () => parseSnapshotTokenPacks(resource.tokenPacks),
     [resource.tokenPacks],
@@ -125,17 +125,17 @@ export function AccountEditorDrawer({
     setResource(snapshotDraft({ ...draft, channel_id: channelId }));
   }
 
-  function handleImportLongCatPacks(lots: Parameters<typeof summarizeLongCatLots>[0]) {
-    const summary = summarizeLongCatLots(lots);
+  function handleSavePacks(lots: LongCatLot[]) {
+    const summary = summarizeLots(lots);
     setResource((current) => ({
       ...current,
-      tokenTotal: summary.total > 0 ? String(summary.total) : current.tokenTotal,
-      tokenUsed: summary.used > 0 ? String(summary.used) : current.tokenUsed,
-      tokenRemaining: summary.remaining > 0 ? String(summary.remaining) : current.tokenRemaining,
+      tokenTotal: String(summary.total),
+      tokenUsed: String(summary.used),
+      tokenRemaining: String(summary.remaining),
       tokenExpire: summary.expireAt ? toDateInput(summary.expireAt) : current.tokenExpire,
-      tokenPacks: summary.source || current.tokenPacks,
+      tokenPacks: JSON.stringify(lots),
     }));
-    setImportOpened(false);
+    setPackManagerOpened(false);
   }
 
   async function save() {
@@ -329,18 +329,17 @@ export function AccountEditorDrawer({
                         variant="subtle"
                         size="xs"
                         leftSection={<IconDatabaseImport size={13} />}
-                        onClick={() => setImportOpened(true)}
+                        onClick={() => setPackManagerOpened(true)}
                       >
-                        导入 LongCat 资源包
+                        管理资源包
                       </Button>
-                      <small>从 F12 捕获的 /token-packs/summary 响应中导入，自动汇总多资源包。</small>
+                      <small>导入、添加、编辑或删除 LongCat 资源包，支持 JSON 批量导入。</small>
                     </div>
                   ) : null}
                   {importedPacks.length > 0 ? (
                     <div className="account-longcat-packs">
-                      <input type="hidden" data-token-packs={resource.tokenPacks} />
                       <div className="account-longcat-packs-heading">
-                        <span>已导入 {importedPacks.length} 个资源包</span>
+                        <span>已维护 {importedPacks.length} 个资源包</span>
                       </div>
                       <div className="longcat-packs-summary">
                         <span>总量 <strong>{formatTokens(tokenTotal)}</strong></span>
@@ -350,12 +349,6 @@ export function AccountEditorDrawer({
                       </div>
                     </div>
                   ) : null}
-                  <div className="account-resource-grid longcat">
-                    <label>资源包总量（Tokens）<TextInput type="number" min="0" value={resource.tokenTotal} onChange={(event) => setResource({ ...resource, tokenTotal: event.target.value })} /></label>
-                    <label>已消耗（Tokens）<TextInput type="number" min="0" value={resource.tokenUsed} onChange={(event) => setResource({ ...resource, tokenUsed: event.target.value })} /></label>
-                    <label className="account-token-remaining">剩余（Tokens）<strong>{formatTokens(tokenRemaining)}</strong></label>
-                    <label className="account-token-expire">到期时间<TextInput type="date" value={resource.tokenExpire} onChange={(event) => setResource({ ...resource, tokenExpire: event.target.value })} /><small>到期后将无法使用，建议及时补充或更新资源包。</small></label>
-                  </div>
                 </div>
               ) : (
                 <div className="account-resource-details payg">
@@ -404,10 +397,11 @@ export function AccountEditorDrawer({
         </Modal>
       </div>
 
-      <LongCatPackImportDialog
-        opened={importOpened}
-        onClose={() => setImportOpened(false)}
-        onImport={(lots) => handleImportLongCatPacks(lots)}
+      <LongCatPackManager
+        opened={packManagerOpened}
+        onClose={() => setPackManagerOpened(false)}
+        onSave={handleSavePacks}
+        initialLots={importedPacks}
       />
 
       <footer className="account-editor-footer">

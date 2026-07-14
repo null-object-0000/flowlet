@@ -43,7 +43,7 @@ import {
   RouteCandidate,
   createAccount,
 } from "../domain";
-import { AccountEditorDrawer, BalanceSnapshotEditor, LongCatPackImportDialog, summarizeLongCatLots, parseSnapshotTokenPacks, formatTokenCount } from "../features/channels";
+import { AccountEditorDrawer, AccountManagementDrawer, BalanceSnapshotEditor, LongCatPackManager, summarizeLots, parseSnapshotTokenPacks, formatTokenCount, formatLongCatTime, LongCatLot } from "../features/channels";
 import { ChannelLogo } from "../components/ChannelLogo";
 import { buildExposedModels } from "../features/routes/exposedModels";
 
@@ -54,6 +54,12 @@ type AccountEditor = {
   apiKeyVisible: boolean;
   advancedOpen: boolean;
   snapshotDraft: ResourceSnapshotDraft;
+};
+
+type ManagementDrawer = {
+  opened: boolean;
+  // 打开时默认选中的账号索引（用于展开特定账号的编辑面板可选）
+  focusIndex: number | null;
 };
 
 type ResourceSnapshotDraft = {
@@ -220,6 +226,7 @@ export function OverviewPage({
   const [observedStartedAt, setObservedStartedAt] = React.useState<Date | null>(status.running ? new Date() : null);
   const [, forceTick] = React.useState(0);
   const [drawerOpened, setDrawerOpened] = React.useState(false);
+  const [managementDrawer, setManagementDrawer] = React.useState<ManagementDrawer>({ opened: false, focusIndex: null });
 
   // 当后端回传的 running / started_at 状态变化时同步本地显示起点。
   // 仅在后端尚未提供新启动时间时回退为本地「首次观察到 running」的时刻。
@@ -329,19 +336,19 @@ export function OverviewPage({
     setAccountEditor((current) => current ? { ...current, snapshotDraft: { ...current.snapshotDraft, ...patch } } : current);
   }
 
-  function handleInlineImportLongCat(lots: Parameters<typeof summarizeLongCatLots>[0]) {
-    const summary = summarizeLongCatLots(lots);
+  function handleInlineSavePacks(lots: LongCatLot[]) {
+    const summary = summarizeLots(lots);
     setAccountEditor((current) => {
       if (!current) return current;
       return {
         ...current,
         snapshotDraft: {
           ...current.snapshotDraft,
-          tokenTotal: summary.total > 0 ? String(summary.total) : current.snapshotDraft.tokenTotal,
-          tokenUsed: summary.used > 0 ? String(summary.used) : current.snapshotDraft.tokenUsed,
-          tokenRemaining: summary.remaining > 0 ? String(summary.remaining) : current.snapshotDraft.tokenRemaining,
+          tokenTotal: String(summary.total),
+          tokenUsed: String(summary.used),
+          tokenRemaining: String(summary.remaining),
           tokenExpire: summary.expireAt ? toDatetimeLocal(summary.expireAt) : current.snapshotDraft.tokenExpire,
-          tokenPacks: summary.source || current.snapshotDraft.tokenPacks,
+          tokenPacks: JSON.stringify(lots),
         },
       };
     });
@@ -739,15 +746,41 @@ export function OverviewPage({
                       <h4><span className="mini-section-icon">▤</span>余额 / 资源包信息（手动维护）</h4>
                       <span className="sync-badge warn">手动维护</span>
                     </div>
-                    <AccountResourceForm
-                      mode={accountEditor.draft.resource_mode ?? (accountEditor.draft.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")}
-                      draft={accountEditor.snapshotDraft}
-                      channelId={accountEditor.draft.channel_id}
-                      onChange={updateSnapshotDraft}
-                      onSwitchMode={(mode) => updateAccountDraft({ resource_mode: mode })}
-                      onImportLongCat={() => setInlineImportOpened(true)}
-                      importedPackCount={parseSnapshotTokenPacks(accountEditor.snapshotDraft.tokenPacks).length}
-                    />
+                    {(() => {
+                      const mode = accountEditor.draft.resource_mode ?? (accountEditor.draft.channel_id === "longcat" ? "token_pack" : "pay_as_you_go");
+                      if (mode !== "token_pack") {
+                        return (
+                          <div className="resource-grid">
+                            <label>账户余额<TextInput type="number" min="0" step="0.01" placeholder="手动填写" value={accountEditor.snapshotDraft.balance} onChange={(event) => updateSnapshotDraft({ balance: event.target.value })} /></label>
+                            <label>货币<TextInput value={accountEditor.snapshotDraft.currency} onChange={(event) => updateSnapshotDraft({ currency: event.target.value })} /></label>
+                          </div>
+                        );
+                      }
+                      const packs = parseSnapshotTokenPacks(accountEditor.snapshotDraft.tokenPacks);
+                      const summary = summarizeLots(packs);
+                      return (
+                        <div className="account-longcat-import">
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            size="xs"
+                            leftSection={<IconDatabaseImport size={13} />}
+                            onClick={() => setInlineImportOpened(true)}
+                          >
+                            管理资源包
+                          </Button>
+                          <small>导入、添加、编辑或删除 LongCat 资源包。</small>
+                          {packs.length > 0 ? (
+                            <div className="longcat-packs-summary">
+                              <span>总量 <strong>{formatTokenCount(summary.total)}</strong></span>
+                              <span>已消耗 <strong>{formatTokenCount(summary.used)}</strong></span>
+                              <span>剩余 <strong>{formatTokenCount(summary.remaining)}</strong></span>
+                              <span>最早到期 <strong>{summary.expireAt ? formatLongCatTime(summary.expireAt) : "-"}</strong></span>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
                   </>
                 )}
               </section>
@@ -779,10 +812,11 @@ export function OverviewPage({
                 </section>
               ) : null}
             </div>
-            <LongCatPackImportDialog
+            <LongCatPackManager
               opened={inlineImportOpened}
               onClose={() => setInlineImportOpened(false)}
-              onImport={(lots) => handleInlineImportLongCat(lots)}
+              onSave={handleInlineSavePacks}
+              initialLots={parseSnapshotTokenPacks(accountEditor?.snapshotDraft.tokenPacks)}
             />
             <footer className="account-modal-footer">
               <Button variant="default" onClick={() => setAccountEditor(null)}>取消</Button>

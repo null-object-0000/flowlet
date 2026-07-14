@@ -1,0 +1,120 @@
+.card {
+  min-height: 126px;
+  padding: 18px 20px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(290px, 0.85fr) minmax(360px, 1fr) 78px;
+  gap: 22px;
+  align-items: center;
+}
+
+.layout h3 {
+  margin: 0;
+  font-size: 17px;
+  color: #0f1f3d;
+  font-weight: 800;
+}
+
+.intro {
+  display: grid;
+  gap: 8px;
+}
+
+.stateText {
+  margin: 0;
+  color: #e58900;
+  font-weight: 700;
+}
+
+.stateText.running {
+  color: #0f9f43;
+}
+
+.stateText.failed {
+  color: #d64545;
+}
+
+.signal {
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: #667795;
+  background: linear-gradient(180deg, #f6f8fc, #eef2f8);
+  border: 1px solid #e1e7f0;
+}
+
+.signal.running {
+  color: #0ba43c;
+  background: linear-gradient(180deg, #ecfbea, #dff7e4);
+}
+
+.signal svg {
+  width: 38px;
+  height: 38px;
+}
+
+.signal path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.metric {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metric > span {
+  color: #667795;
+  font-size: 12px;
+}
+
+.metricValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.metricValue > strong {
+  color: #12213a;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.hintIcon {
+  color: #7a89a6;
+  cursor: help;
+}
+
+.hintIcon:hover {
+  color: #0874f9;
+}
+
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .intro {
+    gap: 14px;
+  }
+}

@@ -5,6 +5,7 @@ import { ExposedModel } from "./exposedModels";
 import { RouteCandidate } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
 import { Panel, PanelHeader } from "../../components/ui";
+import styles from "./ExposedModelsCard.module.css";
 
 type ExposedModelsCardProps = {
   exposedModels: ExposedModel[];
@@ -37,15 +38,20 @@ export function ExposedModelsCard({
         {exposedModels.map((model) => {
           const abnormal = model.enabled && !model.hasAvailableAccount;
           return (
-            <div className="overview-model-row" key={model.publicModel}>
+            <div className={styles.row} key={model.publicModel}>
               <Tooltip label={model.channelName ?? ""} withArrow position="top">
                 <ChannelLogo channelId={model.channelId ?? ""} channelName={model.channelName ?? ""} size={32} variant="avatar" />
               </Tooltip>
               <div className="row-main">
                 <strong>{model.publicModel}</strong>
-                <span className={abnormal ? "model-meta model-meta--warn" : "model-meta"}>
-                  {model.availableAccountCount > 0 ? `${model.availableAccountCount} 个可用账号` : "无可用账号"}{abnormal ? " · 异常" : !model.hasAvailableAccount ? " · 不可用" : ""}
+                <span className={abnormal ? styles.meta + " " + styles.warn : styles.meta}>
+                  {model.availableAccountCount > 0 ? `${model.availableAccountCount} 个可用账号` : "无可用账号"}
                 </span>
+                {abnormal || !model.hasAvailableAccount ? (
+                  <span className={abnormal ? styles.meta + " " + styles.warn : styles.meta}>
+                    {abnormal ? "异常" : "不可用"}
+                  </span>
+                ) : null}
               </div>
               <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
             </div>

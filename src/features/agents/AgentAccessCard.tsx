@@ -2,6 +2,7 @@ import React from "react";
 import { Text, UnstyledButton } from "@mantine/core";
 import { IconBrandOpenai, IconRobot } from "@tabler/icons-react";
 import { Panel, PanelHeader } from "../../components/ui";
+import styles from "./AgentAccessCard.module.css";
 
 type AgentAccessCardProps = {
   baseUrl: string;
@@ -17,18 +18,18 @@ const AGENT_CARDS: Array<{ name: string; desc: string; endpoint: string }> = [
 
 export function AgentAccessCard({ baseUrl, onCopy }: AgentAccessCardProps) {
   return (
-    <Panel className="overview-section-card overview-section-card--grow">
+    <Panel className="overview-section-card">
       <PanelHeader>
         <div>
           <h3>AI Agent 接入</h3>
           <Text size="sm" c="dimmed">选择接入的 Agent 并复制配置</Text>
         </div>
       </PanelHeader>
-      <div className="overview-agent-grid">
+      <div className={styles.grid}>
         {AGENT_CARDS.map((card) => (
           <UnstyledButton
             type="button"
-            className="overview-agent-card"
+            className={styles.card}
             key={card.name}
             onClick={() => void onCopy(`${baseUrl}${card.endpoint}`, `${card.name} 接入地址已复制`)}
           >

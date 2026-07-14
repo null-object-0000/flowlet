@@ -3,6 +3,7 @@ import { ActionIcon, Badge, Group, Text, Tooltip } from "@mantine/core";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Panel } from "../../components/ui";
 import { ProxyBindConfig, ProxyStatus } from "../../domain";
+import styles from "./ProxyStatusCard.module.css";
 
 type ConfigurationStatus = "unconfigured" | "no_models" | "ready";
 
@@ -36,7 +37,7 @@ function formatDuration(ms: number): string {
 
 function StatusSignal({ running }: { running: boolean }) {
   return (
-    <div className={running ? "overview-status-signal running" : "overview-status-signal"} aria-hidden="true">
+    <div className={running ? styles.signal + " " + styles.running : styles.signal} aria-hidden="true">
       <svg viewBox="0 0 64 64">
         <path d="M10 34h10l5-15 10 30 7-20h12" />
       </svg>
@@ -103,28 +104,28 @@ export function ProxyStatusCard({
             : "服务正在监听本地请求";
 
   return (
-    <Panel className="overview-status-card">
-      <div className="overview-status-layout">
-        <div className="overview-status-intro">
+    <Panel className={styles.card}>
+      <div className={styles.layout}>
+        <div className={styles.intro}>
           <Group gap="xs">
             <h3>代理服务状态</h3>
             <Badge color={proxyPhase === "running" ? "green" : proxyPhase === "failed" ? "red" : "orange"} variant="light">
               {proxyPhase === "running" ? "运行中" : proxyPhase === "starting" ? "正在启动" : proxyPhase === "failed" ? "启动失败" : "已停止"}
             </Badge>
           </Group>
-          <Text size="sm" className={proxyPhase === "running" ? "overview-state-text running" : proxyPhase === "failed" ? "overview-state-text failed" : "overview-state-text"}>
+          <Text size="sm" className={proxyPhase === "running" ? styles.stateText + " " + styles.running : proxyPhase === "failed" ? styles.stateText + " " + styles.failed : styles.stateText}>
             {proxyHint}
           </Text>
         </div>
-        <div className="overview-status-metrics">
+        <div className={styles.metrics}>
           {statusMetrics.map((item) => (
-            <div className="overview-status-metric" key={item.label}>
+            <div className={styles.metric} key={item.label}>
               <span>{item.label}</span>
-              <div className="overview-metric-value">
+              <div className={styles.metricValue}>
                 <strong>{item.value}</strong>
                 {item.hint ? (
                   <Tooltip label={item.hint} withArrow position="top">
-                    <ActionIcon className="overview-hint-icon" variant="transparent" size="xs" aria-label="启动时间提示">
+                    <ActionIcon className={styles.hintIcon} variant="transparent" size="xs" aria-label="启动时间提示">
                       <IconInfoCircle size={13} />
                     </ActionIcon>
                   </Tooltip>

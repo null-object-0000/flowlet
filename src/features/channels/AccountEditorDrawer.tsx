@@ -262,7 +262,7 @@ export function AccountEditorDrawer({
           <div className="account-enabled-row">
             <div><strong>启用状态</strong><small>停用后，该账号不会参与请求转发</small></div>
             <Switch checked={draft.enabled} onChange={(event) => updateDraft({ enabled: event.currentTarget.checked })} />
-            <span>{draft.enabled ? "已启用" : "已停用"}</span>
+            <span>{draft.enabled ? "启用" : "停用"}</span>
           </div>
         </section>
 

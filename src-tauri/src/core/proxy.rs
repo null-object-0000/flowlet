@@ -1,6 +1,6 @@
 use super::config::{
-    classify_request, ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ProtocolType,
-    RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
+    classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType,
+    ProxyBindConfig, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
@@ -33,7 +33,6 @@ use tokio::sync::oneshot;
 pub struct ProxySharedConfig {
     pub channels: Arc<Mutex<Vec<ChannelPreset>>>,
     pub accounts: Arc<Mutex<Vec<ChannelAccount>>>,
-    pub clients: Arc<Mutex<Vec<ClientConfig>>>,
     pub routes: Arc<Mutex<Vec<RouteCandidate>>>,
     pub rules: Arc<Mutex<Vec<RouteRule>>>,
     pub scores: Arc<Mutex<Vec<(String, String, f64, f64, f64)>>>,
@@ -103,22 +102,24 @@ pub struct ProxyStatus {
 
 #[derive(Clone)]
 pub struct ProxyController {
-    inner: Arc<Mutex<ProxyRuntime>>,
+    pub inner: Arc<Mutex<ProxyRuntime>>,
+    pub bind_config: Arc<Mutex<ProxyBindConfig>>,
 }
 
 impl Default for ProxyController {
     fn default() -> Self {
         Self {
             inner: Arc::new(Mutex::new(ProxyRuntime::default())),
+            bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
         }
     }
 }
 
-struct ProxyRuntime {
-    shutdown: Option<oneshot::Sender<()>>,
-    bind_addr: String,
+pub struct ProxyRuntime {
+    pub(super) shutdown: Option<oneshot::Sender<()>>,
+    pub(super) bind_addr: String,
     /// 代理进程的真实启动时间，与 ProxyStatus.started_at 一一对应。
-    started_at: Option<String>,
+    pub(super) started_at: Option<String>,
 }
 
 impl Default for ProxyRuntime {
@@ -140,6 +141,7 @@ struct ProxyAppState {
     pub upstream_timeout_seconds: u64,
     pub rate_limiter: RateLimiter,
     pub capture: LogCaptureConfig,
+    pub bind_config: Arc<Mutex<ProxyBindConfig>>,
     /// 本地 config.json 文件路径，每次请求热读 UA rules 用
     pub config_path: std::path::PathBuf,
 }
@@ -226,6 +228,8 @@ impl ProxyController {
         runtime.shutdown = Some(shutdown_tx);
         drop(runtime);
 
+        let bind_config = self.bind_config.lock().map(|c| c.clone()).unwrap_or_default();
+
         let app = Router::new()
             .route("/health", any(health))
             .route("/v1/{*path}", any(forward_openai_compatible))
@@ -241,6 +245,7 @@ impl ProxyController {
                 upstream_timeout_seconds,
                 rate_limiter,
                 capture,
+                bind_config: Arc::new(Mutex::new(bind_config)),
                 config_path,
             });
 
@@ -375,7 +380,7 @@ async fn forward_request(
     let routes = state.shared.routes.lock().unwrap().clone();
     let accounts = state.shared.accounts.lock().unwrap().clone();
     let channels = state.shared.channels.lock().unwrap().clone();
-    let clients_shared = state.shared.clients.lock().unwrap().clone();
+    let default_client_token = state.bind_config.lock().map(|c| c.default_client_token.clone()).unwrap_or_default();
     let rules = state.shared.rules.lock().unwrap().clone();
     let scores = state.shared.scores.lock().unwrap().clone();
 
@@ -391,7 +396,7 @@ async fn forward_request(
     let public_model = extract_model(&body_bytes, &detected_protocol);
 
     // token 身份：仅用于鉴权、路由匹配、限流 key，不再写日志/用量
-    let token_client = identify_client(&parts.headers, &clients_shared);
+    let token_client = identify_client(&parts.headers, &default_client_token);
     let token_client_id = token_client.as_ref().map(|(id, _)| id.clone());
 
     // 客户端身份：仅由本地 config.json 决定，与 token 解耦；不命中即"未知"，不降级

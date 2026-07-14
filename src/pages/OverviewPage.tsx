@@ -2,7 +2,6 @@ import React from "react";
 import {
   ActionIcon,
   Anchor,
-  Badge,
   Box,
   Button,
   Code,
@@ -19,18 +18,13 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import {
-  IconBrandOpenai,
   IconCircleX,
   IconChevronRight,
   IconCopy,
   IconDatabaseImport,
-  IconDotsVertical,
   IconExternalLink,
-  IconInfoCircle,
   IconPlayerPlay,
-  IconPlus,
   IconRefresh,
-  IconRobot,
 } from "@tabler/icons-react";
 import { Actions, Panel, PanelHeader, StatusPill } from "../components/ui";
 import {
@@ -44,8 +38,12 @@ import {
   RouteCandidate,
   createAccount,
 } from "../domain";
-import { AccountEditorDrawer, AccountManagementDrawer, BalanceSnapshotEditor, LongCatPackManager, summarizeLots, parseSnapshotTokenPacks, formatTokenCount, formatLongCatTime, LongCatLot } from "../features/channels";
+import { AccountEditorDrawer, BalanceSnapshotEditor, LongCatPackManager, summarizeLots, parseSnapshotTokenPacks, formatTokenCount, formatLongCatTime, LongCatLot, ChannelAccountOnboarding, ChannelAccountSection, formatIsoDateTime } from "../features/channels";
+import { AgentAccessCard } from "../features/agents";
+import { ProxyStatusCard } from "../features/proxy";
+import { ClientAccessCard } from "../features/clients";
 import { ChannelLogo } from "../components/ChannelLogo";
+import { ExposedModelsCard } from "../features/routes";
 import { buildExposedModels } from "../features/routes/exposedModels";
 
 type AccountEditor = {
@@ -55,12 +53,6 @@ type AccountEditor = {
   apiKeyVisible: boolean;
   advancedOpen: boolean;
   snapshotDraft: ResourceSnapshotDraft;
-};
-
-type ManagementDrawer = {
-  opened: boolean;
-  // 打开时默认选中的账号索引（用于展开特定账号的编辑面板可选）
-  focusIndex: number | null;
 };
 
 type ResourceSnapshotDraft = {
@@ -95,36 +87,10 @@ type OverviewPageProps = {
   onUpdateRoute: (index: number, patch: Partial<RouteCandidate>) => void;
   onSaveRoutes: () => void;
   onSyncModels: () => void;
-  onOpenAccounts: () => void;
   onOpenModelServices: () => void;
   getChannelName: (channelId: string) => string;
+  setDefaultClientToken: (token: string) => void;
 };
-
-function formatDateTime(value: Date | null): string {
-  if (!value) return "-";
-  return value.toLocaleString();
-}
-
-function formatIsoDateTime(value?: string | null): string {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
-}
-
-/** RFC3339 字符串转换为 YYYY-MM-DD HH:mm:ss（与前端展示风格一致）。 */
-function formatRfc3339(value?: string | null): string {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  // 与 AGENTS.md / OverviewPage 现有格式保持一致。
-  return parsed.toLocaleString();
-}
-
-function formatAmount(value: number | null | undefined, fallback = "-"): string {
-  if (value == null) return fallback;
-  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
 
 function toDatetimeLocal(value?: string | null): string {
   if (!value) return "";
@@ -161,41 +127,6 @@ function parseOptionalNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function formatDuration(ms: number): string {
-  if (ms <= 0) return "-";
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) return `${days}天 ${hours}小时 ${minutes}分钟`;
-  if (hours > 0) return `${hours}小时 ${minutes}分钟`;
-  return `${minutes}分钟`;
-}
-
-function AccountEmptyIllustration() {
-  return (
-    <div className="overview-empty-illustration" aria-hidden="true">
-      <span className="empty-dot dot-a" />
-      <span className="empty-dot dot-b" />
-      <span className="empty-dot dot-c" />
-      <div className="empty-base" />
-      <div className="empty-avatar">
-        <IconRobot size={34} stroke={1.8} />
-      </div>
-    </div>
-  );
-}
-
-function StatusSignal({ running }: { running: boolean }) {
-  return (
-    <div className={running ? "overview-status-signal running" : "overview-status-signal"} aria-hidden="true">
-      <svg viewBox="0 0 64 64">
-        <path d="M10 34h10l5-15 10 30 7-20h12" />
-      </svg>
-    </div>
-  );
-}
-
 export function OverviewPage({
   status,
   bindConfig,
@@ -218,81 +149,37 @@ export function OverviewPage({
   onUpdateRoute,
   onSaveRoutes,
   onSyncModels,
-  onOpenAccounts,
   onOpenModelServices,
   getChannelName,
+  setDefaultClientToken,
 }: OverviewPageProps) {
   const [snapshotAccountId, setSnapshotAccountId] = React.useState<string | null>(null);
   const [accountEditor, setAccountEditor] = React.useState<AccountEditor | null>(null);
-  const [observedStartedAt, setObservedStartedAt] = React.useState<Date | null>(status.running ? new Date() : null);
-  const [, forceTick] = React.useState(0);
   const [drawerOpened, setDrawerOpened] = React.useState(false);
-  const [managementDrawer, setManagementDrawer] = React.useState<ManagementDrawer>({ opened: false, focusIndex: null });
-
-  // 当后端回传的 running / started_at 状态变化时同步本地显示起点。
-  // 仅在后端尚未提供新启动时间时回退为本地「首次观察到 running」的时刻。
-  React.useEffect(() => {
-    if (status.running) {
-      // 后端补充了 started_at 时直接使用，否则回退并用当前渲染时刻近似。
-      const backendStamp = status.started_at;
-      if (backendStamp && observedStartedAt) {
-        const observedIso = observedStartedAt.toISOString();
-        if (observedIso !== backendStamp) setObservedStartedAt(new Date(backendStamp));
-      }
-      if (!observedStartedAt && !backendStamp) setObservedStartedAt(new Date());
-    } else {
-      if (observedStartedAt) setObservedStartedAt(null);
-    }
-  }, [status.running, status.started_at]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  React.useEffect(() => {
-    const timer = window.setInterval(() => forceTick((value) => value + 1), 30000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const port = bindConfig.port || Number(status.bind_addr.split(":").pop()) || 18640;
   const baseUrl = `http://127.0.0.1:${port}`;
-  const exposedModels = buildExposedModels(routes, accounts, channels).filter((model) => model.kind === "direct");
+  const exposedModels = React.useMemo(() => {
+    return buildExposedModels(routes, accounts, channels)
+      .filter((model) => model.kind === "direct")
+      .sort((a, b) => {
+        const rank = (m: ReturnType<typeof buildExposedModels>[number]): number => {
+          if (m.enabled && m.hasAvailableAccount) return 0;
+          if (m.enabled) return 1;
+          return 2;
+        };
+        return rank(a) - rank(b) || a.publicModel.localeCompare(b.publicModel);
+      });
+  }, [routes, accounts, channels]);
   const hasAccounts = accounts.length > 0;
   const availableAccounts = accounts.filter((account) => account.enabled && !!account.api_key.trim());
   const hasAvailableAccount = availableAccounts.length > 0;
   const hasAvailableModel = exposedModels.some((model) => model.enabled && model.hasAvailableAccount);
   const configurationStatus = !hasAvailableAccount ? "unconfigured" : hasAvailableModel ? "ready" : "no_models";
-  const proxyPhase = proxyStarting ? "starting" : proxyStartError ? "failed" : status.running ? "running" : "stopped";
   const snapshotAccount = accounts.find((account) => account.id === snapshotAccountId);
   const editorChannel = accountEditor ? channels.find((channel) => channel.id === accountEditor.draft.channel_id) : undefined;
   const editorSnapshot = accountEditor ? getBalanceForAccount(accountEditor.draft.id) : undefined;
   const [inlineImportOpened, setInlineImportOpened] = React.useState(false);
-
-  // 启动时间：优先复用后端提供的真实启动时间（跨会话保持），回退本地观察到 running 的时刻。
-  const startedAtDate = status.started_at ? new Date(status.started_at) : observedStartedAt;
-  const statusMetrics: Array<{ label: string; value: string; hint?: string }> = [
-    { label: "监听地址", value: status.running ? bindConfig.host || "127.0.0.1" : "-" },
-    { label: "端口", value: String(port) },
-    {
-      label: "运行时长",
-      value: startedAtDate ? formatDuration(Date.now() - startedAtDate.getTime()) : "-",
-      hint: startedAtDate ? `启动时间：${formatRfc3339(startedAtDate.toISOString())}` : undefined,
-    },
-  ];
-
-  const proxyHint = proxyPhase === "failed"
-    ? `错误原因：${proxyStartError}`
-    : proxyPhase === "starting"
-      ? "正在启动本地代理服务…"
-      : proxyPhase === "stopped"
-        ? autoStartAttempted ? "代理服务已停止，可重新启动。" : "等待启动代理服务。"
-        : configurationStatus === "unconfigured"
-          ? "代理服务已启动，但尚未配置渠道账号，当前没有可用模型。"
-          : configurationStatus === "no_models"
-            ? "渠道账号已配置，请开放至少一个模型后开始使用。"
-            : "服务正在监听本地请求";
-  const agentCards = [
-    ["Claude Code", "官方 CLI 工具", `${baseUrl}/anthropic`],
-    ["Cline", "VS Code 扩展", `${baseUrl}/v1`],
-    ["OpenCode", "智能编码助手", `${baseUrl}/v1`],
-    ["Continue", "开源 AI 助手", `${baseUrl}/v1`],
-  ];
 
   function openCreateAccount(channelId = channels[0]?.id ?? "longcat") {
     const existing = accounts.filter((account) => account.channel_id === channelId);
@@ -408,32 +295,7 @@ export function OverviewPage({
     setAccountEditor(null);
   }
 
-  function accountState(account: ChannelAccount): string {
-    if (!account.api_key.trim()) return "未配置";
-    return account.enabled ? "已启用" : "已停用";
-  }
-
-  function accountResource(account: ChannelAccount): string {
-    const snapshot = getBalanceForAccount(account.id);
-    const resourceMode = account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go");
-    if (resourceMode === "token_pack") {
-      return `${formatTokenCount(snapshot?.token_pack_remaining)} Tokens`;
-    }
-    if (snapshot?.balance != null) {
-      return `${formatAmount(snapshot.balance)} ${snapshot.currency ?? ""}`;
-    }
-    return "-";
-  }
-
-  function modelState(model: ReturnType<typeof buildExposedModels>[number]): string {
-    if (!model.hasAvailableAccount) return "不可用";
-    return model.enabled ? "已启用" : "已停用";
-  }
-
-  function setModelEnabled(routeIndexes: number[], enabled: boolean) {
-    routeIndexes.forEach((routeIndex) => onUpdateRoute(routeIndex, { enabled }));
-    window.setTimeout(() => void onSaveRoutes(), 0);
-  }
+  const proxyPhase = proxyStarting ? "starting" : proxyStartError ? "failed" : status.running ? "running" : "stopped";
 
   return (
     <div className="overview-page overview-guide">
@@ -456,211 +318,60 @@ export function OverviewPage({
         </Actions>
       </header>
 
-      <Panel className="overview-status-card">
-        <div className="overview-status-layout">
-          <div className="overview-status-intro">
-            <Group gap="xs">
-              <h3>代理服务状态</h3>
-              <Badge color={proxyPhase === "running" ? "green" : proxyPhase === "failed" ? "red" : "orange"} variant="light">
-                {proxyPhase === "running" ? "运行中" : proxyPhase === "starting" ? "正在启动" : proxyPhase === "failed" ? "启动失败" : "已停止"}
-              </Badge>
-            </Group>
-            <Text size="sm" className={proxyPhase === "running" ? "overview-state-text running" : proxyPhase === "failed" ? "overview-state-text failed" : "overview-state-text"}>
-              {proxyHint}
-            </Text>
-          </div>
-          <div className="overview-status-metrics">
-            {statusMetrics.map((item) => (
-              <div className="overview-status-metric" key={item.label}>
-                <span>{item.label}</span>
-                <div className="overview-metric-value">
-                  <strong>{item.value}</strong>
-                  {item.hint ? (
-                    <Tooltip label={item.hint} withArrow position="top">
-                      <ActionIcon className="overview-hint-icon" variant="transparent" size="xs" aria-label="启动时间提示">
-                        <IconInfoCircle size={13} />
-                      </ActionIcon>
-                    </Tooltip>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-          <StatusSignal running={status.running} />
-        </div>
-      </Panel>
+      <ProxyStatusCard
+        status={status}
+        bindConfig={bindConfig}
+        proxyStarting={proxyStarting}
+        proxyStartError={proxyStartError}
+        autoStartAttempted={autoStartAttempted}
+        configurationStatus={configurationStatus}
+      />
 
       {!hasAccounts ? (
-        <Panel className="overview-onboarding-card">
-          <PanelHeader>
-            <h3>渠道账号</h3>
-          </PanelHeader>
-          <div className="overview-empty-state">
-            <AccountEmptyIllustration />
-            <Text className="overview-empty-title">
-              你还没有添加任何渠道账号，先添加 LongCat 或 DeepSeek 账号后，
-              才能开放模型并接入客户端与 AI Agent。
-            </Text>
-            <Group justify="center" gap="md">
-              <Button size="sm" className="longcat-action" onClick={() => openCreateAccount("longcat")}>添加 LongCat 账号</Button>
-              <Button size="sm" onClick={() => openCreateAccount("deepseek")}>添加 DeepSeek 账号</Button>
-            </Group>
-            <div className="overview-steps">
-              <span />
-              <strong>接入流程（仅需 3 步）</strong>
-              <span />
-            </div>
-            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg" className="overview-step-grid">
-              <div><b>1</b><strong>添加渠道账号</strong><span>选择 LongCat 或 DeepSeek</span></div>
-              <div><b>2</b><strong>开放模型</strong><span>选择并开放模型给代理</span></div>
-              <div><b>3</b><strong>接入客户端 / AI Agent</strong><span>获取访问地址并开始使用</span></div>
-            </SimpleGrid>
-          </div>
-        </Panel>
+        <ChannelAccountOnboarding onCreateAccount={openCreateAccount} />
       ) : (
         <>
           <SimpleGrid cols={{ base: 1, lg: 2 }} spacing={16}>
-            <Panel className="overview-section-card overview-section-card--grow">
-              <PanelHeader>
-                <div>
-                  <h3>渠道账号　共 {accounts.length} 个账号</h3>
-                </div>
-                <Group gap="xs">
-                  <Button className="overview-view-all" variant="subtle" onClick={() => openCreateAccount()}>+ 新增账号</Button>
-                  <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={() => setManagementDrawer({ opened: true, focusIndex: null })}>查看全部</Button>
-                </Group>
-              </PanelHeader>
-              <div className="overview-list">
-                {accounts.map((account, index) => (
-                  <button
-                    type="button"
-                    className="overview-account-row"
-                    key={account.id}
-                    onClick={() => setManagementDrawer({ opened: true, focusIndex: index })}
-                    aria-label={`管理账号 ${account.name || getChannelName(account.channel_id)}`}
-                  >
-                    <ChannelLogo channelId={account.channel_id} channelName={getChannelName(account.channel_id)} size={32} variant="avatar" />
-                    <div className="row-main"><strong>{account.name || getChannelName(account.channel_id)}</strong><span>{getChannelName(account.channel_id)}</span></div>
-                    <div className="overview-account-row-metrics">
-                      <span className="overview-resource">{account.channel_id === "longcat" ? `资源包 ${accountResource(account)}` : `余额 ${accountResource(account)}`}</span>
-                      {(account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack" && (
-                        <span className="overview-expire">有效期 {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span>
-                      )}
-                    </div>
-                    <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
-                    <ActionIcon variant="subtle" aria-label="编辑账号" onClick={(event) => {
-                      event.stopPropagation();
-                      openEditAccount(index);
-                    }}><IconDotsVertical size={17} /></ActionIcon>
-                  </button>
-                ))}
-              </div>
-            </Panel>
+            <ChannelAccountSection
+              accounts={accounts}
+              channels={channels}
+              getBalanceForAccount={getBalanceForAccount}
+              getChannelName={getChannelName}
+              onCreateAccount={openCreateAccount}
+              onEditAccount={openEditAccount}
+              onSaveAccounts={onSaveAccounts}
+              onTestConnection={onTestConnection}
+              onSyncBalance={onSyncBalance}
+              onAddBalanceSnapshot={onAddBalanceSnapshot}
+              onOpenEditor={(request) => {
+                if (request.mode === "create") {
+                  openCreateAccount(request.channelId);
+                } else {
+                  openEditAccount(request.index);
+                }
+              }}
+            />
 
-            <Panel className="overview-section-card overview-section-card--grow">
-              <PanelHeader>
-                <div>
-                  <h3>开放模型</h3>
-                  <Text size="sm" c="dimmed">已开放 {exposedModels.filter((model) => model.enabled).length} 个模型</Text>
-                </div>
-                <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={onOpenModelServices}>查看全部</Button>
-              </PanelHeader>
-              <div className="overview-list">
-                {exposedModels.length === 0 ? <Text c="dimmed">暂无模型。请同步或进入模型服务生成默认模型。</Text> : null}
-                {exposedModels.map((model) => (
-                  <div className="overview-model-card" key={model.publicModel}>
-                    <div className="overview-card-main model summary">
-                      <ChannelLogo channelId={model.channelId ?? ""} channelName={model.channelName ?? ""} size={32} variant="avatar" />
-                      <div className="row-main">
-                        <strong>{model.publicModel}</strong>
-                        <span>{model.channelName ?? ""}</span>
-                      </div>
-                      <StatusPill running={model.enabled && model.hasAvailableAccount}>{modelState(model)}</StatusPill>
-                      <Switch checked={model.enabled} onChange={(event) => setModelEnabled(model.routeIndexes, event.currentTarget.checked)} />
-                    </div>
-                    <div className="overview-card-meta">
-                      <span>渠道: {model.channelName ?? ""}</span>
-                      <span>可用账号: {model.availableAccountCount}</span>
-                      <span>状态: {model.hasAvailableAccount ? "正常" : "不可用"}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Panel>
+            <ExposedModelsCard
+              exposedModels={exposedModels}
+              onOpenModelServices={onOpenModelServices}
+              onUpdateRoute={onUpdateRoute}
+              onSaveRoutes={onSaveRoutes}
+            />
           </SimpleGrid>
 
           <SimpleGrid cols={{ base: 1, lg: 2 }} spacing={16}>
-            <Panel className="overview-section-card">
-              <PanelHeader>
-                <div>
-                  <h3>客户端访问信息</h3>
-                </div>
-                <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={() => setDrawerOpened(true)}>查看接入详情</Button>
-              </PanelHeader>
-              <div className="overview-endpoints">
-                <div className="overview-endpoint-row">
-                  <span>OpenAI Base URL</span>
-                  <Code className="overview-endpoint-url">{baseUrl}/v1</Code>
-                  <Button variant="default" size="xs" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/v1`, "OpenAI Base URL 已复制")}>复制</Button>
-                </div>
-                <div className="overview-endpoint-row">
-                  <span>Anthropic Base URL</span>
-                  <Code className="overview-endpoint-url">{baseUrl}/anthropic</Code>
-                  <Button variant="default" size="xs" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/anthropic`, "Anthropic Base URL 已复制")}>复制</Button>
-                </div>
-                <div className="overview-endpoint-row">
-                  <span>健康检查地址</span>
-                  <Code className="overview-endpoint-url">{baseUrl}/health</Code>
-                  <Button variant="default" size="xs" leftSection={<IconCopy size={14} />} onClick={() => void onCopy(`${baseUrl}/health`, "健康检查地址已复制")}>复制</Button>
-                </div>
-              </div>
-            </Panel>
+            <ClientAccessCard
+              baseUrl={baseUrl}
+              defaultClientToken={bindConfig.default_client_token}
+              onCopy={onCopy}
+              onViewDetails={() => setDrawerOpened(true)}
+            />
 
-            <Panel className="overview-section-card">
-              <PanelHeader>
-                <div>
-                  <h3>AI Agent 接入</h3>
-                  <Text size="sm" c="dimmed">选择接入的 Agent 并复制配置</Text>
-                </div>
-              </PanelHeader>
-              <div className="overview-agent-grid">
-                {agentCards.map(([name, desc, endpoint]) => (
-                  <UnstyledButton
-                    type="button"
-                    className="overview-agent-card"
-                    key={name}
-                    onClick={() => void onCopy(endpoint, `${name} 接入地址已复制`)}
-                  >
-                    <span>{name === "Claude Code" ? <IconBrandOpenai size={28} /> : <IconRobot size={28} />}</span>
-                    <strong>{name}</strong>
-                    <small>{desc}</small>
-                  </UnstyledButton>
-                ))}
-              </div>
-            </Panel>
+            <AgentAccessCard baseUrl={baseUrl} onCopy={onCopy} />
           </SimpleGrid>
         </>
       )}
-
-      <AccountManagementDrawer
-        opened={managementDrawer.opened}
-        onClose={() => setManagementDrawer({ opened: false, focusIndex: null })}
-        accounts={accounts}
-        channels={channels}
-        onSaveAccounts={onSaveAccounts}
-        onTestConnection={onTestConnection}
-        onSyncBalance={onSyncBalance}
-        getBalanceForAccount={getBalanceForAccount}
-        onAddBalanceSnapshot={onAddBalanceSnapshot}
-        onOpenEditor={(request) => {
-          setManagementDrawer({ opened: false, focusIndex: null });
-          if (request.mode === "create") {
-            openCreateAccount(request.channelId);
-          } else {
-            openEditAccount(request.index);
-          }
-        }}
-      />
 
       {accountEditor ? (
         <AccountEditorDrawer
@@ -990,80 +701,5 @@ export function OverviewPage({
         />
       ) : null}
     </div>
-  );
-}
-
-type AccountResourceFormProps = {
-  mode: AccountResourceMode;
-  draft: ResourceSnapshotDraft;
-  channelId: string;
-  onChange: (patch: Partial<ResourceSnapshotDraft>) => void;
-  onSwitchMode: (mode: AccountResourceMode) => void;
-  onImportLongCat: () => void;
-  importedPackCount: number;
-};
-
-function formatToken(value: string): string {
-  const num = Number(value);
-  if (!Number.isFinite(num) || num <= 0) return "-";
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
-  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
-  return String(num);
-}
-
-function AccountResourceForm({ mode, draft, channelId, onChange, onSwitchMode, onImportLongCat, importedPackCount }: AccountResourceFormProps) {
-  const isLongCat = channelId === "longcat";
-  const hasImportedPacks = importedPackCount > 0;
-  return (
-    <>
-      <div className="resource-mode-toggle">
-        <button
-          type="button"
-          className={mode === "token_pack" ? "mode-btn selected" : "mode-btn"}
-          onClick={() => onSwitchMode("token_pack")}
-        >
-          <strong>Token 资源包</strong><small>手动维护资源包总量、消耗和过期时间</small>
-        </button>
-        <button
-          type="button"
-          className={mode === "pay_as_you_go" ? "mode-btn selected" : "mode-btn"}
-          onClick={() => onSwitchMode("pay_as_you_go")}
-        >
-          <strong>API 按量付费</strong><small>手动维护账户余额</small>
-        </button>
-      </div>
-      {mode === "token_pack" ? (
-        <>
-          {isLongCat ? (
-            <div className="longcat-import-bar">
-              <Button type="button" variant="subtle" size="xs" leftSection={<IconDatabaseImport size={13} />} onClick={onImportLongCat}>
-                导入 LongCat 资源包
-              </Button>
-              <small>从浏览器 F12 捕获 <code>/token-packs/summary</code> 响应导入多资源包。</small>
-            </div>
-          ) : null}
-          {hasImportedPacks ? (
-            <div className="longcat-imported-summary">
-              <span className="longcat-imported-badge">已导入 {importedPackCount} 个资源包</span>
-              <div className="longcat-summary-grid">
-                <span>总量<strong>{formatToken(draft.tokenTotal)}</strong></span>
-                <span>消耗<strong>{formatToken(draft.tokenUsed)}</strong></span>
-                <span>过期<strong>{draft.tokenExpire ? draft.tokenExpire.split("T")[0] : "-"}</strong></span>
-              </div>
-            </div>
-          ) : null}
-          <div className="resource-grid">
-            <label>资源包总量（Tokens）<TextInput type="number" min="0" disabled={hasImportedPacks} value={draft.tokenTotal} onChange={(event) => onChange({ tokenTotal: event.target.value })} /></label>
-            <label>已消耗（Tokens）<TextInput type="number" min="0" disabled={hasImportedPacks} value={draft.tokenUsed} onChange={(event) => onChange({ tokenUsed: event.target.value })} /></label>
-            <label>过期时间<TextInput type="datetime-local" value={draft.tokenExpire} onChange={(event) => onChange({ tokenExpire: event.target.value })} /></label>
-          </div>
-        </>
-      ) : (
-        <div className="resource-grid">
-          <label>余额<div className="unit-input"><TextInput type="number" min="0" step="0.01" value={draft.balance} onChange={(event) => onChange({ balance: event.target.value })} /><span>{draft.currency || "CNY"}</span></div></label>
-          <label>货币<TextInput value={draft.currency} onChange={(event) => onChange({ currency: event.target.value })} /></label>
-        </div>
-      )}
-    </>
   );
 }

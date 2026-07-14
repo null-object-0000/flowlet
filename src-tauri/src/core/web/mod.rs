@@ -1,7 +1,7 @@
 //! Web Console - HTTP API + embedded dashboard for headless mode
 
 use super::config::{
-    AccountStatsRow, ChannelAccount, ChannelPreset, ClientConfig, RequestLogRow, RouteCandidate,
+    AccountStatsRow, ChannelAccount, ChannelPreset, RequestLogRow, RouteCandidate,
     RouteRule, UsageSummaryRow,
 };
 use super::metrics::Metrics;
@@ -59,7 +59,6 @@ struct StatusResponse {
     channels: usize,
     accounts: usize,
     routes: usize,
-    clients: usize,
 }
 
 pub fn create_web_router(state: WebState) -> Router {
@@ -74,7 +73,6 @@ pub fn create_web_router(state: WebState) -> Router {
         .route("/api/channels", get(channels_handler))
         .route("/api/accounts", get(accounts_handler))
         .route("/api/routes", get(routes_handler))
-        .route("/api/clients", get(clients_handler))
         .route("/api/rules", get(rules_handler))
         .route("/api/logs", get(logs_handler))
         .route("/api/usage", get(usage_handler))
@@ -131,14 +129,12 @@ async fn status_handler(State(state): State<Arc<WebState>>) -> Json<StatusRespon
         .list_route_candidates()
         .unwrap_or_default()
         .len();
-    let clients = state.storage.list_clients().unwrap_or_default().len();
     Json(StatusResponse {
         running,
         proxy_bind_addr: state.proxy_bind_addr.clone(),
         channels,
         accounts,
         routes,
-        clients,
     })
 }
 
@@ -152,10 +148,6 @@ async fn accounts_handler(State(state): State<Arc<WebState>>) -> Json<Vec<Channe
 
 async fn routes_handler(State(state): State<Arc<WebState>>) -> Json<Vec<RouteCandidate>> {
     Json(state.storage.list_route_candidates().unwrap_or_default())
-}
-
-async fn clients_handler(State(state): State<Arc<WebState>>) -> Json<Vec<ClientConfig>> {
-    Json(state.storage.list_clients().unwrap_or_default())
 }
 
 async fn rules_handler(State(state): State<Arc<WebState>>) -> Json<Vec<RouteRule>> {
@@ -221,7 +213,6 @@ tr:hover{background:#1e2a3a}
 <div class="card"><h3>Channels</h3><div class="value" id="chCount">-</div></div>
 <div class="card"><h3>Accounts</h3><div class="value" id="acCount">-</div></div>
 <div class="card"><h3>Routes</h3><div class="value" id="roCount">-</div></div>
-<div class="card"><h3>Clients</h3><div class="value" id="clCount">-</div></div>
 </div>
 <div class="section"><div class="section-header">Recent Logs <span class="refresh-info">auto-refresh 10s</span></div>
 <div class="section-body"><table><thead><tr><th>Time</th><th>Channel</th><th>Account</th><th>Type</th><th>Model</th><th>Status</th><th>Latency</th></tr></thead><tbody id="logsBody"><tr><td colspan="7">Loading...</td></tr></tbody></table></div></div>
@@ -238,7 +229,6 @@ async function refresh(){
   document.getElementById('chCount').textContent=s.channels;
   document.getElementById('acCount').textContent=s.accounts;
   document.getElementById('roCount').textContent=s.routes;
-  document.getElementById('clCount').textContent=s.clients;
   const b=document.getElementById('statusBadge');
   b.textContent=s.running?'Running':'Stopped';
   b.className='status-badge '+(s.running?'status-running':'status-stopped');

@@ -49,6 +49,7 @@ export function useFlowletData() {
     host: "127.0.0.1",
     port: 18640,
     allow_lan: false,
+    default_client_token: "flowlet-local-token",
   });
   const [status, setStatus] = React.useState<ProxyStatus>({
     running: false,

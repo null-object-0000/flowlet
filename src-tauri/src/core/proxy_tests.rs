@@ -146,30 +146,11 @@ fn identifies_client_from_bearer_token() {
         header::AUTHORIZATION,
         HeaderValue::from_static("Bearer token-a"),
     );
-    let clients = vec![
-        ClientConfig {
-            id: "client-a".to_string(),
-            name: "客户端 A".to_string(),
-            token: "token-a".to_string(),
-            app_type: "test".to_string(),
-            enabled: true,
-            created_at: String::new(),
-            updated_at: String::new(),
-        },
-        ClientConfig {
-            id: "client-b".to_string(),
-            name: "客户端 B".to_string(),
-            token: "token-b".to_string(),
-            app_type: "test".to_string(),
-            enabled: false,
-            created_at: String::new(),
-            updated_at: String::new(),
-        },
-    ];
+    let default_token = "token-a";
 
     assert_eq!(
-        identify_client(&headers, &clients),
-        Some(("client-a".to_string(), "客户端 A".to_string()))
+        identify_client(&headers, default_token),
+        Some(("default".to_string(), "默认客户端".to_string()))
     );
 }
 
@@ -177,20 +158,22 @@ fn identifies_client_from_bearer_token() {
 fn identifies_client_from_x_api_key() {
     let mut headers = HeaderMap::new();
     headers.insert("x-api-key", HeaderValue::from_static("token-x"));
-    let clients = vec![ClientConfig {
-        id: "client-x".to_string(),
-        name: "客户端 X".to_string(),
-        token: "token-x".to_string(),
-        app_type: "claude-code".to_string(),
-        enabled: true,
-        created_at: String::new(),
-        updated_at: String::new(),
-    }];
+    let default_token = "token-x";
 
     assert_eq!(
-        identify_client(&headers, &clients),
-        Some(("client-x".to_string(), "客户端 X".to_string()))
+        identify_client(&headers, default_token),
+        Some(("default".to_string(), "默认客户端".to_string()))
     );
+}
+
+#[test]
+fn rejects_unknown_token() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer unknown-token"),
+    );
+    assert_eq!(identify_client(&headers, "my-default-token"), None);
 }
 
 #[test]
@@ -432,15 +415,6 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 created_at: String::new(),
                 updated_at: String::new(),
             }])),
-            clients: Arc::new(Mutex::new(vec![ClientConfig {
-                id: "client-test".to_string(),
-                name: "测试客户端".to_string(),
-                token: "client-token".to_string(),
-                app_type: "test".to_string(),
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            }])),
             routes: Arc::new(Mutex::new(vec![RouteCandidate {
                 id: "route-1".to_string(),
                 virtual_model_id: "auto".to_string(),
@@ -462,6 +436,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
         upstream_timeout_seconds: 120,
         rate_limiter: RateLimiter::new(600),
         capture: LogCaptureConfig::default(),
+        bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
         config_path: std::path::PathBuf::from("/tmp/flowlet_test_config.json"),
     };
 
@@ -1196,6 +1171,7 @@ fn build_test_state(
         upstream_timeout_seconds: 120,
         rate_limiter: RateLimiter::new(600),
         capture: LogCaptureConfig::default(),
+        bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
         config_path: std::path::PathBuf::from("/tmp/flowlet_test_config.json"),
     }
 }

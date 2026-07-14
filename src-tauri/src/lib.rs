@@ -3,8 +3,7 @@ pub mod core;
 
 use core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use core::config::{
-    ChannelAccount, ChannelPreset, ClientConfig, LogCaptureConfig, ModelPrice, ProtocolType,
-    ProxyBindConfig,
+    ChannelAccount, ChannelPreset, LogCaptureConfig, ModelPrice, ProtocolType, ProxyBindConfig,
     RouteCandidate, RouteRule, VirtualModel,
 };
 use core::proxy::ProxyController;
@@ -21,7 +20,6 @@ struct AppState {
     channels: Arc<Mutex<Vec<ChannelPreset>>>,
     accounts: Arc<Mutex<Vec<ChannelAccount>>>,
     routes: Arc<Mutex<Vec<RouteCandidate>>>,
-    clients: Arc<Mutex<Vec<ClientConfig>>>,
     prices: Arc<Mutex<Vec<ModelPrice>>>,
     virtual_models: Arc<Mutex<Vec<VirtualModel>>>,
     rules: Arc<Mutex<Vec<RouteRule>>>,
@@ -60,7 +58,6 @@ impl AppState {
             shared: core::proxy::ProxySharedConfig {
                 channels: Arc::clone(&self.channels),
                 accounts: Arc::clone(&self.accounts),
-                clients: Arc::clone(&self.clients),
                 routes: Arc::clone(&self.routes),
                 rules: Arc::clone(&self.rules),
                 scores: Arc::new(Mutex::new(Vec::new())),
@@ -201,29 +198,6 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         .expect("清理孤儿余额快照失败");
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: routes + balance cleanup");
 
-    // 初始化客户端
-    let clients = storage.list_clients().expect("读取客户端配置失败");
-    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = clients.len(), "step: clients loaded");
-    let clients = if clients.is_empty() {
-        let now = chrono::Utc::now().to_rfc3339();
-        let default_client = ClientConfig {
-            id: "client-default".to_string(),
-            name: "本机默认客户端".to_string(),
-            token: "flowlet-local-token".to_string(),
-            app_type: "local".to_string(),
-            enabled: true,
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        let clients = vec![default_client];
-        storage
-            .save_clients(clients.as_slice())
-            .expect("保存默认客户端失败");
-        clients
-    } else {
-        clients
-    };
-
     // 初始化价格预设：从 config.json 加载
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: loading prices");
     let prices = storage.list_model_prices().expect("读取价格配置失败");
@@ -267,7 +241,18 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
                         .to_string();
                     let port = bind.get("port").and_then(|v| v.as_u64()).unwrap_or(18640) as u16;
                     let allow_lan = host == "0.0.0.0";
-                    ProxyBindConfig { host, port, allow_lan }.normalized()
+                    let default_client_token = bind
+                        .get("default_client_token")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("flowlet-local-token")
+                        .to_string();
+                    ProxyBindConfig {
+                        host,
+                        port,
+                        allow_lan,
+                        default_client_token,
+                    }
+                    .normalized()
                 } else {
                     load_bind_config_from_sqlite(&storage)
                 }
@@ -282,11 +267,13 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     };
 
     let state = AppState {
-        proxy: ProxyController::default(),
+        proxy: ProxyController {
+            inner: Arc::new(Mutex::new(core::proxy::ProxyRuntime::default())),
+            bind_config: Arc::new(Mutex::new(bind_config.clone())),
+        },
         channels: Arc::new(Mutex::new(channels)),
         accounts: Arc::new(Mutex::new(accounts)),
         routes: Arc::new(Mutex::new(routes)),
-        clients: Arc::new(Mutex::new(clients)),
         prices: Arc::new(Mutex::new(prices)),
         virtual_models: Arc::new(Mutex::new(virtual_models)),
         rules: Arc::new(Mutex::new(rules)),
@@ -546,8 +533,6 @@ pub fn run() {
             commands::save_channel_accounts,
             commands::list_route_candidates,
             commands::save_route_candidates,
-            commands::list_clients,
-            commands::save_clients,
             commands::list_model_prices,
             commands::save_model_prices,
             commands::list_channel_models,

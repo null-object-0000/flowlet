@@ -1,8 +1,8 @@
 use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    ClientConfig, LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ModelPrice,
-    ProxyBindConfig, RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
+    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ModelPrice, ProxyBindConfig,
+    RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
@@ -106,6 +106,9 @@ pub(super) fn set_proxy_bind_config(
         .set_app_meta("proxy_bind_config", &json)
         .map_err(|err| err.to_string())?;
     if let Ok(mut guard) = state.bind_config.lock() {
+        *guard = config.clone();
+    }
+    if let Ok(mut guard) = state.proxy.bind_config.lock() {
         *guard = config;
     }
     Ok(())
@@ -214,35 +217,6 @@ pub(super) fn save_route_candidates(
             msg
         })?;
     *current = routes;
-    Ok(())
-}
-
-// ─── Clients Commands ────────────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn list_clients(state: tauri::State<'_, AppState>) -> Result<Vec<ClientConfig>, String> {
-    state
-        .clients
-        .lock()
-        .map(|clients| clients.clone())
-        .map_err(|_| "读取客户端配置失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn save_clients(
-    state: tauri::State<'_, AppState>,
-    clients: Vec<ClientConfig>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_clients(&clients)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .clients
-        .lock()
-        .map_err(|_| "保存客户端配置失败".to_string())?;
-    *current = clients;
     Ok(())
 }
 
@@ -787,7 +761,6 @@ pub(super) fn import_config(state: tauri::State<'_, AppState>, json: String) -> 
         .storage
         .list_route_candidates()
         .map_err(|e| e.to_string())?;
-    let clients = state.storage.list_clients().map_err(|e| e.to_string())?;
     let rules = state
         .storage
         .list_route_rules()
@@ -804,7 +777,6 @@ pub(super) fn import_config(state: tauri::State<'_, AppState>, json: String) -> 
     *state.channels.lock().map_err(|_| "锁失败".to_string())? = channels;
     *state.accounts.lock().map_err(|_| "锁失败".to_string())? = accounts;
     *state.routes.lock().map_err(|_| "锁失败".to_string())? = routes;
-    *state.clients.lock().map_err(|_| "锁失败".to_string())? = clients;
     *state.rules.lock().map_err(|_| "锁失败".to_string())? = rules;
     *state.prices.lock().map_err(|_| "锁失败".to_string())? = prices;
     *state

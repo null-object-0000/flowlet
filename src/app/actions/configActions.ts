@@ -1,6 +1,7 @@
 import { runCommand, logToRust } from "../../services/flowletApi";
 import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext, FlowletData } from "./types";
+import { ProxyBindConfig } from "../../domain";
 
 function validateConfigData({ channels, accounts, routes, clients }: FlowletData): string[] {
   const errors: string[] = [];
@@ -138,6 +139,7 @@ export function createConfigActions({ data, setMessage }: ActionContext) {
       host: nextAllowLan ? "0.0.0.0" : "127.0.0.1",
       port: proxyBindConfig.port || 18640,
       allow_lan: nextAllowLan,
+      default_client_token: proxyBindConfig.default_client_token || "flowlet-local-token",
     };
     runCommand("set_proxy_bind_config", { config: next })
       .then(async () => {
@@ -183,6 +185,21 @@ export function createConfigActions({ data, setMessage }: ActionContext) {
     setMessage(`已切换为「${modeLabel(mode)}」`);
   }
 
+  function setDefaultClientToken(token: string) {
+    const next: ProxyBindConfig = {
+      host: proxyBindConfig.host,
+      port: proxyBindConfig.port,
+      allow_lan: proxyBindConfig.allow_lan,
+      default_client_token: token,
+    };
+    runCommand("set_proxy_bind_config", { config: next })
+      .then(() => {
+        setProxyBindConfig(next);
+        setMessage("默认客户端 Token 已更新");
+      })
+      .catch((err: unknown) => setMessage(`保存客户端 Token 失败: ${String(err)}`));
+  }
+
   return {
     toggleAutostart,
     saveProxyBindConfig,
@@ -192,6 +209,7 @@ export function createConfigActions({ data, setMessage }: ActionContext) {
     cleanupLogs,
     changeExposureMode,
     exposureMode,
+    setDefaultClientToken,
   };
 }
 

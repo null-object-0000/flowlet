@@ -3,7 +3,6 @@ import {
   IconActivity,
   IconChartBar,
   IconDashboard,
-  IconKey,
   IconListDetails,
   IconRoute,
 } from "@tabler/icons-react";
@@ -18,7 +17,6 @@ type SidebarProps = {
 const navIcons: Record<View, typeof IconDashboard> = {
   overview: IconDashboard,
   routes: IconRoute,
-  accounts: IconKey,
   logs: IconListDetails,
   usage: IconChartBar,
   stats: IconActivity,

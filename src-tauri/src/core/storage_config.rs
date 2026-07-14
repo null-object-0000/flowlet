@@ -1,6 +1,6 @@
 use super::{parse_auth_strategy, Storage, StorageError};
 use crate::core::config::{
-    ChannelAccount, ChannelModel, ChannelPreset, ClientConfig, ModelPrice, ProtocolType,
+    ChannelAccount, ChannelModel, ChannelPreset, ModelPrice, ProtocolType,
     RouteCandidate, RouteRule, VirtualModel, ACCOUNT_CREDENTIAL_HEALTHY,
     ACCOUNT_CREDENTIAL_INVALID_KEY,
 };
@@ -364,63 +364,6 @@ impl Storage {
             models.push(row?);
         }
         Ok(models)
-    }
-
-    // ─── Clients ─────────────────────────────────────────────────────────────
-
-    pub fn save_clients(&self, clients: &[ClientConfig]) -> Result<(), StorageError> {
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let tx = connection.transaction()?;
-        tx.execute("DELETE FROM clients", [])?;
-        for client in clients {
-            tx.execute(
-                r#"
-                INSERT INTO clients (id, name, token, app_type, enabled, created_at, updated_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                "#,
-                params![
-                    client.id,
-                    client.name,
-                    client.token,
-                    client.app_type,
-                    client.enabled as i64,
-                    client.created_at,
-                    client.updated_at,
-                ],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn list_clients(&self) -> Result<Vec<ClientConfig>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let mut stmt = connection.prepare(
-            "SELECT id, name, token, app_type, enabled, created_at, updated_at
-             FROM clients ORDER BY created_at ASC, id ASC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(ClientConfig {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                token: row.get(2)?,
-                app_type: row.get(3)?,
-                enabled: row.get::<_, i64>(4)? != 0,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-            })
-        })?;
-        let mut clients = Vec::new();
-        for row in rows {
-            clients.push(row?);
-        }
-        Ok(clients)
     }
 
     // ─── Virtual Models ──────────────────────────────────────────────────────

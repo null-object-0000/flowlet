@@ -1,5 +1,5 @@
 use crate::core::config::{
-    AuthStrategy, ChannelAccount, ChannelPreset, ClientConfig, ProtocolType, RouteCandidate,
+    AuthStrategy, ChannelAccount, ChannelPreset, ProtocolType, RouteCandidate,
     UaClientRule, ACCOUNT_CREDENTIAL_HEALTHY,
 };
 use axum::{
@@ -332,8 +332,11 @@ pub(super) fn is_hop_by_hop(name: &str) -> bool {
 // ─── Client Identification ──────────────────────────────────────────────────
 
 /// 通过鉴权 token（Authorization Bearer 或 X-Api-Key）识别客户端。
-/// 结果用于鉴权、路由匹配和限流 key。
-pub(super) fn identify_client(headers: &HeaderMap, clients: &[ClientConfig]) -> Option<(String, String)> {
+/// 匹配 `default_client_token`（来自 ProxyBindConfig）。
+pub(super) fn identify_client(
+    headers: &HeaderMap,
+    default_token: &str,
+) -> Option<(String, String)> {
     // 1. 先检查 Authorization Bearer
     if let Some(token) = headers
         .get(header::AUTHORIZATION)
@@ -341,8 +344,8 @@ pub(super) fn identify_client(headers: &HeaderMap, clients: &[ClientConfig]) -> 
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::trim)
     {
-        if let Some(client) = clients.iter().find(|c| c.enabled && c.token == token) {
-            return Some((client.id.clone(), client.name.clone()));
+        if token == default_token {
+            return Some(("default".to_string(), "默认客户端".to_string()));
         }
     }
 
@@ -352,8 +355,8 @@ pub(super) fn identify_client(headers: &HeaderMap, clients: &[ClientConfig]) -> 
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
     {
-        if let Some(client) = clients.iter().find(|c| c.enabled && c.token == token) {
-            return Some((client.id.clone(), client.name.clone()));
+        if token == default_token {
+            return Some(("default".to_string(), "默认客户端".to_string()));
         }
     }
 

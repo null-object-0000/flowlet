@@ -812,7 +812,6 @@ pub struct ConfigBundle {
     pub channels: Vec<ChannelPreset>,
     pub accounts: Vec<ChannelAccount>,
     pub routes: Vec<RouteCandidate>,
-    pub clients: Vec<ClientConfig>,
     pub rules: Vec<RouteRule>,
     pub prices: Vec<ModelPrice>,
     pub virtual_models: Vec<VirtualModel>,
@@ -826,7 +825,6 @@ impl Default for ConfigBundle {
             channels: Vec::new(),
             accounts: Vec::new(),
             routes: Vec::new(),
-            clients: Vec::new(),
             rules: Vec::new(),
             prices: Vec::new(),
             virtual_models: Vec::new(),
@@ -900,6 +898,13 @@ pub struct ProxyBindConfig {
     pub host: String,
     pub port: u16,
     pub allow_lan: bool,
+    /// 概览页展示的默认客户端 Token。
+    #[serde(default = "default_client_token")]
+    pub default_client_token: String,
+}
+
+fn default_client_token() -> String {
+    "flowlet-local-token".to_string()
 }
 
 impl Default for ProxyBindConfig {
@@ -908,6 +913,7 @@ impl Default for ProxyBindConfig {
             host: "127.0.0.1".to_string(),
             port: 18640,
             allow_lan: false,
+            default_client_token: default_client_token(),
         }
     }
 }

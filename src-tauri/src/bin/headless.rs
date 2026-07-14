@@ -31,7 +31,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let channels = storage.list_channel_presets()?;
     let accounts = storage.list_channel_accounts()?;
     let routes = storage.list_route_candidates()?;
-    let clients = storage.list_clients()?;
     let rules = storage.list_route_rules()?;
     let scores = storage.account_routing_scores()?;
 
@@ -62,7 +61,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shared = ProxySharedConfig {
         channels: Arc::new(Mutex::new(channels)),
         accounts: Arc::new(Mutex::new(accounts)),
-        clients: Arc::new(Mutex::new(clients)),
         routes: Arc::new(Mutex::new(routes)),
         rules: Arc::new(Mutex::new(rules)),
         scores: Arc::new(Mutex::new(scores)),

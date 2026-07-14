@@ -45,7 +45,6 @@ impl Storage {
             channels: self.list_channel_presets()?,
             accounts: self.list_channel_accounts()?,
             routes: self.list_route_candidates()?,
-            clients: self.list_clients()?,
             rules: self.list_route_rules()?,
             prices: self.list_model_prices()?,
             virtual_models: self.list_virtual_models()?,
@@ -63,7 +62,6 @@ impl Storage {
         self.save_channel_presets(&bundle.channels)?;
         self.save_channel_accounts(&bundle.accounts)?;
         self.save_route_candidates(&bundle.routes)?;
-        self.save_clients(&bundle.clients)?;
         self.save_route_rules(&bundle.rules)?;
         self.save_model_prices(&bundle.prices)?;
         self.save_virtual_models(&bundle.virtual_models)?;
@@ -199,16 +197,6 @@ impl Storage {
                 synced_at            TEXT,
                 created_at           TEXT NOT NULL,
                 updated_at           TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS clients (
-                id         TEXT PRIMARY KEY,
-                name       TEXT NOT NULL,
-                token      TEXT NOT NULL,
-                app_type   TEXT NOT NULL,
-                enabled    INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS virtual_models (

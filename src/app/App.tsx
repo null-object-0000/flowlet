@@ -10,8 +10,6 @@ import { ensureDefaultExposedRoutes } from "./routeHelpers";
 import {
   LogsPage,
   OverviewPage,
-  ChannelsPage,
-  ClientsPage,
   RoutesPage,
   StatsPage,
   UsagePage,
@@ -83,6 +81,7 @@ export default function App() {
     getAccountName,
     getBalanceForAccount,
     addBalanceSnapshot,
+    setDefaultClientToken,
   } = useFlowletActions(flowlet, setMessage);
 
   const [initializing, setInitializing] = React.useState(true);
@@ -286,9 +285,9 @@ export default function App() {
               onUpdateRoute={updateRoute}
               onSaveRoutes={() => void saveRouteCandidates()}
               onSyncModels={() => void regenerateDefaultRoutes()}
-              onOpenAccounts={() => setView("accounts")}
               onOpenModelServices={() => setView("routes")}
               getChannelName={getChannelName}
+              setDefaultClientToken={setDefaultClientToken}
             />
           ) : null}
 
@@ -310,7 +309,6 @@ export default function App() {
             onTestModel={(model) => void testModel(model)}
             exposureMode={exposureMode}
             onChangeExposureMode={(mode) => void changeExposureMode(mode)}
-            onOpenAccounts={() => setView("accounts")}
             getChannelName={getChannelName}
             routeRules={routeRules}
             onAddRouteRule={addRouteRule}
@@ -319,30 +317,6 @@ export default function App() {
             onSaveRouteRules={() => void saveRouteRules()}
             clients={clients}
           />
-        ) : null}
-
-        {view === "accounts" ? (
-          <>
-            <ChannelsPage
-              channels={channels}
-              accounts={accounts}
-              onSaveAccounts={saveAccounts}
-              onTestConnection={(channelId, apiKey, baseUrlOverride) => void testConnection(channelId, apiKey, baseUrlOverride)}
-              onSyncBalance={(id) => void syncBalance(id)}
-              getBalanceForAccount={getBalanceForAccount}
-              onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}
-              proxyRunning={status.running}
-              onRestartProxy={() => void restartProxy()}
-            />
-            <ClientsPage
-              clients={clients}
-              onAdd={addClient}
-              onUpdate={updateClient}
-              onRemove={removeClient}
-              onSave={() => void saveClientTokens()}
-              onCopy={copy}
-            />
-          </>
         ) : null}
 
         {view === "stats" ? (

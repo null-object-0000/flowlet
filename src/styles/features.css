@@ -1,6 +1,5 @@
 .route-list,
 .account-list,
-.client-list,
 .price-list {
   display: grid;
   gap: 10px;
@@ -100,13 +99,6 @@
   padding: 5px 8px;
 }
 
-.client-row {
-  display: grid;
-  grid-template-columns: minmax(130px, 0.7fr) minmax(220px, 1.4fr) minmax(120px, 0.8fr) 72px 72px;
-  align-items: center;
-  gap: 10px;
-}
-
 .route-card {
   display: grid;
   grid-template-columns: 34px minmax(90px, 0.7fr) minmax(110px, 0.8fr) minmax(110px, 0.8fr) minmax(140px, 1fr) minmax(130px, 0.8fr) 60px 60px;
@@ -144,7 +136,6 @@
 }
 
 @media (max-width: 900px) {
-  .client-row,
   .price-row-3,
   .account-row,
   .route-card {
@@ -767,17 +758,7 @@
 }
 .overview-view-all { padding-inline: 4px; color: #0874f9; font-weight: 700; }
 .overview-view-all:hover { background: transparent; color: #0657c9; text-decoration: underline; }
-.overview-account-card, .overview-model-card { display: grid; min-width: 0; }
-.overview-card-main { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto 28px; gap: 12px; min-height: 68px; padding: 12px 14px; align-items: center; }
-.overview-card-main.model { grid-template-columns: 40px minmax(0, 1fr) minmax(140px, 0.75fr) auto 40px; }
-.overview-card-main .provider-mark { width: 36px; height: 36px; border-radius: 8px; font-size: 16px; }
-.overview-card-main .row-main { display: grid; gap: 3px; min-width: 0; }
-.overview-card-main .row-main strong { color: #11213d; font-size: 14px; }
-.overview-card-main .row-main span { color: #697b99; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.overview-card-meta { display: flex; gap: 14px; padding: 10px 18px; border-top: 1px solid #e5ebf4; background: #f8fafc; color: #697b99; font-size: 12px; }
-.overview-card-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.overview-card-meta span:first-child { flex: 1; min-width: 0; }
-.overview-card-meta span:last-child { flex: 0 0 auto; }
+.overview-account-card { display: grid; min-width: 0; }
 .overview-list {
   display: grid;
   border: 1px solid #edf2f8;
@@ -789,7 +770,7 @@
 .overview-account-row,
 .overview-model-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) minmax(220px, 1fr) auto 28px;
+  grid-template-columns: 40px minmax(0, 1fr) auto 28px;
   gap: 12px;
   align-items: center;
   min-height: 64px;
@@ -809,7 +790,60 @@
 }
 
 .overview-model-row {
-  grid-template-columns: 32px minmax(0, 1fr) minmax(150px, 0.85fr) auto 44px;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.overview-model-row .mantine-Switch-root {
+  justify-self: end;
+}
+
+.overview-account-row .row-main,
+.overview-model-row .row-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  align-content: center;
+}
+
+.overview-account-row .row-main strong,
+.overview-model-row .row-main strong {
+  color: #11213d;
+  font-size: 14px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-model-row .model-meta {
+  color: #697b99;
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-model-row .model-meta--warn {
+  color: #d97706;
+}
+
+.overview-account-row .row-main {
+  gap: 1px;
+}
+
+.overview-account-row .row-resource {
+  color: #1d4f87;
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-account-row .row-resource .warn {
+  color: #d97706;
 }
 
 .overview-account-row:last-child,
@@ -827,6 +861,7 @@
   display: grid;
   gap: 10px;
 }
+
 
 .overview-endpoint-row {
   display: grid;
@@ -1260,9 +1295,6 @@
   margin-top: 14px;
 }
 
-.overview-card-main.model.summary {
-  grid-template-columns: 40px minmax(0, 1fr) auto 40px;
-}
 
 @media (max-width: 900px) {
   .flowlet-tier-grid {
@@ -1670,40 +1702,7 @@
 
 .account-editor-footer button { height: 40px; }
 
-/* ===== 渠道账号概览：紧凑列表行 ===== */
-.overview-account-row {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) minmax(220px, 1fr) auto 28px;
-  gap: 12px;
-  align-items: center;
-  min-height: 64px;
-  padding: 12px 14px;
-  border: 0;
-  border-bottom: 1px solid #edf1f6;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-  transition: background 0.12s ease;
-}
-.overview-account-row:last-child { border-bottom: 0; }
-.overview-account-row:hover { background: #f7f9fc; }
-.overview-account-row .row-main { display: grid; gap: 3px; min-width: 0; }
-.overview-account-row .row-main strong { color: #11213d; font-size: 14px; }
-.overview-account-row .row-main span { color: #697b99; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.overview-account-row-metrics { display: flex; gap: 14px; justify-content: flex-end; min-width: 0; flex-wrap: wrap; }
-.overview-account-row-metrics .overview-resource,
-.overview-account-row-metrics .overview-expire { color: #536178; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-@media (max-width: 720px) {
-  .overview-account-row {
-    grid-template-columns: 32px minmax(0, 1fr) auto;
-    gap: 10px;
-  }
-  .overview-account-row-metrics { display: none; }
-}
+/* ===== 渠道账号概览：紧凑列表行（已合并到上方 .overview-account-row 定义） ===== */
 
 /* ===== 渠道账号管理抽屉 ===== */
 .account-management-drawer .mantine-Drawer-header { z-index: 1; }

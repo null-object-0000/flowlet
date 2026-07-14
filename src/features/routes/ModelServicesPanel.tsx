@@ -30,9 +30,9 @@ type ModelServicesPanelProps = {
 function credentialStatusLabel(status: ChannelAccount["credential_status"]): string {
   switch (status) {
     case "invalid_key":
-      return "API Key 无效";
+      return "无效";
     default:
-      return "已启用";
+      return "启用";
   }
 }
 
@@ -169,11 +169,11 @@ export function ModelServicesPanel({
                     <div className="flowlet-underlying-row" key={`${item.channelId}:${item.model}`}>
                       <div>
                         <strong>{item.model}</strong>
-                        <span>{modelAccounts.size} 个可用账号 · {enabled ? "可用" : "已停用"}</span>
+                        <span>{modelAccounts.size} 个可用账号 · {enabled ? "可用" : "停用"}</span>
                         <div className="flowlet-related-accounts">
                           {relatedAccounts.map((account) => (
                             <span key={account.id} className="flowlet-related-account">
-                              {account.name} · {account.enabled ? credentialStatusLabel(account.credential_status) : "已停用"}
+                              {account.name} · {account.enabled ? credentialStatusLabel(account.credential_status) : "停用"}
                             </span>
                           ))}
                         </div>
@@ -197,7 +197,7 @@ export function ModelServicesPanel({
                   );
                 })}
                 <div className="flowlet-model-details-footer">
-                  <Button variant="subtle" size="xs" leftSection={<IconSettings size={14} />} onClick={onOpenAccounts}>
+                  <Button variant="subtle" size="xs" leftSection={<IconSettings size={14} />} onClick={onOpenAccounts} disabled={!onOpenAccounts}>
                     管理渠道账号
                   </Button>
                 </div>

@@ -4,9 +4,9 @@ import { ChannelLogo } from "../../components/ChannelLogo";
 import { formatTokenCount } from "./LongCatPackImportDialog";
 
 function accountStatus(account: ChannelAccount): { label: string; color: "green" | "red" | "gray" } {
-  if (!account.enabled) return { label: "已停用", color: "gray" };
-  if (account.credential_status === "invalid_key") return { label: "API Key 无效", color: "red" };
-  return { label: "正常", color: "green" };
+  if (!account.enabled) return { label: "停用", color: "gray" };
+  if (account.credential_status === "invalid_key") return { label: "无效", color: "red" };
+  return { label: "启用", color: "green" };
 }
 
 type AccountRowProps = {

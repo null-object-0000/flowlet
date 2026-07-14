@@ -1,6 +1,6 @@
 import React from "react";
-import { Button, Drawer, Table } from "@mantine/core";
-import { TableContainer } from "../components/ui";
+import { Button, Table } from "@mantine/core";
+import { SideDrawer, TableContainer } from "../components/ui";
 import { runCommand } from "../services/flowletApi";
 import { RequestLogRow } from "../domain";
 
@@ -40,122 +40,124 @@ export function LogDetailDrawer({
   const finalRow = rows.length === 0 ? null : rows[rows.length - 1];
 
   return (
-    <Drawer opened onClose={onClose} title="请求详情" position="right" size="min(960px, 92vw)" padding={0} zIndex={2000} classNames={{ header: "detail-drawer-header", body: "detail-drawer-body" }}>
-        <header className="detail-header">
-          <div>
-            <div className="muted">{requestId}</div>
-          </div>
+    <SideDrawer
+      opened
+      onClose={onClose}
+      title="请求详情"
+      size="min(960px, 92vw)"
+      subtitle={
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ color: "#6f7d94", fontSize: 12 }}>{requestId}</span>
           <Button type="button" variant="subtle" color="gray" onClick={onClose}>关闭</Button>
-        </header>
-
-        <div className="detail-body">
-          {status === "loading" ? <p>加载中…</p> : null}
-          {status === "error" ? <p className="error">加载失败：{error}</p> : null}
-          {status !== "loading" && status !== "error" && rows.length === 0 ? (
-            <p>未找到匹配的日志记录。</p>
-          ) : null}
-
-          {finalRow ? (
-            <>
-              <section className="section">
-                <h4 className="section-title">基础信息</h4>
-                <dl className="kv-grid">
-                  <dt>时间</dt>
-                  <dd>{formatTimestamp(finalRow.created_at)}</dd>
-                  <dt>客户端</dt>
-                  <dd>{finalRow.client_name || finalRow.client_id || "-"}</dd>
-                  <dt>协议</dt>
-                  <dd>{finalRow.client_protocol}</dd>
-                  <dt>对外模型</dt>
-                  <dd>{finalRow.public_model || "-"}</dd>
-                  <dt>上游模型</dt>
-                  <dd>{finalRow.upstream_model || "-"}</dd>
-                  <dt>请求类型</dt>
-                  <dd>{finalRow.request_type}</dd>
-                  <dt>状态码</dt>
-                  <dd>{finalRow.status ?? "-"}</dd>
-                  <dt>TTFB</dt>
-                  <dd>{fmtMs(finalRow.ttfb_ms)}</dd>
-                  <dt>耗时</dt>
-                  <dd>{fmtMs(finalRow.duration_ms ?? finalRow.latency_ms)}</dd>
-                  <dt>降级次数</dt>
-                  <dd>{finalRow.fallback_count}</dd>
-                  <dt>路由原因</dt>
-                  <dd>{finalRow.route_reason || "-"}</dd>
-                  <dt>错误信息</dt>
-                  <dd>{finalRow.error_message || "-"}</dd>
-                </dl>
-              </section>
-
-              {rows.length > 1 ? (
-                <section className="section">
-                  <h4 className="section-title">尝试链路（{rows.length} 次尝试）</h4>
-                  <TableContainer>
-                    <Table striped highlightOnHover>
-                      <Table.Thead>
-                        <Table.Tr>
-                          <Table.Th>#</Table.Th>
-                          <Table.Th>渠道</Table.Th>
-                          <Table.Th>账号</Table.Th>
-                          <Table.Th>状态</Table.Th>
-                          <Table.Th>TTFB</Table.Th>
-                          <Table.Th>耗时</Table.Th>
-                          <Table.Th>原因</Table.Th>
-                          <Table.Th>错误</Table.Th>
-                        </Table.Tr>
-                      </Table.Thead>
-                      <Table.Tbody>
-                        {rows.map((row, idx) => (
-                          <Table.Tr key={row.id} className="attempt-row">
-                            <Table.Td>{idx + 1}</Table.Td>
-                            <Table.Td>{row.channel_name || row.channel_id || "-"}</Table.Td>
-                            <Table.Td>{row.account_name || row.account_id || "-"}</Table.Td>
-                            <Table.Td>{row.status ?? "-"}</Table.Td>
-                            <Table.Td>{fmtMs(row.ttfb_ms)}</Table.Td>
-                            <Table.Td>{fmtMs(row.duration_ms)}</Table.Td>
-                            <Table.Td>{row.route_reason || "-"}</Table.Td>
-                            <Table.Td title={row.error_message ?? ""}>
-                              {row.error_message
-                                ? row.error_message.length > 40
-                                  ? row.error_message.slice(0, 40) + "…"
-                                  : row.error_message
-                                : "-"}
-                            </Table.Td>
-                          </Table.Tr>
-                        ))}
-                      </Table.Tbody>
-                    </Table>
-                  </TableContainer>
-                </section>
-              ) : null}
-
-              <section className="section">
-                <h4 className="section-title">请求详情</h4>
-                <dl className="kv-grid">
-                  <dt>Method</dt>
-                  <dd>{finalRow.method}</dd>
-                  <dt>Path</dt>
-                  <dd>{finalRow.path}</dd>
-                  <dt>是否流式</dt>
-                  <dd>{finalRow.is_stream ? "是" : "否"}</dd>
-                </dl>
-                <h5 className="block-title">Request Headers</h5>
-                <code className="code-block">{formatJson(finalRow.req_headers_json)}</code>
-                <h5 className="block-title">Request Body</h5>
-                <code className="code-block">{formatBody(finalRow.req_body_b64)}</code>
-              </section>
-
-              <section className="section">
-                <h4 className="section-title">响应详情</h4>
-                <h5 className="block-title">Response Headers</h5>
-                <code className="code-block">{formatJson(finalRow.res_headers_json)}</code>
-                <h5 className="block-title">Response Body</h5>
-                <code className="code-block">{formatBody(finalRow.res_body_b64)}</code>
-              </section>
-            </>
-          ) : null}
         </div>
-    </Drawer>
+      }
+    >
+      {status === "loading" ? <p>加载中…</p> : null}
+      {status === "error" ? <p className="error">加载失败：{error}</p> : null}
+      {status !== "loading" && status !== "error" && rows.length === 0 ? (
+        <p>未找到匹配的日志记录。</p>
+      ) : null}
+
+      {finalRow ? (
+        <>
+          <section className="section">
+            <h4 className="section-title">基础信息</h4>
+            <dl className="kv-grid">
+              <dt>时间</dt>
+              <dd>{formatTimestamp(finalRow.created_at)}</dd>
+              <dt>客户端</dt>
+              <dd>{finalRow.client_name || finalRow.client_id || "-"}</dd>
+              <dt>协议</dt>
+              <dd>{finalRow.client_protocol}</dd>
+              <dt>对外模型</dt>
+              <dd>{finalRow.public_model || "-"}</dd>
+              <dt>上游模型</dt>
+              <dd>{finalRow.upstream_model || "-"}</dd>
+              <dt>请求类型</dt>
+              <dd>{finalRow.request_type}</dd>
+              <dt>状态码</dt>
+              <dd>{finalRow.status ?? "-"}</dd>
+              <dt>TTFB</dt>
+              <dd>{fmtMs(finalRow.ttfb_ms)}</dd>
+              <dt>耗时</dt>
+              <dd>{fmtMs(finalRow.duration_ms ?? finalRow.latency_ms)}</dd>
+              <dt>降级次数</dt>
+              <dd>{finalRow.fallback_count}</dd>
+              <dt>路由原因</dt>
+              <dd>{finalRow.route_reason || "-"}</dd>
+              <dt>错误信息</dt>
+              <dd>{finalRow.error_message || "-"}</dd>
+            </dl>
+          </section>
+
+          {rows.length > 1 ? (
+            <section className="section">
+              <h4 className="section-title">尝试链路（{rows.length} 次尝试）</h4>
+              <TableContainer>
+                <Table striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>#</Table.Th>
+                      <Table.Th>渠道</Table.Th>
+                      <Table.Th>账号</Table.Th>
+                      <Table.Th>状态</Table.Th>
+                      <Table.Th>TTFB</Table.Th>
+                      <Table.Th>耗时</Table.Th>
+                      <Table.Th>原因</Table.Th>
+                      <Table.Th>错误</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {rows.map((row, idx) => (
+                      <Table.Tr key={row.id} className="attempt-row">
+                        <Table.Td>{idx + 1}</Table.Td>
+                        <Table.Td>{row.channel_name || row.channel_id || "-"}</Table.Td>
+                        <Table.Td>{row.account_name || row.account_id || "-"}</Table.Td>
+                        <Table.Td>{row.status ?? "-"}</Table.Td>
+                        <Table.Td>{fmtMs(row.ttfb_ms)}</Table.Td>
+                        <Table.Td>{fmtMs(row.duration_ms)}</Table.Td>
+                        <Table.Td>{row.route_reason || "-"}</Table.Td>
+                        <Table.Td title={row.error_message ?? ""}>
+                          {row.error_message
+                            ? row.error_message.length > 40
+                              ? row.error_message.slice(0, 40) + "…"
+                              : row.error_message
+                            : "-"}
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </TableContainer>
+            </section>
+          ) : null}
+
+          <section className="section">
+            <h4 className="section-title">请求详情</h4>
+            <dl className="kv-grid">
+              <dt>Method</dt>
+              <dd>{finalRow.method}</dd>
+              <dt>Path</dt>
+              <dd>{finalRow.path}</dd>
+              <dt>是否流式</dt>
+              <dd>{finalRow.is_stream ? "是" : "否"}</dd>
+            </dl>
+            <h5 className="block-title">Request Headers</h5>
+            <code className="code-block">{formatJson(finalRow.req_headers_json)}</code>
+            <h5 className="block-title">Request Body</h5>
+            <code className="code-block">{formatBody(finalRow.req_body_b64)}</code>
+          </section>
+
+          <section className="section">
+            <h4 className="section-title">响应详情</h4>
+            <h5 className="block-title">Response Headers</h5>
+            <code className="code-block">{formatJson(finalRow.res_headers_json)}</code>
+            <h5 className="block-title">Response Body</h5>
+            <code className="code-block">{formatBody(finalRow.res_body_b64)}</code>
+          </section>
+        </>
+      ) : null}
+    </SideDrawer>
   );
 }
 

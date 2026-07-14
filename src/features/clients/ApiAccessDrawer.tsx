@@ -1,7 +1,8 @@
 import React from "react";
-import { ActionIcon, Box, Code, Drawer, Group, Stack, Text } from "@mantine/core";
+import { ActionIcon, Code, Group, Stack, Text } from "@mantine/core";
 import { IconCopy } from "@tabler/icons-react";
-import { ProxyBindConfig, ProxyStatus } from "../../domain";
+import { ProxyBindConfig } from "../../domain";
+import { SideDrawer } from "../../components/ui";
 
 type ApiAccessDrawerProps = {
   opened: boolean;
@@ -16,16 +17,14 @@ export function ApiAccessDrawer({ opened, onClose, baseUrl, bindConfig, running,
   const host = bindConfig.host || "127.0.0.1";
 
   return (
-    <Drawer
+    <SideDrawer
       opened={opened}
       onClose={onClose}
       title="API 接入详情"
-      position="right"
       size="min(720px, 92vw)"
-      padding="md"
+      scrollable
     >
-      <Box className="api-detail-drawer">
-        <section className="api-detail-section">
+      <section className="api-detail-section">
           <h4><span className="mini-section-icon">▣</span>服务信息</h4>
           <div className="api-detail-row">
             <span className="api-detail-label">服务基础地址</span>
@@ -132,7 +131,6 @@ export function ApiAccessDrawer({ opened, onClose, baseUrl, bindConfig, running,
             <li>Flowlet 根据 Client Token 识别请求来源，并在转发时替换上游鉴权信息。</li>
           </ul>
         </section>
-      </Box>
-    </Drawer>
+    </SideDrawer>
   );
 }

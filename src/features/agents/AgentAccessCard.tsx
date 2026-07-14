@@ -18,7 +18,7 @@ const AGENT_CARDS: Array<{ name: string; desc: string; endpoint: string }> = [
 
 export function AgentAccessCard({ baseUrl, onCopy }: AgentAccessCardProps) {
   return (
-    <Panel className="overview-section-card">
+    <Panel className={`overview-section-card ${styles.agents}`}>
       <PanelHeader>
         <div>
           <h3>AI Agent 接入</h3>

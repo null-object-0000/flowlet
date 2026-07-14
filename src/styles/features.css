@@ -1204,6 +1204,18 @@
   gap: 12px;
 }
 
+.account-balance-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.account-balance-field > span:first-child {
+  color: #536178;
+  font-size: 13px;
+}
+
 .account-resource-grid.longcat {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

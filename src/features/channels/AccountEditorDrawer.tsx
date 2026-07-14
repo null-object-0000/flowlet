@@ -283,16 +283,17 @@ export function AccountEditorDrawer({
                 <span className="sync-badge">自动同步</span>
               </div>
               <div className="account-resource-grid">
-                <label>账户余额<div className="static-field">{balanceSnapshot?.balance != null ? `${balanceSnapshot.balance} ${balanceSnapshot.currency ?? ""}` : "尚未同步"}</div></label>
+                <label className="account-balance-field">
+                  <span>账户余额</span>
+                  <span className="static-field">{balanceSnapshot?.balance != null ? `${balanceSnapshot.balance} ${balanceSnapshot.currency ?? ""}` : "尚未同步"}</span>
+                  {request.mode === "edit" ? (
+                    <Button type="button" variant="subtle" size="xs" leftSection={<IconRefresh size={13} />} onClick={() => onSyncBalance(draft.id)}>
+                      刷新
+                    </Button>
+                  ) : null}
+                </label>
                 <label>货币<div className="static-field">{balanceSnapshot?.currency ?? "跟随上游返回"}</div></label>
               </div>
-              {request.mode === "edit" ? (
-                <div className="resource-sync-action">
-                  <Button type="button" variant="subtle" size="xs" leftSection={<IconRefresh size={13} />} onClick={() => onSyncBalance(draft.id)}>
-                    刷新余额
-                  </Button>
-                </div>
-              ) : null}
             </div>
           ) : (
             <>

@@ -103,6 +103,21 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [message]);
 
+  function clearLogs(keepDays: number) {
+    runCommand<[number, number]>("cleanup_old_logs", { keepDays })
+      .then(([logs, usage]) => {
+        notifications.show({
+          message: `已清除 ${logs} 条请求日志、${usage} 条用量记录`,
+          color: "dark",
+          autoClose: 2600,
+        });
+        void refreshAll();
+      })
+      .catch((err: unknown) => {
+        notifications.show({ message: `清除失败: ${String(err)}`, color: "red", autoClose: 4000 });
+      });
+  }
+
   React.useEffect(() => {
     const seq = ++initSeq.current;
     setInitializing(true);
@@ -340,6 +355,7 @@ export default function App() {
                 : undefined;
               void refreshLogs(next);
             }}
+            onClearLogs={clearLogs}
           />
         ) : null}
 

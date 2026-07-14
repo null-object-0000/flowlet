@@ -2,6 +2,7 @@ import React from "react";
 import { Badge, Button, Select, Table, TextInput } from "@mantine/core";
 import { Actions, Panel, PanelHeader, TableContainer } from "../components/ui";
 import { ChannelPreset, LogFilter, LogFilterClient, LogMeta, RequestLogRow } from "../domain";
+import { ClearLogsModal } from "./ClearLogsModal";
 import { LogDetailDrawer } from "./LogDetailDrawer";
 
 const DEFAULT_FILTER: LogFilter = {
@@ -19,16 +20,19 @@ export function LogsPage({
   channels,
   logClients,
   onRefresh,
+  onClearLogs,
 }: {
   logs: RequestLogRow[];
   logMeta: LogMeta;
   channels: ChannelPreset[];
   logClients: LogFilterClient[];
   onRefresh: (filter?: LogFilter, page?: number) => void;
+  onClearLogs: (keepDays: number) => void;
 }) {
   const [filter, setFilter] = React.useState<LogFilter>(DEFAULT_FILTER);
   const [draft, setDraft] = React.useState<LogFilter>(DEFAULT_FILTER);
   const [selectedRequestId, setSelectedRequestId] = React.useState<string | null>(null);
+  const [clearOpen, setClearOpen] = React.useState(false);
 
   // 每次通过菜单进入请求日志页面时，自动拉取最新数据
   React.useEffect(() => {
@@ -53,6 +57,11 @@ export function LogsPage({
     onRefresh(filter, filter.page);
   }
 
+  function handleClearLogs(keepDays: number) {
+    setClearOpen(false);
+    onClearLogs(keepDays);
+  }
+
   function resetFilter() {
     setFilter(DEFAULT_FILTER);
     setDraft(DEFAULT_FILTER);
@@ -69,6 +78,16 @@ export function LogsPage({
         <PanelHeader>
           <h3>请求日志</h3>
           <Actions>
+            <Button
+              type="button"
+              variant="light"
+              color="red"
+              disabled={logMeta.total === 0}
+              onClick={() => setClearOpen(true)}
+              title={logMeta.total === 0 ? "暂无可清除的日志" : "按保留范围清除请求日志与用量统计"}
+            >
+              清除日志
+            </Button>
             <Button type="button" variant="default" onClick={refresh}>刷新</Button>
           </Actions>
         </PanelHeader>
@@ -208,6 +227,13 @@ export function LogsPage({
           </div>
         )}
       </Panel>
+
+      <ClearLogsModal
+        opened={clearOpen}
+        onClose={() => setClearOpen(false)}
+        onConfirm={handleClearLogs}
+        totalLogs={logMeta.total}
+      />
 
       {selectedRequestId ? (
         <LogDetailDrawer

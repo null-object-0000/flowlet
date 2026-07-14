@@ -26,7 +26,6 @@ export default function App() {
     setRoutes,
     clients,
     logClients,
-    prices,
     channelModels,
     virtualModels,
     usageRows,
@@ -53,7 +52,6 @@ export default function App() {
     saveRouteCandidates,
     saveRouteRules,
     saveClientTokens,
-    savePrices,
     syncModels,
     regenerateDefaultRoutes,
     refreshUsage,
@@ -68,9 +66,6 @@ export default function App() {
     addClient,
     updateClient,
     removeClient,
-    addPrice,
-    updatePrice,
-    removePrice,
     addRouteRule,
     updateRouteRule,
     removeRouteRule,
@@ -364,12 +359,6 @@ export default function App() {
             rows={usageRows}
             onAnalyze={() => void analyzeUsage()}
             onRefresh={() => void refreshUsage()}
-            prices={prices}
-            channels={channels}
-            onAddPrice={addPrice}
-            onUpdatePrice={updatePrice}
-            onRemovePrice={removePrice}
-            onSavePrices={() => void savePrices()}
           />
         ) : null}
 

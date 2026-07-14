@@ -1,6 +1,5 @@
 .route-list,
-.account-list,
-.price-list {
+.account-list {
   display: grid;
   gap: 10px;
 }
@@ -117,26 +116,7 @@
   font-size: 13px;
 }
 
-.price-row-3 {
-  display: grid;
-  grid-template-columns: minmax(100px, 0.7fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) 60px;
-  align-items: center;
-  gap: 10px;
-}
-
-.price-preview {
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-  color: #50616a;
-  background: #f0f4f6;
-  border-radius: 6px;
-  padding: 0 10px;
-  font-size: 13px;
-}
-
 @media (max-width: 900px) {
-  .price-row-3,
   .account-row,
   .route-card {
     grid-template-columns: 1fr;

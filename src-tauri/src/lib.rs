@@ -3,7 +3,7 @@ pub mod core;
 
 use core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use core::config::{
-    ChannelAccount, ChannelPreset, LogCaptureConfig, ModelPrice, ProtocolType, ProxyBindConfig,
+    ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig,
     RouteCandidate, RouteRule, VirtualModel,
 };
 use core::proxy::ProxyController;
@@ -20,7 +20,6 @@ struct AppState {
     channels: Arc<Mutex<Vec<ChannelPreset>>>,
     accounts: Arc<Mutex<Vec<ChannelAccount>>>,
     routes: Arc<Mutex<Vec<RouteCandidate>>>,
-    prices: Arc<Mutex<Vec<ModelPrice>>>,
     virtual_models: Arc<Mutex<Vec<VirtualModel>>>,
     rules: Arc<Mutex<Vec<RouteRule>>>,
     storage: Storage,
@@ -198,21 +197,11 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         .expect("清理孤儿余额快照失败");
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: routes + balance cleanup");
 
-    // 初始化价格预设：从 config.json 加载
-    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: loading prices");
-    let prices = storage.list_model_prices().expect("读取价格配置失败");
-    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = prices.len(), "step: prices loaded");
-    let prices = if prices.is_empty() {
-        let all_prices = channels_config.prices.clone();
-        if !all_prices.is_empty() {
-            storage
-                .save_model_prices(all_prices.as_slice())
-                .expect("保存默认价格失败");
-        }
-        all_prices
-    } else {
-        prices
-    };
+    // 初始化价格预设：仅从 config.json 加载到内存，作为费用的唯一真实来源。
+    // 不再写入数据库——价格表已移除，费用计算直接在内存中完成。
+    let prices = channels_config.prices.clone();
+    storage.set_prices(prices);
+    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = channels_config.prices.len(), "step: prices loaded from config");
 
     // 初始化路由规则
     tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: loading rules");
@@ -274,7 +263,6 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         channels: Arc::new(Mutex::new(channels)),
         accounts: Arc::new(Mutex::new(accounts)),
         routes: Arc::new(Mutex::new(routes)),
-        prices: Arc::new(Mutex::new(prices)),
         virtual_models: Arc::new(Mutex::new(virtual_models)),
         rules: Arc::new(Mutex::new(rules)),
         storage,
@@ -315,7 +303,7 @@ fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
 }
 
 /// 从指定 config.json 文件解析其中的 channels_config 字段
-fn load_channels_config_from(
+pub fn load_channels_config_from(
     config_path: &std::path::Path,
 ) -> Result<ChannelsConfig, String> {
     let external_result = std::fs::read_to_string(config_path)
@@ -533,8 +521,6 @@ pub fn run() {
             commands::save_channel_accounts,
             commands::list_route_candidates,
             commands::save_route_candidates,
-            commands::list_model_prices,
-            commands::save_model_prices,
             commands::list_channel_models,
             commands::list_virtual_models,
             commands::save_virtual_models,

@@ -228,27 +228,6 @@ impl AuthStrategy {
     }
 }
 
-// ─── Price Source ────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PriceSource {
-    #[default]
-    Preset,
-    Synced,
-    Manual,
-}
-
-impl PriceSource {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Preset => "preset",
-            Self::Synced => "synced",
-            Self::Manual => "manual",
-        }
-    }
-}
-
 // ─── Channel Preset ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,7 +245,6 @@ pub struct ChannelPreset {
     pub timeout_seconds: Option<u64>,
     pub supports_model_list: bool,
     pub supports_model_detail: bool,
-    pub supports_price_sync: bool,
     pub supports_balance_query: bool,
     pub supports_quota_query: bool,
     pub supports_usage_query: bool,
@@ -292,7 +270,6 @@ impl Default for ChannelPreset {
             timeout_seconds: None,
             supports_model_list: false,
             supports_model_detail: false,
-            supports_price_sync: false,
             supports_balance_query: false,
             supports_quota_query: false,
             supports_usage_query: false,
@@ -331,7 +308,6 @@ impl ChannelPreset {
             small_model: None,
             supports_model_list: true,
             supports_model_detail: false,
-            supports_price_sync: false,
             supports_balance_query: true,
             supports_quota_query: false,
             supports_usage_query: false,
@@ -562,8 +538,6 @@ pub struct ModelPrice {
     pub output_price: f64,
     pub currency: String,
     pub unit: String,
-    pub source: PriceSource,
-    pub synced_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -579,8 +553,6 @@ impl Default for ModelPrice {
             output_price: 0.0,
             currency: "USD".to_string(),
             unit: "1M tokens".to_string(),
-            source: PriceSource::Preset,
-            synced_at: None,
             created_at: String::new(),
             updated_at: String::new(),
         }

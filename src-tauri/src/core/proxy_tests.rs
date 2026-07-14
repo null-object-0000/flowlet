@@ -391,7 +391,6 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 timeout_seconds: None,
                 supports_model_list: false,
                 supports_model_detail: false,
-                supports_price_sync: false,
                 supports_balance_query: false,
                 supports_quota_query: false,
                 supports_usage_query: false,

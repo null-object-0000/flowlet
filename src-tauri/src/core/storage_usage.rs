@@ -1,9 +1,40 @@
 use super::{Storage, StorageError};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, LogFilterClient, LogsFilter, LogsPageResult,
-    RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
+    ModelPrice, RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
 };
 use rusqlite::params;
+
+/// 根据内存中的价格表（仅来自 config.json）计算单次用量记录的费用估算。
+/// 公式与旧版 SQL 子查询一致：未命中缓存输入 / 命中缓存输入 / 输出，按每百万 token 计价。
+fn estimate_cost(
+    prices: &[ModelPrice],
+    channel_id: Option<&str>,
+    upstream_model: Option<&str>,
+    input_tokens: Option<i64>,
+    input_cached_tokens: Option<i64>,
+    input_uncached_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+) -> Option<f64> {
+    let channel_id = channel_id?;
+    let upstream_model = upstream_model?;
+    let price = prices
+        .iter()
+        .find(|p| p.channel_id == channel_id && p.upstream_model == upstream_model)?;
+
+    let input_uncached = input_uncached_tokens
+        .or(input_tokens)
+        .unwrap_or(0)
+        .max(0) as f64;
+    let input_cached = input_cached_tokens.unwrap_or(0).max(0) as f64;
+    let output = output_tokens.unwrap_or(0).max(0) as f64;
+
+    let cost = input_uncached * price.input_uncached_price / 1_000_000.0
+        + input_cached * price.input_cached_price / 1_000_000.0
+        + output * price.output_price / 1_000_000.0;
+
+    Some(cost)
+}
 
 impl Storage {    pub fn save_balance_snapshot(
         &self,
@@ -472,24 +503,25 @@ impl Storage {    pub fn save_balance_snapshot(
     }
 
     pub fn upsert_usage_record(&self, usage: &UsageRecordInput) -> Result<(), StorageError> {
+        // 成本在 upsert 当场算掉，避免每次请求都全表 recalc（O(n·m) → O(1)）。
+        // 仅在内存价格表有匹配价格时写 estimated_cost，否则留 NULL 稍后由
+        // recalculate_usage_costs()（analyze_usage 触发）统一填补。
+        // 先于连接锁之外读取价格快照，避免死锁（连接锁与价格锁是两把不同的锁）。
+        let prices = self.prices();
+        let estimated_cost = estimate_cost(
+            &prices,
+            usage.channel_id.as_deref(),
+            usage.upstream_model.as_deref(),
+            usage.input_tokens,
+            usage.input_cached_tokens,
+            usage.input_uncached_tokens,
+            usage.output_tokens,
+        );
+
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        // 成本在 upsert 当场算掉，避免每次请求都全表 recalc（O(n·m) → O(1)）。
-        // 仅在 model_prices 有匹配价格时写 estimated_cost，否则留 NULL 稍后由
-        // recalculate_usage_costs()（analyze_usage 触发）统一填补。
-        let estimated_cost_expr = r#"
-            (
-                SELECT
-                    coalesce(?14, ?12, 0) * mp.input_uncached_price  / 1000000.0
-                  + coalesce(?13, 0)     * mp.input_cached_price    / 1000000.0
-                  + coalesce(?15, 0)     * mp.output_price          / 1000000.0
-                FROM model_prices mp
-                WHERE mp.channel_id = ?4 AND mp.upstream_model = ?11
-                LIMIT 1
-            )
-        "#;
 
         let updated = connection.execute(
             &format!(
@@ -511,7 +543,7 @@ impl Storage {    pub fn save_balance_snapshot(
                     input_uncached_tokens = ?14,
                     output_tokens = ?15,
                     total_tokens = ?16,
-                    estimated_cost = {estimated_cost_expr},
+                    estimated_cost = ?17,
                     analyzed_at = datetime('now')
                 WHERE request_id = ?1
                 "#,
@@ -533,6 +565,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 usage.input_uncached_tokens,
                 usage.output_tokens,
                 usage.total_tokens,
+                estimated_cost,
             ],
         )?;
 
@@ -548,8 +581,7 @@ impl Storage {    pub fn save_balance_snapshot(
                         estimated_cost, analyzed_at, created_at
                     ) VALUES (
                         lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                        ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                        {estimated_cost_expr},
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
                         datetime('now'), datetime('now')
                     )
                     "#,
@@ -571,6 +603,7 @@ impl Storage {    pub fn save_balance_snapshot(
                     usage.input_uncached_tokens,
                     usage.output_tokens,
                     usage.total_tokens,
+                    estimated_cost,
                 ],
             )?;
         }
@@ -579,36 +612,67 @@ impl Storage {    pub fn save_balance_snapshot(
     }
 
     pub fn recalculate_usage_costs(&self) -> Result<usize, StorageError> {
+        // 先于连接锁之外读取价格快照，避免死锁（连接锁与价格锁是两把不同的锁）。
+        let prices = self.prices();
+
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        let updated = connection.execute(
-            r#"
-            UPDATE usage_records
-            SET estimated_cost = (
-                SELECT
-                    coalesce(usage_records.input_uncached_tokens, usage_records.input_tokens, 0)
-                        * model_prices.input_uncached_price / 1000000.0
-                    + coalesce(usage_records.input_cached_tokens, 0)
-                        * model_prices.input_cached_price / 1000000.0
-                    + coalesce(usage_records.output_tokens, 0)
-                        * model_prices.output_price / 1000000.0
-                FROM model_prices
-                WHERE model_prices.channel_id = usage_records.channel_id
-                  AND model_prices.upstream_model = usage_records.upstream_model
-                LIMIT 1
-            )
-            WHERE total_tokens IS NOT NULL
-              AND EXISTS (
-                SELECT 1
-                FROM model_prices
-                WHERE model_prices.channel_id = usage_records.channel_id
-                  AND model_prices.upstream_model = usage_records.upstream_model
-              )
-            "#,
-            [],
-        )?;
+
+        // 取出所有待回填的费用记录主键与用量字段，在锁外完成定价以避免长时间持锁。
+        struct RecalcRow {
+            request_id: String,
+            channel_id: Option<String>,
+            upstream_model: Option<String>,
+            input_tokens: Option<i64>,
+            input_cached_tokens: Option<i64>,
+            input_uncached_tokens: Option<i64>,
+            output_tokens: Option<i64>,
+        }
+        let rows: Vec<RecalcRow> = {
+            let mut stmt = connection.prepare(
+                "SELECT request_id, channel_id, upstream_model, input_tokens,
+                        input_cached_tokens, input_uncached_tokens, output_tokens
+                 FROM usage_records
+                 WHERE total_tokens IS NOT NULL",
+            )?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(RecalcRow {
+                        request_id: row.get(0)?,
+                        channel_id: row.get(1)?,
+                        upstream_model: row.get(2)?,
+                        input_tokens: row.get(3)?,
+                        input_cached_tokens: row.get(4)?,
+                        input_uncached_tokens: row.get(5)?,
+                        output_tokens: row.get(6)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+
+        let mut updated = 0usize;
+        for row in rows {
+            let Some(cost) = estimate_cost(
+                &prices,
+                row.channel_id.as_deref(),
+                row.upstream_model.as_deref(),
+                row.input_tokens,
+                row.input_cached_tokens,
+                row.input_uncached_tokens,
+                row.output_tokens,
+            ) else {
+                continue;
+            };
+            let n = connection.execute(
+                "UPDATE usage_records SET estimated_cost = ?2, analyzed_at = datetime('now')
+                 WHERE request_id = ?1",
+                params![row.request_id, cost],
+            )?;
+            updated += n;
+        }
         Ok(updated)
     }
 

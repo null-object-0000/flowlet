@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use super::config::{AuthStrategy, ChannelPreset, ModelPrice, PriceSource, ProtocolType};
+use super::config::{AuthStrategy, ChannelPreset, ModelPrice, ProtocolType};
 
 /// 编译时随应用固化的默认配置。
 ///
@@ -46,8 +46,6 @@ pub struct ChannelJson {
     pub supports_model_list: bool,
     #[serde(default)]
     pub supports_model_detail: bool,
-    #[serde(default)]
-    pub supports_price_sync: bool,
     #[serde(default)]
     pub supports_balance_query: bool,
     #[serde(default)]
@@ -123,7 +121,6 @@ impl ChannelsConfig {
                 timeout_seconds: None,
                 supports_model_list: c.supports_model_list,
                 supports_model_detail: c.supports_model_detail,
-                supports_price_sync: c.supports_price_sync,
                 supports_balance_query: c.supports_balance_query,
                 supports_quota_query: c.supports_quota_query,
                 supports_usage_query: c.supports_usage_query,
@@ -143,8 +140,6 @@ impl ChannelsConfig {
                 output_price: p.output_price,
                 currency: p.currency,
                 unit: p.unit,
-                source: PriceSource::Preset,
-                synced_at: None,
                 created_at: now.clone(),
                 updated_at: now.clone(),
             }

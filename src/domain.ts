@@ -81,21 +81,6 @@ export type ClientConfig = {
   updated_at: string;
 };
 
-export type ModelPrice = {
-  id: string;
-  channel_id: string;
-  upstream_model: string;
-  input_uncached_price: number;
-  input_cached_price: number;
-  output_price: number;
-  currency: string;
-  unit: string;
-  source: string;
-  synced_at?: string;
-  created_at: string;
-  updated_at: string;
-};
-
 export type VirtualModel = {
   id: string;
   name: string;
@@ -349,24 +334,6 @@ export function createClient(_index?: number): ClientConfig {
     token: `flowlet-${genId("token").slice(-12)}`,
     app_type: "custom",
     enabled: true,
-    created_at: now,
-    updated_at: now,
-  };
-}
-
-export function createModelPrice(channelId: string, _index?: number): ModelPrice {
-  const now = new Date().toISOString();
-  return {
-    id: genId("price"),
-    channel_id: channelId,
-    upstream_model: "",
-    input_uncached_price: 0,
-    input_cached_price: 0,
-    output_price: 0,
-    currency: "USD",
-    unit: "1M tokens",
-    source: "preset",
-    synced_at: undefined,
     created_at: now,
     updated_at: now,
   };

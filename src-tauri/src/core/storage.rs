@@ -1,4 +1,4 @@
-use super::config::{AuthStrategy, ConfigBundle};
+use super::config::{AuthStrategy, ConfigBundle, ModelPrice};
 use rusqlite::Connection;
 use std::{
     path::Path,
@@ -22,6 +22,7 @@ mod storage_usage;
 #[derive(Clone)]
 pub struct Storage {
     connection: Arc<Mutex<Connection>>,
+    prices: Arc<Mutex<Vec<ModelPrice>>>,
 }
 
 impl Storage {
@@ -30,9 +31,22 @@ impl Storage {
         connection.execute_batch("PRAGMA journal_mode = WAL;")?;
         let storage = Self {
             connection: Arc::new(Mutex::new(connection)),
+            prices: Arc::new(Mutex::new(Vec::new())),
         };
         storage.migrate()?;
         Ok(storage)
+    }
+
+    /// 设置运行时模型价格（三段价格）。仅来自 config.json，这是价格的唯一真实来源。
+    /// 写入后费用计算直接使用此内存副本，不再读取数据库。
+    pub fn set_prices(&self, prices: Vec<ModelPrice>) {
+        if let Ok(mut current) = self.prices.lock() {
+            *current = prices;
+        }
+    }
+
+    pub fn prices(&self) -> Vec<ModelPrice> {
+        self.prices.lock().map(|p| p.clone()).unwrap_or_default()
     }
 
     // ─── Config Import/Export ────────────────────────────────────────────────
@@ -46,7 +60,7 @@ impl Storage {
             accounts: self.list_channel_accounts()?,
             routes: self.list_route_candidates()?,
             rules: self.list_route_rules()?,
-            prices: self.list_model_prices()?,
+            prices: self.prices(),
             virtual_models: self.list_virtual_models()?,
         };
         serde_json::to_string_pretty(&bundle)
@@ -63,8 +77,10 @@ impl Storage {
         self.save_channel_accounts(&bundle.accounts)?;
         self.save_route_candidates(&bundle.routes)?;
         self.save_route_rules(&bundle.rules)?;
-        self.save_model_prices(&bundle.prices)?;
         self.save_virtual_models(&bundle.virtual_models)?;
+
+        // 价格不再持久化到数据库；配置导入时直接更新内存中的价格副本。
+        self.set_prices(bundle.prices);
         Ok(())
     }
 
@@ -237,21 +253,6 @@ impl Storage {
                 updated_at            TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS model_prices (
-                id                    TEXT PRIMARY KEY,
-                channel_id            TEXT NOT NULL,
-                upstream_model        TEXT NOT NULL,
-                input_uncached_price  REAL NOT NULL DEFAULT 0,
-                input_cached_price    REAL NOT NULL DEFAULT 0,
-                output_price          REAL NOT NULL DEFAULT 0,
-                currency              TEXT NOT NULL,
-                unit                  TEXT NOT NULL,
-                source                TEXT NOT NULL DEFAULT 'preset',
-                synced_at             TEXT,
-                created_at            TEXT NOT NULL,
-                updated_at            TEXT NOT NULL
-            );
-
             CREATE TABLE IF NOT EXISTS account_balance_snapshots (
                 id                   TEXT PRIMARY KEY,
                 account_id           TEXT NOT NULL,
@@ -326,7 +327,6 @@ impl Storage {
         )?;
 
         normalize_legacy_virtual_model_routes_schema(&connection)?;
-        normalize_legacy_model_prices_schema(&connection)?;
 
         add_column_if_missing(
             &connection,
@@ -412,68 +412,6 @@ impl Storage {
             "updated_at",
             "TEXT NOT NULL DEFAULT ''",
         )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "channel_id",
-            "TEXT NOT NULL DEFAULT ''",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "upstream_model",
-            "TEXT NOT NULL DEFAULT ''",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "input_uncached_price",
-            "REAL NOT NULL DEFAULT 0",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "input_cached_price",
-            "REAL NOT NULL DEFAULT 0",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "output_price",
-            "REAL NOT NULL DEFAULT 0",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "currency",
-            "TEXT NOT NULL DEFAULT 'CNY'",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "unit",
-            "TEXT NOT NULL DEFAULT '1M tokens'",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "source",
-            "TEXT NOT NULL DEFAULT 'preset'",
-        )?;
-        add_column_if_missing(&connection, "model_prices", "synced_at", "TEXT")?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "created_at",
-            "TEXT NOT NULL DEFAULT ''",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "model_prices",
-            "updated_at",
-            "TEXT NOT NULL DEFAULT ''",
-        )?;
-
         // 渠道模板：补充平台查看地址（API Key 管理页跳转）
         add_column_if_missing(&connection, "channel_presets", "platform_url", "TEXT")?;
 
@@ -637,7 +575,6 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_usage_records_request_id     ON usage_records(request_id);
             CREATE INDEX IF NOT EXISTS idx_usage_records_created_at     ON usage_records(created_at);
             CREATE INDEX IF NOT EXISTS idx_usage_channel_upstream_model ON usage_records(channel_id, upstream_model);
-            CREATE INDEX IF NOT EXISTS idx_model_prices_channel_model   ON model_prices(channel_id, upstream_model);
             "#,
         )?;
         tracing::info!("migrate: 建表完成, 开始建索引");
@@ -788,35 +725,6 @@ fn normalize_legacy_virtual_model_routes_schema(
         "#,
     );
     connection.execute_batch(&migration_sql)?;
-    Ok(())
-}
-
-fn normalize_legacy_model_prices_schema(connection: &Connection) -> Result<(), StorageError> {
-    if !table_has_column(connection, "model_prices", "provider_id")? {
-        return Ok(());
-    }
-
-    connection.execute_batch(
-        r#"
-        DROP TABLE IF EXISTS model_prices_legacy_migrate;
-        ALTER TABLE model_prices RENAME TO model_prices_legacy_migrate;
-        CREATE TABLE model_prices (
-            id                    TEXT PRIMARY KEY,
-            channel_id            TEXT NOT NULL,
-            upstream_model        TEXT NOT NULL,
-            input_uncached_price  REAL NOT NULL DEFAULT 0,
-            input_cached_price    REAL NOT NULL DEFAULT 0,
-            output_price          REAL NOT NULL DEFAULT 0,
-            currency              TEXT NOT NULL,
-            unit                  TEXT NOT NULL,
-            source                TEXT NOT NULL DEFAULT 'preset',
-            synced_at             TEXT,
-            created_at            TEXT NOT NULL,
-            updated_at            TEXT NOT NULL
-        );
-        DROP TABLE model_prices_legacy_migrate;
-        "#,
-    )?;
     Ok(())
 }
 

@@ -1,39 +1,17 @@
-import { Button, Select, Table, TextInput } from "@mantine/core";
-import { Actions, DetailsPanel, Panel, PanelHeader } from "../components/ui";
+import { Button, Table } from "@mantine/core";
+import { Actions, Panel, PanelHeader } from "../components/ui";
 import { TableContainer } from "../components/ui";
-import { ChannelPreset, ModelPrice, UsageSummaryRow } from "../domain";
+import { UsageSummaryRow } from "../domain";
 
 export function UsagePage({
   rows,
   onAnalyze,
   onRefresh,
-  prices,
-  channels,
-  onAddPrice,
-  onUpdatePrice,
-  onRemovePrice,
-  onSavePrices,
 }: {
   rows: UsageSummaryRow[];
   onAnalyze: () => void;
   onRefresh: () => void;
-  prices: ModelPrice[];
-  channels: ChannelPreset[];
-  onAddPrice: () => void;
-  onUpdatePrice: (index: number, patch: Partial<ModelPrice>) => void;
-  onRemovePrice: (index: number) => void;
-  onSavePrices: () => void;
 }) {
-  function formatPrice(price: ModelPrice): string {
-    const isUnconfiguredLongCat =
-      price.channel_id === "longcat" &&
-      price.input_uncached_price === 0 &&
-      price.input_cached_price === 0 &&
-      price.output_price === 0;
-    if (isUnconfiguredLongCat) return "价格待配置";
-    return `${price.input_uncached_price}/${price.input_cached_price}/${price.output_price} ${price.currency}`;
-  }
-
   return (
     <>
       <Panel>
@@ -81,33 +59,6 @@ export function UsagePage({
           </Table>
         </TableContainer>
       </Panel>
-
-      <DetailsPanel summary="成本设置">
-        <PanelHeader>
-          <h3>模型价格表（三段价格）</h3>
-          <Actions>
-            <Button type="button" variant="default" onClick={onAddPrice}>新增价格</Button>
-            <Button type="button" onClick={() => void onSavePrices()}>保存价格</Button>
-          </Actions>
-        </PanelHeader>
-        <div className="price-list">
-          {prices.length === 0 ? (
-            <p>暂无模型价格</p>
-          ) : (
-            prices.map((price, index) => (
-              <div className="price-row-3" key={price.id}>
-                <Select value={price.channel_id} onChange={(value) => value && onUpdatePrice(index, { channel_id: value })} data={channels.map((c) => ({ value: c.id, label: c.name }))} />
-                <TextInput value={price.upstream_model} placeholder="模型名" onChange={(e) => onUpdatePrice(index, { upstream_model: e.target.value })} />
-                <span className="price-preview">{formatPrice(price)}</span>
-                <TextInput type="number" min="0" step="0.000001" value={price.input_uncached_price} placeholder="输入(未命中缓存)" onChange={(e) => onUpdatePrice(index, { input_uncached_price: Number(e.target.value) })} />
-                <TextInput type="number" min="0" step="0.000001" value={price.input_cached_price} placeholder="输入(命中缓存)" onChange={(e) => onUpdatePrice(index, { input_cached_price: Number(e.target.value) })} />
-                <TextInput type="number" min="0" step="0.000001" value={price.output_price} placeholder="输出" onChange={(e) => onUpdatePrice(index, { output_price: Number(e.target.value) })} />
-                <Button type="button" variant="subtle" color="red" onClick={() => onRemovePrice(index)}>删除</Button>
-              </div>
-            ))
-          )}
-        </div>
-      </DetailsPanel>
     </>
   );
 }

@@ -28,6 +28,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Opening database: {db_path}");
     let storage = Storage::open(&db_path)?;
 
+    // 价格不再入库：启动时从 config.json 载入到内存，作为唯一真实来源。
+    let config_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("config.json");
+    if let Ok(prices) = flowlet_lib::load_channels_config_from(&config_path).map(|cfg| cfg.prices) {
+        storage.set_prices(prices);
+    }
+
     let channels = storage.list_channel_presets()?;
     let accounts = storage.list_channel_accounts()?;
     let routes = storage.list_route_candidates()?;
@@ -66,9 +74,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scores: Arc::new(Mutex::new(scores)),
                 round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
-    let config_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("config.json");
     proxy
         .start_with_bind(
             shared,

@@ -1,7 +1,7 @@
 use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ModelPrice, ProxyBindConfig,
+    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ProxyBindConfig,
     RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
@@ -217,37 +217,6 @@ pub(super) fn save_route_candidates(
             msg
         })?;
     *current = routes;
-    Ok(())
-}
-
-// ─── Model Prices Commands ──────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn list_model_prices(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<ModelPrice>, String> {
-    state
-        .prices
-        .lock()
-        .map(|prices| prices.clone())
-        .map_err(|_| "读取价格配置失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn save_model_prices(
-    state: tauri::State<'_, AppState>,
-    prices: Vec<ModelPrice>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_model_prices(&prices)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .prices
-        .lock()
-        .map_err(|_| "保存价格配置失败".to_string())?;
-    *current = prices;
     Ok(())
 }
 
@@ -725,10 +694,6 @@ pub(super) fn import_config(state: tauri::State<'_, AppState>, json: String) -> 
         .storage
         .list_route_rules()
         .map_err(|e| e.to_string())?;
-    let prices = state
-        .storage
-        .list_model_prices()
-        .map_err(|e| e.to_string())?;
     let virtual_models = state
         .storage
         .list_virtual_models()
@@ -738,7 +703,6 @@ pub(super) fn import_config(state: tauri::State<'_, AppState>, json: String) -> 
     *state.accounts.lock().map_err(|_| "锁失败".to_string())? = accounts;
     *state.routes.lock().map_err(|_| "锁失败".to_string())? = routes;
     *state.rules.lock().map_err(|_| "锁失败".to_string())? = rules;
-    *state.prices.lock().map_err(|_| "锁失败".to_string())? = prices;
     *state
         .virtual_models
         .lock()

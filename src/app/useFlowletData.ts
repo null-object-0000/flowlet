@@ -9,7 +9,6 @@ import {
   LogFilterClient,
   LogMeta,
   ModelExposureMode,
-  ModelPrice,
   ProxyBindConfig,
   ProxyStatus,
   RequestLogRow,
@@ -25,7 +24,6 @@ export function useFlowletData() {
   const [accounts, setAccounts] = React.useState<ChannelAccount[]>([]);
   const [routes, setRoutes] = React.useState<RouteCandidate[]>([]);
   const [clients, setClients] = React.useState<ClientConfig[]>([]);
-  const [prices, setPrices] = React.useState<ModelPrice[]>([]);
   const [channelModels, setChannelModels] = React.useState<ChannelModel[]>([]);
   const [virtualModels, setVirtualModels] = React.useState<VirtualModel[]>([]);
   const [usageRows, setUsageRows] = React.useState<UsageSummaryRow[]>([]);
@@ -74,12 +72,11 @@ export function useFlowletData() {
 
   const refreshAll = React.useCallback(async () => {
     const token = ++refreshTokenRef.current;
-    const [ch, ac, ro, cl, pr, cm, vm, usage, logs, logClients, snapshots, stats, rules, scores, db] = await Promise.all([
+    const [ch, ac, ro, cl, cm, vm, usage, logs, logClients, snapshots, stats, rules, scores, db] = await Promise.all([
       runCommand<ChannelPreset[]>("list_channel_presets").catch(() => [] as ChannelPreset[]),
       runCommand<ChannelAccount[]>("list_channel_accounts").catch(() => [] as ChannelAccount[]),
       runCommand<RouteCandidate[]>("list_route_candidates").catch(() => [] as RouteCandidate[]),
       runCommand<ClientConfig[]>("list_clients").catch(() => [] as ClientConfig[]),
-      runCommand<ModelPrice[]>("list_model_prices").catch(() => [] as ModelPrice[]),
       runCommand<ChannelModel[]>("list_channel_models").catch(() => [] as ChannelModel[]),
       runCommand<VirtualModel[]>("list_virtual_models").catch(() => [] as VirtualModel[]),
       runCommand<UsageSummaryRow[]>("usage_summary").catch(() => [] as UsageSummaryRow[]),
@@ -115,7 +112,6 @@ export function useFlowletData() {
     setAccounts(ac);
     setRoutes(ro);
     setClients(cl);
-    setPrices(pr);
     setChannelModels(cm);
     setVirtualModels(vm);
     setUsageRows(usage);
@@ -149,8 +145,6 @@ export function useFlowletData() {
     setClients,
     logClients,
     setLogClients,
-    prices,
-    setPrices,
     channelModels,
     virtualModels,
     usageRows,

@@ -1,6 +1,6 @@
 use super::{parse_auth_strategy, Storage, StorageError};
 use crate::core::config::{
-    ChannelAccount, ChannelModel, ChannelPreset, ModelPrice, ProtocolType,
+    ChannelAccount, ChannelModel, ChannelPreset, ProtocolType,
     RouteCandidate, RouteRule, VirtualModel, ACCOUNT_CREDENTIAL_HEALTHY,
     ACCOUNT_CREDENTIAL_INVALID_KEY,
 };
@@ -23,9 +23,9 @@ impl Storage {
                  INSERT INTO channel_presets (
                     id, name, vendor, supported_protocols, openai_base_url, anthropic_base_url,
                     openai_auth, anthropic_auth, default_model, small_model, timeout_seconds, supports_model_list,
-                    supports_model_detail, supports_price_sync, supports_balance_query,
+                    supports_model_detail, supports_balance_query,
                     supports_quota_query, supports_usage_query, platform_url, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
                 "#,
                 params![
                     preset.id,
@@ -41,7 +41,6 @@ impl Storage {
                     preset.timeout_seconds,
                     preset.supports_model_list as i64,
                     preset.supports_model_detail as i64,
-                    preset.supports_price_sync as i64,
                     preset.supports_balance_query as i64,
                     preset.supports_quota_query as i64,
                     preset.supports_usage_query as i64,
@@ -63,7 +62,7 @@ impl Storage {
         let mut stmt = connection.prepare(
             "SELECT id, name, vendor, supported_protocols, openai_base_url, anthropic_base_url,
                     openai_auth, anthropic_auth, default_model, small_model, timeout_seconds, supports_model_list,
-                    supports_model_detail, supports_price_sync, supports_balance_query,
+                    supports_model_detail, supports_balance_query,
                     supports_quota_query, supports_usage_query, platform_url, created_at, updated_at
              FROM channel_presets ORDER BY id ASC",
         )?;
@@ -85,13 +84,12 @@ impl Storage {
                 timeout_seconds: row.get(10)?,
                 supports_model_list: row.get::<_, i64>(11)? != 0,
                 supports_model_detail: row.get::<_, i64>(12)? != 0,
-                supports_price_sync: row.get::<_, i64>(13)? != 0,
-                supports_balance_query: row.get::<_, i64>(14)? != 0,
-                supports_quota_query: row.get::<_, i64>(15)? != 0,
-                supports_usage_query: row.get::<_, i64>(16)? != 0,
-                platform_url: row.get(17)?,
-                created_at: row.get(18)?,
-                updated_at: row.get(19)?,
+                supports_balance_query: row.get::<_, i64>(13)? != 0,
+                supports_quota_query: row.get::<_, i64>(14)? != 0,
+                supports_usage_query: row.get::<_, i64>(15)? != 0,
+                platform_url: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         })?;
         let mut presets = Vec::new();
@@ -573,82 +571,6 @@ impl Storage {
             candidates.push(row?);
         }
         Ok(candidates)
-    }
-
-    // ─── Model Prices (三段价格) ─────────────────────────────────────────────
-
-    pub fn save_model_prices(&self, prices: &[ModelPrice]) -> Result<(), StorageError> {
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let tx = connection.transaction()?;
-        tx.execute("DELETE FROM model_prices", [])?;
-        for price in prices {
-            tx.execute(
-                r#"
-                INSERT INTO model_prices (
-                    id, channel_id, upstream_model, input_uncached_price, input_cached_price,
-                    output_price, currency, unit, source, synced_at, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                "#,
-                params![
-                    price.id,
-                    price.channel_id,
-                    price.upstream_model,
-                    price.input_uncached_price,
-                    price.input_cached_price,
-                    price.output_price,
-                    price.currency,
-                    price.unit,
-                    price.source.as_str(),
-                    price.synced_at,
-                    price.created_at,
-                    price.updated_at,
-                ],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn list_model_prices(&self) -> Result<Vec<ModelPrice>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let mut stmt = connection.prepare(
-            "SELECT id, channel_id, upstream_model, input_uncached_price, input_cached_price,
-                    output_price, currency, unit, source, synced_at, created_at, updated_at
-             FROM model_prices ORDER BY channel_id ASC, upstream_model ASC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let source_raw: String = row.get(8)?;
-            let source = match source_raw.as_str() {
-                "synced" => crate::core::config::PriceSource::Synced,
-                "manual" => crate::core::config::PriceSource::Manual,
-                _ => crate::core::config::PriceSource::Preset,
-            };
-            Ok(ModelPrice {
-                id: row.get(0)?,
-                channel_id: row.get(1)?,
-                upstream_model: row.get(2)?,
-                input_uncached_price: row.get(3)?,
-                input_cached_price: row.get(4)?,
-                output_price: row.get(5)?,
-                currency: row.get(6)?,
-                unit: row.get(7)?,
-                source,
-                synced_at: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-            })
-        })?;
-        let mut prices = Vec::new();
-        for row in rows {
-            prices.push(row?);
-        }
-        Ok(prices)
     }
 
     // ─── Account Balance Snapshots ───────────────────────────────────────────

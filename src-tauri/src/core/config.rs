@@ -177,11 +177,13 @@ fn has_tool_use_content(json: &serde_json::Value, _protocol: &ProtocolType) -> b
 }
 
 // ─── Protocol Type ──────────────────────────────────────────────────────────
+// 序列化必须与 TypeScript 的 ProtocolType ("openai" | "anthropic") 保持一致，
+// 前端会直接比较字符串，不能用 kebab-case 否则会导致 supported_protocols 匹配失败。
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "kebab-case")]
 pub enum ProtocolType {
     #[default]
+    #[serde(rename = "openai")]
     OpenAi,
     Anthropic,
 }

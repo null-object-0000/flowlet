@@ -22,7 +22,8 @@ Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议
 
 ```text
 Flowlet Desktop
-  ├─ src/                         React + TypeScript + Vite 前端
+  ├─ src/                         现有 Mantine 前端 + UI 启动 bootstrap
+  ├─ src-new/                     Semi Design 新前端（重构中）
   ├─ src-tauri/                   Tauri 2 桌面壳
   │  └─ src/
   │     ├─ lib.rs                 Tauri 应用入口和 command 注册
@@ -39,6 +40,8 @@ Flowlet Desktop
   │        └─ analyzer.rs         离线 Token / 成本分析
   └─ docs/                        产品和架构文档
 ```
+
+前端当前处于双版本重构过渡期。`config.json` 的 `ui.version` 在应用启动时选择 `legacy` 或 `next`；两套前端共享同一组 Tauri command 和 Rust 后端，不复制后端业务能力。新前端的分层、依赖方向、阶段计划和完成标准见 [`docs/frontend-rewrite.md`](frontend-rewrite.md)。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 

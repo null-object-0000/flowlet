@@ -45,6 +45,7 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 ```jsonc
 {
+  "ui": { "version": "legacy" }, // 前端版本
   "ua_rules": [ ... ],          // UA 客户端识别规则
   "log_capture": { ... },       // 请求日志捕获配置
   "bind": { ... },              // 代理监听地址
@@ -54,11 +55,31 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 | 字段 | 类型 | 必须 | 说明 |
 |------|------|------|------|
+| `ui` | `object` | 否 | 前端版本选择；缺失或非法时使用 `legacy` |
 | `ua_rules` | `UaClientRule[]` | 是 | 基于 User-Agent 子串的客户端身份识别规则 |
 | `log_capture` | `object` | 是 | 请求/响应日志的捕获与脱敏配置 |
 | `bind` | `object` | 是 | 本地代理监听的 host/port |
 | `channels_config` | `object` | 是 | 渠道模板、价格、默认开放模型、档位 |
 
+### 2.1 `ui` — 前端版本
+
+~~~jsonc
+"ui": {
+  "version": "legacy"
+}
+~~~
+
+| 字段 | 类型 | 必须 | 默认值 | 可选值 | 说明 |
+|------|------|------|--------|--------|------|
+| `version` | `string` | 否 | `legacy` | `legacy`、`next` | 应用启动时选择 Mantine 旧版或 Semi 新版前端 |
+
+**行为**：
+
+- 前端 bootstrap 通过 Tauri command `read_config` 读取原始 JSON，并且只在应用启动时解析一次；
+- `legacy` 加载现有 Mantine 前端，`next` 加载 `src-new` 中的 Semi 前端；
+- 字段缺失、类型错误、值非法、JSON 解析失败或 command 调用失败时，安全回退到 `legacy`；
+- 修改后必须重启整个 Flowlet 应用，不支持运行时热切换；
+- Rust 不负责 UI 产品判断，也不为该字段维护独立运行时结构；Rust 只提供原始配置读取能力。
 ---
 
 ## 3. `ua_rules` — 客户端身份识别
@@ -304,6 +325,7 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 | 配置 | 修改后行为 |
 |------|-----------|
+| `ui.version` | **需重启应用**：仅在前端 bootstrap 时读取一次 |
 | `ua_rules` | **热更新**：下次请求立即生效 |
 | `log_capture` | **热更新**：下次请求立即生效 |
 | `bind` | **需重启代理**：监听地址在启动时绑定 |
@@ -318,7 +340,7 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 **写入校验**：`write_config_raw` 仅校验顶层为 JSON 对象或数组，**不做字段级 schema 校验**。字段级语义校验由前端 `src/app/actions/configActions.ts` 中的 `validateConfigData` 负责（校验渠道/账号/路由/客户端的引用完整性、API Key 非空等），但该校验仅用于导入/导出配置包（`ConfigBundle`），不用于 `config.json` 的写入。
 
-> 前端**不直接读取** `config.json` 文件，所有渠道/账号/模型数据通过各自的 Tauri command（如 `list_channel_presets`）从 SQLite 获取。前端没有描述原始 `config.json` 顶层结构的 TS 类型，只有解析后的各片段类型。
+> 前端不直接访问文件系统。启动 bootstrap 会通过 `read_config` 读取原始 JSON，仅解析 `ui.version`；渠道、账号和模型数据仍通过各自的 Tauri command（如 `list_channel_presets`）从 SQLite 获取。
 
 ---
 
@@ -359,5 +381,6 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 | 前端读写 command | `src-tauri/src/commands.rs`（`read_config`、`write_config`） |
 | 前端配置校验（导入/导出 ConfigBundle 用） | `src/app/actions/configActions.ts`（`validateConfigData`） |
 | 便携版打包 | `scripts/build-portable.mjs` |
+| 前端 UI 版本解析 | `src/bootstrap/uiVersion.ts` |
 | 前端类型定义 | `src/domain.ts`（`ChannelPreset`、`ProxyBindConfig`、`LogCaptureConfig`、`FlowletTier`） |
 | 前端启动兜底常量 | `src/domain.ts`（`defaultExposedModelsByChannel`、`defaultFlowletTierByChannel`、`flowletPublicModels`） |

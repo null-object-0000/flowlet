@@ -1,4 +1,7 @@
 {
+  "ui": {
+    "version": "next"
+  },
   "ua_rules": [
     {
       "id": "opencode",

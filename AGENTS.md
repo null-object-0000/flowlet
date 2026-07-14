@@ -303,7 +303,7 @@ Agent 接入能力应逐步提供：
 
 必须注意：
 
-* API Key、Authorization、x-api-key 等敏感 Header 默认应脱敏；
+* API Key、Authorization、x-api-key、Cookie 等敏感 Header 默认不脱敏，用户可自行配置开启脱敏；
 * 不要在 UI、日志或错误信息中泄露完整密钥；
 * 请求和响应 Body 捕获必须明确受配置控制；
 * 新增日志字段时，要考虑隐私和存储体积；

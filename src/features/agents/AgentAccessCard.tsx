@@ -1,6 +1,6 @@
 import React from "react";
 import { Text, UnstyledButton } from "@mantine/core";
-import { IconBrandOpenai, IconRobot } from "@tabler/icons-react";
+import { ClaudeCode, OpenCode } from "@lobehub/icons";
 import { Panel, PanelHeader } from "../../components/ui";
 import styles from "./AgentAccessCard.module.css";
 
@@ -9,11 +9,9 @@ type AgentAccessCardProps = {
   onCopy: (text: string, done: string) => Promise<void>;
 };
 
-const AGENT_CARDS: Array<{ name: string; desc: string; endpoint: string }> = [
-  { name: "Claude Code", desc: "官方 CLI 工具", endpoint: "/anthropic" },
-  { name: "Cline", desc: "VS Code 扩展", endpoint: "/v1" },
-  { name: "OpenCode", desc: "智能编码助手", endpoint: "/v1" },
-  { name: "Continue", desc: "开源 AI 助手", endpoint: "/v1" },
+const AGENT_CARDS: Array<{ name: string; desc: string; endpoint: string; avatar: React.ComponentType<{ size: number }> }> = [
+  { name: "Claude Code CLI", desc: "命令行接入", endpoint: "/anthropic", avatar: ClaudeCode.Avatar },
+  { name: "OpenCode CLI", desc: "命令行接入", endpoint: "/v1", avatar: OpenCode.Avatar },
 ];
 
 export function AgentAccessCard({ baseUrl, onCopy }: AgentAccessCardProps) {
@@ -33,7 +31,7 @@ export function AgentAccessCard({ baseUrl, onCopy }: AgentAccessCardProps) {
             key={card.name}
             onClick={() => void onCopy(`${baseUrl}${card.endpoint}`, `${card.name} 接入地址已复制`)}
           >
-            <span>{card.name === "Claude Code" ? <IconBrandOpenai size={28} /> : <IconRobot size={28} />}</span>
+            <span><card.avatar size={28} /></span>
             <strong>{card.name}</strong>
             <small>{card.desc}</small>
           </UnstyledButton>

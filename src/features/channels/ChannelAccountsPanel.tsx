@@ -12,7 +12,7 @@ type ChannelAccountsPanelProps = {
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   getChannelName: (channelId: string) => string;
   onCreateAccount: () => void;
-  onOpenManagementDrawer: (focusIndex?: number) => void;
+  onOpenManagementDrawer: (focusIndex: number | null) => void;
   onEditAccount: (index: number) => void;
 };
 
@@ -49,7 +49,7 @@ export function ChannelAccountsPanel({
         </div>
         <Group gap="xs">
           <Button className="overview-view-all" variant="subtle" onClick={onCreateAccount}>+ 新增账号</Button>
-          <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={() => onOpenManagementDrawer()}>查看全部</Button>
+          <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={() => onOpenManagementDrawer(null)}>查看全部</Button>
         </Group>
       </PanelHeader>
       <div className="overview-list">

@@ -5,6 +5,7 @@ export type { AccountEditorRequest } from "./AccountEditorDrawer";
 export { BalanceSnapshotEditor } from "./BalanceSnapshotEditor";
 export { ChannelAccountOnboarding } from "./ChannelAccountOnboarding";
 export { ChannelAccountsPanel } from "./ChannelAccountsPanel";
+export { ChannelAccountSection } from "./ChannelAccountSection";
 export { LongCatPackManager, LongCatPackImportDialog } from "./LongCatPackImportDialog";
 export { summarizeLots, parseSnapshotTokenPacks, formatTokenCount, formatLongCatTime } from "./LongCatPackImportDialog";
 export { formatAmount, formatIsoDateTime } from "./formatters";

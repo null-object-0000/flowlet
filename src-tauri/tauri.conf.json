@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "Flowlet",
+        "userAgent": "Flowlet/0.1.0",
         "width": 1200,
         "height": 720,
         "minWidth": 1200,

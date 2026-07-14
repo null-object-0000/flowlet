@@ -11,6 +11,12 @@
       "pattern": "claude-cli/",
       "name": "Claude Code",
       "enabled": true
+    },
+    {
+      "id": "flowlet",
+      "pattern": "Flowlet/",
+      "name": "Flowlet",
+      "enabled": true
     }
   ],
   "log_capture": {

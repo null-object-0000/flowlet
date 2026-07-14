@@ -28,6 +28,7 @@ import {
   IconExternalLink,
   IconInfoCircle,
   IconPlayerPlay,
+  IconPlus,
   IconRefresh,
   IconRobot,
 } from "@tabler/icons-react";
@@ -522,22 +523,36 @@ export function OverviewPage({
             <Panel className="overview-section-card overview-section-card--grow">
               <PanelHeader>
                 <div>
-                  <h3>渠道账号</h3>
-                  <Text size="sm" c="dimmed">已添加 {accounts.length} 个渠道账号</Text>
+                  <h3>渠道账号　共 {accounts.length} 个账号</h3>
                 </div>
-                <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={onOpenAccounts}>查看全部</Button>
+                <Group gap="xs">
+                  <Button className="overview-view-all" variant="subtle" onClick={() => openCreateAccount()}>+ 新增账号</Button>
+                  <Button className="overview-view-all" variant="subtle" rightSection={<IconChevronRight size={15} />} onClick={() => setManagementDrawer({ opened: true, focusIndex: null })}>查看全部</Button>
+                </Group>
               </PanelHeader>
               <div className="overview-list">
                 {accounts.map((account, index) => (
-                  <div className="overview-account-card" key={account.id}>
-                    <div className="overview-card-main">
-                      <ChannelLogo channelId={account.channel_id} channelName={getChannelName(account.channel_id)} size={32} variant="avatar" />
-                      <div className="row-main"><strong>{account.name || getChannelName(account.channel_id)}</strong><span>{getChannelName(account.channel_id)}</span></div>
-                      <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
-                      <ActionIcon variant="subtle" onClick={() => openEditAccount(index)} aria-label="编辑账号"><IconDotsVertical size={17} /></ActionIcon>
+                  <button
+                    type="button"
+                    className="overview-account-row"
+                    key={account.id}
+                    onClick={() => setManagementDrawer({ opened: true, focusIndex: index })}
+                    aria-label={`管理账号 ${account.name || getChannelName(account.channel_id)}`}
+                  >
+                    <ChannelLogo channelId={account.channel_id} channelName={getChannelName(account.channel_id)} size={32} variant="avatar" />
+                    <div className="row-main"><strong>{account.name || getChannelName(account.channel_id)}</strong><span>{getChannelName(account.channel_id)}</span></div>
+                    <div className="overview-account-row-metrics">
+                      <span className="overview-resource">{account.channel_id === "longcat" ? `资源包 ${accountResource(account)}` : `余额 ${accountResource(account)}`}</span>
+                      {(account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack" && (
+                        <span className="overview-expire">有效期 {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span>
+                      )}
                     </div>
-                    <div className="overview-card-meta">{account.channel_id === "longcat" ? <span>资源包: {accountResource(account)}</span> : <span>余额: {accountResource(account)}</span>}{(account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack" && <span>有效期: {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span>}</div>
-                  </div>
+                    <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
+                    <ActionIcon variant="subtle" aria-label="编辑账号" onClick={(event) => {
+                      event.stopPropagation();
+                      openEditAccount(index);
+                    }}><IconDotsVertical size={17} /></ActionIcon>
+                  </button>
                 ))}
               </div>
             </Panel>
@@ -626,6 +641,26 @@ export function OverviewPage({
           </SimpleGrid>
         </>
       )}
+
+      <AccountManagementDrawer
+        opened={managementDrawer.opened}
+        onClose={() => setManagementDrawer({ opened: false, focusIndex: null })}
+        accounts={accounts}
+        channels={channels}
+        onSaveAccounts={onSaveAccounts}
+        onTestConnection={onTestConnection}
+        onSyncBalance={onSyncBalance}
+        getBalanceForAccount={getBalanceForAccount}
+        onAddBalanceSnapshot={onAddBalanceSnapshot}
+        onOpenEditor={(request) => {
+          setManagementDrawer({ opened: false, focusIndex: null });
+          if (request.mode === "create") {
+            openCreateAccount(request.channelId);
+          } else {
+            openEditAccount(request.index);
+          }
+        }}
+      />
 
       {accountEditor ? (
         <AccountEditorDrawer

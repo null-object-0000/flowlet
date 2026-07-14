@@ -529,7 +529,7 @@ export function OverviewPage({
                       <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
                       <ActionIcon variant="subtle" onClick={() => openEditAccount(index)} aria-label="编辑账号"><IconDotsVertical size={17} /></ActionIcon>
                     </div>
-                    <div className="overview-card-meta">{account.channel_id === "longcat" ? <span>资源包: {accountResource(account)}</span> : <span>余额: {accountResource(account)}</span>}<span>有效期: {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span></div>
+                    <div className="overview-card-meta">{account.channel_id === "longcat" ? <span>资源包: {accountResource(account)}</span> : <span>余额: {accountResource(account)}</span>}{(account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack" && <span>有效期: {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span>}</div>
                   </div>
                 ))}
               </div>

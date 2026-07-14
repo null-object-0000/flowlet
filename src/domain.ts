@@ -158,9 +158,15 @@ export type LogFilter = {
   page: number;        // 1-based
   pageSize: number;
   status: "all" | "success" | "error";
-  client: string;      // "" = 不过滤
+  client: string;      // "" = 不过滤；"__unknown__" = client_id IS NULL（未知）
   channel: string;     // "" = 不过滤
   search: string;      // 模糊匹配 path / request_id / error_message
+};
+
+// 请求日志中实际出现的客户端身份（UA 归因）。id 为空串 = 未知（client_id IS NULL）。
+export type LogFilterClient = {
+  id: string;
+  name: string;
 };
 
 export type LogPage = {

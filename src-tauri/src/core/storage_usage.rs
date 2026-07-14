@@ -1,7 +1,7 @@
 use super::{Storage, StorageError};
 use crate::core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, LogsFilter, LogsPageResult, RequestLogInput,
-    RequestLogRow, UsageRecordInput, UsageSummaryRow,
+    AccountBalanceSnapshot, AccountStatsRow, LogFilterClient, LogsFilter, LogsPageResult,
+    RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
 };
 use rusqlite::params;
 
@@ -268,6 +268,36 @@ impl Storage {    pub fn save_balance_snapshot(
             logs.push(row?);
         }
         Ok(logs)
+    }
+
+    /// 返回请求日志中实际出现的客户端身份（client_id, client_name）。
+    /// 仅前台归因：未命中 UA 规则的请求 client_id 为 NULL，以空 id + "未知" 落盘。
+    /// 用空串 id 表示"未知"，便于前端作为筛选项（后端按 client_id IS NULL 过滤）。
+    pub fn list_request_log_clients(&self) -> Result<Vec<LogFilterClient>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut stmt = connection.prepare(
+            r#"
+            SELECT COALESCE(client_id, '') AS client_id, COALESCE(client_name, '未知') AS client_name
+            FROM request_logs
+            WHERE is_last_attempt = 1
+            GROUP BY COALESCE(client_id, ''), COALESCE(client_name, '未知')
+            ORDER BY client_name = '未知', client_name, client_id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(LogFilterClient {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })?;
+        let mut clients: Vec<LogFilterClient> = Vec::new();
+        for row in rows {
+            clients.push(row?);
+        }
+        Ok(clients)
     }
 
     pub fn list_request_logs_by_request_id(
@@ -777,8 +807,11 @@ impl Storage {    pub fn save_balance_snapshot(
             _ => None,
         };
 
+        // 客户端筛选：空串 = 不过滤；LOG_FILTER_CLIENT_UNKNOWN = 匹配 client_id IS NULL（未知）。
         let client_clause = if filter.client_id.is_empty() {
             None
+        } else if filter.client_id == crate::core::config::LOG_FILTER_CLIENT_UNKNOWN {
+            Some("client_id IS NULL")
         } else {
             refs.push(&filter.client_id);
             Some("client_id = ?")

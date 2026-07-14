@@ -6,6 +6,7 @@ import {
   ChannelModel,
   ChannelPreset,
   ClientConfig,
+  LogFilterClient,
   LogMeta,
   ModelExposureMode,
   ModelPrice,
@@ -29,6 +30,7 @@ export function useFlowletData() {
   const [virtualModels, setVirtualModels] = React.useState<VirtualModel[]>([]);
   const [usageRows, setUsageRows] = React.useState<UsageSummaryRow[]>([]);
   const [requestLogs, setRequestLogs] = React.useState<RequestLogRow[]>([]);
+  const [logClients, setLogClients] = React.useState<LogFilterClient[]>([]);
   const [logMeta, setLogMeta] = React.useState<LogMeta>({
     total: 0,
     page: 1,
@@ -71,7 +73,7 @@ export function useFlowletData() {
 
   const refreshAll = React.useCallback(async () => {
     const token = ++refreshTokenRef.current;
-    const [ch, ac, ro, cl, pr, cm, vm, usage, logs, snapshots, stats, rules, scores, db] = await Promise.all([
+    const [ch, ac, ro, cl, pr, cm, vm, usage, logs, logClients, snapshots, stats, rules, scores, db] = await Promise.all([
       runCommand<ChannelPreset[]>("list_channel_presets").catch(() => [] as ChannelPreset[]),
       runCommand<ChannelAccount[]>("list_channel_accounts").catch(() => [] as ChannelAccount[]),
       runCommand<RouteCandidate[]>("list_route_candidates").catch(() => [] as RouteCandidate[]),
@@ -86,6 +88,7 @@ export function useFlowletData() {
           filter: { page: 1, page_size: 50, status: "all", client_id: "", channel_id: "", search: "" },
         }
       ).catch(() => ({ rows: [], total: 0, page: 1, pageSize: 50 })),
+      runCommand<LogFilterClient[]>("list_request_log_clients").catch(() => [] as LogFilterClient[]),
       runCommand<AccountBalanceSnapshot[]>("latest_balance_snapshots").catch(
         () => [] as AccountBalanceSnapshot[]
       ),
@@ -122,6 +125,7 @@ export function useFlowletData() {
       pageSize: logs.pageSize,
       lastFetchedAt: Date.now(),
     });
+    setLogClients(logClients);
     setBalanceSnapshots(snapshots);
     setAccountStats(stats);
     setRouteRules(rules);
@@ -142,6 +146,8 @@ export function useFlowletData() {
     setRoutes,
     clients,
     setClients,
+    logClients,
+    setLogClients,
     prices,
     setPrices,
     channelModels,

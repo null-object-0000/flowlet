@@ -27,6 +27,7 @@ export default function App() {
     routes,
     setRoutes,
     clients,
+    logClients,
     prices,
     channelModels,
     virtualModels,
@@ -359,7 +360,7 @@ export default function App() {
             logs={requestLogs}
             logMeta={logMeta}
             channels={channels}
-            clients={clients}
+            logClients={logClients}
             onRefresh={(filter, page) => {
               const next: LogFilter | undefined = filter
                 ? { ...filter, page: page ?? filter.page }

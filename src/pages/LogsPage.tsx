@@ -1,7 +1,7 @@
 import React from "react";
 import { Badge, Button, Select, Table, TextInput } from "@mantine/core";
 import { Actions, Panel, PanelHeader, TableContainer } from "../components/ui";
-import { ChannelPreset, ClientConfig, LogFilter, LogMeta, RequestLogRow } from "../domain";
+import { ChannelPreset, LogFilter, LogFilterClient, LogMeta, RequestLogRow } from "../domain";
 import { LogDetailDrawer } from "./LogDetailDrawer";
 
 const DEFAULT_FILTER: LogFilter = {
@@ -17,18 +17,24 @@ export function LogsPage({
   logs,
   logMeta,
   channels,
-  clients,
+  logClients,
   onRefresh,
 }: {
   logs: RequestLogRow[];
   logMeta: LogMeta;
   channels: ChannelPreset[];
-  clients: ClientConfig[];
+  logClients: LogFilterClient[];
   onRefresh: (filter?: LogFilter, page?: number) => void;
 }) {
   const [filter, setFilter] = React.useState<LogFilter>(DEFAULT_FILTER);
   const [draft, setDraft] = React.useState<LogFilter>(DEFAULT_FILTER);
   const [selectedRequestId, setSelectedRequestId] = React.useState<string | null>(null);
+
+  // 每次通过菜单进入请求日志页面时，自动拉取最新数据
+  React.useEffect(() => {
+    onRefresh(DEFAULT_FILTER, 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function applyFilter(next: Partial<LogFilter>) {
     const merged = { ...filter, ...next };
@@ -82,8 +88,11 @@ export function LogsPage({
 
           <Select
             value={filter.client || "__all_clients__"}
-            onChange={(value) => applyFilter({ client: value === "__all_clients__" || !value ? "" : value, page: 1 })}
-            data={[{ value: "__all_clients__", label: "全部客户端" }, ...clients.map((c) => ({ value: c.id, label: c.name || c.id }))]}
+            onChange={(value) => applyFilter({ client: value === "__all_clients__" || !value ? "" : value === "__unknown__" ? "__unknown__" : value, page: 1 })}
+            data={[
+              { value: "__all_clients__", label: "全部客户端" },
+              ...logClients.map((c) => ({ value: c.id || "__unknown__", label: c.name || c.id || "未知" })),
+            ]}
             w={160}
           />
 

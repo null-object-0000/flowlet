@@ -1,8 +1,8 @@
 use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    ClientConfig, LogCaptureConfig, LogsFilter, LogsPageResult, ModelPrice, ProxyBindConfig,
-    RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
+    ClientConfig, LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ModelPrice,
+    ProxyBindConfig, RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
@@ -348,6 +348,18 @@ pub(super) fn list_request_logs(
     state
         .storage
         .list_request_logs_page(filter)
+        .map_err(|err| err.to_string())
+}
+
+/// 返回请求日志中实际出现的客户端身份列表，供前端"客户端"筛选项使用。
+/// id 为空串表示"未知"（client_id IS NULL）。
+#[tauri::command]
+pub(super) fn list_request_log_clients(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<LogFilterClient>, String> {
+    state
+        .storage
+        .list_request_log_clients()
         .map_err(|err| err.to_string())
 }
 

@@ -40,7 +40,7 @@ export function LogDetailDrawer({
   const finalRow = rows.length === 0 ? null : rows[rows.length - 1];
 
   return (
-    <Drawer opened onClose={onClose} title="请求详情" position="right" size="min(960px, 92vw)" padding="lg" className="detail-drawer-root">
+    <Drawer opened onClose={onClose} title="请求详情" position="right" size="min(960px, 92vw)" padding={0} zIndex={2000} classNames={{ header: "detail-drawer-header", body: "detail-drawer-body" }}>
         <header className="detail-header">
           <div>
             <div className="muted">{requestId}</div>

@@ -83,6 +83,16 @@
   min-width: 0;
 }
 
+.detail-drawer-header {
+  padding-top: 44px;
+  padding-left: 28px;
+  padding-right: 28px;
+}
+
+.detail-drawer-body {
+  padding: 0 28px 28px;
+}
+
 .detail-header {
   padding: 0 0 12px;
   margin-bottom: 12px;

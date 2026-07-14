@@ -179,11 +179,12 @@ fn has_tool_use_content(json: &serde_json::Value, _protocol: &ProtocolType) -> b
 // ─── Protocol Type ──────────────────────────────────────────────────────────
 // 序列化必须与 TypeScript 的 ProtocolType ("openai" | "anthropic") 保持一致，
 // 前端会直接比较字符串，不能用 kebab-case 否则会导致 supported_protocols 匹配失败。
+// 反序列化用 alias 兼容旧数据库中的 "open-ai"（kebab-case）数据。
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ProtocolType {
     #[default]
-    #[serde(rename = "openai")]
+    #[serde(rename = "openai", alias = "open-ai")]
     OpenAi,
     Anthropic,
 }
@@ -647,6 +648,17 @@ pub struct RequestLogRow {
 
 // ─── Request Log Page (paginated + filtered) ─────────────────────────────────
 
+/// 请求日志中出现的客户端身份。用于前端"客户端"筛选项。
+/// `id` 为空串表示"未知"（日志中 client_id IS NULL）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogFilterClient {
+    pub id: String,
+    pub name: String,
+}
+
+/// 特殊客户端筛选值：匹配日志中 `client_id IS NULL`（未知）的请求。
+pub const LOG_FILTER_CLIENT_UNKNOWN: &str = "__unknown__";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct LogsFilter {
     /// 1-based 页码
@@ -655,7 +667,7 @@ pub struct LogsFilter {
     pub page_size: u32,
     /// 状态筛选: "all" | "success" (2xx/3xx) | "error" (4xx/5xx/无状态码/有错误)
     pub status: String,
-    /// 客户端 ID 筛选（空串 = 不过滤）
+    /// 客户端 ID 筛选（空串 = 不过滤；`LOG_FILTER_CLIENT_UNKNOWN` 表示 client_id IS NULL）
     pub client_id: String,
     /// 渠道 ID 筛选（空串 = 不过滤）
     pub channel_id: String,

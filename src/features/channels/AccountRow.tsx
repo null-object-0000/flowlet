@@ -1,6 +1,7 @@
 import { Badge, Button } from "@mantine/core";
 import { AccountBalanceSnapshot, ChannelAccount, ChannelPreset } from "../../domain";
 import { ChannelLogo } from "../../components/ChannelLogo";
+import { formatTokenCount } from "./LongCatPackImportDialog";
 
 function accountStatus(account: ChannelAccount): { label: string; color: "green" | "red" | "gray" } {
   if (!account.enabled) return { label: "已停用", color: "gray" };
@@ -18,7 +19,7 @@ type AccountRowProps = {
 function resourceSummary(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): string {
   if (!snapshot) return "暂无资源信息";
   const resourceMode = account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go");
-  if (resourceMode === "token_pack") return `${snapshot.token_pack_remaining?.toLocaleString() ?? "-"} Tokens`;
+  if (resourceMode === "token_pack") return `${formatTokenCount(snapshot.token_pack_remaining)} Tokens`;
   return snapshot.balance == null ? "余额待同步" : `${snapshot.balance} ${snapshot.currency ?? ""}`.trim();
 }
 

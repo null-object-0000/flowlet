@@ -67,11 +67,21 @@ function formatLongCatTime(value?: string): string {
   return value.replace("T", " ").slice(0, 16);
 }
 
-function formatTokenCount(value?: number): string {
+export function formatTokenCount(value: number | null | undefined): string {
   if (value == null) return "-";
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
+  if (value >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
   return String(value);
+}
+
+/// 优先消耗最快过期的资源包：按到期时间升序排列（null/未知排最后）
+function sortLotsByPriority(lots: LongCatLot[]): LongCatLot[] {
+  return [...lots].sort((a, b) => {
+    if (!a.expireTime && !b.expireTime) return 0;
+    if (!a.expireTime) return 1;
+    if (!b.expireTime) return -1;
+    return a.expireTime < b.expireTime ? -1 : a.expireTime > b.expireTime ? 1 : 0;
+  });
 }
 
 export function LongCatPackImportDialog({ opened, onClose, onImport }: LongCatPackImportDialogProps) {
@@ -92,7 +102,8 @@ export function LongCatPackImportDialog({ opened, onClose, onImport }: LongCatPa
 
   function handleImport() {
     if (!preview) return;
-    onImport(preview.lots);
+    // 按到期时间升序传入，保证优先消耗最快过期的资源包
+    onImport(sortLotsByPriority(preview.lots));
     handleClose();
   }
 
@@ -110,6 +121,7 @@ export function LongCatPackImportDialog({ opened, onClose, onImport }: LongCatPa
       title="导入 LongCat 资源包"
       size="min(720px, 96vw)"
       padding="md"
+      zIndex={2000}
       classNames={{ root: "longcat-pack-import-dialog" }}
     >
       <Stack gap="md">
@@ -146,7 +158,7 @@ export function LongCatPackImportDialog({ opened, onClose, onImport }: LongCatPa
         {preview ? (
           <Stack gap="sm">
             <Text size="sm" fw={600}>
-              识别到 {preview.lots.length} 个资源包，汇总后将累加到账号：
+              识别到 {preview.lots.length} 个资源包（默认优先消耗最快过期的），汇总后将累加到账号：
             </Text>
             <Table striped highlightOnHover withTableBorder withColumnBorders className="longcat-pack-preview-table">
               <Table.Thead>
@@ -161,7 +173,7 @@ export function LongCatPackImportDialog({ opened, onClose, onImport }: LongCatPa
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {preview.lots.map((lot) => (
+                {sortLotsByPriority(preview.lots).map((lot) => (
                   <Table.Tr key={lot.lotId ?? lot.bizOrderNo}>
                     <Table.Td>{lot.lotId ?? "-"}</Table.Td>
                     <Table.Td>{lot.status === "ACTIVE" ? "生效中" : (lot.status ?? "-")}</Table.Td>

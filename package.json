@@ -14,7 +14,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@lobehub/icons": "^5.11.0",
+    "@lobehub/icons": "^5.13.0",
     "@mantine/core": "^9.4.1",
     "@mantine/hooks": "^9.4.1",
     "@mantine/notifications": "^9.4.1",

@@ -278,7 +278,7 @@ export default function App() {
               onStartProxy={() => void handleStartProxy()}
               onRestartProxy={() => void handleRestartProxy()}
               onSaveAccounts={saveAccounts}
-              onTestConnection={(id) => void testConnection(id)}
+              onTestConnection={(channelId, apiKey, baseUrlOverride) => void testConnection(channelId, apiKey, baseUrlOverride)}
               onSyncBalance={(id) => void syncBalance(id)}
               getBalanceForAccount={getBalanceForAccount}
               onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}
@@ -326,7 +326,7 @@ export default function App() {
               channels={channels}
               accounts={accounts}
               onSaveAccounts={saveAccounts}
-              onTestConnection={(id) => void testConnection(id)}
+              onTestConnection={(channelId, apiKey, baseUrlOverride) => void testConnection(channelId, apiKey, baseUrlOverride)}
               onSyncBalance={(id) => void syncBalance(id)}
               getBalanceForAccount={getBalanceForAccount}
               onAddBalanceSnapshot={(snapshot) => void addBalanceSnapshot(snapshot)}

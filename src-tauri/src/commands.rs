@@ -60,18 +60,21 @@ pub(super) fn proxy_status(state: tauri::State<'_, AppState>) -> ProxyStatus {
 #[tauri::command]
 pub(super) async fn test_connection(
     state: tauri::State<'_, AppState>,
-    account_id: String,
+    channel_id: String,
+    api_key: String,
+    base_url_override: Option<String>,
 ) -> Result<(), String> {
-    let account = {
-        let accounts = state
-            .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        accounts
-            .iter()
-            .find(|a| a.id == account_id)
-            .ok_or("账号不存在")?
-            .clone()
+    // 直接传入连接参数，这样新建账号（尚未保存）也能测试。
+    // 仅做上游鉴权校验，不读写已保存的账号列表。
+    let account = ChannelAccount {
+        id: String::new(),
+        channel_id,
+        name: String::new(),
+        api_key,
+        enabled: true,
+        priority: 0,
+        base_url_override,
+        ..Default::default()
     };
     test_channel_connection(&account, &state.channels_config).await
 }

@@ -43,7 +43,7 @@ import {
   RouteCandidate,
   createAccount,
 } from "../domain";
-import { AccountEditorDrawer, BalanceSnapshotEditor, LongCatPackImportDialog, summarizeLongCatLots, parseSnapshotTokenPacks } from "../features/channels";
+import { AccountEditorDrawer, BalanceSnapshotEditor, LongCatPackImportDialog, summarizeLongCatLots, parseSnapshotTokenPacks, formatTokenCount } from "../features/channels";
 import { ChannelLogo } from "../components/ChannelLogo";
 import { buildExposedModels } from "../features/routes/exposedModels";
 
@@ -81,7 +81,7 @@ type OverviewPageProps = {
   onStartProxy: () => void;
   onRestartProxy: () => void;
   onSaveAccounts: (nextAccounts?: ChannelAccount[]) => Promise<void>;
-  onTestConnection: (accountId: string) => void;
+  onTestConnection: (channelId: string, apiKey: string, baseUrlOverride?: string | null) => void;
   onSyncBalance: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;
@@ -409,7 +409,7 @@ export function OverviewPage({
     const snapshot = getBalanceForAccount(account.id);
     const resourceMode = account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go");
     if (resourceMode === "token_pack") {
-      return `${formatAmount(snapshot?.token_pack_remaining)} 上下文`;
+      return `${formatTokenCount(snapshot?.token_pack_remaining)} Tokens`;
     }
     if (snapshot?.balance != null) {
       return `${formatAmount(snapshot.balance)} ${snapshot.currency ?? ""}`;
@@ -436,7 +436,7 @@ export function OverviewPage({
         </div>
         <Actions>
           {proxyPhase === "running" ? (
-            <Button className="overview-action-button" leftSection={<IconRefresh size={16} />} variant="default" onClick={onRestartProxy}>重启服务</Button>
+            <Button className="overview-action-button restart" leftSection={<IconRefresh size={16} />} variant="outline" onClick={onRestartProxy}>重启服务</Button>
           ) : proxyPhase === "starting" ? (
             <Button className="overview-action-button" leftSection={<IconRefresh size={16} />} disabled>正在启动…</Button>
           ) : (
@@ -444,7 +444,7 @@ export function OverviewPage({
               {proxyPhase === "failed" ? "重新启动" : "启动服务"}
             </Button>
           )}
-          <Button className="overview-action-button refresh" leftSection={<IconRefresh size={16} />} variant="default" onClick={() => void onRefreshAll()}>刷新数据</Button>
+          <Button className="overview-action-button refresh" leftSection={<IconRefresh size={16} />} variant="outline" onClick={() => void onRefreshAll()}>刷新数据</Button>
         </Actions>
       </header>
 
@@ -529,7 +529,7 @@ export function OverviewPage({
                       <StatusPill running={account.enabled && !!account.api_key.trim()}>{accountState(account)}</StatusPill>
                       <ActionIcon variant="subtle" onClick={() => openEditAccount(index)} aria-label="编辑账号"><IconDotsVertical size={17} /></ActionIcon>
                     </div>
-                    <div className="overview-card-meta"><span>余额: {account.channel_id === "longcat" ? "-" : accountResource(account)}</span><span>资源包: {account.channel_id === "longcat" ? accountResource(account) : "-"}</span><span>有效期: {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span></div>
+                    <div className="overview-card-meta">{account.channel_id === "longcat" ? <span>资源包: {accountResource(account)}</span> : <span>余额: {accountResource(account)}</span>}<span>有效期: {formatIsoDateTime(getBalanceForAccount(account.id)?.token_pack_expire_at).split(" ")[0]}</span></div>
                   </div>
                 ))}
               </div>
@@ -678,19 +678,21 @@ export function OverviewPage({
                 </label>
 
                 <label>
-                  API Key
-                  {editorChannel?.platform_url ? (
-                    <Anchor
-                      href={editorChannel.platform_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      size="xs"
-                      className="account-api-key-link"
-                    >
-                      <IconExternalLink size={12} />
-                      前往查看
-                    </Anchor>
-                  ) : null}
+                  <span className="account-key-label-row">
+                    API Key
+                    {editorChannel?.platform_url ? (
+                      <Anchor
+                        href={editorChannel.platform_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        size="xs"
+                        className="account-api-key-link"
+                      >
+                        <IconExternalLink size={12} />
+                        前往查看
+                      </Anchor>
+                    ) : null}
+                  </span>
                   <div className="secret-input">
                     <PasswordInput
                       visible={accountEditor.apiKeyVisible}
@@ -759,7 +761,7 @@ export function OverviewPage({
                   <div className="advanced-content">
                     <label>Base URL 覆盖（可选）<TextInput value={accountEditor.draft.base_url_override ?? ""} placeholder={editorChannel?.openai_base_url ?? "https://api.example.com/v1"} onChange={(event) => updateAccountDraft({ base_url_override: event.target.value || null })} /></label>
                     <div className="test-row">
-                      <Button variant="default" disabled={accountEditor.mode === "create"} onClick={() => onTestConnection(accountEditor.draft.id)}>测试连接</Button>
+                      <Button variant="default" disabled={!accountEditor.draft.api_key?.trim()} onClick={() => onTestConnection(accountEditor.draft.channel_id, accountEditor.draft.api_key, accountEditor.draft.base_url_override)}>测试连接</Button>
                       <span>上次测试：{formatIsoDateTime(accountEditor.draft.last_used_at)}</span>
                       {accountEditor.draft.last_error ? <strong>{accountEditor.draft.last_error}</strong> : null}
                     </div>

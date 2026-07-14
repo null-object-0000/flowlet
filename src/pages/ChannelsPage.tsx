@@ -8,7 +8,7 @@ type ChannelsPageProps = {
   channels: ChannelPreset[];
   accounts: ChannelAccount[];
   onSaveAccounts: (accounts?: ChannelAccount[]) => Promise<void>;
-  onTestConnection: (accountId: string) => void;
+  onTestConnection: (channelId: string, apiKey: string, baseUrlOverride?: string | null) => void;
   onSyncBalance: (accountId: string) => void;
   getBalanceForAccount: (accountId: string) => AccountBalanceSnapshot | undefined;
   onAddBalanceSnapshot: (snapshot: Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">) => void;

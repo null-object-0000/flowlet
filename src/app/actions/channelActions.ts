@@ -86,10 +86,18 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
     setAccounts((current) => [...current, createAccount(channelId, existing.length)]);
   }
 
-  async function testConnection(accountId: string) {
+  async function testConnection(channelId: string, apiKey: string, baseUrlOverride?: string | null) {
+    if (!apiKey.trim()) {
+      setMessage("请先填写 API Key");
+      return;
+    }
     setMessage("正在测试连接...");
     try {
-      await runCommand<void>("test_connection", { accountId });
+      await runCommand<void>("test_connection", {
+        channelId,
+        apiKey: apiKey.trim(),
+        baseUrlOverride: baseUrlOverride?.trim() || null,
+      });
       setMessage("连接成功！API Key 有效");
     } catch (err: unknown) {
       const msg = String(err);

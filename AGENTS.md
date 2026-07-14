@@ -410,7 +410,50 @@ App.tsx
 
 ---
 
-## 14. 当前优先级
+## 14. config.json 维护
+
+`config.json` 是 Flowlet 的渠道与运行时配置文件，位于项目根目录。
+
+### 字段文档
+
+完整的字段说明见 **`docs/config.md`**，包含：
+
+- 每个字段的类型、默认值、是否必须；
+- 运行时行为（热更新 vs 需重启）；
+- 端点解析优先级；
+- 新增渠道的完整步骤。
+
+### 修改 config.json 时必须同步文档
+
+对 `config.json` 的任何字段变更（新增、删除、修改语义或默认值），**必须同步更新 `docs/config.md`**：
+
+1. 字段新增 / 修改 / 删除时，更新 `docs/config.md` 对应章节的字段表和行为说明；
+2. 新增渠道时，按 `docs/config.md` 第 8 节的步骤操作；
+3. 若运行时行为（热更新 / 需重启）发生变化，同步更新第 7 节；
+4. 若源码中反序列化结构（`channels_config.rs` / `config.rs`）发生变化，同步更新第 9 节；
+5. **三处同步**：修改 `channels_config` 默认值时，必须同时同步 `src/domain.ts` 中的 `defaultExposedModelsByChannel`、`defaultFlowletTierByChannel`、`flowletPublicModels` 三处常量（详见 `docs/config.md`「三处同步」）。
+
+### 加载优先级
+
+- 外部 `config.json`（exe 旁）优先；
+- 缺失或解析失败时，回退到编译时 `include_str!` 进二进制的默认副本；
+- 首次启动不存在时，写入内置副本到磁盘。
+
+因此修改仓库根目录 `config.json` 会同时影响「编译时默认值」和「便携版打包产物」。
+
+涉及文件：
+
+- `config.json` — 项目根目录
+- `src-tauri/src/core/channels_config.rs` — JSON 反序列化与 `DEFAULT_CONFIG_JSON`
+- `src-tauri/src/core/config.rs` — 运行时结构体
+- `src-tauri/src/core/proxy.rs` / `proxy_http.rs` — 读写与热加载
+- `src-tauri/src/lib.rs` — 启动时加载与回退
+- `src-tauri/src/commands.rs` — `read_config` / `write_config` command
+- `scripts/build-portable.mjs` — 便携版打包
+
+---
+
+## 15. 当前优先级
 
 当前优先级依次为：
 
@@ -424,3 +467,18 @@ App.tsx
 8. 高级路由和调度。
 
 不要为了低优先级能力破坏当前核心链路。
+
+---
+
+## 16. 文档维护清单
+
+项目核心文档各自的职责和更新时机：
+
+| 文档 | 职责 | 何时必须更新 |
+|------|------|-------------|
+| `AGENTS.md` | AI Agent 协作规范 | 协作流程、优先级、架构原则变化时 |
+| `docs/config.md` | `config.json` 字段与运行时行为说明 | 任何 `config.json` 字段变更时（见第 14 节） |
+| `docs/architecture.md` | 总体架构与核心模型 | 架构分层、核心数据模型变化时 |
+| `docs/roadmap.md` | 产品路线图 | 优先级或阶段目标调整时 |
+
+修改代码前先检查对应文档是否仍然准确；若已过时，一并更新。

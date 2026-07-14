@@ -4,7 +4,7 @@ import { ensureDefaultExposedRoutes } from "../routeHelpers";
 import { ActionContext } from "./types";
 
 export function createChannelActions({ data, setMessage }: ActionContext) {
-  const { channels, accounts, setAccounts, routes, setRoutes, channelModels, balanceSnapshots, refreshAll, exposureMode } = data;
+  const { channels, accounts, setAccounts, routes, setRoutes, channelModels, refreshChannelModels, balanceSnapshots, refreshAll, exposureMode } = data;
 
   async function saveAccounts(nextAccounts?: ChannelAccount[]) {
     const sourceAccounts = nextAccounts ?? accounts;
@@ -127,6 +127,8 @@ export function createChannelActions({ data, setMessage }: ActionContext) {
           return;
         }
         setRoutes(nextRoutes);
+        // 同步后刷新 channelModels 状态，确保后续路由重计算不丢失已同步模型
+        void refreshChannelModels();
         setMessage(`同步成功，获取 ${result.models_synced} 个模型，Flowlet 模型池已热更新`);
       }
     } catch (err: unknown) {

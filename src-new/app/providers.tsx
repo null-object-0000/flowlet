@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { PropsWithChildren } from "react";
 import { ErrorBoundary } from "../shared/errors/ErrorBoundary";
+import { AppPreferencesProvider } from "./preferences/AppPreferences";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,7 +20,9 @@ const queryClient = new QueryClient({
 export function AppProviders({ children }: PropsWithChildren) {
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <AppPreferencesProvider>
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      </AppPreferencesProvider>
     </ErrorBoundary>
   );
 }

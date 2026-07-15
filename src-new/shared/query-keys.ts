@@ -44,6 +44,7 @@ export const queryKeys = {
     all: ["request-log"] as const,
     list: (filter: unknown) => [...queryKeys.requestLog.all, "list", filter] as const,
     clients: () => [...queryKeys.requestLog.all, "clients"] as const,
+    models: () => [...queryKeys.requestLog.all, "models"] as const,
     detail: (requestId: string) => [...queryKeys.requestLog.all, "detail", requestId] as const,
   },
   usage: {

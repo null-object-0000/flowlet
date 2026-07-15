@@ -81,7 +81,12 @@ export function useAppPreferences() {
 }
 
 function readLanguage(): AppLanguage {
-  return readPreference(LANGUAGE_KEY) === "en-US" ? "en-US" : "zh-CN";
+  const saved = readPreference(LANGUAGE_KEY);
+  return saved === "zh-CN" || saved === "en-US" ? saved : resolveSystemLanguage();
+}
+
+export function resolveSystemLanguage(systemLanguage = typeof navigator === "undefined" ? "" : navigator.language): AppLanguage {
+  return /^zh(?:[-_]|$)/i.test(systemLanguage.trim()) ? "zh-CN" : "en-US";
 }
 
 function readTheme(): ThemePreference {

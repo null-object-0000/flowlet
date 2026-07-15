@@ -5,7 +5,7 @@ vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
 }));
 
-import { AppPreferencesProvider, applyInitialPreferences, useAppPreferences } from "./AppPreferences";
+import { AppPreferencesProvider, applyInitialPreferences, resolveSystemLanguage, useAppPreferences } from "./AppPreferences";
 
 afterEach(() => {
   localStorage.clear();
@@ -14,7 +14,28 @@ afterEach(() => {
 });
 
 describe("AppPreferencesProvider", () => {
+  it.each(["zh", "zh-CN", "zh-TW", "zh-HK", "zh-Hans", "zh-Hant-TW", "ZH_hant_HK"])(
+    "uses Chinese for the %s system locale",
+    (systemLanguage) => {
+      expect(resolveSystemLanguage(systemLanguage)).toBe("zh-CN");
+    },
+  );
+
+  it.each(["en-US", "en-GB", "ja-JP", "ko-KR", "fr-FR", ""])(
+    "uses English for the %s system locale",
+    (systemLanguage) => {
+      expect(resolveSystemLanguage(systemLanguage)).toBe("en-US");
+    },
+  );
+
+  it("uses the system language when no preference has been saved", () => {
+    vi.spyOn(window.navigator, "language", "get").mockReturnValue("zh-TW");
+    applyInitialPreferences();
+    expect(document.documentElement.lang).toBe("zh-CN");
+  });
+
   it("restores persisted language and theme before rendering", () => {
+    vi.spyOn(window.navigator, "language", "get").mockReturnValue("zh-TW");
     localStorage.setItem("flowlet.language", "en-US");
     localStorage.setItem("flowlet.theme", "dark");
     applyInitialPreferences();

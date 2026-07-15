@@ -252,6 +252,7 @@ const english: Record<string, string> = {
   "测试连接失败：{message}": "Connection test failed: {message}",
   "余额已同步": "Balance synchronized",
   "余额同步失败：{message}": "Failed to synchronize balance: {message}",
+  "账号已保存，但自动更新失败：{message}": "Account saved, but automatic refresh failed: {message}",
   "请填写账号名称和 API Key": "Enter an account name and API key",
   "编辑渠道账号": "Edit Channel Account",
   "新增渠道账号": "Add Channel Account",

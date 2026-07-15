@@ -13,7 +13,7 @@ afterEach(() => invokeMock.mockReset());
 
 describe("requestLogCommands contract", () => {
   it("maps the UI filter to the Rust LogsFilter shape", async () => {
-    await requestLogCommands.list({ page: 2, pageSize: 50, status: "error", clientId: "cline", channelId: "longcat", search: "/messages" });
+    await requestLogCommands.list({ page: 2, pageSize: 50, status: "error", clientId: "cline", channelId: "longcat", search: "/messages", timeRange: "6h", model: "flowlet-pro" });
     expect(invokeMock).toHaveBeenCalledWith("list_request_logs", { filter: {
       page: 2,
       page_size: 50,
@@ -21,6 +21,8 @@ describe("requestLogCommands contract", () => {
       client_id: "cline",
       channel_id: "longcat",
       search: "/messages",
+      time_range: "6h",
+      model: "flowlet-pro",
     } });
   });
 

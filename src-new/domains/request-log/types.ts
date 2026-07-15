@@ -1,4 +1,5 @@
 export type RequestLogStatusFilter = "all" | "success" | "error";
+export type RequestLogTimeRange = "1h" | "6h" | "today" | "7d" | "all";
 
 export type RequestLogFilter = {
   page: number;
@@ -7,6 +8,8 @@ export type RequestLogFilter = {
   clientId: string;
   channelId: string;
   search: string;
+  timeRange: RequestLogTimeRange;
+  model: string;
 };
 
 export type RequestLogRow = {
@@ -41,6 +44,19 @@ export type RequestLogRow = {
   res_headers_json: string | null;
   res_body_b64: string | null;
   is_last_attempt: boolean;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  estimated_cost: number | null;
+};
+
+export type RequestLogSummary = {
+  requestCount: number;
+  successCount: number;
+  errorCount: number;
+  averageDurationMs: number | null;
+  knownTokens: number;
+  estimatedCost: number;
 };
 
 export type RequestLogPage = {
@@ -48,15 +64,18 @@ export type RequestLogPage = {
   total: number;
   page: number;
   pageSize: number;
+  summary: RequestLogSummary;
 };
 
 export type RequestLogClient = { id: string; name: string };
 
 export const DEFAULT_REQUEST_LOG_FILTER: RequestLogFilter = {
   page: 1,
-  pageSize: 25,
+  pageSize: 8,
   status: "all",
   clientId: "",
   channelId: "",
   search: "",
+  timeRange: "1h",
+  model: "",
 };

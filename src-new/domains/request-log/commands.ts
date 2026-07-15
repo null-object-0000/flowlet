@@ -11,11 +11,16 @@ export const requestLogCommands = {
         client_id: filter.clientId,
         channel_id: filter.channelId,
         search: filter.search,
+        time_range: filter.timeRange,
+        model: filter.model,
       },
     }).catch(toRequestLogError("request_log_list_failed")),
 
   clients: (): Promise<RequestLogClient[]> =>
     invokeCommand<RequestLogClient[]>("list_request_log_clients").catch(toRequestLogError("request_log_clients_failed")),
+
+  models: (): Promise<string[]> =>
+    invokeCommand<string[]>("list_request_log_models").catch(toRequestLogError("request_log_models_failed")),
 
   detail: (requestId: string): Promise<RequestLogRow[]> =>
     invokeCommand<RequestLogRow[]>("get_request_log_detail", { requestId }).catch(toRequestLogError("request_log_detail_failed")),

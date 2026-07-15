@@ -1,0 +1,5 @@
+.body { display: grid; gap: 14px; }
+.body p { margin: 0; color: var(--semi-color-text-1); line-height: 1.6; }
+.body > span { color: var(--semi-color-text-2); font-size: 12px; line-height: 1.5; }
+.danger { padding: 11px 12px; border-radius: 7px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); }
+.footer { width: 100%; display: flex; justify-content: flex-end; gap: 9px; }

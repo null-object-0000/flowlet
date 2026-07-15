@@ -1,0 +1,54 @@
+.valueBox {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid var(--flowlet-color-border-strong);
+  border-radius: var(--flowlet-radius-control);
+  color: var(--flowlet-color-text-secondary);
+  background: #f9fbfd;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.valueBox code {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: inherit;
+  background: transparent;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.valueBox:hover,
+.valueBox:focus-visible {
+  border-color: rgba(23, 105, 255, 0.3);
+  background: var(--flowlet-color-surface-muted);
+}
+
+.valueBox:focus-visible {
+  outline: 2px solid var(--semi-color-primary-light-active);
+  outline-offset: 2px;
+}
+
+.copyIcon {
+  flex: none;
+  color: #7b8da8;
+  font-size: 14px;
+  opacity: 0.72;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.valueBox:hover .copyIcon,
+.valueBox:focus-visible .copyIcon {
+  color: var(--semi-color-primary);
+  opacity: 1;
+}

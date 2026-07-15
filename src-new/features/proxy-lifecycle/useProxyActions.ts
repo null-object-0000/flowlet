@@ -11,10 +11,7 @@ import { queryKeys } from "../../shared/query-keys";
 export function useProxyActions() {
   const qc = useQueryClient();
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: queryKeys.proxy.all });
-
-  const refetch = () =>
-    qc.refetchQueries({ queryKey: queryKeys.proxy.status(), exact: true });
+  const refetchStatus = () => qc.refetchQueries({ queryKey: queryKeys.proxy.status(), exact: true });
 
   const wrap = <T,>(mut: ReturnType<typeof useMutation<void, unknown, T>>) => ({
     ...mut,
@@ -22,19 +19,17 @@ export function useProxyActions() {
 
   const start = useMutation({
     mutationFn: () => proxyCommands.start(),
-    onSuccess: () => {
-      invalidate();
-    },
+    onSuccess: refetchStatus,
     onError: () => {
       // Always reconcile with the real state even on failure.
-      void qc.refetchQueries({ queryKey: queryKeys.proxy.status() });
+      void refetchStatus();
     },
   });
 
   const restart = useMutation({
     mutationFn: () => proxyCommands.restart(),
-    onSuccess: () => invalidate(),
-    onError: () => void qc.refetchQueries({ queryKey: queryKeys.proxy.status() }),
+    onSuccess: refetchStatus,
+    onError: () => void refetchStatus(),
   });
 
   return {

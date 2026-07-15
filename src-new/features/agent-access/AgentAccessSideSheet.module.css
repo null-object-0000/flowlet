@@ -1,0 +1,90 @@
+.body {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  background: #f5f7fb;
+}
+
+.intro,
+.section,
+.tip {
+  padding: 18px;
+  border: 1px solid #e3e8f1;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.titleRow,
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.intro p,
+.section h5,
+.tip h5 {
+  margin: 8px 0 0;
+}
+
+.configRow {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+}
+
+.configRow code,
+.codeBlock {
+  color: #0759d6;
+  background: #edf3ff;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.configRow code {
+  min-width: 0;
+  padding: 7px 9px;
+  overflow: hidden;
+  border-radius: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codeBlock {
+  margin: 14px 0 0;
+  padding: 14px;
+  overflow-x: auto;
+  border-radius: 8px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.tip {
+  color: #344766;
+  background: #fffaf0;
+  border-color: #f3dfb3;
+}
+
+.tip ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+
+@media (max-width: 600px) {
+  .sectionHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .configRow {
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .configRow > span:first-child {
+    grid-column: 1 / -1;
+  }
+}

@@ -3,6 +3,8 @@ import { useProxyStatus } from "./useProxyStatus";
 import { proxyCommands } from "../../domains/proxy/commands";
 import type { AppError } from "../../shared/errors/AppError";
 import { toAppError } from "../../platform/tauri/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../../shared/query-keys";
 
 /**
  * Front-end-owned proxy auto-start. Product rules (AGENTS.md §3):
@@ -16,6 +18,7 @@ import { toAppError } from "../../platform/tauri/client";
  * "one attempt per app mount" contract on the UI side.
  */
 export function useProxyAutoStart(opts: { enabled: boolean }) {
+  const queryClient = useQueryClient();
   const status = useProxyStatus();
   const autoStartAttempted = useRef(false);
   const [starting, setStarting] = useState(false);
@@ -28,30 +31,28 @@ export function useProxyAutoStart(opts: { enabled: boolean }) {
     if (status.data.running) return;
 
     autoStartAttempted.current = true;
-    let cancelled = false;
     setStarting(true);
 
     proxyCommands
       .start()
       .then(() => {
-        if (!cancelled) setStartError(null);
+        setStartError(null);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setStartError(toAppError(err, "proxy_start_failed"));
+        setStartError(toAppError(err, "proxy_start_failed"));
       })
       .finally(() => {
-        if (!cancelled) setStarting(false);
+        setStarting(false);
+        void queryClient.refetchQueries({ queryKey: queryKeys.proxy.status(), exact: true });
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [opts.enabled, status.isLoading, status.data]);
+  }, [opts.enabled, queryClient, status.isLoading, status.data]);
 
   return {
     autoStartAttempted: autoStartAttempted.current,
     starting,
     startError,
     isInitialLoading: status.isLoading,
+    status,
+    clearError: () => setStartError(null),
   };
 }

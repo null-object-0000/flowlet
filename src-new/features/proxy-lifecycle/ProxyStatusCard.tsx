@@ -1,121 +1,99 @@
-import { Button, Card, Space, Tag, Typography } from "@douyinfe/semi-ui-19";
-import { IconTickCircle, IconClose } from "@douyinfe/semi-icons";
-import { useProxyStatus } from "./useProxyStatus";
-import { useProxyActions } from "./useProxyActions";
-import { useProxyAutoStart } from "./useProxyAutoStart";
-import { DEFAULT_BIND_ADDR } from "../../shared/constants/proxy";
-import type { AppError } from "../../shared/errors/AppError";
+import { useEffect, useState } from "react";
+import { Button, Card, Typography } from "@douyinfe/semi-ui-19";
+import { IconPlay, IconRefresh } from "@douyinfe/semi-icons";
+import type { ConfigurationStatus } from "../../domains/model/types";
+import type { ProxyBindConfig, ProxyRuntimeState, ProxyStatus } from "../../domains/proxy/types";
+import {
+  formatDuration,
+  formatRfc3339,
+  getProxyHint,
+  getProxyPhaseLabel,
+} from "./proxyStatusPresentation";
 import styles from "./ProxyStatusCard.module.css";
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 type Props = {
-  /** Whether the app has finished its initial data load and may auto-start. */
-  ready: boolean;
+  status: ProxyStatus;
+  bindConfig?: ProxyBindConfig;
+  phase: ProxyRuntimeState;
+  errorMessage?: string | null;
+  autoStartAttempted: boolean;
+  configurationStatus: ConfigurationStatus;
+  actionLabel: string;
+  actionBusy: boolean;
+  actionDisabled: boolean;
+  onAction: () => void;
 };
 
-type StatusUi = {
-  label: string;
-  dotClass: string;
-  color: "green" | "grey" | "red";
-};
+export function ProxyStatusCard({
+  status,
+  bindConfig,
+  phase,
+  errorMessage,
+  autoStartAttempted,
+  configurationStatus,
+  actionLabel,
+  actionBusy,
+  actionDisabled,
+  onAction,
+}: Props) {
+  const [observedStartedAt, setObservedStartedAt] = useState<Date | null>(status.running ? new Date() : null);
+  const [, forceTick] = useState(0);
 
-function renderStatusUi(running: boolean, startError: AppError | null): StatusUi {
-  if (startError) return { label: "启动失败", dotClass: styles.dotFailed, color: "red" };
-  if (running) return { label: "运行中", dotClass: styles.dotRunning, color: "green" };
-  return { label: "已停止", dotClass: styles.dotStopped, color: "grey" };
-}
-
-/**
- * Proxy status overview card. Displays starting / running / stopped / failed
- * separately. Dense action rules (AGENTS.md §3):
- *   - running  → "重启服务"
- *   - stopped  → "启动服务"
- *   - failed   → "重新启动" + error reason
- * Pause/stop is intentionally NOT offered here (advanced entry only).
- */
-export function ProxyStatusCard({ ready }: Props) {
-  const status = useProxyStatus();
-  const { restart } = useProxyActions();
-  const auto = useProxyAutoStart({ enabled: ready });
-
-  if (status.isLoading || !status.data) {
-    return (
-      <Card className={styles.card}>
-        <Text type="tertiary">正在读取代理状态…</Text>
-      </Card>
-    );
-  }
-
-  const running = status.data.running;
-  const startError = auto.startError;
-  const ui = renderStatusUi(running, startError);
-  const busy = auto.starting || restart.isPending;
-
-  let actionLabel: string;
-  if (auto.starting) {
-    actionLabel = "正在启动…";
-  } else if (running) {
-    actionLabel = "重启服务";
-  } else if (startError) {
-    actionLabel = "重新启动";
-  } else {
-    actionLabel = "启动服务";
-  }
-
-  const onAction = () => {
-    if (busy) return;
-    if (running) {
-      void restart.mutateAsync().catch(() => undefined);
-    } else {
-      // Stopped/failed: a single manual attempt. useProxyAutoStart already
-      // guards the automatic attempt; this explicit tap is allowed to fail.
-      void restart.mutateAsync().catch(() => undefined);
+  useEffect(() => {
+    if (!status.running) {
+      setObservedStartedAt(null);
+      return;
     }
-  };
+    const backendStartedAt = parseDate(status.started_at);
+    setObservedStartedAt((current) => backendStartedAt ?? current ?? new Date());
+  }, [status.running, status.started_at]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => forceTick((value) => value + 1), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const port = bindConfig?.port || Number(status.bind_addr.split(":").pop()) || 18_640;
+  const startedAt = parseDate(status.started_at) ?? observedStartedAt;
+  const metrics = [
+    { label: "监听地址", value: status.running ? `${bindConfig?.host || "127.0.0.1"}:${port}` : "-" },
+    {
+      label: "运行时长",
+      value: startedAt ? formatDuration(Date.now() - startedAt.getTime()) : "-",
+      hint: startedAt ? `启动于 ${formatRfc3339(startedAt.toISOString())}` : undefined,
+    },
+  ];
 
   return (
-    <Card className={styles.card}>
-      <div className={styles.headerRow}>
-        <Title heading={5} style={{ margin: 0 }}>代理服务</Title>
-        <Tag color={ui.color} size="small">
-          <span className={`${styles.dot} ${ui.dotClass}`} /> {ui.label}
-        </Tag>
-      </div>
-
-      <div className={styles.detail}>
-        <Text type="tertiary" size="small">
-          监听地址: {status.data.bind_addr || DEFAULT_BIND_ADDR}
-        </Text>
-        {status.data.started_at && running && (
-          <Text type="tertiary" size="small">
-            启动时间: {status.data.started_at}
+    <Card className={styles.card} bodyStyle={{ padding: 0 }}>
+      <div className={styles.layout}>
+        <div className={`${styles.statusOrb} ${status.running ? styles.runningOrb : ""}`}><i /></div>
+        <div className={styles.intro}>
+          <h3>{getServiceTitle(phase)}</h3>
+          <Text
+            size="small"
+            className={`${styles.stateText} ${phase === "running" ? styles.running : ""} ${phase === "failed" ? styles.failed : ""}`}
+          >
+            {getProxyHint(phase, configurationStatus, autoStartAttempted, errorMessage)}
           </Text>
-        )}
-      </div>
-
-      {startError && (
-        <div className={styles.error}>
-          <Space spacing="tight" vertical align="start">
-            <Text type="danger">
-              <IconClose /> {startError.message}
-            </Text>
-            {startError.detail && (
-              <Text type="tertiary" size="small">
-                {startError.detail}
-              </Text>
-            )}
-          </Space>
         </div>
-      )}
 
-      <div style={{ marginTop: 12 }}>
+        <div className={styles.metrics}>
+          {metrics.map((metric) => (
+            <div className={styles.metric} key={metric.label} title={metric.hint}>
+              <span>{metric.label}</span>
+              <strong>{metric.value}</strong>
+            </div>
+          ))}
+        </div>
         <Button
-          theme="solid"
-          type="primary"
-          loading={busy}
-          disabled={busy}
-          icon={running ? <IconTickCircle /> : undefined}
+          className={styles.action}
+          aria-label={actionLabel}
+          icon={phase === "running" ? <IconRefresh /> : <IconPlay />}
+          loading={actionBusy}
+          disabled={actionDisabled}
           onClick={onAction}
         >
           {actionLabel}
@@ -123,4 +101,17 @@ export function ProxyStatusCard({ ready }: Props) {
       </div>
     </Card>
   );
+}
+
+function getServiceTitle(phase: ProxyRuntimeState) {
+  if (phase === "running") return "服务运行正常";
+  if (phase === "starting") return "服务正在启动";
+  if (phase === "failed") return "服务启动失败";
+  return getProxyPhaseLabel(phase) === "已停止" ? "服务已停止" : getProxyPhaseLabel(phase);
+}
+
+function parseDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }

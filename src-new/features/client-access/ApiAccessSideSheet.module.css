@@ -1,0 +1,84 @@
+.body {
+  padding: 18px 24px 24px;
+  display: grid;
+  gap: 18px;
+}
+
+.section {
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e5ebf4;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: #0f1f3d;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.row,
+.multiRow {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.staticValue {
+  min-width: 0;
+  padding: 5px 8px;
+  overflow: hidden;
+  border-radius: 5px;
+  color: #233554;
+  background: #f8fafc;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiRow {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.multiRow > span {
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+}
+
+.headerStack {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.security {
+  border-color: #f3e4c2;
+  background: #fff8ec;
+}
+
+.security ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #6f4a14;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.security code {
+  padding: 1px 6px;
+  color: #7a4a0c;
+  background: #f8ebc8;
+}
+
+@media (max-width: 640px) {
+  .row,
+  .multiRow {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}

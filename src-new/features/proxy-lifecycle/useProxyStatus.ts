@@ -10,6 +10,8 @@ export function useProxyStatus() {
     // Tauri invoke is not a browser network call; keep it available offline.
     networkMode: "always",
     refetchOnWindowFocus: false,
+    // Match the legacy overview: reconcile native proxy state every 3 seconds.
+    refetchInterval: 3_000,
     retry: false,
   });
 }

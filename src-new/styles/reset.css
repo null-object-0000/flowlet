@@ -1,0 +1,24 @@
+/* Browser default style reset for the Semi-based new frontend.
+   Keep this minimal: Semi provides its own base. We only enforce the
+   sizing defaults the app shell depends on. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

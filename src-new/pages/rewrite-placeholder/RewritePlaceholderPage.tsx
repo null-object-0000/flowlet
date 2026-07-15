@@ -1,10 +1,11 @@
 import { Card, Space, Tag, Typography } from "@douyinfe/semi-ui-19";
+import styles from "./RewritePlaceholderPage.module.css";
 
 const { Paragraph, Title } = Typography;
 
 export function RewritePlaceholderPage() {
   return (
-    <main className="rewrite-placeholder">
+    <main className={styles.placeholder}>
       <Card>
         <Space vertical align="start" spacing="medium">
           <Tag color="green">架构基座</Tag>

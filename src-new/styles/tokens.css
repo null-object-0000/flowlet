@@ -1,0 +1,25 @@
+/* Flowlet Design Tokens for the new Semi-based frontend.
+   These are the only global custom properties. Page / feature / component
+   visual details belong in co-located CSS Modules, not here. */
+
+:root {
+  --flowlet-font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+
+  /* Spacing scale used across CSS Modules. */
+  --flowlet-space-1: 4px;
+  --flowlet-space-2: 8px;
+  --flowlet-space-3: 12px;
+  --flowlet-space-4: 16px;
+  --flowlet-space-5: 24px;
+  --flowlet-space-6: 32px;
+
+  /* App shell dimensions. */
+  --flowlet-sidebar-width: 224px;
+  --flowlet-header-height: 56px;
+}
+
+body {
+  font-family: var(--flowlet-font-family);
+  color: var(--semi-color-text-0);
+  background: var(--semi-color-bg-0);
+}

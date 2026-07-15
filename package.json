@@ -13,7 +13,9 @@
     "tauri:portable": "node scripts/build-portable.mjs",
     "check": "tsc --noEmit",
     "dev:new": "vite --mode next",
-    "build:new": "tsc && vite build --mode next"
+    "build:new": "tsc && vite build --mode next",
+    "test:new": "vitest run --config src-new/vitest.config.ts",
+    "test:new:watch": "vitest --config src-new/vitest.config.ts"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",
@@ -32,10 +34,16 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
-    "vite": "^8.1.4"
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
   }
 }

@@ -1,0 +1,37 @@
+.shell {
+  min-height: 100%;
+  background: var(--semi-color-bg-0);
+}
+
+.sidebar {
+  width: var(--flowlet-sidebar-width);
+  padding: var(--flowlet-space-5) var(--flowlet-space-4);
+  border-right: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--flowlet-space-5);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--flowlet-space-1);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  height: var(--flowlet-header-height);
+  padding: 0 var(--flowlet-space-5);
+  border-bottom: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-1);
+}
+
+.content {
+  padding: var(--flowlet-space-5);
+}

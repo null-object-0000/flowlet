@@ -1,0 +1,49 @@
+.card {
+  width: 100%;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--flowlet-space-4);
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: var(--flowlet-space-2);
+  margin-top: var(--flowlet-space-3);
+}
+
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dotRunning {
+  background: var(--semi-color-success);
+}
+.dotStopped {
+  background: var(--semi-color-text-2);
+}
+.dotFailed {
+  background: var(--semi-color-danger);
+}
+
+.detail {
+  margin-top: var(--flowlet-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--flowlet-space-1);
+  color: var(--semi-color-text-1);
+}
+
+.error {
+  margin-top: var(--flowlet-space-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

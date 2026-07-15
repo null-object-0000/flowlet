@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountCommands } from "../../domains/account/commands";
 import { queryKeys } from "../../shared/query-keys";
-import type { ChannelAccount } from "../../domains/account/types";
+import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 
 /**
  * Account mutations. All writes return void; on success we refetch the
  * account list so the normalized (credential-reset) result from Rust becomes
- * the source of truth. We never optimistically replace api_key locally
- * (the full key never flows back into list rows anyway).
+ * the source of truth. API keys may only be rendered inside the account editor;
+ * overview and management list rows never display them.
  */
 export function useAccountActions() {
   const qc = useQueryClient();
@@ -33,7 +33,17 @@ export function useAccountActions() {
 
   const queryBalance = useMutation({
     mutationFn: (accountId: string) => accountCommands.queryBalance(accountId),
+    onSuccess: () => {
+      void qc.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
+    },
   });
 
-  return { saveAll, testConnection, syncModels, queryBalance };
+  const saveBalanceSnapshot = useMutation({
+    mutationFn: (snapshot: AccountBalanceSnapshot) => accountCommands.saveBalanceSnapshot(snapshot),
+    onSuccess: () => {
+      void qc.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
+    },
+  });
+
+  return { saveAll, testConnection, syncModels, queryBalance, saveBalanceSnapshot };
 }

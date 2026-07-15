@@ -307,6 +307,16 @@ pub(super) fn list_request_log_clients(
 }
 
 #[tauri::command]
+pub(super) fn list_request_log_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    state
+        .storage
+        .list_request_log_models()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub(super) fn get_request_log_detail(
     state: tauri::State<'_, AppState>,
     request_id: String,

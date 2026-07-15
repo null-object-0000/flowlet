@@ -1,8 +1,35 @@
 use super::Storage;
 use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
-use crate::core::config::{ProtocolType, RouteCandidate};
+use crate::core::config::{LogsFilter, ProtocolType, RouteCandidate};
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
+
+#[test]
+fn lists_paginated_request_logs_with_usage_join() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage {
+        connection: Arc::new(Mutex::new(connection)),
+        prices: Arc::new(Mutex::new(Vec::new())),
+    };
+    storage.migrate().expect("migrate request log schema");
+
+    let page = storage
+        .list_request_logs_page(LogsFilter {
+            page: 1,
+            page_size: 8,
+            status: "all".to_string(),
+            client_id: String::new(),
+            channel_id: String::new(),
+            search: String::new(),
+            time_range: "1h".to_string(),
+            model: String::new(),
+        })
+        .expect("query request logs with qualified joined columns");
+
+    assert_eq!(page.total, 0);
+    assert!(page.rows.is_empty());
+    assert_eq!(page.summary.request_count, 0);
+}
 
 #[test]
 fn migrates_legacy_route_table() {

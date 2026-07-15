@@ -615,6 +615,12 @@ pub struct RequestLogRow {
     pub res_headers_json: Option<String>,
     pub res_body_b64: Option<String>,
     pub is_last_attempt: bool,
+    /// Usage data is joined lazily for the final attempt. Intermediate attempts
+    /// normally keep these fields empty because usage belongs to the request.
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub estimated_cost: Option<f64>,
 }
 
 // ─── Request Log Page (paginated + filtered) ─────────────────────────────────
@@ -644,6 +650,23 @@ pub struct LogsFilter {
     pub channel_id: String,
     /// 路径 / request_id / error_message 模糊搜索
     pub search: String,
+    /// 时间范围: "1h" | "6h" | "today" | "7d" | "all"
+    #[serde(default)]
+    pub time_range: String,
+    /// 对外模型筛选（空串 = 不过滤）
+    #[serde(default)]
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogsSummary {
+    pub request_count: i64,
+    pub success_count: i64,
+    pub error_count: i64,
+    pub average_duration_ms: Option<f64>,
+    pub known_tokens: i64,
+    pub estimated_cost: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -653,6 +676,7 @@ pub struct LogsPageResult {
     pub total: i64,
     pub page: u32,
     pub page_size: u32,
+    pub summary: LogsSummary,
 }
 
 // ─── Usage Record Row ────────────────────────────────────────────────────────

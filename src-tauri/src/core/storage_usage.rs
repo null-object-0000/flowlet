@@ -1,7 +1,7 @@
 use super::{Storage, StorageError};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, LogFilterClient, LogsFilter, LogsPageResult,
-    ModelPrice, RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
+    LogsSummary, ModelPrice, RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
 };
 use rusqlite::params;
 
@@ -290,6 +290,10 @@ impl Storage {    pub fn save_balance_snapshot(
                 res_headers_json: row.get(28)?,
                 res_body_b64: row.get(29)?,
                 is_last_attempt: row.get::<_, i64>(30)? != 0,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                estimated_cost: None,
             })
         })?;
         let mut logs = Vec::new();
@@ -329,6 +333,30 @@ impl Storage {    pub fn save_balance_snapshot(
         Ok(clients)
     }
 
+    /// 返回请求日志中出现过的对外模型，供日志页模型筛选使用。
+    pub fn list_request_log_models(&self) -> Result<Vec<String>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut stmt = connection.prepare(
+            r#"
+            SELECT COALESCE(public_model, virtual_model) AS model
+            FROM request_logs
+            WHERE is_last_attempt = 1
+              AND COALESCE(public_model, virtual_model, '') <> ''
+            GROUP BY COALESCE(public_model, virtual_model)
+            ORDER BY model
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        let mut models = Vec::new();
+        for row in rows {
+            models.push(row?);
+        }
+        Ok(models)
+    }
+
     pub fn list_request_logs_by_request_id(
         &self,
         request_id: &str,
@@ -340,17 +368,19 @@ impl Storage {    pub fn save_balance_snapshot(
         let mut stmt = connection.prepare(
             r#"
             SELECT
-                id, request_id, client_id, client_name, channel_id, channel_name,
-                account_id, account_name, client_protocol, upstream_protocol,
-                virtual_model, public_model, upstream_model, request_type, method, path,
-                status, latency_ms, is_stream, error_message, fallback_count,
-                route_reason, created_at,
-                ttfb_ms, duration_ms, attempt_seq,
-                req_headers_json, req_body_b64, res_headers_json, res_body_b64,
-                is_last_attempt
-            FROM request_logs
-            WHERE request_id = ?1
-            ORDER BY attempt_seq ASC, created_at ASC
+                rl.id, rl.request_id, rl.client_id, rl.client_name, rl.channel_id, rl.channel_name,
+                rl.account_id, rl.account_name, rl.client_protocol, rl.upstream_protocol,
+                rl.virtual_model, rl.public_model, rl.upstream_model, rl.request_type, rl.method, rl.path,
+                rl.status, rl.latency_ms, rl.is_stream, rl.error_message, rl.fallback_count,
+                rl.route_reason, rl.created_at,
+                rl.ttfb_ms, rl.duration_ms, rl.attempt_seq,
+                rl.req_headers_json, rl.req_body_b64, rl.res_headers_json, rl.res_body_b64,
+                rl.is_last_attempt,
+                ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost
+            FROM request_logs rl
+            LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+            WHERE rl.request_id = ?1
+            ORDER BY rl.attempt_seq ASC, rl.created_at ASC
             "#,
         )?;
         let rows = stmt.query_map([request_id], |row| {
@@ -386,6 +416,10 @@ impl Storage {    pub fn save_balance_snapshot(
                 res_headers_json: row.get(28)?,
                 res_body_b64: row.get(29)?,
                 is_last_attempt: row.get::<_, i64>(30)? != 0,
+                input_tokens: row.get(31)?,
+                output_tokens: row.get(32)?,
+                total_tokens: row.get(33)?,
+                estimated_cost: row.get(34)?,
             })
         })?;
         let mut logs = Vec::new();
@@ -853,15 +887,15 @@ impl Storage {    pub fn save_balance_snapshot(
             .map_err(|_| StorageError::LockFailed)?;
 
         let page = filter.page.max(1);
-        let page_size = filter.page_size.clamp(10, 200);
+        let page_size = filter.page_size.clamp(8, 200);
 
         // 收集筛选条件 + 查询参数（用 Vec<&dyn ToSql> 避免 Clone 问题）
         let mut raw_params: Vec<String> = Vec::new(); // 持有字符串生命周期（LIKE）
         let mut refs: Vec<&dyn rusqlite::ToSql> = Vec::new();
 
         let status_clause = match filter.status.as_str() {
-            "success" => Some("(status >= 200 AND status < 400)"),
-            "error" => Some("(status IS NULL OR status >= 400 OR error_message IS NOT NULL)"),
+            "success" => Some("(rl.status >= 200 AND rl.status < 400 AND rl.error_message IS NULL)"),
+            "error" => Some("(rl.status IS NULL OR rl.status >= 400 OR rl.error_message IS NOT NULL)"),
             _ => None,
         };
 
@@ -869,17 +903,32 @@ impl Storage {    pub fn save_balance_snapshot(
         let client_clause = if filter.client_id.is_empty() {
             None
         } else if filter.client_id == crate::core::config::LOG_FILTER_CLIENT_UNKNOWN {
-            Some("client_id IS NULL")
+            Some("rl.client_id IS NULL")
         } else {
             refs.push(&filter.client_id);
-            Some("client_id = ?")
+            Some("rl.client_id = ?")
         };
 
         let channel_clause = if filter.channel_id.is_empty() {
             None
         } else {
             refs.push(&filter.channel_id);
-            Some("channel_id = ?")
+            Some("rl.channel_id = ?")
+        };
+
+        let model_clause = if filter.model.is_empty() {
+            None
+        } else {
+            refs.push(&filter.model);
+            Some("COALESCE(rl.public_model, rl.virtual_model) = ?")
+        };
+
+        let time_clause = match filter.time_range.as_str() {
+            "1h" => Some("datetime(rl.created_at) >= datetime('now', '-1 hour')"),
+            "6h" => Some("datetime(rl.created_at) >= datetime('now', '-6 hours')"),
+            "today" => Some("datetime(rl.created_at, 'localtime') >= datetime('now', 'localtime', 'start of day')"),
+            "7d" => Some("datetime(rl.created_at) >= datetime('now', '-7 days')"),
+            _ => None,
         };
 
         let search_clause = if filter.search.is_empty() {
@@ -889,14 +938,16 @@ impl Storage {    pub fn save_balance_snapshot(
             raw_params.push(like.clone()); // LIKE for path
             raw_params.push(filter.search.clone()); // exact request_id
             raw_params.push(like.clone()); // LIKE for error_message
-            let base = raw_params.len() - 3;
-            refs.push(&raw_params[base]);
-            refs.push(&raw_params[base + 1]);
-            refs.push(&raw_params[base + 2]);
-            Some("(path LIKE ? OR request_id = ? OR error_message LIKE ?)")
+            raw_params.push(like.clone()); // LIKE for model
+            raw_params.push(like); // LIKE for account
+            let base = raw_params.len() - 5;
+            for value in &raw_params[base..base + 5] {
+                refs.push(value);
+            }
+            Some("(rl.path LIKE ? OR rl.request_id = ? OR rl.error_message LIKE ? OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ? OR COALESCE(rl.account_name, rl.account_id, '') LIKE ?)")
         };
 
-        let mut clauses: Vec<&str> = vec!["is_last_attempt = 1"];
+        let mut clauses: Vec<&str> = vec!["rl.is_last_attempt = 1"];
         if let Some(c) = status_clause {
             clauses.push(c);
         }
@@ -906,6 +957,12 @@ impl Storage {    pub fn save_balance_snapshot(
         if let Some(c) = channel_clause {
             clauses.push(c);
         }
+        if let Some(c) = model_clause {
+            clauses.push(c);
+        }
+        if let Some(c) = time_clause {
+            clauses.push(c);
+        }
         if let Some(c) = search_clause {
             clauses.push(c);
         }
@@ -913,7 +970,7 @@ impl Storage {    pub fn save_balance_snapshot(
         let where_sql = format!("WHERE {}", clauses.join(" AND "));
 
         // COUNT
-        let count_sql = format!("SELECT COUNT(*) FROM request_logs {where_sql}");
+        let count_sql = format!("SELECT COUNT(*) FROM request_logs rl {where_sql}");
         let count_start = std::time::Instant::now();
         let total: i64 =
             connection.query_row(&count_sql, rusqlite::params_from_iter(refs.iter()), |row| {
@@ -924,6 +981,33 @@ impl Storage {    pub fn save_balance_snapshot(
             tracing::warn!(count_ms, total, "request_logs COUNT 慢查询");
         }
 
+        let summary_sql = format!(
+            r#"
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN rl.status >= 200 AND rl.status < 400 AND rl.error_message IS NULL THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN rl.status IS NULL OR rl.status >= 400 OR rl.error_message IS NOT NULL THEN 1 ELSE 0 END), 0),
+                AVG(COALESCE(rl.duration_ms, rl.latency_ms)),
+                COALESCE(SUM(ur.total_tokens), 0),
+                COALESCE(SUM(ur.estimated_cost), 0)
+            FROM request_logs rl
+            LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+            {where_sql}
+            "#,
+        );
+        let summary = connection.query_row(
+            &summary_sql,
+            rusqlite::params_from_iter(refs.iter()),
+            |row| Ok(LogsSummary {
+                request_count: row.get(0)?,
+                success_count: row.get(1)?,
+                error_count: row.get(2)?,
+                average_duration_ms: row.get(3)?,
+                known_tokens: row.get(4)?,
+                estimated_cost: row.get(5)?,
+            }),
+        )?;
+
         // 分页查询
         let offset = (page as i64 - 1) * page_size as i64;
         let page_psize = page_size as i64;
@@ -931,16 +1015,18 @@ impl Storage {    pub fn save_balance_snapshot(
         let list_sql = format!(
             r#"
             SELECT
-                id, request_id, client_id, client_name, channel_id, channel_name,
-                account_id, account_name, client_protocol, upstream_protocol,
-                virtual_model, public_model, upstream_model, request_type, method, path,
-                status, latency_ms, is_stream, error_message, fallback_count,
-                route_reason, created_at,
-                ttfb_ms, duration_ms, attempt_seq,
-                is_last_attempt
-            FROM request_logs
+                rl.id, rl.request_id, rl.client_id, rl.client_name, rl.channel_id, rl.channel_name,
+                rl.account_id, rl.account_name, rl.client_protocol, rl.upstream_protocol,
+                rl.virtual_model, rl.public_model, rl.upstream_model, rl.request_type, rl.method, rl.path,
+                rl.status, rl.latency_ms, rl.is_stream, rl.error_message, rl.fallback_count,
+                rl.route_reason, rl.created_at,
+                rl.ttfb_ms, rl.duration_ms, rl.attempt_seq,
+                rl.is_last_attempt,
+                ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost
+            FROM request_logs rl
+            LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             {where_sql}
-            ORDER BY created_at DESC
+            ORDER BY rl.created_at DESC
             LIMIT ? OFFSET ?
             "#,
         );
@@ -989,6 +1075,10 @@ impl Storage {    pub fn save_balance_snapshot(
                     res_headers_json: None,
                     res_body_b64: None,
                     is_last_attempt: row.get::<_, i64>(26)? != 0,
+                    input_tokens: row.get(27)?,
+                    output_tokens: row.get(28)?,
+                    total_tokens: row.get(29)?,
+                    estimated_cost: row.get(30)?,
                 })
             },
         )?;
@@ -1007,6 +1097,7 @@ impl Storage {    pub fn save_balance_snapshot(
             total,
             page,
             page_size,
+            summary,
         })
     }
 }

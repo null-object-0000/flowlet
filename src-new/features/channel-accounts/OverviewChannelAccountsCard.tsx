@@ -1,4 +1,4 @@
-import { Button, Space, Tag, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronRight, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { OverviewActionLink } from "../../shared/ui/OverviewActionLink";
@@ -25,12 +25,12 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
     <OverviewModuleCard
       title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("共 {count} 个账号", { count: accounts.length })}</em></span>}
       headerExtra={(
-        <Space className={styles.headerActions} spacing="tight" align="center">
+        <div className={styles.headerActions}>
           <OverviewActionLink leadingIcon={<IconPlus />} onClick={onCreate}>{t("新增账号")}</OverviewActionLink>
           <OverviewActionLink trailingIcon={<IconChevronRight />} onClick={onViewAll}>
             {t("管理账号")}
           </OverviewActionLink>
-        </Space>
+        </div>
       )}
     >
       <div className={styles.list}>

@@ -9,8 +9,7 @@
 
 .cardTitle { display: inline-flex; align-items: center; gap: 10px; line-height: 28px; }
 .cardTitle em { padding: 3px 9px; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 12px; font-style: normal; font-weight: 500; }
-.headerActions { min-height: 28px; }
-.headerActions :global(.semi-typography) { display: inline-flex; align-items: center; line-height: 28px; }
+.headerActions { min-height: 28px; display: flex; align-items: center; gap: 12px; }
 
 .row {
   min-height: 61px;

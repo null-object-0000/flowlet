@@ -27,7 +27,7 @@ export function OverviewPage() {
   const { t } = useAppPreferences();
   const accounts = useAccounts();
   const presets = useChannelPresets();
-  const accountActions = useAccountActions();
+  const accountActions = useAccountActions(presets.data ?? []);
   const modelActions = useModelActions();
   const [accountRequest, setAccountRequest] = useState<AccountManagerRequest | null>(null);
   const routes = useRouteCandidates();

@@ -1,6 +1,11 @@
 .link {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
   font-weight: 500;
+  line-height: 28px;
+  vertical-align: middle;
 }
 
 .content,
@@ -10,7 +15,9 @@
 }
 
 .content {
+  min-height: 28px;
   gap: 2px;
+  line-height: 28px;
 }
 
 .trailingIcon {

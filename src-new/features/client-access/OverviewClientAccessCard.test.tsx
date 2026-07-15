@@ -30,7 +30,18 @@ describe("OverviewClientAccessCard", () => {
     expect(screen.getByText("Anthropic Base URL")).toBeInTheDocument();
     expect(screen.getByText("健康检查地址")).toBeInTheDocument();
     expect(screen.getByText("默认客户端 Token")).toBeInTheDocument();
+    expect(screen.queryByText("flowlet-local-token")).not.toBeInTheDocument();
+    expect(screen.getByText("••••••••••••••••••••")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "显示默认客户端 Token" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制OpenAI Base URL" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "显示默认客户端 Token" }));
+    expect(screen.getByText("flowlet-local-token")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "隐藏默认客户端 Token" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "复制默认客户端 Token（图标）" }));
+    expect(writeText).toHaveBeenCalledWith("Bearer flowlet-local-token");
+    writeText.mockClear();
 
     await user.click(screen.getByText("OpenAI Base URL"));
     expect(writeText).not.toHaveBeenCalled();

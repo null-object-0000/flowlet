@@ -5,8 +5,10 @@ import { toAppError } from "../../platform/tauri/client";
 import type { AppError } from "../../shared/errors/AppError";
 import { useProxyActions } from "./useProxyActions";
 import { useProxyAutoStart } from "./useProxyAutoStart";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 export function useProxyOverviewLifecycle(enabled: boolean) {
+  const { t } = useAppPreferences();
   const auto = useProxyAutoStart({ enabled });
   const { start, restart } = useProxyActions();
   const [manualError, setManualError] = useState<AppError | null>(null);
@@ -29,15 +31,15 @@ export function useProxyOverviewLifecycle(enabled: boolean) {
     try {
       if (running) {
         await restart.mutateAsync();
-        Toast.success("代理已重启，配置已生效");
+        Toast.success(t("代理已重启，配置已生效"));
       } else {
         await start.mutateAsync();
-        Toast.success("本地代理已启动");
+        Toast.success(t("本地代理已启动"));
       }
     } catch (actionError) {
       const nextError = toAppError(actionError, running ? "proxy_restart_failed" : "proxy_start_failed");
       setManualError(nextError);
-      Toast.error(`${running ? "重启" : "启动"}失败：${nextError.message}`);
+      Toast.error(t(running ? "重启失败：{message}" : "启动失败：{message}", { message: nextError.message }));
     }
   };
 

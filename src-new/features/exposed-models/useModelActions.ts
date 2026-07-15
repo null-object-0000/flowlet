@@ -3,6 +3,7 @@ import { Toast } from "@douyinfe/semi-ui-19";
 import { modelCommands } from "../../domains/model/commands";
 import type { RouteCandidate } from "../../domains/model/types";
 import { queryKeys } from "../../shared/query-keys";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 type ToggleInput = {
   routes: RouteCandidate[];
@@ -12,6 +13,7 @@ type ToggleInput = {
 };
 
 export function useModelActions() {
+  const { t } = useAppPreferences();
   const queryClient = useQueryClient();
 
   const toggleExposedModel = useMutation({
@@ -34,11 +36,11 @@ export function useModelActions() {
     },
     onSuccess: (next, input) => {
       queryClient.setQueryData(queryKeys.model.candidates(), next);
-      Toast.success(`${input.modelId} 已${input.enabled ? "开放" : "停用"}`);
+      Toast.success(t(input.enabled ? "{model} 已开放" : "{model} 已停用", { model: input.modelId }));
     },
     onError: (error, _input, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.model.candidates(), context.previous);
-      Toast.error(`模型状态保存失败：${error instanceof Error ? error.message : String(error)}`);
+      Toast.error(t("模型状态保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.model.candidates(), exact: true });

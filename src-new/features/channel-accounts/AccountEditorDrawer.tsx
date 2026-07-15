@@ -13,6 +13,7 @@ import {
   type LongCatPack,
 } from "./LongCatPackManager";
 import styles from "./AccountEditorDrawer.module.css";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 const { Text } = Typography;
 
@@ -35,7 +36,8 @@ type Props = {
 };
 
 export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance }: Props) {
-  const [draft, setDraft] = useState<ChannelAccount>(() => createDraft(mode, accounts, presets));
+  const { language, t } = useAppPreferences();
+  const [draft, setDraft] = useState<ChannelAccount>(() => createDraft(mode, accounts, presets, language));
   const [resource, setResource] = useState<ResourceDraft>(() => resourceDraft(snapshot));
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -66,7 +68,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     const count = accounts.filter((item) => item.channel_id === channelId).length;
     update({
       channel_id: channelId,
-      name: count === 0 ? `${next?.name ?? "渠道"} 主账号` : `${next?.name ?? "渠道"} 账号 ${count + 1}`,
+      name: count === 0 ? t("{name} 主账号", { name: next?.name ?? t("渠道") }) : t("{name} 账号 {count}", { name: next?.name ?? t("渠道"), count: count + 1 }),
       resource_mode: defaultResourceMode(channelId),
       base_url_override: null,
     });
@@ -75,15 +77,15 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
 
   async function handleTest() {
     if (!currentDraft.api_key.trim()) {
-      Toast.warning("请先填写 API Key");
+      Toast.warning(t("请先填写 API Key"));
       return;
     }
     setTesting(true);
     try {
       await onTestConnection({ channel_id: currentDraft.channel_id, api_key: currentDraft.api_key.trim(), base_url_override: currentDraft.base_url_override });
-      Toast.success("连接成功，API Key 有效");
+      Toast.success(t("连接成功，API Key 有效"));
     } catch (error) {
-      Toast.error(`测试连接失败：${toAppError(error, "account_test_failed").message}`);
+      Toast.error(t("测试连接失败：{message}", { message: toAppError(error, "account_test_failed").message }));
     } finally {
       setTesting(false);
     }
@@ -93,9 +95,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     setSyncing(true);
     try {
       await onSyncBalance(currentDraft.id);
-      Toast.success("余额已同步");
+      Toast.success(t("余额已同步"));
     } catch (error) {
-      Toast.error(`余额同步失败：${toAppError(error, "account_balance_failed").message}`);
+      Toast.error(t("余额同步失败：{message}", { message: toAppError(error, "account_balance_failed").message }));
     } finally {
       setSyncing(false);
     }
@@ -103,7 +105,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
 
   async function handleSave() {
     if (!currentDraft.name.trim() || (!isEdit && !currentDraft.api_key.trim())) {
-      Toast.warning("请填写账号名称和 API Key");
+      Toast.warning(t("请填写账号名称和 API Key"));
       return;
     }
     setSaving(true);
@@ -138,30 +140,30 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       width="min(760px, 94vw)"
       title={(
         <div className={styles.title}>
-          <strong>{isEdit ? "编辑渠道账号" : "新增渠道账号"}</strong>
-          <span>{isEdit ? `更新 ${draft.name} 的连接与资源信息` : "添加 LongCat 或 DeepSeek 账号，用于上游模型转发"}</span>
+          <strong>{t(isEdit ? "编辑渠道账号" : "新增渠道账号")}</strong>
+          <span>{isEdit ? t("更新 {name} 的连接与资源信息", { name: draft.name }) : t("添加 LongCat 或 DeepSeek 账号，用于上游模型转发")}</span>
         </div>
       )}
       onCancel={onClose}
       footer={(
         <div className={styles.footer}>
-          <Button onClick={onClose}>取消</Button>
-          <Button disabled={!draft.api_key.trim()} loading={testing} onClick={() => void handleTest()}>测试连接</Button>
-          <Button theme="solid" type="primary" loading={saving} onClick={() => void handleSave()}>{isEdit ? "保存修改" : "保存账号"}</Button>
+          <Button onClick={onClose}>{t("取消")}</Button>
+          <Button disabled={!draft.api_key.trim()} loading={testing} onClick={() => void handleTest()}>{t("测试连接")}</Button>
+          <Button theme="solid" type="primary" loading={saving} onClick={() => void handleSave()}>{t(isEdit ? "保存修改" : "保存账号")}</Button>
         </div>
       )}
     >
       <div className={styles.content}>
         <section className={`${styles.section} ${styles.basic}`}>
-          <h3>基础信息</h3>
-          {!isEdit ? <Field label="选择渠道">
+          <h3>{t("基础信息")}</h3>
+          {!isEdit ? <Field label={t("选择渠道")}>
             <div className={styles.channelOptions}>
               {presets.map((item) => {
                 const selected = item.id === draft.channel_id;
                 return (
                   <button key={item.id} type="button" className={`${styles.channelOption} ${selected ? styles.selected : ""}`} onClick={() => selectChannel(item.id)}>
                     <ChannelBrandLogo channelId={item.id} name={item.name} />
-                    <span><strong>{item.name}</strong><small>{item.vendor || `${item.name} 大模型服务`}</small></span>
+                    <span><strong>{item.name}</strong><small>{item.vendor || t("{name} 大模型服务", { name: item.name })}</small></span>
                     <i>{selected ? "✓" : ""}</i>
                   </button>
                 );
@@ -170,69 +172,69 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           </Field> : null}
 
           <div className={styles.basicFields}>
-            <Field label="账号名称">
+            <Field label={t("账号名称")}>
               <div className={styles.nameInput}>
-                <Input aria-label="账号名称" maxLength={50} value={draft.name} onChange={(value) => update({ name: value })} />
+                <Input aria-label={t("账号名称")} maxLength={50} value={draft.name} onChange={(value) => update({ name: value })} />
                 <span>{draft.name.length} / 50</span>
               </div>
             </Field>
 
             <Field label={(
               <span className={styles.labelRow}>API Key{channel?.platform_url ? (
-                <Text link={{ href: channel.platform_url, target: "_blank", rel: "noreferrer" }} icon={<IconExternalOpen />} size="small">前往查看</Text>
+                <Text link={{ href: channel.platform_url, target: "_blank", rel: "noreferrer" }} icon={<IconExternalOpen />} size="small">{t("前往查看")}</Text>
               ) : null}</span>
             )}>
-              <Input aria-label="API Key" mode="password" value={draft.api_key} placeholder="请输入渠道 API Key" onChange={(value) => update({ api_key: value })} />
+              <Input aria-label="API Key" mode="password" value={draft.api_key} placeholder={t("请输入渠道 API Key")} onChange={(value) => update({ api_key: value })} />
             </Field>
           </div>
 
           <div className={styles.enabledRow}>
-            <span><strong>启用状态</strong><small>停用后，该账号不会参与请求转发</small></span>
-            <Switch aria-label="启用账号" checked={draft.enabled} onChange={(checked) => update({ enabled: checked })} />
-            <Text>{draft.enabled ? "启用" : "停用"}</Text>
+            <span><strong>{t("启用状态")}</strong><small>{t("停用后，该账号不会参与请求转发")}</small></span>
+            <Switch aria-label={t("启用账号")} checked={draft.enabled} onChange={(checked) => update({ enabled: checked })} />
+            <Text>{t(draft.enabled ? "启用" : "停用")}</Text>
           </div>
         </section>
 
         <section className={styles.section}>
-          <div className={styles.sectionHeading}><span><h3>资源模式</h3><small>{autoSyncBalance ? "按量付费，余额自动同步" : "保存后按所选模式维护资源信息"}</small></span></div>
+          <div className={styles.sectionHeading}><span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : "保存后按所选模式维护资源信息")}</small></span></div>
           {autoSyncBalance ? (
             <div className={styles.resourcePanel}>
-              <div className={styles.resourceHeading}><strong>按量付费信息</strong><span className={styles.autoBadge}>自动同步</span></div>
+              <div className={styles.resourceHeading}><strong>{t("按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
               <div className={styles.balanceRow}>
-                <span><small>账户余额</small><strong>{snapshot?.balance == null ? "尚未同步" : `${snapshot.balance} ${snapshot.currency ?? ""}`}</strong></span>
-                {isEdit ? <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} onClick={() => void handleSync()}>刷新</Button> : null}
+                <span><small>{t("账户余额")}</small><strong>{snapshot?.balance == null ? t("尚未同步") : `${snapshot.balance} ${snapshot.currency ?? ""}`}</strong></span>
+                {isEdit ? <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} onClick={() => void handleSync()}>{t("刷新")}</Button> : null}
               </div>
             </div>
           ) : (
             <>
               <div className={styles.modeOptions}>
-                <ModeOption selected={resourceMode === "token_pack"} title="Token 资源包" description="预付费，手动维护资源包信息" onClick={() => update({ resource_mode: "token_pack" })} />
-                <ModeOption selected={resourceMode === "pay_as_you_go"} title="API 按量付费" description="后付费，手动维护余额" onClick={() => update({ resource_mode: "pay_as_you_go" })} />
+                <ModeOption selected={resourceMode === "token_pack"} title={t("Token 资源包")} description={t("预付费，手动维护资源包信息")} onClick={() => update({ resource_mode: "token_pack" })} />
+                <ModeOption selected={resourceMode === "pay_as_you_go"} title={t("API 按量付费")} description={t("后付费，手动维护余额")} onClick={() => update({ resource_mode: "pay_as_you_go" })} />
               </div>
               <div className={styles.resourcePanel}>
-                <div className={styles.resourceHeading}><strong>{resourceMode === "token_pack" ? "资源包信息" : "按量付费信息"}</strong><span className={styles.manualBadge}>手动维护</span></div>
+                <div className={styles.resourceHeading}><strong>{t(resourceMode === "token_pack" ? "资源包信息" : "按量付费信息")}</strong><span className={styles.manualBadge}>{t("手动维护")}</span></div>
                 {resourceMode === "token_pack" ? (
                   <div className={styles.packSection}>
                     {draft.channel_id === "longcat" ? (
                       <div className={styles.packManageRow}>
-                        <Button onClick={() => setPackManagerOpen(true)}>管理资源包</Button>
-                        <span>导入、添加、编辑或删除 LongCat 资源包，支持 JSON 批量导入。</span>
+                        <Button onClick={() => setPackManagerOpen(true)}>{t("管理资源包")}</Button>
+                        <span>{t("导入、添加、编辑或删除 LongCat 资源包，支持 JSON 批量导入。")}</span>
                       </div>
                     ) : null}
                     {maintainedPacks.length ? (
                       <div className={styles.packSummary}>
-                        <strong>已维护 {maintainedPacks.length} 个资源包</strong>
-                        <span>总量 <b>{formatResourceTokens(optionalNumber(resource.tokenTotal))}</b></span>
-                        <span>已消耗 <b>{formatResourceTokens(optionalNumber(resource.tokenUsed))}</b></span>
-                        <span>剩余 <b>{formatResourceTokens(tokenRemaining)}</b></span>
-                        <span>最早到期 <b>{resource.tokenExpire || "-"}</b></span>
+                        <strong>{t("已维护 {count} 个资源包", { count: maintainedPacks.length })}</strong>
+                        <span>{t("总量")} <b>{formatResourceTokens(optionalNumber(resource.tokenTotal), language)}</b></span>
+                        <span>{t("已消耗")} <b>{formatResourceTokens(optionalNumber(resource.tokenUsed), language)}</b></span>
+                        <span>{t("剩余")} <b>{formatResourceTokens(tokenRemaining, language)}</b></span>
+                        <span>{t("最早到期")} <b>{resource.tokenExpire || "-"}</b></span>
                       </div>
-                    ) : <span className={styles.packEmpty}>尚未维护资源包，请点击“管理资源包”添加或导入。</span>}
+                    ) : <span className={styles.packEmpty}>{t("尚未维护资源包，请点击“管理资源包”添加或导入。")}</span>}
                   </div>
                 ) : (
                   <div className={styles.resourceGrid}>
-                    <Field label="账户余额"><Input aria-label="账户余额" type="number" value={resource.balance} onChange={(value) => setResource({ ...resource, balance: value })} placeholder="手动填写" /></Field>
-                    <Field label="货币"><Input aria-label="货币" value={resource.currency} onChange={(value) => setResource({ ...resource, currency: value })} placeholder="CNY" /></Field>
+                    <Field label={t("账户余额")}><Input aria-label={t("账户余额")} type="number" value={resource.balance} onChange={(value) => setResource({ ...resource, balance: value })} placeholder={t("手动填写")} /></Field>
+                    <Field label={t("货币")}><Input aria-label={t("货币")} value={resource.currency} onChange={(value) => setResource({ ...resource, currency: value })} placeholder="CNY" /></Field>
                   </div>
                 )}
               </div>
@@ -242,13 +244,13 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
 
         <section className={`${styles.section} ${styles.advanced}`}>
           <button type="button" className={styles.advancedToggle} onClick={() => setAdvancedOpen((value) => !value)}>
-            <span><strong>高级设置</strong><small>自定义连接地址与测试账号状态</small></span>
+            <span><strong>{t("高级设置")}</strong><small>{t("自定义连接地址与测试账号状态")}</small></span>
             {advancedOpen ? <IconChevronUp /> : <IconChevronDown />}
           </button>
           {advancedOpen ? (
             <div className={styles.advancedContent}>
-              <Field label="Base URL 覆盖（可选）"><Input aria-label="Base URL 覆盖" value={draft.base_url_override ?? ""} placeholder={channel?.openai_base_url} onChange={(value) => update({ base_url_override: value || null })} showClear /></Field>
-              <Text type="tertiary" size="small">填写 API Key 后可测试真实上游连接。</Text>
+              <Field label={t("Base URL 覆盖（可选）")}><Input aria-label={t("Base URL 覆盖（可选）")} value={draft.base_url_override ?? ""} placeholder={channel?.openai_base_url} onChange={(value) => update({ base_url_override: value || null })} showClear /></Field>
+              <Text type="tertiary" size="small">{t("填写 API Key 后可测试真实上游连接。")}</Text>
             </div>
           ) : null}
         </section>
@@ -277,7 +279,7 @@ function defaultResourceMode(channelId: string): AccountResourceMode {
   return channelId === "longcat" ? "token_pack" : "pay_as_you_go";
 }
 
-function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPreset[]): ChannelAccount {
+function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPreset[], language: "zh-CN" | "en-US"): ChannelAccount {
   if (mode.kind === "edit") return { ...mode.account };
   const channel = presets.find((item) => item.id === mode.channelId);
   const count = accounts.filter((item) => item.channel_id === mode.channelId).length;
@@ -285,7 +287,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
   return {
     id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     channel_id: mode.channelId,
-    name: count === 0 ? `${channel?.name ?? "渠道"} 主账号` : `${channel?.name ?? "渠道"} 账号 ${count + 1}`,
+    name: language === "en-US" ? (count === 0 ? `${channel?.name ?? "Channel"} primary account` : `${channel?.name ?? "Channel"} account ${count + 1}`) : (count === 0 ? `${channel?.name ?? "渠道"} 主账号` : `${channel?.name ?? "渠道"} 账号 ${count + 1}`),
     api_key: "",
     enabled: true,
     priority: accounts.length,
@@ -338,6 +340,6 @@ function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, m
   };
 }
 
-function formatResourceTokens(value: number | null) {
-  return value == null ? "-" : `${formatTokenCount(Math.max(0, value))} Tokens`;
+function formatResourceTokens(value: number | null, language: "zh-CN" | "en-US") {
+  return value == null ? "-" : `${formatTokenCount(Math.max(0, value), language)} Tokens`;
 }

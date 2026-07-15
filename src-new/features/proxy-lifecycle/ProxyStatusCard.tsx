@@ -10,6 +10,9 @@ import {
   getProxyPhaseLabel,
 } from "./proxyStatusPresentation";
 import styles from "./ProxyStatusCard.module.css";
+import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { translate } from "../../app/preferences/translations";
 
 const { Text } = Typography;
 
@@ -38,6 +41,7 @@ export function ProxyStatusCard({
   actionDisabled,
   onAction,
 }: Props) {
+  const { language, t } = useAppPreferences();
   const [observedStartedAt, setObservedStartedAt] = useState<Date | null>(status.running ? new Date() : null);
   const [, forceTick] = useState(0);
 
@@ -58,11 +62,11 @@ export function ProxyStatusCard({
   const port = bindConfig?.port || Number(status.bind_addr.split(":").pop()) || 18_640;
   const startedAt = parseDate(status.started_at) ?? observedStartedAt;
   const metrics = [
-    { label: "监听地址", value: status.running ? `${bindConfig?.host || "127.0.0.1"}:${port}` : "-" },
+    { label: t("监听地址"), value: status.running ? `${bindConfig?.host || "127.0.0.1"}:${port}` : "-" },
     {
-      label: "运行时长",
-      value: startedAt ? formatDuration(Date.now() - startedAt.getTime()) : "-",
-      hint: startedAt ? `启动于 ${formatRfc3339(startedAt.toISOString())}` : undefined,
+      label: t("运行时长"),
+      value: startedAt ? formatDuration(Date.now() - startedAt.getTime(), language) : "-",
+      hint: startedAt ? t("启动于 {time}", { time: formatRfc3339(startedAt.toISOString()) }) : undefined,
     },
   ];
 
@@ -71,12 +75,12 @@ export function ProxyStatusCard({
       <div className={styles.layout}>
         <div className={`${styles.statusOrb} ${status.running ? styles.runningOrb : ""}`}><i /></div>
         <div className={styles.intro}>
-          <h3>{getServiceTitle(phase)}</h3>
+          <h3>{getServiceTitle(phase, language)}</h3>
           <Text
             size="small"
             className={`${styles.stateText} ${phase === "running" ? styles.running : ""} ${phase === "failed" ? styles.failed : ""}`}
           >
-            {getProxyHint(phase, configurationStatus, autoStartAttempted, errorMessage)}
+            {getProxyHint(phase, configurationStatus, autoStartAttempted, errorMessage, language)}
           </Text>
         </div>
 
@@ -89,9 +93,11 @@ export function ProxyStatusCard({
           ))}
         </div>
         <Button
-          className={styles.action}
+          className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.regular}`}
           aria-label={actionLabel}
           icon={phase === "running" ? <IconRefresh /> : <IconPlay />}
+          theme="borderless"
+          type="tertiary"
           loading={actionBusy}
           disabled={actionDisabled}
           onClick={onAction}
@@ -103,11 +109,11 @@ export function ProxyStatusCard({
   );
 }
 
-function getServiceTitle(phase: ProxyRuntimeState) {
-  if (phase === "running") return "服务运行正常";
-  if (phase === "starting") return "服务正在启动";
-  if (phase === "failed") return "服务启动失败";
-  return getProxyPhaseLabel(phase) === "已停止" ? "服务已停止" : getProxyPhaseLabel(phase);
+function getServiceTitle(phase: ProxyRuntimeState, language: "zh-CN" | "en-US") {
+  if (phase === "running") return translate(language, "服务运行正常");
+  if (phase === "starting") return translate(language, "服务正在启动");
+  if (phase === "failed") return translate(language, "服务启动失败");
+  return translate(language, "服务已停止");
 }
 
 function parseDate(value?: string | null): Date | null {

@@ -65,7 +65,7 @@
 }
 
 .support { padding: 3px 8px; border-radius: 6px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 11px; }
-.supported { color: var(--flowlet-color-success); background: #eaf7ed; }
+.supported { color: var(--flowlet-color-success); background: var(--semi-color-success-light-default); }
 .chevron { color: var(--flowlet-color-text-secondary); }
 
 @media (max-width: 760px) {

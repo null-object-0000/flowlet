@@ -17,9 +17,9 @@
   align-items: center;
 }
 
-.statusOrb { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: #f2f3f5; }
+.statusOrb { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--semi-color-fill-0); }
 .statusOrb i { width: 14px; height: 14px; border-radius: 50%; background: var(--semi-color-text-3); box-shadow: 0 0 0 5px rgba(138, 144, 155, 0.08); }
-.runningOrb { background: #eff9f1; }
+.runningOrb { background: var(--semi-color-success-light-default); }
 .runningOrb i { background: var(--flowlet-color-success); box-shadow: 0 0 0 5px rgba(37, 167, 71, 0.08); }
 
 .intro {
@@ -79,9 +79,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.action { min-width: 108px; height: 36px; padding-inline: 14px; border: 1px solid var(--flowlet-color-border-strong); color: var(--flowlet-color-text); background: var(--flowlet-color-surface); box-shadow: 0 4px 12px rgba(30, 45, 70, 0.05); }
-.action:hover { border-color: var(--flowlet-color-primary); color: var(--flowlet-color-primary); background: var(--flowlet-color-surface); }
 
 @media (max-width: 760px) {
   .layout {

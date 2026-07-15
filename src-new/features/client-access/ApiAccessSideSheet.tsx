@@ -2,6 +2,7 @@ import { SideSheet, Typography } from "@douyinfe/semi-ui-19";
 import type { ProxyBindConfig } from "../../domains/proxy/types";
 import { CopyableAccessValue } from "./CopyableAccessValue";
 import styles from "./ApiAccessSideSheet.module.css";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 const { Text, Title } = Typography;
 
@@ -18,22 +19,23 @@ type Props = {
 };
 
 export function ApiAccessSideSheet({ visible, onClose, baseUrl, bindConfig, running, onCopy }: Props) {
+  const { t } = useAppPreferences();
   const host = bindConfig.host || "127.0.0.1";
   const serviceRows: DetailRow[] = [
-    { label: "服务基础地址", value: baseUrl, copyValue: baseUrl, copyMessage: "服务基础地址已复制" },
-    { label: "监听地址", value: running ? `${host}:${bindConfig.port}` : "-", copyValue: running ? `${host}:${bindConfig.port}` : undefined, copyMessage: "监听地址已复制" },
-    { label: "健康检查地址", value: "/health", copyValue: `${baseUrl}/health`, copyMessage: "健康检查地址已复制" },
+    { label: t("服务基础地址"), value: baseUrl, copyValue: baseUrl, copyMessage: t("{label} 已复制", { label: t("服务基础地址") }) },
+    { label: t("监听地址"), value: running ? `${host}:${bindConfig.port}` : "-", copyValue: running ? `${host}:${bindConfig.port}` : undefined, copyMessage: t("{label} 已复制", { label: t("监听地址") }) },
+    { label: t("健康检查地址"), value: "/health", copyValue: `${baseUrl}/health`, copyMessage: t("{label} 已复制", { label: t("健康检查地址") }) },
   ];
   const openAiRows: DetailRow[] = [
-    { label: "Base URL", copyLabel: "OpenAI Base URL", value: `${baseUrl}/v1`, copyValue: `${baseUrl}/v1`, copyMessage: "OpenAI Base URL 已复制" },
-    { label: "模型列表", copyLabel: "OpenAI 模型列表", value: `${baseUrl}/v1/models`, copyValue: `${baseUrl}/v1/models`, copyMessage: "模型列表地址已复制" },
-    { label: "对话接口", copyLabel: "OpenAI 对话接口", value: `${baseUrl}/v1/chat/completions`, copyValue: `${baseUrl}/v1/chat/completions`, copyMessage: "对话接口地址已复制" },
-    { label: "鉴权 Header", value: "Authorization: Bearer <Client Token>", copyValue: "Authorization: Bearer <Client Token>", copyMessage: "鉴权 Header 已复制" },
+    { label: "Base URL", copyLabel: "OpenAI Base URL", value: `${baseUrl}/v1`, copyValue: `${baseUrl}/v1`, copyMessage: t("{label} 已复制", { label: "OpenAI Base URL" }) },
+    { label: t("模型列表"), copyLabel: `OpenAI ${t("模型列表")}`, value: `${baseUrl}/v1/models`, copyValue: `${baseUrl}/v1/models` },
+    { label: t("对话接口"), copyLabel: `OpenAI ${t("对话接口")}`, value: `${baseUrl}/v1/chat/completions`, copyValue: `${baseUrl}/v1/chat/completions` },
+    { label: t("鉴权 Header"), value: "Authorization: Bearer <Client Token>", copyValue: "Authorization: Bearer <Client Token>" },
   ];
   const anthropicRows: DetailRow[] = [
-    { label: "Base URL", copyLabel: "Anthropic Base URL", value: `${baseUrl}/anthropic`, copyValue: `${baseUrl}/anthropic`, copyMessage: "Anthropic Base URL 已复制" },
-    { label: "模型列表", copyLabel: "Anthropic 模型列表", value: `${baseUrl}/anthropic/v1/models`, copyValue: `${baseUrl}/anthropic/v1/models`, copyMessage: "Anthropic 模型列表地址已复制" },
-    { label: "消息接口", copyLabel: "Anthropic 消息接口", value: `${baseUrl}/anthropic/v1/messages`, copyValue: `${baseUrl}/anthropic/v1/messages`, copyMessage: "消息接口地址已复制" },
+    { label: "Base URL", copyLabel: "Anthropic Base URL", value: `${baseUrl}/anthropic`, copyValue: `${baseUrl}/anthropic`, copyMessage: t("{label} 已复制", { label: "Anthropic Base URL" }) },
+    { label: t("模型列表"), copyLabel: `Anthropic ${t("模型列表")}`, value: `${baseUrl}/anthropic/v1/models`, copyValue: `${baseUrl}/anthropic/v1/models` },
+    { label: t("消息接口"), copyLabel: `Anthropic ${t("消息接口")}`, value: `${baseUrl}/anthropic/v1/messages`, copyValue: `${baseUrl}/anthropic/v1/messages` },
   ];
 
   return (
@@ -41,28 +43,28 @@ export function ApiAccessSideSheet({ visible, onClose, baseUrl, bindConfig, runn
       visible={visible}
       zIndex={1100}
       onCancel={onClose}
-      title="API 接入详情"
+      title={t("API 接入详情")}
       width="min(720px, 92vw)"
       footer={null}
       bodyStyle={{ padding: 0 }}
     >
       <div className={styles.body}>
-        <DetailSection icon="▣" title="服务信息" rows={serviceRows} onCopy={onCopy} />
+        <DetailSection icon="▣" title={t("服务信息")} rows={serviceRows} onCopy={onCopy} />
         <DetailSection icon="▤" title="OpenAI-compatible" rows={openAiRows} onCopy={onCopy} />
         <DetailSection icon="▤" title="Anthropic-compatible" rows={anthropicRows} onCopy={onCopy}>
           <div className={styles.multiRow}>
-            <span>鉴权 Header</span>
+            <span>{t("鉴权 Header")}</span>
             <div className={styles.headerStack}>
-              <CopyValue value="Authorization: Bearer <Client Token>" message="Authorization Header 已复制" onCopy={onCopy} />
-              <CopyValue value="X-Api-Key: <Client Token>" message="X-Api-Key Header 已复制" onCopy={onCopy} />
+              <CopyValue value="Authorization: Bearer <Client Token>" message={t("{label} 已复制", { label: "Authorization Header" })} onCopy={onCopy} />
+              <CopyValue value="X-Api-Key: <Client Token>" message={t("{label} 已复制", { label: "X-Api-Key Header" })} onCopy={onCopy} />
             </div>
           </div>
         </DetailSection>
         <section className={`${styles.section} ${styles.security}`}>
-          <Title heading={5} className={styles.sectionTitle}>⚠ 安全提示</Title>
+          <Title heading={5} className={styles.sectionTitle}>⚠ {t("安全提示")}</Title>
           <ul>
-            <li>客户端应使用 <code>Flowlet Client Token</code>，不要直接配置上游渠道的真实 API Key。</li>
-            <li>Flowlet 根据 Client Token 识别请求来源，并在转发时替换上游鉴权信息。</li>
+            <li>{t("客户端应使用 Flowlet Client Token，不要直接配置上游渠道的真实 API Key。")}</li>
+            <li>{t("Flowlet 根据 Client Token 识别请求来源，并在转发时替换上游鉴权信息。")}</li>
           </ul>
         </section>
       </div>

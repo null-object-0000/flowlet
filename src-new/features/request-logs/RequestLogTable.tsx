@@ -42,7 +42,7 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
             <span className={styles.time}>{formatTime(row.created_at)}</span>
             <span className={styles.primaryCell}>
               <strong title={row.public_model || row.virtual_model || ""}>{row.public_model || row.virtual_model || "-"}</strong>
-              <small title={`${row.method} ${row.path}`}><b>{row.method}</b> {row.path}{row.is_stream ? " · 流式" : ""}</small>
+              <small title={`${row.method} ${row.path}`}><b>{row.method}</b> {row.path}{row.is_stream ? ` · ${t("流式")}` : ""}</small>
             </span>
             <span className={styles.primaryCell}>
               <strong>{row.channel_name || row.channel_id || t("未路由")}</strong>

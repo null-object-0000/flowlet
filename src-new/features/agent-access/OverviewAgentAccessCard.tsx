@@ -7,6 +7,7 @@ import { IconChevronRight } from "@douyinfe/semi-icons";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
 import styles from "./OverviewAgentAccessCard.module.css";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 const { Text } = Typography;
 
@@ -50,6 +51,7 @@ type Props = {
 };
 
 export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
+  const { t } = useAppPreferences();
   const [selectedAgent, setSelectedAgent] = useState<AgentKind | null>(null);
 
   const copy = async (value: string, message: string) => {
@@ -57,26 +59,26 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       await navigator.clipboard.writeText(value);
       Toast.success(message);
     } catch (error) {
-      Toast.error(`复制失败：${error instanceof Error ? error.message : String(error)}`);
+      Toast.error(t("复制失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
     }
   };
 
   return (
     <>
-      <OverviewModuleCard title="AI Agent 接入">
-        <Text type="tertiary" size="small">选择适合的 Agent 并查看接入方案</Text>
+      <OverviewModuleCard title={t("AI Agent 接入")}>
+        <Text type="tertiary" size="small">{t("选择适合的 Agent 并查看接入方案")}</Text>
         <div className={styles.grid}>
           {AGENTS.map(({ kind, name, description, icon, iconClassName, supported }) => (
             <button
               key={name}
               type="button"
               className={styles.agentCard}
-              aria-label={`配置 ${name}`}
+              aria-label={t("配置 {name}", { name })}
               onClick={() => kind && setSelectedAgent(kind)}
             >
               <span className={`${styles.icon} ${iconClassName}`}>{icon}</span>
-              <span className={styles.agentText}><strong>{name}</strong><small>{description}</small></span>
-              <span className={`${styles.support} ${supported ? styles.supported : ""}`}>{supported ? "已支持" : "即将支持"}</span>
+              <span className={styles.agentText}><strong>{name}</strong><small>{t(description)}</small></span>
+              <span className={`${styles.support} ${supported ? styles.supported : ""}`}>{t(supported ? "已支持" : "即将支持")}</span>
               <IconChevronRight className={styles.chevron} />
             </button>
           ))}

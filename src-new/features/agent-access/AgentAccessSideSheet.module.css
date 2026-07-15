@@ -2,16 +2,16 @@
   display: grid;
   gap: 12px;
   padding: 20px;
-  background: #f5f7fb;
+  background: var(--flowlet-color-surface-muted);
 }
 
 .intro,
 .section,
 .tip {
   padding: 18px;
-  border: 1px solid #e3e8f1;
+  border: 1px solid var(--flowlet-color-border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--flowlet-color-surface);
 }
 
 .titleRow,

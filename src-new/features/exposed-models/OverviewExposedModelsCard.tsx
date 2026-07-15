@@ -6,6 +6,7 @@ import { ChannelBrandLogo } from "../channel-accounts/ChannelBrandLogo";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { buildOverviewExposedModels } from "./modelView";
 import styles from "./OverviewExposedModelsCard.module.css";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 const { Text } = Typography;
 
@@ -19,11 +20,12 @@ type Props = {
 };
 
 export function OverviewExposedModelsCard({ routes, accounts, channels, busyModelId, onManage, onToggle }: Props) {
+  const { t } = useAppPreferences();
   const models = buildOverviewExposedModels(routes, accounts, channels);
   const enabledCount = models.filter((model) => model.enabled).length;
 
   return (
-    <OverviewModuleCard title={<span className={styles.cardTitle}>开放模型 <em>共 {enabledCount} 个模型</em></span>} action="管理模型" onAction={onManage}>
+    <OverviewModuleCard title={<span className={styles.cardTitle}>{t("开放模型")} <em>{t("共 {count} 个模型", { count: enabledCount })}</em></span>} action={t("管理模型")} onAction={onManage}>
       {models.length > 0 ? (
         <div className={styles.list}>
           {models.map((model) => {
@@ -37,12 +39,12 @@ export function OverviewExposedModelsCard({ routes, accounts, channels, busyMode
                 <div className={styles.main}>
                   <Text strong>{model.publicModel}</Text>
                   <Text className={abnormal ? styles.warning : styles.meta} size="small">
-                    {model.availableAccountCount > 0 ? `${model.availableAccountCount} 个可用账号` : "无可用账号"}
-                    {abnormal ? "　·　异常" : !model.hasAvailableAccount ? "　·　不可用" : ""}
+                    {model.availableAccountCount > 0 ? t("{count} 个可用账号", { count: model.availableAccountCount }) : t("无可用账号")}
+                    {abnormal ? ` · ${t("异常")}` : !model.hasAvailableAccount ? ` · ${t("不可用")}` : ""}
                   </Text>
                 </div>
                 <Switch
-                  aria-label={`${model.publicModel} 对外开放`}
+                  aria-label={t("{model} 对外开放", { model: model.publicModel })}
                   checked={model.enabled}
                   disabled={busyModelId != null}
                   loading={busyModelId === model.publicModel}
@@ -53,7 +55,7 @@ export function OverviewExposedModelsCard({ routes, accounts, channels, busyMode
           })}
         </div>
       ) : (
-        <div className={styles.empty}>暂无模型。请同步或进入模型服务生成默认模型。</div>
+        <div className={styles.empty}>{t("暂无模型。请同步或进入模型服务生成默认模型。")}</div>
       )}
     </OverviewModuleCard>
   );

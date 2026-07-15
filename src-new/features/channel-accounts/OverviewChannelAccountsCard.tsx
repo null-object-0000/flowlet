@@ -5,6 +5,7 @@ import { OverviewActionLink } from "../../shared/ui/OverviewActionLink";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./OverviewChannelAccountsCard.module.css";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 const { Text } = Typography;
 
@@ -17,16 +18,17 @@ type Props = {
 };
 
 export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onViewAll, onEdit }: Props) {
+  const { language, t } = useAppPreferences();
   const snapshotByAccount = new Map(snapshots.map((snapshot) => [snapshot.account_id, snapshot]));
 
   return (
     <OverviewModuleCard
-      title={<span className={styles.cardTitle}>渠道账号 <em>共 {accounts.length} 个账号</em></span>}
+      title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("共 {count} 个账号", { count: accounts.length })}</em></span>}
       headerExtra={(
         <Space className={styles.headerActions} spacing="tight" align="center">
-          <OverviewActionLink leadingIcon={<IconPlus />} onClick={onCreate}>新增账号</OverviewActionLink>
+          <OverviewActionLink leadingIcon={<IconPlus />} onClick={onCreate}>{t("新增账号")}</OverviewActionLink>
           <OverviewActionLink trailingIcon={<IconChevronRight />} onClick={onViewAll}>
-            管理账号
+            {t("管理账号")}
           </OverviewActionLink>
         </Space>
       )}
@@ -34,7 +36,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
       <div className={styles.list}>
         {accounts.map((account) => {
           const snapshot = snapshotByAccount.get(account.id);
-          const status = accountStatus(account);
+          const status = accountStatus(account, t);
           return (
             <div className={styles.row} key={account.id}>
               <button className={styles.rowMain} type="button" onClick={() => onEdit(account.id)}>
@@ -42,7 +44,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
                 <span className={styles.accountText}>
                   <Text strong>{account.name || account.channel_id}</Text>
                   <Text type="tertiary" size="small">
-                    {resourceSummary(account, snapshot)}{expirySummary(account, snapshot)}
+                    {resourceSummary(account, snapshot, t, language)}{expirySummary(account, snapshot, t)}
                   </Text>
                 </span>
               </button>
@@ -50,7 +52,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
               <Button
                 icon={<IconMore />}
                 theme="borderless"
-                aria-label={`编辑账号 ${account.name || account.channel_id}`}
+                aria-label={t("编辑账号 {name}", { name: account.name || account.channel_id })}
                 onClick={() => onEdit(account.id)}
               />
             </div>
@@ -61,27 +63,28 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
   );
 }
 
-function accountStatus(account: ChannelAccount): { label: string; color: "green" | "red" | "grey" } {
-  if (!account.enabled) return { label: "停用", color: "grey" };
-  if (!account.api_key?.trim()) return { label: "未配", color: "grey" };
-  if (account.credential_status === "invalid_key") return { label: "无效", color: "red" };
-  return { label: "启用", color: "green" };
+function accountStatus(account: ChannelAccount, t: (source: string) => string): { label: string; color: "green" | "red" | "grey" } {
+  if (!account.enabled) return { label: t("停用"), color: "grey" };
+  if (!account.api_key?.trim()) return { label: t("未配"), color: "grey" };
+  if (account.credential_status === "invalid_key") return { label: t("无效"), color: "red" };
+  return { label: t("启用"), color: "green" };
 }
 
-function resourceSummary(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): string {
+function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): string {
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
-  if (tokenPack) return `资源包 ${formatTokenCount(snapshot?.token_pack_remaining)} Tokens`;
+  if (tokenPack) return t("资源包 {value} Tokens", { value: formatTokenCount(snapshot?.token_pack_remaining, language) });
   const balance = snapshot?.balance == null ? "-" : snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return `余额 ${balance}${snapshot?.currency ? ` ${snapshot.currency}` : ""}`;
+  return t("余额 {value}", { value: `${balance}${snapshot?.currency ? ` ${snapshot.currency}` : ""}` });
 }
 
-function expirySummary(account: ChannelAccount, snapshot?: AccountBalanceSnapshot): string {
+function expirySummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string): string {
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
-  return tokenPack && snapshot?.token_pack_expire_at ? `　·　有效期至 ${snapshot.token_pack_expire_at.split("T")[0]}` : "";
+  return tokenPack && snapshot?.token_pack_expire_at ? ` · ${t("有效期至 {date}", { date: snapshot.token_pack_expire_at.split("T")[0] })}` : "";
 }
 
-function formatTokenCount(value?: number | null): string {
+function formatTokenCount(value: number | null | undefined, language: "zh-CN" | "en-US"): string {
   if (value == null) return "-";
+  if (language === "en-US") return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
   if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
   if (value >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
   return String(value);

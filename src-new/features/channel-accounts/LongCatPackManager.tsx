@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Input, Modal, TextArea } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconPlus } from "@douyinfe/semi-icons";
 import styles from "./LongCatPackManager.module.css";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 export type LongCatPack = {
   lotId?: number;
@@ -98,13 +99,15 @@ export function summarizeLongCatPacks(packs: LongCatPack[]) {
   );
 }
 
-export function formatTokenCount(value: number) {
+export function formatTokenCount(value: number, language: "zh-CN" | "en-US" = "zh-CN") {
+  if (language === "en-US") return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
   if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
   if (value >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
   return String(value);
 }
 
 export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {
+  const { language, t } = useAppPreferences();
   const [packs, setPacks] = useState(() => sortLongCatPacks(initialPacks));
   const [json, setJson] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +125,7 @@ export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {
       setJson("");
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(t(reason instanceof Error ? reason.message : String(reason)));
     }
   };
 
@@ -132,20 +135,20 @@ export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {
       motion={false}
       zIndex={1200}
       width="min(940px, 96vw)"
-      title="LongCat 资源包管理"
+      title={t("LongCat 资源包管理")}
       footer={(
         <div className={styles.footer}>
-          <Button onClick={onCancel}>取消</Button>
-          <Button theme="solid" type="primary" onClick={() => onSave(sortLongCatPacks(packs))}>保存资源包</Button>
+          <Button onClick={onCancel}>{t("取消")}</Button>
+          <Button theme="solid" type="primary" onClick={() => onSave(sortLongCatPacks(packs))}>{t("保存资源包")}</Button>
         </div>
       )}
       onCancel={onCancel}
     >
       <div className={styles.body}>
         <div className={styles.importPanel}>
-          <p>在 LongCat 控制台获取 <code>/api/pay/quota/metering/token-packs/summary</code> 的响应 JSON，粘贴后可批量导入；相同资源包 ID 会自动覆盖更新。</p>
+          <p>{t("在 LongCat 控制台获取资源包接口的响应 JSON，粘贴后可批量导入；相同资源包 ID 会自动覆盖更新。")} <code>/api/pay/quota/metering/token-packs/summary</code></p>
           <TextArea
-            aria-label="LongCat 资源包 JSON"
+            aria-label="LongCat package JSON"
             value={json}
             rows={3}
             placeholder={'{"code":0,"data":{"currentLot":{...},"otherLots":[...]}}'}
@@ -153,38 +156,38 @@ export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {
           />
           {error ? <div className={styles.error}>{error}</div> : null}
           <div className={styles.importActions}>
-            <Button disabled={!json.trim()} onClick={importJson}>导入 JSON</Button>
-            <Button icon={<IconPlus />} theme="borderless" onClick={addPack}>添加资源包</Button>
+            <Button disabled={!json.trim()} onClick={importJson}>{t("导入 JSON")}</Button>
+            <Button icon={<IconPlus />} theme="borderless" onClick={addPack}>{t("添加资源包")}</Button>
           </div>
         </div>
 
         {packs.length ? (
           <div className={styles.tableScroll}>
             <table className={styles.table}>
-              <thead><tr><th>#</th><th>总量</th><th>已消耗</th><th>剩余</th><th>到期时间</th><th>状态</th><th>操作</th></tr></thead>
+              <thead><tr><th>#</th><th>{t("总量")}</th><th>{t("已消耗")}</th><th>{t("剩余")}</th><th>{t("到期时间")}</th><th>{t("状态")}</th><th>{t("操作")}</th></tr></thead>
               <tbody>
                 {packs.map((pack, index) => (
                   <tr key={pack.lotId ?? index}>
                     <td>{index + 1}</td>
-                    <td><NumberInput label={`资源包 ${index + 1} 总量`} value={pack.totalToken} onChange={(value) => updatePack(index, { totalToken: value })} /></td>
-                    <td><NumberInput label={`资源包 ${index + 1} 已消耗`} value={pack.consumedToken} onChange={(value) => updatePack(index, { consumedToken: value })} /></td>
-                    <td><NumberInput label={`资源包 ${index + 1} 剩余`} value={pack.remainingToken} onChange={(value) => updatePack(index, { remainingToken: value })} /></td>
-                    <td><Input aria-label={`资源包 ${index + 1} 到期时间`} type="date" value={pack.expireTime?.slice(0, 10) ?? ""} onChange={(value) => updatePack(index, { expireTime: value ? `${value}T23:59:59` : undefined })} /></td>
-                    <td><Input aria-label={`资源包 ${index + 1} 状态`} value={pack.status ?? ""} placeholder="ACTIVE" onChange={(value) => updatePack(index, { status: value || undefined })} /></td>
-                    <td><Button aria-label={`删除资源包 ${index + 1}`} icon={<IconDelete />} theme="borderless" type="danger" onClick={() => removePack(index)} /></td>
+                    <td><NumberInput label={t("资源包 {index} 总量", { index: index + 1 })} value={pack.totalToken} onChange={(value) => updatePack(index, { totalToken: value })} /></td>
+                    <td><NumberInput label={t("资源包 {index} 已消耗", { index: index + 1 })} value={pack.consumedToken} onChange={(value) => updatePack(index, { consumedToken: value })} /></td>
+                    <td><NumberInput label={t("资源包 {index} 剩余", { index: index + 1 })} value={pack.remainingToken} onChange={(value) => updatePack(index, { remainingToken: value })} /></td>
+                    <td><Input aria-label={t("资源包 {index} 到期时间", { index: index + 1 })} type="date" value={pack.expireTime?.slice(0, 10) ?? ""} onChange={(value) => updatePack(index, { expireTime: value ? `${value}T23:59:59` : undefined })} /></td>
+                    <td><Input aria-label={t("资源包 {index} 状态", { index: index + 1 })} value={pack.status ?? ""} placeholder="ACTIVE" onChange={(value) => updatePack(index, { status: value || undefined })} /></td>
+                    <td><Button aria-label={t("删除资源包 {index}", { index: index + 1 })} icon={<IconDelete />} theme="borderless" type="danger" onClick={() => removePack(index)} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        ) : <div className={styles.empty}>暂无资源包，请导入 JSON 或手动添加。</div>}
+        ) : <div className={styles.empty}>{t("暂无资源包，请导入 JSON 或手动添加。")}</div>}
 
         <div className={styles.summary}>
-          <span>共 <strong>{packs.length}</strong> 个资源包</span>
-          <span>总量 <strong>{formatTokenCount(summary.total)}</strong></span>
-          <span>已消耗 <strong>{formatTokenCount(summary.used)}</strong></span>
-          <span>剩余 <strong>{formatTokenCount(summary.remaining)}</strong></span>
-          <span>最早到期 <strong>{summary.expireAt?.slice(0, 10) ?? "-"}</strong></span>
+          <span>{t("共 {count} 个资源包", { count: packs.length })}</span>
+          <span>{t("总量")} <strong>{formatTokenCount(summary.total, language)}</strong></span>
+          <span>{t("已消耗")} <strong>{formatTokenCount(summary.used, language)}</strong></span>
+          <span>{t("剩余")} <strong>{formatTokenCount(summary.remaining, language)}</strong></span>
+          <span>{t("最早到期")} <strong>{summary.expireAt?.slice(0, 10) ?? "-"}</strong></span>
         </div>
       </div>
     </Modal>

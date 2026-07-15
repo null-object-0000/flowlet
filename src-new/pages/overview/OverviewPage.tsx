@@ -11,6 +11,7 @@ import { OverviewSections } from "./OverviewSections";
 import { useProxyOverviewLifecycle } from "../../features/proxy-lifecycle/useProxyOverviewLifecycle";
 import { deriveConfigurationStatus } from "../../domains/model/types";
 import styles from "./OverviewPage.module.css";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -23,6 +24,7 @@ const { Paragraph, Text, Title } = Typography;
  *     models, client access and Agent access.
  */
 export function OverviewPage() {
+  const { t } = useAppPreferences();
   const accounts = useAccounts();
   const presets = useChannelPresets();
   const accountActions = useAccountActions();
@@ -36,14 +38,14 @@ export function OverviewPage() {
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
   const configurationStatus = deriveConfigurationStatus(accounts.data ?? [], routes.data ?? []);
   const proxyActionLabel = proxy.status.isError
-    ? "重新读取"
+    ? t("重新读取")
     : proxy.phase === "starting"
-      ? "正在启动…"
+      ? t("正在启动…")
       : proxy.phase === "running"
-        ? "重启服务"
+        ? t("重启服务")
         : proxy.phase === "failed"
-          ? "重新启动"
-          : "启动服务";
+          ? t("重新启动")
+          : t("启动服务");
 
   const handleProxyAction = () => {
     if (proxy.status.isError) void proxy.status.refetch();
@@ -52,8 +54,8 @@ export function OverviewPage() {
 
   return (
     <main className={styles.page}>
-      {proxy.status.isLoading ? <Card>正在读取代理状态…</Card> : null}
-      {proxy.status.isError ? <Card>读取代理状态失败：{proxy.status.error.message}</Card> : null}
+      {proxy.status.isLoading ? <Card>{t("正在读取代理状态…")}</Card> : null}
+      {proxy.status.isError ? <Card>{t("读取代理状态失败：{message}", { message: proxy.status.error.message })}</Card> : null}
       {proxy.status.data ? (
         <ProxyStatusCard
           status={proxy.status.data}
@@ -69,45 +71,45 @@ export function OverviewPage() {
         />
       ) : null}
 
-      {accounts.isLoading ? <Card>正在加载渠道账号…</Card> : null}
-      {accounts.isError ? <Card>加载渠道账号失败：{accounts.error.message}</Card> : null}
+      {accounts.isLoading ? <Card>{t("正在加载渠道账号…")}</Card> : null}
+      {accounts.isError ? <Card>{t("加载渠道账号失败：{message}", { message: accounts.error.message })}</Card> : null}
 
       {!accounts.isLoading && !accounts.isError && !hasAccounts ? <Card>
         <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>
           <Title heading={4} style={{ margin: 0 }}>
-            开始接入
+            {t("开始接入")}
           </Title>
           <Paragraph type="tertiary" style={{ margin: 0 }}>
-            Flowlet 会在本地启动一个代理，把你的渠道账号安全地提供给 AI 客户端和 Agent 使用。
+            {t("Flowlet 会在本地启动一个代理，把你的渠道账号安全地提供给 AI 客户端和 Agent 使用。")}
           </Paragraph>
 
           <div className={styles.steps}>
-            <Step n={1} title="添加渠道账号">
-              选择 LongCat 或 DeepSeek，填写 API Key 并测试连接。API Key 仅保存在本地配置中。
+            <Step n={1} title={t("添加渠道账号")}>
+              {t("选择 LongCat 或 DeepSeek，填写 API Key 并测试连接。API Key 仅保存在本地配置中。")}
             </Step>
-            <Step n={2} title="开放模型">
-              选择要对外开放的模型。默认开放模型会随账号自动同步。
+            <Step n={2} title={t("开放模型")}>
+              {t("选择要对外开放的模型。默认开放模型会随账号自动同步。")}
             </Step>
-            <Step n={3} title="接入 AI 客户端">
-              在 Claude Code、Cursor、Continue 等工具中填入本地 Base URL 和客户端 Token 即可使用。
+            <Step n={3} title={t("接入 AI 客户端")}>
+              {t("在 Claude Code、Cursor、Continue 等工具中填入本地 Base URL 和客户端 Token 即可使用。")}
             </Step>
           </div>
 
           <Space>
             <Button type="primary" icon={<IconPlus />} onClick={() => setAccountRequest({ kind: "create", channelId: "longcat" })}>
-              添加 LongCat
+              {t("添加 LongCat")}
             </Button>
-            <Button onClick={() => setAccountRequest({ kind: "create", channelId: "deepseek" })}>添加 DeepSeek</Button>
+            <Button onClick={() => setAccountRequest({ kind: "create", channelId: "deepseek" })}>{t("添加 DeepSeek")}</Button>
             <Button type="tertiary" onClick={() => setAccountRequest({ kind: "list" })}>
-              管理渠道账号
+              {t("管理渠道账号")}
             </Button>
           </Space>
         </Space>
       </Card> : null}
 
-      {hasAccounts && (routes.isLoading || bindConfig.isLoading) ? <Card>正在加载模型和接入配置…</Card> : null}
-      {hasAccounts && routes.isError ? <Card>加载开放模型失败：{routes.error.message}</Card> : null}
-      {hasAccounts && bindConfig.isError ? <Card>加载客户端配置失败：{bindConfig.error.message}</Card> : null}
+      {hasAccounts && (routes.isLoading || bindConfig.isLoading) ? <Card>{t("正在加载模型和接入配置…")}</Card> : null}
+      {hasAccounts && routes.isError ? <Card>{t("加载开放模型失败：{message}", { message: routes.error.message })}</Card> : null}
+      {hasAccounts && bindConfig.isError ? <Card>{t("加载客户端配置失败：{message}", { message: bindConfig.error.message })}</Card> : null}
 
       {hasAccounts && routes.isSuccess && bindConfig.isSuccess ? (
         <OverviewSections

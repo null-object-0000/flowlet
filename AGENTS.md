@@ -217,6 +217,14 @@ DeepSeek:
 
 概览页是状态总览和接入引导，不是统计大屏。
 
+当前新版概览页必须保持已经确认的信息架构和功能边界：
+
+* 主体由代理服务状态、渠道账号、开放模型、客户端访问信息、AI Agent 接入五个独立业务组件组成；
+* UI 可以基于 Semi Design 和当前 Design Tokens 调整，但不得擅自改变模块划分、功能或左侧菜单枚举；
+* 1200×720 桌面窗口下概览页不得出现页面级滚动条；内容溢出应优先通过组件密度、字号层级和内部布局解决；
+* 跨页面视觉调整优先修改 Design Tokens 或共享组件，不要只为概览页复制一套局部样式；
+* 新增账号、管理账号、管理模型、查看接入详情等轻量导航动作使用链接按钮，不伪装成主操作按钮。
+
 不要在概览页加入：
 
 * 今日请求数；
@@ -262,6 +270,8 @@ DeepSeek:
 
 API Key 只在账号编辑界面中管理。
 
+Client Token 与渠道 API Key 不同，可以在客户端访问信息中展示和复制，但必须默认使用固定长度掩码；只有用户主动点击查看按钮后才临时展示明文，复制操作始终使用真实值。
+
 ---
 
 ## 8. Agent 接入方向
@@ -303,7 +313,8 @@ Agent 接入能力应逐步提供：
 
 必须注意：
 
-* API Key、Authorization、x-api-key、Cookie 等敏感 Header 默认不脱敏，用户可自行配置开启脱敏；
+* SQLite 捕获层是否脱敏由 `log_capture.redact_sensitive_headers` 控制，当前默认关闭，用户可自行开启；
+* 即使捕获层保存了原始内容，UI 展示和复制仍必须进行二次防护，不得暴露 API Key、Authorization、x-api-key、Cookie、Token 等敏感信息；
 * 不要在 UI、日志或错误信息中泄露完整密钥；
 * 请求和响应 Body 捕获必须明确受配置控制；
 * 新增日志字段时，要考虑隐私和存储体积；
@@ -321,13 +332,17 @@ Agent 接入能力应逐步提供：
 
 ## 10. 前端开发原则
 
-* 优先复用 Mantine 组件；
-* 避免同时使用 Mantine 布局和重复的手工偏移；
-* `AppShell` 已管理 Navbar 时，不要再重复设置 `margin-left`；
+Flowlet 当前处于双前端过渡期：`src/` 是 Mantine legacy，`src-new/` 是默认重构目标。除非任务明确要求修复 legacy，否则新功能和 UI 调整默认落在 `src-new/`。
+
+* `src-new` 使用 React 19、`@douyinfe/semi-ui-19`、TanStack Query 和 CSS Modules，不得引入 Mantine 组件、样式或旧前端 Hook；
+* legacy 继续使用 Mantine，只做必要维护，不把新版能力反向建立在 legacy 结构上；
+* 新前端依赖方向保持 `pages -> features -> domains -> platform`，`shared` 不导入具体业务领域；
+* 优先使用 Semi 组件 props、Flowlet Design Tokens 和共享 UI 组件，再增加同目录 CSS Module；
+* 页面或 feature 不得全局覆盖 `.semi-*`，不得依赖不断提高选择器优先级或 `!important` 解决样式冲突；
 * 页面组件不要无限膨胀；
 * 复杂状态和动作优先抽成 Hook；
-* 业务动作集中在 `src/app/actions`；
-* 数据读取集中在 `useFlowletData`；
+* 后端数据由领域 command 与 TanStack Query 读取，mutation 成功后只失效受影响的 query，不恢复全局 `refreshAll`；
+* 页面和组件不得直接拼写 Tauri command 名称，必须通过 `src-new/domains` 到 `src-new/platform/tauri` 的类型化边界调用；
 * 页面负责展示与有限交互；
 * 不要在 render 期间触发 Tauri command；
 * React Effect 必须考虑 StrictMode 重复执行；
@@ -335,14 +350,24 @@ Agent 接入能力应逐步提供：
 * 不要吞掉 Promise rejection；
 * 不要用 `setTimeout` 掩盖数据一致性问题。
 
+桌面窗口必须保持无系统边框模式。新壳负责：
+
+* 提供覆盖有效空白区域的可拖动窗口区域；
+* 提供可用的最小化、最大化/还原、关闭按钮组；
+* 窗口控制按钮不得触发拖动；
+* 关闭主窗口时隐藏到托盘，只有“退出 Flowlet”才停止代理并退出进程。
+
 建议拆分：
 
 ```text
-App.tsx
-  ├── useFlowletData
-  ├── useFlowletActions
-  ├── useProxyLifecycle
-  └── Pages
+src-new/
+  ├── app/          # Provider、Router、Shell
+  ├── pages/        # 路由页面和页面状态组合
+  ├── features/     # 用户动作与业务编排
+  ├── domains/      # 领域类型、command、query、mutation
+  ├── platform/     # Tauri 等运行平台边界
+  ├── shared/       # 无业务含义的共享 UI 与工具
+  └── styles/       # reset 与 Design Tokens
 ```
 
 ---
@@ -375,18 +400,20 @@ App.tsx
 
 涉及代理时重点检查：
 
-* `src/app/App.tsx`
-* `src/app/useFlowletData.ts`
-* `src/app/useFlowletActions.ts`
-* `src/app/actions/proxyActions.ts`
-* `src/pages/OverviewPage.tsx`
+* `src-new/features/proxy-lifecycle/useProxyOverviewLifecycle.ts`
+* `src-new/features/proxy-lifecycle/useProxyAutoStart.ts`
+* `src-new/features/proxy-lifecycle/useProxyActions.ts`
+* `src-new/domains/proxy/commands.ts`
+* `src-new/features/proxy-lifecycle/ProxyStatusCard.tsx`
+* `src-new/pages/overview/OverviewPage.tsx`
+* `src-new/platform/tauri/client.ts`
 * `src-tauri/src/lib.rs`
 * `src-tauri/src/commands.rs`
 * `src-tauri/src/core/proxy.rs`
 * `src-tauri/src/core/proxy_http.rs`
 * `src-tauri/src/core/proxy_routing.rs`
 
-文件结构可能变化，以当前代码为准。
+若任务明确涉及 legacy，再补查 `src/app`、`src/pages` 及旧 Mantine 调用链。文件结构可能变化，以当前代码为准。
 
 ---
 

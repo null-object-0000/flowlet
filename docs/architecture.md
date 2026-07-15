@@ -4,7 +4,7 @@
 
 Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议透明转发的 AI 请求路由客户端。当前阶段采用 LongCat + DeepSeek first 策略，优先把 LongCat / DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口做完整，并以 Claude Code 接入作为核心验证场景。
 
-第一版正式实现采用破坏式重构策略。当前 Provider 原型、旧 SQLite 表和 `provider_id = default` 逻辑不需要兼容迁移，直接重建为 Channel / Account / Model 架构。
+当前正式数据模型已经采用 Channel / Account / Model 架构，不再使用旧 Provider 原型或 `provider_id = default` 逻辑。后续修改必须基于当前迁移后的真实表结构，不得以“尚未实现”为由再次破坏式重建。
 
 产品重心是开箱即用的本地 AI 请求路由体验：普通用户选择渠道模板、填写 API Key、选择模型即可接入；高级用户再展开自定义 Base URL、Header、模型名、价格和错误识别规则。
 
@@ -45,7 +45,7 @@ Flowlet Desktop
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 
-因为第一版尚未发布，SQLite 可以直接重建为新版最小表集合，不保留旧 `providers`、`provider_profiles` 或旧二段价格结构。
+SQLite 迁移由 `Storage::migrate` 负责。除非需求明确允许且已评估用户数据影响，不得直接删除或重建现有表；新增或调整持久化结构必须提供迁移并补充存储测试。
 
 ## 当前阶段核心模型
 
@@ -122,7 +122,7 @@ http://127.0.0.1:18640/v1/*
         ↓
 Flowlet OpenAI-compatible Gateway
         ↓
-OpenAI-compatible Provider
+OpenAI-compatible Channel Account
 
 Claude Code
         ↓
@@ -130,13 +130,13 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:18640
         ↓
 Flowlet Anthropic-compatible Gateway
         ↓
-Anthropic-compatible Provider / Claude Gateway
+Anthropic-compatible Channel Account
 ```
 
 代理只在请求侧做有限处理：
 
-- 根据用户渠道配置选择 Provider。
-- 将本地协议入口路径拼接到 Provider `base_url`。
+- 根据开放模型和可用账号选择 Channel Account。
+- 将本地协议入口路径拼接到渠道模板的协议 `base_url`。
 - 替换上游 `Authorization` Header 或 `X-Api-Key` Header。
 - 必要时将虚拟模型名映射为上游模型名。
 
@@ -238,7 +238,7 @@ API Key 字段保留独立类型，方便后续接入系统密钥链或本地加
 
 封装渠道能力适配器。不同渠道可以有不同实现，但调用方只依赖统一接口。
 
-第一阶段可以先实现 OpenAI-compatible 的测试连接和模型列表查询雏形；随后补充 Anthropic-compatible 的连接测试、模型列表和 Claude Code 接入辅助。价格、余额、额度、用量查询允许先用“不支持”能力声明占位。
+当前渠道适配器已经承担测试连接、模型同步、余额和资源包等异步能力。新增能力仍应通过明确的 capability 声明暴露；不支持的能力返回明确状态，不得影响主代理请求链路。
 
 ### sync
 
@@ -257,29 +257,28 @@ API Key 字段保留独立类型，方便后续接入系统密钥链或本地加
 负责本地监听和透明转发：
 
 - `/health` 返回本地服务健康状态。
-- `/v1/*` 透明转发到 OpenAI-compatible Provider。
-- `/v1/messages`、`/v1/models` 透明转发到 Anthropic-compatible Provider / Claude Gateway。
+- `/v1/*`、`/openai/v1/*` 透明转发到 OpenAI-compatible 渠道端点。
+- `/anthropic/v1/messages`、`/anthropic/v1/models` 透明转发到 Anthropic-compatible 渠道端点。
 - 普通响应直接透传。
 - 流式响应使用上游字节流直接返回，不能缓存完整响应后再返回。
 - 旁路生成 metadata 日志事件，日志失败不影响响应。
 
 ### storage
 
-SQLite 保存本地配置、日志、用量和同步快照，建议表包括：
+SQLite 当前保存本地配置、日志、用量和同步快照，核心表包括：
 
 - `channel_presets`
 - `channel_accounts`
 - `channel_models`
-- `clients`
 - `virtual_models`
 - `virtual_model_routes`
+- `route_rules`
 - `request_logs`
 - `usage_records`
-- `model_prices`
 - `account_balance_snapshots`
-- `provider_quota_snapshots`
-- `provider_usage_snapshots`
-- `provider_sync_runs`
+- `app_meta`
+
+模型价格不写入 SQLite。`config.json` 的 `channels_config.model_prices` 在应用启动时加载到内存，是当前成本估算的唯一价格来源。
 
 ### analyzer
 
@@ -287,30 +286,25 @@ SQLite 保存本地配置、日志、用量和同步快照，建议表包括：
 
 - 优先从 `response.usage` 提取 token。
 - 没有 usage 时标记为 `unknown`。
-- 根据 `model_prices` 计算成本。
-- 支持按日期、Provider、模型、客户端聚合。
+- 根据运行时内存中的模型价格计算成本。
+- 支持按日期、渠道、账号、模型、客户端聚合。
 
-价格来源优先级为：用户手动价格 > 渠道同步价格 > 内置模板价格。
+价格以 `config.json` 为唯一真实来源；调整价格后需要重新加载应用运行时。
 
 ## 桌面端 UI
 
-第一阶段 UI 只做管理和状态展示，不承载复杂平台能力：
+桌面 UI 只做管理、接入引导和状态观测，不承载复杂平台能力：
 
-- 首页展示代理状态。
-- 启动 / 停止本地代理。
-- Provider 管理。
-- 协议入口配置。
-- 渠道模板选择。
-- API Key 填写。
-- 模型选择和模型列表同步。
-- 渠道测试连接。
-- Client Token 管理。
-- Claude Code 接入向导。
-- 虚拟模型管理。
-- 请求日志。
-- 基础用量统计。
-- 一键复制 Base URL。
-- 一键复制 Client Token。
+- 概览页展示代理状态、渠道账号、开放模型、客户端访问信息和 AI Agent 接入；
+- 代理运行中提供“重启服务”，未运行或启动失败时提供相应启动动作；暂停代理只放在高级设置等低频入口；
+- 渠道账号负责 API Key、连接测试、余额、资源包和模型同步；
+- 开放模型负责对外模型名、可用账号和启用状态；
+- 客户端访问信息提供 Base URL 与默认掩码的 Client Token，并支持查看和复制；
+- Agent 接入打开完整说明或配置抽屉，不只复制单个地址；
+- 请求日志提供真实筛选、统计、分页、尝试链路和脱敏详情；
+- 用量与成本页面只展示真实记录和当前价格配置计算出的结果。
+
+应用窗口使用 Tauri 无系统边框模式，由前端壳提供可拖动区域以及最小化、最大化/还原、关闭按钮。关闭主窗口隐藏到托盘，只有“退出 Flowlet”才停止代理并退出应用。
 
 全部界面文案使用中文。
 
@@ -323,6 +317,6 @@ SQLite 保存本地配置、日志、用量和同步快照，建议表包括：
 - 云端账号系统。
 - 团队计费系统。
 - MCP / Prompt / Skills / Sessions 管理。
-- Provider marketplace。
+- Channel marketplace。
 - 复杂智能路由和小模型路由判断。
 - 在主请求链路实时查询价格、余额、额度或用量。

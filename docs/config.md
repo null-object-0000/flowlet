@@ -273,9 +273,9 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 **行为**：
 
-- 启动时若 SQLite `model_prices` 表为空，从 `config.json` 写入。
+- 应用启动时从 `config.json` 解析并加载到运行时内存；SQLite 不再保存 `model_prices` 表。
 - 用于离线成本估算（`estimated_cost`），不进入主请求链路。
-- 价格来源标记为 `PriceSource::Preset`。
+- `config.json` 是模型价格的唯一真实来源；修改后需要重启应用以重新加载运行时价格。
 
 ### 6.3 `default_exposed_models` — 默认开放模型
 
@@ -329,7 +329,7 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 | `ua_rules` | **热更新**：下次请求立即生效 |
 | `log_capture` | **热更新**：下次请求立即生效 |
 | `bind` | **需重启代理**：监听地址在启动时绑定 |
-| `channels_config` | **需重启应用**：仅在启动时解析一次，写入 SQLite |
+| `channels_config` | **需重启应用**：仅在启动时解析一次；渠道模板在表为空时写入 SQLite，模型价格只加载到运行时内存 |
 
 ### 前端读写
 

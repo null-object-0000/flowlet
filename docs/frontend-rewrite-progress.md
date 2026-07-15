@@ -7,12 +7,14 @@
 
 ## 当前状态
 
-- 当前阶段：阶段 4 渠道与账号闭环已完成；壳层、导航和概览信息架构已按旧版校正；下一轮进入阶段 5（开放模型）
-- 已完成切片：调用链矩阵、CSS 拆分、typed client + AppError、query-key 工厂、ErrorBoundary、测试基座、代理领域 + 自动启动 + 概览页、渠道账号领域 + 渠道列表/账号编辑/删除/连接测试页
+- 当前阶段：阶段 D 观测和设置进行中；请求日志及详情已迁移，下一步继续用量与设置页面
+- 已完成切片：调用链矩阵、CSS 拆分、typed client + AppError、query-key 工厂、ErrorBoundary、测试基座、桌面壳与窗口控制、代理生命周期、概览页、渠道账号、开放模型、客户端访问信息、AI Agent 接入、请求日志及详情
 - 分支：`refactor/channel-account-model`
 - 基座提交：`5975a00`
 - `ui.version` 默认值：**next**（用户已确认重构分支默认进入新版；异常场景仍回退 legacy）
 - 旧前端保持可运行；新前端独立构建；双前端共用同一 Rust 后端与 SQLite
+
+> 下方阶段 0 调用链和迁移矩阵记录的是 legacy 初始盘点，用于解释迁移来源；“读取方（旧）”和旧 `refreshAll` 不代表新版实现规范。当前迁移状态以本节和文末迭代记录为准。
 
 ---
 
@@ -95,12 +97,12 @@
 
 | 旧页面 | 主要 Tauri Commands | 核心 Domains | 新页面目标 | 迁移状态 |
 |---|---|---|---|---|
-| `OverviewPage` | `proxy_status`, `get_proxy_bind_config`, `list_channel_accounts`, `list_channel_presets`, `usage_summary`(仅展示状态，不展示统计值) | proxy、channel、account | `pages/overview/OverviewPage` | 待迁移（阶段 2/3） |
+| `OverviewPage` | `proxy_status`, `get_proxy_bind_config`, `list_channel_accounts`, `list_channel_presets`, `usage_summary`(仅展示状态，不展示统计值) | proxy、channel、account | `pages/overview/OverviewPage` | 已迁移 |
 | `ChannelsPage` | `list_channel_presets`, `list_channel_accounts`, `save_channel_accounts`, `test_connection`, `sync_models`, `query_balance`, `latest_balance_snapshots` | channel、account、model、usage | `features/channel-accounts/AccountManagementSideSheet`（概览内） | 已迁移（Iteration 9 校正） |
-| `RoutesPage` / 模型服务 | `list_route_candidates`, `save_route_candidates`, `list_channel_models`, `list_virtual_models`, `list_channel_accounts`, `list_channel_presets`, `read_app_meta`, `write_app_meta` | model、channel | `pages/models/*` | 待迁移（阶段 5） |
-| `ClientsPage` | `list_clients`/`save_clients`(不存在), `get_proxy_bind_config`, `set_proxy_bind_config`(default_client_token) | client、settings | `pages/clients/*` 或合并 settings | 待迁移（阶段 6，**存疑/待确认**） |
-| `ClaudeCodePage` / 代理接入 | `get_proxy_bind_config`, `list_virtual_models` | client、model | `pages/agents/*` | 待迁移（阶段 6） |
-| `LogsPage` | `list_request_logs`, `list_request_log_clients`, `get_request_log_detail` | request-log、usage | `pages/logs/*` | 待迁移（阶段 7） |
+| `RoutesPage` / 模型服务 | `list_route_candidates`, `save_route_candidates`, `list_channel_models`, `list_virtual_models`, `list_channel_accounts`, `list_channel_presets`, `read_app_meta`, `write_app_meta` | model、channel | `pages/models/*` | 已迁移 |
+| `ClientsPage` | `get_proxy_bind_config`, `set_proxy_bind_config`(default_client_token) | client、settings | 合并到概览客户端访问信息与接入详情 | 已迁移（不新增独立客户端页） |
+| `ClaudeCodePage` / 代理接入 | `get_proxy_bind_config`, `list_virtual_models` | client、model | 合并到概览 AI Agent 接入 | 已迁移 |
+| `LogsPage` | `list_request_logs`, `list_request_log_clients`, `list_request_log_models`, `get_request_log_detail` | request-log、usage | `pages/request-logs/*` | 已迁移 |
 | `UsagePage` | `usage_summary`, `analyze_usage` | usage | `pages/usage/*` | 待迁移（阶段 7） |
 | `StatsPage` | `account_stats`, `list_route_rules`, `save_route_rules`, `account_routing_scores`, `cleanup_old_logs`, `is_autostart_enabled`, `enable/disable_autostart`, `export_config`, `import_config` | settings、usage | `pages/settings/*` | 待迁移（阶段 8） |
 

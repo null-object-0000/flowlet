@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useAppPreferences, type ThemePreference } from "../../app/preferences/AppPreferences";
 import type { AppLanguage } from "../../app/preferences/translations";
 import { useAutostartSetting } from "../../features/settings/useAutostartSetting";
-import styles from "./SettingsPage.module.css";
+import styles from "./SettingsPageStatic.module.css";
 
 const { Paragraph, Title } = Typography;
 
@@ -30,14 +30,14 @@ export function SettingsPage() {
       </header>
 
       <div className={styles.content}>
-        <SettingSection title={t("语言")} description={t("选择应用界面的显示语言，修改后立即生效")} icon={<IconGlobe />}>
+        <SettingSection title={t("显示语言")} description={t("选择界面显示语言，修改后立即生效")} icon={<IconGlobe />}>
           <div className={styles.optionGrid}>
             <ChoiceCard selected={language === "zh-CN"} title={t("简体中文")} description={t("中文界面")} onClick={() => setLanguage("zh-CN")} />
             <ChoiceCard selected={language === "en-US"} title="English" description={t("英文界面")} onClick={() => setLanguage("en-US")} />
           </div>
         </SettingSection>
 
-        <SettingSection title={t("外观")} description={t("主题会应用到所有页面，并跟随 Semi Design 组件同步切换")} icon={<IconSun />}>
+        <SettingSection title={t("界面外观")} description={t("选择系统、浅色或深色主题")} icon={<IconSun />}>
           <div className={styles.themeGrid}>
             <ThemeCard value="system" current={theme} icon={<IconDesktop />} title={t("跟随系统")} description={t("根据操作系统的外观设置自动切换")} onChange={setTheme} />
             <ThemeCard value="light" current={theme} icon={<IconSun />} title={t("浅色模式")} description={t("始终使用浅色外观")} onChange={setTheme} />
@@ -45,7 +45,7 @@ export function SettingsPage() {
           </div>
         </SettingSection>
 
-        <SettingSection title={t("系统")} description={t("开机启动")} icon={<IconDesktop />}>
+        <SettingSection title={t("系统")} description={t("配置 Flowlet 的系统启动行为")} icon={<IconDesktop />}>
           <div className={styles.switchRow}>
             <span>
               <strong>{t("开机启动")}</strong>

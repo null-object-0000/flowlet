@@ -100,6 +100,11 @@ export function summarizeLongCatPacks(packs: LongCatPack[]) {
   );
 }
 
+export function toLongCatPackExpireAt(value: string) {
+  const date = value.trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T23:59:59` : null;
+}
+
 export function formatTokenCount(value: number, language: "zh-CN" | "en-US" = "zh-CN") {
   if (language === "en-US") return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
   if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;

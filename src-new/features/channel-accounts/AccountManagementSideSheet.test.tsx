@@ -107,6 +107,52 @@ describe("AccountManagementSideSheet", () => {
       token_packs: expect.stringContaining('"totalToken":1000'),
     }));
   });
+  it("repairs a timezone-shifted snapshot expiry from the stored package data", async () => {
+    const user = userEvent.setup();
+    const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
+    const tokenPacks = JSON.stringify([
+      { lotId: 151724, totalToken: 50_000_000, consumedToken: 22_071_022, remainingToken: 27_928_978, expireTime: "2026-07-30 01:00:31", status: "ACTIVE" },
+      { lotId: 159869, totalToken: 10_000_000, consumedToken: 0, remainingToken: 10_000_000, expireTime: "2026-07-30 09:42:47", status: "ACTIVE" },
+      { lotId: 160795, totalToken: 5_000_000, consumedToken: 0, remainingToken: 5_000_000, expireTime: "2026-07-30 11:48:49", status: "ACTIVE" },
+    ]);
+
+    render(
+      <AccountManagementSideSheet
+        request={{ kind: "edit", accountId: account.id }}
+        accounts={[account]}
+        snapshots={[{
+          id: "snapshot-1",
+          account_id: account.id,
+          balance: null,
+          currency: null,
+          token_pack_total: 65_000_000,
+          token_pack_used: 22_071_022,
+          token_pack_remaining: 42_928_978,
+          token_pack_expire_at: "2026-07-29T16:00:00.000Z",
+          token_packs: tokenPacks,
+          source: "manual",
+          synced_at: "2026-07-15T00:00:00.000Z",
+          remark: null,
+          created_at: "2026-07-15T00:00:00.000Z",
+          updated_at: "2026-07-15T00:00:00.000Z",
+        }]}
+        presets={[preset]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={onSaveBalanceSnapshot}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText("2026-07-30")).toBeInTheDocument();
+    expect(screen.queryByText("2026-07-29")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    expect(onSaveBalanceSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      token_pack_expire_at: "2026-07-30T23:59:59",
+    }));
+  });
 
   it("shows balance refresh feedback in a toast", async () => {
     const user = userEvent.setup();

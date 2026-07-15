@@ -9,6 +9,7 @@ import {
   formatTokenCount,
   LongCatPackManager,
   parseStoredLongCatPacks,
+  toLongCatPackExpireAt,
   summarizeLongCatPacks,
   type LongCatPack,
 } from "./LongCatPackManager";
@@ -304,14 +305,16 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
 }
 
 function resourceDraft(snapshot?: AccountBalanceSnapshot): ResourceDraft {
+  const tokenPacks = snapshot?.token_packs ?? "";
+  const packExpire = summarizeLongCatPacks(parseStoredLongCatPacks(tokenPacks)).expireAt;
   return {
     balance: snapshot?.balance?.toString() ?? "",
     currency: snapshot?.currency ?? "CNY",
     tokenTotal: snapshot?.token_pack_total?.toString() ?? "",
     tokenUsed: snapshot?.token_pack_used?.toString() ?? "",
     tokenRemaining: snapshot?.token_pack_remaining?.toString() ?? "",
-    tokenExpire: snapshot?.token_pack_expire_at?.slice(0, 10) ?? "",
-    tokenPacks: snapshot?.token_packs ?? "",
+    tokenExpire: packExpire?.slice(0, 10) ?? snapshot?.token_pack_expire_at?.slice(0, 10) ?? "",
+    tokenPacks,
   };
 }
 
@@ -333,7 +336,7 @@ function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, m
     token_pack_total: mode === "token_pack" ? optionalNumber(resource.tokenTotal) : null,
     token_pack_used: mode === "token_pack" ? optionalNumber(resource.tokenUsed) : null,
     token_pack_remaining: mode === "token_pack" ? remaining : null,
-    token_pack_expire_at: mode === "token_pack" && resource.tokenExpire ? new Date(`${resource.tokenExpire}T00:00:00`).toISOString() : null,
+    token_pack_expire_at: mode === "token_pack" ? toLongCatPackExpireAt(resource.tokenExpire) : null,
     token_packs: mode === "token_pack" && resource.tokenPacks ? resource.tokenPacks : null,
     source: "manual",
     synced_at: new Date().toISOString(),

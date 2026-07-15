@@ -14,6 +14,7 @@ import {
 } from "./LongCatPackManager";
 import styles from "./AccountEditorDrawer.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 
 const { Text } = Typography;
 
@@ -136,7 +137,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     <SideSheet
       visible
       motion={false}
-      zIndex={1100}
+      zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
       width="min(760px, 94vw)"
       title={(
         <div className={styles.title}>

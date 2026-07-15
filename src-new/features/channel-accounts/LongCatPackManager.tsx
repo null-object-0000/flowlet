@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Input, Modal, TextArea } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconPlus } from "@douyinfe/semi-icons";
 import styles from "./LongCatPackManager.module.css";
+import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 export type LongCatPack = {
@@ -133,7 +134,7 @@ export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {
     <Modal
       visible
       motion={false}
-      zIndex={1200}
+      zIndex={APP_OVERLAY_Z_INDEX.modal}
       width="min(940px, 96vw)"
       title={t("LongCat 资源包管理")}
       footer={(

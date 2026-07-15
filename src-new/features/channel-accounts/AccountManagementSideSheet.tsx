@@ -7,6 +7,7 @@ import { AccountEditorDrawer, type AccountEditorMode, type AccountResourceSnapsh
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./AccountManagementSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 
 const { Text } = Typography;
 
@@ -102,7 +103,7 @@ export function AccountManagementSideSheet(props: Props) {
       {request?.kind === "list" && editor == null ? <SideSheet
         visible
         motion={false}
-        zIndex={1100}
+        zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
         title={<div><strong>{t("渠道账号管理")}</strong><small>{t("共 {total} 个账号，{enabled} 个已启用", { total: accounts.length, enabled: accounts.filter((item) => item.enabled).length })}</small></div>}
         width="min(720px, 94vw)"
         footer={(
@@ -151,7 +152,7 @@ export function AccountManagementSideSheet(props: Props) {
         onTestConnection={onTestConnection}
         onSyncBalance={onSyncBalance}
       /> : null}
-      <Modal title={t("确认删除账号")} visible={deleteTarget != null} zIndex={1200} footer={null} onCancel={() => setDeleteTarget(null)}>
+      <Modal title={t("确认删除账号")} visible={deleteTarget != null} zIndex={APP_OVERLAY_Z_INDEX.modal} footer={null} onCancel={() => setDeleteTarget(null)}>
         <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>
           <Text>{t("确定要删除账号“{name}”吗？删除后将退出所有路由，且无法恢复。", { name: deleteTarget?.name ?? "" })}</Text>
           <Space style={{ justifyContent: "flex-end", width: "100%" }}><Button onClick={() => setDeleteTarget(null)}>{t("取消")}</Button><Button type="danger" theme="solid" loading={busy} onClick={() => void remove()}>{t("确认删除")}</Button></Space>

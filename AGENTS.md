@@ -339,6 +339,8 @@ Flowlet 当前处于双前端过渡期：`src/` 是 Mantine legacy，`src-new/` 
 * 新前端依赖方向保持 `pages -> features -> domains -> platform`，`shared` 不导入具体业务领域；
 * 优先使用 Semi 组件 props、Flowlet Design Tokens 和共享 UI 组件，再增加同目录 CSS Module；
 * 页面或 feature 不得全局覆盖 `.semi-*`，不得依赖不断提高选择器优先级或 `!important` 解决样式冲突；
+* 无系统边框窗口的拖动区和窗口控制按钮是全局固定层；新版 `SideSheet` / Drawer 必须使用 `src-new/shared/ui/overlayLayers.ts` 的共享层级，确保弹层标题、关闭按钮位于窗口标题层之上，不得在业务组件中临时堆叠 `z-index`；
+* 提高 `SideSheet` / Modal 层级时必须同步检查 Toast：Semi 静态 Toast 默认层级可能低于自定义弹层，必须保持 `Toast > 二级 Modal > SideSheet > 窗口标题层`，并验证弹层内的成功、警告和错误提示未被遮挡；
 * 页面组件不要无限膨胀；
 * 复杂状态和动作优先抽成 Hook；
 * 后端数据由领域 command 与 TanStack Query 读取，mutation 成功后只失效受影响的 query，不恢复全局 `refreshAll`；

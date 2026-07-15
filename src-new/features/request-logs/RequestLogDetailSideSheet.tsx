@@ -6,6 +6,7 @@ import { formatCapturedBody, formatCapturedJson, formatDuration, formatLogTime, 
 import { useRequestLogDetail } from "./useRequestLogs";
 import styles from "./RequestLogDetailSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 
 const JSON_VIEWER_OPTIONS = { readOnly: true, autoWrap: true } as const;
 
@@ -26,7 +27,7 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
       onCancel={onClose}
       footer={null}
       bodyStyle={{ padding: 0 }}
-      zIndex={1100}
+      zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
     >
       {detail.isLoading ? <DetailLoading /> : null}
       {detail.isError ? <DetailState title={t("请求详情加载失败")} description={safeLogText(detail.error.message)} action={<Button icon={<IconRefresh />} onClick={() => void detail.refetch()}>{t("重试")}</Button>} /> : null}

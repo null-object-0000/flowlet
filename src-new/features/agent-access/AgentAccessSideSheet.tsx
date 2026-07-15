@@ -2,6 +2,7 @@ import { Button, SideSheet, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconCopy } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -32,6 +33,7 @@ export function AgentAccessSideSheet({ agent, baseUrl, clientToken, onClose, onC
   return (
     <SideSheet
       visible
+      zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
       title={t("{name} 接入", { name })}
       width="min(680px, 92vw)"
       footer={null}

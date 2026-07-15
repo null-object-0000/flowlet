@@ -3,10 +3,12 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import { applyInitialPreferences } from "./app/preferences/AppPreferences";
+import { configureAppOverlayLayers } from "./shared/ui/overlayLayers";
 import "./styles/reset.css";
 import "./styles/tokens.css";
 export function renderApp(root: HTMLElement) {
   applyInitialPreferences();
+  configureAppOverlayLayers();
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
       <App />

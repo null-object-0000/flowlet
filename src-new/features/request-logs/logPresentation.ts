@@ -1,4 +1,5 @@
 import type { RequestLogRow } from "../../domains/request-log/types";
+import { translate, type AppLanguage } from "../../app/preferences/translations";
 
 const SENSITIVE_KEY = /^(authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?token|cookie|set-cookie|password|secret)$/i;
 
@@ -38,8 +39,8 @@ export function safeLogText(value?: string | null) {
     .replace(/((?:api[-_ ]?key|token|password|secret)\s*[=:]\s*)[^\s,;"']+/gi, "$1••••••");
 }
 
-export function formatCapturedJson(value?: string | null) {
-  if (!value) return "— 未捕获";
+export function formatCapturedJson(value?: string | null, language: AppLanguage = "zh-CN") {
+  if (!value) return `— ${translate(language, "未捕获")}`;
   try {
     return JSON.stringify(redactSensitive(JSON.parse(value)), null, 2);
   } catch {
@@ -47,8 +48,8 @@ export function formatCapturedJson(value?: string | null) {
   }
 }
 
-export function formatCapturedBody(value?: string | null) {
-  if (!value) return "— 未捕获";
+export function formatCapturedBody(value?: string | null, language: AppLanguage = "zh-CN") {
+  if (!value) return `— ${translate(language, "未捕获")}`;
   try {
     const binary = atob(value);
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -59,7 +60,7 @@ export function formatCapturedBody(value?: string | null) {
       return safeLogText(decoded);
     }
   } catch {
-    return "— 捕获内容无法解码";
+    return `— ${translate(language, "捕获内容无法解码")}`;
   }
 }
 

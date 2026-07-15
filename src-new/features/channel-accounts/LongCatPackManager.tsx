@@ -148,7 +148,7 @@ export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {
         <div className={styles.importPanel}>
           <p>{t("在 LongCat 控制台获取资源包接口的响应 JSON，粘贴后可批量导入；相同资源包 ID 会自动覆盖更新。")} <code>/api/pay/quota/metering/token-packs/summary</code></p>
           <TextArea
-            aria-label="LongCat package JSON"
+            aria-label={language === "zh-CN" ? "LongCat 资源包 JSON" : "LongCat package JSON"}
             value={json}
             rows={3}
             placeholder={'{"code":0,"data":{"currentLot":{...},"otherLots":[...]}}'}

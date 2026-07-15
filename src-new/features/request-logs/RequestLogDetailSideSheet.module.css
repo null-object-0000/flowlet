@@ -35,6 +35,8 @@
 .capture strong { font-size: 11px; }
 .capture small { color: var(--flowlet-color-text-secondary); font-size: 11px; }
 .jsonViewer { border: 0; font-size: 12px; }
+.jsonContainer { position: relative; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .codeViewer { max-height: 300px; overflow: auto; background: var(--semi-color-fill-0); }
 .codeViewer :global(pre[class*="language-"]) { min-height: 105px; margin: 0; border-radius: 0; background: var(--semi-color-fill-0); white-space: pre-wrap; word-break: break-word; }
 .codeViewer :global(code[class*="language-"]) { font-size: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }

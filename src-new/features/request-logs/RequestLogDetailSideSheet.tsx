@@ -76,15 +76,15 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
           <Tabs.TabPane tab={t("请求")} itemKey="request">
             <div className={styles.tabContent}>
               <AttemptSelector rows={rows} selectedRow={selectedRow} onSelect={setSelectedAttemptId} compact />
-              <CapturedSection title={t("请求 Headers")} value={formatCapturedJson(selectedRow.req_headers_json)} />
-              <CapturedSection title={t("请求 Body")} value={formatCapturedBody(selectedRow.req_body_b64)} />
+              <CapturedSection title={t("请求 Headers")} value={formatCapturedJson(selectedRow.req_headers_json, language)} />
+              <CapturedSection title={t("请求 Body")} value={formatCapturedBody(selectedRow.req_body_b64, language)} />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={t("响应")} itemKey="response">
             <div className={styles.tabContent}>
               <AttemptSelector rows={rows} selectedRow={selectedRow} onSelect={setSelectedAttemptId} compact />
-              <CapturedSection title={t("响应 Headers")} value={formatCapturedJson(selectedRow.res_headers_json)} />
-              <CapturedSection title={t("响应 Body")} value={formatCapturedBody(selectedRow.res_body_b64)} />
+              <CapturedSection title={t("响应 Headers")} value={formatCapturedJson(selectedRow.res_headers_json, language)} />
+              <CapturedSection title={t("响应 Body")} value={formatCapturedBody(selectedRow.res_body_b64, language)} />
             </div>
           </Tabs.TabPane>
         </Tabs>
@@ -151,15 +151,18 @@ function CapturedSection({ title, value }: { title: string; value: string }) {
     <section className={styles.capture}>
       <div><span><strong>{title}</strong><small>{t("敏感凭据已隐藏")}</small></span><Button aria-label={t("复制{title}", { title })} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copy()} /></div>
       {isJson ? (
-        <JsonViewer
-          className={styles.jsonViewer}
-          value={value}
-          width="100%"
-          height={viewerHeight}
-          showSearch
-          limitSearchButtonBounds
-          options={JSON_VIEWER_OPTIONS}
-        />
+        <div className={styles.jsonContainer}>
+          <JsonViewer
+            className={styles.jsonViewer}
+            value={value}
+            width="100%"
+            height={viewerHeight}
+            showSearch
+            limitSearchButtonBounds
+            options={JSON_VIEWER_OPTIONS}
+          />
+          <span className={styles.srOnly}>{value}</span>
+        </div>
       ) : (
         <CodeHighlight
           className={styles.codeViewer}

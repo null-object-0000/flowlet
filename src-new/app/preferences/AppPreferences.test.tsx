@@ -1,5 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("lottie-web", () => ({
+  default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
+}));
+
 import { AppPreferencesProvider, applyInitialPreferences, useAppPreferences } from "./AppPreferences";
 
 afterEach(() => {
@@ -34,4 +39,3 @@ function PreferenceProbe() {
   const { setLanguage, setTheme, t } = useAppPreferences();
   return <><span>{t("设置")}</span><button onClick={() => setLanguage("en-US")}>english</button><button onClick={() => setTheme("dark")}>dark</button></>;
 }
-

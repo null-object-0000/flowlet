@@ -63,14 +63,14 @@ export function RequestLogsPage() {
         </button>
       </header>
 
-      <section className={styles.stats} aria-label="日志统计">
+      <section className={styles.stats} aria-label={t("日志统计")}>
         <StatCard label={t("请求数")} value={formatInteger(summary?.requestCount, language)} hint={t("失败 {count} 条", { count: formatInteger(summary?.errorCount, language) })} />
         <StatCard label={t("成功率")} value={formatRate(summary?.successCount, summary?.requestCount)} hint={t("当前筛选范围")} success />
         <StatCard label={t("平均响应耗时")} value={formatDuration(summary?.averageDurationMs ?? null)} hint={t("基于已完成请求")} />
         <StatCard label={t("Token 消耗")} value={formatCompactNumber(summary?.knownTokens, language)} hint={`¥${(summary?.estimatedCost ?? 0).toFixed(4)}`} />
       </section>
 
-      <section className={styles.toolbar} aria-label="日志筛选">
+      <section className={styles.toolbar} aria-label={t("日志筛选")}>
         <Input className={styles.search} prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索请求 ID、模型或账号")} showClear onChange={setSearchDraft} />
         <Select value={filter.timeRange} optionList={TIME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))} onChange={(value) => apply({ timeRange: value as RequestLogTimeRange })} aria-label={t("时间")} />
         <Select

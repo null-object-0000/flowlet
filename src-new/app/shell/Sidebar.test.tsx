@@ -20,7 +20,7 @@ describe("Sidebar", () => {
       "模型服务",
       "请求日志",
       "用量成本",
-      "高级设置",
+      "设置",
     ]);
     expect(screen.queryByText(/服务运行中|代理服务运行中/)).not.toBeInTheDocument();
   });

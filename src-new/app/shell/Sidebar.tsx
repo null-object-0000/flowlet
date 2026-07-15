@@ -10,6 +10,7 @@ import {
 import { NavLink } from "react-router-dom";
 import navStyles from "./Nav.module.css";
 import styles from "./Sidebar.module.css";
+import { useAppPreferences } from "../preferences/AppPreferences";
 
 const { Text, Title } = Typography;
 
@@ -18,10 +19,10 @@ const navItems: Array<{ to: string; label: string; icon: ReactNode }> = [
   { to: "/models", label: "模型服务", icon: <IconServer /> },
   { to: "/logs", label: "请求日志", icon: <IconList /> },
   { to: "/usage", label: "用量成本", icon: <IconHistogram /> },
-  { to: "/settings", label: "高级设置", icon: <IconSetting /> },
 ];
 
 export function Sidebar() {
+  const { t } = useAppPreferences();
   return (
     <div className={styles.inner}>
       <div className={styles.brand}>
@@ -32,7 +33,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className={styles.nav} aria-label="主导航">
+      <nav className={styles.nav} aria-label={t("主导航")}>
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -41,11 +42,16 @@ export function Sidebar() {
             className={({ isActive }) => (isActive ? navStyles.active : navStyles.link)}
           >
             <span className={navStyles.icon}>{item.icon}</span>
-            {item.label}
+            {t(item.label)}
           </NavLink>
         ))}
       </nav>
-
+      <div className={styles.footer}>
+        <NavLink to="/settings" className={({ isActive }) => (isActive ? navStyles.active : navStyles.link)}>
+          <span className={navStyles.icon}><IconSetting /></span>
+          {t("设置")}
+        </NavLink>
+      </div>
     </div>
   );
 }

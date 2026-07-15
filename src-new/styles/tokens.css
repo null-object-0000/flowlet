@@ -19,6 +19,7 @@
   --flowlet-color-text-tertiary: #9199a7;
   --flowlet-color-primary: #1769ff;
   --flowlet-color-success: #2fa64a;
+  --flowlet-color-shell-glow: rgba(214, 231, 255, 0.4);
   --flowlet-radius-control: 7px;
   --flowlet-radius-card: 12px;
   --flowlet-radius-dialog: 16px;
@@ -66,8 +67,47 @@
   --semi-border-radius-large: var(--flowlet-radius-card);
 }
 
+body[theme-mode="dark"] {
+  --flowlet-color-app-bg: #111722;
+  --flowlet-color-main-bg: rgba(17, 23, 34, 0.96);
+  --flowlet-color-sidebar-bg: rgba(20, 27, 39, 0.96);
+  --flowlet-color-surface: rgba(27, 36, 50, 0.92);
+  --flowlet-color-surface-strong: #202a3a;
+  --flowlet-color-surface-muted: #182130;
+  --flowlet-color-border: rgba(222, 231, 245, 0.09);
+  --flowlet-color-border-strong: rgba(222, 231, 245, 0.16);
+  --flowlet-color-text: #f0f4fa;
+  --flowlet-color-text-secondary: #aeb9c9;
+  --flowlet-color-text-tertiary: #7e8a9c;
+  --flowlet-color-primary: #4d8dff;
+  --flowlet-color-success: #4fbe68;
+  --flowlet-color-shell-glow: rgba(45, 91, 160, 0.18);
+  --flowlet-shadow-card: 0 12px 28px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.16);
+  --flowlet-shadow-floating: 0 28px 80px rgba(0, 0, 0, 0.5);
+
+  --semi-color-primary: var(--flowlet-color-primary);
+  --semi-color-primary-hover: #72a5ff;
+  --semi-color-primary-active: #3379ef;
+  --semi-color-primary-light-default: rgba(77, 141, 255, 0.14);
+  --semi-color-primary-light-hover: rgba(77, 141, 255, 0.2);
+  --semi-color-primary-light-active: rgba(77, 141, 255, 0.26);
+  --semi-color-success: var(--flowlet-color-success);
+  --semi-color-success-light-default: rgba(79, 190, 104, 0.14);
+  --semi-color-border: var(--flowlet-color-border);
+  --semi-color-text-0: var(--flowlet-color-text);
+  --semi-color-text-1: var(--flowlet-color-text-secondary);
+  --semi-color-text-2: var(--flowlet-color-text-tertiary);
+  --semi-color-bg-0: var(--flowlet-color-surface);
+  --semi-color-bg-1: var(--flowlet-color-surface);
+  --semi-color-bg-2: var(--flowlet-color-surface-strong);
+  --semi-color-fill-0: #202b3b;
+  --semi-color-fill-1: #293548;
+  --semi-shadow-elevated: var(--flowlet-shadow-floating);
+}
+
 body {
   font-family: var(--flowlet-font-family);
   color: var(--semi-color-text-0);
   background: var(--flowlet-color-app-bg);
+  transition: color 160ms ease, background-color 160ms ease;
 }

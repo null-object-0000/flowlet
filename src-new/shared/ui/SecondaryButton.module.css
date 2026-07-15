@@ -1,0 +1,64 @@
+.button:global(.semi-button) {
+  border: 1px solid var(--flowlet-color-border-strong);
+  transition: color .18s ease, border-color .18s ease, background-color .18s ease, transform .18s ease;
+  white-space: nowrap;
+}
+
+.button:global(.semi-button):disabled {
+  transform: none;
+}
+
+.regular:global(.semi-button) {
+  min-width: 108px;
+  height: 36px;
+  padding: 0 14px;
+  gap: 9px;
+  border-radius: 8px;
+  color: var(--flowlet-color-text);
+  background: var(--flowlet-color-surface);
+  box-shadow: 0 4px 12px rgba(30, 45, 70, .05);
+  font-size: 13px;
+}
+
+.button.regular:global(.semi-button):hover:not(:disabled) {
+  border-color: rgba(23, 105, 255, .28);
+  color: var(--flowlet-color-text);
+  background: var(--flowlet-color-surface);
+  transform: translateY(-1px);
+}
+
+.button.regular:global(.semi-button):active:not(:disabled) {
+  border-color: rgba(23, 105, 255, .4);
+  color: var(--flowlet-color-text);
+  background: var(--flowlet-color-surface-strong);
+  transform: translateY(0);
+}
+
+.compact:global(.semi-button) {
+  height: 32px;
+  padding: 0 10px;
+  gap: 6px;
+  border-radius: 7px;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-strong);
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.button.compact:global(.semi-button):hover:not(:disabled) {
+  border-color: rgba(23, 105, 255, .28);
+  color: var(--flowlet-color-primary);
+  background: var(--flowlet-color-surface-strong);
+  transform: none;
+}
+
+.button.compact:global(.semi-button):active:not(:disabled) {
+  border-color: rgba(23, 105, 255, .4);
+  color: var(--flowlet-color-primary);
+  background: var(--semi-color-primary-light-default);
+  transform: none;
+}
+
+.compact:global(.semi-button) :global(.semi-icon) {
+  font-size: 14px;
+}

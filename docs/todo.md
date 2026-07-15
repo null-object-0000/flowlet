@@ -32,7 +32,7 @@
 - [x] 请求日志 - 请求详情的弹窗应该和渠道账号管理弹窗一样的层级，需要解决弹窗头部和应用窗口头部冲突的问题
 - [x] 请求日志 - 每次通过菜单点击进入到这个页面应该自动刷新下最新数据，现在还需要自己手动刷新
 - [x] 请求日志里的客户端筛选项和现在实际意义不符了，现在的客户端应该是 UA 解析出来的
-- [ ] 切换到请求日志页面，正在加载请求日志… 不应该有一个这个过渡状态呐，真需要加载也可以在局部比如 table 内部做 loading 或者骨架屏就行了
+- [x] 切换到请求日志页面，正在加载请求日志… 不应该有一个这个过渡状态呐，真需要加载也可以在局部比如 table 内部做 loading 或者骨架屏就行了
 
 ## 其他
 
@@ -46,23 +46,6 @@
 - [x] LongCat 资源包使用规则· 优先消耗最快过期的Token额度· 未在有效期内使用的额度自动清零· 资源包默认于到期时间当天 23:59:59 清零
 - [x] LongCat 资源包现在只支持导入多个资源包，不支持查看和手动维护多个资源包，这个要看怎么处理下
 - [ ] config.json 中 ua_rules 升级为客户端配置，每个客户端包含 UA 识别（若有的话，也有可能某个客户端没有特殊的 UA 识别）然后也需要包含如何确认是否在本地安装，安装的版本是多少（优先都是用 bash 命令来确认，例如 PS C:\Users\nicha> hermes --version ===> \n Hermes Agent v0.18.2 (2026.7.7.2) · upstream aaf56912 \n Install directory: C:\Users\nicha\AppData\Local\hermes\hermes-agent \n Install method: git \n Python: 3.11.14 \n OpenAI SDK: 2.24.0 PS C:\Users\nicha> opencode -v ===> 1.17.18 PS C:\Users\nicha> claude -v ===> 2.1.207 (Claude Code)）
-
-## API 接入详情弹窗头部冲突
-
-> `src/features/clients/ApiAccessDrawer.tsx:19-26` 的 `<Drawer>` 缺少 `zIndex` 和 header offset，弹窗头部被自定义标题栏拖拽区（z-index:1000）叠压。
-
-- [ ] `ApiAccessDrawer.tsx` — `<Drawer>` 添加 `zIndex={2000}`，对齐账号管理（`AccountManagementDrawer`）和请求日志详情（`LogDetailDrawer`）的做法
-- [ ] `ApiAccessDrawer.tsx` — header 添加 `padding-top`（参考日志详情 44px 或账号管理 20px），避开 window-drag-region 的 36px 像素区域
-
-## 模型服务页面性能优化
-
-> 切换至"模型服务"页面时体感卡顿，其他页面流畅。根因：`buildExposedModels` 在 render 体里裸调用未做 memo，而概览页相同调用使用了 `useMemo`。
-
-- [ ] **P0** `ModelServicesPanel.tsx:55-63` — `availableAccountIds`、`buildExposedModels(...)`、`aggregateModels`、`directModels` 全部用 `React.useMemo` 包裹，对齐 `OverviewPage.tsx:97-108` 的做法
-- [ ] **P1** `RouteCandidatesPanel.tsx:30-46` — 大列表（每条 route 展开 3 个 Select + TextInput + Checkbox + Button）未虚拟化，且折叠状态下仍全量 mount。引入 react-window 虚拟化，或改为 `<details>` open 时才挂载 children
-- [ ] **P1** `ModelServicesPanel.tsx:115-164` — Tier 卡片循环内 `.find()` 线性查找 accounts（O(routes × accounts)），预索引为 `Map<id, account>` 并加 `useMemo`
-- [ ] **P2** `routeActions.ts:91-111` — `updateRoutes(indexes, patch)` 同步触发 N 次 `setRoutes`，合并为单次批量更新
-- [ ] **P3** `App.tsx:182-199` — 自动路由同步 effect 内 `ensureDefaultExposedRoutes`（4 层嵌套循环）结果做短时缓存
 
 ## 未来规划
 

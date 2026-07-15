@@ -1,0 +1,33 @@
+.page { height: 100%; max-width: 980px; margin: 0 auto; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 18px; }
+.header { display: grid; gap: 3px; }
+.header h3 { color: var(--flowlet-color-text); font-size: 22px; }
+.header p { font-size: 13px; }
+.content { min-height: 0; display: grid; align-content: start; gap: 14px; overflow: auto; padding: 1px 4px 8px 1px; }
+.section { padding: 18px; display: grid; gap: 16px; border: 1px solid var(--flowlet-color-border); border-radius: var(--flowlet-radius-card); background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
+.sectionHeader { display: flex; align-items: center; gap: 11px; }
+.sectionHeader > i { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-size: 17px; font-style: normal; }
+.sectionHeader > span { min-width: 0; display: grid; gap: 3px; }
+.sectionHeader strong { color: var(--flowlet-color-text); font-size: 14px; }
+.sectionHeader small { color: var(--flowlet-color-text-secondary); font-size: 12px; line-height: 1.45; }
+.optionGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.themeGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.choice, .themeChoice { position: relative; min-width: 0; border: 1px solid var(--flowlet-color-border-strong); border-radius: 9px; color: var(--flowlet-color-text); background: var(--flowlet-color-surface-strong); text-align: left; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+.choice { min-height: 62px; padding: 11px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.themeChoice { min-height: 84px; padding: 13px; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: start; gap: 9px; }
+.choice:hover, .themeChoice:hover { border-color: var(--semi-color-primary); transform: translateY(-1px); }
+.choice.selected, .themeChoice.selected { border-color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); box-shadow: 0 0 0 2px var(--semi-color-primary-light-default); }
+.choice > span, .themeChoice > span { min-width: 0; display: grid; gap: 3px; }
+.choice strong, .themeChoice strong { font-size: 13px; }
+.choice small, .themeChoice small { color: var(--flowlet-color-text-secondary); font-size: 11px; line-height: 1.4; }
+.choice > svg { color: var(--semi-color-primary); }
+.themeChoice > i { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 15px; font-style: normal; }
+.themeChoice.selected > i { color: var(--semi-color-primary); background: var(--flowlet-color-surface-strong); }
+.themeChoice > b { position: absolute; top: 9px; right: 9px; color: var(--semi-color-primary); font-size: 12px; }
+.switchRow { min-height: 60px; padding: 11px 14px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border: 1px solid var(--flowlet-color-border); border-radius: 9px; background: var(--flowlet-color-surface-muted); }
+.switchRow > span { display: grid; gap: 4px; }
+.switchRow strong { color: var(--flowlet-color-text); font-size: 13px; }
+.switchRow small { max-width: 680px; color: var(--flowlet-color-text-secondary); font-size: 11px; line-height: 1.45; }
+.switchRow button { width: max-content; padding: 0; border: 0; color: var(--semi-color-danger); background: transparent; font-size: 11px; cursor: pointer; }
+@media (max-width: 720px) { .themeGrid { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .optionGrid { grid-template-columns: 1fr; } .section { padding: 14px; } }
+

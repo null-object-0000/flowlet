@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { accountCommands } from "../../domains/account/commands";
+import { modelCommands } from "../../domains/model/commands";
 import type { ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import { refreshSavedAccounts } from "./useAccountActions";
@@ -20,6 +21,7 @@ const preset = {
   id: "deepseek",
   supports_balance_query: true,
   supports_model_list: true,
+  supported_protocols: ["openai", "anthropic"],
 } as ChannelPreset;
 
 afterEach(() => vi.restoreAllMocks());
@@ -37,12 +39,18 @@ describe("refreshSavedAccounts", () => {
       models: [],
       errors: [],
     });
+    const listRoutes = vi.spyOn(modelCommands, "listRouteCandidates").mockResolvedValue([]);
+    const saveRoutes = vi.spyOn(modelCommands, "saveRouteCandidates").mockResolvedValue();
 
     const result = await refreshSavedAccounts([account], [preset]);
 
     expect(queryBalance).toHaveBeenCalledWith(account.id);
     expect(syncModels).toHaveBeenCalledWith(account.id);
-    expect(result).toEqual({ balanceRequested: true, modelsRequested: true, failures: [] });
+    expect(listRoutes).toHaveBeenCalledOnce();
+    expect(saveRoutes).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ virtual_model_id: "deepseek-v4-pro", account_id: account.id }),
+    ]));
+    expect(result).toEqual({ balanceRequested: true, modelsRequested: true, routesUpdated: true, failures: [] });
   });
 
   it("skips disabled accounts and unsupported capabilities", async () => {
@@ -57,6 +65,8 @@ describe("refreshSavedAccounts", () => {
       models: [],
       errors: [],
     });
+    const listRoutes = vi.spyOn(modelCommands, "listRouteCandidates").mockResolvedValue([]);
+    const saveRoutes = vi.spyOn(modelCommands, "saveRouteCandidates").mockResolvedValue();
 
     const result = await refreshSavedAccounts(
       [{ ...account, enabled: false }],
@@ -65,7 +75,9 @@ describe("refreshSavedAccounts", () => {
 
     expect(queryBalance).not.toHaveBeenCalled();
     expect(syncModels).not.toHaveBeenCalled();
-    expect(result).toEqual({ balanceRequested: false, modelsRequested: false, failures: [] });
+    expect(listRoutes).not.toHaveBeenCalled();
+    expect(saveRoutes).not.toHaveBeenCalled();
+    expect(result).toEqual({ balanceRequested: false, modelsRequested: false, routesUpdated: false, failures: [] });
   });
 
   it("keeps the save successful and reports upstream refresh failures", async () => {
@@ -75,6 +87,8 @@ describe("refreshSavedAccounts", () => {
       models: [],
       errors: ["模型接口不可用"],
     });
+    vi.spyOn(modelCommands, "listRouteCandidates").mockResolvedValue([]);
+    vi.spyOn(modelCommands, "saveRouteCandidates").mockResolvedValue();
 
     const result = await refreshSavedAccounts([account], [preset]);
 
@@ -82,5 +96,6 @@ describe("refreshSavedAccounts", () => {
       expect.objectContaining({ accountId: account.id, kind: "balance", message: "余额接口超时" }),
       expect.objectContaining({ accountId: account.id, kind: "models", message: "模型接口不可用" }),
     ]);
+    expect(result.routesUpdated).toBe(true);
   });
 });

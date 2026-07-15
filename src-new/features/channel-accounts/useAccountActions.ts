@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Toast } from "@douyinfe/semi-ui-19";
 import { accountCommands } from "../../domains/account/commands";
+import { mergeDefaultRoutes, modelCommands } from "../../domains/model/commands";
 import { queryKeys } from "../../shared/query-keys";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
@@ -25,7 +26,7 @@ export function useAccountActions(presets: ChannelPreset[]) {
       const refresh = await refreshSavedAccounts(saved, presets);
       return { saved, ...refresh };
     },
-    onSuccess: ({ saved, balanceRequested, modelsRequested, failures }) => {
+    onSuccess: ({ saved, balanceRequested, modelsRequested, routesUpdated, failures }) => {
       qc.setQueryData(queryKeys.account.list(), saved);
       void refetchAccounts();
       if (balanceRequested) {
@@ -33,6 +34,9 @@ export function useAccountActions(presets: ChannelPreset[]) {
       }
       if (modelsRequested) {
         void qc.refetchQueries({ queryKey: queryKeys.model.channelModels(), exact: true });
+      }
+      if (routesUpdated) {
+        void qc.refetchQueries({ queryKey: queryKeys.model.candidates(), exact: true });
       }
       if (failures.length > 0) {
         Toast.warning(t("账号已保存，但自动更新失败：{message}", {
@@ -78,10 +82,12 @@ type AutoRefreshOperation = {
   run: () => Promise<void>;
 };
 
+type AutoRefreshFailureKind = AutoRefreshOperation["kind"] | "routes";
 export type AccountAutoRefreshResult = {
   balanceRequested: boolean;
   modelsRequested: boolean;
-  failures: Array<{ accountId: string; accountName: string; kind: "balance" | "models"; message: string }>;
+  routesUpdated: boolean;
+  failures: Array<{ accountId: string; accountName: string; kind: AutoRefreshFailureKind; message: string }>;
 };
 
 /**
@@ -127,16 +133,40 @@ export async function refreshSavedAccounts(
   }
 
   const settled = await Promise.allSettled(operations.map((operation) => operation.run()));
-  const failures = settled.flatMap((result, index) => result.status === "rejected" ? [{
+  const failures: AccountAutoRefreshResult["failures"] = settled.flatMap((result, index) => result.status === "rejected" ? [{
     accountId: operations[index].accountId,
     accountName: operations[index].accountName,
     kind: operations[index].kind,
     message: result.reason instanceof Error ? result.reason.message : String(result.reason),
   }] : []);
+  const routeAccount = accounts.find((account) => {
+    const preset = presetById.get(account.channel_id);
+    return account.enabled && Boolean(account.api_key.trim()) && preset?.supports_model_list === true;
+  });
+  let routesUpdated = false;
+
+  if (routeAccount) {
+    try {
+      const existingRoutes = await modelCommands.listRouteCandidates();
+      const nextRoutes = mergeDefaultRoutes(existingRoutes, accounts, presets);
+      if (nextRoutes.length !== existingRoutes.length) {
+        await modelCommands.saveRouteCandidates(nextRoutes);
+        routesUpdated = true;
+      }
+    } catch (error) {
+      failures.push({
+        accountId: routeAccount.id,
+        accountName: routeAccount.name,
+        kind: "routes",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   return {
     balanceRequested: operations.some((operation) => operation.kind === "balance"),
     modelsRequested: operations.some((operation) => operation.kind === "models"),
+    routesUpdated,
     failures,
   };
 }

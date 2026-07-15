@@ -6,7 +6,7 @@
 |------|-------|------|----------|----------------|
 | **CC Switch** | 118k | Tauri 桌面端 (Win/Mac/Linux) | 供应商代理与配置管理 | 7 |
 | **TiyGate** | — | 桌面端 + 服务端 | 通用 AI 网关、模型路由与日志 | 多 |
-| **claude-tap** | — | 抓包工具 | Agent Trace 查看器 | 2 (Claude Code, Codex) |
+| **claude-tap** | 2.5k | Python 本地代理 + Web 查看器 | Agent Trace 查看器 | 16+ |
 | **CodeBurn** | 8.7k | CLI + macOS 菜单栏 + GNOME | Agent 用量/成本分析 | 32 |
 | **CodexBar** | 18.3k | macOS 菜单栏 (Swift) | Provider 额度与状态查看 | 59 |
 
@@ -42,12 +42,13 @@
 
 | 能力 | Flowlet | CC Switch | TiyGate | claude-tap |
 |------|---------|-----------|---------|------------|
-| 请求列表 | ✅ metadata | ✅ 详细请求日志 | ✅ 完整请求/响应日志 | ✅ 真实 API 流量 |
-| 详情查看 | ✅ 侧边栏 | — | — | ✅ System Prompt / 工具调用 / 流式响应 |
-| Token Diff | ❌ | ❌ | ❌ | ✅ 请求 Diff |
-| 结构化过滤 | ✅ 多维度筛选 | — | — | — |
-| 导出 | ❌ | — | — | — |
-| Body 捕获 | ✅ 配置可控 | — | — | ✅ |
+| 请求列表 | ✅ metadata | ✅ 详细请求日志 | ✅ 完整请求/响应日志 | ✅ 全量请求/响应/工具调用 |
+| 详情查看 | ✅ 侧边栏 | — | — | ✅ System Prompt / 工具调用 / 流式响应 / 推理过程 |
+| 请求 Diff | ❌ | ❌ | ❌ | ✅ 结构化 diff + 字符级高亮 |
+| 结构化过滤 | ✅ 多维度筛选 | — | — | ✅ 路径过滤 + 模型分组 |
+| 导出 | ❌ | — | — | ✅ 自包含 HTML / compact JSON |
+| Body 捕获 | ✅ 配置可控 | — | — | ✅ 全量 |
+| 实时查看 | ❌ | ❌ | ❌ | ✅ SSE 实时推送到浏览器 |
 
 ### 2.4 用量与成本
 
@@ -67,15 +68,19 @@
 
 | 能力 | Flowlet | CC Switch | claude-tap |
 |------|---------|-----------|------------|
-| Claude Code | ✅ 配置向导 + 一键复制 | ✅ 完整管理 | ✅ 抓包 |
-| OpenCode | ✅ 配置向导 | ✅ 完整管理 | ❌ |
-| Codex | ✅ 配置卡片（Desktop 直读规划中） | ✅ 完整管理 | ✅ 抓包 |
-| Gemini CLI | ❌ | ✅ 完整管理 | ❌ |
-| Cursor | ❌ | ❌ | ❌ |
+| Claude Code | ✅ 配置向导 + 一键复制 | ✅ 完整管理 | ✅ 完整支持 |
+| OpenCode | ✅ 配置向导 | ✅ 完整管理 | ✅ 完整支持 |
+| Codex | ✅ 配置卡片（Desktop 直读规划中） | ✅ 完整管理 | ✅ CLI + App 双支持 |
+| Gemini CLI | ❌ | ✅ 完整管理 | ✅ 完整支持 |
+| Cursor | ❌ | ❌ | ✅ Cursor CLI |
 | Cline / Continue | ❌ | ❌ | ❌ |
-| 本地文件直读 | 📐 规划中 (OpenCode Desktop) | ❌ (改配置文件) | ✅ 网络抓包 |
+| Kimi / MiMo | ❌ | ❌ | ✅ |
+| OpenClaw | ❌ | ❌ | ✅ |
+| Hermes | ❌ | ❌ | ✅ |
+| Pi | ❌ | ❌ | ✅ |
+| 本地文件直读 | 📐 规划中 (OpenCode Desktop) | ❌ (改配置文件) | ❌ (网络抓包) |
+| 配置写入 | ❌ | ✅ 各 Agent 配置直接写入 | ❌ |
 | 配置备份 | ❌ | ✅ 自动备份 + 回滚 | ❌ |
-| 配置检测 | ❌ | ❌ | ✅ |
 
 ### 2.6 平台与运维
 
@@ -86,7 +91,7 @@
 | Linux | ✅ (Tauri) | ✅ | ✅ GNOME | ❌ |
 | 系统托盘 | ✅ | ✅ | — | ❌ |
 | 开机自启动 | ✅ | ✅ | ❌ | ❌ |
-| 国际化 | ✅ zh / en | ✅ zh / en / ja / de | ❌ | ✅ 21 语言 |
+| 国际化 | ✅ zh / en | ✅ zh / en / ja / de | ✅ 8 语言 | ✅ 21 语言 |
 | Widget / 小组件 | ❌ | ❌ | ❌ | ✅ WidgetKit |
 | 开源 | ❌ | ✅ MIT | ✅ MIT | ✅ MIT |
 
@@ -116,16 +121,17 @@
 
 ### 核心威胁
 
-1. **CC Switch (118k ⭐)**：功能覆盖面最广，MCP/Prompts/Skills + 云同步 + 一键切换，社区活跃。Flowlet 的差异化应在 Agent 深度接入（直读本地文件 + Session/Trace 观测）上
-2. **CodeBurn (8.7k ⭐)**：用量分析深度远超 Flowlet 当前能力（optimize / guard / compare / yield），但其不做代理也不做渠道管理，是垂直补充型竞品
-3. **CodexBar (18.3k ⭐)**：在"轻量状态展示"维度验证了市场需求，Flowlet 的概览页已经覆盖了这个需求
+1. **CC Switch (118k ⭐)**：功能覆盖面最广，MCP/Prompts/Skills + 云同步 + 一键切换，社区极其活跃。MCP 双向同步 + 配置直接写入 Agent 是其核心壁垒。Flowlet 的差异化应在 Agent 深度接入（直读本地文件 + Session/Trace 观测）上
+2. **CodeBurn (8.7k ⭐)**：用量分析深度远超 Flowlet 当前能力（optimize / guard / compare / yield），覆盖 32 种工具，LiteLLM 价格数据 + 本地读取 + 零代理。但其不做代理也不做渠道管理，是垂直补充型竞品
+3. **CodexBar (18.3k ⭐)**：在"轻量状态展示"维度验证了市场需求，59 种 Provider 额度追踪，纯 macOS Swift 原生体验。Flowlet 的概览页已经覆盖了这个需求
+4. **claude-tap (2.5k ⭐)**：请求/响应全量抓包 + 结构化 Diff + 实时查看器 + 自包含 HTML 导出，覆盖 16+ Agent。其"代理层即可观测"的模式和 Flowlet 的透明代理高度互补，但其不做渠道管理也不做配置管理
 
 ---
 
 ## 四、建议方向
 
-1. **坚持 Agent 接入差异化**：CC Switch 做"全"，Flowlet 做"深"。通过 OpenCode Desktop 本地直读、Session/Trace 观测、配置写入等能力形成差异化
+1. **坚持 Agent 接入差异化**：CC Switch 做"全"（改配置文件），Flowlet 做"深"（直读本地 SQLite + WAL 监听）。通过 Session/Trace 实时观测、结构化 Diff 等能力形成差异化
 2. **补齐 MCP/Prompts/Skills 管理**：Agent 接入不只是给 Base URL，而是统一管理 Agent 的全部配置
 3. **深化用量分析**：吸收 CodeBurn 的 optimize / compare / yield 方法论，在代理层直接做智能分析
-4. **请求日志增强**：Body 级查看 + Diff + 导出，向 claude-tap 的 Trace 能力靠拢
+4. **请求日志增强**：Body 级查看 + Diff + 导出，向 claude-tap 的 Trace 能力靠拢。可在透明代理层直接实现"可选全量捕获 + 本地 Trace 查看器"
 5. **不做的事**：跨协议转换、企业级多租户、权重调度（保持产品定位清晰）

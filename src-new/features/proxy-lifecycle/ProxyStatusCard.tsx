@@ -96,7 +96,6 @@ export function ProxyStatusCard({
           className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.regular}`}
           aria-label={actionLabel}
           icon={phase === "running" ? <IconRefresh /> : <IconPlay />}
-          theme="borderless"
           type="tertiary"
           loading={actionBusy}
           disabled={actionDisabled}

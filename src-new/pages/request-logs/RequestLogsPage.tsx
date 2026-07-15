@@ -92,7 +92,6 @@ export function RequestLogsPage() {
         <Button
           className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
           icon={<IconRefresh />}
-          theme="borderless"
           type="tertiary"
           loading={logs.isFetching}
           onClick={() => void logs.refetch()}

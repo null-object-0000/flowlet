@@ -6,6 +6,7 @@ import type { UsagePeriod } from "../../domains/usage/types";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay } from "./usagePresentation";
+import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import styles from "./UsageCostPage.module.css";
 
 const { Paragraph, Title } = Typography;
@@ -42,7 +43,7 @@ export function UsageCostPage() {
         optionList={[{ value: "today", label: t("今天") }, { value: "7d", label: t("最近 7 天") }, { value: "month", label: t("本月") }]}
         onChange={(value) => setPeriod(value as UsagePeriod)}
       />
-      <Button icon={<IconRefresh />} loading={usage.analyze.isPending} onClick={() => void analyze()}>{t("重新分析")}</Button>
+      <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" icon={<IconRefresh />} loading={usage.analyze.isPending} onClick={() => void analyze()}>{t("重新分析")}</Button>
     </header>
 
     <section className={styles.stats} aria-label={t("用量统计")}>

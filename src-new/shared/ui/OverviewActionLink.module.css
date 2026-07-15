@@ -1,0 +1,18 @@
+.link {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.content,
+.trailingIcon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.content {
+  gap: 2px;
+}
+
+.trailingIcon {
+  font-size: 12px;
+}

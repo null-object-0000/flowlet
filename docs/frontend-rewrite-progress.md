@@ -7,11 +7,11 @@
 
 ## 当前状态
 
-- 当前阶段：阶段 4 渠道与账号闭环已完成；下一轮进入阶段 5（开放模型）
+- 当前阶段：阶段 4 渠道与账号闭环已完成；壳层、导航和概览信息架构已按旧版校正；下一轮进入阶段 5（开放模型）
 - 已完成切片：调用链矩阵、CSS 拆分、typed client + AppError、query-key 工厂、ErrorBoundary、测试基座、代理领域 + 自动启动 + 概览页、渠道账号领域 + 渠道列表/账号编辑/删除/连接测试页
 - 分支：`refactor/channel-account-model`
 - 基座提交：`5975a00`
-- `ui.version` 默认值：**legacy**（禁止未经用户确认改为 next）
+- `ui.version` 默认值：**next**（用户已确认重构分支默认进入新版；异常场景仍回退 legacy）
 - 旧前端保持可运行；新前端独立构建；双前端共用同一 Rust 后端与 SQLite
 
 ---
@@ -96,7 +96,7 @@
 | 旧页面 | 主要 Tauri Commands | 核心 Domains | 新页面目标 | 迁移状态 |
 |---|---|---|---|---|
 | `OverviewPage` | `proxy_status`, `get_proxy_bind_config`, `list_channel_accounts`, `list_channel_presets`, `usage_summary`(仅展示状态，不展示统计值) | proxy、channel、account | `pages/overview/OverviewPage` | 待迁移（阶段 2/3） |
-| `ChannelsPage` | `list_channel_presets`, `list_channel_accounts`, `save_channel_accounts`, `test_connection`, `sync_models`, `query_balance`, `latest_balance_snapshots` | channel、account、model、usage | `pages/channels/*` | 待迁移（阶段 4） |
+| `ChannelsPage` | `list_channel_presets`, `list_channel_accounts`, `save_channel_accounts`, `test_connection`, `sync_models`, `query_balance`, `latest_balance_snapshots` | channel、account、model、usage | `features/channel-accounts/AccountManagementSideSheet`（概览内） | 已迁移（Iteration 9 校正） |
 | `RoutesPage` / 模型服务 | `list_route_candidates`, `save_route_candidates`, `list_channel_models`, `list_virtual_models`, `list_channel_accounts`, `list_channel_presets`, `read_app_meta`, `write_app_meta` | model、channel | `pages/models/*` | 待迁移（阶段 5） |
 | `ClientsPage` | `list_clients`/`save_clients`(不存在), `get_proxy_bind_config`, `set_proxy_bind_config`(default_client_token) | client、settings | `pages/clients/*` 或合并 settings | 待迁移（阶段 6，**存疑/待确认**） |
 | `ClaudeCodePage` / 代理接入 | `get_proxy_bind_config`, `list_virtual_models` | client、model | `pages/agents/*` | 待迁移（阶段 6） |
@@ -251,38 +251,380 @@ client.ts 110、ErrorBoundary 40、domain/proxy/commands 75、ProxyStatusCard 14
 
 ---
 
+### Iteration 3（壳层与概览信息架构校正）
+
+目标：
+- 保持旧版主导航、概览布局与模块划分，不因 clean-room 重写改变产品信息架构。
+- 恢复无系统边框窗口的拖拽区域和最小化/最大化/关闭按钮组。
+- 概览页接入真实账号、路由和代理绑定查询，恢复账号、开放模型、客户端访问、Agent 接入四个模块。
+
+本轮变更：
+- 主导航恢复为「概览、模型服务、请求日志、用量成本、高级设置」；渠道账号管理保留为概览内抽屉，不占用主导航或独立路由。
+- 删除无业务意义的「Flowlet 前端重构」顶栏，壳层恢复为旧版 168px 侧栏和桌面布局。
+- 新增 typed window adapter 和 `WindowControls`，恢复拖动、最小化、禁用态最大化、关闭交互。
+- 概览使用真实 accounts/routes/bind config query；无账号继续展示接入引导，有账号展示旧版四模块布局，API Key 不进入概览。
+- 未迁移的主菜单页面保留明确占位路由，避免菜单缺失或伪装成已迁移。
+- 同步 `docs/frontend-rewrite.md` 与 `docs/config.md`：当前重构分支默认 `next`，异常回退仍为 `legacy`。
+
+检查结果：
+- `bun run check`：通过。
+- `bun run test:new`：3 个测试文件 / 12 个测试通过。
+- `bun run build:new`：通过；仅有已知 lottie-web direct eval 与大 chunk 警告。
+- `bun run build`：通过；警告与新版构建一致。
+- 本地浏览器视觉检查受运行环境 localhost 隔离限制，未完成；需以 Tauri dev 烟雾测试补验窗口拖拽和原生按钮调用。
+
+数据结构影响：无；未修改 Rust、SQLite schema 或 Tauri command。
+
+配置与重启影响：文档与仓库现状对齐，`ui.version = next` 仍需重启应用生效。
+
+下一轮：阶段 5 — 开放模型完整闭环。
+
+---
+
+### Iteration 4（概览：代理服务状态功能对齐）
+
+目标：
+- 将新版概览的代理服务状态模块做到与旧版功能、字段和布局层级一致。
+
+本轮变更：
+- 启动/重启主操作恢复到概览标题区；状态卡不再混入操作按钮。
+- 恢复 `starting / running / stopped / failed` 标签和对应提示。
+- 恢复监听地址、端口、运行时长、启动时间 Tooltip 与心跳信号图形。
+- 配置提示继续独立区分 `unconfigured / no_models / ready`，并要求开放模型绑定可用账号后才进入 ready。
+- 修复自动启动完成后未主动刷新真实代理状态、StrictMode effect 清理后可能丢失启动错误的问题。
+- 修复手动启动/重启失败没有进入 failed 展示的问题。
+- 代理状态恢复每 3 秒轮询，与旧版行为一致。
+
+检查结果：
+- `bun run check`：通过。
+- `bun run test:new`：5 个测试文件 / 18 个测试通过。
+- `bun run build:new`：通过；仅有已知 lottie-web direct eval 与大 chunk 警告。
+- `bun run build`：通过；警告与新版构建一致。
+
+数据结构影响：无；未修改 Rust、SQLite schema、config.json 或 Tauri command。
+
+配置与重启影响：无；代理状态和配置状态仍为独立查询与前端派生状态。
+
+下一轮：继续按旧版逐模块对齐概览页。
+
+---
+
+### Iteration 5（概览五个子模块组件化）
+
+目标：
+- 确保概览页五个业务子模块均为职责独立、可单独迁移和测试的组件。
+
+本轮变更：
+- 保留独立的 `ProxyStatusCard`。
+- 拆出 `OverviewChannelAccountsCard`、`OverviewExposedModelsCard`、`OverviewClientAccessCard`、`OverviewAgentAccessCard`。
+- 新增无业务依赖的共享 `OverviewModuleCard`，只统一卡片标题和操作区。
+- `OverviewSections` 降为纯页面布局组合，不再包含任一业务模块的内部实现。
+- 每个业务模块的样式迁回对应 feature 目录，页面 CSS 只保留两行网格布局。
+
+检查结果：
+- `bun run check`：通过。
+- `bun run test:new`：6 个测试文件 / 19 个测试通过。
+- `bun run build:new`：通过；仅有已知 lottie-web direct eval 与大 chunk 警告。
+- `bun run build`：通过；警告与新版构建一致。
+
+数据结构影响：无；仅调整新前端组件边界。
+
+下一轮：继续逐一对齐概览业务模块的旧版功能。
+
+---
+
+### Iteration 6（概览：客户端访问信息功能对齐）
+
+目标：
+- 恢复旧版概览中客户端访问信息模块的字段、复制行为和完整 API 接入详情。
+
+本轮变更：
+- 恢复 OpenAI Base URL、Anthropic Base URL、健康检查地址和默认客户端 Token 四项信息。
+- 每一项均可点击复制；默认客户端 Token 按旧版复制为 `Bearer <token>`。
+- “查看接入详情”恢复为当前页面的 API 详情侧栏，不再错误跳转到 Agent 接入页。
+- 详情侧栏包含服务状态、OpenAI-compatible、Anthropic-compatible、鉴权 Header 与安全提示。
+- 模块直接使用 `get_proxy_bind_config` 查询结果和真实代理运行状态，不引入硬编码业务数据。
+- 为共享卡片操作入口补充明确的可访问名称，并新增客户端模块交互测试。
+
+检查结果：
+- `bun run check`：通过。
+- `bun run test:new`：7 个测试文件 / 21 个测试通过。
+- `bun run build:new`：通过；仅有已知 lottie-web direct eval 与大 chunk 警告。
+- `bun run build`：通过；警告与新版构建一致。
+
+数据结构影响：无；未修改 Rust、SQLite schema、config.json 或 Tauri command。
+
+配置与重启影响：无；端口、监听地址和默认 Client Token 继续读取现有代理绑定配置。页面刷新查询即可反映配置，实际代理监听配置是否生效仍遵循既有运行时行为。
+
+下一轮：继续逐一对齐概览业务模块的旧版功能。
+
+---
+
+### Iteration 7（概览：AI Agent 接入功能对齐）
+
+目标：
+- 恢复旧版概览的 AI Agent 两卡布局，并提供符合当前产品规则的完整接入说明。
+
+本轮变更：
+- 恢复 Claude Code CLI 与 OpenCode CLI 两个概览入口及命令行接入说明。
+- 点击 Agent 卡片打开独立接入侧栏，不再只复制一个 Base URL。
+- Claude Code 使用 Anthropic-compatible 地址，OpenCode 使用 OpenAI-compatible 地址。
+- Base URL 与默认 Client Token 均来自概览页当前真实代理绑定配置。
+- 支持逐项复制 Base URL、Client Token，以及一键复制完整环境变量配置。
+- 未配置默认 Client Token 时展示占位值和明确引导，不伪造可用 Token。
+- 所有复制操作继续使用已修复的 Semi Toast 提供成功或失败反馈。
+
+检查结果：
+- `bun run check`：通过。
+- `bun run test:new`：8 个测试文件 / 23 个测试通过。
+- `bun run build:new`：通过；仅有已知 lottie-web direct eval 与大 chunk 警告。
+- `bun run build`：通过；警告与新版构建一致。
+
+数据结构影响：无；未修改 Rust、SQLite schema、config.json 或 Tauri command。
+
+配置与重启影响：无；接入信息随现有代理绑定配置查询结果刷新。Agent 环境变量修改后需重启对应 Agent 进程，不要求重启 Flowlet。
+
+下一轮：继续逐一对齐概览业务模块或迁移独立 Agent 接入页。
+
+---
+
+### Iteration 8（概览：渠道账号功能对齐）
+
+目标：
+- 恢复旧版概览中渠道账号模块的账号统计、资源信息、品牌识别与操作入口。
+
+本轮变更：
+- 标题恢复“共 N 个账号”，并恢复“新增账号”“查看全部”两个操作入口。
+- 使用 `@lobehub/icons` 的 LongCat、DeepSeek 品牌 SVG Logo。
+- 新增 `latest_balance_snapshots` typed command 与 TanStack Query Hook，复用现有 Rust command 读取真实余额快照。
+- LongCat 账号展示资源包剩余 Token 和有效期，按旧版规则格式化万/亿单位。
+- 按量付费账号展示余额与币种；无快照时展示 `-`，不伪造资源数据。
+- 恢复启用、停用、未配置、鉴权无效四类账号状态。
+- 点击账号行或更多按钮直接进入对应账号编辑弹窗；新增入口自动打开新增弹窗；查看全部打开概览内账号管理抽屉。
+
+检查结果：
+- `bun run check`：通过。
+- `bun run test:new`：9 个测试文件 / 25 个测试通过。
+- `bun run build:new`：通过；仅有已知 lottie-web direct eval 与大 chunk 警告。
+- `bun run build`：通过；警告与新版构建一致。
+
+数据结构影响：无；仅在新前端补充现有 `AccountBalanceSnapshot` 的 TypeScript 类型，未修改 Rust、SQLite schema、config.json 或 Tauri command。
+
+配置与重启影响：无；余额快照和账号列表均通过现有 command 查询，账号保存后的代理配置仍按既有逻辑热更新。
+
+下一轮：继续逐一对齐概览开放模型模块。
+
+---
+
+### Iteration 9（渠道账号管理信息架构校正）
+
+目标：
+- 按旧版恢复“概览卡片 → 账号管理抽屉 → 账号编辑弹窗”的管理链路，取消独立渠道账号页面。
+
+本轮变更：
+- 移除新版 `/channels` 路由和 `pages/channels` 页面文件。
+- 删除仅服务于独立页面的 `AccountList`、`AccountOnboarding`。
+- 新增 `AccountManagementSideSheet`，支持搜索、资源摘要、启停、编辑、删除和新增账号。
+- 概览卡片的新增、查看全部、账号行和更多按钮全部改为当前概览页内的抽屉状态。
+- 无账号引导中的 LongCat、DeepSeek 添加入口直接打开对应渠道的新增账号弹窗。
+- 修复编辑账号时“API Key 留空则不修改”实际可能清空旧 Key 的问题；前端保存编排会保留原密钥。
+- 账号保存继续调用现有 `save_channel_accounts`，成功后刷新账号查询，代理配置按既有逻辑热更新。
+
+检查结果：
+- `bun run check`：通过。
+- `bun run test:new`：10 个测试文件 / 26 个测试通过。
+- `bun run build:new`：通过；仅有已知 lottie-web direct eval 警告。
+- `bun run build`：通过；警告与新版构建一致。
+
+数据结构影响：无；未修改 Rust、SQLite schema、config.json 或 Tauri command。
+
+配置与重启影响：无；账号修改支持现有热更新，不需要重启 Flowlet。
+
+---
+
+### Iteration 10（账号编辑 UI/UX 与资源配置恢复）
+
+目标：
+- 恢复老版宽侧边账号编辑流程，移除账号管理抽屉上叠加窄 Modal 的错误交互。
+
+本轮变更：
+- “新增/编辑账号”改为独立右侧 `SideSheet`；进入编辑时账号列表抽屉暂时退出，关闭后按入口返回列表或概览。
+- 恢复渠道卡片选择、账号名称计数、API Key 控制台入口、启用状态说明、资源模式、资源信息、高级设置和固定底栏。
+- LongCat 等手动维护渠道支持 Token 资源包与按量付费信息；DeepSeek 等支持余额查询的渠道展示自动同步状态与刷新入口。
+- 测试连接、保存账号和保存资源快照均接入现有 Tauri command；账号与资源保存使用一次完整的成功/失败反馈。
+- 编辑账号继续支持 API Key 留空时保留原密钥。
+
+数据结构影响：无；复用现有 `AccountBalanceSnapshot`、`save_balance_snapshot` 与 `query_balance`，未修改 Rust、SQLite schema 或 `config.json`。
+
+配置与重启影响：账号与手动资源信息保存后立即刷新查询；代理账号配置继续热更新，不需要重启 Flowlet。
+
+---
+
+### Iteration 11（概览开放模型模块）
+
+目标：
+- 按老版恢复概览“开放模型”卡片的状态总览与快速启停能力。
+
+本轮变更：
+- 卡片标题展示真实已开放模型数量，不再只展示模型名代码标签。
+- 按 `virtual_model_id` 聚合多账号、多协议候选路由，避免同一个对外模型重复展示。
+- 每行恢复渠道品牌、对外模型名、可用账号数量、异常/不可用状态和启停开关。
+- 模型开关一次更新该模型下的全部候选路由，并调用现有 `save_route_candidates` 立即保存。
+- 保存采用乐观更新；失败时回滚模型列表并展示错误提示，成功后重新校验查询结果。
+- “模型服务”继续作为 Semi Typography 链接入口，概览卡片不承载完整模型管理页面。
+
+数据结构影响：无；复用现有 `RouteCandidate`、`ChannelAccount` 和 `ChannelPreset`，未修改 Rust、SQLite schema 或 `config.json`。
+
+配置与重启影响：模型启停通过既有共享运行时配置热更新，无需重启代理或 Flowlet。
+
+---
+
+### Iteration 12（概览固定视口布局）
+
+目标：
+- 恢复老版概览页固定在应用可视区内、页面本身不出现纵向滚动条的布局。
+
+本轮变更：
+- 概览根容器占满 AppShell 内容区，使用 `auto auto minmax(0, 1fr)` 分配标题、代理状态与业务模块剩余空间。
+- 页面模块间距由错误的 24px 恢复为老版 12px。
+- 概览业务区使用“账号/模型行占据剩余高度，客户端/Agent 行按内容高度”的两行网格。
+- `OverviewModuleCard` 增加统一的可收缩内容层，避免 Semi Card 内容按固有高度撑破网格。
+- 账号和模型数量超出可用空间时，仅对应卡片列表内部滚动；应用概览主页面保持无滚动条。
+- 小窗口单列断点继续回退为自然高度，避免窄窗口内容被裁切。
+
+数据结构影响：无；纯前端布局调整。
+
+配置与重启影响：无；前端热更新即可生效。
+
+---
+
+### Iteration 13（账号弹层闪烁修复）
+
+目标：
+- 消除概览“新增账号、编辑账号、查看全部”打开弹层时出现的错误中间帧与 WebView motion 闪烁。
+
+本轮变更：
+- 移除 `useEffect` 驱动的“请求 → 编辑器”二次状态切换，点击当次同步确定列表、新增或编辑弹层。
+- 新增/编辑请求不再先渲染一帧账号管理 SideSheet。
+- 账号编辑草稿改为组件挂载时同步初始化，不再先显示空内容或上一次账号数据。
+- 不同账号编辑器使用稳定业务 key 独立挂载，避免复用旧表单状态。
+- 账号相关 SideSheet 关闭 Semi motion，避免桌面 WebView 在遮罩与内容同帧挂载时闪烁；遮罩、Esc 和关闭按钮行为保持不变。
+- 弹层按当前类型条件挂载，隐藏弹层不再残留 Portal DOM。
+
+数据结构影响：无；纯前端状态与弹层生命周期调整。
+
+配置与重启影响：无；前端热更新即可生效。
+
+---
+
+### Iteration 14（已配置 API Key 查看）
+
+目标：
+- 支持在账号编辑抽屉中查看当前真实配置的 API Key。
+
+本轮变更：
+- 编辑账号时不再主动清空 `list_channel_accounts` 返回的 API Key。
+- API Key 默认继续以 Semi 密码框隐藏，用户点击眼睛按钮后才显示明文。
+- 新增账号仍显示空密码框；概览卡片、账号管理列表、日志和错误提示仍不展示密钥。
+- 保存、测试连接与“清空时保留原密钥”的既有保护逻辑保持不变。
+
+数据结构影响：无；复用现有 `list_channel_accounts` 返回值，没有新增 Rust command 或 SQLite 字段。
+
+配置与重启影响：无；纯前端编辑器行为调整。
+
+---
+
+### Iteration 15（LongCat 多资源包管理）
+
+目标：
+- 恢复老版 LongCat 多资源包查看、手动维护和 JSON 批量导入能力。
+
+本轮变更：
+- 账号编辑器不再把 Token 资源包降级为单个汇总包，恢复独立“管理资源包”入口。
+- 新增 Semi 资源包管理弹窗，支持多个资源包新增、编辑、删除及完整列表保存。
+- 支持导入 LongCat `/api/pay/quota/metering/token-packs/summary` 响应，合并 `currentLot` 与 `otherLots`，相同 `lotId` 自动覆盖。
+- 资源包按最早到期时间排列，并按 ACTIVE 资源包计算总量、已消耗、剩余和最早到期汇总。
+- 完整资源包数组继续写入现有余额快照 `token_packs` 字段，概览和账号列表继续读取现有汇总字段。
+- 资源包 Modal 位于账号 SideSheet 上层并关闭 motion，避免层级错误和弹窗闪烁。
+
+数据结构影响：无；复用现有 `AccountBalanceSnapshot.token_packs` JSON 字段及汇总字段。
+
+配置与重启影响：保存快照后查询缓存自动刷新；无需重启代理或应用。
+
+---
+
+### Iteration 16（请求日志页面重构）
+
+目标：
+- 基于现有日志 command 完整重构请求日志列表、筛选、诊断详情和清理流程。
+
+本轮变更：
+- 新增请求日志领域 command 适配，覆盖分页列表、客户端筛选项、按请求 ID 加载详情和日志清理。
+- 页面支持成功/失败、客户端、渠道和路径/请求 ID/错误信息服务端筛选，支持 10/25/50/100 条分页。
+- 支持手动刷新和每 5 秒自动刷新；刷新保持当前筛选和页码。
+- 列表仅加载最终尝试的轻量字段，集中展示请求路径、客户端、路由账号、模型映射、TTFB、总耗时和切换次数。
+- 请求详情按需加载完整尝试链路，并按“概览 / 请求 / 响应”拆分 Headers 与 Body。
+- 支持在多次尝试间切换，查看每次尝试对应的捕获内容和错误原因。
+- Authorization、API Key、Cookie、Token、密码等敏感字段在前端渲染前统一遮蔽，错误文本中的凭据模式同样遮蔽。
+- 日志清理提供保留 7/30/90 天或清理全部的二次确认，并同步失效日志与用量查询缓存。
+
+数据结构影响：无；复用现有 `request_logs`、`usage_records` 和已注册 Tauri command。
+
+配置与重启影响：无；日志筛选、详情和清理均实时生效，不需要重启代理。
+
+---
+
+### Iteration 17（全局视觉 tokens 与 1200×720 概览改版）
+
+目标：
+- 以 1200×720 设计稿为基准统一新前端视觉语言，并在固定窗口高度内完整呈现概览页。
+
+本轮变更：
+- 从参考稿提取冷灰背景、半透明 surface、低对比描边、双层卡片阴影、圆角、主色和成功色，统一沉淀到 `tokens.css` 并覆盖 Semi 语义变量。
+- 应用壳层调整为 188px 侧栏、40px 顶部拖拽区和紧凑内容边距；现有五个菜单枚举、路由与功能保持不变。
+- 删除侧栏左下重复的“服务运行中”模块，代理状态集中由概览页顶部服务卡展示。
+- 顶部服务卡整合服务状态、监听地址、运行时长和启动/重启动作，保持现有代理生命周期调用链不变。
+- 四个概览业务模块改为 2×2 固定高度网格，并统一数量 chip、链接操作、内嵌列表、复制字段和 Agent 支持状态样式。
+- 针对 1200×720 压缩卡片内边距、列表行高与模块间距，概览页外层禁止滚动；超出模块容量的数据在模块内部滚动。
+
+数据结构影响：无；仅调整 React 展示结构、可访问性属性和样式 tokens。
+
+配置与重启影响：无；前端热更新即可生效，不需要重启代理。桌面窗口控件继续调用现有 Tauri window API。
+
+---
+
 ## 五、范围阻塞（必须由用户决定，Loop 不得自行推进）
 
 | # | 阻塞项 | 类型 | 状态 |
 |---|---|---|---|
 | B1 | 是否新增 SQLite `clients` 表 + `list_clients`/`save_clients` Rust command，支撑完整的客户端 Token 管理（独立于 `default_client_token`） | 新增 Rust 能力 / schema | 待确认 |
-| B2 | 何时把 `ui.version` 默认值从 `legacy` 改为 `next`；何时删除旧 `src/` 与 Mantine | 切换决策 | 待用户批准 |
-| B3 | `save_balance_snapshot` 手动快照入口的 UI 是否保留（当前由 `BalanceSnapshotEditor` 提供） | 产品范围 | 待确认 |
+| B2 | 何时删除旧 `src/` 与 Mantine（默认入口已由用户确认为 `next`） | 清理决策 | 待用户批准 |
+| B3 | `save_balance_snapshot` 手动快照入口的 UI 是否保留 | 产品范围 | 已确认保留，并并入账号编辑抽屉 |
 
 ---
 
 ## 六、Loop 优先队列（与文档第十四节一致）
 
 1. ~~调用链盘点和迁移矩阵~~ ✅
-2. 拆分 `src-new/styles/index.css` ← 当前
-3. Tauri typed client 和 AppError
-4. Query key、Error Boundary、测试基座
-5. 代理状态查询
-6. 代理自动启动与 StrictMode 防重
-7. 新版概览页
-8. 渠道列表
-9. 账号创建和编辑
-10. 账号删除、连接测试、余额同步
-11. 渠道模型同步
+2. ~~拆分 `src-new/styles/index.css`~~ ✅
+3. ~~Tauri typed client 和 AppError~~ ✅
+4. ~~Query key、Error Boundary、测试基座~~ ✅
+5. ~~代理状态查询~~ ✅
+6. ~~代理自动启动与 StrictMode 防重~~ ✅
+7. ~~新版概览页~~ ✅
+8. ~~渠道列表~~ ✅
+9. ~~账号创建和编辑~~ ✅
+10. ~~账号删除、连接测试、余额同步~~ ✅
+11. 渠道模型同步 ← 当前
 12. 开放模型
 13. 配置状态 unconfigured / no_models / ready
 14. 客户端访问配置
 15. Agent 接入
-16. 请求日志列表和筛选
-17. 请求日志详情
+16. ~~请求日志列表和筛选~~ ✅
+17. ~~请求日志详情~~ ✅
 18. 用量与成本
 19. 设置
 20. 高级路由
 21. 新旧行为验收矩阵
 22. Tauri、NSIS、便携版完整验收
-23. 等待用户批准切换默认版本
+23. 等待用户批准清理旧版

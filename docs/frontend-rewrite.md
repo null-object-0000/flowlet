@@ -25,7 +25,8 @@
 - loading、error、empty、ready 成为明确的页面状态；
 - 代理生命周期保持独立，不与账号和模型配置状态混合；
 - 新旧前端在重构期间可以分别启动和构建；
-- 新前端完整验收后再切换默认版本。
+- 新前端完整验收前保留 legacy 回退入口，验收并获批准后再清理旧版。
+- 保持旧版已经确认的信息架构、页面布局、模块划分和桌面窗口交互；Semi Design 只用于重建实现与调整视觉细节，不用于擅自重做产品结构。
 
 ## 3. 非目标
 
@@ -65,6 +66,8 @@
 - shared 不导入具体业务领域；
 - src-new 不导入旧版 pages、features、app hooks 或 Mantine 组件；
 - 旧前端只作为行为和验收参考，不作为新架构的基础层。
+- 左侧主导航保持「概览、模型服务、请求日志、用量成本、高级设置」；渠道账号等领域能力继续作为对应页面模块和业务入口，不因技术分层直接升级为主导航。
+- Tauri 窗口继续使用无系统边框模式，新壳必须提供可拖动区域以及最小化、最大化、关闭按钮组，并保持关闭窗口时隐藏到托盘的既有行为。
 
 ### 4.1 文件体积与样式边界
 
@@ -157,7 +160,7 @@ React 19 使用 @douyinfe/semi-ui-19，不使用普通 @douyinfe/semi-ui。
 
 ## 9. 新旧入口
 
-产品级入口由 config.json 的 ui.version 选择：
+产品级入口由 config.json 的 ui.version 选择，当前重构分支默认使用 `next`：
 
 - legacy：运行现有 Mantine 前端；
 - next：运行 src-new 中的 Semi 前端；
@@ -210,7 +213,7 @@ npm run dev:new 和 npm run build:new 的 next mode 只是在非 Tauri 浏览器
 
 - 建立新旧行为验收矩阵；
 - config.json 支持 legacy 与 next；
-- next 成为默认版本；
+- 保持 next 为默认版本并完成新旧行为验收；
 - 保留 legacy 至少一个发布周期；
 - 删除旧前端、Mantine 和临时构建模式；
 - 将 src-new 调整为最终正式目录。
@@ -233,11 +236,11 @@ npm run dev:new 和 npm run build:new 的 next mode 只是在非 Tauri 浏览器
 当前架构基座：
 
 - 不改变现有数据结构；
-- config.json 新增 ui.version，默认 legacy；
+- config.json 的 ui.version 当前默认 next；
 - 不改变 Tauri command；
 - 不改变代理启动逻辑；
 - 不改变便携模式；
-- 旧版生产构建仍为默认。
+- 当前重构分支默认加载新版；缺失、非法和读取失败时仍安全回退旧版。
 
 热更新范围：
 

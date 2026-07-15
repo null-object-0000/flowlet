@@ -45,7 +45,7 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 ```jsonc
 {
-  "ui": { "version": "legacy" }, // 前端版本
+  "ui": { "version": "next" },   // 前端版本
   "ua_rules": [ ... ],          // UA 客户端识别规则
   "log_capture": { ... },       // 请求日志捕获配置
   "bind": { ... },              // 代理监听地址
@@ -65,13 +65,13 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 ~~~jsonc
 "ui": {
-  "version": "legacy"
+  "version": "next"
 }
 ~~~
 
 | 字段 | 类型 | 必须 | 默认值 | 可选值 | 说明 |
 |------|------|------|--------|--------|------|
-| `version` | `string` | 否 | `legacy` | `legacy`、`next` | 应用启动时选择 Mantine 旧版或 Semi 新版前端 |
+| `version` | `string` | 否 | `next` | `legacy`、`next` | 应用启动时选择 Mantine 旧版或 Semi 新版前端；当前重构分支默认新版 |
 
 **行为**：
 

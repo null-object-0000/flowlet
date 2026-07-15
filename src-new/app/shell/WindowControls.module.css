@@ -1,0 +1,34 @@
+.dragRegion {
+  position: fixed;
+  inset: 0 138px auto 188px;
+  height: 40px;
+  z-index: 1000;
+}
+
+.controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 1001;
+  display: flex;
+  gap: 0;
+}
+
+.control {
+  width: 46px;
+  min-width: 46px;
+  height: 40px;
+  padding: 0;
+  border-radius: 0;
+  color: var(--semi-color-text-2);
+}
+
+.control:not(:disabled):hover {
+  color: var(--semi-color-text-0);
+  background: var(--semi-color-fill-1);
+}
+
+.close:not(:disabled):hover {
+  color: #fff;
+  background: #ef4444;
+}

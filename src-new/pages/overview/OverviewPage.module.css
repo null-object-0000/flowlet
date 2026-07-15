@@ -1,8 +1,11 @@
 .page {
-  width: min(960px, 100%);
-  display: flex;
-  flex-direction: column;
-  gap: var(--flowlet-space-5);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
 }
 
 .grid2 {

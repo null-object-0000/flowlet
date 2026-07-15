@@ -1,7 +1,15 @@
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { Button, Card, Space, Typography } from "@douyinfe/semi-ui-19";
 import { IconPlus } from "@douyinfe/semi-icons";
 import { ProxyStatusCard } from "../../features/proxy-lifecycle/ProxyStatusCard";
+import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
+import { AccountManagementSideSheet, type AccountManagerRequest } from "../../features/channel-accounts/AccountManagementSideSheet";
+import { useRouteCandidates } from "../../features/exposed-models/useModels";
+import { useModelActions } from "../../features/exposed-models/useModelActions";
+import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
+import { OverviewSections } from "./OverviewSections";
+import { useProxyOverviewLifecycle } from "../../features/proxy-lifecycle/useProxyOverviewLifecycle";
+import { deriveConfigurationStatus } from "../../domains/model/types";
 import styles from "./OverviewPage.module.css";
 
 const { Paragraph, Text, Title } = Typography;
@@ -10,21 +18,61 @@ const { Paragraph, Text, Title } = Typography;
  * Next OverviewPage — status summary + onboarding. Per AGENTS.md §7:
  *   - Never shows today's requests / tokens / cost / trends / recent logs.
  *   - Never shows API keys here (only inside the account editor).
- *   - Until channels/accounts migrate, we render the proxy status card plus
- *     the "no accounts" three-step onboarding guidance. Sections for exposed
- *     models, client access and Agent access are gated behind the (future)
- *     accounts domain and are intentionally NOT rendered yet.
+ *   - Without accounts, renders proxy status plus the three-step onboarding.
+ *   - With accounts, keeps the legacy module split: channel accounts, exposed
+ *     models, client access and Agent access.
  */
 export function OverviewPage() {
-  const navigate = useNavigate();
-  // TODO: replace with the real accounts-domain query once migrated.
-  const hasAccounts = false;
+  const accounts = useAccounts();
+  const presets = useChannelPresets();
+  const accountActions = useAccountActions();
+  const modelActions = useModelActions();
+  const [accountRequest, setAccountRequest] = useState<AccountManagerRequest | null>(null);
+  const routes = useRouteCandidates();
+  const bindConfig = useProxyBindConfig();
+  const proxy = useProxyOverviewLifecycle(!accounts.isLoading);
+  const hasAccounts = (accounts.data?.length ?? 0) > 0;
+  const balanceSnapshots = useLatestBalanceSnapshots(hasAccounts);
+  const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
+  const configurationStatus = deriveConfigurationStatus(accounts.data ?? [], routes.data ?? []);
+  const proxyActionLabel = proxy.status.isError
+    ? "重新读取"
+    : proxy.phase === "starting"
+      ? "正在启动…"
+      : proxy.phase === "running"
+        ? "重启服务"
+        : proxy.phase === "failed"
+          ? "重新启动"
+          : "启动服务";
+
+  const handleProxyAction = () => {
+    if (proxy.status.isError) void proxy.status.refetch();
+    else void proxy.runPrimaryAction();
+  };
 
   return (
     <main className={styles.page}>
-      <ProxyStatusCard ready={true} />
+      {proxy.status.isLoading ? <Card>正在读取代理状态…</Card> : null}
+      {proxy.status.isError ? <Card>读取代理状态失败：{proxy.status.error.message}</Card> : null}
+      {proxy.status.data ? (
+        <ProxyStatusCard
+          status={proxy.status.data}
+          bindConfig={bindConfig.data}
+          phase={proxy.phase}
+          errorMessage={proxy.error?.message}
+          autoStartAttempted={proxy.autoStartAttempted}
+          configurationStatus={configurationStatus}
+          actionLabel={proxyActionLabel}
+          actionBusy={proxy.busy}
+          actionDisabled={proxy.status.isLoading || proxy.busy}
+          onAction={handleProxyAction}
+        />
+      ) : null}
 
-      <Card>
+      {accounts.isLoading ? <Card>正在加载渠道账号…</Card> : null}
+      {accounts.isError ? <Card>加载渠道账号失败：{accounts.error.message}</Card> : null}
+
+      {!accounts.isLoading && !accounts.isError && !hasAccounts ? <Card>
         <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>
           <Title heading={4} style={{ margin: 0 }}>
             开始接入
@@ -46,20 +94,48 @@ export function OverviewPage() {
           </div>
 
           <Space>
-            <Button type="primary" icon={<IconPlus />} onClick={() => navigate("/channels")}>
+            <Button type="primary" icon={<IconPlus />} onClick={() => setAccountRequest({ kind: "create", channelId: "longcat" })}>
               添加 LongCat
             </Button>
-            <Button onClick={() => navigate("/channels")}>添加 DeepSeek</Button>
-            <Button type="tertiary" onClick={() => navigate("/channels")}>
+            <Button onClick={() => setAccountRequest({ kind: "create", channelId: "deepseek" })}>添加 DeepSeek</Button>
+            <Button type="tertiary" onClick={() => setAccountRequest({ kind: "list" })}>
               管理渠道账号
             </Button>
           </Space>
         </Space>
-      </Card>
+      </Card> : null}
 
-      {/* Exposed models / Client access / Agent access are intentionally
-          hidden until the accounts domain is migrated (AGENTS.md §7). */}
-      {hasAccounts && null}
+      {hasAccounts && (routes.isLoading || bindConfig.isLoading) ? <Card>正在加载模型和接入配置…</Card> : null}
+      {hasAccounts && routes.isError ? <Card>加载开放模型失败：{routes.error.message}</Card> : null}
+      {hasAccounts && bindConfig.isError ? <Card>加载客户端配置失败：{bindConfig.error.message}</Card> : null}
+
+      {hasAccounts && routes.isSuccess && bindConfig.isSuccess ? (
+        <OverviewSections
+          accounts={accounts.data ?? []}
+          channels={presets.data ?? []}
+          balanceSnapshots={balanceSnapshots.data ?? []}
+          routes={routes.data ?? []}
+          baseUrl={baseUrl}
+          bindConfig={bindConfig.data}
+          proxyRunning={proxy.status.data?.running === true}
+          onAccountRequest={setAccountRequest}
+          busyModelId={modelActions.toggleExposedModel.isPending ? modelActions.toggleExposedModel.variables?.modelId : undefined}
+          onToggleModel={(routeIds, modelId, enabled) => modelActions.toggleExposedModel.mutate({ routes: routes.data ?? [], routeIds, modelId, enabled })}
+        />
+      ) : null}
+
+      <AccountManagementSideSheet
+        request={accountRequest}
+        accounts={accounts.data ?? []}
+        snapshots={balanceSnapshots.data ?? []}
+        presets={presets.data ?? []}
+        busy={accountActions.saveAll.isPending || accountActions.testConnection.isPending}
+        onClose={() => setAccountRequest(null)}
+        onSaveAccounts={(next) => accountActions.saveAll.mutateAsync(next).then(() => undefined)}
+        onTestConnection={(input) => accountActions.testConnection.mutateAsync(input)}
+        onSaveBalanceSnapshot={(snapshot) => accountActions.saveBalanceSnapshot.mutateAsync(snapshot)}
+        onSyncBalance={(accountId) => accountActions.queryBalance.mutateAsync(accountId).then(() => undefined)}
+      />
     </main>
   );
 }

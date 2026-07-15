@@ -38,10 +38,6 @@ export function ApiAccessDrawer({ opened, onClose, baseUrl, bindConfig, running,
             <Code className="api-detail-value">{running ? host : "-"}</Code>
           </div>
           <div className="api-detail-row">
-            <span className="api-detail-label">当前端口</span>
-            <Code className="api-detail-value">{String(bindConfig.port)}</Code>
-          </div>
-          <div className="api-detail-row">
             <span className="api-detail-label">健康检查地址</span>
             <Code className="api-detail-value">/health</Code>
             <ActionIcon variant="subtle" size="sm" aria-label="复制健康检查地址" onClick={() => void onCopy(`${baseUrl}/health`, "健康检查地址已复制")}>

@@ -3,16 +3,14 @@ import styles from "./RewritePlaceholderPage.module.css";
 
 const { Paragraph, Title } = Typography;
 
-export function RewritePlaceholderPage() {
+export function RewritePlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
     <main className={styles.placeholder}>
       <Card>
         <Space vertical align="start" spacing="medium">
-          <Tag color="green">架构基座</Tag>
-          <Title heading={3}>新前端已独立运行</Title>
-          <Paragraph>
-            当前只包含 Provider、Router、应用壳和 Tauri 调用边界，不包含任何业务页面。
-          </Paragraph>
+          <Tag color="blue">迁移中</Tag>
+          <Title heading={3}>{title}</Title>
+          <Paragraph>{description}</Paragraph>
         </Space>
       </Card>
     </main>

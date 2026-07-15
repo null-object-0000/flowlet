@@ -47,7 +47,8 @@ export function deriveConfigurationStatus(
 ): ConfigurationStatus {
   const usableAccounts = accounts.filter((a) => a.enabled && a.api_key.trim().length > 0);
   if (usableAccounts.length === 0) return "unconfigured";
-  const enabledRoutes = routes.filter((r) => r.enabled);
+  const usableAccountIds = new Set(usableAccounts.map((account) => account.id));
+  const enabledRoutes = routes.filter((route) => route.enabled && usableAccountIds.has(route.account_id));
   if (enabledRoutes.length === 0) return "no_models";
   return "ready";
 }

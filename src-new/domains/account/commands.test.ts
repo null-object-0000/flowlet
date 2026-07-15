@@ -58,6 +58,18 @@ describe("accountCommands contract", () => {
     await accountCommands.queryBalance("a1");
     expect(invokeMock).toHaveBeenCalledWith("query_balance", { accountId: "a1" });
   });
+
+  it("saveBalanceSnapshot -> save_balance_snapshot with { snapshot }", async () => {
+    const snapshot = { id: "snapshot-1", account_id: "a1" };
+    await accountCommands.saveBalanceSnapshot(snapshot as never);
+    expect(invokeMock).toHaveBeenCalledWith("save_balance_snapshot", { snapshot });
+  });
+
+  it("latestBalanceSnapshots -> latest_balance_snapshots (no args)", async () => {
+    invokeMock.mockResolvedValueOnce([]);
+    await accountCommands.latestBalanceSnapshots();
+    expect(invokeMock).toHaveBeenCalledWith("latest_balance_snapshots", undefined);
+  });
 });
 
 vi.clearAllMocks();

@@ -1,6 +1,6 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import type { AppError } from "../../shared/errors/AppError";
-import type { AccountBalanceResult, ChannelAccount, ModelSyncResult } from "./types";
+import type { AccountBalanceResult, AccountBalanceSnapshot, ChannelAccount, ModelSyncResult } from "./types";
 
 /** Account command adapter. Pages/features call these; never spell
  *  "save_channel_accounts" / "test_connection" / "sync_models" / "query_balance"
@@ -42,6 +42,16 @@ export const accountCommands = {
   queryBalance: (accountId: string): Promise<AccountBalanceResult> =>
     invokeCommand<AccountBalanceResult>("query_balance", { accountId }).catch(
       toAppErr("account_balance_failed"),
+    ),
+
+  saveBalanceSnapshot: (snapshot: AccountBalanceSnapshot): Promise<void> =>
+    invokeCommand<void>("save_balance_snapshot", { snapshot }).catch(
+      toAppErr("account_balance_save_failed"),
+    ),
+
+  latestBalanceSnapshots: (): Promise<AccountBalanceSnapshot[]> =>
+    invokeCommand<AccountBalanceSnapshot[]>("latest_balance_snapshots").catch(
+      toAppErr("account_balance_list_failed"),
     ),
 };
 

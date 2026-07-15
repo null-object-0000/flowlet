@@ -29,6 +29,23 @@ export type AccountBalanceResult = {
   error: string | null;
 };
 
+export type AccountBalanceSnapshot = {
+  id: string;
+  account_id: string;
+  balance: number | null;
+  currency: string | null;
+  token_pack_total: number | null;
+  token_pack_used: number | null;
+  token_pack_remaining: number | null;
+  token_pack_expire_at: string | null;
+  token_packs?: string | null;
+  source: string;
+  synced_at: string | null;
+  remark: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ModelSyncResult = {
   models_synced: number;
   models: { model: string; display_name?: string | null }[];

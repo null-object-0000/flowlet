@@ -41,19 +41,26 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
+  border: 1px solid transparent;
 }
 
 .claudeIcon {
   color: #d97757;
-  background: #09090b;
+  background: rgba(217, 119, 87, 0.12);
+  border-color: rgba(217, 119, 87, 0.18);
 }
 
 .openCodeIcon {
-  color: #fff;
-  background: #000;
+  color: var(--flowlet-color-text);
+  background: var(--flowlet-color-surface-muted);
+  border-color: var(--flowlet-color-border);
 }
 
-.cursorIcon { color: #fff; background: #526cff; }
+.codexIcon {
+  color: #3157d5;
+  background: rgba(49, 87, 213, 0.1);
+  border-color: rgba(49, 87, 213, 0.16);
+}
 
 .agentText { min-width: 0; display: grid; gap: 3px; text-align: left; }
 

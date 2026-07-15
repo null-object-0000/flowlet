@@ -23,6 +23,8 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByRole("button", { name: "配置 OpenCode CLI" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "配置 Claude Code CLI" }));
+    expect(screen.getByRole("button", { name: "配置 Codex Desktop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "配置 Cursor" })).not.toBeInTheDocument();
     expect(await screen.findByText("Claude Code CLI 接入")).toBeInTheDocument();
     expect(screen.getByText("http://127.0.0.1:18640/anthropic")).toBeInTheDocument();
 

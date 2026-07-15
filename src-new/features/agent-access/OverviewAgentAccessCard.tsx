@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Toast, Typography } from "@douyinfe/semi-ui-19";
 import ClaudeCodeLogo from "@lobehub/icons/es/ClaudeCode/components/Mono";
 import OpenCodeLogo from "@lobehub/icons/es/OpenCode/components/Mono";
-import CursorLogo from "@lobehub/icons/es/Cursor/components/Mono";
+import CodexLogo from "@lobehub/icons/es/Codex/components/Mono";
 import { IconChevronRight } from "@douyinfe/semi-icons";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
@@ -37,10 +37,10 @@ const AGENTS: Array<{
   },
   {
     kind: null,
-    name: "Cursor",
+    name: "Codex Desktop",
     description: "客户端接入",
-    icon: <CursorLogo size={21} aria-hidden="true" />,
-    iconClassName: styles.cursorIcon,
+    icon: <CodexLogo size={21} aria-hidden="true" />,
+    iconClassName: styles.codexIcon,
     supported: false,
   },
 ];

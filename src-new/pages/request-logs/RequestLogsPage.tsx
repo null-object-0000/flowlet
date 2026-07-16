@@ -6,7 +6,7 @@ import { ClearRequestLogsModal } from "../../features/request-logs/ClearRequestL
 import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLogDetailSideSheet";
 import { RequestLogTable } from "../../features/request-logs/RequestLogTable";
 import { formatDuration, safeLogText } from "../../features/request-logs/logPresentation";
-import { useRequestLogActions, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
+import { useRequestLogActions, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import styles from "./RequestLogsPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -28,8 +28,10 @@ export function RequestLogsPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
+  const [clientSelectValue, setClientSelectValue] = useState("__all__");
   const logs = useRequestLogs(filter, autoRefresh);
   const models = useRequestLogModels();
+  const clients = useRequestLogClients();
   const actions = useRequestLogActions();
   const page = logs.data;
   const summary = page?.summary;
@@ -73,6 +75,26 @@ export function RequestLogsPage() {
       <section className={styles.toolbar} aria-label={t("日志筛选")}>
         <Input className={styles.search} prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索请求 ID、模型或账号")} showClear onChange={setSearchDraft} />
         <Select value={filter.timeRange} optionList={TIME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))} onChange={(value) => apply({ timeRange: value as RequestLogTimeRange })} aria-label={t("时间")} />
+        <Select
+          value={clientSelectValue}
+          loading={clients.isLoading}
+          optionList={[
+            { value: "__all__", label: t("全部客户端") },
+            ...(clients.data ?? []).map((client) => ({
+              value: client.id || "__unknown__",
+              label: client.name || client.id || t("未知客户端"),
+            })),
+          ]}
+          onChange={(value) => {
+            setClientSelectValue(value);
+            setFilter((current) => ({
+              ...current,
+              clientId: value === "__all__" ? "" : String(value),
+              page: 1,
+            }));
+          }}
+          aria-label={t("客户端")}
+        />
         <Select
           value={filter.model || "__all__"}
           loading={models.isLoading}

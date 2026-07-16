@@ -141,6 +141,7 @@ const english: Record<string, string> = {
   "最近 7 天": "Last 7 days",
   "全部时间": "All time",
   "全部模型": "All models",
+  "全部客户端": "All clients",
   "全部": "All",
   "成功": "Success",
   "失败": "Failed",

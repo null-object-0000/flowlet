@@ -15,6 +15,7 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
     <div className={styles.scrollArea} role="table" aria-label={t("请求日志")}>
       <div className={`${styles.grid} ${styles.head}`} role="row">
         <span role="columnheader">{t("时间")}</span>
+        <span role="columnheader">{t("客户端")}</span>
         <span role="columnheader">{t("模型 / 接口")}</span>
         <span role="columnheader">{t("渠道 / 账号")}</span>
         <span role="columnheader">{t("状态")}</span>
@@ -40,6 +41,9 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
             onClick={() => onOpenDetail(row.request_id)}
           >
             <span className={styles.time}>{formatTime(row.created_at)}</span>
+            <span className={styles.clientCell}>
+              <strong title={row.client_name || row.client_id || ""}>{row.client_name || row.client_id || t("未知客户端")}</strong>
+            </span>
             <span className={styles.primaryCell}>
               <strong title={row.public_model || row.virtual_model || ""}>{row.public_model || row.virtual_model || "-"}</strong>
               <small title={`${row.method} ${row.path}`}><b>{row.method}</b> {row.path}{row.is_stream ? ` · ${t("流式")}` : ""}</small>

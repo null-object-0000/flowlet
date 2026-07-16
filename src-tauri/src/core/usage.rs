@@ -12,9 +12,10 @@ pub fn extract_response_usage(body: &[u8]) -> Option<ResponseUsage> {
     extract_usage_from_value(&value)
 }
 
-/// Parse a completed LongCat/OpenAI-compatible SSE response. The usage event is
-/// accepted only when the stream contains the terminal `data: [DONE]` marker,
-/// so interrupted streams cannot be recorded as complete usage.
+/// Parse a completed OpenAI- or Anthropic-compatible SSE response. OpenAI
+/// streams terminate with `data: [DONE]`; Anthropic streams terminate with a
+/// `message_stop` event. Usage may be split between `message_start` and
+/// `message_delta`, so fields are merged across the completed stream.
 pub fn extract_sse_response_usage(body: &[u8]) -> Option<ResponseUsage> {
     let text = std::str::from_utf8(body).ok()?;
     let mut saw_done = false;
@@ -32,8 +33,14 @@ pub fn extract_sse_response_usage(body: &[u8]) -> Option<ResponseUsage> {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
             continue;
         };
+        if value.get("type").and_then(serde_json::Value::as_str) == Some("message_stop") {
+            saw_done = true;
+        }
         if let Some(usage) = extract_usage_from_value(&value) {
-            latest_usage = Some(usage);
+            latest_usage = Some(match latest_usage {
+                Some(current) => merge_usage(current, usage),
+                None => usage,
+            });
         }
     }
 
@@ -91,8 +98,10 @@ fn value_contains_output_token(value: &serde_json::Value) -> bool {
 }
 
 fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> {
-    let usage = value.get("usage")?;
-    let input_tokens = usage
+    let usage = value
+        .get("usage")
+        .or_else(|| value.pointer("/message/usage"))?;
+    let raw_input_tokens = usage
         .get("prompt_tokens")
         .or_else(|| usage.get("input_tokens"))
         .and_then(serde_json::Value::as_i64);
@@ -100,27 +109,52 @@ fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> 
         .get("completion_tokens")
         .or_else(|| usage.get("output_tokens"))
         .and_then(serde_json::Value::as_i64);
+    let anthropic_cache_read = usage
+        .get("cache_read_input_tokens")
+        .and_then(serde_json::Value::as_i64);
+    let anthropic_cache_creation = usage
+        .get("cache_creation_input_tokens")
+        .and_then(serde_json::Value::as_i64);
+    let has_anthropic_cache_fields = usage.get("cache_read_input_tokens").is_some()
+        || usage.get("cache_creation_input_tokens").is_some();
+    let (input_tokens, input_cached_tokens, input_uncached_tokens) = if has_anthropic_cache_fields {
+        let uncached = match (raw_input_tokens, anthropic_cache_creation) {
+            (Some(input), Some(created)) => Some(input.saturating_add(created)),
+            (Some(input), None) => Some(input),
+            (None, Some(created)) => Some(created),
+            (None, None) => None,
+        };
+        let total = match (uncached, anthropic_cache_read) {
+            (Some(uncached), Some(cached)) => Some(uncached.saturating_add(cached)),
+            (Some(uncached), None) => Some(uncached),
+            (None, Some(cached)) => Some(cached),
+            (None, None) => None,
+        };
+        (total, anthropic_cache_read, uncached)
+    } else {
+        let cached = usage
+            .get("effectiveCachedTokens")
+            .or_else(|| {
+                usage
+                    .get("prompt_tokens_details")
+                    .and_then(|details| details.get("cached_tokens"))
+            })
+            .or_else(|| usage.get("cache_read_tokens"))
+            .or_else(|| usage.get("cached_tokens"))
+            .and_then(serde_json::Value::as_i64);
+        let uncached = match (raw_input_tokens, cached) {
+            (Some(input), Some(cached)) => Some(input.saturating_sub(cached).max(0)),
+            _ => None,
+        };
+        (raw_input_tokens, cached, uncached)
+    };
     let total_tokens = usage
         .get("total_tokens")
         .and_then(serde_json::Value::as_i64)
         .or_else(|| match (input_tokens, output_tokens) {
-            (Some(input), Some(output)) => Some(input + output),
+            (Some(input), Some(output)) => Some(input.saturating_add(output)),
             _ => None,
         });
-    let input_cached_tokens = usage
-        .get("effectiveCachedTokens")
-        .or_else(|| {
-            usage
-                .get("prompt_tokens_details")
-                .and_then(|details| details.get("cached_tokens"))
-        })
-        .or_else(|| usage.get("cache_read_tokens"))
-        .or_else(|| usage.get("cached_tokens"))
-        .and_then(serde_json::Value::as_i64);
-    let input_uncached_tokens = match (input_tokens, input_cached_tokens) {
-        (Some(input), Some(cached)) => Some(input.saturating_sub(cached).max(0)),
-        _ => None,
-    };
 
     if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
         return None;
@@ -133,6 +167,24 @@ fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> 
         output_tokens,
         total_tokens,
     })
+}
+
+fn merge_usage(current: ResponseUsage, next: ResponseUsage) -> ResponseUsage {
+    let input_tokens = next.input_tokens.or(current.input_tokens);
+    let input_cached_tokens = next.input_cached_tokens.or(current.input_cached_tokens);
+    let input_uncached_tokens = next.input_uncached_tokens.or(current.input_uncached_tokens);
+    let output_tokens = next.output_tokens.or(current.output_tokens);
+    let total_tokens = match (input_tokens, output_tokens) {
+        (Some(input), Some(output)) => Some(input.saturating_add(output)),
+        _ => next.total_tokens.or(current.total_tokens),
+    };
+    ResponseUsage {
+        input_tokens,
+        input_cached_tokens,
+        input_uncached_tokens,
+        output_tokens,
+        total_tokens,
+    }
 }
 
 #[cfg(test)]
@@ -167,6 +219,34 @@ data: [DONE]
 
 "#;
         assert_eq!(extract_sse_response_usage(body), None);
+    }
+
+    #[test]
+    fn extracts_longcat_anthropic_usage_from_message_stop_stream() {
+        let body = br#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":21087,"cache_read_input_tokens":7552,"cache_creation_input_tokens":0,"output_tokens":0}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hello"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":52}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#;
+
+        assert_eq!(
+            extract_sse_response_usage(body),
+            Some(ResponseUsage {
+                input_tokens: Some(28639),
+                input_cached_tokens: Some(7552),
+                input_uncached_tokens: Some(21087),
+                output_tokens: Some(52),
+                total_tokens: Some(28691),
+            })
+        );
     }
 
     #[test]

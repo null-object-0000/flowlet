@@ -3,6 +3,8 @@ use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, LogFilterClient, LogsFilter, LogsPageResult,
     LogsSummary, ModelPrice, RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
 };
+use crate::core::usage::{extract_response_usage, extract_sse_response_usage};
+use base64::Engine;
 use rusqlite::params;
 
 /// 根据内存中的价格表（仅来自 config.json）计算单次用量记录的费用估算。
@@ -491,6 +493,104 @@ impl Storage {    pub fn save_balance_snapshot(
     }
 
     // ─── Usage Records ───────────────────────────────────────────────────────
+
+    /// Reparse captured response bodies for requests whose usage is missing or
+    /// still unknown. Stream responses require a complete SSE `[DONE]` marker.
+    pub fn reanalyze_captured_usage(&self) -> Result<usize, StorageError> {
+        struct CapturedUsageRow {
+            request_id: String,
+            client_id: Option<String>,
+            client_name: Option<String>,
+            channel_id: Option<String>,
+            channel_name: Option<String>,
+            account_id: Option<String>,
+            account_name: Option<String>,
+            client_protocol: String,
+            upstream_protocol: String,
+            virtual_model: Option<String>,
+            upstream_model: Option<String>,
+            is_stream: bool,
+            res_body_b64: String,
+        }
+
+        let rows = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let mut stmt = connection.prepare(
+                r#"
+                SELECT
+                    rl.request_id, rl.client_id, rl.client_name,
+                    rl.channel_id, rl.channel_name, rl.account_id, rl.account_name,
+                    rl.client_protocol, rl.upstream_protocol,
+                    rl.virtual_model, rl.upstream_model, rl.is_stream, rl.res_body_b64
+                FROM request_logs rl
+                LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+                WHERE rl.is_last_attempt = 1
+                  AND rl.res_body_b64 IS NOT NULL
+                  AND (ur.id IS NULL OR ur.total_tokens IS NULL)
+                "#,
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(CapturedUsageRow {
+                    request_id: row.get(0)?,
+                    client_id: row.get(1)?,
+                    client_name: row.get(2)?,
+                    channel_id: row.get(3)?,
+                    channel_name: row.get(4)?,
+                    account_id: row.get(5)?,
+                    account_name: row.get(6)?,
+                    client_protocol: row.get(7)?,
+                    upstream_protocol: row.get(8)?,
+                    virtual_model: row.get(9)?,
+                    upstream_model: row.get(10)?,
+                    is_stream: row.get::<_, i64>(11)? != 0,
+                    res_body_b64: row.get(12)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+
+        let mut parsed = 0usize;
+        for row in rows {
+            let Ok(body) = base64::engine::general_purpose::STANDARD.decode(&row.res_body_b64)
+            else {
+                continue;
+            };
+            let usage = if row.is_stream {
+                extract_sse_response_usage(&body)
+            } else {
+                extract_response_usage(&body)
+            };
+            let Some(usage) = usage else {
+                continue;
+            };
+
+            self.upsert_usage_record(&UsageRecordInput {
+                request_id: row.request_id,
+                client_id: row.client_id,
+                client_name: row.client_name,
+                channel_id: row.channel_id,
+                channel_name: row.channel_name,
+                account_id: row.account_id,
+                account_name: row.account_name,
+                client_protocol: row.client_protocol,
+                upstream_protocol: row.upstream_protocol,
+                virtual_model: row.virtual_model,
+                upstream_model: row.upstream_model,
+                input_tokens: usage.input_tokens,
+                input_cached_tokens: usage.input_cached_tokens,
+                input_uncached_tokens: usage.input_uncached_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total_tokens,
+            })?;
+            parsed += 1;
+        }
+
+        Ok(parsed)
+    }
 
     pub fn analyze_unknown_usage(&self) -> Result<usize, StorageError> {
         let connection = self

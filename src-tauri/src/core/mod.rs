@@ -7,6 +7,7 @@ pub mod proxy;
 pub mod rate_limiter;
 pub mod storage;
 pub mod sync;
+pub mod usage;
 pub mod web;
 
 // Re-export commonly used types for headless binary

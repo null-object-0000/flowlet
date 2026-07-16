@@ -265,6 +265,10 @@ pub(super) fn save_virtual_models(
 
 #[tauri::command]
 pub(super) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    let parsed = state
+        .storage
+        .reanalyze_captured_usage()
+        .map_err(|err| err.to_string())?;
     let inserted = state
         .storage
         .analyze_unknown_usage()
@@ -273,7 +277,7 @@ pub(super) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, 
         .storage
         .recalculate_usage_costs()
         .map_err(|err| err.to_string())?;
-    Ok(inserted)
+    Ok(parsed + inserted)
 }
 
 #[tauri::command]

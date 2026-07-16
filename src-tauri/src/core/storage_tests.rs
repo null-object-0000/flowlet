@@ -1,6 +1,7 @@
 use super::Storage;
 use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
-use crate::core::config::{LogsFilter, ProtocolType, RouteCandidate};
+use crate::core::config::{LogsFilter, ProtocolType, RequestLogInput, RouteCandidate};
+use base64::Engine;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 
@@ -29,6 +30,72 @@ fn lists_paginated_request_logs_with_usage_join() {
     assert_eq!(page.total, 0);
     assert!(page.rows.is_empty());
     assert_eq!(page.summary.request_count, 0);
+}
+
+#[test]
+fn reanalyzes_longcat_stream_usage_from_captured_response() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage {
+        connection: Arc::new(Mutex::new(connection)),
+        prices: Arc::new(Mutex::new(Vec::new())),
+    };
+    storage.migrate().expect("migrate request log schema");
+    let body = br#"data: {"choices":[],"usage":{"effectiveCachedTokens":90,"prompt_tokens":100,"completion_tokens":20,"total_tokens":120},"lastOne":true}
+
+data: [DONE]
+
+"#;
+
+    storage
+        .insert_request_log(&RequestLogInput {
+            request_id: "longcat-stream-usage".to_string(),
+            client_id: Some("test-client".to_string()),
+            client_name: Some("Test Client".to_string()),
+            channel_id: Some("longcat".to_string()),
+            channel_name: Some("LongCat".to_string()),
+            account_id: Some("account-1".to_string()),
+            account_name: Some("LongCat Account".to_string()),
+            client_protocol: "openai".to_string(),
+            upstream_protocol: "openai".to_string(),
+            virtual_model: Some("flowlet-pro".to_string()),
+            public_model: Some("flowlet-pro".to_string()),
+            upstream_model: Some("LongCat-2.0".to_string()),
+            request_type: "chat.completions".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/chat/completions".to_string(),
+            status: Some(200),
+            latency_ms: Some(50),
+            is_stream: true,
+            error_message: None,
+            fallback_count: 0,
+            route_reason: Some("direct".to_string()),
+            ttfb_ms: Some(10),
+            duration_ms: Some(50),
+            attempt_seq: 0,
+            req_headers_json: None,
+            req_body_b64: None,
+            res_headers_json: None,
+            res_body_b64: Some(base64::engine::general_purpose::STANDARD.encode(body)),
+            is_last_attempt: true,
+        })
+        .expect("insert captured stream log");
+
+    assert_eq!(storage.reanalyze_captured_usage().unwrap(), 1);
+    let page = storage
+        .list_request_logs_page(LogsFilter {
+            page: 1,
+            page_size: 8,
+            status: "all".to_string(),
+            client_id: String::new(),
+            channel_id: String::new(),
+            search: String::new(),
+            time_range: "1h".to_string(),
+            model: String::new(),
+        })
+        .expect("query reparsed stream usage");
+    assert_eq!(page.rows[0].input_tokens, Some(100));
+    assert_eq!(page.rows[0].output_tokens, Some(20));
+    assert_eq!(page.rows[0].total_tokens, Some(120));
 }
 
 #[test]

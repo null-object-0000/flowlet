@@ -4,6 +4,7 @@ use super::config::{
 };
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
+use super::usage::{extract_response_usage, extract_sse_response_usage, ResponseUsage};
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -984,6 +985,23 @@ async fn build_response(
         let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
         let stream = capture_timed_stream(upstream_response.bytes_stream(), tx_done, capture);
 
+        let usage_capture = UsageCapture {
+            storage: storage.clone(),
+            request_id: request_id.clone(),
+            client_id: log_context.client_id.clone(),
+            client_name: log_context.client_name.clone(),
+            channel_id: Some(log_context.channel_id.clone()),
+            channel_name: Some(log_context.channel_name.clone()),
+            account_id: Some(log_context.account_id.clone()),
+            account_name: Some(log_context.account_name.clone()),
+            client_protocol: protocol.as_str().to_string(),
+            upstream_protocol: protocol.as_str().to_string(),
+            virtual_model: log_context.virtual_model.clone(),
+            upstream_model: Some(log_context.upstream_model.clone()),
+            enabled: true,
+            body: Vec::new(),
+        };
+
         let request_id_for_update = request_id.clone();
         let ttfb_for_update = ttfb_ms;
         let res_headers_for_update = res_headers_json;
@@ -991,6 +1009,7 @@ async fn build_response(
             let done = rx_done.await.unwrap_or(StreamDone {
                 duration_ms: ttfb_for_update,
                 res_body_b64: None,
+                usage: None,
             });
             update_stream_log(
                 storage,
@@ -1000,6 +1019,9 @@ async fn build_response(
                 res_headers_for_update,
                 done.res_body_b64,
             );
+            if let Some(usage) = done.usage {
+                record_parsed_usage(usage_capture, usage);
+            }
         });
 
         let mut response = Response::new(Body::from_stream(stream));
@@ -1102,38 +1124,6 @@ struct UsageCapture {
     body: Vec<u8>,
 }
 
-#[allow(dead_code)]
-fn capture_usage_stream(
-    stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
-    capture: Option<UsageCapture>,
-) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
-    let stream = Box::pin(stream);
-    futures_util::stream::unfold((stream, capture), |(mut stream, mut capture)| async move {
-        match stream.next().await {
-            Some(Ok(bytes)) => {
-                if let Some(current) = capture.as_mut() {
-                    if current.enabled
-                        && current.body.len().saturating_add(bytes.len()) <= MAX_USAGE_CAPTURE_BYTES
-                    {
-                        current.body.extend_from_slice(&bytes);
-                    } else {
-                        current.enabled = false;
-                        current.body.clear();
-                    }
-                }
-                Some((Ok(bytes), (stream, capture)))
-            }
-            Some(Err(err)) => Some((Err(std::io::Error::other(err)), (stream, capture))),
-            None => {
-                if let Some(current) = capture {
-                    record_response_usage(current);
-                }
-                None
-            }
-        }
-    })
-}
-
 fn record_response_usage(capture: UsageCapture) {
     if !capture.enabled {
         return;
@@ -1142,6 +1132,10 @@ fn record_response_usage(capture: UsageCapture) {
         return;
     };
 
+    record_parsed_usage(capture, usage);
+}
+
+fn record_parsed_usage(capture: UsageCapture, usage: ResponseUsage) {
     tokio::task::spawn_blocking(move || {
         let input = UsageRecordInput {
             request_id: capture.request_id,
@@ -1156,8 +1150,8 @@ fn record_response_usage(capture: UsageCapture) {
             virtual_model: capture.virtual_model,
             upstream_model: capture.upstream_model,
             input_tokens: usage.input_tokens,
-            input_cached_tokens: None,
-            input_uncached_tokens: None,
+            input_cached_tokens: usage.input_cached_tokens,
+            input_uncached_tokens: usage.input_uncached_tokens,
             output_tokens: usage.output_tokens,
             total_tokens: usage.total_tokens,
         };
@@ -1165,68 +1159,6 @@ fn record_response_usage(capture: UsageCapture) {
             tracing::warn!("写入 usage 记录失败: {err}");
         }
     });
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ResponseUsage {
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
-    total_tokens: Option<i64>,
-}
-
-fn extract_response_usage(body: &[u8]) -> Option<ResponseUsage> {
-    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
-
-    // OpenAI style: response.usage.prompt_tokens / completion_tokens / total_tokens
-    if let Some(usage) = value.get("usage") {
-        let input_tokens = usage
-            .get("prompt_tokens")
-            .or_else(|| usage.get("input_tokens"))
-            .and_then(|tokens| tokens.as_i64());
-        let output_tokens = usage
-            .get("completion_tokens")
-            .or_else(|| usage.get("output_tokens"))
-            .and_then(|tokens| tokens.as_i64());
-        let total_tokens = usage
-            .get("total_tokens")
-            .and_then(|tokens| tokens.as_i64())
-            .or_else(|| match (input_tokens, output_tokens) {
-                (Some(input), Some(output)) => Some(input + output),
-                _ => None,
-            });
-
-        if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
-            return None;
-        }
-
-        return Some(ResponseUsage {
-            input_tokens,
-            output_tokens,
-            total_tokens,
-        });
-    }
-
-    // Anthropic style: response.usage.input_tokens / output_tokens
-    if let Some(usage) = value.get("usage") {
-        let input_tokens = usage.get("input_tokens").and_then(|t| t.as_i64());
-        let output_tokens = usage.get("output_tokens").and_then(|t| t.as_i64());
-        let total_tokens = match (input_tokens, output_tokens) {
-            (Some(i), Some(o)) => Some(i + o),
-            _ => None,
-        };
-
-        if input_tokens.is_none() && output_tokens.is_none() {
-            return None;
-        }
-
-        return Some(ResponseUsage {
-            input_tokens,
-            output_tokens,
-            total_tokens,
-        });
-    }
-
-    None
 }
 
 fn record_request_log(storage: Storage, log: RequestLogInput) {
@@ -1243,6 +1175,7 @@ fn record_request_log(storage: Storage, log: RequestLogInput) {
 struct StreamDone {
     pub duration_ms: i64,
     pub res_body_b64: Option<String>,
+    pub usage: Option<ResponseUsage>,
 }
 
 /// 包装上游 body 字节流：捕获最多 capture.max_body_bytes 的响应体字节
@@ -1260,6 +1193,8 @@ fn capture_timed_stream(
         res_body_buf: Vec::new(),
         res_body_max: capture.max_body_bytes,
         capture_res_body: capture.capture_res_body,
+        usage_body_buf: Vec::new(),
+        usage_body_enabled: true,
         first_line: None,
         last_line: None,
         line_count: 0,
@@ -1272,6 +1207,15 @@ fn capture_timed_stream(
                     && state.res_body_buf.len().saturating_add(bytes.len()) <= state.res_body_max
                 {
                     state.res_body_buf.extend_from_slice(&bytes);
+                }
+                if state.usage_body_enabled
+                    && state.usage_body_buf.len().saturating_add(bytes.len())
+                        <= MAX_USAGE_CAPTURE_BYTES
+                {
+                    state.usage_body_buf.extend_from_slice(&bytes);
+                } else {
+                    state.usage_body_enabled = false;
+                    state.usage_body_buf.clear();
                 }
                 let piece = String::from_utf8_lossy(&bytes);
                 for line in piece.split('\n') {
@@ -1302,7 +1246,7 @@ fn capture_timed_stream(
 fn send_stream_done(
     state: &mut TimedStreamState,
     tx_done: &std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<StreamDone>>>>,
-    _success: bool,
+    success: bool,
 ) {
     if state.done_sent {
         return;
@@ -1314,10 +1258,16 @@ fn send_stream_done(
     } else {
         Some(encode_body_base64(&state.res_body_buf))
     };
+    let usage = if success && state.usage_body_enabled {
+        extract_sse_response_usage(&state.usage_body_buf)
+    } else {
+        None
+    };
     let _ = tx_done.lock().unwrap().take().map(|tx| {
         tx.send(StreamDone {
             duration_ms,
             res_body_b64,
+            usage,
         })
     });
 }
@@ -1329,6 +1279,8 @@ struct TimedStreamState {
     res_body_buf: Vec<u8>,
     res_body_max: usize,
     capture_res_body: bool,
+    usage_body_buf: Vec<u8>,
+    usage_body_enabled: bool,
     first_line: Option<String>,
     last_line: Option<String>,
     line_count: usize,

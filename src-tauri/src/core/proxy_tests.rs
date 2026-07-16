@@ -247,6 +247,8 @@ fn extracts_openai_usage() {
         usage,
         ResponseUsage {
             input_tokens: Some(11),
+            input_cached_tokens: None,
+            input_uncached_tokens: None,
             output_tokens: Some(7),
             total_tokens: Some(18),
         }
@@ -262,6 +264,8 @@ fn extracts_input_output_usage_and_computes_total() {
         usage,
         ResponseUsage {
             input_tokens: Some(5),
+            input_cached_tokens: None,
+            input_uncached_tokens: None,
             output_tokens: Some(8),
             total_tokens: Some(13),
         }

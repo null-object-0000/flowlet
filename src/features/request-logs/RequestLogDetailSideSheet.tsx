@@ -57,21 +57,6 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
                 </div>
               </DetailSection>
 
-              <DetailSection title={t("请求指标")}>
-                <div className={styles.detailGrid}>
-                  <DetailItem label={t("开始时间")} value={formatLogTime(finalRow.created_at, language)} />
-                  <DetailItem label={t("总耗时")} value={formatDuration(finalRow.duration_ms ?? finalRow.latency_ms)} />
-                  <DetailItem label="TTFT" value={formatDuration(finalRow.ttft_ms)} />
-                  <DetailItem label={t("输出速率")} value={formatTokenRate(calculateOutputTokenRate(finalRow))} />
-                  <DetailItem label={t("输入 Token")} value={formatNumber(finalRow.input_tokens, language)} />
-                  <DetailItem label={t("缓存命中率")} value={formatPercentage(calculateCacheHitRate(finalRow))} />
-                  <DetailItem label={t("缓存输入 Token")} value={formatNumber(finalRow.input_cached_tokens, language)} />
-                  <DetailItem label={t("未缓存输入 Token")} value={formatNumber(finalRow.input_uncached_tokens, language)} />
-                  <DetailItem label={t("输出 Token")} value={formatNumber(finalRow.output_tokens, language)} />
-                  <DetailItem label={t("预估费用")} value={formatCost(finalRow.estimated_cost)} />
-                </div>
-              </DetailSection>
-
               <DetailSection title={t("接口信息")}>
                 <div className={styles.detailGrid}>
                   <DetailItem label={t("请求接口")} value={`${finalRow.method} ${finalRow.path}`} />
@@ -89,6 +74,31 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
               ) : null}
 
               <AttemptSelector rows={rows} selectedRow={selectedRow} onSelect={setSelectedAttemptId} />
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={t("性能")} itemKey="performance">
+            <div className={styles.tabContent}>
+              <DetailSection title={t("响应性能")}>
+                <div className={styles.detailGrid}>
+                  <DetailItem label={t("开始时间")} value={formatLogTime(finalRow.created_at, language)} />
+                  <DetailItem label={t("总耗时")} value={formatDuration(finalRow.duration_ms ?? finalRow.latency_ms)} />
+                  <DetailItem label="TTFT" value={formatDuration(finalRow.ttft_ms)} />
+                  <DetailItem label={t("生成耗时")} value={formatGenerationDuration(finalRow)} />
+                  <DetailItem label={t("输出速率")} value={formatTokenRate(calculateOutputTokenRate(finalRow))} />
+                  <DetailItem label={t("预估费用")} value={formatCost(finalRow.estimated_cost)} />
+                </div>
+              </DetailSection>
+
+              <DetailSection title={t("Token 明细")}>
+                <div className={styles.detailGrid}>
+                  <DetailItem label={t("总 Token")} value={formatNumber(finalRow.total_tokens, language)} />
+                  <DetailItem label={t("输入 Token")} value={formatNumber(finalRow.input_tokens, language)} />
+                  <DetailItem label={t("缓存输入 Token")} value={formatNumber(finalRow.input_cached_tokens, language)} />
+                  <DetailItem label={t("未缓存输入 Token")} value={formatNumber(finalRow.input_uncached_tokens, language)} />
+                  <DetailItem label={t("输出 Token")} value={formatNumber(finalRow.output_tokens, language)} />
+                  <DetailItem label={t("缓存命中率")} value={formatPercentage(calculateCacheHitRate(finalRow))} />
+                </div>
+              </DetailSection>
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={t("请求")} itemKey="request">
@@ -218,4 +228,9 @@ function formatNumber(value: number | null, language: "zh-CN" | "en-US") {
 function formatCost(value: number | null) {
   if (value == null) return "—";
   return `¥${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}`;
+}
+
+function formatGenerationDuration(row: RequestLogRow) {
+  if (row.duration_ms == null || row.ttft_ms == null || row.duration_ms < row.ttft_ms) return "—";
+  return formatDuration(row.duration_ms - row.ttft_ms);
 }

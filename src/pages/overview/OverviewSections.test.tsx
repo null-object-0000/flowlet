@@ -12,6 +12,10 @@ vi.mock("lottie-web", () => ({
   },
 }));
 
+vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
+  useClaudeCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
+}));
+
 describe("OverviewSections", () => {
   it("renders the four independent business modules", () => {
     const account = {

@@ -66,6 +66,10 @@ describe("RequestLogsPage", () => {
     await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
 
     expect(await screen.findByText("请求详情")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "性能" }));
+    expect(screen.getByText("响应性能")).toBeInTheDocument();
+    expect(screen.getByText("Token 明细")).toBeInTheDocument();
+    expect(screen.getByText("660 ms")).toBeInTheDocument();
     await user.click(screen.getByText("请求"));
     expect(screen.getAllByText("敏感凭据已隐藏").length).toBeGreaterThan(0);
     expect(screen.queryByText(/secret-key/)).not.toBeInTheDocument();

@@ -42,6 +42,26 @@ pub struct ProxySharedConfig {
     pub round_robin: Arc<Mutex<HashMap<String, usize>>>,
 }
 
+fn mark_account_credential_invalid(
+    storage: &Storage,
+    shared: &ProxySharedConfig,
+    account_id: &str,
+    message: &str,
+) {
+    let _ = storage.update_account_last_error(account_id, message);
+    let _ = storage.mark_account_credential_invalid(account_id);
+    if let Ok(mut shared_accounts) = shared.accounts.lock() {
+        if let Some(account) = shared_accounts
+            .iter_mut()
+            .find(|item| item.id == account_id)
+        {
+            account.last_error = Some(message.to_string());
+            account.credential_status =
+                crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
+        }
+    }
+}
+
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
 const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
 const MAX_TTFT_PROBE_BYTES: usize = 64 * 1024;
@@ -54,7 +74,15 @@ struct AgentSessionIdentity {
     parent_session_id: Option<String>,
 }
 
-fn extract_opencode_session(headers: &HeaderMap) -> Option<AgentSessionIdentity> {
+fn extract_agent_session(headers: &HeaderMap) -> Option<AgentSessionIdentity> {
+    if let Some(session_id) = valid_session_header(headers, "x-claude-code-session-id") {
+        return Some(AgentSessionIdentity {
+            agent_type: "claude-code".to_string(),
+            session_id,
+            parent_session_id: None,
+        });
+    }
+
     let user_agent_is_opencode = headers
         .get("user-agent")
         .and_then(|value| value.to_str().ok())
@@ -113,7 +141,8 @@ use proxy_http::{
     rewrite_model, sanitize_headers,
 };
 use proxy_routing::{
-    body_contains_quota_exceeded, enrich_upstream_error_log, match_candidates,
+    body_contains_account_deactivated, body_contains_quota_exceeded, enrich_upstream_error_log,
+    match_candidates,
     network_error_route_reason, resolve_small_model, should_check_quota_body_status,
     should_try_next_status,
 };
@@ -416,7 +445,7 @@ async fn forward_request(
         .unwrap_or_else(|| "/".to_string());
 
     let method = parts.method.to_string();
-    let agent_session = extract_opencode_session(&parts.headers);
+    let agent_session = extract_agent_session(&parts.headers);
 
     // 热更新：从共享锁读取最新配置
     let routes = state.shared.routes.lock().unwrap().clone();
@@ -534,6 +563,7 @@ async fn forward_request(
             request_type: request_type.as_str().to_string(),
             method,
             path,
+            upstream_url: None,
             status: Some(404),
             latency_ms: Some(0),
             is_stream: false,
@@ -567,25 +597,6 @@ async fn forward_request(
         );
         return Ok(response);
     }
-    // 循环外一次性捕获请求级 head/body，各候选共享
-    let req_headers_json = if state.capture.capture_req_headers {
-        let keys = if state.capture.redact_sensitive_headers {
-            LogCaptureConfig::redacted_header_keys()
-        } else {
-            &[]
-        };
-        Some(sanitize_headers(&parts.headers, keys).to_string())
-    } else {
-        None
-    };
-    let req_body_b64 = if state.capture.capture_req_body && !body_bytes.is_empty() {
-        let mut bytes: Vec<u8> = body_bytes.to_vec();
-        proxy_http::truncate_utf8(&mut bytes, state.capture.max_body_bytes);
-        Some(encode_body_base64(&bytes))
-    } else {
-        None
-    };
-
     let mut last_network_error: Option<reqwest::Error> = None;
     let mut fallback_count = 0;
 
@@ -612,14 +623,16 @@ async fn forward_request(
         let effective_model = resolve_small_model(&candidate.upstream_model);
         let routed_body = rewrite_model(&body_bytes, &effective_model, &detected_protocol);
 
-        // 账号级 Base URL 覆盖：如果账号配置了 base_url_override 则优先使用
-        let base_url = account
-            .base_url_override
-            .as_deref()
+        // 账号级 Base URL 按协议分别覆盖，未配置时回退到渠道默认地址。
+        let account_base_url = match &detected_protocol {
+            ProtocolType::OpenAi => account.base_url_override.as_deref(),
+            ProtocolType::Anthropic => account.anthropic_base_url_override.as_deref(),
+        };
+        let base_url = account_base_url
             .filter(|url| !url.trim().is_empty())
             .unwrap_or_else(|| channel.base_url_for(&detected_protocol));
         let upstream_url = build_upstream_url(base_url, &parts.uri, &detected_protocol);
-        let mut builder = http_client.request(parts.method.clone(), upstream_url);
+        let mut builder = http_client.request(parts.method.clone(), upstream_url.clone());
 
         // 应用渠道级别超时（如果配置了的话）
         let timeout = channel
@@ -634,6 +647,33 @@ async fn forward_request(
             &detected_protocol,
             channel.auth_strategy_for(&detected_protocol),
         );
+
+        // 先构造唯一的最终上游请求，再从这个 Request 捕获日志并执行它。
+        // 此时 URL、鉴权头和 model 均已完成路由改写，日志与第三方实际收到的报文一致。
+        let upstream_request = builder.body(routed_body).build()?;
+        let req_headers_json = if state.capture.capture_req_headers {
+            let keys = if state.capture.redact_sensitive_headers {
+                LogCaptureConfig::redacted_header_keys()
+            } else {
+                &[]
+            };
+            Some(sanitize_headers(upstream_request.headers(), keys).to_string())
+        } else {
+            None
+        };
+        let req_body_b64 = if state.capture.capture_req_body {
+            upstream_request
+                .body()
+                .and_then(reqwest::Body::as_bytes)
+                .filter(|bytes| !bytes.is_empty())
+                .map(|bytes| {
+                    let mut bytes = bytes.to_vec();
+                    proxy_http::truncate_utf8(&mut bytes, state.capture.max_body_bytes);
+                    encode_body_base64(&bytes)
+                })
+        } else {
+            None
+        };
 
         // 为当前候选准备日志上下文（send_at = 此刻，T0 真实起点）
         let log_context = RouteLogContext {
@@ -654,14 +694,15 @@ async fn forward_request(
             request_type: request_type_str.clone(),
             method: method_clone.clone(),
             path: path_clone.clone(),
+            upstream_url,
             client_protocol: protocol_str.clone(),
             upstream_protocol: protocol_str.clone(),
             send_at: Instant::now(),
-            req_headers_json: req_headers_json.clone(),
-            req_body_b64: req_body_b64.clone(),
+            req_headers_json,
+            req_body_b64,
         };
 
-        match builder.body(routed_body).send().await {
+        match http_client.execute(upstream_request).await {
             Ok(upstream_response) => {
                 // send() 返回即表明收到响应头；此时可记录真实 TTFB
                 let ttfb_ms = log_context.send_at.elapsed().as_millis() as i64;
@@ -669,17 +710,14 @@ async fn forward_request(
                 let channel_vendor = channel.vendor.clone();
                 if status == reqwest::StatusCode::UNAUTHORIZED {
                     let message = "upstream returned 401; API Key may be invalid";
-                    let _ = storage.update_account_last_error(&account.id, message);
                     // 401 表示 API Key 无效：标记账号凭证状态，后续请求自动排除该账号。
                     // 当前请求不 fallback，直接返回 401。
-                    let _ = storage.mark_account_credential_invalid(&account.id);
-                    if let Ok(mut shared_accounts) = state.shared.accounts.lock() {
-                        if let Some(shared_account) = shared_accounts.iter_mut().find(|item| item.id == account.id) {
-                            shared_account.last_error = Some(message.to_string());
-                            shared_account.credential_status =
-                                crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
-                        }
-                    }
+                    mark_account_credential_invalid(
+                        &storage,
+                        &state.shared,
+                        &account.id,
+                        message,
+                    );
                 }
 
                 // 可重试状态码 + 还有下一个候选 → fallback 到下一个
@@ -711,11 +749,52 @@ async fn forward_request(
                 let is_last = index + 1 >= candidates.len()
                     || !should_try_next_status(status, &channel_vendor);
 
-                if should_check_quota_body_status(status) && index + 1 < candidates.len() {
+                if should_check_quota_body_status(status) {
                     let headers = upstream_response.headers().clone();
                     let body = upstream_response.bytes().await?;
                     let duration_ms = log_context.send_at.elapsed().as_millis() as i64;
-                    if body_contains_quota_exceeded(&body) {
+                    let has_next_candidate = index + 1 < candidates.len();
+                    if body_contains_account_deactivated(&body) {
+                        let message = "upstream API Key is disabled (account_deactivated)";
+                        mark_account_credential_invalid(
+                            &storage,
+                            &state.shared,
+                            &account.id,
+                            message,
+                        );
+                        if has_next_candidate {
+                            fallback_count += 1;
+                            let mut log = log_context.log_fallback(
+                                request_id_for_routing.clone(),
+                                Some(status.as_u16() as i64),
+                                Some(message.to_string()),
+                                fallback_count,
+                                "credential_disabled".to_string(),
+                            );
+                            log.ttfb_ms = Some(ttfb_ms);
+                            log.duration_ms = Some(duration_ms);
+                            if state.capture.capture_res_headers {
+                                let keys = if state.capture.redact_sensitive_headers {
+                                    LogCaptureConfig::redacted_header_keys()
+                                } else {
+                                    &[]
+                                };
+                                log.res_headers_json =
+                                    Some(sanitize_headers(&headers, keys).to_string());
+                            }
+                            if state.capture.capture_res_body {
+                                let mut body_for_log = body.to_vec();
+                                proxy_http::truncate_utf8(
+                                    &mut body_for_log,
+                                    state.capture.max_body_bytes,
+                                );
+                                log.res_body_b64 = Some(encode_body_base64(&body_for_log));
+                            }
+                            record_request_log(storage.clone(), log);
+                            continue;
+                        }
+                    }
+                    if body_contains_quota_exceeded(&body) && has_next_candidate {
                         fallback_count += 1;
                         record_request_log(
                             storage.clone(),
@@ -851,11 +930,12 @@ struct RouteLogContext {
     request_type: String,
     method: String,
     path: String,
+    upstream_url: String,
     client_protocol: String,
     upstream_protocol: String,
     /// 本次候选 send 开始的时刻，用于后续计算 TTFB 与 duration
     send_at: Instant,
-    /// 请求级头部（在请求循环外一次性捕获）
+    /// 当前路由尝试实际发送给上游的请求头和请求体（完成 URL、鉴权、model 改写后）
     req_headers_json: Option<String>,
     req_body_b64: Option<String>,
 }
@@ -890,6 +970,7 @@ impl RouteLogContext {
             request_type: self.request_type.clone(),
             method: self.method.clone(),
             path: self.path.clone(),
+            upstream_url: Some(self.upstream_url.clone()),
             status,
             latency_ms,
             is_stream,

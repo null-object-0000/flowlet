@@ -24,3 +24,27 @@ export type AgentEnvironmentReport = {
   primary?: AgentInstallation | null;
   installations: AgentInstallation[];
 };
+
+export type AgentGlobalConfigState =
+  | "not_configured"
+  | "flowlet"
+  | "other_gateway"
+  | "partial"
+  | "invalid";
+
+export type AgentGlobalConfigReport = {
+  agent_id: string;
+  settings_path: string;
+  credentials_path?: string | null;
+  settings_exists: boolean;
+  state: AgentGlobalConfigState;
+  base_url?: string | null;
+  auth_token_configured: boolean;
+  api_key_configured: boolean;
+  primary_model?: string | null;
+  fast_model?: string | null;
+  subagent_model?: string | null;
+  backup_available: boolean;
+  external_environment_overrides: string[];
+  error?: string | null;
+};

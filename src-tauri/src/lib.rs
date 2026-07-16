@@ -510,6 +510,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::detect_agent_environment,
+            commands::inspect_agent_global_config,
+            commands::apply_agent_global_config,
+            commands::restore_agent_global_config,
             commands::start_proxy,
             commands::stop_proxy,
             commands::proxy_status,
@@ -526,7 +529,7 @@ pub fn run() {
             commands::list_virtual_models,
             commands::save_virtual_models,
             commands::analyze_usage,
-            commands::repair_opencode_sessions,
+            commands::repair_agent_sessions,
             commands::repair_captured_usage,
             commands::repair_unknown_usage,
             commands::repair_usage_costs,

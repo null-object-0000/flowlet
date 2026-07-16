@@ -1,8 +1,8 @@
 use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ProxyBindConfig,
-    RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
+    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ProxyBindConfig, RequestLogRow,
+    RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
@@ -19,6 +19,74 @@ pub(super) async fn detect_agent_environment(
     agent_id: String,
 ) -> Result<crate::core::agent_environment::AgentEnvironmentReport, String> {
     crate::core::agent_environment::detect_agent_environment(&agent_id).await
+}
+
+#[tauri::command]
+pub(super) fn inspect_agent_global_config(
+    state: tauri::State<'_, AppState>,
+    agent_id: String,
+) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
+    let bind = state
+        .bind_config
+        .lock()
+        .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
+        .clone()
+        .normalized();
+    let suffix = if agent_id == "opencode" {
+        "/v1"
+    } else {
+        "/anthropic"
+    };
+    crate::core::agent_global_config::inspect_agent_global_config(
+        &agent_id,
+        &format!("http://127.0.0.1:{}{suffix}", bind.port),
+    )
+}
+
+#[tauri::command]
+pub(super) fn apply_agent_global_config(
+    state: tauri::State<'_, AppState>,
+    agent_id: String,
+) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
+    let bind = state
+        .bind_config
+        .lock()
+        .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
+        .clone()
+        .normalized();
+    let suffix = if agent_id == "opencode" {
+        "/v1"
+    } else {
+        "/anthropic"
+    };
+    crate::core::agent_global_config::apply_agent_global_config(
+        &agent_id,
+        &format!("http://127.0.0.1:{}{suffix}", bind.port),
+        &bind.default_client_token,
+    )
+}
+
+#[tauri::command]
+pub(super) fn restore_agent_global_config(
+    state: tauri::State<'_, AppState>,
+    agent_id: String,
+) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
+    let port = state
+        .bind_config
+        .lock()
+        .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
+        .clone()
+        .normalized()
+        .port;
+    let suffix = if agent_id == "opencode" {
+        "/v1"
+    } else {
+        "/anthropic"
+    };
+    crate::core::agent_global_config::restore_agent_global_config(
+        &agent_id,
+        &format!("http://127.0.0.1:{port}{suffix}"),
+    )
 }
 
 // ─── Proxy Commands ──────────────────────────────────────────────────────────
@@ -217,14 +285,11 @@ pub(super) fn save_route_candidates(
             msg
         })?;
 
-    let mut current = state
-        .routes
-        .lock()
-        .map_err(|_| {
-            let msg = "保存路由配置失败".to_string();
-            tracing::error!("{}", msg);
-            msg
-        })?;
+    let mut current = state.routes.lock().map_err(|_| {
+        let msg = "保存路由配置失败".to_string();
+        tracing::error!("{}", msg);
+        msg
+    })?;
     *current = routes;
     Ok(())
 }
@@ -290,13 +355,13 @@ pub(super) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, 
 }
 
 #[tauri::command]
-pub(super) fn repair_opencode_sessions(
+pub(super) fn repair_agent_sessions(
     state: tauri::State<'_, AppState>,
     time_range: String,
 ) -> Result<crate::core::config::AgentSessionRepairResult, String> {
     state
         .storage
-        .repair_opencode_sessions(&time_range)
+        .repair_agent_sessions(&time_range)
         .map_err(|err| err.to_string())
 }
 
@@ -356,14 +421,20 @@ pub(super) fn list_agent_sessions(
     state: tauri::State<'_, AppState>,
     filter: crate::core::config::AgentSessionsFilter,
 ) -> Result<crate::core::config::AgentSessionsPageResult, String> {
-    state.storage.list_agent_sessions(filter).map_err(|err| err.to_string())
+    state
+        .storage
+        .list_agent_sessions(filter)
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
 pub(super) fn list_agent_session_clients(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<LogFilterClient>, String> {
-    state.storage.list_agent_session_clients().map_err(|err| err.to_string())
+    state
+        .storage
+        .list_agent_session_clients()
+        .map_err(|err| err.to_string())
 }
 
 /// 返回请求日志中实际出现的客户端身份列表，供前端"客户端"筛选项使用。
@@ -452,6 +523,19 @@ pub(super) async fn query_balance(
             currency: None,
             is_available: false,
             error: Some("当前仅 DeepSeek 支持余额查询".to_string()),
+        });
+    }
+
+    if account
+        .base_url_override
+        .as_deref()
+        .is_some_and(|url| !url.trim().is_empty())
+    {
+        return Ok(BalanceQueryResult {
+            balance: None,
+            currency: None,
+            is_available: false,
+            error: Some("自定义 OpenAI Base URL 不支持 DeepSeek 官方余额自动同步".to_string()),
         });
     }
 
@@ -701,11 +785,15 @@ pub(super) fn db_stats(state: tauri::State<'_, AppState>) -> Result<(i64, i64, i
 #[tauri::command]
 pub(super) fn read_config(state: tauri::State<'_, AppState>) -> Result<String, String> {
     let path = &state.config_path;
-    crate::core::proxy::read_config_raw(path).ok_or_else(|| "config.json 不存在或读取失败".to_string())
+    crate::core::proxy::read_config_raw(path)
+        .ok_or_else(|| "config.json 不存在或读取失败".to_string())
 }
 
 #[tauri::command]
-pub(super) fn write_config(state: tauri::State<'_, AppState>, content: String) -> Result<(), String> {
+pub(super) fn write_config(
+    state: tauri::State<'_, AppState>,
+    content: String,
+) -> Result<(), String> {
     let path = &state.config_path;
     crate::core::proxy::write_config_raw(path, &content)
 }
@@ -830,5 +918,3 @@ pub(super) fn disable_autostart(app: AppHandle) -> Result<(), String> {
         .disable()
         .map_err(|e| format!("禁用自启动失败: {e}"))
 }
-
-

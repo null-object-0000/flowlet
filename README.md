@@ -1,10 +1,10 @@
 # Flowlet
 
-Flowlet 是一个桌面优先的本地 AI 请求路由客户端。
+Flowlet 是一个面向 AI Agent 的本地桌面模型服务控制台。
 
-Flowlet 当前阶段采用 LongCat + DeepSeek first 策略：先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口、多账号管理、Claude Code 接入、请求日志和 Token / 成本分析做完整，再扩展更多渠道。
+它负责管理上游渠道账号、对外开放模型、为 AI 客户端和 Agent 提供本地代理端点，并提供请求日志、用量成本和运行状态。
 
-项目尚未发布第一个可用版本，因此第一版正式实现允许破坏式重构：不兼容旧 Provider 原型、不做旧 SQLite 表迁移，直接以 Channel / Account / Model 作为正式数据模型。
+Flowlet 当前采用 LongCat + DeepSeek first 策略，先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口和多账号管理做完整，再扩展更多渠道。
 
 ## 产品原则
 
@@ -14,105 +14,95 @@ Flowlet 当前阶段采用 LongCat + DeepSeek first 策略：先把 LongCat 和 
 - 日志旁路记录，不影响主请求链路
 - 模型列表、价格、余额、额度、用量查询走异步同步
 - Token 和成本通过离线分析完成
-- 桌面客户端优先，Docker / Web Console 后续支持
+- 前端优先：业务流程和状态编排由 React 负责，Rust 提供底层原子能力
 
 ## 核心能力
 
-- 本地代理入口
+- 本地代理入口（默认端口 18640）
 - LongCat + DeepSeek 首发渠道模板
-- 多协议客户端入口：OpenAI-compatible 与 Anthropic-compatible
-- Claude Code 接入向导
-- 多账号管理：一个账号对应一个 API Key
-- 内置渠道模板
-- 开箱即用渠道配置：选择渠道、填写 API Key、选择模型、测试连接
-- Provider 配置管理
-- 渠道能力识别
-- 模型列表同步
-- 价格表同步 / 手动维护
-- 余额 / 额度 / 用量查询
-- 渠道测试连接
-- 自定义 OpenAI-compatible / Anthropic-compatible 渠道
-- Client Token 管理
-- 虚拟模型，例如 `auto`
-- 免费额度优先与失败降级
-- 请求日志查看
-- Token / 成本分析
-- 桌面端可视化管理
-- 后续支持 Docker 部署和 Web 访问
+- 多协议入口：OpenAI-compatible 与 Anthropic-compatible
+- 多账号管理：测试连接、余额同步、资源包管理
+- 开放模型管理：按渠道/账号选择对外开放的模型
+- 渠道账号管理：启用/停用、优先级排序、API Key 轮换
+- Client Token 管理：固定掩码展示、按需查看明文
+- Agent 接入向导：Claude Code、Codex CLI、OpenCode 等
+- 请求日志：筛选、详情、清理、实时刷新
+- 用量与成本分析
+- 设置：语言、主题、开机自启动
+- 系统托盘 / 开机自启动
+
+## 当前架构
+
+项目处于双前端过渡期：
+
+- `src/` — Mantine 遗留前端，仅做必要维护
+- `src-new/` — 默认重构目标，Semi Design + React 19 + TanStack Query
+
+新前端采用分层架构：
+
+```text
+src-new/
+├── app/          # Provider、Router、Shell
+├── pages/        # 路由页面和页面状态组合
+├── features/     # 用户动作与业务编排
+├── domains/      # 领域类型、command、query、mutation
+├── platform/     # Tauri 等运行平台边界
+├── shared/       # 无业务含义的共享 UI 与工具
+└── styles/       # reset 与 Design Tokens
+```
+
+Rust 后端（`src-tauri/`）负责代理核心、HTTP 转发、SQLite 持久化、系统托盘和渠道同步。
 
 ## 当前状态
 
-Flowlet 当前处于 Channel / Account / Model 重构雏形阶段，还不是生产就绪版本。当前分支的目标是先验证 LongCat / DeepSeek 双协议透明转发、多账号优先级 fallback、Claude Code 接入、日志和成本统计这条 MVP 主链路。
+Flowlet 正在从 Mantine 迁移到 Semi Design（`src-new/`）。新前端已覆盖概览页、渠道账号、开放模型、请求日志、用量成本和设置页面。
 
 ### 已完成能力
 
-**核心架构**
+**新前端（src-new/）**
+- 概览页（状态总览 + 三步引导）
+- 渠道账号管理（增删改、测试连接、余额同步、LongCat 资源包）
+- 模型服务页（路由候选检查）
+- 请求日志（列表、详情、筛选、清理、自动刷新）
+- 用量成本页
+- 设置页（语言、主题、自启动）
+
+**核心后端**
 - Channel / Account / Model 三层数据模型
-- SQLite WAL 模式持久化、自动迁移
-- 三段价格体系（input_uncached / input_cached / output）
-
-**协议支持**
-- OpenAI-compatible 入口：`/v1/*`、`/openai/v1/*`
-- Anthropic-compatible 入口：`/anthropic/v1/*`
-- 响应零改写、流式透传
-
-**渠道支持**
-- LongCat（OpenAI + Anthropic 双协议）
-- DeepSeek（OpenAI + Anthropic + 模型同步 + 余额查询）
-
-**路由能力**
-- 显式 `auto` 候选顺序路由
-- 账号优先级 fallback
-- 429/5xx/402 fallback、400/401 不降级
-- 请求类型识别仅用于日志，不参与自动换模型
-
-**部署方式**
-- 桌面端（Tauri）
-- 系统托盘 / 开机自启动仍需实机回归
-- Docker、Web Console、无头服务器作为后续阶段验证，不作为当前 MVP 完成项
-
-**可观测性**
-- 请求日志（channel/account/protocol/request_type 维度）
-- Token / 成本分析（response.usage 旁路提取）
-- 账号统计（请求数/失败率/fallback/成本）
-- 余额快照（手动登记 + DeepSeek 查询后自动记录）
+- SQLite WAL 模式持久化
+- OpenAI-compatible + Anthropic-compatible 双协议透明转发
+- 账号优先级 fallback、429/5xx 降级
+- 请求日志旁路捕获（channel/account/protocol 维度）
+- Token / 成本分析
+- 余额快照与 DeepSeek 余额查询
+- 便携版构建、配置导入导出
+- Headless 二进制入口（`bin/headless.rs`）
+- 运行时代理配置热更新
 
 ## 快速开始
 
-### 桌面端
+### 桌面端（新前端）
 
 ```bash
-bun install
-bun run tauri:dev
+npm install
+npm run dev:new
 ```
 
-详细文档见 [docs/](docs/) 目录。
-
-## 当前透明转发边界
-
-- 第一阶段采用 LongCat + DeepSeek first 策略，同时支持 LongCat / DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口。
-- Flowlet 支持多协议入口，但不做跨协议转换。客户端请求使用什么协议，上游 Provider 就必须原生支持同一种协议。
-- OpenAI-compatible 入口优先支持 `/v1/*`。
-- Anthropic-compatible 入口支持 `/anthropic/v1/messages`，用于 Claude Code、Anthropic SDK 和其他 Anthropic-compatible 客户端。
-- 请求侧仅做 Provider base_url 替换、Authorization / X-Api-Key 替换和 `auto` 的 model 映射。
-- 上游返回的最终响应按原 status、headers、body 流式返回。
-- 普通 JSON 响应会旁路复制最多 1MB 响应体用于离线 `usage` 提取；SSE 流式响应不解析。
-- 日志写入走旁路，失败不影响主请求链路。
-- `auto` 当前只做顺序候选：429、5xx、network error 会尝试下一个候选；400、参数错误、协议不匹配、上下文超长不自动降级。
-- 模型列表、价格、余额、额度、用量查询不能进入主请求链路，只能作为配置辅助和异步同步能力。
-- Client Token 识别需要同时支持 `Authorization: Bearer ...` 和 `X-Api-Key: ...`，以兼容 Claude Code 的 `ANTHROPIC_AUTH_TOKEN` 与 `ANTHROPIC_API_KEY` 接入方式。
-
-## 本地开发
-
-前端依赖使用 bun：
+### 桌面端（开发模式）
 
 ```bash
-bun install
-bun run check
-bun run build
+npm run tauri:dev
 ```
 
-Rust Core 检查：
+### 检查与构建
+
+```bash
+npm run check          # 前端 typecheck
+npm run build:new      # 构建新前端
+npm run test:new       # 运行新前端测试
+```
+
+### Rust Core 检查
 
 ```bash
 cd src-tauri
@@ -121,8 +111,14 @@ cargo check
 cargo test
 ```
 
-桌面开发启动：
+详细文档见 [docs/](docs/) 目录。
 
-```bash
-bun run tauri:dev
-```
+## 透明转发边界
+
+- Flowlet 支持多协议入口，但不做跨协议转换。客户端请求使用什么协议，上游 Provider 就必须原生支持同一种协议。
+- OpenAI-compatible 入口支持 `/v1/*`、`/openai/v1/*`。
+- Anthropic-compatible 入口支持 `/anthropic/v1/*`，用于 Claude Code、Anthropic SDK 等。
+- 请求侧仅做 Provider base_url 替换、Authorization / X-Api-Key 替换和 `auto` 的 model 映射。
+- 上游返回的最终响应按原 status、headers、body 流式返回。
+- 日志写入走旁路，失败不影响主请求链路。
+- `auto` 当前只做顺序候选：429、5xx、network error 会尝试下一个候选；400、参数错误、协议不匹配、上下文超长不自动降级。

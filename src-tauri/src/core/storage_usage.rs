@@ -294,7 +294,7 @@ impl Storage {    pub fn save_balance_snapshot(
     ) -> Result<AgentSessionsPageResult, StorageError> {
         let connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
         let page = filter.page.max(1);
-        let page_size = filter.page_size.clamp(1, 100);
+        let page_size = filter.page_size.clamp(1, 8);
         let offset = i64::from((page - 1) * page_size);
         let pattern = format!("%{}%", filter.search.trim());
         let client_id = filter.client_id.trim();
@@ -1030,7 +1030,7 @@ impl Storage {    pub fn save_balance_snapshot(
         let mut stmt = connection.prepare(
             r#"
             SELECT
-                date(request_logs.created_at) AS usage_date,
+                strftime('%Y-%m-%dT%H:00:00', request_logs.created_at, 'localtime') AS usage_date,
                 usage_records.client_id,
                 usage_records.client_name,
                 usage_records.channel_id,
@@ -1050,10 +1050,11 @@ impl Storage {    pub fn save_balance_snapshot(
             FROM usage_records
             LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
                                   AND request_logs.is_last_attempt = 1
+            WHERE datetime(request_logs.created_at) >= datetime('now', '-31 days')
             GROUP BY usage_date, usage_records.client_id, usage_records.channel_id,
                      usage_records.account_id, usage_records.upstream_model
             ORDER BY usage_date DESC, request_count DESC
-            LIMIT 100
+            LIMIT 20000
             "#,
         )?;
         let rows = stmt.query_map([], |row| {

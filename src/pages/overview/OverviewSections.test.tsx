@@ -14,6 +14,7 @@ vi.mock("lottie-web", () => ({
 
 vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
   useClaudeCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
+  useOpenCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
   useClaudeCodeGlobalConfig: () => ({
     query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
     apply: { isPending: false, mutateAsync: vi.fn() },

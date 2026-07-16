@@ -42,6 +42,8 @@ invalid          settings.json 不是合法 JSON，或顶层 / env 结构无效
 
 状态结果可以返回配置文件路径、Base URL、模型名和“Token 是否配置”，但绝不返回 Token、API Key 或备份中的原始凭据。
 
+接入抽屉默认以固定长度掩码展示 Client Token；用户主动点击查看后仅在当前抽屉会话临时显示，关闭后恢复掩码。复制 Token 或手动配置片段时仍使用真实值。
+
 ## 4. Flowlet 管理字段
 
 点击“全局接入 Flowlet”后，Flowlet 在 `settings.json.env` 中写入：
@@ -137,6 +139,8 @@ AgentAccessSideSheet
 - 已经运行的 Claude Code：需要退出并重新启动；
 - 新启动的 Claude Code：自动读取用户级 `settings.json`；
 - 修改 Flowlet 代理端口或 Client Token 后：重新点击“重新写入 Flowlet 配置”。
+
+手动配置区域提供与第 4 节一键写入内容一致的完整 `settings.json.env` 片段，不再只提供 Base URL 和 Token 两个环境变量。
 
 ## 9. 参考
 

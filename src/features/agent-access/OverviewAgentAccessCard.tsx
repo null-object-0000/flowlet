@@ -4,7 +4,7 @@ import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import styles from "./OverviewAgentAccessCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
-import { useClaudeCodeEnvironment } from "./useAgentEnvironment";
+import { useClaudeCodeEnvironment, useClaudeCodeGlobalConfig, useOpenCodeGlobalConfig } from "./useAgentEnvironment";
 
 const AGENTS: Array<{
   name: string;
@@ -25,6 +25,7 @@ const AGENTS: Array<{
     description: "命令行接入",
     icon: <span className={`${styles.brandIcon} ${styles.openCodeMark}`} aria-hidden="true" />,
     iconClassName: styles.openCodeIcon,
+    kind: "opencode",
   },
   {
     name: "ChatGPT Desktop",
@@ -41,8 +42,10 @@ type Props = {
 
 export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const { t } = useAppPreferences();
-  const [detailsVisible, setDetailsVisible] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<AgentKind | null>(null);
   const claudeEnvironment = useClaudeCodeEnvironment();
+  const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
+  const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
 
   const copy = async (value: string, message: string) => {
     try {
@@ -63,6 +66,27 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
           : t("已安装")
         : t("未安装");
 
+  const activeGlobalConfig = selectedAgent === "opencode" ? openCodeGlobalConfig : claudeGlobalConfig;
+  const activeAgentName = selectedAgent === "opencode" ? "OpenCode" : "Claude Code";
+
+  const applyGlobalConfig = async () => {
+    try {
+      await activeGlobalConfig.apply.mutateAsync();
+      Toast.success(t("{name} 已全局接入 Flowlet", { name: activeAgentName }));
+    } catch (error) {
+      Toast.error(t("写入 {name} 全局配置失败：{message}", { name: activeAgentName, message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
+
+  const restoreGlobalConfig = async () => {
+    try {
+      await activeGlobalConfig.restore.mutateAsync();
+      Toast.success(t("{name} 全局配置已恢复", { name: activeAgentName }));
+    } catch (error) {
+      Toast.error(t("恢复 {name} 全局配置失败：{message}", { name: activeAgentName, message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
+
   return (
     <>
       <OverviewModuleCard
@@ -71,7 +95,12 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       >
         <div className={styles.grid}>
           {AGENTS.map(({ name, description, icon, iconClassName, kind }) => {
-            const supported = kind === "claude-code";
+            const supported = kind === "claude-code" || kind === "opencode";
+            const status = kind === "claude-code"
+              ? claudeStatus
+              : kind === "opencode"
+                ? t("CLI 与 Desktop 共用配置")
+                : t(description);
             return (
               <button
                 key={name}
@@ -80,13 +109,13 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                 aria-label={supported ? t("配置 {name}", { name }) : t("{name} 即将支持", { name })}
                 disabled={!supported}
                 onClick={() => {
-                  if (kind === "claude-code") setDetailsVisible(true);
+                  if (kind) setSelectedAgent(kind);
                 }}
               >
                 <span className={`${styles.icon} ${iconClassName}`}>{icon}</span>
                 <span className={styles.agentText}>
                   <strong>{name}</strong>
-                  <small>{supported ? claudeStatus : t(description)}</small>
+                  <small>{supported ? status : t(description)}</small>
                 </span>
                 <span className={`${styles.support} ${supported ? styles.supported : ""}`}>
                   {supported ? t("查看详情") : t("即将支持")}
@@ -98,15 +127,22 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       </OverviewModuleCard>
 
       <AgentAccessSideSheet
-        visible={detailsVisible}
-        agent="claude-code"
+        visible={selectedAgent !== null}
+        agent={selectedAgent || "claude-code"}
         baseUrl={baseUrl}
         clientToken={clientToken}
         environment={claudeEnvironment.data}
         environmentLoading={claudeEnvironment.isFetching}
         environmentError={claudeEnvironment.error?.message}
         onRefreshEnvironment={() => void claudeEnvironment.refetch()}
-        onClose={() => setDetailsVisible(false)}
+        globalConfig={activeGlobalConfig.query.data}
+        globalConfigLoading={selectedAgent !== null && activeGlobalConfig.query.isLoading}
+        globalConfigBusy={activeGlobalConfig.apply.isPending || activeGlobalConfig.restore.isPending}
+        globalConfigError={activeGlobalConfig.query.error?.message}
+        onRefreshGlobalConfig={() => void activeGlobalConfig.query.refetch()}
+        onApplyGlobalConfig={applyGlobalConfig}
+        onRestoreGlobalConfig={restoreGlobalConfig}
+        onClose={() => setSelectedAgent(null)}
         onCopy={copy}
       />
     </>

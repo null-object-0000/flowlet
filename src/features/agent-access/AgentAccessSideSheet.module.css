@@ -84,6 +84,74 @@
   margin-top: 10px;
 }
 
+.globalConfig {
+  margin-top: 14px;
+}
+
+.globalConfigStatus,
+.statusRow,
+.configActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.globalConfigStatus {
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.statusRow {
+  margin-top: 10px;
+}
+
+.statusRow > span {
+  width: 100px;
+  flex: none;
+}
+
+.statusRow code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--flowlet-color-text);
+  font-family: "Cascadia Code", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.configWarning,
+.configNotice {
+  margin-top: 12px;
+}
+
+.configWarning {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--semi-color-warning-light-active);
+  border-radius: 8px;
+  background: var(--semi-color-warning-light-default);
+}
+
+.configWarning span,
+.configWarning small {
+  color: var(--flowlet-color-text-secondary);
+}
+
+.configWarning span {
+  font-family: "Cascadia Code", Consolas, monospace;
+  word-break: break-all;
+}
+
+.configNotice {
+  display: block;
+}
+
+.configActions {
+  margin-top: 14px;
+  justify-content: flex-end;
+}
+
 .codeBlock {
   margin: 14px 0 0;
   padding: 14px;

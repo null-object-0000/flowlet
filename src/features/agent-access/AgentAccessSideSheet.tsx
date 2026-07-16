@@ -1,5 +1,6 @@
+import { useEffect, useMemo, useState } from "react";
 import { Button, SideSheet, Tag, Typography } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
+import { IconCopy, IconEyeClosed, IconEyeOpened, IconRefresh } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
@@ -11,6 +12,7 @@ import type {
 } from "../../domains/agent/types";
 
 const { Paragraph, Text, Title } = Typography;
+const MASKED_TOKEN = "••••••••••••••••••••";
 
 export type AgentKind = "claude-code" | "opencode";
 type Copy = (value: string, message: string) => Promise<void>;
@@ -55,30 +57,22 @@ export function AgentAccessSideSheet({
   onCopy,
 }: Props) {
   const { t } = useAppPreferences();
+  const [tokenVisible, setTokenVisible] = useState(false);
 
   const isClaude = agent === "claude-code";
   const name = isClaude ? "Claude Code CLI" : "OpenCode CLI";
   const protocol = isClaude ? "Anthropic-compatible" : "OpenAI-compatible";
   const endpoint = `${baseUrl}${isClaude ? "/anthropic" : "/v1"}`;
   const token = clientToken || "<Client Token>";
-  const config = isClaude
-    ? `export ANTHROPIC_BASE_URL=${endpoint}\nexport ANTHROPIC_AUTH_TOKEN=${token}`
-    : JSON.stringify({
-      $schema: "https://opencode.ai/config.json",
-      model: "flowlet/flowlet-pro",
-      small_model: "flowlet/flowlet-flash",
-      provider: {
-        flowlet: {
-          name: "Flowlet",
-          npm: "@ai-sdk/openai-compatible",
-          options: { baseURL: endpoint },
-          models: {
-            "flowlet-pro": { name: "flowlet-pro" },
-            "flowlet-flash": { name: "flowlet-flash" },
-          },
-        },
-      },
-    }, null, 2);
+  const displayedToken = clientToken && !tokenVisible ? MASKED_TOKEN : token;
+  const manualSnippets = useMemo(
+    () => buildManualSnippets(isClaude, endpoint, token, displayedToken, t),
+    [displayedToken, endpoint, isClaude, t, token],
+  );
+
+  useEffect(() => {
+    if (!visible) setTokenVisible(false);
+  }, [visible, agent]);
 
   return (
     <SideSheet
@@ -104,12 +98,13 @@ export function AgentAccessSideSheet({
           </Paragraph>
         </section>
 
-        {isClaude ? (
-          <section className={styles.section}>
+        <section className={styles.section}>
             <div className={styles.sectionHeader}>
               <div>
                 <Title heading={5}>{t("本机环境")}</Title>
-                <Text type="tertiary" size="small">{t("识别 Claude Code 的安装位置、版本和安装方式")}</Text>
+                <Text type="tertiary" size="small">
+                  {t(isClaude ? "识别 Claude Code 的安装位置、版本和安装方式" : "识别 OpenCode CLI 与 Desktop 的安装位置和版本")}
+                </Text>
               </div>
               <Button
                 icon={<IconRefresh spin={environmentLoading} />}
@@ -124,15 +119,16 @@ export function AgentAccessSideSheet({
             {environmentError ? <Text className={styles.environmentMessage} type="danger">{t("检测失败：{message}", { message: environmentError })}</Text> : null}
             {!environmentError && !environmentLoading && !environment?.installed ? (
               <Text className={styles.environmentMessage} type="tertiary">
-                {t("未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。")}
+                {t(isClaude ? "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。" : "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。")}
               </Text>
             ) : null}
             {environment?.installations.map((installation, index) => (
               <div className={styles.installation} key={installation.executable_path}>
                 <div className={styles.installationHeader}>
-                  <strong>{installation.version ? `Claude Code ${installation.version}` : t("Claude Code 安装")}</strong>
+                  <strong>{installationTitle(agent, installation.surface, installation.version, t)}</strong>
                   <span className={styles.installationTags}>
-                    {environment.primary?.executable_path === installation.executable_path ? <Tag color="blue">{t("当前使用")}</Tag> : null}
+                    {environment.primary?.executable_path === installation.executable_path && installation.surface !== "desktop" && !installation.error ? <Tag color="blue">{t("当前使用")}</Tag> : null}
+                    {!isClaude ? <Tag color={installation.surface === "desktop" ? "violet" : "cyan"}>{t(installation.surface === "desktop" ? "Desktop" : "CLI")}</Tag> : null}
                     <Tag>{installMethodLabel(installation.install_method, t)}</Tag>
                     {index > 0 ? <Tag color="orange">{t("额外安装")}</Tag> : null}
                   </span>
@@ -150,8 +146,7 @@ export function AgentAccessSideSheet({
                 {installation.error ? <Text className={styles.installationError} type="warning">{installation.error}</Text> : null}
               </div>
             ))}
-          </section>
-        ) : null}
+        </section>
 
         <section className={styles.section}>
             <div className={styles.sectionHeader}>
@@ -229,39 +224,46 @@ export function AgentAccessSideSheet({
         <section className={styles.section}>
           <Title heading={5}>{t("接入参数")}</Title>
           <ConfigRow label="Base URL" value={endpoint} onCopy={() => onCopy(endpoint, t("{label} 已复制", { label: "Base URL" }))} />
-          <ConfigRow
+          <SecretConfigRow
             label="Client Token"
-            value={token}
+            displayValue={displayedToken}
+            revealable={Boolean(clientToken)}
+            visible={tokenVisible}
+            onToggle={() => setTokenVisible((value) => !value)}
             onCopy={() => onCopy(token, t("{label} 已复制", { label: "Client Token" }))}
           />
         </section>
 
         <section className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <Title heading={5}>{t("完整配置")}</Title>
-              <Text type="tertiary" size="small">
-                {t(isClaude ? "在启动 Claude Code 前设置以下环境变量" : "OpenCode Provider 配置示例；凭据由 auth.json 单独管理")}
-              </Text>
-            </div>
-            <Button
-              aria-label={t("复制完整配置")}
-              icon={<IconCopy />}
-              theme="light"
-              type="primary"
-              onClick={() => void onCopy(config, t("{name} 完整配置已复制", { name }))}
-            >
-              {t("复制完整配置")}
-            </Button>
+          <Title heading={5}>{t("手动配置")}</Title>
+          <Text type="tertiary" size="small">
+            {t(isClaude ? "以下内容与一键写入的 Claude Code 全局配置一致" : "OpenCode 的 Provider 配置与凭据文件需要分别设置")}
+          </Text>
+          <div className={styles.snippetList}>
+            {manualSnippets.map((snippet) => (
+              <div className={styles.snippet} key={snippet.label}>
+                <div className={styles.snippetHeader}>
+                  <strong>{snippet.label}</strong>
+                  <Button
+                    aria-label={t("复制{label}", { label: snippet.label })}
+                    icon={<IconCopy />}
+                    theme="light"
+                    onClick={() => void onCopy(snippet.copyValue, t("{label} 已复制", { label: snippet.label }))}
+                  >
+                    {t("复制此片段")}
+                  </Button>
+                </div>
+                <pre className={styles.codeBlock}><code>{snippet.displayValue}</code></pre>
+              </div>
+            ))}
           </div>
-          <pre className={styles.codeBlock}><code>{config}</code></pre>
         </section>
 
         <section className={styles.tip}>
           <Title heading={5}>{t("使用提示")}</Title>
           <ul>
             <li>{t("Client Token 用于访问本地 Flowlet，不是上游渠道的 API Key。")}</li>
-            <li>{t("修改环境变量后请重新启动对应的 Agent 进程。")}</li>
+            <li>{t(isClaude ? "修改全局配置后请重新启动 Claude Code。" : "修改全局配置后请重新启动 OpenCode CLI 与 Desktop。")}</li>
             {!clientToken ? <li>{t("当前未配置默认 Client Token，请先在客户端设置中完成配置。")}</li> : null}
           </ul>
         </section>
@@ -286,12 +288,82 @@ function installMethodLabel(method: AgentInstallMethod, t: (source: string) => s
     native: "原生安装",
     winget: "WinGet",
     npm: "npm 全局安装",
+    bun: "Bun 安装",
     legacy_npm: "旧版 npm 安装",
     homebrew: "Homebrew",
     system_package: "系统包管理器",
+    desktop: "桌面应用",
     unknown: "未知方式",
   };
   return t(labels[method]);
+}
+
+function installationTitle(
+  agent: AgentKind,
+  surface: "cli" | "desktop" | undefined,
+  version: string | null | undefined,
+  t: (source: string) => string,
+) {
+  const name = agent === "claude-code" ? "Claude Code" : surface === "desktop" ? "OpenCode Desktop" : "OpenCode CLI";
+  return version ? `${name} ${version}` : t(`${name} 安装`);
+}
+
+function buildManualSnippets(
+  isClaude: boolean,
+  endpoint: string,
+  token: string,
+  displayedToken: string,
+  t: (source: string) => string,
+) {
+  if (isClaude) {
+    const value = (authToken: string) => JSON.stringify({
+      env: {
+        ANTHROPIC_BASE_URL: endpoint,
+        ANTHROPIC_AUTH_TOKEN: authToken,
+        ANTHROPIC_MODEL: "flowlet-pro",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "flowlet-pro",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "flowlet-pro",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "flowlet-flash",
+        CLAUDE_CODE_SUBAGENT_MODEL: "flowlet-flash",
+      },
+    }, null, 2);
+    return [{
+      label: t("settings.json 配置片段"),
+      displayValue: value(displayedToken),
+      copyValue: value(token),
+    }];
+  }
+  const providerConfig = JSON.stringify({
+    $schema: "https://opencode.ai/config.json",
+    model: "flowlet/flowlet-pro",
+    small_model: "flowlet/flowlet-flash",
+    provider: {
+      flowlet: {
+        name: "Flowlet",
+        npm: "@ai-sdk/openai-compatible",
+        options: { baseURL: endpoint },
+        models: {
+          "flowlet-pro": { name: "flowlet-pro" },
+          "flowlet-flash": { name: "flowlet-flash" },
+        },
+      },
+    },
+  }, null, 2);
+  const credentials = (apiKey: string) => JSON.stringify({
+    flowlet: { type: "api", key: apiKey },
+  }, null, 2);
+  return [
+    {
+      label: t("opencode.jsonc 配置片段"),
+      displayValue: providerConfig,
+      copyValue: providerConfig,
+    },
+    {
+      label: t("auth.json 凭据片段"),
+      displayValue: credentials(displayedToken),
+      copyValue: credentials(token),
+    },
+  ];
 }
 
 function ConfigRow({ label, value, onCopy }: { label: string; value: string; onCopy: () => Promise<void> }) {
@@ -301,6 +373,41 @@ function ConfigRow({ label, value, onCopy }: { label: string; value: string; onC
       <Text type="tertiary" size="small">{label}</Text>
       <code>{value}</code>
       <Button icon={<IconCopy />} theme="borderless" aria-label={t("复制{label}", { label })} onClick={() => void onCopy()} />
+    </div>
+  );
+}
+
+function SecretConfigRow({
+  label,
+  displayValue,
+  revealable,
+  visible,
+  onToggle,
+  onCopy,
+}: {
+  label: string;
+  displayValue: string;
+  revealable: boolean;
+  visible: boolean;
+  onToggle: () => void;
+  onCopy: () => Promise<void>;
+}) {
+  const { t } = useAppPreferences();
+  return (
+    <div className={`${styles.configRow} ${styles.secretConfigRow}`}>
+      <Text type="tertiary" size="small">{label}</Text>
+      <code>{displayValue}</code>
+      <span className={styles.secretActions}>
+        {revealable ? (
+          <Button
+            aria-label={t(visible ? "隐藏 Client Token" : "查看 Client Token")}
+            icon={visible ? <IconEyeClosed /> : <IconEyeOpened />}
+            theme="borderless"
+            onClick={onToggle}
+          />
+        ) : null}
+        <Button icon={<IconCopy />} theme="borderless" aria-label={t("复制{label}", { label })} onClick={() => void onCopy()} />
+      </span>
     </div>
   );
 }

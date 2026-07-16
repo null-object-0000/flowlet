@@ -11,6 +11,10 @@ export function detectClaudeCodeEnvironment(): Promise<AgentEnvironmentReport> {
   return detectAgentEnvironment("claude-code");
 }
 
+export function detectOpenCodeEnvironment(): Promise<AgentEnvironmentReport> {
+  return detectAgentEnvironment("opencode");
+}
+
 export function inspectAgentGlobalConfig(agentId: string): Promise<AgentGlobalConfigReport> {
   return invokeCommand<AgentGlobalConfigReport>("inspect_agent_global_config", { agentId }).catch((error) => {
     throw toAppError(error, "agent_global_config_inspection_failed");

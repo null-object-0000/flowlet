@@ -4,7 +4,12 @@ import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import styles from "./OverviewAgentAccessCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
-import { useClaudeCodeEnvironment, useClaudeCodeGlobalConfig, useOpenCodeGlobalConfig } from "./useAgentEnvironment";
+import {
+  useClaudeCodeEnvironment,
+  useClaudeCodeGlobalConfig,
+  useOpenCodeEnvironment,
+  useOpenCodeGlobalConfig,
+} from "./useAgentEnvironment";
 
 const AGENTS: Array<{
   name: string;
@@ -44,6 +49,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const { t } = useAppPreferences();
   const [selectedAgent, setSelectedAgent] = useState<AgentKind | null>(null);
   const claudeEnvironment = useClaudeCodeEnvironment();
+  const openCodeEnvironment = useOpenCodeEnvironment();
   const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
   const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
 
@@ -65,8 +71,18 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
           ? t("已安装 · {version}", { version: claudeEnvironment.data.primary.version })
           : t("已安装")
         : t("未安装");
+  const openCodeStatus = openCodeEnvironment.isLoading
+    ? t("正在检测…")
+    : openCodeEnvironment.isError
+      ? t("检测失败")
+      : openCodeEnvironment.data?.installed
+        ? openCodeEnvironment.data.primary?.version
+          ? t("已安装 · {version}", { version: openCodeEnvironment.data.primary.version })
+          : t("已安装")
+        : t("未安装");
 
   const activeGlobalConfig = selectedAgent === "opencode" ? openCodeGlobalConfig : claudeGlobalConfig;
+  const activeEnvironment = selectedAgent === "opencode" ? openCodeEnvironment : claudeEnvironment;
   const activeAgentName = selectedAgent === "opencode" ? "OpenCode" : "Claude Code";
 
   const applyGlobalConfig = async () => {
@@ -99,7 +115,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
             const status = kind === "claude-code"
               ? claudeStatus
               : kind === "opencode"
-                ? t("CLI 与 Desktop 共用配置")
+                ? openCodeStatus
                 : t(description);
             return (
               <button
@@ -131,10 +147,10 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         agent={selectedAgent || "claude-code"}
         baseUrl={baseUrl}
         clientToken={clientToken}
-        environment={claudeEnvironment.data}
-        environmentLoading={claudeEnvironment.isFetching}
-        environmentError={claudeEnvironment.error?.message}
-        onRefreshEnvironment={() => void claudeEnvironment.refetch()}
+        environment={activeEnvironment.data}
+        environmentLoading={activeEnvironment.isFetching}
+        environmentError={activeEnvironment.error?.message}
+        onRefreshEnvironment={() => void activeEnvironment.refetch()}
         globalConfig={activeGlobalConfig.query.data}
         globalConfigLoading={selectedAgent !== null && activeGlobalConfig.query.isLoading}
         globalConfigBusy={activeGlobalConfig.apply.isPending || activeGlobalConfig.restore.isPending}

@@ -2,12 +2,17 @@ export type AgentInstallMethod =
   | "native"
   | "winget"
   | "npm"
+  | "bun"
   | "legacy_npm"
   | "homebrew"
   | "system_package"
+  | "desktop"
   | "unknown";
 
+export type AgentSurface = "cli" | "desktop";
+
 export type AgentInstallation = {
+  surface?: AgentSurface;
   executable_path: string;
   install_dir: string;
   install_method: AgentInstallMethod;

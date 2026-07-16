@@ -34,6 +34,44 @@ vi.mock("./useAgentEnvironment", () => ({
     isLoading: false,
     refetch,
   }),
+  useOpenCodeEnvironment: () => ({
+    data: {
+      agent_id: "opencode",
+      agent_name: "OpenCode",
+      installed: true,
+      primary: {
+        surface: "cli",
+        executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe",
+        install_dir: "C:\\Users\\test\\.opencode\\bin",
+        install_method: "native",
+        version: "1.17.18",
+        version_output: "1.17.18",
+        available_on_path: true,
+      },
+      installations: [{
+        surface: "cli",
+        executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe",
+        install_dir: "C:\\Users\\test\\.opencode\\bin",
+        install_method: "native",
+        version: "1.17.18",
+        version_output: "1.17.18",
+        available_on_path: true,
+      }, {
+        surface: "desktop",
+        executable_path: "C:\\Users\\test\\AppData\\Local\\Programs\\@opencode-aidesktop\\OpenCode.exe",
+        install_dir: "C:\\Users\\test\\AppData\\Local\\Programs\\@opencode-aidesktop",
+        install_method: "desktop",
+        version: null,
+        version_output: null,
+        available_on_path: false,
+      }],
+    },
+    error: null,
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+    refetch,
+  }),
   useClaudeCodeGlobalConfig: () => ({
     query: {
       data: {
@@ -94,6 +132,7 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("已安装 · 2.1.207")).toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: "配置 OpenCode CLI" })).toBeEnabled();
+    expect(screen.getByText("已安装 · 1.17.18")).toBeInTheDocument();
     const futureButtons = [screen.getByRole("button", { name: "ChatGPT Desktop 即将支持" })];
     futureButtons.forEach((button) => expect(button).toBeDisabled());
     expect(screen.getAllByText("即将支持")).toHaveLength(1);
@@ -107,12 +146,18 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("C:\\Users\\test\\.claude\\settings.json")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
+    expect(screen.queryByText("token")).not.toBeInTheDocument();
+    expect(screen.getAllByText("••••••••••••••••••••").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "查看 Client Token" }));
+    expect(screen.getAllByText("token").length).toBeGreaterThan(0);
   });
 
   it("opens the shared OpenCode CLI and Desktop global configuration", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
     fireEvent.click(screen.getByRole("button", { name: "配置 OpenCode CLI" }));
+    expect(screen.getByText("OpenCode CLI 1.17.18")).toBeInTheDocument();
+    expect(screen.getByText("OpenCode Desktop 安装")).toBeInTheDocument();
     expect(screen.getByText("OpenCode CLI 与 Desktop 共用此全局配置")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.config\\opencode\\opencode.jsonc")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.local\\share\\opencode\\auth.json")).toBeInTheDocument();

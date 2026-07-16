@@ -3,6 +3,7 @@ import {
   applyClaudeCodeGlobalConfig,
   applyOpenCodeGlobalConfig,
   detectClaudeCodeEnvironment,
+  detectOpenCodeEnvironment,
   inspectClaudeCodeGlobalConfig,
   inspectOpenCodeGlobalConfig,
   restoreClaudeCodeGlobalConfig,
@@ -14,6 +15,15 @@ export function useClaudeCodeEnvironment() {
   return useQuery({
     queryKey: queryKeys.agent.environment("claude-code"),
     queryFn: detectClaudeCodeEnvironment,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useOpenCodeEnvironment() {
+  return useQuery({
+    queryKey: queryKeys.agent.environment("opencode"),
+    queryFn: detectOpenCodeEnvironment,
     staleTime: 60_000,
     retry: 1,
   });

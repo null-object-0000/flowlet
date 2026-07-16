@@ -52,6 +52,15 @@
   white-space: nowrap;
 }
 
+.secretConfigRow {
+  grid-template-columns: 100px minmax(0, 1fr) auto;
+}
+
+.secretActions {
+  display: flex;
+  align-items: center;
+}
+
 .environmentMessage {
   display: block;
   margin-top: 14px;
@@ -162,6 +171,27 @@
   word-break: break-all;
 }
 
+.snippetList {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.snippet {
+  min-width: 0;
+}
+
+.snippetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.snippet .codeBlock {
+  margin-top: 8px;
+}
+
 .tip {
   color: #344766;
   background: #fffaf0;
@@ -182,6 +212,10 @@
 
   .configRow {
     grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .secretConfigRow {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .configRow > span:first-child {

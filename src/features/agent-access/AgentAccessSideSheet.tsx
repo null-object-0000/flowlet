@@ -60,7 +60,7 @@ export function AgentAccessSideSheet({
   const [tokenVisible, setTokenVisible] = useState(false);
 
   const isClaude = agent === "claude-code";
-  const name = isClaude ? "Claude Code CLI" : "OpenCode CLI";
+  const name = isClaude ? "Claude Code CLI" : "OpenCode";
   const protocol = isClaude ? "Anthropic-compatible" : "OpenAI-compatible";
   const endpoint = `${baseUrl}${isClaude ? "/anthropic" : "/v1"}`;
   const token = clientToken || "<Client Token>";

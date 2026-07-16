@@ -131,7 +131,7 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByRole("button", { name: "配置 Claude Code CLI" })).toBeEnabled();
     expect(screen.getByText("已安装 · 2.1.207")).toBeInTheDocument();
 
-    expect(screen.getByRole("button", { name: "配置 OpenCode CLI" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "配置 OpenCode" })).toBeEnabled();
     expect(screen.getByText("已安装 · 1.17.18")).toBeInTheDocument();
     const futureButtons = [screen.getByRole("button", { name: "ChatGPT Desktop 即将支持" })];
     futureButtons.forEach((button) => expect(button).toBeDisabled());
@@ -155,7 +155,7 @@ describe("OverviewAgentAccessCard", () => {
   it("opens the shared OpenCode CLI and Desktop global configuration", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "配置 OpenCode CLI" }));
+    fireEvent.click(screen.getByRole("button", { name: "配置 OpenCode" }));
     expect(screen.getByText("OpenCode CLI 1.17.18")).toBeInTheDocument();
     expect(screen.getByText("OpenCode Desktop 安装")).toBeInTheDocument();
     expect(screen.getByText("OpenCode CLI 与 Desktop 共用此全局配置")).toBeInTheDocument();

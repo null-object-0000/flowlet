@@ -131,6 +131,7 @@ const english: Record<string, string> = {
   "全局配置": "Global configuration",
   "配置后可从任意终端或 IDE 启动 Claude Code": "Configure Claude Code once, then launch it from any terminal or IDE.",
   "CLI 与 Desktop 共用配置": "Shared by CLI and Desktop",
+  "CLI / Desktop 接入": "CLI / Desktop access",
   "OpenCode CLI 与 Desktop 共用此全局配置": "OpenCode CLI and Desktop share this global configuration.",
   "读取全局配置失败：{message}": "Failed to read global configuration: {message}",
   "当前状态": "Current status",

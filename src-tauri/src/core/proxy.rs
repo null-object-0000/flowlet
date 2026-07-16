@@ -1,11 +1,15 @@
-use super::config::{ClientConfig, ProviderConfig, VirtualModelRoute};
-use super::storage::{RequestLogMetadata, Storage, UsageRecordInput};
+use super::config::{
+    classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType,
+    ProxyBindConfig, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
+};
+use super::rate_limiter::RateLimiter;
+use super::storage::Storage;
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
-    response::{IntoResponse, Response},
-    routing::{any, get},
+    http::{HeaderMap, Method, StatusCode},
+    response::Response,
+    routing::any,
     Router,
 };
 use bytes::Bytes;
@@ -13,17 +17,65 @@ use futures_util::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Serialize;
 use std::{
+    collections::HashMap,
     net::SocketAddr,
+    pin::Pin,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tauri::async_runtime;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
-const DEFAULT_BIND_ADDR: &str = "127.0.0.1:11434";
+// ─── Shared Config (hot-reloadable) ─────────────────────────────────────────
+// 代理运行中与 AppState 共用这些 Arc<Mutex<_>>，UI 保存配置后代理无需重启即可生效。
+
+#[derive(Clone)]
+pub struct ProxySharedConfig {
+    pub channels: Arc<Mutex<Vec<ChannelPreset>>>,
+    pub accounts: Arc<Mutex<Vec<ChannelAccount>>>,
+    pub routes: Arc<Mutex<Vec<RouteCandidate>>>,
+    pub rules: Arc<Mutex<Vec<RouteRule>>>,
+    pub scores: Arc<Mutex<Vec<(String, String, f64, f64, f64)>>>,
+    pub round_robin: Arc<Mutex<HashMap<String, usize>>>,
+}
+
+const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
 const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
 
+#[path = "proxy_http.rs"]
+mod proxy_http;
+// Re-export 给 lib.rs 用（proxy_http mod 本身是私有的，需要手动暴露）
+pub use proxy_http::extract_log_capture;
+
+// config.json 读写 — 暴露给 commands.rs / lib.rs 调用
+pub fn read_config_raw(path: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(path).ok()
+}
+
+pub fn write_config_raw(path: &std::path::Path, content: &str) -> Result<(), String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(content).map_err(|e| format!("JSON 解析失败: {e}"))?;
+    if !(parsed.is_object() || parsed.is_array()) {
+        return Err("config.json 顶层必须是对象或数组".to_string());
+    }
+    std::fs::write(path, content).map_err(|e| format!("写入失败: {e}"))?;
+    Ok(())
+}
+
+#[path = "proxy_routing.rs"]
+mod proxy_routing;
+
+use proxy_http::{
+    add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
+    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
+    extract_model, identify_client, identify_client_by_ua, is_model_list_request, is_streaming_response, load_ua_rules,
+    rewrite_model, sanitize_headers,
+};
+use proxy_routing::{
+    body_contains_quota_exceeded, enrich_upstream_error_log, match_candidates,
+    network_error_route_reason, resolve_small_model, should_check_quota_body_status,
+    should_try_next_status,
+};
 #[derive(Debug, Error)]
 pub enum ProxyError {
     #[error("代理服务已经在运行")]
@@ -36,51 +88,115 @@ pub enum ProxyError {
     StartFailed(String),
 }
 
+/// 代理服务当前状态。
+///
+/// `started_at` 为代理服务真实启动时间的 RFC3339 字符串，
+/// 仅在代理处于 `running` 状态时有效；`stopped` / `failed` 后为空。
 #[derive(Debug, Clone, Serialize)]
 pub struct ProxyStatus {
     pub running: bool,
     pub bind_addr: String,
+    /// 代理进程的真实启动时间（RFC3339），未运行时为 null。
+    pub started_at: Option<String>,
 }
 
 #[derive(Clone)]
 pub struct ProxyController {
-    inner: Arc<Mutex<ProxyRuntime>>,
+    pub inner: Arc<Mutex<ProxyRuntime>>,
+    pub bind_config: Arc<Mutex<ProxyBindConfig>>,
 }
 
 impl Default for ProxyController {
     fn default() -> Self {
         Self {
             inner: Arc::new(Mutex::new(ProxyRuntime::default())),
+            bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
         }
     }
 }
 
-#[derive(Default)]
-struct ProxyRuntime {
-    shutdown: Option<oneshot::Sender<()>>,
+pub struct ProxyRuntime {
+    pub(super) shutdown: Option<oneshot::Sender<()>>,
+    pub(super) bind_addr: String,
+    /// 代理进程的真实启动时间，与 ProxyStatus.started_at 一一对应。
+    pub(super) started_at: Option<String>,
+}
+
+impl Default for ProxyRuntime {
+    fn default() -> Self {
+        Self {
+            shutdown: None,
+            bind_addr: DEFAULT_BIND_ADDR.to_string(),
+            started_at: None,
+        }
+    }
 }
 
 #[derive(Clone)]
 struct ProxyAppState {
-    provider: ProviderConfig,
-    routes: Vec<VirtualModelRoute>,
-    clients: Vec<ClientConfig>,
-    client: Client,
-    storage: Storage,
+    pub shared: ProxySharedConfig,
+    pub client: Client,
+    pub storage: Storage,
+    #[allow(dead_code)]
+    pub upstream_timeout_seconds: u64,
+    pub rate_limiter: RateLimiter,
+    pub capture: LogCaptureConfig,
+    pub bind_config: Arc<Mutex<ProxyBindConfig>>,
+    /// 本地 config.json 文件路径，每次请求热读 UA rules 用
+    pub config_path: std::path::PathBuf,
 }
 
 impl ProxyController {
     pub async fn start(
         &self,
-        provider: ProviderConfig,
-        routes: Vec<VirtualModelRoute>,
-        clients: Vec<ClientConfig>,
+        shared: ProxySharedConfig,
         storage: Storage,
+        upstream_timeout_seconds: u64,
+        config_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
-        if !provider.enabled {
-            return Err(ProxyError::StartFailed("Provider 未启用".to_string()));
-        }
+        self.start_with_bind(
+            shared,
+            storage,
+            upstream_timeout_seconds,
+            LogCaptureConfig::default(),
+            DEFAULT_BIND_ADDR,
+            RateLimiter::new(600), // 默认 600 请求/分钟
+            config_path,
+        )
+        .await
+    }
 
+    pub async fn start_with_capture(
+        &self,
+        shared: ProxySharedConfig,
+        storage: Storage,
+        upstream_timeout_seconds: u64,
+        capture: LogCaptureConfig,
+        config_path: std::path::PathBuf,
+    ) -> Result<(), ProxyError> {
+        self.start_with_bind(
+            shared,
+            storage,
+            upstream_timeout_seconds,
+            capture,
+            DEFAULT_BIND_ADDR,
+            RateLimiter::new(600),
+            config_path,
+        )
+        .await
+    }
+
+    /// 启动代理并指定监听地址
+    pub async fn start_with_bind(
+        &self,
+        shared: ProxySharedConfig,
+        storage: Storage,
+        upstream_timeout_seconds: u64,
+        capture: LogCaptureConfig,
+        bind_addr_str: &str,
+        rate_limiter: RateLimiter,
+        config_path: std::path::PathBuf,
+    ) -> Result<(), ProxyError> {
         let mut runtime = self
             .inner
             .lock()
@@ -89,9 +205,9 @@ impl ProxyController {
             return Err(ProxyError::AlreadyRunning);
         }
 
-        let bind_addr: SocketAddr = DEFAULT_BIND_ADDR
+        let bind_addr: SocketAddr = bind_addr_str
             .parse()
-            .map_err(|_| ProxyError::InvalidBindAddr(DEFAULT_BIND_ADDR.to_string()))?;
+            .map_err(|_| ProxyError::InvalidBindAddr(bind_addr_str.to_string()))?;
         let listener = std::net::TcpListener::bind(bind_addr)
             .map_err(|err| ProxyError::StartFailed(err.to_string()))?;
         listener
@@ -100,26 +216,40 @@ impl ProxyController {
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|err| ProxyError::StartFailed(err.to_string()))?;
 
+        // 首次启动时写入完整默认 config.json，用户可直接编辑
+        ensure_config_file(&config_path);
+
+        // 代理即将进入 running 状态，记录真实的启动时间。
+        // 取端口监听成功后的时刻，避免与后续异步 serve 启动之间产生偏差。
+        let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        runtime.bind_addr = bind_addr_str.to_string();
+        runtime.started_at = Some(started_at);
         runtime.shutdown = Some(shutdown_tx);
         drop(runtime);
 
-        let upstream_timeout = provider.upstream_timeout_seconds;
+        let bind_config = self.bind_config.lock().map(|c| c.clone()).unwrap_or_default();
+
         let app = Router::new()
-            .route("/health", get(health))
+            .route("/health", any(health))
             .route("/v1/{*path}", any(forward_openai_compatible))
+            .route("/openai/v1/{*path}", any(forward_openai_compatible))
+            .route("/anthropic/v1/{*path}", any(forward_anthropic_compatible))
             .with_state(ProxyAppState {
-                provider,
-                routes,
-                clients,
+                shared,
                 client: Client::builder()
-                    .timeout(Duration::from_secs(upstream_timeout))
+                    .timeout(Duration::from_secs(upstream_timeout_seconds))
                     .build()
                     .map_err(|err| ProxyError::StartFailed(err.to_string()))?,
                 storage,
+                upstream_timeout_seconds,
+                rate_limiter,
+                capture,
+                bind_config: Arc::new(Mutex::new(bind_config)),
+                config_path,
             });
 
-        async_runtime::spawn(async move {
+        tokio::spawn(async move {
             let server = axum::serve(listener, app).with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
             });
@@ -137,228 +267,505 @@ impl ProxyController {
             .lock()
             .map_err(|_| ProxyError::StartFailed("代理状态锁定失败".to_string()))?;
         let shutdown = runtime.shutdown.take().ok_or(ProxyError::NotRunning)?;
+        // 服务停止后清空启动时间，避免下次启动前的残留。
+        runtime.started_at = None;
         let _ = shutdown.send(());
         Ok(())
     }
 
     pub fn status(&self) -> ProxyStatus {
-        let running = self
+        let (running, bind_addr, started_at) = self
             .inner
             .lock()
-            .map(|runtime| runtime.shutdown.is_some())
-            .unwrap_or(false);
+            .map(|runtime| {
+                (
+                    runtime.shutdown.is_some(),
+                    runtime.bind_addr.clone(),
+                    runtime.started_at.clone(),
+                )
+            })
+            .unwrap_or_else(|_| (false, DEFAULT_BIND_ADDR.to_string(), None));
 
         ProxyStatus {
             running,
-            bind_addr: DEFAULT_BIND_ADDR.to_string(),
+            bind_addr,
+            started_at,
         }
     }
 }
 
-async fn health() -> impl IntoResponse {
-    (StatusCode::OK, "ok")
+// ─── Health Check ────────────────────────────────────────────────────────────
+
+async fn health(request: Request) -> Response {
+    if request.method() == Method::OPTIONS {
+        return cors_preflight_response(request.headers());
+    }
+
+    let mut response = Response::new(Body::from("ok"));
+    *response.status_mut() = StatusCode::OK;
+    add_cors_headers(response.headers_mut(), None);
+    response
 }
+
+// ─── OpenAI-compatible Forward ──────────────────────────────────────────────
 
 async fn forward_openai_compatible(
     State(state): State<ProxyAppState>,
     request: Request,
 ) -> Response {
-    match forward_request(state.clone(), request).await {
-        Ok(response) => response,
+    if request.method() == Method::OPTIONS {
+        return cors_preflight_response(request.headers());
+    }
+
+    match forward_request(state, request, ProtocolType::OpenAi).await {
+        Ok(mut response) => {
+            add_cors_headers(response.headers_mut(), None);
+            response
+        }
         Err(err) => {
             let mut response = Response::new(Body::from(err.to_string()));
             *response.status_mut() = StatusCode::BAD_GATEWAY;
+            add_cors_headers(response.headers_mut(), None);
             response
         }
     }
 }
 
+// ─── Anthropic-compatible Forward ───────────────────────────────────────────
+
+async fn forward_anthropic_compatible(
+    State(state): State<ProxyAppState>,
+    request: Request,
+) -> Response {
+    if request.method() == Method::OPTIONS {
+        return cors_preflight_response(request.headers());
+    }
+
+    match forward_request(state, request, ProtocolType::Anthropic).await {
+        Ok(mut response) => {
+            add_cors_headers(response.headers_mut(), None);
+            response
+        }
+        Err(err) => {
+            let mut response = Response::new(Body::from(err.to_string()));
+            *response.status_mut() = StatusCode::BAD_GATEWAY;
+            add_cors_headers(response.headers_mut(), None);
+            response
+        }
+    }
+}
+
+// ─── Core Forward Logic ────────────────────────────────────────────────────
+
 async fn forward_request(
     state: ProxyAppState,
     request: Request,
+    detected_protocol: ProtocolType,
 ) -> Result<Response, reqwest::Error> {
-    let started_at = Instant::now();
     let request_id = uuid::Uuid::new_v4().to_string();
     let (parts, body) = request.into_parts();
-    let upstream_uri = build_upstream_uri(&state.provider.base_url, &parts.uri);
-    let method = parts.method.to_string();
+    let body_bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .unwrap_or_default();
+
     let path = parts
         .uri
         .path_and_query()
         .map(|value| value.as_str().to_string())
         .unwrap_or_else(|| "/".to_string());
-    let body_bytes = axum::body::to_bytes(body, usize::MAX)
-        .await
-        .unwrap_or_default();
 
-    let public_model = extract_model(&body_bytes);
-    let client_id = identify_client(&parts.headers, &state.clients);
-    let candidates = route_candidates(&state.provider, &state.routes, public_model.as_deref());
+    let method = parts.method.to_string();
+
+    // 热更新：从共享锁读取最新配置
+    let routes = state.shared.routes.lock().unwrap().clone();
+    let accounts = state.shared.accounts.lock().unwrap().clone();
+    let channels = state.shared.channels.lock().unwrap().clone();
+    let default_client_token = state.bind_config.lock().map(|c| c.default_client_token.clone()).unwrap_or_default();
+    let rules = state.shared.rules.lock().unwrap().clone();
+    let scores = state.shared.scores.lock().unwrap().clone();
+
+    if is_model_list_request(&parts.method, &path) {
+        return Ok(build_model_list_response(
+            &routes,
+            &accounts,
+            &channels,
+            &detected_protocol,
+        ));
+    }
+
+    let public_model = extract_model(&body_bytes, &detected_protocol);
+
+    // token 身份：仅用于鉴权、路由匹配、限流 key，不再写日志/用量
+    let token_client = identify_client(&parts.headers, &default_client_token);
+    let token_client_id = token_client.as_ref().map(|(id, _)| id.clone());
+
+    // 客户端身份：仅由本地 config.json 决定，与 token 解耦；不命中即"未知"，不降级
+    let ua_rules = load_ua_rules(&state.config_path);
+    let (client_id, client_name) = match identify_client_by_ua(&parts.headers, &ua_rules) {
+        Some((id, name)) => (Some(id), Some(name)),
+        None => (None, Some("未知".to_string())),
+    };
+
+    // 速率限制检查（key 仍用 token 身份，避免多 UA 共用一 token 时互相影响）
+    if let Some(ref cid) = token_client_id {
+        if !state.rate_limiter.try_consume(cid).await {
+            let retry_after = state.rate_limiter.retry_after(cid).await;
+            let mut response = Response::new(Body::from(
+                serde_json::json!({"error": "rate limit exceeded"}).to_string(),
+            ));
+            *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+            response
+                .headers_mut()
+                .insert("Retry-After", retry_after.to_string().parse().unwrap());
+            response
+                .headers_mut()
+                .insert("Content-Type", "application/json".parse().unwrap());
+            return Ok(response);
+        }
+    }
+
+    // 匹配路由候选（用 token 身份，保证现有多 UA 共用一 token 的规则不破坏）
+    let candidates = {
+        let mut round_robin = state.shared.round_robin.lock().unwrap();
+        match_candidates(
+            &routes,
+            &rules,
+            &scores,
+            public_model.as_deref(),
+            &detected_protocol,
+            token_client_id.as_deref(),
+            &accounts,
+            &channels,
+            &mut round_robin,
+        )
+    };
+
+    // 识别请求类型
+    let request_type = classify_request(&body_bytes, &detected_protocol);
+
+    if candidates.is_empty() {
+        let has_available_account = accounts
+            .iter()
+            .any(|account| account.enabled && !account.api_key.trim().is_empty());
+        let has_exposed_model = routes.iter().any(|route| {
+            route.enabled
+                && accounts.iter().any(|account| {
+                    account.id == route.account_id
+                        && account.enabled
+                        && !account.api_key.trim().is_empty()
+                })
+        });
+        let (error_code, error_message) = if !has_available_account {
+            (
+                "no_available_account",
+                "No enabled account with a configured API key is available",
+            )
+        } else if !has_exposed_model {
+            (
+                "no_available_model",
+                "No model is currently exposed by Flowlet",
+            )
+        } else {
+            (
+                "model_not_exposed",
+                "The requested model is not exposed by Flowlet",
+            )
+        };
+        let log = RequestLogInput {
+            request_id: request_id.clone(),
+            client_id,
+            client_name,
+            channel_id: None,
+            channel_name: None,
+            account_id: None,
+            account_name: None,
+            client_protocol: detected_protocol.as_str().to_string(),
+            upstream_protocol: detected_protocol.as_str().to_string(),
+            virtual_model: public_model.clone(),
+            public_model,
+            upstream_model: None,
+            request_type: request_type.as_str().to_string(),
+            method,
+            path,
+            status: Some(404),
+            latency_ms: Some(0),
+            is_stream: false,
+            error_message: Some(format!("{error_code}: {error_message}")),
+            fallback_count: 0,
+            route_reason: Some(error_code.to_string()),
+            ttfb_ms: None,
+            duration_ms: None,
+            attempt_seq: 0,
+            req_headers_json: None,
+            req_body_b64: None,
+            res_headers_json: None,
+            res_body_b64: None,
+            is_last_attempt: true,
+        };
+        record_request_log(state.storage, log);
+        let payload = match detected_protocol {
+            ProtocolType::OpenAi => serde_json::json!({
+                "error": { "message": error_message, "type": error_code, "code": error_code }
+            }),
+            ProtocolType::Anthropic => serde_json::json!({
+                "type": "error",
+                "error": { "type": error_code, "message": error_message }
+            }),
+        };
+        let mut response = Response::new(Body::from(payload.to_string()));
+        *response.status_mut() = StatusCode::NOT_FOUND;
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+        return Ok(response);
+    }
+    // 循环外一次性捕获请求级 head/body，各候选共享
+    let req_headers_json = if state.capture.capture_req_headers {
+        let keys = if state.capture.redact_sensitive_headers {
+            LogCaptureConfig::redacted_header_keys()
+        } else {
+            &[]
+        };
+        Some(sanitize_headers(&parts.headers, keys).to_string())
+    } else {
+        None
+    };
+    let req_body_b64 = if state.capture.capture_req_body && !body_bytes.is_empty() {
+        let mut bytes: Vec<u8> = body_bytes.to_vec();
+        proxy_http::truncate_utf8(&mut bytes, state.capture.max_body_bytes);
+        Some(encode_body_base64(&bytes))
+    } else {
+        None
+    };
+
     let mut last_network_error: Option<reqwest::Error> = None;
     let mut fallback_count = 0;
 
+    // accounts / channels 已在上面从共享锁 clone，直接复用
+    let storage = state.storage.clone();
+    let http_client = state.client.clone();
+    let protocol_str = detected_protocol.as_str().to_string();
+    let method_clone = method.clone();
+    let path_clone = path.clone();
+    let public_model_for_routing = public_model.clone();
+    let request_id_for_routing = request_id.clone();
+    let client_id_for_routing = client_id;
+    let client_name_for_routing = client_name;
+    let request_type_str = request_type.as_str().to_string();
+
     for (index, candidate) in candidates.iter().enumerate() {
-        let routed_body = rewrite_model(&body_bytes, candidate);
-        let mut builder = state
-            .client
-            .request(parts.method.clone(), upstream_uri.clone());
-        builder = apply_headers(builder, &parts.headers, &state.provider.api_key);
+        let account = accounts.iter().find(|a| a.id == candidate.account_id);
+        let channel = channels.iter().find(|c| c.id == candidate.channel_id);
+        let (Some(account), Some(channel)) = (account, channel) else {
+            continue;
+        };
+
+        // 小模型路由判断：简单短聊天请求使用渠道配置的小模型
+        let effective_model = resolve_small_model(&candidate.upstream_model);
+        let routed_body = rewrite_model(&body_bytes, &effective_model, &detected_protocol);
+
+        // 账号级 Base URL 覆盖：如果账号配置了 base_url_override 则优先使用
+        let base_url = account
+            .base_url_override
+            .as_deref()
+            .filter(|url| !url.trim().is_empty())
+            .unwrap_or_else(|| channel.base_url_for(&detected_protocol));
+        let upstream_url = build_upstream_url(base_url, &parts.uri, &detected_protocol);
+        let mut builder = http_client.request(parts.method.clone(), upstream_url);
+
+        // 应用渠道级别超时（如果配置了的话）
+        let timeout = channel
+            .timeout_seconds
+            .unwrap_or(state.upstream_timeout_seconds);
+        builder = builder.timeout(Duration::from_secs(timeout));
+
+        builder = apply_request_headers(
+            builder,
+            &parts.headers,
+            &account.api_key,
+            &detected_protocol,
+            channel.auth_strategy_for(&detected_protocol),
+        );
+
+        // 为当前候选准备日志上下文（send_at = 此刻，T0 真实起点）
+        let log_context = RouteLogContext {
+            client_id: client_id_for_routing.clone(),
+            client_name: client_name_for_routing.clone(),
+            channel_id: candidate.channel_id.clone(),
+            channel_name: channel.name.clone(),
+            account_id: candidate.account_id.clone(),
+            account_name: account.name.clone(),
+            upstream_model: effective_model.clone(),
+            virtual_model: public_model_for_routing.clone(),
+            public_model: public_model_for_routing.clone(),
+            request_type: request_type_str.clone(),
+            method: method_clone.clone(),
+            path: path_clone.clone(),
+            client_protocol: protocol_str.clone(),
+            upstream_protocol: protocol_str.clone(),
+            send_at: Instant::now(),
+            req_headers_json: req_headers_json.clone(),
+            req_body_b64: req_body_b64.clone(),
+        };
 
         match builder.body(routed_body).send().await {
             Ok(upstream_response) => {
+                // send() 返回即表明收到响应头；此时可记录真实 TTFB
+                let ttfb_ms = log_context.send_at.elapsed().as_millis() as i64;
                 let status = upstream_response.status();
-                if should_try_next_status(status) && index + 1 < candidates.len() {
+                let channel_vendor = channel.vendor.clone();
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    let message = "upstream returned 401; API Key may be invalid";
+                    let _ = storage.update_account_last_error(&account.id, message);
+                    // 401 表示 API Key 无效：标记账号凭证状态，后续请求自动排除该账号。
+                    // 当前请求不 fallback，直接返回 401。
+                    let _ = storage.mark_account_credential_invalid(&account.id);
+                    if let Ok(mut shared_accounts) = state.shared.accounts.lock() {
+                        if let Some(shared_account) = shared_accounts.iter_mut().find(|item| item.id == account.id) {
+                            shared_account.last_error = Some(message.to_string());
+                            shared_account.credential_status =
+                                crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
+                        }
+                    }
+                }
+
+                // 可重试状态码 + 还有下一个候选 → fallback 到下一个
+                if should_try_next_status(status, &channel_vendor) && index + 1 < candidates.len() {
                     fallback_count += 1;
-                    record_request_metadata(
-                        state.storage.clone(),
-                        RequestLogMetadata {
-                            request_id: uuid::Uuid::new_v4().to_string(),
-                            client_id: client_id.clone(),
-                            provider_id: Some("default".to_string()),
-                            public_model: public_model.clone(),
-                            virtual_model: public_model.clone().filter(|model| model == "auto"),
-                            upstream_model: Some(candidate.clone()),
-                            method: method.clone(),
-                            path: path.clone(),
-                            status: Some(status.as_u16() as i64),
-                            latency_ms: Some(started_at.elapsed().as_millis() as i64),
-                            is_stream: false,
-                            error_message: None,
+                    record_request_log(
+                        storage.clone(),
+                        log_context.log_fallback(
+                            request_id_for_routing.clone(),
+                            Some(status.as_u16() as i64),
+                            Some(format!("retryable_status_{}", status.as_u16())),
                             fallback_count,
-                            route_reason: Some("retryable_status".to_string()),
-                        },
+                            "retryable_status".to_string(),
+                        ),
                     );
                     continue;
                 }
 
+                let route_reason = if fallback_count > 0 {
+                    "fallback_success".to_string()
+                } else if public_model_for_routing.as_deref() == Some("auto") {
+                    "auto".to_string()
+                } else {
+                    "direct".to_string()
+                };
+                let attempt_seq = fallback_count;
+                // is_last_attempt 反映"是否还会继续尝试下一个候选"：
+                // 只有当当前候选是数组中最后一个，或者当前响应不可重试（终态）时，才是最后一次。
+                let is_last = index + 1 >= candidates.len()
+                    || !should_try_next_status(status, &channel_vendor);
+
                 if should_check_quota_body_status(status) && index + 1 < candidates.len() {
                     let headers = upstream_response.headers().clone();
                     let body = upstream_response.bytes().await?;
+                    let duration_ms = log_context.send_at.elapsed().as_millis() as i64;
                     if body_contains_quota_exceeded(&body) {
                         fallback_count += 1;
-                        record_request_metadata(
-                            state.storage.clone(),
-                            RequestLogMetadata {
-                                request_id: uuid::Uuid::new_v4().to_string(),
-                                client_id: client_id.clone(),
-                                provider_id: Some("default".to_string()),
-                                public_model: public_model.clone(),
-                                virtual_model: public_model.clone().filter(|model| model == "auto"),
-                                upstream_model: Some(candidate.clone()),
-                                method: method.clone(),
-                                path: path.clone(),
-                                status: Some(status.as_u16() as i64),
-                                latency_ms: Some(started_at.elapsed().as_millis() as i64),
-                                is_stream: false,
-                                error_message: Some("quota exceeded".to_string()),
+                        record_request_log(
+                            storage.clone(),
+                            log_context.log_fallback(
+                                request_id_for_routing.clone(),
+                                Some(status.as_u16() as i64),
+                                Some("quota exceeded".to_string()),
                                 fallback_count,
-                                route_reason: Some("quota_exceeded".to_string()),
-                            },
+                                "quota_exceeded".to_string(),
+                            ),
                         );
                         continue;
                     }
 
+                    // 非 2xx 不会 fallback 的 buffered 分支
+                    let res_headers_json = if state.capture.capture_res_headers {
+                        let keys = if state.capture.redact_sensitive_headers {
+                            LogCaptureConfig::redacted_header_keys()
+                        } else {
+                            &[]
+                        };
+                        Some(sanitize_headers(&headers, keys).to_string())
+                    } else {
+                        None
+                    };
+                    let mut body_for_log: Vec<u8> = body.to_vec();
+                    let res_body_b64 = if state.capture.capture_res_body {
+                        proxy_http::truncate_utf8(&mut body_for_log, state.capture.max_body_bytes);
+                        Some(encode_body_base64(&body_for_log))
+                    } else {
+                        None
+                    };
+
+                    let request_id_clone = request_id_for_routing.clone();
+                    let mut log = log_context.log_success_base(
+                        request_id_for_routing,
+                        status.as_u16() as i64,
+                        fallback_count,
+                        route_reason,
+                        attempt_seq,
+                        is_last,
+                    );
+                    log.ttfb_ms = Some(ttfb_ms);
+                    log.duration_ms = Some(duration_ms);
+                    log.res_headers_json = res_headers_json;
+                    log.res_body_b64 = res_body_b64;
+
                     return build_buffered_response(
-                        state,
+                        storage.clone(),
                         status,
                         headers,
                         body,
-                        RequestLogMetadata {
-                            request_id,
-                            client_id: client_id.clone(),
-                            provider_id: Some("default".to_string()),
-                            public_model: public_model.clone(),
-                            virtual_model: public_model.clone().filter(|model| model == "auto"),
-                            upstream_model: Some(candidate.clone()),
-                            method,
-                            path,
-                            status: Some(status.as_u16() as i64),
-                            latency_ms: Some(started_at.elapsed().as_millis() as i64),
-                            is_stream: false,
-                            error_message: None,
-                            fallback_count,
-                            route_reason: if fallback_count > 0 {
-                                Some("fallback_success".to_string())
-                            } else if public_model.as_deref() == Some("auto") {
-                                Some("auto".to_string())
-                            } else {
-                                Some("direct".to_string())
-                            },
-                        },
+                        log,
+                        request_id_clone,
+                        &detected_protocol,
                     );
                 }
 
+                // 默认路径：流式 or 短响应交给 build_response
                 return build_response(
-                    state,
+                    storage.clone(),
                     upstream_response,
-                    RequestLogMetadata {
-                        request_id,
-                        client_id: client_id.clone(),
-                        provider_id: Some("default".to_string()),
-                        public_model: public_model.clone(),
-                        virtual_model: public_model.clone().filter(|model| model == "auto"),
-                        upstream_model: Some(candidate.clone()),
-                        method,
-                        path,
-                        status: Some(status.as_u16() as i64),
-                        latency_ms: Some(started_at.elapsed().as_millis() as i64),
-                        is_stream: false,
-                        error_message: None,
-                        fallback_count,
-                        route_reason: if fallback_count > 0 {
-                            Some("fallback_success".to_string())
-                        } else if public_model.as_deref() == Some("auto") {
-                            Some("auto".to_string())
-                        } else {
-                            Some("direct".to_string())
-                        },
-                    },
+                    log_context,
+                    ttfb_ms,
+                    status.as_u16() as i64,
+                    attempt_seq,
+                    is_last,
+                    request_id_for_routing.clone(),
+                    fallback_count,
+                    route_reason,
+                    &detected_protocol,
+                    &state.capture,
                 )
                 .await;
             }
             Err(err) => {
                 let route_reason = network_error_route_reason(&err);
+                let error_msg = err.to_string();
+
                 if index + 1 < candidates.len() {
                     fallback_count += 1;
-                    record_request_metadata(
-                        state.storage.clone(),
-                        RequestLogMetadata {
-                            request_id: uuid::Uuid::new_v4().to_string(),
-                            client_id: client_id.clone(),
-                            provider_id: Some("default".to_string()),
-                            public_model: public_model.clone(),
-                            virtual_model: public_model.clone().filter(|model| model == "auto"),
-                            upstream_model: Some(candidate.clone()),
-                            method: method.clone(),
-                            path: path.clone(),
-                            status: None,
-                            latency_ms: Some(started_at.elapsed().as_millis() as i64),
-                            is_stream: false,
-                            error_message: Some(err.to_string()),
+                    record_request_log(
+                        storage.clone(),
+                        log_context.log_fallback(
+                            request_id_for_routing.clone(),
+                            None,
+                            Some(error_msg),
                             fallback_count,
-                            route_reason: Some(format!("{route_reason}_fallback")),
-                        },
+                            format!("{route_reason}_fallback"),
+                        ),
                     );
                     continue;
                 }
-                record_request_metadata(
-                    state.storage.clone(),
-                    RequestLogMetadata {
-                        request_id: uuid::Uuid::new_v4().to_string(),
-                        client_id: client_id.clone(),
-                        provider_id: Some("default".to_string()),
-                        public_model: public_model.clone(),
-                        virtual_model: public_model.clone().filter(|model| model == "auto"),
-                        upstream_model: Some(candidate.clone()),
-                        method: method.clone(),
-                        path: path.clone(),
-                        status: Some(StatusCode::BAD_GATEWAY.as_u16() as i64),
-                        latency_ms: Some(started_at.elapsed().as_millis() as i64),
-                        is_stream: false,
-                        error_message: Some(err.to_string()),
+
+                record_request_log(
+                    storage.clone(),
+                    log_context.log_final_network_error(
+                        request_id_for_routing.clone(),
+                        error_msg,
                         fallback_count,
-                        route_reason: Some(route_reason.to_string()),
-                    },
+                        route_reason.to_string(),
+                    ),
                 );
                 last_network_error = Some(err);
             }
@@ -368,58 +775,268 @@ async fn forward_request(
     Err(last_network_error.expect("至少应有一个路由候选"))
 }
 
+// ─── Route Log Context ──────────────────────────────────────────────────────
+//
+// Timing: send_at 是「开始向上游发请求」的 Instant。真正的 TTFB 在 send()
+// 返回后计算（= send_at.elapsed()），真正的 duration 在 body 收齐后计算
+// （buffered 的 bytes().await 之后；streaming 的 stream 结束回调之后）。
+// 不再把 constructed 时刻的 elapsed() 作为 latency_ms——那只是代理本地排队
+// 耗时而非上游往返耗时。
+
+struct RouteLogContext {
+    client_id: Option<String>,
+    client_name: Option<String>,
+    channel_id: String,
+    channel_name: String,
+    account_id: String,
+    account_name: String,
+    upstream_model: String,
+    virtual_model: Option<String>,
+    public_model: Option<String>,
+    request_type: String,
+    method: String,
+    path: String,
+    client_protocol: String,
+    upstream_protocol: String,
+    /// 本次候选 send 开始的时刻，用于后续计算 TTFB 与 duration
+    send_at: Instant,
+    /// 请求级头部（在请求循环外一次性捕获）
+    req_headers_json: Option<String>,
+    req_body_b64: Option<String>,
+}
+
+impl RouteLogContext {
+    fn base_log_input(
+        &self,
+        request_id: String,
+        status: Option<i64>,
+        latency_ms: Option<i64>,
+        is_stream: bool,
+        error_message: Option<String>,
+        fallback_count: i64,
+        route_reason: String,
+    ) -> RequestLogInput {
+        RequestLogInput {
+            request_id,
+            client_id: self.client_id.clone(),
+            client_name: self.client_name.clone(),
+            channel_id: Some(self.channel_id.clone()),
+            channel_name: Some(self.channel_name.clone()),
+            account_id: Some(self.account_id.clone()),
+            account_name: Some(self.account_name.clone()),
+            client_protocol: self.client_protocol.clone(),
+            upstream_protocol: self.upstream_protocol.clone(),
+            virtual_model: self.virtual_model.clone(),
+            public_model: self.public_model.clone(),
+            upstream_model: Some(self.upstream_model.clone()),
+            request_type: self.request_type.clone(),
+            method: self.method.clone(),
+            path: self.path.clone(),
+            status,
+            latency_ms,
+            is_stream,
+            error_message,
+            fallback_count,
+            route_reason: Some(route_reason),
+            ttfb_ms: None,
+            duration_ms: None,
+            attempt_seq: 0,
+            req_headers_json: self.req_headers_json.clone(),
+            req_body_b64: self.req_body_b64.clone(),
+            res_headers_json: None,
+            res_body_b64: None,
+            is_last_attempt: true,
+        }
+    }
+
+    /// 构建日志项（retryable_status / quota_exceeded / network_error_fallback）：
+    /// ttfb=duration=attempt_elapsed 仍然视为该 attempt 的代理耗时兜底，
+    /// 真实 TTFB 由 Ok(send) 路径填充。
+    fn log_fallback(
+        &self,
+        request_id: String,
+        status: Option<i64>,
+        error_message: Option<String>,
+        fallback_count: i64,
+        route_reason: String,
+    ) -> RequestLogInput {
+        let elapsed = self.send_at.elapsed();
+        let ms = Some(elapsed.as_millis() as i64);
+        let mut log = self.base_log_input(
+            request_id,
+            status,
+            ms,
+            false,
+            error_message,
+            fallback_count,
+            route_reason,
+        );
+        log.ttfb_ms = ms;
+        log.duration_ms = ms;
+        log.attempt_seq = fallback_count;
+        log.is_last_attempt = false;
+        log
+    }
+
+    /// 构建失败（最后一次 network_error）的日志项。
+    fn log_final_network_error(
+        &self,
+        request_id: String,
+        error_message: String,
+        fallback_count: i64,
+        route_reason: String,
+    ) -> RequestLogInput {
+        let elapsed = self.send_at.elapsed();
+        let ms = Some(elapsed.as_millis() as i64);
+        let mut log = self.base_log_input(
+            request_id,
+            Some(StatusCode::BAD_GATEWAY.as_u16() as i64),
+            ms,
+            false,
+            Some(error_message),
+            fallback_count,
+            route_reason,
+        );
+        // 网络错误下 TTFB 无意义（send 都没成功返回），duration 用代理侧耗时占位
+        log.ttfb_ms = None;
+        log.duration_ms = ms;
+        log.attempt_seq = fallback_count;
+        log
+    }
+
+    /// 构建 success 调用的低层日志项入口，
+    /// 由 response builder 进一步回填 ttfb/duration/res_*。
+    fn log_success_base(
+        &self,
+        request_id: String,
+        status: i64,
+        fallback_count: i64,
+        route_reason: String,
+        attempt_seq: i64,
+        is_last: bool,
+    ) -> RequestLogInput {
+        let mut log = self.base_log_input(
+            request_id,
+            Some(status),
+            None,
+            false,
+            None,
+            fallback_count,
+            route_reason,
+        );
+        log.attempt_seq = attempt_seq;
+        log.is_last_attempt = is_last;
+        log
+    }
+}
+
+// ─── Response Builders ──────────────────────────────────────────────────────
+
 async fn build_response(
-    state: ProxyAppState,
+    storage: Storage,
     upstream_response: reqwest::Response,
-    mut log: RequestLogMetadata,
+    log_context: RouteLogContext,
+    ttfb_ms: i64,
+    status_code: i64,
+    attempt_seq: i64,
+    is_last: bool,
+    // 由调用方持有的逐请求信息（不在 log_context 里因为 log_context 是 per-candidate 的副本）
+    request_id: String,
+    fallback_count: i64,
+    route_reason: String,
+    protocol: &ProtocolType,
+    capture: &LogCaptureConfig,
 ) -> Result<Response, reqwest::Error> {
     let status = upstream_response.status();
     let headers = upstream_response.headers().clone();
-    let is_stream = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.contains("text/event-stream"))
-        .unwrap_or(false);
-    log.is_stream = is_stream;
-    let usage_capture = (!is_stream).then(|| UsageCapture {
-        storage: state.storage.clone(),
-        request_id: log.request_id.clone(),
-        client_id: log.client_id.clone(),
-        provider_id: log.provider_id.clone(),
-        virtual_model: log.virtual_model.clone(),
-        upstream_model: log.upstream_model.clone(),
-        enabled: true,
-        body: Vec::new(),
-    });
-    enrich_upstream_error_log(status, &mut log);
-    record_request_metadata(state.storage.clone(), log);
-    let stream = capture_usage_stream(upstream_response.bytes_stream(), usage_capture);
-    let mut response = Response::new(Body::from_stream(stream));
-    *response.status_mut() = status;
-    copy_response_headers(&headers, response.headers_mut());
-    Ok(response)
-}
+    let is_stream = is_streaming_response(&headers);
 
-fn build_buffered_response(
-    state: ProxyAppState,
-    status: reqwest::StatusCode,
-    headers: HeaderMap,
-    body: Bytes,
-    mut log: RequestLogMetadata,
-) -> Result<Response, reqwest::Error> {
-    log.is_stream = false;
+    let res_headers_json = if capture.capture_res_headers {
+        let keys = if capture.redact_sensitive_headers {
+            LogCaptureConfig::redacted_header_keys()
+        } else {
+            &[]
+        };
+        Some(sanitize_headers(&headers, keys).to_string())
+    } else {
+        None
+    };
+
+    let mut log = log_context.log_success_base(
+        request_id.clone(),
+        status_code,
+        fallback_count,
+        route_reason,
+        attempt_seq,
+        is_last,
+    );
+    log.is_stream = is_stream;
+    log.ttfb_ms = Some(ttfb_ms);
+    log.res_headers_json = res_headers_json.clone();
+    log.res_body_b64 = None;
+
+    if is_stream {
+        // 流式：先发一条日志（duration 暂按 ttfb 兜底），再注册 stream 结束回调
+        // 补 duration / res_body_b64。
+        log.duration_ms = log.duration_ms.or(Some(ttfb_ms));
+        record_request_log(storage.clone(), log);
+
+        let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
+        let stream = capture_timed_stream(upstream_response.bytes_stream(), tx_done, capture);
+
+        let request_id_for_update = request_id.clone();
+        let ttfb_for_update = ttfb_ms;
+        let res_headers_for_update = res_headers_json;
+        tokio::spawn(async move {
+            let done = rx_done.await.unwrap_or(StreamDone {
+                duration_ms: ttfb_for_update,
+                res_body_b64: None,
+            });
+            update_stream_log(
+                storage,
+                request_id_for_update,
+                ttfb_for_update,
+                done.duration_ms,
+                res_headers_for_update,
+                done.res_body_b64,
+            );
+        });
+
+        let mut response = Response::new(Body::from_stream(stream));
+        *response.status_mut() = status;
+        copy_response_headers(&headers, response.headers_mut());
+        return Ok(response);
+    }
+
+    // 非流式（走 streaming 判断但非 SSE）— 视为 buffered，收完 body 计 duration
+    let body = upstream_response.bytes().await?;
+    let duration_ms = log_context.send_at.elapsed().as_millis() as i64;
+    log.duration_ms = Some(duration_ms);
+    let mut body_for_log: Vec<u8> = body.to_vec();
+    if capture.capture_res_body {
+        proxy_http::truncate_utf8(&mut body_for_log, capture.max_body_bytes);
+        log.res_body_b64 = Some(encode_body_base64(&body_for_log));
+    }
+
     enrich_upstream_error_log(status, &mut log);
+    record_request_log(storage.clone(), log);
+
     let usage_capture = UsageCapture {
-        storage: state.storage.clone(),
-        request_id: log.request_id.clone(),
-        client_id: log.client_id.clone(),
-        provider_id: log.provider_id.clone(),
-        virtual_model: log.virtual_model.clone(),
-        upstream_model: log.upstream_model.clone(),
+        storage: storage.clone(),
+        request_id,
+        client_id: log_context.client_id.clone(),
+        client_name: log_context.client_name.clone(),
+        channel_id: Some(log_context.channel_id.clone()),
+        channel_name: Some(log_context.channel_name.clone()),
+        account_id: Some(log_context.account_id.clone()),
+        account_name: Some(log_context.account_name.clone()),
+        client_protocol: protocol.as_str().to_string(),
+        upstream_protocol: protocol.as_str().to_string(),
+        virtual_model: log_context.virtual_model.clone(),
+        upstream_model: Some(log_context.upstream_model.clone()),
         enabled: body.len() <= MAX_USAGE_CAPTURE_BYTES,
         body: body.to_vec(),
     };
-    record_request_metadata(state.storage.clone(), log);
     record_response_usage(usage_capture);
 
     let mut response = Response::new(Body::from(body));
@@ -428,31 +1045,64 @@ fn build_buffered_response(
     Ok(response)
 }
 
-fn enrich_upstream_error_log(status: reqwest::StatusCode, log: &mut RequestLogMetadata) {
-    if !status.is_client_error() && !status.is_server_error() {
-        return;
-    }
+fn build_buffered_response(
+    storage: Storage,
+    status: reqwest::StatusCode,
+    headers: HeaderMap,
+    body: Bytes,
+    mut log: RequestLogInput,
+    request_id: String,
+    protocol: &ProtocolType,
+) -> Result<Response, reqwest::Error> {
+    log.is_stream = false;
+    enrich_upstream_error_log(status, &mut log);
+    let usage_capture = UsageCapture {
+        storage: storage.clone(),
+        request_id: request_id.clone(),
+        client_id: log.client_id.clone(),
+        client_name: log.client_name.clone(),
+        channel_id: log.channel_id.clone(),
+        channel_name: log.channel_name.clone(),
+        account_id: log.account_id.clone(),
+        account_name: log.account_name.clone(),
+        client_protocol: protocol.as_str().to_string(),
+        upstream_protocol: protocol.as_str().to_string(),
+        virtual_model: log.virtual_model.clone(),
+        upstream_model: log.upstream_model.clone(),
+        enabled: body.len() <= MAX_USAGE_CAPTURE_BYTES,
+        body: body.to_vec(),
+    };
+    record_request_log(storage, log);
+    record_response_usage(usage_capture);
 
-    if log.error_message.is_none() {
-        log.error_message = Some(format!("upstream status {}", status.as_u16()));
-    }
-    if log.route_reason.as_deref() == Some("direct") || log.route_reason.as_deref() == Some("auto")
-    {
-        log.route_reason = Some("upstream_error".to_string());
-    }
+    let mut response = Response::new(Body::from(body));
+    *response.status_mut() = status;
+    copy_response_headers(&headers, response.headers_mut());
+    Ok(response)
 }
+
+// ─── Routing ────────────────────────────────────────────────────────────────
+
+// ─── Usage Capture ──────────────────────────────────────────────────────────
 
 struct UsageCapture {
     storage: Storage,
     request_id: String,
     client_id: Option<String>,
-    provider_id: Option<String>,
+    client_name: Option<String>,
+    channel_id: Option<String>,
+    channel_name: Option<String>,
+    account_id: Option<String>,
+    account_name: Option<String>,
+    client_protocol: String,
+    upstream_protocol: String,
     virtual_model: Option<String>,
     upstream_model: Option<String>,
     enabled: bool,
     body: Vec<u8>,
 }
 
+#[allow(dead_code)]
 fn capture_usage_stream(
     stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
     capture: Option<UsageCapture>,
@@ -492,17 +1142,26 @@ fn record_response_usage(capture: UsageCapture) {
         return;
     };
 
-    async_runtime::spawn_blocking(move || {
-        if let Err(err) = capture.storage.upsert_usage_record(UsageRecordInput {
+    tokio::task::spawn_blocking(move || {
+        let input = UsageRecordInput {
             request_id: capture.request_id,
             client_id: capture.client_id,
-            provider_id: capture.provider_id,
+            client_name: capture.client_name,
+            channel_id: capture.channel_id,
+            channel_name: capture.channel_name,
+            account_id: capture.account_id,
+            account_name: capture.account_name,
+            client_protocol: capture.client_protocol,
+            upstream_protocol: capture.upstream_protocol,
             virtual_model: capture.virtual_model,
             upstream_model: capture.upstream_model,
             input_tokens: usage.input_tokens,
+            input_cached_tokens: None,
+            input_uncached_tokens: None,
             output_tokens: usage.output_tokens,
             total_tokens: usage.total_tokens,
-        }) {
+        };
+        if let Err(err) = capture.storage.upsert_usage_record(&input) {
             tracing::warn!("写入 usage 记录失败: {err}");
         }
     });
@@ -517,446 +1176,189 @@ struct ResponseUsage {
 
 fn extract_response_usage(body: &[u8]) -> Option<ResponseUsage> {
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
-    let usage = value.get("usage")?;
-    let input_tokens = usage
-        .get("prompt_tokens")
-        .or_else(|| usage.get("input_tokens"))
-        .and_then(|tokens| tokens.as_i64());
-    let output_tokens = usage
-        .get("completion_tokens")
-        .or_else(|| usage.get("output_tokens"))
-        .and_then(|tokens| tokens.as_i64());
-    let total_tokens = usage
-        .get("total_tokens")
-        .and_then(|tokens| tokens.as_i64())
-        .or_else(|| match (input_tokens, output_tokens) {
-            (Some(input), Some(output)) => Some(input + output),
-            _ => None,
+
+    // OpenAI style: response.usage.prompt_tokens / completion_tokens / total_tokens
+    if let Some(usage) = value.get("usage") {
+        let input_tokens = usage
+            .get("prompt_tokens")
+            .or_else(|| usage.get("input_tokens"))
+            .and_then(|tokens| tokens.as_i64());
+        let output_tokens = usage
+            .get("completion_tokens")
+            .or_else(|| usage.get("output_tokens"))
+            .and_then(|tokens| tokens.as_i64());
+        let total_tokens = usage
+            .get("total_tokens")
+            .and_then(|tokens| tokens.as_i64())
+            .or_else(|| match (input_tokens, output_tokens) {
+                (Some(input), Some(output)) => Some(input + output),
+                _ => None,
+            });
+
+        if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
+            return None;
+        }
+
+        return Some(ResponseUsage {
+            input_tokens,
+            output_tokens,
+            total_tokens,
         });
-
-    if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
-        return None;
     }
 
-    Some(ResponseUsage {
-        input_tokens,
-        output_tokens,
-        total_tokens,
-    })
-}
+    // Anthropic style: response.usage.input_tokens / output_tokens
+    if let Some(usage) = value.get("usage") {
+        let input_tokens = usage.get("input_tokens").and_then(|t| t.as_i64());
+        let output_tokens = usage.get("output_tokens").and_then(|t| t.as_i64());
+        let total_tokens = match (input_tokens, output_tokens) {
+            (Some(i), Some(o)) => Some(i + o),
+            _ => None,
+        };
 
-fn route_candidates(
-    provider: &ProviderConfig,
-    routes: &[VirtualModelRoute],
-    public_model: Option<&str>,
-) -> Vec<String> {
-    if public_model != Some("auto") {
-        return vec![public_model
-            .filter(|model| !model.trim().is_empty())
-            .unwrap_or(&provider.default_model)
-            .to_string()];
+        if input_tokens.is_none() && output_tokens.is_none() {
+            return None;
+        }
+
+        return Some(ResponseUsage {
+            input_tokens,
+            output_tokens,
+            total_tokens,
+        });
     }
 
-    let mut candidates: Vec<String> = routes
-        .iter()
-        .filter(|route| route.enabled && route.virtual_model == "auto")
-        .map(|route| route.upstream_model.clone())
-        .filter(|model| !model.trim().is_empty())
-        .collect();
-
-    if candidates.is_empty() {
-        candidates.push(provider.default_model.clone());
-    }
-
-    candidates
+    None
 }
 
-fn extract_model(body: &[u8]) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
-    value
-        .get("model")
-        .and_then(|model| model.as_str())
-        .map(|model| model.to_string())
-}
-
-fn identify_client(headers: &HeaderMap, clients: &[ClientConfig]) -> Option<String> {
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::trim)?;
-
-    clients
-        .iter()
-        .find(|client| client.enabled && client.token == token)
-        .map(|client| client.id.clone())
-}
-
-fn rewrite_model(body: &[u8], upstream_model: &str) -> Vec<u8> {
-    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return body.to_vec();
-    };
-    let Some(model) = value.get_mut("model") else {
-        return body.to_vec();
-    };
-
-    if model.as_str() == Some("auto") {
-        *model = serde_json::Value::String(upstream_model.to_string());
-        serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
-    } else {
-        body.to_vec()
-    }
-}
-
-fn should_try_next_status(status: reqwest::StatusCode) -> bool {
-    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
-}
-
-fn should_check_quota_body_status(status: reqwest::StatusCode) -> bool {
-    status == reqwest::StatusCode::PAYMENT_REQUIRED || status == reqwest::StatusCode::FORBIDDEN
-}
-
-fn body_contains_quota_exceeded(body: &[u8]) -> bool {
-    let text = String::from_utf8_lossy(body).to_ascii_lowercase();
-    text.contains("quota exceeded")
-        || text.contains("insufficient quota")
-        || text.contains("exceeded your current quota")
-        || text.contains("billing quota")
-}
-
-fn network_error_route_reason(err: &reqwest::Error) -> &'static str {
-    if err.is_timeout() {
-        "timeout"
-    } else {
-        "network_error"
-    }
-}
-
-fn record_request_metadata(storage: Storage, log: RequestLogMetadata) {
-    async_runtime::spawn_blocking(move || {
-        if let Err(err) = storage.insert_request_log(log) {
+fn record_request_log(storage: Storage, log: RequestLogInput) {
+    tokio::task::spawn_blocking(move || {
+        if let Err(err) = storage.insert_request_log(&log) {
             tracing::warn!("写入请求日志失败: {err}");
         }
     });
 }
 
-fn build_upstream_uri(base_url: &str, original_uri: &Uri) -> String {
-    let base = base_url.trim_end_matches('/');
-    let path_and_query = original_uri
-        .path_and_query()
-        .map(|value| value.as_str())
-        .unwrap_or("/");
-    format!("{base}{path_and_query}")
+// ─── Streaming response body capture ────────────────────────────────────────
+
+#[derive(Debug)]
+struct StreamDone {
+    pub duration_ms: i64,
+    pub res_body_b64: Option<String>,
 }
 
-fn apply_headers(
-    mut builder: reqwest::RequestBuilder,
-    headers: &HeaderMap,
-    api_key: &str,
-) -> reqwest::RequestBuilder {
-    for (name, value) in headers {
-        if is_hop_by_hop(name.as_str()) || name == header::HOST || name == header::AUTHORIZATION {
-            continue;
+/// 包装上游 body 字节流：捕获最多 capture.max_body_bytes 的响应体字节
+/// 与 SSE 首尾片段文本摘要；流结束时通过 tx_done 回写 StreamDone。
+fn capture_timed_stream(
+    inner: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+    tx_done: tokio::sync::oneshot::Sender<StreamDone>,
+    capture: &LogCaptureConfig,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
+    let inner = Box::pin(inner);
+    let state = TimedStreamState {
+        inner,
+        done_sent: false,
+        started_at: Instant::now(),
+        res_body_buf: Vec::new(),
+        res_body_max: capture.max_body_bytes,
+        capture_res_body: capture.capture_res_body,
+        first_line: None,
+        last_line: None,
+        line_count: 0,
+    };
+    let tx_done = std::sync::Arc::new(std::sync::Mutex::new(Some(tx_done)));
+    futures_util::stream::unfold((state, tx_done), move |(mut state, tx_done)| async move {
+        match state.inner.next().await {
+            Some(Ok(bytes)) => {
+                if state.capture_res_body
+                    && state.res_body_buf.len().saturating_add(bytes.len()) <= state.res_body_max
+                {
+                    state.res_body_buf.extend_from_slice(&bytes);
+                }
+                let piece = String::from_utf8_lossy(&bytes);
+                for line in piece.split('\n') {
+                    let trimmed = line.trim_end_matches('\r');
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if state.first_line.is_none() {
+                        state.first_line = Some(trimmed.to_string());
+                    }
+                    state.last_line = Some(trimmed.to_string());
+                    state.line_count += 1;
+                }
+                Some((Ok(bytes), (state, tx_done)))
+            }
+            Some(Err(err)) => {
+                send_stream_done(&mut state, &tx_done, false);
+                Some((Err(std::io::Error::other(err)), (state, tx_done)))
+            }
+            None => {
+                send_stream_done(&mut state, &tx_done, true);
+                None
+            }
         }
-        builder = builder.header(name, value);
-    }
-
-    if !api_key.trim().is_empty() {
-        builder = builder.bearer_auth(api_key.trim());
-    }
-
-    builder
+    })
 }
 
-fn copy_response_headers(source: &HeaderMap, target: &mut HeaderMap<HeaderValue>) {
-    for (name, value) in source {
-        if is_hop_by_hop(name.as_str()) {
-            continue;
+fn send_stream_done(
+    state: &mut TimedStreamState,
+    tx_done: &std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<StreamDone>>>>,
+    _success: bool,
+) {
+    if state.done_sent {
+        return;
+    }
+    state.done_sent = true;
+    let duration_ms = state.started_at.elapsed().as_millis() as i64;
+    let res_body_b64 = if state.res_body_buf.is_empty() || !state.capture_res_body {
+        None
+    } else {
+        Some(encode_body_base64(&state.res_body_buf))
+    };
+    let _ = tx_done.lock().unwrap().take().map(|tx| {
+        tx.send(StreamDone {
+            duration_ms,
+            res_body_b64,
+        })
+    });
+}
+
+struct TimedStreamState {
+    inner: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
+    done_sent: bool,
+    started_at: Instant,
+    res_body_buf: Vec<u8>,
+    res_body_max: usize,
+    capture_res_body: bool,
+    first_line: Option<String>,
+    last_line: Option<String>,
+    line_count: usize,
+}
+
+/// 流式响应结束后由 spawn task 调用，补写 duration / res_body_b64
+/// 到最近一条 is_last_attempt=1 且 is_stream=1 的日志行。
+fn update_stream_log(
+    storage: Storage,
+    request_id: String,
+    ttfb_ms: i64,
+    duration_ms: i64,
+    res_headers_json: Option<String>,
+    res_body_b64: Option<String>,
+) {
+    tokio::task::spawn_blocking(move || {
+        if let Err(err) = storage.update_request_log_timing(
+            &request_id,
+            ttfb_ms,
+            duration_ms,
+            res_headers_json,
+            res_body_b64,
+        ) {
+            tracing::warn!("补写流式请求日志失败: {err}");
         }
-        target.append(name, value.clone());
-    }
+    });
 }
 
-fn is_hop_by_hop(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "connection"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    )
-}
+// ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::routing::post;
-    use std::path::PathBuf;
-
-    #[test]
-    fn rewrite_model_only_changes_auto() {
-        let body = br#"{"model":"auto","messages":[]}"#;
-        let rewritten = rewrite_model(body, "qwen-plus");
-        let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
-
-        assert_eq!(value["model"], "qwen-plus");
-        assert_eq!(value["messages"], serde_json::json!([]));
-    }
-
-    #[test]
-    fn rewrite_model_keeps_non_auto_body() {
-        let body = br#"{"model":"deepseek-chat","messages":[]}"#;
-        let rewritten = rewrite_model(body, "qwen-plus");
-
-        assert_eq!(rewritten, body);
-    }
-
-    #[test]
-    fn route_candidates_uses_auto_routes_in_order() {
-        let provider = ProviderConfig::default();
-        let routes = vec![
-            VirtualModelRoute {
-                id: "auto-1".to_string(),
-                virtual_model: "auto".to_string(),
-                provider_name: "default".to_string(),
-                upstream_model: "model-a".to_string(),
-                priority: 0,
-                enabled: true,
-            },
-            VirtualModelRoute {
-                id: "auto-2".to_string(),
-                virtual_model: "auto".to_string(),
-                provider_name: "default".to_string(),
-                upstream_model: "model-b".to_string(),
-                priority: 1,
-                enabled: true,
-            },
-        ];
-
-        assert_eq!(
-            route_candidates(&provider, &routes, Some("auto")),
-            vec!["model-a".to_string(), "model-b".to_string()]
-        );
-    }
-
-    #[test]
-    fn retry_only_for_rate_limit_and_server_errors() {
-        assert!(should_try_next_status(
-            reqwest::StatusCode::TOO_MANY_REQUESTS
-        ));
-        assert!(should_try_next_status(reqwest::StatusCode::BAD_GATEWAY));
-        assert!(!should_try_next_status(reqwest::StatusCode::BAD_REQUEST));
-        assert!(!should_try_next_status(
-            reqwest::StatusCode::PAYLOAD_TOO_LARGE
-        ));
-    }
-
-    #[test]
-    fn upstream_timeout_is_configured() {
-        assert_eq!(ProviderConfig::default().upstream_timeout_seconds, 120);
-    }
-
-    #[test]
-    fn checks_quota_body_only_for_quota_candidate_statuses() {
-        assert!(should_check_quota_body_status(
-            reqwest::StatusCode::PAYMENT_REQUIRED
-        ));
-        assert!(should_check_quota_body_status(
-            reqwest::StatusCode::FORBIDDEN
-        ));
-        assert!(!should_check_quota_body_status(
-            reqwest::StatusCode::BAD_REQUEST
-        ));
-    }
-
-    #[test]
-    fn detects_quota_exceeded_messages() {
-        assert!(body_contains_quota_exceeded(
-            br#"{"error":{"message":"You exceeded your current quota"}}"#
-        ));
-        assert!(body_contains_quota_exceeded(
-            br#"{"error":"insufficient quota"}"#
-        ));
-        assert!(!body_contains_quota_exceeded(
-            br#"{"error":"context length exceeded"}"#
-        ));
-    }
-
-    #[test]
-    fn identifies_enabled_client_from_bearer_token() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_static("Bearer token-a"),
-        );
-        let clients = vec![
-            ClientConfig {
-                id: "client-a".to_string(),
-                name: "客户端 A".to_string(),
-                token: "token-a".to_string(),
-                app_type: "test".to_string(),
-                enabled: true,
-            },
-            ClientConfig {
-                id: "client-b".to_string(),
-                name: "客户端 B".to_string(),
-                token: "token-b".to_string(),
-                app_type: "test".to_string(),
-                enabled: false,
-            },
-        ];
-
-        assert_eq!(
-            identify_client(&headers, &clients),
-            Some("client-a".to_string())
-        );
-    }
-
-    #[test]
-    fn enriches_final_upstream_error_metadata_without_body_rewrite() {
-        let mut log = RequestLogMetadata {
-            request_id: "req".to_string(),
-            client_id: Some("client-default".to_string()),
-            provider_id: Some("default".to_string()),
-            public_model: Some("gpt-test".to_string()),
-            virtual_model: None,
-            upstream_model: Some("gpt-test".to_string()),
-            method: "POST".to_string(),
-            path: "/v1/chat/completions".to_string(),
-            status: Some(400),
-            latency_ms: Some(1),
-            is_stream: false,
-            error_message: None,
-            fallback_count: 0,
-            route_reason: Some("direct".to_string()),
-        };
-
-        enrich_upstream_error_log(reqwest::StatusCode::BAD_REQUEST, &mut log);
-
-        assert_eq!(log.error_message, Some("upstream status 400".to_string()));
-        assert_eq!(log.route_reason, Some("upstream_error".to_string()));
-    }
-
-    #[test]
-    fn extracts_openai_usage() {
-        let usage = extract_response_usage(
-            br#"{"id":"chatcmpl","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            usage,
-            ResponseUsage {
-                input_tokens: Some(11),
-                output_tokens: Some(7),
-                total_tokens: Some(18),
-            }
-        );
-    }
-
-    #[test]
-    fn extracts_input_output_usage_and_computes_total() {
-        let usage =
-            extract_response_usage(br#"{"usage":{"input_tokens":5,"output_tokens":8}}"#).unwrap();
-
-        assert_eq!(
-            usage,
-            ResponseUsage {
-                input_tokens: Some(5),
-                output_tokens: Some(8),
-                total_tokens: Some(13),
-            }
-        );
-    }
-
-    #[test]
-    fn ignores_response_without_usage() {
-        assert!(extract_response_usage(br#"{"id":"chatcmpl"}"#).is_none());
-    }
-
-    #[tokio::test]
-    async fn forwards_status_headers_body_and_replaces_authorization() {
-        let captured_auth = Arc::new(Mutex::new(None::<String>));
-        let captured_auth_state = captured_auth.clone();
-        let upstream = Router::new()
-            .route(
-                "/v1/chat/completions",
-                post(
-                    |State(captured): State<Arc<Mutex<Option<String>>>>,
-                     headers: HeaderMap,
-                     body: Bytes| async move {
-                        let auth = headers
-                            .get(header::AUTHORIZATION)
-                            .and_then(|value| value.to_str().ok())
-                            .map(|value| value.to_string());
-                        *captured.lock().unwrap() = auth;
-                        (StatusCode::CREATED, [("x-upstream", "ok")], body)
-                    },
-                ),
-            )
-            .with_state(captured_auth_state);
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let upstream_addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, upstream).await.unwrap();
-        });
-
-        let storage = Storage::open(temp_db_path()).unwrap();
-        let state = ProxyAppState {
-            provider: ProviderConfig {
-                name: "测试 Provider".to_string(),
-                base_url: format!("http://{upstream_addr}"),
-                api_key: "upstream-secret".to_string(),
-                api_key_storage: Default::default(),
-                default_model: "gpt-test".to_string(),
-                upstream_timeout_seconds: 120,
-                enabled: true,
-            },
-            routes: vec![],
-            clients: vec![ClientConfig {
-                id: "client-test".to_string(),
-                name: "测试客户端".to_string(),
-                token: "client-token".to_string(),
-                app_type: "test".to_string(),
-                enabled: true,
-            }],
-            client: Client::new(),
-            storage,
-        };
-        let request = Request::builder()
-            .method("POST")
-            .uri("/v1/chat/completions")
-            .header(header::AUTHORIZATION, "Bearer client-token")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(r#"{"model":"gpt-test","messages":[]}"#))
-            .unwrap();
-
-        let response = forward_request(state, request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::CREATED);
-        assert_eq!(
-            response
-                .headers()
-                .get("x-upstream")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "ok"
-        );
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        assert_eq!(body, r#"{"model":"gpt-test","messages":[]}"#);
-        assert_eq!(
-            captured_auth.lock().unwrap().as_deref(),
-            Some("Bearer upstream-secret")
-        );
-    }
-
-    fn temp_db_path() -> PathBuf {
-        std::env::temp_dir().join(format!("flowlet-test-{}.sqlite", uuid::Uuid::new_v4()))
-    }
-}
+#[path = "proxy_tests.rs"]
+mod proxy_tests;

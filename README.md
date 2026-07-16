@@ -42,39 +42,51 @@ Flowlet 当前阶段采用 LongCat + DeepSeek first 策略：先把 LongCat 和 
 
 ## 当前状态
 
-项目处于早期原型阶段，已经完成第一阶段文档和桌面端技术骨架的初始落地。当前能力统一视为“基础雏形完成”，仍需要稳定性验证和产品化打磨，不应理解为稳定可用版本。
+Flowlet 当前处于 Channel / Account / Model 重构雏形阶段，还不是生产就绪版本。当前分支的目标是先验证 LongCat / DeepSeek 双协议透明转发、多账号优先级 fallback、Claude Code 接入、日志和成本统计这条 MVP 主链路。
 
-已完成基础雏形：
+### 已完成能力
 
-- 中文 README、产品文档、路线图和架构文档
-- Tauri 2 + React + TypeScript + Vite 项目骨架
-- Rust Core 基础目录结构
-- 本地代理启动 / 停止 / 状态 Tauri command
-- `127.0.0.1:11434/health`
-- `/v1/*` OpenAI-compatible 透明转发雏形
-- Provider 基础管理和 SQLite 基础配置存储
-- `auto` 虚拟模型顺序路由雏形
-- 429、5xx、network error 的受限 fallback
-- 成功请求和网络失败请求 metadata 日志旁路
-- Client Token 请求来源识别
-- 离线 unknown 用量分析和基础统计查询雏形
-- 普通 JSON 响应的 `response.usage` 旁路提取
-- 手动模型价格表和基于已知 Token 的成本重算结构
-- 桌面首页中文 UI 雏形
+**核心架构**
+- Channel / Account / Model 三层数据模型
+- SQLite WAL 模式持久化、自动迁移
+- 三段价格体系（input_uncached / input_cached / output）
 
-下一阶段主线：
+**协议支持**
+- OpenAI-compatible 入口：`/v1/*`、`/openai/v1/*`
+- Anthropic-compatible 入口：`/anthropic/v1/*`
+- 响应零改写、流式透传
 
-- 稳定 LongCat / DeepSeek OpenAI-compatible 透明转发
-- 增加 LongCat / DeepSeek Anthropic-compatible 透明转发，用于接入 Claude Code
-- 把 Provider 页升级为渠道页：渠道、账号、模型三层结构
-- 支持 LongCat / DeepSeek 多账号优先级路由和账号级 fallback
-- 支持 LongCat-2.0、deepseek-v4-flash、deepseek-v4-pro 模型与三段价格：输入未命中缓存、输入命中缓存、输出
-- LongCat 余额和资源包第一版采用账号级手动快照；DeepSeek 支持官方余额查询
-- 继续验证透明转发、fallback、SSE 透传和构建流程
+**渠道支持**
+- LongCat（OpenAI + Anthropic 双协议）
+- DeepSeek（OpenAI + Anthropic + 模型同步 + 余额查询）
 
-详细阶段需求见 [docs/longcat-first.md](docs/longcat-first.md) 和 [docs/deepseek-first.md](docs/deepseek-first.md)。相关 LongCat 官方文档：[快速开始](https://longcat.chat/platform/docs/zh/)、[API 概述](https://longcat.chat/platform/docs/zh/APIDocs.html)、[Claude Code 配置](https://longcat.chat/platform/docs/zh/ClaudeCode.html)。相关 DeepSeek 官方文档：[API 文档](https://api-docs.deepseek.com/zh-cn/)、[价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)、[Claude Code](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/claude_code)、[Anthropic API](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)、[余额查询](https://api-docs.deepseek.com/zh-cn/api/get-user-balance)。
+**路由能力**
+- 显式 `auto` 候选顺序路由
+- 账号优先级 fallback
+- 429/5xx/402 fallback、400/401 不降级
+- 请求类型识别仅用于日志，不参与自动换模型
 
-破坏式重构策略见 [docs/breaking-refactor.md](docs/breaking-refactor.md)。
+**部署方式**
+- 桌面端（Tauri）
+- 系统托盘 / 开机自启动仍需实机回归
+- Docker、Web Console、无头服务器作为后续阶段验证，不作为当前 MVP 完成项
+
+**可观测性**
+- 请求日志（channel/account/protocol/request_type 维度）
+- Token / 成本分析（response.usage 旁路提取）
+- 账号统计（请求数/失败率/fallback/成本）
+- 余额快照（手动登记 + DeepSeek 查询后自动记录）
+
+## 快速开始
+
+### 桌面端
+
+```bash
+bun install
+bun run tauri:dev
+```
+
+详细文档见 [docs/](docs/) 目录。
 
 ## 当前透明转发边界
 

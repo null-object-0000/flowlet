@@ -4,19 +4,26 @@
   "version": "0.1.0",
   "identifier": "local.flowlet.desktop",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "title": "Flowlet",
-        "width": 1120,
-        "height": 760,
-        "minWidth": 900,
-        "minHeight": 620
+        "userAgent": "Flowlet/0.1.0",
+        "width": 1200,
+        "height": 720,
+        "minWidth": 1200,
+        "minHeight": 720,
+        "maxWidth": 1200,
+        "maxHeight": 720,
+        "resizable": false,
+        "maximizable": false,
+        "decorations": false,
+        "visible": false
       }
     ],
     "security": {
@@ -24,7 +31,13 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all"
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../config.json": "config.json"
+    }
   }
 }

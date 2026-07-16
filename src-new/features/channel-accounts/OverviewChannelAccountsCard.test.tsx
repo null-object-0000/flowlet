@@ -1,0 +1,56 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
+import { OverviewChannelAccountsCard } from "./OverviewChannelAccountsCard";
+
+vi.mock("lottie-web", () => ({
+  default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
+}));
+
+const account = {
+  id: "account-longcat",
+  channel_id: "longcat",
+  name: "LongCat 主账号",
+  api_key: "configured",
+  enabled: true,
+  credential_status: "healthy",
+  resource_mode: "token_pack",
+} as ChannelAccount;
+
+const snapshot = {
+  account_id: account.id,
+  token_pack_remaining: 43_987_000,
+  token_pack_expire_at: "2026-07-30T00:00:00Z",
+} as AccountBalanceSnapshot;
+
+describe("OverviewChannelAccountsCard", () => {
+  it("renders legacy account summaries and routes all three actions", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn();
+    const onViewAll = vi.fn();
+    const onEdit = vi.fn();
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[account]}
+        snapshots={[snapshot]}
+        onCreate={onCreate}
+        onViewAll={onViewAll}
+        onEdit={onEdit}
+      />,
+    );
+
+    expect(screen.getByText("共 1 个账号")).toBeInTheDocument();
+    expect(screen.getByText(/资源包 4398\.7万 Tokens.*有效期至 2026-07-30/)).toBeInTheDocument();
+    expect(screen.getByText("启用")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: /新增账号/ }));
+    await user.click(screen.getByRole("link", { name: /管理账号/ }));
+    await user.click(screen.getByRole("button", { name: "编辑账号 LongCat 主账号" }));
+
+    expect(onCreate).toHaveBeenCalledOnce();
+    expect(onViewAll).toHaveBeenCalledOnce();
+    expect(onEdit).toHaveBeenCalledWith(account.id);
+  });
+});

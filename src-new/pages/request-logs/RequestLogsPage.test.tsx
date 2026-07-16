@@ -1,0 +1,69 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { RequestLogRow } from "../../domains/request-log/types";
+
+const mocks = vi.hoisted(() => ({
+  useLogs: vi.fn(),
+  useDetail: vi.fn(),
+  cleanup: vi.fn(),
+  refetch: vi.fn(),
+}));
+
+vi.mock("lottie-web", () => ({ default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) } }));
+vi.mock("../../features/channel-accounts", () => ({
+  useChannelPresets: () => ({ data: [{ id: "longcat", name: "LongCat" }], isLoading: false }),
+}));
+vi.mock("../../features/request-logs/useRequestLogs", () => ({
+  useRequestLogs: (...args: unknown[]) => mocks.useLogs(...args),
+  useRequestLogClients: () => ({ data: [{ id: "claude-code", name: "Claude Code" }], isLoading: false }),
+  useRequestLogModels: () => ({ data: ["flowlet-pro"], isLoading: false }),
+  useRequestLogDetail: (...args: unknown[]) => mocks.useDetail(...args),
+  useRequestLogActions: () => ({ cleanup: { mutateAsync: mocks.cleanup, isPending: false } }),
+}));
+
+import { RequestLogsPage } from "./RequestLogsPage";
+
+const row: RequestLogRow = {
+  id: "log-1", request_id: "request-123456789", client_id: "claude-code", client_name: "Claude Code",
+  channel_id: "longcat", channel_name: "LongCat", account_id: "account-1", account_name: "主账号",
+  client_protocol: "anthropic", upstream_protocol: "anthropic", virtual_model: "flowlet-pro",
+  public_model: "flowlet-pro", upstream_model: "LongCat-2.0", request_type: "messages", method: "POST",
+  path: "/anthropic/v1/messages", status: 200, latency_ms: 860, is_stream: true, error_message: null,
+  fallback_count: 0, route_reason: "primary", created_at: "2026-07-15 06:00:00", ttfb_ms: 120,
+  duration_ms: 860, attempt_seq: 1, req_headers_json: JSON.stringify({ Authorization: "Bearer secret-key" }),
+  req_body_b64: btoa(JSON.stringify({ model: "flowlet-pro" })), res_headers_json: JSON.stringify({ "content-type": "application/json" }),
+  res_body_b64: btoa(JSON.stringify({ ok: true })), is_last_attempt: true,
+  input_tokens: 100, output_tokens: 50, total_tokens: 150, estimated_cost: 0.0012,
+};
+
+beforeEach(() => {
+  mocks.useLogs.mockReturnValue({ data: { rows: [row], total: 1, page: 1, pageSize: 8, summary: { requestCount: 1, successCount: 1, errorCount: 0, averageDurationMs: 860, knownTokens: 150, estimatedCost: 0.0012 } }, isLoading: false, isFetching: false, isError: false, dataUpdatedAt: 1, refetch: mocks.refetch });
+  mocks.useDetail.mockReturnValue({ data: [row], isLoading: false, isError: false, isSuccess: true, refetch: mocks.refetch });
+  mocks.cleanup.mockResolvedValue([1, 0]);
+});
+
+describe("RequestLogsPage", () => {
+  it("renders server-backed rows and applies a search filter", async () => {
+    const user = userEvent.setup();
+    render(<RequestLogsPage />);
+
+    expect(screen.getByRole("button", { name: `查看请求 ${row.request_id}` })).toHaveTextContent("/anthropic/v1/messages");
+    expect(screen.getByText("请求数")).toBeInTheDocument();
+    expect(screen.getAllByText("150")).toHaveLength(2);
+    await user.type(screen.getByPlaceholderText("搜索请求 ID、模型或账号"), "messages");
+    await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({ search: "messages", page: 1 }), true));
+  });
+
+  it("loads details on demand and redacts captured credentials", async () => {
+    const user = userEvent.setup();
+    render(<RequestLogsPage />);
+    await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
+
+    expect(await screen.findByText("请求详情")).toBeInTheDocument();
+    await user.click(screen.getByText("请求"));
+    expect(screen.getAllByText("敏感凭据已隐藏").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/secret-key/)).not.toBeInTheDocument();
+    expect(screen.getByText(/••••••/)).toBeInTheDocument();
+  });
+});

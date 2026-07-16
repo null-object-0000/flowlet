@@ -1,0 +1,76 @@
+.valueBox {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 3px 5px 3px 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  border: 1px solid var(--flowlet-color-border-strong);
+  border-radius: var(--flowlet-radius-control);
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-muted);
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.valueBox:hover,
+.valueBox:focus-within {
+  border-color: rgba(23, 105, 255, .3);
+  background: var(--flowlet-color-surface-muted);
+}
+
+.valueBox:focus-within {
+  outline: 2px solid var(--semi-color-primary-light-active);
+  outline-offset: 2px;
+}
+
+.valueButton,
+.iconButton {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.valueButton {
+  min-width: 0;
+  align-self: stretch;
+  flex: 1;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+}
+
+.valueButton code {
+  display: block;
+  overflow: hidden;
+  color: inherit;
+  background: transparent;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iconButton {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: #7b8da8;
+  font-size: 14px;
+  opacity: .76;
+  transition: color 120ms ease, opacity 120ms ease, background-color 120ms ease;
+}
+
+.iconButton:hover,
+.iconButton:focus-visible {
+  color: var(--semi-color-primary);
+  background: var(--semi-color-primary-light-default);
+  opacity: 1;
+  outline: none;
+}

@@ -1,0 +1,9 @@
+/* Phase 2 placeholder: 卡片壳的 overview-section-card / overview-list / overview-view-all 等规则，
+   将在 Phase 3/4 随各 feature 卡片 CSS 并置时从 features.css 迁出并回填这里。 */
+
+.actionsWrap {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}

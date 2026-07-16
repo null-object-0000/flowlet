@@ -1,0 +1,34 @@
+.sections {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 258px minmax(0, 1fr);
+  gap: 10px;
+  overflow: hidden;
+}
+
+.grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.primary {
+  height: 100%;
+}
+
+.secondary { align-items: stretch; }
+
+@media (max-width: 800px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sections {
+    height: auto;
+    overflow: visible;
+    grid-template-rows: auto;
+  }
+}

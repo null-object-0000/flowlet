@@ -1,0 +1,271 @@
+.status {
+  width: fit-content;
+  min-width: 0;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+.panel.compact {
+  gap: 8px;
+}
+
+.advanced-panel {
+  gap: 14px;
+}
+
+.advanced-panel summary {
+  cursor: pointer;
+  color: #50616a;
+  font-weight: 600;
+}
+
+.panel h3 {
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #14264a;
+}
+
+.panel p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.panel p.hint {
+  font-size: 13px;
+  color: #7a8aa5;
+}
+
+.panel code {
+  background: #f0f5ff;
+  color: #0b55c7;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.info-grid,
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.empty-state {
+  border: 1px dashed #cbd8ea;
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  background: #f7fbff;
+}
+
+.channel-protocols {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.protocol-badge {
+  border-radius: 999px;
+}
+
+.table-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.detail-drawer-header {
+  padding-top: 44px;
+  padding-left: 28px;
+  padding-right: 28px;
+}
+
+.detail-drawer-body {
+  padding: 0 28px 28px;
+}
+
+.detail-header {
+  padding: 0 0 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e4e9f1;
+}
+
+.detail-body {
+  padding: 0;
+  overflow-y: visible;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.detail-body .section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e4e9f1;
+  border-radius: 7px;
+}
+
+.detail-body .section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f3a47;
+}
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.kv-grid dt {
+  color: #50616a;
+  font-weight: 500;
+}
+
+.kv-grid dd {
+  margin: 0;
+  color: #172026;
+  word-break: break-word;
+}
+
+.block-title {
+  font-size: 12px;
+  margin: 8px 0 4px;
+  color: #50616a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.code-block {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  background: #0f19220d;
+  border: 1px solid #e6eef2;
+  border-radius: 6px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #172026;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.error {
+  color: #b73019;
+}
+
+.attempt-row td {
+  font-variant-numeric: tabular-nums;
+}
+
+.logs-filter-bar,
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid #e1e7f0;
+  border-radius: 7px;
+}
+
+.logs-filter-bar .logs-search {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.pagination {
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.pagination span.pagination-info {
+  font-size: 13px;
+  color: #5b6b74;
+}
+
+.app-boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}
+
+.boot-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  color: #33414b;
+}
+
+.boot-screen .boot-logo {
+  font-size: 56px;
+  line-height: 1;
+}
+
+.boot-screen h1 {
+  font-size: 24px;
+  margin: 0;
+  font-weight: 700;
+}
+
+.boot-hint {
+  font-size: 13px;
+  color: #7a8b94;
+  margin: 0;
+}
+
+.section-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--primary);
+}
+
+.section-icon svg {
+  width: 19px;
+  height: 19px;
+  display: block;
+}
+
+.section-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 760px) {
+  .info-grid,
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}

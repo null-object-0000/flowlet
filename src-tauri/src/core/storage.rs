@@ -1,70 +1,10 @@
-use super::config::{ClientConfig, ModelPrice, ProviderConfig, SecretStorage, VirtualModelRoute};
-use rusqlite::{params, Connection};
-use serde::Serialize;
+use super::config::{AuthStrategy, ConfigBundle, ModelPrice};
+use rusqlite::Connection;
 use std::{
     path::Path,
     sync::{Arc, Mutex},
 };
 use thiserror::Error;
-
-#[derive(Debug, Clone)]
-pub struct RequestLogMetadata {
-    pub request_id: String,
-    pub client_id: Option<String>,
-    pub provider_id: Option<String>,
-    pub public_model: Option<String>,
-    pub virtual_model: Option<String>,
-    pub upstream_model: Option<String>,
-    pub method: String,
-    pub path: String,
-    pub status: Option<i64>,
-    pub latency_ms: Option<i64>,
-    pub is_stream: bool,
-    pub error_message: Option<String>,
-    pub fallback_count: i64,
-    pub route_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UsageSummaryRow {
-    pub date: String,
-    pub client_id: Option<String>,
-    pub provider_id: Option<String>,
-    pub upstream_model: Option<String>,
-    pub request_count: i64,
-    pub known_tokens: i64,
-    pub unknown_count: i64,
-    pub estimated_cost: f64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RequestLogRow {
-    pub created_at: String,
-    pub client_id: Option<String>,
-    pub method: String,
-    pub path: String,
-    pub provider_id: Option<String>,
-    pub public_model: Option<String>,
-    pub upstream_model: Option<String>,
-    pub status: Option<i64>,
-    pub latency_ms: Option<i64>,
-    pub is_stream: bool,
-    pub fallback_count: i64,
-    pub route_reason: Option<String>,
-    pub error_message: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UsageRecordInput {
-    pub request_id: String,
-    pub client_id: Option<String>,
-    pub provider_id: Option<String>,
-    pub virtual_model: Option<String>,
-    pub upstream_model: Option<String>,
-    pub input_tokens: Option<i64>,
-    pub output_tokens: Option<i64>,
-    pub total_tokens: Option<i64>,
-}
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -74,656 +14,583 @@ pub enum StorageError {
     LockFailed,
 }
 
+#[path = "storage_config.rs"]
+mod storage_config;
+#[path = "storage_usage.rs"]
+mod storage_usage;
+
 #[derive(Clone)]
 pub struct Storage {
     connection: Arc<Mutex<Connection>>,
+    prices: Arc<Mutex<Vec<ModelPrice>>>,
 }
 
 impl Storage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let connection = Connection::open(path)?;
+        connection.execute_batch("PRAGMA journal_mode = WAL;")?;
         let storage = Self {
             connection: Arc::new(Mutex::new(connection)),
+            prices: Arc::new(Mutex::new(Vec::new())),
         };
         storage.migrate()?;
         Ok(storage)
     }
 
-    pub fn save_provider(&self, provider: &ProviderConfig) -> Result<(), StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        connection.execute(
-            r#"
-            INSERT INTO providers (
-                id, name, protocol_type, base_url, auth_type, api_key, api_key_storage, default_model, upstream_timeout_seconds, enabled, created_at, updated_at
-            ) VALUES (
-                'default', ?1, 'openai-compatible', ?2, 'bearer', ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now')
-            )
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                base_url = excluded.base_url,
-                api_key = excluded.api_key,
-                api_key_storage = excluded.api_key_storage,
-                default_model = excluded.default_model,
-                upstream_timeout_seconds = excluded.upstream_timeout_seconds,
-                enabled = excluded.enabled,
-                updated_at = datetime('now')
-            "#,
-            params![
-                provider.name,
-                provider.base_url,
-                provider.api_key,
-                "plaintext",
-                provider.default_model,
-                provider.upstream_timeout_seconds as i64,
-                provider.enabled as i64
-            ],
-        )?;
-        Ok(())
+    /// 设置运行时模型价格（三段价格）。仅来自 config.json，这是价格的唯一真实来源。
+    /// 写入后费用计算直接使用此内存副本，不再读取数据库。
+    pub fn set_prices(&self, prices: Vec<ModelPrice>) {
+        if let Ok(mut current) = self.prices.lock() {
+            *current = prices;
+        }
     }
 
-    pub fn get_provider(&self) -> Result<Option<ProviderConfig>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let mut statement = connection.prepare(
-            r#"
-            SELECT name, base_url, api_key, api_key_storage, default_model, upstream_timeout_seconds, enabled
-            FROM providers
-            WHERE id = 'default'
-            "#,
-        )?;
-        let mut rows = statement.query([])?;
-        let Some(row) = rows.next()? else {
-            return Ok(None);
+    pub fn prices(&self) -> Vec<ModelPrice> {
+        self.prices.lock().map(|p| p.clone()).unwrap_or_default()
+    }
+
+    // ─── Config Import/Export ────────────────────────────────────────────────
+
+    /// 导出完整配置为 JSON 字符串
+    pub fn export_config(&self) -> Result<String, StorageError> {
+        let bundle = ConfigBundle {
+            version: "1".to_string(),
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            channels: self.list_channel_presets()?,
+            accounts: self.list_channel_accounts()?,
+            routes: self.list_route_candidates()?,
+            rules: self.list_route_rules()?,
+            prices: self.prices(),
+            virtual_models: self.list_virtual_models()?,
         };
-
-        Ok(Some(ProviderConfig {
-            name: row.get(0)?,
-            base_url: row.get(1)?,
-            api_key: row.get(2)?,
-            api_key_storage: match row.get::<_, String>(3)?.as_str() {
-                "plaintext" => SecretStorage::Plaintext,
-                _ => SecretStorage::Plaintext,
-            },
-            default_model: row.get(4)?,
-            upstream_timeout_seconds: row.get::<_, i64>(5)? as u64,
-            enabled: row.get::<_, i64>(6)? != 0,
-        }))
+        serde_json::to_string_pretty(&bundle)
+            .map_err(|e| StorageError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(e))))
     }
 
-    pub fn insert_request_log(&self, log: RequestLogMetadata) -> Result<(), StorageError> {
+    /// 从 JSON 字符串导入配置（覆盖现有配置）
+    pub fn import_config(&self, json: &str) -> Result<(), StorageError> {
+        let bundle: ConfigBundle = serde_json::from_str(json).map_err(|e| {
+            StorageError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+        })?;
+
+        self.save_channel_presets(&bundle.channels)?;
+        self.save_channel_accounts(&bundle.accounts)?;
+        self.save_route_candidates(&bundle.routes)?;
+        self.save_route_rules(&bundle.rules)?;
+        self.save_virtual_models(&bundle.virtual_models)?;
+
+        // 价格不再持久化到数据库；配置导入时直接更新内存中的价格副本。
+        self.set_prices(bundle.prices);
+        Ok(())
+    }
+
+    // ─── Maintenance ─────────────────────────────────────────────────────────
+
+    /// 清理指定天数之前的请求日志和用量记录，返回删除的记录数
+    pub fn cleanup_old_logs(&self, keep_days: i64) -> Result<(usize, usize), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+
+        let cutoff = format!("datetime('now', '-{} days')", keep_days);
+
+        let deleted_logs = connection.execute(
+            &format!("DELETE FROM request_logs WHERE created_at < {}", cutoff),
+            [],
+        )?;
+
+        let deleted_usage = connection.execute(
+            &format!("DELETE FROM usage_records WHERE created_at < {}", cutoff),
+            [],
+        )?;
+
+        // 注意：不再在此处执行 VACUUM。VACUUM 会重写整个 DB 文件，大库清理时
+        // 会冻结数秒。 SQLite WAL + 空闲页复用已足够回收空间；如需压缩磁盘
+        // 可在程序空闲时由外部 sqlite3 命令行手动执行 VACUUM。
+
+        Ok((deleted_logs, deleted_usage))
+    }
+
+    /// 获取数据库统计信息
+    pub fn db_stats(&self) -> Result<(i64, i64, i64), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+
+        let logs: i64 =
+            connection.query_row("SELECT COUNT(*) FROM request_logs", [], |row| row.get(0))?;
+
+        let usage: i64 =
+            connection.query_row("SELECT COUNT(*) FROM usage_records", [], |row| row.get(0))?;
+
+        let file_size: i64 = connection.query_row(
+            "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
+            [],
+            |row| row.get(0),
+        )?;
+
+        Ok((logs, usage, file_size))
+    }
+
+    /// 测试辅助：将所有请求日志的 created_at 更新为指定天数前
+    #[cfg(test)]
+    pub fn test_set_logs_created_at_days_ago(&self, days: i64) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         connection.execute(
-            r#"
-            INSERT INTO request_logs (
-                id, request_id, client_id, provider_id, public_model, virtual_model, upstream_model, protocol_type,
-                method, path, status, latency_ms, is_stream, error_message,
-                fallback_count, route_reason, created_at
-            ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'openai-compatible',
-                ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, datetime('now')
-            )
-            "#,
-            params![
-                uuid::Uuid::new_v4().to_string(),
-                log.request_id,
-                log.client_id,
-                log.provider_id,
-                log.public_model,
-                log.virtual_model,
-                log.upstream_model,
-                log.method,
-                log.path,
-                log.status,
-                log.latency_ms,
-                log.is_stream as i64,
-                log.error_message,
-                log.fallback_count,
-                log.route_reason,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn save_virtual_model_routes(
-        &self,
-        routes: &[VirtualModelRoute],
-    ) -> Result<(), StorageError> {
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let transaction = connection.transaction()?;
-        transaction.execute(
-            "DELETE FROM virtual_model_routes WHERE virtual_model_id = 'auto'",
+            &format!(
+                "UPDATE request_logs SET created_at = datetime('now', '-{} days')",
+                days
+            ),
             [],
         )?;
-
-        for route in routes {
-            transaction.execute(
-                r#"
-                INSERT INTO virtual_model_routes (
-                    id, virtual_model_id, provider_id, upstream_model, priority, enabled, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), datetime('now')
-                )
-                "#,
-                params![
-                    route.id,
-                    route.virtual_model,
-                    route.provider_name,
-                    route.upstream_model,
-                    route.priority,
-                    route.enabled as i64
-                ],
-            )?;
-        }
-
-        transaction.commit()?;
         Ok(())
     }
 
-    pub fn list_virtual_model_routes(&self) -> Result<Vec<VirtualModelRoute>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let mut statement = connection.prepare(
-            r#"
-            SELECT id, virtual_model_id, provider_id, upstream_model, priority, enabled
-            FROM virtual_model_routes
-            WHERE virtual_model_id = 'auto'
-            ORDER BY priority ASC, id ASC
-            "#,
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok(VirtualModelRoute {
-                id: row.get(0)?,
-                virtual_model: row.get(1)?,
-                provider_name: row.get(2)?,
-                upstream_model: row.get(3)?,
-                priority: row.get(4)?,
-                enabled: row.get::<_, i64>(5)? != 0,
-            })
-        })?;
-
-        let mut routes = Vec::new();
-        for row in rows {
-            routes.push(row?);
-        }
-
-        Ok(routes)
-    }
-
-    pub fn save_clients(&self, clients: &[ClientConfig]) -> Result<(), StorageError> {
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let transaction = connection.transaction()?;
-        transaction.execute("DELETE FROM clients", [])?;
-
-        for client in clients {
-            transaction.execute(
-                r#"
-                INSERT INTO clients (
-                    id, name, token, app_type, enabled, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now')
-                )
-                "#,
-                params![
-                    client.id,
-                    client.name,
-                    client.token,
-                    client.app_type,
-                    client.enabled as i64
-                ],
-            )?;
-        }
-
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn list_clients(&self) -> Result<Vec<ClientConfig>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let mut statement = connection.prepare(
-            r#"
-            SELECT id, name, token, app_type, enabled
-            FROM clients
-            ORDER BY created_at ASC, id ASC
-            "#,
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok(ClientConfig {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                token: row.get(2)?,
-                app_type: row.get(3)?,
-                enabled: row.get::<_, i64>(4)? != 0,
-            })
-        })?;
-
-        let mut clients = Vec::new();
-        for row in rows {
-            clients.push(row?);
-        }
-
-        Ok(clients)
-    }
-
-    pub fn save_model_prices(&self, prices: &[ModelPrice]) -> Result<(), StorageError> {
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let transaction = connection.transaction()?;
-        transaction.execute("DELETE FROM model_prices", [])?;
-
-        for price in prices {
-            transaction.execute(
-                r#"
-                INSERT INTO model_prices (
-                    id, provider_id, model, input_price, output_price, currency, unit, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now')
-                )
-                "#,
-                params![
-                    price.id,
-                    price.provider_id,
-                    price.model,
-                    price.input_price,
-                    price.output_price,
-                    price.currency,
-                    price.unit,
-                ],
-            )?;
-        }
-
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn list_model_prices(&self) -> Result<Vec<ModelPrice>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let mut statement = connection.prepare(
-            r#"
-            SELECT id, provider_id, model, input_price, output_price, currency, unit
-            FROM model_prices
-            ORDER BY provider_id ASC, model ASC
-            "#,
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok(ModelPrice {
-                id: row.get(0)?,
-                provider_id: row.get(1)?,
-                model: row.get(2)?,
-                input_price: row.get(3)?,
-                output_price: row.get(4)?,
-                currency: row.get(5)?,
-                unit: row.get(6)?,
-            })
-        })?;
-
-        let mut prices = Vec::new();
-        for row in rows {
-            prices.push(row?);
-        }
-
-        Ok(prices)
-    }
-
-    pub fn analyze_unknown_usage(&self) -> Result<usize, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let inserted = connection.execute(
-            r#"
-            INSERT INTO usage_records (
-                id, request_id, client_id, provider_id, virtual_model, upstream_model,
-                input_tokens, output_tokens, total_tokens, estimated_cost, analyzed_at
-            )
-            SELECT
-                lower(hex(randomblob(16))),
-                request_logs.request_id,
-                request_logs.client_id,
-                request_logs.provider_id,
-                request_logs.virtual_model,
-                request_logs.upstream_model,
-                NULL,
-                NULL,
-                NULL,
-                NULL,
-                datetime('now')
-            FROM request_logs
-            LEFT JOIN usage_records ON usage_records.request_id = request_logs.request_id
-            WHERE usage_records.id IS NULL
-            "#,
-            [],
-        )?;
-        Ok(inserted)
-    }
-
-    pub fn upsert_usage_record(&self, usage: UsageRecordInput) -> Result<(), StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let updated = connection.execute(
-            r#"
-            UPDATE usage_records
-            SET
-                client_id = ?2,
-                provider_id = ?3,
-                virtual_model = ?4,
-                upstream_model = ?5,
-                input_tokens = ?6,
-                output_tokens = ?7,
-                total_tokens = ?8,
-                analyzed_at = datetime('now')
-            WHERE request_id = ?1
-            "#,
-            params![
-                usage.request_id,
-                usage.client_id,
-                usage.provider_id,
-                usage.virtual_model,
-                usage.upstream_model,
-                usage.input_tokens,
-                usage.output_tokens,
-                usage.total_tokens,
-            ],
-        )?;
-
-        if updated == 0 {
-            connection.execute(
-                r#"
-                INSERT INTO usage_records (
-                    id, request_id, client_id, provider_id, virtual_model, upstream_model,
-                    input_tokens, output_tokens, total_tokens, estimated_cost, analyzed_at
-                ) VALUES (
-                    lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5,
-                    ?6, ?7, ?8, NULL, datetime('now')
-                )
-                "#,
-                params![
-                    usage.request_id,
-                    usage.client_id,
-                    usage.provider_id,
-                    usage.virtual_model,
-                    usage.upstream_model,
-                    usage.input_tokens,
-                    usage.output_tokens,
-                    usage.total_tokens,
-                ],
-            )?;
-        }
-
-        drop(connection);
-        self.recalculate_usage_costs()?;
-        Ok(())
-    }
-
-    pub fn recalculate_usage_costs(&self) -> Result<usize, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let updated = connection.execute(
-            r#"
-            UPDATE usage_records
-            SET estimated_cost = (
-                SELECT
-                    coalesce(usage_records.input_tokens, 0) * model_prices.input_price / 1000000.0
-                    + coalesce(usage_records.output_tokens, 0) * model_prices.output_price / 1000000.0
-                FROM model_prices
-                WHERE model_prices.provider_id = usage_records.provider_id
-                  AND model_prices.model = usage_records.upstream_model
-                LIMIT 1
-            )
-            WHERE total_tokens IS NOT NULL
-              AND EXISTS (
-                SELECT 1
-                FROM model_prices
-                WHERE model_prices.provider_id = usage_records.provider_id
-                  AND model_prices.model = usage_records.upstream_model
-              )
-            "#,
-            [],
-        )?;
-        Ok(updated)
-    }
-
-    pub fn usage_summary(&self) -> Result<Vec<UsageSummaryRow>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let mut statement = connection.prepare(
-            r#"
-            SELECT
-                date(request_logs.created_at) AS usage_date,
-                usage_records.client_id,
-                usage_records.provider_id,
-                usage_records.upstream_model,
-                count(*) AS request_count,
-                coalesce(sum(usage_records.total_tokens), 0) AS known_tokens,
-                sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
-                coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost
-            FROM usage_records
-            LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
-            GROUP BY usage_date, usage_records.client_id, usage_records.provider_id, usage_records.upstream_model
-            ORDER BY usage_date DESC, request_count DESC
-            LIMIT 100
-            "#,
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok(UsageSummaryRow {
-                date: row
-                    .get::<_, Option<String>>(0)?
-                    .unwrap_or_else(|| "未知日期".to_string()),
-                client_id: row.get(1)?,
-                provider_id: row.get(2)?,
-                upstream_model: row.get(3)?,
-                request_count: row.get(4)?,
-                known_tokens: row.get(5)?,
-                unknown_count: row.get(6)?,
-                estimated_cost: row.get(7)?,
-            })
-        })?;
-
-        let mut summary = Vec::new();
-        for row in rows {
-            summary.push(row?);
-        }
-
-        Ok(summary)
-    }
-
-    pub fn list_request_logs(&self) -> Result<Vec<RequestLogRow>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let mut statement = connection.prepare(
-            r#"
-            SELECT
-                created_at, client_id, method, path, provider_id, public_model, upstream_model,
-                status, latency_ms, is_stream, fallback_count, route_reason, error_message
-            FROM request_logs
-            ORDER BY created_at DESC
-            LIMIT 100
-            "#,
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok(RequestLogRow {
-                created_at: row.get(0)?,
-                client_id: row.get(1)?,
-                method: row.get(2)?,
-                path: row.get(3)?,
-                provider_id: row.get(4)?,
-                public_model: row.get(5)?,
-                upstream_model: row.get(6)?,
-                status: row.get(7)?,
-                latency_ms: row.get(8)?,
-                is_stream: row.get::<_, i64>(9)? != 0,
-                fallback_count: row.get(10)?,
-                route_reason: row.get(11)?,
-                error_message: row.get(12)?,
-            })
-        })?;
-
-        let mut logs = Vec::new();
-        for row in rows {
-            logs.push(row?);
-        }
-
-        Ok(logs)
-    }
+    // ─── Migration ───────────────────────────────────────────────────────────
 
     fn migrate(&self) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
+        tracing::debug!("migrate: 建表");
         connection.execute_batch(
             r#"
-            CREATE TABLE IF NOT EXISTS providers (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                protocol_type TEXT NOT NULL,
-                base_url TEXT NOT NULL,
-                auth_type TEXT NOT NULL,
-                api_key TEXT NOT NULL,
-                api_key_storage TEXT NOT NULL DEFAULT 'plaintext',
-                default_model TEXT NOT NULL,
-                upstream_timeout_seconds INTEGER NOT NULL DEFAULT 120,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS channel_presets (
+                id              TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                vendor          TEXT NOT NULL,
+                supported_protocols TEXT NOT NULL,
+                openai_base_url TEXT NOT NULL,
+                anthropic_base_url TEXT NOT NULL,
+                openai_auth    TEXT NOT NULL DEFAULT 'bearer',
+                anthropic_auth TEXT NOT NULL DEFAULT 'bearer',
+                default_model   TEXT NOT NULL,
+                small_model     TEXT,
+                timeout_seconds INTEGER,
+                supports_model_list    INTEGER NOT NULL DEFAULT 0,
+                supports_model_detail  INTEGER NOT NULL DEFAULT 0,
+                supports_price_sync    INTEGER NOT NULL DEFAULT 0,
+                supports_balance_query INTEGER NOT NULL DEFAULT 0,
+                supports_quota_query   INTEGER NOT NULL DEFAULT 0,
+                supports_usage_query   INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS clients (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                token TEXT NOT NULL,
-                app_type TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS channel_accounts (
+                id                TEXT PRIMARY KEY,
+                channel_id        TEXT NOT NULL,
+                name              TEXT NOT NULL,
+                api_key           TEXT NOT NULL,
+                enabled           INTEGER NOT NULL DEFAULT 1,
+                priority          INTEGER NOT NULL DEFAULT 0,
+                remark            TEXT,
+                resource_mode     TEXT,
+                last_used_at      TEXT,
+                last_error        TEXT,
+                credential_status TEXT NOT NULL DEFAULT 'healthy',
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS channel_models (
+                id                   TEXT PRIMARY KEY,
+                channel_id           TEXT NOT NULL,
+                model                TEXT NOT NULL,
+                display_name         TEXT,
+                supported_protocols  TEXT NOT NULL,
+                context_window       INTEGER,
+                max_output_tokens    INTEGER,
+                supports_stream      INTEGER NOT NULL DEFAULT 1,
+                enabled              INTEGER NOT NULL DEFAULT 1,
+                source               TEXT NOT NULL DEFAULT 'preset',
+                synced_at            TEXT,
+                created_at           TEXT NOT NULL,
+                updated_at           TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS virtual_models (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                protocol_type TEXT NOT NULL,
+                id               TEXT PRIMARY KEY,
+                name             TEXT NOT NULL UNIQUE,
+                protocol_type    TEXT NOT NULL,
                 routing_strategy TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                enabled          INTEGER NOT NULL DEFAULT 1,
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS virtual_model_routes (
-                id TEXT PRIMARY KEY,
+                id               TEXT PRIMARY KEY,
                 virtual_model_id TEXT NOT NULL,
-                provider_id TEXT NOT NULL,
-                profile_id TEXT,
-                upstream_model TEXT NOT NULL,
-                priority INTEGER NOT NULL,
-                cost_weight REAL NOT NULL DEFAULT 0,
-                latency_weight REAL NOT NULL DEFAULT 0,
-                quality_weight REAL NOT NULL DEFAULT 0,
-                free_quota_first INTEGER NOT NULL DEFAULT 0,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                channel_id       TEXT NOT NULL,
+                account_id       TEXT NOT NULL,
+                upstream_model   TEXT NOT NULL,
+                client_protocol  TEXT NOT NULL,
+                priority         INTEGER NOT NULL,
+                enabled          INTEGER NOT NULL DEFAULT 1,
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS route_rules (
+                id                    TEXT PRIMARY KEY,
+                name                  TEXT NOT NULL,
+                enabled               INTEGER NOT NULL DEFAULT 1,
+                priority              INTEGER NOT NULL DEFAULT 0,
+                match_client_id       TEXT,
+                match_model           TEXT,
+                match_protocol        TEXT,
+                target_channel_id     TEXT NOT NULL,
+                target_account_id     TEXT NOT NULL,
+                target_upstream_model TEXT NOT NULL,
+                created_at            TEXT NOT NULL,
+                updated_at            TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS account_balance_snapshots (
+                id                   TEXT PRIMARY KEY,
+                account_id           TEXT NOT NULL,
+                balance              REAL,
+                currency             TEXT,
+                token_pack_total     INTEGER,
+                token_pack_used      INTEGER,
+                token_pack_remaining INTEGER,
+                token_pack_expire_at TEXT,
+                source               TEXT NOT NULL,
+                synced_at            TEXT,
+                remark               TEXT,
+                created_at           TEXT NOT NULL,
+                updated_at           TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS request_logs (
-                id TEXT PRIMARY KEY,
-                request_id TEXT NOT NULL,
-                client_id TEXT,
-                provider_id TEXT,
-                profile_id TEXT,
-                public_model TEXT,
-                virtual_model TEXT,
-                upstream_model TEXT,
-                protocol_type TEXT NOT NULL,
-                method TEXT NOT NULL,
-                path TEXT NOT NULL,
-                status INTEGER,
-                latency_ms INTEGER,
-                is_stream INTEGER NOT NULL DEFAULT 0,
-                request_body_path TEXT,
-                response_body_path TEXT,
-                error_message TEXT,
-                fallback_count INTEGER NOT NULL DEFAULT 0,
-                route_reason TEXT,
-                created_at TEXT NOT NULL
+                id                TEXT PRIMARY KEY,
+                request_id        TEXT NOT NULL,
+                client_id         TEXT,
+                client_name       TEXT,
+                channel_id        TEXT,
+                channel_name      TEXT,
+                account_id        TEXT,
+                account_name      TEXT,
+                client_protocol   TEXT NOT NULL,
+                upstream_protocol TEXT NOT NULL,
+                virtual_model     TEXT,
+                public_model      TEXT,
+                upstream_model    TEXT,
+                request_type      TEXT NOT NULL DEFAULT 'unknown',
+                method            TEXT NOT NULL,
+                path              TEXT NOT NULL,
+                status            INTEGER,
+                latency_ms        INTEGER,
+                is_stream         INTEGER NOT NULL DEFAULT 0,
+                error_message     TEXT,
+                fallback_count    INTEGER NOT NULL DEFAULT 0,
+                route_reason      TEXT,
+                created_at        TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS usage_records (
-                id TEXT PRIMARY KEY,
-                request_id TEXT NOT NULL,
-                client_id TEXT,
-                provider_id TEXT,
-                virtual_model TEXT,
-                upstream_model TEXT,
-                input_tokens INTEGER,
-                output_tokens INTEGER,
-                total_tokens INTEGER,
-                estimated_cost REAL,
-                analyzed_at TEXT NOT NULL
+                id                    TEXT PRIMARY KEY,
+                request_id            TEXT NOT NULL,
+                client_id             TEXT,
+                client_name           TEXT,
+                channel_id            TEXT,
+                channel_name          TEXT,
+                account_id            TEXT,
+                account_name          TEXT,
+                client_protocol       TEXT NOT NULL,
+                upstream_protocol     TEXT NOT NULL,
+                virtual_model         TEXT,
+                upstream_model        TEXT,
+                input_tokens          INTEGER,
+                input_cached_tokens   INTEGER,
+                input_uncached_tokens INTEGER,
+                output_tokens         INTEGER,
+                total_tokens          INTEGER,
+                estimated_cost        REAL,
+                analyzed_at           TEXT,
+                created_at            TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS model_prices (
-                id TEXT PRIMARY KEY,
-                provider_id TEXT NOT NULL,
-                model TEXT NOT NULL,
-                input_price REAL NOT NULL,
-                output_price REAL NOT NULL,
-                currency TEXT NOT NULL,
-                unit TEXT NOT NULL,
-                created_at TEXT NOT NULL,
+            CREATE TABLE IF NOT EXISTS app_meta (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
             "#,
         )?;
+
+        normalize_legacy_virtual_model_routes_schema(&connection)?;
+
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "openai_auth",
+            "TEXT NOT NULL DEFAULT 'bearer'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "anthropic_auth",
+            "TEXT NOT NULL DEFAULT 'bearer'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "small_model",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "timeout_seconds",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "virtual_model_id",
+            "TEXT NOT NULL DEFAULT 'auto'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "channel_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "account_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "upstream_model",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "credential_status",
+            "TEXT NOT NULL DEFAULT 'healthy'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "client_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "priority",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "enabled",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "created_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "virtual_model_routes",
+            "updated_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        // 渠道模板：补充平台查看地址（API Key 管理页跳转）
+        add_column_if_missing(&connection, "channel_presets", "platform_url", "TEXT")?;
+
+        // 余额快照：补充 LongCat 多资源包原始数据（JSON 数组）
+        add_column_if_missing(&connection, "account_balance_snapshots", "token_packs", "TEXT")?;
+
+        // 渠道账号：补充 Base URL 覆盖字段
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "base_url_override",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "resource_mode",
+            "TEXT",
+        )?;
+
+        // 旧版本 request_logs 只记录了少量字段；后续索引和日志页面依赖这些基础列。
         add_column_if_missing(
             &connection,
             "request_logs",
-            "public_model",
-            "ALTER TABLE request_logs ADD COLUMN public_model TEXT",
+            "request_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "client_id", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "client_name", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "channel_id", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "channel_name", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "account_id", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "account_name", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "client_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
         )?;
         add_column_if_missing(
             &connection,
-            "providers",
-            "api_key_storage",
-            "ALTER TABLE providers ADD COLUMN api_key_storage TEXT NOT NULL DEFAULT 'plaintext'",
+            "request_logs",
+            "upstream_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "virtual_model", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "public_model", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "upstream_model", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "request_type",
+            "TEXT NOT NULL DEFAULT 'unknown'",
         )?;
         add_column_if_missing(
             &connection,
-            "providers",
-            "upstream_timeout_seconds",
-            "ALTER TABLE providers ADD COLUMN upstream_timeout_seconds INTEGER NOT NULL DEFAULT 120",
+            "request_logs",
+            "method",
+            "TEXT NOT NULL DEFAULT ''",
         )?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "path",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "status", "INTEGER")?;
+        add_column_if_missing(&connection, "request_logs", "latency_ms", "INTEGER")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "is_stream",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "error_message", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "fallback_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "route_reason", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "created_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+
+        // 请求日志：补充详情字段（TTFB、耗时、尝试序号、请求/响应头部与 body、流式摘要）
+        add_column_if_missing(&connection, "request_logs", "ttfb_ms", "INTEGER")?;
+        add_column_if_missing(&connection, "request_logs", "duration_ms", "INTEGER")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "attempt_seq",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(&connection, "request_logs", "req_headers_json", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "req_body_b64", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "res_headers_json", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "res_body_b64", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "is_last_attempt",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+
+        // 旧版本 usage_records 同样可能缺少账号、渠道和模型字段。
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "request_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(&connection, "usage_records", "client_id", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "client_name", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "channel_id", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "channel_name", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "account_id", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "account_name", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "client_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "upstream_protocol",
+            "TEXT NOT NULL DEFAULT 'openai'",
+        )?;
+        add_column_if_missing(&connection, "usage_records", "virtual_model", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "upstream_model", "TEXT")?;
+        add_column_if_missing(&connection, "usage_records", "input_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "input_cached_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "input_uncached_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "output_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "total_tokens", "INTEGER")?;
+        add_column_if_missing(&connection, "usage_records", "estimated_cost", "REAL")?;
+        add_column_if_missing(&connection, "usage_records", "analyzed_at", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "created_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+
+        // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
+        // usage_summary / recalculate_usage_costs / cleanup_old_logs 等热点查询
+        connection.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_request_logs_created_at       ON request_logs(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_request_id       ON request_logs(request_id);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_is_last_attempt  ON request_logs(is_last_attempt);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_client           ON request_logs(client_id);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_account          ON request_logs(account_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_records_request_id     ON usage_records(request_id);
+            CREATE INDEX IF NOT EXISTS idx_usage_records_created_at     ON usage_records(created_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_channel_upstream_model ON usage_records(channel_id, upstream_model);
+            "#,
+        )?;
+        tracing::info!("migrate: 建表完成, 开始建索引");
+
+        // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
+        connection.execute(
+            "INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.04', datetime('now'))",
+            [],
+        )?;
+
+        // 删除已废弃的 stream_summary 列（流式摘要功能已移除）。
+        // DROP COLUMN 要求 SQLite ≥ 3.35；Tauri 自带的 libsqlite3 满足版本。
+        if table_has_column(&connection, "request_logs", "stream_summary")? {
+            connection.execute("ALTER TABLE request_logs DROP COLUMN stream_summary", [])?;
+        }
+
+        tracing::info!("migrate: 完成");
         Ok(())
     }
 }
@@ -732,17 +599,149 @@ fn add_column_if_missing(
     connection: &Connection,
     table: &str,
     column: &str,
-    sql: &str,
+    definition: &str,
 ) -> Result<(), StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
-
-    for existing in columns {
-        if existing? == column {
-            return Ok(());
-        }
+    let exists: i64 = connection.query_row(
+        &format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+        [column],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        connection.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
     }
-
-    connection.execute(sql, [])?;
     Ok(())
 }
+
+fn table_has_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, StorageError> {
+    let exists: i64 = connection.query_row(
+        &format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+        [column],
+        |row| row.get(0),
+    )?;
+    Ok(exists > 0)
+}
+
+fn normalize_legacy_virtual_model_routes_schema(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    // 旧 schema 可能含 provider_name 或 provider_id 列，任一存在即需迁移。
+    if !table_has_column(connection, "virtual_model_routes", "provider_name")?
+        && !table_has_column(connection, "virtual_model_routes", "provider_id")?
+    {
+        return Ok(());
+    }
+
+    let column_or = |column: &str, default: &str| -> Result<String, StorageError> {
+        if table_has_column(connection, "virtual_model_routes", column)? {
+            Ok(format!("COALESCE({column}, {default})"))
+        } else {
+            Ok(default.to_string())
+        }
+    };
+    let provider_name_exists =
+        table_has_column(connection, "virtual_model_routes", "provider_name")?;
+    let provider_id_exists =
+        table_has_column(connection, "virtual_model_routes", "provider_id")?;
+    let virtual_model_id = if table_has_column(
+        connection,
+        "virtual_model_routes",
+        "virtual_model_id",
+    )? {
+        "COALESCE(virtual_model_id, 'auto')".to_string()
+    } else if provider_name_exists {
+        "COALESCE(provider_name, 'auto')".to_string()
+    } else {
+        "'auto'".to_string()
+    };
+    let channel_id = if table_has_column(connection, "virtual_model_routes", "channel_id")? {
+        "COALESCE(channel_id, '')".to_string()
+    } else if provider_id_exists {
+        "COALESCE(provider_id, '')".to_string()
+    } else {
+        "''".to_string()
+    };
+    let upstream_model = if table_has_column(
+        connection,
+        "virtual_model_routes",
+        "upstream_model",
+    )? {
+        "COALESCE(upstream_model, '')".to_string()
+    } else if provider_name_exists {
+        "COALESCE(provider_name, '')".to_string()
+    } else {
+        "''".to_string()
+    };
+    let account_id = column_or("account_id", "''")?;
+    let priority = column_or("priority", "0")?;
+    let enabled = column_or("enabled", "1")?;
+    let created_at = column_or("created_at", "NULL")?;
+    let updated_at = column_or("updated_at", "NULL")?;
+    let client_protocol = if table_has_column(connection, "virtual_model_routes", "client_protocol")? {
+        "CASE client_protocol WHEN 'anthropic' THEN 'anthropic' ELSE 'openai' END".to_string()
+    } else {
+        "'openai'".to_string()
+    };
+
+    // 重建表并使用 INSERT…SELECT 保留已有的路由数据。
+    // 旧 schema 的 channel_id / account_id / client_protocol 以 '' / 'openai' 为默认，
+    // 这里按原样复制；client_protocol 若不是有效协议则回退为 openai。
+    // 注意：execute_batch 不支持参数绑定，时间戳直接内联到 SQL 文本中。
+    let now = chrono::Utc::now().to_rfc3339();
+    let migration_sql = format!(
+        r#"
+        DROP TABLE IF EXISTS virtual_model_routes_legacy_migrate;
+        ALTER TABLE virtual_model_routes RENAME TO virtual_model_routes_legacy_migrate;
+        CREATE TABLE virtual_model_routes (
+            id               TEXT PRIMARY KEY,
+            virtual_model_id TEXT NOT NULL,
+            channel_id       TEXT NOT NULL DEFAULT '',
+            account_id       TEXT NOT NULL DEFAULT '',
+            upstream_model   TEXT NOT NULL,
+            client_protocol  TEXT NOT NULL DEFAULT 'openai',
+            priority         INTEGER NOT NULL DEFAULT 0,
+            enabled          INTEGER NOT NULL DEFAULT 1,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL
+        );
+        INSERT INTO virtual_model_routes (
+            id, virtual_model_id, channel_id, account_id, upstream_model,
+            client_protocol, priority, enabled, created_at, updated_at
+        )
+        SELECT
+            id,
+            {virtual_model_id},
+            {channel_id},
+            {account_id},
+            {upstream_model},
+            {client_protocol},
+            {priority},
+            {enabled},
+            COALESCE({created_at}, '{now}'),
+            COALESCE({updated_at}, '{now}')
+        FROM virtual_model_routes_legacy_migrate;
+        DROP TABLE virtual_model_routes_legacy_migrate;
+        "#,
+    );
+    connection.execute_batch(&migration_sql)?;
+    Ok(())
+}
+
+fn parse_auth_strategy(value: &str) -> AuthStrategy {
+    match value {
+        "x_api_key" => AuthStrategy::XApiKey,
+        _ => AuthStrategy::Bearer,
+    }
+}
+
+#[cfg(test)]
+#[path = "storage_tests.rs"]
+mod storage_tests;
+
+

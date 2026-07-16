@@ -4,6 +4,15 @@
 
 维护本项目需安装 Semi Design 技能：https://semi.design/zh-CN/start/mcp-skills
 
+涉及 AI / LLM 品牌图标时，必须先读取 Lobe Icons 官方技能：https://lobehub.com/icons/skill.md
+
+图标资源默认规则：
+
+- 优先尝试 `@lobehub/icons-static-svg` 等官方静态包，不优先引入 React 组件包 `@lobehub/icons`；
+- Flowlet 是本地桌面应用，核心界面使用的品牌图标应优先固化到项目资源，避免运行时 CDN 依赖；
+- 固化静态图标时必须记录来源版本并保留上游许可证；
+- 只有官方静态包无法满足交互或主题需求时，才评估引入 React 图标组件及其 peer dependencies。
+
 适用于但不限于：
 
 - Codex
@@ -334,19 +343,18 @@ Agent 接入能力应逐步提供：
 
 ## 10. 前端开发原则
 
-Flowlet 当前处于双前端过渡期：`src/` 是 Mantine legacy，`src-new/` 是默认重构目标。除非任务明确要求修复 legacy，否则新功能和 UI 调整默认落在 `src-new/`。
+Flowlet 已完成前端目录正式化：`src/` 是唯一正式前端，使用 React 19、Semi Design、TanStack Query 和 CSS Modules。旧 Mantine 前端与运行时切换机制已经删除。
 
-* `src-new` 使用 React 19、`@douyinfe/semi-ui-19`、TanStack Query 和 CSS Modules，不得引入 Mantine 组件、样式或旧前端 Hook；
-* legacy 继续使用 Mantine，只做必要维护，不把新版能力反向建立在 legacy 结构上；
-* 新前端依赖方向保持 `pages -> features -> domains -> platform`，`shared` 不导入具体业务领域；
+* 不得重新引入 Mantine 组件、样式或旧前端 Hook；
+* 前端依赖方向保持 `pages -> features -> domains -> platform`，`shared` 不导入具体业务领域；
 * 优先使用 Semi 组件 props、Flowlet Design Tokens 和共享 UI 组件，再增加同目录 CSS Module；
 * 页面或 feature 不得全局覆盖 `.semi-*`，不得依赖不断提高选择器优先级或 `!important` 解决样式冲突；
-* 无系统边框窗口的拖动区和窗口控制按钮是全局固定层；新版 `SideSheet` / Drawer 必须使用 `src-new/shared/ui/overlayLayers.ts` 的共享层级，确保弹层标题、关闭按钮位于窗口标题层之上，不得在业务组件中临时堆叠 `z-index`；
+* 无系统边框窗口的拖动区和窗口控制按钮是全局固定层；`SideSheet` / Drawer 必须使用 `src/shared/ui/overlayLayers.ts` 的共享层级，确保弹层标题、关闭按钮位于窗口标题层之上，不得在业务组件中临时堆叠 `z-index`；
 * 提高 `SideSheet` / Modal 层级时必须同步检查 Toast：Semi 静态 Toast 默认层级可能低于自定义弹层，必须保持 `Toast > 二级 Modal > SideSheet > 窗口标题层`，并验证弹层内的成功、警告和错误提示未被遮挡；
 * 页面组件不要无限膨胀；
 * 复杂状态和动作优先抽成 Hook；
 * 后端数据由领域 command 与 TanStack Query 读取，mutation 成功后只失效受影响的 query，不恢复全局 `refreshAll`；
-* 页面和组件不得直接拼写 Tauri command 名称，必须通过 `src-new/domains` 到 `src-new/platform/tauri` 的类型化边界调用；
+* 页面和组件不得直接拼写 Tauri command 名称，必须通过 `src/domains` 到 `src/platform/tauri` 的类型化边界调用；
 * 页面负责展示与有限交互；
 * 不要在 render 期间触发 Tauri command；
 * React Effect 必须考虑 StrictMode 重复执行；
@@ -364,7 +372,7 @@ Flowlet 当前处于双前端过渡期：`src/` 是 Mantine legacy，`src-new/` 
 建议拆分：
 
 ```text
-src-new/
+src/
   ├── app/          # Provider、Router、Shell
   ├── pages/        # 路由页面和页面状态组合
   ├── features/     # 用户动作与业务编排
@@ -404,20 +412,20 @@ src-new/
 
 涉及代理时重点检查：
 
-* `src-new/features/proxy-lifecycle/useProxyOverviewLifecycle.ts`
-* `src-new/features/proxy-lifecycle/useProxyAutoStart.ts`
-* `src-new/features/proxy-lifecycle/useProxyActions.ts`
-* `src-new/domains/proxy/commands.ts`
-* `src-new/features/proxy-lifecycle/ProxyStatusCard.tsx`
-* `src-new/pages/overview/OverviewPage.tsx`
-* `src-new/platform/tauri/client.ts`
+* `src/features/proxy-lifecycle/useProxyOverviewLifecycle.ts`
+* `src/features/proxy-lifecycle/useProxyAutoStart.ts`
+* `src/features/proxy-lifecycle/useProxyActions.ts`
+* `src/domains/proxy/commands.ts`
+* `src/features/proxy-lifecycle/ProxyStatusCard.tsx`
+* `src/pages/overview/OverviewPage.tsx`
+* `src/platform/tauri/client.ts`
 * `src-tauri/src/lib.rs`
 * `src-tauri/src/commands.rs`
 * `src-tauri/src/core/proxy.rs`
 * `src-tauri/src/core/proxy_http.rs`
 * `src-tauri/src/core/proxy_routing.rs`
 
-若任务明确涉及 legacy，再补查 `src/app`、`src/pages` 及旧 Mantine 调用链。文件结构可能变化，以当前代码为准。
+文件结构可能变化，以当前代码为准。
 
 ---
 
@@ -462,7 +470,7 @@ src-new/
 2. 新增渠道时，按 `docs/config.md` 第 8 节的步骤操作；
 3. 若运行时行为（热更新 / 需重启）发生变化，同步更新第 7 节；
 4. 若源码中反序列化结构（`channels_config.rs` / `config.rs`）发生变化，同步更新第 9 节；
-5. **三处同步**：修改 `channels_config` 默认值时，必须同时同步 `src/domain.ts` 中的 `defaultExposedModelsByChannel`、`defaultFlowletTierByChannel`、`flowletPublicModels` 三处常量（详见 `docs/config.md`「三处同步」）。
+5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
 
 ### 加载优先级
 

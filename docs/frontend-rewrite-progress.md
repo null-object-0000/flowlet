@@ -1,20 +1,18 @@
 # Flowlet 前端重构进度（Progress）
 
-本文档是 `src-new` 重构的唯一迭代状态源。每轮结束按「十八、进度汇报格式」记录。
+本文档记录前端重构的历史迭代；当前正式前端位于 `src`。
 每轮开始前必须重读本文件、`AGENTS.md`、`docs/frontend-rewrite.md`、`docs/config.md`、`docs/architecture.md`、`git status` 和当前分支最新代码。
 
 ---
 
 ## 当前状态
 
-- 当前阶段：阶段 D 观测和设置进行中；请求日志及详情已迁移，下一步继续用量与设置页面
-- 已完成切片：调用链矩阵、CSS 拆分、typed client + AppError、query-key 工厂、ErrorBoundary、测试基座、桌面壳与窗口控制、代理生命周期、概览页、渠道账号、开放模型、客户端访问信息、AI Agent 接入、请求日志及详情
-- 分支：`refactor/channel-account-model`
-- 基座提交：`5975a00`
-- `ui.version` 默认值：**next**（用户已确认重构分支默认进入新版；异常场景仍回退 legacy）
-- 旧前端保持可运行；新前端独立构建；双前端共用同一 Rust 后端与 SQLite
+- 当前阶段：阶段 E 已完成，重构前端已正式化为 `src`
+- 已完成切片：桌面壳、代理生命周期、概览页、渠道账号、开放模型、客户端访问信息、AI Agent 接入、请求日志及详情、用量成本、设置、多语言和主题
+- 正式入口：**仅加载 src**；`ui.version`、legacy fallback 和旧 Mantine 前端已删除
+- 构建入口：`npm run dev`、`npm run build`、`npm test`
 
-> 下方阶段 0 调用链和迁移矩阵记录的是 legacy 初始盘点，用于解释迁移来源；“读取方（旧）”和旧 `refreshAll` 不代表新版实现规范。当前迁移状态以本节和文末迭代记录为准。
+> 下方阶段 0 调用链、旧目录名 `src-new` 和迁移矩阵属于历史记录，用于解释迁移来源；“读取方（旧）”和旧 `refreshAll` 不代表当前实现规范。
 
 ---
 
@@ -67,7 +65,7 @@
 | `read_app_meta` | `Option<String>` | `refreshAll`（`model_exposure_mode`）、旧代码 | — | 自身 | — |
 | `write_app_meta` | `Result<(), String>` | `configActions.changeExposureMode` | — | exposureMode | — |
 | `cleanup_old_logs` | `(usize,usize)` | `configActions.cleanupLogs` | refreshAll | logs、usage | — |
-| `read_config` | `String` | bootstrap 仅读 `ui.version` | — | 无 | 原始 JSON |
+| `read_config` | `String` | 正式 UI 入口不再调用；旧配置能力保留 | — | 无 | 原始 JSON |
 | `write_config` | `Result<(), String>` | 未显式调用 | — | 无 | 完整 JSON 覆盖 |
 | `ipc_ping` | `Value` | 调试 | — | — | — |
 | `log_from_frontend` | `()` | `flowletApi.logToRust`（非高频路径） | — | — | 日志落盘 |
@@ -618,12 +616,12 @@ client.ts 110、ErrorBoundary 40、domain/proxy/commands 75、ProxyStatusCard 14
 | # | 阻塞项 | 类型 | 状态 |
 |---|---|---|---|
 | B1 | 是否新增 SQLite `clients` 表 + `list_clients`/`save_clients` Rust command，支撑完整的客户端 Token 管理（独立于 `default_client_token`） | 新增 Rust 能力 / schema | 待确认 |
-| B2 | 何时删除旧 `src/` 与 Mantine（默认入口已由用户确认为 `next`） | 清理决策 | 待用户批准 |
+| B2 | 删除旧前端、Mantine 与双版本入口 | 清理决策 | 已完成 |
 | B3 | `save_balance_snapshot` 手动快照入口的 UI 是否保留 | 产品范围 | 已确认保留，并并入账号编辑抽屉 |
 
 ---
 
-## 六、Loop 优先队列（与文档第十四节一致）
+## 六、重构完成清单
 
 1. ~~调用链盘点和迁移矩阵~~ ✅
 2. ~~拆分 `src-new/styles/index.css`~~ ✅
@@ -635,16 +633,16 @@ client.ts 110、ErrorBoundary 40、domain/proxy/commands 75、ProxyStatusCard 14
 8. ~~渠道列表~~ ✅
 9. ~~账号创建和编辑~~ ✅
 10. ~~账号删除、连接测试、余额同步~~ ✅
-11. 渠道模型同步 ← 当前
-12. 开放模型
-13. 配置状态 unconfigured / no_models / ready
-14. 客户端访问配置
-15. Agent 接入
+11. ~~渠道模型同步~~ ✅
+12. ~~开放模型~~ ✅
+13. ~~配置状态 unconfigured / no_models / ready~~ ✅
+14. ~~客户端访问配置~~ ✅
+15. ~~Agent 接入~~ ✅
 16. ~~请求日志列表和筛选~~ ✅
 17. ~~请求日志详情~~ ✅
-18. 用量与成本
-19. 设置
-20. 高级路由
-21. 新旧行为验收矩阵
-22. Tauri、NSIS、便携版完整验收
-23. 等待用户批准清理旧版
+18. ~~用量与成本~~ ✅
+19. ~~设置~~ ✅
+20. 高级路由不进入普通用户界面，底层能力保留
+21. ~~正式入口切换~~ ✅
+22. ~~删除旧前端和 Mantine~~ ✅
+23. ~~`src-new` 正式化为 `src`~~ ✅

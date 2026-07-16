@@ -2,7 +2,7 @@
 
 `config.json` 是 Flowlet 的**渠道与运行时配置文件**，位于项目根目录（与 `package.json` 同级）。
 
-Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `write_config` 间接读写它。
+Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `write_config` 提供底层读写能力；当前正式前端没有通用配置编辑入口。
 
 ---
 
@@ -27,17 +27,17 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 > 修改仓库根目录的 `config.json` 会同时影响「编译时内置默认值」和「便携版打包产物」。
 
-### 三处同步（重要）
+### 默认值同步（重要）
 
-`channels_config` 的默认值在代码库中**重复出现三次**，目前没有共享 schema 生成器，必须手动保持一致：
+`channels_config` 的部分默认值在代码库中重复出现，目前没有共享 schema 生成器，必须手动保持一致：
 
 | 位置 | 作用 |
 |------|------|
 | `config.json`（仓库根目录） | 运行时外部文件 + 编译时 `include_str!` 默认值 |
-| `src/domain.ts` 中的 `defaultExposedModelsByChannel`、`defaultFlowletTierByChannel`、`flowletPublicModels` | 前端启动时的兜底常量 |
+| `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL` | 前端创建默认开放模型时的兜底常量 |
 | `src-tauri/src/core/config.rs` 中的 `ChannelPreset::longcat()` / `ChannelPreset::deepseek()` | Rust 侧的工厂默认值 |
 
-新增或修改渠道时，务必同步更新这三处，否则可能出现「外部配置 → SQLite → 前端展示」链条不一致的问题。
+新增渠道或修改默认开放模型时，务必同步更新对应位置，否则可能出现「外部配置 → SQLite → 前端展示」链条不一致的问题。
 
 ---
 
@@ -45,7 +45,6 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 ```jsonc
 {
-  "ui": { "version": "next" },   // 前端版本
   "ua_rules": [ ... ],          // UA 客户端识别规则
   "log_capture": { ... },       // 请求日志捕获配置
   "bind": { ... },              // 代理监听地址
@@ -55,32 +54,10 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 | 字段 | 类型 | 必须 | 说明 |
 |------|------|------|------|
-| `ui` | `object` | 否 | 前端版本选择；缺失或非法时使用 `legacy` |
 | `ua_rules` | `UaClientRule[]` | 是 | 基于 User-Agent 子串的客户端身份识别规则 |
 | `log_capture` | `object` | 是 | 请求/响应日志的捕获与脱敏配置 |
 | `bind` | `object` | 是 | 本地代理监听的 host/port |
 | `channels_config` | `object` | 是 | 渠道模板、价格、默认开放模型、档位 |
-
-### 2.1 `ui` — 前端版本
-
-~~~jsonc
-"ui": {
-  "version": "next"
-}
-~~~
-
-| 字段 | 类型 | 必须 | 默认值 | 可选值 | 说明 |
-|------|------|------|--------|--------|------|
-| `version` | `string` | 否 | `next` | `legacy`、`next` | 应用启动时选择 Mantine 旧版或 Semi 新版前端；当前重构分支默认新版 |
-
-**行为**：
-
-- 前端 bootstrap 通过 Tauri command `read_config` 读取原始 JSON，并且只在应用启动时解析一次；
-- `legacy` 加载现有 Mantine 前端，`next` 加载 `src-new` 中的 Semi 前端；
-- 字段缺失、类型错误、值非法、JSON 解析失败或 command 调用失败时，安全回退到 `legacy`；
-- 修改后必须重启整个 Flowlet 应用，不支持运行时热切换；
-- Rust 不负责 UI 产品判断，也不为该字段维护独立运行时结构；Rust 只提供原始配置读取能力。
----
 
 ## 3. `ua_rules` — 客户端身份识别
 
@@ -325,7 +302,6 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 | 配置 | 修改后行为 |
 |------|-----------|
-| `ui.version` | **需重启应用**：仅在前端 bootstrap 时读取一次 |
 | `ua_rules` | **热更新**：下次请求立即生效 |
 | `log_capture` | **热更新**：下次请求立即生效 |
 | `bind` | **需重启代理**：监听地址在启动时绑定 |
@@ -333,14 +309,14 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 
 ### 前端读写
 
-前端通过 Tauri command 间接操作：
+Rust 暴露以下 Tauri command；当前正式前端没有通用配置编辑入口：
 
 - `read_config()` → 返回 `config.json` 原始字符串
 - `write_config(content)` → 写入完整 JSON 字符串
 
-**写入校验**：`write_config_raw` 仅校验顶层为 JSON 对象或数组，**不做字段级 schema 校验**。字段级语义校验由前端 `src/app/actions/configActions.ts` 中的 `validateConfigData` 负责（校验渠道/账号/路由/客户端的引用完整性、API Key 非空等），但该校验仅用于导入/导出配置包（`ConfigBundle`），不用于 `config.json` 的写入。
+**写入校验**：`write_config_raw` 仅校验顶层为 JSON 对象或数组，**不做字段级 schema 校验**。新增配置编辑入口时，前端必须自行完成字段级语义校验。
 
-> 前端不直接访问文件系统。启动 bootstrap 会通过 `read_config` 读取原始 JSON，仅解析 `ui.version`；渠道、账号和模型数据仍通过各自的 Tauri command（如 `list_channel_presets`）从 SQLite 获取。
+> 前端不直接访问文件系统；渠道、账号和模型数据通过各自的 Tauri command（如 `list_channel_presets`）从 SQLite 获取。
 
 ---
 
@@ -379,8 +355,5 @@ Rust 后端在启动时读取它，前端通过 Tauri command `read_config` / `w
 | 配置读写与热加载 | `src-tauri/src/core/proxy.rs`、`src-tauri/src/core/proxy_http.rs` |
 | 启动时加载与回退 | `src-tauri/src/lib.rs`（`build_app_state`、`load_channels_config_from`） |
 | 前端读写 command | `src-tauri/src/commands.rs`（`read_config`、`write_config`） |
-| 前端配置校验（导入/导出 ConfigBundle 用） | `src/app/actions/configActions.ts`（`validateConfigData`） |
 | 便携版打包 | `scripts/build-portable.mjs` |
-| 前端 UI 版本解析 | `src/bootstrap/uiVersion.ts` |
-| 前端类型定义 | `src/domain.ts`（`ChannelPreset`、`ProxyBindConfig`、`LogCaptureConfig`、`FlowletTier`） |
-| 前端启动兜底常量 | `src/domain.ts`（`defaultExposedModelsByChannel`、`defaultFlowletTierByChannel`、`flowletPublicModels`） |
+| 前端渠道类型与默认开放模型 | `src/domains/channel/types.ts` |

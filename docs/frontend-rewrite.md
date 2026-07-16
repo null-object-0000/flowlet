@@ -1,8 +1,7 @@
 # Flowlet 前端重构方案
 
-状态：核心配置链路已迁移，进入观测和设置阶段
-目标目录：src-new  
-旧前端目录：src
+状态：正式前端切换与目录清理已完成
+正式目录：src
 
 ## 1. 背景
 
@@ -15,7 +14,7 @@
 - domain.ts 同时包含领域类型、渠道默认值和产品常量；
 - 页面和 feature 之间缺少稳定的依赖方向。
 
-本次重构采用 clean-room frontend。旧前端保持可运行，新前端重新建立边界，不在旧 hooks、actions 和组件上继续演化。
+本次重构采用 clean-room frontend，并已完成正式切换。当前 `src` 不依赖旧 hooks、actions、Mantine 组件或 legacy fallback。
 
 ## 2. 目标
 
@@ -24,14 +23,12 @@
 - 按领域查询和精准失效，移除全局 refreshAll 模式；
 - loading、error、empty、ready 成为明确的页面状态；
 - 代理生命周期保持独立，不与账号和模型配置状态混合；
-- 新旧前端在重构期间可以分别启动和构建；
-- 新前端完整验收前保留 legacy 回退入口，验收并获批准后再清理旧版。
+- 正式前端使用单一启动和构建入口；
 - 保持旧版已经确认的信息架构、页面布局、模块划分和桌面窗口交互；Semi Design 只用于重建实现与调整视觉细节，不用于擅自重做产品结构。
 
 ## 3. 当前非目标
 
-- 新版未完成验收前不删除 legacy、Mantine 或双版本 bootstrap；
-- 不提供运行时无重启切换新旧 UI 的能力；
+- 不重新引入 legacy、Mantine 或双版本 bootstrap；
 - 没有明确需求前不引入 Redux、Zustand 或其他全局状态库；
 - 不因视觉重构擅自改变已经确认的信息架构、功能边界和左侧菜单枚举；
 - 不把普通页面重新设计成复杂路由控制台、统计大屏或通用企业网关；
@@ -39,7 +36,7 @@
 
 ## 4. 目录和依赖方向
 
-    src-new/
+    src/
       app/            应用入口、Provider、Router、Shell
       platform/       Tauri 等运行平台适配
       domains/        领域类型、query、mutation、selector
@@ -60,8 +57,7 @@
 - domains 不依赖页面和 UI 框架；
 - features 不依赖 pages；
 - shared 不导入具体业务领域；
-- src-new 不导入旧版 pages、features、app hooks 或 Mantine 组件；
-- 旧前端只作为行为和验收参考，不作为新架构的基础层。
+- `src` 不导入 Mantine 组件或已经删除的旧前端实现；
 - 左侧主导航保持「概览、模型服务、请求日志、用量成本、高级设置」；渠道账号等领域能力继续作为对应页面模块和业务入口，不因技术分层直接升级为主导航。
 - Tauri 窗口继续使用无系统边框模式，新壳必须提供可拖动区域以及最小化、最大化、关闭按钮组，并保持关闭窗口时隐藏到托盘的既有行为。
 
@@ -71,25 +67,25 @@
 
 目录约定：
 
-    src-new/styles/
+    src/styles/
       reset.css                 浏览器默认样式重置
       tokens.css                Flowlet Design Tokens 和全局主题变量
 
-    src-new/app/shell/
+    src/app/shell/
       AppShell.tsx
       AppShell.module.css
 
-    src-new/pages/overview/
+    src/pages/overview/
       OverviewPage.tsx
       OverviewPage.module.css
 
-    src-new/features/account-editor/
+    src/features/account-editor/
       AccountEditor.tsx
       AccountEditor.module.css
 
 强制约束：
 
-- `src-new/styles` 只允许 reset、tokens 和少量真正跨应用的全局规则，不得放页面或 feature 样式；
+- `src/styles` 只允许 reset、tokens 和少量真正跨应用的全局规则，不得放页面或 feature 样式；
 - 页面、feature 和共享组件的样式必须使用同目录 CSS Module；
 - 一个 CSS Module 只能服务一个组件或职责紧密的组件组；
 - 优先使用 Semi 组件 props 和 Design Token，再增加自定义 CSS；
@@ -154,26 +150,23 @@ React 19 使用 @douyinfe/semi-ui-19，不使用普通 @douyinfe/semi-ui。
 
 当前 AppShell 是新版桌面产品壳，负责主导航、内容布局、无边框窗口拖动区和窗口控制按钮。全局视觉语言由 Flowlet Design Tokens 统一，页面只保留必要的布局差异。
 
-## 9. 新旧入口
+## 9. 正式入口
 
-产品级入口由 config.json 的 ui.version 选择，当前重构分支默认使用 `next`：
+产品级入口无条件运行 `src` 中的 Semi 前端：
 
-- legacy：运行现有 Mantine 前端；
-- next：运行 src-new 中的 Semi 前端；
-- 字段缺失、非法或读取失败时回退 legacy；
-- 只在 bootstrap 时读取，修改后需要重启整个应用。
-
-npm run dev:new 和 npm run build:new 的 next mode 只是在非 Tauri 浏览器环境无法调用 read_config 时提供 next 回退值，用于开发和构建验证。生产默认回退值始终是 legacy。一个生产包同时包含两套前端，运行时只加载配置选中的入口。
+- `config.json` 已移除 `ui.version`；
+- 不提供 Mantine fallback；
+- `npm run dev` 和 `npm run build` 是唯一开发、构建入口。
 
 ## 10. 实施阶段
 
 ### 阶段 A：架构基座（已完成）
 
-- config.json 驱动的新旧启动入口；
+- 单一正式启动入口；
 - Semi、Query、Router；
 - 新 App Providers、Router、Shell；
 - platform/tauri 边界；
-- typecheck、旧版构建、新版构建和 HMR。
+- typecheck、正式构建和 HMR。
 
 ### 阶段 B：第一个业务闭环（已完成）
 
@@ -196,23 +189,21 @@ npm run dev:new 和 npm run build:new 的 next mode 只是在非 Tauri 浏览器
 3. 客户端访问配置；
 4. Agent 接入。
 
-### 阶段 D：观测和设置（进行中）
+### 阶段 D：观测和设置（已完成）
 
 按顺序迁移：
 
 1. 请求日志和详情；
 2. 用量；
 3. 应用设置；
-4. 高级路由能力。
+4. 高级路由能力不进入普通用户信息架构，底层协议和路由字段继续保留。
 
-### 阶段 E：切换和清理
+### 阶段 E：切换和清理（已完成）
 
-- 建立新旧行为验收矩阵；
-- config.json 支持 legacy 与 next；
-- 保持 next 为默认版本并完成新旧行为验收；
-- 保留 legacy 至少一个发布周期；
-- 删除旧前端、Mantine 和临时构建模式；
-- 将 src-new 调整为最终正式目录。
+- 正式入口只加载 Semi 前端；
+- 删除 `ui.version`、legacy fallback 和临时构建模式；
+- 删除旧前端与 Mantine；
+- 将重构前端调整为正式 `src` 目录。
 
 ## 11. 每个业务切片的完成标准
 
@@ -223,7 +214,7 @@ npm run dev:new 和 npm run build:new 的 next mode 只是在非 Tauri 浏览器
 - 不吞掉 Promise rejection；
 - StrictMode 下无重复副作用；
 - API Key 和请求敏感数据不泄露；
-- typecheck 和两个前端构建通过；
+- typecheck 和正式前端构建通过；
 - 相关单元测试或契约测试完成；
 - 新旧行为差异有明确记录。
 
@@ -231,18 +222,17 @@ npm run dev:new 和 npm run build:new 的 next mode 只是在非 Tauri 浏览器
 
 当前迁移状态：
 
-- `config.json` 的 `ui.version` 当前默认 `next`；
-- 新旧前端共享同一组 Tauri command、SQLite 和代理核心；
-- 新版已经迁移概览、渠道账号、开放模型、客户端访问、Agent 接入和请求日志等核心切片；
+- `config.json` 已移除 `ui.version`；
+- 正式前端通过同一组 Tauri command 使用 SQLite 和代理核心；
+- 正式前端已经覆盖概览、渠道账号、开放模型、客户端访问、Agent 接入、请求日志、用量和设置等核心切片；
 - 业务迁移可以扩展领域 command 和返回 DTO，但不得复制后端能力或破坏代理生命周期；
-- 当前重构分支默认加载新版；字段缺失、非法或读取失败时仍安全回退 legacy；
+- 当前应用无条件加载 `src`，不提供 legacy fallback；
 - 不改变便携模式的配置加载优先级和托盘退出语义。
 
 热更新范围：
 
-- dev 和 dev:new 中的 React、CSS 修改支持 Vite HMR；
-- 非 Tauri 浏览器开发中切换 Vite mode 需要重启开发服务器；
-- config.json 的 UI 版本切换要求重启应用。
+- `npm run dev` 中的 React、CSS 修改支持 Vite HMR；
+- 代理配置的热更新与重启规则不受前端目录切换影响。
 
 ## 13. 请求日志切片
 

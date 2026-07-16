@@ -31,7 +31,7 @@ export type AgentSessionsPage = {
 
 export const DEFAULT_AGENT_SESSION_FILTER: AgentSessionFilter = {
   page: 1,
-  pageSize: 10,
+  pageSize: 8,
   search: "",
   clientId: "",
 };

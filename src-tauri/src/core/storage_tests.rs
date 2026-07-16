@@ -129,6 +129,7 @@ fn groups_opencode_request_logs_into_sessions() {
         })
         .unwrap();
     assert_eq!(page.total, 1);
+    assert_eq!(page.page_size, 8);
     assert_eq!(page.rows[0].request_count, 2);
     assert_eq!(page.rows[0].success_count, 1);
     assert_eq!(page.rows[0].error_count, 1);

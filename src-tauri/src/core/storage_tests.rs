@@ -123,6 +123,7 @@ fn groups_opencode_request_logs_into_sessions() {
             page: 1,
             page_size: 10,
             search: "ses_test".to_string(),
+            client_id: "opencode".to_string(),
         })
         .unwrap();
     assert_eq!(page.total, 1);
@@ -130,6 +131,20 @@ fn groups_opencode_request_logs_into_sessions() {
     assert_eq!(page.rows[0].success_count, 1);
     assert_eq!(page.rows[0].error_count, 1);
     assert_eq!(page.rows[0].parent_session_id.as_deref(), Some("ses_parent"));
+    assert_eq!(page.rows[0].client_id.as_deref(), Some("opencode"));
+    assert_eq!(page.rows[0].client_name.as_deref(), Some("OpenCode"));
+    let clients = storage.list_agent_session_clients().unwrap();
+    assert_eq!(clients.len(), 1);
+    assert_eq!(clients[0].id, "opencode");
+    let filtered_out = storage
+        .list_agent_sessions(crate::core::config::AgentSessionsFilter {
+            page: 1,
+            page_size: 10,
+            search: String::new(),
+            client_id: "other-client".to_string(),
+        })
+        .unwrap();
+    assert_eq!(filtered_out.total, 0);
 }
 
 #[test]
@@ -143,7 +158,13 @@ fn repairs_historical_opencode_sessions_for_all_attempts() {
     storage.insert_request_log(&request_log_for_repair("req-history", 0, false)).unwrap();
     storage.insert_request_log(&request_log_for_repair("req-history", 1, true)).unwrap();
 
-    let result = storage.repair_opencode_sessions().unwrap();
+    storage.connection.lock().unwrap()
+        .execute("UPDATE request_logs SET created_at = datetime('now', '-10 days') WHERE request_id = 'req-history'", [])
+        .unwrap();
+    let recent_result = storage.repair_opencode_sessions("7d").unwrap();
+    assert_eq!(recent_result.scanned_requests, 0);
+
+    let result = storage.repair_opencode_sessions("all").unwrap();
     assert_eq!(result.scanned_requests, 1);
     assert_eq!(result.repaired_requests, 1);
     assert_eq!(result.repaired_logs, 2);
@@ -171,8 +192,8 @@ fn fills_unknown_usage_once_for_the_final_attempt() {
     storage.insert_request_log(&request_log_for_repair("req-unknown", 0, false)).unwrap();
     storage.insert_request_log(&request_log_for_repair("req-unknown", 1, true)).unwrap();
 
-    assert_eq!(storage.analyze_unknown_usage().unwrap(), 1);
-    assert_eq!(storage.analyze_unknown_usage().unwrap(), 0);
+    assert_eq!(storage.analyze_unknown_usage("all").unwrap(), 1);
+    assert_eq!(storage.analyze_unknown_usage("all").unwrap(), 0);
     let connection = storage.connection.lock().unwrap();
     let usage_rows: i64 = connection
         .query_row("SELECT COUNT(*) FROM usage_records WHERE request_id = 'req-unknown'", [], |row| row.get(0))
@@ -242,7 +263,7 @@ data: [DONE]
         )
         .expect("record stream timing");
 
-    assert_eq!(storage.reanalyze_captured_usage().unwrap(), 1);
+    assert_eq!(storage.reanalyze_captured_usage("all").unwrap(), 1);
     let page = storage
         .list_request_logs_page(LogsFilter {
             page: 1,
@@ -262,6 +283,47 @@ data: [DONE]
     assert_eq!(page.rows[0].total_tokens, Some(120));
     assert_eq!(page.rows[0].ttft_ms, Some(20));
     assert_eq!(page.summary.cache_hit_rate, Some(0.9));
+    storage.connection.lock().unwrap()
+        .execute(
+            "UPDATE usage_records SET input_tokens = 1, total_tokens = 1 WHERE request_id = 'longcat-stream-usage'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(storage.reanalyze_captured_usage("all").unwrap(), 1);
+    let reparsed_page = storage
+        .list_request_logs_page(LogsFilter {
+            page: 1,
+            page_size: 8,
+            status: "all".to_string(),
+            client_id: String::new(),
+            channel_id: String::new(),
+            search: String::new(),
+            time_range: "1h".to_string(),
+            model: String::new(),
+        })
+        .unwrap();
+    assert_eq!(reparsed_page.rows[0].input_tokens, Some(100));
+    assert_eq!(reparsed_page.rows[0].total_tokens, Some(120));
+    {
+        let connection = storage.connection.lock().unwrap();
+        connection.execute(
+            "UPDATE request_logs SET created_at = datetime('now', '-10 days') WHERE request_id = 'longcat-stream-usage'",
+            [],
+        ).unwrap();
+        connection.execute(
+            "UPDATE usage_records SET input_tokens = 2, total_tokens = 2 WHERE request_id = 'longcat-stream-usage'",
+            [],
+        ).unwrap();
+    }
+    assert_eq!(storage.reanalyze_captured_usage("7d").unwrap(), 0);
+    let filtered_tokens: i64 = storage.connection.lock().unwrap()
+        .query_row(
+            "SELECT total_tokens FROM usage_records WHERE request_id = 'longcat-stream-usage'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(filtered_tokens, 2);
     let output_rate = page.summary.average_output_tokens_per_second.unwrap();
     assert!((output_rate - 20000.0 / 30.0).abs() < 0.001);
 }

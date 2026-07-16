@@ -909,6 +909,8 @@ pub struct AgentSessionsFilter {
     pub page_size: u32,
     #[serde(default)]
     pub search: String,
+    #[serde(default)]
+    pub client_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -917,6 +919,8 @@ pub struct AgentSessionRow {
     pub agent_type: String,
     pub session_id: String,
     pub parent_session_id: Option<String>,
+    pub client_id: Option<String>,
+    pub client_name: Option<String>,
     pub started_at: String,
     pub updated_at: String,
     pub request_count: i64,
@@ -924,7 +928,6 @@ pub struct AgentSessionRow {
     pub error_count: i64,
     pub known_tokens: i64,
     pub estimated_cost: f64,
-    pub latest_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

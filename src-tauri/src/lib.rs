@@ -533,6 +533,7 @@ pub fn run() {
             commands::usage_summary,
             commands::list_request_logs,
             commands::list_agent_sessions,
+            commands::list_agent_session_clients,
             commands::list_request_log_clients,
             commands::list_request_log_models,
             commands::get_request_log_detail,

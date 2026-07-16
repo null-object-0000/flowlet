@@ -276,15 +276,15 @@ pub(super) fn save_virtual_models(
 pub(super) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
     let parsed = state
         .storage
-        .reanalyze_captured_usage()
+        .reanalyze_captured_usage("all")
         .map_err(|err| err.to_string())?;
     let inserted = state
         .storage
-        .analyze_unknown_usage()
+        .analyze_unknown_usage("all")
         .map_err(|err| err.to_string())?;
     state
         .storage
-        .recalculate_usage_costs()
+        .recalculate_usage_costs("all")
         .map_err(|err| err.to_string())?;
     Ok(parsed + inserted)
 }
@@ -292,34 +292,44 @@ pub(super) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, 
 #[tauri::command]
 pub(super) fn repair_opencode_sessions(
     state: tauri::State<'_, AppState>,
+    time_range: String,
 ) -> Result<crate::core::config::AgentSessionRepairResult, String> {
     state
         .storage
-        .repair_opencode_sessions()
+        .repair_opencode_sessions(&time_range)
         .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-pub(super) fn repair_captured_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+pub(super) fn repair_captured_usage(
+    state: tauri::State<'_, AppState>,
+    time_range: String,
+) -> Result<usize, String> {
     state
         .storage
-        .reanalyze_captured_usage()
+        .reanalyze_captured_usage(&time_range)
         .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-pub(super) fn repair_unknown_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+pub(super) fn repair_unknown_usage(
+    state: tauri::State<'_, AppState>,
+    time_range: String,
+) -> Result<usize, String> {
     state
         .storage
-        .analyze_unknown_usage()
+        .analyze_unknown_usage(&time_range)
         .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-pub(super) fn repair_usage_costs(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+pub(super) fn repair_usage_costs(
+    state: tauri::State<'_, AppState>,
+    time_range: String,
+) -> Result<usize, String> {
     state
         .storage
-        .recalculate_usage_costs()
+        .recalculate_usage_costs(&time_range)
         .map_err(|err| err.to_string())
 }
 
@@ -347,6 +357,13 @@ pub(super) fn list_agent_sessions(
     filter: crate::core::config::AgentSessionsFilter,
 ) -> Result<crate::core::config::AgentSessionsPageResult, String> {
     state.storage.list_agent_sessions(filter).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn list_agent_session_clients(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<LogFilterClient>, String> {
+    state.storage.list_agent_session_clients().map_err(|err| err.to_string())
 }
 
 /// 返回请求日志中实际出现的客户端身份列表，供前端"客户端"筛选项使用。

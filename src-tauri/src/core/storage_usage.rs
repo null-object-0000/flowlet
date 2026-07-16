@@ -10,6 +10,17 @@ use rusqlite::params;
 
 const MAX_AGENT_SESSION_ID_BYTES: usize = 512;
 
+fn repair_time_clause(column: &str, time_range: &str) -> String {
+    let condition = match time_range {
+        "1h" => "datetime({column}) >= datetime('now', '-1 hour')",
+        "6h" => "datetime({column}) >= datetime('now', '-6 hours')",
+        "today" => "datetime({column}, 'localtime') >= datetime('now', 'localtime', 'start of day')",
+        "7d" => "datetime({column}) >= datetime('now', '-7 days')",
+        _ => "1 = 1",
+    };
+    condition.replace("{column}", column)
+}
+
 fn opencode_session_from_json(headers_json: &str) -> Option<(String, Option<String>)> {
     let parsed = serde_json::from_str::<serde_json::Value>(headers_json).ok()?;
     let headers = parsed
@@ -282,6 +293,7 @@ impl Storage {    pub fn save_balance_snapshot(
         let page_size = filter.page_size.clamp(1, 100);
         let offset = i64::from((page - 1) * page_size);
         let pattern = format!("%{}%", filter.search.trim());
+        let client_id = filter.client_id.trim();
 
         let total = connection.query_row(
             r#"
@@ -292,12 +304,14 @@ impl Storage {    pub fn save_balance_snapshot(
                   AND agent_type = 'opencode'
                   AND agent_session_id IS NOT NULL
                   AND (?1 = '%%' OR agent_session_id LIKE ?1
-                       OR COALESCE(parent_agent_session_id, '') LIKE ?1
-                       OR COALESCE(public_model, virtual_model, '') LIKE ?1)
+                       OR COALESCE(parent_agent_session_id, '') LIKE ?1)
                 GROUP BY agent_type, agent_session_id
+                HAVING ?2 = '' OR SUM(CASE
+                    WHEN (?2 = '__unknown__' AND client_id IS NULL) OR client_id = ?2 THEN 1 ELSE 0
+                END) > 0
             )
             "#,
-            [&pattern],
+            params![pattern, client_id],
             |row| row.get(0),
         )?;
 
@@ -307,52 +321,65 @@ impl Storage {    pub fn save_balance_snapshot(
                 rl.agent_type,
                 rl.agent_session_id,
                 MAX(rl.parent_agent_session_id),
+                MAX(rl.client_id),
+                MAX(rl.client_name),
                 MIN(rl.created_at),
                 MAX(rl.created_at),
                 COUNT(DISTINCT rl.request_id),
                 SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 1 ELSE 0 END),
                 SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 0 ELSE 1 END),
                 COALESCE(SUM(ur.total_tokens), 0),
-                COALESCE(SUM(ur.estimated_cost), 0),
-                (
-                    SELECT COALESCE(latest.public_model, latest.virtual_model)
-                    FROM request_logs latest
-                    WHERE latest.agent_type = rl.agent_type
-                      AND latest.agent_session_id = rl.agent_session_id
-                      AND latest.is_last_attempt = 1
-                    ORDER BY latest.created_at DESC
-                    LIMIT 1
-                )
+                COALESCE(SUM(ur.estimated_cost), 0)
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             WHERE rl.is_last_attempt = 1
               AND rl.agent_type = 'opencode'
               AND rl.agent_session_id IS NOT NULL
               AND (?1 = '%%' OR rl.agent_session_id LIKE ?1
-                   OR COALESCE(rl.parent_agent_session_id, '') LIKE ?1
-                   OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ?1)
+                   OR COALESCE(rl.parent_agent_session_id, '') LIKE ?1)
             GROUP BY rl.agent_type, rl.agent_session_id
+            HAVING ?2 = '' OR SUM(CASE
+                WHEN (?2 = '__unknown__' AND rl.client_id IS NULL) OR rl.client_id = ?2 THEN 1 ELSE 0
+            END) > 0
             ORDER BY MAX(rl.created_at) DESC
-            LIMIT ?2 OFFSET ?3
+            LIMIT ?3 OFFSET ?4
             "#,
         )?;
-        let mapped = stmt.query_map(params![pattern, i64::from(page_size), offset], |row| {
+        let mapped = stmt.query_map(params![pattern, client_id, i64::from(page_size), offset], |row| {
             Ok(AgentSessionRow {
                 agent_type: row.get(0)?,
                 session_id: row.get(1)?,
                 parent_session_id: row.get(2)?,
-                started_at: row.get(3)?,
-                updated_at: row.get(4)?,
-                request_count: row.get(5)?,
-                success_count: row.get(6)?,
-                error_count: row.get(7)?,
-                known_tokens: row.get(8)?,
-                estimated_cost: row.get(9)?,
-                latest_model: row.get(10)?,
+                client_id: row.get(3)?,
+                client_name: row.get(4)?,
+                started_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                request_count: row.get(7)?,
+                success_count: row.get(8)?,
+                error_count: row.get(9)?,
+                known_tokens: row.get(10)?,
+                estimated_cost: row.get(11)?,
             })
         })?;
         let rows = mapped.collect::<Result<Vec<_>, _>>()?;
         Ok(AgentSessionsPageResult { rows, total, page, page_size })
+    }
+
+    pub fn list_agent_session_clients(&self) -> Result<Vec<LogFilterClient>, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let mut stmt = connection.prepare(
+            r#"
+            SELECT COALESCE(client_id, ''), COALESCE(MAX(client_name), '未知') AS display_name
+            FROM request_logs
+            WHERE is_last_attempt = 1
+              AND agent_type = 'opencode'
+              AND agent_session_id IS NOT NULL
+            GROUP BY COALESCE(client_id, '')
+            ORDER BY display_name = '未知', display_name, client_id
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| Ok(LogFilterClient { id: row.get(0)?, name: row.get(1)? }))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     pub fn list_request_logs(&self) -> Result<Vec<RequestLogRow>, StorageError> {
@@ -624,21 +651,22 @@ impl Storage {    pub fn save_balance_snapshot(
 
     /// Repair historical OpenCode session attribution from captured request
     /// headers. Requests without captured headers cannot be recovered.
-    pub fn repair_opencode_sessions(&self) -> Result<AgentSessionRepairResult, StorageError> {
+    pub fn repair_opencode_sessions(&self, time_range: &str) -> Result<AgentSessionRepairResult, StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let rows: Vec<(String, String)> = {
-            let mut stmt = connection.prepare(
+            let mut stmt = connection.prepare(&format!(
                 r#"
                 SELECT request_id, MAX(req_headers_json)
                 FROM request_logs
-                WHERE agent_session_id IS NULL
-                  AND req_headers_json IS NOT NULL
+                WHERE req_headers_json IS NOT NULL
+                  AND {}
                 GROUP BY request_id
                 "#,
-            )?;
+                repair_time_clause("created_at", time_range)
+            ))?;
             let rows = stmt
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -659,7 +687,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 SET agent_type = 'opencode',
                     agent_session_id = ?2,
                     parent_agent_session_id = ?3
-                WHERE request_id = ?1 AND agent_session_id IS NULL
+                WHERE request_id = ?1
                 "#,
                 params![request_id, session_id, parent_session_id],
             )?;
@@ -674,9 +702,10 @@ impl Storage {    pub fn save_balance_snapshot(
         })
     }
 
-    /// Reparse captured response bodies for requests whose usage is missing or
-    /// still unknown. Stream responses require a complete SSE `[DONE]` marker.
-    pub fn reanalyze_captured_usage(&self) -> Result<usize, StorageError> {
+    /// Reparse captured response bodies in the selected period, including
+    /// requests that already have known usage. Stream responses require a
+    /// complete SSE `[DONE]` marker.
+    pub fn reanalyze_captured_usage(&self, time_range: &str) -> Result<usize, StorageError> {
         struct CapturedUsageRow {
             request_id: String,
             client_id: Option<String>,
@@ -698,7 +727,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 .connection
                 .lock()
                 .map_err(|_| StorageError::LockFailed)?;
-            let mut stmt = connection.prepare(
+            let mut stmt = connection.prepare(&format!(
                 r#"
                 SELECT
                     rl.request_id, rl.client_id, rl.client_name,
@@ -706,12 +735,12 @@ impl Storage {    pub fn save_balance_snapshot(
                     rl.client_protocol, rl.upstream_protocol,
                     rl.virtual_model, rl.upstream_model, rl.is_stream, rl.res_body_b64
                 FROM request_logs rl
-                LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
                 WHERE rl.is_last_attempt = 1
                   AND rl.res_body_b64 IS NOT NULL
-                  AND (ur.id IS NULL OR ur.total_tokens IS NULL)
+                  AND {}
                 "#,
-            )?;
+                repair_time_clause("rl.created_at", time_range)
+            ))?;
             let rows = stmt.query_map([], |row| {
                 Ok(CapturedUsageRow {
                     request_id: row.get(0)?,
@@ -772,13 +801,13 @@ impl Storage {    pub fn save_balance_snapshot(
         Ok(parsed)
     }
 
-    pub fn analyze_unknown_usage(&self) -> Result<usize, StorageError> {
+    pub fn analyze_unknown_usage(&self, time_range: &str) -> Result<usize, StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let inserted = connection.execute(
-            r#"
+            &format!(r#"
             INSERT INTO usage_records (
                 id, request_id, client_id, client_name, channel_id, channel_name,
                 account_id, account_name, client_protocol, upstream_protocol,
@@ -803,11 +832,12 @@ impl Storage {    pub fn save_balance_snapshot(
                 datetime('now')
             FROM request_logs
             WHERE request_logs.is_last_attempt = 1
+              AND {}
               AND NOT EXISTS (
                   SELECT 1 FROM usage_records
                   WHERE usage_records.request_id = request_logs.request_id
               )
-            "#,
+            "#, repair_time_clause("request_logs.created_at", time_range)),
             [],
         )?;
         Ok(inserted)
@@ -922,7 +952,7 @@ impl Storage {    pub fn save_balance_snapshot(
         Ok(())
     }
 
-    pub fn recalculate_usage_costs(&self) -> Result<usize, StorageError> {
+    pub fn recalculate_usage_costs(&self, time_range: &str) -> Result<usize, StorageError> {
         // 先于连接锁之外读取价格快照，避免死锁（连接锁与价格锁是两把不同的锁）。
         let prices = self.prices();
 
@@ -942,12 +972,14 @@ impl Storage {    pub fn save_balance_snapshot(
             output_tokens: Option<i64>,
         }
         let rows: Vec<RecalcRow> = {
-            let mut stmt = connection.prepare(
-                "SELECT request_id, channel_id, upstream_model, input_tokens,
-                        input_cached_tokens, input_uncached_tokens, output_tokens
-                 FROM usage_records
-                 WHERE total_tokens IS NOT NULL",
-            )?;
+            let mut stmt = connection.prepare(&format!(
+                "SELECT ur.request_id, ur.channel_id, ur.upstream_model, ur.input_tokens,
+                        ur.input_cached_tokens, ur.input_uncached_tokens, ur.output_tokens
+                 FROM usage_records ur
+                 INNER JOIN request_logs rl ON rl.request_id = ur.request_id AND rl.is_last_attempt = 1
+                 WHERE ur.total_tokens IS NOT NULL AND {}",
+                repair_time_clause("rl.created_at", time_range)
+            ))?;
             let rows = stmt
                 .query_map([], |row| {
                     Ok(RecalcRow {

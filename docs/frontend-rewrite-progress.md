@@ -259,7 +259,7 @@ client.ts 110、ErrorBoundary 40、domain/proxy/commands 75、ProxyStatusCard 14
 - 概览页接入真实账号、路由和代理绑定查询，恢复账号、开放模型、客户端访问、Agent 接入四个模块。
 
 本轮变更：
-- 主导航恢复为「概览、模型服务、请求日志、用量成本、高级设置」；渠道账号管理保留为概览内抽屉，不占用主导航或独立路由。
+- 主导航为「概览、模型服务、请求日志、会话管理、用量成本、高级设置」；会话管理首期支持 OpenCode 请求会话观测，渠道账号管理保留为概览内抽屉，不占用主导航或独立路由。
 - 删除无业务意义的「Flowlet 前端重构」顶栏，壳层恢复为旧版 168px 侧栏和桌面布局。
 - 新增 typed window adapter 和 `WindowControls`，恢复拖动、最小化、禁用态最大化、关闭交互。
 - 概览使用真实 accounts/routes/bind config query；无账号继续展示接入引导，有账号展示旧版四模块布局，API Key 不进入概览。

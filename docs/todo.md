@@ -46,6 +46,8 @@
 - [x] LongCat 资源包使用规则· 优先消耗最快过期的Token额度· 未在有效期内使用的额度自动清零· 资源包默认于到期时间当天 23:59:59 清零
 - [x] LongCat 资源包现在只支持导入多个资源包，不支持查看和手动维护多个资源包，这个要看怎么处理下
 - [ ] config.json 中 ua_rules 升级为客户端配置，每个客户端包含 UA 识别（若有的话，也有可能某个客户端没有特殊的 UA 识别）然后也需要包含如何确认是否在本地安装，安装的版本是多少（优先都是用 bash 命令来确认，例如 PS C:\Users\nicha> hermes --version ===> \n Hermes Agent v0.18.2 (2026.7.7.2) · upstream aaf56912 \n Install directory: C:\Users\nicha\AppData\Local\hermes\hermes-agent \n Install method: git \n Python: 3.11.14 \n OpenAI SDK: 2.24.0 PS C:\Users\nicha> opencode -v ===> 1.17.18 PS C:\Users\nicha> claude -v ===> 2.1.207 (Claude Code)）
+  - [x] Claude Code：完成 PATH、官方常见位置、版本、安装方式及多安装候选探测
+  - [ ] OpenCode / Hermes / 其他 Agent：沿用通用探测结果结构逐个实现
 
 ## 未来规划
 

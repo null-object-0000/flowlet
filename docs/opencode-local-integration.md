@@ -2,6 +2,10 @@
 
 > 本文档针对 **OpenCode Desktop**（Electron 桌面版），非 CLI 版本。
 
+> 当前已先落地代理侧会话观测：从 OpenCode 请求 Header 提取稳定会话 ID，并基于
+> `request_logs` 聚合请求、Token、费用和失败情况，不建立独立会话表。本文件其余内容描述
+> 后续本地数据库直读阶段，用于补充标题、项目、消息和未经过 Flowlet 的历史会话。
+
 ## 核心原则
 
 **Flowlet 自动直读，用户零配置。**

@@ -1,4 +1,11 @@
-import { resolveUiVersion } from "./bootstrap/uiVersion";
+import "@douyinfe/semi-ui-19/react19-adapter";
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./app/App";
+import { applyInitialPreferences } from "./app/preferences/AppPreferences";
+import { configureAppOverlayLayers } from "./shared/ui/overlayLayers";
+import "./styles/reset.css";
+import "./styles/tokens.css";
 
 const root = document.getElementById("root");
 
@@ -6,25 +13,10 @@ if (!root) {
   throw new Error("Flowlet root element was not found");
 }
 
-async function renderLegacyApp() {
-  const { renderApp } = await import("./legacy-main");
-  renderApp(root as HTMLElement);
-}
-
-async function bootstrap() {
-  const uiVersion = await resolveUiVersion(__FLOWLET_UI_FALLBACK__);
-
-  if (uiVersion === "next") {
-    try {
-      const { renderApp } = await import("../src-new/main");
-      renderApp(root as HTMLElement);
-      return;
-    } catch (error) {
-      console.error("Failed to load the next UI; falling back to legacy.", error);
-    }
-  }
-
-  await renderLegacyApp();
-}
-
-void bootstrap();
+applyInitialPreferences();
+configureAppOverlayLayers();
+ReactDOM.createRoot(root).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);

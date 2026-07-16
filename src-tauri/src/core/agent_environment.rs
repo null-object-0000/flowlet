@@ -53,10 +53,128 @@ pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironment
     match agent_id {
         "claude-code" => Ok(detect_claude_code().await),
         "opencode" => Ok(detect_opencode().await),
+        "chatgpt-desktop" => Ok(detect_chatgpt_desktop().await),
         _ => Err(format!("暂不支持检测 Agent：{agent_id}")),
     }
 }
 
+async fn detect_chatgpt_desktop() -> AgentEnvironmentReport {
+    let installations = chatgpt_desktop_installations().await;
+    AgentEnvironmentReport {
+        agent_id: "chatgpt-desktop".to_string(),
+        agent_name: "ChatGPT (Codex)".to_string(),
+        installed: !installations.is_empty(),
+        primary: installations.first().cloned(),
+        installations,
+    }
+}
+
+#[cfg(windows)]
+async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
+    // The unified ChatGPT app currently retains the OpenAI.Codex Store package identity.
+    // Requiring ChatGPT.exe as the application entry keeps legacy Codex packages excluded.
+    const QUERY: &str = r#"$found = $false; $packages = @(); $packages += @(Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue); $packages += @(Get-AppxPackage -Name 'OpenAI.ChatGPT-Desktop' -ErrorAction SilentlyContinue); foreach ($p in @($packages | Sort-Object Version -Descending)) { $relative = ''; try { [xml]$manifest = Get-Content -LiteralPath (Join-Path $p.InstallLocation 'AppxManifest.xml'); $app = @($manifest.Package.Applications.Application) | Where-Object { [IO.Path]::GetFileName([string]$_.Executable) -ieq 'ChatGPT.exe' } | Select-Object -First 1; if ($null -ne $app) { $relative = [string]$app.Executable } } catch {}; if ([string]::IsNullOrWhiteSpace($relative)) { $fallback = Join-Path $p.InstallLocation 'app\ChatGPT.exe'; if (Test-Path -LiteralPath $fallback) { $relative = 'app\ChatGPT.exe' } }; if (-not [string]::IsNullOrWhiteSpace($relative)) { [Console]::Out.Write($p.Version.ToString() + [char]9 + $p.InstallLocation + [char]9 + $relative); $found = $true; break } }; if (-not $found) { $process = Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object { $_.Path -match '\\WindowsApps\\OpenAI\.(Codex|ChatGPT-Desktop)_[^\\]+\\app\\ChatGPT\.exe$' } | Select-Object -First 1; if ($null -ne $process -and $process.Path -match '^(?<install>.*\\OpenAI\.(Codex|ChatGPT-Desktop)_(?<version>[^_]+)_[^\\]+)\\app\\ChatGPT\.exe$') { [Console]::Out.Write($Matches.version + [char]9 + $Matches.install + [char]9 + 'app\ChatGPT.exe') } }"#;
+    let output = tokio::time::timeout(
+        VERSION_TIMEOUT,
+        Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                QUERY,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output(),
+    )
+    .await;
+    let Ok(Ok(output)) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_chatgpt_windows_package_output(&String::from_utf8_lossy(&output.stdout))
+        .into_iter()
+        .collect()
+}
+
+#[cfg(windows)]
+fn parse_chatgpt_windows_package_output(output: &str) -> Option<AgentInstallation> {
+    let mut fields = output.trim().splitn(3, '\t');
+    let version = fields.next()?.trim();
+    let install_dir = PathBuf::from(fields.next()?.trim());
+    if version.is_empty() || install_dir.as_os_str().is_empty() {
+        return None;
+    }
+    let relative = fields.next().unwrap_or_default().trim();
+    let executable = if relative.is_empty() {
+        install_dir.join("ChatGPT.exe")
+    } else {
+        install_dir.join(relative)
+    };
+    Some(AgentInstallation {
+        surface: AgentSurface::Desktop,
+        executable_path: display_path(&executable),
+        install_dir: display_path(&install_dir),
+        install_method: AgentInstallMethod::Desktop,
+        version: Some(version.to_string()),
+        version_output: None,
+        available_on_path: false,
+        error: None,
+    })
+}
+
+#[cfg(target_os = "macos")]
+async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
+    let mut paths = vec![PathBuf::from("/Applications/ChatGPT.app")];
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join("Applications/ChatGPT.app"));
+    }
+    paths
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .map(|app_path| {
+            let plist = std::fs::read_to_string(app_path.join("Contents/Info.plist")).ok();
+            let version = plist
+                .as_deref()
+                .and_then(|value| parse_plist_string(value, "CFBundleShortVersionString"))
+                .or_else(|| {
+                    plist
+                        .as_deref()
+                        .and_then(|value| parse_plist_string(value, "CFBundleVersion"))
+                });
+            AgentInstallation {
+                surface: AgentSurface::Desktop,
+                executable_path: display_path(&app_path.join("Contents/MacOS/ChatGPT")),
+                install_dir: display_path(&app_path),
+                install_method: AgentInstallMethod::Desktop,
+                version,
+                version_output: None,
+                available_on_path: false,
+                error: None,
+            }
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn parse_plist_string(content: &str, key: &str) -> Option<String> {
+    let after_key = content.split_once(&format!("<key>{key}</key>"))?.1;
+    let value = after_key
+        .split_once("<string>")?
+        .1
+        .split_once("</string>")?
+        .0
+        .trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
+    Vec::new()
+}
 async fn detect_claude_code() -> AgentEnvironmentReport {
     let candidates = claude_candidates();
     let mut installations = Vec::with_capacity(candidates.len());
@@ -727,6 +845,20 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn parses_chatgpt_desktop_appx_package_output() {
+        let installation = parse_chatgpt_windows_package_output(
+            "26.707.12708.0\tC:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\tapp\\ChatGPT.exe",
+        )
+        .unwrap();
+        assert_eq!(installation.surface, AgentSurface::Desktop);
+        assert_eq!(installation.version.as_deref(), Some("26.707.12708.0"));
+        assert_eq!(
+            installation.executable_path,
+            "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe"
+        );
+    }
     #[cfg(windows)]
     #[test]
     fn hides_windows_extended_path_prefix_for_display() {

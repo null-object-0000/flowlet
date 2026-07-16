@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   applyClaudeCodeGlobalConfig,
   applyOpenCodeGlobalConfig,
+  detectChatGptDesktopEnvironment,
   detectClaudeCodeEnvironment,
   detectOpenCodeEnvironment,
   inspectClaudeCodeGlobalConfig,
@@ -24,6 +25,15 @@ export function useOpenCodeEnvironment() {
   return useQuery({
     queryKey: queryKeys.agent.environment("opencode"),
     queryFn: detectOpenCodeEnvironment,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useChatGptDesktopEnvironment() {
+  return useQuery({
+    queryKey: queryKeys.agent.environment("chatgpt-desktop"),
+    queryFn: detectChatGptDesktopEnvironment,
     staleTime: 60_000,
     retry: 1,
   });

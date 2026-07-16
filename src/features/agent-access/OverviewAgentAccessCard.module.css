@@ -103,15 +103,19 @@
 }
 
 .surfaceStatuses {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  display: grid;
+  grid-template-columns: 92px 156px;
+  column-gap: 12px;
 }
 
 .surfaceStatuses small {
-  display: inline-flex;
+  min-width: 0;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .surfaceStatuses small span:first-child {

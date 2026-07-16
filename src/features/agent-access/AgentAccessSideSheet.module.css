@@ -3,6 +3,14 @@
   min-width: 0;
 }
 
+.chatGptTitleTabs {
+  width: min(540px, calc(92vw - 96px));
+}
+
+.titleTabLabel {
+  white-space: nowrap;
+}
+
 .body {
   display: grid;
   gap: 12px;

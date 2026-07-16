@@ -72,6 +72,34 @@ vi.mock("./useAgentEnvironment", () => ({
     isLoading: false,
     refetch,
   }),
+  useChatGptDesktopEnvironment: () => ({
+    data: {
+      agent_id: "chatgpt-desktop",
+      agent_name: "ChatGPT (Codex)",
+      installed: true,
+      primary: {
+        surface: "desktop",
+        executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+        install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0",
+        install_method: "desktop",
+        version: "26.707.12708.0",
+        available_on_path: false,
+      },
+      installations: [{
+        surface: "desktop",
+        executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+        install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0",
+        install_method: "desktop",
+        version: "26.707.12708.0",
+        available_on_path: false,
+      }],
+    },
+    error: null,
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+    refetch,
+  }),
   useClaudeCodeGlobalConfig: () => ({
     query: {
       data: {
@@ -125,19 +153,18 @@ vi.mock("lottie-web", () => ({
 }));
 
 describe("OverviewAgentAccessCard", () => {
-  it("shows the detected Claude Code version and keeps unsupported agents disabled", () => {
+  it("shows detected versions for the supported Agent surfaces", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
     expect(screen.getByRole("button", { name: "配置 Claude Code" })).toBeEnabled();
-    expect(screen.getByText("已安装 · 2.1.207")).toBeInTheDocument();
-    expect(screen.getByText("暂不支持")).toBeInTheDocument();
+    expect(screen.getByText("2.1.207")).toBeInTheDocument();
+    expect(screen.getAllByText("暂不支持")).toHaveLength(2);
 
     expect(screen.getByRole("button", { name: "配置 OpenCode" })).toBeEnabled();
-    expect(screen.getByText("已安装 · 1.18.2")).toBeInTheDocument();
+    expect(screen.getByText("1.18.2")).toBeInTheDocument();
     expect(screen.getAllByText("已安装")).toHaveLength(1);
-    const futureButtons = [screen.getByRole("button", { name: "ChatGPT Desktop 即将支持" })];
-    futureButtons.forEach((button) => expect(button).toBeDisabled());
-    expect(screen.getAllByText("即将支持")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "配置 ChatGPT (Codex)" })).toBeEnabled();
+    expect(screen.getByText("26.707.12708.0")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "配置 Claude Code" }));
     expect(screen.getByRole("tab", { name: "Claude Code CLI 接入" })).toHaveAttribute("aria-selected", "true");
@@ -156,6 +183,17 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getAllByText("token").length).toBeGreaterThan(0);
   });
 
+  it("opens the supported Desktop tab and disables the ChatGPT Codex CLI tab", () => {
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 ChatGPT (Codex)" }));
+    expect(screen.getByRole("tab", { name: "ChatGPT (Codex) CLI 接入" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("tab", { name: "ChatGPT (Codex) Desktop 接入" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("ChatGPT Desktop 26.707.12708.0")).toBeInTheDocument();
+    expect(screen.getByText("仅识别统一后的新版 ChatGPT Desktop")).toBeInTheDocument();
+    expect(screen.getByText("C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0")).toBeInTheDocument();
+    expect(screen.queryByText("全局配置")).not.toBeInTheDocument();
+  });
   it("opens the shared OpenCode CLI and Desktop global configuration", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 

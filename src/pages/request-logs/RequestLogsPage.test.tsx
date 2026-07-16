@@ -48,9 +48,11 @@ describe("RequestLogsPage", () => {
     const user = userEvent.setup();
     render(<RequestLogsPage />);
 
+    expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({ timeRange: "all" }), true);
     const logRow = screen.getByRole("button", { name: `查看请求 ${row.request_id}` });
     expect(logRow).toHaveTextContent("/anthropic/v1/messages");
     expect(screen.getByText("请求数")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).not.toHaveTextContent("刷新");
     expect(screen.getAllByText("150")).toHaveLength(2);
     expect(screen.getByText("缓存命中率 60.0%")).toBeInTheDocument();
     await user.hover(within(logRow).getByText("150"));
@@ -66,6 +68,8 @@ describe("RequestLogsPage", () => {
     await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
 
     expect(await screen.findByText("请求详情")).toBeInTheDocument();
+    expect(screen.queryByText("路由信息")).not.toBeInTheDocument();
+    expect(screen.getByText("flowlet-pro → LongCat-2.0 · 直接路由")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "性能" }));
     expect(screen.getByText("响应性能")).toBeInTheDocument();
     expect(screen.getByText("Token 明细")).toBeInTheDocument();

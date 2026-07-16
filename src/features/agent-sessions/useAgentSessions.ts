@@ -11,3 +11,10 @@ export function useAgentSessions(filter: AgentSessionFilter) {
     refetchInterval: 5_000,
   });
 }
+
+export function useAgentSessionClients() {
+  return useQuery({
+    queryKey: queryKeys.agentSession.clients(),
+    queryFn: agentSessionCommands.clients,
+  });
+}

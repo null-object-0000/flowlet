@@ -2,12 +2,15 @@ export type AgentSessionFilter = {
   page: number;
   pageSize: number;
   search: string;
+  clientId: string;
 };
 
 export type AgentSessionRow = {
   agentType: "opencode";
   sessionId: string;
   parentSessionId: string | null;
+  clientId: string | null;
+  clientName: string | null;
   startedAt: string;
   updatedAt: string;
   requestCount: number;
@@ -15,8 +18,9 @@ export type AgentSessionRow = {
   errorCount: number;
   knownTokens: number;
   estimatedCost: number;
-  latestModel: string | null;
 };
+
+export type AgentSessionClient = { id: string; name: string };
 
 export type AgentSessionsPage = {
   rows: AgentSessionRow[];
@@ -29,4 +33,5 @@ export const DEFAULT_AGENT_SESSION_FILTER: AgentSessionFilter = {
   page: 1,
   pageSize: 10,
   search: "",
+  clientId: "",
 };

@@ -35,7 +35,10 @@
 .repairIntro > span { min-width: 0; display: grid; gap: 3px; }
 .repairIntro strong { color: var(--flowlet-color-text); font-size: 14px; }
 .repairIntro small { color: var(--flowlet-color-text-secondary); font-size: 11px; line-height: 1.45; }
-.repairIntro button { flex: none; }
+.repairControls { flex: none; display: flex; align-items: center; gap: 8px; }
+.repairControlLabel { color: var(--flowlet-color-text-secondary); font-size: 11px; white-space: nowrap; }
+.repairControls > div { width: 116px; }
+.repairControls button { flex: none; }
 .repairStages { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
 .repairStage { min-width: 0; padding: 7px 8px; display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: start; gap: 7px; border: 1px solid var(--flowlet-color-border); border-radius: 7px; background: var(--flowlet-color-surface-muted); }
 .repairStage > i { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--flowlet-color-border-strong); }

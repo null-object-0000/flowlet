@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const invokeMock = vi.fn((_command: string): Promise<unknown> => Promise.resolve(undefined));
+const invokeMock = vi.fn((_command: string, _args?: Record<string, unknown>): Promise<unknown> => Promise.resolve(undefined));
 
 vi.mock("../../platform/tauri/client", () => ({
-  invokeCommand: (command: string) => invokeMock(command),
+  invokeCommand: (command: string, args?: Record<string, unknown>) => invokeMock(command, args),
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
@@ -19,10 +19,10 @@ describe("dataRepairCommands contract", () => {
       .mockResolvedValueOnce(4)
       .mockResolvedValueOnce(5);
 
-    await dataRepairCommands.repairSessions();
-    await dataRepairCommands.repairCapturedUsage();
-    await dataRepairCommands.repairUnknownUsage();
-    await dataRepairCommands.repairCosts();
+    await dataRepairCommands.repairSessions("7d");
+    await dataRepairCommands.repairCapturedUsage("7d");
+    await dataRepairCommands.repairUnknownUsage("7d");
+    await dataRepairCommands.repairCosts("7d");
 
     expect(invokeMock.mock.calls.map(([command]) => command)).toEqual([
       "repair_opencode_sessions",
@@ -30,5 +30,6 @@ describe("dataRepairCommands contract", () => {
       "repair_unknown_usage",
       "repair_usage_costs",
     ]);
+    expect(invokeMock.mock.calls.every(([, args]) => args?.timeRange === "7d")).toBe(true);
   });
 });

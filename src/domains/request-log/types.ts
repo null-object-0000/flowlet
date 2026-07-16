@@ -85,6 +85,6 @@ export const DEFAULT_REQUEST_LOG_FILTER: RequestLogFilter = {
   clientId: "",
   channelId: "",
   search: "",
-  timeRange: "1h",
+  timeRange: "all",
   model: "",
 };

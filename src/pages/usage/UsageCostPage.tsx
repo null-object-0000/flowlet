@@ -88,7 +88,7 @@ export function UsageCostPage() {
 }
 
 function Stat({ label, value, meta }: { label: string; value: string; meta: string }) {
-  return <div className={styles.stat}><span>{label}</span><strong>{value}</strong><small>{meta}</small></div>;
+  return <div className={styles.stat}><span>{label}</span><strong title={value}>{value}</strong><small title={meta}>{meta}</small></div>;
 }
 
 function TrendChart({ days, metric, language, emptyLabel }: { days: UsageDay[]; metric: TrendMetric; language: "zh-CN" | "en-US"; emptyLabel: string }) {

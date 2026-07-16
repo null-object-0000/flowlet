@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { dataRepairCommands } from "../../domains/data-repair/commands";
-import type { DataRepairResults, DataRepairStage, DataRepairState } from "../../domains/data-repair/types";
+import type { DataRepairResults, DataRepairStage, DataRepairState, DataRepairTimeRange } from "../../domains/data-repair/types";
 import { queryKeys } from "../../shared/query-keys";
 
 const stages: DataRepairStage[] = ["sessions", "capturedUsage", "unknownUsage", "costs"];
@@ -28,7 +28,11 @@ export function useDataRepair() {
     ]);
   }, [queryClient]);
 
-  const run = useCallback(async () => {
+  const reset = useCallback(() => {
+    if (!runningRef.current) setState(initialState);
+  }, []);
+
+  const run = useCallback(async (timeRange: DataRepairTimeRange) => {
     if (runningRef.current) return;
     runningRef.current = true;
     let completedStages: DataRepairStage[] = [];
@@ -52,10 +56,10 @@ export function useDataRepair() {
         return result;
       };
 
-      await execute("sessions", dataRepairCommands.repairSessions);
-      await execute("capturedUsage", dataRepairCommands.repairCapturedUsage);
-      await execute("unknownUsage", dataRepairCommands.repairUnknownUsage);
-      await execute("costs", dataRepairCommands.repairCosts);
+      await execute("sessions", () => dataRepairCommands.repairSessions(timeRange));
+      await execute("capturedUsage", () => dataRepairCommands.repairCapturedUsage(timeRange));
+      await execute("unknownUsage", () => dataRepairCommands.repairUnknownUsage(timeRange));
+      await execute("costs", () => dataRepairCommands.repairCosts(timeRange));
       setState({ status: "success", currentStage: null, completedStages, percent: 100, results, error: null });
       await refreshAffectedQueries();
     } catch (error) {
@@ -75,5 +79,5 @@ export function useDataRepair() {
     }
   }, [refreshAffectedQueries]);
 
-  return { state, run };
+  return { state, run, reset };
 }

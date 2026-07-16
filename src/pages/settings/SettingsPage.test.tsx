@@ -16,6 +16,7 @@ vi.mock("../../features/settings/useDataRepair", () => ({
   useDataRepair: () => ({
     state: { status: "idle", currentStage: null, completedStages: [], percent: 0, results: {}, error: null },
     run: vi.fn().mockResolvedValue(undefined),
+    reset: vi.fn(),
   }),
 }));
 
@@ -31,5 +32,6 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("switch", { name: "开机启动" })).toBeInTheDocument();
     expect(screen.getByText("本地数据修复")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "开始修复" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "修复时间范围" })).toHaveTextContent("全部时间");
   });
 });

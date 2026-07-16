@@ -1,22 +1,31 @@
-import { Button, Progress, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Progress, Select, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconDesktop, IconGlobe, IconHistory, IconMoon, IconSun } from "@douyinfe/semi-icons";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useAppPreferences, type ThemePreference } from "../../app/preferences/AppPreferences";
 import type { AppLanguage } from "../../app/preferences/translations";
+import type { DataRepairTimeRange } from "../../domains/data-repair/types";
 import { useAutostartSetting } from "../../features/settings/useAutostartSetting";
 import { useDataRepair } from "../../features/settings/useDataRepair";
 import styles from "./SettingsPageStatic.module.css";
 
 const { Paragraph, Title } = Typography;
+const REPAIR_TIME_OPTIONS: Array<{ value: DataRepairTimeRange; label: string }> = [
+  { value: "1h", label: "最近 1 小时" },
+  { value: "6h", label: "最近 6 小时" },
+  { value: "today", label: "今天" },
+  { value: "7d", label: "最近 7 天" },
+  { value: "all", label: "全部时间" },
+];
 
 export function SettingsPage() {
   const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
   const autostart = useAutostartSetting();
   const repair = useDataRepair();
+  const [repairTimeRange, setRepairTimeRange] = useState<DataRepairTimeRange>("all");
 
   async function runDataRepair() {
     try {
-      await repair.run();
+      await repair.run(repairTimeRange);
       Toast.success(t("本地数据修复完成"));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -81,9 +90,22 @@ export function SettingsPage() {
                 <strong>{t("检查并修复历史请求数据")}</strong>
                 <small>{t("依次修复 OpenCode 会话归因、Token 用量、未知记录和预估费用。仅能恢复已捕获请求头或响应体的数据。")}</small>
               </span>
-              <Button loading={repair.state.status === "running"} disabled={repair.state.status === "running"} onClick={() => void runDataRepair()}>
-                {t(repair.state.status === "success" ? "重新修复" : "开始修复")}
-              </Button>
+              <div className={styles.repairControls}>
+                <span id="repair-time-range-label" className={styles.repairControlLabel}>{t("修复时间范围")}</span>
+                <Select
+                  aria-labelledby="repair-time-range-label"
+                  value={repairTimeRange}
+                  disabled={repair.state.status === "running"}
+                  optionList={REPAIR_TIME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+                  onChange={(value) => {
+                    setRepairTimeRange(value as DataRepairTimeRange);
+                    repair.reset();
+                  }}
+                />
+                <Button loading={repair.state.status === "running"} disabled={repair.state.status === "running"} onClick={() => void runDataRepair()}>
+                  {t(repair.state.status === "success" ? "重新修复" : "开始修复")}
+                </Button>
+              </div>
             </div>
             {repair.state.status !== "idle" ? <Progress aria-label={t("数据修复进度")} percent={repair.state.percent} size="small" showInfo /> : null}
             <div className={styles.repairStages}>

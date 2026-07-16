@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Pagination, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Input, Pagination, Select, Typography } from "@douyinfe/semi-ui-19";
 import { IconRefresh, IconSearch } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionRow } from "../../domains/agent-session/types";
-import { useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
+import { useAgentSessionClients, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import styles from "./AgentSessionsPage.module.css";
 
@@ -16,6 +16,7 @@ export function AgentSessionsPage() {
   const [filter, setFilter] = useState<AgentSessionFilter>(DEFAULT_AGENT_SESSION_FILTER);
   const [searchDraft, setSearchDraft] = useState("");
   const sessions = useAgentSessions(filter);
+  const clients = useAgentSessionClients();
   const page = sessions.data;
 
   useEffect(() => {
@@ -35,12 +36,22 @@ export function AgentSessionsPage() {
       <header className={styles.header}>
         <div>
           <Title heading={3} style={{ margin: 0 }}>{t("会话管理")}</Title>
-          <Paragraph type="tertiary" style={{ margin: 0 }}>{t("按 OpenCode 会话查看请求、Token、费用和失败情况")}</Paragraph>
+          <Paragraph type="tertiary" style={{ margin: 0 }}>{t("按 OpenCode 会话和客户端查看请求、Token、费用和失败情况")}</Paragraph>
         </div>
       </header>
 
       <section className={styles.toolbar} aria-label={t("会话筛选")}>
-        <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索会话 ID、父会话或模型")} showClear onChange={setSearchDraft} />
+        <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索会话 ID 或父会话")} showClear onChange={setSearchDraft} />
+        <Select
+          insetLabel={t("客户端")}
+          value={filter.clientId || "__all__"}
+          loading={clients.isLoading}
+          optionList={[
+            { value: "__all__", label: t("全部客户端") },
+            ...(clients.data ?? []).map((client) => ({ value: client.id || "__unknown__", label: client.name })),
+          ]}
+          onChange={(value) => setFilter((current) => ({ ...current, clientId: value === "__all__" ? "" : String(value), page: 1 }))}
+        />
         <span />
         <Button
           className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
@@ -56,7 +67,7 @@ export function AgentSessionsPage() {
 
       <section className={styles.tableCard}>
         <div className={`${styles.grid} ${styles.head}`} role="row">
-          <span>{t("最近活动")}</span><span>{t("会话")}</span><span>{t("模型")}</span><span>{t("请求")}</span><span>Token</span><span>{t("费用")}</span><span>{t("状态")}</span>
+          <span>{t("最近活动")}</span><span>{t("会话")}</span><span>{t("客户端")}</span><span>{t("请求")}</span><span>Token</span><span>{t("费用")}</span><span>{t("状态")}</span>
         </div>
         <div className={styles.body}>
           {sessions.isLoading ? Array.from({ length: 7 }, (_, index) => <SkeletonRow key={index} />) : null}
@@ -79,7 +90,7 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
     <button type="button" className={`${styles.grid} ${styles.row}`} onClick={onOpen}>
       <span>{formatDate(row.updatedAt, language)}</span>
       <span className={styles.session}><strong title={row.sessionId}>{row.sessionId}</strong>{row.parentSessionId ? <small title={row.parentSessionId}>{t("父会话：{id}", { id: row.parentSessionId })}</small> : <small>OpenCode</small>}</span>
-      <span title={row.latestModel ?? ""}>{row.latestModel ?? "—"}</span>
+      <span className={styles.client}><strong title={row.clientName ?? row.clientId ?? t("未知客户端")}>{row.clientName ?? row.clientId ?? t("未知客户端")}</strong>{row.clientId ? <small title={row.clientId}>{row.clientId}</small> : null}</span>
       <span>{row.requestCount.toLocaleString(language)}</span>
       <span>{row.knownTokens.toLocaleString(language)}</span>
       <span>¥{row.estimatedCost.toFixed(4)}</span>

@@ -1,4 +1,5 @@
 export type DataRepairStage = "sessions" | "capturedUsage" | "unknownUsage" | "costs";
+export type DataRepairTimeRange = "1h" | "6h" | "today" | "7d" | "all";
 
 export interface AgentSessionRepairResult {
   scannedRequests: number;

@@ -2,18 +2,19 @@
 .header { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .header h3 { font-size: 20px; font-weight: 740; letter-spacing: -.025em; }
 .header p { margin-top: 3px !important; font-size: 12px; }
-.toolbar { min-height: 42px; padding: 5px; display: grid; grid-template-columns: minmax(240px, 420px) 1fr auto; align-items: center; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
+.toolbar { min-height: 42px; padding: 5px; display: grid; grid-template-columns: minmax(240px, 420px) 190px 1fr auto; align-items: center; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
 .toolbar :global(.semi-input-wrapper) { height: 32px; border-color: var(--flowlet-color-border-strong); background: var(--flowlet-color-surface-muted); }
 .tableCard { min-height: 0; display: grid; grid-template-rows: 38px minmax(0, 1fr) 38px; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
-.grid { display: grid; grid-template-columns: 110px minmax(210px, 1.7fr) minmax(120px, 1fr) 70px 90px 80px 90px; align-items: center; gap: 10px; padding: 0 14px; }
+.grid { display: grid; grid-template-columns: 110px minmax(210px, 1.7fr) minmax(130px, 1fr) 70px 90px 80px 90px; align-items: center; gap: 10px; padding: 0 14px; }
 .head { color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: 11px; font-weight: 650; }
 .body { min-height: 0; overflow: auto; }
 .row { width: 100%; min-height: 54px; border: 0; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: transparent; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .row:hover { background: var(--flowlet-color-surface-muted); }
 .row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session { display: grid; gap: 3px; }
-.session strong, .session small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session small { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.session strong, .session small, .client strong, .client small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session small, .client small { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.client { display: grid; gap: 3px; }
 .success { color: var(--flowlet-color-success); }
 .warning { color: var(--semi-color-warning); }
 .state { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: var(--flowlet-color-text-secondary); }

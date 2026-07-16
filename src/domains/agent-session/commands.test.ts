@@ -13,9 +13,15 @@ afterEach(() => invokeMock.mockReset());
 
 describe("agentSessionCommands contract", () => {
   it("maps pagination and search to the Rust filter", async () => {
-    await agentSessionCommands.list({ page: 2, pageSize: 25, search: "ses_test" });
+    await agentSessionCommands.list({ page: 2, pageSize: 25, search: "ses_test", clientId: "opencode" });
     expect(invokeMock).toHaveBeenCalledWith("list_agent_sessions", {
-      filter: { page: 2, page_size: 25, search: "ses_test" },
+      filter: { page: 2, page_size: 25, search: "ses_test", client_id: "opencode" },
     });
+  });
+
+  it("lists clients observed in agent sessions", async () => {
+    invokeMock.mockResolvedValueOnce([{ id: "opencode", name: "OpenCode" }]);
+    expect(await agentSessionCommands.clients()).toEqual([{ id: "opencode", name: "OpenCode" }]);
+    expect(invokeMock).toHaveBeenCalledWith("list_agent_session_clients", undefined);
   });
 });

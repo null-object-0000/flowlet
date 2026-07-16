@@ -20,6 +20,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 
 const JSON_VIEWER_OPTIONS = { readOnly: true, autoWrap: true } as const;
+type Translate = (source: string, variables?: Record<string, string | number>) => string;
 
 export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: string; onClose: () => void }) {
   const { language, t } = useAppPreferences();
@@ -48,14 +49,7 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
         <Tabs className={styles.tabs} type="line" defaultActiveKey="overview" tabPaneMotion={false}>
           <Tabs.TabPane tab={t("概览")} itemKey="overview">
             <div className={styles.tabContent}>
-              <DetailSection title={t("路由信息")}>
-                <div className={styles.detailGrid}>
-                  <DetailItem label={t("请求模型")} value={finalRow.public_model || finalRow.virtual_model || "-"} />
-                  <DetailItem label={t("实际模型")} value={finalRow.upstream_model || "-"} />
-                  <DetailItem label={t("渠道")} value={finalRow.channel_name || finalRow.channel_id || t("未路由")} />
-                  <DetailItem label={t("账号")} value={finalRow.account_name || finalRow.account_id || "-"} />
-                </div>
-              </DetailSection>
+              <AttemptSelector rows={rows} selectedRow={selectedRow} onSelect={setSelectedAttemptId} />
 
               <DetailSection title={t("接口信息")}>
                 <div className={styles.detailGrid}>
@@ -66,14 +60,12 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
                 </div>
               </DetailSection>
 
-              {finalRow.error_message || finalRow.route_reason ? (
+              {finalRow.error_message ? (
                 <div className={styles.errorBox}>
-                  <strong>{t(finalRow.error_message ? "错误信息" : "路由说明")}</strong>
-                  <span>{safeLogText(finalRow.error_message || finalRow.route_reason)}</span>
+                  <strong>{t("错误信息")}</strong>
+                  <span>{safeLogText(finalRow.error_message)}</span>
                 </div>
               ) : null}
-
-              <AttemptSelector rows={rows} selectedRow={selectedRow} onSelect={setSelectedAttemptId} />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={t("性能")} itemKey="performance">
@@ -149,7 +141,10 @@ function AttemptSelector({ rows, selectedRow, onSelect, compact = false }: { row
         {rows.map((row, index) => (
           <button key={row.id} type="button" className={`${styles.attempt} ${selectedRow.id === row.id ? styles.selected : ""}`} onClick={() => onSelect(row.id)}>
             <i>{index + 1}</i>
-            <span><strong>{row.channel_name || row.channel_id || t("未路由")} · {row.account_name || row.account_id || "-"}</strong><small>{row.error_message || row.route_reason ? safeLogText(row.error_message || row.route_reason) : t("请求完成")}</small></span>
+            <span>
+              <strong>{row.channel_name || row.channel_id || t("未路由")} · {row.account_name || row.account_id || "-"}</strong>
+              <small title={attemptDetail(row, t)}>{attemptDetail(row, t)}</small>
+            </span>
             <span className={styles.attemptMeta}><StatusTag row={row} /><small>{formatDuration(row.duration_ms ?? row.latency_ms)}</small></span>
           </button>
         ))}
@@ -233,4 +228,33 @@ function formatCost(value: number | null) {
 function formatGenerationDuration(row: RequestLogRow) {
   if (row.duration_ms == null || row.ttft_ms == null || row.duration_ms < row.ttft_ms) return "—";
   return formatDuration(row.duration_ms - row.ttft_ms);
+}
+
+function attemptDetail(row: RequestLogRow, t: Translate) {
+  const requestedModel = row.public_model || row.virtual_model;
+  const upstreamModel = row.upstream_model;
+  const model = requestedModel && upstreamModel && requestedModel !== upstreamModel
+    ? `${requestedModel} → ${upstreamModel}`
+    : t("模型 {model}", { model: upstreamModel || requestedModel || "—" });
+  const outcome = row.error_message ? safeLogText(row.error_message) : routeReasonLabel(row.route_reason, t);
+  return `${model} · ${outcome}`;
+}
+
+function routeReasonLabel(reason: string | null, t: Translate) {
+  const labels: Record<string, string> = {
+    direct: "直接路由",
+    primary: "直接路由",
+    auto: "自动路由",
+    fallback_success: "回退成功",
+    retryable_status: "状态异常，准备回退",
+    quota_exceeded: "额度不足，准备回退",
+    network_timeout: "上游超时",
+    network_connect: "上游连接失败",
+    network_request: "上游请求失败",
+    network_error: "上游网络错误",
+  };
+  if (!reason) return t("请求完成");
+  const fallbackBase = reason.endsWith("_fallback") ? reason.slice(0, -"_fallback".length) : null;
+  if (fallbackBase) return t("{reason}后回退", { reason: t(labels[fallbackBase] || fallbackBase) });
+  return t(labels[reason] || reason);
 }

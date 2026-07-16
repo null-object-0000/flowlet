@@ -7,7 +7,6 @@ import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLo
 import { RequestLogTable } from "../../features/request-logs/RequestLogTable";
 import { formatDuration, formatPercentage, formatTokenRate, safeLogText } from "../../features/request-logs/logPresentation";
 import { useRequestLogActions, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
-import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import styles from "./RequestLogsPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
@@ -114,16 +113,9 @@ export function RequestLogsPage() {
         </div>
         <span className={styles.toolbarSpacer} />
         <Tooltip content={t("清理历史日志")}><Button aria-label={t("清理历史日志")} icon={<IconDelete />} type="danger" theme="borderless" onClick={() => setClearOpen(true)} /></Tooltip>
-        <Button
-          className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
-          icon={<IconRefresh />}
-          type="tertiary"
-          theme="outline"
-          loading={logs.isFetching}
-          onClick={() => void logs.refetch()}
-        >
-          {t("刷新")}
-        </Button>
+        <Tooltip content={t("刷新")}>
+          <Button aria-label={t("刷新")} icon={<IconRefresh />} type="tertiary" theme="borderless" loading={logs.isFetching} onClick={() => void logs.refetch()} />
+        </Tooltip>
       </section>
 
       <section className={styles.tableCard}>
@@ -142,7 +134,7 @@ export function RequestLogsPage() {
 }
 
 function StatCard({ label, value, hint, success = false }: { label: string; value: string; hint: string; success?: boolean }) {
-  return <div className={styles.statCard}><span>{label}</span><div><strong>{value}</strong><small className={success ? styles.successHint : ""}>{hint}</small></div></div>;
+  return <div className={styles.statCard}><span>{label}</span><div><strong title={value}>{value}</strong><small title={hint} className={success ? styles.successHint : ""}>{hint}</small></div></div>;
 }
 
 function formatInteger(value: number | undefined, language: "zh-CN" | "en-US") { return (value ?? 0).toLocaleString(language); }

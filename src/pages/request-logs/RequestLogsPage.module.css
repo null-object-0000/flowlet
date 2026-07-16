@@ -6,14 +6,14 @@
 .liveIndicator i { width: 7px; height: 7px; border-radius: 50%; background: var(--flowlet-color-text-tertiary); }
 .liveIndicator.live i { background: var(--flowlet-color-success); box-shadow: 0 0 0 4px rgba(47,166,74,.1); }
 .stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
-.statCard { min-width: 0; height: 68px; padding: 11px 13px; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
+.statCard { min-width: 0; height: 68px; padding: 8px 13px; display: grid; align-content: center; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
 .statCard > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
-.statCard > div { margin-top: 6px; display: flex; align-items: baseline; gap: 7px; }
-.statCard strong { overflow: hidden; font-size: 19px; line-height: 1; font-weight: 730; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
-.statCard small { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.statCard > div { min-width: 0; margin-top: 3px; display: grid; gap: 2px; }
+.statCard strong { min-width: 0; overflow: hidden; font-size: 19px; font-variant-numeric: tabular-nums; line-height: 1; font-weight: 730; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.statCard small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .statCard .successHint { color: var(--flowlet-color-success); }
 .toolbar { min-height: 42px; padding: 5px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
-.search { width: 220px; flex: none; }
+.search { width: 280px; flex: none; }
 .toolbar > :global(.semi-select) { width: 142px; flex: none; }
 .toolbar :global(.semi-input-wrapper), .toolbar :global(.semi-select) { height: 32px; border-color: var(--flowlet-color-border-strong); background: var(--flowlet-color-surface-muted); }
 .statusFilter { padding: 3px; display: flex; align-items: center; gap: 2px; border-radius: 7px; background: var(--semi-color-fill-0); }

@@ -4,6 +4,7 @@ import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import styles from "./OverviewAgentAccessCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
+import type { AgentEnvironmentReport, AgentSurface } from "../../domains/agent/types";
 import {
   useClaudeCodeEnvironment,
   useClaudeCodeGlobalConfig,
@@ -19,8 +20,8 @@ const AGENTS: Array<{
   kind?: AgentKind;
 }> = [
   {
-    name: "Claude Code CLI",
-    description: "命令行接入",
+    name: "Claude Code",
+    description: "CLI 接入",
     icon: <span className={`${styles.brandIcon} ${styles.claudeCodeMark}`} aria-hidden="true" />,
     iconClassName: styles.claudeIcon,
     kind: "claude-code",
@@ -62,24 +63,6 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
     }
   };
 
-  const claudeStatus = claudeEnvironment.isLoading
-    ? t("正在检测…")
-    : claudeEnvironment.isError
-      ? t("检测失败")
-      : claudeEnvironment.data?.installed
-        ? claudeEnvironment.data.primary?.version
-          ? t("已安装 · {version}", { version: claudeEnvironment.data.primary.version })
-          : t("已安装")
-        : t("未安装");
-  const openCodeStatus = openCodeEnvironment.isLoading
-    ? t("正在检测…")
-    : openCodeEnvironment.isError
-      ? t("检测失败")
-      : openCodeEnvironment.data?.installed
-        ? openCodeEnvironment.data.primary?.version
-          ? t("已安装 · {version}", { version: openCodeEnvironment.data.primary.version })
-          : t("已安装")
-        : t("未安装");
 
   const activeGlobalConfig = selectedAgent === "opencode" ? openCodeGlobalConfig : claudeGlobalConfig;
   const activeEnvironment = selectedAgent === "opencode" ? openCodeEnvironment : claudeEnvironment;
@@ -112,11 +95,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         <div className={styles.grid}>
           {AGENTS.map(({ name, description, icon, iconClassName, kind }) => {
             const supported = kind === "claude-code" || kind === "opencode";
-            const status = kind === "claude-code"
-              ? claudeStatus
-              : kind === "opencode"
-                ? openCodeStatus
-                : t(description);
+            const environmentQuery = kind === "claude-code" ? claudeEnvironment : openCodeEnvironment;
             return (
               <button
                 key={name}
@@ -131,7 +110,19 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                 <span className={`${styles.icon} ${iconClassName}`}>{icon}</span>
                 <span className={styles.agentText}>
                   <strong>{name}</strong>
-                  <small>{supported ? status : t(description)}</small>
+                  {supported ? (
+                    <span className={styles.surfaceStatuses}>
+                      <SurfaceStatus label="CLI" surface="cli" environment={environmentQuery.data} loading={environmentQuery.isLoading} error={environmentQuery.isError} />
+                      <SurfaceStatus
+                        label="Desktop"
+                        surface="desktop"
+                        environment={environmentQuery.data}
+                        loading={environmentQuery.isLoading}
+                        error={environmentQuery.isError}
+                        unsupported={kind === "claude-code"}
+                      />
+                    </span>
+                  ) : <small>{t(description)}</small>}
                 </span>
                 <span className={`${styles.support} ${supported ? styles.supported : ""}`}>
                   {supported ? t("查看详情") : t("即将支持")}
@@ -163,4 +154,35 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       />
     </>
   );
+}
+function SurfaceStatus({
+  label,
+  surface,
+  environment,
+  loading,
+  error,
+  unsupported = false,
+}: {
+  label: string;
+  surface: AgentSurface;
+  environment?: AgentEnvironmentReport;
+  loading: boolean;
+  error: boolean;
+  unsupported?: boolean;
+}) {
+  const { t } = useAppPreferences();
+  const installation = environment?.installations.find((candidate) => (candidate.surface || "cli") === surface);
+  const status = unsupported
+    ? t("暂不支持")
+    : loading
+      ? t("正在检测…")
+      : error
+        ? t("检测失败")
+        : installation
+          ? installation.version
+            ? t("已安装 · {version}", { version: installation.version })
+            : t("已安装")
+          : t("未安装");
+
+  return <small><span>{t(label)}</span><span>{status}</span></small>;
 }

@@ -1,7 +1,12 @@
+.titleTabs {
+  width: min(420px, calc(92vw - 96px));
+  min-width: 0;
+}
+
 .body {
   display: grid;
   gap: 12px;
-  padding: 20px;
+  padding: 8px 20px 20px;
   background: var(--flowlet-color-surface-muted);
 }
 
@@ -14,7 +19,6 @@
   background: var(--flowlet-color-surface);
 }
 
-.titleRow,
 .sectionHeader {
   display: flex;
   align-items: center;

@@ -93,13 +93,30 @@
   border-color: var(--flowlet-color-border);
 }
 
-.agentText { min-width: 0; display: grid; gap: 3px; text-align: left; }
+.agentText { min-width: 0; display: grid; gap: 4px; text-align: left; }
 
 .agentCard strong { font-size: 14px; }
 
 .agentCard small {
   color: var(--flowlet-color-text-tertiary);
   font-size: 12px;
+}
+
+.surfaceStatuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.surfaceStatuses small {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.surfaceStatuses small span:first-child {
+  color: var(--flowlet-color-text-secondary);
+  font-weight: 600;
 }
 
 .support { padding: 3px 8px; border-radius: 6px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 11px; }

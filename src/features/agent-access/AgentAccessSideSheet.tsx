@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, SideSheet, Tag, Typography } from "@douyinfe/semi-ui-19";
+import { Button, SideSheet, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconEyeClosed, IconEyeOpened, IconRefresh } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -58,9 +58,10 @@ export function AgentAccessSideSheet({
 }: Props) {
   const { t } = useAppPreferences();
   const [tokenVisible, setTokenVisible] = useState(false);
+  const [surface, setSurface] = useState<"cli" | "desktop">("cli");
 
   const isClaude = agent === "claude-code";
-  const name = isClaude ? "Claude Code CLI" : "OpenCode";
+  const name = isClaude ? "Claude Code" : "OpenCode";
   const protocol = isClaude ? "Anthropic-compatible" : "OpenAI-compatible";
   const endpoint = `${baseUrl}${isClaude ? "/anthropic" : "/v1"}`;
   const token = clientToken || "<Client Token>";
@@ -72,14 +73,30 @@ export function AgentAccessSideSheet({
 
   useEffect(() => {
     if (!visible) setTokenVisible(false);
+    setSurface("cli");
   }, [visible, agent]);
+
+  const surfaceInstallations = environment?.installations.filter(
+    (installation) => (installation.surface || "cli") === surface,
+  );
 
   return (
     <SideSheet
       visible={visible}
       motion={false}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
-      title={t("{name} 接入", { name })}
+      title={
+        <Tabs
+          className={styles.titleTabs}
+          type="line"
+          activeKey={surface}
+          tabPaneMotion={false}
+          onChange={(key) => setSurface(key as "cli" | "desktop")}
+        >
+          <Tabs.TabPane tab={t("{name} CLI 接入", { name })} itemKey="cli" />
+          <Tabs.TabPane tab={t("{name} Desktop 接入", { name })} itemKey="desktop" disabled={isClaude} />
+        </Tabs>
+      }
       width="min(680px, 92vw)"
       footer={null}
       bodyStyle={{ padding: 0 }}
@@ -87,10 +104,7 @@ export function AgentAccessSideSheet({
     >
       <div className={styles.body}>
         <section className={styles.intro}>
-          <div className={styles.titleRow}>
-            <Title heading={4} style={{ margin: 0 }}>{name}</Title>
-            <Tag color="blue">{protocol}</Tag>
-          </div>
+          <Tag color="blue">{protocol}</Tag>
           <Paragraph type="tertiary">
             {isClaude
               ? t("通过 Anthropic-compatible 协议将 Claude Code 接入 Flowlet。")
@@ -122,9 +136,14 @@ export function AgentAccessSideSheet({
                 {t(isClaude ? "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。" : "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。")}
               </Text>
             ) : null}
-            {environment?.installations.map((installation, index) => {
+            {!environmentError && !environmentLoading && environment?.installed && !surfaceInstallations?.length ? (
+              <Text className={styles.environmentMessage} type="tertiary">
+                {t("未检测到 {surface} 安装。", { surface: t(surface === "desktop" ? "Desktop" : "CLI") })}
+              </Text>
+            ) : null}
+            {surfaceInstallations?.map((installation, index) => {
               const surface = installation.surface || "cli";
-              const duplicateSurface = environment.installations
+              const duplicateSurface = surfaceInstallations
                 .slice(0, index)
                 .some((candidate) => (candidate.surface || "cli") === surface);
               return (
@@ -132,8 +151,7 @@ export function AgentAccessSideSheet({
                 <div className={styles.installationHeader}>
                   <strong>{installationTitle(agent, installation.surface, installation.version, t)}</strong>
                   <span className={styles.installationTags}>
-                    {environment.primary?.executable_path === installation.executable_path && installation.surface !== "desktop" && !installation.error ? <Tag color="blue">{t("当前使用")}</Tag> : null}
-                    {!isClaude ? <Tag color={installation.surface === "desktop" ? "violet" : "cyan"}>{t(installation.surface === "desktop" ? "Desktop" : "CLI")}</Tag> : null}
+                    {environment?.primary?.executable_path === installation.executable_path && installation.surface !== "desktop" && !installation.error ? <Tag color="blue">{t("当前使用")}</Tag> : null}
                     <Tag>{installMethodLabel(installation.install_method, t)}</Tag>
                     {duplicateSurface ? <Tag color="orange">{t("额外安装")}</Tag> : null}
                   </span>

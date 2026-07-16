@@ -44,8 +44,8 @@ vi.mock("./useAgentEnvironment", () => ({
         executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe",
         install_dir: "C:\\Users\\test\\.opencode\\bin",
         install_method: "native",
-        version: "1.17.18",
-        version_output: "1.17.18",
+        version: "1.18.2",
+        version_output: "1.18.2",
         available_on_path: true,
       },
       installations: [{
@@ -53,8 +53,8 @@ vi.mock("./useAgentEnvironment", () => ({
         executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe",
         install_dir: "C:\\Users\\test\\.opencode\\bin",
         install_method: "native",
-        version: "1.17.18",
-        version_output: "1.17.18",
+        version: "1.18.2",
+        version_output: "1.18.2",
         available_on_path: true,
       }, {
         surface: "desktop",
@@ -128,16 +128,20 @@ describe("OverviewAgentAccessCard", () => {
   it("shows the detected Claude Code version and keeps unsupported agents disabled", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
-    expect(screen.getByRole("button", { name: "配置 Claude Code CLI" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "配置 Claude Code" })).toBeEnabled();
     expect(screen.getByText("已安装 · 2.1.207")).toBeInTheDocument();
+    expect(screen.getByText("暂不支持")).toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: "配置 OpenCode" })).toBeEnabled();
-    expect(screen.getByText("已安装 · 1.17.18")).toBeInTheDocument();
+    expect(screen.getByText("已安装 · 1.18.2")).toBeInTheDocument();
+    expect(screen.getAllByText("已安装")).toHaveLength(1);
     const futureButtons = [screen.getByRole("button", { name: "ChatGPT Desktop 即将支持" })];
     futureButtons.forEach((button) => expect(button).toBeDisabled());
     expect(screen.getAllByText("即将支持")).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "配置 Claude Code CLI" }));
+    fireEvent.click(screen.getByRole("button", { name: "配置 Claude Code" }));
+    expect(screen.getByRole("tab", { name: "Claude Code CLI 接入" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Claude Code Desktop 接入" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByText("本机环境")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.local\\bin\\claude.exe")).toBeInTheDocument();
     expect(screen.getByText("原生安装")).toBeInTheDocument();
@@ -156,8 +160,12 @@ describe("OverviewAgentAccessCard", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
     fireEvent.click(screen.getByRole("button", { name: "配置 OpenCode" }));
-    expect(screen.getByText("OpenCode CLI 1.17.18")).toBeInTheDocument();
+    expect(screen.getByText("OpenCode CLI 1.18.2")).toBeInTheDocument();
+    expect(screen.queryByText("OpenCode Desktop 安装")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "OpenCode CLI 接入" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "OpenCode Desktop 接入" }));
     expect(screen.getByText("OpenCode Desktop 安装")).toBeInTheDocument();
+    expect(screen.queryByText("OpenCode CLI 1.18.2")).not.toBeInTheDocument();
     expect(screen.queryByText("额外安装")).not.toBeInTheDocument();
     expect(screen.getByText("OpenCode CLI 与 Desktop 共用此全局配置")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.config\\opencode\\opencode.jsonc")).toBeInTheDocument();

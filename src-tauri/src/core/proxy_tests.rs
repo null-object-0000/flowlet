@@ -1343,13 +1343,16 @@ async fn e2e_cross_model_fallback() {
 }
 
 #[tokio::test]
-async fn e2e_account_deactivated_falls_back_and_disables_account() {
+async fn e2e_account_deactivated_falls_back_then_recovers() {
     let seen = Arc::new(Mutex::new(Vec::<String>::new()));
     let seen_by_upstream = seen.clone();
+    let key_disabled = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let key_disabled_by_upstream = key_disabled.clone();
     let upstream = Router::new().route(
         "/v1/chat/completions",
         post(move |headers: HeaderMap| {
             let seen = seen_by_upstream.clone();
+            let key_disabled = key_disabled_by_upstream.clone();
             async move {
                 let key = headers
                     .get(header::AUTHORIZATION)
@@ -1358,7 +1361,9 @@ async fn e2e_account_deactivated_falls_back_and_disables_account() {
                     .unwrap_or("")
                     .to_string();
                 seen.lock().unwrap().push(key.clone());
-                if key == "disabled-key" {
+                if key == "disabled-key"
+                    && key_disabled.load(std::sync::atomic::Ordering::SeqCst)
+                {
                     (
                         StatusCode::FORBIDDEN,
                         [("content-type", "application/json")],
@@ -1414,7 +1419,7 @@ async fn e2e_account_deactivated_falls_back_and_disables_account() {
     let state = build_test_state(channels, accounts, routes);
     let storage = state.storage.clone();
     let response = forward_request(
-        state,
+        state.clone(),
         chat_request("flowlet-pro"),
         ProtocolType::OpenAi,
     )
@@ -1435,6 +1440,35 @@ async fn e2e_account_deactivated_falls_back_and_disables_account() {
         disabled.credential_status,
         crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY
     );
+
+    // 上游重新启用同一个 Key 后，下一次请求会重新探测 DeepSeek 并恢复账号状态。
+    key_disabled.store(false, std::sync::atomic::Ordering::SeqCst);
+    let recovered_response = forward_request(
+        state,
+        chat_request("flowlet-pro"),
+        ProtocolType::OpenAi,
+    )
+    .await
+    .unwrap();
+    assert_eq!(recovered_response.status(), StatusCode::OK);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![
+            "disabled-key".to_string(),
+            "longcat-key".to_string(),
+            "disabled-key".to_string(),
+        ]
+    );
+    let recovered_accounts = storage.list_channel_accounts().unwrap();
+    let recovered = recovered_accounts
+        .iter()
+        .find(|account| account.id == "deepseek-disabled")
+        .unwrap();
+    assert_eq!(
+        recovered.credential_status,
+        crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY
+    );
+    assert!(recovered.last_error.is_none());
 }
 
 #[tokio::test]

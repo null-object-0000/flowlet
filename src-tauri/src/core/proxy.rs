@@ -62,6 +62,33 @@ fn mark_account_credential_invalid(
     }
 }
 
+fn is_transient_deactivated_account(account: &ChannelAccount) -> bool {
+    account.credential_status == crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY
+        && account.last_error.as_deref().is_some_and(|error| {
+            let error = error.to_ascii_lowercase();
+            error.contains("account_deactivated") || error.contains("api key is disabled")
+        })
+}
+
+fn mark_account_credential_recovered(
+    storage: &Storage,
+    shared: &ProxySharedConfig,
+    account_id: &str,
+) {
+    let _ = storage.mark_account_credential_healthy(account_id);
+    let _ = storage.update_account_last_used(account_id);
+    if let Ok(mut shared_accounts) = shared.accounts.lock() {
+        if let Some(account) = shared_accounts
+            .iter_mut()
+            .find(|item| item.id == account_id)
+        {
+            account.last_error = None;
+            account.credential_status =
+                crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+        }
+    }
+}
+
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
 const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
 const MAX_TTFT_PROBE_BYTES: usize = 64 * 1024;
@@ -449,7 +476,15 @@ async fn forward_request(
 
     // 热更新：从共享锁读取最新配置
     let routes = state.shared.routes.lock().unwrap().clone();
-    let accounts = state.shared.accounts.lock().unwrap().clone();
+    let mut accounts = state.shared.accounts.lock().unwrap().clone();
+    // account_deactivated 可能由上游后台临时停用造成。该状态仍允许每次新请求探测；
+    // 一旦成功即恢复 healthy。真正的 401 invalid_key 仍然会被路由层排除。
+    for account in &mut accounts {
+        if is_transient_deactivated_account(account) {
+            account.credential_status =
+                crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+        }
+    }
     let channels = state.shared.channels.lock().unwrap().clone();
     let default_client_token = state.bind_config.lock().map(|c| c.default_client_token.clone()).unwrap_or_default();
     let rules = state.shared.rules.lock().unwrap().clone();
@@ -708,6 +743,16 @@ async fn forward_request(
                 let ttfb_ms = log_context.send_at.elapsed().as_millis() as i64;
                 let status = upstream_response.status();
                 let channel_vendor = channel.vendor.clone();
+                if status.is_success() && account.last_error.as_deref().is_some_and(|error| {
+                    let error = error.to_ascii_lowercase();
+                    error.contains("account_deactivated") || error.contains("api key is disabled")
+                }) {
+                    mark_account_credential_recovered(
+                        &storage,
+                        &state.shared,
+                        &account.id,
+                    );
+                }
                 if status == reqwest::StatusCode::UNAUTHORIZED {
                     let message = "upstream returned 401; API Key may be invalid";
                     // 401 表示 API Key 无效：标记账号凭证状态，后续请求自动排除该账号。

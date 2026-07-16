@@ -28,6 +28,31 @@ export function formatDuration(value?: number | null) {
   return `${(value / 1_000).toFixed(value < 10_000 ? 2 : 1)} s`;
 }
 
+export function calculateOutputTokenRate(
+  row: Pick<RequestLogRow, "output_tokens" | "duration_ms" | "ttft_ms">,
+) {
+  if (row.output_tokens == null || row.duration_ms == null || row.ttft_ms == null) return null;
+  const generationMs = row.duration_ms - row.ttft_ms;
+  return generationMs > 0 ? row.output_tokens * 1_000 / generationMs : null;
+}
+
+export function calculateCacheHitRate(
+  row: Pick<RequestLogRow, "input_tokens" | "input_cached_tokens">,
+) {
+  if (row.input_tokens == null || row.input_tokens <= 0 || row.input_cached_tokens == null) return null;
+  return Math.max(0, Math.min(1, row.input_cached_tokens / row.input_tokens));
+}
+
+export function formatTokenRate(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value.toFixed(value < 100 ? 1 : 0)} tok/s`;
+}
+
+export function formatPercentage(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 export function shortRequestId(value: string) {
   return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
 }

@@ -5,7 +5,7 @@
 .liveIndicator { height: 32px; padding: 0 10px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-size: 12px; cursor: pointer; }
 .liveIndicator i { width: 7px; height: 7px; border-radius: 50%; background: var(--flowlet-color-text-tertiary); }
 .liveIndicator.live i { background: var(--flowlet-color-success); box-shadow: 0 0 0 4px rgba(47,166,74,.1); }
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
 .statCard { min-width: 0; height: 68px; padding: 11px 13px; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
 .statCard > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
 .statCard > div { margin-top: 6px; display: flex; align-items: baseline; gap: 7px; }

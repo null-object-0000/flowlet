@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestLogRow } from "../../domains/request-log/types";
@@ -31,14 +31,14 @@ const row: RequestLogRow = {
   public_model: "flowlet-pro", upstream_model: "LongCat-2.0", request_type: "messages", method: "POST",
   path: "/anthropic/v1/messages", status: 200, latency_ms: 860, is_stream: true, error_message: null,
   fallback_count: 0, route_reason: "primary", created_at: "2026-07-15 06:00:00", ttfb_ms: 120,
-  duration_ms: 860, attempt_seq: 1, req_headers_json: JSON.stringify({ Authorization: "Bearer secret-key" }),
+  ttft_ms: 200, duration_ms: 860, attempt_seq: 1, req_headers_json: JSON.stringify({ Authorization: "Bearer secret-key" }),
   req_body_b64: btoa(JSON.stringify({ model: "flowlet-pro" })), res_headers_json: JSON.stringify({ "content-type": "application/json" }),
   res_body_b64: btoa(JSON.stringify({ ok: true })), is_last_attempt: true,
-  input_tokens: 100, output_tokens: 50, total_tokens: 150, estimated_cost: 0.0012,
+  input_tokens: 100, input_cached_tokens: 60, input_uncached_tokens: 40, output_tokens: 50, total_tokens: 150, estimated_cost: 0.0012,
 };
 
 beforeEach(() => {
-  mocks.useLogs.mockReturnValue({ data: { rows: [row], total: 1, page: 1, pageSize: 8, summary: { requestCount: 1, successCount: 1, errorCount: 0, averageDurationMs: 860, knownTokens: 150, estimatedCost: 0.0012 } }, isLoading: false, isFetching: false, isError: false, dataUpdatedAt: 1, refetch: mocks.refetch });
+  mocks.useLogs.mockReturnValue({ data: { rows: [row], total: 1, page: 1, pageSize: 8, summary: { requestCount: 1, successCount: 1, errorCount: 0, averageDurationMs: 860, averageTtftMs: 200, averageOutputTokensPerSecond: 75.76, knownTokens: 150, inputTokens: 100, inputCachedTokens: 60, inputUncachedTokens: 40, cacheHitRate: 0.6, estimatedCost: 0.0012 } }, isLoading: false, isFetching: false, isError: false, dataUpdatedAt: 1, refetch: mocks.refetch });
   mocks.useDetail.mockReturnValue({ data: [row], isLoading: false, isError: false, isSuccess: true, refetch: mocks.refetch });
   mocks.cleanup.mockResolvedValue([1, 0]);
 });
@@ -48,10 +48,15 @@ describe("RequestLogsPage", () => {
     const user = userEvent.setup();
     render(<RequestLogsPage />);
 
-    expect(screen.getByRole("button", { name: `查看请求 ${row.request_id}` })).toHaveTextContent("/anthropic/v1/messages");
+    const logRow = screen.getByRole("button", { name: `查看请求 ${row.request_id}` });
+    expect(logRow).toHaveTextContent("/anthropic/v1/messages");
     expect(screen.getByText("请求数")).toBeInTheDocument();
     expect(screen.getAllByText("150")).toHaveLength(2);
-    await user.type(screen.getByPlaceholderText("搜索请求 ID、模型或账号"), "messages");
+    expect(screen.getByText("缓存命中率 60.0%")).toBeInTheDocument();
+    await user.hover(within(logRow).getByText("150"));
+    expect(await screen.findByText("缓存输入 Token")).toBeInTheDocument();
+    expect(screen.getByText("未缓存输入 Token")).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("搜索请求 ID、模型、账号或会话"), "messages");
     await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({ search: "messages", page: 1 }), true));
   });
 

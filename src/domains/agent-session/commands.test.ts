@@ -7,14 +7,15 @@ vi.mock("../../platform/tauri/client", () => ({
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
-import { usageCommands } from "./commands";
+import { agentSessionCommands } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
 
-describe("usageCommands contract", () => {
-  it("reads usage summaries through the typed Tauri boundary", async () => {
-    invokeMock.mockResolvedValueOnce([]);
-    expect(await usageCommands.summary()).toEqual([]);
-    expect(invokeMock).toHaveBeenCalledWith("usage_summary", undefined);
+describe("agentSessionCommands contract", () => {
+  it("maps pagination and search to the Rust filter", async () => {
+    await agentSessionCommands.list({ page: 2, pageSize: 25, search: "ses_test" });
+    expect(invokeMock).toHaveBeenCalledWith("list_agent_sessions", {
+      filter: { page: 2, page_size: 25, search: "ses_test" },
+    });
   });
 });

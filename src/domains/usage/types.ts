@@ -9,6 +9,11 @@ export type UsageSummaryRow = {
   upstream_model: string | null;
   request_count: number;
   known_tokens: number;
+  input_tokens: number;
+  input_cached_tokens: number;
+  input_uncached_tokens: number;
+  cache_measured_input_tokens: number;
+  output_tokens: number;
   unknown_count: number;
   estimated_cost: number;
 };

@@ -1,12 +1,10 @@
 import { useMemo, useState } from "react";
-import { Button, Select, Toast, Typography } from "@douyinfe/semi-ui-19";
-import { IconRefresh } from "@douyinfe/semi-icons";
+import { Button, Select, Typography } from "@douyinfe/semi-ui-19";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod } from "../../domains/usage/types";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay } from "./usagePresentation";
-import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import styles from "./UsageCostPage.module.css";
 
 const { Paragraph, Title } = Typography;
@@ -22,17 +20,10 @@ export function UsageCostPage() {
   const days = useMemo(() => groupUsageByDay(rows), [rows]);
   const models = useMemo(() => groupUsageByModel(rows), [rows]);
   const channels = useMemo(() => groupUsageByChannel(rows), [rows]);
-  const average = summary.requests > 0 ? summary.cost / summary.requests : 0;
+  const cacheHitRate = summary.cacheMeasuredInputTokens > 0
+    ? summary.cachedInputTokens / summary.cacheMeasuredInputTokens
+    : null;
   const periodLabel = period === "today" ? t("今天") : period === "7d" ? t("最近 7 天") : t("本月");
-
-  const analyze = async () => {
-    try {
-      const count = await usage.analyze.mutateAsync();
-      Toast.success(t("用量分析完成，更新 {count} 条记录", { count }));
-    } catch (error) {
-      Toast.error(t("用量分析失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
-    }
-  };
 
   return <main className={styles.page}>
     <header className={styles.pageHeading}>
@@ -43,14 +34,13 @@ export function UsageCostPage() {
         optionList={[{ value: "today", label: t("今天") }, { value: "7d", label: t("最近 7 天") }, { value: "month", label: t("本月") }]}
         onChange={(value) => setPeriod(value as UsagePeriod)}
       />
-      <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconRefresh />} loading={usage.analyze.isPending} onClick={() => void analyze()}>{t("重新分析")}</Button>
     </header>
 
     <section className={styles.stats} aria-label={t("用量统计")}>
       <Stat label={t("{period}预估费用", { period: periodLabel })} value={formatCost(summary.cost)} meta={t("基于已知价格")} />
-      <Stat label={t("{period} Token 消耗", { period: periodLabel })} value={formatCompact(summary.tokens, language)} meta={summary.unknown > 0 ? t("{count} 次请求用量未知", { count: summary.unknown }) : t("用量记录完整")} />
+      <Stat label={t("{period} Token 消耗", { period: periodLabel })} value={formatCompact(summary.tokens, language)} meta={t("输入 {input} · 输出 {output}", { input: formatCompact(summary.inputTokens, language), output: formatCompact(summary.outputTokens, language) })} />
       <Stat label={t("{period}请求量", { period: periodLabel })} value={formatInteger(summary.requests, language)} meta={t("本地代理记录")} />
-      <Stat label={t("平均单次成本")} value={formatCost(average, 4)} meta={t("按已记录请求计算")} />
+      <Stat label={t("缓存命中率")} value={cacheHitRate == null ? "—" : formatPercent(cacheHitRate)} meta={t("缓存 {cached} · 未缓存 {uncached}", { cached: formatCompact(summary.cachedInputTokens, language), uncached: formatCompact(summary.uncachedInputTokens, language) })} />
     </section>
 
     {usage.query.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{usage.query.error.message}</span><Button onClick={() => void usage.query.refetch()}>{t("重试")}</Button></div> : null}

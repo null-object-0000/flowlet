@@ -41,6 +41,7 @@ export function useRequestLogActions() {
     onSuccess: () => Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.requestLog.all }),
       queryClient.invalidateQueries({ queryKey: queryKeys.usage.all }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.all }),
     ]),
   });
   return { cleanup };

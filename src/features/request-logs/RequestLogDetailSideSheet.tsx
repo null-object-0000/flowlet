@@ -2,7 +2,18 @@ import { useState, type ReactNode } from "react";
 import { Button, CodeHighlight, JsonViewer, SideSheet, Tabs, Tag, Toast } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
 import type { RequestLogRow } from "../../domains/request-log/types";
-import { formatCapturedBody, formatCapturedJson, formatDuration, formatLogTime, isSuccessfulLog, safeLogText } from "./logPresentation";
+import {
+  calculateCacheHitRate,
+  calculateOutputTokenRate,
+  formatCapturedBody,
+  formatCapturedJson,
+  formatDuration,
+  formatLogTime,
+  formatPercentage,
+  formatTokenRate,
+  isSuccessfulLog,
+  safeLogText,
+} from "./logPresentation";
 import { useRequestLogDetail } from "./useRequestLogs";
 import styles from "./RequestLogDetailSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -50,7 +61,13 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
                 <div className={styles.detailGrid}>
                   <DetailItem label={t("开始时间")} value={formatLogTime(finalRow.created_at, language)} />
                   <DetailItem label={t("总耗时")} value={formatDuration(finalRow.duration_ms ?? finalRow.latency_ms)} />
-                  <DetailItem label={t("输入 / 输出 Token")} value={`${formatNumber(finalRow.input_tokens, language)} / ${formatNumber(finalRow.output_tokens, language)}`} />
+                  <DetailItem label="TTFT" value={formatDuration(finalRow.ttft_ms)} />
+                  <DetailItem label={t("输出速率")} value={formatTokenRate(calculateOutputTokenRate(finalRow))} />
+                  <DetailItem label={t("输入 Token")} value={formatNumber(finalRow.input_tokens, language)} />
+                  <DetailItem label={t("缓存命中率")} value={formatPercentage(calculateCacheHitRate(finalRow))} />
+                  <DetailItem label={t("缓存输入 Token")} value={formatNumber(finalRow.input_cached_tokens, language)} />
+                  <DetailItem label={t("未缓存输入 Token")} value={formatNumber(finalRow.input_uncached_tokens, language)} />
+                  <DetailItem label={t("输出 Token")} value={formatNumber(finalRow.output_tokens, language)} />
                   <DetailItem label={t("预估费用")} value={formatCost(finalRow.estimated_cost)} />
                 </div>
               </DetailSection>

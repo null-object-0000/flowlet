@@ -5,7 +5,7 @@ import { DEFAULT_REQUEST_LOG_FILTER, type RequestLogFilter, type RequestLogStatu
 import { ClearRequestLogsModal } from "../../features/request-logs/ClearRequestLogsModal";
 import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLogDetailSideSheet";
 import { RequestLogTable } from "../../features/request-logs/RequestLogTable";
-import { formatDuration, safeLogText } from "../../features/request-logs/logPresentation";
+import { formatDuration, formatPercentage, formatTokenRate, safeLogText } from "../../features/request-logs/logPresentation";
 import { useRequestLogActions, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import styles from "./RequestLogsPage.module.css";
@@ -23,8 +23,9 @@ const TIME_OPTIONS: Array<{ value: RequestLogTimeRange; label: string }> = [
 
 export function RequestLogsPage() {
   const { language, t } = useAppPreferences();
-  const [filter, setFilter] = useState<RequestLogFilter>(DEFAULT_REQUEST_LOG_FILTER);
-  const [searchDraft, setSearchDraft] = useState("");
+  const initialSearch = initialSearchFromHash();
+  const [filter, setFilter] = useState<RequestLogFilter>(() => ({ ...DEFAULT_REQUEST_LOG_FILTER, search: initialSearch }));
+  const [searchDraft, setSearchDraft] = useState(initialSearch);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
@@ -68,12 +69,13 @@ export function RequestLogsPage() {
       <section className={styles.stats} aria-label={t("日志统计")}>
         <StatCard label={t("请求数")} value={formatInteger(summary?.requestCount, language)} hint={t("失败 {count} 条", { count: formatInteger(summary?.errorCount, language) })} />
         <StatCard label={t("成功率")} value={formatRate(summary?.successCount, summary?.requestCount)} hint={t("当前筛选范围")} success />
-        <StatCard label={t("平均响应耗时")} value={formatDuration(summary?.averageDurationMs ?? null)} hint={t("基于已完成请求")} />
-        <StatCard label={t("Token 消耗")} value={formatCompactNumber(summary?.knownTokens, language)} hint={`¥${(summary?.estimatedCost ?? 0).toFixed(4)}`} />
+        <StatCard label={t("平均总耗时")} value={formatDuration(summary?.averageDurationMs ?? null)} hint={`TTFT ${formatDuration(summary?.averageTtftMs ?? null)}`} />
+        <StatCard label={t("平均输出速率")} value={formatTokenRate(summary?.averageOutputTokensPerSecond)} hint={t("从首 Token 到完成")} />
+        <StatCard label={t("Token 消耗")} value={formatCompactNumber(summary?.knownTokens, language)} hint={t("缓存命中率 {rate}", { rate: formatPercentage(summary?.cacheHitRate) })} />
       </section>
 
       <section className={styles.toolbar} aria-label={t("日志筛选")}>
-        <Input className={styles.search} prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索请求 ID、模型或账号")} showClear onChange={setSearchDraft} />
+        <Input className={styles.search} prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索请求 ID、模型、账号或会话")} showClear onChange={setSearchDraft} />
         <Select value={filter.timeRange} optionList={TIME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))} onChange={(value) => apply({ timeRange: value as RequestLogTimeRange })} aria-label={t("时间")} />
         <Select
           value={clientSelectValue}
@@ -150,4 +152,10 @@ function formatCompactNumber(value: number | undefined, language: "zh-CN" | "en-
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(2)}M`;
   if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K`;
   return amount.toLocaleString(language);
+}
+
+function initialSearchFromHash() {
+  const queryIndex = window.location.hash.indexOf("?");
+  if (queryIndex < 0) return "";
+  return new URLSearchParams(window.location.hash.slice(queryIndex + 1)).get("search") ?? "";
 }

@@ -37,6 +37,7 @@ export type RequestLogRow = {
   route_reason: string | null;
   created_at: string;
   ttfb_ms: number | null;
+  ttft_ms: number | null;
   duration_ms: number | null;
   attempt_seq: number;
   req_headers_json: string | null;
@@ -45,6 +46,8 @@ export type RequestLogRow = {
   res_body_b64: string | null;
   is_last_attempt: boolean;
   input_tokens: number | null;
+  input_cached_tokens: number | null;
+  input_uncached_tokens: number | null;
   output_tokens: number | null;
   total_tokens: number | null;
   estimated_cost: number | null;
@@ -55,7 +58,13 @@ export type RequestLogSummary = {
   successCount: number;
   errorCount: number;
   averageDurationMs: number | null;
+  averageTtftMs: number | null;
+  averageOutputTokensPerSecond: number | null;
   knownTokens: number;
+  inputTokens: number;
+  inputCachedTokens: number;
+  inputUncachedTokens: number;
+  cacheHitRate: number | null;
   estimatedCost: number;
 };
 

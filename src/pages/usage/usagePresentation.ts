@@ -3,6 +3,11 @@ import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
 export type UsageAggregate = {
   cost: number;
   tokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  uncachedInputTokens: number;
+  cacheMeasuredInputTokens: number;
+  outputTokens: number;
   requests: number;
   unknown: number;
 };
@@ -27,9 +32,14 @@ export function summarizeUsage(rows: UsageSummaryRow[]): UsageAggregate {
   return rows.reduce((total, row) => ({
     cost: total.cost + finite(row.estimated_cost),
     tokens: total.tokens + finite(row.known_tokens),
+    inputTokens: total.inputTokens + finite(row.input_tokens),
+    cachedInputTokens: total.cachedInputTokens + finite(row.input_cached_tokens),
+    uncachedInputTokens: total.uncachedInputTokens + finite(row.input_uncached_tokens),
+    cacheMeasuredInputTokens: total.cacheMeasuredInputTokens + finite(row.cache_measured_input_tokens),
+    outputTokens: total.outputTokens + finite(row.output_tokens),
     requests: total.requests + finite(row.request_count),
     unknown: total.unknown + finite(row.unknown_count),
-  }), { cost: 0, tokens: 0, requests: 0, unknown: 0 });
+  }), { cost: 0, tokens: 0, inputTokens: 0, cachedInputTokens: 0, uncachedInputTokens: 0, cacheMeasuredInputTokens: 0, outputTokens: 0, requests: 0, unknown: 0 });
 }
 
 export function groupUsageByModel(rows: UsageSummaryRow[]): UsageBreakdown[] {
@@ -44,9 +54,14 @@ export function groupUsageByDay(rows: UsageSummaryRow[]): UsageDay[] {
   const groups = new Map<string, UsageAggregate>();
   for (const row of rows) {
     const key = row.date.slice(0, 10);
-    const current = groups.get(key) ?? { cost: 0, tokens: 0, requests: 0, unknown: 0 };
+    const current = groups.get(key) ?? emptyAggregate();
     current.cost += finite(row.estimated_cost);
     current.tokens += finite(row.known_tokens);
+    current.inputTokens += finite(row.input_tokens);
+    current.cachedInputTokens += finite(row.input_cached_tokens);
+    current.uncachedInputTokens += finite(row.input_uncached_tokens);
+    current.cacheMeasuredInputTokens += finite(row.cache_measured_input_tokens);
+    current.outputTokens += finite(row.output_tokens);
     current.requests += finite(row.request_count);
     current.unknown += finite(row.unknown_count);
     groups.set(key, current);
@@ -62,9 +77,14 @@ function groupUsage(
   const groups = new Map<string, Omit<UsageBreakdown, "share">>();
   for (const row of rows) {
     const key = keyOf(row);
-    const current = groups.get(key) ?? { key, label: labelOf(row), cost: 0, tokens: 0, requests: 0, unknown: 0 };
+    const current = groups.get(key) ?? { key, label: labelOf(row), ...emptyAggregate() };
     current.cost += finite(row.estimated_cost);
     current.tokens += finite(row.known_tokens);
+    current.inputTokens += finite(row.input_tokens);
+    current.cachedInputTokens += finite(row.input_cached_tokens);
+    current.uncachedInputTokens += finite(row.input_uncached_tokens);
+    current.cacheMeasuredInputTokens += finite(row.cache_measured_input_tokens);
+    current.outputTokens += finite(row.output_tokens);
     current.requests += finite(row.request_count);
     current.unknown += finite(row.unknown_count);
     groups.set(key, current);
@@ -78,6 +98,10 @@ function groupUsage(
 }
 
 function finite(value: number) { return Number.isFinite(value) ? value : 0; }
+
+function emptyAggregate(): UsageAggregate {
+  return { cost: 0, tokens: 0, inputTokens: 0, cachedInputTokens: 0, uncachedInputTokens: 0, cacheMeasuredInputTokens: 0, outputTokens: 0, requests: 0, unknown: 0 };
+}
 
 function localDateKey(value: Date) {
   const year = value.getFullYear();

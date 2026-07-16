@@ -1,5 +1,6 @@
+import { Tooltip } from "@douyinfe/semi-ui-19";
 import type { RequestLogRow } from "../../domains/request-log/types";
-import { formatDuration, isSuccessfulLog } from "./logPresentation";
+import { calculateCacheHitRate, calculateOutputTokenRate, formatDuration, formatPercentage, formatTokenRate, isSuccessfulLog } from "./logPresentation";
 import styles from "./RequestLogTable.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
@@ -19,7 +20,7 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
         <span role="columnheader">{t("模型 / 接口")}</span>
         <span role="columnheader">{t("渠道 / 账号")}</span>
         <span role="columnheader">{t("状态")}</span>
-        <span role="columnheader">{t("耗时")}</span>
+        <span role="columnheader">{t("性能")}</span>
         <span role="columnheader">Token</span>
         <span role="columnheader">{t("费用")}</span>
       </div>
@@ -53,12 +54,31 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
               <small>{row.account_name || row.account_id || "-"}</small>
             </span>
             <Status row={row} />
-            <span className={styles.number}>{formatDuration(row.duration_ms ?? row.latency_ms)}</span>
-            <span className={styles.number}>{formatTokens(row.total_tokens, language)}</span>
+            <span className={styles.metricCell}>
+              <strong>{formatDuration(row.duration_ms ?? row.latency_ms)}</strong>
+              <small>{row.ttft_ms == null ? "TTFT —" : `TTFT ${formatDuration(row.ttft_ms)}`} · {formatTokenRate(calculateOutputTokenRate(row))}</small>
+            </span>
+            <Tooltip content={<TokenBreakdown row={row} language={language} />} showArrow>
+              <span className={styles.tokenTotal}>{formatTokens(row.total_tokens, language)}</span>
+            </Tooltip>
             <span className={styles.number}>{formatCost(row.estimated_cost)}</span>
           </button>
         )) : null}
       </div>
+    </div>
+  );
+}
+
+function TokenBreakdown({ row, language }: { row: RequestLogRow; language: "zh-CN" | "en-US" }) {
+  const { t } = useAppPreferences();
+  return (
+    <div className={styles.tokenBreakdown}>
+      <strong>{t("总 Token")} {formatTokens(row.total_tokens, language)}</strong>
+      <span><small>{t("输入 Token")}</small><b>{formatTokens(row.input_tokens, language)}</b></span>
+      <span><small>{t("缓存输入 Token")}</small><b>{formatTokens(row.input_cached_tokens, language)}</b></span>
+      <span><small>{t("未缓存输入 Token")}</small><b>{formatTokens(row.input_uncached_tokens, language)}</b></span>
+      <span><small>{t("输出 Token")}</small><b>{formatTokens(row.output_tokens, language)}</b></span>
+      <span><small>{t("缓存命中率")}</small><b>{formatPercentage(calculateCacheHitRate(row))}</b></span>
     </div>
   );
 }
@@ -72,7 +92,7 @@ function Status({ row }: { row: RequestLogRow }) {
 function SkeletonRow({ index }: { index: number }) {
   return (
     <div className={`${styles.grid} ${styles.row} ${styles.skeleton}`} aria-hidden="true">
-      {Array.from({ length: 7 }, (_, column) => <span key={column} style={{ width: `${48 + ((index + column) % 4) * 12}%` }} />)}
+      {Array.from({ length: 8 }, (_, column) => <span key={column} style={{ width: `${48 + ((index + column) % 4) * 12}%` }} />)}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 .scrollArea { min-width: 920px; min-height: 0; height: 100%; display: grid; grid-template-rows: 36px minmax(0, 1fr); overflow: hidden; }
-.grid { display: grid; grid-template-columns: 105px minmax(100px, 0.8fr) minmax(155px, 1.25fr) minmax(140px, 1.05fr) 76px 74px 92px 72px; align-items: center; column-gap: 12px; }
+.grid { display: grid; grid-template-columns: 92px minmax(88px, .65fr) minmax(135px, 1.05fr) minmax(120px, .9fr) 64px 112px 76px 66px; align-items: center; column-gap: 8px; }
 .head { min-height: 36px; padding: 0 13px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 11px; font-weight: 600; }
 .body { min-height: 0; overflow: auto; }
 .row { width: 100%; min-height: 45px; padding: 0 13px; border: 0; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: transparent; font: inherit; text-align: left; cursor: pointer; }
@@ -7,6 +7,16 @@
 .row:hover, .row:focus-visible { background: var(--semi-color-fill-0); outline: none; }
 .row:focus-visible { box-shadow: inset 3px 0 var(--semi-color-primary); }
 .time, .number { color: var(--flowlet-color-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.metricCell { min-width: 0; display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+.metricCell strong, .metricCell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metricCell strong { color: var(--flowlet-color-text); font-size: 12px; font-weight: 650; }
+.metricCell small { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.tokenTotal { width: fit-content; color: var(--flowlet-color-text-secondary); border-bottom: 1px dotted var(--flowlet-color-text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.4; white-space: nowrap; cursor: help; }
+.tokenBreakdown { min-width: 190px; display: grid; gap: 7px; }
+.tokenBreakdown > strong { padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,.18); font-size: 12px; }
+.tokenBreakdown > span { display: flex; align-items: center; justify-content: space-between; gap: 18px; font-variant-numeric: tabular-nums; }
+.tokenBreakdown small { color: rgba(255,255,255,.72); font-size: 11px; }
+.tokenBreakdown b { color: #fff; font-size: 11px; font-weight: 650; }
 .clientCell { min-width: 0; display: grid; gap: 2px; }
 .clientCell strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .primaryCell { min-width: 0; display: grid; gap: 2px; }

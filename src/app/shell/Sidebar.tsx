@@ -3,6 +3,7 @@ import { Typography } from "@douyinfe/semi-ui-19";
 import {
   IconHistogram,
   IconHome,
+  IconComment,
   IconList,
   IconServer,
   IconSetting,
@@ -11,6 +12,7 @@ import { NavLink } from "react-router-dom";
 import navStyles from "./Nav.module.css";
 import styles from "./Sidebar.module.css";
 import { useAppPreferences } from "../preferences/AppPreferences";
+import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 
 const { Text, Title } = Typography;
 
@@ -18,6 +20,7 @@ const navItems: Array<{ to: string; label: string; icon: ReactNode }> = [
   { to: "/", label: "概览", icon: <IconHome /> },
   { to: "/models", label: "模型服务", icon: <IconServer /> },
   { to: "/logs", label: "请求日志", icon: <IconList /> },
+  { to: "/sessions", label: "会话管理", icon: <IconComment /> },
   { to: "/usage", label: "用量成本", icon: <IconHistogram /> },
 ];
 
@@ -26,7 +29,7 @@ export function Sidebar() {
   return (
     <div className={styles.inner}>
       <div className={styles.brand}>
-        <span className={styles.mark}>F</span>
+        <FlowletLogo variant="brand" />
         <div className={styles.brandCopy}>
           <Title heading={5} style={{ margin: 0 }}>Flowlet</Title>
           <Text type="tertiary" size="small">v0.1.0</Text>

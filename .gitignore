@@ -151,3 +151,5 @@ vite.config.ts.timestamp-*
 .codex/
 .agents/
 .skills/
+
+.cargo-target-check/

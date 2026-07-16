@@ -26,8 +26,8 @@ const AGENTS: Array<{
     kind: "claude-code",
   },
   {
-    name: "OpenCode CLI",
-    description: "命令行接入",
+    name: "OpenCode",
+    description: "CLI / Desktop 接入",
     icon: <span className={`${styles.brandIcon} ${styles.openCodeMark}`} aria-hidden="true" />,
     iconClassName: styles.openCodeIcon,
     kind: "opencode",

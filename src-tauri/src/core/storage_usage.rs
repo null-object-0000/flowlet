@@ -14,7 +14,9 @@ fn repair_time_clause(column: &str, time_range: &str) -> String {
     let condition = match time_range {
         "1h" => "datetime({column}) >= datetime('now', '-1 hour')",
         "6h" => "datetime({column}) >= datetime('now', '-6 hours')",
-        "today" => "datetime({column}, 'localtime') >= datetime('now', 'localtime', 'start of day')",
+        "today" => {
+            "datetime({column}, 'localtime') >= datetime('now', 'localtime', 'start of day')"
+        }
         "7d" => "datetime({column}) >= datetime('now', '-7 days')",
         _ => "1 = 1",
     };
@@ -26,7 +28,11 @@ fn agent_session_from_json(headers_json: &str) -> Option<(String, String, Option
     let headers = parsed
         .as_object()?
         .iter()
-        .filter_map(|(key, value)| value.as_str().map(|value| (key.to_ascii_lowercase(), value)))
+        .filter_map(|(key, value)| {
+            value
+                .as_str()
+                .map(|value| (key.to_ascii_lowercase(), value))
+        })
         .collect::<std::collections::HashMap<_, _>>();
     let valid = |name: &str| {
         headers.get(name).and_then(|value| {
@@ -50,7 +56,11 @@ fn agent_session_from_json(headers_json: &str) -> Option<(String, String, Option
     let session_id = valid("x-opencode-session")
         .or_else(|| valid("x-session-id"))
         .or_else(|| valid("x-session-affinity"))?;
-    Some(("opencode".to_string(), session_id, valid("x-parent-session-id")))
+    Some((
+        "opencode".to_string(),
+        session_id,
+        valid("x-parent-session-id"),
+    ))
 }
 
 /// 根据内存中的价格表（仅来自 config.json）计算单次用量记录的费用估算。
@@ -70,10 +80,7 @@ fn estimate_cost(
         .iter()
         .find(|p| p.channel_id == channel_id && p.upstream_model == upstream_model)?;
 
-    let input_uncached = input_uncached_tokens
-        .or(input_tokens)
-        .unwrap_or(0)
-        .max(0) as f64;
+    let input_uncached = input_uncached_tokens.or(input_tokens).unwrap_or(0).max(0) as f64;
     let input_cached = input_cached_tokens.unwrap_or(0).max(0) as f64;
     let output = output_tokens.unwrap_or(0).max(0) as f64;
 
@@ -84,7 +91,8 @@ fn estimate_cost(
     Some(cost)
 }
 
-impl Storage {    pub fn save_balance_snapshot(
+impl Storage {
+    pub fn save_balance_snapshot(
         &self,
         snapshot: &AccountBalanceSnapshot,
     ) -> Result<(), StorageError> {
@@ -292,7 +300,10 @@ impl Storage {    pub fn save_balance_snapshot(
         &self,
         filter: AgentSessionsFilter,
     ) -> Result<AgentSessionsPageResult, StorageError> {
-        let connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
         let page = filter.page.max(1);
         let page_size = filter.page_size.clamp(1, 8);
         let offset = i64::from((page - 1) * page_size);
@@ -347,28 +358,39 @@ impl Storage {    pub fn save_balance_snapshot(
             LIMIT ?3 OFFSET ?4
             "#,
         )?;
-        let mapped = stmt.query_map(params![pattern, client_id, i64::from(page_size), offset], |row| {
-            Ok(AgentSessionRow {
-                agent_type: row.get(0)?,
-                session_id: row.get(1)?,
-                parent_session_id: row.get(2)?,
-                client_id: row.get(3)?,
-                client_name: row.get(4)?,
-                started_at: row.get(5)?,
-                updated_at: row.get(6)?,
-                request_count: row.get(7)?,
-                success_count: row.get(8)?,
-                error_count: row.get(9)?,
-                known_tokens: row.get(10)?,
-                estimated_cost: row.get(11)?,
-            })
-        })?;
+        let mapped = stmt.query_map(
+            params![pattern, client_id, i64::from(page_size), offset],
+            |row| {
+                Ok(AgentSessionRow {
+                    agent_type: row.get(0)?,
+                    session_id: row.get(1)?,
+                    parent_session_id: row.get(2)?,
+                    client_id: row.get(3)?,
+                    client_name: row.get(4)?,
+                    started_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    request_count: row.get(7)?,
+                    success_count: row.get(8)?,
+                    error_count: row.get(9)?,
+                    known_tokens: row.get(10)?,
+                    estimated_cost: row.get(11)?,
+                })
+            },
+        )?;
         let rows = mapped.collect::<Result<Vec<_>, _>>()?;
-        Ok(AgentSessionsPageResult { rows, total, page, page_size })
+        Ok(AgentSessionsPageResult {
+            rows,
+            total,
+            page,
+            page_size,
+        })
     }
 
     pub fn list_agent_session_clients(&self) -> Result<Vec<LogFilterClient>, StorageError> {
-        let connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             r#"
             SELECT COALESCE(client_id, ''), COALESCE(MAX(client_name), '未知') AS display_name
@@ -379,7 +401,12 @@ impl Storage {    pub fn save_balance_snapshot(
             ORDER BY display_name = '未知', display_name, client_id
             "#,
         )?;
-        let rows = stmt.query_map([], |row| Ok(LogFilterClient { id: row.get(0)?, name: row.get(1)? }))?;
+        let rows = stmt.query_map([], |row| {
+            Ok(LogFilterClient {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -628,8 +655,7 @@ impl Storage {    pub fn save_balance_snapshot(
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        let mut stmt =
-            connection.prepare("SELECT value FROM app_meta WHERE key = ?1")?;
+        let mut stmt = connection.prepare("SELECT value FROM app_meta WHERE key = ?1")?;
         let mut rows = stmt.query_map([key], |row| row.get::<_, String>(0))?;
         Ok(rows.next().transpose()?)
     }
@@ -654,7 +680,10 @@ impl Storage {    pub fn save_balance_snapshot(
 
     /// Repair historical Claude Code and OpenCode session attribution from
     /// captured request headers. Requests without captured headers cannot be recovered.
-    pub fn repair_agent_sessions(&self, time_range: &str) -> Result<AgentSessionRepairResult, StorageError> {
+    pub fn repair_agent_sessions(
+        &self,
+        time_range: &str,
+    ) -> Result<AgentSessionRepairResult, StorageError> {
         let connection = self
             .connection
             .lock()
@@ -680,7 +709,8 @@ impl Storage {    pub fn save_balance_snapshot(
         let mut repaired_requests = 0usize;
         let mut repaired_logs = 0usize;
         for (request_id, headers_json) in rows {
-            let Some((agent_type, session_id, parent_session_id)) = agent_session_from_json(&headers_json)
+            let Some((agent_type, session_id, parent_session_id)) =
+                agent_session_from_json(&headers_json)
             else {
                 continue;
             };
@@ -744,24 +774,25 @@ impl Storage {    pub fn save_balance_snapshot(
                 "#,
                 repair_time_clause("rl.created_at", time_range)
             ))?;
-            let rows = stmt.query_map([], |row| {
-                Ok(CapturedUsageRow {
-                    request_id: row.get(0)?,
-                    client_id: row.get(1)?,
-                    client_name: row.get(2)?,
-                    channel_id: row.get(3)?,
-                    channel_name: row.get(4)?,
-                    account_id: row.get(5)?,
-                    account_name: row.get(6)?,
-                    client_protocol: row.get(7)?,
-                    upstream_protocol: row.get(8)?,
-                    virtual_model: row.get(9)?,
-                    upstream_model: row.get(10)?,
-                    is_stream: row.get::<_, i64>(11)? != 0,
-                    res_body_b64: row.get(12)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(CapturedUsageRow {
+                        request_id: row.get(0)?,
+                        client_id: row.get(1)?,
+                        client_name: row.get(2)?,
+                        channel_id: row.get(3)?,
+                        channel_name: row.get(4)?,
+                        account_id: row.get(5)?,
+                        account_name: row.get(6)?,
+                        client_protocol: row.get(7)?,
+                        upstream_protocol: row.get(8)?,
+                        virtual_model: row.get(9)?,
+                        upstream_model: row.get(10)?,
+                        is_stream: row.get::<_, i64>(11)? != 0,
+                        res_body_b64: row.get(12)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             rows
         };
 
@@ -1030,7 +1061,7 @@ impl Storage {    pub fn save_balance_snapshot(
         let mut stmt = connection.prepare(
             r#"
             SELECT
-                strftime('%Y-%m-%dT%H:00:00', request_logs.created_at, 'localtime') AS usage_date,
+                strftime('%Y-%m-%d', request_logs.created_at, 'localtime') AS usage_date,
                 usage_records.client_id,
                 usage_records.client_name,
                 usage_records.channel_id,
@@ -1050,11 +1081,9 @@ impl Storage {    pub fn save_balance_snapshot(
             FROM usage_records
             LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
                                   AND request_logs.is_last_attempt = 1
-            WHERE datetime(request_logs.created_at) >= datetime('now', '-31 days')
             GROUP BY usage_date, usage_records.client_id, usage_records.channel_id,
                      usage_records.account_id, usage_records.upstream_model
             ORDER BY usage_date DESC, request_count DESC
-            LIMIT 20000
             "#,
         )?;
         let rows = stmt.query_map([], |row| {
@@ -1210,7 +1239,10 @@ impl Storage {    pub fn save_balance_snapshot(
     /// 注意：列表查询有意排除 `req_headers_json` / `req_body_b64` / `res_headers_json` / `res_body_b64`
     /// 四个大字段（单条最多 1MB+），避免首次加载数百毫秒 ～ 数秒的卡顿。这些大字段仅在详情抽屉
     /// 通过 `list_request_logs_by_request_id` 单独拉取。
-    pub fn list_request_logs_page(&self, filter: LogsFilter) -> Result<LogsPageResult, StorageError> {
+    pub fn list_request_logs_page(
+        &self,
+        filter: LogsFilter,
+    ) -> Result<LogsPageResult, StorageError> {
         let connection = self
             .connection
             .lock()
@@ -1224,8 +1256,12 @@ impl Storage {    pub fn save_balance_snapshot(
         let mut refs: Vec<&dyn rusqlite::ToSql> = Vec::new();
 
         let status_clause = match filter.status.as_str() {
-            "success" => Some("(rl.status >= 200 AND rl.status < 400 AND rl.error_message IS NULL)"),
-            "error" => Some("(rl.status IS NULL OR rl.status >= 400 OR rl.error_message IS NOT NULL)"),
+            "success" => {
+                Some("(rl.status >= 200 AND rl.status < 400 AND rl.error_message IS NULL)")
+            }
+            "error" => {
+                Some("(rl.status IS NULL OR rl.status >= 400 OR rl.error_message IS NOT NULL)")
+            }
             _ => None,
         };
 
@@ -1344,20 +1380,22 @@ impl Storage {    pub fn save_balance_snapshot(
         let summary = connection.query_row(
             &summary_sql,
             rusqlite::params_from_iter(refs.iter()),
-            |row| Ok(LogsSummary {
-                request_count: row.get(0)?,
-                success_count: row.get(1)?,
-                error_count: row.get(2)?,
-                average_duration_ms: row.get(3)?,
-                average_ttft_ms: row.get(4)?,
-                average_output_tokens_per_second: row.get(5)?,
-                known_tokens: row.get(6)?,
-                input_tokens: row.get(7)?,
-                input_cached_tokens: row.get(8)?,
-                input_uncached_tokens: row.get(9)?,
-                cache_hit_rate: row.get(10)?,
-                estimated_cost: row.get(11)?,
-            }),
+            |row| {
+                Ok(LogsSummary {
+                    request_count: row.get(0)?,
+                    success_count: row.get(1)?,
+                    error_count: row.get(2)?,
+                    average_duration_ms: row.get(3)?,
+                    average_ttft_ms: row.get(4)?,
+                    average_output_tokens_per_second: row.get(5)?,
+                    known_tokens: row.get(6)?,
+                    input_tokens: row.get(7)?,
+                    input_cached_tokens: row.get(8)?,
+                    input_uncached_tokens: row.get(9)?,
+                    cache_hit_rate: row.get(10)?,
+                    estimated_cost: row.get(11)?,
+                })
+            },
         )?;
 
         // 分页查询
@@ -1392,53 +1430,50 @@ impl Storage {    pub fn save_balance_snapshot(
         list_refs.push(&offset);
 
         let list_start = std::time::Instant::now();
-        let rows = stmt.query_map(
-            rusqlite::params_from_iter(list_refs.iter()),
-            |row| {
-                Ok(RequestLogRow {
-                    id: row.get(0)?,
-                    request_id: row.get(1)?,
-                    client_id: row.get(2)?,
-                    client_name: row.get(3)?,
-                    channel_id: row.get(4)?,
-                    channel_name: row.get(5)?,
-                    account_id: row.get(6)?,
-                    account_name: row.get(7)?,
-                    client_protocol: row.get(8)?,
-                    upstream_protocol: row.get(9)?,
-                    virtual_model: row.get(10)?,
-                    public_model: row.get(11)?,
-                    upstream_model: row.get(12)?,
-                    request_type: row.get(13)?,
-                    method: row.get(14)?,
-                    path: row.get(15)?,
-                    status: row.get(16)?,
-                    latency_ms: row.get(17)?,
-                    is_stream: row.get::<_, i64>(18)? != 0,
-                    error_message: row.get(19)?,
-                    fallback_count: row.get(20)?,
-                    route_reason: row.get(21)?,
-                    created_at: row.get(22)?,
-                    ttfb_ms: row.get(23)?,
-                    duration_ms: row.get(24)?,
-                    attempt_seq: row.get(25)?,
-                    // 列表不拉四个大字段 — 详情抽屉用 list_request_logs_by_request_id 单独拉
-                    req_headers_json: None,
-                    req_body_b64: None,
-                    res_headers_json: None,
-                    res_body_b64: None,
-                    is_last_attempt: row.get::<_, i64>(26)? != 0,
-                    input_tokens: row.get(27)?,
-                    output_tokens: row.get(28)?,
-                    total_tokens: row.get(29)?,
-                    estimated_cost: row.get(30)?,
-                    ttft_ms: row.get(31)?,
-                    input_cached_tokens: row.get(32)?,
-                    input_uncached_tokens: row.get(33)?,
-                    upstream_url: row.get(34)?,
-                })
-            },
-        )?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(list_refs.iter()), |row| {
+            Ok(RequestLogRow {
+                id: row.get(0)?,
+                request_id: row.get(1)?,
+                client_id: row.get(2)?,
+                client_name: row.get(3)?,
+                channel_id: row.get(4)?,
+                channel_name: row.get(5)?,
+                account_id: row.get(6)?,
+                account_name: row.get(7)?,
+                client_protocol: row.get(8)?,
+                upstream_protocol: row.get(9)?,
+                virtual_model: row.get(10)?,
+                public_model: row.get(11)?,
+                upstream_model: row.get(12)?,
+                request_type: row.get(13)?,
+                method: row.get(14)?,
+                path: row.get(15)?,
+                status: row.get(16)?,
+                latency_ms: row.get(17)?,
+                is_stream: row.get::<_, i64>(18)? != 0,
+                error_message: row.get(19)?,
+                fallback_count: row.get(20)?,
+                route_reason: row.get(21)?,
+                created_at: row.get(22)?,
+                ttfb_ms: row.get(23)?,
+                duration_ms: row.get(24)?,
+                attempt_seq: row.get(25)?,
+                // 列表不拉四个大字段 — 详情抽屉用 list_request_logs_by_request_id 单独拉
+                req_headers_json: None,
+                req_body_b64: None,
+                res_headers_json: None,
+                res_body_b64: None,
+                is_last_attempt: row.get::<_, i64>(26)? != 0,
+                input_tokens: row.get(27)?,
+                output_tokens: row.get(28)?,
+                total_tokens: row.get(29)?,
+                estimated_cost: row.get(30)?,
+                ttft_ms: row.get(31)?,
+                input_cached_tokens: row.get(32)?,
+                input_uncached_tokens: row.get(33)?,
+                upstream_url: row.get(34)?,
+            })
+        })?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -1446,7 +1481,11 @@ impl Storage {    pub fn save_balance_snapshot(
         }
         let list_ms = list_start.elapsed().as_millis();
         if list_ms > 500 {
-            tracing::warn!(list_ms, row_count = results.len(), "request_logs 分页查询慢");
+            tracing::warn!(
+                list_ms,
+                row_count = results.len(),
+                "request_logs 分页查询慢"
+            );
         }
 
         Ok(LogsPageResult {
@@ -1458,4 +1497,3 @@ impl Storage {    pub fn save_balance_snapshot(
         })
     }
 }
-

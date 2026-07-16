@@ -97,6 +97,7 @@ export function AgentAccessSideSheet({
           <Tabs.TabPane tab={t("{name} Desktop 接入", { name })} itemKey="desktop" disabled={isClaude} />
         </Tabs>
       }
+      headerStyle={{ paddingBottom: 0 }}
       width="min(680px, 92vw)"
       footer={null}
       bodyStyle={{ padding: 0 }}

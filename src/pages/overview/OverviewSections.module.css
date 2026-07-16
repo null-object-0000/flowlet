@@ -2,7 +2,7 @@
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: 258px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 236px;
   gap: 10px;
   overflow: hidden;
 }

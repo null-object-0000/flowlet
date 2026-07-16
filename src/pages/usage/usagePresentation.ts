@@ -14,6 +14,14 @@ export type UsageAggregate = {
 
 export type UsageBreakdown = UsageAggregate & { key: string; label: string; share: number };
 export type UsageDay = UsageAggregate & { date: string };
+export type UsageHeatmapCell = { bucket: string; tokens: number; level: 0 | 1 | 2 | 3 | 4; outside: boolean };
+export type UsageHeatmap = {
+  cells: UsageHeatmapCell[];
+  columns: number;
+  labels: Array<{ column: number; label: string }>;
+  granularity: "hour" | "day" | "month";
+  totalTokens: number;
+};
 
 export function filterUsageRows(rows: UsageSummaryRow[], period: UsagePeriod, now = new Date()): UsageSummaryRow[] {
   const today = localDateKey(now);
@@ -69,6 +77,66 @@ export function groupUsageByDay(rows: UsageSummaryRow[]): UsageDay[] {
   return [...groups.entries()].map(([date, value]) => ({ date, ...value })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+export function buildUsageHeatmap(rows: UsageSummaryRow[], period: UsagePeriod, now = new Date(), locale = "zh-CN"): UsageHeatmap {
+  const filtered = filterUsageRows(rows, period, now);
+  if (period === "today") return hourlyHeatmap(filtered, now);
+  if (period === "7d") return weeklyHeatmap(filtered, now);
+  return monthlyHeatmap(filtered, now, locale);
+}
+
+function hourlyHeatmap(rows: UsageSummaryRow[], now: Date): UsageHeatmap {
+  const today = localDateKey(now);
+  const tokensByHour = new Map<number, number>();
+  for (const row of rows) {
+    const hour = Number(row.date.slice(11, 13));
+    const key = Number.isInteger(hour) ? hour : 0;
+    tokensByHour.set(key, (tokensByHour.get(key) ?? 0) + finite(row.known_tokens));
+  }
+  const values = Array.from({ length: 24 }, (_, hour) => ({ bucket: `${today}T${String(hour).padStart(2, "0")}:00:00`, tokens: tokensByHour.get(hour) ?? 0, outside: false }));
+  return finalizeHeatmap(values, 24, [0, 6, 12, 18, 23].map((hour) => ({ column: hour + 1, label: `${String(hour).padStart(2, "0")}:00` })), "hour");
+}
+
+function weeklyHeatmap(rows: UsageSummaryRow[], now: Date): UsageHeatmap {
+  const tokensByDate = new Map(groupUsageByDay(rows).map((day) => [day.date, day.tokens]));
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+  const values = Array.from({ length: 7 }, (_, offset) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + offset);
+    const bucket = localDateKey(date);
+    return { bucket, tokens: tokensByDate.get(bucket) ?? 0, outside: false };
+  });
+  return finalizeHeatmap(values, 7, values.map((cell, index) => ({ column: index + 1, label: cell.bucket.slice(5).replace("-", "/") })), "day");
+}
+
+function monthlyHeatmap(rows: UsageSummaryRow[], now: Date, locale: string): UsageHeatmap {
+  const tokensByDate = new Map(groupUsageByDay(rows).map((day) => [day.date, day.tokens]));
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const gridStart = new Date(first);
+  gridStart.setDate(first.getDate() - first.getDay());
+  const gridEnd = new Date(last);
+  gridEnd.setDate(last.getDate() + (6 - last.getDay()));
+  const values: Array<{ bucket: string; tokens: number; outside: boolean }> = [];
+  for (const cursor = new Date(gridStart); cursor <= gridEnd; cursor.setDate(cursor.getDate() + 1)) {
+    const bucket = localDateKey(cursor);
+    const outside = cursor.getMonth() !== now.getMonth();
+    values.push({ bucket, tokens: outside ? 0 : tokensByDate.get(bucket) ?? 0, outside });
+  }
+  const labels = Array.from({ length: 7 }, (_, index) => ({ column: index + 1, label: new Date(2026, 6, 12 + index).toLocaleDateString(locale, { weekday: "short" }) }));
+  return finalizeHeatmap(values, 7, labels, "month");
+}
+
+function finalizeHeatmap(values: Array<{ bucket: string; tokens: number; outside: boolean }>, columns: number, labels: Array<{ column: number; label: string }>, granularity: UsageHeatmap["granularity"]): UsageHeatmap {
+  const max = Math.max(0, ...values.map((cell) => cell.tokens));
+  return {
+    cells: values.map((cell) => ({ ...cell, level: heatLevel(cell.tokens, max) })),
+    columns,
+    labels,
+    granularity,
+    totalTokens: values.reduce((total, cell) => total + cell.tokens, 0),
+  };
+}
+
 function groupUsage(
   rows: UsageSummaryRow[],
   keyOf: (row: UsageSummaryRow) => string,
@@ -98,6 +166,11 @@ function groupUsage(
 }
 
 function finite(value: number) { return Number.isFinite(value) ? value : 0; }
+
+function heatLevel(value: number, max: number): 0 | 1 | 2 | 3 | 4 {
+  if (value <= 0 || max <= 0) return 0;
+  return Math.max(1, Math.min(4, Math.ceil(Math.log1p(value) / Math.log1p(max) * 4))) as 1 | 2 | 3 | 4;
+}
 
 function emptyAggregate(): UsageAggregate {
   return { cost: 0, tokens: 0, inputTokens: 0, cachedInputTokens: 0, uncachedInputTokens: 0, cacheMeasuredInputTokens: 0, outputTokens: 0, requests: 0, unknown: 0 };

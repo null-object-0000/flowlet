@@ -4,7 +4,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod } from "../../domains/usage/types";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
-import { filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay } from "./usagePresentation";
+import { buildUsageHeatmap, filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay, type UsageHeatmap } from "./usagePresentation";
 import styles from "./UsageCostPage.module.css";
 
 const { Paragraph, Title } = Typography;
@@ -14,10 +14,11 @@ export function UsageCostPage() {
   const { language, t } = useAppPreferences();
   const usage = useUsageSummary();
   const [period, setPeriod] = useState<UsagePeriod>("month");
-  const [metric, setMetric] = useState<TrendMetric>("cost");
+  const [metric, setMetric] = useState<TrendMetric>("tokens");
   const rows = useMemo(() => filterUsageRows(usage.query.data ?? [], period), [period, usage.query.data]);
   const summary = useMemo(() => summarizeUsage(rows), [rows]);
   const days = useMemo(() => groupUsageByDay(rows), [rows]);
+  const activity = useMemo(() => buildUsageHeatmap(usage.query.data ?? [], period, new Date(), language), [language, period, usage.query.data]);
   const models = useMemo(() => groupUsageByModel(rows), [rows]);
   const channels = useMemo(() => groupUsageByChannel(rows), [rows]);
   const cacheHitRate = summary.cacheMeasuredInputTokens > 0
@@ -47,12 +48,16 @@ export function UsageCostPage() {
     {!usage.query.isError ? <div className={styles.workspace}>
       <section className={styles.mainCard}>
         <header className={styles.cardHeader}>
-          <div><strong>{t("消耗趋势")}</strong><small>{t("{period}每日汇总", { period: periodLabel })}</small></div>
+          <div><strong>{t(metric === "tokens" ? "Token 活动" : "消耗趋势")}</strong><small>{metric === "tokens" && period === "today" ? t("{period}按小时汇总", { period: periodLabel }) : t("{period}每日汇总", { period: periodLabel })}</small></div>
           <div className={styles.segments}><button type="button" className={metric === "cost" ? styles.active : ""} onClick={() => setMetric("cost")}>{t("费用")}</button><button type="button" className={metric === "tokens" ? styles.active : ""} onClick={() => setMetric("tokens")}>Tokens</button></div>
         </header>
         <div className={styles.trend}>
-          <div className={styles.trendSummary}><strong>{metric === "cost" ? formatCost(summary.cost) : `${formatCompact(summary.tokens, language)} Tokens`}</strong><span>{periodLabel}{t("累计")}</span></div>
-          <TrendChart days={days} metric={metric} language={language} emptyLabel={usage.query.isLoading ? t("正在加载用量…") : t("当前周期暂无用量数据")} />
+          <div className={styles.trendSummary}><strong>{metric === "cost" ? formatCost(summary.cost) : `${formatCompact(activity.totalTokens, language)} Tokens`}</strong><span>{periodLabel}{t("累计")}</span></div>
+          {metric === "tokens" ? (
+            <TokenActivityHeatmap activity={activity} language={language} lessLabel={t("少")} moreLabel={t("多")} />
+          ) : (
+            <TrendChart days={days} metric={metric} language={language} emptyLabel={usage.query.isLoading ? t("正在加载用量…") : t("当前周期暂无用量数据")} />
+          )}
         </div>
         <div className={styles.breakdown}>
           <div className={styles.breakdownHead}><span>{t("模型")}</span><span>{t("请求量")}</span><span>Tokens</span><span>{t("费用占比")}</span></div>
@@ -114,6 +119,26 @@ function TrendChart({ days, metric, language, emptyLabel }: { days: UsageDay[]; 
     {points.map((point, index) => <circle key={days[index].date} className={styles.chartDot} cx={point.x} cy={point.y} r="2.8" />)}
     {labelIndexes.map((index) => <text key={days[index].date} className={styles.chartLabel} x={Math.max(0, Math.min(565, points[index].x - 16))} y="153">{days[index].date.slice(5)}</text>)}
   </svg>;
+}
+
+function TokenActivityHeatmap({ activity, language, lessLabel, moreLabel }: { activity: UsageHeatmap; language: "zh-CN" | "en-US"; lessLabel: string; moreLabel: string }) {
+  const gridStyle = { gridTemplateColumns: `repeat(${activity.columns}, minmax(0, 1fr))` };
+  return <div className={`${styles.heatmap} ${styles[`heatmap-${activity.granularity}`]}`}>
+    <div className={styles.heatmapLabels} style={gridStyle}>
+      {activity.labels.map((label) => <span key={`${label.column}-${label.label}`} style={{ gridColumn: label.column }}>{label.label}</span>)}
+    </div>
+    <div className={styles.heatmapGrid} style={gridStyle}>
+      {activity.cells.map((cell) => {
+        const date = new Date(activity.granularity === "hour" ? cell.bucket : `${cell.bucket.slice(0, 10)}T00:00:00`);
+        const timeLabel = activity.granularity === "hour"
+          ? date.toLocaleString(language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+          : date.toLocaleDateString(language);
+        const title = `${timeLabel} · ${formatInteger(cell.tokens, language)} Tokens`;
+        return <span key={cell.bucket} className={`${styles.heatmapCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""}`} title={title} aria-label={title} />;
+      })}
+    </div>
+    <div className={styles.heatmapLegend}><span>{lessLabel}</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`${styles.heatmapCell} ${styles[`heatLevel${level}`]}`} />)}<span>{moreLabel}</span></div>
+  </div>;
 }
 
 function formatCost(value: number, digits = 2) { return `$${value.toFixed(digits)}`; }

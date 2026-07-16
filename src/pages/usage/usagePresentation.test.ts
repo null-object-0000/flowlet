@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageSummaryRow } from "../../domains/usage/types";
-import { filterUsageRows, groupUsageByChannel, groupUsageByModel, summarizeUsage } from "./usagePresentation";
+import { buildUsageHeatmap, filterUsageRows, groupUsageByChannel, groupUsageByModel, summarizeUsage } from "./usagePresentation";
 
 const rows = [
   { date: "2026-07-15", channel_id: "deepseek", channel_name: "DeepSeek", upstream_model: "deepseek-v4-pro", request_count: 3, known_tokens: 1200, input_tokens: 900, input_cached_tokens: 600, input_uncached_tokens: 300, cache_measured_input_tokens: 900, output_tokens: 300, unknown_count: 1, estimated_cost: 0.12 },
@@ -21,5 +21,11 @@ describe("usage presentation", () => {
     expect(summarizeUsage(july)).toEqual({ cost: 0.2, tokens: 2000, inputTokens: 1500, cachedInputTokens: 900, uncachedInputTokens: 600, cacheMeasuredInputTokens: 1500, outputTokens: 500, requests: 5, unknown: 1 });
     expect(groupUsageByModel(july)[0]).toEqual(expect.objectContaining({ label: "deepseek-v4-pro", share: 1, requests: 5 }));
     expect(groupUsageByChannel(july)[0]).toEqual(expect.objectContaining({ label: "DeepSeek", share: 1, tokens: 2000 }));
+  });
+
+  it("builds a daily calendar heatmap with visible empty days", () => {
+    const heatmap = buildUsageHeatmap(rows, "month", new Date(2026, 6, 15, 12));
+    expect(heatmap.cells.find((cell) => cell.bucket === "2026-07-15")).toEqual(expect.objectContaining({ tokens: 1200, level: 4 }));
+    expect(heatmap.cells.some((cell) => cell.tokens === 0 && cell.level === 0)).toBe(true);
   });
 });

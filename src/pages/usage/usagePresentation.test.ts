@@ -11,9 +11,20 @@ const rows = [
 describe("usage presentation", () => {
   it("filters local summary rows by selected period", () => {
     const now = new Date(2026, 6, 15, 12);
-    expect(filterUsageRows(rows, "today", now)).toHaveLength(1);
-    expect(filterUsageRows(rows, "7d", now)).toHaveLength(2);
+    expect(filterUsageRows(rows, "week", now)).toHaveLength(2);
     expect(filterUsageRows(rows, "month", now)).toHaveLength(2);
+    expect(filterUsageRows(rows, "quarter", now)).toHaveLength(2);
+    expect(filterUsageRows(rows, "year", now)).toHaveLength(3);
+    expect(filterUsageRows(rows, "all", now)).toHaveLength(3);
+  });
+
+  it("builds calendar heatmaps for every natural time dimension", () => {
+    const now = new Date(2026, 6, 15, 12);
+    expect(buildUsageHeatmap(rows, "week", now)).toEqual(expect.objectContaining({ bucketUnit: "day", columns: 7 }));
+    expect(buildUsageHeatmap(rows, "month", now).cells.length).toBeGreaterThanOrEqual(35);
+    expect(buildUsageHeatmap(rows, "quarter", now).cells.length).toBeGreaterThan(80);
+    expect(buildUsageHeatmap(rows, "year", now)).toEqual(expect.objectContaining({ bucketUnit: "day", rows: 7, columns: 53 }));
+    expect(buildUsageHeatmap(rows, "all", now)).toEqual(expect.objectContaining({ bucketUnit: "month", columns: 12 }));
   });
 
   it("aggregates totals and breakdown shares without fixture data", () => {
@@ -23,9 +34,12 @@ describe("usage presentation", () => {
     expect(groupUsageByChannel(july)[0]).toEqual(expect.objectContaining({ label: "DeepSeek", share: 1, tokens: 2000 }));
   });
 
-  it("builds a daily calendar heatmap with visible empty days", () => {
-    const heatmap = buildUsageHeatmap(rows, "month", new Date(2026, 6, 15, 12));
-    expect(heatmap.cells.find((cell) => cell.bucket === "2026-07-15")).toEqual(expect.objectContaining({ tokens: 1200, level: 4 }));
-    expect(heatmap.cells.some((cell) => cell.tokens === 0 && cell.level === 0)).toBe(true);
+  it("keeps identical model names from different channels separate for branding", () => {
+    const result = groupUsageByModel([
+      rows[0],
+      { ...rows[0], channel_id: "longcat", channel_name: "LongCat" },
+    ]);
+    expect(result).toHaveLength(2);
+    expect(result.map((item) => item.brandId)).toEqual(expect.arrayContaining(["deepseek", "longcat"]));
   });
 });

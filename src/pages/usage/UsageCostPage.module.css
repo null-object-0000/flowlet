@@ -7,8 +7,9 @@
 .stat { min-width: 0; min-height: 84px; padding: 10px 13px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 5px; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .stat > span { min-width: 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .stat strong { min-width: 0; overflow: hidden; color: var(--flowlet-color-text); font-size: 21px; font-variant-numeric: tabular-nums; line-height: 1; white-space: nowrap; text-overflow: ellipsis; }
+.stat .statTooltip { width: fit-content; cursor: help; text-decoration: underline dotted; text-underline-offset: 4px; }
 .stat small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: 1.25; white-space: nowrap; text-overflow: ellipsis; }
-.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr); gap: 10px; }
+.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) max(220px, calc((100% - 27px) / 4)); gap: 10px; }
 .mainCard, .coverageCard, .channelCard, .state { min-height: 0; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .mainCard { display: grid; grid-template-rows: 50px 215px minmax(0, 1fr); }
 .cardHeader { padding: 0 13px; display: flex; align-items: center; border-bottom: 1px solid var(--flowlet-color-border); }
@@ -37,6 +38,11 @@
 .heatmap-hour .heatmapGrid { height: 46px; grid-auto-rows: minmax(0, 1fr); }
 .heatmap-day .heatmapGrid { height: 64px; grid-auto-rows: minmax(0, 1fr); }
 .heatmap-month .heatmapGrid { height: 112px; grid-auto-rows: minmax(0, 1fr); }
+.heatmap-month-buckets .heatmapGrid { height: 112px; overflow: auto; grid-auto-rows: 22px; }
+.heatmap-year { grid-template-rows: 112px 20px 24px; }
+.heatmap-year .heatmapLabels { grid-row: 2; align-items: start; }
+.heatmap-year .heatmapGrid { grid-row: 1; height: 112px; grid-auto-flow: column; }
+.heatmap-year .heatmapLegend { grid-row: 3; }
 .heatmapCell { display: block; min-width: 0; min-height: 0; border-radius: 2px; background: var(--flowlet-color-surface-muted); box-shadow: inset 0 0 0 1px var(--flowlet-color-border); }
 .heatmapCell.outside { opacity: .42; }
 .heatLevel1 { background: color-mix(in srgb, var(--flowlet-color-primary) 18%, var(--flowlet-color-surface-strong)); }
@@ -46,12 +52,11 @@
 .heatmapLegend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-chart-label); }
 .heatmapLegend .heatmapCell { width: 10px; height: 10px; flex: none; }
 .breakdown { min-height: 0; display: grid; grid-template-rows: 32px minmax(0, 1fr); }
-.breakdownHead, .breakdownRow { display: grid; grid-template-columns: minmax(150px, 1.3fr) 74px 82px 72px; align-items: center; gap: 8px; padding: 0 13px; }
+.breakdownHead, .breakdownRow { display: grid; grid-template-columns: minmax(140px, 1fr) 58px 76px 72px 72px; align-items: center; gap: 8px; padding: 0 13px; }
 .breakdownHead { color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: var(--flowlet-font-size-caption); font-weight: 650; }
 .breakdownList { min-height: 0; overflow: auto; }
 .breakdownRow { min-height: 44px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .modelCell { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--flowlet-color-text); }
-.modelCell i { width: 27px; height: 27px; flex: none; display: grid; place-items: center; border-radius: 7px; color: #fff; background: linear-gradient(145deg, #4f73ff, #2059ed); font-size: var(--flowlet-font-size-chart-label); font-style: normal; font-weight: 750; }
 .modelCell strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--flowlet-font-size-body); }
 .share { display: flex; align-items: center; gap: 5px; }
 .share > i { width: 38px; height: 5px; overflow: hidden; border-radius: 99px; background: var(--flowlet-color-border-strong); }
@@ -68,16 +73,21 @@
 .coverageTrack i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--semi-color-primary), #68a0ff); }
 .coverageCard p { margin: 14px 0 0; padding: 9px 10px; border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--semi-color-primary-light-default); font-size: var(--flowlet-font-size-caption); line-height: 1.5; }
 .channelCard { display: grid; grid-template-rows: 46px minmax(0, 1fr) 36px; }
-.channelCard > header { padding: 0 13px; border-bottom: 1px solid var(--flowlet-color-border); }
+.channelCard > header { padding: 0 10px; border-bottom: 1px solid var(--flowlet-color-border); }
 .channelCard > header span { margin-left: auto; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
 .channelList { min-height: 0; overflow: auto; }
-.channelRow { min-height: 58px; padding: 7px 13px; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--flowlet-color-border); }
+.channelRow { min-height: 58px; padding: 7px 10px; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 6px; border-bottom: 1px solid var(--flowlet-color-border); }
 .channelRow > span { min-width: 0; display: grid; gap: 3px; }
 .channelRow > span:last-child { text-align: right; }
 .channelRow strong, .channelRow small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .channelRow strong { font-size: var(--flowlet-font-size-body); }
 .channelRow small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
-.channelCard footer { padding: 0 13px; display: flex; align-items: center; border-top: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
+.channelTokens, .modelTokens { width: fit-content; cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
+.channelUsageTooltip { min-width: 156px; display: grid; gap: 6px; }
+.channelUsageTooltip span { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.channelUsageTooltip em { opacity: .72; font-style: normal; }
+.channelUsageTooltip strong { color: inherit; font-size: 12px; font-variant-numeric: tabular-nums; }
+.channelCard footer { padding: 0 10px; display: flex; align-items: center; border-top: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
 .channelCard footer strong { margin-left: auto; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
 .empty, .state { display: grid; place-items: center; align-content: center; gap: 8px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-body); }
 .state { min-height: 140px; }

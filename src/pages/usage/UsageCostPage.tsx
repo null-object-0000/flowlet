@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Select, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Select, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod } from "../../domains/usage/types";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
@@ -24,7 +24,18 @@ export function UsageCostPage() {
   const cacheHitRate = summary.cacheMeasuredInputTokens > 0
     ? summary.cachedInputTokens / summary.cacheMeasuredInputTokens
     : null;
-  const periodLabel = period === "today" ? t("今天") : period === "7d" ? t("最近 7 天") : t("本月");
+  const cacheDetails = <div className={styles.channelUsageTooltip}>
+    <span><em>{t("输入 Token")}</em><strong>{formatCompact(summary.inputTokens, language)}</strong></span>
+    <span><em>{t("缓存输入 Token")}</em><strong>{formatCompact(summary.cachedInputTokens, language)}</strong></span>
+    <span><em>{t("未缓存输入 Token")}</em><strong>{formatCompact(summary.uncachedInputTokens, language)}</strong></span>
+  </div>;
+  const periodLabel = {
+    all: t("全部时间"),
+    year: t("今年"),
+    quarter: t("本季度"),
+    month: t("本月"),
+    week: t("本周"),
+  }[period];
 
   return <main className={styles.page}>
     <header className={styles.pageHeading}>
@@ -32,7 +43,13 @@ export function UsageCostPage() {
       <Select
         value={period}
         aria-label={t("统计周期")}
-        optionList={[{ value: "today", label: t("今天") }, { value: "7d", label: t("最近 7 天") }, { value: "month", label: t("本月") }]}
+        optionList={[
+          { value: "all", label: t("全部时间") },
+          { value: "year", label: t("今年") },
+          { value: "quarter", label: t("本季度") },
+          { value: "month", label: t("本月") },
+          { value: "week", label: t("本周") },
+        ]}
         onChange={(value) => setPeriod(value as UsagePeriod)}
       />
     </header>
@@ -41,18 +58,18 @@ export function UsageCostPage() {
       <Stat label={t("{period}预估费用", { period: periodLabel })} value={formatCost(summary.cost)} meta={t("基于已知价格")} />
       <Stat label={t("{period} Token 消耗", { period: periodLabel })} value={formatCompact(summary.tokens, language)} meta={t("输入 {input} · 输出 {output}", { input: formatCompact(summary.inputTokens, language), output: formatCompact(summary.outputTokens, language) })} />
       <Stat label={t("{period}请求量", { period: periodLabel })} value={formatInteger(summary.requests, language)} meta={t("本地代理记录")} />
-      <Stat label={t("缓存命中率")} value={cacheHitRate == null ? "—" : formatPercent(cacheHitRate)} meta={t("缓存 {cached} · 未缓存 {uncached}", { cached: formatCompact(summary.cachedInputTokens, language), uncached: formatCompact(summary.uncachedInputTokens, language) })} />
+      <Stat label={t("缓存命中率")} value={cacheHitRate == null ? "—" : formatPercent(cacheHitRate)} meta={t("缓存 {cached} · 未缓存 {uncached}", { cached: formatCompact(summary.cachedInputTokens, language), uncached: formatCompact(summary.uncachedInputTokens, language) })} tooltip={cacheDetails} />
     </section>
 
     {usage.query.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{usage.query.error.message}</span><Button onClick={() => void usage.query.refetch()}>{t("重试")}</Button></div> : null}
     {!usage.query.isError ? <div className={styles.workspace}>
       <section className={styles.mainCard}>
         <header className={styles.cardHeader}>
-          <div><strong>{t(metric === "tokens" ? "Token 活动" : "消耗趋势")}</strong><small>{metric === "tokens" && period === "today" ? t("{period}按小时汇总", { period: periodLabel }) : t("{period}每日汇总", { period: periodLabel })}</small></div>
+          <div><strong>{t(metric === "tokens" ? "Token 活动" : "消耗趋势")}</strong><small>{t("{period}每日汇总", { period: periodLabel })}</small></div>
           <div className={styles.segments}><button type="button" className={metric === "cost" ? styles.active : ""} onClick={() => setMetric("cost")}>{t("费用")}</button><button type="button" className={metric === "tokens" ? styles.active : ""} onClick={() => setMetric("tokens")}>Tokens</button></div>
         </header>
         <div className={styles.trend}>
-          <div className={styles.trendSummary}><strong>{metric === "cost" ? formatCost(summary.cost) : `${formatCompact(activity.totalTokens, language)} Tokens`}</strong><span>{periodLabel}{t("累计")}</span></div>
+          <div className={styles.trendSummary}><strong>{metric === "cost" ? formatCost(summary.cost) : `${formatCompact(summary.tokens, language)} Tokens`}</strong><span>{periodLabel}{t("累计")}</span></div>
           {metric === "tokens" ? (
             <TokenActivityHeatmap activity={activity} language={language} lessLabel={t("少")} moreLabel={t("多")} />
           ) : (
@@ -60,11 +77,20 @@ export function UsageCostPage() {
           )}
         </div>
         <div className={styles.breakdown}>
-          <div className={styles.breakdownHead}><span>{t("模型")}</span><span>{t("请求量")}</span><span>Tokens</span><span>{t("费用占比")}</span></div>
+          <div className={styles.breakdownHead}><span>{t("模型")}</span><span>{t("请求量")}</span><span>Tokens</span><span>{t("缓存命中率")}</span><span>{t("费用占比")}</span></div>
           <div className={styles.breakdownList}>
             {models.length === 0 ? <div className={styles.empty}>{t("暂无模型用量")}</div> : models.map((model) => <div className={styles.breakdownRow} key={model.key}>
-              <span className={styles.modelCell}><i>{model.label.slice(0, 2).toUpperCase()}</i><strong>{model.label}</strong></span>
-              <span>{formatInteger(model.requests, language)}</span><span>{formatCompact(model.tokens, language)}</span>
+              <span className={styles.modelCell}><ChannelBrandLogo channelId={model.brandId ?? "unknown-channel"} name={model.label} /><strong>{model.label}</strong></span>
+              <span>{formatInteger(model.requests, language)}</span>
+              <Tooltip content={<div className={styles.channelUsageTooltip}>
+                <span><em>{t("输入 Token")}</em><strong>{formatCompact(model.inputTokens, language)}</strong></span>
+                <span><em>{t("输出 Token")}</em><strong>{formatCompact(model.outputTokens, language)}</strong></span>
+                <span><em>{t("缓存输入 Token")}</em><strong>{formatCompact(model.cachedInputTokens, language)}</strong></span>
+                <span><em>{t("未缓存输入 Token")}</em><strong>{formatCompact(model.uncachedInputTokens, language)}</strong></span>
+              </div>}>
+                <span className={styles.modelTokens}>{formatCompact(model.tokens, language)}</span>
+              </Tooltip>
+              <span>{model.cacheMeasuredInputTokens > 0 ? formatPercent(model.cachedInputTokens / model.cacheMeasuredInputTokens) : "—"}</span>
               <span className={styles.share}><i><b style={{ width: `${Math.max(0, Math.min(100, model.share * 100))}%` }} /></i><em>{formatPercent(model.share)}</em></span>
             </div>)}
           </div>
@@ -76,13 +102,24 @@ export function UsageCostPage() {
           <header><strong>{t("数据完整度")}</strong></header>
           <div className={styles.coverageValue}><strong>{summary.requests > 0 ? formatPercent((summary.requests - summary.unknown) / summary.requests) : "-"}</strong><span>{t("请求包含可统计用量")}</span></div>
           <div className={styles.coverageTrack}><i style={{ width: `${summary.requests > 0 ? Math.max(0, (summary.requests - summary.unknown) / summary.requests * 100) : 0}%` }} /></div>
-          <p>{t("费用为本地价格表计算的预估值；缺少 Token 或价格时不会虚构成本。")}</p>
+          <p>{t("费用仅统计 Token 与价格均已知的请求")}</p>
         </section>
         <section className={styles.channelCard}>
           <header><strong>{t("渠道成本")}</strong><span>{t("按预估费用排序")}</span></header>
           <div className={styles.channelList}>{channels.length === 0 ? <div className={styles.empty}>{t("暂无渠道用量")}</div> : channels.map((channel) => <div className={styles.channelRow} key={channel.key}>
             <ChannelBrandLogo channelId={channel.key} name={channel.label} />
-            <span><strong>{channel.label}</strong><small>{t("{requests} 次请求 · {tokens} Tokens", { requests: formatInteger(channel.requests, language), tokens: formatCompact(channel.tokens, language) })}</small></span>
+            <span>
+              <strong>{channel.label}</strong>
+              <Tooltip content={<div className={styles.channelUsageTooltip}>
+                <span><em>{t("请求量")}</em><strong>{formatInteger(channel.requests, language)}</strong></span>
+                <span><em>{t("输入 Token")}</em><strong>{formatCompact(channel.inputTokens, language)}</strong></span>
+                <span><em>{t("输出 Token")}</em><strong>{formatCompact(channel.outputTokens, language)}</strong></span>
+                <span><em>{t("缓存输入 Token")}</em><strong>{formatCompact(channel.cachedInputTokens, language)}</strong></span>
+                <span><em>{t("未缓存输入 Token")}</em><strong>{formatCompact(channel.uncachedInputTokens, language)}</strong></span>
+              </div>}>
+                <small className={styles.channelTokens}>{formatCompact(channel.tokens, language)} Tokens</small>
+              </Tooltip>
+            </span>
             <span><strong>{formatCost(channel.cost)}</strong><small>{formatPercent(channel.share)}</small></span>
           </div>)}</div>
           <footer><span>{t("总计 {count} 个渠道", { count: channels.length })}</span><strong>{formatCost(summary.cost)}</strong></footer>
@@ -92,8 +129,9 @@ export function UsageCostPage() {
   </main>;
 }
 
-function Stat({ label, value, meta }: { label: string; value: string; meta: string }) {
-  return <div className={styles.stat}><span>{label}</span><strong title={value}>{value}</strong><small title={meta}>{meta}</small></div>;
+function Stat({ label, value, meta, tooltip }: { label: string; value: string; meta: string; tooltip?: React.ReactNode }) {
+  const valueContent = <strong className={tooltip ? styles.statTooltip : undefined} title={value}>{value}</strong>;
+  return <div className={styles.stat}><span>{label}</span>{tooltip ? <Tooltip content={tooltip}>{valueContent}</Tooltip> : valueContent}<small title={meta}>{meta}</small></div>;
 }
 
 function TrendChart({ days, metric, language, emptyLabel }: { days: UsageDay[]; metric: TrendMetric; language: "zh-CN" | "en-US"; emptyLabel: string }) {
@@ -122,16 +160,20 @@ function TrendChart({ days, metric, language, emptyLabel }: { days: UsageDay[]; 
 }
 
 function TokenActivityHeatmap({ activity, language, lessLabel, moreLabel }: { activity: UsageHeatmap; language: "zh-CN" | "en-US"; lessLabel: string; moreLabel: string }) {
-  const gridStyle = { gridTemplateColumns: `repeat(${activity.columns}, minmax(0, 1fr))` };
-  return <div className={`${styles.heatmap} ${styles[`heatmap-${activity.granularity}`]}`}>
-    <div className={styles.heatmapLabels} style={gridStyle}>
+  const columnStyle = { gridTemplateColumns: `repeat(${activity.columns}, minmax(0, 1fr))` };
+  const gridStyle = {
+    ...columnStyle,
+    ...(activity.rows ? { gridTemplateRows: `repeat(${activity.rows}, minmax(0, 1fr))` } : {}),
+  };
+  return <div className={`${styles.heatmap} ${styles[`heatmap-${activity.granularity}`]} ${styles[`heatmap-${activity.bucketUnit}-buckets`]}`}>
+    <div className={styles.heatmapLabels} style={columnStyle}>
       {activity.labels.map((label) => <span key={`${label.column}-${label.label}`} style={{ gridColumn: label.column }}>{label.label}</span>)}
     </div>
     <div className={styles.heatmapGrid} style={gridStyle}>
       {activity.cells.map((cell) => {
-        const date = new Date(activity.granularity === "hour" ? cell.bucket : `${cell.bucket.slice(0, 10)}T00:00:00`);
-        const timeLabel = activity.granularity === "hour"
-          ? date.toLocaleString(language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+        const date = new Date(activity.bucketUnit === "month" ? `${cell.bucket}-01T00:00:00` : `${cell.bucket.slice(0, 10)}T00:00:00`);
+        const timeLabel = activity.bucketUnit === "month"
+          ? date.toLocaleDateString(language, { year: "numeric", month: "long" })
           : date.toLocaleDateString(language);
         const title = `${timeLabel} · ${formatInteger(cell.tokens, language)} Tokens`;
         return <span key={cell.bucket} className={`${styles.heatmapCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""}`} title={title} aria-label={title} />;

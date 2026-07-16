@@ -12,27 +12,26 @@ export type UsageAggregate = {
   unknown: number;
 };
 
-export type UsageBreakdown = UsageAggregate & { key: string; label: string; share: number };
+export type UsageBreakdown = UsageAggregate & { key: string; label: string; share: number; brandId?: string };
 export type UsageDay = UsageAggregate & { date: string };
 export type UsageHeatmapCell = { bucket: string; tokens: number; level: 0 | 1 | 2 | 3 | 4; outside: boolean };
 export type UsageHeatmap = {
   cells: UsageHeatmapCell[];
   columns: number;
+  rows?: number;
   labels: Array<{ column: number; label: string }>;
-  granularity: "hour" | "day" | "month";
+  bucketUnit: "day" | "month";
+  granularity: "hour" | "day" | "month" | "year";
   totalTokens: number;
 };
 
 export function filterUsageRows(rows: UsageSummaryRow[], period: UsagePeriod, now = new Date()): UsageSummaryRow[] {
   const today = localDateKey(now);
-  const month = today.slice(0, 7);
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
-  const weekStart = localDateKey(start);
+  if (period === "all") return rows;
+  const rangeStart = localDateKey(startOfUsagePeriod(period, now));
   return rows.filter((row) => {
     const date = row.date.slice(0, 10);
-    if (period === "today") return date === today;
-    if (period === "month") return date.startsWith(month);
-    return date >= weekStart && date <= today;
+    return date >= rangeStart && date <= today;
   });
 }
 
@@ -51,7 +50,12 @@ export function summarizeUsage(rows: UsageSummaryRow[]): UsageAggregate {
 }
 
 export function groupUsageByModel(rows: UsageSummaryRow[]): UsageBreakdown[] {
-  return groupUsage(rows, (row) => row.upstream_model ?? "unknown-model", (row) => row.upstream_model ?? "未知模型");
+  return groupUsage(
+    rows,
+    (row) => `${row.channel_id ?? "unknown-channel"}::${row.upstream_model ?? "unknown-model"}`,
+    (row) => row.upstream_model ?? "未知模型",
+    (row) => row.channel_id ?? "unknown-channel",
+  );
 }
 
 export function groupUsageByChannel(rows: UsageSummaryRow[]): UsageBreakdown[] {
@@ -79,9 +83,13 @@ export function groupUsageByDay(rows: UsageSummaryRow[]): UsageDay[] {
 
 export function buildUsageHeatmap(rows: UsageSummaryRow[], period: UsagePeriod, now = new Date(), locale = "zh-CN"): UsageHeatmap {
   const filtered = filterUsageRows(rows, period, now);
-  if (period === "today") return hourlyHeatmap(filtered, now);
-  if (period === "7d") return weeklyHeatmap(filtered, now);
-  return monthlyHeatmap(filtered, now, locale);
+  if (period === "year") return yearlyDailyHeatmap(filtered, now, locale);
+  if (period === "all") {
+    return monthlyBucketHeatmap(filtered, period, now, locale);
+  }
+  const start = startOfUsagePeriod(period, now);
+  const end = endOfUsagePeriod(period, now);
+  return dailyCalendarHeatmap(filtered, start, end, now, locale, period === "week" ? "day" : "month");
 }
 
 function hourlyHeatmap(rows: UsageSummaryRow[], now: Date): UsageHeatmap {
@@ -126,12 +134,72 @@ function monthlyHeatmap(rows: UsageSummaryRow[], now: Date, locale: string): Usa
   return finalizeHeatmap(values, 7, labels, "month");
 }
 
-function finalizeHeatmap(values: Array<{ bucket: string; tokens: number; outside: boolean }>, columns: number, labels: Array<{ column: number; label: string }>, granularity: UsageHeatmap["granularity"]): UsageHeatmap {
+function yearlyDailyHeatmap(rows: UsageSummaryRow[], now: Date, locale: string): UsageHeatmap {
+  const tokensByDate = new Map(groupUsageByDay(rows).map((day) => [day.date, day.tokens]));
+  const first = new Date(now.getFullYear(), 0, 1);
+  const last = new Date(now.getFullYear(), 11, 31);
+  const gridStart = new Date(first);
+  gridStart.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+  const gridEnd = new Date(last);
+  gridEnd.setDate(last.getDate() + (6 - ((last.getDay() + 6) % 7)));
+  const values: Array<{ bucket: string; tokens: number; outside: boolean }> = [];
+  for (const cursor = new Date(gridStart); cursor <= gridEnd; cursor.setDate(cursor.getDate() + 1)) {
+    const bucket = localDateKey(cursor);
+    const outside = cursor.getFullYear() !== now.getFullYear() || cursor > now;
+    values.push({ bucket, tokens: outside ? 0 : tokensByDate.get(bucket) ?? 0, outside });
+  }
+  const labels = Array.from({ length: 12 }, (_, month) => {
+    const date = new Date(now.getFullYear(), month, 1);
+    const index = values.findIndex((cell) => cell.bucket === localDateKey(date));
+    return { column: Math.floor(index / 7) + 1, label: date.toLocaleDateString(locale, { month: "short" }) };
+  });
+  const heatmap = finalizeHeatmap(values, values.length / 7, labels, "year");
+  return { ...heatmap, rows: 7 };
+}
+
+function monthlyBucketHeatmap(rows: UsageSummaryRow[], period: "year" | "all", now: Date, locale: string): UsageHeatmap {
+  const tokensByMonth = new Map<string, number>();
+  for (const row of rows) {
+    const key = row.date.slice(0, 7);
+    tokensByMonth.set(key, (tokensByMonth.get(key) ?? 0) + finite(row.known_tokens));
+  }
+  const earliest = [...tokensByMonth.keys()].sort()[0];
+  const startYear = period === "year" ? now.getFullYear() : Number(earliest?.slice(0, 4)) || now.getFullYear();
+  const values: Array<{ bucket: string; tokens: number; outside: boolean }> = [];
+  for (let year = startYear; year <= now.getFullYear(); year += 1) {
+    for (let month = 0; month < 12; month += 1) {
+      const key = `${year}-${String(month + 1).padStart(2, "0")}`;
+      const outside = year === now.getFullYear() && month > now.getMonth();
+      values.push({ bucket: key, tokens: outside ? 0 : tokensByMonth.get(key) ?? 0, outside });
+    }
+  }
+  const labels = Array.from({ length: 12 }, (_, month) => ({ column: month + 1, label: new Date(2026, month, 1).toLocaleDateString(locale, { month: "short" }) }));
+  return finalizeHeatmap(values, 12, labels, "month", "month");
+}
+
+function dailyCalendarHeatmap(rows: UsageSummaryRow[], start: Date, end: Date, now: Date, locale: string, granularity: "day" | "month"): UsageHeatmap {
+  const tokensByDate = new Map(groupUsageByDay(rows).map((day) => [day.date, day.tokens]));
+  const gridStart = new Date(start);
+  gridStart.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const gridEnd = new Date(end);
+  gridEnd.setDate(end.getDate() + (6 - ((end.getDay() + 6) % 7)));
+  const values: Array<{ bucket: string; tokens: number; outside: boolean }> = [];
+  for (const cursor = new Date(gridStart); cursor <= gridEnd; cursor.setDate(cursor.getDate() + 1)) {
+    const bucket = localDateKey(cursor);
+    const outside = cursor < start || cursor > end || cursor > now;
+    values.push({ bucket, tokens: outside ? 0 : tokensByDate.get(bucket) ?? 0, outside });
+  }
+  const labels = Array.from({ length: 7 }, (_, index) => ({ column: index + 1, label: new Date(2026, 6, 13 + index).toLocaleDateString(locale, { weekday: "short" }) }));
+  return finalizeHeatmap(values, 7, labels, granularity);
+}
+
+function finalizeHeatmap(values: Array<{ bucket: string; tokens: number; outside: boolean }>, columns: number, labels: Array<{ column: number; label: string }>, granularity: UsageHeatmap["granularity"], bucketUnit: UsageHeatmap["bucketUnit"] = "day"): UsageHeatmap {
   const max = Math.max(0, ...values.map((cell) => cell.tokens));
   return {
     cells: values.map((cell) => ({ ...cell, level: heatLevel(cell.tokens, max) })),
     columns,
     labels,
+    bucketUnit,
     granularity,
     totalTokens: values.reduce((total, cell) => total + cell.tokens, 0),
   };
@@ -141,11 +209,12 @@ function groupUsage(
   rows: UsageSummaryRow[],
   keyOf: (row: UsageSummaryRow) => string,
   labelOf: (row: UsageSummaryRow) => string,
+  brandIdOf?: (row: UsageSummaryRow) => string,
 ): UsageBreakdown[] {
   const groups = new Map<string, Omit<UsageBreakdown, "share">>();
   for (const row of rows) {
     const key = keyOf(row);
-    const current = groups.get(key) ?? { key, label: labelOf(row), ...emptyAggregate() };
+    const current = groups.get(key) ?? { key, label: labelOf(row), brandId: brandIdOf?.(row), ...emptyAggregate() };
     current.cost += finite(row.estimated_cost);
     current.tokens += finite(row.known_tokens);
     current.inputTokens += finite(row.input_tokens);
@@ -181,4 +250,21 @@ function localDateKey(value: Date) {
   const month = String(value.getMonth() + 1).padStart(2, "0");
   const day = String(value.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function startOfUsagePeriod(period: Exclude<UsagePeriod, "all">, now: Date): Date {
+  if (period === "year") return new Date(now.getFullYear(), 0, 1);
+  if (period === "quarter") return new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+  if (period === "month") return new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const mondayOffset = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - mondayOffset);
+  return start;
+}
+
+function endOfUsagePeriod(period: "week" | "month" | "quarter", now: Date): Date {
+  if (period === "month") return new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  if (period === "quarter") return new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3 + 3, 0);
+  const start = startOfUsagePeriod("week", now);
+  return new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
 }

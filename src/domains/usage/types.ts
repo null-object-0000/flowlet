@@ -18,4 +18,4 @@ export type UsageSummaryRow = {
   estimated_cost: number;
 };
 
-export type UsagePeriod = "today" | "7d" | "month";
+export type UsagePeriod = "all" | "year" | "quarter" | "month" | "week";

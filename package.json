@@ -12,22 +12,14 @@
     "tauri:build": "tauri build && node scripts/build-portable.mjs",
     "tauri:portable": "node scripts/build-portable.mjs",
     "check": "tsc --noEmit",
-    "dev:new": "vite --mode next",
-    "build:new": "tsc && vite build --mode next",
-    "test:new": "vitest run --config src-new/vitest.config.ts",
-    "test:new:watch": "vitest --config src-new/vitest.config.ts"
+    "test": "vitest run --config src/vitest.config.ts",
+    "test:watch": "vitest --config src/vitest.config.ts"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",
     "@douyinfe/semi-ui-19": "^2.101.0",
-    "@lobehub/icons": "^5.13.0",
-    "@mantine/core": "^9.4.1",
-    "@mantine/hooks": "^9.4.1",
-    "@mantine/notifications": "^9.4.1",
-    "@tabler/icons-react": "^3.44.0",
     "@tanstack/react-query": "^5.101.2",
     "@tauri-apps/api": "^2.11.1",
-    "date-fns": "^2.30.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1"

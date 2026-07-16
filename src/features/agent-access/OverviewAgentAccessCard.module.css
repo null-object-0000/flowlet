@@ -20,7 +20,7 @@
   color: var(--flowlet-color-text);
   background: var(--flowlet-color-surface);
   font: inherit;
-  cursor: default;
+  cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
@@ -29,6 +29,12 @@
 .agentCard:disabled {
   color: var(--flowlet-color-text);
   opacity: 1;
+  cursor: default;
+}
+
+.agentCard:not(:disabled):hover {
+  color: var(--flowlet-color-primary);
+  background: var(--semi-color-primary-light-default);
 }
 
 .icon {
@@ -97,6 +103,11 @@
 }
 
 .support { padding: 3px 8px; border-radius: 6px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 11px; }
+
+.supported {
+  color: var(--flowlet-color-primary);
+  background: var(--semi-color-primary-light-default);
+}
 @media (max-width: 760px) {
   .grid {
     grid-template-columns: 1fr;

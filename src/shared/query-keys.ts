@@ -47,6 +47,14 @@ export const queryKeys = {
     models: () => [...queryKeys.requestLog.all, "models"] as const,
     detail: (requestId: string) => [...queryKeys.requestLog.all, "detail", requestId] as const,
   },
+  agentSession: {
+    all: ["agent-session"] as const,
+    list: (filter: unknown) => [...queryKeys.agentSession.all, "list", filter] as const,
+  },
+  agent: {
+    all: ["agent"] as const,
+    environment: (agentId: string) => [...queryKeys.agent.all, "environment", agentId] as const,
+  },
   usage: {
     all: ["usage"] as const,
     summary: () => [...queryKeys.usage.all, "summary"] as const,

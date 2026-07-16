@@ -1,8 +1,9 @@
 import { Button, SideSheet, Tag, Typography } from "@douyinfe/semi-ui-19";
-import { IconCopy } from "@douyinfe/semi-icons";
+import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import type { AgentEnvironmentReport, AgentInstallMethod } from "../../domains/agent/types";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -13,11 +14,25 @@ type Props = {
   agent: AgentKind | null;
   baseUrl: string;
   clientToken?: string | null;
+  environment?: AgentEnvironmentReport;
+  environmentLoading?: boolean;
+  environmentError?: string;
+  onRefreshEnvironment: () => void;
   onClose: () => void;
   onCopy: Copy;
 };
 
-export function AgentAccessSideSheet({ agent, baseUrl, clientToken, onClose, onCopy }: Props) {
+export function AgentAccessSideSheet({
+  agent,
+  baseUrl,
+  clientToken,
+  environment,
+  environmentLoading = false,
+  environmentError,
+  onRefreshEnvironment,
+  onClose,
+  onCopy,
+}: Props) {
   const { t } = useAppPreferences();
   if (!agent) return null;
 
@@ -52,6 +67,55 @@ export function AgentAccessSideSheet({ agent, baseUrl, clientToken, onClose, onC
               : t("通过 OpenAI-compatible 协议将 OpenCode 接入 Flowlet。")}
           </Paragraph>
         </section>
+
+        {isClaude ? (
+          <section className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <div>
+                <Title heading={5}>{t("本机环境")}</Title>
+                <Text type="tertiary" size="small">{t("识别 Claude Code 的安装位置、版本和安装方式")}</Text>
+              </div>
+              <Button
+                icon={<IconRefresh spin={environmentLoading} />}
+                loading={environmentLoading}
+                theme="light"
+                onClick={onRefreshEnvironment}
+              >
+                {t("重新检测")}
+              </Button>
+            </div>
+
+            {environmentError ? <Text className={styles.environmentMessage} type="danger">{t("检测失败：{message}", { message: environmentError })}</Text> : null}
+            {!environmentError && !environmentLoading && !environment?.installed ? (
+              <Text className={styles.environmentMessage} type="tertiary">
+                {t("未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。")}
+              </Text>
+            ) : null}
+            {environment?.installations.map((installation, index) => (
+              <div className={styles.installation} key={installation.executable_path}>
+                <div className={styles.installationHeader}>
+                  <strong>{installation.version ? `Claude Code ${installation.version}` : t("Claude Code 安装")}</strong>
+                  <span className={styles.installationTags}>
+                    {environment.primary?.executable_path === installation.executable_path ? <Tag color="blue">{t("当前使用")}</Tag> : null}
+                    <Tag>{installMethodLabel(installation.install_method, t)}</Tag>
+                    {index > 0 ? <Tag color="orange">{t("额外安装")}</Tag> : null}
+                  </span>
+                </div>
+                <ConfigRow
+                  label={t("可执行文件")}
+                  value={installation.executable_path}
+                  onCopy={() => onCopy(installation.executable_path, t("{label} 已复制", { label: t("可执行文件") }))}
+                />
+                <ConfigRow
+                  label={t("安装目录")}
+                  value={installation.install_dir}
+                  onCopy={() => onCopy(installation.install_dir, t("{label} 已复制", { label: t("安装目录") }))}
+                />
+                {installation.error ? <Text className={styles.installationError} type="warning">{installation.error}</Text> : null}
+              </div>
+            ))}
+          </section>
+        ) : null}
 
         <section className={styles.section}>
           <Title heading={5}>{t("接入参数")}</Title>
@@ -95,6 +159,19 @@ export function AgentAccessSideSheet({ agent, baseUrl, clientToken, onClose, onC
       </div>
     </SideSheet>
   );
+}
+
+function installMethodLabel(method: AgentInstallMethod, t: (source: string) => string) {
+  const labels: Record<AgentInstallMethod, string> = {
+    native: "原生安装",
+    winget: "WinGet",
+    npm: "npm 全局安装",
+    legacy_npm: "旧版 npm 安装",
+    homebrew: "Homebrew",
+    system_package: "系统包管理器",
+    unknown: "未知方式",
+  };
+  return t(labels[method]);
 }
 
 function ConfigRow({ label, value, onCopy }: { label: string; value: string; onCopy: () => Promise<void> }) {

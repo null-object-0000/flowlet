@@ -51,7 +51,10 @@ export function OverviewSections({ accounts, channels, balanceSnapshots, routes,
           bindConfig={bindConfig}
           running={proxyRunning}
         />
-        <OverviewAgentAccessCard />
+        <OverviewAgentAccessCard
+          baseUrl={baseUrl}
+          clientToken={bindConfig.default_client_token}
+        />
       </div>
     </div>
   );

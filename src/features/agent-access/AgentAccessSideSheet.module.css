@@ -52,6 +52,38 @@
   white-space: nowrap;
 }
 
+.environmentMessage {
+  display: block;
+  margin-top: 14px;
+}
+
+.installation {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.installationHeader,
+.installationTags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.installationHeader {
+  justify-content: space-between;
+}
+
+.installationTags {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.installationError {
+  display: block;
+  margin-top: 10px;
+}
+
 .codeBlock {
   margin: 14px 0 0;
   padding: 14px;

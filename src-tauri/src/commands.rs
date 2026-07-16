@@ -12,6 +12,15 @@ use crate::core::sync::{
 use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
 
+// ─── Agent Environment Commands ────────────────────────────────────────────
+
+#[tauri::command]
+pub(super) async fn detect_agent_environment(
+    agent_id: String,
+) -> Result<crate::core::agent_environment::AgentEnvironmentReport, String> {
+    crate::core::agent_environment::detect_agent_environment(&agent_id).await
+}
+
 // ─── Proxy Commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -296,6 +305,14 @@ pub(super) fn list_request_logs(
         .storage
         .list_request_logs_page(filter)
         .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn list_agent_sessions(
+    state: tauri::State<'_, AppState>,
+    filter: crate::core::config::AgentSessionsFilter,
+) -> Result<crate::core::config::AgentSessionsPageResult, String> {
+    state.storage.list_agent_sessions(filter).map_err(|err| err.to_string())
 }
 
 /// 返回请求日志中实际出现的客户端身份列表，供前端"客户端"筛选项使用。

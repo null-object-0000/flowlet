@@ -509,6 +509,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::detect_agent_environment,
             commands::start_proxy,
             commands::stop_proxy,
             commands::proxy_status,
@@ -527,6 +528,7 @@ pub fn run() {
             commands::analyze_usage,
             commands::usage_summary,
             commands::list_request_logs,
+            commands::list_agent_sessions,
             commands::list_request_log_clients,
             commands::list_request_log_models,
             commands::get_request_log_detail,

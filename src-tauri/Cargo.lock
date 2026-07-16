@@ -1104,6 +1104,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "futures-util",
+ "jsonc-parser",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -2018,6 +2019,16 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "jsonc-parser"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "362fdb0bfedf94ebd31e4e82ff38ba705b6b82417b3b25f0c4bbb024dd11f552"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

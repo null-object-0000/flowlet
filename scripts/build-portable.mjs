@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..");
@@ -32,12 +32,25 @@ const PORTABLE_DIR_NAME = `Flowlet_${version}_${ARCH}_portable`;
 const PORTABLE_DIR = join(PORTABLE_BUNDLE_DIR, PORTABLE_DIR_NAME);
 const ZIP_PATH = join(PORTABLE_BUNDLE_DIR, `${PORTABLE_DIR_NAME}.zip`);
 
-/** 用 python3 内置 zipfile 跨平台打包（已在该项目验证可用） */
+/** 使用 Python 内置 zipfile 跨平台打包，兼容常见的 Python 命令名。 */
 function zipDir() {
   const pyScript = join(__dirname, "_zipdir.py");
-  execSync(`python3 "${pyScript}" "${PORTABLE_DIR}" "${ZIP_PATH}"`, {
-    stdio: "inherit",
-  });
+  const candidates = process.platform === "win32"
+    ? [["python"], ["py", "-3"], ["python3"]]
+    : [["python3"], ["python"]];
+
+  for (const [command, ...prefixArgs] of candidates) {
+    try {
+      execFileSync(command, [...prefixArgs, pyScript, PORTABLE_DIR, ZIP_PATH], {
+        stdio: "inherit",
+      });
+      return;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+
+  throw new Error("未找到 Python 3，无法生成便携版 ZIP");
 }
 
 function main() {

@@ -12,7 +12,7 @@
   min-height: 56px;
   padding: 6px 12px;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto 20px;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   border: 0;
@@ -20,19 +20,15 @@
   color: var(--flowlet-color-text);
   background: var(--flowlet-color-surface);
   font: inherit;
-  cursor: pointer;
+  cursor: default;
   transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
 .agentCard:last-child { border-bottom: 0; }
 
-.agentCard:hover {
-  background: var(--flowlet-color-surface-muted);
-}
-
-.agentCard:focus-visible {
-  outline: 2px solid var(--semi-color-primary-light-active);
-  outline-offset: 2px;
+.agentCard:disabled {
+  color: var(--flowlet-color-text);
+  opacity: 1;
 }
 
 .icon {
@@ -101,9 +97,6 @@
 }
 
 .support { padding: 3px 8px; border-radius: 6px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 11px; }
-.supported { color: var(--flowlet-color-success); background: var(--semi-color-success-light-default); }
-.chevron { color: var(--flowlet-color-text-secondary); }
-
 @media (max-width: 760px) {
   .grid {
     grid-template-columns: 1fr;

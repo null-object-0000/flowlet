@@ -1,22 +1,22 @@
 .link,
 .active {
-  min-height: 36px;
+  min-height: 40px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px;
+  gap: 11px;
+  padding: 0 12px;
   border-radius: 8px;
   color: var(--semi-color-text-0);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 15px;
   transition: color 140ms ease, background 140ms ease;
 }
 
 .icon {
-  width: 17px;
+  width: 18px;
   display: inline-flex;
   justify-content: center;
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .link:hover {

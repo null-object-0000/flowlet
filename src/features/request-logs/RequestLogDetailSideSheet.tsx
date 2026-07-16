@@ -53,10 +53,11 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
 
               <DetailSection title={t("接口信息")}>
                 <div className={styles.detailGrid}>
-                  <DetailItem label={t("请求接口")} value={`${finalRow.method} ${finalRow.path}`} />
-                  <DetailItem label={t("客户端")} value={finalRow.client_name || finalRow.client_id || t("未知客户端")} />
-                  <DetailItem label={t("客户端协议")} value={finalRow.client_protocol || "-"} />
-                  <DetailItem label={t("HTTP 状态")} value={finalRow.status?.toString() || t("失败")} />
+                  <DetailItem label={t("底层接口地址")} value={selectedRow.upstream_url || t("旧日志未记录")} wide copyable={Boolean(selectedRow.upstream_url)} />
+                  <DetailItem label={t("请求接口")} value={`${selectedRow.method} ${selectedRow.path}`} />
+                  <DetailItem label={t("客户端")} value={selectedRow.client_name || selectedRow.client_id || t("未知客户端")} />
+                  <DetailItem label={t("客户端协议")} value={selectedRow.client_protocol || "-"} />
+                  <DetailItem label={t("HTTP 状态")} value={selectedRow.status?.toString() || t("失败")} />
                 </div>
               </DetailSection>
 
@@ -127,8 +128,25 @@ function DetailSection({ title, children }: { title: string; children: ReactNode
   return <section className={styles.section}><strong className={styles.sectionTitle}>{title}</strong>{children}</section>;
 }
 
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return <div className={styles.detailItem}><span>{label}</span><strong title={value}>{value}</strong></div>;
+function DetailItem({ label, value, wide = false, copyable = false }: { label: string; value: string; wide?: boolean; copyable?: boolean }) {
+  const { t } = useAppPreferences();
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      Toast.success(t("{label} 已复制", { label }));
+    } catch {
+      Toast.error(t("复制失败，请手动选择内容"));
+    }
+  };
+  return (
+    <div className={`${styles.detailItem} ${wide ? styles.detailItemWide : ""}`}>
+      <span>{label}</span>
+      <div className={styles.detailItemValue}>
+        <strong title={value}>{value}</strong>
+        {copyable ? <Button aria-label={t("复制{label}", { label })} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copy()} /> : null}
+      </div>
+    </div>
+  );
 }
 
 function AttemptSelector({ rows, selectedRow, onSelect, compact = false }: { rows: RequestLogRow[]; selectedRow: RequestLogRow; onSelect: (id: string) => void; compact?: boolean }) {
@@ -172,7 +190,7 @@ function CapturedSection({ title, value }: { title: string; value: string }) {
   };
   return (
     <section className={styles.capture}>
-      <div><span><strong>{title}</strong><small>{t("敏感凭据已隐藏")}</small></span><Button aria-label={t("复制{title}", { title })} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copy()} /></div>
+      <div><span><strong>{title}</strong></span><Button aria-label={t("复制{title}", { title })} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copy()} /></div>
       {isJson ? (
         <div className={styles.jsonContainer}>
           <JsonViewer

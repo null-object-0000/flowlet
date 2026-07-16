@@ -218,6 +218,34 @@ pub(super) fn body_contains_quota_exceeded(body: &[u8]) -> bool {
         || text.contains("balance insufficient")
 }
 
+pub(super) fn body_contains_account_deactivated(body: &[u8]) -> bool {
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        let error = value.get("error").unwrap_or(&value);
+        if error
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|code| code.eq_ignore_ascii_case("account_deactivated"))
+        {
+            return true;
+        }
+        if error
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|message| {
+                message
+                    .to_ascii_lowercase()
+                    .contains("api key is disabled")
+            })
+        {
+            return true;
+        }
+    }
+
+    String::from_utf8_lossy(body)
+        .to_ascii_lowercase()
+        .contains("api key is disabled")
+}
+
 pub(super) fn network_error_route_reason(err: &reqwest::Error) -> &'static str {
     if err.is_timeout() {
         "timeout"

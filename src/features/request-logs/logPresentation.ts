@@ -1,8 +1,6 @@
 import type { RequestLogRow } from "../../domains/request-log/types";
 import { translate, type AppLanguage } from "../../app/preferences/translations";
 
-const SENSITIVE_KEY = /^(authorization|proxy-authorization|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?token|cookie|set-cookie|password|secret)$/i;
-
 export function isSuccessfulLog(row: Pick<RequestLogRow, "status" | "error_message">) {
   return row.status != null && row.status >= 200 && row.status < 400 && !row.error_message;
 }
@@ -23,8 +21,8 @@ export function formatLogTime(value?: string | null, locale = "zh-CN") {
 }
 
 export function formatDuration(value?: number | null) {
-  if (value == null) return "-";
-  if (value < 1_000) return `${value} ms`;
+  if (value == null || !Number.isFinite(value)) return "-";
+  if (value < 1_000) return `${Math.round(value)} ms`;
   return `${(value / 1_000).toFixed(value < 10_000 ? 2 : 1)} s`;
 }
 
@@ -58,18 +56,15 @@ export function shortRequestId(value: string) {
 }
 
 export function safeLogText(value?: string | null) {
-  if (!value) return "-";
-  return value
-    .replace(/(bearer\s+)[^\s,;"']+/gi, "$1••••••")
-    .replace(/((?:api[-_ ]?key|token|password|secret)\s*[=:]\s*)[^\s,;"']+/gi, "$1••••••");
+  return value || "-";
 }
 
 export function formatCapturedJson(value?: string | null, language: AppLanguage = "zh-CN") {
   if (!value) return `— ${translate(language, "未捕获")}`;
   try {
-    return JSON.stringify(redactSensitive(JSON.parse(value)), null, 2);
+    return JSON.stringify(JSON.parse(value), null, 2);
   } catch {
-    return safeLogText(value);
+    return value;
   }
 }
 
@@ -80,20 +75,11 @@ export function formatCapturedBody(value?: string | null, language: AppLanguage 
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
     const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
     try {
-      return JSON.stringify(redactSensitive(JSON.parse(decoded)), null, 2);
+      return JSON.stringify(JSON.parse(decoded), null, 2);
     } catch {
-      return safeLogText(decoded);
+      return decoded;
     }
   } catch {
     return `— ${translate(language, "捕获内容无法解码")}`;
   }
-}
-
-function redactSensitive(value: unknown, key = ""): unknown {
-  if (typeof value === "string") return SENSITIVE_KEY.test(key) ? "••••••" : safeLogText(value);
-  if (Array.isArray(value)) return value.map((item) => redactSensitive(item));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, redactSensitive(childValue, childKey)]));
-  }
-  return value;
 }

@@ -283,6 +283,9 @@ pub(super) fn apply_request_headers(
     for (name, value) in headers {
         if is_hop_by_hop(name.as_str())
             || name == header::HOST
+            // 请求 body 可能在路由阶段改写 model，旧长度不能继续透传。
+            // 交给 reqwest 根据最终 body 自动生成 Content-Length。
+            || name == header::CONTENT_LENGTH
             || name == header::AUTHORIZATION
             || name.as_str() == "x-api-key"
         {
@@ -537,6 +540,99 @@ mod tests {
     fn encode_body_roundtrips_string() {
         let encoded = encode_body_base64(b"hello");
         assert_eq!(encoded, "aGVsbG8=");
+    }
+
+    #[test]
+    fn apply_request_headers_drops_stale_content_length() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from_static("1"));
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        let request = apply_request_headers(
+            reqwest::Client::new().post("http://127.0.0.1/test"),
+            &headers,
+            "upstream-secret",
+            &ProtocolType::OpenAi,
+            &AuthStrategy::Bearer,
+        )
+        .body("hello")
+        .build()
+        .unwrap();
+
+        assert_ne!(
+            request
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .and_then(|value| value.to_str().ok()),
+            Some("1")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/json")
+        );
+    }
+
+    #[test]
+    fn apply_request_headers_replaces_client_bearer_credentials() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer client-token"),
+        );
+        headers.insert("x-api-key", HeaderValue::from_static("client-api-key"));
+
+        let request = apply_request_headers(
+            reqwest::Client::new().post("http://127.0.0.1/test"),
+            &headers,
+            "upstream-secret",
+            &ProtocolType::OpenAi,
+            &AuthStrategy::Bearer,
+        )
+        .body("{}")
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer upstream-secret")
+        );
+        assert!(!request.headers().contains_key("x-api-key"));
+    }
+
+    #[test]
+    fn apply_request_headers_replaces_client_x_api_key_credentials() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer client-token"),
+        );
+        headers.insert("x-api-key", HeaderValue::from_static("client-api-key"));
+
+        let request = apply_request_headers(
+            reqwest::Client::new().post("http://127.0.0.1/test"),
+            &headers,
+            "upstream-secret",
+            &ProtocolType::Anthropic,
+            &AuthStrategy::XApiKey,
+        )
+        .body("{}")
+        .build()
+        .unwrap();
+
+        assert!(!request.headers().contains_key(header::AUTHORIZATION));
+        assert_eq!(
+            request
+                .headers()
+                .get("x-api-key")
+                .and_then(|value| value.to_str().ok()),
+            Some("upstream-secret")
+        );
     }
 }
 

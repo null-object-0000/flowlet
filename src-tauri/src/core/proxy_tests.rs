@@ -41,7 +41,7 @@ fn extracts_opencode_session_with_precedence_and_parent() {
     headers.insert("x-parent-session-id", HeaderValue::from_static("ses_parent"));
 
     assert_eq!(
-        extract_opencode_session(&headers),
+        extract_agent_session(&headers),
         Some(AgentSessionIdentity {
             agent_type: "opencode".to_string(),
             session_id: "ses_current".to_string(),
@@ -55,7 +55,23 @@ fn ignores_generic_session_header_without_opencode_identity() {
     let mut headers = HeaderMap::new();
     headers.insert("user-agent", HeaderValue::from_static("another-agent/1.0"));
     headers.insert("x-session-id", HeaderValue::from_static("ses_other"));
-    assert_eq!(extract_opencode_session(&headers), None);
+    assert_eq!(extract_agent_session(&headers), None);
+}
+
+#[test]
+fn extracts_claude_code_session_from_official_header() {
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("claude-cli/2.1.207"));
+    headers.insert("x-claude-code-session-id", HeaderValue::from_static("claude-session-123"));
+
+    assert_eq!(
+        extract_agent_session(&headers),
+        Some(AgentSessionIdentity {
+            agent_type: "claude-code".to_string(),
+            session_id: "claude-session-123".to_string(),
+            parent_session_id: None,
+        })
+    );
 }
 
 #[test]
@@ -162,6 +178,19 @@ fn detects_quota_exceeded_messages() {
     ));
     assert!(!body_contains_quota_exceeded(
         br#"{"error":"context length exceeded"}"#
+    ));
+}
+
+#[test]
+fn detects_deactivated_account_errors() {
+    assert!(body_contains_account_deactivated(
+        br#"{"error":{"message":"api key is disabled","type":"authentication_error","code":"account_deactivated"}}"#
+    ));
+    assert!(body_contains_account_deactivated(
+        br#"{"error":{"message":"API KEY IS DISABLED"}}"#
+    ));
+    assert!(!body_contains_account_deactivated(
+        br#"{"error":{"message":"invalid request","code":"invalid_request"}}"#
     ));
 }
 
@@ -357,6 +386,7 @@ fn enriches_final_upstream_error_metadata_without_body_rewrite() {
         request_type: "chat".to_string(),
         method: "POST".to_string(),
         path: "/v1/chat/completions".to_string(),
+        upstream_url: None,
         status: Some(400),
         latency_ms: Some(1),
         is_stream: false,
@@ -407,6 +437,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
     });
 
     let storage = Storage::open(temp_db_path()).unwrap();
+    let log_storage = storage.clone();
     let state = ProxyAppState {
         shared: ProxySharedConfig {
             channels: Arc::new(Mutex::new(vec![ChannelPreset {
@@ -440,6 +471,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 remark: None,
                 resource_mode: None,
                 base_url_override: None,
+                anthropic_base_url_override: None,
                 last_used_at: None,
                 last_error: None,
                 credential_status: "healthy".to_string(),
@@ -476,6 +508,8 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
         .uri("/v1/chat/completions")
         .header(header::AUTHORIZATION, "Bearer client-token")
         .header(header::CONTENT_TYPE, "application/json")
+        // 模拟客户端旧长度；代理改写 model 后必须丢弃并按最终 body 重算。
+        .header(header::CONTENT_LENGTH, "1")
         .body(Body::from(r#"{"model":"auto","messages":[]}"#))
         .unwrap();
 
@@ -499,6 +533,35 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
     assert_eq!(
         captured_auth.lock().unwrap().as_deref(),
         Some("Bearer upstream-secret")
+    );
+    let logs = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let logs = log_storage.list_request_logs().unwrap();
+            if !logs.is_empty() {
+                break logs;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        logs[0].upstream_url.as_deref(),
+        Some(format!("http://{upstream_addr}/v1/chat/completions").as_str())
+    );
+    let logged_headers: serde_json::Value =
+        serde_json::from_str(logs[0].req_headers_json.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        logged_headers["authorization"],
+        serde_json::Value::String("Bearer upstream-secret".to_string())
+    );
+    assert_ne!(
+        logged_headers["authorization"],
+        serde_json::Value::String("Bearer client-token".to_string())
+    );
+    assert_eq!(
+        logs[0].req_body_b64.as_deref(),
+        Some(encode_body_base64(br#"{"model":"gpt-test","messages":[]}"#).as_str())
     );
 }
 
@@ -669,6 +732,7 @@ fn cleanup_old_logs_works() {
                 request_type: "chat".to_string(),
                 method: "POST".to_string(),
                 path: "/v1/chat/completions".to_string(),
+                upstream_url: None,
                 status: Some(200),
                 latency_ms: Some(100),
                 is_stream: false,
@@ -1275,6 +1339,101 @@ async fn e2e_cross_model_fallback() {
     assert_eq!(
         *seen.lock().unwrap(),
         vec!["key-a".to_string(), "key-b".to_string(), "key-c".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn e2e_account_deactivated_falls_back_and_disables_account() {
+    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen_by_upstream = seen.clone();
+    let upstream = Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: HeaderMap| {
+            let seen = seen_by_upstream.clone();
+            async move {
+                let key = headers
+                    .get(header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.strip_prefix("Bearer "))
+                    .unwrap_or("")
+                    .to_string();
+                seen.lock().unwrap().push(key.clone());
+                if key == "disabled-key" {
+                    (
+                        StatusCode::FORBIDDEN,
+                        [("content-type", "application/json")],
+                        r#"{"error":{"message":"api key is disabled","type":"authentication_error","param":"","code":"account_deactivated"}}"#,
+                    )
+                } else {
+                    (
+                        StatusCode::OK,
+                        [("content-type", "application/json")],
+                        r#"{"choices":[]}"#,
+                    )
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+    let base_url = format!("http://{addr}");
+
+    let channels = vec![
+        dual_protocol_channel("deepseek", "DeepSeek", &base_url),
+        dual_protocol_channel("longcat", "LongCat", &base_url),
+    ];
+    let accounts = vec![
+        test_account("deepseek-disabled", "deepseek", "disabled-key", 0),
+        test_account("longcat-ok", "longcat", "longcat-key", 0),
+    ];
+    let routes = vec![
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "deepseek-disabled",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "longcat",
+            "longcat-ok",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            10,
+        ),
+    ];
+    let state = build_test_state(channels, accounts, routes);
+    let storage = state.storage.clone();
+    let response = forward_request(
+        state,
+        chat_request("flowlet-pro"),
+        ProtocolType::OpenAi,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["disabled-key".to_string(), "longcat-key".to_string()]
+    );
+    let stored_accounts = storage.list_channel_accounts().unwrap();
+    let disabled = stored_accounts
+        .iter()
+        .find(|account| account.id == "deepseek-disabled")
+        .unwrap();
+    assert_eq!(
+        disabled.credential_status,
+        crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY
     );
 }
 

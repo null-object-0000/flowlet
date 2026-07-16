@@ -14,8 +14,13 @@
 .detailItem { min-width: 0; min-height: 62px; padding: 11px 14px; display: grid; align-content: center; gap: 5px; border-right: 1px solid var(--flowlet-color-border); border-bottom: 1px solid var(--flowlet-color-border); }
 .detailItem:nth-child(2n) { border-right: 0; }
 .detailItem:nth-last-child(-n + 2) { border-bottom: 0; }
+.detailItemWide { grid-column: 1 / -1; border-right: 0; }
+.detailItemWide ~ .detailItem:nth-child(2n) { border-right: 1px solid var(--flowlet-color-border); }
+.detailItemWide ~ .detailItem:nth-child(2n + 1) { border-right: 0; }
 .detailItem span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
-.detailItem strong { overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.detailItemValue { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.detailItemValue strong { min-width: 0; flex: 1; overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.detailItemValue :global(.semi-button) { flex: none; }
 .errorBox { padding: 12px 14px; display: grid; gap: 5px; border-radius: 7px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); font-size: var(--flowlet-font-size-caption); }
 .errorBox span { line-height: 1.5; word-break: break-word; }
 .attemptHeader { display: flex; align-items: center; justify-content: space-between; }
@@ -46,4 +51,4 @@
 .state { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-body); text-align: center; }
 .state strong { color: var(--flowlet-color-text); font-size: 15px; }
 @keyframes shimmer { to { transform: translateX(100%); } }
-@media (max-width: 520px) { .detailGrid { grid-template-columns: 1fr; } .detailItem { border-right: 0; } .detailItem:nth-last-child(-n + 2) { border-bottom: 1px solid var(--flowlet-color-border); } .detailItem:last-child { border-bottom: 0; } }
+@media (max-width: 520px) { .detailGrid { grid-template-columns: 1fr; } .detailItem, .detailItemWide ~ .detailItem { border-right: 0; } .detailItem:nth-last-child(-n + 2) { border-bottom: 1px solid var(--flowlet-color-border); } .detailItem:last-child { border-bottom: 0; } }

@@ -29,6 +29,7 @@ export type RequestLogRow = {
   request_type: string;
   method: string;
   path: string;
+  upstream_url: string | null;
   status: number | null;
   latency_ms: number | null;
   is_stream: boolean;

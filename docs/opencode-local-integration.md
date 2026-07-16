@@ -159,20 +159,25 @@ interface OpenCodeProvider {
 
 ## 三、配置修改：直接用 OpenCode 的文件格式
 
-Flowlet 可以直接修改桌面版配置目录下的文件：
+OpenCode CLI 与 Desktop 共用用户级全局配置。Flowlet 优先修改已有的：
 
 ```text
-<userData>/opencode.jsonc
+~/.config/opencode/opencode.jsonc
 ```
 
 或已有配置文件：
 
 ```text
-<userData>/opencode.json
-<userData>/config.json
+~/.config/opencode/opencode.json
 ```
 
-OpenCode Desktop 选择顺序也是在这些候选文件中找已有配置；不存在时默认选择 `opencode.jsonc`。
+不存在时 Flowlet 创建 `opencode.jsonc`。Client Token 不写进 Provider 配置，而是单独保存为：
+
+```text
+~/.local/share/opencode/auth.json
+```
+
+其中 Provider ID 固定为 `flowlet`，凭据格式为 `{ "type": "api", "key": "..." }`。
 
 ### 写入策略
 
@@ -180,9 +185,8 @@ OpenCode Desktop 选择顺序也是在这些候选文件中找已有配置；不
 2. 保留原始 JSONC 注释
 3. 使用 `jsonc-parser` 做局部 Patch
 4. 写入临时文件
-5. `fsync`
-6. 原子替换
-7. 保留一份最近备份
+5. 原子替换
+6. 保留一份最近备份
 
 ### 写入内容示例
 

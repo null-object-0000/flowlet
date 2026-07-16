@@ -687,7 +687,8 @@ fn apply_opencode(
     }
 
     let backup = opencode_backup_path(settings_path);
-    if !backup.is_file() {
+    let backup_created = !backup.is_file();
+    if backup_created {
         let snapshot = OpenCodeConfigBackup {
             version: BACKUP_VERSION,
             agent_id: "opencode".to_string(),
@@ -750,12 +751,23 @@ fn apply_opencode(
             }
         }),
     );
-    write_text_file(settings_path, &root.to_string())?;
     auth.as_object_mut().unwrap().insert(
         OPENCODE_PROVIDER_ID.to_string(),
         serde_json::json!({ "type": "api", "key": client_token.trim() }),
     );
-    write_json_file(auth_path, &auth)?;
+    let settings_content = text_file_bytes(&root.to_string());
+    let auth_content = json_file_bytes(&auth)?;
+    if let Err(failure) = write_two_files_transactionally(
+        settings_path,
+        Some(settings_content),
+        auth_path,
+        Some(auth_content),
+    ) {
+        if backup_created && failure.rolled_back {
+            let _ = std::fs::remove_file(&backup);
+        }
+        return Err(failure.message);
+    }
     inspect_opencode(settings_path, auth_path, expected_base_url)
 }
 
@@ -819,14 +831,6 @@ fn restore_opencode(
         );
     }
 
-    if !backup.settings_existed && root_object.properties().is_empty() {
-        if settings_path.is_file() {
-            std::fs::remove_file(settings_path)
-                .map_err(|error| format!("删除 Flowlet 创建的 OpenCode 配置失败：{error}"))?;
-        }
-    } else {
-        write_text_file(settings_path, &root.to_string())?;
-    }
     let auth_object = auth.as_object_mut().unwrap();
     if backup.flowlet_auth.present {
         auth_object.insert(
@@ -836,14 +840,18 @@ fn restore_opencode(
     } else {
         auth_object.remove(OPENCODE_PROVIDER_ID);
     }
-    if !backup.auth_existed && auth_object.is_empty() {
-        if auth_path.is_file() {
-            std::fs::remove_file(&auth_path)
-                .map_err(|error| format!("删除 Flowlet 创建的 OpenCode 凭据文件失败：{error}"))?;
-        }
+    let settings_content = if !backup.settings_existed && root_object.properties().is_empty() {
+        None
     } else {
-        write_json_file(&auth_path, &auth)?;
-    }
+        Some(text_file_bytes(&root.to_string()))
+    };
+    let auth_content = if !backup.auth_existed && auth_object.is_empty() {
+        None
+    } else {
+        Some(json_file_bytes(&auth)?)
+    };
+    write_two_files_transactionally(settings_path, settings_content, &auth_path, auth_content)
+        .map_err(|failure| failure.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("配置已恢复，但清理 Flowlet 备份标记失败：{error}"))?;
     inspect_opencode(settings_path, expected_auth_path, expected_base_url)
@@ -981,12 +989,28 @@ fn opencode_backup_path(settings_path: &Path) -> PathBuf {
 }
 
 fn write_json_file(path: &Path, value: &Value) -> Result<(), String> {
+    write_bytes_file(path, &json_file_bytes(value)?)
+}
+
+fn json_file_bytes(value: &Value) -> Result<Vec<u8>, String> {
+    let content =
+        serde_json::to_string_pretty(value).map_err(|error| format!("序列化配置失败：{error}"))?;
+    Ok(format!("{content}\n").into_bytes())
+}
+
+fn text_file_bytes(content: &str) -> Vec<u8> {
+    if content.ends_with('\n') {
+        content.as_bytes().to_vec()
+    } else {
+        format!("{content}\n").into_bytes()
+    }
+}
+
+fn write_bytes_file(path: &Path, content: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("创建配置目录 {} 失败：{error}", parent.display()))?;
     }
-    let content =
-        serde_json::to_string_pretty(value).map_err(|error| format!("序列化配置失败：{error}"))?;
     let temp_path = path.with_extension(format!(
         "{}.flowlet-tmp-{}",
         path.extension()
@@ -994,7 +1018,7 @@ fn write_json_file(path: &Path, value: &Value) -> Result<(), String> {
             .unwrap_or("json"),
         uuid::Uuid::new_v4()
     ));
-    std::fs::write(&temp_path, format!("{content}\n"))
+    std::fs::write(&temp_path, content)
         .map_err(|error| format!("写入临时配置 {} 失败：{error}", temp_path.display()))?;
     set_private_permissions(&temp_path)?;
     std::fs::rename(&temp_path, path).map_err(|error| {
@@ -1004,31 +1028,73 @@ fn write_json_file(path: &Path, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("创建配置目录 {} 失败：{error}", parent.display()))?;
-    }
-    let temp_path = path.with_extension(format!(
-        "{}.flowlet-tmp-{}",
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or("jsonc"),
-        uuid::Uuid::new_v4()
-    ));
-    let content = if content.ends_with('\n') {
-        content.to_string()
-    } else {
-        format!("{content}\n")
-    };
-    std::fs::write(&temp_path, content)
-        .map_err(|error| format!("写入临时配置 {} 失败：{error}", temp_path.display()))?;
-    set_private_permissions(&temp_path)?;
-    std::fs::rename(&temp_path, path).map_err(|error| {
-        let _ = std::fs::remove_file(&temp_path);
-        format!("替换配置 {} 失败：{error}", path.display())
+#[derive(Debug)]
+struct TransactionFailure {
+    message: String,
+    rolled_back: bool,
+}
+
+fn write_two_files_transactionally(
+    first_path: &Path,
+    first_content: Option<Vec<u8>>,
+    second_path: &Path,
+    second_content: Option<Vec<u8>>,
+) -> Result<(), TransactionFailure> {
+    let first_snapshot = capture_file(first_path).map_err(|message| TransactionFailure {
+        message,
+        rolled_back: true,
     })?;
+    let second_snapshot = capture_file(second_path).map_err(|message| TransactionFailure {
+        message,
+        rolled_back: true,
+    })?;
+    write_optional_file(first_path, first_content.as_deref()).map_err(|message| {
+        TransactionFailure {
+            message,
+            rolled_back: true,
+        }
+    })?;
+    if let Err(write_error) = write_optional_file(second_path, second_content.as_deref()) {
+        let first_rollback = write_optional_file(first_path, first_snapshot.as_deref());
+        let second_rollback = write_optional_file(second_path, second_snapshot.as_deref());
+        let rollback_errors = [first_rollback.err(), second_rollback.err()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if rollback_errors.is_empty() {
+            return Err(TransactionFailure {
+                message: format!("{write_error}；已回滚 OpenCode 配置与凭据文件"),
+                rolled_back: true,
+            });
+        }
+        return Err(TransactionFailure {
+            message: format!(
+                "{write_error}；自动回滚失败：{}",
+                rollback_errors.join("；")
+            ),
+            rolled_back: false,
+        });
+    }
     Ok(())
+}
+
+fn capture_file(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    if path.is_file() {
+        std::fs::read(path)
+            .map(Some)
+            .map_err(|error| format!("读取事务快照 {} 失败：{error}", path.display()))
+    } else {
+        Ok(None)
+    }
+}
+
+fn write_optional_file(path: &Path, content: Option<&[u8]>) -> Result<(), String> {
+    match content {
+        Some(content) => write_bytes_file(path, content),
+        None if path.is_file() => std::fs::remove_file(path)
+            .map_err(|error| format!("删除配置文件 {} 失败：{error}", path.display())),
+        None => Ok(()),
+    }
 }
 
 #[cfg(unix)]
@@ -1274,6 +1340,36 @@ mod tests {
         restore_opencode(&settings_path, &auth_path, "http://127.0.0.1:18640/v1").unwrap();
         assert!(!settings_path.exists());
         assert!(!auth_path.exists());
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn rolls_back_opencode_config_when_credentials_write_fails() {
+        let (settings_path, auth_path) = test_opencode_paths();
+        let directory = settings_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&auth_path).unwrap();
+        let original = b"{\n  // unchanged\n  \"theme\": \"system\"\n}\n";
+        std::fs::write(&settings_path, original).unwrap();
+
+        let error = apply_opencode(
+            &settings_path,
+            &auth_path,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-token",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("已回滚 OpenCode 配置与凭据文件"));
+        assert_eq!(std::fs::read(&settings_path).unwrap(), original);
+        assert!(auth_path.is_dir());
+        assert!(!opencode_backup_path(&settings_path).exists());
 
         let _ = std::fs::remove_dir_all(directory);
     }

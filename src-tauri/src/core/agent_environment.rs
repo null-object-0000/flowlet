@@ -111,6 +111,7 @@ async fn detect_opencode() -> AgentEnvironmentReport {
     let mut installations = Vec::new();
     for candidate in opencode_cli_candidates() {
         let install_method = classify_opencode_cli_method(&candidate.path);
+        let install_dir = resolve_opencode_install_dir(&candidate.path, &install_method);
         let version_result = read_version(&candidate.path).await;
         let (version, version_output, error) = match version_result {
             Ok(output) => (parse_version(&output), Some(output), None),
@@ -119,7 +120,7 @@ async fn detect_opencode() -> AgentEnvironmentReport {
         installations.push(AgentInstallation {
             surface: AgentSurface::Cli,
             executable_path: display_path(&candidate.path),
-            install_dir: display_path(candidate.path.parent().unwrap_or(&candidate.path)),
+            install_dir: display_path(&install_dir),
             install_method,
             version,
             version_output,
@@ -188,20 +189,30 @@ fn opencode_cli_candidates() -> Vec<Candidate> {
     if let Some(path) = std::env::var_os("PATH") {
         for directory in std::env::split_paths(&path) {
             for file_name in executable_names("opencode") {
-                push_candidate(&mut candidates, &mut seen, directory.join(file_name), true);
+                push_opencode_cli_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    directory.join(file_name),
+                    true,
+                );
             }
         }
     }
     if let Some(home) = dirs::home_dir() {
         for relative in known_opencode_cli_locations() {
-            push_candidate(&mut candidates, &mut seen, home.join(relative), false);
+            push_opencode_cli_candidate(&mut candidates, &mut seen, home.join(relative), false);
         }
     }
     #[cfg(windows)]
     if let Some(app_data) = std::env::var_os("APPDATA") {
         let directory = PathBuf::from(app_data).join("npm");
         for file_name in executable_names("opencode") {
-            push_candidate(&mut candidates, &mut seen, directory.join(file_name), false);
+            push_opencode_cli_candidate(
+                &mut candidates,
+                &mut seen,
+                directory.join(file_name),
+                false,
+            );
         }
     }
     candidates
@@ -272,10 +283,47 @@ fn push_candidate(
     }
 }
 
+fn push_opencode_cli_candidate(
+    candidates: &mut Vec<Candidate>,
+    seen: &mut HashSet<String>,
+    path: PathBuf,
+    available_on_path: bool,
+) {
+    #[cfg(windows)]
+    let Some(path) = resolve_windows_opencode_executable(path) else {
+        return;
+    };
+    push_candidate(candidates, seen, path, available_on_path);
+}
+
+#[cfg(windows)]
+fn resolve_windows_opencode_executable(path: PathBuf) -> Option<PathBuf> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension.is_empty() {
+        return None;
+    }
+    if extension == "cmd" || extension == "ps1" {
+        let parent = path.parent()?;
+        if normalized_path_key(parent).ends_with("/npm") {
+            let executable = parent
+                .join("node_modules")
+                .join("opencode-ai")
+                .join("bin")
+                .join("opencode.exe");
+            return executable.is_file().then_some(executable);
+        }
+    }
+    Some(path)
+}
+
 #[cfg(windows)]
 fn executable_names(command: &str) -> Vec<String> {
     let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
-    let mut names = vec![command.to_string()];
+    let mut names = Vec::new();
     names.extend(
         extensions
             .split(';')
@@ -426,7 +474,8 @@ fn classify_opencode_cli_method(path: &Path) -> AgentInstallMethod {
     let normalized = normalized_path_key(path);
     if normalized.contains("/.bun/bin/") {
         AgentInstallMethod::Bun
-    } else if normalized.ends_with("/npm/opencode.cmd")
+    } else if normalized.contains("/node_modules/opencode-ai/")
+        || normalized.ends_with("/npm/opencode.cmd")
         || normalized.ends_with("/npm/opencode.ps1")
         || normalized.ends_with("/npm/opencode")
     {
@@ -532,6 +581,17 @@ fn resolve_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBuf {
             if package_dir.is_dir() {
                 return package_dir;
             }
+        }
+    }
+    path.parent().unwrap_or(path).to_path_buf()
+}
+
+fn resolve_opencode_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBuf {
+    if matches!(method, AgentInstallMethod::Npm)
+        && normalized_path_key(path).contains("/node_modules/opencode-ai/bin/")
+    {
+        if let Some(package_dir) = path.parent().and_then(Path::parent) {
+            return package_dir.to_path_buf();
         }
     }
     path.parent().unwrap_or(path).to_path_buf()

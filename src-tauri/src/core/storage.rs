@@ -272,6 +272,9 @@ impl Storage {
             CREATE TABLE IF NOT EXISTS request_logs (
                 id                TEXT PRIMARY KEY,
                 request_id        TEXT NOT NULL,
+                agent_type        TEXT,
+                agent_session_id  TEXT,
+                parent_agent_session_id TEXT,
                 client_id         TEXT,
                 client_name       TEXT,
                 channel_id        TEXT,
@@ -439,6 +442,14 @@ impl Storage {
             "request_id",
             "TEXT NOT NULL DEFAULT ''",
         )?;
+        add_column_if_missing(&connection, "request_logs", "agent_type", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "agent_session_id", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "parent_agent_session_id",
+            "TEXT",
+        )?;
         add_column_if_missing(&connection, "request_logs", "client_id", "TEXT")?;
         add_column_if_missing(&connection, "request_logs", "client_name", "TEXT")?;
         add_column_if_missing(&connection, "request_logs", "channel_id", "TEXT")?;
@@ -501,8 +512,9 @@ impl Storage {
             "TEXT NOT NULL DEFAULT ''",
         )?;
 
-        // 请求日志：补充详情字段（TTFB、耗时、尝试序号、请求/响应头部与 body、流式摘要）
+        // 请求日志：补充详情字段（TTFB、TTFT、耗时、尝试序号、请求/响应头部与 body、流式摘要）
         add_column_if_missing(&connection, "request_logs", "ttfb_ms", "INTEGER")?;
+        add_column_if_missing(&connection, "request_logs", "ttft_ms", "INTEGER")?;
         add_column_if_missing(&connection, "request_logs", "duration_ms", "INTEGER")?;
         add_column_if_missing(
             &connection,
@@ -571,6 +583,7 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_request_logs_is_last_attempt  ON request_logs(is_last_attempt);
             CREATE INDEX IF NOT EXISTS idx_request_logs_client           ON request_logs(client_id);
             CREATE INDEX IF NOT EXISTS idx_request_logs_account          ON request_logs(account_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_agent_session    ON request_logs(agent_type, agent_session_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_usage_records_request_id     ON usage_records(request_id);
             CREATE INDEX IF NOT EXISTS idx_usage_records_created_at     ON usage_records(created_at);
             CREATE INDEX IF NOT EXISTS idx_usage_channel_upstream_model ON usage_records(channel_id, upstream_model);
@@ -580,7 +593,8 @@ impl Storage {
 
         // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
         connection.execute(
-            "INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.04', datetime('now'))",
+            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.16', datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
             [],
         )?;
 

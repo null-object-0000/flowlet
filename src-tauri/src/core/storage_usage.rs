@@ -1,11 +1,43 @@
 use super::{Storage, StorageError};
 use crate::core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, LogFilterClient, LogsFilter, LogsPageResult,
+    AccountBalanceSnapshot, AccountStatsRow, AgentSessionRepairResult, AgentSessionRow,
+    AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter, LogsPageResult,
     LogsSummary, ModelPrice, RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
 };
 use crate::core::usage::{extract_response_usage, extract_sse_response_usage};
 use base64::Engine;
 use rusqlite::params;
+
+const MAX_AGENT_SESSION_ID_BYTES: usize = 512;
+
+fn opencode_session_from_json(headers_json: &str) -> Option<(String, Option<String>)> {
+    let parsed = serde_json::from_str::<serde_json::Value>(headers_json).ok()?;
+    let headers = parsed
+        .as_object()?
+        .iter()
+        .filter_map(|(key, value)| value.as_str().map(|value| (key.to_ascii_lowercase(), value)))
+        .collect::<std::collections::HashMap<_, _>>();
+    let valid = |name: &str| {
+        headers.get(name).and_then(|value| {
+            let value = value.trim();
+            (!value.is_empty()
+                && value != "[redacted]"
+                && value.len() <= MAX_AGENT_SESSION_ID_BYTES)
+                .then(|| value.to_string())
+        })
+    };
+    let is_opencode = valid("x-opencode-session").is_some()
+        || headers
+            .get("user-agent")
+            .is_some_and(|value| value.to_ascii_lowercase().contains("opencode/"));
+    if !is_opencode {
+        return None;
+    }
+    let session_id = valid("x-opencode-session")
+        .or_else(|| valid("x-session-id"))
+        .or_else(|| valid("x-session-affinity"))?;
+    Some((session_id, valid("x-parent-session-id")))
+}
 
 /// 根据内存中的价格表（仅来自 config.json）计算单次用量记录的费用估算。
 /// 公式与旧版 SQL 子查询一致：未命中缓存输入 / 命中缓存输入 / 输出，按每百万 token 计价。
@@ -189,7 +221,8 @@ impl Storage {    pub fn save_balance_snapshot(
         connection.execute(
             r#"
             INSERT INTO request_logs (
-                id, request_id, client_id, client_name, channel_id, channel_name,
+                id, request_id, agent_type, agent_session_id, parent_agent_session_id,
+                client_id, client_name, channel_id, channel_name,
                 account_id, account_name, client_protocol, upstream_protocol,
                 virtual_model, public_model, upstream_model, request_type, method, path,
                 status, latency_ms, is_stream, error_message, fallback_count,
@@ -198,12 +231,15 @@ impl Storage {    pub fn save_balance_snapshot(
                 res_headers_json, res_body_b64, is_last_attempt
             ) VALUES (
                 lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, datetime('now'),
-                ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
+                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, datetime('now'),
+                ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
             )
             "#,
             params![
                 log.request_id,
+                log.agent_type,
+                log.agent_session_id,
+                log.parent_agent_session_id,
                 log.client_id,
                 log.client_name,
                 log.channel_id,
@@ -237,6 +273,88 @@ impl Storage {    pub fn save_balance_snapshot(
         Ok(())
     }
 
+    pub fn list_agent_sessions(
+        &self,
+        filter: AgentSessionsFilter,
+    ) -> Result<AgentSessionsPageResult, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let page = filter.page.max(1);
+        let page_size = filter.page_size.clamp(1, 100);
+        let offset = i64::from((page - 1) * page_size);
+        let pattern = format!("%{}%", filter.search.trim());
+
+        let total = connection.query_row(
+            r#"
+            SELECT COUNT(*) FROM (
+                SELECT agent_type, agent_session_id
+                FROM request_logs
+                WHERE is_last_attempt = 1
+                  AND agent_type = 'opencode'
+                  AND agent_session_id IS NOT NULL
+                  AND (?1 = '%%' OR agent_session_id LIKE ?1
+                       OR COALESCE(parent_agent_session_id, '') LIKE ?1
+                       OR COALESCE(public_model, virtual_model, '') LIKE ?1)
+                GROUP BY agent_type, agent_session_id
+            )
+            "#,
+            [&pattern],
+            |row| row.get(0),
+        )?;
+
+        let mut stmt = connection.prepare(
+            r#"
+            SELECT
+                rl.agent_type,
+                rl.agent_session_id,
+                MAX(rl.parent_agent_session_id),
+                MIN(rl.created_at),
+                MAX(rl.created_at),
+                COUNT(DISTINCT rl.request_id),
+                SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 0 ELSE 1 END),
+                COALESCE(SUM(ur.total_tokens), 0),
+                COALESCE(SUM(ur.estimated_cost), 0),
+                (
+                    SELECT COALESCE(latest.public_model, latest.virtual_model)
+                    FROM request_logs latest
+                    WHERE latest.agent_type = rl.agent_type
+                      AND latest.agent_session_id = rl.agent_session_id
+                      AND latest.is_last_attempt = 1
+                    ORDER BY latest.created_at DESC
+                    LIMIT 1
+                )
+            FROM request_logs rl
+            LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+            WHERE rl.is_last_attempt = 1
+              AND rl.agent_type = 'opencode'
+              AND rl.agent_session_id IS NOT NULL
+              AND (?1 = '%%' OR rl.agent_session_id LIKE ?1
+                   OR COALESCE(rl.parent_agent_session_id, '') LIKE ?1
+                   OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ?1)
+            GROUP BY rl.agent_type, rl.agent_session_id
+            ORDER BY MAX(rl.created_at) DESC
+            LIMIT ?2 OFFSET ?3
+            "#,
+        )?;
+        let mapped = stmt.query_map(params![pattern, i64::from(page_size), offset], |row| {
+            Ok(AgentSessionRow {
+                agent_type: row.get(0)?,
+                session_id: row.get(1)?,
+                parent_session_id: row.get(2)?,
+                started_at: row.get(3)?,
+                updated_at: row.get(4)?,
+                request_count: row.get(5)?,
+                success_count: row.get(6)?,
+                error_count: row.get(7)?,
+                known_tokens: row.get(8)?,
+                estimated_cost: row.get(9)?,
+                latest_model: row.get(10)?,
+            })
+        })?;
+        let rows = mapped.collect::<Result<Vec<_>, _>>()?;
+        Ok(AgentSessionsPageResult { rows, total, page, page_size })
+    }
+
     pub fn list_request_logs(&self) -> Result<Vec<RequestLogRow>, StorageError> {
         let connection = self
             .connection
@@ -252,7 +370,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 route_reason, created_at,
                 ttfb_ms, duration_ms, attempt_seq,
                 req_headers_json, req_body_b64, res_headers_json, res_body_b64,
-                is_last_attempt
+                is_last_attempt, ttft_ms
             FROM request_logs
             WHERE is_last_attempt = 1
             ORDER BY created_at DESC
@@ -292,7 +410,10 @@ impl Storage {    pub fn save_balance_snapshot(
                 res_headers_json: row.get(28)?,
                 res_body_b64: row.get(29)?,
                 is_last_attempt: row.get::<_, i64>(30)? != 0,
+                ttft_ms: row.get(31)?,
                 input_tokens: None,
+                input_cached_tokens: None,
+                input_uncached_tokens: None,
                 output_tokens: None,
                 total_tokens: None,
                 estimated_cost: None,
@@ -378,7 +499,8 @@ impl Storage {    pub fn save_balance_snapshot(
                 rl.ttfb_ms, rl.duration_ms, rl.attempt_seq,
                 rl.req_headers_json, rl.req_body_b64, rl.res_headers_json, rl.res_body_b64,
                 rl.is_last_attempt,
-                ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost
+                ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost,
+                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             WHERE rl.request_id = ?1
@@ -422,6 +544,9 @@ impl Storage {    pub fn save_balance_snapshot(
                 output_tokens: row.get(32)?,
                 total_tokens: row.get(33)?,
                 estimated_cost: row.get(34)?,
+                ttft_ms: row.get(35)?,
+                input_cached_tokens: row.get(36)?,
+                input_uncached_tokens: row.get(37)?,
             })
         })?;
         let mut logs = Vec::new();
@@ -435,6 +560,7 @@ impl Storage {    pub fn save_balance_snapshot(
         &self,
         request_id: &str,
         ttfb_ms: i64,
+        ttft_ms: Option<i64>,
         duration_ms: i64,
         res_headers_json: Option<String>,
         res_body_b64: Option<String>,
@@ -447,9 +573,10 @@ impl Storage {    pub fn save_balance_snapshot(
             r#"
             UPDATE request_logs
             SET ttfb_ms = ?2,
-                duration_ms = ?3,
-                res_headers_json = ?4,
-                res_body_b64 = ?5
+                ttft_ms = ?3,
+                duration_ms = ?4,
+                res_headers_json = ?5,
+                res_body_b64 = ?6
             WHERE request_id = ?1
               AND is_last_attempt = 1
               AND is_stream = 1
@@ -457,6 +584,7 @@ impl Storage {    pub fn save_balance_snapshot(
             params![
                 request_id,
                 ttfb_ms,
+                ttft_ms,
                 duration_ms,
                 res_headers_json,
                 res_body_b64,
@@ -493,6 +621,58 @@ impl Storage {    pub fn save_balance_snapshot(
     }
 
     // ─── Usage Records ───────────────────────────────────────────────────────
+
+    /// Repair historical OpenCode session attribution from captured request
+    /// headers. Requests without captured headers cannot be recovered.
+    pub fn repair_opencode_sessions(&self) -> Result<AgentSessionRepairResult, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let rows: Vec<(String, String)> = {
+            let mut stmt = connection.prepare(
+                r#"
+                SELECT request_id, MAX(req_headers_json)
+                FROM request_logs
+                WHERE agent_session_id IS NULL
+                  AND req_headers_json IS NOT NULL
+                GROUP BY request_id
+                "#,
+            )?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+
+        let scanned_requests = rows.len();
+        let mut repaired_requests = 0usize;
+        let mut repaired_logs = 0usize;
+        for (request_id, headers_json) in rows {
+            let Some((session_id, parent_session_id)) = opencode_session_from_json(&headers_json)
+            else {
+                continue;
+            };
+            repaired_logs += connection.execute(
+                r#"
+                UPDATE request_logs
+                SET agent_type = 'opencode',
+                    agent_session_id = ?2,
+                    parent_agent_session_id = ?3
+                WHERE request_id = ?1 AND agent_session_id IS NULL
+                "#,
+                params![request_id, session_id, parent_session_id],
+            )?;
+            repaired_requests += 1;
+        }
+
+        Ok(AgentSessionRepairResult {
+            scanned_requests,
+            repaired_requests,
+            repaired_logs,
+            skipped_requests: scanned_requests.saturating_sub(repaired_requests),
+        })
+    }
 
     /// Reparse captured response bodies for requests whose usage is missing or
     /// still unknown. Stream responses require a complete SSE `[DONE]` marker.
@@ -622,8 +802,11 @@ impl Storage {    pub fn save_balance_snapshot(
                 datetime('now'),
                 datetime('now')
             FROM request_logs
-            LEFT JOIN usage_records ON usage_records.request_id = request_logs.request_id
-            WHERE usage_records.id IS NULL
+            WHERE request_logs.is_last_attempt = 1
+              AND NOT EXISTS (
+                  SELECT 1 FROM usage_records
+                  WHERE usage_records.request_id = request_logs.request_id
+              )
             "#,
             [],
         )?;
@@ -822,10 +1005,16 @@ impl Storage {    pub fn save_balance_snapshot(
                 usage_records.upstream_model,
                 count(*) AS request_count,
                 coalesce(sum(usage_records.total_tokens), 0) AS known_tokens,
+                coalesce(sum(usage_records.input_tokens), 0) AS input_tokens,
+                coalesce(sum(usage_records.input_cached_tokens), 0) AS input_cached_tokens,
+                coalesce(sum(usage_records.input_uncached_tokens), 0) AS input_uncached_tokens,
+                coalesce(sum(CASE WHEN usage_records.input_cached_tokens IS NOT NULL THEN usage_records.input_tokens ELSE 0 END), 0) AS cache_measured_input_tokens,
+                coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
                 sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
                 coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost
             FROM usage_records
             LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
+                                  AND request_logs.is_last_attempt = 1
             GROUP BY usage_date, usage_records.client_id, usage_records.channel_id,
                      usage_records.account_id, usage_records.upstream_model
             ORDER BY usage_date DESC, request_count DESC
@@ -846,8 +1035,13 @@ impl Storage {    pub fn save_balance_snapshot(
                 upstream_model: row.get(7)?,
                 request_count: row.get(8)?,
                 known_tokens: row.get(9)?,
-                unknown_count: row.get(10)?,
-                estimated_cost: row.get(11)?,
+                input_tokens: row.get(10)?,
+                input_cached_tokens: row.get(11)?,
+                input_uncached_tokens: row.get(12)?,
+                cache_measured_input_tokens: row.get(13)?,
+                output_tokens: row.get(14)?,
+                unknown_count: row.get(15)?,
+                estimated_cost: row.get(16)?,
             })
         })?;
         let mut summary = Vec::new();
@@ -1039,12 +1233,13 @@ impl Storage {    pub fn save_balance_snapshot(
             raw_params.push(filter.search.clone()); // exact request_id
             raw_params.push(like.clone()); // LIKE for error_message
             raw_params.push(like.clone()); // LIKE for model
-            raw_params.push(like); // LIKE for account
-            let base = raw_params.len() - 5;
-            for value in &raw_params[base..base + 5] {
+            raw_params.push(like.clone()); // LIKE for account
+            raw_params.push(like); // LIKE for Agent session
+            let base = raw_params.len() - 6;
+            for value in &raw_params[base..base + 6] {
                 refs.push(value);
             }
-            Some("(rl.path LIKE ? OR rl.request_id = ? OR rl.error_message LIKE ? OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ? OR COALESCE(rl.account_name, rl.account_id, '') LIKE ?)")
+            Some("(rl.path LIKE ? OR rl.request_id = ? OR rl.error_message LIKE ? OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ? OR COALESCE(rl.account_name, rl.account_id, '') LIKE ? OR COALESCE(rl.agent_session_id, '') LIKE ?)")
         };
 
         let mut clauses: Vec<&str> = vec!["rl.is_last_attempt = 1"];
@@ -1088,7 +1283,22 @@ impl Storage {    pub fn save_balance_snapshot(
                 COALESCE(SUM(CASE WHEN rl.status >= 200 AND rl.status < 400 AND rl.error_message IS NULL THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN rl.status IS NULL OR rl.status >= 400 OR rl.error_message IS NOT NULL THEN 1 ELSE 0 END), 0),
                 AVG(COALESCE(rl.duration_ms, rl.latency_ms)),
+                AVG(rl.ttft_ms),
+                AVG(CASE
+                    WHEN ur.output_tokens IS NOT NULL
+                     AND rl.ttft_ms IS NOT NULL
+                     AND rl.duration_ms > rl.ttft_ms
+                    THEN 1000.0 * ur.output_tokens / (rl.duration_ms - rl.ttft_ms)
+                END),
                 COALESCE(SUM(ur.total_tokens), 0),
+                COALESCE(SUM(ur.input_tokens), 0),
+                COALESCE(SUM(ur.input_cached_tokens), 0),
+                COALESCE(SUM(ur.input_uncached_tokens), 0),
+                CASE
+                    WHEN SUM(CASE WHEN ur.input_cached_tokens IS NOT NULL THEN ur.input_tokens ELSE 0 END) > 0
+                    THEN 1.0 * SUM(ur.input_cached_tokens)
+                         / SUM(CASE WHEN ur.input_cached_tokens IS NOT NULL THEN ur.input_tokens ELSE 0 END)
+                END,
                 COALESCE(SUM(ur.estimated_cost), 0)
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
@@ -1103,8 +1313,14 @@ impl Storage {    pub fn save_balance_snapshot(
                 success_count: row.get(1)?,
                 error_count: row.get(2)?,
                 average_duration_ms: row.get(3)?,
-                known_tokens: row.get(4)?,
-                estimated_cost: row.get(5)?,
+                average_ttft_ms: row.get(4)?,
+                average_output_tokens_per_second: row.get(5)?,
+                known_tokens: row.get(6)?,
+                input_tokens: row.get(7)?,
+                input_cached_tokens: row.get(8)?,
+                input_uncached_tokens: row.get(9)?,
+                cache_hit_rate: row.get(10)?,
+                estimated_cost: row.get(11)?,
             }),
         )?;
 
@@ -1122,7 +1338,8 @@ impl Storage {    pub fn save_balance_snapshot(
                 rl.route_reason, rl.created_at,
                 rl.ttfb_ms, rl.duration_ms, rl.attempt_seq,
                 rl.is_last_attempt,
-                ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost
+                ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost,
+                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             {where_sql}
@@ -1179,6 +1396,9 @@ impl Storage {    pub fn save_balance_snapshot(
                     output_tokens: row.get(28)?,
                     total_tokens: row.get(29)?,
                     estimated_cost: row.get(30)?,
+                    ttft_ms: row.get(31)?,
+                    input_cached_tokens: row.get(32)?,
+                    input_uncached_tokens: row.get(33)?,
                 })
             },
         )?;

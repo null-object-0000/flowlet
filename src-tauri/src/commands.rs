@@ -290,6 +290,40 @@ pub(super) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, 
 }
 
 #[tauri::command]
+pub(super) fn repair_opencode_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::config::AgentSessionRepairResult, String> {
+    state
+        .storage
+        .repair_opencode_sessions()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn repair_captured_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    state
+        .storage
+        .reanalyze_captured_usage()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn repair_unknown_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    state
+        .storage
+        .analyze_unknown_usage()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn repair_usage_costs(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    state
+        .storage
+        .recalculate_usage_costs()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub(super) fn usage_summary(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<UsageSummaryRow>, String> {

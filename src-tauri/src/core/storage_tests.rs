@@ -5,6 +5,43 @@ use base64::Engine;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 
+fn request_log_for_repair(request_id: &str, attempt_seq: i64, is_last_attempt: bool) -> RequestLogInput {
+    RequestLogInput {
+        request_id: request_id.to_string(),
+        agent_type: None,
+        agent_session_id: None,
+        parent_agent_session_id: None,
+        client_id: Some("opencode".to_string()),
+        client_name: Some("OpenCode".to_string()),
+        channel_id: Some("longcat".to_string()),
+        channel_name: Some("LongCat".to_string()),
+        account_id: Some("account-1".to_string()),
+        account_name: Some("Account".to_string()),
+        client_protocol: "openai".to_string(),
+        upstream_protocol: "openai".to_string(),
+        virtual_model: Some("flowlet-pro".to_string()),
+        public_model: Some("flowlet-pro".to_string()),
+        upstream_model: Some("LongCat-2.0".to_string()),
+        request_type: "chat".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/chat/completions".to_string(),
+        status: Some(200),
+        latency_ms: Some(20),
+        is_stream: false,
+        error_message: None,
+        fallback_count: attempt_seq,
+        route_reason: Some("direct".to_string()),
+        ttfb_ms: Some(10),
+        duration_ms: Some(20),
+        attempt_seq,
+        req_headers_json: Some(r#"{"User-Agent":"opencode/local ai-sdk","X-Session-Id":"ses_history","X-Session-Affinity":"ses_history"}"#.to_string()),
+        req_body_b64: None,
+        res_headers_json: None,
+        res_body_b64: None,
+        is_last_attempt,
+    }
+}
+
 #[test]
 fn lists_paginated_request_logs_with_usage_join() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
@@ -33,6 +70,117 @@ fn lists_paginated_request_logs_with_usage_join() {
 }
 
 #[test]
+fn groups_opencode_request_logs_into_sessions() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage {
+        connection: Arc::new(Mutex::new(connection)),
+        prices: Arc::new(Mutex::new(Vec::new())),
+    };
+    storage.migrate().expect("migrate request log schema");
+
+    let mut log = RequestLogInput {
+        request_id: "req-1".to_string(),
+        agent_type: Some("opencode".to_string()),
+        agent_session_id: Some("ses_test".to_string()),
+        parent_agent_session_id: Some("ses_parent".to_string()),
+        client_id: Some("opencode".to_string()),
+        client_name: Some("OpenCode".to_string()),
+        channel_id: Some("longcat".to_string()),
+        channel_name: Some("LongCat".to_string()),
+        account_id: Some("account-1".to_string()),
+        account_name: Some("Account".to_string()),
+        client_protocol: "openai".to_string(),
+        upstream_protocol: "openai".to_string(),
+        virtual_model: Some("flowlet-pro".to_string()),
+        public_model: Some("flowlet-pro".to_string()),
+        upstream_model: Some("LongCat-2.0".to_string()),
+        request_type: "chat".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/chat/completions".to_string(),
+        status: Some(200),
+        latency_ms: Some(20),
+        is_stream: true,
+        error_message: None,
+        fallback_count: 0,
+        route_reason: Some("direct".to_string()),
+        ttfb_ms: Some(10),
+        duration_ms: Some(20),
+        attempt_seq: 0,
+        req_headers_json: None,
+        req_body_b64: None,
+        res_headers_json: None,
+        res_body_b64: None,
+        is_last_attempt: true,
+    };
+    storage.insert_request_log(&log).unwrap();
+    log.request_id = "req-2".to_string();
+    log.status = Some(500);
+    log.error_message = Some("upstream error".to_string());
+    storage.insert_request_log(&log).unwrap();
+
+    let page = storage
+        .list_agent_sessions(crate::core::config::AgentSessionsFilter {
+            page: 1,
+            page_size: 10,
+            search: "ses_test".to_string(),
+        })
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.rows[0].request_count, 2);
+    assert_eq!(page.rows[0].success_count, 1);
+    assert_eq!(page.rows[0].error_count, 1);
+    assert_eq!(page.rows[0].parent_session_id.as_deref(), Some("ses_parent"));
+}
+
+#[test]
+fn repairs_historical_opencode_sessions_for_all_attempts() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage {
+        connection: Arc::new(Mutex::new(connection)),
+        prices: Arc::new(Mutex::new(Vec::new())),
+    };
+    storage.migrate().expect("migrate request log schema");
+    storage.insert_request_log(&request_log_for_repair("req-history", 0, false)).unwrap();
+    storage.insert_request_log(&request_log_for_repair("req-history", 1, true)).unwrap();
+
+    let result = storage.repair_opencode_sessions().unwrap();
+    assert_eq!(result.scanned_requests, 1);
+    assert_eq!(result.repaired_requests, 1);
+    assert_eq!(result.repaired_logs, 2);
+    assert_eq!(result.skipped_requests, 0);
+
+    let connection = storage.connection.lock().unwrap();
+    let repaired: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM request_logs WHERE request_id = 'req-history' AND agent_type = 'opencode' AND agent_session_id = 'ses_history'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(repaired, 2);
+}
+
+#[test]
+fn fills_unknown_usage_once_for_the_final_attempt() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage {
+        connection: Arc::new(Mutex::new(connection)),
+        prices: Arc::new(Mutex::new(Vec::new())),
+    };
+    storage.migrate().expect("migrate request log schema");
+    storage.insert_request_log(&request_log_for_repair("req-unknown", 0, false)).unwrap();
+    storage.insert_request_log(&request_log_for_repair("req-unknown", 1, true)).unwrap();
+
+    assert_eq!(storage.analyze_unknown_usage().unwrap(), 1);
+    assert_eq!(storage.analyze_unknown_usage().unwrap(), 0);
+    let connection = storage.connection.lock().unwrap();
+    let usage_rows: i64 = connection
+        .query_row("SELECT COUNT(*) FROM usage_records WHERE request_id = 'req-unknown'", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(usage_rows, 1);
+}
+
+#[test]
 fn reanalyzes_longcat_stream_usage_from_captured_response() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage {
@@ -45,10 +193,14 @@ fn reanalyzes_longcat_stream_usage_from_captured_response() {
 data: [DONE]
 
 "#;
+    let body_b64 = base64::engine::general_purpose::STANDARD.encode(body);
 
     storage
         .insert_request_log(&RequestLogInput {
             request_id: "longcat-stream-usage".to_string(),
+            agent_type: None,
+            agent_session_id: None,
+            parent_agent_session_id: None,
             client_id: Some("test-client".to_string()),
             client_name: Some("Test Client".to_string()),
             channel_id: Some("longcat".to_string()),
@@ -75,10 +227,20 @@ data: [DONE]
             req_headers_json: None,
             req_body_b64: None,
             res_headers_json: None,
-            res_body_b64: Some(base64::engine::general_purpose::STANDARD.encode(body)),
+            res_body_b64: Some(body_b64.clone()),
             is_last_attempt: true,
         })
         .expect("insert captured stream log");
+    storage
+        .update_request_log_timing(
+            "longcat-stream-usage",
+            10,
+            Some(20),
+            50,
+            None,
+            Some(body_b64),
+        )
+        .expect("record stream timing");
 
     assert_eq!(storage.reanalyze_captured_usage().unwrap(), 1);
     let page = storage
@@ -94,8 +256,14 @@ data: [DONE]
         })
         .expect("query reparsed stream usage");
     assert_eq!(page.rows[0].input_tokens, Some(100));
+    assert_eq!(page.rows[0].input_cached_tokens, Some(90));
+    assert_eq!(page.rows[0].input_uncached_tokens, Some(10));
     assert_eq!(page.rows[0].output_tokens, Some(20));
     assert_eq!(page.rows[0].total_tokens, Some(120));
+    assert_eq!(page.rows[0].ttft_ms, Some(20));
+    assert_eq!(page.summary.cache_hit_rate, Some(0.9));
+    let output_rate = page.summary.average_output_tokens_per_second.unwrap();
+    assert!((output_rate - 20000.0 / 30.0).abs() < 0.001);
 }
 
 #[test]

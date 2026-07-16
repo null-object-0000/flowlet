@@ -4,7 +4,9 @@ use super::config::{
 };
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
-use super::usage::{extract_response_usage, extract_sse_response_usage, ResponseUsage};
+use super::usage::{
+    contains_sse_output_token, extract_response_usage, extract_sse_response_usage, ResponseUsage,
+};
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -42,6 +44,44 @@ pub struct ProxySharedConfig {
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
 const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
+const MAX_TTFT_PROBE_BYTES: usize = 64 * 1024;
+const MAX_AGENT_SESSION_ID_BYTES: usize = 512;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AgentSessionIdentity {
+    agent_type: String,
+    session_id: String,
+    parent_session_id: Option<String>,
+}
+
+fn extract_opencode_session(headers: &HeaderMap) -> Option<AgentSessionIdentity> {
+    let user_agent_is_opencode = headers
+        .get("user-agent")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("opencode/"));
+    let opencode_session = valid_session_header(headers, "x-opencode-session");
+    if !user_agent_is_opencode && opencode_session.is_none() {
+        return None;
+    }
+
+    let session_id = opencode_session
+        .or_else(|| valid_session_header(headers, "x-session-id"))
+        .or_else(|| valid_session_header(headers, "x-session-affinity"))?;
+    Some(AgentSessionIdentity {
+        agent_type: "opencode".to_string(),
+        session_id,
+        parent_session_id: valid_session_header(headers, "x-parent-session-id"),
+    })
+}
+
+fn valid_session_header(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= MAX_AGENT_SESSION_ID_BYTES)
+        .map(str::to_string)
+}
 
 #[path = "proxy_http.rs"]
 mod proxy_http;
@@ -376,6 +416,7 @@ async fn forward_request(
         .unwrap_or_else(|| "/".to_string());
 
     let method = parts.method.to_string();
+    let agent_session = extract_opencode_session(&parts.headers);
 
     // 热更新：从共享锁读取最新配置
     let routes = state.shared.routes.lock().unwrap().clone();
@@ -474,6 +515,11 @@ async fn forward_request(
         };
         let log = RequestLogInput {
             request_id: request_id.clone(),
+            agent_type: agent_session.as_ref().map(|value| value.agent_type.clone()),
+            agent_session_id: agent_session.as_ref().map(|value| value.session_id.clone()),
+            parent_agent_session_id: agent_session
+                .as_ref()
+                .and_then(|value| value.parent_session_id.clone()),
             client_id,
             client_name,
             channel_id: None,
@@ -591,6 +637,11 @@ async fn forward_request(
 
         // 为当前候选准备日志上下文（send_at = 此刻，T0 真实起点）
         let log_context = RouteLogContext {
+            agent_type: agent_session.as_ref().map(|value| value.agent_type.clone()),
+            agent_session_id: agent_session.as_ref().map(|value| value.session_id.clone()),
+            parent_agent_session_id: agent_session
+                .as_ref()
+                .and_then(|value| value.parent_session_id.clone()),
             client_id: client_id_for_routing.clone(),
             client_name: client_name_for_routing.clone(),
             channel_id: candidate.channel_id.clone(),
@@ -785,6 +836,9 @@ async fn forward_request(
 // 耗时而非上游往返耗时。
 
 struct RouteLogContext {
+    agent_type: Option<String>,
+    agent_session_id: Option<String>,
+    parent_agent_session_id: Option<String>,
     client_id: Option<String>,
     client_name: Option<String>,
     channel_id: String,
@@ -819,6 +873,9 @@ impl RouteLogContext {
     ) -> RequestLogInput {
         RequestLogInput {
             request_id,
+            agent_type: self.agent_type.clone(),
+            agent_session_id: self.agent_session_id.clone(),
+            parent_agent_session_id: self.parent_agent_session_id.clone(),
             client_id: self.client_id.clone(),
             client_name: self.client_name.clone(),
             channel_id: Some(self.channel_id.clone()),
@@ -983,7 +1040,12 @@ async fn build_response(
         record_request_log(storage.clone(), log);
 
         let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
-        let stream = capture_timed_stream(upstream_response.bytes_stream(), tx_done, capture);
+        let stream = capture_timed_stream(
+            upstream_response.bytes_stream(),
+            tx_done,
+            capture,
+            log_context.send_at,
+        );
 
         let usage_capture = UsageCapture {
             storage: storage.clone(),
@@ -1008,6 +1070,7 @@ async fn build_response(
         tokio::spawn(async move {
             let done = rx_done.await.unwrap_or(StreamDone {
                 duration_ms: ttfb_for_update,
+                ttft_ms: None,
                 res_body_b64: None,
                 usage: None,
             });
@@ -1015,6 +1078,7 @@ async fn build_response(
                 storage,
                 request_id_for_update,
                 ttfb_for_update,
+                done.ttft_ms,
                 done.duration_ms,
                 res_headers_for_update,
                 done.res_body_b64,
@@ -1174,6 +1238,7 @@ fn record_request_log(storage: Storage, log: RequestLogInput) {
 #[derive(Debug)]
 struct StreamDone {
     pub duration_ms: i64,
+    pub ttft_ms: Option<i64>,
     pub res_body_b64: Option<String>,
     pub usage: Option<ResponseUsage>,
 }
@@ -1184,12 +1249,15 @@ fn capture_timed_stream(
     inner: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
     tx_done: tokio::sync::oneshot::Sender<StreamDone>,
     capture: &LogCaptureConfig,
+    request_started_at: Instant,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
     let inner = Box::pin(inner);
     let state = TimedStreamState {
         inner,
         done_sent: false,
-        started_at: Instant::now(),
+        request_started_at,
+        ttft_ms: None,
+        ttft_probe: Vec::new(),
         res_body_buf: Vec::new(),
         res_body_max: capture.max_body_bytes,
         capture_res_body: capture.capture_res_body,
@@ -1203,6 +1271,16 @@ fn capture_timed_stream(
     futures_util::stream::unfold((state, tx_done), move |(mut state, tx_done)| async move {
         match state.inner.next().await {
             Some(Ok(bytes)) => {
+                if state.ttft_ms.is_none()
+                    && state.ttft_probe.len().saturating_add(bytes.len())
+                        <= MAX_TTFT_PROBE_BYTES
+                {
+                    state.ttft_probe.extend_from_slice(&bytes);
+                    if contains_sse_output_token(&state.ttft_probe) {
+                        state.ttft_ms = Some(state.request_started_at.elapsed().as_millis() as i64);
+                        state.ttft_probe.clear();
+                    }
+                }
                 if state.capture_res_body
                     && state.res_body_buf.len().saturating_add(bytes.len()) <= state.res_body_max
                 {
@@ -1252,7 +1330,7 @@ fn send_stream_done(
         return;
     }
     state.done_sent = true;
-    let duration_ms = state.started_at.elapsed().as_millis() as i64;
+    let duration_ms = state.request_started_at.elapsed().as_millis() as i64;
     let res_body_b64 = if state.res_body_buf.is_empty() || !state.capture_res_body {
         None
     } else {
@@ -1266,6 +1344,7 @@ fn send_stream_done(
     let _ = tx_done.lock().unwrap().take().map(|tx| {
         tx.send(StreamDone {
             duration_ms,
+            ttft_ms: state.ttft_ms,
             res_body_b64,
             usage,
         })
@@ -1275,7 +1354,9 @@ fn send_stream_done(
 struct TimedStreamState {
     inner: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
     done_sent: bool,
-    started_at: Instant,
+    request_started_at: Instant,
+    ttft_ms: Option<i64>,
+    ttft_probe: Vec<u8>,
     res_body_buf: Vec<u8>,
     res_body_max: usize,
     capture_res_body: bool,
@@ -1292,6 +1373,7 @@ fn update_stream_log(
     storage: Storage,
     request_id: String,
     ttfb_ms: i64,
+    ttft_ms: Option<i64>,
     duration_ms: i64,
     res_headers_json: Option<String>,
     res_body_b64: Option<String>,
@@ -1300,6 +1382,7 @@ fn update_stream_log(
         if let Err(err) = storage.update_request_log_timing(
             &request_id,
             ttfb_ms,
+            ttft_ms,
             duration_ms,
             res_headers_json,
             res_body_b64,

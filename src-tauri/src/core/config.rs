@@ -608,6 +608,7 @@ pub struct RequestLogRow {
     pub route_reason: Option<String>,
     pub created_at: String,
     pub ttfb_ms: Option<i64>,
+    pub ttft_ms: Option<i64>,
     pub duration_ms: Option<i64>,
     pub attempt_seq: i64,
     pub req_headers_json: Option<String>,
@@ -618,6 +619,8 @@ pub struct RequestLogRow {
     /// Usage data is joined lazily for the final attempt. Intermediate attempts
     /// normally keep these fields empty because usage belongs to the request.
     pub input_tokens: Option<i64>,
+    pub input_cached_tokens: Option<i64>,
+    pub input_uncached_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
     pub estimated_cost: Option<f64>,
@@ -665,7 +668,13 @@ pub struct LogsSummary {
     pub success_count: i64,
     pub error_count: i64,
     pub average_duration_ms: Option<f64>,
+    pub average_ttft_ms: Option<f64>,
+    pub average_output_tokens_per_second: Option<f64>,
     pub known_tokens: i64,
+    pub input_tokens: i64,
+    pub input_cached_tokens: i64,
+    pub input_uncached_tokens: i64,
+    pub cache_hit_rate: Option<f64>,
     pub estimated_cost: f64,
 }
 
@@ -719,6 +728,11 @@ pub struct UsageSummaryRow {
     pub upstream_model: Option<String>,
     pub request_count: i64,
     pub known_tokens: i64,
+    pub input_tokens: i64,
+    pub input_cached_tokens: i64,
+    pub input_uncached_tokens: i64,
+    pub cache_measured_input_tokens: i64,
+    pub output_tokens: i64,
     pub unknown_count: i64,
     pub estimated_cost: f64,
 }
@@ -854,6 +868,9 @@ pub struct UsageRecordInput {
 #[derive(Debug, Clone)]
 pub struct RequestLogInput {
     pub request_id: String,
+    pub agent_type: Option<String>,
+    pub agent_session_id: Option<String>,
+    pub parent_agent_session_id: Option<String>,
     pub client_id: Option<String>,
     pub client_name: Option<String>,
     pub channel_id: Option<String>,
@@ -882,6 +899,50 @@ pub struct RequestLogInput {
     pub res_headers_json: Option<String>,
     pub res_body_b64: Option<String>,
     pub is_last_attempt: bool,
+}
+
+// ─── Agent Session Observation ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentSessionsFilter {
+    pub page: u32,
+    pub page_size: u32,
+    #[serde(default)]
+    pub search: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionRow {
+    pub agent_type: String,
+    pub session_id: String,
+    pub parent_session_id: Option<String>,
+    pub started_at: String,
+    pub updated_at: String,
+    pub request_count: i64,
+    pub success_count: i64,
+    pub error_count: i64,
+    pub known_tokens: i64,
+    pub estimated_cost: f64,
+    pub latest_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionsPageResult {
+    pub rows: Vec<AgentSessionRow>,
+    pub total: i64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionRepairResult {
+    pub scanned_requests: usize,
+    pub repaired_requests: usize,
+    pub repaired_logs: usize,
+    pub skipped_requests: usize,
 }
 
 

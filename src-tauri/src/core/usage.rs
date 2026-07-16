@@ -40,6 +40,56 @@ pub fn extract_sse_response_usage(body: &[u8]) -> Option<ResponseUsage> {
     saw_done.then_some(latest_usage).flatten()
 }
 
+/// Returns true once a completed SSE data line contains actual model output.
+/// Metadata-only events (role, message_start, usage, keep-alive) do not count
+/// toward TTFT.
+pub fn contains_sse_output_token(body: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(body) else {
+        return false;
+    };
+
+    text.lines().any(|line| {
+        let Some(data) = line.trim().strip_prefix("data:") else {
+            return false;
+        };
+        let data = data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            return false;
+        }
+        serde_json::from_str::<serde_json::Value>(data)
+            .ok()
+            .is_some_and(|value| value_contains_output_token(&value))
+    })
+}
+
+fn value_contains_output_token(value: &serde_json::Value) -> bool {
+    let non_empty_string = |value: Option<&serde_json::Value>| {
+        value
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| !text.is_empty())
+    };
+
+    if non_empty_string(value.get("delta"))
+        || non_empty_string(value.get("completion"))
+        || non_empty_string(value.pointer("/delta/text"))
+        || non_empty_string(value.pointer("/content_block/text"))
+    {
+        return true;
+    }
+
+    value
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                non_empty_string(choice.get("text"))
+                    || non_empty_string(choice.pointer("/delta/content"))
+                    || non_empty_string(choice.pointer("/delta/reasoning_content"))
+                    || non_empty_string(choice.pointer("/delta/text"))
+            })
+        })
+}
+
 fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> {
     let usage = value.get("usage")?;
     let input_tokens = usage
@@ -117,5 +167,23 @@ data: [DONE]
 
 "#;
         assert_eq!(extract_sse_response_usage(body), None);
+    }
+
+    #[test]
+    fn detects_first_output_token_but_ignores_metadata_events() {
+        let metadata = br#"data: {"choices":[{"delta":{"role":"assistant"}}]}
+
+"#;
+        let output = br#"data: {"choices":[{"delta":{"content":"hello"}}]}
+
+"#;
+        let anthropic = br#"event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}
+
+"#;
+
+        assert!(!contains_sse_output_token(metadata));
+        assert!(contains_sse_output_token(output));
+        assert!(contains_sse_output_token(anthropic));
     }
 }

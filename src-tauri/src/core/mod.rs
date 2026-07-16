@@ -1,3 +1,4 @@
+pub mod agent_environment;
 pub mod channels_config;
 pub mod config;
 pub mod logging;

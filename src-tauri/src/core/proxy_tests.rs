@@ -33,6 +33,32 @@ fn protocol_type_from_path_identifies_openai() {
 }
 
 #[test]
+fn extracts_opencode_session_with_precedence_and_parent() {
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("opencode/local runtime/node.js/24"));
+    headers.insert("x-session-affinity", HeaderValue::from_static("legacy-session"));
+    headers.insert("x-session-id", HeaderValue::from_static("ses_current"));
+    headers.insert("x-parent-session-id", HeaderValue::from_static("ses_parent"));
+
+    assert_eq!(
+        extract_opencode_session(&headers),
+        Some(AgentSessionIdentity {
+            agent_type: "opencode".to_string(),
+            session_id: "ses_current".to_string(),
+            parent_session_id: Some("ses_parent".to_string()),
+        })
+    );
+}
+
+#[test]
+fn ignores_generic_session_header_without_opencode_identity() {
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("another-agent/1.0"));
+    headers.insert("x-session-id", HeaderValue::from_static("ses_other"));
+    assert_eq!(extract_opencode_session(&headers), None);
+}
+
+#[test]
 fn protocol_type_from_path_returns_none_for_health() {
     assert_eq!(ProtocolType::from_path("/health"), None);
 }
@@ -314,6 +340,9 @@ fn build_upstream_url_strips_anthropic_entry_prefix() {
 fn enriches_final_upstream_error_metadata_without_body_rewrite() {
     let mut log = RequestLogInput {
         request_id: "req".to_string(),
+        agent_type: None,
+        agent_session_id: None,
+        parent_agent_session_id: None,
         client_id: Some("client-default".to_string()),
         client_name: None,
         channel_id: Some("longcat".to_string()),
@@ -623,6 +652,9 @@ fn cleanup_old_logs_works() {
         storage
             .insert_request_log(&RequestLogInput {
                 request_id: "old-req".to_string(),
+                agent_type: None,
+                agent_session_id: None,
+                parent_agent_session_id: None,
                 client_id: None,
                 client_name: None,
                 channel_id: None,
@@ -915,11 +947,10 @@ async fn proxy_starts_without_accounts_or_routes() {
     let shared = ProxySharedConfig {
         channels: Arc::new(Mutex::new(vec![])),
         accounts: Arc::new(Mutex::new(vec![])),
-        clients: Arc::new(Mutex::new(vec![])),
         routes: Arc::new(Mutex::new(vec![])),
         rules: Arc::new(Mutex::new(vec![])),
         scores: Arc::new(Mutex::new(vec![])),
-                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
     let proxy = ProxyController::default();
     proxy
@@ -948,17 +979,17 @@ async fn missing_account_returns_structured_error_and_log() {
         shared: ProxySharedConfig {
             channels: Arc::new(Mutex::new(vec![])),
             accounts: Arc::new(Mutex::new(vec![])),
-            clients: Arc::new(Mutex::new(vec![])),
             routes: Arc::new(Mutex::new(vec![])),
             rules: Arc::new(Mutex::new(vec![])),
             scores: Arc::new(Mutex::new(vec![])),
-                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
         },
         client: Client::new(),
         storage: storage.clone(),
         upstream_timeout_seconds: 30,
         rate_limiter: RateLimiter::new(600),
         capture: LogCaptureConfig::default(),
+        bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
         config_path: db_path.with_extension("json"),
     };
     let request = Request::builder()
@@ -1161,7 +1192,6 @@ fn build_test_state(
         shared: ProxySharedConfig {
             channels: Arc::new(Mutex::new(channels)),
             accounts: Arc::new(Mutex::new(accounts)),
-            clients: Arc::new(Mutex::new(vec![])),
             routes: Arc::new(Mutex::new(routes)),
             rules: Arc::new(Mutex::new(vec![])),
             scores: Arc::new(Mutex::new(vec![])),

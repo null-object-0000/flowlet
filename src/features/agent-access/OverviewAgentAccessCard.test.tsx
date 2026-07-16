@@ -158,6 +158,7 @@ describe("OverviewAgentAccessCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "配置 OpenCode" }));
     expect(screen.getByText("OpenCode CLI 1.17.18")).toBeInTheDocument();
     expect(screen.getByText("OpenCode Desktop 安装")).toBeInTheDocument();
+    expect(screen.queryByText("额外安装")).not.toBeInTheDocument();
     expect(screen.getByText("OpenCode CLI 与 Desktop 共用此全局配置")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.config\\opencode\\opencode.jsonc")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.local\\share\\opencode\\auth.json")).toBeInTheDocument();

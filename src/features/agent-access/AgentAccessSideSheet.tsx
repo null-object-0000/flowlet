@@ -122,7 +122,12 @@ export function AgentAccessSideSheet({
                 {t(isClaude ? "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。" : "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。")}
               </Text>
             ) : null}
-            {environment?.installations.map((installation, index) => (
+            {environment?.installations.map((installation, index) => {
+              const surface = installation.surface || "cli";
+              const duplicateSurface = environment.installations
+                .slice(0, index)
+                .some((candidate) => (candidate.surface || "cli") === surface);
+              return (
               <div className={styles.installation} key={installation.executable_path}>
                 <div className={styles.installationHeader}>
                   <strong>{installationTitle(agent, installation.surface, installation.version, t)}</strong>
@@ -130,7 +135,7 @@ export function AgentAccessSideSheet({
                     {environment.primary?.executable_path === installation.executable_path && installation.surface !== "desktop" && !installation.error ? <Tag color="blue">{t("当前使用")}</Tag> : null}
                     {!isClaude ? <Tag color={installation.surface === "desktop" ? "violet" : "cyan"}>{t(installation.surface === "desktop" ? "Desktop" : "CLI")}</Tag> : null}
                     <Tag>{installMethodLabel(installation.install_method, t)}</Tag>
-                    {index > 0 ? <Tag color="orange">{t("额外安装")}</Tag> : null}
+                    {duplicateSurface ? <Tag color="orange">{t("额外安装")}</Tag> : null}
                   </span>
                 </div>
                 <ConfigRow
@@ -145,7 +150,8 @@ export function AgentAccessSideSheet({
                 />
                 {installation.error ? <Text className={styles.installationError} type="warning">{installation.error}</Text> : null}
               </div>
-            ))}
+              );
+            })}
         </section>
 
         <section className={styles.section}>

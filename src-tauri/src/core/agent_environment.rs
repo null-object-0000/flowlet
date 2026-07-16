@@ -13,14 +13,24 @@ pub enum AgentInstallMethod {
     Native,
     Winget,
     Npm,
+    Bun,
     LegacyNpm,
     Homebrew,
     SystemPackage,
+    Desktop,
     Unknown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSurface {
+    Cli,
+    Desktop,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AgentInstallation {
+    pub surface: AgentSurface,
     pub executable_path: String,
     pub install_dir: String,
     pub install_method: AgentInstallMethod,
@@ -42,6 +52,7 @@ pub struct AgentEnvironmentReport {
 pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironmentReport, String> {
     match agent_id {
         "claude-code" => Ok(detect_claude_code().await),
+        "opencode" => Ok(detect_opencode().await),
         _ => Err(format!("暂不支持检测 Agent：{agent_id}")),
     }
 }
@@ -60,6 +71,7 @@ async fn detect_claude_code() -> AgentEnvironmentReport {
         };
 
         installations.push(AgentInstallation {
+            surface: AgentSurface::Cli,
             executable_path: display_path(&candidate.path),
             install_dir: display_path(&install_dir),
             install_method,
@@ -95,10 +107,113 @@ async fn detect_claude_code() -> AgentEnvironmentReport {
     }
 }
 
+async fn detect_opencode() -> AgentEnvironmentReport {
+    let mut installations = Vec::new();
+    for candidate in opencode_cli_candidates() {
+        let install_method = classify_opencode_cli_method(&candidate.path);
+        let version_result = read_version(&candidate.path).await;
+        let (version, version_output, error) = match version_result {
+            Ok(output) => (parse_version(&output), Some(output), None),
+            Err(error) => (None, None, Some(error)),
+        };
+        installations.push(AgentInstallation {
+            surface: AgentSurface::Cli,
+            executable_path: display_path(&candidate.path),
+            install_dir: display_path(candidate.path.parent().unwrap_or(&candidate.path)),
+            install_method,
+            version,
+            version_output,
+            available_on_path: candidate.available_on_path,
+            error,
+        });
+    }
+    for candidate in opencode_desktop_candidates() {
+        installations.push(AgentInstallation {
+            surface: AgentSurface::Desktop,
+            executable_path: display_path(&candidate.path),
+            install_dir: display_path(candidate.path.parent().unwrap_or(&candidate.path)),
+            install_method: AgentInstallMethod::Desktop,
+            version: desktop_version(&candidate.path),
+            version_output: None,
+            available_on_path: false,
+            error: None,
+        });
+    }
+
+    let primary = installations
+        .iter()
+        .find(|installation| {
+            installation.surface == AgentSurface::Cli
+                && installation.available_on_path
+                && installation.version.is_some()
+        })
+        .or_else(|| {
+            installations.iter().find(|installation| {
+                installation.surface == AgentSurface::Cli && installation.version.is_some()
+            })
+        })
+        .or_else(|| {
+            installations.iter().find(|installation| {
+                installation.surface == AgentSurface::Desktop && installation.version.is_some()
+            })
+        })
+        .or_else(|| {
+            installations.iter().find(|installation| {
+                installation.surface == AgentSurface::Cli
+                    && installation.available_on_path
+                    && installation.error.is_none()
+            })
+        })
+        .or_else(|| installations.first())
+        .cloned();
+
+    AgentEnvironmentReport {
+        agent_id: "opencode".to_string(),
+        agent_name: "OpenCode".to_string(),
+        installed: !installations.is_empty(),
+        primary,
+        installations,
+    }
+}
+
 #[derive(Debug)]
 struct Candidate {
     path: PathBuf,
     available_on_path: bool,
+}
+
+fn opencode_cli_candidates() -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            for file_name in executable_names("opencode") {
+                push_candidate(&mut candidates, &mut seen, directory.join(file_name), true);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        for relative in known_opencode_cli_locations() {
+            push_candidate(&mut candidates, &mut seen, home.join(relative), false);
+        }
+    }
+    #[cfg(windows)]
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        let directory = PathBuf::from(app_data).join("npm");
+        for file_name in executable_names("opencode") {
+            push_candidate(&mut candidates, &mut seen, directory.join(file_name), false);
+        }
+    }
+    candidates
+}
+
+fn opencode_desktop_candidates() -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    for path in known_opencode_desktop_locations() {
+        push_candidate(&mut candidates, &mut seen, path, false);
+    }
+    candidates
 }
 
 fn claude_candidates() -> Vec<Candidate> {
@@ -184,6 +299,71 @@ fn known_claude_locations() -> &'static [&'static str] {
     ]
 }
 
+#[cfg(windows)]
+fn known_opencode_cli_locations() -> &'static [&'static str] {
+    &[
+        ".opencode/bin/opencode.exe",
+        ".local/bin/opencode.exe",
+        ".bun/bin/opencode.exe",
+    ]
+}
+
+#[cfg(not(windows))]
+fn known_opencode_cli_locations() -> &'static [&'static str] {
+    &[
+        ".opencode/bin/opencode",
+        ".local/bin/opencode",
+        ".bun/bin/opencode",
+    ]
+}
+
+#[cfg(windows)]
+fn known_opencode_desktop_locations() -> Vec<PathBuf> {
+    let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
+        return Vec::new();
+    };
+    let local_app_data = PathBuf::from(local_app_data);
+    vec![
+        local_app_data
+            .join("Programs")
+            .join("@opencode-aidesktop")
+            .join("OpenCode.exe"),
+        local_app_data
+            .join("Programs")
+            .join("OpenCode")
+            .join("OpenCode.exe"),
+    ]
+}
+
+#[cfg(target_os = "macos")]
+fn known_opencode_desktop_locations() -> Vec<PathBuf> {
+    let mut paths = vec![PathBuf::from(
+        "/Applications/OpenCode.app/Contents/MacOS/OpenCode",
+    )];
+    if let Some(home) = dirs::home_dir() {
+        paths.push(
+            home.join("Applications")
+                .join("OpenCode.app")
+                .join("Contents")
+                .join("MacOS")
+                .join("OpenCode"),
+        );
+    }
+    paths
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn known_opencode_desktop_locations() -> Vec<PathBuf> {
+    dirs::home_dir()
+        .map(|home| {
+            vec![
+                home.join(".local").join("bin").join("opencode-desktop"),
+                home.join("Applications").join("OpenCode.AppImage"),
+            ]
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(not(windows))]
 fn known_claude_locations() -> &'static [&'static str] {
     &[".local/bin/claude", ".claude/local/claude"]
@@ -240,6 +420,106 @@ fn classify_install_method(path: &Path) -> AgentInstallMethod {
     } else {
         AgentInstallMethod::Unknown
     }
+}
+
+fn classify_opencode_cli_method(path: &Path) -> AgentInstallMethod {
+    let normalized = normalized_path_key(path);
+    if normalized.contains("/.bun/bin/") {
+        AgentInstallMethod::Bun
+    } else if normalized.ends_with("/npm/opencode.cmd")
+        || normalized.ends_with("/npm/opencode.ps1")
+        || normalized.ends_with("/npm/opencode")
+    {
+        AgentInstallMethod::Npm
+    } else if normalized.contains("/homebrew/") || normalized.contains("/cellar/opencode/") {
+        AgentInstallMethod::Homebrew
+    } else if normalized.contains("/.opencode/bin/") || normalized.contains("/.local/bin/") {
+        AgentInstallMethod::Native
+    } else if normalized.starts_with("/usr/bin/") || normalized.starts_with("/usr/local/bin/") {
+        AgentInstallMethod::SystemPackage
+    } else {
+        AgentInstallMethod::Unknown
+    }
+}
+
+fn desktop_version(path: &Path) -> Option<String> {
+    #[cfg(windows)]
+    if let Some(version) = windows_file_version(path) {
+        return Some(version);
+    }
+    let package_json = path
+        .parent()?
+        .join("resources")
+        .join("app")
+        .join("package.json");
+    let content = std::fs::read_to_string(package_json).ok()?;
+    serde_json::from_str::<serde_json::Value>(&content)
+        .ok()?
+        .get("version")?
+        .as_str()
+        .map(ToOwned::to_owned)
+}
+
+#[cfg(windows)]
+fn windows_file_version(path: &Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+    };
+
+    let wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let mut handle = 0;
+    let size = unsafe { GetFileVersionInfoSizeW(wide.as_ptr(), &mut handle) };
+    if size == 0 {
+        return None;
+    }
+    let mut buffer = vec![0_u8; size as usize];
+    if unsafe { GetFileVersionInfoW(wide.as_ptr(), 0, size, buffer.as_mut_ptr().cast()) } == 0 {
+        return None;
+    }
+    let root = ['\\' as u16, 0];
+    let mut value = std::ptr::null_mut();
+    let mut value_len = 0;
+    if unsafe {
+        VerQueryValueW(
+            buffer.as_ptr().cast(),
+            root.as_ptr(),
+            &mut value,
+            &mut value_len,
+        )
+    } == 0
+        || value.is_null()
+        || value_len < std::mem::size_of::<VS_FIXEDFILEINFO>() as u32
+    {
+        return None;
+    }
+    let info = unsafe { &*(value.cast::<VS_FIXEDFILEINFO>()) };
+    let parts = [
+        info.dwFileVersionMS >> 16,
+        info.dwFileVersionMS & 0xffff,
+        info.dwFileVersionLS >> 16,
+        info.dwFileVersionLS & 0xffff,
+    ];
+    if parts.iter().all(|part| *part == 0) {
+        return None;
+    }
+    let length = parts
+        .iter()
+        .rposition(|part| *part != 0)
+        .map(|index| index + 1)
+        .unwrap_or(2)
+        .max(2);
+    Some(
+        parts[..length]
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("."),
+    )
 }
 
 fn resolve_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBuf {
@@ -357,6 +637,10 @@ mod tests {
             parse_version("Claude Code v2.0.1"),
             Some("2.0.1".to_string())
         );
+        assert_eq!(
+            parse_version("opencode 1.17.18"),
+            Some("1.17.18".to_string())
+        );
     }
 
     #[test]
@@ -373,6 +657,14 @@ mod tests {
             classify_install_method(Path::new("/Users/test/.claude/local/claude")),
             AgentInstallMethod::LegacyNpm
         );
+        assert_eq!(
+            classify_opencode_cli_method(Path::new("C:/Users/test/.opencode/bin/opencode.exe")),
+            AgentInstallMethod::Native
+        );
+        assert_eq!(
+            classify_opencode_cli_method(Path::new("C:/Users/test/.bun/bin/opencode.exe")),
+            AgentInstallMethod::Bun
+        );
     }
 
     #[cfg(windows)]
@@ -386,5 +678,33 @@ mod tests {
             display_path(Path::new(r"\\?\UNC\server\share\claude.exe")),
             r"\\server\share\claude.exe"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolves_npm_shims_to_one_real_opencode_executable() {
+        let directory =
+            std::env::temp_dir().join(format!("flowlet-opencode-shim-{}", uuid::Uuid::new_v4()));
+        let npm = directory.join("npm");
+        let executable = npm
+            .join("node_modules")
+            .join("opencode-ai")
+            .join("bin")
+            .join("opencode.exe");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, []).unwrap();
+        std::fs::write(npm.join("opencode.cmd"), "@echo off").unwrap();
+        std::fs::write(npm.join("opencode"), "#!/bin/sh").unwrap();
+
+        assert_eq!(
+            resolve_windows_opencode_executable(npm.join("opencode.cmd")),
+            Some(executable)
+        );
+        assert_eq!(
+            resolve_windows_opencode_executable(npm.join("opencode")),
+            None
+        );
+
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

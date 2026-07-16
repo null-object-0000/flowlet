@@ -318,17 +318,18 @@ Agent 接入能力应逐步提供：
 
 ---
 
-## 9. 日志与隐私
+## 9. 日志与捕获
 
 请求日志可能包含敏感信息。
 
 必须注意：
 
-* SQLite 捕获层是否脱敏由 `log_capture.redact_sensitive_headers` 控制，当前默认关闭，用户可自行开启；
-* 即使捕获层保存了原始内容，UI 展示和复制仍必须进行二次防护，不得暴露 API Key、Authorization、x-api-key、Cookie、Token 等敏感信息；
-* 不要在 UI、日志或错误信息中泄露完整密钥；
+* 请求日志是否脱敏仅由 `log_capture.redact_sensitive_headers` 控制，当前默认关闭，用户可自行开启；
+* `redact_sensitive_headers = false` 时，SQLite 原样保存，UI 原样展示并复制 Header、Body 和错误信息，包括 API Key、Authorization、x-api-key、Cookie、Token 等字段；
+* `redact_sensitive_headers = true` 时，捕获层在落库前将受支持的敏感 Header 替换为 `[redacted]`，UI 直接展示并复制落库内容，不再二次脱敏；
+* 有路由候选时，每条 attempt 的请求日志必须从完成 URL、模型和鉴权改写后的最终上游 Request 捕获，并与同一次第三方调用的响应对应；不得用客户端入站报文代替上游请求报文；
 * 请求和响应 Body 捕获必须明确受配置控制；
-* 新增日志字段时，要考虑隐私和存储体积；
+* 新增日志字段时，要考虑存储体积；
 * 错误应对用户可读，同时保留详细底层日志；
 * 不要只 `console.log` 错误；
 * 结构化错误应写入请求日志。
@@ -470,7 +471,7 @@ src/
 2. 新增渠道时，按 `docs/config.md` 第 8 节的步骤操作；
 3. 若运行时行为（热更新 / 需重启）发生变化，同步更新第 7 节；
 4. 若源码中反序列化结构（`channels_config.rs` / `config.rs`）发生变化，同步更新第 9 节；
-5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
+5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`；修改 `channels_config.flowlet_tiers` 时，必须同步同文件中的 `FLOWLET_TIER_BY_CHANNEL_MODEL`；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
 
 ### 加载优先级
 

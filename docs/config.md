@@ -112,13 +112,14 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `capture_res_headers` | `bool` | `true` | 是否记录响应 Header |
 | `capture_res_body` | `bool` | `true` | 是否记录响应 Body |
 | `max_body_bytes` | `number` | `1048576` | 单条 Body 截断上限（1 MB） |
-| `redact_sensitive_headers` | `bool` | `false` | 开启后，`authorization` / `x-api-key` / `cookie` / `set-cookie` / `x-auth-token` 会被替换为 `[redacted]` |
+| `redact_sensitive_headers` | `bool` | `false` | 关闭时原样保存、展示和复制；开启后，`authorization` / `x-api-key` / `cookie` / `set-cookie` / `x-auth-token` 在落库前被替换为 `[redacted]` |
 
 **行为**：
 
 - 缺失任何字段时使用上述默认值。
 - 修改后立即生效（热读），无需重启代理。
 - Body 以 base64 形式存入 SQLite。
+- UI 不再二次脱敏，展示和复制的内容与 SQLite 捕获内容一致。
 
 ---
 
@@ -285,6 +286,10 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 ```
 
 **结构**：`Record<channel_id, Record<model_name_lower, tier>>`。
+
+**行为**：账号保存后的默认路由合并会根据该映射，将上游模型同时加入
+`flowlet-pro` 或 `flowlet-flash` 聚合模型；已有路由的启用状态和优先级保持不变，
+只补充缺失的账号、协议和聚合路由。
 
 **tier 取值**：`"pro"` | `"flash"` | `"none"`。
 

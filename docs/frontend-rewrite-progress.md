@@ -131,7 +131,7 @@
 
 - `ChannelAccount.api_key`：明文，仅在账号编辑页管理，概览/列表/日志不得展示完整或脱敏 key。
 - `get_proxy_bind_config` 返回 `default_client_token`：仅用于客户端接入页复制，不作为统计/概览展示。
-- 日志 `req_headers_json` / `req_body_b64` / `res_*`：受 `log_capture` 布尔值与 `max_body_bytes`、`redact_sensitive_headers` 控制；日志页须遵守。
+- 日志 `req_headers_json` / `req_body_b64` / `res_*`：受 `log_capture` 布尔值与 `max_body_bytes`、`redact_sensitive_headers` 控制；日志页原样展示和复制落库内容。
 - `export_config` / `import_config`：流转完整配置（含 api_key）；导入/导出为设置页高级能力。
 
 ---
@@ -565,7 +565,7 @@ client.ts 110、ErrorBoundary 40、domain/proxy/commands 75、ProxyStatusCard 14
 - 列表仅加载最终尝试的轻量字段，集中展示请求路径、客户端、路由账号、模型映射、TTFB、总耗时和切换次数。
 - 请求详情按需加载完整尝试链路，并按“概览 / 请求 / 响应”拆分 Headers 与 Body。
 - 支持在多次尝试间切换，查看每次尝试对应的捕获内容和错误原因。
-- Authorization、API Key、Cookie、Token、密码等敏感字段在前端渲染前统一遮蔽，错误文本中的凭据模式同样遮蔽。
+- 前端不再二次遮蔽 Authorization、API Key、Cookie、Token、密码或错误文本中的凭据；是否脱敏完全由捕获层配置决定。
 - 日志清理提供保留 7/30/90 天或清理全部的二次确认，并同步失效日志与用量查询缓存。
 
 数据结构影响：无；复用现有 `request_logs`、`usage_records` 和已注册 Tauri command。

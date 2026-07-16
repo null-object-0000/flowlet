@@ -48,7 +48,7 @@ describe("OverviewAgentAccessCard", () => {
 
     const futureButtons = [
       screen.getByRole("button", { name: "OpenCode CLI 即将支持" }),
-      screen.getByRole("button", { name: "Codex Desktop 即将支持" }),
+      screen.getByRole("button", { name: "ChatGPT Desktop 即将支持" }),
     ];
     futureButtons.forEach((button) => expect(button).toBeDisabled());
     expect(screen.getAllByText("即将支持")).toHaveLength(2);

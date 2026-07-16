@@ -13,4 +13,5 @@ Vendored files:
 - `deepseek.svg`
 - `claudecode.svg`
 - `opencode.svg`
+- `openai.svg`
 - `codex.svg`

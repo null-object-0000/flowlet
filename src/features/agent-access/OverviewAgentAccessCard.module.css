@@ -68,11 +68,11 @@
   mask-image: url("/icons/lobe/opencode.svg");
 }
 
-.codexMark {
+.chatgptMark {
   width: 21px;
   height: 21px;
-  -webkit-mask-image: url("/icons/lobe/codex.svg");
-  mask-image: url("/icons/lobe/codex.svg");
+  -webkit-mask-image: url("/icons/lobe/openai.svg");
+  mask-image: url("/icons/lobe/openai.svg");
 }
 
 .claudeIcon {
@@ -87,10 +87,10 @@
   border-color: var(--flowlet-color-border);
 }
 
-.codexIcon {
-  color: #3157d5;
-  background: rgba(49, 87, 213, 0.1);
-  border-color: rgba(49, 87, 213, 0.16);
+.chatgptIcon {
+  color: var(--flowlet-color-text);
+  background: var(--flowlet-color-surface-muted);
+  border-color: var(--flowlet-color-border);
 }
 
 .agentText { min-width: 0; display: grid; gap: 3px; text-align: left; }

@@ -2,6 +2,8 @@
 
 本文件是 Flowlet 项目中所有 AI 编程 Agent 的统一协作规范。
 
+维护本项目需安装 Semi Design 技能：https://semi.design/zh-CN/start/mcp-skills
+
 适用于但不限于：
 
 - Codex

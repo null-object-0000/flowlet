@@ -1,9 +1,3 @@
-.description {
-  margin: 0 0 10px;
-  color: var(--flowlet-color-text-secondary);
-  font-size: 13px;
-}
-
 .endpoints {
   width: 100%;
   display: grid;

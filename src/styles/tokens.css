@@ -4,6 +4,10 @@
 
 :root {
   --flowlet-font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --flowlet-font-size-body: 13px;
+  --flowlet-font-size-body-strong: 14px;
+  --flowlet-font-size-caption: 12px;
+  --flowlet-font-size-chart-label: 11px;
 
   /* Global visual language — shared by every page and feature. */
   --flowlet-color-app-bg: #edf2f9;

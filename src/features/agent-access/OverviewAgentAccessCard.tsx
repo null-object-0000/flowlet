@@ -27,10 +27,10 @@ const AGENTS: Array<{
     iconClassName: styles.openCodeIcon,
   },
   {
-    name: "Codex Desktop",
+    name: "ChatGPT Desktop",
     description: "客户端接入",
-    icon: <span className={`${styles.brandIcon} ${styles.codexMark}`} aria-hidden="true" />,
-    iconClassName: styles.codexIcon,
+    icon: <span className={`${styles.brandIcon} ${styles.chatgptMark}`} aria-hidden="true" />,
+    iconClassName: styles.chatgptIcon,
   },
 ];
 
@@ -41,7 +41,7 @@ type Props = {
 
 export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const { t } = useAppPreferences();
-  const [selectedAgent, setSelectedAgent] = useState<AgentKind | null>(null);
+  const [detailsVisible, setDetailsVisible] = useState(false);
   const claudeEnvironment = useClaudeCodeEnvironment();
 
   const copy = async (value: string, message: string) => {
@@ -79,7 +79,9 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                 className={styles.agentCard}
                 aria-label={supported ? t("配置 {name}", { name }) : t("{name} 即将支持", { name })}
                 disabled={!supported}
-                onClick={() => kind && setSelectedAgent(kind)}
+                onClick={() => {
+                  if (kind === "claude-code") setDetailsVisible(true);
+                }}
               >
                 <span className={`${styles.icon} ${iconClassName}`}>{icon}</span>
                 <span className={styles.agentText}>
@@ -96,14 +98,15 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       </OverviewModuleCard>
 
       <AgentAccessSideSheet
-        agent={selectedAgent}
+        visible={detailsVisible}
+        agent="claude-code"
         baseUrl={baseUrl}
         clientToken={clientToken}
         environment={claudeEnvironment.data}
         environmentLoading={claudeEnvironment.isFetching}
         environmentError={claudeEnvironment.error?.message}
         onRefreshEnvironment={() => void claudeEnvironment.refetch()}
-        onClose={() => setSelectedAgent(null)}
+        onClose={() => setDetailsVisible(false)}
         onCopy={copy}
       />
     </>

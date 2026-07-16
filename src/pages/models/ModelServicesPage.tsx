@@ -8,6 +8,7 @@ import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useChannelModels, useRouteCandidates } from "../../features/exposed-models/useModels";
 import { buildModelServiceItems, type ModelRouteGroup, type ModelServiceItem } from "./modelServiceView";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
+import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import styles from "./ModelServicesPage.module.css";
 
 const { Paragraph, Text, Title } = Typography;
@@ -134,7 +135,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "su
 
 function ModelLogo({ model }: { model: ModelServiceItem }) {
   if (model.kind === "direct") return <ChannelBrandLogo channelId={model.channelId ?? "flowlet"} name={model.channelName ?? model.publicModel} />;
-  return <span className={styles.flowletLogo}>F</span>;
+  return <FlowletLogo variant="model" />;
 }
 
 function ModelDetail({ model, accounts, channels, busy, onToggleRoute, t }: {

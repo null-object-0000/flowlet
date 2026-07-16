@@ -8,13 +8,14 @@ const { Title } = Typography;
 
 type Props = {
   title: ReactNode;
+  description?: ReactNode;
   action?: string;
   onAction?: () => void;
   headerExtra?: ReactNode;
   children: ReactNode;
 };
 
-export function OverviewModuleCard({ title, action, onAction, headerExtra, children }: Props) {
+export function OverviewModuleCard({ title, description, action, onAction, headerExtra, children }: Props) {
   return (
     <Card className={styles.card}>
       <div className={styles.body}>
@@ -26,6 +27,7 @@ export function OverviewModuleCard({ title, action, onAction, headerExtra, child
             </OverviewActionLink>
           ) : null)}
         </div>
+        {description ? <div className={styles.description}>{description}</div> : null}
         <div className={styles.content}>
           {children}
         </div>

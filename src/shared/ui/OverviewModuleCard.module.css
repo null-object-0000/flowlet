@@ -32,6 +32,13 @@
 
 .header h5 { color: var(--flowlet-color-text); font-size: 17px; font-weight: 700; }
 
+.description {
+  margin-top: -2px;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 .content {
   min-height: 0;
   width: 100%;

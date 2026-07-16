@@ -11,7 +11,8 @@ export type AgentKind = "claude-code" | "opencode";
 type Copy = (value: string, message: string) => Promise<void>;
 
 type Props = {
-  agent: AgentKind | null;
+  visible: boolean;
+  agent: AgentKind;
   baseUrl: string;
   clientToken?: string | null;
   environment?: AgentEnvironmentReport;
@@ -23,6 +24,7 @@ type Props = {
 };
 
 export function AgentAccessSideSheet({
+  visible,
   agent,
   baseUrl,
   clientToken,
@@ -34,7 +36,6 @@ export function AgentAccessSideSheet({
   onCopy,
 }: Props) {
   const { t } = useAppPreferences();
-  if (!agent) return null;
 
   const isClaude = agent === "claude-code";
   const name = isClaude ? "Claude Code CLI" : "OpenCode CLI";
@@ -47,7 +48,8 @@ export function AgentAccessSideSheet({
 
   return (
     <SideSheet
-      visible
+      visible={visible}
+      motion={false}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
       title={t("{name} 接入", { name })}
       width="min(680px, 92vw)"

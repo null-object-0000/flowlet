@@ -30,10 +30,10 @@ export function OverviewClientAccessCard({ baseUrl, bindConfig, running }: Props
     <>
       <OverviewModuleCard
         title={t("客户端访问信息")}
+        description={t("使用以下地址和 Token 访问本地代理服务")}
         action={t("查看接入详情")}
         onAction={() => setDetailsVisible(true)}
       >
-        <p className={styles.description}>{t("使用以下地址和 Token 访问本地代理服务")}</p>
         <div className={styles.endpoints}>
           <EndpointRow label="OpenAI Base URL" value={`${baseUrl}/v1`} onCopy={copy} />
           <EndpointRow label="Anthropic Base URL" value={`${baseUrl}/anthropic`} onCopy={copy} />

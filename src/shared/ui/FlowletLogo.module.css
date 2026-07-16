@@ -1,0 +1,48 @@
+.logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--flowlet-color-border);
+  background: color-mix(in srgb, var(--semi-color-primary-light-default) 72%, var(--flowlet-color-surface-strong));
+}
+
+.logo img {
+  width: 126%;
+  height: 126%;
+  max-width: none;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.brand {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--flowlet-color-surface-strong) 84%, var(--semi-color-primary-light-default));
+  box-shadow: 0 6px 14px rgba(23, 105, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.38);
+}
+
+.brand img {
+  width: 132%;
+  height: 132%;
+}
+
+.model {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+
+.channel {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+  border-radius: 50%;
+}
+
+body[theme-mode="dark"] .logo {
+  background: color-mix(in srgb, var(--flowlet-color-surface-strong) 78%, var(--semi-color-primary-light-default));
+  border-color: color-mix(in srgb, var(--flowlet-color-primary) 18%, var(--flowlet-color-border));
+}

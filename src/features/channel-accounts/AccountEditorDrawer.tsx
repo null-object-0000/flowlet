@@ -73,6 +73,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       name: count === 0 ? t("{name} 主账号", { name: next?.name ?? t("渠道") }) : t("{name} 账号 {count}", { name: next?.name ?? t("渠道"), count: count + 1 }),
       resource_mode: defaultResourceMode(channelId),
       base_url_override: null,
+      anthropic_base_url_override: null,
     });
     setResource(resourceDraft());
   }
@@ -85,6 +86,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     setTesting(true);
     try {
       await onTestConnection({ channel_id: currentDraft.channel_id, api_key: currentDraft.api_key.trim(), base_url_override: currentDraft.base_url_override });
+      update({ credential_status: "healthy", last_error: null });
       Toast.success(t("连接成功，API Key 有效"));
     } catch (error) {
       Toast.error(t("测试连接失败：{message}", { message: toAppError(error, "account_test_failed").message }));
@@ -113,7 +115,13 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     setSaving(true);
     try {
       await onSave(
-        { ...currentDraft, name: currentDraft.name.trim(), api_key: currentDraft.api_key.trim(), base_url_override: currentDraft.base_url_override?.trim() || null },
+        {
+          ...currentDraft,
+          name: currentDraft.name.trim(),
+          api_key: currentDraft.api_key.trim(),
+          base_url_override: currentDraft.base_url_override?.trim() || null,
+          anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
+        },
         autoSyncBalance ? null : createSnapshotDraft(currentDraft, resource, resourceMode, tokenRemaining),
       );
     } finally {
@@ -251,7 +259,10 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           </button>
           {advancedOpen ? (
             <div className={styles.advancedContent}>
-              <Field label={t("Base URL 覆盖（可选）")}><Input aria-label={t("Base URL 覆盖（可选）")} value={draft.base_url_override ?? ""} placeholder={channel?.openai_base_url} onChange={(value) => update({ base_url_override: value || null })} showClear /></Field>
+              <div className={styles.urlGrid}>
+                <Field label={t("OpenAI Base URL 覆盖（可选）")}><Input aria-label={t("OpenAI Base URL 覆盖（可选）")} value={draft.base_url_override ?? ""} placeholder={channel?.openai_base_url} onChange={(value) => update({ base_url_override: value || null })} showClear /></Field>
+                <Field label={t("Anthropic Base URL 覆盖（可选）")}><Input aria-label={t("Anthropic Base URL 覆盖（可选）")} value={draft.anthropic_base_url_override ?? ""} placeholder={channel?.anthropic_base_url} onChange={(value) => update({ anthropic_base_url_override: value || null })} showClear /></Field>
+              </div>
               <Text type="tertiary" size="small">{t("填写 API Key 后可测试真实上游连接。")}</Text>
             </div>
           ) : null}
@@ -296,6 +307,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     remark: "",
     resource_mode: defaultResourceMode(mode.channelId),
     base_url_override: null,
+    anthropic_base_url_override: null,
     last_used_at: null,
     last_error: null,
     credential_status: "healthy",

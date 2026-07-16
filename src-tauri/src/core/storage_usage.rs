@@ -21,7 +21,7 @@ fn repair_time_clause(column: &str, time_range: &str) -> String {
     condition.replace("{column}", column)
 }
 
-fn opencode_session_from_json(headers_json: &str) -> Option<(String, Option<String>)> {
+fn agent_session_from_json(headers_json: &str) -> Option<(String, String, Option<String>)> {
     let parsed = serde_json::from_str::<serde_json::Value>(headers_json).ok()?;
     let headers = parsed
         .as_object()?
@@ -37,6 +37,9 @@ fn opencode_session_from_json(headers_json: &str) -> Option<(String, Option<Stri
                 .then(|| value.to_string())
         })
     };
+    if let Some(session_id) = valid("x-claude-code-session-id") {
+        return Some(("claude-code".to_string(), session_id, None));
+    }
     let is_opencode = valid("x-opencode-session").is_some()
         || headers
             .get("user-agent")
@@ -47,7 +50,7 @@ fn opencode_session_from_json(headers_json: &str) -> Option<(String, Option<Stri
     let session_id = valid("x-opencode-session")
         .or_else(|| valid("x-session-id"))
         .or_else(|| valid("x-session-affinity"))?;
-    Some((session_id, valid("x-parent-session-id")))
+    Some(("opencode".to_string(), session_id, valid("x-parent-session-id")))
 }
 
 /// 根据内存中的价格表（仅来自 config.json）计算单次用量记录的费用估算。
@@ -239,11 +242,11 @@ impl Storage {    pub fn save_balance_snapshot(
                 status, latency_ms, is_stream, error_message, fallback_count,
                 route_reason, created_at,
                 ttfb_ms, duration_ms, attempt_seq, req_headers_json, req_body_b64,
-                res_headers_json, res_body_b64, is_last_attempt
+                res_headers_json, res_body_b64, is_last_attempt, upstream_url
             ) VALUES (
                 lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                 ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, datetime('now'),
-                ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
+                ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33
             )
             "#,
             params![
@@ -279,6 +282,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 log.res_headers_json,
                 log.res_body_b64,
                 log.is_last_attempt as i64,
+                log.upstream_url,
             ],
         )?;
         Ok(())
@@ -301,7 +305,6 @@ impl Storage {    pub fn save_balance_snapshot(
                 SELECT agent_type, agent_session_id
                 FROM request_logs
                 WHERE is_last_attempt = 1
-                  AND agent_type = 'opencode'
                   AND agent_session_id IS NOT NULL
                   AND (?1 = '%%' OR agent_session_id LIKE ?1
                        OR COALESCE(parent_agent_session_id, '') LIKE ?1)
@@ -333,7 +336,6 @@ impl Storage {    pub fn save_balance_snapshot(
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             WHERE rl.is_last_attempt = 1
-              AND rl.agent_type = 'opencode'
               AND rl.agent_session_id IS NOT NULL
               AND (?1 = '%%' OR rl.agent_session_id LIKE ?1
                    OR COALESCE(rl.parent_agent_session_id, '') LIKE ?1)
@@ -372,7 +374,6 @@ impl Storage {    pub fn save_balance_snapshot(
             SELECT COALESCE(client_id, ''), COALESCE(MAX(client_name), '未知') AS display_name
             FROM request_logs
             WHERE is_last_attempt = 1
-              AND agent_type = 'opencode'
               AND agent_session_id IS NOT NULL
             GROUP BY COALESCE(client_id, '')
             ORDER BY display_name = '未知', display_name, client_id
@@ -397,7 +398,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 route_reason, created_at,
                 ttfb_ms, duration_ms, attempt_seq,
                 req_headers_json, req_body_b64, res_headers_json, res_body_b64,
-                is_last_attempt, ttft_ms
+                is_last_attempt, ttft_ms, upstream_url
             FROM request_logs
             WHERE is_last_attempt = 1
             ORDER BY created_at DESC
@@ -438,6 +439,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 res_body_b64: row.get(29)?,
                 is_last_attempt: row.get::<_, i64>(30)? != 0,
                 ttft_ms: row.get(31)?,
+                upstream_url: row.get(32)?,
                 input_tokens: None,
                 input_cached_tokens: None,
                 input_uncached_tokens: None,
@@ -527,7 +529,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 rl.req_headers_json, rl.req_body_b64, rl.res_headers_json, rl.res_body_b64,
                 rl.is_last_attempt,
                 ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost,
-                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens
+                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             WHERE rl.request_id = ?1
@@ -574,6 +576,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 ttft_ms: row.get(35)?,
                 input_cached_tokens: row.get(36)?,
                 input_uncached_tokens: row.get(37)?,
+                upstream_url: row.get(38)?,
             })
         })?;
         let mut logs = Vec::new();
@@ -649,9 +652,9 @@ impl Storage {    pub fn save_balance_snapshot(
 
     // ─── Usage Records ───────────────────────────────────────────────────────
 
-    /// Repair historical OpenCode session attribution from captured request
-    /// headers. Requests without captured headers cannot be recovered.
-    pub fn repair_opencode_sessions(&self, time_range: &str) -> Result<AgentSessionRepairResult, StorageError> {
+    /// Repair historical Claude Code and OpenCode session attribution from
+    /// captured request headers. Requests without captured headers cannot be recovered.
+    pub fn repair_agent_sessions(&self, time_range: &str) -> Result<AgentSessionRepairResult, StorageError> {
         let connection = self
             .connection
             .lock()
@@ -677,19 +680,19 @@ impl Storage {    pub fn save_balance_snapshot(
         let mut repaired_requests = 0usize;
         let mut repaired_logs = 0usize;
         for (request_id, headers_json) in rows {
-            let Some((session_id, parent_session_id)) = opencode_session_from_json(&headers_json)
+            let Some((agent_type, session_id, parent_session_id)) = agent_session_from_json(&headers_json)
             else {
                 continue;
             };
             repaired_logs += connection.execute(
                 r#"
                 UPDATE request_logs
-                SET agent_type = 'opencode',
-                    agent_session_id = ?2,
-                    parent_agent_session_id = ?3
+                SET agent_type = ?2,
+                    agent_session_id = ?3,
+                    parent_agent_session_id = ?4
                 WHERE request_id = ?1
                 "#,
-                params![request_id, session_id, parent_session_id],
+                params![request_id, agent_type, session_id, parent_session_id],
             )?;
             repaired_requests += 1;
         }
@@ -1371,7 +1374,7 @@ impl Storage {    pub fn save_balance_snapshot(
                 rl.ttfb_ms, rl.duration_ms, rl.attempt_seq,
                 rl.is_last_attempt,
                 ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost,
-                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens
+                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             {where_sql}
@@ -1431,6 +1434,7 @@ impl Storage {    pub fn save_balance_snapshot(
                     ttft_ms: row.get(31)?,
                     input_cached_tokens: row.get(32)?,
                     input_uncached_tokens: row.get(33)?,
+                    upstream_url: row.get(34)?,
                 })
             },
         )?;

@@ -151,7 +151,8 @@ impl Storage {
             let (credential_status, last_error) = match previous.get(&account.id) {
                 Some((old_key, old_status))
                     if old_key == account.api_key.as_str()
-                        && old_status == ACCOUNT_CREDENTIAL_INVALID_KEY =>
+                        && old_status == ACCOUNT_CREDENTIAL_INVALID_KEY
+                        && account.credential_status == ACCOUNT_CREDENTIAL_INVALID_KEY =>
                 {
                     (ACCOUNT_CREDENTIAL_INVALID_KEY.to_string(), account.last_error.clone())
                 }
@@ -161,8 +162,9 @@ impl Storage {
                 r#"
                 INSERT INTO channel_accounts (
                     id, channel_id, name, api_key, enabled, priority,
-                    remark, resource_mode, base_url_override, last_used_at, last_error, credential_status, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                    remark, resource_mode, base_url_override, anthropic_base_url_override,
+                    last_used_at, last_error, credential_status, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                 "#,
                 params![
                     account.id,
@@ -174,6 +176,7 @@ impl Storage {
                     account.remark,
                     account.resource_mode,
                     account.base_url_override,
+                    account.anthropic_base_url_override,
                     account.last_used_at,
                     last_error,
                     credential_status,
@@ -193,7 +196,8 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT id, channel_id, name, api_key, enabled, priority,
-                    remark, resource_mode, base_url_override, last_used_at, last_error, credential_status, created_at, updated_at
+                    remark, resource_mode, base_url_override, anthropic_base_url_override,
+                    last_used_at, last_error, credential_status, created_at, updated_at
              FROM channel_accounts ORDER BY channel_id ASC, priority ASC, id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -207,13 +211,14 @@ impl Storage {
                 remark: row.get(6)?,
                 resource_mode: row.get(7)?,
                 base_url_override: row.get(8)?,
-                last_used_at: row.get(9)?,
-                last_error: row.get(10)?,
+                anthropic_base_url_override: row.get(9)?,
+                last_used_at: row.get(10)?,
+                last_error: row.get(11)?,
                 credential_status: row
-                    .get::<_, String>(11)
+                    .get::<_, String>(12)
                     .unwrap_or_else(|_| "healthy".to_string()),
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         })?;
         let mut accounts = Vec::new();

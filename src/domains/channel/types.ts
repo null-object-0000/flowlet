@@ -33,6 +33,18 @@ export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
 };
 
+/** Per-channel Flowlet aggregate tier mapping. Must stay in sync with
+ *  config.json channels_config.flowlet_tiers. */
+export const FLOWLET_TIER_BY_CHANNEL_MODEL: Record<string, Record<string, "pro" | "flash">> = {
+  longcat: {
+    "longcat-2.0": "pro",
+  },
+  deepseek: {
+    "deepseek-v4-pro": "pro",
+    "deepseek-v4-flash": "flash",
+  },
+};
+
 export function defaultExposedModels(channel: ChannelPreset): string[] {
   return DEFAULT_EXPOSED_MODELS_BY_CHANNEL[channel.id] ?? [channel.default_model].filter(Boolean);
 }

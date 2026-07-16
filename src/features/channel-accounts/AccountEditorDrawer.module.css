@@ -15,8 +15,8 @@
 .channelOption { min-height: 72px; padding: 12px 14px; border: 1px solid var(--semi-color-border); border-radius: 8px; background: var(--semi-color-bg-2); display: grid; grid-template-columns: 34px minmax(0, 1fr) 20px; align-items: center; gap: 10px; color: var(--semi-color-text-0); text-align: left; cursor: pointer; }
 .channelOption > span { display: grid; gap: 4px; }
 .channelOption small, .modeOption small { color: var(--semi-color-text-2); font-size: 12px; }
-.channelOption i { width: 19px; height: 19px; border-radius: 50%; display: grid; place-items: center; background: var(--semi-color-primary); color: white; font-size: 11px; font-style: normal; }
-.channelOption i:empty { background: transparent; }
+.channelOption > i { width: 19px; height: 19px; border-radius: 50%; display: grid; place-items: center; background: var(--semi-color-primary); color: white; font-size: 11px; font-style: normal; }
+.channelOption > i:empty { background: transparent; }
 .channelOption:hover, .channelOption.selected, .modeOption:hover, .modeOption.selected { border-color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); }
 .channelOption:disabled { cursor: not-allowed; opacity: .65; }
 .nameInput { position: relative; }
@@ -48,10 +48,11 @@
 .advancedToggle { width: 100%; min-height: 58px; padding: 0 14px; border: 0; background: var(--semi-color-bg-2); display: flex; align-items: center; justify-content: space-between; color: var(--semi-color-text-0); text-align: left; cursor: pointer; }
 .advancedToggle > span { display: grid; gap: 4px; }
 .advancedContent { padding: 14px; border-top: 1px solid var(--semi-color-border); display: grid; gap: 12px; }
+.urlGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .footer { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 12px; }
 .footer button { height: 40px; }
 @media (max-width: 620px) {
-  .channelOptions, .modeOptions, .resourceGrid, .basicFields { grid-template-columns: 1fr; }
+  .channelOptions, .modeOptions, .resourceGrid, .basicFields, .urlGrid { grid-template-columns: 1fr; }
   .packManageRow { align-items: flex-start; flex-direction: column; }
   .packSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

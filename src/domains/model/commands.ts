@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import { DEFAULT_EXPOSED_MODELS_BY_CHANNEL } from "../channel/types";
+import { DEFAULT_EXPOSED_MODELS_BY_CHANNEL, FLOWLET_TIER_BY_CHANNEL_MODEL } from "../channel/types";
 import type { ChannelAccount } from "../account/types";
 import type { ChannelPreset, ProtocolType } from "../channel/types";
 import type { ChannelModel, ModelExposureMode, RouteCandidate } from "./types";
@@ -48,25 +48,31 @@ export function buildDefaultRoutes(
   const now = new Date().toISOString();
   const out: RouteCandidate[] = [];
   upstreamModels.forEach((up, i) => {
+    const tier = FLOWLET_TIER_BY_CHANNEL_MODEL[channelId]?.[up.toLowerCase()];
+    const publicModels = tier ? [up, `flowlet-${tier}`] : [up];
     usable.forEach((acc, j) => {
-      out.push({
-        id: `route-${acc.id}-${up}-${protocol}-${i}-${j}`,
-        virtual_model_id: up,
-        channel_id: channelId,
-        account_id: acc.id,
-        upstream_model: up,
-        client_protocol: protocol,
-        priority: j,
-        enabled: true,
-        created_at: now,
-        updated_at: now,
+      publicModels.forEach((publicModel) => {
+        out.push({
+          id: publicModel === up
+            ? `route-${acc.id}-${up}-${protocol}-${i}-${j}`
+            : `route-${acc.id}-${publicModel}-${up}-${protocol}-${i}-${j}`,
+          virtual_model_id: publicModel,
+          channel_id: channelId,
+          account_id: acc.id,
+          upstream_model: up,
+          client_protocol: protocol,
+          priority: j,
+          enabled: true,
+          created_at: now,
+          updated_at: now,
+        });
       });
     });
   });
   return out;
 }
 
-/** Add only missing default direct-model routes. Existing routes are returned
+/** Add only missing default direct-model and Flowlet aggregate routes. Existing routes are returned
  * unchanged so user-controlled enabled state, priority and timestamps survive
  * account edits and repeated model synchronization. */
 export function mergeDefaultRoutes(

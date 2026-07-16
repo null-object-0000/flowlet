@@ -60,8 +60,8 @@ async fn detect_claude_code() -> AgentEnvironmentReport {
         };
 
         installations.push(AgentInstallation {
-            executable_path: candidate.path.to_string_lossy().into_owned(),
-            install_dir: install_dir.to_string_lossy().into_owned(),
+            executable_path: display_path(&candidate.path),
+            install_dir: display_path(&install_dir),
             install_method,
             version,
             version_output,
@@ -196,6 +196,20 @@ fn normalized_path_key(path: &Path) -> String {
     } else {
         value
     }
+}
+
+pub(super) fn display_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        if let Some(path) = value.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{path}");
+        }
+        if let Some(path) = value.strip_prefix(r"\\?\") {
+            return path.to_string();
+        }
+    }
+    value.into_owned()
 }
 
 fn classify_install_method(path: &Path) -> AgentInstallMethod {
@@ -358,6 +372,19 @@ mod tests {
         assert_eq!(
             classify_install_method(Path::new("/Users/test/.claude/local/claude")),
             AgentInstallMethod::LegacyNpm
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hides_windows_extended_path_prefix_for_display() {
+        assert_eq!(
+            display_path(Path::new(r"\\?\C:\Users\test\.local\bin\claude.exe")),
+            r"C:\Users\test\.local\bin\claude.exe"
+        );
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share\claude.exe")),
+            r"\\server\share\claude.exe"
         );
     }
 }

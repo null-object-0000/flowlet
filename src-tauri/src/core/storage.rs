@@ -192,6 +192,8 @@ impl Storage {
                 priority          INTEGER NOT NULL DEFAULT 0,
                 remark            TEXT,
                 resource_mode     TEXT,
+                base_url_override TEXT,
+                anthropic_base_url_override TEXT,
                 last_used_at      TEXT,
                 last_error        TEXT,
                 credential_status TEXT NOT NULL DEFAULT 'healthy',
@@ -428,6 +430,24 @@ impl Storage {
             "base_url_override",
             "TEXT",
         )?;
+        let migrate_anthropic_override = !table_has_column(
+            &connection,
+            "channel_accounts",
+            "anthropic_base_url_override",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "anthropic_base_url_override",
+            "TEXT",
+        )?;
+        if migrate_anthropic_override {
+            // 旧版单一覆盖地址同时作用于两种协议；首次迁移时复制一份以保持兼容。
+            connection.execute(
+                "UPDATE channel_accounts SET anthropic_base_url_override = base_url_override WHERE base_url_override IS NOT NULL AND trim(base_url_override) <> ''",
+                [],
+            )?;
+        }
         add_column_if_missing(
             &connection,
             "channel_accounts",
@@ -516,6 +536,7 @@ impl Storage {
         add_column_if_missing(&connection, "request_logs", "ttfb_ms", "INTEGER")?;
         add_column_if_missing(&connection, "request_logs", "ttft_ms", "INTEGER")?;
         add_column_if_missing(&connection, "request_logs", "duration_ms", "INTEGER")?;
+        add_column_if_missing(&connection, "request_logs", "upstream_url", "TEXT")?;
         add_column_if_missing(
             &connection,
             "request_logs",

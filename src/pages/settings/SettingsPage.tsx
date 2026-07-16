@@ -88,7 +88,7 @@ export function SettingsPage() {
             <div className={styles.repairIntro}>
               <span>
                 <strong>{t("检查并修复历史请求数据")}</strong>
-                <small>{t("依次修复 OpenCode 会话归因、Token 用量、未知记录和预估费用。仅能恢复已捕获请求头或响应体的数据。")}</small>
+                <small>{t("依次修复 Claude Code、OpenCode 会话归因、Token 用量、未知记录和预估费用。仅能恢复已捕获请求头或响应体的数据。")}</small>
               </span>
               <div className={styles.repairControls}>
                 <span id="repair-time-range-label" className={styles.repairControlLabel}>{t("修复时间范围")}</span>

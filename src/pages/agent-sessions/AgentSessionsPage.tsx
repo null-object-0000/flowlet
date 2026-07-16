@@ -36,7 +36,7 @@ export function AgentSessionsPage() {
       <header className={styles.header}>
         <div>
           <Title heading={3} style={{ margin: 0 }}>{t("会话管理")}</Title>
-          <Paragraph type="tertiary" style={{ margin: 0 }}>{t("按 OpenCode 会话和客户端查看请求、Token、费用和失败情况")}</Paragraph>
+          <Paragraph type="tertiary" style={{ margin: 0 }}>{t("按 Agent 会话和客户端查看请求、Token、费用和失败情况")}</Paragraph>
         </div>
       </header>
 
@@ -72,7 +72,7 @@ export function AgentSessionsPage() {
         <div className={styles.body}>
           {sessions.isLoading ? Array.from({ length: 7 }, (_, index) => <SkeletonRow key={index} />) : null}
           {sessions.isError ? <div className={styles.state}><strong>{t("会话加载失败")}</strong><span>{sessions.error.message}</span><Button onClick={() => void sessions.refetch()}>{t("重试")}</Button></div> : null}
-          {!sessions.isLoading && !sessions.isError && (page?.rows.length ?? 0) === 0 ? <div className={styles.state}><strong>{t("暂无 OpenCode 会话")}</strong><span>{t("通过 Flowlet 发起 OpenCode 模型请求后，会话会自动出现在这里。")}</span></div> : null}
+          {!sessions.isLoading && !sessions.isError && (page?.rows.length ?? 0) === 0 ? <div className={styles.state}><strong>{t("暂无 Agent 会话")}</strong><span>{t("通过 Flowlet 发起 Claude Code 或 OpenCode 模型请求后，会话会自动出现在这里。")}</span></div> : null}
           {!sessions.isLoading && !sessions.isError ? page?.rows.map((row) => <SessionRow key={`${row.agentType}:${row.sessionId}`} row={row} language={language} onOpen={() => openSession(row.sessionId)} />) : null}
         </div>
         <footer className={styles.footer}>
@@ -89,7 +89,7 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
   return (
     <button type="button" className={`${styles.grid} ${styles.row}`} onClick={onOpen}>
       <span>{formatDate(row.updatedAt, language)}</span>
-      <span className={styles.session}><strong title={row.sessionId}>{row.sessionId}</strong>{row.parentSessionId ? <small title={row.parentSessionId}>{t("父会话：{id}", { id: row.parentSessionId })}</small> : <small>OpenCode</small>}</span>
+      <span className={styles.session}><strong title={row.sessionId}>{row.sessionId}</strong>{row.parentSessionId ? <small title={row.parentSessionId}>{t("父会话：{id}", { id: row.parentSessionId })}</small> : <small>{agentLabel(row.agentType)}</small>}</span>
       <span className={styles.client}><strong title={row.clientName ?? row.clientId ?? t("未知客户端")}>{row.clientName ?? row.clientId ?? t("未知客户端")}</strong>{row.clientId ? <small title={row.clientId}>{row.clientId}</small> : null}</span>
       <span>{row.requestCount.toLocaleString(language)}</span>
       <span>{row.knownTokens.toLocaleString(language)}</span>
@@ -97,6 +97,10 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
       <span className={row.errorCount > 0 ? styles.warning : styles.success}>{row.errorCount > 0 ? t("{count} 次失败", { count: row.errorCount }) : t("正常")}</span>
     </button>
   );
+}
+
+function agentLabel(agentType: AgentSessionRow["agentType"]) {
+  return agentType === "claude-code" ? "Claude Code" : "OpenCode";
 }
 
 function SkeletonRow() {

@@ -355,7 +355,11 @@ pub struct ChannelAccount {
     pub remark: Option<String>,
     #[serde(default)]
     pub resource_mode: Option<String>,
+    /// Account-level OpenAI-compatible upstream URL override.
     pub base_url_override: Option<String>,
+    /// Account-level Anthropic-compatible upstream URL override.
+    #[serde(default)]
+    pub anthropic_base_url_override: Option<String>,
     pub last_used_at: Option<String>,
     pub last_error: Option<String>,
     #[serde(default = "default_credential_status")]
@@ -376,6 +380,7 @@ impl Default for ChannelAccount {
             remark: None,
             resource_mode: None,
             base_url_override: None,
+            anthropic_base_url_override: None,
             last_used_at: None,
             last_error: None,
             credential_status: ACCOUNT_CREDENTIAL_HEALTHY.to_string(),
@@ -600,6 +605,7 @@ pub struct RequestLogRow {
     pub request_type: String,
     pub method: String,
     pub path: String,
+    pub upstream_url: Option<String>,
     pub status: Option<i64>,
     pub latency_ms: Option<i64>,
     pub is_stream: bool,
@@ -885,6 +891,7 @@ pub struct RequestLogInput {
     pub request_type: String,
     pub method: String,
     pub path: String,
+    pub upstream_url: Option<String>,
     pub status: Option<i64>,
     pub latency_ms: Option<i64>,
     pub is_stream: bool,

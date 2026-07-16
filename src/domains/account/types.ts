@@ -14,6 +14,7 @@ export type ChannelAccount = {
   remark: string | null;
   resource_mode: AccountResourceMode | null;
   base_url_override: string | null;
+  anthropic_base_url_override: string | null;
   last_used_at: string | null;
   last_error: string | null;
   credential_status: AccountCredentialStatus;
@@ -65,6 +66,7 @@ export function newAccount(channelId: string, index: number): ChannelAccount {
     remark: "",
     resource_mode: null,
     base_url_override: null,
+    anthropic_base_url_override: null,
     last_used_at: null,
     last_error: null,
     credential_status: "healthy",

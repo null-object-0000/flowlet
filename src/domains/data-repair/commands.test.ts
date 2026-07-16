@@ -25,7 +25,7 @@ describe("dataRepairCommands contract", () => {
     await dataRepairCommands.repairCosts("7d");
 
     expect(invokeMock.mock.calls.map(([command]) => command)).toEqual([
-      "repair_opencode_sessions",
+      "repair_agent_sessions",
       "repair_captured_usage",
       "repair_unknown_usage",
       "repair_usage_costs",

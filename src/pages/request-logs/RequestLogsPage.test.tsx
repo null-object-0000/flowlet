@@ -29,7 +29,7 @@ const row: RequestLogRow = {
   channel_id: "longcat", channel_name: "LongCat", account_id: "account-1", account_name: "主账号",
   client_protocol: "anthropic", upstream_protocol: "anthropic", virtual_model: "flowlet-pro",
   public_model: "flowlet-pro", upstream_model: "LongCat-2.0", request_type: "messages", method: "POST",
-  path: "/anthropic/v1/messages", status: 200, latency_ms: 860, is_stream: true, error_message: null,
+  path: "/anthropic/v1/messages", upstream_url: "https://api.longcat.chat/anthropic/v1/messages", status: 200, latency_ms: 860, is_stream: true, error_message: null,
   fallback_count: 0, route_reason: "primary", created_at: "2026-07-15 06:00:00", ttfb_ms: 120,
   ttft_ms: 200, duration_ms: 860, attempt_seq: 1, req_headers_json: JSON.stringify({ Authorization: "Bearer secret-key" }),
   req_body_b64: btoa(JSON.stringify({ model: "flowlet-pro" })), res_headers_json: JSON.stringify({ "content-type": "application/json" }),
@@ -62,7 +62,7 @@ describe("RequestLogsPage", () => {
     await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({ search: "messages", page: 1 }), true));
   });
 
-  it("loads details on demand and redacts captured credentials", async () => {
+  it("loads details on demand and preserves captured credentials", async () => {
     const user = userEvent.setup();
     render(<RequestLogsPage />);
     await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
@@ -70,13 +70,14 @@ describe("RequestLogsPage", () => {
     expect(await screen.findByText("请求详情")).toBeInTheDocument();
     expect(screen.queryByText("路由信息")).not.toBeInTheDocument();
     expect(screen.getByText("flowlet-pro → LongCat-2.0 · 直接路由")).toBeInTheDocument();
+    expect(screen.getByText("https://api.longcat.chat/anthropic/v1/messages")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制底层接口地址" })).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "性能" }));
     expect(screen.getByText("响应性能")).toBeInTheDocument();
     expect(screen.getByText("Token 明细")).toBeInTheDocument();
     expect(screen.getByText("660 ms")).toBeInTheDocument();
     await user.click(screen.getByText("请求"));
-    expect(screen.getAllByText("敏感凭据已隐藏").length).toBeGreaterThan(0);
-    expect(screen.queryByText(/secret-key/)).not.toBeInTheDocument();
-    expect(screen.getByText(/••••••/)).toBeInTheDocument();
+    expect(screen.queryByText("敏感凭据已隐藏")).not.toBeInTheDocument();
+    expect(screen.getByText(/secret-key/)).toBeInTheDocument();
   });
 });

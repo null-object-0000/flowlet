@@ -25,6 +25,7 @@ fn request_log_for_repair(request_id: &str, attempt_seq: i64, is_last_attempt: b
         request_type: "chat".to_string(),
         method: "POST".to_string(),
         path: "/v1/chat/completions".to_string(),
+        upstream_url: None,
         status: Some(200),
         latency_ms: Some(20),
         is_stream: false,
@@ -97,6 +98,7 @@ fn groups_opencode_request_logs_into_sessions() {
         request_type: "chat".to_string(),
         method: "POST".to_string(),
         path: "/v1/chat/completions".to_string(),
+        upstream_url: Some("https://api.longcat.chat/openai/v1/chat/completions".to_string()),
         status: Some(200),
         latency_ms: Some(20),
         is_stream: true,
@@ -148,6 +150,65 @@ fn groups_opencode_request_logs_into_sessions() {
 }
 
 #[test]
+fn groups_claude_code_requests_by_official_session_header_attribution() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage {
+        connection: Arc::new(Mutex::new(connection)),
+        prices: Arc::new(Mutex::new(Vec::new())),
+    };
+    storage.migrate().expect("migrate request log schema");
+
+    let mut log = request_log_for_repair("claude-request-1", 0, true);
+    log.agent_type = Some("claude-code".to_string());
+    log.agent_session_id = Some("09af5e1a-bc08-4ae8-bb34-7ed47dca196d".to_string());
+    log.parent_agent_session_id = None;
+    log.client_id = Some("claude-code".to_string());
+    log.client_name = Some("Claude Code".to_string());
+    storage.insert_request_log(&log).unwrap();
+
+    let page = storage
+        .list_agent_sessions(crate::core::config::AgentSessionsFilter {
+            page: 1,
+            page_size: 10,
+            search: "09af5e1a".to_string(),
+            client_id: "claude-code".to_string(),
+        })
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.rows[0].agent_type, "claude-code");
+    assert_eq!(page.rows[0].session_id, "09af5e1a-bc08-4ae8-bb34-7ed47dca196d");
+    assert_eq!(page.rows[0].client_name.as_deref(), Some("Claude Code"));
+}
+
+#[test]
+fn repairs_historical_claude_code_session_header() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage {
+        connection: Arc::new(Mutex::new(connection)),
+        prices: Arc::new(Mutex::new(Vec::new())),
+    };
+    storage.migrate().expect("migrate request log schema");
+    let mut log = request_log_for_repair("claude-history", 0, true);
+    log.client_id = Some("claude-code".to_string());
+    log.client_name = Some("Claude Code".to_string());
+    log.req_headers_json = Some(r#"{"user-agent":"claude-cli/2.1.207 (external, cli)","x-claude-code-session-id":"claude-history-session"}"#.to_string());
+    storage.insert_request_log(&log).unwrap();
+
+    let result = storage.repair_agent_sessions("all").unwrap();
+    assert_eq!(result.repaired_requests, 1);
+    let connection = storage.connection.lock().unwrap();
+    let attribution: (String, String) = connection
+        .query_row(
+            "SELECT agent_type, agent_session_id FROM request_logs WHERE request_id = 'claude-history'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(attribution.0, "claude-code");
+    assert_eq!(attribution.1, "claude-history-session");
+}
+
+#[test]
 fn repairs_historical_opencode_sessions_for_all_attempts() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage {
@@ -161,10 +222,10 @@ fn repairs_historical_opencode_sessions_for_all_attempts() {
     storage.connection.lock().unwrap()
         .execute("UPDATE request_logs SET created_at = datetime('now', '-10 days') WHERE request_id = 'req-history'", [])
         .unwrap();
-    let recent_result = storage.repair_opencode_sessions("7d").unwrap();
+    let recent_result = storage.repair_agent_sessions("7d").unwrap();
     assert_eq!(recent_result.scanned_requests, 0);
 
-    let result = storage.repair_opencode_sessions("all").unwrap();
+    let result = storage.repair_agent_sessions("all").unwrap();
     assert_eq!(result.scanned_requests, 1);
     assert_eq!(result.repaired_requests, 1);
     assert_eq!(result.repaired_logs, 2);
@@ -236,6 +297,7 @@ data: [DONE]
             request_type: "chat.completions".to_string(),
             method: "POST".to_string(),
             path: "/v1/chat/completions".to_string(),
+            upstream_url: Some("https://api.longcat.chat/openai/v1/chat/completions".to_string()),
             status: Some(200),
             latency_ms: Some(50),
             is_stream: true,
@@ -282,6 +344,10 @@ data: [DONE]
     assert_eq!(page.rows[0].output_tokens, Some(20));
     assert_eq!(page.rows[0].total_tokens, Some(120));
     assert_eq!(page.rows[0].ttft_ms, Some(20));
+    assert_eq!(
+        page.rows[0].upstream_url.as_deref(),
+        Some("https://api.longcat.chat/openai/v1/chat/completions")
+    );
     assert_eq!(page.summary.cache_hit_rate, Some(0.9));
     storage.connection.lock().unwrap()
         .execute(

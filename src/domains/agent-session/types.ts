@@ -6,7 +6,7 @@ export type AgentSessionFilter = {
 };
 
 export type AgentSessionRow = {
-  agentType: "opencode";
+  agentType: "opencode" | "claude-code";
   sessionId: string;
   parentSessionId: string | null;
   clientId: string | null;

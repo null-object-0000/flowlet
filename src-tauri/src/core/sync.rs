@@ -53,26 +53,86 @@ pub async fn test_channel_connection(account: &ChannelAccount, _config: &Channel
         .build()
         .map_err(|err| format!("创建 HTTP 客户端失败: {err}"))?;
 
-    // 根据渠道配置选择对应的轻量端点进行鉴权测试
-    let url = _config.models_endpoint_url(&account.channel_id)
+    // 自定义 OpenAI Base URL 必须参与连接测试；未覆盖时才使用渠道配置端点。
+    let url = account
+        .base_url_override
+        .as_deref()
+        .filter(|url| !url.trim().is_empty())
+        .map(openai_models_url)
+        .or_else(|| _config.models_endpoint_url(&account.channel_id))
         .ok_or_else(|| format!("不支持测试连接的渠道: {}", account.channel_id))?;
     let auth_header = format!("Bearer {}", account.api_key.trim());
+    let started_at = std::time::Instant::now();
 
-    let response = client
+    tracing::info!(
+        channel_id = %account.channel_id,
+        method = "GET",
+        url = %url,
+        custom_base_url = account.base_url_override.as_deref().is_some_and(|value| !value.trim().is_empty()),
+        "test_connection: 开始请求上游"
+    );
+
+    let response = match client
         .get(&url)
         .header("Authorization", auth_header)
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|err| format!("请求失败: {err}"))?;
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::warn!(
+                channel_id = %account.channel_id,
+                method = "GET",
+                url = %url,
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                error = %error,
+                "test_connection: 上游请求失败"
+            );
+            return Err(format!("GET {url} 请求失败: {error}"));
+        }
+    };
 
     let status = response.status();
     if status.is_success() {
+        tracing::info!(
+            channel_id = %account.channel_id,
+            method = "GET",
+            url = %url,
+            http_status = status.as_u16(),
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            "test_connection: 上游响应成功"
+        );
         Ok(())
     } else if status.as_u16() == 401 {
-        Err("API Key 无效 (HTTP 401)".to_string())
+        tracing::warn!(
+            channel_id = %account.channel_id,
+            method = "GET",
+            url = %url,
+            http_status = status.as_u16(),
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            "test_connection: 上游鉴权失败"
+        );
+        Err(format!("GET {url} → HTTP 401，API Key 无效或鉴权方式不匹配"))
     } else {
-        Err(format!("连接异常 (HTTP {})", status.as_u16()))
+        tracing::warn!(
+            channel_id = %account.channel_id,
+            method = "GET",
+            url = %url,
+            http_status = status.as_u16(),
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            "test_connection: 上游返回异常状态"
+        );
+        Err(format!("GET {url} → HTTP {}", status.as_u16()))
+    }
+}
+
+fn openai_models_url(base_url: &str) -> String {
+    let base = base_url.trim().trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{base}/models")
+    } else {
+        format!("{base}/v1/models")
     }
 }
 

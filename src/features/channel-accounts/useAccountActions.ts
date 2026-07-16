@@ -108,7 +108,9 @@ export async function refreshSavedAccounts(
     const preset = presetById.get(account.channel_id);
     if (!preset) continue;
 
-    if (preset.supports_balance_query) {
+    const usesCustomOpenAiEndpoint = Boolean(account.base_url_override?.trim());
+
+    if (preset.supports_balance_query && !usesCustomOpenAiEndpoint) {
       operations.push({
         accountId: account.id,
         accountName: account.name,
@@ -119,7 +121,7 @@ export async function refreshSavedAccounts(
         },
       });
     }
-    if (preset.supports_model_list) {
+    if (preset.supports_model_list && !usesCustomOpenAiEndpoint) {
       operations.push({
         accountId: account.id,
         accountName: account.name,

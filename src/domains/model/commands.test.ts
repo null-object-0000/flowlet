@@ -40,16 +40,20 @@ describe("mergeDefaultRoutes", () => {
     supported_protocols: ["openai", "anthropic"],
   } as ChannelPreset;
 
-  it("creates both protocols for every configured DeepSeek default model", () => {
+  it("creates direct and Flowlet aggregate routes for both protocols", () => {
     const routes = mergeDefaultRoutes([], [account], [preset]);
-    expect(routes).toHaveLength(4);
+    expect(routes).toHaveLength(8);
     expect(routes.map((route) => [route.virtual_model_id, route.client_protocol])).toEqual([
       ["deepseek-v4-flash", "openai"],
+      ["flowlet-flash", "openai"],
       ["deepseek-v4-pro", "openai"],
+      ["flowlet-pro", "openai"],
       ["deepseek-v4-flash", "anthropic"],
+      ["flowlet-flash", "anthropic"],
       ["deepseek-v4-pro", "anthropic"],
+      ["flowlet-pro", "anthropic"],
     ]);
-    expect(new Set(routes.map((route) => route.id))).toHaveLength(4);
+    expect(new Set(routes.map((route) => route.id))).toHaveLength(8);
   });
 
   it("preserves an existing disabled route and adds only missing routes", () => {
@@ -66,7 +70,7 @@ describe("mergeDefaultRoutes", () => {
       updated_at: "old",
     }] as RouteCandidate[];
     const routes = mergeDefaultRoutes(existing, [account], [preset]);
-    expect(routes).toHaveLength(4);
+    expect(routes).toHaveLength(8);
     expect(routes[0]).toBe(existing[0]);
   });
 });

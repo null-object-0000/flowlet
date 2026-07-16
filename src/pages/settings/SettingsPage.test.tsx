@@ -12,6 +12,13 @@ vi.mock("../../features/settings/useAutostartSetting", () => ({
   }),
 }));
 
+vi.mock("../../features/settings/useDataRepair", () => ({
+  useDataRepair: () => ({
+    state: { status: "idle", currentStage: null, completedStages: [], percent: 0, results: {}, error: null },
+    run: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 import { SettingsPage } from "./SettingsPage";
 
 describe("SettingsPage", () => {
@@ -22,5 +29,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("界面外观")).toBeInTheDocument();
     expect(screen.getByText("配置 Flowlet 的系统启动行为")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "开机启动" })).toBeInTheDocument();
+    expect(screen.getByText("本地数据修复")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始修复" })).toBeInTheDocument();
   });
 });

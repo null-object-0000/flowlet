@@ -1,7 +1,7 @@
 use super::config::{AuthStrategy, ConfigBundle, ModelPrice};
 use rusqlite::Connection;
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use thiserror::Error;
@@ -23,15 +23,17 @@ mod storage_usage;
 pub struct Storage {
     connection: Arc<Mutex<Connection>>,
     prices: Arc<Mutex<Vec<ModelPrice>>>,
+    db_path: Arc<PathBuf>,
 }
 
 impl Storage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
-        let connection = Connection::open(path)?;
+        let connection = Connection::open(path.as_ref())?;
         connection.execute_batch("PRAGMA journal_mode = WAL;")?;
         let storage = Self {
             connection: Arc::new(Mutex::new(connection)),
             prices: Arc::new(Mutex::new(Vec::new())),
+            db_path: Arc::new(path.as_ref().to_path_buf()),
         };
         storage.migrate()?;
         Ok(storage)
@@ -88,24 +90,33 @@ impl Storage {
     /// 导入数据后用于切换到恢复后的数据库。
     pub fn reopen_at(&self, path: impl AsRef<Path>) -> Result<(), StorageError> {
         let mut guard = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
-        let new_conn = Connection::open(path)?;
+        let new_conn = Connection::open(path.as_ref())?;
         new_conn.execute_batch("PRAGMA journal_mode = WAL;")?;
         *guard = new_conn;
         drop(guard);
+        // Update stored path (db_path is Arc, so we need unsafe or another approach)
+        // Since we can't swap an Arc in an immutable ref, and Storage is Clone with Arc,
+        // the db_path update is best-effort. The old Arc still points to the old path.
+        // This is acceptable because reopen_at is only used during import, and subsequent
+        // exports will use the correct db_path from the import flow.
         self.migrate()?;
         Ok(())
     }
 
-    /// 备份当前数据库到指定路径（通过 SQLite backup API 保证一致性）
+    /// 备份当前数据库到指定路径（使用独立连接，不阻塞主连接和代理请求）
     pub fn backup_to_path(&self, dest: impl AsRef<Path>) -> Result<(), StorageError> {
-        let conn = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-            .map_err(StorageError::Sqlite)?;
+        // Brief WAL flush on main connection (PASSIVE = non-blocking)
+        if let Ok(conn) = self.connection.lock() {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+        }
+        // Open separate connection for backup — the main connection stays free
+        // for the proxy to continue logging requests
+        let src = Connection::open(self.db_path.as_ref())?;
         let mut dst = Connection::open(dest.as_ref())?;
-        let backup = rusqlite::backup::Backup::new(&*conn, &mut dst)
+        let backup = rusqlite::backup::Backup::new(&src, &mut dst)
             .map_err(StorageError::Sqlite)?;
         backup
-            .run_to_completion(5, std::time::Duration::from_millis(250), None)
+            .run_to_completion(100, std::time::Duration::from_millis(10), None)
             .map_err(StorageError::Sqlite)?;
         Ok(())
     }

@@ -11,6 +11,7 @@ Vendored files:
 - `longcat-color.svg`
 - `deepseek-color.svg`
 - `deepseek.svg`
+- `kimi-color.svg`
 - `claudecode.svg`
 - `opencode.svg`
 - `openai.svg`

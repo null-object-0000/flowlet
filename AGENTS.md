@@ -220,6 +220,10 @@ LongCat:
 DeepSeek:
 - deepseek-v4-flash
 - deepseek-v4-pro
+
+Kimi:
+- kimi-k3
+- kimi-k2.7-code
 ```
 
 ---
@@ -252,7 +256,7 @@ DeepSeek:
 
 * 代理服务状态；
 * 渠道账号引导；
-* LongCat 和 DeepSeek 添加入口；
+* LongCat、DeepSeek 和 Kimi 添加入口；
 * 三步接入流程。
 
 隐藏：
@@ -463,6 +467,16 @@ src/
 - 端点解析优先级；
 - 新增渠道的完整步骤。
 
+### 新增渠道
+
+新增渠道或扩展渠道协议、余额、模型同步等能力前，**必须先阅读并按
+`docs/channel-integration.md` 执行**。该文档以 LongCat、DeepSeek、Kimi 为参照，
+覆盖官方能力核实、配置默认值、SQLite 升级迁移、Rust command、前端账号流程、
+默认路由、品牌图标和回归测试。
+
+不得只修改 `config.json` 或只让渠道出现在前端。必须验证从旧 SQLite 升级后，
+渠道协议、账号、开放模型、`/models` 和真实代理候选链均一致。
+
 ### 修改 config.json 时必须同步文档
 
 对 `config.json` 的任何字段变更（新增、删除、修改语义或默认值），**必须同步更新 `docs/config.md`**：
@@ -517,6 +531,7 @@ src/
 | 文档 | 职责 | 何时必须更新 |
 |------|------|-------------|
 | `AGENTS.md` | AI Agent 协作规范 | 协作流程、优先级、架构原则变化时 |
+| `docs/channel-integration.md` | 新增渠道的端到端接入流程和检查清单 | 新增渠道，或渠道接入架构、迁移、同步、路由流程变化时 |
 | `docs/config.md` | `config.json` 字段与运行时行为说明 | 任何 `config.json` 字段变更时（见第 14 节） |
 | `docs/architecture.md` | 总体架构与核心模型 | 架构分层、核心数据模型变化时 |
 | `docs/roadmap.md` | 产品路线图 | 优先级或阶段目标调整时 |

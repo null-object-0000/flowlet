@@ -2,7 +2,7 @@
 .header { min-height: 44px; display: grid; align-content: center; gap: 3px; }
 .header h3 { margin: 0; color: var(--flowlet-color-text); font-size: 20px; line-height: 1.2; }
 .header p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: 13px; }
-.content { min-height: 0; padding-right: 3px; display: grid; grid-template-rows: 136px 200px 126px 222px; align-content: start; gap: 10px; overflow: auto; }
+.content { min-height: 0; padding-right: 3px; display: grid; grid-template-rows: auto auto auto auto auto; align-content: start; gap: 10px; overflow: auto; }
 .section { min-width: 0; min-height: 0; display: grid; grid-template-columns: 234px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .sectionHeader { min-width: 0; padding: 18px 16px; display: flex; align-items: flex-start; gap: 11px; border-right: 1px solid var(--flowlet-color-border); background: color-mix(in srgb, var(--flowlet-color-surface-muted) 72%, transparent); }
 .sectionHeader > i { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-size: 17px; font-style: normal; }
@@ -49,4 +49,12 @@
 .repairStage.completed > i { background: var(--semi-color-success); }
 .repairStage.error > i { background: var(--semi-color-danger); }
 .repairError { margin: 0; overflow: hidden; color: var(--semi-color-danger); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.dataPanel { min-width: 0; margin: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.dataPanelExporting { min-width: 0; margin: 6px 16px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: start; gap: 6px 16px; }
+.dataPanelExporting > span { min-width: 0; display: grid; gap: 3px; }
+.dataPanel > span { min-width: 0; display: grid; gap: 3px; }
+.dataPanel strong { color: var(--flowlet-color-text); font-size: 13px; }
+.dataPanel small { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 11px; line-height: 1.45; white-space: nowrap; text-overflow: ellipsis; }
+.dataButtons { flex: none; display: flex; gap: 8px; }
+.dataProgress { grid-column: 1 / -1; margin-top: 2px; }
 @media (max-width: 800px) { .content { overflow: auto; grid-template-rows: auto; } .section { grid-template-columns: 1fr; } .sectionHeader { border-right: 0; border-bottom: 1px solid var(--flowlet-color-border); } }

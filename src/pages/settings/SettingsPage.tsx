@@ -1,10 +1,11 @@
-import { Button, Progress, Select, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
-import { IconDesktop, IconGlobe, IconHistory, IconMoon, IconSun } from "@douyinfe/semi-icons";
+import { Button, Modal, Progress, Select, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { IconDesktop, IconGlobe, IconHistory, IconMoon, IconSave, IconSun } from "@douyinfe/semi-icons";
 import { useState, type ReactNode } from "react";
 import { useAppPreferences, type ThemePreference } from "../../app/preferences/AppPreferences";
 import type { AppLanguage } from "../../app/preferences/translations";
 import type { DataRepairTimeRange } from "../../domains/data-repair/types";
 import { useAutostartSetting } from "../../features/settings/useAutostartSetting";
+import { useDataImport, useDataExport } from "../../features/settings/useDataImportExport";
 import { useDataRepair } from "../../features/settings/useDataRepair";
 import styles from "./SettingsPageStatic.module.css";
 
@@ -21,6 +22,8 @@ export function SettingsPage() {
   const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
   const autostart = useAutostartSetting();
   const repair = useDataRepair();
+  const { mutateAsync: exportAsync, isPending: exportPending, progress: exportProgress } = useDataExport();
+  const dataImport = useDataImport();
   const [repairTimeRange, setRepairTimeRange] = useState<DataRepairTimeRange>("all");
 
   async function runDataRepair() {
@@ -41,6 +44,36 @@ export function SettingsPage() {
       const message = error && typeof error === "object" && "message" in error ? String(error.message) : String(error);
       Toast.error(t("更新开机启动失败：{message}", { message }));
     }
+  }
+
+  async function handleExport() {
+    try {
+      await exportAsync();
+      Toast.success(t("数据导出成功"));
+    } catch (error) {
+      if (error instanceof Error && error.message === "CANCELLED") return;
+      const message = error && typeof error === "object" && "message" in error ? String(error.message) : String(error);
+      Toast.error(t("数据导出失败：{message}", { message }));
+    }
+  }
+
+  async function handleImport() {
+    Modal.confirm({
+      title: t("确认导入数据"),
+      content: t("导入将覆盖当前全部数据（配置、账号、模型、请求日志等），此操作不可撤销。确定继续？"),
+      okText: t("确认导入"),
+      cancelText: t("取消"),
+      onOk: async () => {
+        try {
+          await dataImport.mutateAsync();
+          Toast.success(t("数据导入成功，代理已重新启动"));
+        } catch (error) {
+          if (error instanceof Error && error.message === "CANCELLED") return;
+          const message = error && typeof error === "object" && "message" in error ? String(error.message) : String(error);
+          Toast.error(t("数据导入失败：{message}", { message }));
+        }
+      },
+    });
   }
 
   return (
@@ -117,6 +150,26 @@ export function SettingsPage() {
             {repair.state.error ? <p className={styles.repairError}>{t("修复中断：{message}", { message: repair.state.error })}</p> : null}
           </div>
         </SettingSection>
+
+        <SettingSection title={t("数据管理")} description={t("将全部数据（配置、账号、模型、请求日志等）导出为备份文件，或从备份文件恢复")} icon={<IconSave />}>
+          <div className={exportProgress ? styles.dataPanelExporting : styles.dataPanel}>
+            <span>
+              <strong>{t("导出和导入全部数据")}</strong>
+              <small>{t("导出：将当前所有数据保存为备份文件。导入：从备份文件恢复，覆盖当前数据并自动重启代理。")}</small>
+            </span>
+            <div className={styles.dataButtons}>
+              <Button loading={exportPending} disabled={dataImport.isPending} onClick={() => void handleExport()}>
+                {exportProgress ? exportProgress.message : t("导出数据")}
+              </Button>
+              <Button loading={dataImport.isPending} disabled={exportPending} type="danger" onClick={() => void handleImport()}>
+                {t("导入数据")}
+              </Button>
+            </div>
+            {exportProgress && exportProgress.stage !== "done" ? (
+              <Progress percent={stagePercent(exportProgress.stage)} size="small" showInfo className={styles.dataProgress} />
+            ) : null}
+          </div>
+        </SettingSection>
       </div>
     </main>
   );
@@ -159,5 +212,15 @@ function countDetail(count: number | undefined, template: string, t: ReturnType<
 function ThemeCard({ value, current, icon, title, description, onChange }: { value: ThemePreference; current: ThemePreference; icon: ReactNode; title: string; description: string; onChange: (value: ThemePreference) => void }) {
   const selected = value === current;
   return <button type="button" aria-pressed={selected} className={`${styles.themeChoice} ${selected ? styles.selected : ""}`} onClick={() => onChange(value)}><i>{icon}</i><span><strong>{title}</strong><small>{description}</small></span></button>;
+}
+
+function stagePercent(stage: string): number {
+  switch (stage) {
+    case "reading_config": return 5;
+    case "backing_up_db": return 20;
+    case "compressing": return 50;
+    case "done": return 100;
+    default: return 0;
+  }
 }
 

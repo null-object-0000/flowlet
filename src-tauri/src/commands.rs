@@ -9,7 +9,14 @@ use crate::core::proxy::ProxyStatus;
 use crate::core::sync::{
     query_deepseek_balance, query_kimi_balance, sync_deepseek_models, sync_kimi_models, sync_longcat_models, test_channel_connection,
 };
-use tauri::AppHandle;
+use std::io::Write;
+use tauri::{AppHandle, Emitter};
+
+#[derive(Clone, serde::Serialize)]
+struct ExportProgress {
+    stage: String,
+    message: String,
+}
 use tauri_plugin_autostart::ManagerExt;
 
 // ─── Agent Environment Commands ────────────────────────────────────────────
@@ -890,6 +897,306 @@ pub(super) fn import_config(state: tauri::State<'_, AppState>, json: String) -> 
         .virtual_models
         .lock()
         .map_err(|_| "锁失败".to_string())? = virtual_models;
+
+    Ok(())
+}
+
+// ─── Full Data Export/Import Commands ─────────────────────────────────────
+
+#[tauri::command]
+pub(super) async fn export_all_data(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    dest_path: String,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let dest = std::path::Path::new(&dest_path);
+
+        let _ = app.emit("export-progress", ExportProgress {
+            stage: "reading_config".into(),
+            message: "读取配置文件…".into(),
+        });
+
+        let config_content = std::fs::read_to_string(&state.config_path)
+            .map_err(|e| format!("读取 config.json 失败: {e}"))?;
+
+        let _ = app.emit("export-progress", ExportProgress {
+            stage: "backing_up_db".into(),
+            message: "备份数据库…".into(),
+        });
+
+        let tmp_db = std::env::temp_dir()
+            .join(format!("flowlet-export-{}.sqlite", uuid::Uuid::new_v4()));
+        state
+            .storage
+            .backup_to_path(&tmp_db)
+            .map_err(|e| format!("备份数据库失败: {e}"))?;
+
+        let _ = app.emit("export-progress", ExportProgress {
+            stage: "compressing".into(),
+            message: "正在压缩…".into(),
+        });
+
+        let file = std::fs::File::create(dest)
+            .map_err(|e| format!("创建备份文件失败: {e}"))?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("config.json", options)
+            .map_err(|e| format!("压缩 config.json 失败: {e}"))?;
+        zip.write_all(config_content.as_bytes())
+            .map_err(|e| format!("写入 config.json 到备份失败: {e}"))?;
+
+        zip.start_file("flowlet.sqlite", options)
+            .map_err(|e| format!("压缩数据库失败: {e}"))?;
+        let db_bytes = std::fs::read(&tmp_db)
+            .map_err(|e| format!("读取备份数据库失败: {e}"))?;
+        zip.write_all(&db_bytes)
+            .map_err(|e| format!("写入数据库到备份失败: {e}"))?;
+
+        zip.finish().map_err(|e| format!("完成备份失败: {e}"))?;
+        let _ = std::fs::remove_file(&tmp_db);
+
+        let _ = app.emit("export-progress", ExportProgress {
+            stage: "done".into(),
+            message: "导出完成".into(),
+        });
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("导出任务失败: {e}"))?
+}
+
+#[tauri::command]
+pub(super) async fn import_all_data(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    source_path: String,
+) -> Result<(), String> {
+    // Phase 1: extract + validate (blocking I/O)
+    let (tmp, new_config_path, new_db_path) = tokio::task::spawn_blocking(move || {
+        let src = std::path::Path::new(&source_path);
+        let tmp = std::env::temp_dir()
+            .join(format!("flowlet-import-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp)
+            .map_err(|e| format!("创建临时目录失败: {e}"))?;
+
+        // Extract zip
+        {
+            let file = std::fs::File::open(src)
+                .map_err(|e| format!("打开备份文件失败: {e}"))?;
+            let mut archive = zip::ZipArchive::new(file)
+                .map_err(|e| format!("读取备份压缩包失败: {e}"))?;
+
+            let mut config_found = false;
+            let mut db_found = false;
+            for i in 0..archive.len() {
+                let mut entry =
+                    archive.by_index(i).map_err(|e| format!("读取压缩条目失败: {e}"))?;
+                let name = entry.name().to_string();
+                let out_path = tmp.join(&name);
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("创建解压目录失败: {e}"))?;
+                }
+                let mut out_file = std::fs::File::create(&out_path)
+                    .map_err(|e| format!("创建解压文件失败: {e}"))?;
+                std::io::copy(&mut entry, &mut out_file)
+                    .map_err(|e| format!("解压文件失败: {e}"))?;
+                if name == "config.json" {
+                    config_found = true;
+                }
+                if name == "flowlet.sqlite" {
+                    db_found = true;
+                }
+            }
+            if !config_found || !db_found {
+                let _ = std::fs::remove_dir_all(&tmp);
+                return Err("备份文件不完整：缺少 config.json 或 flowlet.sqlite".to_string());
+            }
+        }
+
+        // Validate config.json
+        let new_config_path = tmp.join("config.json");
+        let config_str = std::fs::read_to_string(&new_config_path)
+            .map_err(|e| format!("读取备份中的 config.json 失败: {e}"))?;
+        serde_json::from_str::<serde_json::Value>(&config_str)
+            .map_err(|e| format!("备份中的 config.json 格式无效: {e}"))?;
+
+        // Validate SQLite
+        let new_db_path = tmp.join("flowlet.sqlite");
+        rusqlite::Connection::open(&new_db_path)
+            .map_err(|e| format!("备份中的数据库无法打开: {e}"))?
+            .close()
+            .map_err(|(_, e)| format!("备份数据库损坏: {e}"))?;
+
+        Ok::<_, String>((tmp, new_config_path, new_db_path))
+    })
+    .await
+    .map_err(|e| format!("导入准备失败: {e}"))??;
+
+    // Phase 2: stop proxy (async)
+    state.proxy.stop().await.map_err(|e| format!("停止代理失败: {e}"))?;
+
+    // Phase 3: replace files + reopen DB + reload state (blocking)
+    let state_clone = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let db_path = state_clone
+            .config_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("flowlet.sqlite");
+
+        // Replace config.json
+        std::fs::copy(&new_config_path, &state_clone.config_path)
+            .map_err(|e| format!("替换 config.json 失败: {e}"))?;
+
+        // Remove old WAL/SHM files
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
+
+        // Replace database file
+        std::fs::copy(&new_db_path, &db_path)
+            .map_err(|e| format!("替换数据库失败: {e}"))?;
+
+        // Reopen database
+        state_clone
+            .storage
+            .reopen_at(&db_path)
+            .map_err(|e| format!("重新打开数据库失败: {e}"))?;
+
+        // Reload state
+        reload_state_after_import(&state_clone)?;
+
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| format!("导入替换失败: {e}"))??;
+
+    // Phase 4: restart proxy (async)
+    state.start_configured_proxy().await.map_err(|e| {
+        tracing::warn!(error = %e, "数据导入后代理启动失败，请手动启动");
+        format!("数据已导入，但代理启动失败: {e}")
+    })?;
+
+    update_tray_tooltip(&app, true);
+
+    // Clean up temp directory
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    Ok(())
+}
+
+fn reload_state_after_import(state: &AppState) -> Result<(), String> {
+    // Reload channels, accounts, routes, virtual_models, rules from DB
+    let channels = state
+        .storage
+        .list_channel_presets()
+        .map_err(|e| e.to_string())?;
+    let accounts = state
+        .storage
+        .list_channel_accounts()
+        .map_err(|e| e.to_string())?;
+    let routes = state
+        .storage
+        .list_route_candidates()
+        .map_err(|e| e.to_string())?;
+    let virtual_models = state
+        .storage
+        .list_virtual_models()
+        .map_err(|e| e.to_string())?;
+    let rules = state
+        .storage
+        .list_route_rules()
+        .map_err(|e| e.to_string())?;
+
+    // Reload channels_config from new config.json for prices
+    let channels_config = crate::load_channels_config_from(&state.config_path)?;
+    let merged = crate::merge_builtin_config(channels_config);
+    state.storage.set_prices(merged.prices);
+
+    // Reload capture and bind config from new config.json
+    let capture = if let Some(json_str) =
+        crate::core::proxy::read_config_raw(&state.config_path)
+    {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            crate::core::proxy::extract_log_capture(&value)
+        } else {
+            LogCaptureConfig::default()
+        }
+    } else {
+        LogCaptureConfig::default()
+    };
+    let bind_config = if let Some(json_str) =
+        crate::core::proxy::read_config_raw(&state.config_path)
+    {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            if let Some(obj) = value.as_object() {
+                if let Some(bind) = obj.get("bind").and_then(|v| v.as_object()) {
+                    let host = bind
+                        .get("host")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("127.0.0.1")
+                        .to_string();
+                    let port =
+                        bind.get("port").and_then(|v| v.as_u64()).unwrap_or(18640) as u16;
+                    let allow_lan = host == "0.0.0.0";
+                    let default_client_token = bind
+                        .get("default_client_token")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("flowlet-local-token")
+                        .to_string();
+                    ProxyBindConfig {
+                        host,
+                        port,
+                        allow_lan,
+                        default_client_token,
+                    }
+                    .normalized()
+                } else {
+                    crate::load_bind_config_from_sqlite(&state.storage)
+                }
+            } else {
+                crate::load_bind_config_from_sqlite(&state.storage)
+            }
+        } else {
+            crate::load_bind_config_from_sqlite(&state.storage)
+        }
+    } else {
+        crate::load_bind_config_from_sqlite(&state.storage)
+    };
+
+    *state
+        .channels
+        .lock()
+        .map_err(|_| "锁定渠道状态失败".to_string())? = channels;
+    *state
+        .accounts
+        .lock()
+        .map_err(|_| "锁定账号状态失败".to_string())? = accounts;
+    *state
+        .routes
+        .lock()
+        .map_err(|_| "锁定路由状态失败".to_string())? = routes;
+    *state
+        .virtual_models
+        .lock()
+        .map_err(|_| "锁定虚拟模型状态失败".to_string())? = virtual_models;
+    *state
+        .rules
+        .lock()
+        .map_err(|_| "锁定规则状态失败".to_string())? = rules;
+    *state
+        .capture
+        .lock()
+        .map_err(|_| "锁定捕获配置失败".to_string())? = capture;
+    *state
+        .bind_config
+        .lock()
+        .map_err(|_| "锁定绑定配置失败".to_string())? = bind_config;
 
     Ok(())
 }

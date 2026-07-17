@@ -9,6 +9,7 @@
     "core:window:allow-close",
     "core:window:allow-start-dragging",
     "autostart:default",
-    "opener:default"
+    "opener:default",
+    "dialog:default"
   ]
 }

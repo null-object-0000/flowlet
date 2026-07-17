@@ -84,6 +84,32 @@ impl Storage {
         Ok(())
     }
 
+    /// 关闭当前连接并重新打开指定路径的数据库文件（含迁移）。
+    /// 导入数据后用于切换到恢复后的数据库。
+    pub fn reopen_at(&self, path: impl AsRef<Path>) -> Result<(), StorageError> {
+        let mut guard = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let new_conn = Connection::open(path)?;
+        new_conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+        *guard = new_conn;
+        drop(guard);
+        self.migrate()?;
+        Ok(())
+    }
+
+    /// 备份当前数据库到指定路径（通过 SQLite backup API 保证一致性）
+    pub fn backup_to_path(&self, dest: impl AsRef<Path>) -> Result<(), StorageError> {
+        let conn = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(StorageError::Sqlite)?;
+        let mut dst = Connection::open(dest.as_ref())?;
+        let backup = rusqlite::backup::Backup::new(&*conn, &mut dst)
+            .map_err(StorageError::Sqlite)?;
+        backup
+            .run_to_completion(5, std::time::Duration::from_millis(250), None)
+            .map_err(StorageError::Sqlite)?;
+        Ok(())
+    }
+
     // ─── Maintenance ─────────────────────────────────────────────────────────
 
     /// 清理指定天数之前的请求日志和用量记录，返回删除的记录数

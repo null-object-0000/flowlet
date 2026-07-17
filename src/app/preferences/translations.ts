@@ -569,6 +569,19 @@ const english: Record<string, string> = {
   "本地数据修复完成": "Local data repair completed",
   "本地数据修复失败：{message}": "Local data repair failed: {message}",
   "修复中断：{message}": "Repair stopped: {message}",
+  "数据管理": "Data management",
+  "将全部数据（配置、账号、模型、请求日志等）导出为备份文件，或从备份文件恢复": "Export all data (config, accounts, models, request logs, etc.) as a backup file, or restore from a backup file",
+  "导出和导入全部数据": "Export and import all data",
+  "导出：将当前所有数据保存为备份文件。导入：从备份文件恢复，覆盖当前数据并自动重启代理。": "Export: Save all current data as a backup file. Import: Restore from a backup file, overwriting current data and restarting the proxy.",
+  "导出数据": "Export data",
+  "导入数据": "Import data",
+  "数据导出成功": "Data exported successfully",
+  "数据导出失败：{message}": "Data export failed: {message}",
+  "数据导入成功，代理已重新启动": "Data imported successfully, proxy restarted",
+  "数据导入失败：{message}": "Data import failed: {message}",
+  "确认导入数据": "Confirm data import",
+  "导入将覆盖当前全部数据（配置、账号、模型、请求日志等），此操作不可撤销。确定继续？": "Import will overwrite all current data (config, accounts, models, request logs, etc.). This action cannot be undone. Continue?",
+  "确认导入": "Confirm import",
 };
 
 export type TranslationVariables = Record<string, string | number>;

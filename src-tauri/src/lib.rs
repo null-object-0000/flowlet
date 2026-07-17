@@ -6,8 +6,8 @@ use core::config::{
     ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig,
     RouteCandidate, RouteRule, VirtualModel,
 };
-use core::proxy::ProxyController;
 use core::presets::builtin_channel_presets;
+use core::proxy::ProxyController;
 use core::storage::Storage;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -300,7 +300,7 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     state
 }
 
-fn load_bind_config_from_sqlite(storage: &Storage) -> ProxyBindConfig {
+pub(crate) fn load_bind_config_from_sqlite(storage: &Storage) -> ProxyBindConfig {
     storage
         .get_app_meta("proxy_bind_config")
         .unwrap_or_default()
@@ -484,6 +484,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             let setup_t0 = std::time::Instant::now();
@@ -630,6 +631,8 @@ pub fn run() {
             commands::account_routing_scores,
             commands::export_config,
             commands::import_config,
+            commands::export_all_data,
+            commands::import_all_data,
             commands::db_stats,
             commands::read_app_meta,
             commands::write_app_meta,

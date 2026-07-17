@@ -85,7 +85,7 @@ export function OverviewPage() {
 
           <div className={styles.steps}>
             <Step n={1} title={t("添加渠道账号")}>
-              {t("选择 LongCat 或 DeepSeek，填写 API Key 并测试连接。API Key 仅保存在本地配置中。")}
+              {t("选择 LongCat、DeepSeek 或 Kimi，填写 API Key 并测试连接。API Key 仅保存在本地配置中。")}
             </Step>
             <Step n={2} title={t("开放模型")}>
               {t("选择要对外开放的模型。默认开放模型会随账号自动同步。")}
@@ -100,6 +100,7 @@ export function OverviewPage() {
               {t("添加 LongCat")}
             </Button>
             <Button onClick={() => setAccountRequest({ kind: "create", channelId: "deepseek" })}>{t("添加 DeepSeek")}</Button>
+            <Button onClick={() => setAccountRequest({ kind: "create", channelId: "kimi" })}>{t("添加 Kimi")}</Button>
             <Button type="tertiary" onClick={() => setAccountRequest({ kind: "list" })}>
               {t("管理渠道账号")}
             </Button>

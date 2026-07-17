@@ -8,6 +8,9 @@ export function ChannelBrandLogo({ channelId, name }: { channelId: string; name:
   if (channelId === "longcat") {
     return <span className={`${styles.logo} ${styles.longcat}`} aria-hidden="true"><img src="/icons/lobe/longcat-color.svg" alt="" /></span>;
   }
+  if (channelId === "kimi") {
+    return <span className={`${styles.logo} ${styles.kimi}`} aria-hidden="true"><img src="/icons/lobe/kimi-color.svg" alt="" /></span>;
+  }
   if (channelId === "deepseek") {
     return <span className={`${styles.logo} ${styles.deepseek}`} aria-hidden="true"><i /></span>;
   }

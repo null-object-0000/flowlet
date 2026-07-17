@@ -201,6 +201,20 @@ impl ChannelsConfig {
         })
     }
 
+    /// 获取 Kimi 模型列表端点
+    pub fn kimi_models_endpoint(&self) -> String {
+        self.endpoint_or("kimi", "models", |c| {
+            format!("{}/models", c.openai_base_url)
+        })
+    }
+
+    /// 获取 Kimi 余额端点
+    pub fn kimi_balance_endpoint(&self) -> String {
+        self.endpoint_or("kimi", "balance", |c| {
+            format!("{}/users/me/balance", c.openai_base_url)
+        })
+    }
+
     /// 获取 DeepSeek 模型列表端点
     pub fn deepseek_models_endpoint(&self) -> String {
         self.endpoint_or("deepseek", "models", |c| {
@@ -237,7 +251,9 @@ impl ChannelsConfig {
         }
         // 2. 按老逻辑拼接
         self.presets.iter().find(|c| c.id == channel_id).map(|c| {
-            if c.id == "deepseek" {
+            if c.id == "kimi" {
+                format!("{}/models", c.openai_base_url)
+            } else if c.id == "deepseek" {
                 format!("{}/models", c.openai_base_url)
             } else {
                 format!("{}/v1/models", c.openai_base_url)

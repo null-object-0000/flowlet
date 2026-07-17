@@ -2,7 +2,7 @@ use super::config::{ChannelModel, ChannelPreset};
 
 /// 返回所有内置渠道模板
 pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
-    vec![ChannelPreset::longcat(), ChannelPreset::deepseek()]
+    vec![ChannelPreset::longcat(), ChannelPreset::deepseek(), ChannelPreset::kimi()]
 }
 
 /// 模型列表同步结果

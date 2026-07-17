@@ -467,6 +467,55 @@ fn fills_preset_platform_urls_after_migration_without_relocking() {
 }
 
 #[test]
+fn syncs_protocol_config_for_existing_channel_presets() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet-protocol-config-migration-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let storage = Storage::open(&path).expect("open storage");
+    let json: serde_json::Value =
+        serde_json::from_str(DEFAULT_CONFIG_JSON).expect("parse embedded config");
+    let config = ChannelsConfig::from_config_json(&json).expect("load channel defaults");
+    let kimi = config
+        .presets
+        .iter()
+        .find(|preset| preset.id == "kimi")
+        .expect("embedded Kimi preset");
+    let mut stored_kimi = kimi.clone();
+    stored_kimi.supported_protocols = vec![ProtocolType::OpenAi];
+    stored_kimi.anthropic_base_url.clear();
+
+    storage
+        .save_channel_presets(&[stored_kimi])
+        .expect("save legacy Kimi preset");
+    storage
+        .sync_preset_protocol_config(&config.presets)
+        .expect("sync protocol config");
+
+    let migrated = storage
+        .list_channel_presets()
+        .expect("read presets")
+        .into_iter()
+        .find(|preset| preset.id == "kimi")
+        .expect("migrated Kimi preset");
+    assert_eq!(
+        migrated.supported_protocols,
+        vec![ProtocolType::OpenAi, ProtocolType::Anthropic]
+    );
+    assert_eq!(
+        migrated.anthropic_base_url,
+        "https://api.moonshot.cn/anthropic"
+    );
+    assert_eq!(migrated.openai_auth, kimi.openai_auth);
+    assert_eq!(migrated.anthropic_auth, kimi.anthropic_auth);
+
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}
+
+#[test]
 fn adds_new_channel_preset_columns_to_legacy_schema() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     connection

@@ -121,6 +121,122 @@ impl Storage {
         Ok(())
     }
 
+    /// 将 config.json 中存在但 SQLite 中缺失的渠道模板追加到表中（新增渠道迁移）。
+    /// 该方法必须在 `Storage::migrate` 释放连接锁之后调用。
+    pub fn ensure_missing_presets(
+        &self,
+        presets: &[ChannelPreset],
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        for preset in presets {
+            let exists: bool = connection
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM channel_presets WHERE id = ?1",
+                    params![preset.id.as_str()],
+                    |row| row.get(0),
+                )?;
+            if exists {
+                continue;
+            }
+            let protocols =
+                serde_json::to_string(&preset.supported_protocols).unwrap_or_default();
+            connection.execute(
+                r#"
+                 INSERT INTO channel_presets (
+                    id, name, vendor, supported_protocols, openai_base_url, anthropic_base_url,
+                    openai_auth, anthropic_auth, default_model, small_model, timeout_seconds, supports_model_list,
+                    supports_model_detail, supports_balance_query,
+                    supports_quota_query, supports_usage_query, platform_url, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                "#,
+                params![
+                    preset.id,
+                    preset.name,
+                    preset.vendor,
+                    protocols,
+                    preset.openai_base_url,
+                    preset.anthropic_base_url,
+                    preset.openai_auth.as_str(),
+                    preset.anthropic_auth.as_str(),
+                    preset.default_model,
+                    preset.small_model,
+                    preset.timeout_seconds,
+                    preset.supports_model_list as i64,
+                    preset.supports_model_detail as i64,
+                    preset.supports_balance_query as i64,
+                    preset.supports_quota_query as i64,
+                    preset.supports_usage_query as i64,
+                    preset.platform_url,
+                    preset.created_at,
+                    preset.updated_at,
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 将 config.json 中影响协议路由的渠道字段同步到 SQLite（升级迁移）。
+    ///
+    /// 渠道模板是 Flowlet 内置维护的数据；账号覆盖地址和用户控制的路由开关分别
+    /// 存储在账号与路由表中，不会被这里修改。该同步确保新增协议或修正上游端点后，
+    /// 已有安装不会继续使用旧的渠道能力声明。
+    pub fn sync_preset_protocol_config(
+        &self,
+        presets: &[ChannelPreset],
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        for preset in presets {
+            let protocols =
+                serde_json::to_string(&preset.supported_protocols).unwrap_or_default();
+            connection.execute(
+                r#"
+                UPDATE channel_presets
+                SET supported_protocols = ?1,
+                    openai_base_url = ?2,
+                    anthropic_base_url = ?3,
+                    openai_auth = ?4,
+                    anthropic_auth = ?5,
+                    updated_at = ?6
+                WHERE id = ?7
+                "#,
+                params![
+                    protocols,
+                    preset.openai_base_url,
+                    preset.anthropic_base_url,
+                    preset.openai_auth.as_str(),
+                    preset.anthropic_auth.as_str(),
+                    chrono::Utc::now().to_rfc3339(),
+                    preset.id.as_str(),
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 将 config.json 中各渠道的 supports_balance_query 同步到 SQLite（升级迁移）。
+    pub fn ensure_preset_balance_query(
+        &self,
+        presets: &[ChannelPreset],
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        for preset in presets {
+            connection.execute(
+                "UPDATE channel_presets SET supports_balance_query = ?1 WHERE id = ?2",
+                params![preset.supports_balance_query as i64, preset.id.as_str()],
+            )?;
+        }
+        Ok(())
+    }
+
     // ─── Channel Accounts ────────────────────────────────────────────────────
 
     pub fn save_channel_accounts(&self, accounts: &[ChannelAccount]) -> Result<(), StorageError> {

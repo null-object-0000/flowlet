@@ -87,7 +87,7 @@ describe("AccountManagementSideSheet", () => {
 
     expect(await screen.findByText("新增渠道账号")).toBeInTheDocument();
     expect(screen.queryByText(/渠道账号管理/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /LongCat/ })).toBeEnabled();
+    expect(screen.getByRole("combobox")).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("请输入渠道 API Key"), "sk-test");
     await user.click(screen.getByRole("button", { name: "管理资源包" }));
     expect(await screen.findByText("LongCat 资源包管理")).toBeInTheDocument();

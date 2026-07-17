@@ -293,6 +293,28 @@ impl ChannelPreset {
         }
     }
 
+    pub fn kimi() -> Self {
+        Self {
+            id: "kimi".to_string(),
+            name: "Kimi".to_string(),
+            vendor: "moonshot".to_string(),
+            platform_url: Some("https://platform.kimi.com/console/api-keys".to_string()),
+            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+            openai_base_url: "https://api.moonshot.cn/v1".to_string(),
+            anthropic_base_url: "https://api.moonshot.cn/anthropic".to_string(),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::Bearer,
+            default_model: "kimi-k3".to_string(),
+            small_model: None,
+            supports_model_list: true,
+            supports_model_detail: false,
+            supports_balance_query: true,
+            supports_quota_query: false,
+            supports_usage_query: false,
+            ..Default::default()
+        }
+    }
+
     pub fn deepseek() -> Self {
         Self {
             id: "deepseek".to_string(),

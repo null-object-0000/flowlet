@@ -57,6 +57,29 @@
         }
       },
       {
+        "id": "kimi",
+        "name": "Kimi",
+        "vendor": "moonshot",
+        "platform_url": "https://platform.kimi.com/console/api-keys",
+        "supported_protocols": ["openai", "anthropic"],
+        "openai_base_url": "https://api.moonshot.cn/v1",
+        "anthropic_base_url": "https://api.moonshot.cn/anthropic",
+        "openai_auth": "bearer",
+        "anthropic_auth": "bearer",
+        "default_model": "kimi-k3",
+        "small_model": null,
+        "supports_model_list": true,
+        "supports_model_detail": false,
+        "supports_price_sync": false,
+        "supports_balance_query": true,
+        "supports_quota_query": false,
+        "supports_usage_query": false,
+        "endpoints": {
+          "models": "https://api.moonshot.cn/v1/models",
+          "balance": "https://api.moonshot.cn/v1/users/me/balance"
+        }
+      },
+      {
         "id": "deepseek",
         "name": "DeepSeek",
         "vendor": "deepseek",
@@ -107,11 +130,30 @@
         "output_price": 6.0,
         "currency": "CNY",
         "unit": "1M tokens"
+      },
+      {
+        "channel_id": "kimi",
+        "upstream_model": "kimi-k3",
+        "input_uncached_price": 20.0,
+        "input_cached_price": 2.0,
+        "output_price": 100.0,
+        "currency": "CNY",
+        "unit": "1M tokens"
+      },
+      {
+        "channel_id": "kimi",
+        "upstream_model": "kimi-k2.7-code",
+        "input_uncached_price": 6.5,
+        "input_cached_price": 1.3,
+        "output_price": 27.0,
+        "currency": "CNY",
+        "unit": "1M tokens"
       }
     ],
     "default_exposed_models": {
       "longcat": ["LongCat-2.0"],
-      "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"]
+      "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
+      "kimi": ["kimi-k3", "kimi-k2.7-code"]
     },
     "flowlet_tiers": {
       "longcat": {
@@ -120,6 +162,10 @@
       "deepseek": {
         "deepseek-v4-pro": "pro",
         "deepseek-v4-flash": "flash"
+      },
+      "kimi": {
+        "kimi-k3": "pro",
+        "kimi-k2.7-code": "pro"
       }
     }
   }

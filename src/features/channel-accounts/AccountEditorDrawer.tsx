@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
-import { Button, Input, SideSheet, Space, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Input, Select, SideSheet, Space, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { toAppError } from "../../platform/tauri/client";
 import type { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
-import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import {
   formatTokenCount,
   LongCatPackManager,
@@ -50,6 +49,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const channel = presets.find((item) => item.id === draft?.channel_id);
   const isEdit = mode.kind === "edit";
   const autoSyncBalance = channel?.supports_balance_query === true;
+  const supportsTokenPack = draft?.channel_id === "longcat";
   const resourceMode = draft?.resource_mode ?? defaultResourceMode(draft?.channel_id ?? "");
   const tokenRemaining = useMemo(() => {
     const total = optionalNumber(resource.tokenTotal);
@@ -151,7 +151,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       title={(
         <div className={styles.title}>
           <strong>{t(isEdit ? "编辑渠道账号" : "新增渠道账号")}</strong>
-          <span>{isEdit ? t("更新 {name} 的连接与资源信息", { name: draft.name }) : t("添加 LongCat 或 DeepSeek 账号，用于上游模型转发")}</span>
+          <span>{isEdit ? t("更新 {name} 的连接与资源信息", { name: draft.name }) : t("添加 LongCat、DeepSeek 或 Kimi 账号，用于上游模型转发")}</span>
         </div>
       )}
       onCancel={onClose}
@@ -166,20 +166,42 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       <div className={styles.content}>
         <section className={`${styles.section} ${styles.basic}`}>
           <h3>{t("基础信息")}</h3>
-          {!isEdit ? <Field label={t("选择渠道")}>
-            <div className={styles.channelOptions}>
-              {presets.map((item) => {
-                const selected = item.id === draft.channel_id;
-                return (
-                  <button key={item.id} type="button" className={`${styles.channelOption} ${selected ? styles.selected : ""}`} onClick={() => selectChannel(item.id)}>
-                    <ChannelBrandLogo channelId={item.id} name={item.name} />
-                    <span><strong>{item.name}</strong><small>{item.vendor || t("{name} 大模型服务", { name: item.name })}</small></span>
-                    <i>{selected ? "✓" : ""}</i>
-                  </button>
-                );
-              })}
+          {!isEdit ? (
+            <div className={styles.channelRow}>
+              <Field label={t("选择渠道")}>
+                <Select
+                  value={draft.channel_id}
+                  zIndex={APP_OVERLAY_Z_INDEX.sideSheet + 1}
+                  style={{ width: "100%" }}
+                  onChange={(value) => selectChannel(value as string)}
+                >
+                  {presets.map((item) => (
+                    <Select.Option key={item.id} value={item.id}>
+                      <span className={styles.channelOptionLabel}>
+                        {item.id === "kimi" ? (
+                          <span className={styles.kimiSwatch}><img src={`/icons/lobe/${item.id}-color.svg`} alt="" className={styles.logoIcon} /></span>
+                        ) : (
+                          <img src={`/icons/lobe/${item.id}-color.svg`} alt="" className={styles.logoIcon} />
+                        )}
+                        {item.name}
+                      </span>
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Field>
+              <div className={styles.enabledRow}>
+                <span><strong>{t("启用状态")}</strong><small>{t("停用后，该账号不会参与请求转发")}</small></span>
+                <Switch aria-label={t("启用账号")} checked={draft.enabled} onChange={(checked) => update({ enabled: checked })} />
+                <Text>{t(draft.enabled ? "启用" : "停用")}</Text>
+              </div>
             </div>
-          </Field> : null}
+          ) : (
+            <div className={styles.enabledRow}>
+              <span><strong>{t("启用状态")}</strong><small>{t("停用后，该账号不会参与请求转发")}</small></span>
+              <Switch aria-label={t("启用账号")} checked={draft.enabled} onChange={(checked) => update({ enabled: checked })} />
+              <Text>{t(draft.enabled ? "启用" : "停用")}</Text>
+            </div>
+          )}
 
           <div className={styles.basicFields}>
             <Field label={t("账号名称")}>
@@ -197,16 +219,10 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
               <Input aria-label="API Key" mode="password" value={draft.api_key} placeholder={t("请输入渠道 API Key")} onChange={(value) => update({ api_key: value })} />
             </Field>
           </div>
-
-          <div className={styles.enabledRow}>
-            <span><strong>{t("启用状态")}</strong><small>{t("停用后，该账号不会参与请求转发")}</small></span>
-            <Switch aria-label={t("启用账号")} checked={draft.enabled} onChange={(checked) => update({ enabled: checked })} />
-            <Text>{t(draft.enabled ? "启用" : "停用")}</Text>
-          </div>
         </section>
 
         <section className={styles.section}>
-          <div className={styles.sectionHeading}><span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : "保存后按所选模式维护资源信息")}</small></span></div>
+          <div className={styles.sectionHeading}><span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : supportsTokenPack ? "保存后按所选模式维护资源信息" : "手动维护按量付费余额")}</small></span></div>
           {autoSyncBalance ? (
             <div className={styles.resourcePanel}>
               <div className={styles.resourceHeading}><strong>{t("按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
@@ -217,10 +233,12 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             </div>
           ) : (
             <>
-              <div className={styles.modeOptions}>
-                <ModeOption selected={resourceMode === "token_pack"} title={t("Token 资源包")} description={t("预付费，手动维护资源包信息")} onClick={() => update({ resource_mode: "token_pack" })} />
-                <ModeOption selected={resourceMode === "pay_as_you_go"} title={t("API 按量付费")} description={t("后付费，手动维护余额")} onClick={() => update({ resource_mode: "pay_as_you_go" })} />
-              </div>
+              {supportsTokenPack ? (
+                <div className={styles.modeOptions}>
+                  <ModeOption selected={resourceMode === "token_pack"} title={t("Token 资源包")} description={t("预付费，手动维护资源包信息")} onClick={() => update({ resource_mode: "token_pack" })} />
+                  <ModeOption selected={resourceMode === "pay_as_you_go"} title={t("API 按量付费")} description={t("后付费，手动维护余额")} onClick={() => update({ resource_mode: "pay_as_you_go" })} />
+                </div>
+              ) : null}
               <div className={styles.resourcePanel}>
                 <div className={styles.resourceHeading}><strong>{t(resourceMode === "token_pack" ? "资源包信息" : "按量付费信息")}</strong><span className={styles.manualBadge}>{t("手动维护")}</span></div>
                 {resourceMode === "token_pack" ? (

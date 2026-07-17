@@ -7,7 +7,7 @@ use crate::core::config::{
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
 use crate::core::sync::{
-    query_deepseek_balance, sync_deepseek_models, sync_longcat_models, test_channel_connection,
+    query_deepseek_balance, query_kimi_balance, sync_deepseek_models, sync_kimi_models, sync_longcat_models, test_channel_connection,
 };
 use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
@@ -516,13 +516,13 @@ pub(super) async fn query_balance(
             .clone()
     };
 
-    // 目前仅支持 DeepSeek 余额查询
-    if account.channel_id != "deepseek" {
+    // 目前支持 DeepSeek 和 Kimi 余额查询
+    if account.channel_id != "deepseek" && account.channel_id != "kimi" {
         return Ok(BalanceQueryResult {
             balance: None,
             currency: None,
             is_available: false,
-            error: Some("当前仅 DeepSeek 支持余额查询".to_string()),
+            error: Some("当前仅 DeepSeek 和 Kimi 支持余额查询".to_string()),
         });
     }
 
@@ -535,7 +535,7 @@ pub(super) async fn query_balance(
             balance: None,
             currency: None,
             is_available: false,
-            error: Some("自定义 OpenAI Base URL 不支持 DeepSeek 官方余额自动同步".to_string()),
+            error: Some("自定义 OpenAI Base URL 不支持官方余额自动同步".to_string()),
         });
     }
 
@@ -547,7 +547,11 @@ pub(super) async fn query_balance(
             .enable_all()
             .build()
             .unwrap_or_else(|_| panic!("创建运行时失败"));
-        rt.block_on(query_deepseek_balance(&account, &config))
+        if account.channel_id == "kimi" {
+            rt.block_on(query_kimi_balance(&account, &config))
+        } else {
+            rt.block_on(query_deepseek_balance(&account, &config))
+        }
     })
     .await
     .map_err(|e| format!("任务执行失败: {e}"))?;
@@ -591,7 +595,7 @@ pub(super) async fn query_balance(
             token_packs: None,
             source: "sync".to_string(),
             synced_at: Some(now.clone()),
-            remark: Some("DeepSeek /user/balance 自动同步".to_string()),
+            remark: Some("余额自动同步".to_string()),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -644,11 +648,20 @@ pub(super) async fn sync_models(
         })
         .await
         .map_err(|e| format!("任务执行失败: {e}"))?,
+        "kimi" => tauri::async_runtime::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|_| panic!("创建运行时失败"));
+            rt.block_on(sync_kimi_models(&account, &config))
+        })
+        .await
+        .map_err(|e| format!("任务执行失败: {e}"))?,
         _ => {
             return Ok(ModelSyncResult {
                 models_synced: 0,
                 models: Vec::new(),
-                errors: vec![format!("当前仅 DeepSeek 和 LongCat 支持模型列表同步")],
+                errors: vec![format!("当前仅 DeepSeek、LongCat 和 Kimi 支持模型列表同步")],
             });
         }
     };

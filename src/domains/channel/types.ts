@@ -31,6 +31,7 @@ export type ChannelPreset = {
 export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   longcat: ["LongCat-2.0"],
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
+  kimi: ["kimi-k3", "kimi-k2.7-code"],
 };
 
 /** Per-channel Flowlet aggregate tier mapping. Must stay in sync with
@@ -42,6 +43,10 @@ export const FLOWLET_TIER_BY_CHANNEL_MODEL: Record<string, Record<string, "pro" 
   deepseek: {
     "deepseek-v4-pro": "pro",
     "deepseek-v4-flash": "flash",
+  },
+  kimi: {
+    "kimi-k3": "pro",
+    "kimi-k2.7-code": "pro",
   },
 };
 

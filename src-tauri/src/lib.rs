@@ -7,6 +7,7 @@ use core::config::{
     RouteCandidate, RouteRule, VirtualModel,
 };
 use core::proxy::ProxyController;
+use core::presets::builtin_channel_presets;
 use core::storage::Storage;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -86,7 +87,8 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     let channels_config = match load_channels_config_from(&config_path) {
         Ok(cfg) => {
             tracing::info!(channels = cfg.presets.len(), prices = cfg.prices.len(), "从 config.json 加载渠道配置");
-            Arc::new(cfg)
+            let merged = merge_builtin_config(cfg);
+            Arc::new(merged)
         }
         Err(e) => {
             tracing::error!(error = %e, "加载渠道配置失败");
@@ -105,6 +107,27 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     storage
         .ensure_preset_platform_urls(&channels_config.presets)
         .expect("补全渠道模板平台地址失败");
+
+    // 将内置默认渠道中外部配置可能缺失的渠道补入 SQLite（升级迁移）。
+    let mut migration_presets = channels_config.presets.clone();
+    let builtin = builtin_channel_presets();
+    for bp in &builtin {
+        if !migration_presets.iter().any(|p| p.id == bp.id) {
+            migration_presets.push(bp.clone());
+        }
+    }
+
+    storage
+        .ensure_missing_presets(&migration_presets)
+        .expect("追加新增渠道模板失败");
+
+    storage
+        .sync_preset_protocol_config(&migration_presets)
+        .expect("同步渠道协议配置失败");
+
+    storage
+        .ensure_preset_balance_query(&migration_presets)
+        .expect("同步渠道余额查询标志失败");
 
     tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "Storage 初始化完成, 开始加载渠道模板");
 
@@ -329,6 +352,56 @@ pub fn load_channels_config_from(
     }
 }
 
+/// 将内置 config.json 中外部配置可能缺失的渠道、价格、端点合并进运行时配置。
+pub(crate) fn merge_builtin_config(mut external: ChannelsConfig) -> ChannelsConfig {
+    let builtin = match parse_channels_config(DEFAULT_CONFIG_JSON, "应用内置 config.json") {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            tracing::warn!(error = %e, "解析内置渠道配置失败，跳过合并");
+            return external;
+        }
+    };
+
+    for bp in &builtin.presets {
+        if !external.presets.iter().any(|p| p.id == bp.id) {
+            external.presets.push(bp.clone());
+        }
+    }
+
+    for bp in &builtin.prices {
+        if !external
+            .prices
+            .iter()
+            .any(|p| p.channel_id == bp.channel_id && p.upstream_model == bp.upstream_model)
+        {
+            external.prices.push(bp.clone());
+        }
+    }
+
+    for (channel_id, channel_endpoints) in &builtin.endpoints {
+        external
+            .endpoints
+            .entry(channel_id.clone())
+            .or_insert_with(|| channel_endpoints.clone());
+    }
+
+    for (channel_id, models) in &builtin.default_exposed_models {
+        external
+            .default_exposed_models
+            .entry(channel_id.clone())
+            .or_insert_with(|| models.clone());
+    }
+
+    for (channel_id, tiers) in &builtin.flowlet_tiers {
+        external
+            .flowlet_tiers
+            .entry(channel_id.clone())
+            .or_insert_with(|| tiers.clone());
+    }
+
+    external
+}
+
 fn parse_channels_config(content: &str, source: &str) -> Result<ChannelsConfig, String> {
     let json: serde_json::Value = serde_json::from_str(content)
         .map_err(|e| format!("解析 {source} 失败: {e}"))?;
@@ -352,6 +425,7 @@ mod app_config_tests {
 
         assert!(config.presets.iter().any(|channel| channel.id == "longcat"));
         assert!(config.presets.iter().any(|channel| channel.id == "deepseek"));
+        assert!(config.presets.iter().any(|channel| channel.id == "kimi"));
     }
 
     #[test]

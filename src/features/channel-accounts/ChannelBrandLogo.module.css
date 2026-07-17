@@ -19,6 +19,17 @@
   transform: scale(0.7);
 }
 
+.kimi {
+  background: #1a1a1a;
+  border: 1px solid var(--flowlet-color-border);
+}
+
+.kimi img {
+  width: 32px;
+  height: 32px;
+  transform: scale(0.7);
+}
+
 .deepseek {
   color: #fff;
   background: #4d6bfe;

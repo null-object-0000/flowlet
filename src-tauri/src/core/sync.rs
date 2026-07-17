@@ -41,6 +41,32 @@ pub struct DeepSeekModelEntry {
     owned_by: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct KimiModelsResponse {
+    #[serde(default)]
+    data: Vec<KimiModelEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct KimiModelEntry {
+    pub id: String,
+    #[serde(default)]
+    object: Option<String>,
+    #[serde(default)]
+    created: Option<u64>,
+    #[serde(default)]
+    owned_by: Option<String>,
+    #[serde(default)]
+    context_length: Option<i64>,
+    #[serde(default)]
+    supports_image_in: Option<bool>,
+    #[serde(default)]
+    supports_video_in: Option<bool>,
+    #[serde(default)]
+    supports_reasoning: Option<bool>,
+}
+
 /// 测试渠道连接：仅验证 API Key 是否有效，不做余额读写。
 /// 通过访问模型列表端点实现轻量级鉴权验证。
 pub async fn test_channel_connection(account: &ChannelAccount, _config: &ChannelsConfig) -> Result<(), String> {
@@ -239,6 +265,116 @@ pub async fn query_deepseek_balance(account: &ChannelAccount, config: &ChannelsC
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct KimiBalanceResponse {
+    #[serde(default)]
+    code: i32,
+    data: Option<KimiBalanceData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KimiBalanceData {
+    #[serde(default)]
+    available_balance: f64,
+}
+
+/// 查询 Kimi 余额
+pub async fn query_kimi_balance(account: &ChannelAccount, config: &ChannelsConfig) -> BalanceQueryResult {
+    if account.api_key.trim().is_empty() {
+        return BalanceQueryResult {
+            balance: None,
+            currency: None,
+            is_available: false,
+            error: Some("API Key 未配置".to_string()),
+        };
+    }
+
+    let client = match Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(err) => {
+            return BalanceQueryResult {
+                balance: None,
+                currency: None,
+                is_available: false,
+                error: Some(format!("创建 HTTP 客户端失败: {err}")),
+            }
+        }
+    };
+
+    let response = client
+        .get(&config.kimi_balance_endpoint())
+        .header(
+            "Authorization",
+            format!("Bearer {}", account.api_key.trim()),
+        )
+        .header("Accept", "application/json")
+        .send()
+        .await;
+
+    let response = match response {
+        Ok(r) => r,
+        Err(err) => {
+            return BalanceQueryResult {
+                balance: None,
+                currency: None,
+                is_available: false,
+                error: Some(format!("请求失败: {err}")),
+            }
+        }
+    };
+
+    let status = response.status();
+    let body = match response.text().await {
+        Ok(b) => b,
+        Err(err) => {
+            return BalanceQueryResult {
+                balance: None,
+                currency: None,
+                is_available: false,
+                error: Some(format!("读取响应失败: {err}")),
+            }
+        }
+    };
+
+    if !status.is_success() {
+        return BalanceQueryResult {
+            balance: None,
+            currency: None,
+            is_available: false,
+            error: Some(format!("HTTP {}: {}", status.as_u16(), body)),
+        };
+    }
+
+    match serde_json::from_str::<KimiBalanceResponse>(&body) {
+        Ok(data) => {
+            if data.code != 0 {
+                return BalanceQueryResult {
+                    balance: None,
+                    currency: None,
+                    is_available: false,
+                    error: Some(format!("余额查询失败，服务器返回 code={}", data.code)),
+                };
+            }
+            let balance = data.data.map(|d| d.available_balance);
+            BalanceQueryResult {
+                balance,
+                currency: Some("CNY".to_string()),
+                is_available: data.code == 0,
+                error: None,
+            }
+        }
+        Err(err) => BalanceQueryResult {
+            balance: None,
+            currency: None,
+            is_available: false,
+            error: Some(format!("解析响应失败: {err}")),
+        },
+    }
+}
+
 /// 同步 DeepSeek 模型列表
 pub async fn sync_deepseek_models(account: &ChannelAccount, config: &ChannelsConfig) -> ModelSyncResult {
     if account.api_key.trim().is_empty() {
@@ -330,6 +466,98 @@ pub async fn sync_deepseek_models(account: &ChannelAccount, config: &ChannelsCon
     }
 }
 
+
+/// 同步 Kimi 模型列表（兼容 OpenAI /v1/models 格式，含 context_length 等字段）
+pub async fn sync_kimi_models(account: &ChannelAccount, config: &ChannelsConfig) -> ModelSyncResult {
+    if account.api_key.trim().is_empty() {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec!["API Key 未配置".to_string()],
+        };
+    }
+
+    let client = match Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("创建 HTTP 客户端失败: {err}")],
+            }
+        }
+    };
+
+    let response = client
+        .get(&config.kimi_models_endpoint())
+        .header(
+            "Authorization",
+            format!("Bearer {}", account.api_key.trim()),
+        )
+        .header("Accept", "application/json")
+        .send()
+        .await;
+
+    let response = match response {
+        Ok(r) => r,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("请求失败: {err}")],
+            }
+        }
+    };
+
+    let status = response.status();
+    let body = match response.text().await {
+        Ok(b) => b,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("读取响应失败: {err}")],
+            }
+        }
+    };
+
+    if !status.is_success() {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec![format!("HTTP {}: {}", status.as_u16(), body)],
+        };
+    }
+
+    match serde_json::from_str::<KimiModelsResponse>(&body) {
+        Ok(data) => {
+            let synced_at = chrono::Utc::now().to_rfc3339();
+            let models: Vec<_> = data
+                .data
+                .into_iter()
+                .filter(|m| !m.id.trim().is_empty())
+                .map(|m| kimi_channel_model(
+                    m.id,
+                    m.context_length,
+                    &synced_at,
+                ))
+                .collect();
+            ModelSyncResult {
+                models_synced: models.len(),
+                models,
+                errors: Vec::new(),
+            }
+        }
+        Err(err) => ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec![format!("解析响应失败: {err}")],
+        },
+    }
+}
 
 /// LongCat 单模型详情（GET /openai/v1/models/{id}）
 #[derive(Debug, Deserialize)]
@@ -576,6 +804,24 @@ fn deepseek_channel_model(model: String, synced_at: &str) -> ChannelModel {
         supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
         context_window: Some(1_000_000),
         max_output_tokens: Some(384_000),
+        supports_stream: true,
+        enabled: true,
+        source: "synced".to_string(),
+        synced_at: Some(synced_at.to_string()),
+        created_at: synced_at.to_string(),
+        updated_at: synced_at.to_string(),
+    }
+}
+
+fn kimi_channel_model(model: String, context_length: Option<i64>, synced_at: &str) -> ChannelModel {
+    ChannelModel {
+        id: format!("kimi-{model}"),
+        channel_id: "kimi".to_string(),
+        display_name: Some(model.clone()),
+        model,
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        context_window: context_length,
+        max_output_tokens: None,
         supports_stream: true,
         enabled: true,
         source: "synced".to_string(),

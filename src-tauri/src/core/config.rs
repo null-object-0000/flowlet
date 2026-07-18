@@ -947,7 +947,11 @@ pub struct AgentSessionsFilter {
 pub struct AgentSessionRow {
     pub agent_type: String,
     pub session_id: String,
+    pub title: Option<String>,
+    pub project_path: Option<String>,
     pub parent_session_id: Option<String>,
+    pub native_started_at: Option<String>,
+    pub native_updated_at: Option<String>,
     pub client_id: Option<String>,
     pub client_name: Option<String>,
     pub started_at: String,

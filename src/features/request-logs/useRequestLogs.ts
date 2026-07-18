@@ -16,6 +16,7 @@ export function useRequestLogClients() {
   return useQuery({
     queryKey: queryKeys.requestLog.clients(),
     queryFn: () => requestLogCommands.clients(),
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -23,6 +24,7 @@ export function useRequestLogModels() {
   return useQuery({
     queryKey: queryKeys.requestLog.models(),
     queryFn: () => requestLogCommands.models(),
+    staleTime: 5 * 60_000,
   });
 }
 

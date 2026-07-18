@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Input, Select, Switch, Typography } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconRefresh, IconSearch } from "@douyinfe/semi-icons";
+import { IconCopy, IconHandle, IconRefresh, IconSearch } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useAccounts, useChannelPresets } from "../../features/channel-accounts";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useChannelModels, useRouteCandidates } from "../../features/exposed-models/useModels";
 import { buildModelServiceItems, type ModelRouteGroup, type ModelServiceItem } from "./modelServiceView";
+import { filterModelServiceItems, reorderModelRouteGroups, type ModelStatusFilter } from "./modelServiceInteractions";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import styles from "./ModelServicesPage.module.css";
 
 const { Paragraph, Text, Title } = Typography;
-type StatusFilter = "all" | "enabled" | "disabled";
 
 export function ModelServicesPage() {
   const { t } = useAppPreferences();
@@ -22,30 +22,32 @@ export function ModelServicesPage() {
   const channelModels = useChannelModels();
   const actions = useModelActions();
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("all");
+  const [status, setStatus] = useState<ModelStatusFilter>("all");
+  const [channelFilter, setChannelFilter] = useState("all");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
   const models = useMemo(
     () => buildModelServiceItems(routes.data ?? [], accounts.data ?? [], channels.data ?? []),
     [accounts.data, channels.data, routes.data],
   );
-  const filtered = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    return models.filter((model) => {
-      const statusMatches = status === "all" || (status === "enabled" ? model.enabled : !model.enabled);
-      const searchMatches = !keyword || model.publicModel.toLowerCase().includes(keyword)
-        || model.routes.some((route) => route.upstream_model.toLowerCase().includes(keyword));
-      return statusMatches && searchMatches;
-    });
-  }, [models, search, status]);
+  const filtered = useMemo(
+    () => filterModelServiceItems(models, search, status, channelFilter),
+    [channelFilter, models, search, status],
+  );
 
   useEffect(() => {
-    if (models.length === 0) setSelectedModel(null);
-    else if (!selectedModel || !models.some((model) => model.publicModel === selectedModel)) setSelectedModel(models[0].publicModel);
-  }, [models, selectedModel]);
+    if (filtered.length === 0) setSelectedModel(null);
+    else if (!selectedModel || !filtered.some((model) => model.publicModel === selectedModel)) {
+      setSelectedModel(filtered[0].publicModel);
+    }
+  }, [filtered, selectedModel]);
 
-  const selected = models.find((model) => model.publicModel === selectedModel) ?? null;
-  const busyModel = actions.toggleExposedModel.isPending ? actions.toggleExposedModel.variables?.modelId : undefined;
+  const selected = filtered.find((model) => model.publicModel === selectedModel) ?? null;
+  const busyModel = actions.toggleExposedModel.isPending
+    ? actions.toggleExposedModel.variables?.modelId
+    : actions.reorderRoutes.isPending
+      ? actions.reorderRoutes.variables?.modelId
+      : undefined;
   const enabledCount = models.filter((model) => model.enabled).length;
   const availableCount = models.filter((model) => model.available).length;
   const loading = accounts.isLoading || channels.isLoading || routes.isLoading || channelModels.isLoading;
@@ -57,6 +59,18 @@ export function ModelServicesPage() {
   };
   const toggleRoute = (modelId: string, routeGroup: ModelRouteGroup, enabled: boolean) => {
     actions.toggleExposedModel.mutate({ routes: routes.data ?? [], routeIds: routeGroup.routeIds, modelId, enabled });
+  };
+  const reorderRoute = (modelId: string, sourceKey: string, targetKey: string) => {
+    const currentRoutes = routes.data ?? [];
+    const nextRoutes = reorderModelRouteGroups(
+      currentRoutes,
+      modelId,
+      sourceKey,
+      targetKey,
+      new Date().toISOString(),
+    );
+    if (nextRoutes === currentRoutes) return;
+    actions.reorderRoutes.mutate({ routes: currentRoutes, nextRoutes, modelId });
   };
 
   return (
@@ -79,6 +93,15 @@ export function ModelServicesPage() {
           <div className={styles.toolbar}>
             <Input prefix={<IconSearch />} value={search} onChange={setSearch} placeholder={t("搜索模型名称或映射模型")} aria-label={t("搜索模型")} />
             <Select
+              value={channelFilter}
+              aria-label={t("渠道类型")}
+              optionList={[
+                { value: "all", label: t("全部渠道") },
+                ...(channels.data ?? []).map((channel) => ({ value: channel.id, label: channel.name })),
+              ]}
+              onChange={(value) => setChannelFilter(String(value))}
+            />
+            <Select
               value={status}
               aria-label={t("模型状态")}
               optionList={[
@@ -86,7 +109,7 @@ export function ModelServicesPage() {
                 { value: "enabled", label: t("已启用") },
                 { value: "disabled", label: t("已停用") },
               ]}
-              onChange={(value) => setStatus(value as StatusFilter)}
+              onChange={(value) => setStatus(value as ModelStatusFilter)}
             />
           </div>
           <div className={styles.listHead}><span>{t("对外模型")}</span><span>{t("可用路由")}</span><span>{t("状态")}</span><span>{t("启用")}</span></div>
@@ -122,6 +145,7 @@ export function ModelServicesPage() {
           channels={channels.data ?? []}
           busy={busyModel != null}
           onToggleRoute={toggleRoute}
+          onReorderRoute={reorderRoute}
           t={t}
         />
       </div> : null}
@@ -138,30 +162,89 @@ function ModelLogo({ model }: { model: ModelServiceItem }) {
   return <FlowletLogo variant="model" />;
 }
 
-function ModelDetail({ model, accounts, channels, busy, onToggleRoute, t }: {
+function ModelDetail({ model, accounts, channels, busy, onToggleRoute, onReorderRoute, t }: {
   model: ModelServiceItem | null;
   accounts: ReturnType<typeof useAccounts>["data"] extends (infer T)[] | undefined ? T[] : never;
   channels: ReturnType<typeof useChannelPresets>["data"] extends (infer T)[] | undefined ? T[] : never;
   busy: boolean;
   onToggleRoute: (modelId: string, routeGroup: ModelRouteGroup, enabled: boolean) => void;
+  onReorderRoute: (modelId: string, sourceKey: string, targetKey: string) => void;
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
+  const [draggedRouteKey, setDraggedRouteKey] = useState<string | null>(null);
+  const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
+  useEffect(() => {
+    const cancelPointerDrag = () => {
+      setDraggedRouteKey(null);
+      setDragTargetKey(null);
+    };
+    window.addEventListener("pointercancel", cancelPointerDrag);
+    window.addEventListener("pointerup", cancelPointerDrag);
+    return () => {
+      window.removeEventListener("pointercancel", cancelPointerDrag);
+      window.removeEventListener("pointerup", cancelPointerDrag);
+    };
+  }, []);
+
   if (!model) return <section className={`${styles.detailCard} ${styles.detailEmpty}`}><Text type="tertiary">{t("选择一个模型查看路由配置")}</Text></section>;
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
   const copy = () => void navigator.clipboard.writeText(model.publicModel);
+  const canReorder = !busy && model.routeGroups.length > 1;
   return <section className={styles.detailCard}>
     <header className={styles.detailHeader}><ModelLogo model={model} /><span><strong>{model.publicModel}</strong><small>{model.availableAccountCount > 0 ? t("{count} 个可用账号", { count: model.availableAccountCount }) : t("无可用账号")}</small></span></header>
     <div className={styles.detailBody}>
       <DetailSection title={t("基础配置")}>
         <div className={styles.configRow}><span>{t("对外模型名称")}</span><strong>{model.publicModel}</strong><Button theme="borderless" icon={<IconCopy />} aria-label={t("复制模型名称")} onClick={copy} /></div>
       </DetailSection>
-      <DetailSection title={t("渠道路由")} note={t("数字越小优先级越高")}>
-        {model.routeGroups.map((routeGroup) => {
+      <DetailSection title={t("渠道路由")} note={t("拖动路由可调整优先级")}>
+        {model.routeGroups.map((routeGroup, index) => {
           const account = accountById.get(routeGroup.accountId);
           const usable = Boolean(account?.enabled && account.api_key.trim() && account.credential_status !== "invalid_key");
-          return <div className={styles.routeRow} key={routeGroup.key}>
-            <span className={styles.priority}>{routeGroup.priority + 1}</span>
+          const moveByKeyboard = (direction: -1 | 1) => {
+            const target = model.routeGroups[index + direction];
+            if (target) onReorderRoute(model.publicModel, routeGroup.key, target.key);
+          };
+          return <div
+            className={`${styles.routeRow} ${draggedRouteKey === routeGroup.key ? styles.dragging : ""} ${dragTargetKey === routeGroup.key ? styles.dragTarget : ""}`}
+            key={routeGroup.key}
+            onPointerEnter={() => {
+              if (canReorder && draggedRouteKey && draggedRouteKey !== routeGroup.key) setDragTargetKey(routeGroup.key);
+            }}
+            onPointerUp={() => {
+              const sourceKey = draggedRouteKey;
+              setDraggedRouteKey(null);
+              setDragTargetKey(null);
+              if (canReorder && sourceKey && sourceKey !== routeGroup.key) {
+                onReorderRoute(model.publicModel, sourceKey, routeGroup.key);
+              }
+            }}
+          >
+            <button
+              type="button"
+              className={`${styles.dragHandle} ${!canReorder ? styles.dragHandleInactive : ""}`}
+              disabled={busy}
+              aria-disabled={!canReorder}
+              aria-label={t("拖动调整路由 {name} 的优先级", { name: routeGroup.upstreamModel })}
+              title={model.routeGroups.length > 1 ? t("拖动调整优先级") : t("当前只有一条路由，无需排序")}
+              onPointerDown={(event) => {
+                if (!canReorder || event.button !== 0) return;
+                event.preventDefault();
+                setDraggedRouteKey(routeGroup.key);
+                setDragTargetKey(null);
+              }}
+              onKeyDown={(event) => {
+                if (!canReorder) return;
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  moveByKeyboard(-1);
+                } else if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  moveByKeyboard(1);
+                }
+              }}
+            ><IconHandle /></button>
+            <span className={styles.priority}>{index + 1}</span>
             <span className={styles.routeCopy}><strong>{channelById.get(routeGroup.channelId)?.name ?? routeGroup.channelId} · {account?.name ?? routeGroup.accountId}</strong><small>{routeGroup.upstreamModel}</small></span>
             <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
             <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />

@@ -12,6 +12,12 @@ type ToggleInput = {
   enabled: boolean;
 };
 
+type ReorderInput = {
+  routes: RouteCandidate[];
+  nextRoutes: RouteCandidate[];
+  modelId: string;
+};
+
 export function useModelActions() {
   const { t } = useAppPreferences();
   const queryClient = useQueryClient();
@@ -47,5 +53,29 @@ export function useModelActions() {
     },
   });
 
-  return { toggleExposedModel };
+  const reorderRoutes = useMutation({
+    mutationFn: async ({ nextRoutes }: ReorderInput) => {
+      await modelCommands.saveRouteCandidates(nextRoutes);
+      return nextRoutes;
+    },
+    onMutate: async ({ routes, nextRoutes }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.model.candidates(), exact: true });
+      const previous = queryClient.getQueryData<RouteCandidate[]>(queryKeys.model.candidates()) ?? routes;
+      queryClient.setQueryData<RouteCandidate[]>(queryKeys.model.candidates(), nextRoutes);
+      return { previous };
+    },
+    onSuccess: (nextRoutes) => {
+      queryClient.setQueryData(queryKeys.model.candidates(), nextRoutes);
+      Toast.success(t("路由优先级已更新"));
+    },
+    onError: (error, _input, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.model.candidates(), context.previous);
+      Toast.error(t("路由优先级保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.model.candidates(), exact: true });
+    },
+  });
+
+  return { toggleExposedModel, reorderRoutes };
 }

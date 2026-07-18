@@ -1,8 +1,7 @@
 use super::{parse_auth_strategy, Storage, StorageError};
 use crate::core::config::{
-    ChannelAccount, ChannelModel, ChannelPreset, ProtocolType,
-    RouteCandidate, RouteRule, VirtualModel, ACCOUNT_CREDENTIAL_HEALTHY,
-    ACCOUNT_CREDENTIAL_INVALID_KEY,
+    ChannelAccount, ChannelModel, ChannelPreset, ProtocolType, RouteCandidate, RouteRule,
+    VirtualModel, ACCOUNT_CREDENTIAL_HEALTHY, ACCOUNT_CREDENTIAL_INVALID_KEY,
 };
 use rusqlite::params;
 
@@ -123,26 +122,21 @@ impl Storage {
 
     /// 将 config.json 中存在但 SQLite 中缺失的渠道模板追加到表中（新增渠道迁移）。
     /// 该方法必须在 `Storage::migrate` 释放连接锁之后调用。
-    pub fn ensure_missing_presets(
-        &self,
-        presets: &[ChannelPreset],
-    ) -> Result<(), StorageError> {
+    pub fn ensure_missing_presets(&self, presets: &[ChannelPreset]) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         for preset in presets {
-            let exists: bool = connection
-                .query_row(
-                    "SELECT COUNT(*) > 0 FROM channel_presets WHERE id = ?1",
-                    params![preset.id.as_str()],
-                    |row| row.get(0),
-                )?;
+            let exists: bool = connection.query_row(
+                "SELECT COUNT(*) > 0 FROM channel_presets WHERE id = ?1",
+                params![preset.id.as_str()],
+                |row| row.get(0),
+            )?;
             if exists {
                 continue;
             }
-            let protocols =
-                serde_json::to_string(&preset.supported_protocols).unwrap_or_default();
+            let protocols = serde_json::to_string(&preset.supported_protocols).unwrap_or_default();
             connection.execute(
                 r#"
                  INSERT INTO channel_presets (
@@ -192,8 +186,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         for preset in presets {
-            let protocols =
-                serde_json::to_string(&preset.supported_protocols).unwrap_or_default();
+            let protocols = serde_json::to_string(&preset.supported_protocols).unwrap_or_default();
             connection.execute(
                 r#"
                 UPDATE channel_presets
@@ -251,7 +244,11 @@ impl Storage {
             tx.prepare("SELECT id, api_key, credential_status FROM channel_accounts")?;
         let prev = prev_stmt
             .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })?
             .filter_map(|row| row.ok())
             .collect::<Vec<(String, String, String)>>();
@@ -270,7 +267,10 @@ impl Storage {
                         && old_status == ACCOUNT_CREDENTIAL_INVALID_KEY
                         && account.credential_status == ACCOUNT_CREDENTIAL_INVALID_KEY =>
                 {
-                    (ACCOUNT_CREDENTIAL_INVALID_KEY.to_string(), account.last_error.clone())
+                    (
+                        ACCOUNT_CREDENTIAL_INVALID_KEY.to_string(),
+                        account.last_error.clone(),
+                    )
                 }
                 _ => (ACCOUNT_CREDENTIAL_HEALTHY.to_string(), None),
             };

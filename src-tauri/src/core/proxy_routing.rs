@@ -20,7 +20,9 @@ pub(super) fn match_candidates(
 
     // 高级规则保留给旧自定义模型；固定 Flowlet 档位始终使用隔离的模型池。
     if !is_flowlet_model {
-        if let Some(rule) = find_matching_rule(rules, client_id, Some(public_model), protocol, accounts) {
+        if let Some(rule) =
+            find_matching_rule(rules, client_id, Some(public_model), protocol, accounts)
+        {
             return vec![RouteCandidate {
                 id: format!("rule-{}", rule.id),
                 virtual_model_id: public_model.to_string(),
@@ -49,7 +51,9 @@ pub(super) fn match_candidates(
         .iter()
         .filter(|channel| {
             channel.supported_protocols.contains(&ProtocolType::OpenAi)
-                && channel.supported_protocols.contains(&ProtocolType::Anthropic)
+                && channel
+                    .supported_protocols
+                    .contains(&ProtocolType::Anthropic)
         })
         .map(|channel| channel.id.as_str())
         .collect();
@@ -73,8 +77,16 @@ pub(super) fn match_candidates(
             .cmp(&b.priority)
             .then_with(|| a.channel_id.cmp(&b.channel_id))
             .then_with(|| a.upstream_model.cmp(&b.upstream_model))
-            .then_with(|| account_a.map(|account| account.priority).cmp(&account_b.map(|account| account.priority)))
-            .then_with(|| account_a.map(|account| account.created_at.as_str()).cmp(&account_b.map(|account| account.created_at.as_str())))
+            .then_with(|| {
+                account_a
+                    .map(|account| account.priority)
+                    .cmp(&account_b.map(|account| account.priority))
+            })
+            .then_with(|| {
+                account_a
+                    .map(|account| account.created_at.as_str())
+                    .cmp(&account_b.map(|account| account.created_at.as_str()))
+            })
     });
 
     // 每个“档位 + 协议 + 底层模型”的账号池独立轮询；模型池之间仍按 priority 固定 fallback。
@@ -91,7 +103,13 @@ pub(super) fn match_candidates(
         {
             end += 1;
         }
-        let key = format!("{}:{}:{}:{}", public_model, protocol.as_str(), group_channel, group_model);
+        let key = format!(
+            "{}:{}:{}:{}",
+            public_model,
+            protocol.as_str(),
+            group_channel,
+            group_model
+        );
         let next = round_robin.entry(key).or_insert(0);
         let group_len = end - cursor;
         matched[cursor..end].rotate_left(*next % group_len);
@@ -231,11 +249,7 @@ pub(super) fn body_contains_account_deactivated(body: &[u8]) -> bool {
         if error
             .get("message")
             .and_then(serde_json::Value::as_str)
-            .is_some_and(|message| {
-                message
-                    .to_ascii_lowercase()
-                    .contains("api key is disabled")
-            })
+            .is_some_and(|message| message.to_ascii_lowercase().contains("api key is disabled"))
         {
             return true;
         }
@@ -267,4 +281,3 @@ pub(super) fn enrich_upstream_error_log(status: reqwest::StatusCode, log: &mut R
         log.route_reason = Some("upstream_error".to_string());
     }
 }
-

@@ -1,8 +1,8 @@
 //! Web Console - HTTP API + embedded dashboard for headless mode
 
 use super::config::{
-    AccountStatsRow, ChannelAccount, ChannelPreset, RequestLogRow, RouteCandidate,
-    RouteRule, UsageSummaryRow,
+    AccountStatsRow, ChannelAccount, ChannelPreset, RequestLogRow, RouteCandidate, RouteRule,
+    UsageSummaryRow,
 };
 use super::metrics::Metrics;
 use super::storage::Storage;

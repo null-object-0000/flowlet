@@ -1,8 +1,8 @@
 //! Flowlet headless proxy server
 //! Run without Tauri GUI: `cargo run --bin headless`
 
-use flowlet_lib::core::metrics::Metrics;
 use flowlet_lib::core::config::LogCaptureConfig;
+use flowlet_lib::core::metrics::Metrics;
 use flowlet_lib::core::proxy::{ProxyController, ProxySharedConfig};
 use flowlet_lib::core::rate_limiter::RateLimiter;
 use flowlet_lib::core::storage::Storage;
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         routes: Arc::new(Mutex::new(routes)),
         rules: Arc::new(Mutex::new(rules)),
         scores: Arc::new(Mutex::new(scores)),
-                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
     proxy
         .start_with_bind(

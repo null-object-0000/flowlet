@@ -1,6 +1,6 @@
 use crate::core::config::{
-    AuthStrategy, ChannelAccount, ChannelPreset, ProtocolType, RouteCandidate,
-    UaClientRule, ACCOUNT_CREDENTIAL_HEALTHY,
+    AuthStrategy, ChannelAccount, ChannelPreset, ProtocolType, RouteCandidate, UaClientRule,
+    ACCOUNT_CREDENTIAL_HEALTHY,
 };
 use axum::{
     body::Body,
@@ -18,7 +18,10 @@ pub(super) fn cors_preflight_response(request_headers: &HeaderMap) -> Response {
     response
 }
 
-pub(super) fn add_cors_headers(headers: &mut HeaderMap<HeaderValue>, requested_headers: Option<&HeaderValue>) {
+pub(super) fn add_cors_headers(
+    headers: &mut HeaderMap<HeaderValue>,
+    requested_headers: Option<&HeaderValue>,
+) {
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
@@ -104,7 +107,9 @@ fn collect_model_entries(
         .iter()
         .filter(|channel| {
             channel.supported_protocols.contains(&ProtocolType::OpenAi)
-                && channel.supported_protocols.contains(&ProtocolType::Anthropic)
+                && channel
+                    .supported_protocols
+                    .contains(&ProtocolType::Anthropic)
         })
         .map(|channel| channel.id.as_str())
         .collect();
@@ -124,8 +129,10 @@ fn collect_model_entries(
         {
             continue;
         }
-        let is_aggregate =
-            matches!(route.virtual_model_id.as_str(), "flowlet-pro" | "flowlet-flash");
+        let is_aggregate = matches!(
+            route.virtual_model_id.as_str(),
+            "flowlet-pro" | "flowlet-flash"
+        );
         // 聚合模型必须来自双协议渠道；直接模型按 client_protocol 自然兼容。
         if is_aggregate && !dual_protocol_channels.contains(route.channel_id.as_str()) {
             continue;
@@ -154,7 +161,11 @@ fn collect_model_entries(
         });
     }
     // 排序固定：flowlet-pro → flowlet-flash → 其余按名字典序（需求八）。
-    result.sort_by(|a, b| rank_model(&a.id).cmp(&rank_model(&b.id)).then_with(|| a.id.cmp(&b.id)));
+    result.sort_by(|a, b| {
+        rank_model(&a.id)
+            .cmp(&rank_model(&b.id))
+            .then_with(|| a.id.cmp(&b.id))
+    });
     result
 }
 
@@ -250,7 +261,11 @@ pub(super) fn is_streaming_response(headers: &HeaderMap) -> bool {
 
 // ─── URL Building ────────────────────────────────────────────────────────────
 
-pub(super) fn build_upstream_url(base_url: &str, original_uri: &Uri, protocol: &ProtocolType) -> String {
+pub(super) fn build_upstream_url(
+    base_url: &str,
+    original_uri: &Uri,
+    protocol: &ProtocolType,
+) -> String {
     let base = base_url.trim_end_matches('/');
     let path = original_uri
         .path_and_query()
@@ -424,7 +439,9 @@ pub(super) fn identify_client_by_ua(
     headers: &HeaderMap,
     rules: &[UaClientRule],
 ) -> Option<(String, String)> {
-    let ua = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok())?;
+    let ua = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())?;
     rules
         .iter()
         .find(|r| r.enabled && !r.pattern.is_empty() && ua.contains(&r.pattern))
@@ -455,8 +472,6 @@ pub(super) fn load_config_ua_rules(path: &std::path::Path) -> Vec<UaClientRule> 
 
 // 向后兼容：旧代码里 load_ua_rules(...) 仍然可用
 pub(super) use load_config_ua_rules as load_ua_rules;
-
-
 
 // ─── Model Rewriting ─────────────────────────────────────────────────────────
 
@@ -546,7 +561,10 @@ mod tests {
     fn apply_request_headers_drops_stale_content_length() {
         let mut headers = HeaderMap::new();
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from_static("1"));
-        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
 
         let request = apply_request_headers(
             reqwest::Client::new().post("http://127.0.0.1/test"),
@@ -636,11 +654,19 @@ mod tests {
     }
 }
 
-pub(super) fn rewrite_model(body: &[u8], upstream_model: &str, _protocol: &ProtocolType) -> Vec<u8> {
+pub(super) fn rewrite_model(
+    body: &[u8],
+    upstream_model: &str,
+    _protocol: &ProtocolType,
+) -> Vec<u8> {
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return body.to_vec();
     };
-    let Some(original_model) = value.get("model").and_then(|field| field.as_str()).map(str::to_string) else {
+    let Some(original_model) = value
+        .get("model")
+        .and_then(|field| field.as_str())
+        .map(str::to_string)
+    else {
         return body.to_vec();
     };
     let Some(model_field) = value.get_mut("model") else {
@@ -650,8 +676,14 @@ pub(super) fn rewrite_model(body: &[u8], upstream_model: &str, _protocol: &Proto
 
     let body_text = String::from_utf8_lossy(body);
     for (search, replacement) in [
-        (format!(r#""model":"{}""#, original_model), format!(r#""model":"{}""#, upstream_model)),
-        (format!(r#""model": "{}""#, original_model), format!(r#""model": "{}""#, upstream_model)),
+        (
+            format!(r#""model":"{}""#, original_model),
+            format!(r#""model":"{}""#, upstream_model),
+        ),
+        (
+            format!(r#""model": "{}""#, original_model),
+            format!(r#""model": "{}""#, upstream_model),
+        ),
     ] {
         if let Some(position) = body_text.find(&search) {
             let mut result = body_text.clone().into_owned();

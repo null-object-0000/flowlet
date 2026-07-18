@@ -83,8 +83,7 @@ fn mark_account_credential_recovered(
             .find(|item| item.id == account_id)
         {
             account.last_error = None;
-            account.credential_status =
-                crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+            account.credential_status = crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
         }
     }
 }
@@ -164,14 +163,13 @@ mod proxy_routing;
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
     copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
-    extract_model, identify_client, identify_client_by_ua, is_model_list_request, is_streaming_response, load_ua_rules,
-    rewrite_model, sanitize_headers,
+    extract_model, identify_client, identify_client_by_ua, is_model_list_request,
+    is_streaming_response, load_ua_rules, rewrite_model, sanitize_headers,
 };
 use proxy_routing::{
     body_contains_account_deactivated, body_contains_quota_exceeded, enrich_upstream_error_log,
-    match_candidates,
-    network_error_route_reason, resolve_small_model, should_check_quota_body_status,
-    should_try_next_status,
+    match_candidates, network_error_route_reason, resolve_small_model,
+    should_check_quota_body_status, should_try_next_status,
 };
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -325,7 +323,11 @@ impl ProxyController {
         runtime.shutdown = Some(shutdown_tx);
         drop(runtime);
 
-        let bind_config = self.bind_config.lock().map(|c| c.clone()).unwrap_or_default();
+        let bind_config = self
+            .bind_config
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_default();
 
         let app = Router::new()
             .route("/health", any(health))
@@ -481,12 +483,15 @@ async fn forward_request(
     // 一旦成功即恢复 healthy。真正的 401 invalid_key 仍然会被路由层排除。
     for account in &mut accounts {
         if is_transient_deactivated_account(account) {
-            account.credential_status =
-                crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+            account.credential_status = crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
         }
     }
     let channels = state.shared.channels.lock().unwrap().clone();
-    let default_client_token = state.bind_config.lock().map(|c| c.default_client_token.clone()).unwrap_or_default();
+    let default_client_token = state
+        .bind_config
+        .lock()
+        .map(|c| c.default_client_token.clone())
+        .unwrap_or_default();
     let rules = state.shared.rules.lock().unwrap().clone();
     let scores = state.shared.scores.lock().unwrap().clone();
 
@@ -727,26 +732,20 @@ async fn forward_request(
                 let ttfb_ms = log_context.send_at.elapsed().as_millis() as i64;
                 let status = upstream_response.status();
                 let channel_vendor = channel.vendor.clone();
-                if status.is_success() && account.last_error.as_deref().is_some_and(|error| {
-                    let error = error.to_ascii_lowercase();
-                    error.contains("account_deactivated") || error.contains("api key is disabled")
-                }) {
-                    mark_account_credential_recovered(
-                        &storage,
-                        &state.shared,
-                        &account.id,
-                    );
+                if status.is_success()
+                    && account.last_error.as_deref().is_some_and(|error| {
+                        let error = error.to_ascii_lowercase();
+                        error.contains("account_deactivated")
+                            || error.contains("api key is disabled")
+                    })
+                {
+                    mark_account_credential_recovered(&storage, &state.shared, &account.id);
                 }
                 if status == reqwest::StatusCode::UNAUTHORIZED {
                     let message = "upstream returned 401; API Key may be invalid";
                     // 401 表示 API Key 无效：标记账号凭证状态，后续请求自动排除该账号。
                     // 当前请求不 fallback，直接返回 401。
-                    mark_account_credential_invalid(
-                        &storage,
-                        &state.shared,
-                        &account.id,
-                        message,
-                    );
+                    mark_account_credential_invalid(&storage, &state.shared, &account.id, message);
                 }
 
                 // 可重试状态码 + 还有下一个候选 → fallback 到下一个
@@ -1417,8 +1416,7 @@ fn capture_timed_stream(
         match state.inner.next().await {
             Some(Ok(bytes)) => {
                 if state.ttft_ms.is_none()
-                    && state.ttft_probe.len().saturating_add(bytes.len())
-                        <= MAX_TTFT_PROBE_BYTES
+                    && state.ttft_probe.len().saturating_add(bytes.len()) <= MAX_TTFT_PROBE_BYTES
                 {
                     state.ttft_probe.extend_from_slice(&bytes);
                     if contains_sse_output_token(&state.ttft_probe) {

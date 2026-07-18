@@ -69,7 +69,10 @@ struct KimiModelEntry {
 
 /// 测试渠道连接：仅验证 API Key 是否有效，不做余额读写。
 /// 通过访问模型列表端点实现轻量级鉴权验证。
-pub async fn test_channel_connection(account: &ChannelAccount, _config: &ChannelsConfig) -> Result<(), String> {
+pub async fn test_channel_connection(
+    account: &ChannelAccount,
+    _config: &ChannelsConfig,
+) -> Result<(), String> {
     if account.api_key.trim().is_empty() {
         return Err("API Key 未配置".to_string());
     }
@@ -139,7 +142,9 @@ pub async fn test_channel_connection(account: &ChannelAccount, _config: &Channel
             elapsed_ms = started_at.elapsed().as_millis() as u64,
             "test_connection: 上游鉴权失败"
         );
-        Err(format!("GET {url} → HTTP 401，API Key 无效或鉴权方式不匹配"))
+        Err(format!(
+            "GET {url} → HTTP 401，API Key 无效或鉴权方式不匹配"
+        ))
     } else {
         tracing::warn!(
             channel_id = %account.channel_id,
@@ -163,7 +168,10 @@ fn openai_models_url(base_url: &str) -> String {
 }
 
 /// 查询 DeepSeek 余额
-pub async fn query_deepseek_balance(account: &ChannelAccount, config: &ChannelsConfig) -> BalanceQueryResult {
+pub async fn query_deepseek_balance(
+    account: &ChannelAccount,
+    config: &ChannelsConfig,
+) -> BalanceQueryResult {
     if account.api_key.trim().is_empty() {
         return BalanceQueryResult {
             balance: None,
@@ -279,7 +287,10 @@ struct KimiBalanceData {
 }
 
 /// 查询 Kimi 余额
-pub async fn query_kimi_balance(account: &ChannelAccount, config: &ChannelsConfig) -> BalanceQueryResult {
+pub async fn query_kimi_balance(
+    account: &ChannelAccount,
+    config: &ChannelsConfig,
+) -> BalanceQueryResult {
     if account.api_key.trim().is_empty() {
         return BalanceQueryResult {
             balance: None,
@@ -376,7 +387,10 @@ pub async fn query_kimi_balance(account: &ChannelAccount, config: &ChannelsConfi
 }
 
 /// 同步 DeepSeek 模型列表
-pub async fn sync_deepseek_models(account: &ChannelAccount, config: &ChannelsConfig) -> ModelSyncResult {
+pub async fn sync_deepseek_models(
+    account: &ChannelAccount,
+    config: &ChannelsConfig,
+) -> ModelSyncResult {
     if account.api_key.trim().is_empty() {
         return ModelSyncResult {
             models_synced: 0,
@@ -466,9 +480,11 @@ pub async fn sync_deepseek_models(account: &ChannelAccount, config: &ChannelsCon
     }
 }
 
-
 /// 同步 Kimi 模型列表（兼容 OpenAI /v1/models 格式，含 context_length 等字段）
-pub async fn sync_kimi_models(account: &ChannelAccount, config: &ChannelsConfig) -> ModelSyncResult {
+pub async fn sync_kimi_models(
+    account: &ChannelAccount,
+    config: &ChannelsConfig,
+) -> ModelSyncResult {
     if account.api_key.trim().is_empty() {
         return ModelSyncResult {
             models_synced: 0,
@@ -539,11 +555,7 @@ pub async fn sync_kimi_models(account: &ChannelAccount, config: &ChannelsConfig)
                 .data
                 .into_iter()
                 .filter(|m| !m.id.trim().is_empty())
-                .map(|m| kimi_channel_model(
-                    m.id,
-                    m.context_length,
-                    &synced_at,
-                ))
+                .map(|m| kimi_channel_model(m.id, m.context_length, &synced_at))
                 .collect();
             ModelSyncResult {
                 models_synced: models.len(),
@@ -589,7 +601,10 @@ pub struct LongCatArchitecture {
 }
 
 /// 同步 LongCat 模型列表，并对每个模型拉取详情获取 context_length / pricing
-pub async fn sync_longcat_models(account: &ChannelAccount, config: &ChannelsConfig) -> ModelSyncResult {
+pub async fn sync_longcat_models(
+    account: &ChannelAccount,
+    config: &ChannelsConfig,
+) -> ModelSyncResult {
     if account.api_key.trim().is_empty() {
         return ModelSyncResult {
             models_synced: 0,
@@ -642,17 +657,10 @@ pub async fn sync_longcat_models(account: &ChannelAccount, config: &ChannelsConf
 
     for entry in &entries {
         if let Some(detail) = fetch_longcat_detail(&client, account, &entry.id, config).await {
-            channel_models.push(longcat_channel_model(
-                entry.id.clone(),
-                detail,
-                &synced_at,
-            ));
+            channel_models.push(longcat_channel_model(entry.id.clone(), detail, &synced_at));
         } else {
             // 详情拉取失败时退化为仅列表信息
-            channel_models.push(longcat_channel_model_from_id(
-                entry.id.clone(),
-                &synced_at,
-            ));
+            channel_models.push(longcat_channel_model_from_id(entry.id.clone(), &synced_at));
         }
     }
 
@@ -865,6 +873,45 @@ mod tests {
     }
 
     #[test]
+    fn parse_kimi_balance_response() {
+        let json = r#"{
+            "code": 0,
+            "data": {
+                "available_balance": 49.58894,
+                "voucher_balance": 46.58893,
+                "cash_balance": 3.00001
+            },
+            "scode": "0x0",
+            "status": true
+        }"#;
+        let data: KimiBalanceResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(data.code, 0);
+        assert_eq!(data.data.unwrap().available_balance, 49.58894);
+    }
+
+    #[test]
+    fn parse_kimi_models_response_and_preserve_context() {
+        let json = r#"{
+            "object": "list",
+            "data": [{
+                "id": "kimi-k3",
+                "object": "model",
+                "owned_by": "moonshot",
+                "context_length": 1048576,
+                "supports_reasoning": true
+            }]
+        }"#;
+        let data: KimiModelsResponse = serde_json::from_str(json).unwrap();
+        let entry = data.data.into_iter().next().unwrap();
+        assert_eq!(entry.id, "kimi-k3");
+        assert_eq!(entry.context_length, Some(1_048_576));
+        let model = kimi_channel_model(entry.id, entry.context_length, "now");
+        assert_eq!(
+            model.supported_protocols,
+            vec![ProtocolType::OpenAi, ProtocolType::Anthropic]
+        );
+    }
+    #[test]
     fn parse_empty_balance_response() {
         let json = r#"{"is_available": false, "balance_infos": []}"#;
         let data: DeepSeekBalanceResponse = serde_json::from_str(json).unwrap();
@@ -914,32 +961,3 @@ mod tests {
         assert!(params.contains(&"tools".to_string()));
     }
 }
-
-
-    #[test]
-    fn parse_kimi_balance_response() {
-        let json = serde_json::json!({
-            "data": {
-                "available_balance": "100.50",
-                "total_balance": "200.00",
-                "is_available": true,
-            }
-        });
-        let raw = serde_json::to_string(&json).unwrap();
-        let result = parse_kimi_balance_response(&raw).unwrap();
-        assert_eq!(result.available_balance, "100.50");
-    }
-
-    #[test]
-    fn parse_kimi_models_response_and_preserve_context() {
-        let json = serde_json::json!({
-            "data": [
-                { "id": "kimi-k3", "context_length": 131072 },
-                { "id": "kimi-k2.7-code", "context_length": 262144 },
-            ]
-        });
-        let raw = serde_json::to_string(&json).unwrap();
-        let models = parse_kimi_models_response(&raw).unwrap();
-        assert_eq!(models.len(), 2);
-        assert!(models[0].context_length > 0);
-    }

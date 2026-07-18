@@ -3,8 +3,8 @@ pub mod core;
 
 use core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use core::config::{
-    ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig,
-    RouteCandidate, RouteRule, VirtualModel,
+    ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig, RouteCandidate,
+    RouteRule, VirtualModel,
 };
 use core::presets::builtin_channel_presets;
 use core::proxy::ProxyController;
@@ -81,13 +81,21 @@ impl AppState {
 
 fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf) -> AppState {
     let _t0 = std::time::Instant::now();
+    let codex_accounts_dir = db_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("codex-accounts");
 
     tracing::info!(db_path = %db_path.display(), t_ms = _t0.elapsed().as_millis() as u64, "初始化 Storage");
 
     // 从 config.json 顶层 channels_config 字段解析渠道配置
     let channels_config = match load_channels_config_from(&config_path) {
         Ok(cfg) => {
-            tracing::info!(channels = cfg.presets.len(), prices = cfg.prices.len(), "从 config.json 加载渠道配置");
+            tracing::info!(
+                channels = cfg.presets.len(),
+                prices = cfg.prices.len(),
+                "从 config.json 加载渠道配置"
+            );
             let merged = merge_builtin_config(cfg);
             Arc::new(merged)
         }
@@ -130,11 +138,18 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         .ensure_preset_balance_query(&migration_presets)
         .expect("同步渠道余额查询标志失败");
 
-    tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "Storage 初始化完成, 开始加载渠道模板");
+    tracing::info!(
+        t_ms = _t0.elapsed().as_millis() as u64,
+        "Storage 初始化完成, 开始加载渠道模板"
+    );
 
     // 初始化渠道模板：优先从 config.json 加载，SQLite 为空时写入
     let channels = storage.list_channel_presets().expect("读取渠道模板失败");
-    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = channels.len(), "渠道模板加载完成");
+    tracing::trace!(
+        t_ms = _t0.elapsed().as_millis() as u64,
+        count = channels.len(),
+        "渠道模板加载完成"
+    );
     let channels = if channels.is_empty() {
         let presets = channels_config.presets.clone();
         storage
@@ -162,7 +177,10 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     // 固定 Flowlet 对外模型；旧自定义模型保留供高级模式使用。
     let mut virtual_models = storage.list_virtual_models().expect("读取虚拟模型失败");
     let now = chrono::Utc::now().to_rfc3339();
-    for (id, name) in [("flowlet-pro", "Flowlet Pro"), ("flowlet-flash", "Flowlet Flash")] {
+    for (id, name) in [
+        ("flowlet-pro", "Flowlet Pro"),
+        ("flowlet-flash", "Flowlet Flash"),
+    ] {
         if !virtual_models.iter().any(|model| model.id == id) {
             virtual_models.push(VirtualModel {
                 id: id.to_string(),
@@ -226,18 +244,32 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     storage
         .cleanup_orphan_balance_snapshots()
         .expect("清理孤儿余额快照失败");
-    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: routes + balance cleanup");
+    tracing::trace!(
+        t_ms = _t0.elapsed().as_millis() as u64,
+        "step: routes + balance cleanup"
+    );
 
     // 初始化价格预设：仅从 config.json 加载到内存，作为费用的唯一真实来源。
     // 不再写入数据库——价格表已移除，费用计算直接在内存中完成。
     let prices = channels_config.prices.clone();
     storage.set_prices(prices);
-    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = channels_config.prices.len(), "step: prices loaded from config");
+    tracing::trace!(
+        t_ms = _t0.elapsed().as_millis() as u64,
+        count = channels_config.prices.len(),
+        "step: prices loaded from config"
+    );
 
     // 初始化路由规则
-    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, "step: loading rules");
+    tracing::trace!(
+        t_ms = _t0.elapsed().as_millis() as u64,
+        "step: loading rules"
+    );
     let rules = storage.list_route_rules().expect("读取路由规则失败");
-    tracing::trace!(t_ms = _t0.elapsed().as_millis() as u64, count = rules.len(), "step: rules loaded");
+    tracing::trace!(
+        t_ms = _t0.elapsed().as_millis() as u64,
+        count = rules.len(),
+        "step: rules loaded"
+    );
 
     // 从 config.json 顶层 log_capture 读取
     let capture = if let Some(json_str) = core::proxy::read_config_raw(&config_path) {
@@ -303,9 +335,12 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         tray: Arc::new(Mutex::new(None)),
         config_path,
         codex_accounts_dir,
-        channels_config: Arc::clone(&channels_config),
+        channels_config: Arc::new(Mutex::new((*channels_config).clone())),
     };
-    tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "build_app_state 全部完成");
+    tracing::info!(
+        t_ms = _t0.elapsed().as_millis() as u64,
+        "build_app_state 全部完成"
+    );
     state
 }
 
@@ -335,9 +370,7 @@ fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
 }
 
 /// 从指定 config.json 文件解析其中的 channels_config 字段
-pub fn load_channels_config_from(
-    config_path: &std::path::Path,
-) -> Result<ChannelsConfig, String> {
+pub fn load_channels_config_from(config_path: &std::path::Path) -> Result<ChannelsConfig, String> {
     let external_result = std::fs::read_to_string(config_path)
         .map_err(|e| format!("读取 config.json 失败 ({}): {}", config_path.display(), e))
         .and_then(|content| parse_channels_config(&content, &config_path.display().to_string()));
@@ -412,8 +445,8 @@ pub(crate) fn merge_builtin_config(mut external: ChannelsConfig) -> ChannelsConf
 }
 
 fn parse_channels_config(content: &str, source: &str) -> Result<ChannelsConfig, String> {
-    let json: serde_json::Value = serde_json::from_str(content)
-        .map_err(|e| format!("解析 {source} 失败: {e}"))?;
+    let json: serde_json::Value =
+        serde_json::from_str(content).map_err(|e| format!("解析 {source} 失败: {e}"))?;
     ChannelsConfig::from_config_json(&json)
 }
 
@@ -423,17 +456,18 @@ mod app_config_tests {
 
     #[test]
     fn old_config_without_channels_uses_embedded_defaults() {
-        let path = std::env::temp_dir().join(format!(
-            "flowlet-old-config-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("flowlet-old-config-{}.json", uuid::Uuid::new_v4()));
         std::fs::write(&path, r#"{"ua_rules": []}"#).unwrap();
 
         let config = load_channels_config_from(&path).unwrap();
         let _ = std::fs::remove_file(path);
 
         assert!(config.presets.iter().any(|channel| channel.id == "longcat"));
-        assert!(config.presets.iter().any(|channel| channel.id == "deepseek"));
+        assert!(config
+            .presets
+            .iter()
+            .any(|channel| channel.id == "deepseek"));
         assert!(config.presets.iter().any(|channel| channel.id == "kimi"));
     }
 
@@ -458,10 +492,6 @@ fn migrate_legacy_database(db_path: &std::path::Path) {
     let legacy_db_path = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("flowlet.sqlite");
-    let codex_accounts_dir = db_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("codex-accounts");
     if !legacy_db_path.exists() {
         return;
     }
@@ -507,7 +537,10 @@ pub fn run() {
             let state = build_app_state(app_database_path(app), config_path);
             app.manage(state.clone());
             let state_for_tray = state.clone();
-            tracing::info!(t_ms = setup_t0.elapsed().as_millis() as u64, "setup: state managed");
+            tracing::info!(
+                t_ms = setup_t0.elapsed().as_millis() as u64,
+                "setup: state managed"
+            );
 
             let app_handle = app.handle();
 
@@ -532,8 +565,13 @@ pub fn run() {
 
             // 构建托盘菜单
             let toggle = MenuItem::with_id(app_handle, "toggle", "显示/隐藏", true, None::<&str>)?;
-            let start_item =
-                MenuItem::with_id(app_handle, "start_proxy", "重启代理服务", true, None::<&str>)?;
+            let start_item = MenuItem::with_id(
+                app_handle,
+                "start_proxy",
+                "重启代理服务",
+                true,
+                None::<&str>,
+            )?;
             let quit = MenuItem::with_id(app_handle, "quit", "退出 Flowlet", true, None::<&str>)?;
             let menu = Menu::with_items(app_handle, &[&toggle, &start_item, &quit])?;
 
@@ -592,12 +630,16 @@ pub fn run() {
                 *tray_guard = Some(tray);
             }
 
-            tracing::info!(t_ms = setup_t0.elapsed().as_millis() as u64, "✅ setup 完成 — invoke_handler + Tauri event loop 接管");
+            tracing::info!(
+                t_ms = setup_t0.elapsed().as_millis() as u64,
+                "✅ setup 完成 — invoke_handler + Tauri event loop 接管"
+            );
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::detect_agent_environment,
+            commands::query_codex_accounts,
             commands::inspect_agent_global_config,
             commands::apply_agent_global_config,
             commands::restore_agent_global_config,
@@ -624,9 +666,7 @@ pub fn run() {
             commands::usage_summary,
             commands::list_request_logs,
             commands::list_agent_sessions,
-            commands::query_codex_accounts,
             commands::list_agent_session_children,
-            commands::query_codex_accounts,
             commands::list_agent_session_clients,
             commands::list_request_log_clients,
             commands::list_request_log_models,
@@ -710,7 +750,6 @@ async fn start_proxy_internal(
         config_path,
     } = config;
 
-
     // 传入 shared（持有 Arc 引用），代理运行中会锁定读取最新配置
     proxy
         .start_with_bind(
@@ -725,8 +764,3 @@ async fn start_proxy_internal(
         .await
         .map_err(|err| err.to_string())
 }
-
-
-
-
-

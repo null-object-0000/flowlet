@@ -1,5 +1,5 @@
-use super::*;
 use super::proxy_routing::rank_candidates_by_score;
+use super::*;
 use crate::core::config::{AuthStrategy, UaClientRule};
 use axum::{
     http::{header, HeaderValue, Uri},
@@ -35,10 +35,19 @@ fn protocol_type_from_path_identifies_openai() {
 #[test]
 fn extracts_opencode_session_with_precedence_and_parent() {
     let mut headers = HeaderMap::new();
-    headers.insert("user-agent", HeaderValue::from_static("opencode/local runtime/node.js/24"));
-    headers.insert("x-session-affinity", HeaderValue::from_static("legacy-session"));
+    headers.insert(
+        "user-agent",
+        HeaderValue::from_static("opencode/local runtime/node.js/24"),
+    );
+    headers.insert(
+        "x-session-affinity",
+        HeaderValue::from_static("legacy-session"),
+    );
     headers.insert("x-session-id", HeaderValue::from_static("ses_current"));
-    headers.insert("x-parent-session-id", HeaderValue::from_static("ses_parent"));
+    headers.insert(
+        "x-parent-session-id",
+        HeaderValue::from_static("ses_parent"),
+    );
 
     assert_eq!(
         extract_agent_session(&headers),
@@ -62,7 +71,10 @@ fn ignores_generic_session_header_without_opencode_identity() {
 fn extracts_claude_code_session_from_official_header() {
     let mut headers = HeaderMap::new();
     headers.insert("user-agent", HeaderValue::from_static("claude-cli/2.1.207"));
-    headers.insert("x-claude-code-session-id", HeaderValue::from_static("claude-session-123"));
+    headers.insert(
+        "x-claude-code-session-id",
+        HeaderValue::from_static("claude-session-123"),
+    );
 
     assert_eq!(
         extract_agent_session(&headers),
@@ -492,7 +504,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
             }])),
             rules: Arc::new(Mutex::new(vec![])),
             scores: Arc::new(Mutex::new(vec![])),
-                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
         },
         client: Client::new(),
         storage,
@@ -900,7 +912,8 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
         ..Default::default()
     }];
 
-    let response = build_model_list_response(&routes, &accounts, &channels, &ProtocolType::Anthropic);
+    let response =
+        build_model_list_response(&routes, &accounts, &channels, &ProtocolType::Anthropic);
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -981,13 +994,13 @@ fn temp_db_path() -> PathBuf {
     std::env::temp_dir().join(format!("flowlet-test-{}.sqlite", uuid::Uuid::new_v4()))
 }
 
-
-
 #[tokio::test]
 async fn empty_openai_model_list_is_valid() {
     let response = build_model_list_response(&[], &[], &[], &ProtocolType::OpenAi);
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value, serde_json::json!({"object": "list", "data": []}));
 }
@@ -996,7 +1009,9 @@ async fn empty_openai_model_list_is_valid() {
 async fn empty_anthropic_model_list_is_valid() {
     let response = build_model_list_response(&[], &[], &[], &ProtocolType::Anthropic);
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value["data"], serde_json::json!([]));
     assert_eq!(value["has_more"], false);
@@ -1113,19 +1128,39 @@ async fn missing_account_returns_structured_error_and_log() {
 #[test]
 fn flowlet_pool_round_robins_accounts_before_next_model() {
     let account = |id: &str, channel_id: &str, priority: i64, api_key: &str| ChannelAccount {
-        id: id.to_string(), channel_id: channel_id.to_string(), name: id.to_string(),
-        api_key: api_key.to_string(), enabled: true, priority,
+        id: id.to_string(),
+        channel_id: channel_id.to_string(),
+        name: id.to_string(),
+        api_key: api_key.to_string(),
+        enabled: true,
+        priority,
         ..Default::default()
     };
-    let route = |id: &str, public: &str, channel: &str, account: &str, upstream: &str, priority: i64| RouteCandidate {
-        id: id.to_string(), virtual_model_id: public.to_string(), channel_id: channel.to_string(),
-        account_id: account.to_string(), upstream_model: upstream.to_string(),
-        client_protocol: ProtocolType::OpenAi, priority, enabled: true,
-        ..Default::default()
-    };
+    let route =
+        |id: &str, public: &str, channel: &str, account: &str, upstream: &str, priority: i64| {
+            RouteCandidate {
+                id: id.to_string(),
+                virtual_model_id: public.to_string(),
+                channel_id: channel.to_string(),
+                account_id: account.to_string(),
+                upstream_model: upstream.to_string(),
+                client_protocol: ProtocolType::OpenAi,
+                priority,
+                enabled: true,
+                ..Default::default()
+            }
+        };
     let channels = vec![
-        ChannelPreset { id: "deepseek".to_string(), supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic], ..Default::default() },
-        ChannelPreset { id: "longcat".to_string(), supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic], ..Default::default() },
+        ChannelPreset {
+            id: "deepseek".to_string(),
+            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+            ..Default::default()
+        },
+        ChannelPreset {
+            id: "longcat".to_string(),
+            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+            ..Default::default()
+        },
     ];
     let accounts = vec![
         account("a", "deepseek", 0, "key-a"),
@@ -1136,16 +1171,64 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
     let routes = vec![
         route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", 0),
         route("2", "flowlet-pro", "deepseek", "b", "deepseek-v4-pro", 0),
-        route("3", "flowlet-pro", "deepseek", "empty", "deepseek-v4-pro", 0),
+        route(
+            "3",
+            "flowlet-pro",
+            "deepseek",
+            "empty",
+            "deepseek-v4-pro",
+            0,
+        ),
         route("4", "flowlet-pro", "longcat", "c", "LongCat-2.0", 10),
-        route("5", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", 0),
+        route(
+            "5",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            0,
+        ),
     ];
     let mut round_robin = std::collections::HashMap::new();
-    let first = match_candidates(&routes, &[], &[], Some("flowlet-pro"), &ProtocolType::OpenAi, None, &accounts, &channels, &mut round_robin);
-    assert_eq!(first.iter().map(|route| route.account_id.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c"]);
-    let second = match_candidates(&routes, &[], &[], Some("flowlet-pro"), &ProtocolType::OpenAi, None, &accounts, &channels, &mut round_robin);
-    assert_eq!(second.iter().map(|route| route.account_id.as_str()).collect::<Vec<_>>(), vec!["b", "a", "c"]);
-    assert!(second.iter().all(|route| route.virtual_model_id == "flowlet-pro"));
+    let first = match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("flowlet-pro"),
+        &ProtocolType::OpenAi,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin,
+    );
+    assert_eq!(
+        first
+            .iter()
+            .map(|route| route.account_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a", "b", "c"]
+    );
+    let second = match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("flowlet-pro"),
+        &ProtocolType::OpenAi,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin,
+    );
+    assert_eq!(
+        second
+            .iter()
+            .map(|route| route.account_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["b", "a", "c"]
+    );
+    assert!(second
+        .iter()
+        .all(|route| route.virtual_model_id == "flowlet-pro"));
 }
 
 #[test]
@@ -1156,16 +1239,34 @@ fn flowlet_pool_rejects_single_protocol_channels() {
         ..Default::default()
     }];
     let accounts = vec![ChannelAccount {
-        id: "account".to_string(), channel_id: "openai-only".to_string(), api_key: "key".to_string(), enabled: true,
+        id: "account".to_string(),
+        channel_id: "openai-only".to_string(),
+        api_key: "key".to_string(),
+        enabled: true,
         ..Default::default()
     }];
     let routes = vec![RouteCandidate {
-        virtual_model_id: "flowlet-pro".to_string(), channel_id: "openai-only".to_string(), account_id: "account".to_string(),
-        upstream_model: "model".to_string(), client_protocol: ProtocolType::OpenAi, enabled: true,
+        virtual_model_id: "flowlet-pro".to_string(),
+        channel_id: "openai-only".to_string(),
+        account_id: "account".to_string(),
+        upstream_model: "model".to_string(),
+        client_protocol: ProtocolType::OpenAi,
+        enabled: true,
         ..Default::default()
     }];
     let mut round_robin = std::collections::HashMap::new();
-    assert!(match_candidates(&routes, &[], &[], Some("flowlet-pro"), &ProtocolType::OpenAi, None, &accounts, &channels, &mut round_robin).is_empty());
+    assert!(match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("flowlet-pro"),
+        &ProtocolType::OpenAi,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin
+    )
+    .is_empty());
 }
 
 // ─── End-to-end routing test helpers ─────────────────────────────────────────
@@ -1181,7 +1282,10 @@ async fn spawn_spy_upstream(
 ) -> (String, Arc<Mutex<Vec<String>>>) {
     use axum::extract::State;
     let seen = Arc::new(Mutex::new(Vec::<String>::new()));
-    let state = Arc::new(SpyUpstream { status_by_key, seen_keys: seen.clone() });
+    let state = Arc::new(SpyUpstream {
+        status_by_key,
+        seen_keys: seen.clone(),
+    });
     // 代理会把 /anthropic/v1/messages 重写成上游 /v1/messages，因此需同时注册两条路径。
     use axum::handler::Handler;
     let handler = {
@@ -1304,7 +1408,9 @@ fn chat_request(model: &str) -> Request<Body> {
         .method("POST")
         .uri("/v1/chat/completions")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(format!(r#"{{"model":"{model}","messages":[]}}"#)))
+        .body(Body::from(format!(
+            r#"{{"model":"{model}","messages":[]}}"#
+        )))
         .unwrap()
 }
 
@@ -1327,14 +1433,35 @@ async fn e2e_same_model_account_fallback() {
         test_account("b", "deepseek", "key-b", 1),
     ];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-pro", "deepseek", "b", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "deepseek",
+            "b",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(*seen.lock().unwrap(), vec!["key-a".to_string(), "key-b".to_string()]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["key-a".to_string(), "key-b".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -1356,17 +1483,47 @@ async fn e2e_cross_model_fallback() {
         test_account("c", "longcat", "key-c", 0),
     ];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-pro", "deepseek", "b", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("3", "flowlet-pro", "longcat", "c", "LongCat-2.0", ProtocolType::OpenAi, 10),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "deepseek",
+            "b",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "3",
+            "flowlet-pro",
+            "longcat",
+            "c",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            10,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         *seen.lock().unwrap(),
-        vec!["key-a".to_string(), "key-b".to_string(), "key-c".to_string()]
+        vec![
+            "key-a".to_string(),
+            "key-b".to_string(),
+            "key-c".to_string()
+        ]
     );
 }
 
@@ -1407,9 +1564,7 @@ async fn e2e_account_deactivated_falls_back_then_recovers() {
             }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, upstream).await.unwrap();
@@ -1471,13 +1626,10 @@ async fn e2e_account_deactivated_falls_back_then_recovers() {
 
     // 上游重新启用同一个 Key 后，下一次请求会重新探测 DeepSeek 并恢复账号状态。
     key_disabled.store(false, std::sync::atomic::Ordering::SeqCst);
-    let recovered_response = forward_request(
-        state,
-        chat_request("flowlet-pro"),
-        ProtocolType::OpenAi,
-    )
-    .await
-    .unwrap();
+    let recovered_response =
+        forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+            .await
+            .unwrap();
     assert_eq!(recovered_response.status(), StatusCode::OK);
     assert_eq!(
         *seen.lock().unwrap(),
@@ -1513,11 +1665,29 @@ async fn e2e_pro_flash_strict_isolation() {
         test_account("flash", "deepseek", "flash-key", 0),
     ];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "pro", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-flash", "deepseek", "flash", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "pro",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-flash",
+            "deepseek",
+            "flash",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
 
     // 所有 pro 候选都失败 → 最终返回 500
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -1539,11 +1709,29 @@ async fn e2e_flash_does_not_escalate_to_pro() {
         test_account("pro", "deepseek", "pro-key", 0),
     ];
     let routes = vec![
-        test_route("1", "flowlet-flash", "deepseek", "flash", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-pro", "deepseek", "pro", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "flowlet-flash",
+            "deepseek",
+            "flash",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "deepseek",
+            "pro",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-flash"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, chat_request("flowlet-flash"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
 
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert!(!seen.lock().unwrap().contains(&"pro-key".to_string()));
@@ -1563,12 +1751,30 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
         test_account("b", "deepseek", "key-b", 1),
     ];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-pro", "deepseek", "b", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "deepseek",
+            "b",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
     let storage = state.storage.clone();
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
 
     // 401 不 fallback：直接返回 401，且只命中过 A
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -1577,7 +1783,11 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
     // 存储中 A 应已被标记 invalid_key
     let stored = storage.list_channel_accounts().unwrap();
     assert_eq!(
-        stored.iter().find(|a| a.id == "a").unwrap().credential_status,
+        stored
+            .iter()
+            .find(|a| a.id == "a")
+            .unwrap()
+            .credential_status,
         "invalid_key"
     );
 
@@ -1590,11 +1800,29 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
     let persisted_accounts = storage.list_channel_accounts().unwrap();
     let channels2 = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr2)];
     let routes2 = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-pro", "deepseek", "b", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "deepseek",
+            "b",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state2 = build_test_state(channels2, persisted_accounts, routes2);
-    let response2 = forward_request(state2, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response2 = forward_request(state2, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
 
     assert_eq!(response2.status(), StatusCode::OK);
     // 第二次请求只命中 B，A 因 invalid_key 被候选池排除
@@ -1611,8 +1839,24 @@ async fn e2e_model_sort_order_is_respected() {
 
     // 初始顺序：deepseek-v4-pro(priority 0) → LongCat-2.0(priority 10)
     let routes_order_a = vec![
-        test_route("1", "flowlet-pro", "deepseek", "ds", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-pro", "longcat", "lc", "LongCat-2.0", ProtocolType::OpenAi, 10),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "ds",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "longcat",
+            "lc",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            10,
+        ),
     ];
     // deepseek 可重试 429 从而回落 LongCat，验证 deepseek 先被尝试。
     let (addr, seen) = spawn_spy_upstream(status_map(&[
@@ -1625,13 +1869,34 @@ async fn e2e_model_sort_order_is_respected() {
         dual_protocol_channel("longcat", "LongCat", &addr),
     ];
     let state = build_test_state(channels, accounts.clone(), routes_order_a);
-    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
-    assert_eq!(*seen.lock().unwrap(), vec!["key-ds".to_string(), "key-lc".to_string()]);
+    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["key-ds".to_string(), "key-lc".to_string()]
+    );
 
     // 用户交换顺序：LongCat-2.0(priority 0) → deepseek-v4-pro(priority 10)。OpenAI 与 Anthropic 请求均应遵循新顺序。
     let routes_order_b = vec![
-        test_route("1", "flowlet-pro", "longcat", "lc", "LongCat-2.0", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-pro", "deepseek", "ds", "deepseek-v4-pro", ProtocolType::OpenAi, 10),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "longcat",
+            "lc",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "deepseek",
+            "ds",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            10,
+        ),
     ];
     let (addr, seen) = spawn_spy_upstream(status_map(&[
         ("key-lc", StatusCode::TOO_MANY_REQUESTS),
@@ -1643,12 +1908,33 @@ async fn e2e_model_sort_order_is_respected() {
         dual_protocol_channel("longcat", "LongCat", &addr),
     ];
     let state = build_test_state(channels, accounts.clone(), routes_order_b);
-    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
-    assert_eq!(*seen.lock().unwrap(), vec!["key-lc".to_string(), "key-ds".to_string()]);
+    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["key-lc".to_string(), "key-ds".to_string()]
+    );
 
     let routes_order_b_anthropic = vec![
-        test_route("1", "flowlet-pro", "longcat", "lc", "LongCat-2.0", ProtocolType::Anthropic, 0),
-        test_route("2", "flowlet-pro", "deepseek", "ds", "deepseek-v4-pro", ProtocolType::Anthropic, 10),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "longcat",
+            "lc",
+            "LongCat-2.0",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "deepseek",
+            "ds",
+            "deepseek-v4-pro",
+            ProtocolType::Anthropic,
+            10,
+        ),
     ];
     let (addr, seen) = spawn_spy_upstream(status_map(&[
         ("key-lc", StatusCode::TOO_MANY_REQUESTS),
@@ -1664,10 +1950,17 @@ async fn e2e_model_sort_order_is_respected() {
         .method("POST")
         .uri("/anthropic/v1/messages")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"model":"flowlet-pro","max_tokens":10,"messages":[]}"#))
+        .body(Body::from(
+            r#"{"model":"flowlet-pro","max_tokens":10,"messages":[]}"#,
+        ))
         .unwrap();
-    let response = forward_request(state, anthropic_request, ProtocolType::Anthropic).await.unwrap();
-    assert_eq!(*seen.lock().unwrap(), vec!["key-lc".to_string(), "key-ds".to_string()]);
+    let response = forward_request(state, anthropic_request, ProtocolType::Anthropic)
+        .await
+        .unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["key-lc".to_string(), "key-ds".to_string()]
+    );
     assert_eq!(response.status(), StatusCode::OK);
 }
 
@@ -1689,12 +1982,60 @@ async fn e2e_model_enable_disable_sync() {
     ];
     // pro 使用 deepseek-v4-pro(prio 0) + LongCat-2.0(prio 10)；flash 使用 deepseek-v4-flash(prio 0)
     let all_routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "ds", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-pro", "longcat", "lc", "LongCat-2.0", ProtocolType::OpenAi, 10),
-        test_route("3", "flowlet-pro", "deepseek", "ds", "deepseek-v4-pro", ProtocolType::Anthropic, 0),
-        test_route("4", "flowlet-pro", "longcat", "lc", "LongCat-2.0", ProtocolType::Anthropic, 10),
-        test_route("5", "flowlet-flash", "deepseek", "ds", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
-        test_route("6", "flowlet-flash", "deepseek", "ds", "deepseek-v4-flash", ProtocolType::Anthropic, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "ds",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "longcat",
+            "lc",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            10,
+        ),
+        test_route(
+            "3",
+            "flowlet-pro",
+            "deepseek",
+            "ds",
+            "deepseek-v4-pro",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "4",
+            "flowlet-pro",
+            "longcat",
+            "lc",
+            "LongCat-2.0",
+            ProtocolType::Anthropic,
+            10,
+        ),
+        test_route(
+            "5",
+            "flowlet-flash",
+            "deepseek",
+            "ds",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "6",
+            "flowlet-flash",
+            "deepseek",
+            "ds",
+            "deepseek-v4-flash",
+            ProtocolType::Anthropic,
+            0,
+        ),
     ];
 
     // 首次请求前：deepseek 返回可重试 429，验证 pro 先尝试 deepseek 再回落 LongCat
@@ -1708,8 +2049,13 @@ async fn e2e_model_enable_disable_sync() {
         dual_protocol_channel("longcat", "LongCat", &addr),
     ];
     let state = build_test_state(channels, accounts.clone(), all_routes.clone());
-    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
-    assert_eq!(*seen.lock().unwrap(), vec!["key-ds".to_string(), "key-lc".to_string()]);
+    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["key-ds".to_string(), "key-lc".to_string()]
+    );
 
     // 关闭 deepseek-v4-pro 底层模型（channel=deepseek, upstream=deepseek-v4-pro 的所有路由 enabled=false）
     let disabled_routes: Vec<RouteCandidate> = all_routes
@@ -1734,7 +2080,9 @@ async fn e2e_model_enable_disable_sync() {
         dual_protocol_channel("longcat", "LongCat", &addr),
     ];
     let state = build_test_state(channels, accounts.clone(), disabled_routes.clone());
-    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi).await.unwrap();
+    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
     assert_eq!(*seen.lock().unwrap(), vec!["key-lc".to_string()]);
     // 关闭后 pro 的 Anthropic 请求也只能走 LongCat-2.0（协议同步）
     let (addr, seen) = spawn_spy_upstream(status_map(&[
@@ -1751,9 +2099,13 @@ async fn e2e_model_enable_disable_sync() {
         .method("POST")
         .uri("/anthropic/v1/messages")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"model":"flowlet-pro","max_tokens":10,"messages":[]}"#))
+        .body(Body::from(
+            r#"{"model":"flowlet-pro","max_tokens":10,"messages":[]}"#,
+        ))
         .unwrap();
-    forward_request(state, anthropic_request, ProtocolType::Anthropic).await.unwrap();
+    forward_request(state, anthropic_request, ProtocolType::Anthropic)
+        .await
+        .unwrap();
     assert_eq!(*seen.lock().unwrap(), vec!["key-lc".to_string()]);
 
     // flash 档位不受影响：仍使用 deepseek-v4-flash 账号（key-ds）
@@ -1767,7 +2119,9 @@ async fn e2e_model_enable_disable_sync() {
         dual_protocol_channel("longcat", "LongCat", &addr),
     ];
     let state = build_test_state(channels, accounts, disabled_routes);
-    forward_request(state, chat_request("flowlet-flash"), ProtocolType::OpenAi).await.unwrap();
+    forward_request(state, chat_request("flowlet-flash"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
     assert_eq!(*seen.lock().unwrap(), vec!["key-ds".to_string()]);
 }
 
@@ -1778,35 +2132,89 @@ async fn e2e_dual_protocol_model_list_consistency() {
     let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
     let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
-        test_route("3", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::Anthropic, 0),
-        test_route("4", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::Anthropic, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "3",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "4",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::Anthropic,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
 
     let openai = forward_request(
         state.clone(),
-        Request::builder().method("GET").uri("/v1/models").body(Body::empty()).unwrap(),
+        Request::builder()
+            .method("GET")
+            .uri("/v1/models")
+            .body(Body::empty())
+            .unwrap(),
         ProtocolType::OpenAi,
     )
     .await
     .unwrap();
     let anthropic = forward_request(
         state,
-        Request::builder().method("GET").uri("/anthropic/v1/models").body(Body::empty()).unwrap(),
+        Request::builder()
+            .method("GET")
+            .uri("/anthropic/v1/models")
+            .body(Body::empty())
+            .unwrap(),
         ProtocolType::Anthropic,
     )
     .await
     .unwrap();
 
-    let openai_body = axum::body::to_bytes(openai.into_body(), usize::MAX).await.unwrap();
-    let anthropic_body = axum::body::to_bytes(anthropic.into_body(), usize::MAX).await.unwrap();
+    let openai_body = axum::body::to_bytes(openai.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let anthropic_body = axum::body::to_bytes(anthropic.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let openai_value: serde_json::Value = serde_json::from_slice(&openai_body).unwrap();
     let anthropic_value: serde_json::Value = serde_json::from_slice(&anthropic_body).unwrap();
 
-    let openai_ids: Vec<&str> = openai_value["data"].as_array().unwrap().iter().map(|m| m["id"].as_str().unwrap()).collect();
-    let anthropic_ids: Vec<&str> = anthropic_value["data"].as_array().unwrap().iter().map(|m| m["id"].as_str().unwrap()).collect();
+    let openai_ids: Vec<&str> = openai_value["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+    let anthropic_ids: Vec<&str> = anthropic_value["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
     assert_eq!(openai_ids, vec!["flowlet-pro", "flowlet-flash"]);
     assert_eq!(anthropic_ids, vec!["flowlet-pro", "flowlet-flash"]);
 }
@@ -1821,25 +2229,95 @@ async fn e2e_models_exposes_direct_models_by_default() {
     let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
     // 聚合路由 + 直接路由（virtual_model_id === upstream_model）
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
-        test_route("3", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::Anthropic, 0),
-        test_route("4", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::Anthropic, 0),
-        test_route("5", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("6", "deepseek-v4-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
-        test_route("7", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::Anthropic, 0),
-        test_route("8", "deepseek-v4-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::Anthropic, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "3",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "4",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "5",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "6",
+            "deepseek-v4-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "7",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "8",
+            "deepseek-v4-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::Anthropic,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
 
     let response = forward_request(
         state,
-        Request::builder().method("GET").uri("/v1/models").body(Body::empty()).unwrap(),
+        Request::builder()
+            .method("GET")
+            .uri("/v1/models")
+            .body(Body::empty())
+            .unwrap(),
         ProtocolType::OpenAi,
     )
     .await
     .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let ids: Vec<&str> = value["data"]
         .as_array()
@@ -1847,7 +2325,15 @@ async fn e2e_models_exposes_direct_models_by_default() {
         .iter()
         .map(|m| m["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["flowlet-pro", "flowlet-flash", "deepseek-v4-flash", "deepseek-v4-pro"]);
+    assert_eq!(
+        ids,
+        vec![
+            "flowlet-pro",
+            "flowlet-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
+        ]
+    );
 
     // owned_by：聚合模型为 flowlet，直接模型为渠道 vendor
     let owned_by: Vec<&str> = value["data"]
@@ -1866,16 +2352,49 @@ async fn e2e_models_flowlet_only_hides_direct_models() {
     let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
     let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
         // 直接路由全部关闭（模拟 flowlet_only 模式）
-        test_route("5", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("6", "deepseek-v4-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
+        test_route(
+            "5",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "6",
+            "deepseek-v4-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let disabled_routes: Vec<RouteCandidate> = routes
         .into_iter()
         .map(|mut r| {
-            if r.virtual_model_id == "deepseek-v4-pro" || r.virtual_model_id == "deepseek-v4-flash" {
+            if r.virtual_model_id == "deepseek-v4-pro" || r.virtual_model_id == "deepseek-v4-flash"
+            {
                 r.enabled = false;
             }
             r
@@ -1885,12 +2404,18 @@ async fn e2e_models_flowlet_only_hides_direct_models() {
 
     let response = forward_request(
         state,
-        Request::builder().method("GET").uri("/v1/models").body(Body::empty()).unwrap(),
+        Request::builder()
+            .method("GET")
+            .uri("/v1/models")
+            .body(Body::empty())
+            .unwrap(),
         ProtocolType::OpenAi,
     )
     .await
     .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let ids: Vec<&str> = value["data"]
         .as_array()
@@ -1908,11 +2433,43 @@ async fn e2e_models_custom_mode_respects_per_model_toggle() {
     let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
     let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
         // deepseek-v4-pro 开启，deepseek-v4-flash 关闭
-        test_route("5", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("6", "deepseek-v4-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
+        test_route(
+            "5",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "6",
+            "deepseek-v4-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let toggled: Vec<RouteCandidate> = routes
         .into_iter()
@@ -1927,12 +2484,18 @@ async fn e2e_models_custom_mode_respects_per_model_toggle() {
 
     let response = forward_request(
         state,
-        Request::builder().method("GET").uri("/v1/models").body(Body::empty()).unwrap(),
+        Request::builder()
+            .method("GET")
+            .uri("/v1/models")
+            .body(Body::empty())
+            .unwrap(),
         ProtocolType::OpenAi,
     )
     .await
     .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let ids: Vec<&str> = value["data"]
         .as_array()
@@ -1957,17 +2520,42 @@ async fn e2e_direct_model_account_round_robin() {
         test_account("b", "deepseek", "key-b", 1),
     ];
     let routes = vec![
-        test_route("1", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "deepseek-v4-pro", "deepseek", "b", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "deepseek-v4-pro",
+            "deepseek",
+            "b",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
 
     for _ in 0..3 {
         let s = state.clone();
-        forward_request(s, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi).await.unwrap();
+        forward_request(s, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
+            .await
+            .unwrap();
     }
     // 轮询：A → B → A（spy 累积记录全部调用顺序）
-    assert_eq!(*seen.lock().unwrap(), vec!["key-a".to_string(), "key-b".to_string(), "key-a".to_string()]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![
+            "key-a".to_string(),
+            "key-b".to_string(),
+            "key-a".to_string()
+        ]
+    );
 }
 
 // test 5: 直接模型同模型 fallback（A 429 → B 200）
@@ -1984,13 +2572,34 @@ async fn e2e_direct_model_same_model_fallback() {
         test_account("b", "deepseek", "key-b", 1),
     ];
     let routes = vec![
-        test_route("1", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "deepseek-v4-pro", "deepseek", "b", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "deepseek-v4-pro",
+            "deepseek",
+            "b",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(*seen.lock().unwrap(), vec!["key-a".to_string(), "key-b".to_string()]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["key-a".to_string(), "key-b".to_string()]
+    );
 }
 
 // test 6: 直接模型禁止跨模型 fallback（deepseek-v4-pro 全败，LongCat 健康但不命中）
@@ -2011,11 +2620,29 @@ async fn e2e_direct_model_no_cross_model_fallback() {
     ];
     // 直接路由：deepseek-v4-pro 与 LongCat-2.0 各自独立
     let routes = vec![
-        test_route("1", "deepseek-v4-pro", "deepseek", "ds", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "LongCat-2.0", "longcat", "lc", "LongCat-2.0", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "deepseek-v4-pro",
+            "deepseek",
+            "ds",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "LongCat-2.0",
+            "longcat",
+            "lc",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
     // deepseek-v4-pro 唯一账号失败 → 500，不命中 LongCat
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(*seen.lock().unwrap(), vec!["key-ds".to_string()]);
@@ -2032,23 +2659,69 @@ async fn e2e_models_excludes_invalid_key_direct_model() {
     invalid_account.credential_status = "invalid_key".to_string();
     let accounts = vec![healthy_account, invalid_account];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "ok", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-flash", "deepseek", "ok", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "ok",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-flash",
+            "deepseek",
+            "ok",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
         // deepseek-v4-pro 同时有健康账号与 invalid 账号
-        test_route("3", "deepseek-v4-pro", "deepseek", "ok", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("4", "deepseek-v4-pro", "deepseek", "bad", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
+        test_route(
+            "3",
+            "deepseek-v4-pro",
+            "deepseek",
+            "ok",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "4",
+            "deepseek-v4-pro",
+            "deepseek",
+            "bad",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
         // deepseek-v4-flash 仅有 invalid 账号 → 不应出现
-        test_route("5", "deepseek-v4-flash", "deepseek", "bad", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
+        test_route(
+            "5",
+            "deepseek-v4-flash",
+            "deepseek",
+            "bad",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
     let response = forward_request(
         state,
-        Request::builder().method("GET").uri("/v1/models").body(Body::empty()).unwrap(),
+        Request::builder()
+            .method("GET")
+            .uri("/v1/models")
+            .body(Body::empty())
+            .unwrap(),
         ProtocolType::OpenAi,
     )
     .await
     .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let ids: Vec<&str> = value["data"]
         .as_array()
@@ -2067,18 +2740,24 @@ async fn e2e_models_excludes_invalid_key_direct_model() {
 #[tokio::test]
 async fn e2e_recovers_after_api_key_change() {
     // 第一轮：账号 A 401 → 标记 invalid_key
-    let (addr, _seen1) = spawn_spy_upstream(status_map(&[
-        ("old-key", StatusCode::UNAUTHORIZED),
-    ]))
-    .await;
+    let (addr, _seen1) =
+        spawn_spy_upstream(status_map(&[("old-key", StatusCode::UNAUTHORIZED)])).await;
     let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
     let accounts = vec![test_account("a", "deepseek", "old-key", 0)];
-    let routes = vec![
-        test_route("1", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-    ];
+    let routes = vec![test_route(
+        "1",
+        "deepseek-v4-pro",
+        "deepseek",
+        "a",
+        "deepseek-v4-pro",
+        ProtocolType::OpenAi,
+        0,
+    )];
     let state = build_test_state(channels, accounts, routes);
     let storage = state.storage.clone();
-    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     // 模拟用户修改 API Key 并保存：存储层重置 credential_status 为 healthy
@@ -2096,17 +2775,26 @@ async fn e2e_recovers_after_api_key_change() {
         .unwrap();
 
     // 第二轮：新 key 可用，不重启代理（从存储重建状态）
-    let (addr, seen2) = spawn_spy_upstream(status_map(&[
-        ("new-key", StatusCode::OK),
-    ]))
-    .await;
+    let (addr, seen2) = spawn_spy_upstream(status_map(&[("new-key", StatusCode::OK)])).await;
     let persisted = storage.list_channel_accounts().unwrap();
     let channels2 = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
-    let routes2 = vec![
-        test_route("1", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-    ];
+    let routes2 = vec![test_route(
+        "1",
+        "deepseek-v4-pro",
+        "deepseek",
+        "a",
+        "deepseek-v4-pro",
+        ProtocolType::OpenAi,
+        0,
+    )];
     let state2 = build_test_state(channels2, persisted, routes2);
-    let response2 = forward_request(state2, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response2 = forward_request(
+        state2,
+        chat_request("deepseek-v4-pro"),
+        ProtocolType::OpenAi,
+    )
+    .await
+    .unwrap();
     assert_eq!(response2.status(), StatusCode::OK);
     assert_eq!(*seen2.lock().unwrap(), vec!["new-key".to_string()]);
 }
@@ -2125,20 +2813,47 @@ async fn e2e_same_instance_excludes_401_account_on_next_request() {
         test_account("b", "deepseek", "key-b", 1),
     ];
     let routes = vec![
-        test_route("1", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "deepseek-v4-pro", "deepseek", "b", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
+        test_route(
+            "1",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "deepseek-v4-pro",
+            "deepseek",
+            "b",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
 
     // 第一次请求：A 401，不 fallback，A 被标记 invalid_key 并更新共享内存
-    let response = forward_request(state.clone(), chat_request("deepseek-v4-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(
+        state.clone(),
+        chat_request("deepseek-v4-pro"),
+        ProtocolType::OpenAi,
+    )
+    .await
+    .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(*seen.lock().unwrap(), vec!["key-a".to_string()]);
 
     // 第二次请求（同一 state，共享内存已更新）：A 被排除，命中 B
-    let response2 = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi).await.unwrap();
+    let response2 = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
     assert_eq!(response2.status(), StatusCode::OK);
-    assert_eq!(*seen.lock().unwrap(), vec!["key-a".to_string(), "key-b".to_string()]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["key-a".to_string(), "key-b".to_string()]
+    );
 }
 
 // test 11: 新账号保存兼容 — 缺省 credential_status 可反序列化（默认 healthy）
@@ -2170,34 +2885,110 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
     let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
     let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
     let routes = vec![
-        test_route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("2", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
-        test_route("3", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::Anthropic, 0),
-        test_route("4", "flowlet-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::Anthropic, 0),
-        test_route("5", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::OpenAi, 0),
-        test_route("6", "deepseek-v4-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::OpenAi, 0),
-        test_route("7", "deepseek-v4-pro", "deepseek", "a", "deepseek-v4-pro", ProtocolType::Anthropic, 0),
-        test_route("8", "deepseek-v4-flash", "deepseek", "a", "deepseek-v4-flash", ProtocolType::Anthropic, 0),
+        test_route(
+            "1",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "3",
+            "flowlet-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "4",
+            "flowlet-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "5",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "6",
+            "deepseek-v4-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "7",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::Anthropic,
+            0,
+        ),
+        test_route(
+            "8",
+            "deepseek-v4-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::Anthropic,
+            0,
+        ),
     ];
     let state = build_test_state(channels, accounts, routes);
 
     let openai = forward_request(
         state.clone(),
-        Request::builder().method("GET").uri("/v1/models").body(Body::empty()).unwrap(),
+        Request::builder()
+            .method("GET")
+            .uri("/v1/models")
+            .body(Body::empty())
+            .unwrap(),
         ProtocolType::OpenAi,
     )
     .await
     .unwrap();
     let anthropic = forward_request(
         state,
-        Request::builder().method("GET").uri("/anthropic/v1/models").body(Body::empty()).unwrap(),
+        Request::builder()
+            .method("GET")
+            .uri("/anthropic/v1/models")
+            .body(Body::empty())
+            .unwrap(),
         ProtocolType::Anthropic,
     )
     .await
     .unwrap();
 
-    let openai_body = axum::body::to_bytes(openai.into_body(), usize::MAX).await.unwrap();
-    let anthropic_body = axum::body::to_bytes(anthropic.into_body(), usize::MAX).await.unwrap();
+    let openai_body = axum::body::to_bytes(openai.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let anthropic_body = axum::body::to_bytes(anthropic.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let openai_value: serde_json::Value = serde_json::from_slice(&openai_body).unwrap();
     let anthropic_value: serde_json::Value = serde_json::from_slice(&anthropic_body).unwrap();
 
@@ -2213,8 +3004,24 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
         .iter()
         .map(|m| m["id"].as_str().unwrap())
         .collect();
-    assert_eq!(openai_ids, vec!["flowlet-pro", "flowlet-flash", "deepseek-v4-flash", "deepseek-v4-pro"]);
-    assert_eq!(anthropic_ids, vec!["flowlet-pro", "flowlet-flash", "deepseek-v4-flash", "deepseek-v4-pro"]);
+    assert_eq!(
+        openai_ids,
+        vec![
+            "flowlet-pro",
+            "flowlet-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
+        ]
+    );
+    assert_eq!(
+        anthropic_ids,
+        vec![
+            "flowlet-pro",
+            "flowlet-flash",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
+        ]
+    );
     // 不暴露账号名称
     assert!(!openai_body.to_vec().windows(4).any(|w| w == b"acc-"));
 }

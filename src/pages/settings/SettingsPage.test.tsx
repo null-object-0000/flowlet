@@ -52,12 +52,16 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("heading", { name: "应用设置" })).toBeInTheDocument();
     expect(screen.getByText("显示语言")).toBeInTheDocument();
     expect(screen.getByText("界面外观")).toBeInTheDocument();
-    expect(screen.getByText("配置 Flowlet 的系统启动行为")).toBeInTheDocument();
+    expect(screen.getByText("系统启动")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "显示语言" })).toHaveTextContent("简体中文");
+    expect(screen.getByRole("combobox", { name: "界面外观" })).toHaveTextContent("跟随系统");
     expect(screen.getByRole("switch", { name: "开机启动" })).toBeInTheDocument();
-    expect(screen.getByText("本地数据修复")).toBeInTheDocument();
+    expect(screen.queryByText("本地数据修复")).not.toBeInTheDocument();
+    expect(screen.getByText("根据已捕获的请求与响应，补全会话归因、Token 用量和预估费用。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "开始修复" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "修复时间范围" })).toHaveTextContent("全部时间");
     expect(screen.getByText("数据管理")).toBeInTheDocument();
+    expect(screen.getByText("导入备份会覆盖现有数据，并自动重启代理。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出数据" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入数据" })).toBeInTheDocument();
   });

@@ -1,60 +1,408 @@
-.page { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
-.header { min-height: 44px; display: grid; align-content: center; gap: 3px; }
-.header h3 { margin: 0; color: var(--flowlet-color-text); font-size: 20px; line-height: 1.2; }
-.header p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: 13px; }
-.content { min-height: 0; padding-right: 3px; display: grid; grid-template-rows: auto auto auto auto auto; align-content: start; gap: 10px; overflow: auto; }
-.section { min-width: 0; min-height: 0; display: grid; grid-template-columns: 234px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
-.sectionHeader { min-width: 0; padding: 18px 16px; display: flex; align-items: flex-start; gap: 11px; border-right: 1px solid var(--flowlet-color-border); background: color-mix(in srgb, var(--flowlet-color-surface-muted) 72%, transparent); }
-.sectionHeader > i { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-size: 17px; font-style: normal; }
-.sectionHeader > span { min-width: 0; padding-top: 1px; display: grid; align-content: start; gap: 4px; }
-.sectionHeader strong { color: var(--flowlet-color-text); font-size: 15px; }
-.sectionHeader small { color: var(--flowlet-color-text-secondary); font-size: 12px; line-height: 1.5; }
-.optionGrid, .themeGrid { width: auto; min-width: 0; margin: 14px 16px; display: grid; gap: 10px; }
-.optionGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-self: center; }
-.themeGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.choice, .themeChoice { position: relative; min-width: 0; border: 1px solid var(--flowlet-color-border-strong); border-radius: 9px; color: var(--flowlet-color-text); background: color-mix(in srgb, var(--flowlet-color-surface-strong) 68%, transparent); text-align: left; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
-.choice:hover, .themeChoice:hover { border-color: color-mix(in srgb, var(--semi-color-primary) 45%, transparent); transform: translateY(-1px); }
-.choice.selected, .themeChoice.selected { border-color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--semi-color-primary) 8%, transparent); }
-.choice { height: 76px; padding: 12px 14px; display: flex; align-items: center; }
-.choice > span { min-width: 0; display: grid; gap: 3px; }
-.choice strong { font-size: 15px; }
-.choice small { color: var(--flowlet-color-text-secondary); font-size: 12px; }
-.themeChoice { height: 144px; padding: 12px; display: grid; grid-template-columns: 1fr; grid-template-rows: 76px auto; align-content: start; gap: 9px; }
-.themeChoice > i { width: 100%; height: 72px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 7px; color: var(--flowlet-color-text-secondary); background: linear-gradient(145deg, var(--flowlet-color-sidebar-bg) 0 28%, var(--flowlet-color-surface-muted) 28% 100%); font-size: 22px; font-style: normal; }
-.themeChoice.selected > i { color: var(--semi-color-primary); border-color: color-mix(in srgb, var(--semi-color-primary) 22%, transparent); }
-.themeChoice > span { min-width: 0; display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px; }
-.themeChoice strong { font-size: 13px; }
-.themeChoice small { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
-.switchRow { min-width: 0; min-height: 72px; margin: 13px 16px; padding: 10px 13px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border: 1px solid var(--flowlet-color-border); border-radius: 9px; background: var(--flowlet-color-surface-muted); }
-.switchRow > span { min-width: 0; display: grid; gap: 4px; }
-.switchRow strong { color: var(--flowlet-color-text); font-size: 14px; }
-.switchRow small { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 12px; line-height: 1.45; white-space: nowrap; text-overflow: ellipsis; }
-.switchRow button { width: max-content; padding: 0; border: 0; color: var(--semi-color-danger); background: transparent; font-size: 12px; cursor: pointer; }
-.repairPanel { min-width: 0; margin: 12px 16px; display: grid; align-content: start; gap: 9px; }
-.repairIntro { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.repairIntro > span { min-width: 0; display: grid; gap: 3px; }
-.repairIntro strong { color: var(--flowlet-color-text); font-size: 14px; }
-.repairIntro small { color: var(--flowlet-color-text-secondary); font-size: 11px; line-height: 1.45; }
-.repairControls { flex: none; display: flex; align-items: center; gap: 8px; }
-.repairControlLabel { color: var(--flowlet-color-text-secondary); font-size: 11px; white-space: nowrap; }
-.repairControls > div { width: 116px; }
-.repairControls button { flex: none; }
-.repairStages { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
-.repairStage { min-width: 0; padding: 7px 8px; display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: start; gap: 7px; border: 1px solid var(--flowlet-color-border); border-radius: 7px; background: var(--flowlet-color-surface-muted); }
-.repairStage > i { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--flowlet-color-border-strong); }
-.repairStage > span { min-width: 0; display: grid; gap: 2px; }
-.repairStage strong { color: var(--flowlet-color-text); font-size: 11px; }
-.repairStage small { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
-.repairStage.running > i { background: var(--semi-color-primary); box-shadow: 0 0 0 3px var(--semi-color-primary-light-default); }
-.repairStage.completed > i { background: var(--semi-color-success); }
-.repairStage.error > i { background: var(--semi-color-danger); }
-.repairError { margin: 0; overflow: hidden; color: var(--semi-color-danger); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
-.dataPanel { min-width: 0; margin: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.dataPanelExporting { min-width: 0; margin: 6px 16px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: start; gap: 6px 16px; }
-.dataPanelExporting > span { min-width: 0; display: grid; gap: 3px; }
-.dataPanel > span { min-width: 0; display: grid; gap: 3px; }
-.dataPanel strong { color: var(--flowlet-color-text); font-size: 13px; }
-.dataPanel small { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 11px; line-height: 1.45; white-space: nowrap; text-overflow: ellipsis; }
-.dataButtons { flex: none; display: flex; gap: 8px; }
-.dataProgress { grid-column: 1 / -1; margin-top: 2px; }
-@media (max-width: 800px) { .content { overflow: auto; grid-template-rows: auto; } .section { grid-template-columns: 1fr; } .sectionHeader { border-right: 0; border-bottom: 1px solid var(--flowlet-color-border); } }
+.page {
+  width: 100%;
+  max-width: 1040px;
+  height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+}
+
+.header {
+  min-height: 56px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+}
+
+.header h3 {
+  margin: 0;
+  color: var(--flowlet-color-text);
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.header p {
+  margin: 0;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 13px;
+}
+
+.content {
+  min-height: 0;
+  padding: 1px 4px 12px 1px;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.preferencesCard,
+.section {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: var(--flowlet-radius-card);
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+}
+
+.preferencesCard {
+  min-height: 122px;
+  padding: 22px 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.preferenceField {
+  min-width: 0;
+  padding: 0 28px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.preferenceField + .preferenceField {
+  border-left: 1px solid var(--flowlet-color-border);
+}
+
+.preferenceField > i {
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--flowlet-color-text);
+  font-size: 22px;
+  font-style: normal;
+}
+
+.preferenceBody {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.preferenceBody > strong {
+  color: var(--flowlet-color-text);
+  font-size: 15px;
+  line-height: 28px;
+}
+
+.selectControl {
+  width: 100%;
+}
+
+.autostartControl {
+  min-width: 0;
+  min-height: var(--flowlet-control-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.autostartControl > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.autostartControl small {
+  overflow: hidden;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.autostartControl button {
+  width: max-content;
+  padding: 0;
+  border: 0;
+  color: var(--semi-color-danger);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.section {
+  display: grid;
+}
+
+.managementContent {
+  min-width: 0;
+  display: grid;
+}
+
+.sectionHeader {
+  min-width: 0;
+  padding: 17px 28px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  border-bottom: 1px solid var(--flowlet-color-border);
+}
+
+.sectionHeader > i {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--semi-color-primary);
+  font-size: 21px;
+  font-style: normal;
+}
+
+.sectionHeader > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.sectionHeader strong {
+  color: var(--flowlet-color-text);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.sectionHeader small {
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.repairPanel {
+  min-width: 0;
+  padding: 17px 28px 20px;
+  display: grid;
+  align-content: start;
+  gap: 13px;
+}
+
+.repairIntro {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+}
+
+.repairIntro > span,
+.dataPanel > span,
+.dataPanelExporting > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.repairIntro strong,
+.dataPanel strong,
+.dataPanelExporting strong {
+  color: var(--flowlet-color-text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.repairIntro small,
+.dataPanel small,
+.dataPanelExporting small {
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.repairIntro > span {
+  max-width: 560px;
+}
+
+.repairControls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.repairControlLabel {
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.repairControls > div {
+  width: 142px;
+}
+
+.repairControls button {
+  flex: none;
+}
+
+.repairStages {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.repairStage {
+  min-width: 0;
+  min-height: 58px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  background: var(--flowlet-color-surface-muted);
+}
+
+.repairStage > i {
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--flowlet-color-border-strong);
+}
+
+.repairStage > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.repairStage strong {
+  color: var(--flowlet-color-text);
+  font-size: 12px;
+}
+
+.repairStage small {
+  overflow: hidden;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.repairStage.running > i {
+  background: var(--semi-color-primary);
+  box-shadow: 0 0 0 3px var(--semi-color-primary-light-default);
+}
+
+.repairStage.completed > i {
+  background: var(--semi-color-success);
+}
+
+.repairStage.error > i {
+  background: var(--semi-color-danger);
+}
+
+.repairError {
+  margin: 0;
+  overflow: hidden;
+  color: var(--semi-color-danger);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dataPanel,
+.dataPanelExporting {
+  min-width: 0;
+  padding: 18px 28px;
+  align-items: center;
+  gap: 10px 24px;
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.dataPanel {
+  display: flex;
+  justify-content: space-between;
+}
+
+.dataPanelExporting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.dataButtons {
+  flex: none;
+  display: flex;
+  gap: 10px;
+}
+
+.dataProgress {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 860px) {
+  .preferencesCard {
+    grid-template-columns: 1fr;
+    padding: 0 20px;
+  }
+
+  .preferenceField {
+    padding: 16px 0;
+  }
+
+  .preferenceField + .preferenceField {
+    border-top: 1px solid var(--flowlet-color-border);
+    border-left: 0;
+  }
+
+  .repairIntro {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .repairControls {
+    width: 100%;
+  }
+
+  .repairControls > div {
+    flex: 1;
+    width: auto;
+  }
+
+  .repairStages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .sectionHeader,
+  .repairPanel,
+  .dataPanel,
+  .dataPanelExporting {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .repairControls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .repairControlLabel {
+    white-space: normal;
+  }
+
+  .repairStages {
+    grid-template-columns: 1fr;
+  }
+
+  .dataPanel,
+  .dataPanelExporting {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .dataButtons {
+    justify-content: flex-end;
+  }
+}

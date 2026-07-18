@@ -24,4 +24,13 @@ describe("agentSessionCommands contract", () => {
     expect(await agentSessionCommands.clients()).toEqual([{ id: "opencode", name: "OpenCode" }]);
     expect(invokeMock).toHaveBeenCalledWith("list_agent_session_clients", undefined);
   });
+
+  it("lists direct child sessions for a main session", async () => {
+    invokeMock.mockResolvedValueOnce([]);
+    await agentSessionCommands.children("opencode", "ses_main");
+    expect(invokeMock).toHaveBeenCalledWith("list_agent_session_children", {
+      agentType: "opencode",
+      parentSessionId: "ses_main",
+    });
+  });
 });

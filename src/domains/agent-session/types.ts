@@ -8,9 +8,13 @@ export type AgentSessionFilter = {
 export type AgentSessionRow = {
   agentType: "opencode" | "claude-code";
   sessionId: string;
+  title: string | null;
+  projectPath: string | null;
   parentSessionId: string | null;
   clientId: string | null;
   clientName: string | null;
+  nativeStartedAt: string | null;
+  nativeUpdatedAt: string | null;
   startedAt: string;
   updatedAt: string;
   requestCount: number;

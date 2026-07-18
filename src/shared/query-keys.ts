@@ -50,6 +50,7 @@ export const queryKeys = {
   agentSession: {
     all: ["agent-session"] as const,
     list: (filter: unknown) => [...queryKeys.agentSession.all, "list", filter] as const,
+    children: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "children", agentType, sessionId] as const,
     clients: () => [...queryKeys.agentSession.all, "clients"] as const,
   },
   agent: {

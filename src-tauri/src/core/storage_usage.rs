@@ -310,24 +310,135 @@ impl Storage {
         let pattern = format!("%{}%", filter.search.trim());
         let client_id = filter.client_id.trim();
 
-        let total = connection.query_row(
+        let mut stmt = connection.prepare(
             r#"
-            SELECT COUNT(*) FROM (
-                SELECT agent_type, agent_session_id
-                FROM request_logs
-                WHERE is_last_attempt = 1
-                  AND agent_session_id IS NOT NULL
-                  AND (?1 = '%%' OR agent_session_id LIKE ?1
-                       OR COALESCE(parent_agent_session_id, '') LIKE ?1)
-                GROUP BY agent_type, agent_session_id
-                HAVING ?2 = '' OR SUM(CASE
-                    WHEN (?2 = '__unknown__' AND client_id IS NULL) OR client_id = ?2 THEN 1 ELSE 0
-                END) > 0
-            )
+            SELECT
+                rl.agent_type,
+                rl.agent_session_id,
+                MAX(rl.parent_agent_session_id),
+                MAX(rl.client_id),
+                MAX(rl.client_name),
+                MIN(rl.created_at),
+                MAX(rl.created_at),
+                COUNT(DISTINCT rl.request_id),
+                SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 0 ELSE 1 END),
+                COALESCE(SUM(ur.total_tokens), 0),
+                COALESCE(SUM(ur.estimated_cost), 0),
+                COUNT(*) OVER()
+            FROM request_logs rl
+            LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+            WHERE rl.is_last_attempt = 1
+              AND rl.agent_session_id IS NOT NULL
+              AND (?1 = '%%' OR rl.agent_session_id LIKE ?1
+                   OR EXISTS (
+                       SELECT 1
+                       FROM request_logs child
+                       WHERE child.is_last_attempt = 1
+                         AND child.agent_type = rl.agent_type
+                         AND child.parent_agent_session_id = rl.agent_session_id
+                         AND child.agent_session_id LIKE ?1
+                   ))
+            GROUP BY rl.agent_type, rl.agent_session_id
+            HAVING MAX(NULLIF(TRIM(rl.parent_agent_session_id), '')) IS NULL
+               AND (?2 = '' OR SUM(CASE
+                   WHEN (?2 = '__unknown__' AND rl.client_id IS NULL) OR rl.client_id = ?2 THEN 1 ELSE 0
+               END) > 0)
+            ORDER BY MAX(rl.created_at) DESC
+            LIMIT ?3 OFFSET ?4
             "#,
-            params![pattern, client_id],
-            |row| row.get(0),
         )?;
+        let mut total = 0;
+        let mapped = stmt.query_map(
+            params![pattern, client_id, i64::from(page_size), offset],
+            |row| {
+                Ok((
+                    AgentSessionRow {
+                        agent_type: row.get(0)?,
+                        session_id: row.get(1)?,
+                        title: None,
+                        project_path: None,
+                        parent_session_id: row.get(2)?,
+                        client_id: row.get(3)?,
+                        client_name: row.get(4)?,
+                        native_started_at: None,
+                        native_updated_at: None,
+                        started_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                        request_count: row.get(7)?,
+                        success_count: row.get(8)?,
+                        error_count: row.get(9)?,
+                        known_tokens: row.get(10)?,
+                        estimated_cost: row.get(11)?,
+                    },
+                    row.get::<_, i64>(12)?,
+                ))
+            },
+        )?;
+        let mut rows = mapped
+            .map(|result| {
+                result.map(|(row, row_total)| {
+                    total = row_total;
+                    row
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // 页码因清理日志等操作越界时，窗口查询没有行可携带 total。
+        // 仅在这种罕见场景补一次轻量计数，正常加载始终只做一遍分组聚合。
+        if rows.is_empty() && page > 1 {
+            total = connection.query_row(
+                r#"
+                SELECT COUNT(*) FROM (
+                    SELECT agent_type, agent_session_id
+                    FROM request_logs
+                    WHERE is_last_attempt = 1
+                      AND agent_session_id IS NOT NULL
+                      AND (?1 = '%%' OR agent_session_id LIKE ?1
+                           OR EXISTS (
+                               SELECT 1
+                               FROM request_logs child
+                               WHERE child.is_last_attempt = 1
+                                 AND child.agent_type = request_logs.agent_type
+                                 AND child.parent_agent_session_id = request_logs.agent_session_id
+                                 AND child.agent_session_id LIKE ?1
+                           ))
+                    GROUP BY agent_type, agent_session_id
+                    HAVING MAX(NULLIF(TRIM(parent_agent_session_id), '')) IS NULL
+                       AND (?2 = '' OR SUM(CASE
+                           WHEN (?2 = '__unknown__' AND client_id IS NULL) OR client_id = ?2 THEN 1 ELSE 0
+                       END) > 0)
+                )
+                "#,
+                params![pattern, client_id],
+                |row| row.get(0),
+            )?;
+        }
+        drop(stmt);
+        drop(connection);
+        crate::core::agent_session_metadata::enrich_agent_sessions(&mut rows);
+        Ok(AgentSessionsPageResult {
+            rows,
+            total,
+            page,
+            page_size,
+        })
+    }
+
+    pub fn list_agent_session_children(
+        &self,
+        agent_type: &str,
+        parent_session_id: &str,
+    ) -> Result<Vec<AgentSessionRow>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let agent_type = agent_type.trim();
+        let parent_session_id = parent_session_id.trim();
+        if agent_type.is_empty() || parent_session_id.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let mut stmt = connection.prepare(
             r#"
@@ -347,43 +458,38 @@ impl Storage {
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             WHERE rl.is_last_attempt = 1
+              AND rl.agent_type = ?1
               AND rl.agent_session_id IS NOT NULL
-              AND (?1 = '%%' OR rl.agent_session_id LIKE ?1
-                   OR COALESCE(rl.parent_agent_session_id, '') LIKE ?1)
+              AND rl.parent_agent_session_id = ?2
             GROUP BY rl.agent_type, rl.agent_session_id
-            HAVING ?2 = '' OR SUM(CASE
-                WHEN (?2 = '__unknown__' AND rl.client_id IS NULL) OR rl.client_id = ?2 THEN 1 ELSE 0
-            END) > 0
             ORDER BY MAX(rl.created_at) DESC
-            LIMIT ?3 OFFSET ?4
             "#,
         )?;
-        let mapped = stmt.query_map(
-            params![pattern, client_id, i64::from(page_size), offset],
-            |row| {
-                Ok(AgentSessionRow {
-                    agent_type: row.get(0)?,
-                    session_id: row.get(1)?,
-                    parent_session_id: row.get(2)?,
-                    client_id: row.get(3)?,
-                    client_name: row.get(4)?,
-                    started_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    request_count: row.get(7)?,
-                    success_count: row.get(8)?,
-                    error_count: row.get(9)?,
-                    known_tokens: row.get(10)?,
-                    estimated_cost: row.get(11)?,
-                })
-            },
-        )?;
-        let rows = mapped.collect::<Result<Vec<_>, _>>()?;
-        Ok(AgentSessionsPageResult {
-            rows,
-            total,
-            page,
-            page_size,
-        })
+        let mapped = stmt.query_map(params![agent_type, parent_session_id], |row| {
+            Ok(AgentSessionRow {
+                agent_type: row.get(0)?,
+                session_id: row.get(1)?,
+                title: None,
+                project_path: None,
+                parent_session_id: row.get(2)?,
+                client_id: row.get(3)?,
+                client_name: row.get(4)?,
+                native_started_at: None,
+                native_updated_at: None,
+                started_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                request_count: row.get(7)?,
+                success_count: row.get(8)?,
+                error_count: row.get(9)?,
+                known_tokens: row.get(10)?,
+                estimated_cost: row.get(11)?,
+            })
+        })?;
+        let mut rows = mapped.collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        drop(connection);
+        crate::core::agent_session_metadata::enrich_agent_sessions(&mut rows);
+        Ok(rows)
     }
 
     pub fn list_agent_session_clients(&self) -> Result<Vec<LogFilterClient>, StorageError> {
@@ -1290,10 +1396,12 @@ impl Storage {
         };
 
         let time_clause = match filter.time_range.as_str() {
-            "1h" => Some("datetime(rl.created_at) >= datetime('now', '-1 hour')"),
-            "6h" => Some("datetime(rl.created_at) >= datetime('now', '-6 hours')"),
-            "today" => Some("datetime(rl.created_at, 'localtime') >= datetime('now', 'localtime', 'start of day')"),
-            "7d" => Some("datetime(rl.created_at) >= datetime('now', '-7 days')"),
+            // created_at 由 SQLite datetime('now') 统一写成 UTC 的可排序文本。
+            // 不在列上套 datetime()，让 (is_last_attempt, created_at) 索引能做范围扫描。
+            "1h" => Some("rl.created_at >= datetime('now', '-1 hour')"),
+            "6h" => Some("rl.created_at >= datetime('now', '-6 hours')"),
+            "today" => Some("rl.created_at >= datetime('now', 'localtime', 'start of day', 'utc')"),
+            "7d" => Some("rl.created_at >= datetime('now', '-7 days')"),
             _ => None,
         };
 
@@ -1335,18 +1443,6 @@ impl Storage {
         }
 
         let where_sql = format!("WHERE {}", clauses.join(" AND "));
-
-        // COUNT
-        let count_sql = format!("SELECT COUNT(*) FROM request_logs rl {where_sql}");
-        let count_start = std::time::Instant::now();
-        let total: i64 =
-            connection.query_row(&count_sql, rusqlite::params_from_iter(refs.iter()), |row| {
-                row.get(0)
-            })?;
-        let count_ms = count_start.elapsed().as_millis();
-        if count_ms > 200 {
-            tracing::warn!(count_ms, total, "request_logs COUNT 慢查询");
-        }
 
         let summary_sql = format!(
             r#"
@@ -1397,6 +1493,8 @@ impl Storage {
                 })
             },
         )?;
+        // 汇总查询的 COUNT(*) 与分页总数使用完全相同的筛选条件，不再重复扫描一次日志表。
+        let total = summary.request_count;
 
         // 分页查询
         let offset = (page as i64 - 1) * page_size as i64;

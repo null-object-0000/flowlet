@@ -36,17 +36,17 @@ export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
 
 /** Per-channel Flowlet aggregate tier mapping. Must stay in sync with
  *  config.json channels_config.flowlet_tiers. */
-export const FLOWLET_TIER_BY_CHANNEL_MODEL: Record<string, Record<string, "pro" | "flash">> = {
+export const FLOWLET_TIERS_BY_CHANNEL_MODEL: Record<string, Record<string, Array<"pro" | "flash">>> = {
   longcat: {
-    "longcat-2.0": "pro",
+    "longcat-2.0": ["pro", "flash"],
   },
   deepseek: {
-    "deepseek-v4-pro": "pro",
-    "deepseek-v4-flash": "flash",
+    "deepseek-v4-pro": ["pro"],
+    "deepseek-v4-flash": ["flash"],
   },
   kimi: {
-    "kimi-k3": "pro",
-    "kimi-k2.7-code": "pro",
+    "kimi-k3": ["pro"],
+    "kimi-k2.7-code": ["pro"],
   },
 };
 

@@ -1,5 +1,7 @@
+use super::config::{
+    AuthStrategy, ChannelAccount, ChannelPreset, ModelPrice, ProtocolType, RouteCandidate,
+};
 use serde::Deserialize;
-use super::config::{AuthStrategy, ChannelPreset, ModelPrice, ProtocolType};
 
 /// 编译时随应用固化的默认配置。
 ///
@@ -18,7 +20,24 @@ pub struct ChannelConfigJson {
     #[serde(default)]
     pub default_exposed_models: std::collections::HashMap<String, Vec<String>>,
     #[serde(default)]
-    pub flowlet_tiers: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    pub flowlet_tiers:
+        std::collections::HashMap<String, std::collections::HashMap<String, FlowletTiersJson>>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum FlowletTiersJson {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl FlowletTiersJson {
+    fn into_vec(self) -> Vec<String> {
+        match self {
+            Self::One(tier) => vec![tier],
+            Self::Many(tiers) => tiers,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -81,7 +100,8 @@ pub struct ChannelsConfig {
     pub presets: Vec<ChannelPreset>,
     pub prices: Vec<ModelPrice>,
     pub default_exposed_models: std::collections::HashMap<String, Vec<String>>,
-    pub flowlet_tiers: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    pub flowlet_tiers:
+        std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
     /// 每个渠道的端点覆盖，key 为 channel_id → (endpoint_key → url)
     pub endpoints: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
 }
@@ -99,39 +119,48 @@ impl ChannelsConfig {
         let now = chrono::Utc::now().to_rfc3339();
 
         // 必须先 borrow 出 endpoints（不能与下面的 into_iter 同周期 move）
-        let endpoints: std::collections::HashMap<String, std::collections::HashMap<String, String>> = json
+        let endpoints: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, String>,
+        > = json
             .channels
             .iter()
             .map(|c| (c.id.clone(), c.endpoints.clone()))
             .collect();
 
-        let presets: Vec<ChannelPreset> = json.channels.into_iter().map(|c| {
-            let protocols = parse_protocols(&c.supported_protocols);
-            ChannelPreset {
-                id: c.id,
-                name: c.name,
-                vendor: c.vendor,
-                supported_protocols: protocols,
-                openai_base_url: c.openai_base_url,
-                anthropic_base_url: c.anthropic_base_url,
-                openai_auth: parse_auth_strategy(&c.openai_auth),
-                anthropic_auth: parse_auth_strategy(&c.anthropic_auth),
-                default_model: c.default_model,
-                small_model: c.small_model,
-                timeout_seconds: None,
-                supports_model_list: c.supports_model_list,
-                supports_model_detail: c.supports_model_detail,
-                supports_balance_query: c.supports_balance_query,
-                supports_quota_query: c.supports_quota_query,
-                supports_usage_query: c.supports_usage_query,
-                platform_url: c.platform_url,
-                created_at: now.clone(),
-                updated_at: now.clone(),
-            }
-        }).collect();
+        let presets: Vec<ChannelPreset> = json
+            .channels
+            .into_iter()
+            .map(|c| {
+                let protocols = parse_protocols(&c.supported_protocols);
+                ChannelPreset {
+                    id: c.id,
+                    name: c.name,
+                    vendor: c.vendor,
+                    supported_protocols: protocols,
+                    openai_base_url: c.openai_base_url,
+                    anthropic_base_url: c.anthropic_base_url,
+                    openai_auth: parse_auth_strategy(&c.openai_auth),
+                    anthropic_auth: parse_auth_strategy(&c.anthropic_auth),
+                    default_model: c.default_model,
+                    small_model: c.small_model,
+                    timeout_seconds: None,
+                    supports_model_list: c.supports_model_list,
+                    supports_model_detail: c.supports_model_detail,
+                    supports_balance_query: c.supports_balance_query,
+                    supports_quota_query: c.supports_quota_query,
+                    supports_usage_query: c.supports_usage_query,
+                    platform_url: c.platform_url,
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                }
+            })
+            .collect();
 
-        let prices: Vec<ModelPrice> = json.model_prices.into_iter().map(|p| {
-            ModelPrice {
+        let prices: Vec<ModelPrice> = json
+            .model_prices
+            .into_iter()
+            .map(|p| ModelPrice {
                 id: format!("price-{}-{}", p.channel_id, p.upstream_model),
                 channel_id: p.channel_id,
                 upstream_model: p.upstream_model,
@@ -142,28 +171,33 @@ impl ChannelsConfig {
                 unit: p.unit,
                 created_at: now.clone(),
                 updated_at: now.clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
-
+        let flowlet_tiers = json
+            .flowlet_tiers
+            .into_iter()
+            .map(|(channel_id, models)| {
+                let models = models
+                    .into_iter()
+                    .map(|(model, tiers)| (model, tiers.into_vec()))
+                    .collect();
+                (channel_id, models)
+            })
+            .collect();
 
         Ok(Self {
             presets,
             prices,
             default_exposed_models: json.default_exposed_models,
-            flowlet_tiers: json.flowlet_tiers,
+            flowlet_tiers,
             endpoints,
         })
     }
 
     /// 从指定渠道的 endpoints 覆盖中读取一个端点 URL，缺失时调用
     /// fallback 基于 openai_base_url 拼接，再缺失则返回 default。
-    fn endpoint_or<F>(
-        &self,
-        channel_id: &str,
-        key: &str,
-        fallback: F,
-    ) -> String
+    fn endpoint_or<F>(&self, channel_id: &str, key: &str, fallback: F) -> String
     where
         F: FnOnce(&ChannelPreset) -> String,
     {
@@ -222,14 +256,14 @@ impl ChannelsConfig {
         })
     }
 
-    /// 获取 Flowlet 档位
-    pub fn flowlet_tier(&self, channel_id: &str, model: &str) -> String {
+    /// 获取模型所属的全部 Flowlet 档位。
+    pub fn flowlet_tiers(&self, channel_id: &str, model: &str) -> Vec<String> {
         let normalized = model.trim().to_lowercase();
         self.flowlet_tiers
             .get(channel_id)
             .and_then(|m| m.get(&normalized))
             .cloned()
-            .unwrap_or_else(|| "none".to_string())
+            .unwrap_or_default()
     }
 
     /// 获取默认开放模型列表
@@ -238,6 +272,81 @@ impl ChannelsConfig {
             .get(channel_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// 为现有账号补齐配置声明的直连模型与 Flowlet 聚合模型路由。
+    ///
+    /// 只追加缺失签名，不覆盖用户已有的启停状态、优先级和时间戳。
+    pub fn merge_default_routes(
+        &self,
+        existing: &[RouteCandidate],
+        accounts: &[ChannelAccount],
+        presets: &[ChannelPreset],
+    ) -> Vec<RouteCandidate> {
+        let mut merged = existing.to_vec();
+        let mut signatures: std::collections::HashSet<String> =
+            existing.iter().map(route_signature).collect();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        for preset in presets {
+            let upstream_models = self.default_exposed_models(&preset.id);
+            for protocol in &preset.supported_protocols {
+                for (model_index, upstream_model) in upstream_models.iter().enumerate() {
+                    let tiers = self.flowlet_tiers(&preset.id, upstream_model);
+                    let public_models: Vec<String> = std::iter::once(upstream_model.clone())
+                        .chain(tiers.into_iter().map(|tier| format!("flowlet-{tier}")))
+                        .collect();
+                    for (account_index, account) in accounts
+                        .iter()
+                        .filter(|account| {
+                            account.channel_id == preset.id
+                                && account.enabled
+                                && !account.api_key.trim().is_empty()
+                        })
+                        .enumerate()
+                    {
+                        for public_model in &public_models {
+                            let route = RouteCandidate {
+                                id: if public_model == upstream_model {
+                                    format!(
+                                        "route-{}-{}-{}-{}-{}",
+                                        account.id,
+                                        upstream_model,
+                                        protocol.as_str(),
+                                        model_index,
+                                        account_index
+                                    )
+                                } else {
+                                    format!(
+                                        "route-{}-{}-{}-{}-{}-{}",
+                                        account.id,
+                                        public_model,
+                                        upstream_model,
+                                        protocol.as_str(),
+                                        model_index,
+                                        account_index
+                                    )
+                                },
+                                virtual_model_id: public_model.clone(),
+                                channel_id: preset.id.clone(),
+                                account_id: account.id.clone(),
+                                upstream_model: upstream_model.clone(),
+                                client_protocol: protocol.clone(),
+                                priority: account_index as i64,
+                                enabled: true,
+                                created_at: now.clone(),
+                                updated_at: now.clone(),
+                            };
+                            if signatures.insert(route_signature(&route)) {
+                                merged.push(route);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        merged
     }
 
     /// 获取指定渠道的 models 端点 URL（用于测试连接）。
@@ -260,6 +369,17 @@ impl ChannelsConfig {
             }
         })
     }
+}
+
+fn route_signature(route: &RouteCandidate) -> String {
+    [
+        route.virtual_model_id.as_str(),
+        route.channel_id.as_str(),
+        route.account_id.as_str(),
+        route.upstream_model.as_str(),
+        route.client_protocol.as_str(),
+    ]
+    .join("\0")
 }
 
 fn parse_protocols(raw: &[String]) -> Vec<ProtocolType> {
@@ -344,11 +464,70 @@ mod tests {
         let config = ChannelsConfig::from_config_json(&json).unwrap();
         assert_eq!(config.presets.len(), 1);
         assert_eq!(config.prices.len(), 1);
-        assert_eq!(config.default_exposed_models("deepseek"), vec!["deepseek-v4-flash".to_string()]);
-        assert_eq!(config.flowlet_tier("deepseek", "deepseek-v4-flash"), "flash");
+        assert_eq!(
+            config.default_exposed_models("deepseek"),
+            vec!["deepseek-v4-flash".to_string()]
+        );
+        assert_eq!(
+            config.flowlet_tiers("deepseek", "deepseek-v4-flash"),
+            vec!["flash".to_string()]
+        );
         // 覆盖端点生效
-        assert_eq!(config.deepseek_models_endpoint(), "https://api.deepseek.com/models");
-        assert_eq!(config.balance_endpoint(), "https://api.deepseek.com/user/balance");
-        assert_eq!(config.models_endpoint_url("deepseek").as_deref(), Some("https://api.deepseek.com/models"));
+        assert_eq!(
+            config.deepseek_models_endpoint(),
+            "https://api.deepseek.com/models"
+        );
+        assert_eq!(
+            config.balance_endpoint(),
+            "https://api.deepseek.com/user/balance"
+        );
+        assert_eq!(
+            config.models_endpoint_url("deepseek").as_deref(),
+            Some("https://api.deepseek.com/models")
+        );
+    }
+
+    #[test]
+    fn maps_one_upstream_model_to_multiple_flowlet_tiers() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "longcat",
+                    "name": "LongCat",
+                    "vendor": "longcat",
+                    "supported_protocols": ["openai", "anthropic"]
+                }],
+                "default_exposed_models": {
+                    "longcat": ["LongCat-2.0"]
+                },
+                "flowlet_tiers": {
+                    "longcat": {
+                        "longcat-2.0": ["pro", "flash"]
+                    }
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let account = ChannelAccount {
+            id: "longcat-account".to_string(),
+            channel_id: "longcat".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            ..Default::default()
+        };
+
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        assert_eq!(routes.len(), 6);
+        for protocol in [ProtocolType::OpenAi, ProtocolType::Anthropic] {
+            let public_models: Vec<&str> = routes
+                .iter()
+                .filter(|route| route.client_protocol == protocol)
+                .map(|route| route.virtual_model_id.as_str())
+                .collect();
+            assert_eq!(
+                public_models,
+                vec!["LongCat-2.0", "flowlet-pro", "flowlet-flash"]
+            );
+        }
     }
 }

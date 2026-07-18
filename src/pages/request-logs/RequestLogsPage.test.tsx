@@ -80,4 +80,33 @@ describe("RequestLogsPage", () => {
     expect(screen.queryByText("敏感凭据已隐藏")).not.toBeInTheDocument();
     expect(screen.getByText(/secret-key/)).toBeInTheDocument();
   });
+
+  it("distinguishes the inbound URL from a missing upstream route", async () => {
+    const user = userEvent.setup();
+    mocks.useDetail.mockReturnValue({
+      data: [{
+        ...row,
+        status: 404,
+        upstream_url: null,
+        channel_id: null,
+        channel_name: null,
+        account_id: null,
+        account_name: null,
+        route_reason: "model_not_exposed",
+        error_message: "model_not_exposed",
+        req_headers_json: JSON.stringify({ host: "127.0.0.1:18640" }),
+      }],
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: mocks.refetch,
+    });
+
+    render(<RequestLogsPage />);
+    await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
+
+    expect(await screen.findByText("http://127.0.0.1:18640/anthropic/v1/messages")).toBeInTheDocument();
+    expect(screen.getByText("未发往上游（路由前失败）")).toBeInTheDocument();
+    expect(screen.queryByText("旧日志未记录")).not.toBeInTheDocument();
+  });
 });

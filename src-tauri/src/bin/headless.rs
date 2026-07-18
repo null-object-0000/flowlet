@@ -32,13 +32,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("config.json");
-    if let Ok(prices) = flowlet_lib::load_channels_config_from(&config_path).map(|cfg| cfg.prices) {
-        storage.set_prices(prices);
+    let channels_config = flowlet_lib::load_channels_config_from(&config_path).ok();
+    if let Some(config) = &channels_config {
+        storage.set_prices(config.prices.clone());
     }
 
     let channels = storage.list_channel_presets()?;
     let accounts = storage.list_channel_accounts()?;
-    let routes = storage.list_route_candidates()?;
+    let mut routes = storage.list_route_candidates()?;
+    if let Some(config) = &channels_config {
+        let merged = config.merge_default_routes(&routes, &accounts, &channels);
+        if merged.len() != routes.len() {
+            storage.save_route_candidates(&merged)?;
+            routes = merged;
+        }
+    }
     let rules = storage.list_route_rules()?;
     let scores = storage.account_routing_scores()?;
 

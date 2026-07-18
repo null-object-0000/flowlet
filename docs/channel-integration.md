@@ -45,7 +45,7 @@
 | 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 |
 | 自动余额 | 否 | 是 | 是 |
 | Token 资源包 UI | 是 | 否 | 否 |
-| 默认 Flowlet 档位 | `LongCat-2.0 → pro` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` |
+| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` |
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
 
@@ -86,7 +86,7 @@
 - `channels_config.default_exposed_models`；
 - `channels_config.flowlet_tiers`。
 
-`flowlet_tiers` 只声明明确进入 `flowlet-pro` 或 `flowlet-flash` 的模型。不要根据模型名称猜档位，也不要把所有模型默认映射到同一档。
+`flowlet_tiers` 只声明明确进入 `flowlet-pro` 或 `flowlet-flash` 的模型，值为档位数组；同一个上游模型可以同时进入多个档位。不要根据模型名称猜档位，也不要把所有模型默认映射到同一档。
 
 ### 3.2 同步代码默认值
 
@@ -94,7 +94,7 @@
 
 - `src/domains/channel/types.ts`
   - `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`
-  - `FLOWLET_TIER_BY_CHANNEL_MODEL`
+  - `FLOWLET_TIERS_BY_CHANNEL_MODEL`
 - `src-tauri/src/core/config.rs`
   - `ChannelPreset::<channel>()`
 - `src-tauri/src/core/presets.rs`

@@ -8,9 +8,11 @@ import {
   formatCapturedBody,
   formatCapturedJson,
   formatDuration,
+  formatEntryRequestUrl,
   formatLogTime,
   formatPercentage,
   formatTokenRate,
+  isPreRoutingFailure,
   isSuccessfulLog,
   safeLogText,
 } from "./logPresentation";
@@ -53,7 +55,13 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
 
               <DetailSection title={t("接口信息")}>
                 <div className={styles.detailGrid}>
-                  <DetailItem label={t("底层接口地址")} value={selectedRow.upstream_url || t("旧日志未记录")} wide copyable={Boolean(selectedRow.upstream_url)} />
+                  <DetailItem label={t("入口请求地址")} value={formatEntryRequestUrl(selectedRow)} wide copyable />
+                  <DetailItem
+                    label={t("底层接口地址")}
+                    value={selectedRow.upstream_url || (isPreRoutingFailure(selectedRow) ? t("未发往上游（路由前失败）") : t("旧日志未记录"))}
+                    wide
+                    copyable={Boolean(selectedRow.upstream_url)}
+                  />
                   <DetailItem label={t("请求接口")} value={`${selectedRow.method} ${selectedRow.path}`} />
                   <DetailItem label={t("客户端")} value={selectedRow.client_name || selectedRow.client_id || t("未知客户端")} />
                   <DetailItem label={t("客户端协议")} value={selectedRow.client_protocol || "-"} />

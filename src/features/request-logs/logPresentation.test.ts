@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCacheHitRate, calculateOutputTokenRate, formatCapturedBody, formatCapturedJson, formatDuration, safeLogText } from "./logPresentation";
+import { calculateCacheHitRate, calculateOutputTokenRate, formatCapturedBody, formatCapturedJson, formatDuration, formatEntryRequestUrl, isPreRoutingFailure, safeLogText } from "./logPresentation";
 
 describe("request log presentation", () => {
   it("preserves sensitive headers and nested JSON values", () => {
@@ -33,5 +33,16 @@ describe("request log presentation", () => {
   it("rounds averaged millisecond durations without leaking floating-point precision", () => {
     expect(formatDuration(412.8888888888889)).toBe("413 ms");
     expect(formatDuration(2_728.5)).toBe("2.73 s");
+  });
+
+  it("reconstructs the inbound URL and identifies failures before routing", () => {
+    const row = {
+      path: "/v1/chat/completions",
+      req_headers_json: JSON.stringify({ host: "127.0.0.1:18640" }),
+      route_reason: "model_not_exposed",
+      upstream_url: null,
+    };
+    expect(formatEntryRequestUrl(row)).toBe("http://127.0.0.1:18640/v1/chat/completions");
+    expect(isPreRoutingFailure(row)).toBe(true);
   });
 });

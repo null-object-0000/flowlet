@@ -157,7 +157,7 @@
     },
     "flowlet_tiers": {
       "longcat": {
-        "longcat-2.0": "pro"
+        "longcat-2.0": ["pro", "flash"]
       },
       "deepseek": {
         "deepseek-v4-pro": "pro",

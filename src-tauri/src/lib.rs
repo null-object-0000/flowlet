@@ -216,6 +216,13 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
             .expect("清理默认路由失败");
         routes = cleaned_routes;
     }
+    let merged_routes = channels_config.merge_default_routes(&routes, &accounts, &channels);
+    if merged_routes.len() != routes.len() {
+        storage
+            .save_route_candidates(merged_routes.as_slice())
+            .expect("补齐默认路由失败");
+        routes = merged_routes;
+    }
     storage
         .cleanup_orphan_balance_snapshots()
         .expect("清理孤儿余额快照失败");

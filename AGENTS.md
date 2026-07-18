@@ -485,7 +485,7 @@ src/
 2. 新增渠道时，按 `docs/config.md` 第 8 节的步骤操作；
 3. 若运行时行为（热更新 / 需重启）发生变化，同步更新第 7 节；
 4. 若源码中反序列化结构（`channels_config.rs` / `config.rs`）发生变化，同步更新第 9 节；
-5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`；修改 `channels_config.flowlet_tiers` 时，必须同步同文件中的 `FLOWLET_TIER_BY_CHANNEL_MODEL`；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
+5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`；修改 `channels_config.flowlet_tiers` 时，必须同步同文件中的 `FLOWLET_TIERS_BY_CHANNEL_MODEL`；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
 
 ### 加载优先级
 

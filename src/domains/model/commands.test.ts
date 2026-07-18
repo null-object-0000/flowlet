@@ -73,4 +73,27 @@ describe("mergeDefaultRoutes", () => {
     expect(routes).toHaveLength(8);
     expect(routes[0]).toBe(existing[0]);
   });
+
+  it("maps LongCat-2.0 into both Flowlet aggregate tiers", () => {
+    const longcatAccount = {
+      ...account,
+      id: "account-longcat",
+      channel_id: "longcat",
+    } as ChannelAccount;
+    const longcatPreset = {
+      id: "longcat",
+      supported_protocols: ["openai", "anthropic"],
+    } as ChannelPreset;
+
+    const routes = mergeDefaultRoutes([], [longcatAccount], [longcatPreset]);
+    expect(routes).toHaveLength(6);
+    expect(routes.map((route) => [route.virtual_model_id, route.client_protocol])).toEqual([
+      ["LongCat-2.0", "openai"],
+      ["flowlet-pro", "openai"],
+      ["flowlet-flash", "openai"],
+      ["LongCat-2.0", "anthropic"],
+      ["flowlet-pro", "anthropic"],
+      ["flowlet-flash", "anthropic"],
+    ]);
+  });
 });

@@ -59,6 +59,38 @@ export function safeLogText(value?: string | null) {
   return value || "-";
 }
 
+export function formatEntryRequestUrl(
+  row: Pick<RequestLogRow, "path" | "req_headers_json">,
+) {
+  if (/^https?:\/\//i.test(row.path)) return row.path;
+  if (!row.req_headers_json) return row.path;
+  try {
+    const headers = JSON.parse(row.req_headers_json) as Record<string, unknown>;
+    const normalized = new Map(
+      Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]),
+    );
+    const host = normalized.get("host") ?? normalized.get(":authority");
+    if (typeof host !== "string" || !host.trim()) return row.path;
+    const forwardedProtocol = normalized.get("x-forwarded-proto");
+    const protocol = typeof forwardedProtocol === "string" && forwardedProtocol.trim()
+      ? forwardedProtocol.split(",")[0].trim()
+      : "http";
+    return `${protocol}://${host}${row.path.startsWith("/") ? row.path : `/${row.path}`}`;
+  } catch {
+    return row.path;
+  }
+}
+
+export function isPreRoutingFailure(
+  row: Pick<RequestLogRow, "route_reason" | "upstream_url">,
+) {
+  return !row.upstream_url && [
+    "no_available_account",
+    "no_available_model",
+    "model_not_exposed",
+  ].includes(row.route_reason ?? "");
+}
+
 export function formatCapturedJson(value?: string | null, language: AppLanguage = "zh-CN") {
   if (!value) return `— ${translate(language, "未捕获")}`;
   try {

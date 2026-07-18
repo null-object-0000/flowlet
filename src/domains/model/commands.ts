@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import { DEFAULT_EXPOSED_MODELS_BY_CHANNEL, FLOWLET_TIER_BY_CHANNEL_MODEL } from "../channel/types";
+import { DEFAULT_EXPOSED_MODELS_BY_CHANNEL, FLOWLET_TIERS_BY_CHANNEL_MODEL } from "../channel/types";
 import type { ChannelAccount } from "../account/types";
 import type { ChannelPreset, ProtocolType } from "../channel/types";
 import type { ChannelModel, ModelExposureMode, RouteCandidate } from "./types";
@@ -48,8 +48,8 @@ export function buildDefaultRoutes(
   const now = new Date().toISOString();
   const out: RouteCandidate[] = [];
   upstreamModels.forEach((up, i) => {
-    const tier = FLOWLET_TIER_BY_CHANNEL_MODEL[channelId]?.[up.toLowerCase()];
-    const publicModels = tier ? [up, `flowlet-${tier}`] : [up];
+    const tiers = FLOWLET_TIERS_BY_CHANNEL_MODEL[channelId]?.[up.toLowerCase()] ?? [];
+    const publicModels = [up, ...tiers.map((tier) => `flowlet-${tier}`)];
     usable.forEach((acc, j) => {
       publicModels.forEach((publicModel) => {
         out.push({

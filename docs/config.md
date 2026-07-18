@@ -278,26 +278,27 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 ```jsonc
 "flowlet_tiers": {
   "longcat": {
-    "longcat-2.0": "pro"
+    "longcat-2.0": ["pro", "flash"]
   },
   "deepseek": {
-    "deepseek-v4-pro": "pro",
-    "deepseek-v4-flash": "flash"
+    "deepseek-v4-pro": ["pro"],
+    "deepseek-v4-flash": ["flash"]
   },
   "kimi": {
-    "kimi-k3": "pro",
-    "kimi-k2.7-code": "pro"
+    "kimi-k3": ["pro"],
+    "kimi-k2.7-code": ["pro"]
   }
 }
 ```
 
-**结构**：`Record<channel_id, Record<model_name_lower, tier>>`。
+**结构**：`Record<channel_id, Record<model_name_lower, tier[]>>`。旧配置中的单个
+`"pro"` / `"flash"` 字符串仍可兼容读取。
 
 **行为**：账号保存后的默认路由合并会根据该映射，将上游模型同时加入
-`flowlet-pro` 或 `flowlet-flash` 聚合模型；已有路由的启用状态和优先级保持不变，
+一个或多个聚合模型；已有路由的启用状态和优先级保持不变，
 只补充缺失的账号、协议和聚合路由。
 
-**tier 取值**：`"pro"` | `"flash"` | `"none"`。
+**tier 取值**：`"pro"` | `"flash"`。
 
 **行为**：
 

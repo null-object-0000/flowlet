@@ -1060,11 +1060,16 @@ async fn missing_account_returns_structured_error_and_log() {
         .method("POST")
         .uri("/v1/chat/completions")
         .header(header::CONTENT_TYPE, "application/json")
+        .header("x-debug-request", "opencode-first-request")
         .body(Body::from(r#"{"model":"missing","messages":[]}"#))
         .unwrap();
-    let response = forward_request(state, request, ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, request, ProtocolType::OpenAi)
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value["error"]["code"], "no_available_account");
     let logs = tokio::time::timeout(std::time::Duration::from_secs(1), async {
@@ -1079,7 +1084,30 @@ async fn missing_account_returns_structured_error_and_log() {
     .await
     .unwrap();
     assert_eq!(logs.len(), 1);
-    assert_eq!(logs[0].route_reason.as_deref(), Some("no_available_account"));
+    assert_eq!(
+        logs[0].route_reason.as_deref(),
+        Some("no_available_account")
+    );
+    let request_headers: serde_json::Value =
+        serde_json::from_str(logs[0].req_headers_json.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        request_headers["x-debug-request"],
+        serde_json::Value::String("opencode-first-request".to_string())
+    );
+    assert_eq!(
+        logs[0].req_body_b64.as_deref(),
+        Some(encode_body_base64(br#"{"model":"missing","messages":[]}"#).as_str())
+    );
+    let response_headers: serde_json::Value =
+        serde_json::from_str(logs[0].res_headers_json.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        response_headers["content-type"],
+        serde_json::Value::String("application/json".to_string())
+    );
+    assert_eq!(
+        logs[0].res_body_b64.as_deref(),
+        Some(encode_body_base64(&body).as_str())
+    );
     let _ = std::fs::remove_file(db_path);
 }
 #[test]

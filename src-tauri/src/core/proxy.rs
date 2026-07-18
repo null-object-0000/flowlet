@@ -577,6 +577,23 @@ async fn forward_request(
                 "The requested model is not exposed by Flowlet",
             )
         };
+        let payload = match detected_protocol {
+            ProtocolType::OpenAi => serde_json::json!({
+                "error": { "message": error_message, "type": error_code, "code": error_code }
+            }),
+            ProtocolType::Anthropic => serde_json::json!({
+                "type": "error",
+                "error": { "type": error_code, "message": error_message }
+            }),
+        };
+        let payload_bytes = payload.to_string().into_bytes();
+        let mut response = Response::new(Body::from(payload_bytes.clone()));
+        *response.status_mut() = StatusCode::NOT_FOUND;
+        response.headers_mut().insert(
+            axum::http::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+
         let log = RequestLogInput {
             request_id: request_id.clone(),
             agent_type: agent_session.as_ref().map(|value| value.agent_type.clone()),
@@ -608,28 +625,13 @@ async fn forward_request(
             ttfb_ms: None,
             duration_ms: None,
             attempt_seq: 0,
-            req_headers_json: None,
-            req_body_b64: None,
-            res_headers_json: None,
-            res_body_b64: None,
+            req_headers_json: capture_headers(&parts.headers, &state.capture, true),
+            req_body_b64: capture_body(&body_bytes, &state.capture, true),
+            res_headers_json: capture_headers(response.headers(), &state.capture, false),
+            res_body_b64: capture_body(&payload_bytes, &state.capture, false),
             is_last_attempt: true,
         };
         record_request_log(state.storage, log);
-        let payload = match detected_protocol {
-            ProtocolType::OpenAi => serde_json::json!({
-                "error": { "message": error_message, "type": error_code, "code": error_code }
-            }),
-            ProtocolType::Anthropic => serde_json::json!({
-                "type": "error",
-                "error": { "type": error_code, "message": error_message }
-            }),
-        };
-        let mut response = Response::new(Body::from(payload.to_string()));
-        *response.status_mut() = StatusCode::NOT_FOUND;
-        response.headers_mut().insert(
-            axum::http::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
-        );
         return Ok(response);
     }
     let mut last_network_error: Option<reqwest::Error> = None;
@@ -686,29 +688,11 @@ async fn forward_request(
         // 先构造唯一的最终上游请求，再从这个 Request 捕获日志并执行它。
         // 此时 URL、鉴权头和 model 均已完成路由改写，日志与第三方实际收到的报文一致。
         let upstream_request = builder.body(routed_body).build()?;
-        let req_headers_json = if state.capture.capture_req_headers {
-            let keys = if state.capture.redact_sensitive_headers {
-                LogCaptureConfig::redacted_header_keys()
-            } else {
-                &[]
-            };
-            Some(sanitize_headers(upstream_request.headers(), keys).to_string())
-        } else {
-            None
-        };
-        let req_body_b64 = if state.capture.capture_req_body {
-            upstream_request
-                .body()
-                .and_then(reqwest::Body::as_bytes)
-                .filter(|bytes| !bytes.is_empty())
-                .map(|bytes| {
-                    let mut bytes = bytes.to_vec();
-                    proxy_http::truncate_utf8(&mut bytes, state.capture.max_body_bytes);
-                    encode_body_base64(&bytes)
-                })
-        } else {
-            None
-        };
+        let req_headers_json = capture_headers(upstream_request.headers(), &state.capture, true);
+        let req_body_b64 = upstream_request
+            .body()
+            .and_then(reqwest::Body::as_bytes)
+            .and_then(|bytes| capture_body(bytes, &state.capture, true));
 
         // 为当前候选准备日志上下文（send_at = 此刻，T0 真实起点）
         let log_context = RouteLogContext {
@@ -983,6 +967,41 @@ struct RouteLogContext {
     /// 当前路由尝试实际发送给上游的请求头和请求体（完成 URL、鉴权、model 改写后）
     req_headers_json: Option<String>,
     req_body_b64: Option<String>,
+}
+
+fn capture_headers(
+    headers: &HeaderMap,
+    capture: &LogCaptureConfig,
+    request: bool,
+) -> Option<String> {
+    let enabled = if request {
+        capture.capture_req_headers
+    } else {
+        capture.capture_res_headers
+    };
+    if !enabled {
+        return None;
+    }
+    let redact = if capture.redact_sensitive_headers {
+        LogCaptureConfig::redacted_header_keys()
+    } else {
+        &[]
+    };
+    Some(sanitize_headers(headers, redact).to_string())
+}
+
+fn capture_body(body: &[u8], capture: &LogCaptureConfig, request: bool) -> Option<String> {
+    let enabled = if request {
+        capture.capture_req_body
+    } else {
+        capture.capture_res_body
+    };
+    if !enabled || body.is_empty() {
+        return None;
+    }
+    let mut captured = body.to_vec();
+    proxy_http::truncate_utf8(&mut captured, capture.max_body_bytes);
+    Some(encode_body_base64(&captured))
 }
 
 impl RouteLogContext {

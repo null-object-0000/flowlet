@@ -29,6 +29,14 @@ pub(super) async fn detect_agent_environment(
 }
 
 #[tauri::command]
+pub(super) async fn query_codex_accounts(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::codex_account::CodexAccountsReport, String> {
+    crate::core::codex_account::query_codex_accounts(&state.codex_accounts_dir).await
+}
+
+
+#[tauri::command]
 pub(super) fn inspect_agent_global_config(
     state: tauri::State<'_, AppState>,
     agent_id: String,

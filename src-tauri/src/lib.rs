@@ -29,6 +29,7 @@ struct AppState {
     bind_config: Arc<Mutex<ProxyBindConfig>>,
     tray: Arc<Mutex<Option<TrayIcon>>>,
     config_path: std::path::PathBuf,
+    codex_accounts_dir: std::path::PathBuf,
     channels_config: Arc<ChannelsConfig>,
 }
 
@@ -294,6 +295,7 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         bind_config: Arc::new(Mutex::new(bind_config)),
         tray: Arc::new(Mutex::new(None)),
         config_path,
+        codex_accounts_dir,
         channels_config: Arc::clone(&channels_config),
     };
     tracing::info!(t_ms = _t0.elapsed().as_millis() as u64, "build_app_state 全部完成");
@@ -611,6 +613,7 @@ pub fn run() {
             commands::usage_summary,
             commands::list_request_logs,
             commands::list_agent_sessions,
+            commands::query_codex_accounts,
             commands::list_agent_session_clients,
             commands::list_request_log_clients,
             commands::list_request_log_models,

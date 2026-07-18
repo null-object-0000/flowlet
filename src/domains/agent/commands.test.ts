@@ -8,6 +8,7 @@ import {
   detectOpenCodeEnvironment,
   inspectClaudeCodeGlobalConfig,
   inspectOpenCodeGlobalConfig,
+  queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
   restoreOpenCodeGlobalConfig,
 } from "./commands";
@@ -33,6 +34,14 @@ describe("agent commands", () => {
     await call();
 
     expect(invoke).toHaveBeenCalledWith("detect_agent_environment", { agentId });
+  });
+
+  it("queries Codex account data through the typed Tauri boundary", async () => {
+    vi.mocked(invoke).mockResolvedValue({ accounts: [], current_account_id: null });
+
+    await queryCodexAccounts();
+
+    expect(invoke).toHaveBeenCalledWith("query_codex_accounts", undefined);
   });
 
   it.each([

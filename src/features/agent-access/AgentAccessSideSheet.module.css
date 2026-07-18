@@ -84,6 +84,106 @@
   border-top: 1px solid var(--flowlet-color-border);
 }
 
+.codexAccountList {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.codexAccount {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 9px;
+  background: var(--flowlet-color-surface);
+}
+
+.codexAccountHeader,
+.accountTags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.codexAccountHeader {
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.codexAccountHeader > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountSummary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+}
+
+.accountSummary > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.accountSummary strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usageWindows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.usageWindow {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  background: var(--flowlet-color-surface-muted);
+}
+
+.usageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usageHeader span {
+  color: var(--semi-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.usageTrack {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--semi-color-fill-0);
+}
+
+.usageTrack > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--semi-color-primary);
+}
+
+.accountNotice {
+  display: block;
+}
+
 .installationHeader,
 .installationTags {
   display: flex;
@@ -232,5 +332,10 @@
 
   .configRow > span:first-child {
     grid-column: 1 / -1;
+  }
+
+  .accountSummary,
+  .usageWindows {
+    grid-template-columns: 1fr;
   }
 }

@@ -7,6 +7,7 @@ import {
   detectOpenCodeEnvironment,
   inspectClaudeCodeGlobalConfig,
   inspectOpenCodeGlobalConfig,
+  queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
   restoreOpenCodeGlobalConfig,
 } from "../../domains/agent/commands";
@@ -36,6 +37,16 @@ export function useChatGptDesktopEnvironment() {
     queryFn: detectChatGptDesktopEnvironment,
     staleTime: 60_000,
     retry: 1,
+  });
+}
+
+export function useCodexAccounts(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.agent.codexAccount(),
+    queryFn: queryCodexAccounts,
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }
 

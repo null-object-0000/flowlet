@@ -1,6 +1,7 @@
 pub mod agent_environment;
 pub mod agent_global_config;
 pub mod channels_config;
+pub mod codex_account;
 pub mod config;
 pub mod logging;
 pub mod metrics;

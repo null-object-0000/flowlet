@@ -10,6 +10,7 @@ import {
   useChatGptDesktopEnvironment,
   useClaudeCodeEnvironment,
   useClaudeCodeGlobalConfig,
+  useCodexAccounts,
   useOpenCodeEnvironment,
   useOpenCodeGlobalConfig,
 } from "./useAgentEnvironment";
@@ -53,6 +54,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const claudeEnvironment = useClaudeCodeEnvironment();
   const openCodeEnvironment = useOpenCodeEnvironment();
   const chatGptEnvironment = useChatGptDesktopEnvironment();
+  const codexAccounts = useCodexAccounts(selectedAgent === "chatgpt-desktop");
   const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
   const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
 
@@ -159,6 +161,10 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         loading={chatGptEnvironment.isFetching}
         error={chatGptEnvironment.error?.message}
         onRefresh={() => void chatGptEnvironment.refetch()}
+        accounts={codexAccounts.data}
+        accountLoading={codexAccounts.isFetching}
+        accountError={codexAccounts.error?.message}
+        onRefreshAccount={() => void codexAccounts.refetch()}
         onClose={() => setSelectedAgent(null)}
         onCopy={copy}
       />

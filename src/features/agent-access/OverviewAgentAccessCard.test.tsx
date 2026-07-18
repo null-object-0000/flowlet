@@ -100,6 +100,28 @@ vi.mock("./useAgentEnvironment", () => ({
     isLoading: false,
     refetch,
   }),
+  useCodexAccounts: () => ({
+    data: {
+      current_account_id: "account-1",
+      accounts: [{
+        account_id: "account-1",
+        signed_in: true,
+        is_current: true,
+        auth_mode: "chatgpt",
+        email: "user@example.com",
+        plan_type: "plus",
+        primary: { used_percent: 25, window_duration_mins: 300, resets_at: 1779459394 },
+        secondary: { used_percent: 18, window_duration_mins: 10080, resets_at: 1779826837 },
+        credits: { has_credits: true, unlimited: false, balance: "12.50" },
+        source: "app_server",
+        updated_at: "2026-07-18T10:00:00Z",
+        stale: false,
+      }],
+    },
+    error: null,
+    isFetching: false,
+    refetch,
+  }),
   useClaudeCodeGlobalConfig: () => ({
     query: {
       data: {
@@ -193,6 +215,12 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("仅识别统一后的新版 ChatGPT Desktop")).toBeInTheDocument();
     expect(screen.getByText("C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0")).toBeInTheDocument();
     expect(screen.queryByText("全局配置")).not.toBeInTheDocument();
+    expect(screen.getByText("user@example.com")).toBeInTheDocument();
+    expect(screen.getByText("当前账号")).toBeInTheDocument();
+    expect(screen.getByText("Plus")).toBeInTheDocument();
+    expect(screen.getByText("5 小时用量")).toBeInTheDocument();
+    expect(screen.getByText("每周用量")).toBeInTheDocument();
+    expect(screen.getByText("剩余 75%")).toBeInTheDocument();
   });
   it("opens the shared OpenCode CLI and Desktop global configuration", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);

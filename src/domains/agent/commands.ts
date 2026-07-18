@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { AgentEnvironmentReport, AgentGlobalConfigReport } from "./types";
+import type { AgentEnvironmentReport, AgentGlobalConfigReport, CodexAccountsReport } from "./types";
 
 export function detectAgentEnvironment(agentId: string): Promise<AgentEnvironmentReport> {
   return invokeCommand<AgentEnvironmentReport>("detect_agent_environment", { agentId }, 10_000).catch((error) => {

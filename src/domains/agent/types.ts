@@ -30,6 +30,40 @@ export type AgentEnvironmentReport = {
   installations: AgentInstallation[];
 };
 
+export type CodexUsageWindow = {
+  used_percent: number;
+  window_duration_mins: number;
+  resets_at: number;
+};
+
+export type CodexCredits = {
+  has_credits: boolean;
+  unlimited: boolean;
+  balance?: string | null;
+};
+
+export type CodexAccountReport = {
+  account_id: string;
+  signed_in: boolean;
+  is_current: boolean;
+  auth_mode?: string | null;
+  email?: string | null;
+  plan_type?: string | null;
+  primary?: CodexUsageWindow | null;
+  secondary?: CodexUsageWindow | null;
+  credits?: CodexCredits | null;
+  rate_limit_reached_type?: string | null;
+  source: "oauth" | "app_server";
+  updated_at: string;
+  stale: boolean;
+  error?: string | null;
+};
+
+export type CodexAccountsReport = {
+  accounts: CodexAccountReport[];
+  current_account_id?: string | null;
+};
+
 export type AgentGlobalConfigState =
   | "not_configured"
   | "flowlet"

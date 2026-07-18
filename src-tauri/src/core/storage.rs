@@ -10,6 +10,10 @@ use thiserror::Error;
 pub enum StorageError {
     #[error("数据库错误: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("文件系统错误: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("导入数据库校验失败: {0}")]
+    InvalidImport(String),
     #[error("数据库状态锁定失败")]
     LockFailed,
 }
@@ -51,6 +55,15 @@ impl Storage {
         self.prices.lock().map(|p| p.clone()).unwrap_or_default()
     }
 
+    #[cfg(test)]
+    fn from_connection_for_test(connection: Connection) -> Self {
+        Self {
+            connection: Arc::new(Mutex::new(connection)),
+            prices: Arc::new(Mutex::new(Vec::new())),
+            db_path: Arc::new(PathBuf::from(":memory:")),
+        }
+    }
+
     // ─── Config Import/Export ────────────────────────────────────────────────
 
     /// 导出完整配置为 JSON 字符串
@@ -86,21 +99,102 @@ impl Storage {
         Ok(())
     }
 
-    /// 关闭当前连接并重新打开指定路径的数据库文件（含迁移）。
-    /// 导入数据后用于切换到恢复后的数据库。
-    pub fn reopen_at(&self, path: impl AsRef<Path>) -> Result<(), StorageError> {
-        let mut guard = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
-        let new_conn = Connection::open(path.as_ref())?;
-        new_conn.execute_batch("PRAGMA journal_mode = WAL;")?;
-        *guard = new_conn;
-        drop(guard);
-        // Update stored path (db_path is Arc, so we need unsafe or another approach)
-        // Since we can't swap an Arc in an immutable ref, and Storage is Clone with Arc,
-        // the db_path update is best-effort. The old Arc still points to the old path.
-        // This is acceptable because reopen_at is only used during import, and subsequent
-        // exports will use the correct db_path from the import flow.
-        self.migrate()?;
-        Ok(())
+    /// 用已经过验证的数据库安全替换当前数据库。
+    ///
+    /// 整个切换期间持有连接锁，先把导入库复制到目标目录并完成迁移，再关闭旧连接，
+    /// 通过同目录 rename 切换文件。打开新库失败时会恢复原文件和连接。
+    pub fn replace_database_from(&self, source: impl AsRef<Path>) -> Result<(), StorageError> {
+        let target = self.db_path.as_ref();
+        let parent = target.parent().unwrap_or_else(|| Path::new("."));
+        let nonce = uuid::Uuid::new_v4();
+        let staged = parent.join(format!(".flowlet-import-stage-{nonce}.sqlite"));
+        let rollback = parent.join(format!(".flowlet-import-rollback-{nonce}.sqlite"));
+
+        std::fs::copy(source.as_ref(), &staged)?;
+
+        let staged_storage = match Storage::open(&staged) {
+            Ok(storage) => storage,
+            Err(error) => {
+                remove_sqlite_files(&staged);
+                return Err(error);
+            }
+        };
+        {
+            let connection = staged_storage
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let check: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+            if check != "ok" {
+                drop(connection);
+                drop(staged_storage);
+                remove_sqlite_files(&staged);
+                return Err(StorageError::InvalidImport(check));
+            }
+            connection
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;")?;
+        }
+        drop(staged_storage);
+
+        let mut guard = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        guard.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        let placeholder = Connection::open_in_memory()?;
+        let old_connection = std::mem::replace(&mut *guard, placeholder);
+        drop(old_connection);
+        remove_sqlite_sidecars(target);
+
+        let switch_result = (|| -> Result<Connection, StorageError> {
+            if target.exists() {
+                std::fs::rename(target, &rollback)?;
+            }
+            std::fs::rename(&staged, target)?;
+            let connection = Connection::open(target)?;
+            connection.execute_batch("PRAGMA journal_mode = WAL;")?;
+            Ok(connection)
+        })();
+
+        match switch_result {
+            Ok(connection) => {
+                *guard = connection;
+                remove_sqlite_files(&rollback);
+                Ok(())
+            }
+            Err(switch_error) => {
+                let restore_file_result = if rollback.exists() {
+                    remove_sqlite_files(target);
+                    std::fs::rename(&rollback, target).map_err(StorageError::Io)
+                } else {
+                    Ok(())
+                };
+
+                let restore_connection_result = Connection::open(target).and_then(|connection| {
+                    connection.execute_batch("PRAGMA journal_mode = WAL;")?;
+                    Ok(connection)
+                });
+
+                remove_sqlite_files(&staged);
+
+                match (restore_file_result, restore_connection_result) {
+                    (Ok(()), Ok(connection)) => {
+                        *guard = connection;
+                        Err(switch_error)
+                    }
+                    (file_result, connection_result) => {
+                        let restore_error = file_result
+                            .err()
+                            .map(|error| error.to_string())
+                            .or_else(|| connection_result.err().map(|error| error.to_string()))
+                            .unwrap_or_else(|| "未知恢复错误".to_string());
+                        Err(StorageError::InvalidImport(format!(
+                            "数据库切换失败（{switch_error}），恢复原数据库也失败（{restore_error}）"
+                        )))
+                    }
+                }
+            }
+        }
     }
 
     /// 备份当前数据库到指定路径（使用独立连接，不阻塞主连接和代理请求）
@@ -113,8 +207,7 @@ impl Storage {
         // for the proxy to continue logging requests
         let src = Connection::open(self.db_path.as_ref())?;
         let mut dst = Connection::open(dest.as_ref())?;
-        let backup = rusqlite::backup::Backup::new(&src, &mut dst)
-            .map_err(StorageError::Sqlite)?;
+        let backup = rusqlite::backup::Backup::new(&src, &mut dst).map_err(StorageError::Sqlite)?;
         backup
             .run_to_completion(100, std::time::Duration::from_millis(10), None)
             .map_err(StorageError::Sqlite)?;
@@ -382,18 +475,8 @@ impl Storage {
             "anthropic_auth",
             "TEXT NOT NULL DEFAULT 'bearer'",
         )?;
-        add_column_if_missing(
-            &connection,
-            "channel_presets",
-            "small_model",
-            "TEXT",
-        )?;
-        add_column_if_missing(
-            &connection,
-            "channel_presets",
-            "timeout_seconds",
-            "INTEGER",
-        )?;
+        add_column_if_missing(&connection, "channel_presets", "small_model", "TEXT")?;
+        add_column_if_missing(&connection, "channel_presets", "timeout_seconds", "INTEGER")?;
         add_column_if_missing(
             &connection,
             "virtual_model_routes",
@@ -458,15 +541,15 @@ impl Storage {
         add_column_if_missing(&connection, "channel_presets", "platform_url", "TEXT")?;
 
         // 余额快照：补充 LongCat 多资源包原始数据（JSON 数组）
-        add_column_if_missing(&connection, "account_balance_snapshots", "token_packs", "TEXT")?;
-
-        // 渠道账号：补充 Base URL 覆盖字段
         add_column_if_missing(
             &connection,
-            "channel_accounts",
-            "base_url_override",
+            "account_balance_snapshots",
+            "token_packs",
             "TEXT",
         )?;
+
+        // 渠道账号：补充 Base URL 覆盖字段
+        add_column_if_missing(&connection, "channel_accounts", "base_url_override", "TEXT")?;
         let migrate_anthropic_override = !table_has_column(
             &connection,
             "channel_accounts",
@@ -485,12 +568,7 @@ impl Storage {
                 [],
             )?;
         }
-        add_column_if_missing(
-            &connection,
-            "channel_accounts",
-            "resource_mode",
-            "TEXT",
-        )?;
+        add_column_if_missing(&connection, "channel_accounts", "resource_mode", "TEXT")?;
 
         // 旧版本 request_logs 只记录了少量字段；后续索引和日志页面依赖这些基础列。
         add_column_if_missing(
@@ -619,8 +697,18 @@ impl Storage {
         add_column_if_missing(&connection, "usage_records", "virtual_model", "TEXT")?;
         add_column_if_missing(&connection, "usage_records", "upstream_model", "TEXT")?;
         add_column_if_missing(&connection, "usage_records", "input_tokens", "INTEGER")?;
-        add_column_if_missing(&connection, "usage_records", "input_cached_tokens", "INTEGER")?;
-        add_column_if_missing(&connection, "usage_records", "input_uncached_tokens", "INTEGER")?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "input_cached_tokens",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "input_uncached_tokens",
+            "INTEGER",
+        )?;
         add_column_if_missing(&connection, "usage_records", "output_tokens", "INTEGER")?;
         add_column_if_missing(&connection, "usage_records", "total_tokens", "INTEGER")?;
         add_column_if_missing(&connection, "usage_records", "estimated_cost", "REAL")?;
@@ -639,9 +727,14 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_request_logs_created_at       ON request_logs(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_request_logs_request_id       ON request_logs(request_id);
             CREATE INDEX IF NOT EXISTS idx_request_logs_is_last_attempt  ON request_logs(is_last_attempt);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_page             ON request_logs(is_last_attempt, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_request_logs_client           ON request_logs(client_id);
             CREATE INDEX IF NOT EXISTS idx_request_logs_account          ON request_logs(account_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_request_logs_agent_session    ON request_logs(agent_type, agent_session_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_session_cover    ON request_logs(
+                is_last_attempt, agent_type, agent_session_id, created_at DESC, request_id,
+                parent_agent_session_id, client_id, client_name, status, error_message
+            );
             CREATE INDEX IF NOT EXISTS idx_usage_records_request_id     ON usage_records(request_id);
             CREATE INDEX IF NOT EXISTS idx_usage_records_created_at     ON usage_records(created_at);
             CREATE INDEX IF NOT EXISTS idx_usage_channel_upstream_model ON usage_records(channel_id, upstream_model);
@@ -719,19 +812,15 @@ fn normalize_legacy_virtual_model_routes_schema(
     };
     let provider_name_exists =
         table_has_column(connection, "virtual_model_routes", "provider_name")?;
-    let provider_id_exists =
-        table_has_column(connection, "virtual_model_routes", "provider_id")?;
-    let virtual_model_id = if table_has_column(
-        connection,
-        "virtual_model_routes",
-        "virtual_model_id",
-    )? {
-        "COALESCE(virtual_model_id, 'auto')".to_string()
-    } else if provider_name_exists {
-        "COALESCE(provider_name, 'auto')".to_string()
-    } else {
-        "'auto'".to_string()
-    };
+    let provider_id_exists = table_has_column(connection, "virtual_model_routes", "provider_id")?;
+    let virtual_model_id =
+        if table_has_column(connection, "virtual_model_routes", "virtual_model_id")? {
+            "COALESCE(virtual_model_id, 'auto')".to_string()
+        } else if provider_name_exists {
+            "COALESCE(provider_name, 'auto')".to_string()
+        } else {
+            "'auto'".to_string()
+        };
     let channel_id = if table_has_column(connection, "virtual_model_routes", "channel_id")? {
         "COALESCE(channel_id, '')".to_string()
     } else if provider_id_exists {
@@ -739,11 +828,8 @@ fn normalize_legacy_virtual_model_routes_schema(
     } else {
         "''".to_string()
     };
-    let upstream_model = if table_has_column(
-        connection,
-        "virtual_model_routes",
-        "upstream_model",
-    )? {
+    let upstream_model = if table_has_column(connection, "virtual_model_routes", "upstream_model")?
+    {
         "COALESCE(upstream_model, '')".to_string()
     } else if provider_name_exists {
         "COALESCE(provider_name, '')".to_string()
@@ -755,11 +841,12 @@ fn normalize_legacy_virtual_model_routes_schema(
     let enabled = column_or("enabled", "1")?;
     let created_at = column_or("created_at", "NULL")?;
     let updated_at = column_or("updated_at", "NULL")?;
-    let client_protocol = if table_has_column(connection, "virtual_model_routes", "client_protocol")? {
-        "CASE client_protocol WHEN 'anthropic' THEN 'anthropic' ELSE 'openai' END".to_string()
-    } else {
-        "'openai'".to_string()
-    };
+    let client_protocol =
+        if table_has_column(connection, "virtual_model_routes", "client_protocol")? {
+            "CASE client_protocol WHEN 'anthropic' THEN 'anthropic' ELSE 'openai' END".to_string()
+        } else {
+            "'openai'".to_string()
+        };
 
     // 重建表并使用 INSERT…SELECT 保留已有的路由数据。
     // 旧 schema 的 channel_id / account_id / client_protocol 以 '' / 'openai' 为默认，
@@ -805,6 +892,16 @@ fn normalize_legacy_virtual_model_routes_schema(
     Ok(())
 }
 
+fn remove_sqlite_sidecars(path: &Path) {
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+}
+
+fn remove_sqlite_files(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    remove_sqlite_sidecars(path);
+}
+
 fn parse_auth_strategy(value: &str) -> AuthStrategy {
     match value {
         "x_api_key" => AuthStrategy::XApiKey,
@@ -815,5 +912,3 @@ fn parse_auth_strategy(value: &str) -> AuthStrategy {
 #[cfg(test)]
 #[path = "storage_tests.rs"]
 mod storage_tests;
-
-

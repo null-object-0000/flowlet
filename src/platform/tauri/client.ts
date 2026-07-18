@@ -53,18 +53,22 @@ export function invokeCommand<TResult>(
 ): Promise<TResult> {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new InvokeError(command, `invoke timeout: ${command}`, true));
-    }, timeoutMs);
-  });
-
   const call = invoke<TResult>(command, args).then(
     (value) => value,
     (err: unknown) => {
       throw normalizeInvokeFailure(command, err);
     },
   );
+
+  if (!Number.isFinite(timeoutMs)) {
+    return call;
+  }
+
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new InvokeError(command, `invoke timeout: ${command}`, true));
+    }, timeoutMs);
+  });
 
   return Promise.race([call, timeout]).finally(() => {
     if (timer) clearTimeout(timer);

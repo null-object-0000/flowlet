@@ -19,6 +19,12 @@ export function detectChatGptDesktopEnvironment(): Promise<AgentEnvironmentRepor
   return detectAgentEnvironment("chatgpt-desktop");
 }
 
+export function queryCodexAccounts(): Promise<CodexAccountsReport> {
+  return invokeCommand<CodexAccountsReport>("query_codex_accounts", undefined, 60_000).catch((error) => {
+    throw toAppError(error, "codex_account_query_failed");
+  });
+}
+
 export function inspectAgentGlobalConfig(agentId: string): Promise<AgentGlobalConfigReport> {
   return invokeCommand<AgentGlobalConfigReport>("inspect_agent_global_config", { agentId }).catch((error) => {
     throw toAppError(error, "agent_global_config_inspection_failed");

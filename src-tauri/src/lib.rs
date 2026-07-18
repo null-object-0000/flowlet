@@ -30,7 +30,7 @@ struct AppState {
     tray: Arc<Mutex<Option<TrayIcon>>>,
     config_path: std::path::PathBuf,
     codex_accounts_dir: std::path::PathBuf,
-    channels_config: Arc<ChannelsConfig>,
+    channels_config: Arc<Mutex<ChannelsConfig>>,
 }
 
 struct ProxyStartupConfig {
@@ -458,6 +458,10 @@ fn migrate_legacy_database(db_path: &std::path::Path) {
     let legacy_db_path = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("flowlet.sqlite");
+    let codex_accounts_dir = db_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("codex-accounts");
     if !legacy_db_path.exists() {
         return;
     }
@@ -620,6 +624,8 @@ pub fn run() {
             commands::usage_summary,
             commands::list_request_logs,
             commands::list_agent_sessions,
+            commands::query_codex_accounts,
+            commands::list_agent_session_children,
             commands::query_codex_accounts,
             commands::list_agent_session_clients,
             commands::list_request_log_clients,

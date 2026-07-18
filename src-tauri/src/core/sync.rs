@@ -914,3 +914,32 @@ mod tests {
         assert!(params.contains(&"tools".to_string()));
     }
 }
+
+
+    #[test]
+    fn parse_kimi_balance_response() {
+        let json = serde_json::json!({
+            "data": {
+                "available_balance": "100.50",
+                "total_balance": "200.00",
+                "is_available": true,
+            }
+        });
+        let raw = serde_json::to_string(&json).unwrap();
+        let result = parse_kimi_balance_response(&raw).unwrap();
+        assert_eq!(result.available_balance, "100.50");
+    }
+
+    #[test]
+    fn parse_kimi_models_response_and_preserve_context() {
+        let json = serde_json::json!({
+            "data": [
+                { "id": "kimi-k3", "context_length": 131072 },
+                { "id": "kimi-k2.7-code", "context_length": 262144 },
+            ]
+        });
+        let raw = serde_json::to_string(&json).unwrap();
+        let models = parse_kimi_models_response(&raw).unwrap();
+        assert_eq!(models.len(), 2);
+        assert!(models[0].context_length > 0);
+    }

@@ -2,9 +2,10 @@
 
 > 本文档针对 **OpenCode Desktop**（Electron 桌面版），非 CLI 版本。
 
-> 当前已先落地代理侧会话观测：从 OpenCode 请求 Header 提取稳定会话 ID，并基于
-> `request_logs` 聚合请求、Token、费用和失败情况，不建立独立会话表。本文件其余内容描述
-> 后续本地数据库直读阶段，用于补充标题、项目、消息和未经过 Flowlet 的历史会话。
+> 当前已落地代理侧会话观测，以及当前分页会话的只读原生元数据增强：从 OpenCode 请求
+> Header 提取稳定会话 ID，基于 `request_logs` 聚合指标，再按 ID 从 `opencode.db` 补充标题、
+> 项目目录、父会话和原生时间，不建立独立会话表。消息导入、未经过 Flowlet 的历史会话和
+> WAL 实时同步仍属于后续阶段。
 
 ## 核心原则
 

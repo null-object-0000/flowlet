@@ -5,6 +5,7 @@
 | 竞品 | 核心定位 | 与 Flowlet 的关系 |
 |------|----------|-------------------|
 | CC Switch | AI 编程工具供应商、代理与配置管理 | 产品形态和功能模块高度重合 |
+| AIUsage | AI 订阅账号、Agent 代理与用量分析 | 账号、模型服务、Agent 接入和观测主链路高度重合 |
 | TiyGate | 通用 AI 网关、模型路由与日志 | 网关架构高度重合 |
 | claude-tap | Claude Code 请求与 Agent Trace 查看 | 请求日志、调试能力重合 |
 | CodeBurn | AI 编程用量与成本分析 | 用量成本模块重合 |
@@ -13,7 +14,7 @@
 ## 接近程度
 
 ```text
-CC Switch  ≈  TiyGate  >  claude-tap  >  CodeBurn  >  CodexBar
+CC Switch  ≈  AIUsage  >  TiyGate  >  claude-tap  >  CodeBurn  >  CodexBar
 ```
 
 ---
@@ -30,6 +31,20 @@ CC Switch  ≈  TiyGate  >  claude-tap  >  CodeBurn  >  CodexBar
   - MCP、Prompts、Skills 的统一配置与同步
 - **覆盖工具**：Claude Code、Claude Desktop、Codex、Gemini CLI、OpenCode、OpenClaw、Hermes Agent
 - **与 Flowlet 的关系**：产品形态和功能模块高度重合。不只是简单切换 API Key，而是覆盖了「模型服务—渠道账号—请求日志—用量成本—客户端接入」全链路，是 Flowlet 当前最直接的竞品
+
+### AIUsage
+
+- **定位**：面向 macOS 的 AI 订阅账号、Agent 代理和用量分析桌面应用
+- **核心能力**：
+  - 统一管理 12+ Provider 的多账号、额度、成本和凭据
+  - 为 Claude Code、Codex CLI、OpenCode、Claude Science 提供独立本地代理和上游切换
+  - 通过 Unified API Providers 将一份 Base URL、协议、Key、模型和价格配置分发到多个 Agent
+  - 可选托管 CLIProxyAPI sidecar，提供 OAuth 账号池、模型发现和 OpenAI/Anthropic/Gemini 多协议 API
+  - 从本地会话与代理记录统计 Token、成本及 MCP、Skill、Tool 调用
+  - 自动合并或接管 Agent 配置，并支持从 CC Switch 导入部分 Provider
+- **覆盖工具**：Claude Code、Codex CLI、OpenCode、Claude Science；CPA Gateway 还可向其他 API 客户端暴露端点
+- **与 Flowlet 的关系**：与 Flowlet 的「渠道账号—开放模型—本地代理—Agent 接入—用量观测」主链路高度重合，是直接竞品。AIUsage 当前优势在多订阅额度聚合、Agent 配置写入和调用分析；Flowlet 的差异方向是 Windows/macOS/Linux 跨平台、协议原生透传，以及围绕统一开放模型和 Agent Session/Trace 的深度整合
+- **边界差异**：AIUsage 当前仅支持 macOS 14+，并接受 Claude→OpenAI 等跨协议转换及 CLIProxyAPI sidecar；Flowlet 当前坚持 OpenAI/Anthropic 协议内透传，不以跨协议转换为目标
 
 ### TiyGate
 
@@ -60,6 +75,7 @@ CC Switch  ≈  TiyGate  >  claude-tap  >  CodeBurn  >  CodexBar
 | 竞品 | 分类 |
 |------|------|
 | CC Switch | 供应商代理与配置管理 |
+| AIUsage | 订阅账号、Agent 代理与用量分析 |
 | TiyGate | 通用 AI 网关 |
 | claude-tap | Agent Trace 查看器 |
 | CodeBurn | Agent 用量/成本分析 |

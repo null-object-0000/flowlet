@@ -4,7 +4,7 @@ import { IconRefresh, IconSearch } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionRow } from "../../domains/agent-session/types";
-import { useAgentSessionClients, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
+import { useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSessionDetailSideSheet";
 import styles from "./AgentSessionsPage.module.css";
@@ -18,7 +18,6 @@ export function AgentSessionsPage() {
   const [searchDraft, setSearchDraft] = useState("");
   const [selectedSession, setSelectedSession] = useState<AgentSessionRow | null>(null);
   const sessions = useAgentSessions(filter);
-  const clients = useAgentSessionClients();
   const page = sessions.data;
 
   useEffect(() => {
@@ -34,21 +33,35 @@ export function AgentSessionsPage() {
       <header className={styles.header}>
         <div>
           <Title heading={3} style={{ margin: 0 }}>{t("会话管理")}</Title>
-          <Paragraph type="tertiary" style={{ margin: 0 }}>{t("按 Agent 会话和客户端查看请求、Token、费用和失败情况")}</Paragraph>
+          <Paragraph type="tertiary" style={{ margin: 0 }}>{t("统一查看 Agent 本地会话与 Flowlet 请求观测")}</Paragraph>
         </div>
       </header>
 
       <section className={styles.toolbar} aria-label={t("会话筛选")}>
-        <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索主会话或子会话 ID")} showClear onChange={setSearchDraft} />
+        <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索会话标题、ID 或项目目录")} showClear onChange={setSearchDraft} />
         <Select
+          style={{ width: "100%" }}
           insetLabel={t("客户端")}
-          value={filter.clientId || "__all__"}
-          loading={clients.isLoading}
+          value={filter.agentType || "__all__"}
           optionList={[
             { value: "__all__", label: t("全部客户端") },
-            ...(clients.data ?? []).map((client) => ({ value: client.id || "__unknown__", label: client.name })),
+            { value: "codex-desktop", label: "ChatGPT (Codex)" },
+            { value: "codex-cli", label: "Codex CLI" },
+            { value: "claude-code", label: "Claude Code" },
+            { value: "opencode", label: "OpenCode" },
           ]}
-          onChange={(value) => setFilter((current) => ({ ...current, clientId: value === "__all__" ? "" : String(value), page: 1 }))}
+          onChange={(value) => setFilter((current) => ({ ...current, agentType: value === "__all__" ? "" : String(value) as AgentSessionFilter["agentType"], page: 1 }))}
+        />
+        <Select
+          style={{ width: "100%" }}
+          insetLabel={t("Flowlet 状态")}
+          value={filter.flowletStatus || "__all__"}
+          optionList={[
+            { value: "__all__", label: t("全部状态") },
+            { value: "observed", label: t("经过 Flowlet") },
+            { value: "native", label: t("未经过 Flowlet") },
+          ]}
+          onChange={(value) => setFilter((current) => ({ ...current, flowletStatus: value === "__all__" ? "" : String(value) as AgentSessionFilter["flowletStatus"], page: 1 }))}
         />
         <span />
         <Button
@@ -70,7 +83,7 @@ export function AgentSessionsPage() {
         <div className={styles.body}>
           {sessions.isLoading ? Array.from({ length: 7 }, (_, index) => <SkeletonRow key={index} />) : null}
           {sessions.isError ? <div className={styles.state}><strong>{t("会话加载失败")}</strong><span>{sessions.error.message}</span><Button onClick={() => void sessions.refetch()}>{t("重试")}</Button></div> : null}
-          {!sessions.isLoading && !sessions.isError && (page?.rows.length ?? 0) === 0 ? <div className={styles.state}><strong>{t("暂无 Agent 会话")}</strong><span>{t("通过 Flowlet 发起 Claude Code 或 OpenCode 模型请求后，会话会自动出现在这里。")}</span></div> : null}
+          {!sessions.isLoading && !sessions.isError && (page?.rows.length ?? 0) === 0 ? <div className={styles.state}><strong>{t("暂无 Agent 会话")}</strong><span>{t("安装并使用 ChatGPT（Codex）、Claude Code 或 OpenCode 后，本地会话会自动出现在这里。")}</span></div> : null}
           {!sessions.isLoading && !sessions.isError ? page?.rows.map((row) => <SessionRow key={`${row.agentType}:${row.sessionId}`} row={row} language={language} onOpen={() => setSelectedSession(row)} />) : null}
         </div>
         <footer className={styles.footer}>
@@ -93,19 +106,22 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
   const { t } = useAppPreferences();
   return (
     <button type="button" className={`${styles.grid} ${styles.row}`} onClick={onOpen}>
-      <span>{formatDate(row.updatedAt, language)}</span>
+      <span>{formatDate(row.activityAt, language)}</span>
       <span className={styles.session}><strong title={row.title ?? row.sessionId}>{sessionDisplayTitle(row)}</strong><small title={row.projectPath ?? row.sessionId}>{row.projectPath ? `${agentLabel(row.agentType)} · ${projectName(row.projectPath)}` : agentLabel(row.agentType)}</small></span>
-      <span className={styles.client}><strong title={row.clientName ?? row.clientId ?? t("未知客户端")}>{row.clientName ?? row.clientId ?? t("未知客户端")}</strong>{row.clientId ? <small title={row.clientId}>{row.clientId}</small> : null}</span>
-      <span>{row.requestCount.toLocaleString(language)}</span>
-      <span>{row.knownTokens.toLocaleString(language)}</span>
-      <span>¥{row.estimatedCost.toFixed(4)}</span>
-      <span className={row.errorCount > 0 ? styles.warning : styles.success}>{row.errorCount > 0 ? t("{count} 次失败", { count: row.errorCount }) : t("正常")}</span>
+      <span className={styles.client}><strong title={row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet")}>{row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet")}</strong>{row.clientId ? <small title={row.clientId}>{row.clientId}</small> : <small>{t("仅本地会话")}</small>}</span>
+      <span>{row.flowletObserved ? row.requestCount.toLocaleString(language) : "—"}</span>
+      <span>{row.flowletObserved ? row.knownTokens.toLocaleString(language) : "—"}</span>
+      <span>{row.flowletObserved ? `¥${row.estimatedCost.toFixed(4)}` : "—"}</span>
+      <span className={!row.flowletObserved ? styles.localOnly : row.errorCount > 0 ? styles.warning : styles.success}>{!row.flowletObserved ? t("本地会话") : row.errorCount > 0 ? t("{count} 次失败", { count: row.errorCount }) : t("正常")}</span>
     </button>
   );
 }
 
 function agentLabel(agentType: AgentSessionRow["agentType"]) {
-  return agentType === "claude-code" ? "Claude Code" : "OpenCode";
+  if (agentType === "claude-code") return "Claude Code";
+  if (agentType === "codex-desktop") return "ChatGPT (Codex)";
+  if (agentType === "codex-cli") return "Codex CLI";
+  return "OpenCode";
 }
 
 function projectName(path: string) {

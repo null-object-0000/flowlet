@@ -17,6 +17,8 @@ const session: AgentSessionRow = {
   clientName: "OpenCode",
   nativeStartedAt: "2026-07-18T08:00:00Z",
   nativeUpdatedAt: "2026-07-18T09:00:00Z",
+  activityAt: "2026-07-18T09:05:00Z",
+  flowletObserved: true,
   startedAt: "2026-07-18 08:05:00",
   updatedAt: "2026-07-18 09:05:00",
   requestCount: 4,
@@ -57,9 +59,25 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
 }));
 
 import { AgentSessionsPage } from "./AgentSessionsPage";
-import { sessionDisplayTitle } from "./AgentSessionDetailSideSheet";
+import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSessionDetailSideSheet";
 
 describe("AgentSessionsPage", () => {
+  it("offers Codex and an independent Flowlet observation filter", () => {
+    render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByText("全部客户端"));
+    const codexOption = screen.getByText("ChatGPT (Codex)");
+    expect(codexOption).toBeInTheDocument();
+    expect(screen.getByText("Codex CLI")).toBeInTheDocument();
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+    expect(screen.getAllByText("OpenCode").length).toBeGreaterThan(1);
+    fireEvent.click(codexOption);
+
+    fireEvent.click(screen.getByText("全部状态"));
+    expect(screen.getByText("经过 Flowlet")).toBeInTheDocument();
+    expect(screen.getByText("未经过 Flowlet")).toBeInTheDocument();
+  });
+
   it("opens session details in a side sheet when a row is clicked", () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
@@ -103,6 +121,23 @@ describe("AgentSessionsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "查看会话 ses_child 的请求日志明细" }));
 
     expect(screen.getByTestId("location")).toHaveTextContent("/logs?search=ses_child");
+  });
+
+  it("marks native-only sessions without exposing a request-log action", () => {
+    render(
+      <MemoryRouter>
+        <AgentSessionDetailSideSheet
+          session={{ ...session, agentType: "codex-desktop", flowletObserved: false, clientId: null, clientName: null }}
+          onClose={vi.fn()}
+          onViewRequestLogs={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("未经过 Flowlet")).toBeInTheDocument();
+    expect(screen.getByText("ChatGPT (Codex)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(5);
   });
 });
 

@@ -3,7 +3,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import { applyInitialPreferences } from "./app/preferences/AppPreferences";
-import { configureAppOverlayLayers } from "./shared/ui/overlayLayers";
+import { windowCommands } from "./platform/tauri/window";
+import { configureAppOverlayLayers, configureSideSheetWindowDragging } from "./shared/ui/overlayLayers";
 import "./styles/reset.css";
 import "./styles/tokens.css";
 
@@ -15,6 +16,7 @@ if (!root) {
 
 applyInitialPreferences();
 configureAppOverlayLayers();
+configureSideSheetWindowDragging(windowCommands.startDragging);
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <App />

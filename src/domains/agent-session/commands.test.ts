@@ -13,9 +13,9 @@ afterEach(() => invokeMock.mockReset());
 
 describe("agentSessionCommands contract", () => {
   it("maps pagination and search to the Rust filter", async () => {
-    await agentSessionCommands.list({ page: 2, pageSize: 25, search: "ses_test", clientId: "opencode" });
+    await agentSessionCommands.list({ page: 2, pageSize: 25, search: "ses_test", agentType: "opencode", flowletStatus: "native" });
     expect(invokeMock).toHaveBeenCalledWith("list_agent_sessions", {
-      filter: { page: 2, page_size: 25, search: "ses_test", client_id: "opencode" },
+      filter: { page: 2, page_size: 25, search: "ses_test", agent_type: "opencode", flowlet_status: "native" },
     });
   });
 

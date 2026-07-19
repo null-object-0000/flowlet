@@ -1,12 +1,16 @@
+export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli";
+export type AgentSessionFlowletStatus = "" | "observed" | "native";
+
 export type AgentSessionFilter = {
   page: number;
   pageSize: number;
   search: string;
-  clientId: string;
+  agentType: "" | AgentSessionType;
+  flowletStatus: AgentSessionFlowletStatus;
 };
 
 export type AgentSessionRow = {
-  agentType: "opencode" | "claude-code";
+  agentType: AgentSessionType;
   sessionId: string;
   title: string | null;
   projectPath: string | null;
@@ -15,6 +19,8 @@ export type AgentSessionRow = {
   clientName: string | null;
   nativeStartedAt: string | null;
   nativeUpdatedAt: string | null;
+  activityAt: string;
+  flowletObserved: boolean;
   startedAt: string;
   updatedAt: string;
   requestCount: number;
@@ -37,5 +43,6 @@ export const DEFAULT_AGENT_SESSION_FILTER: AgentSessionFilter = {
   page: 1,
   pageSize: 8,
   search: "",
-  clientId: "",
+  agentType: "",
+  flowletStatus: "",
 };

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, SideSheet, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconEyeClosed, IconEyeOpened, IconRefresh } from "@douyinfe/semi-icons";
+import { Button, Select, SideSheet, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
+import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
@@ -11,7 +11,7 @@ import type {
   AgentInstallMethod,
 } from "../../domains/agent/types";
 
-const { Paragraph, Text, Title } = Typography;
+const { Text, Title } = Typography;
 const MASKED_TOKEN = "••••••••••••••••••••";
 
 export type AgentKind = "claude-code" | "opencode";
@@ -57,22 +57,19 @@ export function AgentAccessSideSheet({
   onCopy,
 }: Props) {
   const { t } = useAppPreferences();
-  const [tokenVisible, setTokenVisible] = useState(false);
   const [surface, setSurface] = useState<"cli" | "desktop">("cli");
 
   const isClaude = agent === "claude-code";
   const name = isClaude ? "Claude Code" : "OpenCode";
-  const protocol = isClaude ? "Anthropic-compatible" : "OpenAI-compatible";
   const endpoint = `${baseUrl}${isClaude ? "/anthropic" : "/v1"}`;
   const token = clientToken || "<Client Token>";
-  const displayedToken = clientToken && !tokenVisible ? MASKED_TOKEN : token;
+  const displayedToken = clientToken ? MASKED_TOKEN : token;
   const manualSnippets = useMemo(
     () => buildManualSnippets(isClaude, endpoint, token, displayedToken, t),
     [displayedToken, endpoint, isClaude, t, token],
   );
 
   useEffect(() => {
-    if (!visible) setTokenVisible(false);
     setSurface("cli");
   }, [visible, agent]);
 
@@ -98,21 +95,12 @@ export function AgentAccessSideSheet({
         </Tabs>
       }
       headerStyle={{ paddingBottom: 0 }}
-      width="min(680px, 92vw)"
+      width="min(760px, 96vw)"
       footer={null}
       bodyStyle={{ padding: 0 }}
       onCancel={onClose}
     >
       <div className={styles.body}>
-        <section className={styles.intro}>
-          <Tag color="blue">{protocol}</Tag>
-          <Paragraph type="tertiary">
-            {isClaude
-              ? t("通过 Anthropic-compatible 协议将 Claude Code 接入 Flowlet。")
-              : t("通过 OpenAI-compatible 协议将 OpenCode 接入 Flowlet。")}
-          </Paragraph>
-        </section>
-
         <section className={styles.section}>
             <div className={styles.sectionHeader}>
               <div>
@@ -143,10 +131,9 @@ export function AgentAccessSideSheet({
               </Text>
             ) : null}
             {surfaceInstallations?.map((installation, index) => {
-              const surface = installation.surface || "cli";
               const duplicateSurface = surfaceInstallations
                 .slice(0, index)
-                .some((candidate) => (candidate.surface || "cli") === surface);
+                .some((candidate) => (candidate.surface || "cli") === (installation.surface || "cli"));
               return (
               <div className={styles.installation} key={installation.executable_path}>
                 <div className={styles.installationHeader}>
@@ -157,15 +144,10 @@ export function AgentAccessSideSheet({
                     {duplicateSurface ? <Tag color="orange">{t("额外安装")}</Tag> : null}
                   </span>
                 </div>
-                <ConfigRow
-                  label={t("可执行文件")}
-                  value={installation.executable_path}
-                  onCopy={() => onCopy(installation.executable_path, t("{label} 已复制", { label: t("可执行文件") }))}
-                />
-                <ConfigRow
-                  label={t("安装目录")}
-                  value={installation.install_dir}
-                  onCopy={() => onCopy(installation.install_dir, t("{label} 已复制", { label: t("安装目录") }))}
+                <InstallationPathRow
+                  executablePath={installation.executable_path}
+                  installDir={installation.install_dir}
+                  onCopy={onCopy}
                 />
                 {installation.error ? <Text className={styles.installationError} type="warning">{installation.error}</Text> : null}
               </div>
@@ -244,19 +226,6 @@ export function AgentAccessSideSheet({
                 </div>
               </div>
             ) : null}
-        </section>
-
-        <section className={styles.section}>
-          <Title heading={5}>{t("接入参数")}</Title>
-          <ConfigRow label="Base URL" value={endpoint} onCopy={() => onCopy(endpoint, t("{label} 已复制", { label: "Base URL" }))} />
-          <SecretConfigRow
-            label="Client Token"
-            displayValue={displayedToken}
-            revealable={Boolean(clientToken)}
-            visible={tokenVisible}
-            onToggle={() => setTokenVisible((value) => !value)}
-            onCopy={() => onCopy(token, t("{label} 已复制", { label: "Client Token" }))}
-          />
         </section>
 
         <section className={styles.section}>
@@ -402,37 +371,34 @@ function ConfigRow({ label, value, onCopy }: { label: string; value: string; onC
   );
 }
 
-function SecretConfigRow({
-  label,
-  displayValue,
-  revealable,
-  visible,
-  onToggle,
+function InstallationPathRow({
+  executablePath,
+  installDir,
   onCopy,
 }: {
-  label: string;
-  displayValue: string;
-  revealable: boolean;
-  visible: boolean;
-  onToggle: () => void;
-  onCopy: () => Promise<void>;
+  executablePath: string;
+  installDir: string;
+  onCopy: Copy;
 }) {
   const { t } = useAppPreferences();
+  const [kind, setKind] = useState<"executable" | "directory">("executable");
+  const label = t(kind === "executable" ? "可执行文件" : "安装目录");
+  const value = kind === "executable" ? executablePath : installDir;
   return (
-    <div className={`${styles.configRow} ${styles.secretConfigRow}`}>
-      <Text type="tertiary" size="small">{label}</Text>
-      <code>{displayValue}</code>
-      <span className={styles.secretActions}>
-        {revealable ? (
-          <Button
-            aria-label={t(visible ? "隐藏 Client Token" : "查看 Client Token")}
-            icon={visible ? <IconEyeClosed /> : <IconEyeOpened />}
-            theme="borderless"
-            onClick={onToggle}
-          />
-        ) : null}
-        <Button icon={<IconCopy />} theme="borderless" aria-label={t("复制{label}", { label })} onClick={() => void onCopy()} />
-      </span>
+    <div className={styles.configRow}>
+      <Select
+        aria-label={t("路径类型")}
+        className={styles.pathKindSelector}
+        zIndex={APP_OVERLAY_Z_INDEX.sideSheet + 1}
+        value={kind}
+        optionList={[
+          { label: t("可执行文件"), value: "executable" },
+          { label: t("安装目录"), value: "directory" },
+        ]}
+        onChange={(nextKind) => setKind(nextKind as "executable" | "directory")}
+      />
+      <code>{value}</code>
+      <Button icon={<IconCopy />} theme="borderless" aria-label={t("复制{label}", { label })} onClick={() => void onCopy(value, t("{label} 已复制", { label }))} />
     </div>
   );
 }

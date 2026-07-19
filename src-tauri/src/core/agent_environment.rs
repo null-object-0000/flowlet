@@ -53,20 +53,65 @@ pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironment
     match agent_id {
         "claude-code" => Ok(detect_claude_code().await),
         "opencode" => Ok(detect_opencode().await),
-        "chatgpt-desktop" => Ok(detect_chatgpt_desktop().await),
+        "chatgpt-desktop" => Ok(detect_chatgpt_codex().await),
         _ => Err(format!("暂不支持检测 Agent：{agent_id}")),
     }
 }
 
-async fn detect_chatgpt_desktop() -> AgentEnvironmentReport {
-    let installations = chatgpt_desktop_installations().await;
+async fn detect_chatgpt_codex() -> AgentEnvironmentReport {
+    let mut installations = codex_cli_installations().await;
+    installations.extend(chatgpt_desktop_installations().await);
+    let primary = installations
+        .iter()
+        .find(|installation| {
+            installation.surface == AgentSurface::Cli
+                && installation.available_on_path
+                && installation.version.is_some()
+        })
+        .or_else(|| {
+            installations
+                .iter()
+                .find(|installation| installation.surface == AgentSurface::Cli)
+        })
+        .or_else(|| installations.first())
+        .cloned();
     AgentEnvironmentReport {
         agent_id: "chatgpt-desktop".to_string(),
         agent_name: "ChatGPT (Codex)".to_string(),
         installed: !installations.is_empty(),
-        primary: installations.first().cloned(),
+        primary,
         installations,
     }
+}
+
+async fn codex_cli_installations() -> Vec<AgentInstallation> {
+    let mut installations = Vec::new();
+    for candidate in codex_cli_candidates() {
+        let install_method = classify_codex_cli_method(&candidate.path);
+        let install_dir = resolve_codex_install_dir(&candidate.path, &install_method);
+        let package_version = read_package_version(&install_dir);
+        let version_result = read_version(&candidate.path).await;
+        let (version, version_output, error) = match version_result {
+            Ok(output) => (
+                parse_version(&output).or(package_version),
+                Some(output),
+                None,
+            ),
+            Err(_) if package_version.is_some() => (package_version, None, None),
+            Err(error) => (None, None, Some(error)),
+        };
+        installations.push(AgentInstallation {
+            surface: AgentSurface::Cli,
+            executable_path: display_path(&candidate.path),
+            install_dir: display_path(&install_dir),
+            install_method,
+            version,
+            version_output,
+            available_on_path: candidate.available_on_path,
+            error,
+        });
+    }
+    installations
 }
 
 #[cfg(windows)]
@@ -336,6 +381,45 @@ fn opencode_cli_candidates() -> Vec<Candidate> {
     candidates
 }
 
+fn codex_cli_candidates() -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            for file_name in executable_names("codex") {
+                push_candidate(&mut candidates, &mut seen, directory.join(file_name), true);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        for relative in known_codex_cli_locations() {
+            push_candidate(&mut candidates, &mut seen, home.join(relative), false);
+        }
+    }
+    #[cfg(windows)]
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        let directory = PathBuf::from(app_data).join("npm");
+        for file_name in executable_names("codex") {
+            push_candidate(&mut candidates, &mut seen, directory.join(file_name), false);
+        }
+    }
+    #[cfg(windows)]
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        push_candidate(
+            &mut candidates,
+            &mut seen,
+            PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("OpenAI")
+                .join("Codex")
+                .join("bin")
+                .join("codex.exe"),
+            false,
+        );
+    }
+    candidates
+}
+
 fn opencode_desktop_candidates() -> Vec<Candidate> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
@@ -474,6 +558,16 @@ fn known_opencode_cli_locations() -> &'static [&'static str] {
     ]
 }
 
+#[cfg(windows)]
+fn known_codex_cli_locations() -> &'static [&'static str] {
+    &[".local/bin/codex.exe"]
+}
+
+#[cfg(not(windows))]
+fn known_codex_cli_locations() -> &'static [&'static str] {
+    &[".local/bin/codex"]
+}
+
 #[cfg(not(windows))]
 fn known_opencode_cli_locations() -> &'static [&'static str] {
     &[
@@ -609,6 +703,28 @@ fn classify_opencode_cli_method(path: &Path) -> AgentInstallMethod {
     }
 }
 
+fn classify_codex_cli_method(path: &Path) -> AgentInstallMethod {
+    let normalized = normalized_path_key(path);
+    if normalized.contains("/node_modules/@openai/codex/")
+        || normalized.ends_with("/npm/codex.cmd")
+        || normalized.ends_with("/npm/codex.ps1")
+        || normalized.ends_with("/npm/codex")
+    {
+        AgentInstallMethod::Npm
+    } else if normalized.contains("/homebrew/") || normalized.contains("/cellar/codex/") {
+        AgentInstallMethod::Homebrew
+    } else if normalized.ends_with("/.local/bin/codex")
+        || normalized.ends_with("/.local/bin/codex.exe")
+        || normalized.contains("/programs/openai/codex/bin/")
+    {
+        AgentInstallMethod::Native
+    } else if normalized.starts_with("/usr/bin/") || normalized.starts_with("/usr/local/bin/") {
+        AgentInstallMethod::SystemPackage
+    } else {
+        AgentInstallMethod::Unknown
+    }
+}
+
 fn desktop_version(path: &Path) -> Option<String> {
     #[cfg(windows)]
     if let Some(version) = windows_file_version(path) {
@@ -715,6 +831,32 @@ fn resolve_opencode_install_dir(path: &Path, method: &AgentInstallMethod) -> Pat
     path.parent().unwrap_or(path).to_path_buf()
 }
 
+fn resolve_codex_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBuf {
+    if matches!(method, AgentInstallMethod::Npm) {
+        if let Some(bin_dir) = path.parent() {
+            let package_dir = bin_dir.join("node_modules").join("@openai").join("codex");
+            if package_dir.is_dir() {
+                return package_dir;
+            }
+        }
+    }
+    path.parent().unwrap_or(path).to_path_buf()
+}
+
+fn read_package_version(install_dir: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(install_dir.join("package.json")).ok()?;
+    parse_package_version(&content)
+}
+
+fn parse_package_version(content: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()?
+        .get("version")?
+        .as_str()
+        .filter(|version| !version.is_empty())
+        .map(str::to_owned)
+}
+
 async fn read_version(path: &Path) -> Result<String, String> {
     let mut command = version_command(path);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -748,7 +890,21 @@ fn version_command(path: &Path) -> Command {
         .and_then(|extension| extension.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if extension == "cmd" || extension == "bat" {
+    if is_windows_store_codex_executable(path) {
+        // Packaged executables can fail when spawned directly from a
+        // CreateProcess-based host. PowerShell preserves the package launch
+        // behavior and still gives us the real Codex CLI version output.
+        let escaped = path.to_string_lossy().replace('\'', "''");
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!("& '{escaped}' --version"),
+        ]);
+        command
+    } else if extension == "cmd" || extension == "bat" {
         let mut command = Command::new("cmd.exe");
         command.arg("/D").arg("/C").arg(path).arg("--version");
         command
@@ -769,6 +925,14 @@ fn version_command(path: &Path) -> Command {
         command.arg("--version");
         command
     }
+}
+
+#[cfg(windows)]
+fn is_windows_store_codex_executable(path: &Path) -> bool {
+    let normalized = normalized_path_key(path);
+    (normalized.contains("/windowsapps/openai.codex_")
+        || normalized.contains("/windowsapps/openai.chatgpt-desktop_"))
+        && normalized.ends_with("/app/resources/codex.exe")
 }
 
 #[cfg(not(windows))]
@@ -822,6 +986,14 @@ mod tests {
     }
 
     #[test]
+    fn parses_codex_npm_package_version() {
+        assert_eq!(
+            parse_package_version(r#"{"name":"@openai/codex","version":"0.142.5"}"#),
+            Some("0.142.5".to_string())
+        );
+    }
+
+    #[test]
     fn classifies_official_install_locations() {
         assert_eq!(
             classify_install_method(Path::new("C:/Users/test/.local/bin/claude.exe")),
@@ -843,6 +1015,25 @@ mod tests {
             classify_opencode_cli_method(Path::new("C:/Users/test/.bun/bin/opencode.exe")),
             AgentInstallMethod::Bun
         );
+        assert_eq!(
+            classify_codex_cli_method(Path::new("C:/Users/test/AppData/Roaming/npm/codex.cmd")),
+            AgentInstallMethod::Npm
+        );
+        assert_eq!(
+            classify_codex_cli_method(Path::new(
+                "C:/Users/test/AppData/Local/Programs/OpenAI/Codex/bin/codex.exe"
+            )),
+            AgentInstallMethod::Native
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn recognizes_windows_store_codex_command_target() {
+        let path = Path::new(
+            "C:/Program Files/WindowsApps/OpenAI.Codex_26.715.4045.0_x64__2p2nqsd0c76g0/app/resources/codex.exe",
+        );
+        assert!(is_windows_store_codex_executable(path));
     }
 
     #[cfg(windows)]

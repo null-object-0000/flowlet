@@ -939,7 +939,9 @@ pub struct AgentSessionsFilter {
     #[serde(default)]
     pub search: String,
     #[serde(default)]
-    pub client_id: String,
+    pub agent_type: String,
+    #[serde(default)]
+    pub flowlet_status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -947,7 +949,6 @@ pub struct AgentSessionsFilter {
 pub struct AgentSessionRow {
     pub agent_type: String,
     pub session_id: String,
-    pub agent_type: Option<String>,
     pub title: Option<String>,
     pub project_path: Option<String>,
     pub parent_session_id: Option<String>,
@@ -955,6 +956,8 @@ pub struct AgentSessionRow {
     pub client_name: Option<String>,
     pub native_started_at: Option<String>,
     pub native_updated_at: Option<String>,
+    pub activity_at: String,
+    pub flowlet_observed: bool,
     pub started_at: String,
     pub updated_at: String,
     pub request_count: i64,
@@ -981,7 +984,6 @@ pub struct AgentSessionRepairResult {
     pub repaired_logs: usize,
     pub skipped_requests: usize,
 }
-
 
 // ─── Proxy Bind Configuration ───────────────────────────────────────────────
 
@@ -1056,7 +1058,12 @@ impl Default for LogCaptureConfig {
 
 impl LogCaptureConfig {
     pub const fn redacted_header_keys() -> &'static [&'static str] {
-        &["authorization", "x-api-key", "cookie", "set-cookie", "x-auth-token"]
+        &[
+            "authorization",
+            "x-api-key",
+            "cookie",
+            "set-cookie",
+            "x-auth-token",
+        ]
     }
 }
-

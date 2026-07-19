@@ -130,7 +130,8 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
             page: 1,
             page_size: 10,
             search: "ses_test".to_string(),
-            client_id: "opencode".to_string(),
+            agent_type: "opencode".to_string(),
+            flowlet_status: "observed".to_string(),
         })
         .unwrap();
     assert_eq!(page.total, 1);
@@ -151,10 +152,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
     assert_eq!(children[0].request_count, 2);
     assert_eq!(children[0].success_count, 1);
     assert_eq!(children[0].error_count, 1);
-    assert_eq!(
-        children[0].parent_session_id.as_deref(),
-        Some("ses_parent")
-    );
+    assert_eq!(children[0].parent_session_id.as_deref(), Some("ses_parent"));
     let clients = storage.list_agent_session_clients().unwrap();
     assert_eq!(clients.len(), 1);
     assert_eq!(clients[0].id, "opencode");
@@ -163,7 +161,8 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
             page: 1,
             page_size: 10,
             search: String::new(),
-            client_id: "other-client".to_string(),
+            agent_type: "claude-code".to_string(),
+            flowlet_status: String::new(),
         })
         .unwrap();
     assert_eq!(filtered_out.total, 0);
@@ -173,7 +172,8 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
             page: 2,
             page_size: 8,
             search: String::new(),
-            client_id: String::new(),
+            agent_type: String::new(),
+            flowlet_status: String::new(),
         })
         .unwrap();
     assert!(out_of_range.rows.is_empty());
@@ -199,7 +199,8 @@ fn groups_claude_code_requests_by_official_session_header_attribution() {
             page: 1,
             page_size: 10,
             search: "09af5e1a".to_string(),
-            client_id: "claude-code".to_string(),
+            agent_type: "claude-code".to_string(),
+            flowlet_status: "observed".to_string(),
         })
         .unwrap();
     assert_eq!(page.total, 1);

@@ -389,6 +389,7 @@ const english: Record<string, string> = {
   "未发往上游（路由前失败）": "Not sent upstream (failed before routing)",
   "旧日志未记录": "Not recorded for older logs",
   "客户端": "Client",
+  "Agent 来源": "Agent source",
   "未知客户端": "Unknown client",
   "客户端协议": "Client protocol",
   "HTTP 状态": "HTTP status",

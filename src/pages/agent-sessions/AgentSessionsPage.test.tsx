@@ -135,7 +135,9 @@ describe("AgentSessionsPage", () => {
     );
 
     expect(screen.getByText("未经过 Flowlet")).toBeInTheDocument();
-    expect(screen.getByText("ChatGPT (Codex)")).toBeInTheDocument();
+    expect(screen.getByText("Agent 来源")).toBeInTheDocument();
+    expect(screen.getAllByText("ChatGPT (Codex)")).toHaveLength(2);
+    expect(screen.queryByText("未知客户端")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).not.toBeInTheDocument();
     expect(screen.getAllByText("—")).toHaveLength(5);
   });

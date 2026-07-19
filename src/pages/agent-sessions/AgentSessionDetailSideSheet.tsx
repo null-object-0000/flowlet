@@ -49,7 +49,12 @@ export function AgentSessionDetailSideSheet({
             <DetailItem label={t("会话标题")} value={title} wide />
             <DetailItem label={t("会话 ID")} value={session.sessionId} copyable wide onOpen={session.flowletObserved ? () => onViewRequestLogs(session.sessionId) : undefined} />
             {session.parentSessionId ? <DetailItem label={t("父会话 ID")} value={session.parentSessionId} copyable wide /> : null}
-            <DetailItem label={t("客户端")} value={session.clientName ?? session.clientId ?? t("未知客户端")} />
+            <DetailItem
+              label={session.flowletObserved ? t("客户端") : t("Agent 来源")}
+              value={session.flowletObserved
+                ? session.clientName ?? session.clientId ?? t("未知客户端")
+                : agentLabel(session.agentType)}
+            />
             <DetailItem label={t("项目目录")} value={session.projectPath ?? "—"} />
           </div>
         </DetailSection>

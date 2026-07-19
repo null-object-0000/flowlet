@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   applyClaudeCodeGlobalConfig,
   applyOpenCodeGlobalConfig,
+  authorizeCodexAccount,
   detectChatGptDesktopEnvironment,
   detectClaudeCodeEnvironment,
   detectOpenCodeEnvironment,
@@ -47,6 +48,14 @@ export function useCodexAccounts(enabled = true) {
     enabled,
     staleTime: 5 * 60_000,
     retry: false,
+  });
+}
+
+export function useCodexAccountAuthorization() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: authorizeCodexAccount,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.agent.codexAccount() }),
   });
 }
 

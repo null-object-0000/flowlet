@@ -1,10 +1,10 @@
 .titleTabs {
-  width: min(420px, calc(92vw - 96px));
+  width: min(420px, calc(96vw - 96px));
   min-width: 0;
 }
 
 .chatGptTitleTabs {
-  width: min(540px, calc(92vw - 96px));
+  width: min(540px, calc(96vw - 96px));
 }
 
 .titleTabLabel {
@@ -18,7 +18,6 @@
   background: var(--flowlet-color-surface-muted);
 }
 
-.intro,
 .section,
 .tip {
   padding: 18px;
@@ -34,7 +33,13 @@
   gap: 12px;
 }
 
-.intro p,
+.sectionActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
 .section h5,
 .tip h5 {
   margin: 8px 0 0;
@@ -43,7 +48,7 @@
 .configRow {
   margin-top: 10px;
   display: grid;
-  grid-template-columns: 100px minmax(0, 1fr) 32px;
+  grid-template-columns: 116px minmax(0, 1fr) 32px;
   align-items: center;
   gap: 8px;
 }
@@ -62,15 +67,6 @@
   border-radius: 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.secretConfigRow {
-  grid-template-columns: 100px minmax(0, 1fr) auto;
-}
-
-.secretActions {
-  display: flex;
-  align-items: center;
 }
 
 .environmentMessage {
@@ -122,14 +118,16 @@
 
 .accountSummary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 24px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .accountSummary > div {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
+  align-content: start;
+  justify-items: start;
 }
 
 .accountSummary strong {
@@ -138,32 +136,44 @@
   white-space: nowrap;
 }
 
+.accountValueTags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
 .usageWindows {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
 .usageWindow {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 9px 12px;
   border: 1px solid var(--flowlet-color-border);
   border-radius: 8px;
   background: var(--flowlet-color-surface-muted);
 }
 
 .usageHeader {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
 }
 
 .usageHeader span {
   color: var(--semi-color-primary);
   font-size: 12px;
   font-weight: 600;
+}
+
+.usageHeader > :last-child {
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .usageTrack {
@@ -184,6 +194,49 @@
   display: block;
 }
 
+.resetCredits {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--semi-color-primary-light-active);
+  border-radius: 8px;
+  background: var(--semi-color-primary-light-default);
+}
+
+.resetCreditsHeader,
+.resetCredit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resetCreditList {
+  display: grid;
+  gap: 6px;
+}
+
+.resetCredit {
+  min-height: 28px;
+  padding-top: 6px;
+  border-top: 1px solid var(--semi-color-primary-light-active);
+}
+
+.resetCredit > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resetCredit > :last-child {
+  flex: none;
+  white-space: nowrap;
+}
+
+.resetCreditNotice {
+  display: block;
+}
+
 .installationHeader,
 .installationTags {
   display: flex;
@@ -193,6 +246,11 @@
 
 .installationHeader {
   justify-content: space-between;
+}
+
+.pathKindSelector {
+  width: 116px;
+  min-width: 0;
 }
 
 .installationTags {
@@ -326,16 +384,26 @@
     grid-template-columns: minmax(0, 1fr) 32px;
   }
 
-  .secretConfigRow {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
   .configRow > span:first-child {
     grid-column: 1 / -1;
   }
 
-  .accountSummary,
-  .usageWindows {
-    grid-template-columns: 1fr;
+  .accountSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .usageHeader {
+    grid-template-columns: auto auto;
+  }
+
+  .usageHeader > :last-child {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .resetCredit {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 }

@@ -7,8 +7,86 @@ use crate::core::config::{
 use crate::core::usage::{extract_response_usage, extract_sse_response_usage};
 use base64::Engine;
 use rusqlite::params;
+use std::collections::{HashMap, HashSet};
 
 const MAX_AGENT_SESSION_ID_BYTES: usize = 512;
+type AgentSessionKey = (String, String);
+
+fn agent_session_key(row: &AgentSessionRow) -> AgentSessionKey {
+    (row.agent_type.clone(), row.session_id.clone())
+}
+
+fn matching_root_session_keys(
+    catalog: &[AgentSessionRow],
+    search: &str,
+) -> HashSet<AgentSessionKey> {
+    if search.is_empty() {
+        return catalog
+            .iter()
+            .filter(|row| row.parent_session_id.is_none())
+            .map(agent_session_key)
+            .collect();
+    }
+    let parent_by_key = catalog
+        .iter()
+        .filter_map(|row| {
+            row.parent_session_id.as_ref().map(|parent| {
+                (
+                    agent_session_key(row),
+                    (row.agent_type.clone(), parent.clone()),
+                )
+            })
+        })
+        .collect::<HashMap<_, _>>();
+    let known_keys = catalog
+        .iter()
+        .map(agent_session_key)
+        .collect::<HashSet<_>>();
+    let mut roots = HashSet::new();
+
+    for row in catalog
+        .iter()
+        .filter(|row| session_matches_search(row, search))
+    {
+        let mut current = agent_session_key(row);
+        let mut visited = HashSet::new();
+        while visited.insert(current.clone()) {
+            let Some(parent) = parent_by_key.get(&current) else {
+                if known_keys.contains(&current) {
+                    roots.insert(current);
+                }
+                break;
+            };
+            current = parent.clone();
+        }
+    }
+    roots
+}
+
+fn session_matches_search(row: &AgentSessionRow, search: &str) -> bool {
+    row.session_id.to_lowercase().contains(search)
+        || row
+            .title
+            .as_deref()
+            .is_some_and(|value| value.to_lowercase().contains(search))
+        || row
+            .project_path
+            .as_deref()
+            .is_some_and(|value| value.to_lowercase().contains(search))
+}
+
+fn matches_agent_session_type(row: &AgentSessionRow, agent_type: &str) -> bool {
+    agent_type.is_empty() || row.agent_type == agent_type
+}
+
+fn matches_agent_session_flowlet_status(row: &AgentSessionRow, flowlet_status: &str) -> bool {
+    match flowlet_status {
+        "" => true,
+        "observed" => row.flowlet_observed,
+        "native" => !row.flowlet_observed,
+        _ => false,
+    }
+}
 
 fn repair_time_clause(column: &str, time_range: &str) -> String {
     let condition = match time_range {
@@ -300,123 +378,36 @@ impl Storage {
         &self,
         filter: AgentSessionsFilter,
     ) -> Result<AgentSessionsPageResult, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
         let page = filter.page.max(1);
         let page_size = filter.page_size.clamp(1, 8);
-        let offset = i64::from((page - 1) * page_size);
-        let pattern = format!("%{}%", filter.search.trim());
-        let client_id = filter.client_id.trim();
-
-        let mut stmt = connection.prepare(
-            r#"
-            SELECT
-                rl.agent_type,
-                rl.agent_session_id,
-                MAX(rl.parent_agent_session_id),
-                MAX(rl.client_id),
-                MAX(rl.client_name),
-                MIN(rl.created_at),
-                MAX(rl.created_at),
-                COUNT(DISTINCT rl.request_id),
-                SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 1 ELSE 0 END),
-                SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 0 ELSE 1 END),
-                COALESCE(SUM(ur.total_tokens), 0),
-                COALESCE(SUM(ur.estimated_cost), 0),
-                COUNT(*) OVER()
-            FROM request_logs rl
-            LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
-            WHERE rl.is_last_attempt = 1
-              AND rl.agent_session_id IS NOT NULL
-              AND (?1 = '%%' OR rl.agent_session_id LIKE ?1
-                   OR EXISTS (
-                       SELECT 1
-                       FROM request_logs child
-                       WHERE child.is_last_attempt = 1
-                         AND child.agent_type = rl.agent_type
-                         AND child.parent_agent_session_id = rl.agent_session_id
-                         AND child.agent_session_id LIKE ?1
-                   ))
-            GROUP BY rl.agent_type, rl.agent_session_id
-            HAVING MAX(NULLIF(TRIM(rl.parent_agent_session_id), '')) IS NULL
-               AND (?2 = '' OR SUM(CASE
-                   WHEN (?2 = '__unknown__' AND rl.client_id IS NULL) OR rl.client_id = ?2 THEN 1 ELSE 0
-               END) > 0)
-            ORDER BY MAX(rl.created_at) DESC
-            LIMIT ?3 OFFSET ?4
-            "#,
-        )?;
-        let mut total = 0;
-        let mapped = stmt.query_map(
-            params![pattern, client_id, i64::from(page_size), offset],
-            |row| {
-                Ok((
-                    AgentSessionRow {
-                        agent_type: row.get(0)?,
-                        session_id: row.get(1)?,
-                        title: None,
-                        project_path: None,
-                        parent_session_id: row.get(2)?,
-                        client_id: row.get(3)?,
-                        client_name: row.get(4)?,
-                        native_started_at: None,
-                        native_updated_at: None,
-                        started_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                        request_count: row.get(7)?,
-                        success_count: row.get(8)?,
-                        error_count: row.get(9)?,
-                        known_tokens: row.get(10)?,
-                        estimated_cost: row.get(11)?,
-                    },
-                    row.get::<_, i64>(12)?,
+        let offset = ((page - 1) * page_size) as usize;
+        let search = filter.search.trim().to_lowercase();
+        let agent_type = filter.agent_type.trim();
+        let flowlet_status = filter.flowlet_status.trim();
+        let mut catalog = crate::core::agent_session_metadata::merge_agent_session_catalog(
+            self.list_observed_agent_sessions()?,
+            self.list_native_agent_sessions(),
+        );
+        let matching_roots = matching_root_session_keys(&catalog, &search);
+        catalog.retain(|row| {
+            row.parent_session_id.is_none()
+                && matching_roots.contains(&agent_session_key(row))
+                && matches_agent_session_type(row, agent_type)
+                && matches_agent_session_flowlet_status(row, flowlet_status)
+        });
+        catalog.sort_by(|left, right| {
+            crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
+                .cmp(&crate::core::agent_session_metadata::session_time_millis(
+                    &left.activity_at,
                 ))
-            },
-        )?;
-        let mut rows = mapped
-            .map(|result| {
-                result.map(|(row, row_total)| {
-                    total = row_total;
-                    row
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // 页码因清理日志等操作越界时，窗口查询没有行可携带 total。
-        // 仅在这种罕见场景补一次轻量计数，正常加载始终只做一遍分组聚合。
-        if rows.is_empty() && page > 1 {
-            total = connection.query_row(
-                r#"
-                SELECT COUNT(*) FROM (
-                    SELECT agent_type, agent_session_id
-                    FROM request_logs
-                    WHERE is_last_attempt = 1
-                      AND agent_session_id IS NOT NULL
-                      AND (?1 = '%%' OR agent_session_id LIKE ?1
-                           OR EXISTS (
-                               SELECT 1
-                               FROM request_logs child
-                               WHERE child.is_last_attempt = 1
-                                 AND child.agent_type = request_logs.agent_type
-                                 AND child.parent_agent_session_id = request_logs.agent_session_id
-                                 AND child.agent_session_id LIKE ?1
-                           ))
-                    GROUP BY agent_type, agent_session_id
-                    HAVING MAX(NULLIF(TRIM(parent_agent_session_id), '')) IS NULL
-                       AND (?2 = '' OR SUM(CASE
-                           WHEN (?2 = '__unknown__' AND client_id IS NULL) OR client_id = ?2 THEN 1 ELSE 0
-                       END) > 0)
-                )
-                "#,
-                params![pattern, client_id],
-                |row| row.get(0),
-            )?;
-        }
-        drop(stmt);
-        drop(connection);
-        crate::core::agent_session_metadata::enrich_agent_sessions(&mut rows);
+                .then_with(|| right.session_id.cmp(&left.session_id))
+        });
+        let total = catalog.len() as i64;
+        let rows = catalog
+            .into_iter()
+            .skip(offset)
+            .take(page_size as usize)
+            .collect();
         Ok(AgentSessionsPageResult {
             rows,
             total,
@@ -430,16 +421,34 @@ impl Storage {
         agent_type: &str,
         parent_session_id: &str,
     ) -> Result<Vec<AgentSessionRow>, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
         let agent_type = agent_type.trim();
         let parent_session_id = parent_session_id.trim();
         if agent_type.is_empty() || parent_session_id.is_empty() {
             return Ok(Vec::new());
         }
+        let mut rows = crate::core::agent_session_metadata::merge_agent_session_catalog(
+            self.list_observed_agent_sessions()?,
+            self.list_native_agent_sessions(),
+        )
+        .into_iter()
+        .filter(|row| {
+            row.agent_type == agent_type
+                && row.parent_session_id.as_deref() == Some(parent_session_id)
+        })
+        .collect::<Vec<_>>();
+        rows.sort_by(|left, right| {
+            crate::core::agent_session_metadata::session_time_millis(&right.activity_at).cmp(
+                &crate::core::agent_session_metadata::session_time_millis(&left.activity_at),
+            )
+        });
+        Ok(rows)
+    }
 
+    fn list_observed_agent_sessions(&self) -> Result<Vec<AgentSessionRow>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             r#"
             SELECT
@@ -458,14 +467,13 @@ impl Storage {
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             WHERE rl.is_last_attempt = 1
-              AND rl.agent_type = ?1
               AND rl.agent_session_id IS NOT NULL
-              AND rl.parent_agent_session_id = ?2
             GROUP BY rl.agent_type, rl.agent_session_id
-            ORDER BY MAX(rl.created_at) DESC
             "#,
         )?;
-        let mapped = stmt.query_map(params![agent_type, parent_session_id], |row| {
+        let rows = stmt.query_map([], |row| {
+            let started_at: String = row.get(5)?;
+            let updated_at: String = row.get(6)?;
             Ok(AgentSessionRow {
                 agent_type: row.get(0)?,
                 session_id: row.get(1)?,
@@ -476,8 +484,10 @@ impl Storage {
                 client_name: row.get(4)?,
                 native_started_at: None,
                 native_updated_at: None,
-                started_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                activity_at: updated_at.clone(),
+                flowlet_observed: true,
+                started_at,
+                updated_at,
                 request_count: row.get(7)?,
                 success_count: row.get(8)?,
                 error_count: row.get(9)?,
@@ -485,11 +495,15 @@ impl Storage {
                 estimated_cost: row.get(11)?,
             })
         })?;
-        let mut rows = mapped.collect::<Result<Vec<_>, _>>()?;
-        drop(stmt);
-        drop(connection);
-        crate::core::agent_session_metadata::enrich_agent_sessions(&mut rows);
-        Ok(rows)
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    fn list_native_agent_sessions(&self) -> Vec<AgentSessionRow> {
+        if self.db_path.as_ref() == std::path::Path::new(":memory:") {
+            Vec::new()
+        } else {
+            crate::core::agent_session_metadata::list_native_agent_sessions()
+        }
     }
 
     pub fn list_agent_session_clients(&self) -> Result<Vec<LogFilterClient>, StorageError> {
@@ -1593,5 +1607,52 @@ impl Storage {
             page_size,
             summary,
         })
+    }
+}
+
+#[cfg(test)]
+mod agent_session_filter_tests {
+    use super::*;
+
+    fn session(agent_type: &str, flowlet_observed: bool) -> AgentSessionRow {
+        AgentSessionRow {
+            agent_type: agent_type.to_string(),
+            session_id: "session-1".to_string(),
+            title: None,
+            project_path: None,
+            parent_session_id: None,
+            client_id: None,
+            client_name: None,
+            native_started_at: None,
+            native_updated_at: None,
+            activity_at: "2026-07-19T00:00:00Z".to_string(),
+            flowlet_observed,
+            started_at: "2026-07-19T00:00:00Z".to_string(),
+            updated_at: "2026-07-19T00:00:00Z".to_string(),
+            request_count: 0,
+            success_count: 0,
+            error_count: 0,
+            known_tokens: 0,
+            estimated_cost: 0.0,
+        }
+    }
+
+    #[test]
+    fn filters_native_sessions_by_agent_type_independently_from_flowlet_status() {
+        let codex = session("codex-desktop", false);
+        assert!(matches_agent_session_type(&codex, "codex-desktop"));
+        assert!(matches_agent_session_flowlet_status(&codex, "native"));
+        assert!(!matches_agent_session_flowlet_status(&codex, "observed"));
+        assert!(!matches_agent_session_type(&codex, "opencode"));
+    }
+
+    #[test]
+    fn supports_all_observed_and_native_flowlet_filters() {
+        let observed = session("opencode", true);
+        let native = session("opencode", false);
+        assert!(matches_agent_session_flowlet_status(&observed, ""));
+        assert!(matches_agent_session_flowlet_status(&native, ""));
+        assert!(matches_agent_session_flowlet_status(&observed, "observed"));
+        assert!(matches_agent_session_flowlet_status(&native, "native"));
     }
 }

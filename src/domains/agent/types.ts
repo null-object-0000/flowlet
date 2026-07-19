@@ -42,6 +42,21 @@ export type CodexCredits = {
   balance?: string | null;
 };
 
+export type CodexRateLimitResetCredit = {
+  id: string;
+  reset_type?: string | null;
+  status?: string | null;
+  granted_at?: number | null;
+  expires_at?: number | null;
+  title?: string | null;
+  description?: string | null;
+};
+
+export type CodexRateLimitResetCredits = {
+  available_count: number;
+  credits?: CodexRateLimitResetCredit[] | null;
+};
+
 export type CodexAccountReport = {
   account_id: string;
   signed_in: boolean;
@@ -52,6 +67,7 @@ export type CodexAccountReport = {
   primary?: CodexUsageWindow | null;
   secondary?: CodexUsageWindow | null;
   credits?: CodexCredits | null;
+  rate_limit_reset_credits?: CodexRateLimitResetCredits | null;
   rate_limit_reached_type?: string | null;
   source: "oauth" | "app_server";
   updated_at: string;

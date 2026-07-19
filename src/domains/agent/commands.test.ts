@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   applyClaudeCodeGlobalConfig,
   applyOpenCodeGlobalConfig,
+  authorizeCodexAccount,
   detectChatGptDesktopEnvironment,
   detectClaudeCodeEnvironment,
   detectOpenCodeEnvironment,
@@ -42,6 +43,14 @@ describe("agent commands", () => {
     await queryCodexAccounts();
 
     expect(invoke).toHaveBeenCalledWith("query_codex_accounts", undefined);
+  });
+
+  it("starts independent Codex account authorization through the typed Tauri boundary", async () => {
+    vi.mocked(invoke).mockResolvedValue({ account_id: "account-2", signed_in: true });
+
+    await authorizeCodexAccount();
+
+    expect(invoke).toHaveBeenCalledWith("authorize_codex_account", undefined);
   });
 
   it.each([

@@ -10,6 +10,7 @@ import {
   useChatGptDesktopEnvironment,
   useClaudeCodeEnvironment,
   useClaudeCodeGlobalConfig,
+  useCodexAccountAuthorization,
   useCodexAccounts,
   useOpenCodeEnvironment,
   useOpenCodeGlobalConfig,
@@ -55,6 +56,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const openCodeEnvironment = useOpenCodeEnvironment();
   const chatGptEnvironment = useChatGptDesktopEnvironment();
   const codexAccounts = useCodexAccounts(selectedAgent === "chatgpt-desktop");
+  const codexAccountAuthorization = useCodexAccountAuthorization();
   const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
   const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
 
@@ -89,6 +91,16 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
     }
   };
 
+  const authorizeCodexAccount = async () => {
+    try {
+      await codexAccountAuthorization.mutateAsync();
+      await codexAccounts.refetch();
+      Toast.success(t("Codex 账号授权成功"));
+    } catch (error) {
+      Toast.error(t("Codex 账号授权失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
+
   return (
     <>
       <OverviewModuleCard title={t("AI Agent 接入")}>
@@ -117,7 +129,6 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                       environment={environmentQuery.data}
                       loading={environmentQuery.isLoading}
                       error={environmentQuery.isError}
-                      unsupported={kind === "chatgpt-desktop"}
                     />
                     <SurfaceStatus
                       label="Desktop"
@@ -165,6 +176,8 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         accountLoading={codexAccounts.isFetching}
         accountError={codexAccounts.error?.message}
         onRefreshAccount={() => void codexAccounts.refetch()}
+        accountAuthorizationBusy={codexAccountAuthorization.isPending}
+        onAuthorizeAccount={() => void authorizeCodexAccount()}
         onClose={() => setSelectedAgent(null)}
         onCopy={copy}
       />

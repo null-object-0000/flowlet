@@ -9,6 +9,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(12);
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const MANAGED_PROFILE_CONFIG: &str = "cli_auth_credentials_store = \"file\"\n";
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct CodexUsageWindow {
@@ -25,6 +27,23 @@ pub struct CodexCredits {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CodexRateLimitResetCredit {
+    pub id: String,
+    pub reset_type: Option<String>,
+    pub status: Option<String>,
+    pub granted_at: Option<i64>,
+    pub expires_at: Option<i64>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CodexRateLimitResetCredits {
+    pub available_count: i64,
+    pub credits: Option<Vec<CodexRateLimitResetCredit>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct CodexAccountReport {
     pub account_id: String,
     pub signed_in: bool,
@@ -35,6 +54,8 @@ pub struct CodexAccountReport {
     pub primary: Option<CodexUsageWindow>,
     pub secondary: Option<CodexUsageWindow>,
     pub credits: Option<CodexCredits>,
+    #[serde(default)]
+    pub rate_limit_reset_credits: Option<CodexRateLimitResetCredits>,
     pub rate_limit_reached_type: Option<String>,
     pub source: String,
     pub updated_at: String,
@@ -102,11 +123,17 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
                         write_private_json(&snapshot_path, &report)?;
                         accounts.push(report);
                     }
-                    _ => {
+                    app_server_result => {
                         if let Some(mut snapshot) = stored_snapshot {
                             snapshot.is_current = false;
                             snapshot.stale = true;
-                            snapshot.error = Some(oauth_error);
+                            snapshot.error = Some(match app_server_result {
+                                Ok(_) => "登录凭据已失效，请在 Codex 中重新登录该账号后刷新"
+                                    .to_string(),
+                                Err(app_server_error) => format!(
+                                    "Codex 账号刷新失败。OAuth 会话：{oauth_error}；app-server：{app_server_error}"
+                                ),
+                            });
                             accounts.push(snapshot);
                         }
                     }
@@ -115,12 +142,7 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
         }
     }
 
-    accounts.sort_by(|left, right| {
-        right
-            .is_current
-            .cmp(&left.is_current)
-            .then_with(|| left.email.cmp(&right.email))
-    });
+    sort_accounts(&mut accounts);
     deduplicate_accounts(&mut accounts);
     if accounts.is_empty() {
         if let Some(error) = current_error {
@@ -132,6 +154,68 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
         accounts,
         current_account_id,
     })
+}
+
+fn sort_accounts(accounts: &mut [CodexAccountReport]) {
+    accounts.sort_by(|left, right| {
+        right
+            .is_current
+            .cmp(&left.is_current)
+            .then_with(|| left.stale.cmp(&right.stale))
+            .then_with(|| left.email.cmp(&right.email))
+    });
+}
+
+pub async fn authorize_codex_account<F>(
+    managed_root: &Path,
+    open_auth_url: F,
+) -> Result<CodexAccountReport, String>
+where
+    F: FnOnce(&str) -> Result<(), String>,
+{
+    std::fs::create_dir_all(managed_root)
+        .map_err(|error| format!("无法创建 Codex 多账号目录：{error}"))?;
+    let pending_dir = managed_root.join(format!(".pending-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&pending_dir)
+        .map_err(|error| format!("无法创建 Codex 独立登录目录：{error}"))?;
+    if let Err(error) = write_managed_profile_config(&pending_dir) {
+        let _ = std::fs::remove_dir_all(&pending_dir);
+        return Err(error);
+    }
+
+    let mut rpc = match start_codex_rpc(Some(&pending_dir)).await {
+        Ok(rpc) => rpc,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&pending_dir);
+            return Err(error);
+        }
+    };
+    let result = async {
+        initialize_codex_rpc(&mut rpc).await?;
+        let login = rpc
+            .call(2, "account/login/start", Some(json!({ "type": "chatgpt" })))
+            .await?;
+        let (login_id, auth_url) = parse_login_start(&login)?;
+        open_auth_url(&auth_url)?;
+        rpc.wait_for_login_completed(&login_id).await?;
+
+        let auth_path = pending_dir.join("auth.json");
+        let report = match query_codex_account_via_oauth_path(&auth_path).await {
+            Ok(report) => report,
+            Err(_) => read_codex_account_report(&mut rpc, false, 3).await?,
+        };
+        if !report.signed_in {
+            return Err("Codex 独立账号授权完成后仍未检测到登录状态".to_string());
+        }
+        let auth = read_json(&auth_path)?;
+        persist_managed_profile(managed_root, &auth, &report)?;
+        Ok(report)
+    }
+    .await;
+
+    rpc.stop().await;
+    let _ = std::fs::remove_dir_all(&pending_dir);
+    result
 }
 
 fn deduplicate_accounts(accounts: &mut Vec<CodexAccountReport>) {
@@ -147,8 +231,14 @@ fn persist_managed_profile(
     let profile_dir = managed_root.join(profile_directory_name(&report.account_id));
     std::fs::create_dir_all(&profile_dir)
         .map_err(|error| format!("无法创建 Codex 账号目录：{error}"))?;
+    write_managed_profile_config(&profile_dir)?;
     write_private_json(&profile_dir.join("auth.json"), auth)?;
     write_private_json(&profile_dir.join("snapshot.json"), report)
+}
+
+fn write_managed_profile_config(profile_dir: &Path) -> Result<(), String> {
+    std::fs::write(profile_dir.join("config.toml"), MANAGED_PROFILE_CONFIG)
+        .map_err(|error| format!("写入 Codex 独立账号配置失败：{error}"))
 }
 
 fn read_json(path: &Path) -> Result<Value, String> {
@@ -228,6 +318,18 @@ async fn query_current_codex_account() -> Result<CodexAccountReport, String> {
 async fn query_codex_account_via_app_server(
     home_override: Option<&Path>,
 ) -> Result<CodexAccountReport, String> {
+    let mut rpc = start_codex_rpc(home_override).await?;
+    let result = async {
+        initialize_codex_rpc(&mut rpc).await?;
+        read_codex_account_report(&mut rpc, true, 2).await
+    }
+    .await;
+
+    rpc.stop().await;
+    result
+}
+
+async fn start_codex_rpc(home_override: Option<&Path>) -> Result<CodexRpc, String> {
     let executable = resolve_codex_executable().await;
     let mut command = codex_command(&executable);
     if let Some(home) = home_override {
@@ -254,108 +356,144 @@ async fn query_codex_account_via_app_server(
         .stdout
         .take()
         .ok_or_else(|| "无法连接 Codex app-server 标准输出".to_string())?;
-    let mut rpc = CodexRpc::new(child, stdin, stdout);
+    Ok(CodexRpc::new(child, stdin, stdout))
+}
 
-    let result = async {
-        rpc.call(
-            1,
-            "initialize",
-            Some(json!({
-                "clientInfo": {
-                    "name": "flowlet",
-                    "title": "Flowlet",
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            })),
+async fn initialize_codex_rpc(rpc: &mut CodexRpc) -> Result<(), String> {
+    rpc.call(
+        1,
+        "initialize",
+        Some(json!({
+            "clientInfo": {
+                "name": "flowlet",
+                "title": "Flowlet",
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        })),
+    )
+    .await?;
+    rpc.notify("initialized", None).await
+}
+
+async fn read_codex_account_report(
+    rpc: &mut CodexRpc,
+    refresh_token: bool,
+    account_call_id: i64,
+) -> Result<CodexAccountReport, String> {
+    let account = rpc
+        .call(
+            account_call_id,
+            "account/read",
+            Some(if refresh_token {
+                account_read_params()
+            } else {
+                json!({ "refreshToken": false })
+            }),
         )
         .await?;
-        rpc.notify("initialized", None).await?;
 
-        let account = rpc
-            .call(2, "account/read", Some(json!({ "refreshToken": false })))
-            .await?;
+    let account_value = account.get("account").filter(|value| !value.is_null());
+    let auth_mode = account_value
+        .and_then(|value| value.get("type"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let email = account_value
+        .and_then(|value| value.get("email"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let account_plan = account_value
+        .and_then(|value| value.get("planType"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
 
-        let account_value = account.get("account").filter(|value| !value.is_null());
-        let auth_mode = account_value
-            .and_then(|value| value.get("type"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let email = account_value
-            .and_then(|value| value.get("email"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let account_plan = account_value
-            .and_then(|value| value.get("planType"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-
-        if account_value.is_none() {
-            return Ok(CodexAccountReport {
-                account_id: String::new(),
-                signed_in: false,
-                is_current: false,
-                auth_mode: None,
-                email: None,
-                plan_type: None,
-                primary: None,
-                secondary: None,
-                credits: None,
-                rate_limit_reached_type: None,
-                source: "app_server".to_string(),
-                updated_at: chrono::Utc::now().to_rfc3339(),
-                stale: false,
-                error: None,
-            });
-        }
-
-        let rate_limit_result = if auth_mode.as_deref() == Some("chatgpt") {
-            Some(rpc.call(3, "account/rateLimits/read", None).await?)
-        } else {
-            None
-        };
-        let rate_limits = rate_limit_result
-            .as_ref()
-            .and_then(|value| value.get("rateLimits"))
-            .filter(|value| !value.is_null());
-
-        Ok(CodexAccountReport {
-            account_id: account_value
-                .and_then(|value| value.get("accountId"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or_else(|| account_identity(None, email.as_deref())),
-            signed_in: true,
+    if account_value.is_none() {
+        return Ok(CodexAccountReport {
+            account_id: String::new(),
+            signed_in: false,
             is_current: false,
-            auth_mode,
-            email,
-            plan_type: rate_limits
-                .and_then(|value| value.get("planType"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .or(account_plan),
-            primary: rate_limits
-                .and_then(|value| value.get("primary"))
-                .and_then(parse_usage_window),
-            secondary: rate_limits
-                .and_then(|value| value.get("secondary"))
-                .and_then(parse_usage_window),
-            credits: rate_limits
-                .and_then(|value| value.get("credits"))
-                .and_then(parse_credits),
-            rate_limit_reached_type: rate_limits
-                .and_then(|value| value.get("rateLimitReachedType"))
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+            auth_mode: None,
+            email: None,
+            plan_type: None,
+            primary: None,
+            secondary: None,
+            credits: None,
+            rate_limit_reset_credits: None,
+            rate_limit_reached_type: None,
             source: "app_server".to_string(),
             updated_at: chrono::Utc::now().to_rfc3339(),
             stale: false,
             error: None,
-        })
+        });
     }
-    .await;
 
-    rpc.stop().await;
-    result
+    let rate_limit_result = if auth_mode.as_deref() == Some("chatgpt") {
+        Some(
+            rpc.call(account_call_id + 1, "account/rateLimits/read", None)
+                .await?,
+        )
+    } else {
+        None
+    };
+    let rate_limits = rate_limit_result
+        .as_ref()
+        .and_then(|value| value.get("rateLimits"))
+        .filter(|value| !value.is_null());
+
+    Ok(CodexAccountReport {
+        account_id: account_value
+            .and_then(|value| value.get("accountId"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| account_identity(None, email.as_deref())),
+        signed_in: true,
+        is_current: false,
+        auth_mode,
+        email,
+        plan_type: rate_limits
+            .and_then(|value| value.get("planType"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or(account_plan),
+        primary: rate_limits
+            .and_then(|value| value.get("primary"))
+            .and_then(parse_usage_window),
+        secondary: rate_limits
+            .and_then(|value| value.get("secondary"))
+            .and_then(parse_usage_window),
+        credits: rate_limits
+            .and_then(|value| value.get("credits"))
+            .and_then(parse_credits),
+        rate_limit_reset_credits: rate_limit_result
+            .as_ref()
+            .and_then(|value| value.get("rateLimitResetCredits"))
+            .and_then(parse_rate_limit_reset_credits),
+        rate_limit_reached_type: rate_limits
+            .and_then(|value| value.get("rateLimitReachedType"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        source: "app_server".to_string(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+        stale: false,
+        error: None,
+    })
+}
+
+fn account_read_params() -> Value {
+    json!({ "refreshToken": true })
+}
+
+fn parse_login_start(value: &Value) -> Result<(String, String), String> {
+    let login_id = value
+        .get("loginId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Codex 登录流程未返回 loginId".to_string())?;
+    let auth_url = value
+        .get("authUrl")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Codex 登录流程未返回授权地址".to_string())?;
+    Ok((login_id.to_string(), auth_url.to_string()))
 }
 
 async fn query_codex_account_via_oauth() -> Result<CodexAccountReport, String> {
@@ -432,6 +570,10 @@ fn parse_oauth_usage(
             .pointer("/rate_limit/secondary_window")
             .and_then(parse_oauth_usage_window),
         credits: usage.get("credits").and_then(parse_oauth_credits),
+        rate_limit_reset_credits: usage
+            .get("rate_limit_reset_credits")
+            .or_else(|| usage.get("rateLimitResetCredits"))
+            .and_then(parse_rate_limit_reset_credits),
         rate_limit_reached_type: usage
             .get("rate_limit_reached_type")
             .and_then(Value::as_str)
@@ -463,7 +605,64 @@ fn parse_oauth_credits(value: &Value) -> Option<CodexCredits> {
     })
 }
 
-fn codex_home() -> PathBuf {
+fn parse_rate_limit_reset_credits(value: &Value) -> Option<CodexRateLimitResetCredits> {
+    let available_count = value
+        .get("availableCount")
+        .or_else(|| value.get("available_count"))?
+        .as_i64()?;
+    let credits = match value.get("credits") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(items)) => Some(
+            items
+                .iter()
+                .filter_map(parse_rate_limit_reset_credit)
+                .collect(),
+        ),
+        Some(_) => return None,
+    };
+    Some(CodexRateLimitResetCredits {
+        available_count,
+        credits,
+    })
+}
+
+fn parse_rate_limit_reset_credit(value: &Value) -> Option<CodexRateLimitResetCredit> {
+    Some(CodexRateLimitResetCredit {
+        id: value.get("id")?.as_str()?.to_string(),
+        reset_type: optional_string(value, "resetType", "reset_type"),
+        status: value
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        granted_at: optional_i64(value, "grantedAt", "granted_at"),
+        expires_at: optional_i64(value, "expiresAt", "expires_at"),
+        title: value
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    })
+}
+
+fn optional_string(value: &Value, camel: &str, snake: &str) -> Option<String> {
+    value
+        .get(camel)
+        .or_else(|| value.get(snake))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+fn optional_i64(value: &Value, camel: &str, snake: &str) -> Option<i64> {
+    value
+        .get(camel)
+        .or_else(|| value.get(snake))
+        .and_then(Value::as_i64)
+}
+
+pub(crate) fn codex_home() -> PathBuf {
     std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
@@ -519,6 +718,9 @@ async fn resolve_codex_executable() -> PathBuf {
         crate::core::agent_environment::detect_agent_environment("chatgpt-desktop").await;
     if let Ok(report) = environment {
         if let Some(installation) = report.primary {
+            if installation.surface == crate::core::agent_environment::AgentSurface::Cli {
+                return PathBuf::from(installation.executable_path);
+            }
             let install_dir = PathBuf::from(installation.install_dir);
             #[cfg(windows)]
             {
@@ -599,6 +801,23 @@ impl CodexRpc {
         self.send(&request).await
     }
 
+    async fn wait_for_login_completed(&mut self, login_id: &str) -> Result<(), String> {
+        let deadline = tokio::time::Instant::now() + LOGIN_TIMEOUT;
+        loop {
+            let line = tokio::time::timeout_at(deadline, self.stdout.next_line())
+                .await
+                .map_err(|_| "等待 Codex 账号授权超时，请重试".to_string())?
+                .map_err(|error| format!("读取 Codex 登录结果失败：{error}"))?
+                .ok_or_else(|| "Codex app-server 在登录完成前意外退出".to_string())?;
+            let message: Value = serde_json::from_str(&line)
+                .map_err(|error| format!("Codex app-server 返回了无效登录结果：{error}"))?;
+            let Some(result) = parse_login_completed(&message, login_id) else {
+                continue;
+            };
+            return result;
+        }
+    }
+
     async fn send(&mut self, value: &Value) -> Result<(), String> {
         let mut message = serde_json::to_vec(value)
             .map_err(|error| format!("生成 Codex app-server 请求失败：{error}"))?;
@@ -616,6 +835,25 @@ impl CodexRpc {
     async fn stop(&mut self) {
         let _ = self.child.kill().await;
         let _ = self.child.wait().await;
+    }
+}
+
+fn parse_login_completed(message: &Value, expected_login_id: &str) -> Option<Result<(), String>> {
+    if message.get("method").and_then(Value::as_str) != Some("account/login/completed") {
+        return None;
+    }
+    let params = message.get("params")?;
+    if params.get("loginId").and_then(Value::as_str) != Some(expected_login_id) {
+        return None;
+    }
+    if params.get("success").and_then(Value::as_bool) == Some(true) {
+        Some(Ok(()))
+    } else {
+        let detail = params
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("未知错误");
+        Some(Err(format!("Codex 账号授权失败：{detail}")))
     }
 }
 
@@ -637,6 +875,49 @@ mod tests {
                 resets_at: 1_779_459_394,
             })
         );
+    }
+
+    #[test]
+    fn app_server_account_read_forces_token_refresh() {
+        assert_eq!(
+            account_read_params()
+                .get("refreshToken")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn parses_browser_login_start_and_completion() {
+        assert_eq!(
+            parse_login_start(&json!({
+                "type": "chatgpt",
+                "loginId": "login-1",
+                "authUrl": "https://chatgpt.com/auth"
+            })),
+            Ok((
+                "login-1".to_string(),
+                "https://chatgpt.com/auth".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_login_completed(
+                &json!({
+                    "method": "account/login/completed",
+                    "params": { "loginId": "login-1", "success": true, "error": null }
+                }),
+                "login-1"
+            ),
+            Some(Ok(()))
+        );
+        assert!(parse_login_completed(
+            &json!({
+                "method": "account/login/completed",
+                "params": { "loginId": "another-login", "success": true }
+            }),
+            "login-1"
+        )
+        .is_none());
     }
 
     #[test]
@@ -665,6 +946,46 @@ mod tests {
     }
 
     #[test]
+    fn parses_rate_limit_reset_credits_and_expiration() {
+        assert_eq!(
+            parse_rate_limit_reset_credits(&json!({
+                "availableCount": 2,
+                "credits": [{
+                    "id": "RateLimitResetCredit_1",
+                    "resetType": "codexRateLimits",
+                    "status": "available",
+                    "grantedAt": 1781654400_i64,
+                    "expiresAt": 1784246400_i64,
+                    "title": "Full reset",
+                    "description": "Ready to redeem"
+                }]
+            })),
+            Some(CodexRateLimitResetCredits {
+                available_count: 2,
+                credits: Some(vec![CodexRateLimitResetCredit {
+                    id: "RateLimitResetCredit_1".to_string(),
+                    reset_type: Some("codexRateLimits".to_string()),
+                    status: Some("available".to_string()),
+                    granted_at: Some(1781654400),
+                    expires_at: Some(1784246400),
+                    title: Some("Full reset".to_string()),
+                    description: Some("Ready to redeem".to_string()),
+                }]),
+            })
+        );
+        assert_eq!(
+            parse_rate_limit_reset_credits(&json!({
+                "available_count": 1,
+                "credits": null
+            })),
+            Some(CodexRateLimitResetCredits {
+                available_count: 1,
+                credits: None,
+            })
+        );
+    }
+
+    #[test]
     fn parses_oauth_usage_response() {
         let report = parse_oauth_usage(
             &json!({
@@ -683,6 +1004,16 @@ mod tests {
                     "has_credits": true,
                     "unlimited": false,
                     "balance": "10.5"
+                },
+                "rate_limit_reset_credits": {
+                    "available_count": 1,
+                    "credits": [{
+                        "id": "RateLimitResetCredit_1",
+                        "reset_type": "codex_rate_limits",
+                        "status": "available",
+                        "granted_at": 1781654400_i64,
+                        "expires_at": 1784246400_i64
+                    }]
                 },
                 "rate_limit_reached_type": null
             }),
@@ -708,6 +1039,13 @@ mod tests {
             Some("10.5")
         );
         assert_eq!(report.source, "oauth");
+        assert_eq!(
+            report
+                .rate_limit_reset_credits
+                .and_then(|credits| credits.credits)
+                .and_then(|credits| credits.first().and_then(|credit| credit.expires_at)),
+            Some(1784246400)
+        );
     }
 
     #[test]

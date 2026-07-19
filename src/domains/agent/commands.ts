@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { AgentEnvironmentReport, AgentGlobalConfigReport, CodexAccountsReport } from "./types";
+import type { AgentEnvironmentReport, AgentGlobalConfigReport, CodexAccountReport, CodexAccountsReport } from "./types";
 
 export function detectAgentEnvironment(agentId: string): Promise<AgentEnvironmentReport> {
   return invokeCommand<AgentEnvironmentReport>("detect_agent_environment", { agentId }, 10_000).catch((error) => {
@@ -22,6 +22,12 @@ export function detectChatGptDesktopEnvironment(): Promise<AgentEnvironmentRepor
 export function queryCodexAccounts(): Promise<CodexAccountsReport> {
   return invokeCommand<CodexAccountsReport>("query_codex_accounts", undefined, 60_000).catch((error) => {
     throw toAppError(error, "codex_account_query_failed");
+  });
+}
+
+export function authorizeCodexAccount(): Promise<CodexAccountReport> {
+  return invokeCommand<CodexAccountReport>("authorize_codex_account", undefined, 6 * 60_000).catch((error) => {
+    throw toAppError(error, "codex_account_authorization_failed");
   });
 }
 

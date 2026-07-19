@@ -640,6 +640,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::detect_agent_environment,
             commands::query_codex_accounts,
+            commands::authorize_codex_account,
             commands::inspect_agent_global_config,
             commands::apply_agent_global_config,
             commands::restore_agent_global_config,

@@ -1,11 +1,12 @@
-import { Button, SideSheet, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
-import type { AgentEnvironmentReport, CodexAccountReport, CodexAccountsReport, CodexUsageWindow } from "../../domains/agent/types";
+import { useEffect, useRef, useState } from "react";
+import { Button, Select, SideSheet, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
+import { IconCopy, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
+import type { AgentEnvironmentReport, AgentSurface, CodexAccountReport, CodexAccountsReport, CodexRateLimitResetCredits, CodexUsageWindow } from "../../domains/agent/types";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import styles from "./AgentAccessSideSheet.module.css";
 
-const { Paragraph, Text, Title } = Typography;
+const { Text, Title } = Typography;
 type Copy = (value: string, message: string) => Promise<void>;
 
 type Props = {
@@ -18,6 +19,8 @@ type Props = {
   accountLoading?: boolean;
   accountError?: string;
   onRefreshAccount: () => void;
+  accountAuthorizationBusy?: boolean;
+  onAuthorizeAccount: () => void;
   onClose: () => void;
   onCopy: Copy;
 };
@@ -32,11 +35,27 @@ export function ChatGptDesktopSideSheet({
   accountLoading = false,
   accountError,
   onRefreshAccount,
+  accountAuthorizationBusy = false,
+  onAuthorizeAccount,
   onClose,
   onCopy,
 }: Props) {
   const { language, t } = useAppPreferences();
-  const installation = environment?.installations.find((item) => item.surface === "desktop");
+  const [surface, setSurface] = useState<AgentSurface>("desktop");
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const installations = environment?.installations.filter((item) => item.surface === surface) ?? [];
+
+  useEffect(() => {
+    if (visible) {
+      setSurface("desktop");
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const scrollContainer = bodyRef.current?.closest<HTMLElement>(".semi-sidesheet-body");
+    if (scrollContainer) scrollContainer.scrollTop = 0;
+  }, [surface, visible]);
 
   return (
     <SideSheet
@@ -46,31 +65,25 @@ export function ChatGptDesktopSideSheet({
       title={
         <Tabs
           className={`${styles.titleTabs} ${styles.chatGptTitleTabs}`}
-          activeKey="desktop"
+          activeKey={surface}
+          onChange={(key) => setSurface(key as AgentSurface)}
           tabList={[
-            { tab: <span className={styles.titleTabLabel}>{t("ChatGPT (Codex) CLI 接入")}</span>, itemKey: "cli", disabled: true },
+            { tab: <span className={styles.titleTabLabel}>{t("ChatGPT (Codex) CLI 接入")}</span>, itemKey: "cli" },
             { tab: <span className={styles.titleTabLabel}>{t("ChatGPT (Codex) Desktop 接入")}</span>, itemKey: "desktop" },
           ]}
         />
       }
       headerStyle={{ paddingBottom: 0 }}
-      width={680}
+      width="min(760px, 96vw)"
       onCancel={onClose}
       bodyStyle={{ padding: 0 }}
     >
-      <div className={styles.body}>
-        <section className={styles.intro}>
-          <Tag color="blue">Desktop</Tag>
-          <Paragraph type="tertiary">
-            {t("检测新版 ChatGPT Desktop 的安装版本和位置。")}
-          </Paragraph>
-        </section>
-
+      <div ref={bodyRef} className={styles.body}>
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <div>
               <Title heading={5}>{t("本机环境")}</Title>
-              <Text type="tertiary">{t("仅识别统一后的新版 ChatGPT Desktop")}</Text>
+              <Text type="tertiary">{t(surface === "cli" ? "识别 PATH 与官方常见安装位置中的 Codex CLI" : "仅识别统一后的新版 ChatGPT Desktop")}</Text>
             </div>
             <Button icon={<IconRefresh />} loading={loading} onClick={onRefresh}>
               {t("重新检测")}
@@ -81,23 +94,24 @@ export function ChatGptDesktopSideSheet({
             <Text className={styles.environmentMessage} type="danger">
               {t("检测失败：{message}", { message: error })}
             </Text>
-          ) : !installation ? (
+          ) : !installations.length ? (
             <Text className={styles.environmentMessage} type="tertiary">
-              {loading ? t("正在检测…") : t("未检测到 ChatGPT Desktop")}
+              {loading ? t("正在检测…") : t(surface === "cli" ? "未检测到 Codex CLI" : "未检测到 ChatGPT Desktop")}
             </Text>
           ) : (
-            <div className={styles.installation}>
+            installations.map((installation) => (
+            <div className={styles.installation} key={installation.executable_path}>
               <div className={styles.installationHeader}>
-                <strong>
-                  {installation.version
-                    ? t("ChatGPT Desktop {version}", { version: installation.version })
-                    : t("ChatGPT Desktop 已安装")}
-                </strong>
+                <strong>{codexInstallationTitle(surface, installation.version, t)}</strong>
                 {!installation.version && <Tag color="green">{t("已安装")}</Tag>}
               </div>
-              <ConfigRow label={t("应用路径")} value={installation.executable_path} onCopy={onCopy} />
-              <ConfigRow label={t("安装目录")} value={installation.install_dir} onCopy={onCopy} />
+              <InstallationPathRow
+                executablePath={installation.executable_path}
+                installDir={installation.install_dir}
+                onCopy={onCopy}
+              />
             </div>
+            ))
           )}
         </section>
 
@@ -105,11 +119,21 @@ export function ChatGptDesktopSideSheet({
           <div className={styles.sectionHeader}>
             <div>
               <Title heading={5}>{t("Codex 账号与用量")}</Title>
-              <Text type="tertiary">{t("切换 Codex 账号后刷新即可保留；登录凭据仅保存在本机查询目录")}</Text>
+              <Text type="tertiary">{t("Codex 账号凭据仅保存在本机")}</Text>
             </div>
-            <Button icon={<IconRefresh />} loading={accountLoading} onClick={onRefreshAccount}>
-              {t("刷新用量")}
-            </Button>
+            <div className={styles.sectionActions}>
+              <Button
+                aria-label={t("添加 / 重新授权账号")}
+                icon={<IconPlus />}
+                loading={accountAuthorizationBusy}
+                onClick={onAuthorizeAccount}
+              >
+                {accountAuthorizationBusy ? t("等待浏览器授权…") : t("添加 / 重新授权账号")}
+              </Button>
+              <Button icon={<IconRefresh />} loading={accountLoading} disabled={accountAuthorizationBusy} onClick={onRefreshAccount}>
+                {t("刷新用量")}
+              </Button>
+            </div>
           </div>
 
           {accountError ? (
@@ -133,8 +157,25 @@ export function ChatGptDesktopSideSheet({
   );
 }
 
+function codexInstallationTitle(
+  surface: AgentSurface,
+  version: string | null | undefined,
+  t: (source: string, variables?: Record<string, string | number>) => string,
+) {
+  if (version) {
+    return surface === "cli"
+      ? t("Codex CLI {version}", { version })
+      : t("ChatGPT Desktop {version}", { version });
+  }
+  return t(surface === "cli" ? "Codex CLI 已安装" : "ChatGPT Desktop 已安装");
+}
+
 function CodexAccountCard({ account, language }: { account: CodexAccountReport; language: "zh-CN" | "en-US" }) {
   const { t } = useAppPreferences();
+  const resetCredits = account.rate_limit_reset_credits;
+  const hasResetCreditDetails = Boolean(
+    resetCredits?.credits?.some((credit) => typeof credit.expires_at === "number"),
+  );
   const updatedAt = new Intl.DateTimeFormat(language, {
     month: "short",
     day: "numeric",
@@ -154,7 +195,12 @@ function CodexAccountCard({ account, language }: { account: CodexAccountReport; 
       <div className={styles.accountSummary}>
         <div>
           <Text type="tertiary">{t("会员套餐")}</Text>
-          <Tag color="blue">{formatPlan(account.plan_type, t("未知套餐"))}</Tag>
+          <span className={styles.accountValueTags}>
+            <Tag color="blue">{formatPlan(account.plan_type, t("未知套餐"))}</Tag>
+            {resetCredits && resetCredits.available_count > 0 && !hasResetCreditDetails ? (
+              <Tag color="green">{t("重置 {count} 次", { count: resetCredits.available_count })}</Tag>
+            ) : null}
+          </span>
         </div>
         <div>
           <Text type="tertiary">{t("登录方式")}</Text>
@@ -172,6 +218,9 @@ function CodexAccountCard({ account, language }: { account: CodexAccountReport; 
         </div>
       </div>
       {account.error ? <Text className={styles.accountNotice} type="warning">{t("刷新失败：{message}", { message: account.error })}</Text> : null}
+      {resetCredits && hasResetCreditDetails ? (
+        <ResetCredits credits={resetCredits} language={language} />
+      ) : null}
       {account.primary || account.secondary ? (
         <div className={styles.usageWindows}>
           {account.primary ? <UsageWindow window={account.primary} language={language} /> : null}
@@ -180,6 +229,54 @@ function CodexAccountCard({ account, language }: { account: CodexAccountReport; 
       ) : (
         <Text className={styles.accountNotice} type="tertiary">{t("当前登录方式未返回订阅用量窗口")}</Text>
       )}
+    </div>
+  );
+}
+
+function ResetCredits({
+  credits,
+  language,
+}: {
+  credits: CodexRateLimitResetCredits;
+  language: "zh-CN" | "en-US";
+}) {
+  const { t } = useAppPreferences();
+  const details = credits.credits ?? [];
+  const missingDetails = Math.max(0, credits.available_count - details.length);
+  const dateFormatter = new Intl.DateTimeFormat(language, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return (
+    <div className={styles.resetCredits}>
+      <div className={styles.resetCreditsHeader}>
+        <strong>{t("重置机会")}</strong>
+        <Tag color={credits.available_count > 0 ? "green" : "grey"}>
+          {t("可用 {count} 次", { count: credits.available_count })}
+        </Tag>
+      </div>
+      {details.length ? (
+        <div className={styles.resetCreditList}>
+          {details.map((credit) => (
+            <div className={styles.resetCredit} key={credit.id}>
+              <strong>{credit.title || t("用量限额重置")}</strong>
+              <Text type="tertiary">
+                {typeof credit.expires_at === "number"
+                  ? t("将于 {time} 到期", { time: dateFormatter.format(new Date(credit.expires_at * 1000)) })
+                  : t("未提供过期时间")}
+              </Text>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {missingDetails > 0 ? (
+        <Text className={styles.resetCreditNotice} type="tertiary">
+          {t("另有 {count} 次未返回明细", { count: missingDetails })}
+        </Text>
+      ) : null}
     </div>
   );
 }
@@ -205,6 +302,7 @@ function UsageWindow({ window, language }: { window: CodexUsageWindow; language:
       <div className={styles.usageHeader}>
         <strong>{label}</strong>
         <span>{t("剩余 {percent}%", { percent: Math.round(remaining) })}</span>
+        <Text type="tertiary">{t("重置时间：{time}", { time: reset })}</Text>
       </div>
       <div
         className={styles.usageTrack}
@@ -216,7 +314,6 @@ function UsageWindow({ window, language }: { window: CodexUsageWindow; language:
       >
         <span style={{ width: `${remaining}%` }} />
       </div>
-      <Text type="tertiary">{t("重置时间：{time}", { time: reset })}</Text>
     </div>
   );
 }
@@ -256,6 +353,44 @@ function ConfigRow({ label, value, onCopy }: { label: string; value: string; onC
   return (
     <div className={styles.configRow}>
       <Text type="tertiary">{label}</Text>
+      <code title={value}>{value}</code>
+      <Button
+        theme="borderless"
+        type="primary"
+        icon={<IconCopy />}
+        aria-label={t("复制 {label}", { label })}
+        onClick={() => void onCopy(value, t("{label} 已复制", { label }))}
+      />
+    </div>
+  );
+}
+
+function InstallationPathRow({
+  executablePath,
+  installDir,
+  onCopy,
+}: {
+  executablePath: string;
+  installDir: string;
+  onCopy: Copy;
+}) {
+  const { t } = useAppPreferences();
+  const [kind, setKind] = useState<"executable" | "directory">("executable");
+  const label = t(kind === "executable" ? "可执行文件" : "安装目录");
+  const value = kind === "executable" ? executablePath : installDir;
+  return (
+    <div className={styles.configRow}>
+      <Select
+        aria-label={t("路径类型")}
+        className={styles.pathKindSelector}
+        zIndex={APP_OVERLAY_Z_INDEX.sideSheet + 1}
+        value={kind}
+        optionList={[
+          { label: t("可执行文件"), value: "executable" },
+          { label: t("安装目录"), value: "directory" },
+        ]}
+        onChange={(nextKind) => setKind(nextKind as "executable" | "directory")}
+      />
       <code title={value}>{value}</code>
       <Button
         theme="borderless"

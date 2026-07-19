@@ -37,6 +37,17 @@ pub(super) async fn query_codex_accounts(
 }
 
 #[tauri::command]
+pub(super) async fn authorize_codex_account(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::codex_account::CodexAccountReport, String> {
+    crate::core::codex_account::authorize_codex_account(&state.codex_accounts_dir, |auth_url| {
+        tauri_plugin_opener::open_url(auth_url, None::<&str>)
+            .map_err(|error| format!("无法打开 Codex 账号授权页面：{error}"))
+    })
+    .await
+}
+
+#[tauri::command]
 pub(super) fn inspect_agent_global_config(
     state: tauri::State<'_, AppState>,
     agent_id: String,

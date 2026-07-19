@@ -2,7 +2,7 @@
 
 Flowlet 是一个面向 AI Agent 的本地桌面模型服务控制台。
 
-它负责管理上游渠道账号、对外开放模型、为 AI 客户端和 Agent 提供本地代理端点，并提供请求日志、用量成本和运行状态。
+它负责管理上游渠道账号、对外开放模型、为 AI 客户端和 Agent 提供本地代理端点，并提供请求日志、Agent 会话、用量成本和运行状态。长期方向是建立与代理流量解耦的统一 AI 成本账本，让官方账号和本地 Agent 使用也能按任务、会话和请求归集。
 
 Flowlet 当前采用 LongCat + DeepSeek first 策略，先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口和多账号管理做完整，再扩展更多渠道。
 
@@ -14,6 +14,7 @@ Flowlet 当前采用 LongCat + DeepSeek first 策略，先把 LongCat 和 DeepSe
 - 日志旁路记录，不影响主请求链路
 - 模型列表、价格、余额、额度、用量查询走异步同步
 - Token 和成本通过离线分析完成
+- 成本账本金额优先，区分实际支付、公开价估算、摊销、分配和等价价值，不伪造精度
 - 前端优先：业务流程和状态编排由 React 负责，Rust 提供底层原子能力
 
 ## 核心能力
@@ -27,7 +28,7 @@ Flowlet 当前采用 LongCat + DeepSeek first 策略，先把 LongCat 和 DeepSe
 - Client Token 管理：固定掩码展示、按需查看明文
 - Agent 接入向导：Claude Code、Codex CLI、OpenCode 等
 - 请求日志：筛选、详情、清理、实时刷新
-- 用量与成本分析
+- 用量与成本分析（统一成本账本已纳入规划）
 - 设置：语言、主题、开机自启动
 - 系统托盘 / 开机自启动
 
@@ -47,6 +48,8 @@ src/
 ```
 
 Rust 后端（`src-tauri/`）负责代理核心、HTTP 转发、SQLite 持久化、系统托盘和渠道同步。
+
+统一 AI 成本账本尚未实现；完整产品语义、目标模型、阶段范围和验收标准见 [`docs/ai-cost-ledger.md`](docs/ai-cost-ledger.md)。当前页面中的预估费用仍是基于公开模型价格计算的估算值，不代表实际支付或订阅分摊成本。
 
 ## 当前状态
 

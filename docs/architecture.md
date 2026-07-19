@@ -2,7 +2,7 @@
 
 ## 目标
 
-Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议透明转发的 AI 请求路由客户端。当前阶段采用 LongCat + DeepSeek first 策略，优先把 LongCat / DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口做完整，并以 Claude Code 接入作为核心验证场景。
+Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议透明转发的 AI 请求路由客户端。长期产品方向是面向 AI Agent 的本地使用与成本控制台：代理是高精度数据入口，但代理外 Agent 使用也可经授权的本地 Adapter、导入或手动记录进入统一成本账本。当前阶段仍采用 LongCat + DeepSeek first 策略，优先把 LongCat / DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口做完整，并以 Claude Code 接入作为核心验证场景。
 
 当前正式数据模型已经采用 Channel / Account / Model 架构，不再使用旧 Provider 原型或 `provider_id = default` 逻辑。后续修改必须基于当前迁移后的真实表结构，不得以“尚未实现”为由再次破坏式重建。
 
@@ -16,6 +16,8 @@ Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议
 - 日志旁路记录，失败不能影响主请求链路。
 - 模型列表、价格、余额、额度、用量查询只能用于异步同步和配置辅助。
 - Token 和成本分析走离线任务，不能阻塞真实请求。
+- 成本账本与请求日志解耦；实际支付、按量费用、公开价估算、摊销、分配和等价价值使用不同字段表达。
+- 外部 Agent Adapter 默认本地只读、显式授权、最小化采集，并使用独立错误边界。
 - 第一阶段采用 LongCat + DeepSeek first，同时完成两个首发渠道的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口。
 
 ## 总体结构
@@ -360,6 +362,18 @@ Claude Code / OpenCode 会话归因回填、已捕获响应用量重解析、未
 权限或请求错误盲目重试；401 无效密钥仍需修改 Key 或显式测试连接成功后恢复。
 
 模型价格不写入 SQLite。`config.json` 的 `channels_config.model_prices` 在应用启动时加载到内存，是当前成本估算的唯一价格来源。
+
+### 统一 AI 成本账本（目标架构）
+
+成本账本在现有 `request_logs` / `usage_records` 之上增量建设，不替换代理日志主链路。目标层级为 `cost_source -> product/account -> task -> session -> usage_event`，并由独立 `CostAllocationEngine` 按账期生成带版本、可信度和解释信息的 `cost_allocations`。
+
+当前 `usage_records.estimated_cost` 仅表示公开模型价格估算，目标语义映射为 `list_price_cost`。实际现金扣费、套餐或资源包分配成本及 API 等价价值分别使用 `cash_cost`、`allocated_cost` 和 `equivalent_cost`，不得继续复用 `estimated_cost` 表示全部成本。
+
+规划新增的 `cost_sources`、`usage_events`、`agent_tasks`、`agent_sessions` 和 `cost_allocations` 必须通过 SQLite migration 增量创建。网关请求幂等映射为 `usage_event`；无网关请求的 Agent turn、会话汇总、官方记录和手动用量也可以成为事件，因此 `request_id` 可空。
+
+成本公式、金额精度、事务、账期重算和分配版本由 Rust 保证；React 负责来源配置、业务流程编排、状态反馈和解释展示。Adapter 同步失败不能影响代理或其他 Adapter，未经用户授权不读取第三方本地数据，默认不保存 Prompt、Response、对话正文或凭据。
+
+完整需求、MVP 边界、实施阶段和验收标准见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)。该章节描述目标架构，不代表相关表和引擎已经实现。
 
 ### analyzer
 

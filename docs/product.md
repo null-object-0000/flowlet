@@ -2,17 +2,19 @@
 
 ## 1. 产品定位
 
-Flowlet 是一个桌面优先的本地 AI 请求路由客户端。
+Flowlet 是一个面向 AI Agent、桌面优先、本地运行的使用与成本控制台。本地透明代理仍是获取精确请求数据和统一接入的核心能力，但不是使用统计与成本归集的前提。
 
 当前阶段采用 **LongCat + DeepSeek first** 策略：先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口、多账号管理、Claude Code 接入、请求日志和 Token / 成本分析做完整，再扩展更多渠道。详细阶段需求见 [LongCat-first 需求整理](./longcat-first.md) 和 [DeepSeek 首发渠道需求整理](./deepseek-first.md)。相关官方文档：LongCat [快速开始](https://longcat.chat/platform/docs/zh/)、[API 概述](https://longcat.chat/platform/docs/zh/APIDocs.html)、[Claude Code 配置](https://longcat.chat/platform/docs/zh/ClaudeCode.html)；DeepSeek [API 文档](https://api-docs.deepseek.com/zh-cn/)、[价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)、[Claude Code](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/claude_code)、[Anthropic API](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)、[余额查询](https://api-docs.deepseek.com/zh-cn/api/get-user-balance)。
 
-Flowlet 尚未发布第一个可用版本，因此第一版正式实现允许破坏式重构：不做旧 Provider 原型兼容，不做旧 SQLite 表迁移，直接以 Channel / Account / Model 作为正式数据模型。详细策略见 [破坏式重构策略](./breaking-refactor.md)。
+旧 Provider 原型阶段曾通过破坏式重构确立 Channel / Account / Model 正式数据模型。当前 SQLite 数据已经成为演进基线，后续功能必须提供增量迁移，不得再以早期原型策略重建或丢弃现有数据。历史决策见 [破坏式重构策略](./breaking-refactor.md)。
 
-它让 Claude Code、Cursor、Cline、Open WebUI、Cherry Studio、Continue 等 AI 工具统一接入一个本地入口，并在不做协议转换、不改写响应内容的前提下，实现开箱即用渠道配置、虚拟模型路由、请求日志和 Token 成本分析。
+它让 Claude Code、Cursor、Cline、Open WebUI、Cherry Studio、Continue 等 AI 工具统一接入一个本地入口，并在不做协议转换、不改写响应内容的前提下，实现开箱即用渠道配置、虚拟模型路由、请求日志和 Token 成本分析。长期还将通过本地 Agent Adapter、导入和手动记录，把未经过代理的官方账号使用纳入统一成本账本。
 
 Flowlet 不是 LiteLLM Desktop、New API Desktop，也不是 Helicone / Portkey 这类服务端 AI Gateway。它的核心定位是：
 
-> 一个本地运行、可视化管理、响应零改写、内置常用渠道模板的 AI 请求路由客户端。
+> 一个面向 AI Agent、本地运行、可解释的使用与成本控制台；透明代理是高精度数据入口，但不是统计前提。
+
+统一成本账本的完整产品语义、数据模型、阶段范围和验收标准见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)。在该能力实现前，现有页面中的 `estimated_cost` 仍只代表按公开模型价格计算的估算费用，不代表实际支付或订阅分摊成本。
 
 ---
 
@@ -1262,14 +1264,15 @@ client_protocol / upstream_protocol
 
 ---
 
-### 阶段五：价格与成本分析产品化
+### 阶段五：统一 AI 成本账本
 
 ```text
-manual / synced / preset 价格来源
-成本统计页优化
-按 client / provider / model / day 聚合统计
-价格过期提示
-unknown token 重算
+成本来源、使用事件、任务、会话和成本分配模型
+按量 API、Token 包、订阅和手动来源
+实际支付、已摊销、已分配、未分配和待摊销分离
+网关请求与代理外 Agent 使用统一归集
+可信度、证据、解释和账期版本
+按 ai-cost-ledger.md 分阶段实施
 ```
 
 ---
@@ -1301,9 +1304,9 @@ Volume 持久化
 
 ## 19. 最终产品定义
 
-Flowlet 是一个 Desktop-first、本地优先、响应零改写、支持多协议透明转发但不做跨协议转换、内置常用渠道模板的 AI 请求路由客户端。
+Flowlet 是一个 Desktop-first、本地优先、面向 AI Agent 的使用与成本控制台。它提供响应零改写、多协议透明转发但不做跨协议转换的本地代理，也允许代理外 Agent 使用通过授权的本地 Adapter、导入或手动记录进入统一账本。
 
-它通过可视化客户端帮助用户统一管理多个 AI 工具的本地接入、渠道模板、用户渠道、虚拟模型、请求日志和用量成本。
+它通过可视化客户端帮助用户统一管理多个 AI 工具的本地接入、渠道模板、渠道账号、开放模型、请求日志、Agent 会话以及可解释的任务/会话/请求成本。
 
 代理层只做必要的请求路由和认证替换，响应完全透明透传，日志、同步和成本分析通过旁路记录与离线任务完成。
 

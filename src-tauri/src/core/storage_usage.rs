@@ -4,6 +4,7 @@ use crate::core::config::{
     AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter, LogsPageResult,
     LogsSummary, ModelPrice, RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
 };
+use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_response_usage, extract_sse_response_usage};
 use base64::Engine;
 use rusqlite::params;
@@ -170,6 +171,75 @@ fn estimate_cost(
 }
 
 impl Storage {
+    pub(crate) fn cost_ledger_gateway_probe_snapshot(
+        &self,
+        sample_limit: usize,
+    ) -> Result<GatewayProbeSnapshot, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let (record_count, time_range_start, time_range_end) = connection.query_row(
+            r#"
+            SELECT COUNT(*), MIN(created_at), MAX(created_at)
+            FROM request_logs
+            WHERE is_last_attempt = 1
+            "#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let mut statement = connection.prepare(
+            r#"
+            SELECT
+                rl.request_id, rl.agent_type, rl.agent_session_id,
+                rl.parent_agent_session_id, rl.client_id, rl.account_id,
+                rl.upstream_model, rl.created_at,
+                ur.input_tokens, ur.input_cached_tokens, ur.input_uncached_tokens,
+                ur.output_tokens, ur.total_tokens, ur.estimated_cost,
+                rl.status, rl.error_message
+            FROM request_logs rl
+            LEFT JOIN usage_records ur ON ur.id = (
+                SELECT ur2.id
+                FROM usage_records ur2
+                WHERE ur2.request_id = rl.request_id
+                ORDER BY ur2.analyzed_at DESC, ur2.created_at DESC, ur2.id DESC
+                LIMIT 1
+            )
+            WHERE rl.is_last_attempt = 1
+            ORDER BY rl.created_at DESC, rl.request_id DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = statement.query_map(params![sample_limit as i64], |row| {
+            Ok(GatewayUsageSample {
+                request_id: row.get(0)?,
+                agent_type: row.get(1)?,
+                session_id: row.get(2)?,
+                parent_session_id: row.get(3)?,
+                client_id: row.get(4)?,
+                account_id: row.get(5)?,
+                project_path: None,
+                model: row.get(6)?,
+                occurred_at: row.get(7)?,
+                input_tokens: row.get(8)?,
+                cached_input_tokens: row.get(9)?,
+                uncached_input_tokens: row.get(10)?,
+                output_tokens: row.get(11)?,
+                total_tokens: row.get(12)?,
+                estimated_cost: row.get(13)?,
+                status: row.get(14)?,
+                error_message: row.get(15)?,
+            })
+        })?;
+        let samples = rows.collect::<Result<Vec<_>, _>>()?;
+        Ok(GatewayProbeSnapshot {
+            record_count,
+            time_range_start,
+            time_range_end,
+            samples,
+        })
+    }
+
     pub fn save_balance_snapshot(
         &self,
         snapshot: &AccountBalanceSnapshot,
@@ -463,6 +533,12 @@ impl Storage {
                 SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 1 ELSE 0 END),
                 SUM(CASE WHEN rl.status BETWEEN 200 AND 399 AND rl.error_message IS NULL THEN 0 ELSE 1 END),
                 COALESCE(SUM(ur.total_tokens), 0),
+                COALESCE(SUM(ur.input_tokens), 0),
+                COALESCE(SUM(ur.input_cached_tokens), 0),
+                COALESCE(SUM(ur.input_uncached_tokens), 0),
+                COALESCE(SUM(CASE WHEN ur.input_cached_tokens IS NOT NULL THEN ur.input_tokens ELSE 0 END), 0),
+                COALESCE(SUM(ur.output_tokens), 0),
+                SUM(CASE WHEN ur.total_tokens IS NULL THEN 1 ELSE 0 END),
                 COALESCE(SUM(ur.estimated_cost), 0)
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
@@ -492,7 +568,15 @@ impl Storage {
                 success_count: row.get(8)?,
                 error_count: row.get(9)?,
                 known_tokens: row.get(10)?,
-                estimated_cost: row.get(11)?,
+                input_tokens: row.get(11)?,
+                input_cached_tokens: row.get(12)?,
+                input_uncached_tokens: row.get(13)?,
+                cache_measured_input_tokens: row.get(14)?,
+                output_tokens: row.get(15)?,
+                unknown_usage_count: row.get(16)?,
+                estimated_cost: row.get(17)?,
+                native_summary: None,
+                native_synced_at: None,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -502,7 +586,9 @@ impl Storage {
         if self.db_path.as_ref() == std::path::Path::new(":memory:") {
             Vec::new()
         } else {
-            crate::core::agent_session_metadata::list_native_agent_sessions()
+            self.enrich_native_agent_sessions(
+                crate::core::agent_session_metadata::list_native_agent_sessions(),
+            )
         }
     }
 
@@ -1633,7 +1719,15 @@ mod agent_session_filter_tests {
             success_count: 0,
             error_count: 0,
             known_tokens: 0,
+            input_tokens: 0,
+            input_cached_tokens: 0,
+            input_uncached_tokens: 0,
+            cache_measured_input_tokens: 0,
+            output_tokens: 0,
+            unknown_usage_count: 0,
             estimated_cost: 0.0,
+            native_summary: None,
+            native_synced_at: None,
         }
     }
 

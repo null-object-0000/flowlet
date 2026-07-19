@@ -19,6 +19,7 @@ import {
 import { useRequestLogDetail } from "./useRequestLogs";
 import styles from "./RequestLogDetailSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { formatInteger } from "../../shared/formatters/number";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 
 const JSON_VIEWER_OPTIONS = { readOnly: true, autoWrap: true } as const;
@@ -242,9 +243,7 @@ function DetailState({ title, description, action }: { title: string; descriptio
   return <div className={styles.state}><strong>{title}</strong>{description ? <span>{description}</span> : null}{action}</div>;
 }
 
-function formatNumber(value: number | null, language: "zh-CN" | "en-US") {
-  return value == null ? "—" : new Intl.NumberFormat(language).format(value);
-}
+const formatNumber = formatInteger;
 
 function formatCost(value: number | null) {
   if (value == null) return "—";

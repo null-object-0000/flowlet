@@ -232,9 +232,12 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "upstream_model": "LongCat-2.0",  // 上游模型名
   "input_uncached_price": 2.0,      // 输入价格（未缓存，每 unit）
   "input_cached_price": 0.04,       // 输入价格（已缓存，每 unit）
+  "input_cache_write_price": null,  // 可选：缓存写入价格（每 unit）
   "output_price": 8.0,              // 输出价格（每 unit）
   "currency": "CNY",                // 货币单位
-  "unit": "1M tokens"               // 计价单位
+  "unit": "1M tokens",              // 计价单位
+  "source_url": null,                // 可选：价格来源
+  "price_version": null              // 可选：价格版本或核验日期
 }
 ```
 
@@ -246,14 +249,20 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `upstream_model` | `string` | 是 | — | 上游模型名 |
 | `input_uncached_price` | `number` | 否 | `0` | 未缓存输入 token 单价 |
 | `input_cached_price` | `number` | 否 | `0` | 已缓存输入 token 单价 |
+| `input_cache_write_price` | `number \| null` | 否 | `null` | 缓存写入 token 单价；缺失时回退到未缓存输入单价 |
 | `output_price` | `number` | 否 | `0` | 输出 token 单价 |
 | `currency` | `string` | 否 | `"USD"` | 货币单位 |
 | `unit` | `string` | 否 | `"1M tokens"` | 计价单位 |
+| `source_url` | `string \| null` | 否 | `null` | 价格来源页面，用于解释预估依据 |
+| `price_version` | `string \| null` | 否 | `null` | 价格版本或最近核验日期 |
 
 **行为**：
 
 - 应用启动时从 `config.json` 解析并加载到运行时内存；SQLite 不再保存 `model_prices` 表。
 - 用于离线成本估算（`estimated_cost`），不进入主请求链路。
+- `channel_id = "openai-api"` 是标准 OpenAI API 公开价格的保留命名空间，用于计算 Codex 原生会话的 API 等价价值；结果保留价格表原币种，不做汇率转换。
+- `channel_id = "codex-native"` 是 Codex 套餐消耗的保留价格命名空间，按官方 credits/百万 Token 费率独立估算；两个保留命名空间都不代表新增代理渠道。
+- Codex 原生预估只在会话能够确定唯一模型且对应价格表存在精确模型匹配时生成；无法确认模型或无公开价格的模型保持未计价，不做推测。API 等价价值采用标准基础 API 价格，不叠加无法从原生记录可靠确认的长上下文、Priority processing 或 Fast mode 等乘数。
 - `config.json` 是模型价格的唯一真实来源；修改后需要重启应用以重新加载运行时价格。
 
 ### 6.3 `default_exposed_models` — 默认开放模型

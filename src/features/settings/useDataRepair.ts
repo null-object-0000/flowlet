@@ -25,6 +25,7 @@ export function useDataRepair() {
       queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.all }),
       queryClient.invalidateQueries({ queryKey: queryKeys.requestLog.all }),
       queryClient.invalidateQueries({ queryKey: queryKeys.usage.all }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.storageUsage() }),
     ]);
   }, [queryClient]);
 

@@ -136,7 +136,18 @@ export function ChatGptDesktopSideSheet({
             </div>
           </div>
 
-          {accountError ? (
+          {accountLoading && accounts?.accounts.length ? (
+            <Text className={styles.accountRefreshNotice} type="warning">
+              {t("正在刷新，当前展示上次更新的数据")}
+            </Text>
+          ) : null}
+          {accountError && accounts?.accounts.length ? (
+            <Text className={styles.accountRefreshNotice} type="warning">
+              {t("刷新失败，当前展示上次更新的数据：{message}", { message: accountError })}
+            </Text>
+          ) : null}
+
+          {accountError && !accounts?.accounts.length ? (
             <Text className={styles.environmentMessage} type="danger">
               {t("账号信息查询失败：{message}", { message: accountError })}
             </Text>

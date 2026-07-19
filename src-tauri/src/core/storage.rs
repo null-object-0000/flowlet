@@ -20,8 +20,17 @@ pub enum StorageError {
 
 #[path = "storage_config.rs"]
 mod storage_config;
+#[path = "storage_stats.rs"]
+mod storage_stats;
+#[path = "storage_tasks.rs"]
+mod storage_tasks;
 #[path = "storage_usage.rs"]
 mod storage_usage;
+pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
+pub use storage_tasks::{
+    AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
+    BackgroundJobsFilter, BackgroundJobsPage, CleanupBackgroundJobsResult,
+};
 
 #[derive(Clone)]
 pub struct Storage {
@@ -458,7 +467,109 @@ impl Storage {
                 value      TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS agent_session_snapshots (
+                agent_type TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                source_offset INTEGER NOT NULL DEFAULT 0,
+                parser_version INTEGER NOT NULL DEFAULT 0,
+                usage_ids_json TEXT NOT NULL DEFAULT '[]',
+                cursor_guard TEXT NOT NULL DEFAULT '',
+                synced_at TEXT NOT NULL,
+                PRIMARY KEY (agent_type, session_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_source_sync_state (
+                agent_type TEXT PRIMARY KEY,
+                last_checked_at TEXT,
+                last_synced_at TEXT,
+                status TEXT NOT NULL DEFAULT 'idle',
+                last_error TEXT,
+                scanned_count INTEGER NOT NULL DEFAULT 0,
+                changed_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS background_jobs (
+                id TEXT PRIMARY KEY,
+                job_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                trigger_source TEXT NOT NULL,
+                status TEXT NOT NULL,
+                stage TEXT,
+                progress_current INTEGER NOT NULL DEFAULT 0,
+                progress_total INTEGER NOT NULL DEFAULT 0,
+                summary_json TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS background_job_events (
+                id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                level TEXT NOT NULL,
+                stage TEXT,
+                message TEXT NOT NULL,
+                detail_json TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_background_jobs_created_at
+                ON background_jobs(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_background_job_events_job
+                ON background_job_events(job_id, sequence);
             "#,
+        )?;
+
+        add_column_if_missing(
+            &connection,
+            "background_jobs",
+            "cancel_requested",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "agent_session_snapshots",
+            "source_offset",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "agent_session_snapshots",
+            "parser_version",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "agent_session_snapshots",
+            "usage_ids_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "agent_session_snapshots",
+            "cursor_guard",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        connection.execute(
+            "DELETE FROM background_job_events WHERE job_id IN (SELECT id FROM background_jobs WHERE status NOT IN ('queued', 'running') AND created_at < datetime('now', '-90 days'))",
+            [],
+        )?;
+        connection.execute(
+            "DELETE FROM background_jobs WHERE status NOT IN ('queued', 'running') AND created_at < datetime('now', '-90 days')",
+            [],
+        )?;
+
+        connection.execute(
+            "UPDATE background_jobs SET status = 'interrupted', stage = '应用已重启', finished_at = datetime('now'), updated_at = datetime('now') WHERE status IN ('queued', 'running')",
+            [],
         )?;
 
         normalize_legacy_virtual_model_routes_schema(&connection)?;
@@ -744,7 +855,7 @@ impl Storage {
 
         // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
         connection.execute(
-            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.16', datetime('now'))
+            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.19', datetime('now'))
              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
             [],
         )?;

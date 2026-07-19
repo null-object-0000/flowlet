@@ -6,6 +6,7 @@ import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./OverviewChannelAccountsCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { formatCompactNumber } from "../../shared/formatters/number";
 
 const { Text } = Typography;
 
@@ -72,7 +73,7 @@ function accountStatus(account: ChannelAccount, t: (source: string) => string): 
 
 function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): string {
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
-  if (tokenPack) return t("资源包 {value} Tokens", { value: formatTokenCount(snapshot?.token_pack_remaining, language) });
+  if (tokenPack) return t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
   const balance = snapshot?.balance == null ? "-" : snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 });
   return t("余额 {value}", { value: `${balance}${snapshot?.currency ? ` ${snapshot.currency}` : ""}` });
 }
@@ -80,12 +81,4 @@ function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
 function expirySummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string): string {
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
   return tokenPack && snapshot?.token_pack_expire_at ? ` · ${t("有效期至 {date}", { date: snapshot.token_pack_expire_at.split("T")[0] })}` : "";
-}
-
-function formatTokenCount(value: number | null | undefined, language: "zh-CN" | "en-US"): string {
-  if (value == null) return "-";
-  if (language === "en-US") return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
-  if (value >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
-  return String(value);
 }

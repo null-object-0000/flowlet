@@ -69,6 +69,41 @@ pub struct CodexAccountsReport {
     pub current_account_id: Option<String>,
 }
 
+/// Read the last successful local snapshots without performing network I/O.
+/// The frontend uses this as stale-while-refresh data while a live query runs.
+pub fn list_cached_codex_accounts(managed_root: &Path) -> Result<CodexAccountsReport, String> {
+    std::fs::create_dir_all(managed_root)
+        .map_err(|error| format!("无法创建 Codex 多账号目录：{error}"))?;
+
+    let entries = std::fs::read_dir(managed_root)
+        .map_err(|error| format!("无法读取 Codex 多账号目录：{error}"))?;
+    let mut accounts = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| is_managed_profile_directory(path))
+        .filter_map(|path| read_snapshot(&path.join("snapshot.json")))
+        .filter(|report| report.signed_in)
+        .collect::<Vec<_>>();
+
+    sort_accounts(&mut accounts);
+    deduplicate_accounts(&mut accounts);
+    let current_index = accounts
+        .iter()
+        .enumerate()
+        .filter(|(_, account)| account.is_current)
+        .max_by(|(_, left), (_, right)| left.updated_at.cmp(&right.updated_at))
+        .map(|(index, _)| index);
+    for (index, account) in accounts.iter_mut().enumerate() {
+        account.is_current = Some(index) == current_index;
+    }
+    let current_account_id = current_index.map(|index| accounts[index].account_id.clone());
+
+    Ok(CodexAccountsReport {
+        accounts,
+        current_account_id,
+    })
+}
+
 pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsReport, String> {
     std::fs::create_dir_all(managed_root)
         .map_err(|error| format!("无法创建 Codex 多账号目录：{error}"))?;
@@ -78,11 +113,17 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
     let mut current = current_result.ok().filter(|report| report.signed_in);
     if let Some(report) = current.as_mut() {
         report.is_current = true;
+        if is_fallback_account_id(report) {
+            if let Some(account_id) = canonical_managed_account_id(managed_root, report) {
+                report.account_id = account_id;
+            }
+        }
         if let Ok(auth) = read_json(&codex_home().join("auth.json")) {
             persist_managed_profile(managed_root, &auth, report)?;
         }
     }
-    let current_account_id = current.as_ref().map(|report| report.account_id.clone());
+    let current_account_id_hint = current.as_ref().map(|report| report.account_id.clone());
+    let current_email = current.as_ref().and_then(|report| normalized_email(report));
     let mut accounts = current.into_iter().collect::<Vec<_>>();
 
     let entries = std::fs::read_dir(managed_root)
@@ -90,7 +131,7 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
     for profile_dir in entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
+        .filter(|path| is_managed_profile_directory(path))
     {
         let auth_path = profile_dir.join("auth.json");
         let snapshot_path = profile_dir.join("snapshot.json");
@@ -108,7 +149,11 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
                         .map(str::to_owned)
                 })
             });
-        if stored_id.as_deref() == current_account_id.as_deref() {
+        let matches_current_email = stored_snapshot
+            .as_ref()
+            .and_then(normalized_email)
+            .is_some_and(|email| current_email.as_deref() == Some(email.as_str()));
+        if stored_id.as_deref() == current_account_id_hint.as_deref() || matches_current_email {
             continue;
         }
 
@@ -144,6 +189,10 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
 
     sort_accounts(&mut accounts);
     deduplicate_accounts(&mut accounts);
+    let current_account_id = accounts
+        .iter()
+        .find(|account| account.is_current)
+        .map(|account| account.account_id.clone());
     if accounts.is_empty() {
         if let Some(error) = current_error {
             return Err(error);
@@ -219,8 +268,105 @@ where
 }
 
 fn deduplicate_accounts(accounts: &mut Vec<CodexAccountReport>) {
-    let mut seen = std::collections::HashSet::new();
-    accounts.retain(|account| seen.insert(account.account_id.clone()));
+    let mut merged: Vec<CodexAccountReport> = Vec::with_capacity(accounts.len());
+    for account in accounts.drain(..) {
+        if let Some(existing) = merged
+            .iter_mut()
+            .find(|existing| same_account_identity(existing, &account))
+        {
+            merge_account_report(existing, account);
+        } else {
+            merged.push(account);
+        }
+    }
+    *accounts = merged;
+}
+
+fn same_account_identity(left: &CodexAccountReport, right: &CodexAccountReport) -> bool {
+    left.account_id == right.account_id
+        || normalized_email(left)
+            .zip(normalized_email(right))
+            .is_some_and(|(left, right)| left == right)
+}
+
+fn normalized_email(report: &CodexAccountReport) -> Option<String> {
+    report
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|email| !email.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
+fn is_fallback_account_id(report: &CodexAccountReport) -> bool {
+    report.account_id.is_empty()
+        || normalized_email(report)
+            .is_some_and(|email| report.account_id.eq_ignore_ascii_case(&email))
+}
+
+fn merge_account_report(existing: &mut CodexAccountReport, duplicate: CodexAccountReport) {
+    if is_fallback_account_id(existing) && !is_fallback_account_id(&duplicate) {
+        existing.account_id = duplicate.account_id.clone();
+    }
+    existing.signed_in |= duplicate.signed_in;
+    existing.is_current |= duplicate.is_current;
+    existing.stale &= duplicate.stale;
+    if duplicate.updated_at > existing.updated_at {
+        existing.updated_at = duplicate.updated_at.clone();
+    }
+    if existing.auth_mode.is_none() {
+        existing.auth_mode = duplicate.auth_mode;
+    }
+    if existing.email.is_none() {
+        existing.email = duplicate.email;
+    }
+    if existing.plan_type.is_none() {
+        existing.plan_type = duplicate.plan_type;
+    }
+    if existing.primary.is_none() {
+        existing.primary = duplicate.primary;
+    }
+    if existing.secondary.is_none() {
+        existing.secondary = duplicate.secondary;
+    }
+    if existing.credits.is_none() {
+        existing.credits = duplicate.credits;
+    }
+    if existing.rate_limit_reset_credits.is_none() {
+        existing.rate_limit_reset_credits = duplicate.rate_limit_reset_credits;
+    }
+    if existing.rate_limit_reached_type.is_none() {
+        existing.rate_limit_reached_type = duplicate.rate_limit_reached_type;
+    }
+    if existing.error.is_none() {
+        existing.error = duplicate.error;
+    }
+}
+
+fn is_managed_profile_directory(path: &Path) -> bool {
+    path.is_dir()
+        && !path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(".pending-"))
+}
+
+fn canonical_managed_account_id(
+    managed_root: &Path,
+    current: &CodexAccountReport,
+) -> Option<String> {
+    let current_email = normalized_email(current)?;
+    std::fs::read_dir(managed_root)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| is_managed_profile_directory(path))
+        .filter_map(|path| read_snapshot(&path.join("snapshot.json")))
+        .find(|snapshot| {
+            normalized_email(snapshot).as_deref() == Some(current_email.as_str())
+                && !is_fallback_account_id(snapshot)
+        })
+        .map(|snapshot| snapshot.account_id)
 }
 
 fn persist_managed_profile(
@@ -1104,6 +1250,126 @@ mod tests {
 
         assert_eq!(accounts.len(), 1);
         assert!(accounts[0].is_current);
+    }
+
+    #[test]
+    fn deduplicates_email_fallback_and_canonical_id_while_preserving_current() {
+        let mut current = parse_oauth_usage(
+            &json!({
+                "email": "Same@Example.com",
+                "plan_type": "plus"
+            }),
+            None,
+        )
+        .expect("parse current account");
+        current.is_current = true;
+        current.source = "app_server".to_string();
+        let managed = parse_oauth_usage(
+            &json!({
+                "account_id": "user-canonical",
+                "email": "same@example.com",
+                "plan_type": "plus"
+            }),
+            None,
+        )
+        .expect("parse managed account");
+        let mut accounts = vec![current, managed];
+
+        deduplicate_accounts(&mut accounts);
+
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].account_id, "user-canonical");
+        assert!(accounts[0].is_current);
+    }
+
+    #[test]
+    fn resolves_email_fallback_to_existing_canonical_managed_id() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-identity-{}", uuid::Uuid::new_v4()));
+        let profile = root.join("user-canonical");
+        std::fs::create_dir_all(&profile).expect("create profile");
+        let managed = parse_oauth_usage(
+            &json!({
+                "account_id": "user-canonical",
+                "email": "same@example.com",
+                "plan_type": "plus"
+            }),
+            None,
+        )
+        .expect("parse managed account");
+        write_private_json(&profile.join("snapshot.json"), &managed).expect("write snapshot");
+        let current = parse_oauth_usage(
+            &json!({
+                "email": "SAME@example.com",
+                "plan_type": "plus"
+            }),
+            None,
+        )
+        .expect("parse current account");
+
+        assert_eq!(
+            canonical_managed_account_id(&root, &current).as_deref(),
+            Some("user-canonical")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn excludes_pending_authorization_directories() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-pending-{}", uuid::Uuid::new_v4()));
+        let pending = root.join(".pending-login");
+        let managed = root.join("user-1");
+        std::fs::create_dir_all(&pending).expect("create pending");
+        std::fs::create_dir_all(&managed).expect("create managed");
+
+        assert!(!is_managed_profile_directory(&pending));
+        assert!(is_managed_profile_directory(&managed));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_accounts_return_immediately_and_merge_duplicate_snapshots() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-cache-{}", uuid::Uuid::new_v4()));
+        let canonical_dir = root.join("user-canonical");
+        let fallback_dir = root.join("same_example.com");
+        let pending_dir = root.join(".pending-login");
+        std::fs::create_dir_all(&canonical_dir).expect("create canonical profile");
+        std::fs::create_dir_all(&fallback_dir).expect("create fallback profile");
+        std::fs::create_dir_all(&pending_dir).expect("create pending profile");
+
+        let canonical = parse_oauth_usage(
+            &json!({
+                "account_id": "user-canonical",
+                "email": "same@example.com",
+                "plan_type": "plus"
+            }),
+            None,
+        )
+        .expect("parse canonical account");
+        let mut fallback = canonical.clone();
+        fallback.account_id = "same@example.com".to_string();
+        fallback.is_current = true;
+        fallback.updated_at = "2026-07-19T15:04:00Z".to_string();
+        let mut pending = canonical.clone();
+        pending.account_id = "pending-account".to_string();
+        pending.email = Some("pending@example.com".to_string());
+
+        write_private_json(&canonical_dir.join("snapshot.json"), &canonical)
+            .expect("write canonical snapshot");
+        write_private_json(&fallback_dir.join("snapshot.json"), &fallback)
+            .expect("write fallback snapshot");
+        write_private_json(&pending_dir.join("snapshot.json"), &pending)
+            .expect("write pending snapshot");
+
+        let report = list_cached_codex_accounts(&root).expect("read cached accounts");
+
+        assert_eq!(report.accounts.len(), 1);
+        assert_eq!(report.accounts[0].account_id, "user-canonical");
+        assert!(report.accounts[0].is_current);
+        assert_eq!(report.current_account_id.as_deref(), Some("user-canonical"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

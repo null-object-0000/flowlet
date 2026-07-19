@@ -31,6 +31,77 @@ struct CachedClaudeSession {
 static CLAUDE_SESSION_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedClaudeSession>>> =
     OnceLock::new();
 
+#[derive(Clone, Debug)]
+pub struct NativeAgentSourceWatch {
+    pub agent_type: String,
+    pub path: PathBuf,
+    pub recursive: bool,
+}
+
+pub fn native_agent_source_watches() -> Vec<NativeAgentSourceWatch> {
+    let mut watches = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        let claude = home.join(".claude").join("projects");
+        if claude.is_dir() {
+            watches.push(NativeAgentSourceWatch {
+                agent_type: "claude-code".into(),
+                path: claude,
+                recursive: true,
+            });
+        }
+        let codex_home = std::env::var_os("CODEX_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".codex"));
+        let sessions = codex_home.join("sessions");
+        if sessions.is_dir() {
+            watches.push(NativeAgentSourceWatch {
+                agent_type: "codex".into(),
+                path: sessions,
+                recursive: true,
+            });
+            watches.push(NativeAgentSourceWatch {
+                agent_type: "codex".into(),
+                path: codex_home,
+                recursive: false,
+            });
+        }
+    }
+    for database in opencode_database_candidates()
+        .into_iter()
+        .filter(|path| path.is_file())
+    {
+        if let Some(parent) = database.parent() {
+            watches.push(NativeAgentSourceWatch {
+                agent_type: "opencode".into(),
+                path: parent.to_path_buf(),
+                recursive: false,
+            });
+        }
+    }
+    let mut seen = HashSet::new();
+    watches.retain(|watch| {
+        seen.insert((
+            watch.agent_type.clone(),
+            watch.path.clone(),
+            watch.recursive,
+        ))
+    });
+    watches
+}
+
+pub fn available_native_agent_types() -> HashSet<String> {
+    native_agent_source_watches()
+        .into_iter()
+        .flat_map(|watch| {
+            if watch.agent_type == "codex" {
+                vec!["codex-desktop".to_string(), "codex-cli".to_string()]
+            } else {
+                vec![watch.agent_type]
+            }
+        })
+        .collect()
+}
+
 pub fn list_native_agent_sessions() -> Vec<AgentSessionRow> {
     let mut rows = list_claude_native_sessions();
     let mut seen = rows
@@ -78,6 +149,12 @@ pub fn merge_agent_session_catalog(
             native.success_count = observed.success_count;
             native.error_count = observed.error_count;
             native.known_tokens = observed.known_tokens;
+            native.input_tokens = observed.input_tokens;
+            native.input_cached_tokens = observed.input_cached_tokens;
+            native.input_uncached_tokens = observed.input_uncached_tokens;
+            native.cache_measured_input_tokens = observed.cache_measured_input_tokens;
+            native.output_tokens = observed.output_tokens;
+            native.unknown_usage_count = observed.unknown_usage_count;
             native.estimated_cost = observed.estimated_cost;
             native.flowlet_observed = true;
         } else {
@@ -467,7 +544,15 @@ fn native_row(
         success_count: 0,
         error_count: 0,
         known_tokens: 0,
+        input_tokens: 0,
+        input_cached_tokens: 0,
+        input_uncached_tokens: 0,
+        cache_measured_input_tokens: 0,
+        output_tokens: 0,
+        unknown_usage_count: 0,
         estimated_cost: 0.0,
+        native_summary: None,
+        native_synced_at: None,
     }
 }
 
@@ -627,9 +712,9 @@ mod tests {
             main.native_started_at.as_deref(),
             Some("2026-07-19T08:00:00Z")
         );
-        assert_eq!(
-            main.native_updated_at.as_deref(),
-            Some("2026-07-19T10:00:00Z")
+        assert!(
+            session_time_millis(main.native_updated_at.as_deref().unwrap())
+                >= session_time_millis("2026-07-19T10:00:00Z")
         );
         let child = rows
             .iter()

@@ -51,7 +51,15 @@ export const queryKeys = {
     all: ["agent-session"] as const,
     list: (filter: unknown) => [...queryKeys.agentSession.all, "list", filter] as const,
     children: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "children", agentType, sessionId] as const,
+    timeline: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "timeline", agentType, sessionId] as const,
+    nativeSummary: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "native-summary", agentType, sessionId] as const,
     clients: () => [...queryKeys.agentSession.all, "clients"] as const,
+  },
+  backgroundTask: {
+    all: ["background-task"] as const,
+    list: (filter?: unknown) => [...queryKeys.backgroundTask.all, "list", filter] as const,
+    detail: (jobId: string) => [...queryKeys.backgroundTask.all, "detail", jobId] as const,
+    agentSyncStatus: () => [...queryKeys.backgroundTask.all, "agent-sync-status"] as const,
   },
   agent: {
     all: ["agent"] as const,
@@ -70,6 +78,7 @@ export const queryKeys = {
     autostart: () => [...queryKeys.settings.all, "autostart"] as const,
     logCapture: () => [...queryKeys.settings.all, "log-capture"] as const,
     dbStats: () => [...queryKeys.settings.all, "db-stats"] as const,
+    storageUsage: () => [...queryKeys.settings.all, "storage-usage"] as const,
     appMeta: (key: string) => [...queryKeys.settings.all, "app-meta", key] as const,
   },
 } as const;

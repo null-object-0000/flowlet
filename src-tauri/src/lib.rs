@@ -31,6 +31,7 @@ struct AppState {
     config_path: std::path::PathBuf,
     codex_accounts_dir: std::path::PathBuf,
     channels_config: Arc<Mutex<ChannelsConfig>>,
+    agent_source_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 struct ProxyStartupConfig {
@@ -336,6 +337,7 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         config_path,
         codex_accounts_dir,
         channels_config: Arc::new(Mutex::new((*channels_config).clone())),
+        agent_source_watcher: Arc::new(Mutex::new(None)),
     };
     tracing::info!(
         t_ms = _t0.elapsed().as_millis() as u64,
@@ -543,6 +545,16 @@ pub fn run() {
             );
 
             let app_handle = app.handle();
+            match core::agent_source_watcher::start_agent_source_watcher(app_handle.clone()) {
+                Ok(watcher) => {
+                    if let Ok(mut guard) = state.agent_source_watcher.lock() {
+                        *guard = Some(watcher);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Agent 数据源文件监听未启用，将继续使用定时轮询")
+                }
+            }
 
             // 关闭窗口时隐藏到托盘，而非退出。自启动传入 --hidden 时保持后台托盘模式。
             if let Some(window) = app.get_webview_window("main") {
@@ -639,6 +651,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::detect_agent_environment,
+            commands::list_cached_codex_accounts,
             commands::query_codex_accounts,
             commands::authorize_codex_account,
             commands::inspect_agent_global_config,
@@ -668,6 +681,15 @@ pub fn run() {
             commands::list_request_logs,
             commands::list_agent_sessions,
             commands::list_agent_session_children,
+            commands::get_agent_session_timeline,
+            commands::get_agent_session_native_summary,
+            commands::sync_agent_data,
+            commands::list_background_jobs,
+            commands::get_background_job_detail,
+            commands::get_agent_sync_status,
+            commands::cancel_background_job,
+            commands::cleanup_background_jobs,
+            commands::probe_cost_ledger_sources,
             commands::list_agent_session_clients,
             commands::list_request_log_clients,
             commands::list_request_log_models,
@@ -691,6 +713,7 @@ pub fn run() {
             commands::export_all_data,
             commands::import_all_data,
             commands::db_stats,
+            commands::storage_usage_summary,
             commands::read_app_meta,
             commands::write_app_meta,
             commands::cleanup_old_logs,

@@ -1,6 +1,8 @@
 use super::Storage;
 use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
-use crate::core::config::{LogsFilter, ProtocolType, RequestLogInput, RouteCandidate};
+use crate::core::config::{
+    LogsFilter, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
+};
 use base64::Engine;
 use rusqlite::Connection;
 
@@ -115,11 +117,51 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
     log.agent_session_id = Some("ses_parent".to_string());
     log.parent_agent_session_id = None;
     storage.insert_request_log(&log).unwrap();
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "req-root".to_string(),
+            client_id: log.client_id.clone(),
+            client_name: log.client_name.clone(),
+            channel_id: log.channel_id.clone(),
+            channel_name: log.channel_name.clone(),
+            account_id: log.account_id.clone(),
+            account_name: log.account_name.clone(),
+            client_protocol: log.client_protocol.clone(),
+            upstream_protocol: log.upstream_protocol.clone(),
+            virtual_model: log.virtual_model.clone(),
+            upstream_model: log.upstream_model.clone(),
+            input_tokens: Some(100),
+            input_cached_tokens: Some(40),
+            input_uncached_tokens: Some(60),
+            output_tokens: Some(20),
+            total_tokens: Some(120),
+        })
+        .unwrap();
 
     log.request_id = "req-1".to_string();
     log.agent_session_id = Some("ses_test".to_string());
     log.parent_agent_session_id = Some("ses_parent".to_string());
     storage.insert_request_log(&log).unwrap();
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "req-1".to_string(),
+            client_id: log.client_id.clone(),
+            client_name: log.client_name.clone(),
+            channel_id: log.channel_id.clone(),
+            channel_name: log.channel_name.clone(),
+            account_id: log.account_id.clone(),
+            account_name: log.account_name.clone(),
+            client_protocol: log.client_protocol.clone(),
+            upstream_protocol: log.upstream_protocol.clone(),
+            virtual_model: log.virtual_model.clone(),
+            upstream_model: log.upstream_model.clone(),
+            input_tokens: Some(200),
+            input_cached_tokens: Some(100),
+            input_uncached_tokens: Some(100),
+            output_tokens: Some(50),
+            total_tokens: Some(250),
+        })
+        .unwrap();
     log.request_id = "req-2".to_string();
     log.status = Some(500);
     log.error_message = Some("upstream error".to_string());
@@ -143,6 +185,13 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
     assert_eq!(page.rows[0].parent_session_id, None);
     assert_eq!(page.rows[0].client_id.as_deref(), Some("opencode"));
     assert_eq!(page.rows[0].client_name.as_deref(), Some("OpenCode"));
+    assert_eq!(page.rows[0].known_tokens, 120);
+    assert_eq!(page.rows[0].input_tokens, 100);
+    assert_eq!(page.rows[0].input_cached_tokens, 40);
+    assert_eq!(page.rows[0].input_uncached_tokens, 60);
+    assert_eq!(page.rows[0].cache_measured_input_tokens, 100);
+    assert_eq!(page.rows[0].output_tokens, 20);
+    assert_eq!(page.rows[0].unknown_usage_count, 0);
 
     let children = storage
         .list_agent_session_children("opencode", "ses_parent")
@@ -153,6 +202,13 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
     assert_eq!(children[0].success_count, 1);
     assert_eq!(children[0].error_count, 1);
     assert_eq!(children[0].parent_session_id.as_deref(), Some("ses_parent"));
+    assert_eq!(children[0].known_tokens, 250);
+    assert_eq!(children[0].input_tokens, 200);
+    assert_eq!(children[0].input_cached_tokens, 100);
+    assert_eq!(children[0].input_uncached_tokens, 100);
+    assert_eq!(children[0].cache_measured_input_tokens, 200);
+    assert_eq!(children[0].output_tokens, 50);
+    assert_eq!(children[0].unknown_usage_count, 1);
     let clients = storage.list_agent_session_clients().unwrap();
     assert_eq!(clients.len(), 1);
     assert_eq!(clients[0].id, "opencode");

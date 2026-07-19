@@ -1,0 +1,11 @@
+export type BackgroundJobStatus = "queued" | "running" | "succeeded" | "succeeded_with_warnings" | "failed" | "interrupted" | "cancelled";
+export type BackgroundJobRow = { id: string; jobType: string; title: string; triggerSource: string; status: BackgroundJobStatus; stage: string | null; progressCurrent: number; progressTotal: number; summaryJson: string | null; errorMessage: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null; updatedAt: string; cancelRequested: boolean };
+export type BackgroundJobsFilter = { page: number; pageSize: number; status: "" | BackgroundJobStatus; jobType: string };
+export type BackgroundJobsPage = { rows: BackgroundJobRow[]; total: number; page: number; pageSize: number };
+export const DEFAULT_BACKGROUND_JOBS_FILTER: BackgroundJobsFilter = { page: 1, pageSize: 8, status: "", jobType: "" };
+export type CleanupBackgroundJobsResult = { deletedJobs: number; deletedEvents: number };
+export type BackgroundJobEvent = { id: string; jobId: string; sequence: number; level: string; stage: string | null; message: string; detailJson: string | null; createdAt: string };
+export type BackgroundJobDetail = { job: BackgroundJobRow; events: BackgroundJobEvent[] };
+export type AgentDataSyncResult = { started: boolean; jobId: string | null; scanned: number; changed: number; failed: number; message: string };
+export type AgentSourceSyncState = { agentType: string; lastCheckedAt: string | null; lastSyncedAt: string | null; status: string; lastError: string | null; scannedCount: number; changedCount: number; failedCount: number };
+export type AgentSyncStatusReport = { running: boolean; sources: AgentSourceSyncState[] };

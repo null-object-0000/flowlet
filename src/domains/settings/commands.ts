@@ -1,4 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import type { StorageUsageSummary } from "./types";
 
 export async function getAutostartEnabled() {
   try {
@@ -33,3 +34,10 @@ export async function importAllData(sourcePath: string) {
   }
 }
 
+export async function getStorageUsage(scanId: string) {
+  try {
+    return await invokeCommand<StorageUsageSummary>("storage_usage_summary", { scanId });
+  } catch (error) {
+    throw toAppError(error, "storage_usage_read_failed");
+  }
+}

@@ -1,11 +1,10 @@
 .page {
   width: 100%;
   max-width: 1040px;
-  height: 100%;
-  min-height: 0;
+  min-height: 100%;
   margin: 0 auto;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   gap: 16px;
 }
 
@@ -31,13 +30,12 @@
 }
 
 .content {
-  min-height: 0;
+  min-height: auto;
   padding: 1px 4px 12px 1px;
   display: grid;
   align-content: start;
   gap: 16px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  overflow: visible;
 }
 
 .preferencesCard,
@@ -173,6 +171,165 @@
   color: var(--flowlet-color-text-secondary);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.storagePanel {
+  min-width: 0;
+  padding: 17px 28px 18px;
+  display: grid;
+  gap: 12px;
+  border-bottom: 1px solid var(--flowlet-color-border);
+}
+
+.storageHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.storageHeader > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.storageHeader strong {
+  color: var(--flowlet-color-text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.storageHeader small,
+.storageNote,
+.storageState {
+  color: var(--flowlet-color-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.storageTotal b {
+  color: var(--flowlet-color-text);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.storageTotal {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.storageTotal > small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--semi-color-primary);
+  font-size: 11px;
+}
+
+.storageTotal > small i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--semi-color-primary);
+  box-shadow: 0 0 0 3px var(--semi-color-primary-light-default);
+  animation: storagePulse 1.2s ease-in-out infinite;
+}
+
+.storageGrid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.storageItem {
+  min-width: 0;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  background: var(--flowlet-color-surface-muted);
+}
+
+.storageItemCounting {
+  border-color: var(--semi-color-primary-light-active);
+}
+
+.storageItem > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.storageItem i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--semi-color-primary);
+}
+
+.storageItem strong {
+  overflow: hidden;
+  color: var(--flowlet-color-text);
+  font-size: 14px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.storageItem small {
+  overflow: hidden;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.storageMeter {
+  height: 3px;
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--flowlet-color-border);
+}
+
+.storageMeter > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--semi-color-primary);
+  transition: width 160ms ease-out;
+}
+
+@keyframes storagePulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+.storageState {
+  margin: 0;
+}
+
+.storageError {
+  color: var(--semi-color-danger);
+}
+
+.storageError button {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  color: var(--semi-color-primary);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .repairPanel {
@@ -371,10 +528,15 @@
   .repairStages {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .storageGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
   .sectionHeader,
+  .storagePanel,
   .repairPanel,
   .dataPanel,
   .dataPanelExporting {
@@ -392,6 +554,10 @@
   }
 
   .repairStages {
+    grid-template-columns: 1fr;
+  }
+
+  .storageGrid {
     grid-template-columns: 1fr;
   }
 

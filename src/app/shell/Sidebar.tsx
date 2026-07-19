@@ -7,6 +7,7 @@ import {
   IconList,
   IconServer,
   IconSetting,
+  IconHistory,
 } from "@douyinfe/semi-icons";
 import { NavLink } from "react-router-dom";
 import navStyles from "./Nav.module.css";
@@ -21,6 +22,7 @@ const navItems: Array<{ to: string; label: string; icon: ReactNode }> = [
   { to: "/models", label: "模型服务", icon: <IconServer /> },
   { to: "/logs", label: "请求日志", icon: <IconList /> },
   { to: "/sessions", label: "会话管理", icon: <IconComment /> },
+  { to: "/tasks", label: "任务日志", icon: <IconHistory /> },
   { to: "/usage", label: "用量成本", icon: <IconHistogram /> },
 ];
 

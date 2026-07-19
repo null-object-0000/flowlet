@@ -8,6 +8,7 @@ import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./AccountManagementSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { formatCompactNumber } from "../../shared/formatters/number";
 
 const { Text } = Typography;
 
@@ -186,14 +187,7 @@ function getStatus(account: ChannelAccount, t: (source: string) => string): { la
 function resourceDetails(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string) => string, language: "zh-CN" | "en-US") {
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
   if (!tokenPack) return [{ label: t("余额"), value: snapshot?.balance == null ? "-" : `${snapshot.balance} ${snapshot.currency ?? ""}`.trim() }];
-  const rows = [{ label: t("剩余"), value: snapshot?.token_pack_remaining == null ? "-" : `${formatToken(snapshot.token_pack_remaining, language)} Tokens` }];
+  const rows = [{ label: t("剩余"), value: snapshot?.token_pack_remaining == null ? "-" : `${formatCompactNumber(snapshot.token_pack_remaining, language)} Tokens` }];
   if (snapshot?.token_pack_expire_at) rows.push({ label: t("有效期"), value: snapshot.token_pack_expire_at.split("T")[0] });
   return rows;
-}
-
-function formatToken(value: number, language: "zh-CN" | "en-US") {
-  if (language === "en-US") return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
-  if (value >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
-  return String(value);
 }

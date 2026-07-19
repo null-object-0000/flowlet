@@ -6,6 +6,7 @@ import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { buildUsageHeatmap, filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay, type UsageHeatmap } from "./usagePresentation";
 import styles from "./UsageCostPage.module.css";
+import { formatCompactNumber as formatCompact, formatInteger } from "../../shared/formatters/number";
 
 const { Paragraph, Title } = Typography;
 type TrendMetric = "cost" | "tokens";
@@ -185,5 +186,3 @@ function TokenActivityHeatmap({ activity, language, lessLabel, moreLabel }: { ac
 
 function formatCost(value: number, digits = 2) { return `$${value.toFixed(digits)}`; }
 function formatPercent(value: number) { return `${(value * 100).toFixed(1)}%`; }
-function formatInteger(value: number, language: "zh-CN" | "en-US") { return new Intl.NumberFormat(language).format(value); }
-function formatCompact(value: number, language: "zh-CN" | "en-US") { return new Intl.NumberFormat(language, { notation: "compact", maximumFractionDigits: 1 }).format(value); }

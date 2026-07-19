@@ -1,8 +1,9 @@
-import { Tooltip } from "@douyinfe/semi-ui-19";
 import type { RequestLogRow } from "../../domains/request-log/types";
-import { calculateCacheHitRate, calculateOutputTokenRate, formatDuration, formatPercentage, formatTokenRate, isSuccessfulLog } from "./logPresentation";
+import { calculateCacheHitRate, calculateOutputTokenRate, formatDuration, formatTokenRate, isSuccessfulLog } from "./logPresentation";
 import styles from "./RequestLogTable.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
+import { CompactNumber } from "../../shared/ui/CompactNumber";
 
 type Props = {
   rows: RequestLogRow[];
@@ -58,27 +59,24 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
               <strong>{formatDuration(row.duration_ms ?? row.latency_ms)}</strong>
               <small>{row.ttft_ms == null ? "TTFT —" : `TTFT ${formatDuration(row.ttft_ms)}`} · {formatTokenRate(calculateOutputTokenRate(row))}</small>
             </span>
-            <Tooltip content={<TokenBreakdown row={row} language={language} />} showArrow>
-              <span className={styles.tokenTotal}>{formatTokens(row.total_tokens, language)}</span>
-            </Tooltip>
+            <TokenBreakdownTooltip
+              language={language}
+              t={t}
+              tokens={{
+                total: row.total_tokens,
+                input: row.input_tokens,
+                cachedInput: row.input_cached_tokens,
+                uncachedInput: row.input_uncached_tokens,
+                output: row.output_tokens,
+                cacheHitRate: calculateCacheHitRate(row),
+              }}
+            >
+              <CompactNumber className={styles.tokenTotal} value={row.total_tokens} language={language} />
+            </TokenBreakdownTooltip>
             <span className={styles.number}>{formatCost(row.estimated_cost)}</span>
           </button>
         )) : null}
       </div>
-    </div>
-  );
-}
-
-function TokenBreakdown({ row, language }: { row: RequestLogRow; language: "zh-CN" | "en-US" }) {
-  const { t } = useAppPreferences();
-  return (
-    <div className={styles.tokenBreakdown}>
-      <strong>{t("总 Token")} {formatTokens(row.total_tokens, language)}</strong>
-      <span><small>{t("输入 Token")}</small><b>{formatTokens(row.input_tokens, language)}</b></span>
-      <span><small>{t("缓存输入 Token")}</small><b>{formatTokens(row.input_cached_tokens, language)}</b></span>
-      <span><small>{t("未缓存输入 Token")}</small><b>{formatTokens(row.input_uncached_tokens, language)}</b></span>
-      <span><small>{t("输出 Token")}</small><b>{formatTokens(row.output_tokens, language)}</b></span>
-      <span><small>{t("缓存命中率")}</small><b>{formatPercentage(calculateCacheHitRate(row))}</b></span>
     </div>
   );
 }
@@ -102,11 +100,6 @@ function formatTime(value: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function formatTokens(value: number | null, language: "zh-CN" | "en-US") {
-  if (value == null) return "—";
-  return new Intl.NumberFormat(language).format(value);
 }
 
 function formatCost(value: number | null) {

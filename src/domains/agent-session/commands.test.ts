@@ -33,4 +33,22 @@ describe("agentSessionCommands contract", () => {
       parentSessionId: "ses_main",
     });
   });
+
+  it("loads a native session timeline on demand", async () => {
+    invokeMock.mockResolvedValueOnce({ sourceAvailable: true, truncated: false, events: [] });
+    await agentSessionCommands.timeline("codex-desktop", "session-1");
+    expect(invokeMock).toHaveBeenCalledWith("get_agent_session_timeline", {
+      agentType: "codex-desktop",
+      sessionId: "session-1",
+    });
+  });
+
+  it("loads a native session summary for list enrichment", async () => {
+    invokeMock.mockResolvedValueOnce({ sourceAvailable: true, truncated: false, turnCount: 2, usage: null });
+    await agentSessionCommands.nativeSummary("claude-code", "session-2");
+    expect(invokeMock).toHaveBeenCalledWith("get_agent_session_native_summary", {
+      agentType: "claude-code",
+      sessionId: "session-2",
+    });
+  });
 });

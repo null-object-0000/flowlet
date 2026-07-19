@@ -562,9 +562,12 @@ pub struct ModelPrice {
     pub upstream_model: String,
     pub input_uncached_price: f64,
     pub input_cached_price: f64,
+    pub input_cache_write_price: Option<f64>,
     pub output_price: f64,
     pub currency: String,
     pub unit: String,
+    pub source_url: Option<String>,
+    pub price_version: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -577,9 +580,12 @@ impl Default for ModelPrice {
             upstream_model: String::new(),
             input_uncached_price: 0.0,
             input_cached_price: 0.0,
+            input_cache_write_price: None,
             output_price: 0.0,
             currency: "USD".to_string(),
             unit: "1M tokens".to_string(),
+            source_url: None,
+            price_version: None,
             created_at: String::new(),
             updated_at: String::new(),
         }
@@ -964,7 +970,15 @@ pub struct AgentSessionRow {
     pub success_count: i64,
     pub error_count: i64,
     pub known_tokens: i64,
+    pub input_tokens: i64,
+    pub input_cached_tokens: i64,
+    pub input_uncached_tokens: i64,
+    pub cache_measured_input_tokens: i64,
+    pub output_tokens: i64,
+    pub unknown_usage_count: i64,
     pub estimated_cost: f64,
+    pub native_summary: Option<AgentSessionNativeSummary>,
+    pub native_synced_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -974,6 +988,72 @@ pub struct AgentSessionsPageResult {
     pub total: i64,
     pub page: u32,
     pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionTimeline {
+    pub source_available: bool,
+    pub truncated: bool,
+    pub turn_count: i64,
+    pub usage: Option<AgentSessionNativeUsage>,
+    pub models: Vec<String>,
+    pub events: Vec<AgentSessionTimelineEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionNativeSummary {
+    pub source_available: bool,
+    pub truncated: bool,
+    pub turn_count: i64,
+    pub usage: Option<AgentSessionNativeUsage>,
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionCostEstimate {
+    pub amount: Option<f64>,
+    pub currency: Option<String>,
+    pub source_url: Option<String>,
+    pub price_version: Option<String>,
+    pub priced_turn_count: i64,
+    pub unpriced_turn_count: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionNativeUsage {
+    pub input_tokens: i64,
+    pub cached_input_tokens: i64,
+    pub cache_write_input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub total_tokens: i64,
+    pub cost: Option<f64>,
+    pub cost_currency: Option<String>,
+    #[serde(default)]
+    pub api_equivalent: Option<AgentSessionCostEstimate>,
+    #[serde(default)]
+    pub plan_consumption: Option<AgentSessionCostEstimate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionTimelineEvent {
+    pub id: String,
+    pub kind: String,
+    pub source: String,
+    pub timestamp: Option<String>,
+    pub title: Option<String>,
+    pub content: Option<String>,
+    pub model: Option<String>,
+    pub status: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub time_to_first_token_ms: Option<i64>,
+    pub usage: Option<AgentSessionNativeUsage>,
 }
 
 #[derive(Debug, Clone, Serialize)]

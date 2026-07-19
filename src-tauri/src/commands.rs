@@ -11,12 +11,28 @@ use crate::core::sync::{
     sync_longcat_models, test_channel_connection,
 };
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
 #[derive(Clone, serde::Serialize)]
 struct ExportProgress {
     stage: String,
     message: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageUsageProgress {
+    scan_id: String,
+    summary: crate::core::storage::StorageUsageSummary,
+}
+
+static AGENT_DATA_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+struct AgentDataSyncGuard;
+impl Drop for AgentDataSyncGuard {
+    fn drop(&mut self) {
+        AGENT_DATA_SYNC_RUNNING.store(false, Ordering::Release);
+    }
 }
 use tauri_plugin_autostart::ManagerExt;
 
@@ -34,6 +50,13 @@ pub(super) async fn query_codex_accounts(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::codex_account::CodexAccountsReport, String> {
     crate::core::codex_account::query_codex_accounts(&state.codex_accounts_dir).await
+}
+
+#[tauri::command]
+pub(super) fn list_cached_codex_accounts(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::codex_account::CodexAccountsReport, String> {
+    crate::core::codex_account::list_cached_codex_accounts(&state.codex_accounts_dir)
 }
 
 #[tauri::command]
@@ -471,6 +494,149 @@ pub(super) fn list_agent_session_children(
 }
 
 #[tauri::command]
+pub(super) async fn get_agent_session_timeline(
+    state: tauri::State<'_, AppState>,
+    agent_type: String,
+    session_id: String,
+) -> Result<crate::core::config::AgentSessionTimeline, String> {
+    let prices = state.storage.prices();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut timeline = crate::core::agent_session_timeline::get_native_agent_session_timeline(
+            &agent_type,
+            &session_id,
+        )?;
+        crate::core::agent_session_timeline::apply_native_cost_estimate_to_timeline(
+            &agent_type,
+            &mut timeline,
+            &prices,
+        );
+        Ok(timeline)
+    })
+    .await
+    .map_err(|error| format!("读取原生会话任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn get_agent_session_native_summary(
+    state: tauri::State<'_, AppState>,
+    agent_type: String,
+    session_id: String,
+) -> Result<crate::core::config::AgentSessionNativeSummary, String> {
+    let prices = state.storage.prices();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut summary = crate::core::agent_session_timeline::get_native_agent_session_summary(
+            &agent_type,
+            &session_id,
+        )?;
+        crate::core::agent_session_timeline::apply_native_cost_estimate_to_summary(
+            &agent_type,
+            &mut summary,
+            &prices,
+        );
+        Ok(summary)
+    })
+    .await
+    .map_err(|error| format!("读取原生会话摘要任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn sync_agent_data(
+    state: tauri::State<'_, AppState>,
+    force: bool,
+    trigger_source: String,
+) -> Result<crate::core::storage::AgentDataSyncResult, String> {
+    if AGENT_DATA_SYNC_RUNNING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Ok(crate::core::storage::AgentDataSyncResult {
+            started: false,
+            job_id: None,
+            scanned: 0,
+            changed: 0,
+            failed: 0,
+            message: "已有 Agent 数据同步正在运行".to_string(),
+        });
+    }
+    let _guard = AgentDataSyncGuard;
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || storage.sync_agent_data(force, &trigger_source))
+        .await
+        .map_err(|error| format!("Agent 数据同步任务失败：{error}"))?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(super) fn list_background_jobs(
+    state: tauri::State<'_, AppState>,
+    filter: crate::core::storage::BackgroundJobsFilter,
+) -> Result<crate::core::storage::BackgroundJobsPage, String> {
+    state
+        .storage
+        .list_background_jobs(filter)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(super) fn get_background_job_detail(
+    state: tauri::State<'_, AppState>,
+    job_id: String,
+) -> Result<crate::core::storage::BackgroundJobDetail, String> {
+    state
+        .storage
+        .get_background_job_detail(&job_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "任务日志不存在".to_string())
+}
+
+#[tauri::command]
+pub(super) fn get_agent_sync_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::storage::AgentSyncStatusReport, String> {
+    Ok(crate::core::storage::AgentSyncStatusReport {
+        running: AGENT_DATA_SYNC_RUNNING.load(Ordering::Acquire),
+        sources: state
+            .storage
+            .list_agent_source_sync_states()
+            .map_err(|error| error.to_string())?,
+    })
+}
+
+#[tauri::command]
+pub(super) fn cancel_background_job(
+    state: tauri::State<'_, AppState>,
+    job_id: String,
+) -> Result<bool, String> {
+    state
+        .storage
+        .request_background_job_cancel(&job_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(super) fn cleanup_background_jobs(
+    state: tauri::State<'_, AppState>,
+    keep_days: u32,
+) -> Result<crate::core::storage::CleanupBackgroundJobsResult, String> {
+    state
+        .storage
+        .cleanup_background_jobs(keep_days)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(super) async fn probe_cost_ledger_sources(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::cost_ledger_source_probe::CostLedgerSourceProbeResult, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::core::cost_ledger_source_probe::probe_cost_ledger_sources(&storage)
+    })
+    .await
+    .map_err(|error| format!("探测成本账本数据源失败：{error}"))
+}
+
+#[tauri::command]
 pub(super) fn list_agent_session_clients(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<LogFilterClient>, String> {
@@ -844,6 +1010,34 @@ pub(super) fn write_app_meta(
 #[tauri::command]
 pub(super) fn db_stats(state: tauri::State<'_, AppState>) -> Result<(i64, i64, i64), String> {
     state.storage.db_stats().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) async fn storage_usage_summary(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    scan_id: String,
+) -> Result<crate::core::storage::StorageUsageSummary, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let config_bytes = std::fs::metadata(&state.config_path)
+            .map(|metadata| metadata.len().min(i64::MAX as u64) as i64)
+            .unwrap_or(0);
+        state
+            .storage
+            .storage_usage_summary_with_progress(config_bytes, |summary| {
+                let _ = app.emit(
+                    "storage-usage-progress",
+                    StorageUsageProgress {
+                        scan_id: scan_id.clone(),
+                        summary,
+                    },
+                );
+            })
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取存储占用任务失败：{error}"))?
 }
 
 #[tauri::command]

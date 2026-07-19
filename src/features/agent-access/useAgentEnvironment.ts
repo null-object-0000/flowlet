@@ -8,6 +8,7 @@ import {
   detectOpenCodeEnvironment,
   inspectClaudeCodeGlobalConfig,
   inspectOpenCodeGlobalConfig,
+  listCachedCodexAccounts,
   queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
   restoreOpenCodeGlobalConfig,
@@ -42,9 +43,17 @@ export function useChatGptDesktopEnvironment() {
 }
 
 export function useCodexAccounts(enabled = true) {
+  const queryClient = useQueryClient();
+  const queryKey = queryKeys.agent.codexAccount();
   return useQuery({
-    queryKey: queryKeys.agent.codexAccount(),
-    queryFn: queryCodexAccounts,
+    queryKey,
+    queryFn: async () => {
+      const cached = await listCachedCodexAccounts();
+      if (cached.accounts.length > 0) {
+        queryClient.setQueryData(queryKey, cached);
+      }
+      return queryCodexAccounts();
+    },
     enabled,
     staleTime: 5 * 60_000,
     retry: false,

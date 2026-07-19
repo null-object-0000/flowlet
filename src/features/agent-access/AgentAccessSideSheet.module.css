@@ -74,6 +74,11 @@
   margin-top: 14px;
 }
 
+.accountRefreshNotice {
+  display: block;
+  margin-top: 12px;
+}
+
 .installation {
   margin-top: 14px;
   padding-top: 14px;

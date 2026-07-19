@@ -1,9 +1,12 @@
 pub mod agent_environment;
 pub mod agent_global_config;
 pub mod agent_session_metadata;
+pub mod agent_session_timeline;
+pub mod agent_source_watcher;
 pub mod channels_config;
 pub mod codex_account;
 pub mod config;
+pub mod cost_ledger_source_probe;
 pub mod logging;
 pub mod metrics;
 pub mod presets;

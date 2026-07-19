@@ -4,6 +4,7 @@ import { IconDelete, IconPlus } from "@douyinfe/semi-icons";
 import styles from "./LongCatPackManager.module.css";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { formatCompactNumber } from "../../shared/formatters/number";
 
 export type LongCatPack = {
   lotId?: number;
@@ -106,10 +107,7 @@ export function toLongCatPackExpireAt(value: string) {
 }
 
 export function formatTokenCount(value: number, language: "zh-CN" | "en-US" = "zh-CN") {
-  if (language === "en-US") return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
-  if (value >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
-  return String(value);
+  return formatCompactNumber(value, language);
 }
 
 export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {

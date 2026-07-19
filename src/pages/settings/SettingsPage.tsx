@@ -7,6 +7,7 @@ import type { DataRepairTimeRange } from "../../domains/data-repair/types";
 import { useAutostartSetting } from "../../features/settings/useAutostartSetting";
 import { useDataImport, useDataExport } from "../../features/settings/useDataImportExport";
 import { useDataRepair } from "../../features/settings/useDataRepair";
+import { useStorageUsage } from "../../features/settings/useStorageUsage";
 import styles from "./SettingsPageStatic.module.css";
 
 const { Paragraph, Title } = Typography;
@@ -22,6 +23,7 @@ export function SettingsPage() {
   const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
   const autostart = useAutostartSetting();
   const repair = useDataRepair();
+  const storageUsage = useStorageUsage();
   const { mutateAsync: exportAsync, isPending: exportPending, progress: exportProgress } = useDataExport();
   const dataImport = useDataImport();
   const [repairTimeRange, setRepairTimeRange] = useState<DataRepairTimeRange>("all");
@@ -131,6 +133,8 @@ export function SettingsPage() {
 
         <SettingSection title={t("数据管理")} description={t("修复、备份或恢复 Flowlet 的本地数据")} icon={<IconFolder />}>
           <div className={styles.managementContent}>
+            <StorageUsagePanel query={storageUsage} t={t} />
+
             <div className={styles.repairPanel}>
               <div className={styles.repairIntro}>
                 <span>
@@ -186,6 +190,65 @@ export function SettingsPage() {
       </div>
     </main>
   );
+}
+
+const STORAGE_CATEGORY_LABELS = {
+  configuration: "配置与账号",
+  requestLogs: "请求日志",
+  usage: "用量与费用",
+  agentSessions: "Agent 会话",
+  backgroundTasks: "后台任务",
+} as const;
+
+function StorageUsagePanel({ query, t }: { query: ReturnType<typeof useStorageUsage>; t: ReturnType<typeof useAppPreferences>["t"] }) {
+  const displayData = query.isCounting ? query.progress : (query.data ?? query.progress);
+  const databaseTotal = Math.max(displayData.databaseBytes, 1);
+  return (
+    <div className={styles.storagePanel}>
+      <div className={styles.storageHeader}>
+        <span>
+          <strong>{t("存储占用")}</strong>
+          <small>{t("数据库与配置文件合计")}</small>
+        </span>
+        <div className={styles.storageTotal}>
+          {query.isCounting ? <small><i />{t("正在统计")}</small> : null}
+          <b>{formatBytes(displayData.totalBytes)}</b>
+        </div>
+      </div>
+
+      {query.isError ? (
+        <p className={`${styles.storageState} ${styles.storageError}`}>
+          {t("读取存储占用失败")}
+          <button type="button" onClick={() => void query.refetch()}>{t("重试")}</button>
+        </p>
+      ) : null}
+      {!query.isError ? (
+        <>
+          <div className={styles.storageGrid}>
+            {displayData.categories.map((category) => (
+              <div className={`${styles.storageItem} ${query.isCounting ? styles.storageItemCounting : ""}`} key={category.key}>
+                <span><i /><small>{t(STORAGE_CATEGORY_LABELS[category.key])}</small></span>
+                <strong>{formatBytes(category.allocatedBytes)}</strong>
+                <small>{t("{count} 条记录", { count: category.rowCount })}</small>
+                <span className={styles.storageMeter} aria-hidden="true">
+                  <i style={{ width: `${Math.min(category.allocatedBytes / databaseTotal * 100, 100)}%` }} />
+                </span>
+              </div>
+            ))}
+          </div>
+          <small className={styles.storageNote}>{t(query.isCounting ? "正在逐页统计，记录数和占用会持续更新。" : "分类占用按数据库页统计；总占用还包含空闲页和临时文件。")}</small>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** unitIndex;
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function PreferenceField({ title, titleId, icon, children }: { title: string; titleId?: string; icon: ReactNode; children: ReactNode }) {

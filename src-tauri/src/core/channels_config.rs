@@ -86,11 +86,17 @@ pub struct ModelPriceJson {
     #[serde(default)]
     pub input_cached_price: f64,
     #[serde(default)]
+    pub input_cache_write_price: Option<f64>,
+    #[serde(default)]
     pub output_price: f64,
     #[serde(default)]
     pub currency: String,
     #[serde(default)]
     pub unit: String,
+    #[serde(default)]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub price_version: Option<String>,
 }
 
 // ─── 运行时渠道配置 ─────────────────────────────────────────────────────────
@@ -166,9 +172,12 @@ impl ChannelsConfig {
                 upstream_model: p.upstream_model,
                 input_uncached_price: p.input_uncached_price,
                 input_cached_price: p.input_cached_price,
+                input_cache_write_price: p.input_cache_write_price,
                 output_price: p.output_price,
                 currency: p.currency,
                 unit: p.unit,
+                source_url: p.source_url,
+                price_version: p.price_version,
                 created_at: now.clone(),
                 updated_at: now.clone(),
             })
@@ -485,6 +494,33 @@ mod tests {
             config.models_endpoint_url("deepseek").as_deref(),
             Some("https://api.deepseek.com/models")
         );
+    }
+
+    #[test]
+    fn embedded_prices_cover_all_current_codex_models_in_both_dimensions() {
+        let json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let current_models = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"];
+
+        for model in current_models {
+            let api_price = config
+                .prices
+                .iter()
+                .find(|price| price.channel_id == "openai-api" && price.upstream_model == model)
+                .unwrap_or_else(|| panic!("missing OpenAI API price for {model}"));
+            assert_eq!(api_price.currency, "USD");
+            assert!(api_price.input_uncached_price > 0.0);
+            assert!(api_price.output_price > 0.0);
+
+            let plan_price = config
+                .prices
+                .iter()
+                .find(|price| price.channel_id == "codex-native" && price.upstream_model == model)
+                .unwrap_or_else(|| panic!("missing Codex credits price for {model}"));
+            assert_eq!(plan_price.currency, "CREDITS");
+            assert!(plan_price.input_uncached_price > 0.0);
+            assert!(plan_price.output_price > 0.0);
+        }
     }
 
     #[test]

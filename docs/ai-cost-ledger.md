@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-- 状态：已纳入产品规划，尚未实现
+- 状态：已纳入产品规划；数据源只读探针 v1 已实现，账本持久化与成本引擎尚未实现
 - 目标版本：分阶段交付，第一阶段先完成可验证的最小闭环
 - 需求来源：2026-07-19 成本账本完整需求整理
 - 关联文档：[产品定义](./product.md)、[架构说明](./architecture.md)、[路线图](./roadmap.md)
@@ -424,6 +424,7 @@ created_at, updated_at
 
 ### Phase 0：模型与迁移设计
 
+- 先以只读探针验证数据源可行性，冻结统一 `SourceIdentity`、`SessionObservation`、`UsageObservation`、`AccountEntitlement`、`BalanceObservation`、`Evidence` 与 `SourceProbeReport` 契约；
 - 冻结金额、账期、时区、币种、资源包消耗和可信度语义；
 - 设计 migrations、唯一键、索引、幂等导入和金额精度；
 - 将现有 `estimated_cost` 明确映射为 `list_price_cost`；
@@ -488,6 +489,8 @@ Adapter 失败不影响代理；未经授权不读取第三方数据；默认不
 
 当前状态：
 
+- 已提供只读 `probe_cost_ledger_sources` 探针，统一报告 Flowlet 网关、Codex、Claude Code 与 OpenCode 的字段能力、粒度、去重键、增量游标、格式指纹、缺失字段、可信度和少量无正文样本；
+- 探针只返回内存 DTO，不创建账本表、不持久化第三方会话、不返回 Prompt、Response、对话正文、凭据或原始文件路径；样本中的会话汇总以 `is_rollup` 标记，不能与其 turn 样本相加；
 - `usage_records.estimated_cost` 是基于运行时模型价格的公开价估算，不是统一账本实际成本；
 - 网关请求已具备请求、Token、账号、模型和 Agent Session 归因基础；
 - Codex、Claude Code、OpenCode 原生会话已支持只读、尽力而为的查询时聚合；
@@ -501,8 +504,10 @@ src-tauri/src/core/storage.rs
 src-tauri/src/core/storage_usage.rs
 src-tauri/src/core/usage.rs
 src-tauri/src/core/agent_session_metadata.rs
+src-tauri/src/core/cost_ledger_source_probe.rs
 src-tauri/src/commands.rs
 
+src/domains/cost-ledger/
 src/domains/usage/
 src/domains/agent-session/
 src/features/usage/
@@ -527,4 +532,3 @@ src/features/request-logs/
 6. 多币种总览是否只分币种展示，何时引入有版本的汇率快照；
 7. 原始证据被清理或第三方日志变化后，已生成分配记录如何保留审计能力；
 8. Adapter 授权、暂停、重扫、数据删除与重复导入的完整生命周期。
-

@@ -25,6 +25,12 @@ export function queryCodexAccounts(): Promise<CodexAccountsReport> {
   });
 }
 
+export function listCachedCodexAccounts(): Promise<CodexAccountsReport> {
+  return invokeCommand<CodexAccountsReport>("list_cached_codex_accounts").catch((error) => {
+    throw toAppError(error, "codex_account_cache_read_failed");
+  });
+}
+
 export function authorizeCodexAccount(): Promise<CodexAccountReport> {
   return invokeCommand<CodexAccountReport>("authorize_codex_account", undefined, 6 * 60_000).catch((error) => {
     throw toAppError(error, "codex_account_authorization_failed");

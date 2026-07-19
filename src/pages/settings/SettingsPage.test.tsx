@@ -37,6 +37,39 @@ vi.mock("../../features/settings/useDataRepair", () => ({
   }),
 }));
 
+vi.mock("../../features/settings/useStorageUsage", () => ({
+  useStorageUsage: () => ({
+    data: {
+      totalBytes: 1_572_864,
+      databaseBytes: 1_500_000,
+      walBytes: 72_000,
+      sharedMemoryBytes: 0,
+      configBytes: 864,
+      categorizedBytes: 800_000,
+      categories: [
+        { key: "configuration", rowCount: 12, allocatedBytes: 8_192 },
+        { key: "requestLogs", rowCount: 240, allocatedBytes: 524_288 },
+        { key: "usage", rowCount: 160, allocatedBytes: 196_608 },
+        { key: "agentSessions", rowCount: 18, allocatedBytes: 65_536 },
+        { key: "backgroundTasks", rowCount: 6, allocatedBytes: 5_376 },
+      ],
+    },
+    isLoading: false,
+    isError: false,
+    isCounting: false,
+    progress: {
+      totalBytes: 0,
+      databaseBytes: 0,
+      walBytes: 0,
+      sharedMemoryBytes: 0,
+      configBytes: 0,
+      categorizedBytes: 0,
+      categories: [],
+    },
+    refetch: vi.fn(),
+  }),
+}));
+
 import { SettingsPage } from "./SettingsPage";
 
 function renderWithQueryClient(ui: React.ReactElement) {
@@ -61,6 +94,10 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: "开始修复" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "修复时间范围" })).toHaveTextContent("全部时间");
     expect(screen.getByText("数据管理")).toBeInTheDocument();
+    expect(screen.getByText("存储占用")).toBeInTheDocument();
+    expect(screen.getByText("1.5 MB")).toBeInTheDocument();
+    expect(screen.getByText("配置与账号")).toBeInTheDocument();
+    expect(screen.getByText("Agent 会话")).toBeInTheDocument();
     expect(screen.getByText("导入备份会覆盖现有数据，并自动重启代理。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出数据" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入数据" })).toBeInTheDocument();

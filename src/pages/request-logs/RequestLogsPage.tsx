@@ -9,6 +9,7 @@ import { formatDuration, formatPercentage, formatTokenRate, safeLogText } from "
 import { useRequestLogActions, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
 import styles from "./RequestLogsPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -137,14 +138,7 @@ function StatCard({ label, value, hint, success = false }: { label: string; valu
   return <div className={styles.statCard}><span>{label}</span><div><strong title={value}>{value}</strong><small title={hint} className={success ? styles.successHint : ""}>{hint}</small></div></div>;
 }
 
-function formatInteger(value: number | undefined, language: "zh-CN" | "en-US") { return (value ?? 0).toLocaleString(language); }
 function formatRate(success?: number, total?: number) { return total ? `${((success ?? 0) / total * 100).toFixed(1)}%` : "—"; }
-function formatCompactNumber(value: number | undefined, language: "zh-CN" | "en-US") {
-  const amount = value ?? 0;
-  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(2)}M`;
-  if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K`;
-  return amount.toLocaleString(language);
-}
 
 function initialSearchFromHash() {
   const queryIndex = window.location.hash.indexOf("?");

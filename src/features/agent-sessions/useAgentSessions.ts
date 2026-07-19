@@ -27,3 +27,23 @@ export function useAgentSessionChildren(session: AgentSessionRow) {
     refetchInterval: 15_000,
   });
 }
+
+export function useAgentSessionTimeline(session: AgentSessionRow, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.agentSession.timeline(session.agentType, session.sessionId),
+    queryFn: () => agentSessionCommands.timeline(session.agentType, session.sessionId),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useAgentSessionNativeSummary(session: AgentSessionRow) {
+  return useQuery({
+    queryKey: queryKeys.agentSession.nativeSummary(session.agentType, session.sessionId),
+    queryFn: () => agentSessionCommands.nativeSummary(session.agentType, session.sessionId),
+    enabled: !session.flowletObserved && !session.nativeSummary,
+    staleTime: 5 * 60_000,
+    gcTime: 10 * 60_000,
+    retry: 1,
+  });
+}

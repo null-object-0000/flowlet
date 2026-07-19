@@ -9,6 +9,7 @@ import {
   detectOpenCodeEnvironment,
   inspectClaudeCodeGlobalConfig,
   inspectOpenCodeGlobalConfig,
+  listCachedCodexAccounts,
   queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
   restoreOpenCodeGlobalConfig,
@@ -43,6 +44,14 @@ describe("agent commands", () => {
     await queryCodexAccounts();
 
     expect(invoke).toHaveBeenCalledWith("query_codex_accounts", undefined);
+  });
+
+  it("reads cached Codex account snapshots through the typed Tauri boundary", async () => {
+    vi.mocked(invoke).mockResolvedValue({ accounts: [], current_account_id: null });
+
+    await listCachedCodexAccounts();
+
+    expect(invoke).toHaveBeenCalledWith("list_cached_codex_accounts", undefined);
   });
 
   it("starts independent Codex account authorization through the typed Tauri boundary", async () => {

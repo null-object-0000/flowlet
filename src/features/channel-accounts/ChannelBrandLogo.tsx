@@ -11,6 +11,9 @@ export function ChannelBrandLogo({ channelId, name }: { channelId: string; name:
   if (channelId === "kimi") {
     return <span className={`${styles.logo} ${styles.kimi}`} aria-hidden="true"><img src="/icons/lobe/kimi-color.svg" alt="" /></span>;
   }
+  if (channelId === "qwen") {
+    return <span className={`${styles.logo} ${styles.qwen}`} aria-hidden="true"><img src="/icons/lobe/qwen-color.svg" alt="" /></span>;
+  }
   if (channelId === "deepseek") {
     return <span className={`${styles.logo} ${styles.deepseek}`} aria-hidden="true"><i /></span>;
   }

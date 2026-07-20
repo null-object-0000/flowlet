@@ -12,6 +12,7 @@ Vendored files:
 - `deepseek-color.svg`
 - `deepseek.svg`
 - `kimi-color.svg`
+- `qwen-color.svg`
 - `claudecode.svg`
 - `opencode.svg`
 - `openai.svg`

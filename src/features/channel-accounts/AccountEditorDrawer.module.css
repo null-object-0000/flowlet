@@ -32,13 +32,16 @@
 .modeOption.selected strong { color: var(--semi-color-primary); }
 .resourcePanel { padding: 14px; border: 1px solid var(--semi-color-border); border-radius: 8px; background: var(--semi-color-bg-2); display: grid; gap: 14px; }
 .resourceHeading { display: flex; align-items: center; gap: 9px; }
-.autoBadge, .manualBadge { padding: 2px 7px; border-radius: 10px; font-size: 11px; }
+.autoBadge, .manualBadge, .planBadge { padding: 2px 7px; border-radius: 10px; font-size: 11px; }
 .autoBadge { color: var(--semi-color-success); background: var(--semi-color-success-light-default); }
 .manualBadge { color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); }
+.planBadge { color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); }
 .balanceRow { display: flex; align-items: center; justify-content: space-between; }
 .balanceRow > span { display: grid; gap: 5px; }
 .balanceRow small { color: var(--semi-color-text-2); }
 .packSection { display: grid; gap: 12px; }
+.tokenPlanInfo { display: grid; gap: 8px; color: var(--semi-color-text-2); font-size: 12px; }
+.tokenPlanInfo > span { line-height: 1.6; }
 .packManageRow { display: flex; align-items: center; gap: 12px; }
 .packManageRow > span, .packEmpty { color: var(--semi-color-text-2); font-size: 12px; }
 .packSummary { display: grid; grid-template-columns: 1.2fr repeat(4, minmax(0, 1fr)); gap: 12px; padding: 11px 12px; border-radius: 7px; background: var(--semi-color-fill-0); color: var(--semi-color-text-2); font-size: 12px; }

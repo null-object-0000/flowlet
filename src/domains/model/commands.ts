@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import { DEFAULT_EXPOSED_MODELS_BY_CHANNEL, FLOWLET_TIERS_BY_CHANNEL_MODEL } from "../channel/types";
+import { DEFAULT_EXPOSED_MODELS_BY_CHANNEL, FLOWLET_TIERS_BY_CHANNEL_MODEL, isQwenTokenPlanAccount, QWEN_TOKEN_PLAN_DEFAULT_MODELS } from "../channel/types";
 import type { ChannelAccount } from "../account/types";
 import type { ChannelPreset, ProtocolType } from "../channel/types";
 import type { ChannelModel, ModelExposureMode, RouteCandidate } from "./types";
@@ -43,14 +43,14 @@ export function buildDefaultRoutes(
   accounts: ChannelAccount[],
   protocol: ProtocolType,
 ): RouteCandidate[] {
-  const upstreamModels = DEFAULT_EXPOSED_MODELS_BY_CHANNEL[channelId] ?? [];
   const usable = accounts.filter((a) => a.channel_id === channelId && a.enabled && a.api_key.trim());
   const now = new Date().toISOString();
   const out: RouteCandidate[] = [];
-  upstreamModels.forEach((up, i) => {
-    const tiers = FLOWLET_TIERS_BY_CHANNEL_MODEL[channelId]?.[up.toLowerCase()] ?? [];
-    const publicModels = [up, ...tiers.map((tier) => `flowlet-${tier}`)];
-    usable.forEach((acc, j) => {
+  usable.forEach((acc, j) => {
+    const upstreamModels = defaultModelsForAccount(channelId, acc);
+    upstreamModels.forEach((up, i) => {
+      const tiers = FLOWLET_TIERS_BY_CHANNEL_MODEL[channelId]?.[up.toLowerCase()] ?? [];
+      const publicModels = [up, ...tiers.map((tier) => `flowlet-${tier}`)];
       publicModels.forEach((publicModel) => {
         out.push({
           id: publicModel === up
@@ -70,6 +70,15 @@ export function buildDefaultRoutes(
     });
   });
   return out;
+}
+
+/** Default exposed models for one account. Qwen Token Plan accounts get the
+ *  subscription model set (qwen3.8-max-preview is plan-only); every other
+ *  account uses the channel-level defaults from config.json. Mirrors the
+ *  Rust-side selection in channels_config.merge_default_routes. */
+function defaultModelsForAccount(channelId: string, account: ChannelAccount): string[] {
+  if (isQwenTokenPlanAccount(account)) return QWEN_TOKEN_PLAN_DEFAULT_MODELS;
+  return DEFAULT_EXPOSED_MODELS_BY_CHANNEL[channelId] ?? [];
 }
 
 /** Add only missing default direct-model and Flowlet aggregate routes. Existing routes are returned

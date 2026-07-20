@@ -5,6 +5,12 @@ import { toAppError } from "../../platform/tauri/client";
 import type { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import {
+  QWEN_CHANNEL_ID,
+  QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL,
+  QWEN_TOKEN_PLAN_CONSOLE_URL,
+  QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
+} from "../../domains/channel/types";
+import {
   formatTokenCount,
   LongCatPackManager,
   parseStoredLongCatPacks,
@@ -49,7 +55,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const channel = presets.find((item) => item.id === draft?.channel_id);
   const isEdit = mode.kind === "edit";
   const autoSyncBalance = channel?.supports_balance_query === true;
-  const supportsTokenPack = draft?.channel_id === "longcat";
+  const resourceOptions = resourceModeOptions(draft?.channel_id ?? "");
   const resourceMode = draft?.resource_mode ?? defaultResourceMode(draft?.channel_id ?? "");
   const tokenRemaining = useMemo(() => {
     const total = optionalNumber(resource.tokenTotal);
@@ -76,6 +82,29 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       anthropic_base_url_override: null,
     });
     setResource(resourceDraft());
+  }
+
+  /** 切换资源模式。千问 Token Plan 需要配套专属端点：选入时自动写入
+   *  账号级 Base URL 覆盖，切回按量付费时仅清除仍是 Token Plan 地址的覆盖，
+   *  保留用户在高级设置中自定义的地址（如团队版专属 URL）。 */
+  function selectResourceMode(nextMode: AccountResourceMode) {
+    if (currentDraft.channel_id !== QWEN_CHANNEL_ID) {
+      update({ resource_mode: nextMode });
+      return;
+    }
+    if (nextMode === "token_plan") {
+      update({
+        resource_mode: nextMode,
+        base_url_override: QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
+        anthropic_base_url_override: QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL,
+      });
+      return;
+    }
+    update({
+      resource_mode: nextMode,
+      base_url_override: currentDraft.base_url_override?.trim() === QWEN_TOKEN_PLAN_OPENAI_BASE_URL ? null : currentDraft.base_url_override,
+      anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() === QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL ? null : currentDraft.anthropic_base_url_override,
+    });
   }
 
   async function handleTest() {
@@ -151,7 +180,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       title={(
         <div className={styles.title}>
           <strong>{t(isEdit ? "编辑渠道账号" : "新增渠道账号")}</strong>
-          <span>{isEdit ? t("更新 {name} 的连接与资源信息", { name: draft.name }) : t("添加 LongCat、DeepSeek 或 Kimi 账号，用于上游模型转发")}</span>
+          <span>{isEdit ? t("更新 {name} 的连接与资源信息", { name: draft.name }) : t("添加 {name} 账号，用于上游模型转发", { name: channel?.name ?? t("渠道") })}</span>
         </div>
       )}
       onCancel={onClose}
@@ -222,7 +251,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         </section>
 
         <section className={styles.section}>
-          <div className={styles.sectionHeading}><span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : supportsTokenPack ? "保存后按所选模式维护资源信息" : "手动维护按量付费余额")}</small></span></div>
+          <div className={styles.sectionHeading}><span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : resourceOptions.length ? "保存后按所选模式维护资源信息" : "手动维护按量付费余额")}</small></span></div>
           {autoSyncBalance ? (
             <div className={styles.resourcePanel}>
               <div className={styles.resourceHeading}><strong>{t("按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
@@ -233,14 +262,24 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             </div>
           ) : (
             <>
-              {supportsTokenPack ? (
+              {resourceOptions.length ? (
                 <div className={styles.modeOptions}>
-                  <ModeOption selected={resourceMode === "token_pack"} title={t("Token 资源包")} description={t("预付费，手动维护资源包信息")} onClick={() => update({ resource_mode: "token_pack" })} />
-                  <ModeOption selected={resourceMode === "pay_as_you_go"} title={t("API 按量付费")} description={t("后付费，手动维护余额")} onClick={() => update({ resource_mode: "pay_as_you_go" })} />
+                  {resourceOptions.map((option) => (
+                    <ModeOption
+                      key={option.value}
+                      selected={resourceMode === option.value}
+                      title={t(option.title)}
+                      description={t(option.description)}
+                      onClick={() => selectResourceMode(option.value)}
+                    />
+                  ))}
                 </div>
               ) : null}
               <div className={styles.resourcePanel}>
-                <div className={styles.resourceHeading}><strong>{t(resourceMode === "token_pack" ? "资源包信息" : "按量付费信息")}</strong><span className={styles.manualBadge}>{t("手动维护")}</span></div>
+                <div className={styles.resourceHeading}>
+                  <strong>{t(resourceMode === "token_pack" ? "资源包信息" : resourceMode === "token_plan" ? "Token Plan 订阅信息" : "按量付费信息")}</strong>
+                  <span className={resourceMode === "token_plan" ? styles.planBadge : styles.manualBadge}>{t(resourceMode === "token_plan" ? "订阅" : "手动维护")}</span>
+                </div>
                 {resourceMode === "token_pack" ? (
                   <div className={styles.packSection}>
                     {draft.channel_id === "longcat" ? (
@@ -258,6 +297,12 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                         <span>{t("最早到期")} <b>{resource.tokenExpire || "-"}</b></span>
                       </div>
                     ) : <span className={styles.packEmpty}>{t("尚未维护资源包，请点击“管理资源包”添加或导入。")}</span>}
+                  </div>
+                ) : resourceMode === "token_plan" ? (
+                  <div className={styles.tokenPlanInfo}>
+                    <span>{t("Token Plan 以 Credits 统一计量，额度与剩余量请在千问 Token Plan 控制台查看。")}</span>
+                    <span>{t("仅限 Claude Code、Qwen Code 等 AI 编程工具交互式使用，禁止用于自动化脚本或应用后端。")}</span>
+                    <Text link={{ href: QWEN_TOKEN_PLAN_CONSOLE_URL, target: "_blank", rel: "noreferrer" }} icon={<IconExternalOpen />} size="small">{t("打开 Token Plan 控制台")}</Text>
                   </div>
                 ) : (
                   <div className={styles.resourceGrid}>
@@ -310,6 +355,24 @@ function defaultResourceMode(channelId: string): AccountResourceMode {
   return channelId === "longcat" ? "token_pack" : "pay_as_you_go";
 }
 
+/** 各渠道可选的资源模式。LongCat 支持 Token 资源包；千问支持 Token Plan
+ *  订阅（专属 sk-sp Key 与套餐端点）；其余渠道只有按量付费。 */
+function resourceModeOptions(channelId: string): { value: AccountResourceMode; title: string; description: string }[] {
+  if (channelId === "longcat") {
+    return [
+      { value: "token_pack", title: "Token 资源包", description: "预付费，手动维护资源包信息" },
+      { value: "pay_as_you_go", title: "API 按量付费", description: "后付费，手动维护余额" },
+    ];
+  }
+  if (channelId === QWEN_CHANNEL_ID) {
+    return [
+      { value: "pay_as_you_go", title: "API 按量付费", description: "后付费，手动维护余额" },
+      { value: "token_plan", title: "Token Plan", description: "订阅套餐，sk-sp 专属 Key，按 Credits 计量" },
+    ];
+  }
+  return [];
+}
+
 function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPreset[], language: "zh-CN" | "en-US"): ChannelAccount {
   if (mode.kind === "edit") return { ...mode.account };
   const channel = presets.find((item) => item.id === mode.channelId);
@@ -355,6 +418,8 @@ function optionalNumber(value: string): number | null {
 }
 
 function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, mode: AccountResourceMode, remaining: number | null): AccountResourceSnapshotDraft | null {
+  // Token Plan 订阅额度只能在千问控制台查看，本地不维护快照。
+  if (mode === "token_plan") return null;
   const hasValue = mode === "token_pack"
     ? Boolean(resource.tokenTotal.trim() || resource.tokenUsed.trim() || resource.tokenExpire.trim() || resource.tokenPacks.trim())
     : Boolean(resource.balance.trim());

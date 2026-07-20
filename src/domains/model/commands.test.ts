@@ -96,4 +96,34 @@ describe("mergeDefaultRoutes", () => {
       ["flowlet-flash", "anthropic"],
     ]);
   });
+
+  it("gives Qwen Token Plan accounts the plan-only default models", () => {
+    const qwenPreset = {
+      id: "qwen",
+      supported_protocols: ["openai", "anthropic"],
+    } as ChannelPreset;
+    const paygAccount = {
+      ...account,
+      id: "account-qwen-payg",
+      channel_id: "qwen",
+      resource_mode: "pay_as_you_go",
+    } as ChannelAccount;
+    const planAccount = {
+      ...account,
+      id: "account-qwen-plan",
+      channel_id: "qwen",
+      resource_mode: "token_plan",
+    } as ChannelAccount;
+
+    const paygRoutes = mergeDefaultRoutes([], [paygAccount], [qwenPreset]);
+    expect(new Set(paygRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.7-max", "qwen3.6-flash"]));
+
+    const planRoutes = mergeDefaultRoutes([], [planAccount], [qwenPreset]);
+    expect(new Set(planRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.8-max-preview", "qwen3.6-flash"]));
+    // qwen3.8-max-preview → flowlet-pro，qwen3.6-flash → flowlet-flash
+    expect(planRoutes.filter((route) => route.virtual_model_id === "flowlet-pro" && route.upstream_model === "qwen3.8-max-preview")).toHaveLength(2);
+    expect(planRoutes.filter((route) => route.virtual_model_id === "flowlet-flash" && route.upstream_model === "qwen3.6-flash")).toHaveLength(2);
+    // 按量付费账号不开放仅订阅可用的模型
+    expect(paygRoutes.some((route) => route.upstream_model === "qwen3.8-max-preview")).toBe(false);
+  });
 });

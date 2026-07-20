@@ -35,7 +35,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 |------|------|
 | `config.json`（仓库根目录） | 运行时外部文件 + 编译时 `include_str!` 默认值 |
 | `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL` | 前端创建默认开放模型时的兜底常量 |
-| `src-tauri/src/core/config.rs` 中的 `ChannelPreset::longcat()` / `ChannelPreset::deepseek()` / `ChannelPreset::kimi()` | Rust 侧的工厂默认值 |
+| `src-tauri/src/core/config.rs` 中的 `ChannelPreset::longcat()` / `ChannelPreset::deepseek()` / `ChannelPreset::kimi()` / `ChannelPreset::qwen()` | Rust 侧的工厂默认值 |
 
 新增渠道或修改默认开放模型时，务必同步更新对应位置，否则可能出现「外部配置 → SQLite → 前端展示」链条不一致的问题。
 
@@ -160,7 +160,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 ### 6.1 `channels` — 渠道模板
 
-每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi）。
+每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、千问 Qwen）。
 
 ```jsonc
 {
@@ -223,6 +223,10 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 - 已有渠道模板的 `supported_protocols`、`openai_base_url`、`anthropic_base_url`、`openai_auth`、`anthropic_auth` 会在启动时从有效配置同步，确保新增协议和端点修正能迁移到已有安装。
 - 后续通过 `list_channel_presets` command 供前端使用。
 - 同步渠道模板**不会**修改已创建账号的覆盖地址，也不会新增、删除或改变现有路由的启用状态。
+- 千问 Qwen（`id = "qwen"`）的渠道级端点是**按量付费**端点；Token Plan 订阅账号
+  （`resource_mode = "token_plan"`）通过账号级 `base_url_override` /
+  `anthropic_base_url_override` 指向 `https://token-plan.cn-beijing.maas.aliyuncs.com`
+  下的专属端点，由账号编辑器在选择 Token Plan 模式时自动写入。
 
 ### 6.2 `model_prices` — 模型价格预设
 
@@ -271,7 +275,8 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 "default_exposed_models": {
   "longcat": ["LongCat-2.0"],
   "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
-  "kimi": ["kimi-k3", "kimi-k2.7-code"]
+  "kimi": ["kimi-k3", "kimi-k2.7-code"],
+  "qwen": ["qwen3.7-max", "qwen3.6-flash"]
 }
 ```
 
@@ -281,6 +286,11 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 - 用于初始化时的默认模型开放列表。
 - 前端可通过 `getDefaultExposedModels(channel)` 读取。
+- 千问 Token Plan 账号（`resource_mode = "token_plan"`）不使用此处的渠道级默认列表，
+  而是由代码级常量 `QWEN_TOKEN_PLAN_DEFAULT_MODELS`
+  （`src/domains/channel/types.ts` 与 `src-tauri/src/core/channels_config.rs` 各一份，
+  必须手动保持一致）提供套餐专属默认模型 `["qwen3.8-max-preview", "qwen3.6-flash"]`，
+  因为 `qwen3.8-max-preview` 仅 Token Plan 可用。
 
 ### 6.4 `flowlet_tiers` — Flowlet 档位映射
 
@@ -296,6 +306,11 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "kimi": {
     "kimi-k3": ["pro"],
     "kimi-k2.7-code": ["pro"]
+  },
+  "qwen": {
+    "qwen3.7-max": ["pro"],
+    "qwen3.6-flash": ["flash"],
+    "qwen3.8-max-preview": ["pro"]
   }
 }
 ```

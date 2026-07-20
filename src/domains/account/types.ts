@@ -2,7 +2,7 @@
 
 export type AccountCredentialStatus = "healthy" | "invalid_key";
 
-export type AccountResourceMode = "token_pack" | "pay_as_you_go";
+export type AccountResourceMode = "token_pack" | "pay_as_you_go" | "token_plan";
 
 export type ChannelAccount = {
   id: string;

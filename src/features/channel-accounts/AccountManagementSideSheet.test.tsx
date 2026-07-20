@@ -180,4 +180,94 @@ describe("AccountManagementSideSheet", () => {
     expect(onSyncBalance).toHaveBeenCalledWith(deepSeekAccount.id);
     expect(await screen.findByText("余额已同步")).toBeInTheDocument();
   });
+
+  it("fills Token Plan endpoints when selecting the Qwen subscription mode", async () => {
+    const user = userEvent.setup();
+    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
+    const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
+    const qwenPreset = {
+      id: "qwen",
+      name: "千问 Qwen",
+      openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic",
+    } as ChannelPreset;
+
+    render(
+      <AccountManagementSideSheet
+        request={{ kind: "create", channelId: "qwen" }}
+        accounts={[]}
+        snapshots={[]}
+        presets={[qwenPreset]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={onSaveAccounts}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={onSaveBalanceSnapshot}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText("新增渠道账号")).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("请输入渠道 API Key"), "sk-sp-test");
+    await user.click(screen.getByRole("button", { name: /Token Plan/ }));
+    expect(screen.getByText("Token Plan 订阅信息")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存账号" }));
+
+    expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({
+      channel_id: "qwen",
+      api_key: "sk-sp-test",
+      resource_mode: "token_plan",
+      base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      anthropic_base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
+    })]);
+    // Token Plan 额度只在官方控制台查看，本地不保存资源快照
+    expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("clears only Token Plan endpoints when switching back to pay-as-you-go", async () => {
+    const user = userEvent.setup();
+    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
+    const planAccount: ChannelAccount = {
+      ...account,
+      id: "account-qwen-plan",
+      channel_id: "qwen",
+      name: "千问 Token Plan",
+      resource_mode: "token_plan",
+      base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      anthropic_base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
+    };
+    const qwenPreset = {
+      id: "qwen",
+      name: "千问 Qwen",
+      openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic",
+    } as ChannelPreset;
+
+    render(
+      <AccountManagementSideSheet
+        request={{ kind: "edit", accountId: planAccount.id }}
+        accounts={[planAccount]}
+        snapshots={[]}
+        presets={[qwenPreset]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={onSaveAccounts}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText("Token Plan 订阅信息")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /API 按量付费/ }));
+    expect(screen.getByText("按量付费信息")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({
+      id: planAccount.id,
+      resource_mode: "pay_as_you_go",
+      base_url_override: null,
+      anthropic_base_url_override: null,
+    })]);
+  });
 });

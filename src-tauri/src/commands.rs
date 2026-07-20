@@ -8,7 +8,7 @@ use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
 use crate::core::sync::{
     query_deepseek_balance, query_kimi_balance, sync_deepseek_models, sync_kimi_models,
-    sync_longcat_models, test_channel_connection,
+    sync_longcat_models, sync_qwen_models, test_channel_connection,
 };
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -874,11 +874,22 @@ pub(super) async fn sync_models(
         })
         .await
         .map_err(|e| format!("任务执行失败: {e}"))?,
+        "qwen" => tauri::async_runtime::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|_| panic!("创建运行时失败"));
+            rt.block_on(sync_qwen_models(&account, &config))
+        })
+        .await
+        .map_err(|e| format!("任务执行失败: {e}"))?,
         _ => {
             return Ok(ModelSyncResult {
                 models_synced: 0,
                 models: Vec::new(),
-                errors: vec![format!("当前仅 DeepSeek、LongCat 和 Kimi 支持模型列表同步")],
+                errors: vec![
+                    "当前仅 DeepSeek、LongCat、Kimi 和千问 Qwen 支持模型列表同步".to_string(),
+                ],
             });
         }
     };

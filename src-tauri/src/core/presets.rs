@@ -6,6 +6,7 @@ pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
         ChannelPreset::longcat(),
         ChannelPreset::deepseek(),
         ChannelPreset::kimi(),
+        ChannelPreset::qwen(),
     ]
 }
 

@@ -571,6 +571,98 @@ pub async fn sync_kimi_models(
     }
 }
 
+/// 同步千问 Qwen 模型列表（DashScope 兼容模式，标准 OpenAI /models 格式）。
+/// 官方列表不返回上下文窗口等详情，相关字段保持 None，不硬编码。
+pub async fn sync_qwen_models(
+    account: &ChannelAccount,
+    config: &ChannelsConfig,
+) -> ModelSyncResult {
+    if account.api_key.trim().is_empty() {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec!["API Key 未配置".to_string()],
+        };
+    }
+
+    let client = match Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("创建 HTTP 客户端失败: {err}")],
+            }
+        }
+    };
+
+    let response = client
+        .get(&config.qwen_models_endpoint())
+        .header(
+            "Authorization",
+            format!("Bearer {}", account.api_key.trim()),
+        )
+        .header("Accept", "application/json")
+        .send()
+        .await;
+
+    let response = match response {
+        Ok(r) => r,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("请求失败: {err}")],
+            }
+        }
+    };
+
+    let status = response.status();
+    let body = match response.text().await {
+        Ok(b) => b,
+        Err(err) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("读取响应失败: {err}")],
+            }
+        }
+    };
+
+    if !status.is_success() {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec![format!("HTTP {}: {}", status.as_u16(), body)],
+        };
+    }
+
+    match serde_json::from_str::<DeepSeekModelsResponse>(&body) {
+        Ok(data) => {
+            let synced_at = chrono::Utc::now().to_rfc3339();
+            let models: Vec<_> = data
+                .data
+                .into_iter()
+                .filter(|m| !m.id.trim().is_empty())
+                .map(|m| qwen_channel_model(m.id, &synced_at))
+                .collect();
+            ModelSyncResult {
+                models_synced: models.len(),
+                models,
+                errors: Vec::new(),
+            }
+        }
+        Err(err) => ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec![format!("解析响应失败: {err}")],
+        },
+    }
+}
+
 /// LongCat 单模型详情（GET /openai/v1/models/{id}）
 #[derive(Debug, Deserialize)]
 pub struct LongCatModelDetail {
@@ -839,6 +931,24 @@ fn kimi_channel_model(model: String, context_length: Option<i64>, synced_at: &st
     }
 }
 
+fn qwen_channel_model(model: String, synced_at: &str) -> ChannelModel {
+    ChannelModel {
+        id: format!("qwen-{model}"),
+        channel_id: "qwen".to_string(),
+        display_name: Some(model.clone()),
+        model,
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        context_window: None,
+        max_output_tokens: None,
+        supports_stream: true,
+        enabled: true,
+        source: "synced".to_string(),
+        synced_at: Some(synced_at.to_string()),
+        created_at: synced_at.to_string(),
+        updated_at: synced_at.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -931,6 +1041,37 @@ mod tests {
         let data: DeepSeekModelsResponse = serde_json::from_str(json).unwrap();
         assert_eq!(data.data.len(), 1);
         assert_eq!(data.data[0].id, "LongCat-2.0");
+    }
+
+    #[test]
+    fn parse_qwen_models_response_and_map_channel_model() {
+        // 千问 DashScope 兼容模式返回标准 OpenAI /models 列表
+        let json = r#"{
+            "object": "list",
+            "data": [
+                {"id": "qwen3.7-max", "object": "model", "created": 1748736000, "owned_by": "qwen"},
+                {"id": "qwen3.6-flash", "object": "model", "created": 1744848000, "owned_by": "qwen"},
+                {"id": " ", "object": "model", "owned_by": "qwen"}
+            ]
+        }"#;
+        let data: DeepSeekModelsResponse = serde_json::from_str(json).unwrap();
+        let models: Vec<_> = data
+            .data
+            .into_iter()
+            .filter(|m| !m.id.trim().is_empty())
+            .map(|m| qwen_channel_model(m.id, "now"))
+            .collect();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "qwen-qwen3.7-max");
+        assert_eq!(models[0].channel_id, "qwen");
+        assert_eq!(models[0].model, "qwen3.7-max");
+        // 官方列表不返回上下文与输出上限，保持 None 不硬编码
+        assert_eq!(models[0].context_window, None);
+        assert_eq!(models[0].max_output_tokens, None);
+        assert_eq!(
+            models[0].supported_protocols,
+            vec![ProtocolType::OpenAi, ProtocolType::Anthropic]
+        );
     }
 
     #[test]

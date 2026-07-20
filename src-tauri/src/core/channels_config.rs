@@ -265,6 +265,13 @@ impl ChannelsConfig {
         })
     }
 
+    /// 获取千问 Qwen 模型列表端点
+    pub fn qwen_models_endpoint(&self) -> String {
+        self.endpoint_or("qwen", "models", |c| {
+            format!("{}/models", c.openai_base_url.trim_end_matches('/'))
+        })
+    }
+
     /// 获取模型所属的全部 Flowlet 档位。
     pub fn flowlet_tiers(&self, channel_id: &str, model: &str) -> Vec<String> {
         let normalized = model.trim().to_lowercase();
@@ -286,6 +293,7 @@ impl ChannelsConfig {
     /// 为现有账号补齐配置声明的直连模型与 Flowlet 聚合模型路由。
     ///
     /// 只追加缺失签名，不覆盖用户已有的启停状态、优先级和时间戳。
+    /// 千问 Token Plan 账号使用套餐专属默认模型（qwen3.8-max-preview 仅订阅可用）。
     pub fn merge_default_routes(
         &self,
         existing: &[RouteCandidate],
@@ -298,22 +306,32 @@ impl ChannelsConfig {
         let now = chrono::Utc::now().to_rfc3339();
 
         for preset in presets {
-            let upstream_models = self.default_exposed_models(&preset.id);
+            let channel_models = self.default_exposed_models(&preset.id);
             for protocol in &preset.supported_protocols {
-                for (model_index, upstream_model) in upstream_models.iter().enumerate() {
-                    let tiers = self.flowlet_tiers(&preset.id, upstream_model);
-                    let public_models: Vec<String> = std::iter::once(upstream_model.clone())
-                        .chain(tiers.into_iter().map(|tier| format!("flowlet-{tier}")))
-                        .collect();
-                    for (account_index, account) in accounts
-                        .iter()
-                        .filter(|account| {
-                            account.channel_id == preset.id
-                                && account.enabled
-                                && !account.api_key.trim().is_empty()
-                        })
-                        .enumerate()
-                    {
+                for (account_index, account) in accounts
+                    .iter()
+                    .filter(|account| {
+                        account.channel_id == preset.id
+                            && account.enabled
+                            && !account.api_key.trim().is_empty()
+                    })
+                    .enumerate()
+                {
+                    let plan_models;
+                    let upstream_models: &[String] = if is_qwen_token_plan_account(account) {
+                        plan_models = QWEN_TOKEN_PLAN_DEFAULT_MODELS
+                            .iter()
+                            .map(|model| model.to_string())
+                            .collect::<Vec<String>>();
+                        &plan_models
+                    } else {
+                        &channel_models
+                    };
+                    for (model_index, upstream_model) in upstream_models.iter().enumerate() {
+                        let tiers = self.flowlet_tiers(&preset.id, upstream_model);
+                        let public_models: Vec<String> = std::iter::once(upstream_model.clone())
+                            .chain(tiers.into_iter().map(|tier| format!("flowlet-{tier}")))
+                            .collect();
                         for public_model in &public_models {
                             let route = RouteCandidate {
                                 id: if public_model == upstream_model {
@@ -373,6 +391,9 @@ impl ChannelsConfig {
                 format!("{}/models", c.openai_base_url)
             } else if c.id == "deepseek" {
                 format!("{}/models", c.openai_base_url)
+            } else if c.id == "qwen" {
+                // 千问 openai_base_url 以 /v1 结尾，直接拼 /models
+                format!("{}/models", c.openai_base_url.trim_end_matches('/'))
             } else {
                 format!("{}/v1/models", c.openai_base_url)
             }
@@ -389,6 +410,17 @@ fn route_signature(route: &RouteCandidate) -> String {
         route.client_protocol.as_str(),
     ]
     .join("\0")
+}
+
+/// 千问 Token Plan 账号的默认开放模型。
+/// qwen3.8-max-preview 仅 Token Plan 可用；按量付费账号使用渠道级
+/// `default_exposed_models.qwen`。
+const QWEN_TOKEN_PLAN_DEFAULT_MODELS: [&str; 2] = ["qwen3.8-max-preview", "qwen3.6-flash"];
+
+/// 判断账号是否为千问 Token Plan 订阅模式（sk-sp 专属 Key + 套餐端点，
+/// 通过账号级 Base URL 覆盖接入）。
+fn is_qwen_token_plan_account(account: &ChannelAccount) -> bool {
+    account.channel_id == "qwen" && account.resource_mode.as_deref() == Some("token_plan")
 }
 
 fn parse_protocols(raw: &[String]) -> Vec<ProtocolType> {
@@ -565,5 +597,98 @@ mod tests {
                 vec!["LongCat-2.0", "flowlet-pro", "flowlet-flash"]
             );
         }
+    }
+
+    #[test]
+    fn qwen_models_endpoint_avoids_double_v1() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "qwen",
+                    "name": "千问 Qwen",
+                    "vendor": "qwen",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "anthropic_base_url": "https://dashscope.aliyuncs.com/apps/anthropic"
+                }]
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        // openai_base_url 已以 /v1 结尾，拼 models 时不得再补 /v1
+        assert_eq!(
+            config.qwen_models_endpoint(),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
+        );
+        assert_eq!(
+            config.models_endpoint_url("qwen").as_deref(),
+            Some("https://dashscope.aliyuncs.com/compatible-mode/v1/models")
+        );
+    }
+
+    #[test]
+    fn qwen_token_plan_account_gets_plan_default_models() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "qwen",
+                    "name": "千问 Qwen",
+                    "vendor": "qwen",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "anthropic_base_url": "https://dashscope.aliyuncs.com/apps/anthropic"
+                }],
+                "default_exposed_models": {
+                    "qwen": ["qwen3.7-max", "qwen3.6-flash"]
+                },
+                "flowlet_tiers": {
+                    "qwen": {
+                        "qwen3.7-max": "pro",
+                        "qwen3.6-flash": "flash",
+                        "qwen3.8-max-preview": "pro"
+                    }
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let payg_account = ChannelAccount {
+            id: "qwen-payg".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            resource_mode: Some("pay_as_you_go".to_string()),
+            ..Default::default()
+        };
+        let plan_account = ChannelAccount {
+            id: "qwen-plan".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk-sp-test".to_string(),
+            enabled: true,
+            resource_mode: Some("token_plan".to_string()),
+            ..Default::default()
+        };
+
+        let payg_routes = config.merge_default_routes(&[], &[payg_account], &config.presets);
+        let payg_models: std::collections::HashSet<&str> = payg_routes
+            .iter()
+            .map(|route| route.upstream_model.as_str())
+            .collect();
+        assert_eq!(
+            payg_models,
+            std::collections::HashSet::from(["qwen3.7-max", "qwen3.6-flash"])
+        );
+
+        let plan_routes = config.merge_default_routes(&[], &[plan_account], &config.presets);
+        let plan_models: std::collections::HashSet<&str> = plan_routes
+            .iter()
+            .map(|route| route.upstream_model.as_str())
+            .collect();
+        assert_eq!(
+            plan_models,
+            std::collections::HashSet::from(["qwen3.8-max-preview", "qwen3.6-flash"])
+        );
+        // Token Plan 旗舰模型应进入 flowlet-pro 聚合路由
+        assert!(plan_routes.iter().any(|route| {
+            route.virtual_model_id == "flowlet-pro" && route.upstream_model == "qwen3.8-max-preview"
+        }));
     }
 }

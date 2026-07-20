@@ -471,6 +471,7 @@ mod app_config_tests {
             .iter()
             .any(|channel| channel.id == "deepseek"));
         assert!(config.presets.iter().any(|channel| channel.id == "kimi"));
+        assert!(config.presets.iter().any(|channel| channel.id == "qwen"));
     }
 
     #[test]

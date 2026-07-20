@@ -101,6 +101,28 @@
           "models": "https://api.deepseek.com/models",
           "balance": "https://api.deepseek.com/user/balance"
         }
+      },
+      {
+        "id": "qwen",
+        "name": "千问 Qwen",
+        "vendor": "qwen",
+        "platform_url": "https://platform.qianwenai.com/home/api-keys",
+        "supported_protocols": ["openai", "anthropic"],
+        "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "anthropic_base_url": "https://dashscope.aliyuncs.com/apps/anthropic",
+        "openai_auth": "bearer",
+        "anthropic_auth": "bearer",
+        "default_model": "qwen3.7-max",
+        "small_model": null,
+        "supports_model_list": true,
+        "supports_model_detail": false,
+        "supports_price_sync": false,
+        "supports_balance_query": false,
+        "supports_quota_query": false,
+        "supports_usage_query": false,
+        "endpoints": {
+          "models": "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
+        }
       }
     ],
     "model_prices": [
@@ -148,6 +170,28 @@
         "output_price": 27.0,
         "currency": "CNY",
         "unit": "1M tokens"
+      },
+      {
+        "channel_id": "qwen",
+        "upstream_model": "qwen3.7-max",
+        "input_uncached_price": 12.0,
+        "input_cached_price": 0.0,
+        "output_price": 36.0,
+        "currency": "CNY",
+        "unit": "1M tokens",
+        "source_url": "https://platform.qianwenai.com/docs/developer-guides/getting-started/pricing",
+        "price_version": "2026-07-20"
+      },
+      {
+        "channel_id": "qwen",
+        "upstream_model": "qwen3.6-flash",
+        "input_uncached_price": 1.2,
+        "input_cached_price": 0.0,
+        "output_price": 7.2,
+        "currency": "CNY",
+        "unit": "1M tokens",
+        "source_url": "https://platform.qianwenai.com/docs/developer-guides/getting-started/pricing",
+        "price_version": "2026-07-20"
       },
       {
         "channel_id": "codex-native",
@@ -288,7 +332,8 @@
     "default_exposed_models": {
       "longcat": ["LongCat-2.0"],
       "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
-      "kimi": ["kimi-k3", "kimi-k2.7-code"]
+      "kimi": ["kimi-k3", "kimi-k2.7-code"],
+      "qwen": ["qwen3.7-max", "qwen3.6-flash"]
     },
     "flowlet_tiers": {
       "longcat": {
@@ -301,6 +346,11 @@
       "kimi": {
         "kimi-k3": "pro",
         "kimi-k2.7-code": "pro"
+      },
+      "qwen": {
+        "qwen3.7-max": "pro",
+        "qwen3.6-flash": "flash",
+        "qwen3.8-max-preview": "pro"
       }
     }
   }

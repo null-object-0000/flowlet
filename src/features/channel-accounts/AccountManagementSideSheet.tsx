@@ -3,6 +3,7 @@ import { Button, Input, Modal, SideSheet, Space, Switch, Tag, Toast, Typography 
 import { IconDelete, IconMore, IconPlus, IconSearch } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
+import { isQwenTokenPlanAccount } from "../../domains/channel/types";
 import { AccountEditorDrawer, type AccountEditorMode, type AccountResourceSnapshotDraft } from "./AccountEditorDrawer";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./AccountManagementSideSheet.module.css";
@@ -185,6 +186,7 @@ function getStatus(account: ChannelAccount, t: (source: string) => string): { la
 }
 
 function resourceDetails(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string) => string, language: "zh-CN" | "en-US") {
+  if (isQwenTokenPlanAccount(account)) return [{ label: t("订阅"), value: "Token Plan" }];
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
   if (!tokenPack) return [{ label: t("余额"), value: snapshot?.balance == null ? "-" : `${snapshot.balance} ${snapshot.currency ?? ""}`.trim() }];
   const rows = [{ label: t("剩余"), value: snapshot?.token_pack_remaining == null ? "-" : `${formatCompactNumber(snapshot.token_pack_remaining, language)} Tokens` }];

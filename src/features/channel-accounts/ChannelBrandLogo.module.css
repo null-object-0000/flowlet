@@ -30,6 +30,17 @@
   transform: scale(0.7);
 }
 
+.qwen {
+  background: var(--flowlet-color-surface);
+  border: 1px solid var(--flowlet-color-border);
+}
+
+.qwen img {
+  width: 32px;
+  height: 32px;
+  transform: scale(0.72);
+}
+
 .deepseek {
   color: #fff;
   background: #4d6bfe;

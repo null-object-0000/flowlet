@@ -1,6 +1,7 @@
 import { Button, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronRight, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
+import { isQwenTokenPlanAccount } from "../../domains/channel/types";
 import { OverviewActionLink } from "../../shared/ui/OverviewActionLink";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
@@ -72,6 +73,7 @@ function accountStatus(account: ChannelAccount, t: (source: string) => string): 
 }
 
 function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): string {
+  if (isQwenTokenPlanAccount(account)) return t("Token Plan 订阅");
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
   if (tokenPack) return t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
   const balance = snapshot?.balance == null ? "-" : snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 });

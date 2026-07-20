@@ -337,6 +337,31 @@ impl ChannelPreset {
         }
     }
 
+    /// 千问 Qwen（千问 AI 平台）按量付费渠道。
+    /// Token Plan 订阅账号通过账号级 resource_mode + Base URL 覆盖接入，
+    /// 渠道级默认值保持按量付费端点。
+    pub fn qwen() -> Self {
+        Self {
+            id: "qwen".to_string(),
+            name: "千问 Qwen".to_string(),
+            vendor: "qwen".to_string(),
+            platform_url: Some("https://platform.qianwenai.com/home/api-keys".to_string()),
+            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+            openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+            anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic".to_string(),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::Bearer,
+            default_model: "qwen3.7-max".to_string(),
+            small_model: None,
+            supports_model_list: true,
+            supports_model_detail: false,
+            supports_balance_query: false,
+            supports_quota_query: false,
+            supports_usage_query: false,
+            ..Default::default()
+        }
+    }
+
     pub fn base_url_for(&self, protocol: &ProtocolType) -> &str {
         match protocol {
             ProtocolType::OpenAi => &self.openai_base_url,

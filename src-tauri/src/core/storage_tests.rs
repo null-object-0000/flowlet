@@ -718,3 +718,63 @@ fn adds_new_channel_preset_columns_to_legacy_schema() {
     )
     .unwrap());
 }
+
+#[test]
+fn appends_qwen_preset_to_existing_database_without_touching_legacy_presets() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet-qwen-preset-migration-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let storage = Storage::open(&path).expect("open storage");
+    let json: serde_json::Value =
+        serde_json::from_str(DEFAULT_CONFIG_JSON).expect("parse embedded config");
+    let config = ChannelsConfig::from_config_json(&json).expect("load channel defaults");
+
+    // 模拟旧版本数据库：只有 longcat / deepseek / kimi 三个预设
+    let legacy_presets: Vec<_> = config
+        .presets
+        .iter()
+        .filter(|preset| preset.id != "qwen")
+        .cloned()
+        .collect();
+    assert!(!legacy_presets.is_empty());
+    storage
+        .save_channel_presets(&legacy_presets)
+        .expect("save legacy presets");
+
+    storage
+        .ensure_missing_presets(&config.presets)
+        .expect("append missing qwen preset");
+    // 迁移幂等：再次执行结果一致
+    storage
+        .ensure_missing_presets(&config.presets)
+        .expect("ensure_missing_presets is idempotent");
+
+    let presets = storage.list_channel_presets().expect("read presets");
+    assert_eq!(presets.len(), legacy_presets.len() + 1);
+    let qwen = presets
+        .iter()
+        .find(|preset| preset.id == "qwen")
+        .expect("qwen preset appended");
+    assert_eq!(
+        qwen.openai_base_url,
+        "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    );
+    assert_eq!(
+        qwen.anthropic_base_url,
+        "https://dashscope.aliyuncs.com/apps/anthropic"
+    );
+    assert!(qwen.supports_model_list);
+    assert!(!qwen.supports_balance_query);
+    // 已有预设不被修改
+    let longcat = presets
+        .iter()
+        .find(|preset| preset.id == "longcat")
+        .expect("longcat preset kept");
+    assert_eq!(longcat.openai_base_url, "https://api.longcat.chat/openai");
+
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}

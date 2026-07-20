@@ -36,18 +36,26 @@
 
 ## 2. 已接入渠道对照
 
-| 能力 | LongCat | DeepSeek | Kimi |
-|------|---------|----------|------|
-| 渠道 ID | `longcat` | `deepseek` | `kimi` |
-| OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` |
-| Anthropic Base URL | `https://api.longcat.chat/anthropic` | `https://api.deepseek.com/anthropic` | `https://api.moonshot.cn/anthropic` |
-| 鉴权 | Bearer | Bearer | Bearer |
-| 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 |
-| 自动余额 | 否 | 是 | 是 |
-| Token 资源包 UI | 是 | 否 | 否 |
-| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` |
+| 能力 | LongCat | DeepSeek | Kimi | 千问 Qwen |
+|------|---------|----------|------|-----------|
+| 渠道 ID | `longcat` | `deepseek` | `kimi` | `qwen` |
+| OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Anthropic Base URL | `https://api.longcat.chat/anthropic` | `https://api.deepseek.com/anthropic` | `https://api.moonshot.cn/anthropic` | `https://dashscope.aliyuncs.com/apps/anthropic` |
+| 鉴权 | Bearer | Bearer | Bearer | Bearer |
+| 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 | 标准模型列表（无上下文详情） |
+| 自动余额 | 否 | 是 | 是 | 否 |
+| 资源模式 | Token 资源包 UI | 否 | 否 | Token Plan 订阅模式（额度仅官方控制台可见） |
+| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.7-max → pro`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max-preview → pro`、`qwen3.6-flash → flash` |
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
+
+千问 Qwen 的一个账号级特性是 **Token Plan**（订阅制，`sk-sp-` 前缀 Key）：
+渠道级端点保持按量付费地址，Token Plan 账号通过账号级 Base URL 覆盖指向
+`https://token-plan.cn-beijing.maas.aliyuncs.com` 下的专属端点
+（OpenAI `/compatible-mode/v1`，Anthropic `/apps/anthropic`），
+账号编辑器在选择 Token Plan 模式时自动写入覆盖。Token Plan 没有公开余额/Credits
+查询接口，订阅额度只在官方控制台查看；账号级覆盖地址会按现有规则跳过官方
+模型列表自动同步。
 
 ## 3. 配置与默认值
 

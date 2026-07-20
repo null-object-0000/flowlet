@@ -224,7 +224,20 @@ DeepSeek:
 Kimi:
 - kimi-k3
 - kimi-k2.7-code
+
+千问 Qwen（按量付费账号）:
+- qwen3.7-max
+- qwen3.6-flash
+
+千问 Qwen（Token Plan 账号，resource_mode = "token_plan"）:
+- qwen3.8-max-preview
+- qwen3.6-flash
 ```
+
+千问 Qwen 是单渠道双资源模式：渠道级端点为按量付费地址；
+Token Plan 账号（sk-sp 前缀 Key）通过账号级 Base URL 覆盖接入套餐专属端点，
+默认开放模型由代码级常量（`QWEN_TOKEN_PLAN_DEFAULT_MODELS`，前端 TS 与
+Rust `channels_config.rs` 各一份，必须同步维护）提供。
 
 ---
 
@@ -256,7 +269,7 @@ Kimi:
 
 * 代理服务状态；
 * 渠道账号引导；
-* LongCat、DeepSeek 和 Kimi 添加入口；
+* LongCat、DeepSeek、Kimi 和千问 Qwen 添加入口；
 * 三步接入流程。
 
 隐藏：

@@ -4,8 +4,22 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
+// CREATE_NO_WINDOW：用于 Windows 子进程。非 Windows 平台剥离 cfg 函数后该
+// import 在 `cargo check`（Linux）下会被误报未使用，故显式放行。
+#[cfg(windows)]
+#[allow(unused_imports)]
+use std::os::windows::process::CommandExt;
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+
+// 让子进程在 Windows 上不弹出可见控制台窗口。概览页等场景会并发
+// spawn 多个 powershell.exe / cmd.exe / 目标 exe 子进程去读版本，
+// 在无可附加控制台的 GUI 构建（如 portable）上每个都会抢到一个新控制台。
+// 该标志（CREATE_NO_WINDOW）仅控制是否新建可见控制台，不影响 pipe 捕获和子进程生命周期。
+#[cfg(windows)]
+pub(crate) fn configure_hidden_console(command: &mut Command) {
+    command.creation_flags(0x08000000);
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -119,19 +133,19 @@ async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
     // The unified ChatGPT app currently retains the OpenAI.Codex Store package identity.
     // Requiring ChatGPT.exe as the application entry keeps legacy Codex packages excluded.
     const QUERY: &str = r#"$found = $false; $packages = @(); $packages += @(Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue); $packages += @(Get-AppxPackage -Name 'OpenAI.ChatGPT-Desktop' -ErrorAction SilentlyContinue); foreach ($p in @($packages | Sort-Object Version -Descending)) { $relative = ''; try { [xml]$manifest = Get-Content -LiteralPath (Join-Path $p.InstallLocation 'AppxManifest.xml'); $app = @($manifest.Package.Applications.Application) | Where-Object { [IO.Path]::GetFileName([string]$_.Executable) -ieq 'ChatGPT.exe' } | Select-Object -First 1; if ($null -ne $app) { $relative = [string]$app.Executable } } catch {}; if ([string]::IsNullOrWhiteSpace($relative)) { $fallback = Join-Path $p.InstallLocation 'app\ChatGPT.exe'; if (Test-Path -LiteralPath $fallback) { $relative = 'app\ChatGPT.exe' } }; if (-not [string]::IsNullOrWhiteSpace($relative)) { [Console]::Out.Write($p.Version.ToString() + [char]9 + $p.InstallLocation + [char]9 + $relative); $found = $true; break } }; if (-not $found) { $process = Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object { $_.Path -match '\\WindowsApps\\OpenAI\.(Codex|ChatGPT-Desktop)_[^\\]+\\app\\ChatGPT\.exe$' } | Select-Object -First 1; if ($null -ne $process -and $process.Path -match '^(?<install>.*\\OpenAI\.(Codex|ChatGPT-Desktop)_(?<version>[^_]+)_[^\\]+)\\app\\ChatGPT\.exe$') { [Console]::Out.Write($Matches.version + [char]9 + $Matches.install + [char]9 + 'app\ChatGPT.exe') } }"#;
+    let mut command = Command::new("powershell.exe");
+    command.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        QUERY,
+    ]);
+    #[cfg(windows)]
+    configure_hidden_console(&mut command);
     let output = tokio::time::timeout(
         VERSION_TIMEOUT,
-        Command::new("powershell.exe")
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                QUERY,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output(),
+        command.stdout(Stdio::piped()).stderr(Stdio::null()).output(),
     )
     .await;
     let Ok(Ok(output)) = output else {
@@ -903,10 +917,14 @@ fn version_command(path: &Path) -> Command {
             "-Command",
             &format!("& '{escaped}' --version"),
         ]);
+        #[cfg(windows)]
+        configure_hidden_console(&mut command);
         command
     } else if extension == "cmd" || extension == "bat" {
         let mut command = Command::new("cmd.exe");
         command.arg("/D").arg("/C").arg(path).arg("--version");
+        #[cfg(windows)]
+        configure_hidden_console(&mut command);
         command
     } else if extension == "ps1" {
         let mut command = Command::new("powershell.exe");
@@ -919,10 +937,14 @@ fn version_command(path: &Path) -> Command {
             .arg("-File")
             .arg(path)
             .arg("--version");
+        #[cfg(windows)]
+        configure_hidden_console(&mut command);
         command
     } else {
         let mut command = Command::new(path);
         command.arg("--version");
+        #[cfg(windows)]
+        configure_hidden_console(&mut command);
         command
     }
 }

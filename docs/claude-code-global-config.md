@@ -57,12 +57,15 @@ invalid          settings.json 不是合法 JSON，或顶层 / env 结构无效
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "flowlet-pro",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "flowlet-pro",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "flowlet-flash",
+    "ANTHROPIC_SMALL_FAST_MODEL": "flowlet-flash",
     "CLAUDE_CODE_SUBAGENT_MODEL": "flowlet-flash"
   }
 }
 ```
 
 模型别名必须完整映射：Claude Code 的主会话、模型切换和后台功能可能分别使用 Opus、Sonnet 和 Haiku。Flowlet 将 Opus / Sonnet 映射到 `flowlet-pro`，将 Haiku 和子 Agent 映射到 `flowlet-flash`。
+
+`ANTHROPIC_SMALL_FAST_MODEL` 是 Claude Code 的遗留小模型变量。它在会话标题生成等后台任务中仍优先于 `ANTHROPIC_DEFAULT_HAIKU_MODEL` 生效，因此必须一并写入 `flowlet-flash`。如果 settings.json 中残留用户手动配置的 `ANTHROPIC_SMALL_FAST_MODEL`（例如指向某个直接模型），接入状态会被判定为 `partial`，重新写入后即可收敛；其原值进入备份并可恢复。
 
 为避免用户级配置继续绕过 Flowlet，应用时移除以下冲突字段：
 

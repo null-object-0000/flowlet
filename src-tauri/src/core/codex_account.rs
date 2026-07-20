@@ -829,6 +829,7 @@ fn codex_command(executable: &Path) -> Command {
         "-Command",
         &format!("& '{escaped}' -s read-only -a untrusted app-server"),
     ]);
+    super::agent_environment::configure_hidden_console(&mut command);
     command
 }
 

@@ -1460,6 +1460,133 @@ fn chat_request(model: &str) -> Request<Body> {
         .unwrap()
 }
 
+#[tokio::test]
+async fn streaming_idle_timeout_resets_after_each_chunk() {
+    let upstream = futures_util::stream::unfold(0usize, |index| async move {
+        if index >= 4 {
+            return None;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        Some((
+            Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"data: keep-alive\n\n")),
+            index + 1,
+        ))
+    });
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let stream = capture_timed_stream(
+        upstream,
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_millis(200),
+    );
+    futures_util::pin_mut!(stream);
+
+    let mut chunks = 0;
+    while let Some(chunk) = stream.next().await {
+        chunk.unwrap();
+        chunks += 1;
+    }
+
+    let done = rx_done.await.unwrap();
+    assert_eq!(chunks, 4);
+    assert!(done.duration_ms >= 300);
+    assert_eq!(done.error_message, None);
+    assert_eq!(done.route_reason, None);
+}
+
+#[tokio::test]
+async fn streaming_idle_timeout_reports_stream_failure() {
+    let upstream = futures_util::stream::pending::<Result<Bytes, reqwest::Error>>();
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let stream = capture_timed_stream(
+        upstream,
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_millis(40),
+    );
+    futures_util::pin_mut!(stream);
+
+    let error = stream.next().await.unwrap().unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    assert!(stream.next().await.is_none());
+
+    let done = rx_done.await.unwrap();
+    assert!(done.error_message.is_some());
+    assert_eq!(done.route_reason.as_deref(), Some("stream_timeout"));
+}
+
+#[tokio::test]
+async fn streaming_response_can_outlive_channel_timeout_when_chunks_keep_arriving() {
+    let upstream = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            let chunks = futures_util::stream::unfold(0usize, |index| async move {
+                if index >= 4 {
+                    return None;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+                Some((
+                    Ok::<Bytes, std::convert::Infallible>(Bytes::from_static(
+                        b"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+                    )),
+                    index + 1,
+                ))
+            });
+            let mut response = Response::new(Body::from_stream(chunks));
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/event-stream"),
+            );
+            response
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+
+    let mut channel = dual_protocol_channel("longcat", "LongCat", &format!("http://{addr}"));
+    channel.timeout_seconds = Some(1);
+    let state = build_test_state(
+        vec![channel],
+        vec![test_account("account", "longcat", "key", 0)],
+        vec![test_route(
+            "route",
+            "flowlet-pro",
+            "longcat",
+            "account",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+
+    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    let body = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        axum::body::to_bytes(response.into_body(), usize::MAX),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        body.windows(b"data:".len())
+            .filter(|part| *part == b"data:")
+            .count(),
+        4
+    );
+}
+
 // 8 个端到端路由测试
 //
 // 核心思路：上游根据 api_key 返回预置状态码，并记录调用顺序。顺序与最终成功账号是 fallback 行为的直接证据；

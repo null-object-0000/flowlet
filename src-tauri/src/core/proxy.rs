@@ -5,7 +5,7 @@ use super::config::{
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
 use super::usage::{
-    contains_sse_output_token, extract_response_usage, extract_sse_response_usage, ResponseUsage,
+    contains_sse_output_token, extract_response_usage, extract_stream_usage, ResponseUsage,
 };
 use axum::{
     body::Body,
@@ -183,6 +183,26 @@ pub enum ProxyError {
     StartFailed(String),
 }
 
+#[derive(Debug, Error)]
+enum ProxyForwardError {
+    #[error(transparent)]
+    Network(#[from] reqwest::Error),
+    #[error("上游{phase}等待超过 {timeout_seconds} 秒")]
+    Timeout {
+        phase: &'static str,
+        timeout_seconds: u64,
+    },
+}
+
+impl ProxyForwardError {
+    fn route_reason(&self) -> &'static str {
+        match self {
+            Self::Network(err) => network_error_route_reason(err),
+            Self::Timeout { .. } => "timeout",
+        }
+    }
+}
+
 /// 代理服务当前状态。
 ///
 /// `started_at` 为代理服务真实启动时间的 RFC3339 字符串，
@@ -337,7 +357,6 @@ impl ProxyController {
             .with_state(ProxyAppState {
                 shared,
                 client: Client::builder()
-                    .timeout(Duration::from_secs(upstream_timeout_seconds))
                     .build()
                     .map_err(|err| ProxyError::StartFailed(err.to_string()))?,
                 storage,
@@ -460,7 +479,7 @@ async fn forward_request(
     state: ProxyAppState,
     request: Request,
     detected_protocol: ProtocolType,
-) -> Result<Response, reqwest::Error> {
+) -> Result<Response, ProxyForwardError> {
     let request_id = uuid::Uuid::new_v4().to_string();
     let (parts, body) = request.into_parts();
     let body_bytes = axum::body::to_bytes(body, usize::MAX)
@@ -639,7 +658,7 @@ async fn forward_request(
         record_request_log(state.storage, log);
         return Ok(response);
     }
-    let mut last_network_error: Option<reqwest::Error> = None;
+    let mut last_network_error: Option<ProxyForwardError> = None;
     let mut fallback_count = 0;
 
     // accounts / channels 已在上面从共享锁 clone，直接复用
@@ -676,11 +695,12 @@ async fn forward_request(
         let upstream_url = build_upstream_url(base_url, &parts.uri, &detected_protocol);
         let mut builder = http_client.request(parts.method.clone(), upstream_url.clone());
 
-        // 应用渠道级别超时（如果配置了的话）
-        let timeout = channel
+        // 渠道超时限制等待响应头，以及流式响应连续无数据的时长。
+        // 不再作为整个 SSE 生命周期的绝对时限，避免持续输出的长请求被截断。
+        let timeout_seconds = channel
             .timeout_seconds
             .unwrap_or(state.upstream_timeout_seconds);
-        builder = builder.timeout(Duration::from_secs(timeout));
+        let timeout = Duration::from_secs(timeout_seconds);
 
         builder = apply_request_headers(
             builder,
@@ -726,7 +746,16 @@ async fn forward_request(
             req_body_b64,
         };
 
-        match http_client.execute(upstream_request).await {
+        let upstream_result =
+            match tokio::time::timeout(timeout, http_client.execute(upstream_request)).await {
+                Ok(result) => result.map_err(ProxyForwardError::Network),
+                Err(_) => Err(ProxyForwardError::Timeout {
+                    phase: "响应头",
+                    timeout_seconds,
+                }),
+            };
+
+        match upstream_result {
             Ok(upstream_response) => {
                 // send() 返回即表明收到响应头；此时可记录真实 TTFB
                 let ttfb_ms = log_context.send_at.elapsed().as_millis() as i64;
@@ -779,7 +808,7 @@ async fn forward_request(
 
                 if should_check_quota_body_status(status) {
                     let headers = upstream_response.headers().clone();
-                    let body = upstream_response.bytes().await?;
+                    let body = read_buffered_body(upstream_response, timeout_seconds).await?;
                     let duration_ms = log_context.send_at.elapsed().as_millis() as i64;
                     let has_next_candidate = index + 1 < candidates.len();
                     if body_contains_account_deactivated(&body) {
@@ -873,7 +902,7 @@ async fn forward_request(
                     log.res_headers_json = res_headers_json;
                     log.res_body_b64 = res_body_b64;
 
-                    return build_buffered_response(
+                    return Ok(build_buffered_response(
                         storage.clone(),
                         status,
                         headers,
@@ -881,7 +910,7 @@ async fn forward_request(
                         log,
                         request_id_clone,
                         &detected_protocol,
-                    );
+                    )?);
                 }
 
                 // 默认路径：流式 or 短响应交给 build_response
@@ -898,11 +927,12 @@ async fn forward_request(
                     route_reason,
                     &detected_protocol,
                     &state.capture,
+                    timeout_seconds,
                 )
                 .await;
             }
             Err(err) => {
-                let route_reason = network_error_route_reason(&err);
+                let route_reason = err.route_reason();
                 let error_msg = err.to_string();
 
                 if index + 1 < candidates.len() {
@@ -1137,6 +1167,24 @@ impl RouteLogContext {
 
 // ─── Response Builders ──────────────────────────────────────────────────────
 
+async fn read_buffered_body(
+    upstream_response: reqwest::Response,
+    timeout_seconds: u64,
+) -> Result<Bytes, ProxyForwardError> {
+    match tokio::time::timeout(
+        Duration::from_secs(timeout_seconds),
+        upstream_response.bytes(),
+    )
+    .await
+    {
+        Ok(result) => result.map_err(ProxyForwardError::Network),
+        Err(_) => Err(ProxyForwardError::Timeout {
+            phase: "响应体",
+            timeout_seconds,
+        }),
+    }
+}
+
 async fn build_response(
     storage: Storage,
     upstream_response: reqwest::Response,
@@ -1151,7 +1199,8 @@ async fn build_response(
     route_reason: String,
     protocol: &ProtocolType,
     capture: &LogCaptureConfig,
-) -> Result<Response, reqwest::Error> {
+    timeout_seconds: u64,
+) -> Result<Response, ProxyForwardError> {
     let status = upstream_response.status();
     let headers = upstream_response.headers().clone();
     let is_stream = is_streaming_response(&headers);
@@ -1194,6 +1243,7 @@ async fn build_response(
             capture,
             log_context.send_at,
             res_content_encoding,
+            Duration::from_secs(timeout_seconds),
         );
 
         let usage_capture = UsageCapture {
@@ -1222,6 +1272,8 @@ async fn build_response(
                 ttft_ms: None,
                 res_body_b64: None,
                 usage: None,
+                error_message: Some("下游客户端在流结束前断开连接".to_string()),
+                route_reason: Some("stream_cancelled".to_string()),
             });
             update_stream_log(
                 storage,
@@ -1231,6 +1283,8 @@ async fn build_response(
                 done.duration_ms,
                 res_headers_for_update,
                 done.res_body_b64,
+                done.error_message,
+                done.route_reason,
             );
             if let Some(usage) = done.usage {
                 record_parsed_usage(usage_capture, usage);
@@ -1244,10 +1298,10 @@ async fn build_response(
     }
 
     // 非流式（走 streaming 判断但非 SSE）— 视为 buffered，收完 body 计 duration
-    let body = upstream_response.bytes().await?;
+    let body = read_buffered_body(upstream_response, timeout_seconds).await?;
     let duration_ms = log_context.send_at.elapsed().as_millis() as i64;
     log.duration_ms = Some(duration_ms);
-    let mut body_for_log: Vec<u8> = body.to_vec();
+    let body_for_log: Vec<u8> = body.to_vec();
     if capture.capture_res_body {
         log.res_body_b64 = proxy_http::prepare_captured_res_body(
             &body_for_log,
@@ -1394,21 +1448,27 @@ struct StreamDone {
     pub ttft_ms: Option<i64>,
     pub res_body_b64: Option<String>,
     pub usage: Option<ResponseUsage>,
+    pub error_message: Option<String>,
+    pub route_reason: Option<String>,
 }
 
 /// 包装上游 body 字节流：捕获最多 capture.max_body_bytes 的响应体字节
-/// 与 SSE 首尾片段文本摘要；流结束时通过 tx_done 回写 StreamDone。
+/// 与 SSE 首尾片段文本摘要；每次等待下一块数据使用空闲超时，
+/// 流结束时通过 tx_done 回写 StreamDone。
 fn capture_timed_stream(
     inner: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
     tx_done: tokio::sync::oneshot::Sender<StreamDone>,
     capture: &LogCaptureConfig,
     request_started_at: Instant,
     res_content_encoding: Option<String>,
+    idle_timeout: Duration,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
     let inner = Box::pin(inner);
     let state = TimedStreamState {
         inner,
         done_sent: false,
+        terminated: false,
+        idle_timeout,
         request_started_at,
         ttft_ms: None,
         ttft_probe: Vec::new(),
@@ -1424,8 +1484,11 @@ fn capture_timed_stream(
     };
     let tx_done = std::sync::Arc::new(std::sync::Mutex::new(Some(tx_done)));
     futures_util::stream::unfold((state, tx_done), move |(mut state, tx_done)| async move {
-        match state.inner.next().await {
-            Some(Ok(bytes)) => {
+        if state.terminated {
+            return None;
+        }
+        match tokio::time::timeout(state.idle_timeout, state.inner.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 if state.ttft_ms.is_none()
                     && state.ttft_probe.len().saturating_add(bytes.len()) <= MAX_TTFT_PROBE_BYTES
                 {
@@ -1463,13 +1526,40 @@ fn capture_timed_stream(
                 }
                 Some((Ok(bytes), (state, tx_done)))
             }
-            Some(Err(err)) => {
-                send_stream_done(&mut state, &tx_done, false);
-                Some((Err(std::io::Error::other(err)), (state, tx_done)))
+            Ok(Some(Err(err))) => {
+                let error_message = err.to_string();
+                send_stream_done(
+                    &mut state,
+                    &tx_done,
+                    false,
+                    Some(error_message.clone()),
+                    Some("stream_error".to_string()),
+                );
+                state.terminated = true;
+                Some((Err(std::io::Error::other(error_message)), (state, tx_done)))
             }
-            None => {
-                send_stream_done(&mut state, &tx_done, true);
+            Ok(None) => {
+                send_stream_done(&mut state, &tx_done, true, None, None);
                 None
+            }
+            Err(_) => {
+                let timeout_seconds = state.idle_timeout.as_secs();
+                let error_message = format!("上游流连续 {timeout_seconds} 秒未返回数据，已中止");
+                send_stream_done(
+                    &mut state,
+                    &tx_done,
+                    false,
+                    Some(error_message.clone()),
+                    Some("stream_timeout".to_string()),
+                );
+                state.terminated = true;
+                Some((
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        error_message,
+                    )),
+                    (state, tx_done),
+                ))
             }
         }
     })
@@ -1479,6 +1569,8 @@ fn send_stream_done(
     state: &mut TimedStreamState,
     tx_done: &std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<StreamDone>>>>,
     success: bool,
+    error_message: Option<String>,
+    route_reason: Option<String>,
 ) {
     if state.done_sent {
         return;
@@ -1495,7 +1587,8 @@ fn send_stream_done(
         )
     };
     let usage = if success && state.usage_body_enabled {
-        extract_sse_response_usage(&state.usage_body_buf)
+        // 流已正常结束：兼容无终止标记的 SSE 流，以及以 event-stream 返回的单条 JSON 消息。
+        extract_stream_usage(&state.usage_body_buf)
     } else {
         None
     };
@@ -1505,6 +1598,8 @@ fn send_stream_done(
             ttft_ms: state.ttft_ms,
             res_body_b64,
             usage,
+            error_message,
+            route_reason,
         })
     });
 }
@@ -1512,6 +1607,8 @@ fn send_stream_done(
 struct TimedStreamState {
     inner: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
     done_sent: bool,
+    terminated: bool,
+    idle_timeout: Duration,
     request_started_at: Instant,
     ttft_ms: Option<i64>,
     ttft_probe: Vec<u8>,
@@ -1536,6 +1633,8 @@ fn update_stream_log(
     duration_ms: i64,
     res_headers_json: Option<String>,
     res_body_b64: Option<String>,
+    error_message: Option<String>,
+    route_reason: Option<String>,
 ) {
     tokio::task::spawn_blocking(move || {
         if let Err(err) = storage.update_request_log_timing(
@@ -1545,6 +1644,8 @@ fn update_stream_log(
             duration_ms,
             res_headers_json,
             res_body_b64,
+            error_message,
+            route_reason,
         ) {
             tracing::warn!("补写流式请求日志失败: {err}");
         }

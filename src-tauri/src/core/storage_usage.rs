@@ -2,10 +2,11 @@ use super::{Storage, StorageError};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentSessionRepairResult, AgentSessionRow,
     AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter, LogsPageResult,
-    LogsSummary, ModelPrice, RequestLogInput, RequestLogRow, UsageRecordInput, UsageSummaryRow,
+    LogsSummary, ModelPrice, RequestLogInput, RequestLogModelOptions, RequestLogRow,
+    UsageRecordInput, UsageSummaryRow,
 };
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
-use crate::core::usage::{extract_response_usage, extract_sse_response_usage};
+use crate::core::usage::{extract_response_usage, extract_stream_usage};
 use base64::Engine;
 use rusqlite::params;
 use std::collections::{HashMap, HashSet};
@@ -728,28 +729,47 @@ impl Storage {
         Ok(clients)
     }
 
-    /// 返回请求日志中出现过的对外模型，供日志页模型筛选使用。
-    pub fn list_request_log_models(&self) -> Result<Vec<String>, StorageError> {
+    /// 返回请求日志页模型筛选项：对外模型（public/virtual）与路由目标模型（upstream）分两组。
+    /// 两组均供筛选使用，选中任一值时按两个维度 OR 匹配，使仅作为路由目标出现的模型（如 deepseek）也可被筛选。
+    pub fn list_request_log_models(&self) -> Result<RequestLogModelOptions, StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        let mut stmt = connection.prepare(
-            r#"
-            SELECT COALESCE(public_model, virtual_model) AS model
-            FROM request_logs
-            WHERE is_last_attempt = 1
-              AND COALESCE(public_model, virtual_model, '') <> ''
-            GROUP BY COALESCE(public_model, virtual_model)
-            ORDER BY model
-            "#,
-        )?;
-        let rows = stmt.query_map([], |row| row.get(0))?;
-        let mut models = Vec::new();
-        for row in rows {
-            models.push(row?);
-        }
-        Ok(models)
+
+        let public_models = connection
+            .prepare(
+                r#"
+                SELECT COALESCE(public_model, virtual_model) AS model
+                FROM request_logs
+                WHERE is_last_attempt = 1
+                  AND COALESCE(public_model, virtual_model, '') <> ''
+                GROUP BY COALESCE(public_model, virtual_model)
+                ORDER BY model
+                "#,
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+
+        let upstream_models = connection
+            .prepare(
+                r#"
+                SELECT upstream_model AS model
+                FROM request_logs
+                WHERE is_last_attempt = 1
+                  AND upstream_model IS NOT NULL
+                  AND upstream_model <> ''
+                GROUP BY upstream_model
+                ORDER BY model
+                "#,
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+
+        Ok(RequestLogModelOptions {
+            public_models,
+            upstream_models,
+        })
     }
 
     pub fn list_request_logs_by_request_id(
@@ -837,6 +857,8 @@ impl Storage {
         duration_ms: i64,
         res_headers_json: Option<String>,
         res_body_b64: Option<String>,
+        error_message: Option<String>,
+        route_reason: Option<String>,
     ) -> Result<(), StorageError> {
         let connection = self
             .connection
@@ -849,7 +871,9 @@ impl Storage {
                 ttft_ms = ?3,
                 duration_ms = ?4,
                 res_headers_json = ?5,
-                res_body_b64 = ?6
+                res_body_b64 = ?6,
+                error_message = COALESCE(?7, error_message),
+                route_reason = COALESCE(?8, route_reason)
             WHERE request_id = ?1
               AND is_last_attempt = 1
               AND is_stream = 1
@@ -861,6 +885,8 @@ impl Storage {
                 duration_ms,
                 res_headers_json,
                 res_body_b64,
+                error_message,
+                route_reason,
             ],
         )?;
         Ok(())
@@ -1019,7 +1045,8 @@ impl Storage {
                 continue;
             };
             let usage = if row.is_stream {
-                extract_sse_response_usage(&body)
+                // 重解析已落库的完整捕获体；兼容无终止标记的 SSE 流与单条 JSON 消息。
+                extract_stream_usage(&body)
             } else {
                 extract_response_usage(&body)
             };
@@ -1506,11 +1533,14 @@ impl Storage {
             Some("rl.channel_id = ?")
         };
 
+        // 模型筛选同时匹配对外模型（public/virtual）与路由目标模型（upstream），
+        // 使仅作为路由目标出现的模型（如 deepseek）也可被筛选。
         let model_clause = if filter.model.is_empty() {
             None
         } else {
             refs.push(&filter.model);
-            Some("COALESCE(rl.public_model, rl.virtual_model) = ?")
+            refs.push(&filter.model);
+            Some("(COALESCE(rl.public_model, rl.virtual_model) = ? OR rl.upstream_model = ?)")
         };
 
         let time_clause = match filter.time_range.as_str() {

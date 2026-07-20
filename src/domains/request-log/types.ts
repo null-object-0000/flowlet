@@ -79,6 +79,13 @@ export type RequestLogPage = {
 
 export type RequestLogClient = { id: string; name: string };
 
+export type RequestLogModelOptions = {
+  /** 对外模型（public/virtual_model），即客户端请求时使用的模型名。 */
+  publicModels: string[];
+  /** 路由目标模型（upstream_model），即实际被转发到上游的模型名。 */
+  upstreamModels: string[];
+};
+
 export const DEFAULT_REQUEST_LOG_FILTER: RequestLogFilter = {
   page: 1,
   pageSize: 8,

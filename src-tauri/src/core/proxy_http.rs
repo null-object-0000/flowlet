@@ -558,7 +558,14 @@ pub(super) fn content_encoding_value(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::CONTENT_ENCODING)
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.split(',').next().unwrap_or(value).trim().to_ascii_lowercase())
+        .map(|value| {
+            value
+                .split(',')
+                .next()
+                .unwrap_or(value)
+                .trim()
+                .to_ascii_lowercase()
+        })
         .filter(|value| !value.is_empty())
 }
 
@@ -666,7 +673,9 @@ mod tests {
         let plain = br#"{"ok":true,"msg":"hello world"}"#;
         let compressed = gzip_compress(plain);
         let encoded = prepare_captured_res_body(&compressed, Some("gzip"), 1024).unwrap();
-        let decoded = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
         assert_eq!(decoded, plain);
 
         // 空体返回 None
@@ -674,7 +683,9 @@ mod tests {
 
         // 解压上限生效：上限小于明文时只保留前缀，且不破坏 UTF-8 边界
         let capped = prepare_captured_res_body(&compressed, Some("gzip"), 8).unwrap();
-        let decoded = base64::engine::general_purpose::STANDARD.decode(capped).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(capped)
+            .unwrap();
         assert!(decoded.len() <= 8);
         assert!(std::str::from_utf8(&decoded).is_ok());
     }
@@ -682,7 +693,10 @@ mod tests {
     #[test]
     fn content_encoding_value_takes_first_token_lowercase() {
         let mut headers = HeaderMap::new();
-        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(" Gzip, identity"));
+        headers.insert(
+            header::CONTENT_ENCODING,
+            HeaderValue::from_static(" Gzip, identity"),
+        );
         assert_eq!(content_encoding_value(&headers).as_deref(), Some("gzip"));
         let empty = HeaderMap::new();
         assert_eq!(content_encoding_value(&empty), None);

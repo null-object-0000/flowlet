@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { RequestLogClient, RequestLogFilter, RequestLogPage, RequestLogRow } from "./types";
+import type { RequestLogClient, RequestLogFilter, RequestLogModelOptions, RequestLogPage, RequestLogRow } from "./types";
 
 export const requestLogCommands = {
   list: (filter: RequestLogFilter): Promise<RequestLogPage> =>
@@ -19,8 +19,8 @@ export const requestLogCommands = {
   clients: (): Promise<RequestLogClient[]> =>
     invokeCommand<RequestLogClient[]>("list_request_log_clients").catch(toRequestLogError("request_log_clients_failed")),
 
-  models: (): Promise<string[]> =>
-    invokeCommand<string[]>("list_request_log_models").catch(toRequestLogError("request_log_models_failed")),
+  models: (): Promise<RequestLogModelOptions> =>
+    invokeCommand<RequestLogModelOptions>("list_request_log_models").catch(toRequestLogError("request_log_models_failed")),
 
   detail: (requestId: string): Promise<RequestLogRow[]> =>
     invokeCommand<RequestLogRow[]>("get_request_log_detail", { requestId }).catch(toRequestLogError("request_log_detail_failed")),

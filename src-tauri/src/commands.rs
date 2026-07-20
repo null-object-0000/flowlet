@@ -1,8 +1,9 @@
 use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ProxyBindConfig, RequestLogRow,
-    RouteCandidate, RouteRule, UsageSummaryRow, VirtualModel,
+    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ProxyBindConfig,
+    RequestLogModelOptions, RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow,
+    VirtualModel,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
@@ -661,7 +662,7 @@ pub(super) fn list_request_log_clients(
 #[tauri::command]
 pub(super) fn list_request_log_models(
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+) -> Result<RequestLogModelOptions, String> {
     state
         .storage
         .list_request_log_models()

@@ -36,6 +36,10 @@ export function RequestLogsPage() {
   const actions = useRequestLogActions();
   const page = logs.data;
   const summary = page?.summary;
+  // 分组只在「有数据」时才作为 Select 的顶层子节点出现：Semi 仅按顶层子节点 key 判断
+  // 选项是否变化，若分组始终存在（空→填充），key 不变就不会重新收集，下拉会一直为空。
+  const publicModels = models.data?.publicModels ?? [];
+  const upstreamModels = models.data?.upstreamModels ?? [];
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -101,10 +105,29 @@ export function RequestLogsPage() {
         <Select
           value={filter.model || "__all__"}
           loading={models.isLoading}
-          optionList={[{ value: "__all__", label: t("全部模型") }, ...(models.data ?? []).map((model) => ({ value: model, label: model }))]}
           onChange={(value) => apply({ model: value === "__all__" ? "" : String(value) })}
           aria-label="模型筛选"
-        />
+        >
+          <Select.Option value="__all__">{t("全部模型")}</Select.Option>
+          {publicModels.length > 0 ? (
+            <Select.OptGroup key="public" label={t("对外模型")}>
+              {publicModels.map((model) => (
+                <Select.Option key={`public-${model}`} value={model}>
+                  {model}
+                </Select.Option>
+              ))}
+            </Select.OptGroup>
+          ) : null}
+          {upstreamModels.length > 0 ? (
+            <Select.OptGroup key="upstream" label={t("路由模型")}>
+              {upstreamModels.map((model) => (
+                <Select.Option key={`upstream-${model}`} value={model}>
+                  {model}
+                </Select.Option>
+              ))}
+            </Select.OptGroup>
+          ) : null}
+        </Select>
         <div className={styles.statusFilter}>
           {(["all", "success", "error"] as RequestLogStatusFilter[]).map((status) => (
             <button key={status} type="button" className={filter.status === status ? styles.activeStatus : ""} onClick={() => apply({ status })}>

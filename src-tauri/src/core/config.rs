@@ -806,6 +806,14 @@ pub struct LogsPageResult {
     pub summary: LogsSummary,
 }
 
+/// 请求日志页模型筛选项：对外模型（public/virtual）与路由目标模型（upstream）分两组返回。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLogModelOptions {
+    pub public_models: Vec<String>,
+    pub upstream_models: Vec<String>,
+}
+
 // ─── Usage Record Row ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

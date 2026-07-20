@@ -17,7 +17,7 @@ vi.mock("../../features/channel-accounts", () => ({
 vi.mock("../../features/request-logs/useRequestLogs", () => ({
   useRequestLogs: (...args: unknown[]) => mocks.useLogs(...args),
   useRequestLogClients: () => ({ data: [{ id: "claude-code", name: "Claude Code" }], isLoading: false }),
-  useRequestLogModels: () => ({ data: ["flowlet-pro"], isLoading: false }),
+  useRequestLogModels: () => ({ data: { publicModels: ["flowlet-pro"], upstreamModels: ["LongCat-2.0"] }, isLoading: false }),
   useRequestLogDetail: (...args: unknown[]) => mocks.useDetail(...args),
   useRequestLogActions: () => ({ cleanup: { mutateAsync: mocks.cleanup, isPending: false } }),
 }));

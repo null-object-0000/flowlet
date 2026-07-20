@@ -17,7 +17,12 @@ pub fn extract_response_usage(body: &[u8]) -> Option<ResponseUsage> {
 /// streams terminate with `data: [DONE]`; Anthropic streams terminate with a
 /// `message_stop` event. Usage may be split between `message_start` and
 /// `message_delta`, so fields are merged across the completed stream.
-pub fn extract_sse_response_usage(body: &[u8]) -> Option<ResponseUsage> {
+///
+/// `require_done_marker`：为 `true` 时仅在见到终止标记（`[DONE]` 或 `message_stop`）
+/// 才返回用量，用于可能被截断的捕获体；为 `false` 时只要解析到用量就返回，
+/// 用于已正常结束的流——部分 Anthropic 兼容上游（如千问 Token Plan）的流
+/// 不带 `message_stop`/`[DONE]` 终止标记，但用量事件本身是完整的。
+pub fn extract_sse_response_usage(body: &[u8], require_done_marker: bool) -> Option<ResponseUsage> {
     let text = std::str::from_utf8(body).ok()?;
     let mut saw_done = false;
     let mut latest_usage = None;
@@ -45,7 +50,19 @@ pub fn extract_sse_response_usage(body: &[u8]) -> Option<ResponseUsage> {
         }
     }
 
-    saw_done.then_some(latest_usage).flatten()
+    if require_done_marker {
+        saw_done.then_some(latest_usage).flatten()
+    } else {
+        latest_usage
+    }
+}
+
+/// 解析“流式”响应的用量，兼容两类上游行为：
+/// 1. 标准 SSE 流（含无 `message_stop`/`[DONE]` 终止标记但已结束的流）；
+/// 2. 上游以 `text/event-stream` 返回、但实际是单条 JSON 消息（无 `data:` 前缀）
+///    的非流式响应——此时回退按普通 JSON 消息解析。
+pub fn extract_stream_usage(body: &[u8]) -> Option<ResponseUsage> {
+    extract_sse_response_usage(body, false).or_else(|| extract_response_usage(body))
 }
 
 /// Returns true once a completed SSE data line contains actual model output.
@@ -212,7 +229,7 @@ data: [DONE]
 "#;
 
         assert_eq!(
-            extract_sse_response_usage(body),
+            extract_sse_response_usage(body, true),
             Some(ResponseUsage {
                 input_tokens: Some(110653),
                 input_cached_tokens: Some(110592),
@@ -229,7 +246,7 @@ data: [DONE]
         let body = br#"data: {"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}
 
 "#;
-        assert_eq!(extract_sse_response_usage(body), None);
+        assert_eq!(extract_sse_response_usage(body, true), None);
     }
 
     #[test]
@@ -249,7 +266,7 @@ data: {"type":"message_stop"}
 "#;
 
         assert_eq!(
-            extract_sse_response_usage(body),
+            extract_sse_response_usage(body, true),
             Some(ResponseUsage {
                 input_tokens: Some(28639),
                 input_cached_tokens: Some(7552),
@@ -275,7 +292,7 @@ data: {"type":"message_stop"}
 "#;
 
         assert_eq!(
-            extract_sse_response_usage(body),
+            extract_sse_response_usage(body, true),
             Some(ResponseUsage {
                 // 未缓存沿用旧口径含缓存写入：净输入 1000 + 写入 2000 = 3000；总输入再 + 缓存读取 500 = 3500
                 input_tokens: Some(3500),
@@ -284,6 +301,57 @@ data: {"type":"message_stop"}
                 input_cache_write_tokens: Some(2000),
                 output_tokens: Some(50),
                 total_tokens: Some(3550),
+            })
+        );
+    }
+
+    #[test]
+    fn extracts_usage_from_completed_stream_without_done_marker() {
+        // 千问 Token Plan 等 Anthropic 兼容上游的流可能不带 message_stop/[DONE]
+        // 终止标记；流正常结束后仍应从用量事件提取 Token 明细。
+        let body = br#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":6,"cache_read_input_tokens":23746,"cache_creation_input_tokens":11351,"output_tokens":0}}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":249}}
+
+"#;
+
+        // 严格要求终止标记时无结果（用于可能被截断的捕获体）
+        assert_eq!(extract_sse_response_usage(body, true), None);
+        // 流已正常结束（不要求终止标记）时返回合并用量
+        assert_eq!(
+            extract_sse_response_usage(body, false),
+            Some(ResponseUsage {
+                // 净输入 6 + 写入 11351 = 11357；总输入再 + 缓存读取 23746 = 35103
+                input_tokens: Some(35103),
+                input_cached_tokens: Some(23746),
+                input_uncached_tokens: Some(11357),
+                input_cache_write_tokens: Some(11351),
+                output_tokens: Some(249),
+                total_tokens: Some(35352),
+            })
+        );
+    }
+
+    #[test]
+    fn extracts_stream_usage_falls_back_to_plain_json_message() {
+        // 上游以 text/event-stream 返回、但实际是单条 JSON 消息（无 data: 前缀）：
+        // SSE 解析无结果，extract_stream_usage 回退按普通 JSON 消息解析。
+        let body = br#"{"id":"msg_1","type":"message","role":"assistant","model":"qwen3.8-max-preview","stop_reason":"end_turn","usage":{"input_tokens":6,"output_tokens":249,"cache_creation_input_tokens":11351,"cache_read_input_tokens":23746}}"#;
+
+        // 纯 SSE 解析对无 data: 前缀的正文无结果
+        assert_eq!(extract_sse_response_usage(body, false), None);
+        // extract_stream_usage 回退到 JSON 解析，得到完整用量
+        assert_eq!(
+            extract_stream_usage(body),
+            Some(ResponseUsage {
+                input_tokens: Some(35103),
+                input_cached_tokens: Some(23746),
+                input_uncached_tokens: Some(11357),
+                input_cache_write_tokens: Some(11351),
+                output_tokens: Some(249),
+                total_tokens: Some(35352),
             })
         );
     }

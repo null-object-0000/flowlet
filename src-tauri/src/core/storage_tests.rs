@@ -412,6 +412,8 @@ data: [DONE]
             50,
             None,
             Some(body_b64),
+            None,
+            None,
         )
         .expect("record stream timing");
 

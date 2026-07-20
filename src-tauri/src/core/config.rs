@@ -589,6 +589,10 @@ pub struct ModelPrice {
     pub input_cached_price: f64,
     pub input_cache_write_price: Option<f64>,
     pub output_price: f64,
+    /// 按输入长度分级计价。为空时使用上面的扁平单价；非空时按请求总输入 Token 选档。
+    /// 约定按 `up_to_input_tokens` 升序排列，最后一档可用 `None` 作为无上限兜底。
+    #[serde(default)]
+    pub tiers: Vec<ModelPriceTier>,
     pub currency: String,
     pub unit: String,
     pub source_url: Option<String>,
@@ -607,6 +611,7 @@ impl Default for ModelPrice {
             input_cached_price: 0.0,
             input_cache_write_price: None,
             output_price: 0.0,
+            tiers: Vec::new(),
             currency: "USD".to_string(),
             unit: "1M tokens".to_string(),
             source_url: None,
@@ -614,6 +619,60 @@ impl Default for ModelPrice {
             created_at: String::new(),
             updated_at: String::new(),
         }
+    }
+}
+
+/// 单个输入长度价格档位。`up_to_input_tokens` 为总输入 Token 的闭区间上限，
+/// `None` 表示无上限（兜底档）。各价格为该档内的每百万 Token 单价。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelPriceTier {
+    #[serde(default)]
+    pub up_to_input_tokens: Option<i64>,
+    #[serde(default)]
+    pub input_uncached_price: f64,
+    #[serde(default)]
+    pub input_cached_price: f64,
+    #[serde(default)]
+    pub input_cache_write_price: Option<f64>,
+    #[serde(default)]
+    pub output_price: f64,
+}
+
+impl ModelPrice {
+    /// 按总输入 Token 数解析生效的每百万 Token 单价。
+    /// 返回 `(未缓存输入, 缓存输入, 缓存写入, 输出)`。
+    /// 无分级时回退扁平单价；有分级时取第一个 `up_to_input_tokens >= input`
+    /// 的档位（`None` 上限视为兜底），均未命中则回退扁平单价。
+    pub fn resolve_prices(&self, input_tokens: Option<i64>) -> (f64, f64, Option<f64>, f64) {
+        if self.tiers.is_empty() {
+            return (
+                self.input_uncached_price,
+                self.input_cached_price,
+                self.input_cache_write_price,
+                self.output_price,
+            );
+        }
+        let input = input_tokens.unwrap_or(0);
+        for tier in &self.tiers {
+            let hit = match tier.up_to_input_tokens {
+                None => true,
+                Some(limit) => input <= limit,
+            };
+            if hit {
+                return (
+                    tier.input_uncached_price,
+                    tier.input_cached_price,
+                    tier.input_cache_write_price,
+                    tier.output_price,
+                );
+            }
+        }
+        (
+            self.input_uncached_price,
+            self.input_cached_price,
+            self.input_cache_write_price,
+            self.output_price,
+        )
     }
 }
 
@@ -918,6 +977,7 @@ pub struct UsageRecordInput {
     pub input_tokens: Option<i64>,
     pub input_cached_tokens: Option<i64>,
     pub input_uncached_tokens: Option<i64>,
+    pub input_cache_write_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
 }

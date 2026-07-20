@@ -161,6 +161,9 @@ fn estimate_usage_cost(
     }) else {
         return unpriced_estimate(turn_count);
     };
+    // 按会话总输入 Token 选档；无分级时回退扁平单价。
+    let (uncached_price, cached_price, cache_write_price, output_price) =
+        price.resolve_prices(Some(usage.input_tokens));
     let cached_input = usage.cached_input_tokens.max(0) as f64;
     let cache_write_input = usage.cache_write_input_tokens.max(0) as f64;
     let uncached_input = usage
@@ -171,13 +174,10 @@ fn estimate_usage_cost(
     let output = usage.output_tokens.max(0) as f64;
     AgentSessionCostEstimate {
         amount: Some(
-            (uncached_input * price.input_uncached_price
-                + cached_input * price.input_cached_price
-                + cache_write_input
-                    * price
-                        .input_cache_write_price
-                        .unwrap_or(price.input_uncached_price)
-                + output * price.output_price)
+            (uncached_input * uncached_price
+                + cached_input * cached_price
+                + cache_write_input * cache_write_price.unwrap_or(uncached_price)
+                + output * output_price)
                 / 1_000_000.0,
         ),
         currency: Some(price.currency.clone()),

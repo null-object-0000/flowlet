@@ -316,6 +316,7 @@ fn extracts_openai_usage() {
             input_tokens: Some(11),
             input_cached_tokens: None,
             input_uncached_tokens: None,
+            input_cache_write_tokens: None,
             output_tokens: Some(7),
             total_tokens: Some(18),
         }
@@ -333,6 +334,7 @@ fn extracts_input_output_usage_and_computes_total() {
             input_tokens: Some(5),
             input_cached_tokens: None,
             input_uncached_tokens: None,
+            input_cache_write_tokens: None,
             output_tokens: Some(8),
             total_tokens: Some(13),
         }
@@ -409,11 +411,7 @@ fn build_upstream_url_dedupes_v1_for_qwen_dashscope_base_url() {
 #[test]
 fn build_upstream_url_dedupes_v1_for_moonshot_base_url() {
     let uri: Uri = "/v1/chat/completions".parse().unwrap();
-    let url = build_upstream_url(
-        "https://api.moonshot.cn/v1",
-        &uri,
-        &ProtocolType::OpenAi,
-    );
+    let url = build_upstream_url("https://api.moonshot.cn/v1", &uri, &ProtocolType::OpenAi);
     assert_eq!(url, "https://api.moonshot.cn/v1/chat/completions");
 }
 
@@ -421,11 +419,7 @@ fn build_upstream_url_dedupes_v1_for_moonshot_base_url() {
 fn build_upstream_url_keeps_v1_in_base_when_path_has_no_v1() {
     // 入站路径不带 /v1 时，base 的尾随 /v1 必须保留
     let uri: Uri = "/chat/completions".parse().unwrap();
-    let url = build_upstream_url(
-        "https://api.moonshot.cn/v1",
-        &uri,
-        &ProtocolType::OpenAi,
-    );
+    let url = build_upstream_url("https://api.moonshot.cn/v1", &uri, &ProtocolType::OpenAi);
     assert_eq!(url, "https://api.moonshot.cn/v1/chat/completions");
 }
 

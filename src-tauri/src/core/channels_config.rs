@@ -1,5 +1,6 @@
 use super::config::{
-    AuthStrategy, ChannelAccount, ChannelPreset, ModelPrice, ProtocolType, RouteCandidate,
+    AuthStrategy, ChannelAccount, ChannelPreset, ModelPrice, ModelPriceTier, ProtocolType,
+    RouteCandidate,
 };
 use serde::Deserialize;
 
@@ -90,6 +91,8 @@ pub struct ModelPriceJson {
     #[serde(default)]
     pub output_price: f64,
     #[serde(default)]
+    pub tiers: Vec<ModelPriceTier>,
+    #[serde(default)]
     pub currency: String,
     #[serde(default)]
     pub unit: String,
@@ -174,6 +177,7 @@ impl ChannelsConfig {
                 input_cached_price: p.input_cached_price,
                 input_cache_write_price: p.input_cache_write_price,
                 output_price: p.output_price,
+                tiers: p.tiers,
                 currency: p.currency,
                 unit: p.unit,
                 source_url: p.source_url,
@@ -553,6 +557,69 @@ mod tests {
             assert!(plan_price.input_uncached_price > 0.0);
             assert!(plan_price.output_price > 0.0);
         }
+    }
+
+    #[test]
+    fn embedded_qwen_prices_match_latest_major_pricing() {
+        let json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+
+        // qwen3.7-plus：分级计价（≤256k / >256k），长上下文档更贵
+        let plus = config
+            .prices
+            .iter()
+            .find(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.7-plus")
+            .expect("missing qwen3.7-plus price");
+        assert_eq!(plus.tiers.len(), 2);
+        assert_eq!(plus.tiers[0].up_to_input_tokens, Some(262144));
+        assert_eq!(plus.tiers[1].up_to_input_tokens, None);
+        assert!(plus.tiers[1].input_uncached_price > plus.tiers[0].input_uncached_price);
+        assert!(plus.tiers[1].output_price > plus.tiers[0].output_price);
+
+        // qwen3.7-max：主模型 MAJOR 目录价×0.5，扁平单价（无分级）
+        let max = config
+            .prices
+            .iter()
+            .find(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.7-max")
+            .expect("missing qwen3.7-max price");
+        assert!(max.tiers.is_empty());
+        assert!((max.input_uncached_price - 6.0).abs() < 1e-9);
+        assert!((max.input_cached_price - 1.2).abs() < 1e-9);
+        assert!((max.input_cache_write_price.unwrap_or(0.0) - 7.5).abs() < 1e-9);
+        assert!((max.output_price - 18.0).abs() < 1e-9);
+
+        // qwen3.6-plus：分级计价，输入/输出/缓存无折扣；缓存命中取显式缓存读取价
+        let plus36 = config
+            .prices
+            .iter()
+            .find(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.6-plus")
+            .expect("missing qwen3.6-plus price");
+        assert_eq!(plus36.tiers.len(), 2);
+        assert!((plus36.tiers[0].input_uncached_price - 2.0).abs() < 1e-9);
+        assert!((plus36.tiers[0].output_price - 12.0).abs() < 1e-9);
+        assert!((plus36.tiers[1].input_uncached_price - 8.0).abs() < 1e-9);
+        assert!((plus36.tiers[1].output_price - 48.0).abs() < 1e-9);
+
+        // qwen3.6-flash：分级计价，>256k 档单价为 ≤256k 档的 4 倍
+        let flash36 = config
+            .prices
+            .iter()
+            .find(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.6-flash")
+            .expect("missing qwen3.6-flash price");
+        assert_eq!(flash36.tiers.len(), 2);
+        assert!((flash36.tiers[0].input_uncached_price - 1.2).abs() < 1e-9);
+        assert!((flash36.tiers[0].output_price - 7.2).abs() < 1e-9);
+        assert!((flash36.tiers[1].input_uncached_price - 4.8).abs() < 1e-9);
+        assert!((flash36.tiers[1].output_price - 28.8).abs() < 1e-9);
+
+        // qwen3.8-max-preview：暂无公开单价，不应配置价格（不用其他模型替代）
+        assert!(
+            !config
+                .prices
+                .iter()
+                .any(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.8-max-preview"),
+            "qwen3.8-max-preview should have no price entry"
+        );
     }
 
     #[test]

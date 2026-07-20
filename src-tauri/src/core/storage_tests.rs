@@ -133,6 +133,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
             input_tokens: Some(100),
             input_cached_tokens: Some(40),
             input_uncached_tokens: Some(60),
+            input_cache_write_tokens: None,
             output_tokens: Some(20),
             total_tokens: Some(120),
         })
@@ -158,6 +159,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
             input_tokens: Some(200),
             input_cached_tokens: Some(100),
             input_uncached_tokens: Some(100),
+            input_cache_write_tokens: None,
             output_tokens: Some(50),
             total_tokens: Some(250),
         })

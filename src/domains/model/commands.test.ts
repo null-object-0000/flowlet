@@ -116,7 +116,7 @@ describe("mergeDefaultRoutes", () => {
     } as ChannelAccount;
 
     const paygRoutes = mergeDefaultRoutes([], [paygAccount], [qwenPreset]);
-    expect(new Set(paygRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.7-max", "qwen3.6-flash"]));
+    expect(new Set(paygRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"]));
 
     const planRoutes = mergeDefaultRoutes([], [planAccount], [qwenPreset]);
     expect(new Set(planRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.8-max-preview", "qwen3.6-flash"]));

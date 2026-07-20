@@ -145,7 +145,10 @@ async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
     configure_hidden_console(&mut command);
     let output = tokio::time::timeout(
         VERSION_TIMEOUT,
-        command.stdout(Stdio::piped()).stderr(Stdio::null()).output(),
+        command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output(),
     )
     .await;
     let Ok(Ok(output)) = output else {

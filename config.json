@@ -174,24 +174,59 @@
       {
         "channel_id": "qwen",
         "upstream_model": "qwen3.7-max",
-        "input_uncached_price": 12.0,
-        "input_cached_price": 0.0,
-        "output_price": 36.0,
+        "input_uncached_price": 6.0,
+        "input_cached_price": 1.2,
+        "input_cache_write_price": 7.5,
+        "output_price": 18.0,
         "currency": "CNY",
         "unit": "1M tokens",
-        "source_url": "https://platform.qianwenai.com/docs/developer-guides/getting-started/pricing",
-        "price_version": "2026-07-20"
+        "source_url": "https://www.qianwenai.com/models/qwen3.7-max#pricing",
+        "price_version": "2026-07-20 (主模型 MAJOR，目录价×0.5)"
       },
       {
         "channel_id": "qwen",
         "upstream_model": "qwen3.6-flash",
         "input_uncached_price": 1.2,
-        "input_cached_price": 0.0,
+        "input_cached_price": 0.12,
         "output_price": 7.2,
+        "tiers": [
+          { "up_to_input_tokens": 262144, "input_uncached_price": 1.2, "input_cached_price": 0.12, "input_cache_write_price": 1.5, "output_price": 7.2 },
+          { "up_to_input_tokens": null, "input_uncached_price": 4.8, "input_cached_price": 0.48, "input_cache_write_price": 6.0, "output_price": 28.8 }
+        ],
         "currency": "CNY",
         "unit": "1M tokens",
-        "source_url": "https://platform.qianwenai.com/docs/developer-guides/getting-started/pricing",
-        "price_version": "2026-07-20"
+        "source_url": "https://www.qianwenai.com/models/qwen3.6-flash#pricing",
+        "price_version": "2026-07-20 (主模型 MAJOR，输入/输出/缓存无折扣；缓存命中取显式缓存读取价)"
+      },
+      {
+        "channel_id": "qwen",
+        "upstream_model": "qwen3.7-plus",
+        "input_uncached_price": 1.6,
+        "input_cached_price": 0.32,
+        "output_price": 6.4,
+        "tiers": [
+          { "up_to_input_tokens": 262144, "input_uncached_price": 1.6, "input_cached_price": 0.32, "input_cache_write_price": 2.0, "output_price": 6.4 },
+          { "up_to_input_tokens": null, "input_uncached_price": 4.8, "input_cached_price": 0.96, "input_cache_write_price": 6.0, "output_price": 19.2 }
+        ],
+        "currency": "CNY",
+        "unit": "1M tokens",
+        "source_url": "https://www.qianwenai.com/models/qwen3.7-plus#pricing",
+        "price_version": "2026-07-20 (主模型 MAJOR，目录价×0.8)"
+      },
+      {
+        "channel_id": "qwen",
+        "upstream_model": "qwen3.6-plus",
+        "input_uncached_price": 2.0,
+        "input_cached_price": 0.2,
+        "output_price": 12.0,
+        "tiers": [
+          { "up_to_input_tokens": 262144, "input_uncached_price": 2.0, "input_cached_price": 0.2, "input_cache_write_price": 2.5, "output_price": 12.0 },
+          { "up_to_input_tokens": null, "input_uncached_price": 8.0, "input_cached_price": 0.8, "input_cache_write_price": 10.0, "output_price": 48.0 }
+        ],
+        "currency": "CNY",
+        "unit": "1M tokens",
+        "source_url": "https://www.qianwenai.com/models/qwen3.6-plus#pricing",
+        "price_version": "2026-07-20 (主模型 MAJOR，输入/输出/缓存无折扣；缓存命中取显式缓存读取价)"
       },
       {
         "channel_id": "codex-native",
@@ -333,7 +368,7 @@
       "longcat": ["LongCat-2.0"],
       "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
       "kimi": ["kimi-k3", "kimi-k2.7-code"],
-      "qwen": ["qwen3.8-max-preview", "qwen3.7-plus", "qwen3.7-max", "qwen3.6-flash"]
+      "qwen": ["qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"]
     },
     "flowlet_tiers": {
       "longcat": {
@@ -351,6 +386,7 @@
         "qwen3.8-max-preview": "pro",
         "qwen3.7-plus": "pro",
         "qwen3.7-max": "pro",
+        "qwen3.6-plus": "pro",
         "qwen3.6-flash": "flash"
       }
     }

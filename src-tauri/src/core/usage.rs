@@ -3,6 +3,7 @@ pub struct ResponseUsage {
     pub input_tokens: Option<i64>,
     pub input_cached_tokens: Option<i64>,
     pub input_uncached_tokens: Option<i64>,
+    pub input_cache_write_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
 }
@@ -117,37 +118,41 @@ fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> 
         .and_then(serde_json::Value::as_i64);
     let has_anthropic_cache_fields = usage.get("cache_read_input_tokens").is_some()
         || usage.get("cache_creation_input_tokens").is_some();
-    let (input_tokens, input_cached_tokens, input_uncached_tokens) = if has_anthropic_cache_fields {
-        let uncached = match (raw_input_tokens, anthropic_cache_creation) {
-            (Some(input), Some(created)) => Some(input.saturating_add(created)),
-            (Some(input), None) => Some(input),
-            (None, Some(created)) => Some(created),
-            (None, None) => None,
+    let (input_tokens, input_cached_tokens, input_uncached_tokens, input_cache_write_tokens) =
+        if has_anthropic_cache_fields {
+            // 未缓存输入沿用旧口径（含缓存写入），保证既有展示与汇总不变；
+            // 缓存写入另行单列，计价时再单独扣减并按缓存写入单价计费。
+            let cache_write = anthropic_cache_creation;
+            let uncached = match (raw_input_tokens, anthropic_cache_creation) {
+                (Some(input), Some(created)) => Some(input.saturating_add(created)),
+                (Some(input), None) => Some(input),
+                (None, Some(created)) => Some(created),
+                (None, None) => None,
+            };
+            let total = match (uncached, anthropic_cache_read) {
+                (Some(uncached), Some(cached)) => Some(uncached.saturating_add(cached)),
+                (Some(uncached), None) => Some(uncached),
+                (None, Some(cached)) => Some(cached),
+                (None, None) => None,
+            };
+            (total, anthropic_cache_read, uncached, cache_write)
+        } else {
+            let cached = usage
+                .get("effectiveCachedTokens")
+                .or_else(|| {
+                    usage
+                        .get("prompt_tokens_details")
+                        .and_then(|details| details.get("cached_tokens"))
+                })
+                .or_else(|| usage.get("cache_read_tokens"))
+                .or_else(|| usage.get("cached_tokens"))
+                .and_then(serde_json::Value::as_i64);
+            let uncached = match (raw_input_tokens, cached) {
+                (Some(input), Some(cached)) => Some(input.saturating_sub(cached).max(0)),
+                _ => None,
+            };
+            (raw_input_tokens, cached, uncached, None)
         };
-        let total = match (uncached, anthropic_cache_read) {
-            (Some(uncached), Some(cached)) => Some(uncached.saturating_add(cached)),
-            (Some(uncached), None) => Some(uncached),
-            (None, Some(cached)) => Some(cached),
-            (None, None) => None,
-        };
-        (total, anthropic_cache_read, uncached)
-    } else {
-        let cached = usage
-            .get("effectiveCachedTokens")
-            .or_else(|| {
-                usage
-                    .get("prompt_tokens_details")
-                    .and_then(|details| details.get("cached_tokens"))
-            })
-            .or_else(|| usage.get("cache_read_tokens"))
-            .or_else(|| usage.get("cached_tokens"))
-            .and_then(serde_json::Value::as_i64);
-        let uncached = match (raw_input_tokens, cached) {
-            (Some(input), Some(cached)) => Some(input.saturating_sub(cached).max(0)),
-            _ => None,
-        };
-        (raw_input_tokens, cached, uncached)
-    };
     let total_tokens = usage
         .get("total_tokens")
         .and_then(serde_json::Value::as_i64)
@@ -164,6 +169,7 @@ fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> 
         input_tokens,
         input_cached_tokens,
         input_uncached_tokens,
+        input_cache_write_tokens,
         output_tokens,
         total_tokens,
     })
@@ -173,6 +179,9 @@ fn merge_usage(current: ResponseUsage, next: ResponseUsage) -> ResponseUsage {
     let input_tokens = next.input_tokens.or(current.input_tokens);
     let input_cached_tokens = next.input_cached_tokens.or(current.input_cached_tokens);
     let input_uncached_tokens = next.input_uncached_tokens.or(current.input_uncached_tokens);
+    let input_cache_write_tokens = next
+        .input_cache_write_tokens
+        .or(current.input_cache_write_tokens);
     let output_tokens = next.output_tokens.or(current.output_tokens);
     let total_tokens = match (input_tokens, output_tokens) {
         (Some(input), Some(output)) => Some(input.saturating_add(output)),
@@ -182,6 +191,7 @@ fn merge_usage(current: ResponseUsage, next: ResponseUsage) -> ResponseUsage {
         input_tokens,
         input_cached_tokens,
         input_uncached_tokens,
+        input_cache_write_tokens,
         output_tokens,
         total_tokens,
     }
@@ -207,6 +217,7 @@ data: [DONE]
                 input_tokens: Some(110653),
                 input_cached_tokens: Some(110592),
                 input_uncached_tokens: Some(61),
+                input_cache_write_tokens: None,
                 output_tokens: Some(77),
                 total_tokens: Some(110730),
             })
@@ -243,8 +254,36 @@ data: {"type":"message_stop"}
                 input_tokens: Some(28639),
                 input_cached_tokens: Some(7552),
                 input_uncached_tokens: Some(21087),
+                input_cache_write_tokens: Some(0),
                 output_tokens: Some(52),
                 total_tokens: Some(28691),
+            })
+        );
+    }
+
+    #[test]
+    fn captures_anthropic_cache_write_tokens() {
+        let body = br#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":1000,"cache_read_input_tokens":500,"cache_creation_input_tokens":2000,"output_tokens":0}}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":50}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#;
+
+        assert_eq!(
+            extract_sse_response_usage(body),
+            Some(ResponseUsage {
+                // 未缓存沿用旧口径含缓存写入：净输入 1000 + 写入 2000 = 3000；总输入再 + 缓存读取 500 = 3500
+                input_tokens: Some(3500),
+                input_cached_tokens: Some(500),
+                input_uncached_tokens: Some(3000),
+                input_cache_write_tokens: Some(2000),
+                output_tokens: Some(50),
+                total_tokens: Some(3550),
             })
         );
     }

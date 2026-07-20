@@ -455,6 +455,7 @@ impl Storage {
                 input_tokens          INTEGER,
                 input_cached_tokens   INTEGER,
                 input_uncached_tokens INTEGER,
+                input_cache_write_tokens INTEGER,
                 output_tokens         INTEGER,
                 total_tokens          INTEGER,
                 estimated_cost        REAL,
@@ -818,6 +819,12 @@ impl Storage {
             &connection,
             "usage_records",
             "input_uncached_tokens",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "input_cache_write_tokens",
             "INTEGER",
         )?;
         add_column_if_missing(&connection, "usage_records", "output_tokens", "INTEGER")?;

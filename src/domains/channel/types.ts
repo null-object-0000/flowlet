@@ -32,7 +32,7 @@ export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   longcat: ["LongCat-2.0"],
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
   kimi: ["kimi-k3", "kimi-k2.7-code"],
-  qwen: ["qwen3.7-max", "qwen3.6-flash"],
+  qwen: ["qwen3.8-max-preview", "qwen3.7-plus", "qwen3.7-max", "qwen3.6-flash"],
 };
 
 /** Per-channel Flowlet aggregate tier mapping. Must stay in sync with
@@ -50,9 +50,10 @@ export const FLOWLET_TIERS_BY_CHANNEL_MODEL: Record<string, Record<string, Array
     "kimi-k2.7-code": ["pro"],
   },
   qwen: {
+    "qwen3.8-max-preview": ["pro"],
+    "qwen3.7-plus": ["pro"],
     "qwen3.7-max": ["pro"],
     "qwen3.6-flash": ["flash"],
-    "qwen3.8-max-preview": ["pro"],
   },
 };
 
@@ -75,7 +76,7 @@ export const QWEN_TOKEN_PLAN_CONSOLE_URL = "https://platform.qianwenai.com/home/
  *  按量付费账号使用 DEFAULT_EXPOSED_MODELS_BY_CHANNEL.qwen。
  *  必须与 src-tauri/src/core/channels_config.rs 的
  *  QWEN_TOKEN_PLAN_DEFAULT_MODELS 保持一致。 */
-export const QWEN_TOKEN_PLAN_DEFAULT_MODELS = ["qwen3.8-max-preview", "qwen3.6-flash"];
+export const QWEN_TOKEN_PLAN_DEFAULT_MODELS = ["qwen3.8-max-preview", "qwen3.7-plus", "qwen3.7-max", "qwen3.6-flash"];
 
 /** 判断账号是否为千问 Token Plan 模式。 */
 export function isQwenTokenPlanAccount(account: { channel_id: string; resource_mode: string | null }): boolean {

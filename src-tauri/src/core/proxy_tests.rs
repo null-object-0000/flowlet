@@ -378,6 +378,58 @@ fn build_upstream_url_strips_anthropic_entry_prefix() {
 }
 
 #[test]
+fn build_upstream_url_dedupes_v1_for_qwen_token_plan_base_url() {
+    // token plan 账号级 Base URL 覆盖本身带 /v1，入站路径也带 /v1，不能拼成 /v1/v1
+    let uri: Uri = "/v1/chat/completions".parse().unwrap();
+    let url = build_upstream_url(
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        &uri,
+        &ProtocolType::OpenAi,
+    );
+    assert_eq!(
+        url,
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
+    );
+}
+
+#[test]
+fn build_upstream_url_dedupes_v1_for_qwen_dashscope_base_url() {
+    let uri: Uri = "/v1/chat/completions".parse().unwrap();
+    let url = build_upstream_url(
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        &uri,
+        &ProtocolType::OpenAi,
+    );
+    assert_eq!(
+        url,
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+    );
+}
+
+#[test]
+fn build_upstream_url_dedupes_v1_for_moonshot_base_url() {
+    let uri: Uri = "/v1/chat/completions".parse().unwrap();
+    let url = build_upstream_url(
+        "https://api.moonshot.cn/v1",
+        &uri,
+        &ProtocolType::OpenAi,
+    );
+    assert_eq!(url, "https://api.moonshot.cn/v1/chat/completions");
+}
+
+#[test]
+fn build_upstream_url_keeps_v1_in_base_when_path_has_no_v1() {
+    // 入站路径不带 /v1 时，base 的尾随 /v1 必须保留
+    let uri: Uri = "/chat/completions".parse().unwrap();
+    let url = build_upstream_url(
+        "https://api.moonshot.cn/v1",
+        &uri,
+        &ProtocolType::OpenAi,
+    );
+    assert_eq!(url, "https://api.moonshot.cn/v1/chat/completions");
+}
+
+#[test]
 fn enriches_final_upstream_error_metadata_without_body_rewrite() {
     let mut log = RequestLogInput {
         request_id: "req".to_string(),

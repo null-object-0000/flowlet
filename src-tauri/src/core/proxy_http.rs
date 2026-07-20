@@ -276,13 +276,28 @@ pub(super) fn build_upstream_url(
         ProtocolType::OpenAi => {
             // 保留 /v1 和 /openai/v1 前缀，因为 base_url 已经包含了 /openai 或 /v1 的入口前缀
             let path = path.trim_start_matches("/openai");
+            let base = strip_duplicate_v1(base, path);
             format!("{base}{path}")
         }
         ProtocolType::Anthropic => {
             // 保留 /v1 前缀，只去掉 /anthropic 入口前缀
             let path = path.trim_start_matches("/anthropic");
+            let base = strip_duplicate_v1(base, path);
             format!("{base}{path}")
         }
+    }
+}
+
+/// 许多 OpenAI-compatible 端点的官方 Base URL 本身就带 `/v1` 后缀
+/// （dashscope `compatible-mode/v1`、token-plan、moonshot `api.moonshot.cn/v1` 等），
+/// 而入站请求路径同样以 `/v1` 开头。直接拼接会得到 `.../v1/v1/chat/completions`，
+/// 因此在路径已含 `/v1` 前缀时去掉 base 的尾随 `/v1`，避免重复。
+/// 路径不带 `/v1` 时保留 base 原样，确保 `base(.../v1) + /chat/completions` 仍然正确。
+fn strip_duplicate_v1<'a>(base: &'a str, path: &str) -> &'a str {
+    if path.starts_with("/v1/") || path == "/v1" {
+        base.strip_suffix("/v1").unwrap_or(base)
+    } else {
+        base
     }
 }
 

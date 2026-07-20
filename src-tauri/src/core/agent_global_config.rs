@@ -27,6 +27,7 @@ const MANAGED_FIELDS: &[&str] = &[
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
@@ -42,6 +43,7 @@ const EXTERNAL_OVERRIDE_FIELDS: &[&str] = &[
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
@@ -324,6 +326,10 @@ fn report_from_settings(
     .iter()
     .all(|name| string_value(name).as_deref() == Some(PRIMARY_MODEL))
         && fast_model.as_deref() == Some(FAST_MODEL);
+    // 遗留的 ANTHROPIC_SMALL_FAST_MODEL 在会话标题生成等后台任务中仍优先于
+    // ANTHROPIC_DEFAULT_HAIKU_MODEL 生效，必须一并收敛到 FAST_MODEL。
+    let small_fast_matches =
+        string_value("ANTHROPIC_SMALL_FAST_MODEL").as_deref() == Some(FAST_MODEL);
     let subagent_matches = subagent_model.as_deref() == Some(FAST_MODEL);
     let cloud_conflict = [
         "CLAUDE_CODE_USE_BEDROCK",
@@ -343,6 +349,7 @@ fn report_from_settings(
         && !api_key_configured
         && !cloud_conflict
         && aliases_match
+        && small_fast_matches
         && subagent_matches
     {
         AgentGlobalConfigState::Flowlet
@@ -442,6 +449,7 @@ fn apply_claude_code(
         ("ANTHROPIC_DEFAULT_OPUS_MODEL", PRIMARY_MODEL),
         ("ANTHROPIC_DEFAULT_SONNET_MODEL", PRIMARY_MODEL),
         ("ANTHROPIC_DEFAULT_HAIKU_MODEL", FAST_MODEL),
+        ("ANTHROPIC_SMALL_FAST_MODEL", FAST_MODEL),
         ("CLAUDE_CODE_SUBAGENT_MODEL", FAST_MODEL),
     ] {
         env.insert(name.to_string(), Value::String(value.to_string()));
@@ -1153,7 +1161,7 @@ mod tests {
         let path = test_settings_path();
         std::fs::write(
             &path,
-            r#"{"theme":"dark","env":{"ANTHROPIC_BASE_URL":"https://old.example","CUSTOM":"keep","ANTHROPIC_API_KEY":"old-secret"}}"#,
+            r#"{"theme":"dark","env":{"ANTHROPIC_BASE_URL":"https://old.example","CUSTOM":"keep","ANTHROPIC_API_KEY":"old-secret","ANTHROPIC_SMALL_FAST_MODEL":"LongCat-2.0"}}"#,
         )
         .unwrap();
 
@@ -1166,6 +1174,7 @@ mod tests {
         assert_eq!(current["env"]["CUSTOM"], "keep");
         assert!(current["env"].get("ANTHROPIC_API_KEY").is_none());
         assert_eq!(current["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], FAST_MODEL);
+        assert_eq!(current["env"]["ANTHROPIC_SMALL_FAST_MODEL"], FAST_MODEL);
         assert_eq!(current["env"]["CLAUDE_CODE_SUBAGENT_MODEL"], FAST_MODEL);
 
         let restored = restore_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
@@ -1177,7 +1186,55 @@ mod tests {
             "https://old.example"
         );
         assert_eq!(restored_settings["env"]["ANTHROPIC_API_KEY"], "old-secret");
+        assert_eq!(
+            restored_settings["env"]["ANTHROPIC_SMALL_FAST_MODEL"],
+            "LongCat-2.0"
+        );
         assert_eq!(restored_settings["env"]["CUSTOM"], "keep");
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn legacy_small_fast_model_is_reported_partial_and_repaired_by_apply() {
+        // 旧版 Flowlet 写入的完整配置 + 用户遗留的 ANTHROPIC_SMALL_FAST_MODEL：
+        // 该遗留变量在会话标题生成等后台任务中优先于 ANTHROPIC_DEFAULT_HAIKU_MODEL，
+        // 必须被视为未收敛（Partial），重新写入后收敛到 FAST_MODEL 且可恢复原值。
+        let path = test_settings_path();
+        std::fs::write(
+            &path,
+            r#"{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18640/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "flowlet-token",
+    "ANTHROPIC_MODEL": "flowlet-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "flowlet-pro",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "flowlet-pro",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "flowlet-flash",
+    "ANTHROPIC_SMALL_FAST_MODEL": "LongCat-2.0",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "flowlet-flash"
+  }
+}"#,
+        )
+        .unwrap();
+
+        let inspected = inspect_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
+        assert_eq!(inspected.state, AgentGlobalConfigState::Partial);
+
+        let applied =
+            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token").unwrap();
+        assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+        let current = read_settings(&path).unwrap();
+        assert_eq!(current["env"]["ANTHROPIC_SMALL_FAST_MODEL"], FAST_MODEL);
+        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], FAST_MODEL);
+
+        let restored = restore_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::Partial);
+        let restored_settings = read_settings(&path).unwrap();
+        assert_eq!(
+            restored_settings["env"]["ANTHROPIC_SMALL_FAST_MODEL"],
+            "LongCat-2.0"
+        );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

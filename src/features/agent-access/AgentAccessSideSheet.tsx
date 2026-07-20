@@ -318,6 +318,7 @@ function buildManualSnippets(
         ANTHROPIC_DEFAULT_OPUS_MODEL: "flowlet-pro",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "flowlet-pro",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "flowlet-flash",
+        ANTHROPIC_SMALL_FAST_MODEL: "flowlet-flash",
         CLAUDE_CODE_SUBAGENT_MODEL: "flowlet-flash",
       },
     }, null, 2);

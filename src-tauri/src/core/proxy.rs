@@ -811,12 +811,12 @@ async fn forward_request(
                                     Some(sanitize_headers(&headers, keys).to_string());
                             }
                             if state.capture.capture_res_body {
-                                let mut body_for_log = body.to_vec();
-                                proxy_http::truncate_utf8(
-                                    &mut body_for_log,
+                                let body_for_log = body.to_vec();
+                                log.res_body_b64 = proxy_http::prepare_captured_res_body(
+                                    &body_for_log,
+                                    proxy_http::content_encoding_value(&headers).as_deref(),
                                     state.capture.max_body_bytes,
                                 );
-                                log.res_body_b64 = Some(encode_body_base64(&body_for_log));
                             }
                             record_request_log(storage.clone(), log);
                             continue;
@@ -848,10 +848,13 @@ async fn forward_request(
                     } else {
                         None
                     };
-                    let mut body_for_log: Vec<u8> = body.to_vec();
+                    let body_for_log: Vec<u8> = body.to_vec();
                     let res_body_b64 = if state.capture.capture_res_body {
-                        proxy_http::truncate_utf8(&mut body_for_log, state.capture.max_body_bytes);
-                        Some(encode_body_base64(&body_for_log))
+                        proxy_http::prepare_captured_res_body(
+                            &body_for_log,
+                            proxy_http::content_encoding_value(&headers).as_deref(),
+                            state.capture.max_body_bytes,
+                        )
                     } else {
                         None
                     };
@@ -1184,11 +1187,13 @@ async fn build_response(
         record_request_log(storage.clone(), log);
 
         let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
+        let res_content_encoding = proxy_http::content_encoding_value(&headers);
         let stream = capture_timed_stream(
             upstream_response.bytes_stream(),
             tx_done,
             capture,
             log_context.send_at,
+            res_content_encoding,
         );
 
         let usage_capture = UsageCapture {
@@ -1244,8 +1249,11 @@ async fn build_response(
     log.duration_ms = Some(duration_ms);
     let mut body_for_log: Vec<u8> = body.to_vec();
     if capture.capture_res_body {
-        proxy_http::truncate_utf8(&mut body_for_log, capture.max_body_bytes);
-        log.res_body_b64 = Some(encode_body_base64(&body_for_log));
+        log.res_body_b64 = proxy_http::prepare_captured_res_body(
+            &body_for_log,
+            proxy_http::content_encoding_value(&headers).as_deref(),
+            capture.max_body_bytes,
+        );
     }
 
     enrich_upstream_error_log(status, &mut log);
@@ -1360,6 +1368,7 @@ fn record_parsed_usage(capture: UsageCapture, usage: ResponseUsage) {
             input_tokens: usage.input_tokens,
             input_cached_tokens: usage.input_cached_tokens,
             input_uncached_tokens: usage.input_uncached_tokens,
+            input_cache_write_tokens: usage.input_cache_write_tokens,
             output_tokens: usage.output_tokens,
             total_tokens: usage.total_tokens,
         };
@@ -1394,6 +1403,7 @@ fn capture_timed_stream(
     tx_done: tokio::sync::oneshot::Sender<StreamDone>,
     capture: &LogCaptureConfig,
     request_started_at: Instant,
+    res_content_encoding: Option<String>,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
     let inner = Box::pin(inner);
     let state = TimedStreamState {
@@ -1405,6 +1415,7 @@ fn capture_timed_stream(
         res_body_buf: Vec::new(),
         res_body_max: capture.max_body_bytes,
         capture_res_body: capture.capture_res_body,
+        res_content_encoding,
         usage_body_buf: Vec::new(),
         usage_body_enabled: true,
         first_line: None,
@@ -1474,10 +1485,14 @@ fn send_stream_done(
     }
     state.done_sent = true;
     let duration_ms = state.request_started_at.elapsed().as_millis() as i64;
-    let res_body_b64 = if state.res_body_buf.is_empty() || !state.capture_res_body {
+    let res_body_b64 = if !state.capture_res_body {
         None
     } else {
-        Some(encode_body_base64(&state.res_body_buf))
+        proxy_http::prepare_captured_res_body(
+            &state.res_body_buf,
+            state.res_content_encoding.as_deref(),
+            state.res_body_max,
+        )
     };
     let usage = if success && state.usage_body_enabled {
         extract_sse_response_usage(&state.usage_body_buf)
@@ -1503,6 +1518,7 @@ struct TimedStreamState {
     res_body_buf: Vec<u8>,
     res_body_max: usize,
     capture_res_body: bool,
+    res_content_encoding: Option<String>,
     usage_body_buf: Vec<u8>,
     usage_body_enabled: bool,
     first_line: Option<String>,

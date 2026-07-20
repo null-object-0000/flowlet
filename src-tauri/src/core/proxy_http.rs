@@ -9,6 +9,7 @@ use axum::{
 };
 use base64::Engine;
 use std::collections::BTreeSet;
+use std::io::Read;
 
 pub(super) fn cors_preflight_response(request_headers: &HeaderMap) -> Response {
     let mut response = Response::new(Body::empty());
@@ -551,6 +552,68 @@ pub(super) fn truncate_utf8(body: &mut Vec<u8>, max: usize) {
     body.truncate(cut);
 }
 
+/// 读取响应头中的 content-encoding 首值（小写、去空白）。
+/// reqwest 未启用自动解压 feature，上游压缩体会原样透传，捕获层需据此解压。
+pub(super) fn content_encoding_value(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(header::CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(',').next().unwrap_or(value).trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
+/// 按 content-encoding 对捕获到的压缩体做一次性解压，支持 gzip / deflate / br。
+/// 解压输出受 max_out 上限保护，避免压缩炸弹；无法识别或解压失败时回退原字节，
+/// 保证日志可见性优先于完美解码。
+pub(super) fn decompress_for_capture(
+    body: &[u8],
+    content_encoding: Option<&str>,
+    max_out: usize,
+) -> Vec<u8> {
+    let encoding = match content_encoding {
+        Some(value) => value,
+        None => return body.to_vec(),
+    };
+    let result: std::io::Result<Vec<u8>> = match encoding {
+        "gzip" | "x-gzip" => read_capped(flate2::read::GzDecoder::new(body), max_out),
+        "deflate" => read_capped(flate2::read::DeflateDecoder::new(body), max_out),
+        "br" => read_capped(brotli::Decompressor::new(body, 4096), max_out),
+        _ => return body.to_vec(),
+    };
+    result.unwrap_or_else(|_| body.to_vec())
+}
+
+fn read_capped(mut reader: impl Read, max_out: usize) -> std::io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        if out.len() >= max_out {
+            break;
+        }
+        let to_read = buf.len().min(max_out - out.len());
+        let n = reader.read(&mut buf[..to_read])?;
+        if n == 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+    Ok(out)
+}
+
+/// 捕获响应体的统一入口：按 content-encoding 解压 → 截断到 UTF-8 边界 → base64。
+pub(super) fn prepare_captured_res_body(
+    body: &[u8],
+    content_encoding: Option<&str>,
+    max_bytes: usize,
+) -> Option<String> {
+    if body.is_empty() {
+        return None;
+    }
+    let mut decompressed = decompress_for_capture(body, content_encoding, max_bytes);
+    truncate_utf8(&mut decompressed, max_bytes);
+    Some(encode_body_base64(&decompressed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,6 +633,59 @@ mod tests {
     fn encode_body_roundtrips_string() {
         let encoded = encode_body_base64(b"hello");
         assert_eq!(encoded, "aGVsbG8=");
+    }
+
+    fn gzip_compress(bytes: &[u8]) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn decompress_for_capture_handles_gzip_and_unknown() {
+        let plain = br#"{"ok":true,"msg":"hello world"}"#;
+        let compressed = gzip_compress(plain);
+        assert_eq!(
+            decompress_for_capture(&compressed, Some("gzip"), 1024),
+            plain.to_vec()
+        );
+        // 未压缩体 + 无编码头：原样返回
+        assert_eq!(decompress_for_capture(plain, None, 1024), plain.to_vec());
+        // 未知编码：原样返回，不丢数据
+        assert_eq!(
+            decompress_for_capture(&compressed, Some("identity"), 1024),
+            compressed
+        );
+    }
+
+    #[test]
+    fn prepare_captured_res_body_decompresses_then_truncates_utf8() {
+        let plain = br#"{"ok":true,"msg":"hello world"}"#;
+        let compressed = gzip_compress(plain);
+        let encoded = prepare_captured_res_body(&compressed, Some("gzip"), 1024).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        assert_eq!(decoded, plain);
+
+        // 空体返回 None
+        assert!(prepare_captured_res_body(&[], Some("gzip"), 1024).is_none());
+
+        // 解压上限生效：上限小于明文时只保留前缀，且不破坏 UTF-8 边界
+        let capped = prepare_captured_res_body(&compressed, Some("gzip"), 8).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD.decode(capped).unwrap();
+        assert!(decoded.len() <= 8);
+        assert!(std::str::from_utf8(&decoded).is_ok());
+    }
+
+    #[test]
+    fn content_encoding_value_takes_first_token_lowercase() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(" Gzip, identity"));
+        assert_eq!(content_encoding_value(&headers).as_deref(), Some("gzip"));
+        let empty = HeaderMap::new();
+        assert_eq!(content_encoding_value(&empty), None);
     }
 
     #[test]

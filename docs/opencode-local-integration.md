@@ -1,17 +1,14 @@
-# OpenCode Desktop 本地直读集成设计
+# OpenCode 本地集成
 
-> 本文档针对 **OpenCode Desktop**（Electron 桌面版），非 CLI 版本。
-
-> 当前已落地代理侧会话观测和只读原生会话目录：从 OpenCode 请求 Header 提取稳定会话 ID，
-> 基于 `request_logs` 聚合指标，同时从 `opencode.db` 读取全部会话的标题、项目目录、父会话和
-> 原生时间，再按稳定 ID 去重合并。未经过 Flowlet 的历史会话也会展示，但不具备请求、Token、
-> 费用和失败指标。当前不建立独立会话表；消息导入和 WAL 实时同步仍属于后续阶段。
+> 本文档于 2026-07-21 按当前实现改写。原始设计中的 WAL 实时同步、
+> `OpenCodeLocalAdapter` 统一接口、Config Service IPC 读取等方案未被采用；
+> 实际落地的是「代理请求头提取 + 请求日志聚合 + 原生只读直读」路线。
 
 ## 核心原则
 
 **Flowlet 自动直读，用户零配置。**
 
-前提：Flowlet 必须有运行在用户电脑上的本地进程、桌面端或 Local Agent。纯浏览器网页、纯云端服务无法越过系统权限读取 OpenCode Desktop 的本地文件。
+前提：Flowlet 必须有运行在用户电脑上的本地进程。纯浏览器网页、纯云端服务无法越过系统权限读取 OpenCode 的本地文件。
 
 用户不需要：
 
@@ -23,473 +20,187 @@
 
 Flowlet 启动后自己检测即可。
 
-## 架构概览
+同时坚持：
+
+- 原生数据源只读，Flowlet 不写入、不修改 OpenCode 的任何文件；
+- 原生读取失败不影响 Flowlet 自身的请求聚合结果；
+- 不复制消息正文到 Flowlet SQLite，不建立独立会话表；
+- 原生指标与 Flowlet 请求观测分栏展示，不相加，避免同一请求重复计算。
+
+## 一、总体架构（当前实现）
 
 ```text
-OpenCode Desktop
-   ├─ 配置文件 (opencode.jsonc / opencode.json / config.json)
-   ├─ auth.json (凭证)
-   ├─ opencode.db (会话/消息 SQLite)
-   └─ opencode.db-wal (WAL 增量)
-          ↑
-          │ 自动发现、只读监听
-          │
-   Flowlet Local Bridge
-          ↓
-   Flowlet 会话、任务、Agent 数据
+OpenCode (CLI / Desktop)
+   │
+   ├─ 请求头 x-opencode-session / x-parent-session-id
+   │       ↓ 经过 Flowlet 本地代理时结构化提取
+   │   request_logs.agent_type / agent_session_id / parent_agent_session_id
+   │       ↓ GROUP BY (agent_type, agent_session_id)
+   │   会话列表「经过 Flowlet」指标：请求数 / Token / 费用 / 失败数
+   │
+   ├─ opencode.db（session / message / part 表）
+   │       ↑ 只读连接，列表与详情按需查询
+   │   原生会话目录（标题 / 工作目录 / 父会话 / 时间）
+   │   + 原生时间线（消息 / 思考 / 工具事件）+ 原生累计 Token / cost
+   │
+   └─ opencode.db 所在目录
+           ↑ notify 文件监听（仅作「需要重扫」提示）
+       前端调度增量同步 → agent_session_snapshots（指纹 + 原生摘要）
 ```
 
----
+两类数据按 `(agent_type, session_id)` 去重合并：经过 Flowlet 的会话同时具备请求指标和原生摘要；未经过 Flowlet 的本地会话也会展示，但没有请求、费用和失败指标。
 
-## 一、自动识别 OpenCode 数据目录
+## 二、会话身份提取（代理侧）
 
-三级发现机制，逐级回退：
+OpenCode 请求经过 Flowlet 代理时，`proxy.rs` 的 `extract_agent_session()` 结构化提取会话标识：
 
-### 优先级 1：通过 IPC / 本地协议获取路径
+- **识别方式**：请求携带 `x-opencode-session` 头，或 User-Agent 包含 `opencode/`；
+- **会话 ID 回退顺序**：`x-opencode-session` → `x-session-id` → `x-session-affinity`；
+- **父会话**：`x-parent-session-id`；
+- 提取结果写入 `request_logs` 的 `agent_type`（`opencode`）、`agent_session_id`、`parent_agent_session_id` 三个字段，并建立 `(agent_type, agent_session_id, created_at)` 索引。
 
-OpenCode Desktop 通过 Electron 管理本地数据文件。Flowlet 应优先通过 Desktop 自身的 IPC 通道或本地 HTTP API 获取实际路径。
+完整 Header / Body 捕获关闭时，会话标识仍然会被提取。会话 ID 经 `valid_session_header()` 校验：去空白、非空、不超过长度上限。
 
-### 优先级 2：标准桌面版目录
+功能上线前的历史请求无法自动具备会话标识；设置页数据修复（见第七节）可从已捕获的 `req_headers_json` 回填归因（`storage_usage.rs` 的 `agent_session_from_json()` 使用与代理相同的 Header 优先级），未捕获请求头的旧请求无法恢复。
 
-桌面版 Electron 应用 ID：
+## 三、会话列表聚合
 
-| 版本 | 应用 ID |
-|------|---------|
-| 正式版 | `ai.opencode.desktop` |
-| Beta | `ai.opencode.desktop.beta` |
-| 开发版 | `ai.opencode.desktop.dev` |
+**不建立独立 sessions 表。** 会话列表由两路数据合并（`list_agent_sessions` command）：
 
-桌面版 Electron `userData` 路径为：
+### 经过 Flowlet 的观测指标
 
-```ts
-join(app.getPath("appData"), appId)
-```
-
-Windows 正式版典型路径：
-
-```text
-%APPDATA%\ai.opencode.desktop
-```
-
-macOS 典型路径：
-
-```text
-~/Library/Application Support/ai.opencode.desktop
-```
-
-Linux 典型路径：
-
-```text
-~/.config/ai.opencode.desktop
-```
-
-### 优先级 3：特征文件扫描
-
-在用户目录下有限范围扫描：
-
-```text
-opencode.db
-opencode.db-wal
-auth.json
-opencode.json
-opencode.jsonc
-```
-
-通过数据库表名验证：
+对 `request_logs` 聚合：
 
 ```sql
-SELECT name FROM sqlite_master WHERE type = 'table';
+WHERE is_last_attempt = 1 AND agent_session_id IS NOT NULL
+GROUP BY agent_type, agent_session_id
+LEFT JOIN usage_records ...
 ```
 
-只接受包含 `session`、`message`、`part`、`project` 表的数据库。
+产出每个会话的客户端、请求数、成功/失败数、输入/缓存/输出 Token、预估费用和最近活动时间。
 
----
+### 原生会话目录
 
-## 二、配置读取：读取合并后的最终配置
-
-OpenCode 配置来源多元：
-
-- 全局 `opencode.jsonc` / `opencode.json`
-- 项目目录配置
-- `.opencode` 目录
-- 环境变量
-- 企业托管配置
-- 远程配置
-- Auth Well-known 配置
-
-Flowlet 不应只解析某一文件，否则可能与用户在 OpenCode 中实际看到的渠道、模型不一致。
-
-### 最稳读取方式
-
-通过 Desktop 内置的 Config Service API 获取合并后的最终配置。OpenCode Desktop 提供内部接口输出已经完成多层次合并的配置。示例输出：
-
-```json
-{
-  "model": "openai/gpt-5.4",
-  "small_model": "openai/gpt-5-mini",
-  "provider": {
-    "openai": {
-      "options": {
-        "baseURL": "https://example.com/v1"
-      },
-      "models": {
-        "gpt-5.4": {},
-        "gpt-5-mini": {}
-      }
-    }
-  }
-}
-```
-
-### Flowlet 内部标准化结构
-
-```ts
-interface OpenCodeProvider {
-  providerId: string
-  displayName?: string
-  baseUrl?: string
-  models: OpenCodeModel[]
-  defaultModel?: string
-  credentialConfigured: boolean
-  credentialType?: "api" | "oauth" | "wellknown"
-  source: "global" | "project" | "environment" | "remote"
-}
-```
-
----
-
-## 三、配置修改：直接用 OpenCode 的文件格式
-
-OpenCode CLI 与 Desktop 共用用户级全局配置。Flowlet 优先修改已有的：
-
-```text
-~/.config/opencode/opencode.jsonc
-```
-
-或已有配置文件：
-
-```text
-~/.config/opencode/opencode.json
-```
-
-不存在时 Flowlet 创建 `opencode.jsonc`。Client Token 不写进 Provider 配置，而是单独保存为：
-
-```text
-~/.local/share/opencode/auth.json
-```
-
-其中 Provider ID 固定为 `flowlet`，凭据格式为 `{ "type": "api", "key": "..." }`。
-
-### 写入策略
-
-1. 找到现有配置文件
-2. 保留原始 JSONC 注释
-3. 使用 `jsonc-parser` 做局部 Patch
-4. 写入临时文件
-5. 原子替换
-6. 保留一份最近备份
-
-### 写入内容示例
-
-修改默认模型：
-
-```json
-{
-  "model": "anthropic/claude-sonnet-4-6"
-}
-```
-
-新增 OpenAI Compatible 渠道：
-
-```json
-{
-  "provider": {
-    "flowlet-gateway": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Flowlet Gateway",
-      "options": {
-        "baseURL": "https://gateway.example.com/v1"
-      },
-      "models": {
-        "gpt-5.4": {
-          "name": "GPT-5.4"
-        }
-      }
-    }
-  }
-}
-```
-
-### 配置缓存注意事项
-
-OpenCode 全局配置缓存 TTL 为无限期。直接改文件后：
-
-- 磁盘配置一定已修改
-- 正在运行的 OpenCode 实例不一定马上刷新
-- 下次启动一定读取新配置
-
-Flowlet 可做到用户零操作：
-
-```text
-修改配置
-  ↓
-检测 OpenCode 当前是否有运行中 Session
-  ↓
-没有任务运行：自动重启 OpenCode
-有任务运行：等待任务结束后自动重启
-```
-
-更温和方式：提示"新配置将在下一次会话生效"，但不要求用户做任何操作。
-
----
-
-## 四、凭证读取与修改
-
-凭证保存在桌面版数据目录下：
-
-```text
-<userData>/auth.json
-```
-
-支持三类凭证：
-
-```ts
-type Auth =
-  | { type: "api"; key: string; metadata?: Record<string, string> }
-  | { type: "oauth"; refresh: string; access: string; expires: number; accountId?: string }
-  | { type: "wellknown"; key: string; token: string }
-```
-
-### 安全原则
-
-Flowlet 直接读取，但只把状态信息返回给业务层：
-
-```json
-{
-  "providerId": "anthropic",
-  "configured": true,
-  "type": "api",
-  "maskedKey": "sk-ant-••••••••9x2d"
-}
-```
-
-**不把明文 Key 返回 Flowlet Web 前端。**
-
-### 写入要求
-
-- 更新 `auth.json` 时保持文件权限 `0600`
-- OpenCode 自己写入也使用 `0600`
-
-### 桥接接口
-
-```ts
-setProviderCredential(providerId, credential)
-removeProviderCredential(providerId)
-getProviderCredentialStatus(providerId)
-```
-
-不提供：
-
-```ts
-getPlaintextApiKey()  // 禁止
-```
-
----
-
-## 五、会话信息读取 SQLite
-
-数据库位置：
-
-```text
-<userData>/opencode.db
-```
-
-OpenCode 开启：
+只读查询 `opencode.db` 的 `session` 表：
 
 ```sql
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA busy_timeout = 5000;
-PRAGMA foreign_keys = ON;
+SELECT id, title, directory, parent_id, time_created, time_updated FROM session
 ```
 
-### 只读连接配置
+只取标题、工作目录、父子关系和时间字段；**不读取原生 token / cost 列**——经过 Flowlet 的会话其费用指标以 Flowlet 请求聚合为准。
 
-```ts
-const db = new Database(dbPath, {
-  readonly: true,
-  fileMustExist: true,
-})
+### 合并规则
 
-db.pragma("busy_timeout = 5000")
-db.pragma("query_only = ON")
+- 按 `(agent_type, session_id)` 去重，原生行提供身份，观测行补充指标，并标记 `flowlet_observed`；
+- 列表只分页展示没有父会话的主会话（每页最多 8 条，适配桌面窗口高度）；
+- 直接子会话通过独立 command（`list_agent_session_children`）在主会话详情中按最近活动排序展示；
+- 客户端筛选维度拆分为 Agent 类型和 Flowlet 观测状态（全部 / 经过 Flowlet / 未经过 Flowlet），原生会话不因缺少 `client_id` 被排除；
+- 模型不是会话固定属性（一个会话允许切换模型），不作为列表字段展示；
+- 清理请求日志会同时移除对应的观测结果。
+
+相关 command：`list_agent_sessions`、`list_agent_session_children`、`list_agent_session_clients`。
+
+## 四、原生数据目录发现与只读直读
+
+### 目录发现
+
+`opencode_database_candidates()` 按顺序尝试以下候选路径（`HashSet` 去重）：
+
+| 优先级 | 路径 | 覆盖 |
+|--------|------|------|
+| 1 | `~/.local/share/opencode/opencode.db` | CLI 标准布局（Linux） |
+| 2 | `<data_dir>/opencode/opencode.db` | CLI 布局（Win: `%APPDATA%\opencode`，macOS: `~/Library/Application Support/opencode`） |
+| 3 | `<data_dir>/ai.opencode.desktop/opencode.db` | Desktop 布局 |
+| 4 | `<config_dir>/ai.opencode.desktop/opencode.db` | Desktop 备选 |
+
+### 只读连接
+
+```rust
+OpenFlags::SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX
+busy_timeout = 750ms
 ```
 
-**不要设置 `immutable=1`**——OpenCode 使用 WAL，`immutable=1` 可能看不到尚未 checkpoint 到主数据库的数据。
+不使用 `immutable=1`：OpenCode 使用 WAL 模式，`immutable` 可能看不到尚未 checkpoint 的数据。
 
-### 关键表结构
+### 时间线直读
 
-**session 表**包含：
-
-| 字段 | 说明 |
-|------|------|
-| id | 会话 ID |
-| project_id | 项目 ID |
-| workspace_id | 工作区 ID |
-| parent_id | 父会话 ID |
-| title | 标题 |
-| directory | 工作目录 |
-| cost | 费用 |
-| tokens_input / tokens_output / tokens_reasoning | Token 统计 |
-| tokens_cache_read / tokens_cache_write | 缓存 Token |
-| agent | Agent 类型 |
-| model | `{ id, providerID, variant }` |
-| time_created / time_updated / time_archived | 时间戳 |
-
-**message 表**通过 `session_id` 关联会话，消息内容存在 JSON `data` 字段。
-
-**part 表**通过 `message_id` 关联消息，工具调用、文本、推理、文件内容等保存在 JSON `data` 中。
-
-### Flowlet 内部结构
-
-```ts
-interface FlowletImportedSession {
-  externalSessionId: string
-  projectId: string
-  directory: string
-  title: string
-  providerId?: string
-  modelId?: string
-  agent?: string
-  cost: number
-  tokens: { input: number; output: number; reasoning: number }
-  messages: FlowletMessage[]
-  createdAt: number
-  updatedAt: number
-}
-```
-
----
-
-## 六、实时增量同步
-
-### WAL 监听
-
-直接监听 `opencode.db-wal` 文件变化，做 300~500ms debounce，然后增量查询：
+会话详情「时间线」Tab 按需调用 `get_agent_session_timeline`（前端 Query，打开详情或手动刷新时才读取）：
 
 ```sql
-SELECT * FROM session WHERE time_updated > ?;
+SELECT m.id, m.time_created, m.data, p.id, p.time_created, p.data
+FROM message m LEFT JOIN part p ON p.message_id = m.id
+WHERE m.session_id = ?1
+ORDER BY COALESCE(p.time_created, m.time_created), m.id, p.id
 ```
 
-```sql
-SELECT * FROM message WHERE time_created > ? ORDER BY time_created, id;
-```
+- `part.type` 的 text / reasoning / tool 等类型统一映射为六类事件：用户消息、助手回复、思考摘要、工具调用、工具结果、错误（与 Claude Code、Codex 时间线同构）；
+- 读取上限：单会话最多扫描 **16 MiB**、返回 **300** 个展示事件、单条事件内容最多 **8000** 字符；达到事件上限后仍继续扫描剩余记录统计轮次与累计用量，详情页提示事件已截断；
+- 原生累计用量单独读取：`session` 表的累计 Token / cost 与消息级 tokens；OpenCode 原生提供的 cost 直接展示；
+- 内容不写入 Flowlet SQLite；原生源不存在时返回「不可用」空结果，结构不兼容或读取失败时返回可重试错误。
 
-### 同步水位
+列表页不解析消息正文：同步快照存在时直接使用 `agent_session_snapshots` 的摘要；缺少快照时按可见行懒加载 `get_agent_session_native_summary`（只返回 turn 数、累计用量和模型集合）并缓存 5 分钟。
 
-```ts
-interface OpenCodeSyncCursor {
-  databasePath: string
-  lastSessionUpdatedAt: number
-  lastMessageCreatedAt: number
-  lastMessageId?: string
-  schemaFingerprint: string
-}
-```
+## 五、变更监听与增量同步
 
-### SQLite 可同步 vs 边界
+### 文件监听
 
-可以同步：
+`agent_source_watcher.rs` 使用 `notify` 监听 opencode.db 所在**父目录**（`NonRecursive`，同时监听 Claude Code 项目目录和 Codex sessions 目录）：
 
-- 会话历史
-- 用户消息
-- AI 回复
-- Tool Part
-- Token / Cost
-- 使用模型
-- 项目目录
-- 文件变更摘要
-- Todo
+- 只关心扩展名为 `jsonl` / `db` / `sqlite` / `wal` 或文件名为 `session_index.jsonl` 的变化；
+- 按 agent_type **去抖 750ms** 后发出 Tauri 事件 `agent-source-changed`；
+- 文件事件只作为「需要重新扫描」的提示，不直接触发解析；监听失败时记录警告，轮询兜底仍然有效。
 
-不能完整反映运行态：
+### 前端调度
 
-- 正在排队
-- 等待用户授权
-- 当前流式 token
-- 内存中的 Abort 状态
-- 尚未提交的工具执行状态
+`AgentDataAutoSync.tsx` 消费事件并调度 `sync_agent_data`：
 
-> OpenCode Server API 单独提供了 Session Status 和实时事件，说明这些信息并不完全等同于数据库历史。第一版只读会话信息、串联数据，SQLite 足够。
+- 收到文件事件后静默 **8 秒**再触发，触发间隔至少 **30 秒**；
+- 轮询兜底：窗口前台每 **1 分钟**、后台每 **5 分钟**，应用启动约 **3 秒**后首次检查，恢复前台时尽快补查。
 
----
+### 同步快照
 
-## 七、Flowlet 侧完整接口设计
+同步只在来源指纹变化时更新 `agent_session_snapshots`（PK `(agent_type, session_id)`）：
 
-```ts
-interface OpenCodeLocalAdapter {
-  // 自动发现
-  discoverInstallations(): Promise<OpenCodeInstallation[]>
-  resolvePaths(): Promise<OpenCodePaths>
+- 指纹 = `native_updated_at | activity_at | title | project_path`，未读完的增量轮次追加 `|partial:{offset}`；
+- 保存内容：指纹、原生摘要 JSON、`source_offset`、`parser_version`、`usage_ids_json`、游标校验值——**不保存消息正文**；
+- 文件缩短、游标校验失败或解析器版本升级时自动从头整理；单轮最多读取 16 MiB；
+- 已消失或归档的会话快照会被删除；`agent_source_sync_state` 按客户端保存检查时间、扫描数、变化数、失败数和错误；单会话失败不覆盖旧快照，后续检查会重试；
+- 同一时刻只允许一个 Agent 同步运行，任务信息落入 `background_jobs`，任务日志页可查看触发方式、进度、结果和错误。
 
-  // 配置
-  readResolvedConfig(projectDirectory?: string): Promise<OpenCodeConfig>
-  updateGlobalConfig(patch: Partial<OpenCodeConfig>): Promise<void>
-  updateProjectConfig(
-    projectDirectory: string,
-    patch: Partial<OpenCodeConfig>,
-  ): Promise<void>
+## 六、全局配置与凭据写入
 
-  // 渠道凭证
-  listProviderCredentials(): Promise<ProviderCredentialStatus[]>
-  setProviderCredential(
-    providerId: string,
-    credential: ProviderCredentialInput,
-  ): Promise<void>
-  removeProviderCredential(providerId: string): Promise<void>
+OpenCode CLI 与 Desktop 共用用户级全局配置。Flowlet 在 `~/.config/opencode/opencode.jsonc`（或已有的 `opencode.json`）中结构化合并 `provider.flowlet`、`model` 和 `small_model`，并把 Client Token 单独写入 `~/.local/share/opencode/auth.json` 的 `flowlet` 凭据项；两个文件事务写入，第二个失败时恢复原始字节。完整字段、备份与恢复行为见 [`opencode-global-config.md`](./opencode-global-config.md)。
 
-  // 会话
-  listSessions(query?: SessionQuery): Promise<OpenCodeSession[]>
-  readSession(sessionId: string): Promise<OpenCodeSessionDetail>
-  readMessages(sessionId: string): Promise<OpenCodeMessage[]>
+注意：该链路写入的是用户级配置，不区分 CLI / Desktop，也不读取 Desktop 的 `userData` 目录。
 
-  // 增量同步
-  watchSessions(
-    callback: (event: OpenCodeSessionChange) => void,
-  ): Promise<Disposable>
+## 七、数据修复
 
-  // 配置生效
-  scheduleReload(): Promise<void>
-}
-```
+设置页提供显式的本地数据修复（`useDataRepair` 顺序编排四个细粒度 command，时间范围支持最近 1 小时 / 6 小时 / 今天 / 7 天 / 全部）：
 
----
+| 阶段 | Tauri command | 作用 |
+|------|---------------|------|
+| 会话归因 | `repair_agent_sessions` | 从已捕获请求头回填会话标识 |
+| 用量重解析 | `repair_captured_usage` | 重解析已捕获响应，覆盖范围内已有结果 |
+| 未知用量补齐 | `repair_unknown_usage` | 补齐缺失的用量记录 |
+| 费用重算 | `repair_usage_costs` | 按当前价格配置重算费用 |
 
-## 八、用户体验流程
+修复直接更新现有 `request_logs` / `usage_records`，不新增会话表，也不需要重启代理。
 
-```text
-安装了 OpenCode Desktop
-  ↓
-打开 Flowlet
-  ↓
-Flowlet 自动发现 Desktop 本地数据
-  ↓
-渠道、模型、历史会话自动展示
-  ↓
-在 Flowlet 修改渠道或模型
-  ↓
-OpenCode Desktop 自动同步生效
-```
+## 八、与原设计的差异（未实现 / 未采用）
 
-不需要用户额外完成任何接入操作。
+| 原设计 | 当前状态 |
+|--------|----------|
+| `OpenCodeLocalAdapter` 统一 TS 接口（discoverInstallations / watchSessions 等） | 未采用；能力拆分在 `proxy.rs`、`agent_session_metadata.rs`、`agent_session_timeline.rs`、`storage_tasks.rs` 等 Rust 模块，前端通过类型化 command 调用 |
+| 通过 Desktop IPC / Config Service 读取合并后的最终配置 | 未实现；配置写入只操作用户级 `opencode.jsonc`（见第六节） |
+| 监听 `opencode.db-wal` 做 300–500ms 增量查询、导入消息到 Flowlet 表 | 未实现；改为目录级 `notify` 提示 + 指纹增量同步，且只同步摘要，不导入消息正文 |
+| 读取 Desktop `userData/auth.json` 凭据状态、桥接凭证增删 | 未实现；凭据写入走用户级 `auth.json`，不做凭据状态回读 |
+| 修改配置后检测空闲并自动重启 OpenCode | 未实现；配置变更下次启动 / 会话生效 |
+| 读取 `session` 表的 cost / tokens_* / agent / model 列 | 未采用；经过 Flowlet 的会话指标以请求聚合为准，原生累计用量仅在详情页展示且不与请求统计相加 |
 
----
+## 九、后续阶段（规划）
 
-## 实现路径总结
+以下能力仍属于后续阶段，优先级低于成本账本主线（见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)）：
 
-| 数据 | 读取方式 | 写入方式 |
-|------|----------|----------|
-| 配置 | Desktop API / 直接读取 JSONC | JSONC 文件直接修改 |
-| 凭证 | `<userData>/auth.json` 读取状态 | `auth.json` 覆盖写入，权限 0600 |
-| 会话 | `<userData>/opencode.db` 只读查询 | 只读，不写 |
-| 增量同步 | `<userData>/opencode.db-wal` 文件监听 | — |
-| 配置生效 | — | Flowlet 判断空闲后通知 Desktop 重载配置 |
+- **消息正文导入 / 完整会话同步**：当前时间线按需只读、不落库；若成本账本需要任务级证据，再评估导入边界（默认仍应最小化采集、显式授权）；
+- **配置变更生效提示**：检测 OpenCode 运行状态并提示「下次会话生效」或空闲时重载；
+- **原生运行态信息**：排队、等待授权、流式中 token 等运行态不在 SQLite 中，需要 OpenCode Server API，当前不做。

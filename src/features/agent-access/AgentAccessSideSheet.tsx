@@ -372,6 +372,7 @@ function buildManualSnippets(
         ANTHROPIC_BASE_URL: endpoint,
         ANTHROPIC_AUTH_TOKEN: authToken,
         ANTHROPIC_MODEL: "flowlet-pro",
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "flowlet-pro",
         ANTHROPIC_DEFAULT_OPUS_MODEL: "flowlet-pro",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "flowlet-pro",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "flowlet-flash",

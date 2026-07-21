@@ -28,6 +28,7 @@ const MANAGED_FIELDS: &[&str] = &[
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
@@ -44,6 +45,7 @@ const EXTERNAL_OVERRIDE_FIELDS: &[&str] = &[
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
@@ -387,6 +389,7 @@ fn report_from_settings(
     let subagent_model = string_value("CLAUDE_CODE_SUBAGENT_MODEL");
     let aliases_match = [
         "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
     ]
@@ -513,6 +516,7 @@ fn apply_claude_code(
         ("ANTHROPIC_BASE_URL", expected_base_url),
         ("ANTHROPIC_AUTH_TOKEN", client_token.trim()),
         ("ANTHROPIC_MODEL", PRIMARY_MODEL),
+        ("ANTHROPIC_DEFAULT_FABLE_MODEL", PRIMARY_MODEL),
         ("ANTHROPIC_DEFAULT_OPUS_MODEL", PRIMARY_MODEL),
         ("ANTHROPIC_DEFAULT_SONNET_MODEL", PRIMARY_MODEL),
         ("ANTHROPIC_DEFAULT_HAIKU_MODEL", FAST_MODEL),
@@ -1596,6 +1600,7 @@ mod tests {
         assert_eq!(current["theme"], "dark");
         assert_eq!(current["env"]["CUSTOM"], "keep");
         assert!(current["env"].get("ANTHROPIC_API_KEY").is_none());
+        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_FABLE_MODEL"], PRIMARY_MODEL);
         assert_eq!(current["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], FAST_MODEL);
         assert_eq!(current["env"]["ANTHROPIC_SMALL_FAST_MODEL"], FAST_MODEL);
         assert_eq!(current["env"]["CLAUDE_CODE_SUBAGENT_MODEL"], FAST_MODEL);
@@ -1658,6 +1663,41 @@ mod tests {
             restored_settings["env"]["ANTHROPIC_SMALL_FAST_MODEL"],
             "LongCat-2.0"
         );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn missing_fable_alias_is_reported_partial_and_repaired_by_apply() {
+        // 早期 Flowlet 写入的配置缺少 ANTHROPIC_DEFAULT_FABLE_MODEL：此时 `/model fable`、
+        // `best` 别名会解析到内置 Fable 5 模型 ID，而非 Flowlet 暴露的模型，必须视为
+        // 未收敛（Partial），重新写入后补上该变量并收敛到 PRIMARY_MODEL。
+        let path = test_settings_path();
+        std::fs::write(
+            &path,
+            r#"{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18640/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "flowlet-token",
+    "ANTHROPIC_MODEL": "flowlet-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "flowlet-pro",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "flowlet-pro",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "flowlet-flash",
+    "ANTHROPIC_SMALL_FAST_MODEL": "flowlet-flash",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "flowlet-flash"
+  }
+}"#,
+        )
+        .unwrap();
+
+        let inspected = inspect_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
+        assert_eq!(inspected.state, AgentGlobalConfigState::Partial);
+
+        let applied =
+            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token").unwrap();
+        assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+        let current = read_settings(&path).unwrap();
+        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_FABLE_MODEL"], PRIMARY_MODEL);
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

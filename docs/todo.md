@@ -1,55 +1,44 @@
 # 任务列表
 
-## 概览页
+## UI/UX 优化
 
-- [x] 将「刷新数据」改为蓝色实心按钮（背景/边框 #1677FF，文字 #FFFFFF），「重启服务」改为橙色描边按钮（文字/边框 #FA8C16，背景 #FFFFFF）
-- [x] 调整概览页右上角操作区，将「刷新数据」由蓝色主按钮改为中性次级按钮（背景 #FFFFFF、文字 #64748B、边框 #D9E2F0），「重启服务」保持橙色描边（背景 #FFFFFF、文字及边框 #FA8C16）
-- [x] LongCat 账号只能支持余额或资源包，所以概览-渠道账号里的 LongCat 信息展示也没必要同时展示
-- [x] 如果渠道账号是余额模式，在概览页的渠道账号模块里就不应该展示有效期了
-- [x] 概览页里渠道账号和开放模型里的渠道名称露出感觉有点多余，因为渠道 logo 就可以作为标识了，可以做一个鼠标悬浮到渠道 logo 上也展示渠道名称。并且把现在渠道名称展示的位置那一行都用来展示余额、资源包信息以及 N 个账号可用的附加信息
-- [x] 概览页里每个模块都拆成一个独立的组件，然后 OverviewPage 负责整体引入和布局
-- [x] 客户端访问信息里的地址直接做成点击链接地址就复制，不需要一个独立的复制按钮了
-- [x] 已启用这个 tag 太长了，统一都改成两字的版本
-- [x] 代理服务状态模块的高度可以再调小一点，然后客户端访问信息、AI Agent 接入这一行模块高度不变，把多余的高度给渠道账号、开放模型这一行
-- [x] 开放模型中模型对应的 N 个可用账号不应该跟着这个模型是否开关来
-- [x] API 接入详情弹窗里的地址展示和复制 icon 以及复制交互做成和外面客户端访问信息模块里一样
-- [x] 编辑渠道账号的时候可以直接把选择渠道（编辑时不可更改）以及渠道选择直接隐藏
-- [x] 新增账号、编辑账号时账号名称和 API Key 可以做成一行两列的节约空间
-- [ ] 概览页 - 渠道账号模块头部新增账号 管理账号没在同一行上，有一点点错行
-- [x] 新增账号、编辑账号、管理账号等右侧边弹窗的标题和应用窗口的标题冲突了，需要处理
+- [x] 概览页的 AI Agent 接入模块，以及模型服务页、用量成本页的渠道成本模块的滚动条都是原生样式吧，应该改成和概览页的渠道账号模块以及开放模型模块一样，并且这个滚动条样式应该做成全局统一的
+- [x] 请求日志列表页时间要把日期也放出来，可以只放到月、日，年不放，类似会话管理页的时间，但是要到秒，这里都统一下吧，请求日志、会话管理、任务日志三个列表页面的时间展示格式
+- [x] 用量成本页的模型列表增加一个费用列，现在只有费用占比，另外这里的价格符号咋都是 $ 不应该跟着模型计价货币的不同采用￥或者$嘛
+- [x] 用量成本页中的费用“仅统计 Token 与价格均已知的请求”这句文案不需要单独占一行，可以用一个小提示 icon 放在模块标识旁边，然后鼠标悬浮展示吧
+- [ ] 请求日志列表中渠道 / 账号列现在有点宽，有点浪费
+- [ ] 用量成本页的 Tokens 日历热力图样式整体要优化下，另外鼠标悬浮上去的 token 信息展示应该和其他页面的 token 信息展示一样
 
-### 渠道账号
+## Agent 接入
 
-- [x] 模块标题调整为「渠道账号　共 6 个账号」，右侧增加「+ 新增账号」和「查看全部」点击「新增账号」打开新增抽屉；点击账号行或「查看全部」打开完整账号管理抽屉，支持搜索、编辑、启停和删除。
-- [x] 取消单条账号的内层卡片样式，改为紧凑列表，通过分割线区分，每条高度控制在 64～68px。每条账号左侧展示渠道图标；中间第一行展示账号名称，第二行展示渠道名称；余额、资源包、有效期横向展示在同一行。右侧保留「已启用/已停用」状态标签及更多操作按钮。
-
-### 开放模型
-
-- [x] 取消单条模型的内层卡片样式，改为紧凑列表，通过分割线区分，每条高度控制在 64～68px。每条模型左侧展示渠道图标；中间第一行展示模型名称，第二行展示所属渠道、可用账号数及运行状态。右侧保留「已启用/已停用」状态标签和启停开关；状态异常时使用橙色或红色文字提示。模型排序优先展示已启用模型，其次展示异常模型，已停用模型放在最后。
+- [x] https://code.claude.com/docs/zh-CN/model-config#environment-variables 参考官方文档，看我们 Claude Code CLI 的配置覆盖是不是还不够全面
+- [x] Pi 有 Desktop 版吗，没有的话就不该在概览页的 AI Agent 接入模块中展示暂不支持，以及弹窗详情中有 Desktop 的 Tab
+- [x] Pi 区分主模型、快速模型吗，如果区分，为啥我们使用写入 Flowlet 配置功能后快速模型展示的是 - ，如果不支持的话就可以直接去掉呀
+- [x] Pi 目前看请求里没有会话标识，并且我们也没有去实现针对 Pi 的原生会话数据读取，这是两个工作，你都看看 —— 两项均已实现：(1) 请求会话标识：Pi 走 OpenAI 兼容 SDK、原生请求不带会话标识，故 Flowlet 在写入 Pi 配置时同步写入 `~/.pi/agent/extensions/flowlet.ts`（Pi 官方扩展机制，`before_provider_headers` 事件通过 `ctx.sessionManager.getSessionId()` 实时注入 `x-flowlet-session`，以 `x-flowlet-client: pi` 标记头为门控，仅污染 Flowlet 渠道请求）；代理侧 `extract_agent_session` 与历史修复路径 `agent_session_from_json` 同步新增 Pi 分支识别该头，`apply_request_headers` 转发上游前将其与 `x-flowlet-client` 一并剥离。(2) 原生会话读取：Pi 会话存于 `~/.pi/agent/sessions/<编码后的cwd>/<timestamp>_<uuid>.jsonl`，v3 JSONL 树状结构（id/parentId 支持原地分支）；`agent_session_metadata.rs` 注册目录监听并解析头行（id/cwd/timestamp/parentSession）+ `session_info` 名/首条 user 消息为标题，`agent_session_timeline.rs` 从叶子回溯重建活动分支并映射为时间线事件。注入的 session UUID 与原生会话文件头行 `id` 一致，故 `merge_agent_session_catalog` 可按 `(agent_type, session_id)` 将「经过 Flowlet 的观测会话」与「原生会话」精确合并。前端会话管理页客户端筛选器与 `agentLabel` 已补充 Pi；手动配置片段补上扩展文件内容
+- [x] Codex 账号与用量支持周期性后台定时自动同步，单周期不用太频繁，比如五分钟之类的，你可以看看多少时间合适，并且这个要进入到任务日志中 —— 已实现：AppShell 挂载 `CodexAccountAutoSync`，启动约 20 秒后首次执行、此后固定每 5 分钟一轮（前后台同周期，用量窗口本身是 5 小时/周级粒度，5 分钟足够新鲜且避免高频打官方用量接口）。Rust 新增细粒度 command `sync_codex_accounts`：未发现任何 Codex 登录凭据或托管多账号时直接跳过（不建任务、不发网络请求、不拉起 app-server）；否则以 job_type `codex-account-sync` 记入 `background_jobs` / `background_job_events`，同步成功后失效 Codex 账号查询缓存。任务日志页新增「Codex 账号同步」类型筛选，详情展示账号数量、失效账号、失败账号与总耗时；同一时刻只允许一个 Codex 同步运行
+- [x] 是否开启 1m 的配置可以让用户自己选择吧，你看是放在模型服务里好还是放在具体某个 agent 接入详情弹窗里好 —— 已放在 Claude Code 接入详情「全局配置」中（`[1m]` 是客户端侧上下文预算配置、且为 Claude Code 专属机制，不属于模型能力，故不放模型服务页）。「1M 长上下文」开关默认关闭，开启后主模型环境变量写入 `[1m]` 后缀，配置片段与 inspect 状态同步；代理层防御性剥离入站 `[1m]` 后缀并剔除 `context-1m` beta 头
+- [ ] Explore(Map OpenCode session implementation) Initializing… Error: flowlet-pro is temporarily unavailable, so auto mode cannot determine the safety of Agent right now. Wait briefly and then try this action again. If it keeps failing, continue with other tasks that don't require this action and come back to it later. Note: reading files, searching code, and other read-only operations do not require the classifier and can still be used.
+- [ ] 支持检查 Agent 最新版本号，并提示用户可以升级，如果可以的话再加上更新版本记录（并支持翻译成目标语言）
+- [ ] 现在 Codex 有定时同步，所以打开 Agent 弹窗详情就不自动触发刷新同步了，除非用户自己手动强制刷新
 
 ## 请求日志
 
-- [x] 请求日志 - 请求详情的弹窗应该和渠道账号管理弹窗一样的层级，需要解决弹窗头部和应用窗口头部冲突的问题
-- [x] 请求日志 - 每次通过菜单点击进入到这个页面应该自动刷新下最新数据，现在还需要自己手动刷新
-- [x] 请求日志里的客户端筛选项和现在实际意义不符了，现在的客户端应该是 UA 解析出来的
-- [x] 切换到请求日志页面，正在加载请求日志… 不应该有一个这个过渡状态呐，真需要加载也可以在局部比如 table 内部做 loading 或者骨架屏就行了
+- [ ] 性能统计上增加 RPM、TPM 的概念，耗时也需要再拆分下 TTFB、TTFT
+- [x] 请求日志列表中增加是否是流式的标识，可以不用单独一列，你看放在哪合适
+- [x] 筛选模型类型的时候，如果选对外模型那就是筛选对外模型，而不是路由和对外都筛选
+- [-] 出一套清理历史的响应报文的机制，可以是基于时间、也可以基于大小的清理机制
 
-## 其他
+## 模型服务
 
-- [x] 渠道账号管理的时候 API Key 标题旁的前往查看不应该换行，应该和 API Key 在一行上
-- [x] 新增渠道账号时，不能测试链接，这是不对的，是否可以测试链接应该看的是是否维护了关键信息。另外点击测试链接后，toast 提示的层级没有当前渠道账号管理弹窗层级高
-- [x] 由我们应用内部发起的请求应该修改下 UA，加个标识，这样我们内部的 LLM API 测试落到请求日志里也能根据 ua_rules 解析为 Flowlet 客户端
-- [x] 导入 LongCat 资源包弹窗的层级没有渠道账号管理弹窗层级高
-- [x] 渠道账号删除需要有一个二次确认 & 如果是编辑渠道账号，则不允许更改渠道类型
-- [x] （编辑时不可更改）这句话应该和 选择渠道 这个标题在一行上
-- [x] 资源包如果超过 10 万的话，就加个万的单位，另外资源包默认优先消耗
-- [x] LongCat 资源包使用规则· 优先消耗最快过期的Token额度· 未在有效期内使用的额度自动清零· 资源包默认于到期时间当天 23:59:59 清零
-- [x] LongCat 资源包现在只支持导入多个资源包，不支持查看和手动维护多个资源包，这个要看怎么处理下
-- [ ] config.json 中 ua_rules 升级为客户端配置，每个客户端包含 UA 识别（若有的话，也有可能某个客户端没有特殊的 UA 识别）然后也需要包含如何确认是否在本地安装，安装的版本是多少（优先都是用 bash 命令来确认，例如 PS C:\Users\nicha> hermes --version ===> \n Hermes Agent v0.18.2 (2026.7.7.2) · upstream aaf56912 \n Install directory: C:\Users\nicha\AppData\Local\hermes\hermes-agent \n Install method: git \n Python: 3.11.14 \n OpenAI SDK: 2.24.0 PS C:\Users\nicha> opencode -v ===> 1.17.18 PS C:\Users\nicha> claude -v ===> 2.1.207 (Claude Code)）
-  - [x] Claude Code：完成 PATH、官方常见位置、版本、安装方式及多安装候选探测
-  - [ ] OpenCode / Hermes / 其他 Agent：沿用通用探测结果结构逐个实现
+- [x] 模型基础信息：直接渠道模型（LongCat-2.0、deepseek-v4-pro 等）右侧详情新增「基础信息」区块（上下文窗口、最大输出、输入/输出定价，数据来自渠道模型同步与 config.json `model_prices`，缺失显示 —）。经确认 flowlet-pro/flowlet-flash 聚合模型保持渠道路由面板不变。Claude Code 1M 长上下文已按用户可选开关实现：Claude Code 接入详情「全局配置」中提供「1M 长上下文」开关（默认关），开启后主模型环境变量写入 `[1m]` 后缀（网关场景官方推荐做法，Claude Code 发送前剥离后缀），配置片段同步展示；代理层防御性剥离入站模型名 `[1m]` 后缀、转发前剔除 `context-1m-2025-08-07` beta 头。注意 flowlet-pro 部分后端（如 Kimi K3 约 256K）撑不满 1M 窗口，开关旁已给出提示。参考 https://code.claude.com/docs/zh-CN/model-config#pin-models-for-third-party-deployments
+
+## 渠道账号
+
+- [ ] 渠道账号保存后，资源模式就不允许切换了
 
 ## 未来规划
 
-- [ ] 可以有个会话/任务维度的分析/管理页面
+- [-] 我想通过内置浏览器内容让用户在我们 Flowlet 的环境里进行官网 Web 登陆然后我们就能自动解析出那些不支持 API 方式查询的套餐余量或是 API 余额了
 - [ ] 可以出一个任务分发功能，我们只管提交 todo，并且分配给不同的 AI Agent，然后 Flowlet 来调度（这里一定需要用到工作树，不然太乱了）
+- [ ] 要想一种办法可以让多个设备上的数据互相都能看到，但明细数据不需要混合在一起，可以按设备分开筛选查看，用量成本这类统计向的数据需要有汇总的版本，当然也可以查看指定设备上的情况
+- [ ] 要重前端轻后端，并且要重点看下后端代码是否有超大文件，前端也可以顺带看下

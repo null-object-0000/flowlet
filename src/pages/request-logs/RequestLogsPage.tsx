@@ -103,16 +103,27 @@ export function RequestLogsPage() {
           aria-label={t("客户端")}
         />
         <Select
-          value={filter.model || "__all__"}
+          value={filter.model && filter.modelKind ? `${filter.modelKind}:${filter.model}` : "__all__"}
           loading={models.isLoading}
-          onChange={(value) => apply({ model: value === "__all__" ? "" : String(value) })}
+          onChange={(value) => {
+            const raw = String(value);
+            if (raw === "__all__") {
+              apply({ model: "", modelKind: "" });
+              return;
+            }
+            // 选项值编码为 "<kind>:<model>"，仅按第一个冒号切分，避免模型名含冒号时误判。
+            const separator = raw.indexOf(":");
+            const kind = raw.slice(0, separator);
+            const model = raw.slice(separator + 1);
+            apply({ model, modelKind: kind === "upstream" ? "upstream" : "public" });
+          }}
           aria-label="模型筛选"
         >
           <Select.Option value="__all__">{t("全部模型")}</Select.Option>
           {publicModels.length > 0 ? (
             <Select.OptGroup key="public" label={t("对外模型")}>
               {publicModels.map((model) => (
-                <Select.Option key={`public-${model}`} value={model}>
+                <Select.Option key={`public-${model}`} value={`public:${model}`}>
                   {model}
                 </Select.Option>
               ))}
@@ -121,7 +132,7 @@ export function RequestLogsPage() {
           {upstreamModels.length > 0 ? (
             <Select.OptGroup key="upstream" label={t("路由模型")}>
               {upstreamModels.map((model) => (
-                <Select.Option key={`upstream-${model}`} value={model}>
+                <Select.Option key={`upstream-${model}`} value={`upstream:${model}`}>
                   {model}
                 </Select.Option>
               ))}

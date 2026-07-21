@@ -13,6 +13,7 @@ export const requestLogCommands = {
         search: filter.search,
         time_range: filter.timeRange,
         model: filter.model,
+        model_kind: filter.modelKind,
       },
     }).catch(toRequestLogError("request_log_list_failed")),
 

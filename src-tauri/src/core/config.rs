@@ -774,9 +774,13 @@ pub struct LogsFilter {
     /// 时间范围: "1h" | "6h" | "today" | "7d" | "all"
     #[serde(default)]
     pub time_range: String,
-    /// 对外模型筛选（空串 = 不过滤）
+    /// 模型名筛选（空串 = 不过滤）。匹配哪一列由 `model_kind` 决定。
     #[serde(default)]
     pub model: String,
+    /// 模型筛选来源维度: "public" = 对外模型（public/virtual）、"upstream" = 路由目标模型（upstream）。
+    /// 空串为兼容旧调用方，按两个维度 OR 匹配。
+    #[serde(default)]
+    pub model_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

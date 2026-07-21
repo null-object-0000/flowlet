@@ -64,12 +64,69 @@ fn lists_paginated_request_logs_with_usage_join() {
             search: String::new(),
             time_range: "1h".to_string(),
             model: String::new(),
+            model_kind: String::new(),
         })
         .expect("query request logs with qualified joined columns");
 
     assert_eq!(page.total, 0);
     assert!(page.rows.is_empty());
     assert_eq!(page.summary.request_count, 0);
+}
+
+fn model_filter(model: &str, kind: &str) -> LogsFilter {
+    LogsFilter {
+        page: 1,
+        page_size: 8,
+        status: "all".to_string(),
+        client_id: String::new(),
+        channel_id: String::new(),
+        search: String::new(),
+        time_range: "all".to_string(),
+        model: model.to_string(),
+        model_kind: kind.to_string(),
+    }
+}
+
+#[test]
+fn model_filter_matches_only_the_selected_dimension() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+
+    // request_log_for_repair: public/virtual = flowlet-pro，upstream = LongCat-2.0。
+    storage
+        .insert_request_log(&request_log_for_repair("req-dim", 0, true))
+        .expect("insert request log");
+
+    // 选“对外模型 flowlet-pro”只命中对外维度。
+    let public_hit = storage
+        .list_request_logs_page(model_filter("flowlet-pro", "public"))
+        .expect("filter by public model");
+    assert_eq!(public_hit.total, 1);
+
+    // 同名按“路由模型”筛选不命中（upstream 是 LongCat-2.0）。
+    let public_as_upstream = storage
+        .list_request_logs_page(model_filter("flowlet-pro", "upstream"))
+        .expect("filter public name as upstream");
+    assert_eq!(public_as_upstream.total, 0);
+
+    // 选“路由模型 LongCat-2.0”只命中路由维度。
+    let upstream_hit = storage
+        .list_request_logs_page(model_filter("LongCat-2.0", "upstream"))
+        .expect("filter by upstream model");
+    assert_eq!(upstream_hit.total, 1);
+
+    // 同名按“对外模型”筛选不命中。
+    let upstream_as_public = storage
+        .list_request_logs_page(model_filter("LongCat-2.0", "public"))
+        .expect("filter upstream name as public");
+    assert_eq!(upstream_as_public.total, 0);
+
+    // 兼容旧调用方：不传来源时两个维度 OR 匹配。
+    let legacy = storage
+        .list_request_logs_page(model_filter("LongCat-2.0", ""))
+        .expect("legacy OR filter");
+    assert_eq!(legacy.total, 1);
 }
 
 #[test]
@@ -428,6 +485,7 @@ data: [DONE]
             search: String::new(),
             time_range: "1h".to_string(),
             model: String::new(),
+            model_kind: String::new(),
         })
         .expect("query reparsed stream usage");
     assert_eq!(page.rows[0].input_tokens, Some(100));
@@ -458,6 +516,7 @@ data: [DONE]
             search: String::new(),
             time_range: "1h".to_string(),
             model: String::new(),
+            model_kind: String::new(),
         })
         .unwrap();
     assert_eq!(reparsed_page.rows[0].input_tokens, Some(100));

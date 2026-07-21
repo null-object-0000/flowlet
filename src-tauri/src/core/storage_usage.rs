@@ -730,7 +730,7 @@ impl Storage {
     }
 
     /// 返回请求日志页模型筛选项：对外模型（public/virtual）与路由目标模型（upstream）分两组。
-    /// 两组均供筛选使用，选中任一值时按两个维度 OR 匹配，使仅作为路由目标出现的模型（如 deepseek）也可被筛选。
+    /// 前端按分组传回 `model_kind`，选中对外模型只匹配 public/virtual，选中路由模型只匹配 upstream。
     pub fn list_request_log_models(&self) -> Result<RequestLogModelOptions, StorageError> {
         let connection = self
             .connection
@@ -1533,14 +1533,28 @@ impl Storage {
             Some("rl.channel_id = ?")
         };
 
-        // 模型筛选同时匹配对外模型（public/virtual）与路由目标模型（upstream），
-        // 使仅作为路由目标出现的模型（如 deepseek）也可被筛选。
+        // 模型筛选按用户所选分组匹配对应维度：
+        // - "public"：只匹配对外模型（public/virtual）；
+        // - "upstream"：只匹配路由目标模型（upstream）；
+        // - 空串（兼容旧调用方）：两个维度 OR 匹配。
         let model_clause = if filter.model.is_empty() {
             None
         } else {
-            refs.push(&filter.model);
-            refs.push(&filter.model);
-            Some("(COALESCE(rl.public_model, rl.virtual_model) = ? OR rl.upstream_model = ?)")
+            match filter.model_kind.as_str() {
+                "public" => {
+                    refs.push(&filter.model);
+                    Some("COALESCE(rl.public_model, rl.virtual_model) = ?")
+                }
+                "upstream" => {
+                    refs.push(&filter.model);
+                    Some("rl.upstream_model = ?")
+                }
+                _ => {
+                    refs.push(&filter.model);
+                    refs.push(&filter.model);
+                    Some("(COALESCE(rl.public_model, rl.virtual_model) = ? OR rl.upstream_model = ?)")
+                }
+            }
         };
 
         let time_clause = match filter.time_range.as_str() {

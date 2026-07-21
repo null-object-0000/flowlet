@@ -1,5 +1,7 @@
 export type RequestLogStatusFilter = "all" | "success" | "error";
 export type RequestLogTimeRange = "1h" | "6h" | "today" | "7d" | "all";
+/** 模型筛选来源维度：对外模型（public/virtual）或路由目标模型（upstream）。 */
+export type RequestLogModelKind = "public" | "upstream";
 
 export type RequestLogFilter = {
   page: number;
@@ -10,6 +12,8 @@ export type RequestLogFilter = {
   search: string;
   timeRange: RequestLogTimeRange;
   model: string;
+  /** 所选模型的来源分组；空串表示未按模型筛选（或兼容旧行为的 OR 匹配）。 */
+  modelKind: "" | RequestLogModelKind;
 };
 
 export type RequestLogRow = {
@@ -95,4 +99,5 @@ export const DEFAULT_REQUEST_LOG_FILTER: RequestLogFilter = {
   search: "",
   timeRange: "all",
   model: "",
+  modelKind: "",
 };

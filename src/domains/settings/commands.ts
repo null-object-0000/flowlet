@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { StorageUsageSummary } from "./types";
+import type { ModelPriceCurrencyEntry, StorageUsageSummary } from "./types";
 
 export async function getAutostartEnabled() {
   try {
@@ -40,4 +40,34 @@ export async function getStorageUsage(scanId: string) {
   } catch (error) {
     throw toAppError(error, "storage_usage_read_failed");
   }
+}
+
+export async function getModelPriceCurrencies(): Promise<ModelPriceCurrencyEntry[]> {
+  try {
+    const raw = await invokeCommand<string>("read_config");
+    return parseModelPriceCurrencies(raw);
+  } catch (error) {
+    throw toAppError(error, "config_read_failed");
+  }
+}
+
+/** Extract per-model cost currencies from raw config.json text. Tolerates
+ *  malformed JSON and unexpected shapes: the usage page degrades to
+ *  symbol-less amounts rather than failing when pricing data is absent. */
+export function parseModelPriceCurrencies(rawConfigJson: string): ModelPriceCurrencyEntry[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawConfigJson);
+  } catch {
+    return [];
+  }
+  const root = parsed as { channels_config?: { model_prices?: unknown }; model_prices?: unknown } | null;
+  const prices = root?.channels_config?.model_prices ?? root?.model_prices;
+  if (!Array.isArray(prices)) return [];
+  return prices.flatMap((entry): ModelPriceCurrencyEntry[] => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const { channel_id, upstream_model, currency } = entry as Record<string, unknown>;
+    if (typeof channel_id !== "string" || typeof upstream_model !== "string") return [];
+    return [{ channel_id, upstream_model, currency: typeof currency === "string" ? currency : null }];
+  });
 }

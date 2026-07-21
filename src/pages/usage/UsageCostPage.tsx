@@ -4,9 +4,11 @@ import { IconInfoCircle } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod } from "../../domains/usage/types";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
+import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { buildUsageHeatmap, filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay, type UsageHeatmap } from "./usagePresentation";
 import styles from "./UsageCostPage.module.css";
+import { dominantCostCurrency, formatCostAmount, formatMultiCurrencyCost } from "../../shared/formatters/cost";
 import { formatCompactNumber as formatCompact, formatInteger } from "../../shared/formatters/number";
 
 const { Paragraph, Title } = Typography;
@@ -18,11 +20,15 @@ export function UsageCostPage() {
   const [period, setPeriod] = useState<UsagePeriod>("month");
   const [metric, setMetric] = useState<TrendMetric>("tokens");
   const rows = useMemo(() => filterUsageRows(usage.query.data ?? [], period), [period, usage.query.data]);
-  const summary = useMemo(() => summarizeUsage(rows), [rows]);
+  const priceLookup = useModelPriceCurrencyLookup();
+  const { modelCurrencyOf, channelCurrencyOf } = priceLookup;
+  const summary = useMemo(() => summarizeUsage(rows, modelCurrencyOf), [rows, modelCurrencyOf]);
   const days = useMemo(() => groupUsageByDay(rows), [rows]);
   const activity = useMemo(() => buildUsageHeatmap(usage.query.data ?? [], period, new Date(), language), [language, period, usage.query.data]);
-  const models = useMemo(() => groupUsageByModel(rows), [rows]);
-  const channels = useMemo(() => groupUsageByChannel(rows), [rows]);
+  const models = useMemo(() => groupUsageByModel(rows, modelCurrencyOf), [rows, modelCurrencyOf]);
+  const channels = useMemo(() => groupUsageByChannel(rows, channelCurrencyOf), [rows, channelCurrencyOf]);
+  const totalCostLabel = formatMultiCurrencyCost(summary.costByCurrency);
+  const chartCostCurrency = dominantCostCurrency(summary.costByCurrency);
   const cacheHitRate = summary.cacheMeasuredInputTokens > 0
     ? summary.cachedInputTokens / summary.cacheMeasuredInputTokens
     : null;
@@ -57,7 +63,7 @@ export function UsageCostPage() {
     </header>
 
     <section className={styles.stats} aria-label={t("用量统计")}>
-      <Stat label={t("{period}预估费用", { period: periodLabel })} value={formatCost(summary.cost)} meta={t("基于已知价格")} />
+      <Stat label={t("{period}预估费用", { period: periodLabel })} value={totalCostLabel} meta={t("基于已知价格")} />
       <Stat label={t("{period} Token 消耗", { period: periodLabel })} value={formatCompact(summary.tokens, language)} meta={t("输入 {input} · 输出 {output}", { input: formatCompact(summary.inputTokens, language), output: formatCompact(summary.outputTokens, language) })} />
       <Stat label={t("{period}请求量", { period: periodLabel })} value={formatInteger(summary.requests, language)} meta={t("本地代理记录")} />
       <Stat label={t("缓存命中率")} value={cacheHitRate == null ? "—" : formatPercent(cacheHitRate)} meta={t("缓存 {cached} · 未缓存 {uncached}", { cached: formatCompact(summary.cachedInputTokens, language), uncached: formatCompact(summary.uncachedInputTokens, language) })} tooltip={cacheDetails} />
@@ -71,15 +77,15 @@ export function UsageCostPage() {
           <div className={styles.segments}><button type="button" className={metric === "cost" ? styles.active : ""} onClick={() => setMetric("cost")}>{t("费用")}</button><button type="button" className={metric === "tokens" ? styles.active : ""} onClick={() => setMetric("tokens")}>Tokens</button></div>
         </header>
         <div className={styles.trend}>
-          <div className={styles.trendSummary}><strong>{metric === "cost" ? formatCost(summary.cost) : `${formatCompact(summary.tokens, language)} Tokens`}</strong><span>{periodLabel}{t("累计")}</span></div>
+          <div className={styles.trendSummary}><strong>{metric === "cost" ? totalCostLabel : `${formatCompact(summary.tokens, language)} Tokens`}</strong><span>{periodLabel}{t("累计")}</span></div>
           {metric === "tokens" ? (
             <TokenActivityHeatmap activity={activity} language={language} lessLabel={t("少")} moreLabel={t("多")} />
           ) : (
-            <TrendChart days={days} metric={metric} language={language} emptyLabel={usage.query.isLoading ? t("正在加载用量…") : t("当前周期暂无用量数据")} />
+            <TrendChart days={days} metric={metric} language={language} costCurrency={chartCostCurrency} emptyLabel={usage.query.isLoading ? t("正在加载用量…") : t("当前周期暂无用量数据")} />
           )}
         </div>
         <div className={styles.breakdown}>
-          <div className={styles.breakdownHead}><span>{t("模型")}</span><span>{t("请求量")}</span><span>Tokens</span><span>{t("缓存命中率")}</span><span>{t("费用占比")}</span></div>
+          <div className={styles.breakdownHead}><span>{t("模型")}</span><span>{t("请求量")}</span><span>Tokens</span><span>{t("缓存命中率")}</span><span>{t("费用")}</span><span>{t("费用占比")}</span></div>
           <div className={styles.breakdownList}>
             {models.length === 0 ? <div className={styles.empty}>{t("暂无模型用量")}</div> : models.map((model) => <div className={styles.breakdownRow} key={model.key}>
               <span className={styles.modelCell}><ChannelBrandLogo channelId={model.brandId ?? "unknown-channel"} name={model.label} /><strong>{model.label}</strong></span>
@@ -93,6 +99,7 @@ export function UsageCostPage() {
                 <span className={styles.modelTokens}>{formatCompact(model.tokens, language)}</span>
               </Tooltip>
               <span>{model.cacheMeasuredInputTokens > 0 ? formatPercent(model.cachedInputTokens / model.cacheMeasuredInputTokens) : "—"}</span>
+              <span className={styles.costCell} title={formatCostAmount({ amount: model.cost, currency: model.currency })}>{formatUsageCost(model.cost, model.currency)}</span>
               <span className={styles.share}><i><b style={{ width: `${Math.max(0, Math.min(100, model.share * 100))}%` }} /></i><em>{formatPercent(model.share)}</em></span>
             </div>)}
           </div>
@@ -126,9 +133,9 @@ export function UsageCostPage() {
                 <small className={styles.channelTokens}>{formatCompact(channel.tokens, language)} Tokens</small>
               </Tooltip>
             </span>
-            <span><strong>{formatCost(channel.cost)}</strong><small>{formatPercent(channel.share)}</small></span>
+            <span><strong title={formatCostAmount({ amount: channel.cost, currency: channel.currency })}>{formatUsageCost(channel.cost, channel.currency)}</strong><small>{formatPercent(channel.share)}</small></span>
           </div>)}</div>
-          <footer><span>{t("总计 {count} 个渠道", { count: channels.length })}</span><strong>{formatCost(summary.cost)}</strong></footer>
+          <footer><span>{t("总计 {count} 个渠道", { count: channels.length })}</span><strong>{totalCostLabel}</strong></footer>
         </section>
       </aside>
     </div> : null}
@@ -140,7 +147,7 @@ function Stat({ label, value, meta, tooltip }: { label: string; value: string; m
   return <div className={styles.stat}><span>{label}</span>{tooltip ? <Tooltip content={tooltip}>{valueContent}</Tooltip> : valueContent}<small title={meta}>{meta}</small></div>;
 }
 
-function TrendChart({ days, metric, language, emptyLabel }: { days: UsageDay[]; metric: TrendMetric; language: "zh-CN" | "en-US"; emptyLabel: string }) {
+function TrendChart({ days, metric, language, costCurrency, emptyLabel }: { days: UsageDay[]; metric: TrendMetric; language: "zh-CN" | "en-US"; costCurrency: string | null; emptyLabel: string }) {
   if (days.length === 0) return <div className={styles.chartEmpty}>{emptyLabel}</div>;
   const values = days.map((day) => metric === "cost" ? day.cost : day.tokens);
   const max = Math.max(...values, 1);
@@ -158,7 +165,7 @@ function TrendChart({ days, metric, language, emptyLabel }: { days: UsageDay[]; 
   return <svg className={styles.chart} viewBox="0 0 610 158" preserveAspectRatio="none" aria-label="usage trend">
     <defs><linearGradient id="flowletUsageArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="var(--semi-color-primary)" stopOpacity=".38" /><stop offset="100%" stopColor="var(--semi-color-primary)" stopOpacity="0" /></linearGradient></defs>
     {[18, 56, 94, 132].map((y) => <line key={y} className={styles.gridLine} x1="36" y1={y} x2="600" y2={y} />)}
-    <text className={styles.chartLabel} x="1" y="21">{metric === "cost" ? formatCost(max) : formatCompact(max, language)}</text>
+    <text className={styles.chartLabel} x="1" y="21">{metric === "cost" ? formatCostAmount({ amount: max, currency: costCurrency }, 2) : formatCompact(max, language)}</text>
     <path className={styles.chartArea} d={area} /><path className={styles.chartLine} d={line} />
     {points.map((point, index) => <circle key={days[index].date} className={styles.chartDot} cx={point.x} cy={point.y} r="2.8" />)}
     {labelIndexes.map((index) => <text key={days[index].date} className={styles.chartLabel} x={Math.max(0, Math.min(565, points[index].x - 16))} y="153">{days[index].date.slice(5)}</text>)}
@@ -189,5 +196,9 @@ function TokenActivityHeatmap({ activity, language, lessLabel, moreLabel }: { ac
   </div>;
 }
 
-function formatCost(value: number, digits = 2) { return `$${value.toFixed(digits)}`; }
+/** Cost cell formatter: currency symbol follows the model's pricing currency
+ *  (¥ / $ / "credits"), with extra precision for sub-cent amounts. */
+function formatUsageCost(value: number, currency: string | null) {
+  return formatCostAmount({ amount: value, currency }, value > 0 && value < 0.01 ? 4 : 2);
+}
 function formatPercent(value: number) { return `${(value * 100).toFixed(1)}%`; }

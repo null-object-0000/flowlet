@@ -12,7 +12,9 @@ export type UsageAggregate = {
   unknown: number;
 };
 
-export type UsageBreakdown = UsageAggregate & { key: string; label: string; share: number; brandId?: string };
+export type UsageBreakdown = UsageAggregate & { key: string; label: string; share: number; brandId?: string; currency: string | null };
+export type UsageSummaryTotals = UsageAggregate & { costByCurrency: Record<string, number> };
+export type CostCurrencyLookup = (row: UsageSummaryRow) => string | null;
 export type UsageDay = UsageAggregate & { date: string };
 export type UsageHeatmapCell = { bucket: string; tokens: number; level: 0 | 1 | 2 | 3 | 4; outside: boolean };
 export type UsageHeatmap = {
@@ -35,8 +37,8 @@ export function filterUsageRows(rows: UsageSummaryRow[], period: UsagePeriod, no
   });
 }
 
-export function summarizeUsage(rows: UsageSummaryRow[]): UsageAggregate {
-  return rows.reduce((total, row) => ({
+export function summarizeUsage(rows: UsageSummaryRow[], currencyOf?: CostCurrencyLookup): UsageSummaryTotals {
+  const totals = rows.reduce((total, row) => ({
     cost: total.cost + finite(row.estimated_cost),
     tokens: total.tokens + finite(row.known_tokens),
     inputTokens: total.inputTokens + finite(row.input_tokens),
@@ -47,19 +49,33 @@ export function summarizeUsage(rows: UsageSummaryRow[]): UsageAggregate {
     requests: total.requests + finite(row.request_count),
     unknown: total.unknown + finite(row.unknown_count),
   }), { cost: 0, tokens: 0, inputTokens: 0, cachedInputTokens: 0, uncachedInputTokens: 0, cacheMeasuredInputTokens: 0, outputTokens: 0, requests: 0, unknown: 0 });
+  // Cost totals are only comparable within one currency; keep a per-currency
+  // split (keyed by currency code, "" for unresolvable) alongside the legacy
+  // single sum so views can avoid mixing ¥, $ and credits.
+  const costByCurrency: Record<string, number> = {};
+  if (currencyOf) {
+    for (const row of rows) {
+      const cost = finite(row.estimated_cost);
+      if (cost <= 0) continue;
+      const key = currencyOf(row) ?? "";
+      costByCurrency[key] = (costByCurrency[key] ?? 0) + cost;
+    }
+  }
+  return { ...totals, costByCurrency };
 }
 
-export function groupUsageByModel(rows: UsageSummaryRow[]): UsageBreakdown[] {
+export function groupUsageByModel(rows: UsageSummaryRow[], currencyOf?: CostCurrencyLookup): UsageBreakdown[] {
   return groupUsage(
     rows,
     (row) => `${row.channel_id ?? "unknown-channel"}::${row.upstream_model ?? "unknown-model"}`,
     (row) => row.upstream_model ?? "未知模型",
     (row) => row.channel_id ?? "unknown-channel",
+    currencyOf,
   );
 }
 
-export function groupUsageByChannel(rows: UsageSummaryRow[]): UsageBreakdown[] {
-  return groupUsage(rows, (row) => row.channel_id ?? "unknown-channel", (row) => row.channel_name ?? row.channel_id ?? "未知渠道");
+export function groupUsageByChannel(rows: UsageSummaryRow[], currencyOf?: CostCurrencyLookup): UsageBreakdown[] {
+  return groupUsage(rows, (row) => row.channel_id ?? "unknown-channel", (row) => row.channel_name ?? row.channel_id ?? "未知渠道", undefined, currencyOf);
 }
 
 export function groupUsageByDay(rows: UsageSummaryRow[]): UsageDay[] {
@@ -210,11 +226,15 @@ function groupUsage(
   keyOf: (row: UsageSummaryRow) => string,
   labelOf: (row: UsageSummaryRow) => string,
   brandIdOf?: (row: UsageSummaryRow) => string,
+  currencyOf?: CostCurrencyLookup,
 ): UsageBreakdown[] {
   const groups = new Map<string, Omit<UsageBreakdown, "share">>();
   for (const row of rows) {
     const key = keyOf(row);
-    const current = groups.get(key) ?? { key, label: labelOf(row), brandId: brandIdOf?.(row), ...emptyAggregate() };
+    const current = groups.get(key) ?? { key, label: labelOf(row), brandId: brandIdOf?.(row), currency: null, ...emptyAggregate() };
+    if (currencyOf && current.currency === null && finite(row.estimated_cost) > 0) {
+      current.currency = currencyOf(row);
+    }
     current.cost += finite(row.estimated_cost);
     current.tokens += finite(row.known_tokens);
     current.inputTokens += finite(row.input_tokens);

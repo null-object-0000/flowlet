@@ -79,6 +79,7 @@ export const queryKeys = {
     logCapture: () => [...queryKeys.settings.all, "log-capture"] as const,
     dbStats: () => [...queryKeys.settings.all, "db-stats"] as const,
     storageUsage: () => [...queryKeys.settings.all, "storage-usage"] as const,
+    modelPriceCurrencies: () => [...queryKeys.settings.all, "model-price-currencies"] as const,
     appMeta: (key: string) => [...queryKeys.settings.all, "app-meta", key] as const,
   },
 } as const;

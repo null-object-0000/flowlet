@@ -7,7 +7,7 @@ vi.mock("../../platform/tauri/client", () => ({
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
-import { getAutostartEnabled, getStorageUsage, setAutostartEnabled } from "./commands";
+import { getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, parseModelPriceCurrencies, setAutostartEnabled } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
 
@@ -35,6 +35,40 @@ describe("settings command contract", () => {
     invokeMock.mockResolvedValueOnce(summary);
     await expect(getStorageUsage("scan-1")).resolves.toBe(summary);
     expect(invokeMock).toHaveBeenCalledWith("storage_usage_summary", { scanId: "scan-1" });
+  });
+
+  it("reads model price currencies through the read_config command", async () => {
+    const raw = JSON.stringify({ channels_config: { model_prices: [{ channel_id: "kimi", upstream_model: "kimi-k3", currency: "CNY" }] } });
+    invokeMock.mockResolvedValueOnce(raw);
+    await expect(getModelPriceCurrencies()).resolves.toEqual([{ channel_id: "kimi", upstream_model: "kimi-k3", currency: "CNY" }]);
+    expect(invokeMock).toHaveBeenCalledWith("read_config");
+  });
+});
+
+describe("parseModelPriceCurrencies", () => {
+  it("extracts currencies from channels_config.model_prices and skips malformed entries", () => {
+    const raw = JSON.stringify({
+      channels_config: {
+        model_prices: [
+          { channel_id: "longcat", upstream_model: "LongCat-2.0", currency: "CNY" },
+          { channel_id: "openai-api", upstream_model: "gpt-5.5", currency: "USD" },
+          { channel_id: "codex-native", upstream_model: "gpt-5.5" },
+          { channel_id: "broken" },
+          "garbage",
+        ],
+      },
+    });
+    expect(parseModelPriceCurrencies(raw)).toEqual([
+      { channel_id: "longcat", upstream_model: "LongCat-2.0", currency: "CNY" },
+      { channel_id: "openai-api", upstream_model: "gpt-5.5", currency: "USD" },
+      { channel_id: "codex-native", upstream_model: "gpt-5.5", currency: null },
+    ]);
+  });
+
+  it("returns no currencies for malformed or empty config json", () => {
+    expect(parseModelPriceCurrencies("{oops")).toEqual([]);
+    expect(parseModelPriceCurrencies("{}")).toEqual([]);
+    expect(parseModelPriceCurrencies(JSON.stringify({ model_prices: "nope" }))).toEqual([]);
   });
 });
 

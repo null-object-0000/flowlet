@@ -52,12 +52,13 @@
 .heatmapLegend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-chart-label); }
 .heatmapLegend .heatmapCell { width: 10px; height: 10px; flex: none; }
 .breakdown { min-height: 0; display: grid; grid-template-rows: 32px minmax(0, 1fr); }
-.breakdownHead, .breakdownRow { display: grid; grid-template-columns: minmax(140px, 1fr) 58px 76px 72px 72px; align-items: center; gap: 8px; padding: 0 13px; }
+.breakdownHead, .breakdownRow { display: grid; grid-template-columns: minmax(132px, 1fr) 58px 76px 62px 78px 72px; align-items: center; gap: 8px; padding: 0 13px; }
 .breakdownHead { color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: var(--flowlet-font-size-caption); font-weight: 650; }
 .breakdownList { min-height: 0; overflow: auto; }
 .breakdownRow { min-height: 44px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .modelCell { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--flowlet-color-text); }
 .modelCell strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--flowlet-font-size-body); }
+.costCell { overflow: hidden; color: var(--flowlet-color-text); font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
 .share { display: flex; align-items: center; gap: 5px; }
 .share > i { width: 38px; height: 5px; overflow: hidden; border-radius: 99px; background: var(--flowlet-color-border-strong); }
 .share b { display: block; height: 100%; border-radius: inherit; background: var(--semi-color-primary); }

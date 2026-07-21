@@ -29,9 +29,23 @@ describe("usage presentation", () => {
 
   it("aggregates totals and breakdown shares without fixture data", () => {
     const july = rows.slice(0, 2);
-    expect(summarizeUsage(july)).toEqual({ cost: 0.2, tokens: 2000, inputTokens: 1500, cachedInputTokens: 900, uncachedInputTokens: 600, cacheMeasuredInputTokens: 1500, outputTokens: 500, requests: 5, unknown: 1 });
+    expect(summarizeUsage(july)).toEqual({ cost: 0.2, tokens: 2000, inputTokens: 1500, cachedInputTokens: 900, uncachedInputTokens: 600, cacheMeasuredInputTokens: 1500, outputTokens: 500, requests: 5, unknown: 1, costByCurrency: {} });
     expect(groupUsageByModel(july)[0]).toEqual(expect.objectContaining({ label: "deepseek-v4-pro", share: 1, requests: 5 }));
     expect(groupUsageByChannel(july)[0]).toEqual(expect.objectContaining({ label: "DeepSeek", share: 1, tokens: 2000 }));
+  });
+
+  it("attributes the pricing currency to model and channel groups", () => {
+    const currencyOf = (row: UsageSummaryRow) => (row.upstream_model === "deepseek-v4-pro" ? "CNY" : null);
+    const byModel = groupUsageByModel(rows, currencyOf);
+    expect(byModel.find((item) => item.label === "deepseek-v4-pro")?.currency).toBe("CNY");
+    expect(byModel.find((item) => item.label === "LongCat-2.0")?.currency).toBeNull();
+    const byChannel = groupUsageByChannel(rows, (row) => (row.channel_id === "longcat" ? "CNY" : null));
+    expect(byChannel.find((item) => item.label === "LongCat")?.currency).toBe("CNY");
+  });
+
+  it("splits summary costs by currency", () => {
+    const currencyOf = (row: UsageSummaryRow) => (row.channel_id === "longcat" ? "USD" : "CNY");
+    expect(summarizeUsage(rows, currencyOf).costByCurrency).toEqual({ CNY: 0.2, USD: 0.5 });
   });
 
   it("keeps identical model names from different channels separate for branding", () => {

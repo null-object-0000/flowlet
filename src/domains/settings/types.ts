@@ -20,3 +20,12 @@ export interface StorageUsageSummary {
   categorizedBytes: number;
   categories: StorageUsageCategory[];
 }
+
+/** One entry of `channels_config.model_prices` in config.json — only the
+ *  fields the frontend needs: which currency a model's estimated cost is
+ *  denominated in (e.g. CNY / USD / CREDITS). */
+export interface ModelPriceCurrencyEntry {
+  channel_id: string;
+  upstream_model: string;
+  currency: string | null;
+}

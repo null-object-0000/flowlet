@@ -1,17 +1,17 @@
 .body { display: grid; gap: 16px; }
-.importPanel { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--semi-color-border); border-radius: 8px; background: var(--semi-color-fill-0); }
+.importPanel { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--semi-color-fill-0); }
 .importPanel p { margin: 0; color: var(--semi-color-text-2); font-size: 13px; line-height: 1.6; }
 .importPanel code { color: var(--semi-color-primary); }
 .importActions, .footer { display: flex; justify-content: flex-end; gap: 8px; }
 .error { padding: 8px 10px; border-radius: 6px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); font-size: 12px; }
-.tableScroll { overflow-x: auto; border: 1px solid var(--semi-color-border); border-radius: 8px; }
+.tableScroll { overflow-x: auto; border: 1px solid var(--flowlet-color-border); border-radius: 8px; }
 .table { width: 100%; min-width: 790px; border-collapse: collapse; table-layout: fixed; }
 .table th { padding: 9px 8px; color: var(--semi-color-text-2); background: var(--semi-color-fill-0); font-size: 12px; font-weight: 500; text-align: left; }
-.table td { padding: 8px; border-top: 1px solid var(--semi-color-border); }
+.table td { padding: 8px; border-top: 1px solid var(--flowlet-color-border); }
 .table th:first-child, .table td:first-child { width: 38px; text-align: center; }
 .table th:nth-child(5) { width: 145px; }
 .table th:nth-child(6) { width: 105px; }
 .table th:last-child, .table td:last-child { width: 48px; text-align: center; }
-.empty { padding: 24px; border: 1px dashed var(--semi-color-border); border-radius: 8px; color: var(--semi-color-text-2); text-align: center; }
+.empty { padding: 24px; border: 1px dashed var(--flowlet-color-border); border-radius: 8px; color: var(--semi-color-text-2); text-align: center; }
 .summary { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 11px 13px; border-radius: 8px; color: var(--semi-color-text-2); background: var(--semi-color-fill-0); font-size: 13px; }
 .summary strong { color: var(--semi-color-text-0); }

@@ -4,6 +4,12 @@
 
 * {
   box-sizing: border-box;
+  /* App-wide scrollbar baseline: every scroll container renders the same
+     slim system scrollbar. Lowest specificity on purpose — a component can
+     still opt out with `scrollbar-width: none`. Colors stay `auto` and
+     follow the `color-scheme` set by AppPreferences, so they adapt to the
+     light/dark theme automatically. */
+  scrollbar-width: thin;
 }
 
 html,

@@ -3,16 +3,20 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   applyClaudeCodeGlobalConfig,
   applyOpenCodeGlobalConfig,
+  applyPiGlobalConfig,
   authorizeCodexAccount,
   detectChatGptDesktopEnvironment,
   detectClaudeCodeEnvironment,
   detectOpenCodeEnvironment,
+  detectPiEnvironment,
   inspectClaudeCodeGlobalConfig,
   inspectOpenCodeGlobalConfig,
+  inspectPiGlobalConfig,
   listCachedCodexAccounts,
   queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
   restoreOpenCodeGlobalConfig,
+  restorePiGlobalConfig,
 } from "./commands";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -23,6 +27,7 @@ describe("agent commands", () => {
   it.each([
     [detectClaudeCodeEnvironment, "claude-code"],
     [detectOpenCodeEnvironment, "opencode"],
+    [detectPiEnvironment, "pi"],
     [detectChatGptDesktopEnvironment, "chatgpt-desktop"],
   ] as const)("uses the typed environment boundary for %s", async (call, agentId) => {
     vi.mocked(invoke).mockResolvedValue({
@@ -70,6 +75,16 @@ describe("agent commands", () => {
     vi.mocked(invoke).mockResolvedValue({});
     await call();
     expect(invoke).toHaveBeenCalledWith(command, { agentId: "claude-code" });
+  });
+
+  it.each([
+    [inspectPiGlobalConfig, "inspect_agent_global_config"],
+    [applyPiGlobalConfig, "apply_agent_global_config"],
+    [restorePiGlobalConfig, "restore_agent_global_config"],
+  ] as const)("uses the typed Pi global config boundary", async (call, command) => {
+    vi.mocked(invoke).mockResolvedValue({});
+    await call();
+    expect(invoke).toHaveBeenCalledWith(command, { agentId: "pi" });
   });
 
   it.each([

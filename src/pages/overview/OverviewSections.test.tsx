@@ -15,6 +15,7 @@ vi.mock("lottie-web", () => ({
 vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
   useClaudeCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
   useOpenCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
+  usePiEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
   useChatGptDesktopEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
   useCodexAccounts: () => ({ data: undefined, error: null, isFetching: false, refetch: vi.fn() }),
   useCodexAccountAuthorization: () => ({ isPending: false, mutateAsync: vi.fn() }),
@@ -24,6 +25,11 @@ vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
     restore: { isPending: false, mutateAsync: vi.fn() },
   }),
   useOpenCodeGlobalConfig: () => ({
+    query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
+    apply: { isPending: false, mutateAsync: vi.fn() },
+    restore: { isPending: false, mutateAsync: vi.fn() },
+  }),
+  usePiGlobalConfig: () => ({
     query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
     apply: { isPending: false, mutateAsync: vi.fn() },
     restore: { isPending: false, mutateAsync: vi.fn() },

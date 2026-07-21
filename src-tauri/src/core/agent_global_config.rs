@@ -18,6 +18,10 @@ const OPENCODE_BACKUP_FILE: &str = "opencode-global-config-backup.json";
 const OPENCODE_PROVIDER_ID: &str = "flowlet";
 const OPENCODE_PRIMARY_MODEL: &str = "flowlet/flowlet-pro";
 const OPENCODE_FAST_MODEL: &str = "flowlet/flowlet-flash";
+const PI_BACKUP_FILE: &str = "pi-global-config-backup.json";
+const PI_PROVIDER_ID: &str = "flowlet";
+const PI_PRIMARY_MODEL: &str = "flowlet-pro";
+const PI_FAST_MODEL: &str = "flowlet-flash";
 
 const MANAGED_FIELDS: &[&str] = &[
     "ANTHROPIC_BASE_URL",
@@ -117,6 +121,24 @@ struct OpenCodeConfigBackup {
     flowlet_auth: BackedUpValue,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PiConfigBackup {
+    version: u32,
+    agent_id: String,
+    created_at: String,
+    settings_path: String,
+    models_path: String,
+    auth_path: String,
+    settings_existed: bool,
+    models_existed: bool,
+    auth_existed: bool,
+    providers_existed: bool,
+    default_provider: BackedUpValue,
+    default_model: BackedUpValue,
+    flowlet_provider: BackedUpValue,
+    flowlet_auth: BackedUpValue,
+}
+
 fn config_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -134,6 +156,12 @@ pub fn inspect_agent_global_config(
         "opencode" => inspect_opencode(
             &opencode_settings_path()?,
             &opencode_auth_path()?,
+            expected_base_url,
+        ),
+        "pi" => inspect_pi(
+            &pi_settings_path()?,
+            &pi_models_path()?,
+            &pi_auth_path()?,
             expected_base_url,
         ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
@@ -158,6 +186,13 @@ pub fn apply_agent_global_config(
             expected_base_url,
             client_token,
         ),
+        "pi" => apply_pi(
+            &pi_settings_path()?,
+            &pi_models_path()?,
+            &pi_auth_path()?,
+            expected_base_url,
+            client_token,
+        ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
     }
 }
@@ -174,6 +209,12 @@ pub fn restore_agent_global_config(
         "opencode" => restore_opencode(
             &opencode_settings_path()?,
             &opencode_auth_path()?,
+            expected_base_url,
+        ),
+        "pi" => restore_pi(
+            &pi_settings_path()?,
+            &pi_models_path()?,
+            &pi_auth_path()?,
             expected_base_url,
         ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
@@ -231,6 +272,32 @@ fn opencode_auth_path() -> Result<PathBuf, String> {
                 .join("auth.json")
         })
         .ok_or_else(|| "无法确定 OpenCode 凭据文件路径".to_string())
+}
+
+// Pi 的用户级配置统一位于 `~/.pi/agent/`：`models.json` 声明自定义 Provider，
+// `auth.json`（0600）保存 Provider 凭据，`settings.json` 决定默认 Provider 和模型。
+fn pi_agent_path(file_name: &str) -> Result<PathBuf, String> {
+    let path = dirs::home_dir()
+        .map(|home| home.join(".pi").join("agent").join(file_name))
+        .ok_or_else(|| format!("无法确定 Pi 用户配置路径：{file_name}"))?;
+    if path.exists() {
+        std::fs::canonicalize(&path)
+            .map_err(|error| format!("无法解析 Pi 配置路径 {}：{error}", path.display()))
+    } else {
+        Ok(path)
+    }
+}
+
+fn pi_settings_path() -> Result<PathBuf, String> {
+    pi_agent_path("settings.json")
+}
+
+fn pi_models_path() -> Result<PathBuf, String> {
+    pi_agent_path("models.json")
+}
+
+fn pi_auth_path() -> Result<PathBuf, String> {
+    pi_agent_path("auth.json")
 }
 
 fn inspect_claude_code(
@@ -765,11 +832,12 @@ fn apply_opencode(
     );
     let settings_content = text_file_bytes(&root.to_string());
     let auth_content = json_file_bytes(&auth)?;
-    if let Err(failure) = write_two_files_transactionally(
-        settings_path,
-        Some(settings_content),
-        auth_path,
-        Some(auth_content),
+    if let Err(failure) = write_files_transactionally(
+        "OpenCode 配置与凭据文件",
+        &[
+            (settings_path.to_path_buf(), Some(settings_content)),
+            (auth_path.to_path_buf(), Some(auth_content)),
+        ],
     ) {
         if backup_created && failure.rolled_back {
             let _ = std::fs::remove_file(&backup);
@@ -858,11 +926,361 @@ fn restore_opencode(
     } else {
         Some(json_file_bytes(&auth)?)
     };
-    write_two_files_transactionally(settings_path, settings_content, &auth_path, auth_content)
-        .map_err(|failure| failure.message)?;
+    write_files_transactionally(
+        "OpenCode 配置与凭据文件",
+        &[
+            (settings_path.to_path_buf(), settings_content),
+            (auth_path.to_path_buf(), auth_content),
+        ],
+    )
+    .map_err(|failure| failure.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("配置已恢复，但清理 Flowlet 备份标记失败：{error}"))?;
     inspect_opencode(settings_path, expected_auth_path, expected_base_url)
+}
+
+fn inspect_pi(
+    settings_path: &Path,
+    models_path: &Path,
+    auth_path: &Path,
+    expected_base_url: &str,
+) -> Result<AgentGlobalConfigReport, String> {
+    let backup_available = pi_backup_path(models_path).is_file();
+    let report = |state: AgentGlobalConfigState,
+                  base_url: Option<String>,
+                  api_key_configured: bool,
+                  primary_model: Option<String>,
+                  error: Option<String>| {
+        AgentGlobalConfigReport {
+            agent_id: "pi".to_string(),
+            // UI 的“配置文件”指向真正承载 Flowlet Provider 的 models.json，
+            // 凭据文件指向 auth.json；defaultProvider / defaultModel 位于 settings.json。
+            settings_path: display_path(models_path),
+            credentials_path: Some(display_path(auth_path)),
+            settings_exists: models_path.is_file(),
+            state,
+            base_url,
+            auth_token_configured: api_key_configured,
+            api_key_configured,
+            primary_model,
+            fast_model: None,
+            subagent_model: None,
+            backup_available,
+            external_environment_overrides: Vec::new(),
+            error,
+        }
+    };
+
+    if !models_path.is_file() {
+        return Ok(report(
+            AgentGlobalConfigState::NotConfigured,
+            None,
+            false,
+            None,
+            None,
+        ));
+    }
+
+    let models = match read_settings(models_path) {
+        Ok(models) => models,
+        Err(error) => {
+            return Ok(report(
+                AgentGlobalConfigState::Invalid,
+                None,
+                false,
+                None,
+                Some(error),
+            ));
+        }
+    };
+    let auth = match read_optional_json_object(auth_path) {
+        Ok(auth) => auth,
+        Err(error) => {
+            return Ok(report(
+                AgentGlobalConfigState::Invalid,
+                None,
+                false,
+                None,
+                Some(error),
+            ));
+        }
+    };
+    let settings = match read_optional_json_object(settings_path) {
+        Ok(settings) => settings,
+        Err(error) => {
+            return Ok(report(
+                AgentGlobalConfigState::Invalid,
+                None,
+                false,
+                None,
+                Some(error),
+            ));
+        }
+    };
+
+    let provider = models.pointer("/providers/flowlet");
+    let base_url = provider
+        .and_then(|value| value.get("baseUrl"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned);
+    let api_matches = provider.and_then(|value| value.get("api")).and_then(Value::as_str)
+        == Some("openai-completions");
+    let model_ids = provider
+        .and_then(|value| value.get("models"))
+        .and_then(Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model.get("id").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let models_shape_matches = model_ids.contains(&PI_PRIMARY_MODEL)
+        && model_ids.contains(&PI_FAST_MODEL);
+    let api_key_configured = auth
+        .pointer("/flowlet/key")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    let auth_type_matches =
+        auth.pointer("/flowlet/type").and_then(Value::as_str) == Some("api_key");
+    let default_provider = settings.get("defaultProvider").and_then(Value::as_str);
+    let primary_model = settings
+        .get("defaultModel")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let expected_base_url = normalize_url(expected_base_url);
+    let base_url_matches =
+        base_url.as_deref().map(normalize_url).as_deref() == Some(expected_base_url.as_str());
+    let state = if base_url_matches
+        && api_matches
+        && models_shape_matches
+        && api_key_configured
+        && auth_type_matches
+        && default_provider == Some(PI_PROVIDER_ID)
+        && primary_model.as_deref() == Some(PI_PRIMARY_MODEL)
+    {
+        AgentGlobalConfigState::Flowlet
+    } else if base_url
+        .as_deref()
+        .is_some_and(|value| normalize_url(value) != expected_base_url)
+    {
+        AgentGlobalConfigState::OtherGateway
+    } else if provider.is_some()
+        || auth.get(PI_PROVIDER_ID).is_some()
+        || default_provider == Some(PI_PROVIDER_ID)
+        || primary_model
+            .as_deref()
+            .is_some_and(|model| model.starts_with("flowlet"))
+    {
+        AgentGlobalConfigState::Partial
+    } else {
+        AgentGlobalConfigState::NotConfigured
+    };
+
+    Ok(report(
+        state,
+        base_url,
+        api_key_configured,
+        primary_model,
+        None,
+    ))
+}
+
+fn apply_pi(
+    settings_path: &Path,
+    models_path: &Path,
+    auth_path: &Path,
+    expected_base_url: &str,
+    client_token: &str,
+) -> Result<AgentGlobalConfigReport, String> {
+    if client_token.trim().is_empty() {
+        return Err("Flowlet 默认 Client Token 未配置，无法写入 Pi".to_string());
+    }
+    let settings_existed = settings_path.is_file();
+    let models_existed = models_path.is_file();
+    let auth_existed = auth_path.is_file();
+    let mut settings = read_optional_json_object(settings_path)?;
+    let mut models = read_optional_json_object(models_path)?;
+    let mut auth = read_optional_json_object(auth_path)?;
+    if models
+        .get("providers")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err("Pi models.json 中的 providers 必须是 JSON 对象".to_string());
+    }
+
+    let backup = pi_backup_path(models_path);
+    let backup_created = !backup.is_file();
+    if backup_created {
+        let providers_existed = models.get("providers").is_some();
+        let snapshot = PiConfigBackup {
+            version: BACKUP_VERSION,
+            agent_id: "pi".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            settings_path: display_path(settings_path),
+            models_path: display_path(models_path),
+            auth_path: display_path(auth_path),
+            settings_existed,
+            models_existed,
+            auth_existed,
+            providers_existed,
+            default_provider: backed_up_value(settings.get("defaultProvider")),
+            default_model: backed_up_value(settings.get("defaultModel")),
+            flowlet_provider: backed_up_value(models.pointer("/providers/flowlet")),
+            flowlet_auth: backed_up_value(auth.get(PI_PROVIDER_ID)),
+        };
+        write_json_file(
+            &backup,
+            &serde_json::to_value(snapshot).map_err(|error| error.to_string())?,
+        )?;
+    }
+
+    let providers = models
+        .as_object_mut()
+        .unwrap()
+        .entry("providers")
+        .or_insert_with(|| Value::Object(Map::new()));
+    providers.as_object_mut().unwrap().insert(
+        PI_PROVIDER_ID.to_string(),
+        serde_json::json!({
+            "baseUrl": expected_base_url,
+            "api": "openai-completions",
+            "headers": { "x-flowlet-client": "pi" },
+            "models": [
+                { "id": PI_PRIMARY_MODEL, "name": PI_PRIMARY_MODEL },
+                { "id": PI_FAST_MODEL, "name": PI_FAST_MODEL }
+            ]
+        }),
+    );
+    auth.as_object_mut().unwrap().insert(
+        PI_PROVIDER_ID.to_string(),
+        serde_json::json!({ "type": "api_key", "key": client_token.trim() }),
+    );
+    let settings_object = settings.as_object_mut().unwrap();
+    settings_object.insert(
+        "defaultProvider".to_string(),
+        Value::String(PI_PROVIDER_ID.to_string()),
+    );
+    settings_object.insert(
+        "defaultModel".to_string(),
+        Value::String(PI_PRIMARY_MODEL.to_string()),
+    );
+
+    let writes = vec![
+        (settings_path.to_path_buf(), Some(json_file_bytes(&settings)?)),
+        (models_path.to_path_buf(), Some(json_file_bytes(&models)?)),
+        (auth_path.to_path_buf(), Some(json_file_bytes(&auth)?)),
+    ];
+    if let Err(failure) = write_files_transactionally("Pi 配置、模型与凭据文件", &writes) {
+        if backup_created && failure.rolled_back {
+            let _ = std::fs::remove_file(&backup);
+        }
+        return Err(failure.message);
+    }
+    inspect_pi(settings_path, models_path, auth_path, expected_base_url)
+}
+
+fn restore_pi(
+    settings_path: &Path,
+    models_path: &Path,
+    auth_path: &Path,
+    expected_base_url: &str,
+) -> Result<AgentGlobalConfigReport, String> {
+    let backup_path = pi_backup_path(models_path);
+    if !backup_path.is_file() {
+        return Err("没有可恢复的 Pi 全局配置备份".to_string());
+    }
+    let backup: PiConfigBackup = serde_json::from_value(read_settings(&backup_path)?)
+        .map_err(|error| format!("备份格式无效：{error}"))?;
+    if backup.version != BACKUP_VERSION || backup.agent_id != "pi" {
+        return Err("Pi 全局配置备份版本不受支持".to_string());
+    }
+    if !paths_equal(&PathBuf::from(&backup.settings_path), settings_path)
+        || !paths_equal(&PathBuf::from(&backup.models_path), models_path)
+        || !paths_equal(&PathBuf::from(&backup.auth_path), auth_path)
+    {
+        return Err("Pi 配置备份路径与当前用户配置不一致".to_string());
+    }
+
+    let mut settings = read_optional_json_object(settings_path)?;
+    let mut models = read_optional_json_object(models_path)?;
+    let mut auth = read_optional_json_object(auth_path)?;
+
+    restore_json_property(&mut settings, "defaultProvider", &backup.default_provider);
+    restore_json_property(&mut settings, "defaultModel", &backup.default_model);
+
+    let mut providers_empty = false;
+    if let Some(providers) = models.get_mut("providers").and_then(Value::as_object_mut) {
+        if backup.flowlet_provider.present {
+            providers.insert(
+                PI_PROVIDER_ID.to_string(),
+                backup.flowlet_provider.value.clone(),
+            );
+        } else {
+            providers.remove(PI_PROVIDER_ID);
+        }
+        providers_empty = providers.is_empty();
+    } else if backup.flowlet_provider.present {
+        let mut providers = Map::new();
+        providers.insert(
+            PI_PROVIDER_ID.to_string(),
+            backup.flowlet_provider.value.clone(),
+        );
+        models.as_object_mut()
+            .unwrap()
+            .insert("providers".to_string(), Value::Object(providers));
+    } else {
+        providers_empty = true;
+    }
+    if !backup.providers_existed && providers_empty {
+        models.as_object_mut().unwrap().remove("providers");
+    }
+
+    let auth_object = auth.as_object_mut().unwrap();
+    if backup.flowlet_auth.present {
+        auth_object.insert(PI_PROVIDER_ID.to_string(), backup.flowlet_auth.value.clone());
+    } else {
+        auth_object.remove(PI_PROVIDER_ID);
+    }
+
+    let settings_content =
+        if !backup.settings_existed && settings.as_object().unwrap().is_empty() {
+            None
+        } else {
+            Some(json_file_bytes(&settings)?)
+        };
+    let models_content = if !backup.models_existed && models.as_object().unwrap().is_empty() {
+        None
+    } else {
+        Some(json_file_bytes(&models)?)
+    };
+    let auth_content = if !backup.auth_existed && auth_object.is_empty() {
+        None
+    } else {
+        Some(json_file_bytes(&auth)?)
+    };
+    write_files_transactionally(
+        "Pi 配置、模型与凭据文件",
+        &[
+            (settings_path.to_path_buf(), settings_content),
+            (models_path.to_path_buf(), models_content),
+            (auth_path.to_path_buf(), auth_content),
+        ],
+    )
+    .map_err(|failure| failure.message)?;
+    std::fs::remove_file(&backup_path)
+        .map_err(|error| format!("配置已恢复，但清理 Flowlet 备份标记失败：{error}"))?;
+    inspect_pi(settings_path, models_path, auth_path, expected_base_url)
+}
+
+fn restore_json_property(root: &mut Value, name: &str, backed_up: &BackedUpValue) {
+    let object = root.as_object_mut().unwrap();
+    if backed_up.present {
+        object.insert(name.to_string(), backed_up.value.clone());
+    } else {
+        object.remove(name);
+    }
 }
 
 fn backed_up_value(value: Option<&Value>) -> BackedUpValue {
@@ -996,6 +1414,14 @@ fn opencode_backup_path(settings_path: &Path) -> PathBuf {
         .join(OPENCODE_BACKUP_FILE)
 }
 
+fn pi_backup_path(models_path: &Path) -> PathBuf {
+    models_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(FLOWLET_DIR)
+        .join(PI_BACKUP_FILE)
+}
+
 fn write_json_file(path: &Path, value: &Value) -> Result<(), String> {
     write_bytes_file(path, &json_file_bytes(value)?)
 }
@@ -1042,46 +1468,43 @@ struct TransactionFailure {
     rolled_back: bool,
 }
 
-fn write_two_files_transactionally(
-    first_path: &Path,
-    first_content: Option<Vec<u8>>,
-    second_path: &Path,
-    second_content: Option<Vec<u8>>,
+// 依次写入多个配置文件；任一写入失败时，将此前已写入的文件恢复到写入前快照。
+// `description` 用于向用户说明被回滚的是哪组文件。
+fn write_files_transactionally(
+    description: &str,
+    writes: &[(PathBuf, Option<Vec<u8>>)],
 ) -> Result<(), TransactionFailure> {
-    let first_snapshot = capture_file(first_path).map_err(|message| TransactionFailure {
-        message,
-        rolled_back: true,
-    })?;
-    let second_snapshot = capture_file(second_path).map_err(|message| TransactionFailure {
-        message,
-        rolled_back: true,
-    })?;
-    write_optional_file(first_path, first_content.as_deref()).map_err(|message| {
-        TransactionFailure {
+    let snapshots = writes
+        .iter()
+        .map(|(path, _)| capture_file(path))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|message| TransactionFailure {
             message,
             rolled_back: true,
-        }
-    })?;
-    if let Err(write_error) = write_optional_file(second_path, second_content.as_deref()) {
-        let first_rollback = write_optional_file(first_path, first_snapshot.as_deref());
-        let second_rollback = write_optional_file(second_path, second_snapshot.as_deref());
-        let rollback_errors = [first_rollback.err(), second_rollback.err()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-        if rollback_errors.is_empty() {
+        })?;
+    for (index, (path, content)) in writes.iter().enumerate() {
+        if let Err(write_error) = write_optional_file(path, content.as_deref()) {
+            let rollback_errors = writes
+                .iter()
+                .take(index)
+                .zip(snapshots.iter())
+                .map(|((path, _), snapshot)| write_optional_file(path, snapshot.as_deref()))
+                .filter_map(Result::err)
+                .collect::<Vec<_>>();
+            if rollback_errors.is_empty() {
+                return Err(TransactionFailure {
+                    message: format!("{write_error}；已回滚 {description}"),
+                    rolled_back: true,
+                });
+            }
             return Err(TransactionFailure {
-                message: format!("{write_error}；已回滚 OpenCode 配置与凭据文件"),
-                rolled_back: true,
+                message: format!(
+                    "{write_error}；自动回滚失败：{}",
+                    rollback_errors.join("；")
+                ),
+                rolled_back: false,
             });
         }
-        return Err(TransactionFailure {
-            message: format!(
-                "{write_error}；自动回滚失败：{}",
-                rollback_errors.join("；")
-            ),
-            rolled_back: false,
-        });
     }
     Ok(())
 }
@@ -1399,6 +1822,159 @@ mod tests {
         assert!(!auth_path.exists());
 
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    fn test_pi_paths() -> (PathBuf, PathBuf, PathBuf) {
+        let directory = std::env::temp_dir().join(format!(
+            "flowlet-pi-global-config-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        (
+            directory.join("settings.json"),
+            directory.join("models.json"),
+            directory.join("auth.json"),
+        )
+    }
+
+    #[test]
+    fn applies_and_restores_pi_models_auth_and_settings() {
+        let (settings_path, models_path, auth_path) = test_pi_paths();
+        std::fs::write(
+            &settings_path,
+            r#"{"theme":"dark","defaultProvider":"anthropic","defaultModel":"claude-sonnet-4-5"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &models_path,
+            r#"{"providers":{"other":{"baseUrl":"https://other.example","api":"openai-completions","models":[{"id":"m1"}]},"flowlet":{"baseUrl":"https://old.example/v1","api":"openai-completions","models":[{"id":"old-model"}]}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &auth_path,
+            r#"{"other":{"type":"api_key","key":"keep"},"flowlet":{"type":"api_key","key":"old"}}"#,
+        )
+        .unwrap();
+
+        let applied = apply_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-token",
+        )
+        .unwrap();
+        assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+        assert!(applied.backup_available);
+        let models = read_settings(&models_path).unwrap();
+        assert_eq!(
+            models["providers"]["flowlet"]["baseUrl"],
+            "http://127.0.0.1:18640/v1"
+        );
+        assert_eq!(models["providers"]["flowlet"]["api"], "openai-completions");
+        assert_eq!(
+            models["providers"]["flowlet"]["headers"]["x-flowlet-client"],
+            "pi"
+        );
+        let model_ids = models["providers"]["flowlet"]["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|model| model["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(model_ids, vec![PI_PRIMARY_MODEL, PI_FAST_MODEL]);
+        assert_eq!(models["providers"]["other"]["baseUrl"], "https://other.example");
+        let auth = read_settings(&auth_path).unwrap();
+        assert_eq!(auth["flowlet"]["type"], "api_key");
+        assert_eq!(auth["flowlet"]["key"], "flowlet-token");
+        assert_eq!(auth["other"]["key"], "keep");
+        let settings = read_settings(&settings_path).unwrap();
+        assert_eq!(settings["defaultProvider"], PI_PROVIDER_ID);
+        assert_eq!(settings["defaultModel"], PI_PRIMARY_MODEL);
+        assert_eq!(settings["theme"], "dark");
+
+        let restored = restore_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::OtherGateway);
+        assert!(!restored.backup_available);
+        let models = read_settings(&models_path).unwrap();
+        assert_eq!(
+            models["providers"]["flowlet"]["baseUrl"],
+            "https://old.example/v1"
+        );
+        assert_eq!(models["providers"]["flowlet"]["models"][0]["id"], "old-model");
+        let auth = read_settings(&auth_path).unwrap();
+        assert_eq!(auth["flowlet"]["key"], "old");
+        let settings = read_settings(&settings_path).unwrap();
+        assert_eq!(settings["defaultProvider"], "anthropic");
+        assert_eq!(settings["defaultModel"], "claude-sonnet-4-5");
+
+        let _ = std::fs::remove_dir_all(settings_path.parent().unwrap());
+    }
+
+    #[test]
+    fn removes_pi_files_created_only_for_flowlet() {
+        let (settings_path, models_path, auth_path) = test_pi_paths();
+        let directory = settings_path.parent().unwrap().to_path_buf();
+
+        apply_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-token",
+        )
+        .unwrap();
+        assert!(settings_path.is_file());
+        assert!(models_path.is_file());
+        assert!(auth_path.is_file());
+
+        let restored = restore_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+        assert!(!settings_path.exists());
+        assert!(!models_path.exists());
+        assert!(!auth_path.exists());
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn reports_pi_partial_state_without_default_provider() {
+        let (settings_path, models_path, auth_path) = test_pi_paths();
+        std::fs::write(
+            &models_path,
+            r#"{"providers":{"flowlet":{"baseUrl":"http://127.0.0.1:18640/v1","api":"openai-completions","models":[{"id":"flowlet-pro"},{"id":"flowlet-flash"}]}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &auth_path,
+            r#"{"flowlet":{"type":"api_key","key":"flowlet-token"}}"#,
+        )
+        .unwrap();
+        // settings.json 缺失 defaultProvider / defaultModel，配置不完整。
+
+        let inspected = inspect_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
+        assert_eq!(inspected.state, AgentGlobalConfigState::Partial);
+        assert!(inspected.api_key_configured);
+
+        let _ = std::fs::remove_dir_all(settings_path.parent().unwrap());
     }
 
     #[test]

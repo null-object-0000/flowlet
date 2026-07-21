@@ -14,6 +14,8 @@ import {
   useCodexAccounts,
   useOpenCodeEnvironment,
   useOpenCodeGlobalConfig,
+  usePiEnvironment,
+  usePiGlobalConfig,
 } from "./useAgentEnvironment";
 
 type SupportedAgentKind = AgentKind | "chatgpt-desktop";
@@ -23,24 +25,35 @@ const AGENTS: Array<{
   icon: React.ReactNode;
   iconClassName: string;
   kind: SupportedAgentKind;
+  supportsDesktop: boolean;
 }> = [
   {
     name: "Claude Code",
     icon: <span className={`${styles.brandIcon} ${styles.claudeCodeMark}`} aria-hidden="true" />,
     iconClassName: styles.claudeIcon,
     kind: "claude-code",
+    supportsDesktop: false,
   },
   {
     name: "OpenCode",
     icon: <span className={`${styles.brandIcon} ${styles.openCodeMark}`} aria-hidden="true" />,
     iconClassName: styles.openCodeIcon,
     kind: "opencode",
+    supportsDesktop: true,
+  },
+  {
+    name: "Pi",
+    icon: <span className={`${styles.brandIcon} ${styles.piMark}`} aria-hidden="true" />,
+    iconClassName: styles.piIcon,
+    kind: "pi",
+    supportsDesktop: false,
   },
   {
     name: "ChatGPT (Codex)",
     icon: <span className={`${styles.brandIcon} ${styles.chatgptMark}`} aria-hidden="true" />,
     iconClassName: styles.chatgptIcon,
     kind: "chatgpt-desktop",
+    supportsDesktop: true,
   },
 ];
 
@@ -54,11 +67,13 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const [selectedAgent, setSelectedAgent] = useState<SupportedAgentKind | null>(null);
   const claudeEnvironment = useClaudeCodeEnvironment();
   const openCodeEnvironment = useOpenCodeEnvironment();
+  const piEnvironment = usePiEnvironment();
   const chatGptEnvironment = useChatGptDesktopEnvironment();
   const codexAccounts = useCodexAccounts(selectedAgent === "chatgpt-desktop");
   const codexAccountAuthorization = useCodexAccountAuthorization();
   const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
   const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
+  const piGlobalConfig = usePiGlobalConfig(selectedAgent === "pi");
 
   const copy = async (value: string, message: string) => {
     try {
@@ -69,9 +84,21 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
     }
   };
 
-  const activeGlobalConfig = selectedAgent === "opencode" ? openCodeGlobalConfig : claudeGlobalConfig;
-  const activeEnvironment = selectedAgent === "opencode" ? openCodeEnvironment : claudeEnvironment;
-  const activeAgentName = selectedAgent === "opencode" ? "OpenCode" : "Claude Code";
+  const activeGlobalConfig = selectedAgent === "opencode"
+    ? openCodeGlobalConfig
+    : selectedAgent === "pi"
+      ? piGlobalConfig
+      : claudeGlobalConfig;
+  const activeEnvironment = selectedAgent === "opencode"
+    ? openCodeEnvironment
+    : selectedAgent === "pi"
+      ? piEnvironment
+      : claudeEnvironment;
+  const activeAgentName = selectedAgent === "opencode"
+    ? "OpenCode"
+    : selectedAgent === "pi"
+      ? "Pi"
+      : "Claude Code";
 
   const applyGlobalConfig = async () => {
     try {
@@ -105,12 +132,14 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
     <>
       <OverviewModuleCard title={t("AI Agent 接入")}>
         <div className={styles.grid}>
-          {AGENTS.map(({ name, icon, iconClassName, kind }) => {
+          {AGENTS.map(({ name, icon, iconClassName, kind, supportsDesktop }) => {
             const environmentQuery = kind === "claude-code"
               ? claudeEnvironment
               : kind === "opencode"
                 ? openCodeEnvironment
-                : chatGptEnvironment;
+                : kind === "pi"
+                  ? piEnvironment
+                  : chatGptEnvironment;
             return (
               <button
                 key={name}
@@ -136,7 +165,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                       environment={environmentQuery.data}
                       loading={environmentQuery.isLoading}
                       error={environmentQuery.isError}
-                      unsupported={kind === "claude-code"}
+                      unsupported={!supportsDesktop}
                     />
                   </span>
                 </span>
@@ -148,8 +177,8 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       </OverviewModuleCard>
 
       <AgentAccessSideSheet
-        visible={selectedAgent === "claude-code" || selectedAgent === "opencode"}
-        agent={selectedAgent === "opencode" ? "opencode" : "claude-code"}
+        visible={selectedAgent === "claude-code" || selectedAgent === "opencode" || selectedAgent === "pi"}
+        agent={selectedAgent === "opencode" ? "opencode" : selectedAgent === "pi" ? "pi" : "claude-code"}
         baseUrl={baseUrl}
         clientToken={clientToken}
         environment={activeEnvironment.data}

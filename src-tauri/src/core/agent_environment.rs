@@ -67,6 +67,7 @@ pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironment
     match agent_id {
         "claude-code" => Ok(detect_claude_code().await),
         "opencode" => Ok(detect_opencode().await),
+        "pi" => Ok(detect_pi().await),
         "chatgpt-desktop" => Ok(detect_chatgpt_codex().await),
         _ => Err(format!("暂不支持检测 Agent：{agent_id}")),
     }
@@ -357,10 +358,84 @@ async fn detect_opencode() -> AgentEnvironmentReport {
     }
 }
 
+async fn detect_pi() -> AgentEnvironmentReport {
+    let mut installations = Vec::new();
+    for candidate in pi_cli_candidates() {
+        let install_method = classify_pi_cli_method(&candidate.path);
+        let install_dir = resolve_pi_install_dir(&candidate.path, &install_method);
+        let package_version = read_package_version(&install_dir);
+        let version_result = read_version(&candidate.path).await;
+        let (version, version_output, error) = match version_result {
+            Ok(output) => (parse_version(&output).or(package_version), Some(output), None),
+            Err(_) if package_version.is_some() => (package_version, None, None),
+            Err(error) => (None, None, Some(error)),
+        };
+        installations.push(AgentInstallation {
+            surface: AgentSurface::Cli,
+            executable_path: display_path(&candidate.path),
+            install_dir: display_path(&install_dir),
+            install_method,
+            version,
+            version_output,
+            available_on_path: candidate.available_on_path,
+            error,
+        });
+    }
+
+    let primary = installations
+        .iter()
+        .find(|installation| installation.available_on_path && installation.version.is_some())
+        .or_else(|| {
+            installations
+                .iter()
+                .find(|installation| installation.version.is_some())
+        })
+        .or_else(|| {
+            installations
+                .iter()
+                .find(|installation| installation.available_on_path)
+        })
+        .or_else(|| installations.first())
+        .cloned();
+
+    AgentEnvironmentReport {
+        agent_id: "pi".to_string(),
+        agent_name: "Pi".to_string(),
+        installed: !installations.is_empty(),
+        primary,
+        installations,
+    }
+}
+
 #[derive(Debug)]
 struct Candidate {
     path: PathBuf,
     available_on_path: bool,
+}
+
+fn pi_cli_candidates() -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            for file_name in executable_names("pi") {
+                push_candidate(&mut candidates, &mut seen, directory.join(file_name), true);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        for relative in known_pi_cli_locations() {
+            push_candidate(&mut candidates, &mut seen, home.join(relative), false);
+        }
+    }
+    #[cfg(windows)]
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        let directory = PathBuf::from(app_data).join("npm");
+        for file_name in executable_names("pi") {
+            push_candidate(&mut candidates, &mut seen, directory.join(file_name), false);
+        }
+    }
+    candidates
 }
 
 fn opencode_cli_candidates() -> Vec<Candidate> {
@@ -585,6 +660,18 @@ fn known_codex_cli_locations() -> &'static [&'static str] {
     &[".local/bin/codex"]
 }
 
+// Pi 官方安装脚本优先使用 npm 全局前缀，不可写时回退到 `$HOME/.local`，
+// 因此独立安装的二进制通常位于 `~/.local/bin/pi`。
+#[cfg(windows)]
+fn known_pi_cli_locations() -> &'static [&'static str] {
+    &[".local/bin/pi.exe", ".local/bin/pi.cmd"]
+}
+
+#[cfg(not(windows))]
+fn known_pi_cli_locations() -> &'static [&'static str] {
+    &[".local/bin/pi"]
+}
+
 #[cfg(not(windows))]
 fn known_opencode_cli_locations() -> &'static [&'static str] {
     &[
@@ -742,6 +829,38 @@ fn classify_codex_cli_method(path: &Path) -> AgentInstallMethod {
     }
 }
 
+fn classify_pi_cli_method(path: &Path) -> AgentInstallMethod {
+    let normalized = normalized_path_key(path);
+    if normalized.contains("/node_modules/@earendil-works/pi-coding-agent")
+        || normalized.ends_with("/npm/pi.cmd")
+        || normalized.ends_with("/npm/pi.ps1")
+        || normalized.ends_with("/npm/pi")
+    {
+        AgentInstallMethod::Npm
+    } else if normalized.ends_with("/.local/bin/pi") || normalized.ends_with("/.local/bin/pi.exe") {
+        AgentInstallMethod::Native
+    } else if normalized.starts_with("/usr/bin/") || normalized.starts_with("/usr/local/bin/") {
+        AgentInstallMethod::SystemPackage
+    } else {
+        AgentInstallMethod::Unknown
+    }
+}
+
+fn resolve_pi_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBuf {
+    if matches!(method, AgentInstallMethod::Npm) {
+        if let Some(bin_dir) = path.parent() {
+            let package_dir = bin_dir
+                .join("node_modules")
+                .join("@earendil-works")
+                .join("pi-coding-agent");
+            if package_dir.is_dir() {
+                return package_dir;
+            }
+        }
+    }
+    path.parent().unwrap_or(path).to_path_buf()
+}
+
 fn desktop_version(path: &Path) -> Option<String> {
     #[cfg(windows)]
     if let Some(version) = windows_file_version(path) {
@@ -883,8 +1002,8 @@ async fn read_version(path: &Path) -> Result<String, String> {
         .map_err(|_| "版本检测超时".to_string())?
         .map_err(|error| format!("无法执行版本命令：{error}"))?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = decode_process_output(&output.stdout);
+    let stderr = decode_process_output(&output.stderr);
     let text = if !stdout.is_empty() { stdout } else { stderr };
     if !output.status.success() {
         return Err(if text.is_empty() {
@@ -990,6 +1109,50 @@ fn parse_version(output: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+// 子进程输出优先按 UTF-8 解释；中文 Windows 下 cmd.exe / .cmd 垫片在版本探测
+// 失败时输出的是系统 ANSI 代码页（GBK）文本，直接 lossy 解码会产生成片替换符
+// （乱码），故在 UTF-8 非法时回退到 MultiByteToWideChar(CP_ACP)。
+fn decode_process_output(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.trim().to_string();
+    }
+    #[cfg(windows)]
+    {
+        return decode_windows_acp(bytes).trim().to_string();
+    }
+    #[cfg(not(windows))]
+    String::from_utf8_lossy(bytes).trim().to_string()
+}
+
+#[cfg(windows)]
+fn decode_windows_acp(bytes: &[u8]) -> String {
+    use windows_sys::Win32::Globalization::{MultiByteToWideChar, CP_ACP};
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let byte_len = bytes.len().min(i32::MAX as usize) as i32;
+    let required =
+        unsafe { MultiByteToWideChar(CP_ACP, 0, bytes.as_ptr(), byte_len, std::ptr::null_mut(), 0) };
+    if required <= 0 {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    let mut wide = vec![0_u16; required as usize];
+    let written = unsafe {
+        MultiByteToWideChar(
+            CP_ACP,
+            0,
+            bytes.as_ptr(),
+            byte_len,
+            wide.as_mut_ptr(),
+            required,
+        )
+    };
+    if written <= 0 {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    String::from_utf16_lossy(&wide[..written as usize])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1008,6 +1171,20 @@ mod tests {
             parse_version("opencode 1.17.18"),
             Some("1.17.18".to_string())
         );
+    }
+
+    #[test]
+    fn decodes_valid_utf8_output_unchanged() {
+        assert_eq!(decode_process_output(b"  pi 0.42.1\n"), "pi 0.42.1");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn decodes_gbk_process_output_on_windows() {
+        // “不是” 的 GBK 字节，直接按 UTF-8 解释会得到替换符乱码。
+        let gbk = [0xB2_u8, 0xBB, 0xCA, 0xC7];
+        assert_eq!(decode_windows_acp(&gbk), "不是");
+        assert_eq!(decode_process_output(&gbk), "不是");
     }
 
     #[test]
@@ -1049,6 +1226,20 @@ mod tests {
                 "C:/Users/test/AppData/Local/Programs/OpenAI/Codex/bin/codex.exe"
             )),
             AgentInstallMethod::Native
+        );
+        assert_eq!(
+            classify_pi_cli_method(Path::new("C:/Users/test/AppData/Roaming/npm/pi.cmd")),
+            AgentInstallMethod::Npm
+        );
+        assert_eq!(
+            classify_pi_cli_method(Path::new("/Users/test/.local/bin/pi")),
+            AgentInstallMethod::Native
+        );
+        assert_eq!(
+            classify_pi_cli_method(Path::new(
+                "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/bin/pi.js"
+            )),
+            AgentInstallMethod::Npm
         );
     }
 

@@ -304,6 +304,53 @@ fn ua_skip_disabled_and_empty_pattern() {
 }
 
 #[test]
+fn agent_marker_header_identifies_pi_and_beats_ua_rules() {
+    let mut headers = HeaderMap::new();
+    // Pi 走 OpenAI SDK，UA 是通用的 OpenAI/JS；标记头应优先归属为 Pi。
+    headers.insert(header::USER_AGENT, HeaderValue::from_static("OpenAI/JS 6.26.0"));
+    headers.insert("x-flowlet-client", HeaderValue::from_static("pi"));
+    let rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    assert_eq!(
+        identify_client_agent(&headers, &rules),
+        Some(("pi".to_string(), "Pi".to_string()))
+    );
+}
+
+#[test]
+fn agent_marker_header_unknown_value_uses_value_as_name() {
+    let mut headers = HeaderMap::new();
+    headers.insert("x-flowlet-client", HeaderValue::from_static("  FutureAgent  "));
+
+    assert_eq!(
+        identify_client_agent(&headers, &[]),
+        Some(("futureagent".to_string(), "FutureAgent".to_string()))
+    );
+}
+
+#[test]
+fn agent_marker_falls_back_to_ua_when_absent() {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::USER_AGENT, HeaderValue::from_static("opencode/1.0"));
+    let rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    assert_eq!(
+        identify_client_agent(&headers, &rules),
+        Some(("opencode".to_string(), "OpenCode".to_string()))
+    );
+}
+
+#[test]
 fn extracts_openai_usage() {
     let usage = extract_response_usage(
         br#"{"id":"chatcmpl","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"#,

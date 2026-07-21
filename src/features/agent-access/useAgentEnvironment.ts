@@ -2,16 +2,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   applyClaudeCodeGlobalConfig,
   applyOpenCodeGlobalConfig,
+  applyPiGlobalConfig,
   authorizeCodexAccount,
   detectChatGptDesktopEnvironment,
   detectClaudeCodeEnvironment,
   detectOpenCodeEnvironment,
+  detectPiEnvironment,
   inspectClaudeCodeGlobalConfig,
   inspectOpenCodeGlobalConfig,
+  inspectPiGlobalConfig,
   listCachedCodexAccounts,
   queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
   restoreOpenCodeGlobalConfig,
+  restorePiGlobalConfig,
 } from "../../domains/agent/commands";
 import { queryKeys } from "../../shared/query-keys";
 
@@ -28,6 +32,15 @@ export function useOpenCodeEnvironment() {
   return useQuery({
     queryKey: queryKeys.agent.environment("opencode"),
     queryFn: detectOpenCodeEnvironment,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function usePiEnvironment() {
+  return useQuery({
+    queryKey: queryKeys.agent.environment("pi"),
+    queryFn: detectPiEnvironment,
     staleTime: 60_000,
     retry: 1,
   });
@@ -84,6 +97,28 @@ export function useOpenCodeGlobalConfig(enabled = true) {
   });
   const restore = useMutation({
     mutationFn: restoreOpenCodeGlobalConfig,
+    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
+  });
+
+  return { query, apply, restore };
+}
+
+export function usePiGlobalConfig(enabled = true) {
+  const queryClient = useQueryClient();
+  const queryKey = queryKeys.agent.globalConfig("pi");
+  const query = useQuery({
+    queryKey,
+    queryFn: inspectPiGlobalConfig,
+    enabled,
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const apply = useMutation({
+    mutationFn: applyPiGlobalConfig,
+    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
+  });
+  const restore = useMutation({
+    mutationFn: restorePiGlobalConfig,
     onSuccess: (report) => queryClient.setQueryData(queryKey, report),
   });
 

@@ -14,8 +14,60 @@ import type {
 const { Text, Title } = Typography;
 const MASKED_TOKEN = "••••••••••••••••••••";
 
-export type AgentKind = "claude-code" | "opencode";
+export type AgentKind = "claude-code" | "opencode" | "pi";
 type Copy = (value: string, message: string) => Promise<void>;
+
+type AgentMeta = {
+  name: string;
+  endpointSuffix: "/anthropic" | "/v1";
+  supportsDesktop: boolean;
+  showsCredentialsFile: boolean;
+  showsSubagentModel: boolean;
+  environmentDescription: string;
+  notInstalledText: string;
+  globalConfigDescription: string;
+  manualDescription: string;
+  restartTip: string;
+};
+
+const AGENT_META: Record<AgentKind, AgentMeta> = {
+  "claude-code": {
+    name: "Claude Code",
+    endpointSuffix: "/anthropic",
+    supportsDesktop: false,
+    showsCredentialsFile: false,
+    showsSubagentModel: true,
+    environmentDescription: "识别 Claude Code 的安装位置、版本和安装方式",
+    notInstalledText: "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。",
+    globalConfigDescription: "配置后可从任意终端或 IDE 启动 Claude Code",
+    manualDescription: "以下内容与一键写入的 Claude Code 全局配置一致",
+    restartTip: "修改全局配置后请重新启动 Claude Code。",
+  },
+  opencode: {
+    name: "OpenCode",
+    endpointSuffix: "/v1",
+    supportsDesktop: true,
+    showsCredentialsFile: true,
+    showsSubagentModel: false,
+    environmentDescription: "识别 OpenCode CLI 与 Desktop 的安装位置和版本",
+    notInstalledText: "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。",
+    globalConfigDescription: "OpenCode CLI 与 Desktop 共用此全局配置",
+    manualDescription: "OpenCode 的 Provider 配置与凭据文件需要分别设置",
+    restartTip: "修改全局配置后请重新启动 OpenCode CLI 与 Desktop。",
+  },
+  pi: {
+    name: "Pi",
+    endpointSuffix: "/v1",
+    supportsDesktop: false,
+    showsCredentialsFile: true,
+    showsSubagentModel: false,
+    environmentDescription: "识别 Pi CLI 的安装位置和版本",
+    notInstalledText: "未检测到 Pi。Flowlet 会检查 PATH 和常见安装位置。",
+    globalConfigDescription: "Pi 的 Provider 定义在 models.json，凭据在 auth.json，默认模型在 settings.json",
+    manualDescription: "Pi 的 models.json、auth.json 与 settings.json 需要分别设置",
+    restartTip: "修改全局配置后请重新启动 Pi。",
+  },
+};
 
 type Props = {
   visible: boolean;
@@ -59,14 +111,14 @@ export function AgentAccessSideSheet({
   const { t } = useAppPreferences();
   const [surface, setSurface] = useState<"cli" | "desktop">("cli");
 
-  const isClaude = agent === "claude-code";
-  const name = isClaude ? "Claude Code" : "OpenCode";
-  const endpoint = `${baseUrl}${isClaude ? "/anthropic" : "/v1"}`;
+  const meta = AGENT_META[agent];
+  const name = meta.name;
+  const endpoint = `${baseUrl}${meta.endpointSuffix}`;
   const token = clientToken || "<Client Token>";
   const displayedToken = clientToken ? MASKED_TOKEN : token;
   const manualSnippets = useMemo(
-    () => buildManualSnippets(isClaude, endpoint, token, displayedToken, t),
-    [displayedToken, endpoint, isClaude, t, token],
+    () => buildManualSnippets(agent, endpoint, token, displayedToken, t),
+    [agent, displayedToken, endpoint, t, token],
   );
 
   useEffect(() => {
@@ -91,7 +143,7 @@ export function AgentAccessSideSheet({
           onChange={(key) => setSurface(key as "cli" | "desktop")}
         >
           <Tabs.TabPane tab={t("{name} CLI 接入", { name })} itemKey="cli" />
-          <Tabs.TabPane tab={t("{name} Desktop 接入", { name })} itemKey="desktop" disabled={isClaude} />
+          <Tabs.TabPane tab={t("{name} Desktop 接入", { name })} itemKey="desktop" disabled={!meta.supportsDesktop} />
         </Tabs>
       }
       headerStyle={{ paddingBottom: 0 }}
@@ -106,7 +158,7 @@ export function AgentAccessSideSheet({
               <div>
                 <Title heading={5}>{t("本机环境")}</Title>
                 <Text type="tertiary" size="small">
-                  {t(isClaude ? "识别 Claude Code 的安装位置、版本和安装方式" : "识别 OpenCode CLI 与 Desktop 的安装位置和版本")}
+                  {t(meta.environmentDescription)}
                 </Text>
               </div>
               <Button
@@ -122,7 +174,7 @@ export function AgentAccessSideSheet({
             {environmentError ? <Text className={styles.environmentMessage} type="danger">{t("检测失败：{message}", { message: environmentError })}</Text> : null}
             {!environmentError && !environmentLoading && !environment?.installed ? (
               <Text className={styles.environmentMessage} type="tertiary">
-                {t(isClaude ? "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。" : "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。")}
+                {t(meta.notInstalledText)}
               </Text>
             ) : null}
             {!environmentError && !environmentLoading && environment?.installed && !surfaceInstallations?.length ? (
@@ -160,7 +212,7 @@ export function AgentAccessSideSheet({
               <div>
                 <Title heading={5}>{t("全局配置")}</Title>
                 <Text type="tertiary" size="small">
-                  {t(isClaude ? "配置后可从任意终端或 IDE 启动 Claude Code" : "OpenCode CLI 与 Desktop 共用此全局配置")}
+                  {t(meta.globalConfigDescription)}
                 </Text>
               </div>
               <Button
@@ -185,7 +237,7 @@ export function AgentAccessSideSheet({
                   value={globalConfig.settings_path}
                   onCopy={() => onCopy(globalConfig.settings_path, t("{label} 已复制", { label: t("配置文件") }))}
                 />
-                {!isClaude && globalConfig.credentials_path ? (
+                {meta.showsCredentialsFile && globalConfig.credentials_path ? (
                   <ConfigRow
                     label={t("凭据文件")}
                     value={globalConfig.credentials_path}
@@ -196,7 +248,7 @@ export function AgentAccessSideSheet({
                 <StatusRow label="Client Token" value={t(globalConfig.auth_token_configured ? "已配置（内容已隐藏）" : "未配置")} />
                 <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
                 <StatusRow label={t("快速模型")} value={globalConfig.fast_model || "-"} />
-                {isClaude ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}
+                {meta.showsSubagentModel ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}
                 {globalConfig.error ? <Text type="danger">{globalConfig.error}</Text> : null}
                 {globalConfig.external_environment_overrides.length ? (
                   <div className={styles.configWarning}>
@@ -231,7 +283,7 @@ export function AgentAccessSideSheet({
         <section className={styles.section}>
           <Title heading={5}>{t("手动配置")}</Title>
           <Text type="tertiary" size="small">
-            {t(isClaude ? "以下内容与一键写入的 Claude Code 全局配置一致" : "OpenCode 的 Provider 配置与凭据文件需要分别设置")}
+            {t(meta.manualDescription)}
           </Text>
           <div className={styles.snippetList}>
             {manualSnippets.map((snippet) => (
@@ -257,7 +309,7 @@ export function AgentAccessSideSheet({
           <Title heading={5}>{t("使用提示")}</Title>
           <ul>
             <li>{t("Client Token 用于访问本地 Flowlet，不是上游渠道的 API Key。")}</li>
-            <li>{t(isClaude ? "修改全局配置后请重新启动 Claude Code。" : "修改全局配置后请重新启动 OpenCode CLI 与 Desktop。")}</li>
+            <li>{t(meta.restartTip)}</li>
             {!clientToken ? <li>{t("当前未配置默认 Client Token，请先在客户端设置中完成配置。")}</li> : null}
           </ul>
         </section>
@@ -298,18 +350,23 @@ function installationTitle(
   version: string | null | undefined,
   t: (source: string) => string,
 ) {
-  const name = agent === "claude-code" ? "Claude Code" : surface === "desktop" ? "OpenCode Desktop" : "OpenCode CLI";
+  const base = AGENT_META[agent].name;
+  const name = agent === "claude-code"
+    ? "Claude Code"
+    : surface === "desktop"
+      ? `${base} Desktop`
+      : `${base} CLI`;
   return version ? `${name} ${version}` : t(`${name} 安装`);
 }
 
 function buildManualSnippets(
-  isClaude: boolean,
+  agent: AgentKind,
   endpoint: string,
   token: string,
   displayedToken: string,
   t: (source: string) => string,
 ) {
-  if (isClaude) {
+  if (agent === "claude-code") {
     const value = (authToken: string) => JSON.stringify({
       env: {
         ANTHROPIC_BASE_URL: endpoint,
@@ -327,6 +384,45 @@ function buildManualSnippets(
       displayValue: value(displayedToken),
       copyValue: value(token),
     }];
+  }
+  if (agent === "pi") {
+    const modelsConfig = JSON.stringify({
+      providers: {
+        flowlet: {
+          baseUrl: endpoint,
+          api: "openai-completions",
+          headers: { "x-flowlet-client": "pi" },
+          models: [
+            { id: "flowlet-pro", name: "flowlet-pro" },
+            { id: "flowlet-flash", name: "flowlet-flash" },
+          ],
+        },
+      },
+    }, null, 2);
+    const credentials = (apiKey: string) => JSON.stringify({
+      flowlet: { type: "api_key", key: apiKey },
+    }, null, 2);
+    const defaults = JSON.stringify({
+      defaultProvider: "flowlet",
+      defaultModel: "flowlet-pro",
+    }, null, 2);
+    return [
+      {
+        label: t("models.json Provider 片段"),
+        displayValue: modelsConfig,
+        copyValue: modelsConfig,
+      },
+      {
+        label: t("auth.json 凭据片段"),
+        displayValue: credentials(displayedToken),
+        copyValue: credentials(token),
+      },
+      {
+        label: t("settings.json 默认模型片段"),
+        displayValue: defaults,
+        copyValue: defaults,
+      },
+    ];
   }
   const providerConfig = JSON.stringify({
     $schema: "https://opencode.ai/config.json",

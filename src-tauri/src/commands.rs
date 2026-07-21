@@ -39,6 +39,15 @@ use tauri_plugin_autostart::ManagerExt;
 
 // ─── Agent Environment Commands ────────────────────────────────────────────
 
+// Claude Code 走 Anthropic-compatible 端点，其余已支持一键接入的 Agent
+// （OpenCode、Pi）走 OpenAI-compatible 端点。
+fn agent_endpoint_suffix(agent_id: &str) -> &'static str {
+    match agent_id {
+        "claude-code" => "/anthropic",
+        _ => "/v1",
+    }
+}
+
 #[tauri::command]
 pub(super) async fn detect_agent_environment(
     agent_id: String,
@@ -82,11 +91,7 @@ pub(super) fn inspect_agent_global_config(
         .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
         .clone()
         .normalized();
-    let suffix = if agent_id == "opencode" {
-        "/v1"
-    } else {
-        "/anthropic"
-    };
+    let suffix = agent_endpoint_suffix(&agent_id);
     crate::core::agent_global_config::inspect_agent_global_config(
         &agent_id,
         &format!("http://127.0.0.1:{}{suffix}", bind.port),
@@ -104,11 +109,7 @@ pub(super) fn apply_agent_global_config(
         .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
         .clone()
         .normalized();
-    let suffix = if agent_id == "opencode" {
-        "/v1"
-    } else {
-        "/anthropic"
-    };
+    let suffix = agent_endpoint_suffix(&agent_id);
     crate::core::agent_global_config::apply_agent_global_config(
         &agent_id,
         &format!("http://127.0.0.1:{}{suffix}", bind.port),
@@ -128,11 +129,7 @@ pub(super) fn restore_agent_global_config(
         .clone()
         .normalized()
         .port;
-    let suffix = if agent_id == "opencode" {
-        "/v1"
-    } else {
-        "/anthropic"
-    };
+    let suffix = agent_endpoint_suffix(&agent_id);
     crate::core::agent_global_config::restore_agent_global_config(
         &agent_id,
         &format!("http://127.0.0.1:{port}{suffix}"),

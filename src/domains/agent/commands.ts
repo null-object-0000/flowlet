@@ -15,6 +15,10 @@ export function detectOpenCodeEnvironment(): Promise<AgentEnvironmentReport> {
   return detectAgentEnvironment("opencode");
 }
 
+export function detectPiEnvironment(): Promise<AgentEnvironmentReport> {
+  return detectAgentEnvironment("pi");
+}
+
 export function detectChatGptDesktopEnvironment(): Promise<AgentEnvironmentReport> {
   return detectAgentEnvironment("chatgpt-desktop");
 }
@@ -77,4 +81,16 @@ export function applyOpenCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {
 
 export function restoreOpenCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {
   return restoreAgentGlobalConfig("opencode");
+}
+
+export function inspectPiGlobalConfig(): Promise<AgentGlobalConfigReport> {
+  return inspectAgentGlobalConfig("pi");
+}
+
+export function applyPiGlobalConfig(): Promise<AgentGlobalConfigReport> {
+  return applyAgentGlobalConfig("pi");
+}
+
+export function restorePiGlobalConfig(): Promise<AgentGlobalConfigReport> {
+  return restoreAgentGlobalConfig("pi");
 }

@@ -72,6 +72,36 @@ vi.mock("./useAgentEnvironment", () => ({
     isLoading: false,
     refetch,
   }),
+  usePiEnvironment: () => ({
+    data: {
+      agent_id: "pi",
+      agent_name: "Pi",
+      installed: true,
+      primary: {
+        surface: "cli",
+        executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd",
+        install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent",
+        install_method: "npm",
+        version: "0.42.1",
+        version_output: "0.42.1",
+        available_on_path: true,
+      },
+      installations: [{
+        surface: "cli",
+        executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd",
+        install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent",
+        install_method: "npm",
+        version: "0.42.1",
+        version_output: "0.42.1",
+        available_on_path: true,
+      }],
+    },
+    error: null,
+    isError: false,
+    isFetching: false,
+    isLoading: false,
+    refetch,
+  }),
   useChatGptDesktopEnvironment: () => ({
     data: {
       agent_id: "chatgpt-desktop",
@@ -188,6 +218,29 @@ vi.mock("./useAgentEnvironment", () => ({
     apply: { isPending: false, mutateAsync },
     restore: { isPending: false, mutateAsync },
   }),
+  usePiGlobalConfig: () => ({
+    query: {
+      data: {
+        agent_id: "pi",
+        settings_path: "C:\\Users\\test\\.pi\\agent\\models.json",
+        credentials_path: "C:\\Users\\test\\.pi\\agent\\auth.json",
+        settings_exists: true,
+        state: "flowlet",
+        base_url: "http://127.0.0.1:18640/v1",
+        auth_token_configured: true,
+        api_key_configured: true,
+        primary_model: "flowlet-pro",
+        fast_model: null,
+        backup_available: true,
+        external_environment_overrides: [],
+      },
+      error: null,
+      isLoading: false,
+      refetch,
+    },
+    apply: { isPending: false, mutateAsync },
+    restore: { isPending: false, mutateAsync },
+  }),
   useOpenCodeGlobalConfig: () => ({
     query: {
       data: {
@@ -223,7 +276,9 @@ describe("OverviewAgentAccessCard", () => {
 
     expect(screen.getByRole("button", { name: "配置 Claude Code" })).toBeEnabled();
     expect(screen.getByText("2.1.207")).toBeInTheDocument();
-    expect(screen.getAllByText("暂不支持")).toHaveLength(1);
+    expect(screen.getAllByText("暂不支持")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "配置 Pi" })).toBeEnabled();
+    expect(screen.getByText("0.42.1")).toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: "配置 OpenCode" })).toBeEnabled();
     expect(screen.getByText("1.18.2")).toBeInTheDocument();
@@ -309,5 +364,24 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("flowlet/flowlet-pro")).toBeInTheDocument();
     expect(screen.getByText("flowlet/flowlet-flash")).toBeInTheDocument();
     expect(screen.queryByText("接入参数")).not.toBeInTheDocument();
+  });
+
+  it("opens the Pi CLI global configuration backed by models.json and auth.json", () => {
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 Pi" }));
+    expect(screen.getByRole("tab", { name: "Pi CLI 接入" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Pi Desktop 接入" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("Pi CLI 0.42.1")).toBeInTheDocument();
+    expect(screen.getByText("npm 全局安装")).toBeInTheDocument();
+    expect(screen.getByText("Pi 的 Provider 定义在 models.json，凭据在 auth.json，默认模型在 settings.json")).toBeInTheDocument();
+    expect(screen.getByText("C:\\Users\\test\\.pi\\agent\\models.json")).toBeInTheDocument();
+    expect(screen.getByText("C:\\Users\\test\\.pi\\agent\\auth.json")).toBeInTheDocument();
+    expect(screen.getByText("已接入 Flowlet")).toBeInTheDocument();
+    expect(screen.getAllByText("flowlet-pro").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
+    expect(screen.getByText("models.json Provider 片段")).toBeInTheDocument();
+    expect(screen.getByText("settings.json 默认模型片段")).toBeInTheDocument();
   });
 });

@@ -163,9 +163,12 @@ mod proxy_routing;
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
     copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
-    extract_model, identify_client, identify_client_by_ua, is_model_list_request,
+    extract_model, identify_client, identify_client_agent, is_model_list_request,
     is_streaming_response, load_ua_rules, rewrite_model, sanitize_headers,
 };
+// 仅测试（proxy_tests）需要直接调用 UA 子串匹配；非测试构建不应引入以免告警。
+#[cfg(test)]
+use proxy_http::identify_client_by_ua;
 use proxy_routing::{
     body_contains_account_deactivated, body_contains_quota_exceeded, enrich_upstream_error_log,
     match_candidates, network_error_route_reason, resolve_small_model,
@@ -531,7 +534,7 @@ async fn forward_request(
 
     // 客户端身份：仅由本地 config.json 决定，与 token 解耦；不命中即"未知"，不降级
     let ua_rules = load_ua_rules(&state.config_path);
-    let (client_id, client_name) = match identify_client_by_ua(&parts.headers, &ua_rules) {
+    let (client_id, client_name) = match identify_client_agent(&parts.headers, &ua_rules) {
         Some((id, name)) => (Some(id), Some(name)),
         None => (None, Some("未知".to_string())),
     };

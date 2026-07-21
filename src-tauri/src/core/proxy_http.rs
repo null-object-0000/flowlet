@@ -319,6 +319,8 @@ pub(super) fn apply_request_headers(
             || name == header::CONTENT_LENGTH
             || name == header::AUTHORIZATION
             || name.as_str() == "x-api-key"
+            // 客户端归属标记头仅用于本地识别，识别后不再透传上游，避免泄露受管信息。
+            || name.as_str() == AGENT_CLIENT_HEADER
         {
             continue;
         }
@@ -445,6 +447,42 @@ pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::Lo
         }
     }
     LogCaptureConfig::default()
+}
+
+/// Flowlet 与受管 Agent 约定的客户端标记头。
+///
+/// 部分 Agent（如 Pi）复用通用 SDK 的 User-Agent（例如 `OpenAI/JS`），无法靠 UA
+/// 子串区分，故由 Flowlet 在写入其全局配置时注入本头，值即客户端 id。识别时优先
+/// 读取本头，再回退到 UA 规则，确保开箱即可归属，不依赖用户 config.json 是否含
+/// 对应规则。该头会随请求透传上游，仅用于归属，不参与鉴权或路由。
+pub(super) const AGENT_CLIENT_HEADER: &str = "x-flowlet-client";
+
+/// 标记头值 → 展示名。仅收录 UA 无法区分、需要靠标记头识别的 Agent。
+fn agent_client_marker_name(value: &str) -> Option<&'static str> {
+    match value {
+        "pi" => Some("Pi"),
+        _ => None,
+    }
+}
+
+/// 识别客户端身份：优先读取 Flowlet 标记头，再回退 UA 子串规则。
+///
+/// 与鉴权 token 无关，仅决定日志/用量中的客户端归属。返回 (id, name)；
+/// 标记头与 UA 规则均无命中时返回 None。
+pub(super) fn identify_client_agent(headers: &HeaderMap, rules: &[UaClientRule]) -> Option<(String, String)> {
+    if let Some(value) = headers
+        .get(AGENT_CLIENT_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        let id = value.to_ascii_lowercase();
+        let name = agent_client_marker_name(&id)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| value.to_string());
+        return Some((id, name));
+    }
+    identify_client_by_ua(headers, rules)
 }
 
 /// 通过请求 User-Agent 子串匹配独立的客户端身份规则。
@@ -796,6 +834,29 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("upstream-secret")
         );
+    }
+
+    #[test]
+    fn apply_request_headers_strips_agent_client_marker_before_forwarding() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::USER_AGENT, HeaderValue::from_static("OpenAI/JS 6.26.0"));
+        headers.insert(AGENT_CLIENT_HEADER, HeaderValue::from_static("pi"));
+
+        let request = apply_request_headers(
+            reqwest::Client::new().post("http://127.0.0.1/test"),
+            &headers,
+            "",
+            &ProtocolType::OpenAi,
+            &AuthStrategy::Bearer,
+        )
+        .body("{}")
+        .build()
+        .unwrap();
+
+        // 标记头仅用于本地归属，转发上游前必须剥离。
+        assert!(!request.headers().contains_key(AGENT_CLIENT_HEADER));
+        // 其余普通头（含 UA）照常透传。
+        assert!(request.headers().contains_key(header::USER_AGENT));
     }
 }
 

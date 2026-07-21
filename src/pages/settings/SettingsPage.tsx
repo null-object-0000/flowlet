@@ -1,4 +1,4 @@
-import { Button, Modal, Progress, Select, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, InputNumber, Modal, Progress, Select, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconDesktop, IconDownload, IconFolder, IconGlobe, IconSun, IconUpload } from "@douyinfe/semi-icons";
 import { useState, type ReactNode } from "react";
 import { useAppPreferences, type ThemePreference } from "../../app/preferences/AppPreferences";
@@ -7,6 +7,7 @@ import type { DataRepairTimeRange } from "../../domains/data-repair/types";
 import { useAutostartSetting } from "../../features/settings/useAutostartSetting";
 import { useDataImport, useDataExport } from "../../features/settings/useDataImportExport";
 import { useDataRepair } from "../../features/settings/useDataRepair";
+import { useLogCaptureSetting } from "../../features/settings/useLogCaptureSetting";
 import { useStorageUsage } from "../../features/settings/useStorageUsage";
 import styles from "./SettingsPageStatic.module.css";
 
@@ -22,6 +23,7 @@ const REPAIR_TIME_OPTIONS: Array<{ value: DataRepairTimeRange; label: string }> 
 export function SettingsPage() {
   const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
   const autostart = useAutostartSetting();
+  const logCapture = useLogCaptureSetting();
   const repair = useDataRepair();
   const storageUsage = useStorageUsage();
   const { mutateAsync: exportAsync, isPending: exportPending, progress: exportProgress } = useDataExport();
@@ -35,6 +37,18 @@ export function SettingsPage() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       Toast.error(t("本地数据修复失败：{message}", { message }));
+    }
+  }
+
+  async function updateLogCapture<K extends keyof LogCaptureConfigState>(key: K, value: LogCaptureConfigState[K]) {
+    if (!logCapture.query.data) return;
+    const updated = { ...logCapture.query.data, [key]: value };
+    try {
+      await logCapture.mutation.mutateAsync(updated);
+      Toast.success(t("日志捕获设置已保存"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      Toast.error(t("保存失败：{message}", { message }));
     }
   }
 
@@ -129,6 +143,87 @@ export function SettingsPage() {
               />
             </div>
           </PreferenceField>
+        </section>
+
+        <section className={styles.section} aria-label={t("日志捕获设置")}>
+          <div className={styles.sectionHeader}><i><IconDesktop /></i><span><strong>{t("日志捕获设置")}</strong><small>{t("控制请求/响应数据的捕获与保留策略")}</small></span></div>
+          <div className={styles.logCaptureContent}>
+            <div className={styles.logCaptureRow}>
+              <span>
+                <strong>{t("捕获请求 Body")}</strong>
+                <small>{t("记录发送到上游的完整请求内容（可能包含大量 Token）")}</small>
+              </span>
+              <Switch
+                aria-label={t("捕获请求 Body")}
+                checked={logCapture.query.data?.capture_req_body ?? true}
+                loading={logCapture.query.isLoading || logCapture.mutation.isPending}
+                onChange={(checked) => void updateLogCapture("capture_req_body", checked)}
+              />
+            </div>
+            <div className={styles.logCaptureRow}>
+              <span>
+                <strong>{t("捕获响应 Body")}</strong>
+                <small>{t("记录上游返回的完整响应内容（用于 Token 用量修复）")}</small>
+              </span>
+              <Switch
+                aria-label={t("捕获响应 Body")}
+                checked={logCapture.query.data?.capture_res_body ?? true}
+                loading={logCapture.query.isLoading || logCapture.mutation.isPending}
+                onChange={(checked) => void updateLogCapture("capture_res_body", checked)}
+              />
+            </div>
+            <div className={styles.logCaptureRow}>
+              <span>
+                <strong>{t("Body 保留天数")}</strong>
+                <small>{t("超过保留期限且已有完整 Token 统计的 Body 将被自动清除；-1 = 永久保留")}</small>
+              </span>
+              <InputNumber
+                aria-label={t("Body 保留天数")}
+                min={-1}
+                max={365}
+                value={logCapture.query.data?.body_retention_days ?? 3}
+                disabled={logCapture.query.isLoading || logCapture.mutation.isPending}
+                onChange={(value) => {
+                  const num = typeof value === "number" ? value : parseInt(String(value), 10);
+                  if (!Number.isNaN(num)) void updateLogCapture("body_retention_days", Math.max(-1, Math.min(365, num)));
+                }}
+                suffix={t("天")}
+                style={{ width: 110 }}
+              />
+            </div>
+            <div className={styles.logCaptureRow}>
+              <span>
+                <strong>{t("Body 体积上限")}</strong>
+                <small>{t("Body 数据总占用超过此值时，自动清理最老的 10%（仅清理已有完整 Token 统计的记录）；0 = 不限制")}</small>
+              </span>
+              <InputNumber
+                aria-label={t("Body 体积上限")}
+                min={0}
+                max={10240}
+                step={16}
+                value={logCapture.query.data?.body_max_size_mb ?? 128}
+                disabled={logCapture.query.isLoading || logCapture.mutation.isPending}
+                onChange={(value) => {
+                  const num = typeof value === "number" ? value : parseInt(String(value), 10);
+                  if (!Number.isNaN(num)) void updateLogCapture("body_max_size_mb", Math.max(0, Math.min(10240, num)));
+                }}
+                suffix="MB"
+                style={{ width: 110 }}
+              />
+            </div>
+            <div className={styles.logCaptureRow}>
+              <span>
+                <strong>{t("脱敏敏感 Header")}</strong>
+                <small>{t("落库前将 Authorization / X-API-Key / Cookie 替换为 [redacted]")}</small>
+              </span>
+              <Switch
+                aria-label={t("脱敏敏感 Header")}
+                checked={logCapture.query.data?.redact_sensitive_headers ?? false}
+                loading={logCapture.query.isLoading || logCapture.mutation.isPending}
+                onChange={(checked) => void updateLogCapture("redact_sensitive_headers", checked)}
+              />
+            </div>
+          </div>
         </section>
 
         <SettingSection title={t("数据管理")} description={t("修复、备份或恢复 Flowlet 的本地数据")} icon={<IconFolder />}>
@@ -292,6 +387,8 @@ function sessionRepairDetail(result: ReturnType<typeof useDataRepair>["state"]["
 function countDetail(count: number | undefined, template: string, t: ReturnType<typeof useAppPreferences>["t"]) {
   return count == null ? t("等待处理") : template.replace("{count}", String(count));
 }
+
+type LogCaptureConfigState = NonNullable<ReturnType<typeof useLogCaptureSetting>["query"]["data"]>;
 
 function stagePercent(stage: string): number {
   switch (stage) {

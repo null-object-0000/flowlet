@@ -1,5 +1,30 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import type { LogCaptureConfig } from "./types";
 import type { ModelPriceCurrencyEntry, ModelPriceInfo, ModelPriceTierInfo, StorageUsageSummary } from "./types";
+
+export async function getLogCaptureConfig(): Promise<LogCaptureConfig> {
+  try {
+    return await invokeCommand<LogCaptureConfig>("get_log_capture_config");
+  } catch (error) {
+    throw toAppError(error, "log_capture_read_failed");
+  }
+}
+
+export async function setLogCaptureConfig(config: LogCaptureConfig): Promise<void> {
+  try {
+    await invokeCommand<void>("set_log_capture_config", { config });
+  } catch (error) {
+    throw toAppError(error, "log_capture_update_failed");
+  }
+}
+
+export async function cleanupExpiredBodyData(retentionDays: number): Promise<number> {
+  try {
+    return await invokeCommand<number>("cleanup_expired_body_data", { retentionDays });
+  } catch (error) {
+    throw toAppError(error, "body_cleanup_failed");
+  }
+}
 
 export async function getAutostartEnabled() {
   try {

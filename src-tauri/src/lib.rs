@@ -282,6 +282,65 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     } else {
         LogCaptureConfig::default()
     };
+
+    // 启动时清理过期的请求/响应 Body 数据（仅清除已有完整 Token 统计的记录）。
+    let body_retention_days = capture.body_retention_days;
+    match storage.cleanup_expired_body_data(body_retention_days) {
+        Ok(cleared) if cleared > 0 => tracing::info!(
+            t_ms = _t0.elapsed().as_millis() as u64,
+            cleared,
+            retention_days = body_retention_days,
+            "step: expired body data cleaned"
+        ),
+        Ok(_) => tracing::trace!(
+            t_ms = _t0.elapsed().as_millis() as u64,
+            retention_days = body_retention_days,
+            "step: no expired body data to clean"
+        ),
+        Err(err) => tracing::warn!(
+            t_ms = _t0.elapsed().as_millis() as u64,
+            error = %err,
+            "step: cleanup expired body data failed"
+        ),
+    }
+
+    // 体积上限清理：当 Body 总占用超过 body_max_size_mb 时，按 body_prune_ratio 清理最老的记录。
+    let body_max_size_mb = capture.body_max_size_mb;
+    let body_prune_ratio = capture.body_prune_ratio;
+    if body_max_size_mb > 0 {
+        match storage.get_total_body_size_bytes() {
+            Ok(current_bytes) => {
+                let max_bytes = body_max_size_mb * 1024 * 1024;
+                if current_bytes >= max_bytes {
+                    match storage.prune_oldest_body_data(max_bytes, body_prune_ratio) {
+                        Ok(pruned) if pruned > 0 => tracing::info!(
+                            t_ms = _t0.elapsed().as_millis() as u64,
+                            pruned,
+                            current_mb = current_bytes / 1024 / 1024,
+                            max_mb = body_max_size_mb,
+                            prune_ratio = body_prune_ratio,
+                            "step: body data pruned by size limit"
+                        ),
+                        Ok(_) => tracing::trace!(
+                            t_ms = _t0.elapsed().as_millis() as u64,
+                            "step: no body data to prune by size"
+                        ),
+                        Err(err) => tracing::warn!(
+                            t_ms = _t0.elapsed().as_millis() as u64,
+                            error = %err,
+                            "step: prune body data by size failed"
+                        ),
+                    }
+                }
+            }
+            Err(err) => tracing::warn!(
+                t_ms = _t0.elapsed().as_millis() as u64,
+                error = %err,
+                "step: get body size failed"
+            ),
+        }
+    }
+
     // 优先从 config.json 顶层 bind 读取；缺失时回退到 SQLite app_meta 旧配置
     let bind_config = if let Some(json_str) = core::proxy::read_config_raw(&config_path) {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
@@ -719,6 +778,9 @@ pub fn run() {
             commands::read_app_meta,
             commands::write_app_meta,
             commands::cleanup_old_logs,
+            commands::cleanup_expired_body_data,
+            commands::prune_oldest_body_data,
+            commands::get_total_body_size_bytes,
             commands::read_config,
             commands::write_config,
             commands::ipc_ping,

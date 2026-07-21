@@ -251,6 +251,125 @@ impl Storage {
         Ok((deleted_logs, deleted_usage))
     }
 
+    /// 清理超过保留天数的请求/响应 Body 数据。
+    ///
+    /// 仅清除已有完整 Token 用量统计的记录（usage_records.input_tokens IS NOT NULL），
+    /// 确保数据修复（reanalyze_captured_usage）不会因 Body 提前清理而丢失可重解析对象。
+    ///
+    /// 返回清除 Body 的记录数。
+    pub fn cleanup_expired_body_data(&self, retention_days: i64) -> Result<usize, StorageError> {
+        if retention_days < 0 {
+            // -1 = 永久保留，不做清理
+            return Ok(0);
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+
+        let cutoff = format!("datetime('now', '-{} days')", retention_days);
+
+        // 仅清理：
+        // 1. 超过保留期限
+        // 2. req_body_b64 或 res_body_b64 非空
+        // 3. 已有完整的 Token 统计（usage_records 存在且 input_tokens IS NOT NULL）
+        let cleared = connection.execute(
+            &format!(
+                r#"UPDATE request_logs
+                SET req_body_b64 = NULL, res_body_b64 = NULL
+                WHERE created_at < {}
+                  AND (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
+                  AND EXISTS (
+                    SELECT 1 FROM usage_records ur
+                    WHERE ur.request_id = request_logs.request_id
+                      AND ur.input_tokens IS NOT NULL
+                  )"#,
+                cutoff
+            ),
+            [],
+        )?;
+
+        Ok(cleared)
+    }
+
+    /// 获取当前 Body 数据总占用字节数（req_body_b64 + res_body_b64 的 length 之和）。
+    pub fn get_total_body_size_bytes(&self) -> Result<i64, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+
+        let size: i64 = connection.query_row(
+            r#"SELECT COALESCE(SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, ''))), 0)
+               FROM request_logs
+               WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL"#,
+            [],
+            |row| row.get(0),
+        )?;
+
+        Ok(size)
+    }
+
+    /// 按体积上限清理最老的 Body 数据。
+    /// 仅清除已有完整 Token 统计的记录（usage_records.input_tokens IS NOT NULL）。
+    /// prune_ratio 控制一次清理的比例（0.0~1.0），按 created_at 升序取最老的记录。
+    /// 返回实际清理的行数。
+    pub fn prune_oldest_body_data(
+        &self,
+        target_bytes: i64,
+        prune_ratio: f64,
+    ) -> Result<usize, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+
+        // 先计算当前符合条件的记录总数
+        let total_eligible: i64 = connection.query_row(
+            r#"SELECT COUNT(*) FROM request_logs
+               WHERE (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
+                 AND EXISTS (
+                   SELECT 1 FROM usage_records ur
+                   WHERE ur.request_id = request_logs.request_id
+                     AND ur.input_tokens IS NOT NULL
+                 )"#,
+            [],
+            |row| row.get(0),
+        )?;
+
+        if total_eligible == 0 {
+            return Ok(0);
+        }
+
+        // 按 prune_ratio 计算要清理的行数（至少 1 行）
+        let prune_count = ((total_eligible as f64) * prune_ratio).ceil() as i64;
+        let prune_count = std::cmp::max(prune_count, 1);
+
+        // 清理最老的 prune_count 条记录
+        let cleared = connection.execute(
+            &format!(
+                r#"UPDATE request_logs
+                SET req_body_b64 = NULL, res_body_b64 = NULL
+                WHERE rowid IN (
+                  SELECT rl.rowid FROM request_logs rl
+                  WHERE (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL)
+                    AND EXISTS (
+                      SELECT 1 FROM usage_records ur
+                      WHERE ur.request_id = rl.request_id
+                        AND ur.input_tokens IS NOT NULL
+                    )
+                  ORDER BY rl.created_at ASC
+                  LIMIT {}
+                )"#,
+                prune_count
+            ),
+            [],
+        )?;
+
+        let _ = target_bytes;
+        Ok(cleared)
+    }
+
     /// 获取数据库统计信息
     pub fn db_stats(&self) -> Result<(i64, i64, i64), StorageError> {
         let connection = self
@@ -286,6 +405,27 @@ impl Storage {
                 days
             ),
             [],
+        )?;
+        Ok(())
+    }
+
+    /// 测试辅助：将指定 request_id 的 created_at 更新为指定天数前
+    #[cfg(test)]
+    pub fn test_set_log_created_at_days_ago(
+        &self,
+        request_id: &str,
+        days: i64,
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection.execute(
+            &format!(
+                "UPDATE request_logs SET created_at = datetime('now', '-{} days') WHERE request_id = ?1",
+                days
+            ),
+            [request_id],
         )?;
         Ok(())
     }

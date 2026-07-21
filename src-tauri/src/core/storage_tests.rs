@@ -841,3 +841,251 @@ fn appends_qwen_preset_to_existing_database_without_touching_legacy_presets() {
         let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
     }
 }
+
+fn body_request_log(request_id: &str) -> RequestLogInput {
+    RequestLogInput {
+        request_id: request_id.to_string(),
+        req_body_b64: Some("aGVsbG8=".to_string()),
+        res_body_b64: Some("d29ybGQ=".to_string()),
+        is_last_attempt: true,
+        attempt_seq: 1,
+        agent_type: None,
+        agent_session_id: None,
+        parent_agent_session_id: None,
+        client_id: Some("opencode".to_string()),
+        client_name: Some("OpenCode".to_string()),
+        channel_id: Some("longcat".to_string()),
+        channel_name: Some("LongCat".to_string()),
+        account_id: Some("account-1".to_string()),
+        account_name: Some("Account".to_string()),
+        client_protocol: "openai".to_string(),
+        upstream_protocol: "openai".to_string(),
+        virtual_model: Some("flowlet-pro".to_string()),
+        public_model: Some("flowlet-pro".to_string()),
+        upstream_model: Some("LongCat-2.0".to_string()),
+        request_type: "chat".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/chat/completions".to_string(),
+        upstream_url: None,
+        status: Some(200),
+        latency_ms: Some(20),
+        is_stream: false,
+        error_message: None,
+        fallback_count: 0,
+        route_reason: Some("direct".to_string()),
+        ttfb_ms: Some(10),
+        duration_ms: Some(20),
+        req_headers_json: Some(r#"{"User-Agent":"opencode/local ai-sdk"}"# .to_string()),
+        res_headers_json: None,
+    }
+}
+
+#[test]
+fn cleanup_expired_body_data_keeps_incomplete_usage_records() {
+    let path = std::env::temp_dir().join(format!("flowlet_test_body_cleanup_{}.sqlite", uuid::Uuid::new_v4()));
+    let storage = Storage::open(&path).expect("open storage");
+
+    // 插入过期记录（先全部插入再统一修饰时间戳）
+    storage
+        .insert_request_log(&body_request_log("old-no-usage"))
+        .expect("insert old no usage");
+    storage
+        .insert_request_log(&body_request_log("old-with-usage"))
+        .expect("insert old with usage");
+
+    // 把已插入的记录时间戳改为 10 天前
+    storage.test_set_logs_created_at_days_ago(10).expect("set old timestamp");
+
+    // 为 old-with-usage 插入完整 usage 统计
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "old-with-usage".to_string(),
+            input_tokens: Some(100),
+            output_tokens: Some(50),
+            ..empty_usage_input("old-with-usage")
+        })
+        .expect("insert usage");
+
+    // 插入一条近期请求（test_set_logs_created_at_days_ago 之后再插入，保持近期）
+    storage
+        .insert_request_log(&body_request_log("recent-with-usage"))
+        .expect("insert recent");
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "recent-with-usage".to_string(),
+            input_tokens: Some(200),
+            output_tokens: Some(100),
+            ..empty_usage_input("recent-with-usage")
+        })
+        .expect("insert recent usage");
+
+    // 执行清理（保留 3 天）
+    let cleared = storage.cleanup_expired_body_data(3).expect("cleanup");
+    assert_eq!(cleared, 1, "应只清除 1 条有完整统计的过期记录");
+
+    // 验证 old-no-usage 的 Body 仍保留
+    let logs = storage.list_request_logs().expect("list logs");
+    let old_no_usage_log = logs.iter().find(|l| l.request_id == "old-no-usage").unwrap();
+    assert!(old_no_usage_log.req_body_b64.is_some(), "无统计的过期记录不应清除 Body");
+
+    // 验证 old-with-usage 的 Body 已清除
+    let old_with_usage_log = logs.iter().find(|l| l.request_id == "old-with-usage").unwrap();
+    assert!(old_with_usage_log.req_body_b64.is_none(), "有完整统计的过期记录应清除 Body");
+    assert!(old_with_usage_log.res_body_b64.is_none(), "有完整统计的过期记录应清除 Body");
+
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}
+
+#[test]
+fn cleanup_expired_body_data_never_retention() {
+    let path = std::env::temp_dir().join(format!("flowlet_test_body_cleanup_never_{}.sqlite", uuid::Uuid::new_v4()));
+    let storage = Storage::open(&path).expect("open storage");
+
+    // 插入过期请求（有 Body + 完整统计）
+    let old = RequestLogInput {
+        request_id: "old-forever".to_string(),
+        req_body_b64: Some("aGVsbG8=".to_string()),
+        res_body_b64: Some("d29ybGQ=".to_string()),
+        is_last_attempt: true,
+        attempt_seq: 1,
+        ..request_log_for_repair("old-forever", 1, true)
+    };
+    storage.insert_request_log(&old).expect("insert");
+    storage.test_set_logs_created_at_days_ago(365).expect("set old timestamp");
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "old-forever".to_string(),
+            input_tokens: Some(100),
+            output_tokens: Some(50),
+            ..empty_usage_input("old-forever")
+        })
+        .expect("insert usage");
+
+    // retention_days = -1（永久保留）
+    let cleared = storage.cleanup_expired_body_data(-1).expect("cleanup");
+    assert_eq!(cleared, 0, "永久保留不应清除任何 Body");
+
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}
+
+fn empty_usage_input(request_id: &str) -> UsageRecordInput {
+    UsageRecordInput {
+        request_id: request_id.to_string(),
+        client_id: None,
+        client_name: None,
+        channel_id: None,
+        channel_name: None,
+        account_id: None,
+        account_name: None,
+        client_protocol: "openai".to_string(),
+        upstream_protocol: "openai".to_string(),
+        virtual_model: None,
+        upstream_model: None,
+        input_tokens: None,
+        input_cached_tokens: None,
+        input_uncached_tokens: None,
+        input_cache_write_tokens: None,
+        output_tokens: None,
+        total_tokens: None,
+    }
+}
+
+#[test]
+fn get_total_body_size_bytes_counts_only_non_null() {
+    let path = std::env::temp_dir().join(format!("flowlet_test_body_size_{}.sqlite", uuid::Uuid::new_v4()));
+    let storage = Storage::open(&path).expect("open storage");
+
+    // 无记录时返回 0
+    let size = storage.get_total_body_size_bytes().expect("get size");
+    assert_eq!(size, 0);
+
+    // 插入一条有 Body 的记录（base64 "aGVsbG8=" = 8 chars）
+    storage
+        .insert_request_log(&body_request_log("with-body"))
+        .expect("insert");
+    let size = storage.get_total_body_size_bytes().expect("get size");
+    assert!(size > 0, "body size should be > 0");
+
+    // 插入一条无 Body 的记录
+    let mut no_body = body_request_log("no-body");
+    no_body.req_body_b64 = None;
+    no_body.res_body_b64 = None;
+    storage.insert_request_log(&no_body).expect("insert no body");
+
+    let size2 = storage.get_total_body_size_bytes().expect("get size");
+    assert_eq!(size, size2, "null body should not affect total size");
+
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}
+
+#[test]
+fn prune_oldest_body_data_removes_oldest_first() {
+    let path = std::env::temp_dir().join(format!("flowlet_test_body_prune_{}.sqlite", uuid::Uuid::new_v4()));
+    let storage = Storage::open(&path).expect("open storage");
+
+    // 插入 5 条记录，每条都有 Body 和完整的 usage 统计
+    for i in 0..5 {
+        storage
+            .insert_request_log(&body_request_log(&format!("req-{i}")))
+            .expect("insert");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: format!("req-{i}"),
+                input_tokens: Some(100),
+                output_tokens: Some(50),
+                ..empty_usage_input(&format!("req-{i}"))
+            })
+            .expect("insert usage");
+    }
+
+    // 将 req-0 和 req-1 的时间戳改为最老（12 天前和 11 天前，确保排序确定）
+    storage.test_set_log_created_at_days_ago("req-0", 12).expect("set req-0");
+    storage.test_set_log_created_at_days_ago("req-1", 11).expect("set req-1");
+
+    // 再插入 5 条近期记录（(datetime('now')) 自动赋予）
+    for i in 5..10 {
+        storage
+            .insert_request_log(&body_request_log(&format!("req-{i}")))
+            .expect("insert");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: format!("req-{i}"),
+                input_tokens: Some(100),
+                output_tokens: Some(50),
+                ..empty_usage_input(&format!("req-{i}"))
+            })
+            .expect("insert usage");
+    }
+
+    // 此时 10 条记录都有 Body，最老的是 req-0, req-1
+    // 按 prune_ratio=0.2 清理（10 * 0.2 = 2 条）
+    let pruned = storage
+        .prune_oldest_body_data(0, 0.2)
+        .expect("prune");
+    assert_eq!(pruned, 2, "应清理最老的 2 条记录");
+
+    // 验证最老的记录被清理
+    let logs = storage.list_request_logs().expect("list");
+    let req0 = logs.iter().find(|l| l.request_id == "req-0").unwrap();
+    assert!(req0.req_body_b64.is_none(), "req-0 应被清理");
+    let req1 = logs.iter().find(|l| l.request_id == "req-1").unwrap();
+    assert!(req1.req_body_b64.is_none(), "req-1 应被清理");
+
+    // 验证近期记录未被清理
+    let req9 = logs.iter().find(|l| l.request_id == "req-9").unwrap();
+    assert!(req9.req_body_b64.is_some(), "req-9 不应被清理");
+
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}

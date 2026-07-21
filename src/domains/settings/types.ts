@@ -1,3 +1,15 @@
+export interface LogCaptureConfig {
+  capture_req_headers: boolean;
+  capture_req_body: boolean;
+  capture_res_headers: boolean;
+  capture_res_body: boolean;
+  max_body_bytes: number;
+  redact_sensitive_headers: boolean;
+  body_retention_days: number;
+  body_max_size_mb: number;
+  body_prune_ratio: number;
+}
+
 export type StorageUsageCategoryKey =
   | "configuration"
   | "requestLogs"

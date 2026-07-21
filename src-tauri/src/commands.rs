@@ -1139,6 +1139,39 @@ pub(super) fn cleanup_old_logs(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+pub(super) fn cleanup_expired_body_data(
+    state: tauri::State<'_, AppState>,
+    retention_days: i64,
+) -> Result<usize, String> {
+    state
+        .storage
+        .cleanup_expired_body_data(retention_days)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn prune_oldest_body_data(
+    state: tauri::State<'_, AppState>,
+    target_bytes: i64,
+    prune_ratio: f64,
+) -> Result<usize, String> {
+    state
+        .storage
+        .prune_oldest_body_data(target_bytes, prune_ratio)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(super) fn get_total_body_size_bytes(
+    state: tauri::State<'_, AppState>,
+) -> Result<i64, String> {
+    state
+        .storage
+        .get_total_body_size_bytes()
+        .map_err(|err| err.to_string())
+}
+
 // ─── Config Import/Export Commands ────────────────────────────────────────
 
 #[tauri::command]

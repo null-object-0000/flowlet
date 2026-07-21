@@ -99,7 +99,10 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "capture_res_headers": true,       // 记录响应 Header
   "capture_res_body": true,          // 记录响应 Body
   "max_body_bytes": 1048576,         // 单条 Body 最大字节数（1 MB）
-  "redact_sensitive_headers": false  // 是否脱敏敏感 Header
+  "redact_sensitive_headers": false, // 是否脱敏敏感 Header
+  "body_retention_days": 3,          // Body 保留天数（-1=永久, 0=不保留, N=保留 N 天后清除）
+  "body_max_size_mb": 128,           // Body 数据体积上限（MB），超出后按比例清理最老的记录（0=不限制）
+  "body_prune_ratio": 0.1            // 超出体积上限时，清理最老记录的比例（0.0~1.0）
 }
 ```
 
@@ -113,6 +116,9 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `capture_res_body` | `bool` | `true` | 是否记录响应 Body |
 | `max_body_bytes` | `number` | `1048576` | 单条 Body 截断上限（1 MB） |
 | `redact_sensitive_headers` | `bool` | `false` | 关闭时原样保存、展示和复制；开启后，`authorization` / `x-api-key` / `cookie` / `set-cookie` / `x-auth-token` 在落库前被替换为 `[redacted]` |
+| `body_retention_days` | `number` | `3` | Body 保留天数：`-1` = 永久保留；`0` = 不保留（落库后立即清除 Body）；`N` = 保留 N 天后自动清除 |
+| `body_max_size_mb` | `number` | `128` | Body 数据体积上限（MB）。超出后按 `body_prune_ratio` 比例清理最老的、已有完整 Token 统计的记录。`0` = 不限制（仅受 `body_retention_days` 控制） |
+| `body_prune_ratio` | `number` | `0.1` | 超出 `body_max_size_mb` 时，单次清理最老记录的比例（`0.0`~`1.0`）。例如 `0.1` = 清理最老的 10%（按 `created_at` 升序），将体积压回阈值以下 |
 
 **行为**：
 
@@ -120,6 +126,9 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 - 修改后立即生效（热读），无需重启代理。
 - Body 以 base64 形式存入 SQLite。
 - UI 不再二次脱敏，展示和复制的内容与 SQLite 捕获内容一致。
+- 过期清理仅在记录已有完整 Token 用量统计（`usage_records.input_tokens IS NOT NULL`）时执行，确保数据修复功能仍可对未完整统计的记录进行重解析。
+- 每次应用启动时自动执行一次清理；过期 Body 数据被清除为 `NULL` 后，SQLite 空闲页可被后续写入复用，但磁盘文件不会自动收缩（需手动执行 `VACUUM`）。
+- 体积上限清理（`body_max_size_mb`）在每次启动时检查一次，超出阈值时按 `body_prune_ratio` 比例清理最老的记录。该清理独立于 `body_retention_days`，两者可同时生效（先按时间清理，再按体积清理）。
 
 ---
 

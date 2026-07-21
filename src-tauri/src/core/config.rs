@@ -1218,6 +1218,16 @@ pub struct LogCaptureConfig {
     /// 是否脱敏敏感 Header（默认 false — 明文记录）。
     /// 开启后，authorization / x-api-key / cookie / set-cookie / x-auth-token 会被替换为 [redacted]。
     pub redact_sensitive_headers: bool,
+    /// 请求/响应 Body 保留天数。
+    /// -1 = 永久保留；0 = 不保留（等价于 capture_req_body / capture_res_body = false，但仅影响落库后清理）；N = 保留 N 天后自动清除。
+    /// 清除时仅针对已有完整 Token 用量统计的记录（usage_records.input_tokens IS NOT NULL）。
+    pub body_retention_days: i64,
+    /// Body 数据最大占用空间（MB）。超出后按 body_prune_ratio 比例清理最老的、已有完整统计的记录。
+    /// 0 = 不限制（仅受 body_retention_days 控制）。
+    pub body_max_size_mb: i64,
+    /// 超出 body_max_size_mb 时，清理最老记录的比例（0.0~1.0）。
+    /// 例如 0.1 = 清理最老的 10%（按 created_at 排序），将体积压回阈值以下。
+    pub body_prune_ratio: f64,
 }
 
 impl Default for LogCaptureConfig {
@@ -1229,6 +1239,9 @@ impl Default for LogCaptureConfig {
             capture_res_body: true,
             max_body_bytes: 1024 * 1024,
             redact_sensitive_headers: false,
+            body_retention_days: 3,
+            body_max_size_mb: 128,
+            body_prune_ratio: 0.1,
         }
     }
 }

@@ -474,6 +474,18 @@ pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::Lo
                     .get("redact_sensitive_headers")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false),
+                body_retention_days: lc
+                    .get("body_retention_days")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(3),
+                body_max_size_mb: lc
+                    .get("body_max_size_mb")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(128),
+                body_prune_ratio: lc
+                    .get("body_prune_ratio")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.1),
             };
         }
     }

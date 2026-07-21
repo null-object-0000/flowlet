@@ -25,7 +25,10 @@
     "capture_res_headers": true,
     "capture_res_body": true,
     "max_body_bytes": 1048576,
-    "redact_sensitive_headers": false
+    "redact_sensitive_headers": false,
+    "body_retention_days": 3,
+    "body_max_size_mb": 128,
+    "body_prune_ratio": 0.1
   },
   "bind": {
     "host": "127.0.0.1",

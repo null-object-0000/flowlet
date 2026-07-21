@@ -495,6 +495,40 @@
   grid-column: 1 / -1;
 }
 
+.logCaptureContent {
+  min-width: 0;
+  padding: 17px 28px 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.logCaptureRow {
+  min-width: 0;
+  min-height: var(--flowlet-control-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.logCaptureRow > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.logCaptureRow strong {
+  color: var(--flowlet-color-text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.logCaptureRow small {
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 @media (max-width: 860px) {
   .preferencesCard {
     grid-template-columns: 1fr;
@@ -539,9 +573,16 @@
   .storagePanel,
   .repairPanel,
   .dataPanel,
-  .dataPanelExporting {
+  .dataPanelExporting,
+  .logCaptureContent {
     padding-right: 16px;
     padding-left: 16px;
+  }
+
+  .logCaptureRow {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .repairControls {

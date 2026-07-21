@@ -80,6 +80,7 @@ export const queryKeys = {
     dbStats: () => [...queryKeys.settings.all, "db-stats"] as const,
     storageUsage: () => [...queryKeys.settings.all, "storage-usage"] as const,
     modelPriceCurrencies: () => [...queryKeys.settings.all, "model-price-currencies"] as const,
+    modelPrices: () => [...queryKeys.settings.all, "model-prices"] as const,
     appMeta: (key: string) => [...queryKeys.settings.all, "app-meta", key] as const,
   },
 } as const;

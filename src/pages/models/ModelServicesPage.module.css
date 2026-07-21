@@ -45,6 +45,11 @@
 .configRow:last-child { border-bottom: 0; }
 .configRow > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .configRow > strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--flowlet-font-size-body-strong); }
+.configRow > strong.priceCell { overflow: visible; white-space: normal; display: grid; justify-items: start; gap: 2px; }
+.priceCell small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); font-weight: 500; }
+.infoFootnote { padding: 6px 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; border-top: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
+.infoFootnote a { color: var(--semi-color-primary); text-decoration: none; }
+.infoFootnote a:hover { text-decoration: underline; }
 .routeRow { min-height: 58px; padding: 7px 9px; display: grid; grid-template-columns: 22px 24px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--flowlet-color-border); transition: background-color 120ms ease, opacity 120ms ease; }
 .routeRow:last-child { border-bottom: 0; }
 .routeRow.dragging { opacity: .48; }

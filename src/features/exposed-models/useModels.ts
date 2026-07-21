@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { modelCommands } from "../../domains/model/commands";
+import { getModelPrices } from "../../domains/settings/commands";
 import { queryKeys } from "../../shared/query-keys";
 
 export function useChannelModels() {
@@ -30,5 +31,19 @@ export function useModelExposureMode() {
     networkMode: "always",
     refetchOnWindowFocus: false,
     retry: false,
+  });
+}
+
+/** config.json `channels_config.model_prices` 的完整定价表。价格仅用于模型
+ *  服务页展示，加载失败时页面降级为“—”而不阻塞，故 retry 保守、不进页面级
+ *  error 聚合。数据随 config.json 热加载语义一致（价格变更需重启代理）。 */
+export function useModelPrices() {
+  return useQuery({
+    queryKey: queryKeys.settings.modelPrices(),
+    queryFn: getModelPrices,
+    staleTime: 5 * 60 * 1000,
+    networkMode: "always",
+    refetchOnWindowFocus: false,
+    retry: 1,
   });
 }

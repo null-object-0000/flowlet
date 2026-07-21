@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { AgentEnvironmentReport, AgentGlobalConfigReport, CodexAccountReport, CodexAccountsReport } from "./types";
+import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentGlobalConfigReport, CodexAccountReport, CodexAccountsReport } from "./types";
 
 export function detectAgentEnvironment(agentId: string): Promise<AgentEnvironmentReport> {
   return invokeCommand<AgentEnvironmentReport>("detect_agent_environment", { agentId }, 10_000).catch((error) => {
@@ -47,8 +47,8 @@ export function inspectAgentGlobalConfig(agentId: string): Promise<AgentGlobalCo
   });
 }
 
-export function applyAgentGlobalConfig(agentId: string): Promise<AgentGlobalConfigReport> {
-  return invokeCommand<AgentGlobalConfigReport>("apply_agent_global_config", { agentId }).catch((error) => {
+export function applyAgentGlobalConfig(agentId: string, options?: AgentGlobalConfigOptions): Promise<AgentGlobalConfigReport> {
+  return invokeCommand<AgentGlobalConfigReport>("apply_agent_global_config", { agentId, options }).catch((error) => {
     throw toAppError(error, "agent_global_config_apply_failed");
   });
 }
@@ -63,8 +63,8 @@ export function inspectClaudeCodeGlobalConfig(): Promise<AgentGlobalConfigReport
   return inspectAgentGlobalConfig("claude-code");
 }
 
-export function applyClaudeCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return applyAgentGlobalConfig("claude-code");
+export function applyClaudeCodeGlobalConfig(options?: AgentGlobalConfigOptions): Promise<AgentGlobalConfigReport> {
+  return applyAgentGlobalConfig("claude-code", options);
 }
 
 export function restoreClaudeCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {

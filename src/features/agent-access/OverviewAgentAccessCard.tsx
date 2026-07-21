@@ -5,7 +5,7 @@ import styles from "./OverviewAgentAccessCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
 import { ChatGptDesktopSideSheet } from "./ChatGptDesktopSideSheet";
-import type { AgentEnvironmentReport, AgentSurface } from "../../domains/agent/types";
+import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentSurface } from "../../domains/agent/types";
 import {
   useChatGptDesktopEnvironment,
   useClaudeCodeEnvironment,
@@ -100,9 +100,14 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       ? "Pi"
       : "Claude Code";
 
-  const applyGlobalConfig = async () => {
+  const applyGlobalConfig = async (options?: AgentGlobalConfigOptions) => {
     try {
-      await activeGlobalConfig.apply.mutateAsync();
+      // 仅 Claude Code 支持可选参数（1M 长上下文开关）；其他 Agent 忽略。
+      if (selectedAgent === "claude-code") {
+        await claudeGlobalConfig.apply.mutateAsync(options);
+      } else {
+        await activeGlobalConfig.apply.mutateAsync(undefined);
+      }
       Toast.success(t("{name} 已全局接入 Flowlet", { name: activeAgentName }));
     } catch (error) {
       Toast.error(t("写入 {name} 全局配置失败：{message}", { name: activeAgentName, message: error instanceof Error ? error.message : String(error) }));

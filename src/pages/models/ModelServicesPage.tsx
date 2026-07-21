@@ -5,9 +5,14 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useAccounts, useChannelPresets } from "../../features/channel-accounts";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { useModelActions } from "../../features/exposed-models/useModelActions";
-import { useChannelModels, useRouteCandidates } from "../../features/exposed-models/useModels";
+import { useChannelModels, useModelPrices, useRouteCandidates } from "../../features/exposed-models/useModels";
 import { buildModelServiceItems, type ModelRouteGroup, type ModelServiceItem } from "./modelServiceView";
+import { buildModelBasicInfo, type ModelBasicInfo } from "./modelBasicInfo";
 import { filterModelServiceItems, reorderModelRouteGroups, type ModelStatusFilter } from "./modelServiceInteractions";
+import type { ChannelModel } from "../../domains/model/types";
+import type { ModelPriceInfo } from "../../domains/settings/types";
+import { formatCompactNumber, type NumberLanguage } from "../../shared/formatters/number";
+import { formatCostAmount } from "../../shared/formatters/cost";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import styles from "./ModelServicesPage.module.css";
@@ -15,11 +20,13 @@ import styles from "./ModelServicesPage.module.css";
 const { Paragraph, Text, Title } = Typography;
 
 export function ModelServicesPage() {
-  const { t } = useAppPreferences();
+  const { language, t } = useAppPreferences();
   const accounts = useAccounts();
   const channels = useChannelPresets();
   const routes = useRouteCandidates();
   const channelModels = useChannelModels();
+  // 定价仅用于详情展示，加载失败降级为“—”，不参与页面级 loading/error 聚合。
+  const prices = useModelPrices();
   const actions = useModelActions();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ModelStatusFilter>("all");
@@ -53,7 +60,7 @@ export function ModelServicesPage() {
   const loading = accounts.isLoading || channels.isLoading || routes.isLoading || channelModels.isLoading;
   const error = accounts.error ?? channels.error ?? routes.error ?? channelModels.error;
 
-  const refresh = () => void Promise.all([accounts.refetch(), channels.refetch(), routes.refetch(), channelModels.refetch()]);
+  const refresh = () => void Promise.all([accounts.refetch(), channels.refetch(), routes.refetch(), channelModels.refetch(), prices.refetch()]);
   const toggleModel = (model: ModelServiceItem, enabled: boolean) => {
     actions.toggleExposedModel.mutate({ routes: routes.data ?? [], routeIds: model.routeIds, modelId: model.publicModel, enabled });
   };
@@ -143,6 +150,9 @@ export function ModelServicesPage() {
           model={selected}
           accounts={accounts.data ?? []}
           channels={channels.data ?? []}
+          channelModels={channelModels.data ?? []}
+          prices={prices.data ?? []}
+          language={language}
           busy={busyModel != null}
           onToggleRoute={toggleRoute}
           onReorderRoute={reorderRoute}
@@ -162,10 +172,13 @@ function ModelLogo({ model }: { model: ModelServiceItem }) {
   return <FlowletLogo variant="model" />;
 }
 
-function ModelDetail({ model, accounts, channels, busy, onToggleRoute, onReorderRoute, t }: {
+function ModelDetail({ model, accounts, channels, channelModels, prices, language, busy, onToggleRoute, onReorderRoute, t }: {
   model: ModelServiceItem | null;
   accounts: ReturnType<typeof useAccounts>["data"] extends (infer T)[] | undefined ? T[] : never;
   channels: ReturnType<typeof useChannelPresets>["data"] extends (infer T)[] | undefined ? T[] : never;
+  channelModels: ChannelModel[];
+  prices: ModelPriceInfo[];
+  language: NumberLanguage;
   busy: boolean;
   onToggleRoute: (modelId: string, routeGroup: ModelRouteGroup, enabled: boolean) => void;
   onReorderRoute: (modelId: string, sourceKey: string, targetKey: string) => void;
@@ -197,6 +210,11 @@ function ModelDetail({ model, accounts, channels, busy, onToggleRoute, onReorder
       <DetailSection title={t("基础配置")}>
         <div className={styles.configRow}><span>{t("对外模型名称")}</span><strong>{model.publicModel}</strong><Button theme="borderless" icon={<IconCopy />} aria-label={t("复制模型名称")} onClick={copy} /></div>
       </DetailSection>
+      {model.kind === "direct" ? (
+        <DetailSection title={t("基础信息")}>
+          <ModelBasicInfoRows info={buildModelBasicInfo(model, channelModels, prices)} language={language} t={t} />
+        </DetailSection>
+      ) : null}
       <DetailSection title={t("渠道路由")} note={t("拖动路由可调整优先级")}>
         {model.routeGroups.map((routeGroup, index) => {
           const account = accountById.get(routeGroup.accountId);
@@ -258,4 +276,40 @@ function ModelDetail({ model, accounts, channels, busy, onToggleRoute, onReorder
 
 function DetailSection({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return <section className={styles.detailSection}><header><strong>{title}</strong>{note ? <span>{note}</span> : null}</header><div className={styles.configBox}>{children}</div></section>;
+}
+
+/** 直接渠道模型的定价与限制展示。聚合模型（flowlet-pro/flash）没有单一
+ *  上游，不渲染本区块。数据缺失一律显示“—”，不硬编码限制值（AGENTS.md §7）。 */
+function ModelBasicInfoRows({ info, language, t }: {
+  info: ModelBasicInfo | null;
+  language: NumberLanguage;
+  t: (source: string, values?: Record<string, string | number>) => string;
+}) {
+  const price = info?.price ?? null;
+  const unitLabel = price && price.unit !== "1M tokens" ? price.unit : t("百万 tokens");
+  const formatPrice = (amount: number) => (price ? formatCostAmount({ amount, currency: price.currency }, 2) : "—");
+  const inputPrice = price ? `${formatPrice(price.input_uncached_price)} / ${unitLabel}` : "—";
+  const outputPrice = price ? `${formatPrice(price.output_price)} / ${unitLabel}` : "—";
+  const tierBoundary = price && price.tiers.length > 0 ? price.tiers[0].up_to_input_tokens : null;
+  const hasTierNote = price != null && price.tiers.length > 0;
+  return <>
+    <div className={styles.configRow}><span>{t("上下文窗口")}</span><strong>{formatCompactNumber(info?.contextWindow ?? null, language)}</strong></div>
+    <div className={styles.configRow}><span>{t("最大输出")}</span><strong>{formatCompactNumber(info?.maxOutputTokens ?? null, language)}</strong></div>
+    <div className={styles.configRow}>
+      <span>{t("输入定价")}</span>
+      <strong className={styles.priceCell}>
+        {inputPrice}
+        {price && price.input_cached_price !== price.input_uncached_price ? <small>{t("缓存 {price}", { price: formatPrice(price.input_cached_price) })}</small> : null}
+        {price?.input_cache_write_price != null ? <small>{t("写入 {price}", { price: formatPrice(price.input_cache_write_price) })}</small> : null}
+        {hasTierNote ? <small>{tierBoundary != null ? t("输入超 {tokens} 分段计价", { tokens: formatCompactNumber(tierBoundary, language) }) : t("按输入长度分段计价")}</small> : null}
+      </strong>
+    </div>
+    <div className={styles.configRow}><span>{t("输出定价")}</span><strong>{outputPrice}</strong></div>
+    {price?.price_version || price?.source_url ? (
+      <div className={styles.infoFootnote}>
+        {price?.price_version ? <span>{price.price_version}</span> : null}
+        {price?.source_url ? <a href={price.source_url} target="_blank" rel="noreferrer">{t("价格来源")}</a> : null}
+      </div>
+    ) : null}
+  </>;
 }

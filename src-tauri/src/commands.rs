@@ -139,6 +139,7 @@ pub(super) fn inspect_agent_global_config(
 pub(super) fn apply_agent_global_config(
     state: tauri::State<'_, AppState>,
     agent_id: String,
+    options: Option<crate::core::agent_global_config::AgentGlobalConfigOptions>,
 ) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
     let bind = state
         .bind_config
@@ -151,6 +152,7 @@ pub(super) fn apply_agent_global_config(
         &agent_id,
         &format!("http://127.0.0.1:{}{suffix}", bind.port),
         &bind.default_client_token,
+        options.as_ref(),
     )
 }
 

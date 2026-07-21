@@ -62,16 +62,17 @@
 .share > i { width: 38px; height: 5px; overflow: hidden; border-radius: 99px; background: var(--flowlet-color-border-strong); }
 .share b { display: block; height: 100%; border-radius: inherit; background: var(--semi-color-primary); }
 .share em { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); font-style: normal; }
-.side { min-height: 0; display: grid; grid-template-rows: 190px minmax(0, 1fr); gap: 10px; }
+.side { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
 .coverageCard { padding: 13px; }
 .coverageCard header, .channelCard > header { display: flex; align-items: center; }
 .coverageCard header strong, .channelCard > header strong { font-size: 14px; }
+.hintIcon { flex: none; width: 15px; height: 15px; margin-left: 6px; color: var(--flowlet-color-text-tertiary); cursor: help; transition: color 140ms ease, transform 140ms ease; }
+.hintIcon:hover { color: var(--semi-color-primary); transform: scale(1.12); }
 .coverageValue { margin-top: 17px; display: flex; align-items: flex-end; gap: 8px; }
 .coverageValue strong { font-size: 25px; line-height: 1; }
 .coverageValue span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .coverageTrack { height: 8px; margin-top: 13px; overflow: hidden; border-radius: 99px; background: var(--flowlet-color-border-strong); }
 .coverageTrack i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--semi-color-primary), #68a0ff); }
-.coverageCard p { margin: 14px 0 0; padding: 9px 10px; border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--semi-color-primary-light-default); font-size: var(--flowlet-font-size-caption); line-height: 1.5; }
 .channelCard { display: grid; grid-template-rows: 46px minmax(0, 1fr) 36px; }
 .channelCard > header { padding: 0 10px; border-bottom: 1px solid var(--flowlet-color-border); }
 .channelCard > header span { margin-left: auto; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }

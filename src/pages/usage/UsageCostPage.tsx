@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button, Select, Tooltip, Typography } from "@douyinfe/semi-ui-19";
+import { IconInfoCircle } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod } from "../../domains/usage/types";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
@@ -100,10 +101,14 @@ export function UsageCostPage() {
 
       <aside className={styles.side}>
         <section className={styles.coverageCard}>
-          <header><strong>{t("数据完整度")}</strong></header>
+          <header>
+            <strong>{t("数据完整度")}</strong>
+            <Tooltip content={t("费用仅统计 Token 与价格均已知的请求")}>
+              <IconInfoCircle className={styles.hintIcon} role="img" aria-label={t("费用仅统计 Token 与价格均已知的请求")} />
+            </Tooltip>
+          </header>
           <div className={styles.coverageValue}><strong>{summary.requests > 0 ? formatPercent((summary.requests - summary.unknown) / summary.requests) : "-"}</strong><span>{t("请求包含可统计用量")}</span></div>
           <div className={styles.coverageTrack}><i style={{ width: `${summary.requests > 0 ? Math.max(0, (summary.requests - summary.unknown) / summary.requests * 100) : 0}%` }} /></div>
-          <p>{t("费用仅统计 Token 与价格均已知的请求")}</p>
         </section>
         <section className={styles.channelCard}>
           <header><strong>{t("渠道成本")}</strong><span>{t("按预估费用排序")}</span></header>

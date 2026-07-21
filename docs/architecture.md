@@ -24,25 +24,44 @@ Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议
 
 ```text
 Flowlet Desktop
-  ├─ src/                         React 19 + Semi Design 正式前端
-  ├─ src-tauri/                   Tauri 2 桌面壳
+  ├─ src/                              React 19 + Semi Design 正式前端
+  ├─ src-tauri/                        Tauri 2 桌面壳
   │  └─ src/
-  │     ├─ lib.rs                 Tauri 应用入口和 command 注册
-  │     ├─ main.rs                桌面进程入口
+  │     ├─ lib.rs                      Tauri 应用入口和 command 注册
+  │     ├─ main.rs                     桌面进程入口
+  │     ├─ commands.rs                 Tauri command 定义
   │     └─ core/
-  │        ├─ mod.rs              Core 模块出口
-  │        ├─ config.rs           基础配置结构
-  │        ├─ presets.rs          内置渠道模板
-  │        ├─ provider.rs         用户渠道配置
-  │        ├─ adapter.rs          渠道能力适配器
-  │        ├─ sync.rs             模型 / 价格 / 额度异步同步任务
-  │        ├─ proxy.rs            本地透明代理
-  │        ├─ storage.rs          SQLite 存储
-  │        └─ analyzer.rs         离线 Token / 成本分析
-  └─ docs/                        产品和架构文档
+  │        ├─ mod.rs                   Core 模块出口
+  │        ├─ config.rs                运行时配置结构
+  │        ├─ channels_config.rs       config.json 反序列化与渠道默认值
+  │        ├─ presets.rs               内置渠道模板
+  │        ├─ proxy.rs                 代理生命周期（启动 / 停止 / 幂等）
+  │        ├─ proxy_http.rs            HTTP 转发与请求头改写
+  │        ├─ proxy_routing.rs         路由候选与失败降级
+  │        ├─ proxy_tests.rs           代理测试
+  │        ├─ rate_limiter.rs          客户端级别速率限制
+  │        ├─ storage.rs               SQLite 存储与迁移
+  │        ├─ storage_config.rs        渠道 / 账号 / 模型配置读写
+  │        ├─ storage_usage.rs         用量与会话聚合查询
+  │        ├─ storage_stats.rs         统计查询
+  │        ├─ storage_tasks.rs         后台任务持久化
+  │        ├─ storage_tests.rs         存储测试
+  │        ├─ sync.rs                  模型 / 价格 / 余额异步同步任务
+  │        ├─ usage.rs                 Token 提取与成本估算
+  │        ├─ logging.rs               日志捕获与脱敏
+  │        ├─ metrics.rs               运行时指标
+  │        ├─ agent_environment.rs     Agent 本机安装探测
+  │        ├─ agent_global_config.rs   Claude Code / OpenCode 全局配置写入与恢复
+  │        ├─ agent_session_metadata.rs 原生会话目录与会话列表
+  │        ├─ agent_session_timeline.rs 原生会话时间线解析
+  │        ├─ agent_source_watcher.rs  Agent 数据源文件监听
+  │        ├─ codex_account.rs         Codex 账号与用量
+  │        ├─ cost_ledger_source_probe.rs 成本账本只读数据源探针
+  │        └─ web/                     内嵌 Web 资源
+  └─ docs/                             产品和架构文档
 ```
 
-应用无条件加载 `src` 中的 Semi Design 前端。旧 Mantine 前端、`ui.version` 入口选择和 legacy fallback 已删除。前端分层、依赖方向和迁移记录见 [`docs/frontend-rewrite.md`](frontend-rewrite.md)。
+应用无条件加载 `src` 中的 Semi Design 前端。旧 Mantine 前端、`ui.version` 入口选择和 legacy fallback 已删除。前端分层与依赖方向见 `AGENTS.md` 第 10 节「前端开发原则」。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 

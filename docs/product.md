@@ -4,9 +4,9 @@
 
 Flowlet 是一个面向 AI Agent、桌面优先、本地运行的使用与成本控制台。本地透明代理仍是获取精确请求数据和统一接入的核心能力，但不是使用统计与成本归集的前提。
 
-当前阶段采用 **LongCat + DeepSeek first** 策略：先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口、多账号管理、Claude Code 接入、请求日志和 Token / 成本分析做完整，再扩展更多渠道。详细阶段需求见 [LongCat-first 需求整理](./longcat-first.md) 和 [DeepSeek 首发渠道需求整理](./deepseek-first.md)。相关官方文档：LongCat [快速开始](https://longcat.chat/platform/docs/zh/)、[API 概述](https://longcat.chat/platform/docs/zh/APIDocs.html)、[Claude Code 配置](https://longcat.chat/platform/docs/zh/ClaudeCode.html)；DeepSeek [API 文档](https://api-docs.deepseek.com/zh-cn/)、[价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)、[Claude Code](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/claude_code)、[Anthropic API](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)、[余额查询](https://api-docs.deepseek.com/zh-cn/api/get-user-balance)。
+当前阶段采用 **LongCat + DeepSeek first** 策略：先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口、多账号管理、Claude Code 接入、请求日志和 Token / 成本分析做完整，再扩展更多渠道。相关官方文档：LongCat [快速开始](https://longcat.chat/platform/docs/zh/)、[API 概述](https://longcat.chat/platform/docs/zh/APIDocs.html)、[Claude Code 配置](https://longcat.chat/platform/docs/zh/ClaudeCode.html)；DeepSeek [API 文档](https://api-docs.deepseek.com/zh-cn/)、[价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)、[Claude Code](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/claude_code)、[Anthropic API](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)、[余额查询](https://api-docs.deepseek.com/zh-cn/api/get-user-balance)。
 
-旧 Provider 原型阶段曾通过破坏式重构确立 Channel / Account / Model 正式数据模型。当前 SQLite 数据已经成为演进基线，后续功能必须提供增量迁移，不得再以早期原型策略重建或丢弃现有数据。历史决策见 [破坏式重构策略](./breaking-refactor.md)。
+旧 Provider 原型阶段曾通过破坏式重构确立 Channel / Account / Model 正式数据模型。当前 SQLite 数据已经成为演进基线，后续功能必须提供增量迁移，不得再以早期原型策略重建或丢弃现有数据。
 
 它让 Claude Code、Cursor、Cline、Open WebUI、Cherry Studio、Continue 等 AI 工具统一接入一个本地入口，并在不做协议转换、不改写响应内容的前提下，实现开箱即用渠道配置、虚拟模型路由、请求日志和 Token 成本分析。长期还将通过本地 Agent Adapter、导入和手动记录，把未经过代理的官方账号使用纳入统一成本账本。
 
@@ -582,100 +582,19 @@ Docker / Web 不是第一阶段主形态，而是高级部署形态。
 
 ## 7. 技术架构
 
-Flowlet 可以拆成三层：
+总体结构、运行时端口、协议入口、请求链路、存储分层、Agent 会话观测和成本账本目标架构的完整说明统一维护在 [`architecture.md`](./architecture.md)，本节只保留产品视角的形态划分：
 
 ```text
-AI Reverse Proxy Core
-  - 本地代理
-  - OpenAI-compatible Gateway
-  - Anthropic-compatible Gateway
-  - Channel Preset
-  - Channel Account
-  - ChannelAdapter
-  - 模型 / 价格 / 额度异步同步
-  - Client Token 管理
-  - 请求转发
-  - Header 替换
-  - 虚拟模型路由
-  - 日志落盘
-  - 离线分析
-  - 管理 API
-
-Desktop Client
-  - Tauri 可视化客户端
-  - 系统托盘
-  - 开机自启
-  - 管理 Core 生命周期
-  - 调用 Core 管理 API
-
-Web Console
-  - 复用 Desktop 前端
-  - Docker 模式浏览器访问
-  - 调用 Core 管理 API
+AI Reverse Proxy Core     本地代理、渠道模板与账号、路由、日志落盘、离线分析
+Desktop Client（当前形态） Tauri 可视化客户端、系统托盘、开机自启、管理 Core 生命周期
+Docker / Web Console      后续高级部署形态（见 §6.2），复用 Core，浏览器访问
 ```
 
 ---
 
-## 8. Desktop 模式架构
+## 8. MVP 范围
 
-```text
-Tauri Desktop App
-  ├─ UI
-  ├─ 系统托盘
-  ├─ 开机自启
-  ├─ 启停 Core
-  └─ Core 内置 / sidecar
-        ├─ 127.0.0.1:18640 代理端口
-        └─ 127.0.0.1:11435 管理 API
-```
-
-请求链路：
-
-```text
-Cursor / Cline / Open WebUI
-        ↓
-http://127.0.0.1:18640/v1/*
-        ↓
-Flowlet Local Proxy
-        ↓
-OpenAI-compatible Provider
-
-Claude Code
-        ↓
-ANTHROPIC_BASE_URL=http://127.0.0.1:18640
-        ↓
-Flowlet Local Proxy
-        ↓
-Anthropic-compatible Provider / Claude Gateway
-```
-
----
-
-## 9. Docker 模式架构
-
-```text
-Docker Container
-  ├─ Reverse Proxy Core
-  │   ├─ 0.0.0.0:18640
-  │   └─ 0.0.0.0:11435
-  ├─ Web Console
-  │   └─ 0.0.0.0:3000
-  └─ SQLite / Logs Volume
-```
-
-Docker 模式要求：
-
-```text
-Core 可以 headless 运行
-配置和日志通过 volume 持久化
-Web Console 通过管理 API 控制 Core
-支持 docker-compose
-支持基础访问鉴权
-```
-
----
-
-## 10. MVP 范围
+> 第一阶段 MVP 已完成，各里程碑的当前状态见 [`roadmap.md`](./roadmap.md)。
 
 第一阶段只做最核心能力：
 
@@ -705,7 +624,7 @@ Web Console 通过管理 API 控制 Core
 
 ---
 
-## 11. 第一阶段不做什么
+## 9. 第一阶段不做什么
 
 为了控制复杂度，第一阶段明确不做：
 
@@ -729,9 +648,9 @@ Web Console 通过管理 API 控制 Core
 
 ---
 
-## 12. 日志策略
+## 10. 日志策略
 
-### 12.1 Metadata 模式
+### 10.1 Metadata 模式
 
 默认开启，只记录：
 
@@ -761,7 +680,7 @@ route_reason
 
 ---
 
-### 12.2 安全日志模式
+### 10.2 安全日志模式
 
 记录请求/响应摘要；是否脱敏由 `log_capture.redact_sensitive_headers` 决定：
 
@@ -775,7 +694,7 @@ cost 信息
 
 ---
 
-### 12.3 完整日志模式
+### 10.3 完整日志模式
 
 用户主动开启后，记录完整内容：
 
@@ -805,7 +724,7 @@ stream chunks
 
 ---
 
-## 13. 流式响应策略
+## 11. 流式响应策略
 
 流式响应遵循：
 
@@ -829,9 +748,9 @@ stream chunks
 
 ---
 
-## 14. 路由策略
+## 12. 路由策略
 
-### 14.1 第一阶段：顺序路由
+### 12.1 第一阶段：顺序路由
 
 虚拟模型按配置顺序选择候选模型：
 
@@ -846,7 +765,7 @@ auto
 
 ---
 
-### 14.2 第二阶段：成本优先
+### 12.2 第二阶段：成本优先
 
 优先使用：
 
@@ -858,7 +777,7 @@ auto
 
 ---
 
-### 14.3 第三阶段：规则路由
+### 12.3 第三阶段：规则路由
 
 根据请求特征进行路由：
 
@@ -874,7 +793,7 @@ prompt 长度
 
 ---
 
-### 14.4 第四阶段：小模型智能路由
+### 12.4 第四阶段：小模型智能路由
 
 未来可以启动一个小模型，专门判断当前请求应该走哪个模型更合适。
 
@@ -894,11 +813,12 @@ Flowlet 再根据路由结果选择具体 Provider 和 Model。
 
 ---
 
-## 15. 数据模型建议
+## 13. 数据模型
 
-当前阶段采用 Channel / Account / Model 三层结构，详细字段见 [LongCat-first 需求整理](./longcat-first.md)。
+当前阶段采用 Channel / Account / Model 三层结构。本节为字段参考，实际表结构以
+`src-tauri/src/core/storage.rs` 的迁移为准。
 
-### 15.1 channel_presets
+### 13.1 channel_presets
 
 ```text
 id
@@ -921,7 +841,7 @@ updated_at
 
 ---
 
-### 15.2 channel_accounts
+### 13.2 channel_accounts
 
 ```text
 id
@@ -942,7 +862,7 @@ updated_at
 
 ---
 
-### 15.3 channel_models
+### 13.3 channel_models
 
 ```text
 id
@@ -962,7 +882,7 @@ updated_at
 
 ---
 
-### 15.4 clients
+### 13.4 clients
 
 ```text
 id
@@ -976,7 +896,7 @@ updated_at
 
 ---
 
-### 15.5 virtual_models
+### 13.5 virtual_models
 
 ```text
 id
@@ -990,7 +910,7 @@ updated_at
 
 ---
 
-### 15.6 virtual_model_routes
+### 13.6 virtual_model_routes
 
 ```text
 id
@@ -1012,7 +932,7 @@ updated_at
 
 ---
 
-### 15.7 request_logs
+### 13.7 request_logs
 
 ```text
 id
@@ -1040,7 +960,7 @@ created_at
 
 ---
 
-### 15.8 usage_records
+### 13.8 usage_records
 
 ```text
 id
@@ -1063,7 +983,7 @@ analyzed_at
 
 ---
 
-### 15.9 model_prices
+### 13.9 model_prices
 
 ```text
 id
@@ -1090,7 +1010,7 @@ manual
 
 ---
 
-### 15.10 account_balance_snapshots
+### 13.10 account_balance_snapshots
 
 ```text
 id
@@ -1110,77 +1030,19 @@ updated_at
 
 ---
 
-## 16. 和其他项目的区别
+## 14. 和其他项目的区别
 
-### 16.1 和 LiteLLM / New API 的区别
+完整竞品功能对比、能力缺口与战略建议统一维护在 [`competitor-analysis.md`](./competitor-analysis.md)，本节只保留产品定位层面的一句话区别：
 
-LiteLLM / New API 更偏：
-
-```text
-协议适配
-统一 Gateway
-Provider 转换
-复杂路由
-服务端平台
-```
-
-Flowlet 更偏：
-
-```text
-本地透明代理
-响应零改写
-不做协议转换
-桌面客户端
-内置渠道模板
-本地日志和成本分析
-```
+- **vs LiteLLM / New API**：对方是服务端统一 Gateway，重协议适配与转换；Flowlet 是本地透明代理，不做协议转换、响应零改写、桌面客户端形态。
+- **vs Helicone / Portkey**：对方是云端 / 服务端 AI Gateway 与 Observability 平台；Flowlet 面向个人和小团队本地使用。
+- **vs CC Switch**：对方重点是切换 Claude Code、Codex、Gemini CLI 等工具配置；Flowlet 重点是让所有 AI 工具统一走一个本地请求入口，并提供路由、日志和成本分析。
 
 ---
 
-### 16.2 和 Helicone / Portkey 的区别
+## 15. 产品价值
 
-Helicone / Portkey 更偏：
-
-```text
-云 / 服务端 AI Gateway
-Observability 平台
-企业级日志与监控
-```
-
-Flowlet 更偏：
-
-```text
-本地桌面客户端
-AI 请求路由
-Provider 管理
-个人和小团队本地使用
-```
-
----
-
-### 16.3 和 CC Switch 的区别
-
-CC Switch 更像：
-
-```text
-AI Coding Tool Switcher
-```
-
-重点是切换 Claude Code、Codex、Gemini CLI 等工具配置。
-
-Flowlet 更像：
-
-```text
-Local AI Request Router
-```
-
-重点是让所有 AI 工具统一走一个本地请求入口，并提供路由、日志和成本分析。
-
----
-
-## 17. 产品价值
-
-### 17.1 对用户
+### 15.1 对用户
 
 ```text
 不用每个 AI 工具重复配置 Provider
@@ -1196,7 +1058,7 @@ Local AI Request Router
 
 ---
 
-### 17.2 对产品
+### 15.2 对产品
 
 ```text
 复杂度可控
@@ -1208,110 +1070,15 @@ Local AI Request Router
 
 ---
 
-## 18. 阶段路线
+## 16. 阶段路线
 
-### 阶段一：Desktop MVP 稳定化
+阶段路线统一维护在 [`roadmap.md`](./roadmap.md)（Milestone 0–8 与当前优先级）；统一 AI 成本账本的阶段范围与验收标准见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)。
 
-```text
-Tauri Desktop
-本地透明代理
-Provider/Profile 基础雏形
-Client Token
-OpenAI-compatible 透明转发
-响应零改写
-虚拟模型 auto
-顺序降级
-请求/响应日志
-离线 Token / Cost
-基础 Dashboard
-```
+本节原有的七阶段计划（Desktop MVP 稳定化 → 渠道模板 → Anthropic-compatible 与 Claude Code → 渠道能力与同步框架 → 统一成本账本 → 额度感知 auto 路由 → Docker / Web Console）已被上述两份文档取代，不再在此维护。
 
 ---
 
-### 阶段二：开箱即用渠道模板
-
-```text
-Channel Preset
-Channel Account
-Channel Model
-渠道选择
-API Key 填写
-默认模型选择
-测试连接
-高级自定义渠道
-```
-
----
-
-### 阶段三：Anthropic-compatible 与 Claude Code 支持
-
-```text
-Anthropic-compatible Gateway
-/v1/messages 透明转发
-/v1/models 透明转发
-Anthropic-compatible Channel Preset
-Claude Code 接入向导
-Authorization Bearer / X-Api-Key 双识别
-不做 OpenAI <-> Anthropic 协议转换
-```
-
----
-
-### 阶段四：渠道能力与同步框架
-
-```text
-Channel Capability
-ChannelAdapter
-client_protocol / upstream_protocol
-模型列表同步
-价格同步
-余额快照
-额度快照
-用量快照
-同步失败不影响代理
-```
-
----
-
-### 阶段五：统一 AI 成本账本
-
-```text
-成本来源、使用事件、任务、会话和成本分配模型
-按量 API、Token 包、订阅和手动来源
-实际支付、已摊销、已分配、未分配和待摊销分离
-网关请求与代理外 Agent 使用统一归集
-可信度、证据、解释和账期版本
-按 ai-cost-ledger.md 分阶段实施
-```
-
----
-
-### 阶段六：额度感知 auto 路由
-
-```text
-剩余额度展示
-免费额度优先
-低价优先
-缓存数据兜底
-快照过期时降级为顺序路由
-```
-
----
-
-### 阶段七：Docker / Web Console
-
-```text
-Core headless
-Web Console
-Docker Compose
-Volume 持久化
-基础鉴权
-内网访问
-```
-
----
-
-## 19. 最终产品定义
+## 17. 最终产品定义
 
 Flowlet 是一个 Desktop-first、本地优先、面向 AI Agent 的使用与成本控制台。它提供响应零改写、多协议透明转发但不做跨协议转换的本地代理，也允许代理外 Agent 使用通过授权的本地 Adapter、导入或手动记录进入统一账本。
 

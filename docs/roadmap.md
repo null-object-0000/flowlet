@@ -4,9 +4,9 @@
 
 Flowlet 已经完成桌面端和本地透明代理的基础雏形，但还不是稳定可用版本。当前阶段路线调整为 LongCat + DeepSeek first：先把 LongCat / DeepSeek OpenAI-compatible、Anthropic-compatible、Claude Code 接入、多账号管理、余额和账号级统计做完整。
 
-`refactor/channel-account-model` 分支已经把旧 Provider 模型大幅重构到 Channel / Account / Model，但它仍应按 MVP 验证分支处理，不按生产就绪版本合并。第一版优先收敛主链路：渠道账号、多协议透明转发、账号优先级 fallback、Claude Code、日志与成本。
+旧 Provider 模型已经通过 `refactor/channel-account-model` 重构并合入主线，正式采用 Channel / Account / Model。当前版本仍按 MVP 验证阶段对待，优先收敛主链路：渠道账号、多协议透明转发、账号优先级 fallback、Claude Code、日志与成本。
 
-旧 Provider 原型阶段曾允许破坏式重构；当前 Channel / Account / Model 数据已成为正式基线，后续成本账本必须通过增量 migration 演进，不得重建或丢弃现有 SQLite 数据。历史策略见 [breaking-refactor.md](./breaking-refactor.md)。
+旧 Provider 原型阶段曾允许破坏式重构；当前 Channel / Account / Model 数据已成为正式基线，后续成本账本必须通过增量 migration 演进，不得重建或丢弃现有 SQLite 数据。
 
 最关键的产品原则：
 

@@ -7,5 +7,6 @@ export type CleanupBackgroundJobsResult = { deletedJobs: number; deletedEvents: 
 export type BackgroundJobEvent = { id: string; jobId: string; sequence: number; level: string; stage: string | null; message: string; detailJson: string | null; createdAt: string };
 export type BackgroundJobDetail = { job: BackgroundJobRow; events: BackgroundJobEvent[] };
 export type AgentDataSyncResult = { started: boolean; jobId: string | null; scanned: number; changed: number; failed: number; message: string };
+export type CodexAccountSyncResult = { started: boolean; jobId: string | null; accounts: number; stale: number; failed: number; message: string };
 export type AgentSourceSyncState = { agentType: string; lastCheckedAt: string | null; lastSyncedAt: string | null; status: string; lastError: string | null; scannedCount: number; changedCount: number; failedCount: number };
 export type AgentSyncStatusReport = { running: boolean; sources: AgentSourceSyncState[] };

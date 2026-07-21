@@ -69,6 +69,17 @@ pub struct CodexAccountsReport {
     pub current_account_id: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAccountSyncResult {
+    pub started: bool,
+    pub job_id: Option<String>,
+    pub accounts: usize,
+    pub stale: usize,
+    pub failed: usize,
+    pub message: String,
+}
+
 /// Read the last successful local snapshots without performing network I/O.
 /// The frontend uses this as stale-while-refresh data while a live query runs.
 pub fn list_cached_codex_accounts(managed_root: &Path) -> Result<CodexAccountsReport, String> {
@@ -203,6 +214,127 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
         accounts,
         current_account_id,
     })
+}
+
+/// Cheap pre-check for scheduled sync: skip network and process work entirely
+/// when the user has never signed in to Codex on this machine.
+pub(crate) fn has_codex_account_sources(managed_root: &Path, codex_home: &Path) -> bool {
+    codex_home.join("auth.json").is_file()
+        || std::fs::read_dir(managed_root)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .any(|path| is_managed_profile_directory(&path))
+            })
+            .unwrap_or(false)
+}
+
+/// Refresh Codex accounts and usage in the background, recording the run in
+/// the task log (`background_jobs` / `background_job_events`) so periodic
+/// syncs are observable on the task logs page.
+pub async fn sync_codex_accounts(
+    storage: &crate::core::storage::Storage,
+    managed_root: &Path,
+    codex_home: &Path,
+    trigger: &str,
+) -> Result<CodexAccountSyncResult, String> {
+    if !has_codex_account_sources(managed_root, codex_home) {
+        return Ok(CodexAccountSyncResult {
+            started: false,
+            job_id: None,
+            accounts: 0,
+            stale: 0,
+            failed: 0,
+            message: "未发现 Codex 账号，已跳过本次同步".to_string(),
+        });
+    }
+
+    let job_id = uuid::Uuid::new_v4().to_string();
+    storage
+        .create_job(
+            &job_id,
+            "codex-account-sync",
+            "Codex 账号与用量同步",
+            "查询账号与用量",
+            trigger,
+            0,
+            "开始查询 Codex 账号与用量",
+        )
+        .map_err(|error| error.to_string())?;
+    let started_at = std::time::Instant::now();
+    match query_codex_accounts(managed_root).await {
+        Ok(report) => {
+            let total = report.accounts.len();
+            let stale = report.accounts.iter().filter(|account| account.stale).count();
+            let failed = report
+                .accounts
+                .iter()
+                .filter(|account| account.error.is_some())
+                .count();
+            storage
+                .update_job_progress(&job_id, total as i64, total as i64)
+                .map_err(|error| error.to_string())?;
+            for account in &report.accounts {
+                if let Some(message) = &account.error {
+                    let identity = account
+                        .email
+                        .clone()
+                        .filter(|email| !email.trim().is_empty())
+                        .unwrap_or_else(|| account_identity(Some(&account.account_id), None));
+                    storage
+                        .add_job_event(
+                            &job_id,
+                            "warning",
+                            "账号刷新失败",
+                            &format!("{identity}：{message}"),
+                        )
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            let status = if failed == 0 && stale == 0 {
+                "succeeded"
+            } else {
+                "succeeded_with_warnings"
+            };
+            let summary = serde_json::json!({
+                "accounts": total,
+                "staleAccounts": stale,
+                "failedAccounts": failed,
+                "currentAccountId": report.current_account_id,
+                "durationMs": started_at.elapsed().as_millis() as u64,
+            })
+            .to_string();
+            storage
+                .finish_job(&job_id, status, &summary, "Codex 账号与用量同步完成")
+                .map_err(|error| error.to_string())?;
+            Ok(CodexAccountSyncResult {
+                started: true,
+                job_id: Some(job_id),
+                accounts: total,
+                stale,
+                failed,
+                message: if failed == 0 {
+                    format!("已同步 {total} 个 Codex 账号与用量")
+                } else {
+                    format!("已同步 {total} 个 Codex 账号，其中 {failed} 个刷新失败")
+                },
+            })
+        }
+        Err(error) => {
+            storage
+                .fail_job(&job_id, &error)
+                .map_err(|storage_error| storage_error.to_string())?;
+            Ok(CodexAccountSyncResult {
+                started: true,
+                job_id: Some(job_id),
+                accounts: 0,
+                stale: 0,
+                failed: 1,
+                message: format!("Codex 账号同步失败：{error}"),
+            })
+        }
+    }
 }
 
 fn sort_accounts(accounts: &mut [CodexAccountReport]) {
@@ -1370,6 +1502,62 @@ mod tests {
         assert_eq!(report.accounts[0].account_id, "user-canonical");
         assert!(report.accounts[0].is_current);
         assert_eq!(report.current_account_id.as_deref(), Some("user-canonical"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn detects_codex_account_sources_from_auth_or_managed_profiles() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-sources-{}", uuid::Uuid::new_v4()));
+        let home = root.join("home");
+        let managed = root.join("accounts");
+        std::fs::create_dir_all(&home).expect("create codex home");
+        std::fs::create_dir_all(&managed).expect("create managed root");
+
+        assert!(!has_codex_account_sources(&managed, &home));
+
+        std::fs::create_dir_all(managed.join(".pending-login")).expect("create pending profile");
+        assert!(
+            !has_codex_account_sources(&managed, &home),
+            "pending authorization directories are not accounts"
+        );
+
+        std::fs::create_dir_all(managed.join("user-1")).expect("create managed profile");
+        assert!(has_codex_account_sources(&managed, &home));
+
+        let empty_managed = root.join("empty");
+        std::fs::create_dir_all(&empty_managed).expect("create empty managed root");
+        std::fs::write(home.join("auth.json"), "{}").expect("write auth");
+        assert!(has_codex_account_sources(&empty_managed, &home));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn skips_sync_without_creating_task_log_when_no_accounts_exist() {
+        let storage = crate::core::storage::Storage::from_connection_for_test(
+            rusqlite::Connection::open_in_memory().unwrap(),
+        );
+        storage.migrate().unwrap();
+        let root = std::env::temp_dir().join(format!("flowlet-codex-sync-{}", uuid::Uuid::new_v4()));
+        let home = root.join("home");
+        let managed = root.join("accounts");
+        std::fs::create_dir_all(&home).expect("create codex home");
+
+        let result = sync_codex_accounts(&storage, &managed, &home, "background")
+            .await
+            .expect("skip sync");
+        assert!(!result.started);
+        assert_eq!(result.job_id, None);
+
+        let page = storage
+            .list_background_jobs(crate::core::storage::BackgroundJobsFilter {
+                page: 1,
+                page_size: 10,
+                status: String::new(),
+                job_type: String::new(),
+            })
+            .expect("list jobs");
+        assert_eq!(page.total, 0, "skipped syncs must not pollute the task log");
         let _ = std::fs::remove_dir_all(root);
     }
 

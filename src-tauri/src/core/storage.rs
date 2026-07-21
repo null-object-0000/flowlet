@@ -65,7 +65,7 @@ impl Storage {
     }
 
     #[cfg(test)]
-    fn from_connection_for_test(connection: Connection) -> Self {
+    pub(crate) fn from_connection_for_test(connection: Connection) -> Self {
         Self {
             connection: Arc::new(Mutex::new(connection)),
             prices: Arc::new(Mutex::new(Vec::new())),
@@ -292,7 +292,7 @@ impl Storage {
 
     // ─── Migration ───────────────────────────────────────────────────────────
 
-    fn migrate(&self) -> Result<(), StorageError> {
+    pub(crate) fn migrate(&self) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()

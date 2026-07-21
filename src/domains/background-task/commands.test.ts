@@ -20,6 +20,11 @@ describe("backgroundTaskCommands contract", () => {
     expect(invokeMock).toHaveBeenCalledWith("sync_agent_data", { force: true, triggerSource: "manual" }, 120_000);
   });
 
+  it("starts a scheduled Codex account sync with the long-running timeout", async () => {
+    await backgroundTaskCommands.syncCodexAccounts("background");
+    expect(invokeMock).toHaveBeenCalledWith("sync_codex_accounts", { triggerSource: "background" }, 120_000);
+  });
+
   it("reads persisted per-source sync status", async () => {
     await backgroundTaskCommands.agentSyncStatus();
     expect(invokeMock).toHaveBeenCalledWith("get_agent_sync_status", undefined, undefined);

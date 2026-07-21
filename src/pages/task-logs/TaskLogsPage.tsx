@@ -44,7 +44,7 @@ export function TaskLogsPage() {
     </header>
     <section className={styles.toolbar} aria-label={t("任务筛选")}>
       <Select style={{ width: "100%" }} insetLabel={t("状态")} value={filter.status || "__all__"} optionList={statusOptions(t)} onChange={(value) => setFilter((current) => ({ ...current, status: value === "__all__" ? "" : String(value) as BackgroundJobsFilter["status"], page: 1 }))} />
-      <Select style={{ width: "100%" }} insetLabel={t("任务类型")} value={filter.jobType || "__all__"} optionList={[{ value: "__all__", label: t("全部类型") }, { value: "agent-data-sync", label: t("Agent 数据同步") }]} onChange={(value) => setFilter((current) => ({ ...current, jobType: value === "__all__" ? "" : String(value), page: 1 }))} />
+      <Select style={{ width: "100%" }} insetLabel={t("任务类型")} value={filter.jobType || "__all__"} optionList={[{ value: "__all__", label: t("全部类型") }, { value: "agent-data-sync", label: t("Agent 数据同步") }, { value: "codex-account-sync", label: t("Codex 账号同步") }]} onChange={(value) => setFilter((current) => ({ ...current, jobType: value === "__all__" ? "" : String(value), page: 1 }))} />
       <span className={styles.toolbarMeta}>{tasks.isFetching ? t("正在刷新任务日志…") : t("共 {count} 条", { count: tasks.data?.total ?? 0 })}</span>
       <div className={styles.toolbarActions}>
         <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconDelete />} loading={cleanup.isPending} onClick={confirmCleanup}>{t("清理日志")}</Button>
@@ -83,16 +83,16 @@ function TaskDetail({ jobId, onClose }: { jobId: string | null; onClose: () => v
     {detail.isLoading ? <div className={styles.state}>{t("正在加载任务详情…")}</div> : null}
     {detail.data ? <div className={styles.detail}>
       <section><div className={styles.detailTitle}><strong>{detail.data.job.title}</strong><StatusTag job={detail.data.job} t={t} /></div><p>{detail.data.job.stage ?? "—"}</p><Progress percent={detail.data.job.progressTotal ? Math.round(detail.data.job.progressCurrent / detail.data.job.progressTotal * 100) : 0} showInfo /></section>
-      {metrics ? <section><h4>{t("性能指标")}</h4><div className={styles.metrics}>{metric(t("总耗时"), metrics.durationMs)}{metric(t("目录扫描"), metrics.scanMs)}{metric(t("指纹比较"), metrics.compareMs)}{metric(t("会话解析"), metrics.parseMs)}{metric(t("数据库写入"), metrics.writeMs)}{metric(t("增量会话"), metrics.incrementalSessions, false)}{metric(t("全量会话"), metrics.fullSessions, false)}{metricText(t("读取数据"), formatBytes(metrics.sourceBytesProcessed))}{metric(t("延后处理"), metrics.deferred, false)}</div></section> : null}
+      {metrics ? <section><h4>{t("性能指标")}</h4><div className={styles.metrics}>{metric(t("总耗时"), metrics.durationMs)}{metric(t("账号数量"), metrics.accounts, false)}{metric(t("失效账号"), metrics.staleAccounts, false)}{metric(t("失败账号"), metrics.failedAccounts, false)}{metric(t("目录扫描"), metrics.scanMs)}{metric(t("指纹比较"), metrics.compareMs)}{metric(t("会话解析"), metrics.parseMs)}{metric(t("数据库写入"), metrics.writeMs)}{metric(t("增量会话"), metrics.incrementalSessions, false)}{metric(t("全量会话"), metrics.fullSessions, false)}{metrics.sourceBytesProcessed != null ? metricText(t("读取数据"), formatBytes(metrics.sourceBytesProcessed)) : null}{metric(t("延后处理"), metrics.deferred, false)}</div></section> : null}
       {detail.data.job.errorMessage ? <section className={styles.error}>{detail.data.job.errorMessage}</section> : null}
       <section><h4>{t("处理记录")}</h4><div className={styles.timeline}>{detail.data.events.map((event) => <article key={event.id}><i className={styles[event.level] ?? ""} /><div><strong>{event.stage ?? t("处理")}</strong><time>{formatTimestamp(event.createdAt, language)}</time><p>{event.message}</p></div></article>)}</div></section>
     </div> : null}
   </SideSheet>;
 }
 
-type SummaryMetrics = { durationMs?: number; scanMs?: number; compareMs?: number; parseMs?: number; writeMs?: number; deferred?: number; incrementalSessions?: number; fullSessions?: number; sourceBytesProcessed?: number };
+type SummaryMetrics = { durationMs?: number; accounts?: number; staleAccounts?: number; failedAccounts?: number; scanMs?: number; compareMs?: number; parseMs?: number; writeMs?: number; deferred?: number; incrementalSessions?: number; fullSessions?: number; sourceBytesProcessed?: number };
 function parseSummary(value: string | null | undefined): SummaryMetrics | null { if (!value) return null; try { return JSON.parse(value) as SummaryMetrics; } catch { return null; } }
-function metric(label: string, value: number | undefined, milliseconds = true) { return <span><small>{label}</small><strong>{value == null ? "—" : milliseconds ? `${value} ms` : value}</strong></span>; }
+function metric(label: string, value: number | undefined, milliseconds = true) { if (value == null) return null; return <span><small>{label}</small><strong>{milliseconds ? `${value} ms` : value}</strong></span>; }
 function metricText(label: string, value: string) { return <span><small>{label}</small><strong>{value}</strong></span>; }
 function formatBytes(value: number | undefined) { if (value == null) return "—"; if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`; return `${(value / 1024 / 1024).toFixed(1)} MiB`; }
 function useElapsedNow(enabled: boolean) { const [now, setNow] = useState(Date.now); useEffect(() => { if (!enabled) return; setNow(Date.now()); const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [enabled]); return now; }

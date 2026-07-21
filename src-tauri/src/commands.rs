@@ -35,6 +35,14 @@ impl Drop for AgentDataSyncGuard {
         AGENT_DATA_SYNC_RUNNING.store(false, Ordering::Release);
     }
 }
+
+static CODEX_ACCOUNT_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+struct CodexAccountSyncGuard;
+impl Drop for CodexAccountSyncGuard {
+    fn drop(&mut self) {
+        CODEX_ACCOUNT_SYNC_RUNNING.store(false, Ordering::Release);
+    }
+}
 use tauri_plugin_autostart::ManagerExt;
 
 // ─── Agent Environment Commands ────────────────────────────────────────────
@@ -67,6 +75,35 @@ pub(super) fn list_cached_codex_accounts(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::codex_account::CodexAccountsReport, String> {
     crate::core::codex_account::list_cached_codex_accounts(&state.codex_accounts_dir)
+}
+
+#[tauri::command]
+pub(super) async fn sync_codex_accounts(
+    state: tauri::State<'_, AppState>,
+    trigger_source: String,
+) -> Result<crate::core::codex_account::CodexAccountSyncResult, String> {
+    if CODEX_ACCOUNT_SYNC_RUNNING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Ok(crate::core::codex_account::CodexAccountSyncResult {
+            started: false,
+            job_id: None,
+            accounts: 0,
+            stale: 0,
+            failed: 0,
+            message: "已有 Codex 账号同步正在运行".to_string(),
+        });
+    }
+    let _guard = CodexAccountSyncGuard;
+    let codex_home = crate::core::codex_account::codex_home();
+    crate::core::codex_account::sync_codex_accounts(
+        &state.storage,
+        &state.codex_accounts_dir,
+        &codex_home,
+        &trigger_source,
+    )
+    .await
 }
 
 #[tauri::command]

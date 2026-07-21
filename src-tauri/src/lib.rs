@@ -654,6 +654,7 @@ pub fn run() {
             commands::detect_agent_environment,
             commands::list_cached_codex_accounts,
             commands::query_codex_accounts,
+            commands::sync_codex_accounts,
             commands::authorize_codex_account,
             commands::inspect_agent_global_config,
             commands::apply_agent_global_config,

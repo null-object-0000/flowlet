@@ -304,7 +304,16 @@ impl Storage {
         }
         let (changed, deferred) = limit_sync_batch(changed, force);
         let job_id = uuid::Uuid::new_v4().to_string();
-        self.create_job(&job_id, trigger, changed.len() + deleted.len())?;
+        let total = changed.len() + deleted.len();
+        self.create_job(
+            &job_id,
+            "agent-data-sync",
+            "Agent 数据同步",
+            "扫描并整理会话",
+            trigger,
+            total,
+            &format!("发现 {total} 个需要整理的会话"),
+        )?;
         let result = self.run_agent_sync_job(
             &job_id,
             &sessions,
@@ -377,7 +386,7 @@ impl Storage {
         for (index, (session, fingerprint)) in changed.iter().enumerate() {
             if self.is_job_cancel_requested(job_id)? {
                 let summary = serde_json::json!({ "scanned": sessions.len(), "processed": index, "deferred": deferred + changed.len() - index, "durationMs": total_started.elapsed().as_millis() }).to_string();
-                self.finish_job(job_id, "cancelled", &summary)?;
+                self.finish_job(job_id, "cancelled", &summary, "Agent 数据同步已取消")?;
                 return Ok(AgentDataSyncResult {
                     started: true,
                     job_id: Some(job_id.to_string()),
@@ -408,7 +417,7 @@ impl Storage {
             }
             if self.is_job_cancel_requested(job_id)? {
                 let summary = serde_json::json!({ "scanned": sessions.len(), "processed": index, "deferred": deferred + changed.len() - index, "durationMs": total_started.elapsed().as_millis() }).to_string();
-                self.finish_job(job_id, "cancelled", &summary)?;
+                self.finish_job(job_id, "cancelled", &summary, "Agent 数据同步已取消")?;
                 return Ok(AgentDataSyncResult {
                     started: true,
                     job_id: Some(job_id.to_string()),
@@ -466,7 +475,7 @@ impl Storage {
             if self.is_job_cancel_requested(job_id)? {
                 let processed = changed.len() + offset;
                 let summary = serde_json::json!({ "scanned": sessions.len(), "processed": processed, "deferred": deferred + deleted.len() - offset, "durationMs": total_started.elapsed().as_millis() }).to_string();
-                self.finish_job(job_id, "cancelled", &summary)?;
+                self.finish_job(job_id, "cancelled", &summary, "Agent 数据同步已取消")?;
                 return Ok(AgentDataSyncResult {
                     started: true,
                     job_id: Some(job_id.to_string()),
@@ -496,7 +505,7 @@ impl Storage {
             "incrementalSessions": incremental_sessions, "fullSessions": full_sessions,
             "sourceBytesProcessed": source_bytes_processed,
         }).to_string();
-        self.finish_job(job_id, status, &summary)?;
+        self.finish_job(job_id, status, &summary, "Agent 数据同步完成")?;
         Ok(AgentDataSyncResult {
             started: true,
             job_id: Some(job_id.to_string()),
@@ -515,13 +524,22 @@ impl Storage {
         })
     }
 
-    fn create_job(&self, id: &str, trigger: &str, total: usize) -> Result<(), StorageError> {
+    pub(crate) fn create_job(
+        &self,
+        id: &str,
+        job_type: &str,
+        title: &str,
+        stage: &str,
+        trigger: &str,
+        total: usize,
+        first_event_message: &str,
+    ) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        connection.execute("INSERT INTO background_jobs (id, job_type, title, trigger_source, status, stage, progress_total, created_at, started_at, updated_at) VALUES (?1, 'agent-data-sync', 'Agent 数据同步', ?2, 'running', '扫描并整理会话', ?3, datetime('now'), datetime('now'), datetime('now'))", params![id, trigger, total as i64])?;
-        connection.execute("INSERT INTO background_job_events (id, job_id, sequence, level, stage, message, created_at) VALUES (?1, ?2, 1, 'info', '扫描', ?3, datetime('now'))", params![uuid::Uuid::new_v4().to_string(), id, format!("发现 {total} 个需要整理的会话")])?;
+        connection.execute("INSERT INTO background_jobs (id, job_type, title, trigger_source, status, stage, progress_total, created_at, started_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?6, datetime('now'), datetime('now'), datetime('now'))", params![id, job_type, title, trigger, stage, total as i64])?;
+        connection.execute("INSERT INTO background_job_events (id, job_id, sequence, level, stage, message, created_at) VALUES (?1, ?2, 1, 'info', ?3, ?4, datetime('now'))", params![uuid::Uuid::new_v4().to_string(), id, stage, first_event_message])?;
         Ok(())
     }
     fn save_agent_snapshot(
@@ -646,7 +664,7 @@ impl Storage {
         }
         Ok(())
     }
-    fn add_job_event(
+    pub(crate) fn add_job_event(
         &self,
         job_id: &str,
         level: &str,
@@ -665,7 +683,12 @@ impl Storage {
         connection.execute("INSERT INTO background_job_events (id, job_id, sequence, level, stage, message, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))", params![uuid::Uuid::new_v4().to_string(), job_id, seq, level, stage, message])?;
         Ok(())
     }
-    fn update_job_progress(&self, id: &str, current: i64, total: i64) -> Result<(), StorageError> {
+    pub(crate) fn update_job_progress(
+        &self,
+        id: &str,
+        current: i64,
+        total: i64,
+    ) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
@@ -687,7 +710,7 @@ impl Storage {
             .optional()?
             .unwrap_or(false))
     }
-    fn fail_job(&self, id: &str, error: &str) -> Result<(), StorageError> {
+    pub(crate) fn fail_job(&self, id: &str, error: &str) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
@@ -696,7 +719,13 @@ impl Storage {
         drop(connection);
         self.add_job_event(id, "error", "失败", error)
     }
-    fn finish_job(&self, id: &str, status: &str, summary: &str) -> Result<(), StorageError> {
+    pub(crate) fn finish_job(
+        &self,
+        id: &str,
+        status: &str,
+        summary: &str,
+        done_message: &str,
+    ) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
@@ -718,11 +747,7 @@ impl Storage {
                 "warning"
             },
             stage,
-            if status == "cancelled" {
-                "Agent 数据同步已取消"
-            } else {
-                "Agent 数据同步完成"
-            },
+            done_message,
         )
     }
 }
@@ -910,9 +935,21 @@ mod tests {
     fn persists_and_lists_task_progress_and_events() {
         let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
-        storage.create_job("job-1", "manual", 2).unwrap();
+        storage
+            .create_job(
+                "job-1",
+                "agent-data-sync",
+                "Agent 数据同步",
+                "扫描并整理会话",
+                "manual",
+                2,
+                "发现 2 个需要整理的会话",
+            )
+            .unwrap();
         storage.update_job_progress("job-1", 1, 2).unwrap();
-        storage.finish_job("job-1", "succeeded", "{}").unwrap();
+        storage
+            .finish_job("job-1", "succeeded", "{}", "Agent 数据同步完成")
+            .unwrap();
         let detail = storage.get_background_job_detail("job-1").unwrap().unwrap();
         assert_eq!(detail.job.status, "succeeded");
         assert_eq!(detail.job.progress_current, 1);
@@ -923,9 +960,31 @@ mod tests {
     fn paginates_filters_cancels_and_cleans_completed_tasks() {
         let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
-        storage.create_job("running", "manual", 2).unwrap();
-        storage.create_job("finished", "foreground", 1).unwrap();
-        storage.finish_job("finished", "succeeded", "{}").unwrap();
+        storage
+            .create_job(
+                "running",
+                "agent-data-sync",
+                "Agent 数据同步",
+                "扫描并整理会话",
+                "manual",
+                2,
+                "发现 2 个需要整理的会话",
+            )
+            .unwrap();
+        storage
+            .create_job(
+                "finished",
+                "agent-data-sync",
+                "Agent 数据同步",
+                "扫描并整理会话",
+                "foreground",
+                1,
+                "发现 1 个需要整理的会话",
+            )
+            .unwrap();
+        storage
+            .finish_job("finished", "succeeded", "{}", "Agent 数据同步完成")
+            .unwrap();
 
         let running = storage
             .list_background_jobs(BackgroundJobsFilter {
@@ -955,6 +1014,70 @@ mod tests {
             .get_background_job_detail("finished")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn filters_and_completes_codex_account_sync_jobs_separately() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        storage
+            .create_job(
+                "codex-job",
+                "codex-account-sync",
+                "Codex 账号与用量同步",
+                "查询账号与用量",
+                "background",
+                0,
+                "开始查询 Codex 账号与用量",
+            )
+            .unwrap();
+        storage.update_job_progress("codex-job", 2, 2).unwrap();
+        storage
+            .add_job_event(
+                "codex-job",
+                "warning",
+                "账号刷新失败",
+                "user@example.com：官方用量接口返回 HTTP 401",
+            )
+            .unwrap();
+        storage
+            .finish_job(
+                "codex-job",
+                "succeeded_with_warnings",
+                "{\"accounts\":2,\"stale\":1,\"failed\":1}",
+                "Codex 账号与用量同步完成",
+            )
+            .unwrap();
+
+        let codex_jobs = storage
+            .list_background_jobs(BackgroundJobsFilter {
+                page: 1,
+                page_size: 10,
+                status: "".into(),
+                job_type: "codex-account-sync".into(),
+            })
+            .unwrap();
+        assert_eq!(codex_jobs.total, 1);
+        assert_eq!(codex_jobs.rows[0].title, "Codex 账号与用量同步");
+        assert_eq!(codex_jobs.rows[0].trigger_source, "background");
+        let agent_jobs = storage
+            .list_background_jobs(BackgroundJobsFilter {
+                page: 1,
+                page_size: 10,
+                status: "".into(),
+                job_type: "agent-data-sync".into(),
+            })
+            .unwrap();
+        assert_eq!(agent_jobs.total, 0);
+        let detail = storage
+            .get_background_job_detail("codex-job")
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.job.status, "succeeded_with_warnings");
+        assert!(detail
+            .events
+            .iter()
+            .any(|event| event.stage.as_deref() == Some("账号刷新失败")));
     }
 
     #[test]
@@ -1001,7 +1124,17 @@ mod tests {
     fn task_queries_and_cancel_remain_responsive_during_slow_parse() {
         let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
-        storage.create_job("slow-job", "manual", 1).unwrap();
+        storage
+            .create_job(
+                "slow-job",
+                "agent-data-sync",
+                "Agent 数据同步",
+                "扫描并整理会话",
+                "manual",
+                1,
+                "发现 1 个需要整理的会话",
+            )
+            .unwrap();
 
         let session = native_session();
         let sessions = vec![session.clone()];

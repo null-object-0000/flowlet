@@ -20,7 +20,7 @@ type Copy = (value: string, message: string) => Promise<void>;
 type AgentMeta = {
   name: string;
   endpointSuffix: "/anthropic" | "/v1";
-  supportsDesktop: boolean;
+  hasDesktop: boolean;
   showsCredentialsFile: boolean;
   showsSubagentModel: boolean;
   environmentDescription: string;
@@ -34,7 +34,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
   "claude-code": {
     name: "Claude Code",
     endpointSuffix: "/anthropic",
-    supportsDesktop: false,
+    hasDesktop: false,
     showsCredentialsFile: false,
     showsSubagentModel: true,
     environmentDescription: "识别 Claude Code 的安装位置、版本和安装方式",
@@ -46,7 +46,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
   opencode: {
     name: "OpenCode",
     endpointSuffix: "/v1",
-    supportsDesktop: true,
+    hasDesktop: true,
     showsCredentialsFile: true,
     showsSubagentModel: false,
     environmentDescription: "识别 OpenCode CLI 与 Desktop 的安装位置和版本",
@@ -58,7 +58,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
   pi: {
     name: "Pi",
     endpointSuffix: "/v1",
-    supportsDesktop: false,
+    hasDesktop: false,
     showsCredentialsFile: true,
     showsSubagentModel: false,
     environmentDescription: "识别 Pi CLI 的安装位置和版本",
@@ -143,7 +143,9 @@ export function AgentAccessSideSheet({
           onChange={(key) => setSurface(key as "cli" | "desktop")}
         >
           <Tabs.TabPane tab={t("{name} CLI 接入", { name })} itemKey="cli" />
-          <Tabs.TabPane tab={t("{name} Desktop 接入", { name })} itemKey="desktop" disabled={!meta.supportsDesktop} />
+          {meta.hasDesktop ? (
+            <Tabs.TabPane tab={t("{name} Desktop 接入", { name })} itemKey="desktop" />
+          ) : null}
         </Tabs>
       }
       headerStyle={{ paddingBottom: 0 }}

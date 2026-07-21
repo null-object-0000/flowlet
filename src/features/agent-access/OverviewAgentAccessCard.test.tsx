@@ -276,7 +276,7 @@ describe("OverviewAgentAccessCard", () => {
 
     expect(screen.getByRole("button", { name: "配置 Claude Code" })).toBeEnabled();
     expect(screen.getByText("2.1.207")).toBeInTheDocument();
-    expect(screen.getAllByText("暂不支持")).toHaveLength(2);
+    expect(screen.queryByText("暂不支持")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "配置 Pi" })).toBeEnabled();
     expect(screen.getByText("0.42.1")).toBeInTheDocument();
 
@@ -289,7 +289,7 @@ describe("OverviewAgentAccessCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "配置 Claude Code" }));
     expect(screen.getByRole("tab", { name: "Claude Code CLI 接入" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Claude Code Desktop 接入" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("tab", { name: "Claude Code Desktop 接入" })).not.toBeInTheDocument();
     expect(screen.queryByText("Anthropic-compatible")).not.toBeInTheDocument();
     expect(screen.queryByText("通过 Anthropic-compatible 协议将 Claude Code 接入 Flowlet。")).not.toBeInTheDocument();
     expect(screen.getByText("本机环境")).toBeInTheDocument();
@@ -371,7 +371,7 @@ describe("OverviewAgentAccessCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "配置 Pi" }));
     expect(screen.getByRole("tab", { name: "Pi CLI 接入" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Pi Desktop 接入" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("tab", { name: "Pi Desktop 接入" })).not.toBeInTheDocument();
     expect(screen.getByText("Pi CLI 0.42.1")).toBeInTheDocument();
     expect(screen.getByText("npm 全局安装")).toBeInTheDocument();
     expect(screen.getByText("Pi 的 Provider 定义在 models.json，凭据在 auth.json，默认模型在 settings.json")).toBeInTheDocument();

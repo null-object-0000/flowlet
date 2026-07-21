@@ -183,7 +183,6 @@ const english: Record<string, string> = {
   "已安装": "Installed",
   "已安装 · {version}": "Installed · {version}",
   "未安装": "Not installed",
-  "暂不支持": "Not supported yet",
   "配置 {name}": "Configure {name}",
   "{name} 接入": "{name} setup",
   "{name} CLI 接入": "{name} CLI setup",

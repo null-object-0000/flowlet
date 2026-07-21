@@ -25,35 +25,35 @@ const AGENTS: Array<{
   icon: React.ReactNode;
   iconClassName: string;
   kind: SupportedAgentKind;
-  supportsDesktop: boolean;
+  hasDesktop: boolean;
 }> = [
   {
     name: "Claude Code",
     icon: <span className={`${styles.brandIcon} ${styles.claudeCodeMark}`} aria-hidden="true" />,
     iconClassName: styles.claudeIcon,
     kind: "claude-code",
-    supportsDesktop: false,
+    hasDesktop: false,
   },
   {
     name: "OpenCode",
     icon: <span className={`${styles.brandIcon} ${styles.openCodeMark}`} aria-hidden="true" />,
     iconClassName: styles.openCodeIcon,
     kind: "opencode",
-    supportsDesktop: true,
+    hasDesktop: true,
   },
   {
     name: "Pi",
     icon: <span className={`${styles.brandIcon} ${styles.piMark}`} aria-hidden="true" />,
     iconClassName: styles.piIcon,
     kind: "pi",
-    supportsDesktop: false,
+    hasDesktop: false,
   },
   {
     name: "ChatGPT (Codex)",
     icon: <span className={`${styles.brandIcon} ${styles.chatgptMark}`} aria-hidden="true" />,
     iconClassName: styles.chatgptIcon,
     kind: "chatgpt-desktop",
-    supportsDesktop: true,
+    hasDesktop: true,
   },
 ];
 
@@ -132,7 +132,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
     <>
       <OverviewModuleCard title={t("AI Agent 接入")}>
         <div className={styles.grid}>
-          {AGENTS.map(({ name, icon, iconClassName, kind, supportsDesktop }) => {
+          {AGENTS.map(({ name, icon, iconClassName, kind, hasDesktop }) => {
             const environmentQuery = kind === "claude-code"
               ? claudeEnvironment
               : kind === "opencode"
@@ -159,14 +159,15 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                       loading={environmentQuery.isLoading}
                       error={environmentQuery.isError}
                     />
-                    <SurfaceStatus
-                      label="Desktop"
-                      surface="desktop"
-                      environment={environmentQuery.data}
-                      loading={environmentQuery.isLoading}
-                      error={environmentQuery.isError}
-                      unsupported={!supportsDesktop}
-                    />
+                    {hasDesktop ? (
+                      <SurfaceStatus
+                        label="Desktop"
+                        surface="desktop"
+                        environment={environmentQuery.data}
+                        loading={environmentQuery.isLoading}
+                        error={environmentQuery.isError}
+                      />
+                    ) : null}
                   </span>
                 </span>
                 <span className={`${styles.support} ${styles.supported}`}>{t("查看详情")}</span>
@@ -220,28 +221,24 @@ function SurfaceStatus({
   environment,
   loading,
   error,
-  unsupported = false,
 }: {
   label: string;
   surface: AgentSurface;
   environment?: AgentEnvironmentReport;
   loading: boolean;
   error: boolean;
-  unsupported?: boolean;
 }) {
   const { t } = useAppPreferences();
   const installation = environment?.installations.find((candidate) => (candidate.surface || "cli") === surface);
-  const status = unsupported
-    ? t("暂不支持")
-    : loading
-      ? t("正在检测…")
-      : error
-        ? t("检测失败")
-        : installation
+  const status = loading
+    ? t("正在检测…")
+    : error
+      ? t("检测失败")
+      : installation
+        ? installation.version
           ? installation.version
-            ? installation.version
-            : t("已安装")
-          : t("未安装");
+          : t("已安装")
+        : t("未安装");
 
   return <small><span>{t(label)}</span><span>{status}</span></small>;
 }

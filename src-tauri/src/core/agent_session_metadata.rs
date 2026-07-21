@@ -65,6 +65,16 @@ pub fn native_agent_source_watches() -> Vec<NativeAgentSourceWatch> {
                 recursive: false,
             });
         }
+        // Pi 原生会话存储：`~/.pi/agent/sessions/<编码后的cwd>/<timestamp>_<uuid>.jsonl`。
+        // 目录名是 cwd 按规则编码后的结果，这里直接递归扫描所有 .jsonl，无需反推编码。
+        let pi_sessions = home.join(".pi").join("agent").join("sessions");
+        if pi_sessions.is_dir() {
+            watches.push(NativeAgentSourceWatch {
+                agent_type: "pi".into(),
+                path: pi_sessions,
+                recursive: true,
+            });
+        }
     }
     for database in opencode_database_candidates()
         .into_iter()
@@ -114,6 +124,11 @@ pub fn list_native_agent_sessions() -> Vec<AgentSessionRow> {
         }
     }
     for row in list_codex_native_sessions() {
+        if seen.insert(session_key(&row)) {
+            rows.push(row);
+        }
+    }
+    for row in list_pi_native_sessions() {
         if seen.insert(session_key(&row)) {
             rows.push(row);
         }
@@ -513,6 +528,160 @@ fn list_opencode_native_sessions_from(database_path: &Path) -> Vec<AgentSessionR
     mapped.flatten().collect()
 }
 
+fn list_pi_native_sessions() -> Vec<AgentSessionRow> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    list_pi_native_sessions_from(&home.join(".pi").join("agent").join("sessions"))
+}
+
+fn list_pi_native_sessions_from(sessions_root: &Path) -> Vec<AgentSessionRow> {
+    if !sessions_root.is_dir() {
+        return Vec::new();
+    }
+    let mut paths = Vec::new();
+    collect_jsonl_files(sessions_root, &mut paths);
+    paths
+        .into_iter()
+        .filter_map(|path| read_pi_session_summary(&path))
+        .collect()
+}
+
+// 扫描 Pi 会话文件时最多读取的字节数。会话文件可能很大，列表页只需头行与标题，
+// 无需读完全部内容；超出后回退到文件修改时间作为更新时间。
+const MAX_PI_SESSION_SUMMARY_BYTES: usize = 64 * 1024;
+
+fn read_pi_session_summary(path: &Path) -> Option<AgentSessionRow> {
+    let file = File::open(path).ok()?;
+    let mut session_id = None;
+    let mut parent_session_id = None;
+    let mut project_path = None;
+    let mut native_started_at = None;
+    let mut native_updated_at = None;
+    let mut title = None;
+    let mut first_user_text = None;
+    let mut bytes_read = 0;
+
+    for line in BufReader::new(file).lines() {
+        let Ok(line) = line else { break };
+        bytes_read += line.len();
+        if bytes_read > MAX_PI_SESSION_SUMMARY_BYTES {
+            break;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        match value.get("type").and_then(Value::as_str) {
+            Some("session") => {
+                // 头行：id 即会话 UUID（与扩展注入的 x-flowlet-session 值一致），
+                // cwd 即项目路径，timestamp 即会话开始时间，parentSession 指向派生来源文件。
+                if session_id.is_none() {
+                    session_id = string_field(&value, "id");
+                }
+                if project_path.is_none() {
+                    project_path = string_field(&value, "cwd");
+                }
+                if native_started_at.is_none() {
+                    native_started_at = string_field(&value, "timestamp");
+                }
+                if parent_session_id.is_none() {
+                    parent_session_id = string_field(&value, "parentSession")
+                        .as_deref()
+                        .and_then(pi_parent_session_id);
+                }
+            }
+            Some("session_info") => {
+                // 用户通过 /name 设置的名优先作为标题。
+                if let Some(name) = string_field(&value, "name") {
+                    title = Some(name);
+                }
+            }
+            Some("message") => {
+                if let Some(message) = value.get("message") {
+                    if message.get("role").and_then(Value::as_str) == Some("user")
+                        && first_user_text.is_none()
+                    {
+                        first_user_text = pi_first_user_text(message);
+                    }
+                }
+            }
+            _ => {}
+        }
+        // 所有 entry 都带 timestamp，取最后一个作为更新时间。
+        if let Some(timestamp) = string_field(&value, "timestamp") {
+            native_updated_at = Some(timestamp);
+        }
+    }
+
+    // 回退：扫描被截断或没有有效 entry 时，用文件修改时间作为更新时间。
+    if native_updated_at.is_none() {
+        native_updated_at = fs::metadata(path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .map(DateTime::<Utc>::from)
+            .map(|value| value.to_rfc3339());
+    }
+
+    let session_id = session_id?;
+    // 无自定义名时，回退到首条用户消息文本作为标题。
+    if title.is_none() {
+        title = first_user_text;
+    }
+    Some(native_row(
+        "pi",
+        session_id,
+        parent_session_id,
+        title,
+        project_path,
+        native_started_at,
+        native_updated_at,
+    ))
+}
+
+// 从派生会话的 parentSession 文件路径中提取来源会话的 UUID。
+// parentSession 形如 `.../<timestamp>_<uuid>.jsonl`，uuid 即文件名主干最后一个 `_` 之后的部分。
+fn pi_parent_session_id(parent_session: &str) -> Option<String> {
+    let stem = Path::new(parent_session)
+        .file_stem()
+        .and_then(|stem| stem.to_str())?;
+    let (_, uuid) = stem.rsplit_once('_')?;
+    (!uuid.is_empty()).then(|| uuid.to_string())
+}
+
+// 取 Pi 用户消息的首段文本（content 可能是字符串或 TextContent 数组），
+// 截断后作为会话标题回退。
+fn pi_first_user_text(message: &Value) -> Option<String> {
+    let content = message.get("content")?;
+    let text = match content {
+        Value::String(text) => text.trim().to_string(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|block| {
+                if block.get("type").and_then(Value::as_str) == Some("text") {
+                    block.get("text").and_then(Value::as_str)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string(),
+        _ => String::new(),
+    };
+    (!text.is_empty()).then(|| truncate_session_title(&text, 80))
+}
+
+fn truncate_session_title(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let prefix = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}…")
+    } else {
+        prefix
+    }
+}
+
 fn native_row(
     agent_type: &str,
     session_id: String,
@@ -728,6 +897,63 @@ mod tests {
             .unwrap();
         assert_eq!(cli.agent_type, "codex-cli");
         assert_eq!(cli.parent_session_id, None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lists_pi_native_sessions_from_session_file() {
+        let root = std::env::temp_dir().join(format!("flowlet-pi-session-{}", Uuid::new_v4()));
+        let project_dir = root.join("--Users-dev-my-app--");
+        fs::create_dir_all(&project_dir).unwrap();
+        // 头行 id 即会话 UUID；session_info 提供标题；首条 user 消息作为标题回退。
+        fs::write(
+            project_dir.join("1701600000000_550e8400-e29b-41d4-a716-446655440000.jsonl"),
+            concat!(
+                "{\"type\":\"session\",\"version\":3,\"id\":\"550e8400-e29b-41d4-a716-446655440000\",\"timestamp\":\"2024-12-03T14:00:00.000Z\",\"cwd\":\"/Users/dev/my-app\"}\n",
+                "{\"type\":\"message\",\"id\":\"a1\",\"parentId\":null,\"timestamp\":\"2024-12-03T14:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"帮我重构鉴权模块\"}}\n",
+                "{\"type\":\"session_info\",\"id\":\"s1\",\"parentId\":\"a1\",\"timestamp\":\"2024-12-03T14:00:02.000Z\",\"name\":\"Refactor auth\"}\n",
+                "{\"type\":\"message\",\"id\":\"a2\",\"parentId\":\"s1\",\"timestamp\":\"2024-12-03T14:00:05.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Working\"}]}}\n"
+            ),
+        )
+        .unwrap();
+        // 派生会话：parentSession 指向来源文件，应提取来源 UUID 作为 parent_session_id。
+        fs::write(
+            project_dir.join("1701600100000_660e8400-e29b-41d4-a716-446655440000.jsonl"),
+            concat!(
+                "{\"type\":\"session\",\"version\":3,\"id\":\"660e8400-e29b-41d4-a716-446655440000\",\"timestamp\":\"2024-12-03T14:01:00.000Z\",\"cwd\":\"/Users/dev/my-app\",\"parentSession\":\"1701600000000_550e8400-e29b-41d4-a716-446655440000.jsonl\"}\n",
+                "{\"type\":\"message\",\"id\":\"b1\",\"parentId\":null,\"timestamp\":\"2024-12-03T14:01:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"另一个思路\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let rows = list_pi_native_sessions_from(&root);
+        assert_eq!(rows.len(), 2);
+        let main = rows
+            .iter()
+            .find(|row| row.session_id == "550e8400-e29b-41d4-a716-446655440000")
+            .unwrap();
+        assert_eq!(main.title.as_deref(), Some("Refactor auth"));
+        assert_eq!(main.project_path.as_deref(), Some("/Users/dev/my-app"));
+        assert_eq!(
+            main.native_started_at.as_deref(),
+            Some("2024-12-03T14:00:00.000Z")
+        );
+        assert_eq!(
+            main.native_updated_at.as_deref(),
+            Some("2024-12-03T14:00:05.000Z")
+        );
+        assert_eq!(main.parent_session_id, None);
+        assert!(!main.flowlet_observed);
+        let child = rows
+            .iter()
+            .find(|row| row.session_id == "660e8400-e29b-41d4-a716-446655440000")
+            .unwrap();
+        // 无 session_info 名时，回退到首条用户消息文本。
+        assert_eq!(child.title.as_deref(), Some("另一个思路"));
+        assert_eq!(
+            child.parent_session_id.as_deref(),
+            Some("550e8400-e29b-41d4-a716-446655440000")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

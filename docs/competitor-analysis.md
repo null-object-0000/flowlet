@@ -134,7 +134,7 @@
 | OpenClaw | ❌ | ✅ | ❌ | ✅ | ❌ |
 | Hermes Agent | ❌ | ✅ | ❌ | ✅ | ❌ |
 | Kimi / MiMo | ❌ | ❌ | ❌（仅订阅监控） | ✅ | — |
-| Pi | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Pi | ✅ 配置写入+会话读取 | ❌ | ❌ | ✅ | ❌ |
 | Qoder CLI | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Antigravity CLI | ❌ | ❌ | ❌（仅订阅监控/CPA 账号） | ✅ | ❌ |
 | CodeBuddy CLI | ❌ | ❌ | ❌ | ✅ | ❌ |
@@ -145,7 +145,7 @@
 | 配置写入 Agent | ❌ | ✅ 各 Agent 直接写入 | ✅ Claude/Codex/OpenCode | ❌ | ❌ |
 | 配置备份 | ❌ | ✅ 原子写入+自动备份 | ✅ 接管前保留原配置 | ❌ | ❌ |
 | 配置回滚 | ❌ | ✅ act undo | ✅ 停用时恢复 | ❌ | ❌ |
-| 本地文件直读 | 📐 规划中 | ❌ | ✅ 会话日志/opencode.db | ❌ | ✅ 读取会话文件 |
+| 本地文件直读 | ✅ Codex/Claude Code/OpenCode/Pi | ❌ | ✅ 会话日志/opencode.db | ❌ | ✅ 读取会话文件 |
 | 一键切换 Provider | ❌（前端决策） | ✅ 托盘+主界面 | ✅ 菜单栏+主界面 | ❌ | ❌ |
 
 ### 2.6 Agent MCP / Prompts / Skills

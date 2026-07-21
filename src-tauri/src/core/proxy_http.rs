@@ -321,7 +321,16 @@ pub(super) fn apply_request_headers(
             || name.as_str() == "x-api-key"
             // 客户端归属标记头仅用于本地识别，识别后不再透传上游，避免泄露受管信息。
             || name.as_str() == AGENT_CLIENT_HEADER
+            // Pi 会话标识头仅用于本地会话归属，识别后不再透传上游。
+            || name.as_str() == AGENT_SESSION_HEADER
         {
+            continue;
+        }
+        if name.as_str() == "anthropic-beta" {
+            // 过滤 Claude Code 长上下文附带的 context-1m beta（见下方说明）。
+            if let Some(filtered) = filter_anthropic_beta(value) {
+                builder = builder.header(name, filtered);
+            }
             continue;
         }
         builder = builder.header(name, value);
@@ -340,6 +349,28 @@ pub(super) fn apply_request_headers(
 
     let _ = protocol;
     builder
+}
+
+/// Claude Code 开启 1M 上下文时会在 `anthropic-beta` 附带
+/// `context-1m-2025-08-07`。这是 Anthropic 官方 API 的 beta 标志，转发给
+/// 第三方 Anthropic 兼容端点可能因未知 beta 被拒绝；Flowlet 支持的上游
+/// （LongCat / DeepSeek / Kimi / 千问等）各自管理上下文长度，故转发前剔除
+/// 该项，保留其余 beta。返回 `None` 表示过滤后为空、应整体丢弃该头。
+/// 注：若未来接入 Anthropic 官方 API 渠道，应按上游 host 条件化保留。
+fn filter_anthropic_beta(value: &HeaderValue) -> Option<HeaderValue> {
+    const CONTEXT_1M_BETA: &str = "context-1m-2025-08-07";
+    let Ok(raw) = value.to_str() else {
+        return Some(value.clone());
+    };
+    let kept = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|token| !token.is_empty() && !token.eq_ignore_ascii_case(CONTEXT_1M_BETA))
+        .collect::<Vec<_>>();
+    if kept.is_empty() {
+        return None;
+    }
+    HeaderValue::from_maybe_shared(kept.join(",")).ok()
 }
 
 pub(super) fn copy_response_headers(source: &HeaderMap, target: &mut HeaderMap<HeaderValue>) {
@@ -454,8 +485,20 @@ pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::Lo
 /// 部分 Agent（如 Pi）复用通用 SDK 的 User-Agent（例如 `OpenAI/JS`），无法靠 UA
 /// 子串区分，故由 Flowlet 在写入其全局配置时注入本头，值即客户端 id。识别时优先
 /// 读取本头，再回退到 UA 规则，确保开箱即可归属，不依赖用户 config.json 是否含
-/// 对应规则。该头会随请求透传上游，仅用于归属，不参与鉴权或路由。
+/// 对应规则。该头仅用于本地归属，不参与鉴权或路由；Flowlet 在识别后、转发上游前
+/// 会将其剥离，不向上游泄露。
 pub(super) const AGENT_CLIENT_HEADER: &str = "x-flowlet-client";
+
+/// Pi 与 Flowlet 约定的会话标识头。
+///
+/// Pi 走 OpenAI 兼容 SDK，原生请求不带会话标识。Flowlet 在写入 Pi 配置时会同时
+/// 写入一个扩展（`~/.pi/agent/extensions/flowlet.ts`），在每次 LLM 请求的 headers
+/// 组装完成后注入本头，值即当前会话 UUID（与 Pi 原生会话文件头行的 `id` 一致），
+/// 使 Flowlet 能把请求按会话归并，并与原生会话数据按 `(agent_type, session_id)` 合并。
+/// 该头仅用于本地会话归属，不参与鉴权或路由；Flowlet 在识别后、转发上游前会将其
+/// 剥离，不向上游泄露。识别时以 `x-flowlet-client: pi` 标记头为门控，避免误读其他
+/// 客户端的同名头。
+pub(super) const AGENT_SESSION_HEADER: &str = "x-flowlet-session";
 
 /// 标记头值 → 展示名。仅收录 UA 无法区分、需要靠标记头识别的 Agent。
 fn agent_client_marker_name(value: &str) -> Option<&'static str> {
@@ -529,18 +572,24 @@ pub(super) use load_config_ua_rules as load_ua_rules;
 
 // ─── Model Rewriting ─────────────────────────────────────────────────────────
 
+/// Claude Code 用 `[1m]` 模型名后缀启用百万级上下文窗口预算，正常情况下会在
+/// 发送请求前剥离后缀；这里防御性再剥离一次，确保带后缀的请求仍能命中对外
+/// 模型（对普通模型无影响）。
+fn strip_long_context_suffix(model: &str) -> &str {
+    if model.to_ascii_lowercase().ends_with("[1m]") {
+        &model[..model.len() - 4]
+    } else {
+        model
+    }
+}
+
 pub(super) fn extract_model(body: &[u8], protocol: &ProtocolType) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
-    match protocol {
-        ProtocolType::OpenAi => value
-            .get("model")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        ProtocolType::Anthropic => value
-            .get("model")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-    }
+    let model = match protocol {
+        ProtocolType::OpenAi => value.get("model").and_then(|v| v.as_str()),
+        ProtocolType::Anthropic => value.get("model").and_then(|v| v.as_str()),
+    }?;
+    Some(strip_long_context_suffix(model).to_string())
 }
 
 // ─── Header Sanitization + Body Encoding ─────────────────────────────────────
@@ -857,6 +906,77 @@ mod tests {
         assert!(!request.headers().contains_key(AGENT_CLIENT_HEADER));
         // 其余普通头（含 UA）照常透传。
         assert!(request.headers().contains_key(header::USER_AGENT));
+    }
+
+    #[test]
+    fn extract_model_strips_long_context_suffix() {
+        // Claude Code 的 [1m] 后缀正常会在发送前剥离；代理层防御性兼容带后缀的请求。
+        let suffixed = br#"{"model":"flowlet-pro[1m]"}"#;
+        assert_eq!(
+            extract_model(suffixed, &ProtocolType::Anthropic).as_deref(),
+            Some("flowlet-pro")
+        );
+        let upper = br#"{"model":"flowlet-pro[1M]"}"#;
+        assert_eq!(
+            extract_model(upper, &ProtocolType::OpenAi).as_deref(),
+            Some("flowlet-pro")
+        );
+        let plain = br#"{"model":"flowlet-pro"}"#;
+        assert_eq!(
+            extract_model(plain, &ProtocolType::Anthropic).as_deref(),
+            Some("flowlet-pro")
+        );
+    }
+
+    #[test]
+    fn apply_request_headers_filters_context_1m_beta_only() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "anthropic-beta",
+            HeaderValue::from_static("prompt-caching-2024-07-31, context-1m-2025-08-07"),
+        );
+
+        let request = apply_request_headers(
+            reqwest::Client::new().post("http://127.0.0.1/test"),
+            &headers,
+            "",
+            &ProtocolType::Anthropic,
+            &AuthStrategy::Bearer,
+        )
+        .body("{}")
+        .build()
+        .unwrap();
+
+        // context-1m 是 Anthropic 官方 beta，第三方兼容端点可能拒绝，需剔除；其余保留。
+        assert_eq!(
+            request
+                .headers()
+                .get("anthropic-beta")
+                .and_then(|value| value.to_str().ok()),
+            Some("prompt-caching-2024-07-31")
+        );
+    }
+
+    #[test]
+    fn apply_request_headers_drops_beta_header_when_only_context_1m() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "anthropic-beta",
+            HeaderValue::from_static("context-1m-2025-08-07"),
+        );
+
+        let request = apply_request_headers(
+            reqwest::Client::new().post("http://127.0.0.1/test"),
+            &headers,
+            "",
+            &ProtocolType::Anthropic,
+            &AuthStrategy::Bearer,
+        )
+        .body("{}")
+        .build()
+        .unwrap();
+
+        assert!(!request.headers().contains_key("anthropic-beta"));
     }
 }
 

@@ -109,6 +109,26 @@ fn extract_agent_session(headers: &HeaderMap) -> Option<AgentSessionIdentity> {
         });
     }
 
+    // Pi — Pi 走 OpenAI 兼容 SDK，原生请求不带会话标识。Flowlet 在写入 Pi 配置时
+    // 会同时写入一个扩展（~/.pi/agent/extensions/flowlet.ts），在每次 LLM 请求的
+    // headers 组装完成后注入 x-flowlet-session（值为当前会话 UUID，与 Pi 原生会话
+    // 文件头行的 id 一致）。识别时以 x-flowlet-client: pi 标记头为门控，避免误读
+    // 其他客户端的同名头。
+    let is_flowlet_pi = headers
+        .get(proxy_http::AGENT_CLIENT_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case("pi"));
+    if is_flowlet_pi {
+        if let Some(session_id) = valid_session_header(headers, proxy_http::AGENT_SESSION_HEADER) {
+            return Some(AgentSessionIdentity {
+                agent_type: "pi".to_string(),
+                session_id,
+                parent_session_id: None,
+            });
+        }
+    }
+
     let user_agent_is_opencode = headers
         .get("user-agent")
         .and_then(|value| value.to_str().ok())

@@ -1,4 +1,4 @@
-export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli";
+export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi";
 export type AgentSessionFlowletStatus = "" | "observed" | "native";
 
 export type AgentSessionFilter = {

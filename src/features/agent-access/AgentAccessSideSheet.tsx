@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Select, SideSheet, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Select, SideSheet, Switch, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import type {
   AgentEnvironmentReport,
+  AgentGlobalConfigOptions,
   AgentGlobalConfigReport,
   AgentGlobalConfigState,
   AgentInstallMethod,
@@ -87,7 +88,7 @@ type Props = {
   globalConfigBusy?: boolean;
   globalConfigError?: string;
   onRefreshGlobalConfig: () => void;
-  onApplyGlobalConfig: () => Promise<void>;
+  onApplyGlobalConfig: (options?: AgentGlobalConfigOptions) => Promise<void>;
   onRestoreGlobalConfig: () => Promise<void>;
   onClose: () => void;
   onCopy: Copy;
@@ -120,9 +121,11 @@ export function AgentAccessSideSheet({
   const endpoint = `${baseUrl}${meta.endpointSuffix}`;
   const token = clientToken || "<Client Token>";
   const displayedToken = clientToken ? MASKED_TOKEN : token;
+  // 1M 长上下文是 Claude Code 专属配置：主模型环境变量是否带 [1m] 后缀。
+  const longContext = agent === "claude-code" && (globalConfig?.long_context ?? false);
   const manualSnippets = useMemo(
-    () => buildManualSnippets(agent, endpoint, token, displayedToken, t),
-    [agent, displayedToken, endpoint, t, token],
+    () => buildManualSnippets(agent, endpoint, token, displayedToken, longContext, t),
+    [agent, displayedToken, endpoint, longContext, t, token],
   );
 
   useEffect(() => {
@@ -255,6 +258,38 @@ export function AgentAccessSideSheet({
                 <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
                 {meta.showsFastModel ? <StatusRow label={t("快速模型")} value={globalConfig.fast_model || "-"} /> : null}
                 {meta.showsSubagentModel ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}
+                {agent === "claude-code" ? (
+                  <div className={styles.longContextRow}>
+                    <div>
+                      <strong>{t("1M 长上下文")}</strong>
+                      <small>{t("为主模型写入 [1m] 后缀，Claude Code 长会话按百万级上下文窗口管理。")}</small>
+                      <small>{t("Flowlet 实际可用上下文受路由后端限制，部分后端（如 Kimi K3 约 256K）撑不满 1M。")}</small>
+                    </div>
+                    <Switch
+                      checked={globalConfig.long_context ?? false}
+                      disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
+                      loading={globalConfigBusy}
+                      aria-label={t("1M 长上下文")}
+                      onChange={(checked) => void onApplyGlobalConfig({ longContext: checked })}
+                    />
+                  </div>
+                ) : null}
+                {agent === "pi" ? (
+                  <div className={styles.longContextRow}>
+                    <div>
+                      <strong>{t("会话扩展")}</strong>
+                      <small>{t("安装后可为请求注入会话标识，Flowlet 按会话归并请求；未安装则无法做会话维度串联。")}</small>
+                      <small>{t("Pi 仍可作为 Flowlet 客户端使用，仅会话维度数据不可用。")}</small>
+                    </div>
+                    <Switch
+                      checked={globalConfig.session_extension ?? true}
+                      disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
+                      loading={globalConfigBusy}
+                      aria-label={t("会话扩展")}
+                      onChange={(checked) => void onApplyGlobalConfig({ sessionExtension: checked })}
+                    />
+                  </div>
+                ) : null}
                 {globalConfig.error ? <Text type="danger">{globalConfig.error}</Text> : null}
                 {globalConfig.external_environment_overrides.length ? (
                   <div className={styles.configWarning}>
@@ -274,7 +309,13 @@ export function AgentAccessSideSheet({
                     theme="solid"
                     loading={globalConfigBusy}
                     disabled={globalConfig.state === "invalid" || !clientToken}
-                    onClick={() => void onApplyGlobalConfig()}
+                    onClick={() => void onApplyGlobalConfig(
+                      agent === "claude-code"
+                        ? { longContext: globalConfig.long_context ?? false }
+                        : agent === "pi"
+                          ? { sessionExtension: globalConfig.session_extension ?? true }
+                          : undefined,
+                    )}
                   >
                     {t(globalConfig.state === "flowlet" ? "重新写入 Flowlet 配置" : globalConfig.state === "other_gateway" ? "覆盖并接入 Flowlet" : "全局接入 Flowlet")}
                   </Button>
@@ -370,17 +411,20 @@ function buildManualSnippets(
   endpoint: string,
   token: string,
   displayedToken: string,
+  longContext: boolean,
   t: (source: string) => string,
 ) {
   if (agent === "claude-code") {
+    // 与一键写入保持一致：开启 1M 长上下文时主模型带 [1m] 后缀。
+    const primaryModel = longContext ? "flowlet-pro[1m]" : "flowlet-pro";
     const value = (authToken: string) => JSON.stringify({
       env: {
         ANTHROPIC_BASE_URL: endpoint,
         ANTHROPIC_AUTH_TOKEN: authToken,
-        ANTHROPIC_MODEL: "flowlet-pro",
-        ANTHROPIC_DEFAULT_FABLE_MODEL: "flowlet-pro",
-        ANTHROPIC_DEFAULT_OPUS_MODEL: "flowlet-pro",
-        ANTHROPIC_DEFAULT_SONNET_MODEL: "flowlet-pro",
+        ANTHROPIC_MODEL: primaryModel,
+        ANTHROPIC_DEFAULT_FABLE_MODEL: primaryModel,
+        ANTHROPIC_DEFAULT_OPUS_MODEL: primaryModel,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: primaryModel,
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "flowlet-flash",
         ANTHROPIC_SMALL_FAST_MODEL: "flowlet-flash",
         CLAUDE_CODE_SUBAGENT_MODEL: "flowlet-flash",
@@ -413,6 +457,25 @@ function buildManualSnippets(
       defaultProvider: "flowlet",
       defaultModel: "flowlet-pro",
     }, null, 2);
+    // 会话扩展：Pi 走 OpenAI 兼容 SDK，原生请求不带会话标识，需额外部署该扩展
+    // 才能让 Flowlet 把 Pi 请求按会话归并（与一键写入功能写入的扩展相同）。
+    const sessionExtension = [
+      "// 保存为 ~/.pi/agent/extensions/flowlet.ts，Pi 启动时自动加载（无需编译）。",
+      "// 作用：为发往 Flowlet 渠道的请求注入 x-flowlet-session 头（值为当前会话 UUID），",
+      "// 使 Flowlet 能按会话归并请求；该头仅用于本地归属，Flowlet 转发上游前会将其剥离。",
+      'export default function (pi) {',
+      '  pi.on("before_provider_headers", (event, ctx) => {',
+      '    if (event.headers?.["x-flowlet-client"] !== "pi") return;',
+      "    try {",
+      '      const sessionId = ctx?.sessionManager?.getSessionId?.();',
+      '      if (typeof sessionId === "string" && sessionId.length > 0) {',
+      '        event.headers["x-flowlet-session"] = sessionId;',
+      "      }",
+      "    } catch {}",
+      "  });",
+      "}",
+      "",
+    ].join("\n");
     return [
       {
         label: t("models.json Provider 片段"),
@@ -428,6 +491,11 @@ function buildManualSnippets(
         label: t("settings.json 默认模型片段"),
         displayValue: defaults,
         copyValue: defaults,
+      },
+      {
+        label: t("会话扩展片段（flowlet.ts）"),
+        displayValue: sessionExtension,
+        copyValue: sessionExtension,
       },
     ];
   }

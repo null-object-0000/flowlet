@@ -87,6 +87,54 @@ fn extracts_claude_code_session_from_official_header() {
 }
 
 #[test]
+fn extracts_pi_session_only_with_client_marker() {
+    let mut headers = HeaderMap::new();
+    // Pi 走 OpenAI 兼容 SDK，UA 是通用的 OpenAI/JS，必须靠标记头识别。
+    headers.insert("user-agent", HeaderValue::from_static("OpenAI/JS 4.90.0"));
+    headers.insert("x-flowlet-client", HeaderValue::from_static("pi"));
+    headers.insert(
+        "x-flowlet-session",
+        HeaderValue::from_static("pi-session-abc"),
+    );
+
+    assert_eq!(
+        extract_agent_session(&headers),
+        Some(AgentSessionIdentity {
+            agent_type: "pi".to_string(),
+            session_id: "pi-session-abc".to_string(),
+            parent_session_id: None,
+        })
+    );
+}
+
+#[test]
+fn ignores_pi_session_header_without_client_marker() {
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("OpenAI/JS 4.90.0"));
+    // 没有 x-flowlet-client: pi 标记头时，x-flowlet-session 不应被读取，
+    // 避免其他客户端的同名头被误归为 Pi 会话。
+    headers.insert(
+        "x-flowlet-session",
+        HeaderValue::from_static("pi-session-abc"),
+    );
+
+    assert_eq!(extract_agent_session(&headers), None);
+}
+
+#[test]
+fn ignores_pi_session_header_with_non_pi_client_marker() {
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("OpenAI/JS 4.90.0"));
+    headers.insert("x-flowlet-client", HeaderValue::from_static("other"));
+    headers.insert(
+        "x-flowlet-session",
+        HeaderValue::from_static("pi-session-abc"),
+    );
+
+    assert_eq!(extract_agent_session(&headers), None);
+}
+
+#[test]
 fn protocol_type_from_path_returns_none_for_health() {
     assert_eq!(ProtocolType::from_path("/health"), None);
 }

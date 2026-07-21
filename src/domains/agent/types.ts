@@ -99,7 +99,19 @@ export type AgentGlobalConfigReport = {
   primary_model?: string | null;
   fast_model?: string | null;
   subagent_model?: string | null;
+  /** Claude Code 主模型是否已写入 `[1m]` 长上下文后缀；其他 Agent 恒为 false。 */
+  long_context?: boolean;
   backup_available: boolean;
   external_environment_overrides: string[];
   error?: string | null;
+  /** 仅 Pi：Flowlet 会话扩展（`~/.pi/agent/extensions/flowlet.ts`）是否在位。 */
+  session_extension?: boolean;
+};
+
+/** 一键写入 Agent 全局配置的可选参数；某 Agent 不支持的选项会被忽略。 */
+export type AgentGlobalConfigOptions = {
+  /** 仅 Claude Code：主模型环境变量附加 `[1m]` 后缀，启用百万级上下文窗口预算。 */
+  longContext?: boolean;
+  /** 仅 Pi：是否安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。安装后可按会话归并请求。 */
+  sessionExtension?: boolean;
 };

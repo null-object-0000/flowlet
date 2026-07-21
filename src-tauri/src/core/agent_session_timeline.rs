@@ -5,7 +5,7 @@ use super::config::{
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OpenFlags};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -50,6 +50,7 @@ pub fn get_native_agent_session_timeline(
         "opencode" => read_opencode_timeline(session_id),
         "claude-code" => read_claude_timeline(session_id),
         "codex-desktop" | "codex-cli" => read_codex_timeline(agent_type, session_id),
+        "pi" => read_pi_timeline(session_id),
         _ => Err(format!("暂不支持读取 Agent 会话时间线：{agent_type}")),
     }
 }
@@ -900,6 +901,329 @@ fn parse_codex_line(
     }
 }
 
+fn read_pi_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
+    let Some(home) = dirs::home_dir() else {
+        return Ok(empty_timeline());
+    };
+    let root = home.join(".pi").join("agent").join("sessions");
+    let Some(path) = find_pi_session_file(&root, session_id) else {
+        return Ok(empty_timeline());
+    };
+    read_pi_timeline_from(&path)
+}
+
+// Pi 会话文件按 `<timestamp>_<uuid>.jsonl` 命名，uuid 即会话 id。在 sessions 目录下
+// 递归查找文件名主干以 `_<session_id>` 结尾的 .jsonl 文件。
+fn find_pi_session_file(root: &Path, session_id: &str) -> Option<PathBuf> {
+    let mut paths = Vec::new();
+    collect_jsonl_files(root, &mut paths);
+    paths.into_iter().find(|path| {
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| stem.ends_with(&format!("_{session_id}")))
+    })
+}
+
+// Pi 会话是树状结构（entry 通过 id/parentId 连接，支持原地分支）。这里重建当前活动
+// 分支：从叶子（不被任何 entry 引为 parentId 的 entry）沿 parentId 回溯到根，再反转
+// 为时间顺序，映射为时间线事件。
+fn read_pi_timeline_from(path: &Path) -> Result<AgentSessionTimeline, String> {
+    let file = File::open(path).map_err(|error| format!("无法读取 Pi 会话文件：{error}"))?;
+    let mut entries: Vec<(usize, Value)> = Vec::new();
+    let mut bytes_read = 0usize;
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        let line = line.map_err(|error| format!("读取 Pi 会话文件失败：{error}"))?;
+        bytes_read = bytes_read.saturating_add(line.len());
+        if bytes_read > MAX_TIMELINE_FILE_BYTES {
+            break;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        // 跳过头行（type == session，无 id/parentId）。
+        if value.get("type").and_then(Value::as_str) == Some("session") {
+            continue;
+        }
+        entries.push((index, value));
+    }
+
+    let by_id: HashMap<String, (usize, Value)> = entries
+        .iter()
+        .filter_map(|(index, value)| {
+            value
+                .get("id")
+                .and_then(Value::as_str)
+                .map(|id| (id.to_string(), (*index, value.clone())))
+        })
+        .collect();
+    let parented: HashSet<String> = entries
+        .iter()
+        .filter_map(|(_, value)| value.get("parentId").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    // 叶子：有 id 且不被任何 entry 引为 parentId 的 entry；取时间戳最靠后的叶子。
+    let mut leaf: Option<(usize, Value)> = None;
+    for (index, value) in &entries {
+        let Some(id) = value.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if parented.contains(id) {
+            continue;
+        }
+        let candidate = (*index, value.clone());
+        leaf = match leaf {
+            Some((_, ref leaf_value)) => {
+                let leaf_ts = string_field(leaf_value, "timestamp");
+                let cand_ts = string_field(value, "timestamp");
+                if cand_ts > leaf_ts {
+                    Some(candidate)
+                } else {
+                    leaf
+                }
+            }
+            None => Some(candidate),
+        };
+    }
+
+    // 从叶子回溯到根，收集活动分支上的 entry 下标。
+    let mut branch_indices: Vec<usize> = Vec::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut current_id: Option<String> = leaf.as_ref().and_then(|(_, value)| {
+        value.get("id").and_then(Value::as_str).map(str::to_string)
+    });
+    while let Some(id) = current_id {
+        if !visited.insert(id.clone()) {
+            break;
+        }
+        let entry_index = entries.iter().position(|(_, value)| {
+            value.get("id").and_then(Value::as_str) == Some(id.as_str())
+        });
+        if let Some(entry_index) = entry_index {
+            branch_indices.push(entry_index);
+        }
+        // 沿 parentId 上溯；找不到父 entry 或父 id 为空时结束。
+        current_id = entries
+            .iter()
+            .find(|(_, value)| {
+                value.get("id").and_then(Value::as_str) == Some(id.as_str())
+            })
+            .and_then(|(_, value)| value.get("parentId").and_then(Value::as_str))
+            .filter(|parent_id| !parent_id.is_empty())
+            .and_then(|parent_id| by_id.contains_key(parent_id).then(|| parent_id.to_string()));
+    }
+    branch_indices.reverse();
+
+    let mut timeline = AgentSessionTimeline {
+        source_available: true,
+        truncated: false,
+        turn_count: 0,
+        usage: None,
+        models: Vec::new(),
+        events: Vec::new(),
+    };
+    let mut seen_usage_ids: HashSet<String> = HashSet::new();
+    for entry_index in branch_indices {
+        let (_, value) = &entries[entry_index];
+        parse_pi_entry(value, &mut timeline, &mut seen_usage_ids);
+    }
+    Ok(timeline)
+}
+
+fn parse_pi_entry(
+    value: &Value,
+    timeline: &mut AgentSessionTimeline,
+    seen_usage_ids: &mut HashSet<String>,
+) {
+    let timestamp = string_field(value, "timestamp");
+    let id = string_field(value, "id").unwrap_or_default();
+    match value.get("type").and_then(Value::as_str) {
+        Some("message") => {
+            let Some(message) = value.get("message") else {
+                return;
+            };
+            let role = message.get("role").and_then(Value::as_str).unwrap_or_default();
+            let model = string_field(message, "model");
+            if let Some(model) = model.as_deref() {
+                remember_model(timeline, model);
+            }
+            match role {
+                "user" => {
+                    let content = pi_message_text(message);
+                    push_event(
+                        timeline,
+                        id,
+                        "user-message",
+                        timestamp,
+                        None,
+                        content,
+                        model,
+                        None,
+                    );
+                }
+                "assistant" => {
+                    let content = message.get("content").and_then(Value::as_array);
+                    let blocks = content.cloned().unwrap_or_default();
+                    let event_start = timeline.events.len();
+                    if blocks.is_empty() {
+                        // 无内容块时（如仅 tool 调用未返回文本）保留一条占位。
+                        push_event(
+                            timeline,
+                            id.clone(),
+                            "assistant-message",
+                            timestamp.clone(),
+                            None,
+                            None,
+                            model.clone(),
+                            None,
+                        );
+                    }
+                    for (block_index, block) in blocks.iter().enumerate() {
+                        let block_id = format!("{id}:{block_index}");
+                        match block.get("type").and_then(Value::as_str) {
+                            Some("text") => push_event(
+                                timeline,
+                                block_id,
+                                "assistant-message",
+                                timestamp.clone(),
+                                None,
+                                string_field(block, "text"),
+                                model.clone(),
+                                None,
+                            ),
+                            Some("thinking") => push_event(
+                                timeline,
+                                block_id,
+                                "reasoning",
+                                timestamp.clone(),
+                                Some("思考摘要".to_string()),
+                                string_field(block, "thinking"),
+                                model.clone(),
+                                None,
+                            ),
+                            Some("toolCall") => push_event(
+                                timeline,
+                                block_id,
+                                "tool-call",
+                                timestamp.clone(),
+                                string_field(block, "name"),
+                                block.get("arguments").and_then(render_json_value),
+                                model.clone(),
+                                None,
+                            ),
+                            _ => {}
+                        }
+                    }
+                    if seen_usage_ids.insert(id.clone()) {
+                        timeline.turn_count += 1;
+                        if let Some(usage) = usage_from_pi_message(message) {
+                            attach_usage_to_first_event(timeline, event_start, Some(usage.clone()));
+                            add_usage_to_summary(timeline, &usage);
+                        }
+                    }
+                }
+                "toolResult" => {
+                    let is_error = message
+                        .get("isError")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let content = pi_message_text(message);
+                    push_event(
+                        timeline,
+                        id,
+                        if is_error { "error" } else { "tool-result" },
+                        timestamp,
+                        string_field(message, "toolName"),
+                        content,
+                        model,
+                        None,
+                    );
+                }
+                "bashExecution" => {
+                    // 将 bash 执行折叠为一条工具结果事件：标题为命令，内容为输出。
+                    let command = string_field(message, "command");
+                    let output = string_field(message, "output");
+                    let exit_code = message.get("exitCode").and_then(Value::as_i64);
+                    let status = match exit_code {
+                        Some(0) => Some("completed".to_string()),
+                        Some(_) => Some("error".to_string()),
+                        None => None,
+                    };
+                    push_event(
+                        timeline,
+                        id,
+                        "tool-result",
+                        timestamp,
+                        command,
+                        output,
+                        model,
+                        status,
+                    );
+                }
+                "compactionSummary" | "branchSummary" | "custom" => {
+                    // 摘要/分支摘要/扩展消息不单独渲染，避免干扰主线。
+                }
+                _ => {}
+            }
+        }
+        Some("model_change") => {
+            if let Some(model) = value.get("modelId").and_then(Value::as_str) {
+                remember_model(timeline, model);
+            }
+        }
+        _ => {
+            // session_info / compaction / thinking_level_change / label 等不单独渲染。
+        }
+    }
+}
+
+// 提取 Pi 消息的文本内容：content 可能是字符串或 TextContent 数组。
+fn pi_message_text(message: &Value) -> Option<String> {
+    let content = message.get("content")?;
+    match content {
+        Value::String(text) => {
+            let text = text.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        }
+        Value::Array(blocks) => {
+            let text = blocks
+                .iter()
+                .filter_map(|block| {
+                    if block.get("type").and_then(Value::as_str) == Some("text") {
+                        block.get("text").and_then(Value::as_str)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim()
+                .to_string();
+            (!text.is_empty()).then_some(text)
+        }
+        _ => None,
+    }
+}
+
+fn usage_from_pi_message(message: &Value) -> Option<AgentSessionNativeUsage> {
+    let usage = message.get("usage")?;
+    let cost = usage.get("cost");
+    Some(AgentSessionNativeUsage {
+        input_tokens: integer_field(usage, "input"),
+        cached_input_tokens: integer_field(usage, "cacheRead"),
+        cache_write_input_tokens: integer_field(usage, "cacheWrite"),
+        output_tokens: integer_field(usage, "output"),
+        reasoning_tokens: integer_field(usage, "reasoning"),
+        total_tokens: integer_field(usage, "totalTokens"),
+        // Pi 的 cost.total 由上游报告，可能是整数或浮点。
+        cost: cost.and_then(|cost| {
+            cost.get("total").and_then(optional_number_field)
+        }),
+        cost_currency: None,
+        api_equivalent: None,
+        plan_consumption: None,
+    })
+}
+
 fn read_jsonl_timeline(
     path: &Path,
     parser: fn(&Value, usize, &mut AgentSessionTimeline, &mut HashSet<String>),
@@ -1180,6 +1504,12 @@ fn add_usage(target: &mut Option<AgentSessionNativeUsage>, usage: &AgentSessionN
     summary.output_tokens += usage.output_tokens;
     summary.reasoning_tokens += usage.reasoning_tokens;
     summary.total_tokens += usage.total_tokens;
+    // cost 为可选字段（部分 Agent/Provider 不报告），仅在双方均有值时累加。
+    if let (Some(total), Some(delta)) = (summary.cost, usage.cost) {
+        summary.cost = Some(total + delta);
+    } else if summary.cost.is_none() {
+        summary.cost = usage.cost;
+    }
 }
 
 fn optional_integer_field(value: &Value, field: &str) -> Option<i64> {
@@ -1211,6 +1541,13 @@ fn integer_field(value: &Value, field: &str) -> i64 {
 
 fn number_field(value: &Value, field: &str) -> Option<f64> {
     value.get(field).and_then(Value::as_f64)
+}
+
+fn optional_number_field(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|value| value as f64))
+        .or_else(|| value.as_u64().map(|value| value as f64))
 }
 
 fn render_json_value(value: &Value) -> Option<String> {
@@ -1343,6 +1680,47 @@ fn opencode_database_candidates() -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn reads_pi_branch_from_leaf_with_usage_and_tool_result() {
+        let root = std::env::temp_dir().join(format!("flowlet-pi-timeline-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("1701600000000_550e8400-e29b-41d4-a716-446655440000.jsonl");
+        // 树状结构：user(a1) -> assistant(a2) -> user(a3) 为主干；a2 另有一个分支
+        // a4(thinking) 与 a5。叶子 a5 与 a3 中，a5 时间戳更晚，故活动分支经 a5。
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"session\",\"version\":3,\"id\":\"550e8400-e29b-41d4-a716-446655440000\",\"timestamp\":\"2024-12-03T14:00:00.000Z\",\"cwd\":\"/Users/dev/my-app\"}\n",
+                "{\"type\":\"message\",\"id\":\"a1\",\"parentId\":null,\"timestamp\":\"2024-12-03T14:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Fix the bug\"}}\n",
+                "{\"type\":\"message\",\"id\":\"a2\",\"parentId\":\"a1\",\"timestamp\":\"2024-12-03T14:00:02.000Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"usage\":{\"input\":100,\"output\":25,\"cacheRead\":40,\"cacheWrite\":10,\"totalTokens\":175,\"cost\":{\"input\":1,\"output\":2,\"cacheRead\":0,\"cacheWrite\":0,\"total\":3}},\"content\":[{\"type\":\"text\",\"text\":\"Working on it\"},{\"type\":\"toolCall\",\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}]}}\n",
+                "{\"type\":\"message\",\"id\":\"a3\",\"parentId\":\"a2\",\"timestamp\":\"2024-12-03T14:00:03.000Z\",\"message\":{\"role\":\"toolResult\",\"toolCallId\":\"c1\",\"toolName\":\"bash\",\"content\":[{\"type\":\"text\",\"text\":\"src/\"}],\"isError\":false}}\n",
+                "{\"type\":\"message\",\"id\":\"a4\",\"parentId\":\"a2\",\"timestamp\":\"2024-12-03T14:00:04.000Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"usage\":{\"input\":80,\"output\":10,\"cacheRead\":0,\"cacheWrite\":0,\"totalTokens\":90,\"cost\":{\"input\":1,\"output\":1,\"cacheRead\":0,\"cacheWrite\":0,\"total\":2}},\"content\":[{\"type\":\"thinking\",\"thinking\":\"maybe refactor\"}]}}\n",
+                "{\"type\":\"message\",\"id\":\"a5\",\"parentId\":\"a4\",\"timestamp\":\"2024-12-03T14:00:05.000Z\",\"message\":{\"role\":\"user\",\"content\":\"Go ahead\"}}\n"
+            ),
+        )
+        .unwrap();
+        let timeline = read_pi_timeline_from(&path).unwrap();
+        assert!(timeline.source_available);
+        // 活动分支应为 a1 -> a2 -> a4 -> a5（叶子 a5 时间戳晚于 a3）。
+        let kinds: Vec<&str> = timeline.events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "user-message",
+                "assistant-message",
+                "tool-call",
+                "reasoning",
+                "user-message",
+            ]
+        );
+        assert_eq!(timeline.models, vec!["claude-sonnet-4-5"]);
+        // 仅 a2 计入 turn（a4 无 toolResult 配对但仍为 assistant，按 assistant 消息计 turn）。
+        assert_eq!(timeline.turn_count, 2);
+        assert_eq!(timeline.usage.as_ref().unwrap().total_tokens, 265);
+        assert_eq!(timeline.usage.as_ref().unwrap().cost, Some(5.0));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn reads_claude_messages_and_tool_events_without_persisting_them() {

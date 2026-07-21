@@ -62,6 +62,7 @@ export function AgentSessionsPage() {
             { value: "codex-cli", label: "Codex CLI" },
             { value: "claude-code", label: "Claude Code" },
             { value: "opencode", label: "OpenCode" },
+            { value: "pi", label: "Pi" },
           ]}
           onChange={(value) => setFilter((current) => ({ ...current, agentType: value === "__all__" ? "" : String(value) as AgentSessionFilter["agentType"], page: 1 }))}
         />
@@ -96,7 +97,7 @@ export function AgentSessionsPage() {
         <div className={styles.body}>
           {sessions.isLoading ? Array.from({ length: 7 }, (_, index) => <SkeletonRow key={index} />) : null}
           {sessions.isError ? <div className={styles.state}><strong>{t("会话加载失败")}</strong><span>{sessions.error.message}</span><Button onClick={() => void sessions.refetch()}>{t("重试")}</Button></div> : null}
-          {!sessions.isLoading && !sessions.isError && (page?.rows.length ?? 0) === 0 ? <div className={styles.state}><strong>{t("暂无 Agent 会话")}</strong><span>{t("安装并使用 ChatGPT（Codex）、Claude Code 或 OpenCode 后，本地会话会自动出现在这里。")}</span></div> : null}
+          {!sessions.isLoading && !sessions.isError && (page?.rows.length ?? 0) === 0 ? <div className={styles.state}><strong>{t("暂无 Agent 会话")}</strong><span>{t("安装并使用 ChatGPT（Codex）、Claude Code、OpenCode 或 Pi 后，本地会话会自动出现在这里。")}</span></div> : null}
           {!sessions.isLoading && !sessions.isError ? page?.rows.map((row) => <SessionRow key={`${row.agentType}:${row.sessionId}`} row={row} language={language} onOpen={() => setSelectedSession(row)} />) : null}
         </div>
         <footer className={styles.footer}>
@@ -173,6 +174,7 @@ function agentLabel(agentType: AgentSessionRow["agentType"]) {
   if (agentType === "claude-code") return "Claude Code";
   if (agentType === "codex-desktop") return "ChatGPT (Codex)";
   if (agentType === "codex-cli") return "Codex CLI";
+  if (agentType === "pi") return "Pi";
   return "OpenCode";
 }
 

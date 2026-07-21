@@ -12,6 +12,10 @@ use super::agent_environment::display_path;
 const BACKUP_VERSION: u32 = 1;
 const PRIMARY_MODEL: &str = "flowlet-pro";
 const FAST_MODEL: &str = "flowlet-flash";
+/// Claude Code 长上下文后缀：网关部署下 Claude Code 无法验证上游 1M 支持，
+/// 在模型名后附加本后缀即可启用百万级上下文窗口预算；Claude Code 会在
+/// 发送请求前剥离后缀，Flowlet 代理层也会防御性剥离（见 proxy_http.rs）。
+const LONG_CONTEXT_SUFFIX: &str = "[1m]";
 const FLOWLET_DIR: &str = ".flowlet";
 const ACTIVE_BACKUP_FILE: &str = "claude-code-global-config-backup.json";
 const OPENCODE_BACKUP_FILE: &str = "opencode-global-config-backup.json";
@@ -80,9 +84,35 @@ pub struct AgentGlobalConfigReport {
     pub primary_model: Option<String>,
     pub fast_model: Option<String>,
     pub subagent_model: Option<String>,
+    /// Claude Code 主模型是否写入 `[1m]` 长上下文后缀；其他 Agent 恒为 false。
+    #[serde(default)]
+    pub long_context: bool,
     pub backup_available: bool,
     pub external_environment_overrides: Vec<String>,
     pub error: Option<String>,
+    /// 仅 Pi：Flowlet 会话扩展（`~/.pi/agent/extensions/flowlet.ts`）是否在位。
+    /// 该扩展为 Pi 请求注入 x-flowlet-session 头，使 Flowlet 能按会话归并请求。
+    #[serde(default)]
+    pub session_extension: bool,
+}
+
+/// Agent 全局配置一键写入的可选参数；某 Agent 不支持的选项会被忽略。
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentGlobalConfigOptions {
+    /// 仅 Claude Code：为主模型环境变量附加 `[1m]` 后缀，启用百万级上下文窗口预算。
+    #[serde(default)]
+    pub long_context: bool,
+    /// 仅 Pi：是否为 Pi 安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。
+    /// 安装后可为发往 Flowlet 渠道的请求注入 x-flowlet-session 头，使 Flowlet 能按会话
+    /// 归并请求；关闭则不安装（Pi 仍可作为 Flowlet 客户端使用，但无法做会话维度串联）。
+    /// 默认开启。
+    #[serde(default = "true_bool")]
+    pub session_extension: bool,
+}
+
+fn true_bool() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -131,14 +161,18 @@ struct PiConfigBackup {
     settings_path: String,
     models_path: String,
     auth_path: String,
+    extension_path: String,
     settings_existed: bool,
     models_existed: bool,
     auth_existed: bool,
     providers_existed: bool,
+    extension_existed: bool,
     default_provider: BackedUpValue,
     default_model: BackedUpValue,
     flowlet_provider: BackedUpValue,
     flowlet_auth: BackedUpValue,
+    // 扩展写入前的原始内容（若存在），恢复时写回；不存在时恢复即删除。
+    extension_previous: BackedUpValue,
 }
 
 fn config_lock() -> &'static Mutex<()> {
@@ -164,6 +198,7 @@ pub fn inspect_agent_global_config(
             &pi_settings_path()?,
             &pi_models_path()?,
             &pi_auth_path()?,
+            &pi_extension_path()?,
             expected_base_url,
         ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
@@ -174,14 +209,18 @@ pub fn apply_agent_global_config(
     agent_id: &str,
     expected_base_url: &str,
     client_token: &str,
+    options: Option<&AgentGlobalConfigOptions>,
 ) -> Result<AgentGlobalConfigReport, String> {
     let _guard = config_lock()
         .lock()
         .map_err(|_| "Agent 全局配置锁已损坏".to_string())?;
     match agent_id {
-        "claude-code" => {
-            apply_claude_code(&claude_settings_path()?, expected_base_url, client_token)
-        }
+        "claude-code" => apply_claude_code(
+            &claude_settings_path()?,
+            expected_base_url,
+            client_token,
+            options.is_some_and(|options| options.long_context),
+        ),
         "opencode" => apply_opencode(
             &opencode_settings_path()?,
             &opencode_auth_path()?,
@@ -192,8 +231,11 @@ pub fn apply_agent_global_config(
             &pi_settings_path()?,
             &pi_models_path()?,
             &pi_auth_path()?,
+            &pi_extension_path()?,
             expected_base_url,
             client_token,
+            // 会话扩展默认安装；仅当用户明确关闭开关时才不安装。
+            options.as_ref().map_or(true, |options| options.session_extension),
         ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
     }
@@ -217,6 +259,7 @@ pub fn restore_agent_global_config(
             &pi_settings_path()?,
             &pi_models_path()?,
             &pi_auth_path()?,
+            &pi_extension_path()?,
             expected_base_url,
         ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
@@ -302,6 +345,36 @@ fn pi_auth_path() -> Result<PathBuf, String> {
     pi_agent_path("auth.json")
 }
 
+// Pi 会话扩展位于 `~/.pi/agent/extensions/flowlet.ts`，Pi 启动时由 jiti 自动加载
+// （无需编译）。扩展通过 `before_provider_headers` 事件在每次 LLM 请求 headers
+// 组装完成后注入 x-flowlet-session 头，使 Flowlet 能把 Pi 请求按会话归并。
+fn pi_extension_path() -> Result<PathBuf, String> {
+    pi_agent_path("extensions/flowlet.ts")
+}
+
+// Pi 会话扩展源码。仅在请求发往 Flowlet 渠道（x-flowlet-client: pi）时注入，
+// 避免污染 Pi 到其他 Provider 的请求。注入的 session id 与 Pi 原生会话文件
+// 头行的 `id` 一致，供 Flowlet 在本地做会话归属；Flowlet 在转发上游前会将其剥离。
+const PI_SESSION_EXTENSION_SOURCE: &str = r#"// Flowlet 自动写入：为 Pi 请求注入会话标识，使 Flowlet 能按会话归属请求。
+// 该扩展在每次 LLM 请求 headers 组装完成后，检测是否发往 Flowlet 渠道
+// （x-flowlet-client: pi），若是则注入 x-flowlet-session 头，值为当前会话 UUID
+// （与 ~/.pi/agent/sessions/ 下会话文件头行的 id 一致）。该头仅用于本地归属，
+// Flowlet 在转发上游前会将其剥离，不参与鉴权或路由。
+export default function (pi) {
+  pi.on("before_provider_headers", (event, ctx) => {
+    if (event.headers?.["x-flowlet-client"] !== "pi") return;
+    try {
+      const sessionId = ctx?.sessionManager?.getSessionId?.();
+      if (typeof sessionId === "string" && sessionId.length > 0) {
+        event.headers["x-flowlet-session"] = sessionId;
+      }
+    } catch {
+      // 忽略：无法获取会话 id 时不阻塞请求。
+    }
+  });
+}
+"#;
+
 fn inspect_claude_code(
     settings_path: &Path,
     expected_base_url: &str,
@@ -327,9 +400,11 @@ fn inspect_claude_code(
             primary_model: None,
             fast_model: None,
             subagent_model: None,
+            long_context: false,
             backup_available,
             external_environment_overrides,
             error: None,
+            session_extension: false,
         });
     }
 
@@ -348,9 +423,11 @@ fn inspect_claude_code(
                 primary_model: None,
                 fast_model: None,
                 subagent_model: None,
+                long_context: false,
                 backup_available,
                 external_environment_overrides,
                 error: Some(error),
+                session_extension: false,
             });
         }
     };
@@ -361,6 +438,18 @@ fn inspect_claude_code(
         backup_available,
         external_environment_overrides,
     )
+}
+
+fn has_long_context_suffix(value: &str) -> bool {
+    value.to_ascii_lowercase().ends_with(LONG_CONTEXT_SUFFIX)
+}
+
+fn strip_long_context_suffix(value: &str) -> &str {
+    if has_long_context_suffix(value) {
+        &value[..value.len() - LONG_CONTEXT_SUFFIX.len()]
+    } else {
+        value
+    }
 }
 
 fn report_from_settings(
@@ -387,6 +476,7 @@ fn report_from_settings(
     let primary_model = string_value("ANTHROPIC_MODEL");
     let fast_model = string_value("ANTHROPIC_DEFAULT_HAIKU_MODEL");
     let subagent_model = string_value("CLAUDE_CODE_SUBAGENT_MODEL");
+    // 主模型允许携带 `[1m]` 长上下文后缀，比较收敛状态前先剥离。
     let aliases_match = [
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_FABLE_MODEL",
@@ -394,8 +484,12 @@ fn report_from_settings(
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
     ]
     .iter()
-    .all(|name| string_value(name).as_deref() == Some(PRIMARY_MODEL))
+    .all(|name| {
+        string_value(name).as_deref().map(strip_long_context_suffix) == Some(PRIMARY_MODEL)
+    })
         && fast_model.as_deref() == Some(FAST_MODEL);
+    // 写入时四个主模型变量同时带后缀；检测只看 ANTHROPIC_MODEL 即可反映开关状态。
+    let long_context = primary_model.as_deref().is_some_and(has_long_context_suffix);
     // 遗留的 ANTHROPIC_SMALL_FAST_MODEL 在会话标题生成等后台任务中仍优先于
     // ANTHROPIC_DEFAULT_HAIKU_MODEL 生效，必须一并收敛到 FAST_MODEL。
     let small_fast_matches =
@@ -446,9 +540,11 @@ fn report_from_settings(
         primary_model,
         fast_model,
         subagent_model,
+        long_context,
         backup_available,
         external_environment_overrides,
         error: None,
+        session_extension: false,
     })
 }
 
@@ -456,6 +552,7 @@ fn apply_claude_code(
     settings_path: &Path,
     expected_base_url: &str,
     client_token: &str,
+    long_context: bool,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
         return Err("Flowlet 默认 Client Token 未配置，无法写入 Claude Code".to_string());
@@ -512,13 +609,20 @@ fn apply_claude_code(
     ] {
         env.remove(name);
     }
+    // `[1m]` 后缀只附加到主模型别名：Claude Code 据此启用百万级上下文窗口预算，
+    // 并在发送请求前剥离后缀。快速模型用于会话标题等后台任务，无需长上下文。
+    let primary_value = if long_context {
+        format!("{PRIMARY_MODEL}{LONG_CONTEXT_SUFFIX}")
+    } else {
+        PRIMARY_MODEL.to_string()
+    };
     for (name, value) in [
         ("ANTHROPIC_BASE_URL", expected_base_url),
         ("ANTHROPIC_AUTH_TOKEN", client_token.trim()),
-        ("ANTHROPIC_MODEL", PRIMARY_MODEL),
-        ("ANTHROPIC_DEFAULT_FABLE_MODEL", PRIMARY_MODEL),
-        ("ANTHROPIC_DEFAULT_OPUS_MODEL", PRIMARY_MODEL),
-        ("ANTHROPIC_DEFAULT_SONNET_MODEL", PRIMARY_MODEL),
+        ("ANTHROPIC_MODEL", primary_value.as_str()),
+        ("ANTHROPIC_DEFAULT_FABLE_MODEL", primary_value.as_str()),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL", primary_value.as_str()),
+        ("ANTHROPIC_DEFAULT_SONNET_MODEL", primary_value.as_str()),
         ("ANTHROPIC_DEFAULT_HAIKU_MODEL", FAST_MODEL),
         ("ANTHROPIC_SMALL_FAST_MODEL", FAST_MODEL),
         ("CLAUDE_CODE_SUBAGENT_MODEL", FAST_MODEL),
@@ -606,9 +710,11 @@ fn inspect_opencode(
             primary_model: None,
             fast_model: None,
             subagent_model: None,
+            long_context: false,
             backup_available,
             external_environment_overrides,
             error: None,
+            session_extension: false,
         });
     }
 
@@ -627,9 +733,11 @@ fn inspect_opencode(
                 primary_model: None,
                 fast_model: None,
                 subagent_model: None,
+                long_context: false,
                 backup_available,
                 external_environment_overrides,
                 error: Some(error),
+                session_extension: false,
             });
         }
     };
@@ -648,9 +756,11 @@ fn inspect_opencode(
                 primary_model: None,
                 fast_model: None,
                 subagent_model: None,
+                long_context: false,
                 backup_available,
                 external_environment_overrides,
                 error: Some(error),
+                session_extension: false,
             });
         }
     };
@@ -725,9 +835,11 @@ fn inspect_opencode(
         primary_model,
         fast_model,
         subagent_model: None,
+        long_context: false,
         backup_available,
         external_environment_overrides,
         error: None,
+        session_extension: false,
     })
 }
 
@@ -947,9 +1059,11 @@ fn inspect_pi(
     settings_path: &Path,
     models_path: &Path,
     auth_path: &Path,
+    extension_path: &Path,
     expected_base_url: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     let backup_available = pi_backup_path(models_path).is_file();
+    let session_extension = extension_path.is_file();
     let report = |state: AgentGlobalConfigState,
                   base_url: Option<String>,
                   api_key_configured: bool,
@@ -969,9 +1083,11 @@ fn inspect_pi(
             primary_model,
             fast_model: None,
             subagent_model: None,
+            long_context: false,
             backup_available,
             external_environment_overrides: Vec::new(),
             error,
+            session_extension,
         }
     };
 
@@ -1095,8 +1211,10 @@ fn apply_pi(
     settings_path: &Path,
     models_path: &Path,
     auth_path: &Path,
+    extension_path: &Path,
     expected_base_url: &str,
     client_token: &str,
+    session_extension: bool,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
         return Err("Flowlet 默认 Client Token 未配置，无法写入 Pi".to_string());
@@ -1104,6 +1222,9 @@ fn apply_pi(
     let settings_existed = settings_path.is_file();
     let models_existed = models_path.is_file();
     let auth_existed = auth_path.is_file();
+    // 扩展的备份始终反映写入前的真实磁盘状态，与 session_extension 选项无关，
+    // 确保恢复时能正确还原；该选项仅控制本次是否写入扩展。
+    let extension_existed = extension_path.is_file();
     let mut settings = read_optional_json_object(settings_path)?;
     let mut models = read_optional_json_object(models_path)?;
     let mut auth = read_optional_json_object(auth_path)?;
@@ -1118,6 +1239,15 @@ fn apply_pi(
     let backup_created = !backup.is_file();
     if backup_created {
         let providers_existed = models.get("providers").is_some();
+        // 仅当扩展已存在时才记录其原始内容；present == false 表示写入前不存在，
+        // 恢复时应删除 Flowlet 创建的扩展文件。
+        let extension_previous = if extension_existed {
+            Some(Value::String(std::fs::read_to_string(extension_path).map_err(
+                |error| format!("读取 Pi 会话扩展失败：{error}"),
+            )?))
+        } else {
+            None
+        };
         let snapshot = PiConfigBackup {
             version: BACKUP_VERSION,
             agent_id: "pi".to_string(),
@@ -1125,14 +1255,17 @@ fn apply_pi(
             settings_path: display_path(settings_path),
             models_path: display_path(models_path),
             auth_path: display_path(auth_path),
+            extension_path: display_path(extension_path),
             settings_existed,
             models_existed,
             auth_existed,
             providers_existed,
+            extension_existed,
             default_provider: backed_up_value(settings.get("defaultProvider")),
             default_model: backed_up_value(settings.get("defaultModel")),
             flowlet_provider: backed_up_value(models.pointer("/providers/flowlet")),
             flowlet_auth: backed_up_value(auth.get(PI_PROVIDER_ID)),
+            extension_previous: backed_up_value(extension_previous.as_ref()),
         };
         write_json_file(
             &backup,
@@ -1171,24 +1304,36 @@ fn apply_pi(
         Value::String(PI_PRIMARY_MODEL.to_string()),
     );
 
-    let writes = vec![
+    let mut writes = vec![
         (settings_path.to_path_buf(), Some(json_file_bytes(&settings)?)),
         (models_path.to_path_buf(), Some(json_file_bytes(&models)?)),
         (auth_path.to_path_buf(), Some(json_file_bytes(&auth)?)),
     ];
-    if let Err(failure) = write_files_transactionally("Pi 配置、模型与凭据文件", &writes) {
+    if session_extension {
+        let extension_bytes = text_file_bytes(PI_SESSION_EXTENSION_SOURCE);
+        writes.push((extension_path.to_path_buf(), Some(extension_bytes)));
+    } else {
+        // 用户选择不安装会话扩展：若文件存在则删除，确保实际状态与选择一致。
+        // 删除前的原始内容已由上方备份（extension_previous）捕获，恢复时可写回。
+        writes.push((extension_path.to_path_buf(), None));
+    }
+    if let Err(failure) = write_files_transactionally(
+        "Pi 配置、模型、凭据与会话扩展文件",
+        &writes,
+    ) {
         if backup_created && failure.rolled_back {
             let _ = std::fs::remove_file(&backup);
         }
         return Err(failure.message);
     }
-    inspect_pi(settings_path, models_path, auth_path, expected_base_url)
+    inspect_pi(settings_path, models_path, auth_path, extension_path, expected_base_url)
 }
 
 fn restore_pi(
     settings_path: &Path,
     models_path: &Path,
     auth_path: &Path,
+    extension_path: &Path,
     expected_base_url: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     let backup_path = pi_backup_path(models_path);
@@ -1203,6 +1348,7 @@ fn restore_pi(
     if !paths_equal(&PathBuf::from(&backup.settings_path), settings_path)
         || !paths_equal(&PathBuf::from(&backup.models_path), models_path)
         || !paths_equal(&PathBuf::from(&backup.auth_path), auth_path)
+        || !paths_equal(&PathBuf::from(&backup.extension_path), extension_path)
     {
         return Err("Pi 配置备份路径与当前用户配置不一致".to_string());
     }
@@ -1264,18 +1410,35 @@ fn restore_pi(
     } else {
         Some(json_file_bytes(&auth)?)
     };
+    // 恢复会话扩展：若写入前已存在则写回原始内容，否则删除 Flowlet 写入的扩展文件。
+    let extension_content = if backup.extension_previous.present {
+        backup
+            .extension_previous
+            .value
+            .as_str()
+            .map(|text| text_file_bytes(text))
+    } else {
+        None
+    };
     write_files_transactionally(
-        "Pi 配置、模型与凭据文件",
+        "Pi 配置、模型、凭据与会话扩展文件",
         &[
             (settings_path.to_path_buf(), settings_content),
             (models_path.to_path_buf(), models_content),
             (auth_path.to_path_buf(), auth_content),
+            (extension_path.to_path_buf(), extension_content),
         ],
     )
     .map_err(|failure| failure.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("配置已恢复，但清理 Flowlet 备份标记失败：{error}"))?;
-    inspect_pi(settings_path, models_path, auth_path, expected_base_url)
+    inspect_pi(
+        settings_path,
+        models_path,
+        auth_path,
+        extension_path,
+        expected_base_url,
+    )
 }
 
 fn restore_json_property(root: &mut Value, name: &str, backed_up: &BackedUpValue) {
@@ -1593,7 +1756,7 @@ mod tests {
         .unwrap();
 
         let applied =
-            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token").unwrap();
+            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
         assert!(applied.backup_available);
         let current = read_settings(&path).unwrap();
@@ -1619,6 +1782,81 @@ mod tests {
             "LongCat-2.0"
         );
         assert_eq!(restored_settings["env"]["CUSTOM"], "keep");
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn long_context_option_writes_and_removes_suffix() {
+        let path = test_settings_path();
+        let applied = apply_claude_code(
+            &path,
+            "http://127.0.0.1:18640/anthropic",
+            "flowlet-token",
+            true,
+        )
+        .unwrap();
+        assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+        assert!(applied.long_context);
+        assert_eq!(applied.primary_model.as_deref(), Some("flowlet-pro[1m]"));
+        let current = read_settings(&path).unwrap();
+        for name in [
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        ] {
+            assert_eq!(current["env"][name], "flowlet-pro[1m]", "{name}");
+        }
+        // 快速模型与子 Agent 模型不参与长上下文。
+        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], FAST_MODEL);
+        assert_eq!(current["env"]["ANTHROPIC_SMALL_FAST_MODEL"], FAST_MODEL);
+        assert_eq!(current["env"]["CLAUDE_CODE_SUBAGENT_MODEL"], FAST_MODEL);
+
+        // 关闭开关后重新写入应剥离后缀并收敛。
+        let reapplied = apply_claude_code(
+            &path,
+            "http://127.0.0.1:18640/anthropic",
+            "flowlet-token",
+            false,
+        )
+        .unwrap();
+        assert_eq!(reapplied.state, AgentGlobalConfigState::Flowlet);
+        assert!(!reapplied.long_context);
+        let current = read_settings(&path).unwrap();
+        assert_eq!(current["env"]["ANTHROPIC_MODEL"], PRIMARY_MODEL);
+        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], PRIMARY_MODEL);
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn manually_suffixed_config_still_converges_to_flowlet() {
+        // 用户手动添加 [1m]（或旧版本写入）时，inspect 应剥离后缀比较，
+        // 状态仍为 Flowlet，并如实回报 long_context。
+        let path = test_settings_path();
+        std::fs::write(
+            &path,
+            r#"{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:18640/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "flowlet-token",
+    "ANTHROPIC_MODEL": "flowlet-pro[1m]",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "flowlet-pro[1m]",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "flowlet-pro[1m]",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "flowlet-pro[1m]",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "flowlet-flash",
+    "ANTHROPIC_SMALL_FAST_MODEL": "flowlet-flash",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "flowlet-flash"
+  }
+}"#,
+        )
+        .unwrap();
+
+        let inspected = inspect_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
+        assert_eq!(inspected.state, AgentGlobalConfigState::Flowlet);
+        assert!(inspected.long_context);
+        assert_eq!(inspected.primary_model.as_deref(), Some("flowlet-pro[1m]"));
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -1650,7 +1888,7 @@ mod tests {
         assert_eq!(inspected.state, AgentGlobalConfigState::Partial);
 
         let applied =
-            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token").unwrap();
+            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
         let current = read_settings(&path).unwrap();
         assert_eq!(current["env"]["ANTHROPIC_SMALL_FAST_MODEL"], FAST_MODEL);
@@ -1694,7 +1932,7 @@ mod tests {
         assert_eq!(inspected.state, AgentGlobalConfigState::Partial);
 
         let applied =
-            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token").unwrap();
+            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
         let current = read_settings(&path).unwrap();
         assert_eq!(current["env"]["ANTHROPIC_DEFAULT_FABLE_MODEL"], PRIMARY_MODEL);
@@ -1707,7 +1945,7 @@ mod tests {
         let path = test_settings_path();
         let directory = path.parent().unwrap().to_path_buf();
 
-        apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token").unwrap();
+        apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
         assert!(path.is_file());
 
         let restored = restore_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
@@ -1722,7 +1960,7 @@ mod tests {
         let path = test_settings_path();
         let directory = path.parent().unwrap().to_path_buf();
 
-        apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token").unwrap();
+        apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
         let backup = backup_path(&path);
         let mut backup_value = read_settings(&backup).unwrap();
         backup_value["fields"]
@@ -1745,7 +1983,7 @@ mod tests {
         let report = inspect_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Invalid);
         assert!(report.error.is_some());
-        assert!(apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "token").is_err());
+        assert!(apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "token", false).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{invalid");
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -1864,22 +2102,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(directory);
     }
 
-    fn test_pi_paths() -> (PathBuf, PathBuf, PathBuf) {
+    fn test_pi_paths() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
         let directory = std::env::temp_dir().join(format!(
             "flowlet-pi-global-config-{}",
             uuid::Uuid::new_v4()
         ));
-        std::fs::create_dir_all(&directory).unwrap();
+        let extensions = directory.join("extensions");
+        std::fs::create_dir_all(&extensions).unwrap();
         (
             directory.join("settings.json"),
             directory.join("models.json"),
             directory.join("auth.json"),
+            extensions.join("flowlet.ts"),
         )
     }
 
     #[test]
     fn applies_and_restores_pi_models_auth_and_settings() {
-        let (settings_path, models_path, auth_path) = test_pi_paths();
+        let (settings_path, models_path, auth_path, extension_path) = test_pi_paths();
         std::fs::write(
             &settings_path,
             r#"{"theme":"dark","defaultProvider":"anthropic","defaultModel":"claude-sonnet-4-5"}"#,
@@ -1900,12 +2140,16 @@ mod tests {
             &settings_path,
             &models_path,
             &auth_path,
+            &extension_path,
             "http://127.0.0.1:18640/v1",
             "flowlet-token",
+            true,
         )
         .unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
         assert!(applied.backup_available);
+        assert!(applied.session_extension);
+        assert!(extension_path.is_file());
         let models = read_settings(&models_path).unwrap();
         assert_eq!(
             models["providers"]["flowlet"]["baseUrl"],
@@ -1937,11 +2181,14 @@ mod tests {
             &settings_path,
             &models_path,
             &auth_path,
+            &extension_path,
             "http://127.0.0.1:18640/v1",
         )
         .unwrap();
         assert_eq!(restored.state, AgentGlobalConfigState::OtherGateway);
         assert!(!restored.backup_available);
+        assert!(!restored.session_extension);
+        assert!(!extension_path.exists());
         let models = read_settings(&models_path).unwrap();
         assert_eq!(
             models["providers"]["flowlet"]["baseUrl"],
@@ -1959,25 +2206,29 @@ mod tests {
 
     #[test]
     fn removes_pi_files_created_only_for_flowlet() {
-        let (settings_path, models_path, auth_path) = test_pi_paths();
+        let (settings_path, models_path, auth_path, extension_path) = test_pi_paths();
         let directory = settings_path.parent().unwrap().to_path_buf();
 
         apply_pi(
             &settings_path,
             &models_path,
             &auth_path,
+            &extension_path,
             "http://127.0.0.1:18640/v1",
             "flowlet-token",
+            true,
         )
         .unwrap();
         assert!(settings_path.is_file());
         assert!(models_path.is_file());
         assert!(auth_path.is_file());
+        assert!(extension_path.is_file());
 
         let restored = restore_pi(
             &settings_path,
             &models_path,
             &auth_path,
+            &extension_path,
             "http://127.0.0.1:18640/v1",
         )
         .unwrap();
@@ -1985,13 +2236,93 @@ mod tests {
         assert!(!settings_path.exists());
         assert!(!models_path.exists());
         assert!(!auth_path.exists());
+        assert!(!extension_path.exists());
 
         let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
+    fn backs_up_and_restores_pre_existing_pi_session_extension() {
+        let (settings_path, models_path, auth_path, extension_path) = test_pi_paths();
+        // 用户事先已存在一个同名扩展文件（内容不应被覆盖丢失）。
+        std::fs::write(&extension_path, "// user-owned extension\n").unwrap();
+
+        let applied = apply_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            &extension_path,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-token",
+            true,
+        )
+        .unwrap();
+        assert!(applied.session_extension);
+        assert_eq!(
+            std::fs::read_to_string(&extension_path).unwrap(),
+            PI_SESSION_EXTENSION_SOURCE
+        );
+
+        let restored = restore_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            &extension_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
+        // 用户事先已存在同名扩展，Flowlet 不应删除用户文件，恢复后应写回用户原始内容。
+        assert!(restored.session_extension);
+        assert_eq!(
+            std::fs::read_to_string(&extension_path).unwrap(),
+            "// user-owned extension\n"
+        );
+
+        let _ = std::fs::remove_dir_all(settings_path.parent().unwrap());
+    }
+
+    #[test]
+    fn skips_session_extension_when_opted_out() {
+        let (settings_path, models_path, auth_path, extension_path) = test_pi_paths();
+        // 用户事先存在一个扩展文件，但本次选择不安装会话扩展。
+        std::fs::write(&extension_path, "// pre-existing extension\n").unwrap();
+
+        let applied = apply_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            &extension_path,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-token",
+            false,
+        )
+        .unwrap();
+        assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+        // 选择不安装时，扩展应被删除（删除前内容已由备份捕获）。
+        assert!(!applied.session_extension);
+        assert!(!extension_path.exists());
+
+        // 恢复时应写回删除前的原始内容。
+        let restored = restore_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            &extension_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
+        assert!(restored.session_extension);
+        assert_eq!(
+            std::fs::read_to_string(&extension_path).unwrap(),
+            "// pre-existing extension\n"
+        );
+
+        let _ = std::fs::remove_dir_all(settings_path.parent().unwrap());
+    }
+
+    #[test]
     fn reports_pi_partial_state_without_default_provider() {
-        let (settings_path, models_path, auth_path) = test_pi_paths();
+        let (settings_path, models_path, auth_path, extension_path) = test_pi_paths();
         std::fs::write(
             &models_path,
             r#"{"providers":{"flowlet":{"baseUrl":"http://127.0.0.1:18640/v1","api":"openai-completions","models":[{"id":"flowlet-pro"},{"id":"flowlet-flash"}]}}}"#,
@@ -2008,11 +2339,13 @@ mod tests {
             &settings_path,
             &models_path,
             &auth_path,
+            &extension_path,
             "http://127.0.0.1:18640/v1",
         )
         .unwrap();
         assert_eq!(inspected.state, AgentGlobalConfigState::Partial);
         assert!(inspected.api_key_configured);
+        assert!(!inspected.session_extension);
 
         let _ = std::fs::remove_dir_all(settings_path.parent().unwrap());
     }

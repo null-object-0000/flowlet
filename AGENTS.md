@@ -346,6 +346,27 @@ Agent 接入能力应逐步提供：
 新增此类 Agent 时，需同步在 Rust `proxy_http.rs` 的 `agent_client_marker_name` 登记
 展示名，并在一键写入与手动配置片段中同时注入该头。
 
+### Pi 会话标识头
+
+部分 Agent（如 Pi）走 OpenAI 兼容 SDK，原生请求不携带任何会话/对话标识，无法像
+Claude Code（`x-claude-code-session-id`）那样直接读取。对这类 Agent，Flowlet 在写入
+其全局配置时同步部署一个原生扩展（Pi 写在 `~/.pi/agent/extensions/flowlet.ts`，利用
+Pi 官方的 `before_provider_headers` 事件），在每次 LLM 请求的 headers 组装完成后
+注入 `x-flowlet-session: <session_uuid>`（值来自 `ctx.sessionManager.getSessionId()`，
+与 Pi 原生会话文件头行的 `id` 一致），并以已存在的 `x-flowlet-client: pi` 标记头为门控，
+确保只污染该 Agent 发往 Flowlet 渠道的请求。
+
+代理侧在 `proxy.rs` 的 `extract_agent_session`（及历史日志修复路径 `storage_usage.rs`
+的 `agent_session_from_json`）中，以 `x-flowlet-client: pi` 为门控读取 `x-flowlet-session`，
+识别后、转发上游前在 `apply_request_headers` 将其与 `x-flowlet-client` 一并剥离，不向上游
+泄露。注入的 session UUID 与 Pi 原生会话文件头行的 `id` 是同一个值，因此
+`merge_agent_session_catalog` 能按 `(agent_type, session_id)` 把经过 Flowlet 的观测会话
+与 Pi 原生会话精确合并。
+
+新增此类 Agent 时，需同步：在 `extract_agent_session` 与 `agent_session_from_json` 增加
+对应分支（以该 Agent 的标记头为门控）；在 `apply_request_headers` 剥离该头；在一键写入
+与手动配置片段中同时部署注入该头的原生扩展/配置。
+
 ---
 
 ## 9. 日志与捕获

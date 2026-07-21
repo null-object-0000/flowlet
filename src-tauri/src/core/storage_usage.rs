@@ -126,6 +126,16 @@ fn agent_session_from_json(headers_json: &str) -> Option<(String, String, Option
     if let Some(session_id) = valid("x-claude-code-session-id") {
         return Some(("claude-code".to_string(), session_id, None));
     }
+    // Pi — 以 x-flowlet-client: pi 标记头为门控读取 x-flowlet-session，与
+    // proxy.rs 的 extract_agent_session 保持一致，确保历史日志修复路径能回填 Pi 会话。
+    let is_flowlet_pi = headers
+        .get("x-flowlet-client")
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("pi"));
+    if is_flowlet_pi {
+        if let Some(session_id) = valid("x-flowlet-session") {
+            return Some(("pi".to_string(), session_id, None));
+        }
+    }
     let is_opencode = valid("x-opencode-session").is_some()
         || headers
             .get("user-agent")

@@ -7,6 +7,7 @@ import { DEFAULT_BACKGROUND_JOBS_FILTER, type BackgroundJobRow, type BackgroundJ
 import { useBackgroundTaskDetail, useBackgroundTasks, useCancelBackgroundTask, useCleanupBackgroundTasks } from "../../features/background-tasks/useBackgroundTasks";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { formatTimestamp } from "../../shared/formatters/datetime";
 import styles from "./TaskLogsPage.module.css";
 import { formatJobDuration } from "./taskDuration";
 
@@ -56,7 +57,7 @@ export function TaskLogsPage() {
         {tasks.isLoading ? Array.from({ length: DEFAULT_BACKGROUND_JOBS_FILTER.pageSize }, (_, index) => <SkeletonRow key={index} />) : null}
         {tasks.isError ? <div className={styles.state}><strong>{t("任务日志加载失败")}</strong><span>{tasks.error.message}</span><Button type="tertiary" theme="outline" onClick={() => void tasks.refetch()}>{t("重试")}</Button></div> : null}
         {!tasks.isLoading && !tasks.isError && !tasks.data?.rows.length ? <div className={styles.state}><strong>{t("暂无任务日志")}</strong><span>{t("后台任务运行后，处理进度和结果会出现在这里。")}</span></div> : null}
-        {tasks.data?.rows.map((job) => <button type="button" key={job.id} className={`${styles.grid} ${styles.row}`} onClick={() => setSelected(job.id)}><span>{formatDate(job.createdAt, language)}</span><span className={styles.task}><strong>{job.title}</strong><small>{job.stage ?? "—"}</small></span><span>{triggerLabel(job.triggerSource, t)}</span><span>{job.progressTotal > 0 ? `${job.progressCurrent}/${job.progressTotal}` : "—"}</span><span className={styles.duration}>{formatJobDuration(job, now, language)}</span><span><StatusTag job={job} t={t} /></span></button>)}
+        {tasks.data?.rows.map((job) => <button type="button" key={job.id} className={`${styles.grid} ${styles.row}`} onClick={() => setSelected(job.id)}><span>{formatTimestamp(job.createdAt, language)}</span><span className={styles.task}><strong>{job.title}</strong><small>{job.stage ?? "—"}</small></span><span>{triggerLabel(job.triggerSource, t)}</span><span>{job.progressTotal > 0 ? `${job.progressCurrent}/${job.progressTotal}` : "—"}</span><span className={styles.duration}>{formatJobDuration(job, now, language)}</span><span><StatusTag job={job} t={t} /></span></button>)}
       </div>
       <footer className={styles.footer}><Text type="tertiary" size="small">{t("共 {count} 条", { count: tasks.data?.total ?? 0 })}</Text><Pagination total={tasks.data?.total ?? 0} currentPage={filter.page} pageSize={filter.pageSize} onPageChange={(page) => setFilter((current) => ({ ...current, page }))} /></footer>
     </section>
@@ -77,14 +78,14 @@ function TaskDetail({ jobId, onClose }: { jobId: string | null; onClose: () => v
       Toast.error(t("任务操作失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
     }
   };
-  const sideTitle = <div className={styles.sideTitle}><strong>{detail.data?.job.title ?? t("任务详情")}</strong><span>{detail.data ? `${triggerLabel(detail.data.job.triggerSource, t)} · ${formatDate(detail.data.job.createdAt, language)}` : t("后台任务")}</span></div>;
+  const sideTitle = <div className={styles.sideTitle}><strong>{detail.data?.job.title ?? t("任务详情")}</strong><span>{detail.data ? `${triggerLabel(detail.data.job.triggerSource, t)} · ${formatTimestamp(detail.data.job.createdAt, language)}` : t("后台任务")}</span></div>;
   return <SideSheet title={sideTitle} visible={Boolean(jobId)} onCancel={onClose} width="min(680px, 96vw)" bodyStyle={{ padding: 0 }} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={detail.data?.job.status === "running" ? <Button type="danger" loading={cancel.isPending} disabled={detail.data.job.cancelRequested} onClick={() => void cancelTask()}>{detail.data.job.cancelRequested ? t("正在取消…") : t("取消任务")}</Button> : null}>
     {detail.isLoading ? <div className={styles.state}>{t("正在加载任务详情…")}</div> : null}
     {detail.data ? <div className={styles.detail}>
       <section><div className={styles.detailTitle}><strong>{detail.data.job.title}</strong><StatusTag job={detail.data.job} t={t} /></div><p>{detail.data.job.stage ?? "—"}</p><Progress percent={detail.data.job.progressTotal ? Math.round(detail.data.job.progressCurrent / detail.data.job.progressTotal * 100) : 0} showInfo /></section>
       {metrics ? <section><h4>{t("性能指标")}</h4><div className={styles.metrics}>{metric(t("总耗时"), metrics.durationMs)}{metric(t("目录扫描"), metrics.scanMs)}{metric(t("指纹比较"), metrics.compareMs)}{metric(t("会话解析"), metrics.parseMs)}{metric(t("数据库写入"), metrics.writeMs)}{metric(t("增量会话"), metrics.incrementalSessions, false)}{metric(t("全量会话"), metrics.fullSessions, false)}{metricText(t("读取数据"), formatBytes(metrics.sourceBytesProcessed))}{metric(t("延后处理"), metrics.deferred, false)}</div></section> : null}
       {detail.data.job.errorMessage ? <section className={styles.error}>{detail.data.job.errorMessage}</section> : null}
-      <section><h4>{t("处理记录")}</h4><div className={styles.timeline}>{detail.data.events.map((event) => <article key={event.id}><i className={styles[event.level] ?? ""} /><div><strong>{event.stage ?? t("处理")}</strong><time>{formatDate(event.createdAt, language)}</time><p>{event.message}</p></div></article>)}</div></section>
+      <section><h4>{t("处理记录")}</h4><div className={styles.timeline}>{detail.data.events.map((event) => <article key={event.id}><i className={styles[event.level] ?? ""} /><div><strong>{event.stage ?? t("处理")}</strong><time>{formatTimestamp(event.createdAt, language)}</time><p>{event.message}</p></div></article>)}</div></section>
     </div> : null}
   </SideSheet>;
 }
@@ -99,4 +100,3 @@ function statusOptions(t: Translate) { return [{ value: "__all__", label: t("全
 function SkeletonRow() { return <div className={`${styles.grid} ${styles.row} ${styles.skeleton}`} aria-hidden="true">{Array.from({ length: 6 }, (_, index) => <span key={index} />)}</div>; }
 function StatusTag({ job, t }: { job: BackgroundJobRow; t: Translate }) { const map: Record<string, [string, "green" | "blue" | "orange" | "red" | "grey"]> = { running: ["运行中", "blue"], succeeded: ["成功", "green"], succeeded_with_warnings: ["部分失败", "orange"], failed: ["失败", "red"], cancelled: ["已取消", "grey"], interrupted: ["已中断", "grey"], queued: ["等待中", "grey"] }; const [label, color] = map[job.status] ?? [job.status, "grey"]; return <Tag size="small" color={color}>{t(label)}</Tag>; }
 function triggerLabel(value: string, t: Translate) { return t(value === "manual" ? "手动" : value === "background" ? "后台自动" : value === "file-watch" ? "文件变化" : "前台自动"); }
-function formatDate(value: string, language: "zh-CN" | "en-US") { const date = new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`); return Number.isNaN(date.getTime()) ? value : date.toLocaleString(language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }); }

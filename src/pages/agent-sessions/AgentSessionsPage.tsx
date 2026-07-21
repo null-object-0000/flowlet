@@ -10,6 +10,7 @@ import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
+import { formatTimestamp } from "../../shared/formatters/datetime";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSessionDetailSideSheet";
 import styles from "./AgentSessionsPage.module.css";
@@ -75,7 +76,7 @@ export function AgentSessionsPage() {
           ]}
           onChange={(value) => setFilter((current) => ({ ...current, flowletStatus: value === "__all__" ? "" : String(value) as AgentSessionFilter["flowletStatus"], page: 1 }))}
         />
-        <span className={styles.syncMeta} title={syncStatusTitle}>{syncStatus.data?.running ? t("正在同步 Agent 数据…") : syncStatus.data?.sources.some((source) => source.failedCount > 0) ? t("部分客户端同步异常") : latestCheckedAt ? t("上次 {last} · 下次 {next}", { last: formatDate(latestCheckedAt, language), next: nextSyncAt ? formatDate(new Date(nextSyncAt).toISOString(), language) : "—" }) : t("自动同步：前台每 1 分钟，后台每 5 分钟")}</span>
+        <span className={styles.syncMeta} title={syncStatusTitle}>{syncStatus.data?.running ? t("正在同步 Agent 数据…") : syncStatus.data?.sources.some((source) => source.failedCount > 0) ? t("部分客户端同步异常") : latestCheckedAt ? t("上次 {last} · 下次 {next}", { last: formatTimestamp(latestCheckedAt, language), next: nextSyncAt ? formatTimestamp(new Date(nextSyncAt).toISOString(), language) : "—" }) : t("自动同步：前台每 1 分钟，后台每 5 分钟")}</span>
         <div className={styles.syncActions}>{lastJobId ? <Button type="tertiary" onClick={() => navigate(`/tasks?jobId=${encodeURIComponent(lastJobId)}`)}>{t("查看任务")}</Button> : null}<Button
           className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
           icon={<IconRefresh />}
@@ -130,7 +131,7 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
   const requestCount = row.flowletObserved ? row.requestCount : nativeAvailable ? resolvedNativeSummary?.turnCount ?? null : null;
   return (
     <button type="button" className={`${styles.grid} ${styles.row}`} onClick={onOpen}>
-      <span>{formatDate(row.activityAt, language)}</span>
+      <span>{formatTimestamp(row.activityAt, language)}</span>
       <span className={styles.session}><strong title={row.title ?? row.sessionId}>{sessionDisplayTitle(row)}</strong><small title={row.projectPath ?? row.sessionId}>{row.projectPath ? `${agentLabel(row.agentType)} · ${projectName(row.projectPath)}` : agentLabel(row.agentType)}{row.nativeSyncedAt && !row.flowletObserved ? ` · ${t("已同步")}` : ""}</small></span>
       <span className={styles.client}><strong title={row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet")}>{row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet")}</strong>{row.clientId ? <small title={row.clientId}>{row.clientId}</small> : <small>{t("仅本地会话")}</small>}</span>
       <CompactNumber
@@ -231,10 +232,4 @@ function projectName(path: string) {
 
 function SkeletonRow() {
   return <div className={`${styles.grid} ${styles.row} ${styles.skeleton}`} aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <span key={index} />)}</div>;
-}
-
-function formatDate(value: string, language: "zh-CN" | "en-US") {
-  const iso = value.includes("T") || value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`;
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 }

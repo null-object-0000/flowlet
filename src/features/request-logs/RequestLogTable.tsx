@@ -4,6 +4,7 @@ import styles from "./RequestLogTable.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
+import { formatTimestamp } from "../../shared/formatters/datetime";
 
 type Props = {
   rows: RequestLogRow[];
@@ -42,7 +43,7 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
             aria-label={t("查看请求 {id}", { id: row.request_id })}
             onClick={() => onOpenDetail(row.request_id)}
           >
-            <span className={styles.time}>{formatTime(row.created_at)}</span>
+            <span className={styles.time}>{formatTimestamp(row.created_at, language)}</span>
             <span className={styles.clientCell}>
               <strong title={row.client_name || row.client_id || ""}>{row.client_name || row.client_id || t("未知客户端")}</strong>
             </span>
@@ -93,13 +94,6 @@ function SkeletonRow({ index }: { index: number }) {
       {Array.from({ length: 8 }, (_, column) => <span key={column} style={{ width: `${48 + ((index + column) % 4) * 12}%` }} />)}
     </div>
   );
-}
-
-function formatTime(value: string) {
-  const iso = value.includes("T") || value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`;
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function formatCost(value: number | null) {

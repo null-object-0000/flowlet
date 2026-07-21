@@ -1,5 +1,5 @@
 .scrollArea { min-width: 920px; min-height: 0; height: 100%; display: grid; grid-template-rows: 36px minmax(0, 1fr); overflow: hidden; }
-.grid { display: grid; grid-template-columns: 92px minmax(88px, .65fr) minmax(135px, 1.05fr) minmax(120px, .9fr) 64px 112px 76px 66px; align-items: center; column-gap: 8px; }
+.grid { display: grid; grid-template-columns: 120px minmax(88px, .65fr) minmax(135px, 1.05fr) minmax(120px, .9fr) 64px 112px 76px 66px; align-items: center; column-gap: 8px; }
 .head { min-height: 36px; padding: 0 13px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 11px; font-weight: 600; }
 .body { min-height: 0; overflow: auto; }
 .row { width: 100%; min-height: 45px; padding: 0 13px; border: 0; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: transparent; font: inherit; text-align: left; cursor: pointer; }

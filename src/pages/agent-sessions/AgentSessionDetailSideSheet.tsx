@@ -7,6 +7,7 @@ import { useAgentSessionChildren, useAgentSessionTimeline } from "../../features
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
+import { formatTimestamp } from "../../shared/formatters/datetime";
 import styles from "./AgentSessionDetailSideSheet.module.css";
 
 export function AgentSessionDetailSideSheet({
@@ -225,7 +226,7 @@ function TimelineEventCard({ event, language }: { event: AgentSessionTimelineEve
       <div className={styles.timelineEventHeader}>
         <span>{label} · {t("Agent 原生")}</span>
         <strong>{event.title ?? event.model ?? label}</strong>
-        {event.timestamp ? <time>{formatShortDate(event.timestamp, language)}</time> : null}
+        {event.timestamp ? <time>{formatTimestamp(event.timestamp, language)}</time> : null}
       </div>
       {event.content ? (
         <details open={expanded}>
@@ -400,7 +401,7 @@ function ChildSessionsSection({
                 <small title={row.sessionId}>{row.sessionId}</small>
               </div>
               <div className={styles.childMeta}>
-                <span>{formatShortDate(row.activityAt, language)}</span>
+                <span>{formatTimestamp(row.activityAt, language)}</span>
                 <small>{row.flowletObserved ? t("{requests} 次请求 · {tokens} Token · ¥{cost}", {
                   requests: formatCompactNumber(row.requestCount, language),
                   tokens: formatCompactNumber(row.knownTokens, language),
@@ -454,13 +455,5 @@ function formatDate(value: string, language: "zh-CN" | "en-US") {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(language, {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  });
-}
-
-function formatShortDate(value: string, language: "zh-CN" | "en-US") {
-  const iso = value.includes("T") || value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`;
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(language, {
-    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
   });
 }

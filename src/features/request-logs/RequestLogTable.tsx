@@ -49,7 +49,7 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
             </span>
             <span className={styles.primaryCell}>
               <strong title={row.public_model || row.virtual_model || ""}>{row.public_model || row.virtual_model || "-"}</strong>
-              <small title={`${row.method} ${row.path}`}><b>{row.method}</b> {row.path}{row.is_stream ? ` · ${t("流式")}` : ""}</small>
+              <small title={`${row.method} ${row.path}`}><b>{row.method}</b> {row.path}</small>
             </span>
             <span className={styles.primaryCell}>
               <strong>{row.channel_name || row.channel_id || t("未路由")}</strong>
@@ -57,7 +57,10 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
             </span>
             <Status row={row} />
             <span className={styles.metricCell}>
-              <strong>{formatDuration(row.duration_ms ?? row.latency_ms)}</strong>
+              <strong>
+                {formatDuration(row.duration_ms ?? row.latency_ms)}
+                {row.is_stream ? <span className={styles.streamBadge}>{t("流式")}</span> : null}
+              </strong>
               <small>{row.ttft_ms == null ? "TTFT —" : `TTFT ${formatDuration(row.ttft_ms)}`} · {formatTokenRate(calculateOutputTokenRate(row))}</small>
             </span>
             <TokenBreakdownTooltip

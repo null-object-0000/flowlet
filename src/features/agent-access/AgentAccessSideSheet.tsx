@@ -22,6 +22,7 @@ type AgentMeta = {
   endpointSuffix: "/anthropic" | "/v1";
   hasDesktop: boolean;
   showsCredentialsFile: boolean;
+  showsFastModel: boolean;
   showsSubagentModel: boolean;
   environmentDescription: string;
   notInstalledText: string;
@@ -36,6 +37,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     endpointSuffix: "/anthropic",
     hasDesktop: false,
     showsCredentialsFile: false,
+    showsFastModel: true,
     showsSubagentModel: true,
     environmentDescription: "识别 Claude Code 的安装位置、版本和安装方式",
     notInstalledText: "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。",
@@ -48,6 +50,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     endpointSuffix: "/v1",
     hasDesktop: true,
     showsCredentialsFile: true,
+    showsFastModel: true,
     showsSubagentModel: false,
     environmentDescription: "识别 OpenCode CLI 与 Desktop 的安装位置和版本",
     notInstalledText: "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。",
@@ -60,6 +63,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     endpointSuffix: "/v1",
     hasDesktop: false,
     showsCredentialsFile: true,
+    showsFastModel: false,
     showsSubagentModel: false,
     environmentDescription: "识别 Pi CLI 的安装位置和版本",
     notInstalledText: "未检测到 Pi。Flowlet 会检查 PATH 和常见安装位置。",
@@ -249,7 +253,7 @@ export function AgentAccessSideSheet({
                 {globalConfig.base_url ? <StatusRow label="Base URL" value={globalConfig.base_url} /> : null}
                 <StatusRow label="Client Token" value={t(globalConfig.auth_token_configured ? "已配置（内容已隐藏）" : "未配置")} />
                 <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
-                <StatusRow label={t("快速模型")} value={globalConfig.fast_model || "-"} />
+                {meta.showsFastModel ? <StatusRow label={t("快速模型")} value={globalConfig.fast_model || "-"} /> : null}
                 {meta.showsSubagentModel ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}
                 {globalConfig.error ? <Text type="danger">{globalConfig.error}</Text> : null}
                 {globalConfig.external_environment_overrides.length ? (

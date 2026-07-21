@@ -372,6 +372,7 @@ describe("OverviewAgentAccessCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "配置 Pi" }));
     expect(screen.getByRole("tab", { name: "Pi CLI 接入" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("tab", { name: "Pi Desktop 接入" })).not.toBeInTheDocument();
+    expect(screen.queryByText("快速模型")).not.toBeInTheDocument();
     expect(screen.getByText("Pi CLI 0.42.1")).toBeInTheDocument();
     expect(screen.getByText("npm 全局安装")).toBeInTheDocument();
     expect(screen.getByText("Pi 的 Provider 定义在 models.json，凭据在 auth.json，默认模型在 settings.json")).toBeInTheDocument();

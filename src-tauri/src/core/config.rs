@@ -1247,7 +1247,7 @@ impl Default for LogCaptureConfig {
             max_body_bytes: 1024 * 1024,
             redact_sensitive_headers: false,
             body_retention_days: 3,
-            body_max_size_mb: 128,
+            body_max_size_mb: 512,
             body_prune_ratio: 0.1,
         }
     }

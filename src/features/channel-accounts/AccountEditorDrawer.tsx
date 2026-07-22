@@ -21,6 +21,7 @@ import {
 import styles from "./AccountEditorDrawer.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { useScrapeConsole } from "./useScrapeConsole";
 
 const { Text } = Typography;
 
@@ -40,9 +41,10 @@ type Props = {
   onSave: (account: ChannelAccount, snapshot: AccountResourceSnapshotDraft | null) => Promise<void>;
   onTestConnection: (input: TestInput) => Promise<void>;
   onSyncBalance: (accountId: string) => Promise<void>;
+  onScrape?: (accountId: string) => Promise<void>;
 };
 
-export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance }: Props) {
+export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance, onScrape }: Props) {
   const { language, t } = useAppPreferences();
   const [draft, setDraft] = useState<ChannelAccount>(() => createDraft(mode, accounts, presets, language));
   const [resource, setResource] = useState<ResourceDraft>(() => resourceDraft(snapshot));
@@ -55,6 +57,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const channel = presets.find((item) => item.id === draft?.channel_id);
   const isEdit = mode.kind === "edit";
   const autoSyncBalance = channel?.supports_balance_query === true;
+  const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
   const resourceOptions = resourceModeOptions(draft?.channel_id ?? "");
   const resourceMode = draft?.resource_mode ?? defaultResourceMode(draft?.channel_id ?? "");
   const tokenRemaining = useMemo(() => {
@@ -262,6 +265,19 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                 {isEdit ? <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} onClick={() => void handleSync()}>{t("刷新")}</Button> : null}
               </div>
             </div>
+          ) : supportsScrape ? (
+            <div className={styles.resourcePanel}>
+              <div className={styles.resourceHeading}>
+                <strong>{t("控制台抓取")}</strong>
+                <span className={styles.manualBadge}>{t("手动触发")}</span>
+              </div>
+              <ScrapeConsolePanel
+                account={draft}
+                snapshot={snapshot}
+                onScrape={onScrape}
+                t={t}
+              />
+            </div>
           ) : (
             <>
               {resourceOptions.length ? (
@@ -440,6 +456,115 @@ function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, m
     synced_at: new Date().toISOString(),
     remark: null,
   };
+}
+
+/** 控制台抓取面板:触发按钮 + 最近一次抓取结果展示。 */
+function ScrapeConsolePanel({
+  account,
+  snapshot,
+  onScrape,
+  t,
+}: {
+  account: ChannelAccount;
+  snapshot?: AccountBalanceSnapshot;
+  onScrape?: (accountId: string) => Promise<void>;
+  t: (k: string, params?: Record<string, string | number> | undefined) => string;
+}) {
+  const { startScrape, retryScrape, lastResult, isScraping, needLogin, error, statusText } = useScrapeConsole();
+  const isEdit = Boolean(account.id);
+
+  async function handleScrape() {
+    if (onScrape) {
+      await onScrape(account.id);
+    } else {
+      await startScrape(account.id);
+    }
+  }
+
+  async function handleRetry() {
+    await retryScrape(account.id);
+  }
+
+  // 优先展示 hook 最近的抓取结果(ScrapeBalanceResult),否则回退到父组件传入的 snapshot
+  const scrapeDisplay = lastResult;
+  const fallbackDisplay = snapshot;
+
+  return (
+    <div className={styles.scrapePanel}>
+      <div className={styles.scrapeToolbar}>
+        <Button
+          theme="solid"
+          type="primary"
+          size="small"
+          icon={<IconRefresh />}
+          loading={isScraping}
+          disabled={!isEdit}
+          onClick={() => void handleScrape()}
+        >
+          {t("登录控制台抓取")}
+        </Button>
+        {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
+      </div>
+      {needLogin ? (
+        <div className={styles.scrapeError}>
+          {t("未登录官方控制台,请在弹出的窗口中完成登录。")}
+          <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
+            {t("登录完成,重新抓取")}
+          </Button>
+        </div>
+      ) : null}
+      {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
+      {scrapeDisplay ? (
+        <div className={styles.scrapeResult}>
+          {scrapeDisplay.plan_name ? <strong>{scrapeDisplay.plan_name}</strong> : null}
+          {scrapeDisplay.balance != null ? (
+            <span>{t("余额")} <b>{scrapeDisplay.balance} {scrapeDisplay.currency ?? ""}</b></span>
+          ) : null}
+          {scrapeDisplay.token_total != null ? (
+            <span>{t("总额")} <b>{formatResourceTokens(scrapeDisplay.token_total, "zh-CN")}</b></span>
+          ) : null}
+          {scrapeDisplay.token_used != null ? (
+            <span>{t("已用")} <b>{formatResourceTokens(scrapeDisplay.token_used, "zh-CN")}</b></span>
+          ) : null}
+          {scrapeDisplay.token_remaining != null ? (
+            <span>{t("剩余")} <b>{formatResourceTokens(scrapeDisplay.token_remaining, "zh-CN")}</b></span>
+          ) : null}
+          {scrapeDisplay.token_pack_expire_at ? (
+            <span>{t("到期")} <b>{scrapeDisplay.token_pack_expire_at.slice(0, 10)}</b></span>
+          ) : null}
+          {scrapeDisplay.synced_at ? (
+            <span className={styles.scrapeSynced}>{t("同步时间")} <b>{scrapeDisplay.synced_at.slice(0, 19).replace("T", " ")}</b></span>
+          ) : null}
+        </div>
+      ) : fallbackDisplay && fallbackDisplay.source === "scrape" ? (
+        <div className={styles.scrapeResult}>
+          {fallbackDisplay.balance != null ? (
+            <span>{t("余额")} <b>{fallbackDisplay.balance} {fallbackDisplay.currency ?? ""}</b></span>
+          ) : null}
+          {fallbackDisplay.token_pack_total != null ? (
+            <span>{t("总额")} <b>{formatResourceTokens(fallbackDisplay.token_pack_total, "zh-CN")}</b></span>
+          ) : null}
+          {fallbackDisplay.token_pack_used != null ? (
+            <span>{t("已用")} <b>{formatResourceTokens(fallbackDisplay.token_pack_used, "zh-CN")}</b></span>
+          ) : null}
+          {fallbackDisplay.token_pack_remaining != null ? (
+            <span>{t("剩余")} <b>{formatResourceTokens(fallbackDisplay.token_pack_remaining, "zh-CN")}</b></span>
+          ) : null}
+          {fallbackDisplay.token_pack_expire_at ? (
+            <span>{t("到期")} <b>{fallbackDisplay.token_pack_expire_at.slice(0, 10)}</b></span>
+          ) : null}
+          {fallbackDisplay.synced_at ? (
+            <span className={styles.scrapeSynced}>{t("同步时间")} <b>{fallbackDisplay.synced_at.slice(0, 19).replace("T", " ")}</b></span>
+          ) : null}
+        </div>
+      ) : null}
+      {!scrapeDisplay && !(fallbackDisplay && fallbackDisplay.source === "scrape") && !error ? (
+        <span className={styles.scrapeHint}>
+          {t("点击上方按钮登录官方控制台,自动抓取套餐余量。抓取前请确认浏览器已登录该渠道。")}
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 function formatResourceTokens(value: number | null, language: "zh-CN" | "en-US") {

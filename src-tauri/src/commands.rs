@@ -843,6 +843,7 @@ pub(super) async fn query_balance(
             token_pack_remaining: None,
             token_pack_expire_at: None,
             token_packs: None,
+            raw_scraped_json: None,
             source: "sync".to_string(),
             synced_at: Some(now.clone()),
             remark: Some("余额自动同步".to_string()),
@@ -1699,4 +1700,489 @@ mod data_import_export_tests {
         let _ = std::fs::remove_file(empty_db);
         let _ = std::fs::remove_file(archive_path);
     }
+}
+
+// ─── Scrape Console Commands ────────────────────────────────────────────────
+// 后台 webview 登录控制台 + 拦截 API 抓取套餐余量。
+
+use crate::core::scrape_console::{
+    self, build_scrape_webview, classify_response_url, resolve_scrape_mode,
+};
+
+/// 抓取结果(前端展示用)。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrapeBalanceResult {
+    pub balance: Option<f64>,
+    pub currency: Option<String>,
+    pub plan_name: Option<String>,
+    pub token_total: Option<i64>,
+    pub token_used: Option<i64>,
+    pub token_remaining: Option<i64>,
+    pub token_pack_expire_at: Option<String>,
+    pub raw_scraped_json: Option<String>,
+    pub source: String,
+    pub synced_at: String,
+}
+
+/// 登录态探测结果。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrapeLoginStatus {
+    pub is_logged_in: bool,
+    pub channel_id: String,
+    /// 登录后的账户标识(如有,用于 UI 展示)。
+    pub account_hint: Option<String>,
+}
+
+/// 创建 per-account 后台抓取 webview(隐藏)。
+#[tauri::command]
+pub(super) async fn open_scrape_console(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    account_id: String,
+) -> Result<(), String> {
+    // 已存在则直接返回
+    {
+        let guard = state
+            .scrape_webviews
+            .lock()
+            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+        if guard.contains_key(&account_id) {
+            return Ok(());
+        }
+    }
+
+    let mode = {
+        let accounts = state
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号失败".to_string())?;
+        let account = accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .ok_or("账号不存在")?;
+        let config = state
+            .channels_config
+            .lock()
+            .map_err(|_| "锁定渠道配置失败".to_string())?;
+        resolve_scrape_mode(&config, &account.channel_id, account.resource_mode.as_deref())
+            .ok_or("该账号所属渠道不支持控制台抓取")?
+    };
+
+    let window = build_scrape_webview(&app, &account_id, &mode)?;
+
+    let mut guard = state
+        .scrape_webviews
+        .lock()
+        .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+    guard.insert(account_id, window);
+    Ok(())
+}
+
+/// 关闭并 drop per-account 抓取 webview。
+#[tauri::command]
+pub(super) async fn close_scrape_console(
+    state: tauri::State<'_, AppState>,
+    account_id: String,
+) -> Result<(), String> {
+    let mut guard = state
+        .scrape_webviews
+        .lock()
+        .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+    if let Some(window) = guard.remove(&account_id) {
+        let _ = window.close();
+    }
+    Ok(())
+}
+
+/// 页面 JS 通过 IPC 回传拦截到的响应体。
+#[tauri::command]
+pub(super) async fn handle_intercepted_response(
+    state: tauri::State<'_, AppState>,
+    channel_id: String,
+    url: String,
+    body: String,
+) -> Result<(), String> {
+    let mut guard = state
+        .scrape_pending
+        .lock()
+        .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+    let entry = guard.entry(channel_id).or_default();
+    // 按 URL 分类去重:同类型响应只保留最新
+    let kind = classify_response_url(&url);
+    entry.retain(|(u, _)| classify_response_url(u) != kind);
+    entry.push((url, body));
+    Ok(())
+}
+
+/// 登录态探测脚本:在目标控制台域上发一次 account-info 请求,解析响应判断是否已登录。
+/// 已登录 → 返回 is_logged_in=true;未登录/跳转登录页 → is_logged_in=false。
+fn probe_login_script(channel_id: &str) -> &'static str {
+    match channel_id {
+        // LongCat:/api/v1/user-current → code===0 && data.loginStatus===1
+        "longcat" => r#"(async()=>{
+          try {
+            const res = await fetch('/api/v1/user-current', { credentials: 'include', headers: { 'x-requested-with': 'XMLHttpRequest' } });
+            if (!res.ok) return JSON.stringify({ isLoggedIn: false });
+            const json = await res.json();
+            const ok = json?.code === 0 && json?.data?.loginStatus === 1;
+            return JSON.stringify({ isLoggedIn: ok, accountHint: json?.data?.name ?? null });
+          } catch (e) { return JSON.stringify({ isLoggedIn: false, error: String(e) }); }
+        })()"#,
+        // Qwen:platform-home.qianwenai.com/api/account/info.json → code==="200" && data.currentId
+        "qwen" => r#"(async()=>{
+          try {
+            const res = await fetch('https://platform-home.qianwenai.com/api/account/info.json', { credentials: 'include' });
+            if (!res.ok) return JSON.stringify({ isLoggedIn: false });
+            const json = await res.json();
+            const ok = json?.code === '200' && json?.data?.currentId;
+            return JSON.stringify({ isLoggedIn: ok, accountHint: json?.data?.aliyunId ?? null });
+          } catch (e) { return JSON.stringify({ isLoggedIn: false, error: String(e) }); }
+        })()"#,
+        _ => r#"(async()=>JSON.stringify({ isLoggedIn: false, error: 'unsupported-channel' }))()"#,
+    }
+}
+
+/// 探测当前 webview 是否已登录控制台。
+/// 流程:确保 webview 存在 → 导航到控制台 URL → 等页面加载 → eval 探测脚本 → 返回登录态。
+#[tauri::command]
+pub(super) async fn probe_scrape_login(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    account_id: String,
+) -> Result<ScrapeLoginStatus, String> {
+    // 1. 确保 webview 存在(会解析 channel_id)
+    open_scrape_console(app.clone(), state.clone(), account_id.clone()).await?;
+
+    let (channel_id, console_url) = {
+        let accounts = state
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号失败".to_string())?;
+        let account = accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .ok_or("账号不存在")?;
+        let config = state
+            .channels_config
+            .lock()
+            .map_err(|_| "锁定渠道配置失败".to_string())?;
+        let mode = resolve_scrape_mode(&config, &account.channel_id, account.resource_mode.as_deref())
+            .ok_or("该账号所属渠道不支持控制台抓取")?;
+        (account.channel_id.clone(), mode.console_url.clone())
+    };
+
+    // 2. 导航到控制台 URL
+    {
+        let guard = state
+            .scrape_webviews
+            .lock()
+            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+        let window = guard
+            .get(&account_id)
+            .ok_or("抓取 webview 不存在")?;
+        let url = console_url
+            .parse()
+            .map_err(|e| format!("URL 解析失败: {e}"))?;
+        window
+            .navigate(url)
+            .map_err(|e| format!("导航失败: {e}"))?;
+    }
+
+    // 3. eval 探测脚本(页面加载后 fetch 当前用户接口)
+    let probe_js = probe_login_script(&channel_id);
+    let raw_result = {
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        {
+            let guard = state
+                .scrape_webviews
+                .lock()
+                .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+            let window = guard
+                .get(&account_id)
+                .ok_or("抓取 webview 不存在")?;
+            let tx_cell = std::cell::Cell::new(Some(tx));
+            let _ = window.eval_with_callback(probe_js, move |s| {
+                if let Some(tx) = tx_cell.take() {
+                    let _ = tx.send(s);
+                }
+            });
+        }
+        // 探测超时 15s(含页面加载 + fetch)
+        match tokio::time::timeout(std::time::Duration::from_secs(15), rx).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(_)) => return Err("探测回调通道关闭".to_string()),
+            Err(_) => return Err("登录态探测超时".to_string()),
+        }
+    };
+
+    // 4. 解析探测结果
+    #[derive(serde::Deserialize)]
+    struct ProbeResp {
+        #[serde(rename = "isLoggedIn")]
+        is_logged_in: bool,
+        #[serde(rename = "accountHint")]
+        account_hint: Option<String>,
+    }
+    let parsed: ProbeResp = serde_json::from_str(&raw_result)
+        .map_err(|e| format!("探测输出解析失败: {e}, raw={raw_result}"))?;
+
+    let status = ScrapeLoginStatus {
+        is_logged_in: parsed.is_logged_in,
+        channel_id,
+        account_hint: parsed.account_hint,
+    };
+
+    // 未登录 → 把 webview 移到可见区域,让用户登录
+    if !status.is_logged_in {
+        surface_scrape_webview(&state, &account_id)?;
+    }
+
+    Ok(status)
+}
+
+/// 把抓取 webview 移到可见区域(用于未登录时让用户登录)。
+fn surface_scrape_webview(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+) -> Result<(), String> {
+    let guard = state
+        .scrape_webviews
+        .lock()
+        .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+    let window = guard.get(account_id).ok_or("抓取 webview 不存在")?;
+    window
+        .set_size(tauri::LogicalSize::new(1024.0, 768.0))
+        .map_err(|e| format!("设置窗口大小失败: {e}"))?;
+    window
+        .set_position(tauri::LogicalPosition::new(100.0, 100.0))
+        .map_err(|e| format!("设置窗口位置失败: {e}"))?;
+    window.show().map_err(|e| format!("显示窗口失败: {e}"))?;
+    window
+        .set_focus()
+        .map_err(|e| format!("聚焦窗口失败: {e}"))?;
+    Ok(())
+}
+
+/// 编排器:抓取余额的主入口(前端按钮调用)。
+/// 流程:探测登录态 → 未登录则弹出 webview 并提前返回;已登录则继续拦截+提取。
+/// 注意:前端在调 scrape_balance 之前应先调 probe_scrape_login 显式处理登录态;
+/// 这里的探测是防御性二次检查(防直连调用),未登录时只返回错误,不再发事件(避免与前端事件监听竞态)。
+#[tauri::command]
+pub(super) async fn scrape_balance(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    account_id: String,
+) -> Result<ScrapeBalanceResult, String> {
+    // 1. 探测登录态(内部会确保 webview 存在 + 导航 + eval 探测脚本)
+    let login_status = probe_scrape_login(app.clone(), state.clone(), account_id.clone()).await?;
+    if !login_status.is_logged_in {
+        // 未登录:probe_scrape_login 已经把 webview 移到可见区域,直接返回错误
+        return Err("请先登录官方控制台(已弹出登录窗口)".to_string());
+    }
+
+    // 2. 解析模式配置
+    let mode = {
+        let accounts = state
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号失败".to_string())?;
+        let account = accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .ok_or("账号不存在")?;
+        let config = state
+            .channels_config
+            .lock()
+            .map_err(|_| "锁定渠道配置失败".to_string())?;
+        resolve_scrape_mode(&config, &account.channel_id, account.resource_mode.as_deref())
+            .ok_or("该账号所属渠道不支持控制台抓取")?
+    };
+
+    // 3. 清空该账号旧的待处理缓冲
+    {
+        let mut guard = state
+            .scrape_pending
+            .lock()
+            .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+        guard.remove(&account_id);
+    }
+
+    // 4. 导航到控制台 URL(触发页面自发调 API)
+    {
+        let guard = state
+            .scrape_webviews
+            .lock()
+            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+        let window = guard
+            .get(&account_id)
+            .ok_or("抓取 webview 不存在")?;
+        let url = mode
+            .console_url
+            .parse()
+            .map_err(|e| format!("URL 解析失败: {e}"))?;
+        window
+            .navigate(url)
+            .map_err(|e| format!("导航失败: {e}"))?;
+    }
+
+    // 5. 收集窗口:等待拦截响应到位(简单轮询,5s 窗口)
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let slots = loop {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            break None;
+        }
+        {
+            let guard = state
+                .scrape_pending
+                .lock()
+                .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+            if let Some(pending) = guard.get(&account_id) {
+                let mut map = std::collections::HashMap::new();
+                for (url, body) in pending {
+                    map.insert(classify_response_url(url).to_string(), body.clone());
+                }
+                if scrape_console::aggregate_complete(&map, &mode) {
+                    break Some(map);
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    };
+
+    let slots = slots.ok_or("抓取超时:未收到目标 API 响应,请确认已登录或重试")?;
+
+    // 6. 执行 extractor
+    let extractor_call = if mode.aggregate {
+        let bundle = scrape_console::build_aggregate_bundle(&slots);
+        format!(
+            "(function(){{ try {{ return JSON.stringify(({})({})); }} catch(e) {{ return JSON.stringify({{error:String(e)}}); }} }})()",
+            mode.extractor_js, bundle
+        )
+    } else {
+        // 单响应模式:取唯一目标槽
+        let target_key = if mode.console_url.contains("tab=api") {
+            "api_usage_summary"
+        } else {
+            "token_packs_summary"
+        };
+        let raw = slots
+            .get(target_key)
+            .ok_or("未找到目标响应")?;
+        format!(
+            "(function(){{ try {{ return JSON.stringify(({})({})); }} catch(e) {{ return JSON.stringify({{error:String(e)}}); }} }})()",
+            mode.extractor_js, raw
+        )
+    };
+
+    let raw_result = {
+        // window 引用需要限制在 await 之前,否则 MutexGuard 跨 await 导致 !Send
+        let extractor_call_clone = extractor_call.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        {
+            let guard = state
+                .scrape_webviews
+                .lock()
+                .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+            let window = guard
+                .get(&account_id)
+                .ok_or("抓取 webview 不存在")?;
+            // eval_with_callback 的回调是 Fn(不是 FnOnce),用 Cell 绕过 move 限制
+            let tx_cell = std::cell::Cell::new(Some(tx));
+            let _ = window.eval_with_callback(extractor_call_clone, move |s| {
+                if let Some(tx) = tx_cell.take() {
+                    let _ = tx.send(s);
+                }
+            });
+        } // guard 在这里 drop
+        // 等待回调,超时 10s
+        match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(_)) => return Err("extractor 回调通道关闭".to_string()),
+            Err(_) => return Err("extractor 执行超时".to_string()),
+        }
+    };
+
+    // 7. 解析 extractor 输出
+    let parsed: serde_json::Value = serde_json::from_str(&raw_result)
+        .map_err(|e| format!("extractor 输出解析失败: {e}, raw={raw_result}"))?;
+    if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+        return Err(format!("extractor 执行错误: {err}"));
+    }
+    if parsed.is_null() || parsed == serde_json::Value::Null {
+        return Err("extractor 返回空结果,请确认页面已加载目标数据".to_string());
+    }
+
+    let balance = parsed.get("balance").and_then(|v| v.as_f64());
+    let currency = parsed
+        .get("currency")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let plan_name = parsed
+        .get("plan_name")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let token_total = parsed.get("token_total").and_then(|v| v.as_i64());
+    let token_used = parsed.get("token_used").and_then(|v| v.as_i64());
+    let token_remaining = parsed.get("token_remaining").and_then(|v| v.as_i64());
+    let token_pack_expire_at = parsed
+        .get("token_expire_at")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let raw_scraped_json = serde_json::to_string(&parsed).ok();
+
+    // 8. 写快照
+    let snapshot = AccountBalanceSnapshot {
+        id: format!("balance-{}-{}", account_id, uuid::Uuid::new_v4()),
+        account_id: account_id.clone(),
+        balance,
+        currency: currency.clone(),
+        token_pack_total: token_total,
+        token_pack_used: token_used,
+        token_pack_remaining: token_remaining,
+        token_pack_expire_at: token_pack_expire_at.clone(),
+        token_packs: None,
+        raw_scraped_json: raw_scraped_json.clone(),
+        source: "scrape".to_string(),
+        synced_at: Some(now.clone()),
+        remark: Some("控制台抓取".to_string()),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
+    state
+        .storage
+        .save_balance_snapshot(&snapshot)
+        .map_err(|e| format!("保存余额快照失败: {e}"))?;
+
+    // 9. 发事件通知前端
+    let result = ScrapeBalanceResult {
+        balance,
+        currency,
+        plan_name,
+        token_total,
+        token_used,
+        token_remaining,
+        token_pack_expire_at: token_pack_expire_at.clone(),
+        raw_scraped_json,
+        source: "scrape".to_string(),
+        synced_at: now,
+    };
+    let _ = app.emit("scrape:result", &result);
+
+    // 10. 隐藏 webview(保活供下次抓取)
+    {
+        let guard = state
+            .scrape_webviews
+            .lock()
+            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+        if let Some(window) = guard.get(&account_id) {
+            let _ = window.hide();
+        }
+    }
+
+    Ok(result)
 }

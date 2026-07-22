@@ -53,6 +53,47 @@ export const accountCommands = {
     invokeCommand<AccountBalanceSnapshot[]>("latest_balance_snapshots").catch(
       toAppErr("account_balance_list_failed"),
     ),
+
+  // —— 控制台抓取 ——
+  /** 抓取结果(前端展示用)。 */
+  openScrapeConsole: (accountId: string): Promise<void> =>
+    invokeCommand<void>("open_scrape_console", { accountId }).catch(
+      toAppErr("account_scrape_failed"),
+    ),
+  closeScrapeConsole: (accountId: string): Promise<void> =>
+    invokeCommand<void>("close_scrape_console", { accountId }).catch(
+      toAppErr("account_scrape_failed"),
+    ),
+  /** 探测当前 webview 是否已登录控制台。未登录时 Rust 侧会自动弹出 webview。 */
+  probeScrapeLogin: (accountId: string): Promise<ScrapeLoginStatus> =>
+    invokeCommand<ScrapeLoginStatus>("probe_scrape_login", { accountId }).catch(
+      toAppErr("account_scrape_failed"),
+    ),
+  scrapeBalance: (accountId: string): Promise<ScrapeBalanceResult> =>
+    invokeCommand<ScrapeBalanceResult>("scrape_balance", { accountId }).catch(
+      toAppErr("account_scrape_failed"),
+    ),
+};
+
+/** 控制台抓取结果类型(与 Rust ScrapeBalanceResult 对应)。 */
+export type ScrapeBalanceResult = {
+  balance: number | null;
+  currency: string | null;
+  plan_name: string | null;
+  token_total: number | null;
+  token_used: number | null;
+  token_remaining: number | null;
+  token_pack_expire_at: string | null;
+  raw_scraped_json: string | null;
+  source: string;
+  synced_at: string;
+};
+
+/** 登录态探测结果(与 Rust ScrapeLoginStatus 对应)。 */
+export type ScrapeLoginStatus = {
+  is_logged_in: boolean;
+  channel_id: string;
+  account_hint: string | null;
 };
 
 function toAppErr(code: string) {

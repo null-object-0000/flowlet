@@ -291,63 +291,9 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         LogCaptureConfig::default()
     };
 
-    // 启动时清理过期的请求/响应 Body 数据（仅清除已有完整 Token 统计的记录）。
-    let body_retention_days = capture.body_retention_days;
-    match storage.cleanup_expired_body_data(body_retention_days) {
-        Ok(cleared) if cleared > 0 => tracing::info!(
-            t_ms = _t0.elapsed().as_millis() as u64,
-            cleared,
-            retention_days = body_retention_days,
-            "step: expired body data cleaned"
-        ),
-        Ok(_) => tracing::trace!(
-            t_ms = _t0.elapsed().as_millis() as u64,
-            retention_days = body_retention_days,
-            "step: no expired body data to clean"
-        ),
-        Err(err) => tracing::warn!(
-            t_ms = _t0.elapsed().as_millis() as u64,
-            error = %err,
-            "step: cleanup expired body data failed"
-        ),
-    }
-
-    // 体积上限清理：当 Body 总占用超过 body_max_size_mb 时，按 body_prune_ratio 清理最老的记录。
-    let body_max_size_mb = capture.body_max_size_mb;
-    let body_prune_ratio = capture.body_prune_ratio;
-    if body_max_size_mb > 0 {
-        match storage.get_total_body_size_bytes() {
-            Ok(current_bytes) => {
-                let max_bytes = body_max_size_mb * 1024 * 1024;
-                if current_bytes >= max_bytes {
-                    match storage.prune_oldest_body_data(max_bytes, body_prune_ratio) {
-                        Ok(pruned) if pruned > 0 => tracing::info!(
-                            t_ms = _t0.elapsed().as_millis() as u64,
-                            pruned,
-                            current_mb = current_bytes / 1024 / 1024,
-                            max_mb = body_max_size_mb,
-                            prune_ratio = body_prune_ratio,
-                            "step: body data pruned by size limit"
-                        ),
-                        Ok(_) => tracing::trace!(
-                            t_ms = _t0.elapsed().as_millis() as u64,
-                            "step: no body data to prune by size"
-                        ),
-                        Err(err) => tracing::warn!(
-                            t_ms = _t0.elapsed().as_millis() as u64,
-                            error = %err,
-                            "step: prune body data by size failed"
-                        ),
-                    }
-                }
-            }
-            Err(err) => tracing::warn!(
-                t_ms = _t0.elapsed().as_millis() as u64,
-                error = %err,
-                "step: get body size failed"
-            ),
-        }
-    }
+    // Body 清理全部交给 setup 里的定时任务（启动后 15 分钟触发第一次）。
+    // 启动时不做任何清理动作，避免阻塞主界面。
+    let _ = capture;
 
     // 优先从 config.json 顶层 bind 读取；缺失时回退到 SQLite app_meta 旧配置
     let bind_config = if let Some(json_str) = core::proxy::read_config_raw(&config_path) {
@@ -711,6 +657,46 @@ pub fn run() {
             if let Ok(mut tray_guard) = state_for_tray.tray.lock() {
                 *tray_guard = Some(tray);
             }
+
+            // 定时 Body 清理：启动后 15 分钟触发第一次，之后每 15 分钟跑一次。
+            // 启动时不做任何清理动作，全部交给定时任务。
+            // 每次清理在 spawn_blocking 中执行（不阻塞主线程），结果写入 background_jobs。
+            let timer_storage = state.storage.clone();
+            let timer_config_path = state.config_path.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15 * 60));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                // 第一次 tick 立即触发，等价于启动后 15 分钟开始（interval 的首次 tick 是 15 分钟后）
+                loop {
+                    interval.tick().await;
+                    let storage = timer_storage.clone();
+                    let cfg_path = timer_config_path.clone();
+                    let result = tauri::async_runtime::spawn_blocking(move || {
+                        storage.run_scheduled_body_cleanup_job(&cfg_path)
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok((job_id, expired, pruned, before, after))) => {
+                            let before_mb = before as f64 / 1048576.0;
+                            let after_mb = after as f64 / 1048576.0;
+                            tracing::info!(
+                                job_id = %job_id,
+                                expired,
+                                pruned,
+                                before_mb = format!("{before_mb:.1}"),
+                                after_mb = format!("{after_mb:.1}"),
+                                "scheduled body cleanup finished"
+                            );
+                        }
+                        Ok(Err(error)) => {
+                            tracing::warn!(error = %error, "scheduled body cleanup job failed");
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "scheduled body cleanup task panicked");
+                        }
+                    }
+                }
+            });
 
             tracing::info!(
                 t_ms = setup_t0.elapsed().as_millis() as u64,

@@ -105,6 +105,7 @@ where
     let database_bytes = main_file_bytes.max(allocated_database_bytes);
     let table_stats = read_table_page_stats(connection, |partial_stats| {
         on_progress(build_summary(
+            connection,
             partial_stats,
             database_bytes,
             wal_bytes,
@@ -114,6 +115,7 @@ where
         ));
     })?;
     let summary = build_summary(
+        connection,
         &table_stats,
         database_bytes,
         wal_bytes,
@@ -167,6 +169,7 @@ where
 }
 
 fn build_summary(
+    connection: &Connection,
     table_stats: &TablePageStats,
     database_bytes: i64,
     wal_bytes: i64,
@@ -206,6 +209,25 @@ fn build_summary(
         ),
     ];
     categories[0].allocated_bytes += config_bytes;
+
+    // Body 数据单独统计：直接查询 req_body_b64 + res_body_b64 的实际字节数。
+    // 这部分是可清理的（定时任务目标），混在 request_logs 的页统计里看不清楚。
+    if let Ok((body_bytes, body_rows)) = connection.query_row(
+        r#"SELECT COALESCE(SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, ''))), 0),
+                  COUNT(*) FILTER (WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
+           FROM request_logs"#,
+        [],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    ) {
+        if body_bytes > 0 {
+            categories.push(StorageUsageCategory {
+                key: "bodyData".to_string(),
+                row_count: body_rows,
+                allocated_bytes: body_bytes,
+            });
+        }
+    }
+
     let categorized_bytes = categories.iter().map(|item| item.allocated_bytes).sum();
     StorageUsageSummary {
         total_bytes: if completed {

@@ -1032,10 +1032,18 @@ fn prune_oldest_body_data_removes_oldest_first() {
     let path = std::env::temp_dir().join(format!("flowlet_test_body_prune_{}.sqlite", uuid::Uuid::new_v4()));
     let storage = Storage::open(&path).expect("open storage");
 
-    // 插入 5 条记录，每条都有 Body 和完整的 usage 统计
-    for i in 0..5 {
+    // 构造一条大约 100 KB 的请求体（base64 编码后约 136 KB）
+    let big_body = "a".repeat(100 * 1024);
+    let big_body_b64 = base64(big_body.as_bytes());
+
+    // 插入 10 条记录，每条都有大 Body 和完整的 usage 统计
+    for i in 0..10 {
         storage
-            .insert_request_log(&body_request_log(&format!("req-{i}")))
+            .insert_request_log(&RequestLogInput {
+                req_body_b64: Some(big_body_b64.clone()),
+                res_body_b64: Some(big_body_b64.clone()),
+                ..body_request_log(&format!("req-{i}"))
+            })
             .expect("insert");
         storage
             .upsert_usage_record(&UsageRecordInput {
@@ -1051,27 +1059,14 @@ fn prune_oldest_body_data_removes_oldest_first() {
     storage.test_set_log_created_at_days_ago("req-0", 12).expect("set req-0");
     storage.test_set_log_created_at_days_ago("req-1", 11).expect("set req-1");
 
-    // 再插入 5 条近期记录（(datetime('now')) 自动赋予）
-    for i in 5..10 {
-        storage
-            .insert_request_log(&body_request_log(&format!("req-{i}")))
-            .expect("insert");
-        storage
-            .upsert_usage_record(&UsageRecordInput {
-                request_id: format!("req-{i}"),
-                input_tokens: Some(100),
-                output_tokens: Some(50),
-                ..empty_usage_input(&format!("req-{i}"))
-            })
-            .expect("insert usage");
-    }
-
-    // 此时 10 条记录都有 Body，最老的是 req-0, req-1
-    // 按 prune_ratio=0.2 清理（10 * 0.2 = 2 条）
+    // 当前 10 条约 200 KB/条（req + res），总计 ~2000 KB
+    // 目标上限 1000 KB，prune_ratio=0.5 → 目标压到 1000 * (1 - 0.5) = 500 KB 以下
+    // 循环清理直到低于目标（每次删最老的 50%，即 5 条 → 5 条 → ...）
+    let target_bytes = 1000 * 1024;
     let pruned = storage
-        .prune_oldest_body_data(0, 0.2)
+        .prune_oldest_body_data_to_goal(target_bytes, 0.5, 50)
         .expect("prune");
-    assert_eq!(pruned, 2, "应清理最老的 2 条记录");
+    assert!(pruned >= 7, "应清理足够多的老记录，实际删了 {pruned} 条");
 
     // 验证最老的记录被清理
     let logs = storage.list_request_logs().expect("list");
@@ -1080,12 +1075,22 @@ fn prune_oldest_body_data_removes_oldest_first() {
     let req1 = logs.iter().find(|l| l.request_id == "req-1").unwrap();
     assert!(req1.req_body_b64.is_none(), "req-1 应被清理");
 
-    // 验证近期记录未被清理
-    let req9 = logs.iter().find(|l| l.request_id == "req-9").unwrap();
-    assert!(req9.req_body_b64.is_some(), "req-9 不应被清理");
+    // 验证清理后体积低于目标
+    let remaining_bytes = storage.get_total_body_size_bytes().expect("size");
+    assert!(
+        remaining_bytes < target_bytes,
+        "清理后 {} KB 应低于目标 {} KB",
+        remaining_bytes / 1024,
+        target_bytes / 1024
+    );
 
     drop(storage);
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
     }
+}
+
+fn base64(input: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(input)
 }

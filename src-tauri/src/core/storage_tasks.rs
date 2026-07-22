@@ -161,6 +161,136 @@ impl Storage {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// 定时触发的 Body 清理任务：过期清理 + 超限清理，结果写入 background_jobs。
+    /// 返回 (job_id, expired_cleared, pruned, before_bytes, after_bytes)。
+    pub fn run_scheduled_body_cleanup_job(
+        &self,
+        config_path: &std::path::Path,
+    ) -> Result<(String, usize, usize, i64, i64), StorageError> {
+        use crate::core::proxy::extract_log_capture;
+        use crate::core::proxy::read_config_raw;
+
+        let capture = read_config_raw(config_path)
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+            .map(|value| extract_log_capture(&value))
+            .unwrap_or_default();
+
+        let job_id = uuid::Uuid::new_v4().to_string();
+        self.create_job(
+            &job_id,
+            "body-cleanup",
+            "请求 Body 过期清理",
+            "按保留策略自动清理过期与超限的请求/响应 Body",
+            "scheduled",
+            2,
+            "开始按保留策略自动清理请求 Body",
+        )?;
+
+        let before_bytes = self.get_total_body_size_bytes().unwrap_or(0);
+
+        // 第一步：过期清理（超过保留天数的 Body 自动清除）
+        let expired_cleared = match self.cleanup_expired_body_data(capture.body_retention_days) {
+            Ok(n) => {
+                let _ = self.add_job_event(
+                    &job_id,
+                    "info",
+                    "过期清理",
+                    &format!(
+                        "保留策略 {} 天，已自动清理 {} 条过期 Body",
+                        capture.body_retention_days, n
+                    ),
+                );
+                n
+            }
+            Err(error) => {
+                let _ = self.add_job_event(
+                    &job_id,
+                    "warning",
+                    "过期清理",
+                    &format!("过期清理失败：{error}"),
+                );
+                0
+            }
+        };
+        self.update_job_progress(&job_id, 1, 2)?;
+
+        // 第二步：超限清理（体积超过上限时，按最老优先原则循环清理，直到低于目标）
+        let mut pruned = 0usize;
+        if capture.body_max_size_mb > 0 {
+            let max_bytes = capture.body_max_size_mb * 1024 * 1024;
+            let current = self.get_total_body_size_bytes().unwrap_or(0);
+            if current >= max_bytes {
+                // 安全兜底：最多循环 50 轮（远超正常需求，避免意外死循环）
+                match self.prune_oldest_body_data_to_goal(max_bytes, capture.body_prune_ratio, 50) {
+                    Ok(n) => {
+                        pruned = n;
+                        let after = self.get_total_body_size_bytes().unwrap_or(0);
+                        let _ = self.add_job_event(
+                            &job_id,
+                            "info",
+                            "超限清理",
+                            &format!(
+                                "体积 {} MB 超过上限 {} MB，按最老优先原则清理 {} 条后降至 {} MB",
+                                current / 1024 / 1024,
+                                capture.body_max_size_mb,
+                                n,
+                                after / 1024 / 1024
+                            ),
+                        );
+                    }
+                    Err(error) => {
+                        let _ = self.add_job_event(
+                            &job_id,
+                            "warning",
+                            "超限清理",
+                            &format!("超限清理失败：{error}"),
+                        );
+                    }
+                }
+            } else {
+                let _ = self.add_job_event(
+                    &job_id,
+                    "info",
+                    "超限清理",
+                    &format!(
+                        "当前体积 {} MB 未超上限 {} MB，无需清理",
+                        current / 1024 / 1024,
+                        capture.body_max_size_mb
+                    ),
+                );
+            }
+        } else {
+            let _ = self.add_job_event(&job_id, "info", "超限清理", "体积上限设为 0（不限制），跳过");
+        }
+
+        let after_bytes = self.get_total_body_size_bytes().unwrap_or(0);
+        let summary = serde_json::json!({
+            "expiredCleared": expired_cleared,
+            "pruned": pruned,
+            "beforeBytes": before_bytes,
+            "afterBytes": after_bytes,
+            "clearedBytes": (before_bytes - after_bytes).max(0),
+            "retentionDays": capture.body_retention_days,
+            "maxSizeMb": capture.body_max_size_mb,
+            "pruneRatio": capture.body_prune_ratio,
+        })
+        .to_string();
+        self.finish_job(
+            &job_id,
+            "succeeded",
+            &summary,
+            &format!(
+                "Body 过期清理完成：过期 {} 条，超限 {} 条，清理前 {:.1} MB → 清理后 {:.1} MB",
+                expired_cleared,
+                pruned,
+                before_bytes as f64 / 1048576.0,
+                after_bytes as f64 / 1048576.0
+            ),
+        )?;
+
+        Ok((job_id, expired_cleared, pruned, before_bytes, after_bytes))
+    }
+
     pub fn list_background_jobs(
         &self,
         filter: BackgroundJobsFilter,

@@ -310,9 +310,14 @@ impl Storage {
         Ok(size)
     }
 
-    /// 按体积上限清理最老的 Body 数据。
+    /// 按体积上限清理最老的 Body 数据（单次清理，不长期持锁）。
     /// 仅清除已有完整 Token 统计的记录（usage_records.input_tokens IS NOT NULL）。
-    /// prune_ratio 控制一次清理的比例（0.0~1.0），按 created_at 升序取最老的记录。
+    ///
+    /// 清理策略（按体积而非记录数）：
+    /// - 当前体积已低于 target_bytes * (1 - prune_ratio) 时直接返回 0
+    /// - 否则按"符合条件记录总数的 prune_ratio"换算成单批数量，一次性删最老的这批
+    /// - 若要压到目标以下，由调用方循环多次调用本函数（每次调用只持锁一次）
+    ///
     /// 返回实际清理的行数。
     pub fn prune_oldest_body_data(
         &self,
@@ -324,7 +329,27 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
 
-        // 先计算当前符合条件的记录总数
+        let prune_ratio = prune_ratio.clamp(0.0, 1.0);
+        if prune_ratio <= 0.0 {
+            return Ok(0);
+        }
+
+        // 目标：压到 target_bytes * (1 - prune_ratio) 以下
+        let goal_bytes = ((target_bytes as f64) * (1.0 - prune_ratio)).max(0.0) as i64;
+
+        // 当前体积
+        let current_bytes: i64 = connection.query_row(
+            r#"SELECT COALESCE(SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, ''))), 0)
+               FROM request_logs
+               WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL"#,
+            [],
+            |row| row.get(0),
+        )?;
+        if current_bytes <= goal_bytes {
+            return Ok(0);
+        }
+
+        // 符合条件记录总数（决定批大小）
         let total_eligible: i64 = connection.query_row(
             r#"SELECT COUNT(*) FROM request_logs
                WHERE (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
@@ -336,16 +361,15 @@ impl Storage {
             [],
             |row| row.get(0),
         )?;
-
         if total_eligible == 0 {
             return Ok(0);
         }
 
-        // 按 prune_ratio 计算要清理的行数（至少 1 行）
-        let prune_count = ((total_eligible as f64) * prune_ratio).ceil() as i64;
-        let prune_count = std::cmp::max(prune_count, 1);
+        // 批大小：按 prune_ratio 换算成数量（至少 1 条）
+        let batch_size = ((total_eligible as f64) * prune_ratio).ceil() as i64;
+        let batch_size = std::cmp::max(batch_size, 1);
 
-        // 清理最老的 prune_count 条记录
+        // 单次清理最老的这批（不长期持锁）
         let cleared = connection.execute(
             &format!(
                 r#"UPDATE request_logs
@@ -361,13 +385,32 @@ impl Storage {
                   ORDER BY rl.created_at ASC
                   LIMIT {}
                 )"#,
-                prune_count
+                batch_size
             ),
             [],
         )?;
 
-        let _ = target_bytes;
         Ok(cleared)
+    }
+
+    /// 按体积上限循环清理最老的 Body 数据，直到低于目标或无记录可删。
+    /// 每次清理都单独持锁（不阻塞其他 DB 操作），带安全兜底上限。
+    /// 返回实际清理的总行数。
+    pub fn prune_oldest_body_data_to_goal(
+        &self,
+        target_bytes: i64,
+        prune_ratio: f64,
+        max_rounds: usize,
+    ) -> Result<usize, StorageError> {
+        let mut total = 0usize;
+        for _ in 0..max_rounds {
+            let cleared = self.prune_oldest_body_data(target_bytes, prune_ratio)?;
+            if cleared == 0 {
+                break;
+            }
+            total += cleared;
+        }
+        Ok(total)
     }
 
     /// 获取数据库统计信息

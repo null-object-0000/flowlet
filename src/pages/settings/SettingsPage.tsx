@@ -290,6 +290,7 @@ export function SettingsPage() {
 const STORAGE_CATEGORY_LABELS = {
   configuration: "配置与账号",
   requestLogs: "请求日志",
+  bodyData: "请求 Body（过期自动清理）",
   usage: "用量与费用",
   agentSessions: "Agent 会话",
   backgroundTasks: "后台任务",

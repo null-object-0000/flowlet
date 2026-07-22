@@ -224,7 +224,7 @@ describe("AccountManagementSideSheet", () => {
     expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
   });
 
-  it("clears only Token Plan endpoints when switching back to pay-as-you-go", async () => {
+  it("keeps the saved resource mode and Token Plan endpoints immutable while editing", async () => {
     const user = userEvent.setup();
     const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
     const planAccount: ChannelAccount = {
@@ -259,15 +259,15 @@ describe("AccountManagementSideSheet", () => {
     );
 
     expect(await screen.findByText("Token Plan 订阅信息")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /API 按量付费/ }));
-    expect(screen.getByText("按量付费信息")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /API 按量付费/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Token Plan/ })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "保存修改" }));
 
     expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({
       id: planAccount.id,
-      resource_mode: "pay_as_you_go",
-      base_url_override: null,
-      anthropic_base_url_override: null,
+      resource_mode: "token_plan",
+      base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      anthropic_base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
     })]);
   });
 });

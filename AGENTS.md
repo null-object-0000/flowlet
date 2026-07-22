@@ -228,6 +228,8 @@ Kimi:
 
 千问 Qwen（按量付费账号）:
 - qwen3.7-max
+- qwen3.7-plus
+- qwen3.6-plus
 - qwen3.6-flash
 
 千问 Qwen（Token Plan 账号，resource_mode = "token_plan"）:

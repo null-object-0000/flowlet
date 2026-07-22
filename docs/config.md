@@ -285,7 +285,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "longcat": ["LongCat-2.0"],
   "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
   "kimi": ["kimi-k3", "kimi-k2.7-code"],
-  "qwen": ["qwen3.7-max", "qwen3.6-flash"]
+  "qwen": ["qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"]
 }
 ```
 
@@ -318,6 +318,8 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   },
   "qwen": {
     "qwen3.7-max": ["pro"],
+    "qwen3.7-plus": ["pro"],
+    "qwen3.6-plus": ["pro"],
     "qwen3.6-flash": ["flash"],
     "qwen3.8-max-preview": ["pro"]
   }

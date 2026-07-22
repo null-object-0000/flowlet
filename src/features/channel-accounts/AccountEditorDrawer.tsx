@@ -477,10 +477,14 @@ function ScrapeConsolePanel({
     if (onScrape) {
       // onScrape 直接调 scrapeBalance mutation,绕过 hook 的 startScrape。
       // 需要自行捕获错误并转为 UI 可见的 Toast/状态,避免静默失败。
+      // 注意:错误可能是 AppError 对象({code, message})而非 Error 实例,
+      // 直接取 message 属性,避免 String(err) 得到 "[object Object]"。
       try {
         await onScrape(account.id);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = err && typeof err === "object" && "message" in err
+          ? String((err as { message: unknown }).message)
+          : err instanceof Error ? err.message : String(err);
         Toast.error(t("抓取失败：{message}", { message }));
       }
       return;

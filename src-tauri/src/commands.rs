@@ -1818,29 +1818,36 @@ pub(super) async fn handle_intercepted_response(
 
 /// 登录态探测脚本:在目标控制台域上发一次 account-info 请求,解析响应判断是否已登录。
 /// 已登录 → 返回 is_logged_in=true;未登录/跳转登录页 → is_logged_in=false。
+///
+/// 注意:必须用 .then() 链而非 async/await。eval_with_callback 的回调拿到的是脚本
+/// 的返回值,async 函数返回 Promise,而 JSON.stringify(Promise) = "{}",导致解析失败。
 fn probe_login_script(channel_id: &str) -> &'static str {
     match channel_id {
         // LongCat:/api/v1/user-current → code===0 && data.loginStatus===1
-        "longcat" => r#"(async()=>{
-          try {
-            const res = await fetch('/api/v1/user-current', { credentials: 'include', headers: { 'x-requested-with': 'XMLHttpRequest' } });
-            if (!res.ok) return JSON.stringify({ isLoggedIn: false });
-            const json = await res.json();
-            const ok = json?.code === 0 && json?.data?.loginStatus === 1;
-            return JSON.stringify({ isLoggedIn: ok, accountHint: json?.data?.name ?? null });
-          } catch (e) { return JSON.stringify({ isLoggedIn: false, error: String(e) }); }
+        "longcat" => r#"(function(){
+          return fetch('/api/v1/user-current', { credentials: 'include', headers: { 'x-requested-with': 'XMLHttpRequest' } })
+            .then((res) => {
+              if (!res.ok) return JSON.stringify({ isLoggedIn: false });
+              return res.json().then((j) => {
+                const ok = j?.code === 0 && j?.data?.loginStatus === 1;
+                return JSON.stringify({ isLoggedIn: ok, accountHint: j?.data?.name ?? null });
+              });
+            })
+            .catch((e) => JSON.stringify({ isLoggedIn: false, error: String(e) }));
         })()"#,
         // Qwen:platform-home.qianwenai.com/api/account/info.json → code==="200" && data.currentId
-        "qwen" => r#"(async()=>{
-          try {
-            const res = await fetch('https://platform-home.qianwenai.com/api/account/info.json', { credentials: 'include' });
-            if (!res.ok) return JSON.stringify({ isLoggedIn: false });
-            const json = await res.json();
-            const ok = json?.code === '200' && json?.data?.currentId;
-            return JSON.stringify({ isLoggedIn: ok, accountHint: json?.data?.aliyunId ?? null });
-          } catch (e) { return JSON.stringify({ isLoggedIn: false, error: String(e) }); }
+        "qwen" => r#"(function(){
+          return fetch('https://platform-home.qianwenai.com/api/account/info.json', { credentials: 'include' })
+            .then((res) => {
+              if (!res.ok) return JSON.stringify({ isLoggedIn: false });
+              return res.json().then((j) => {
+                const ok = j?.code === '200' && j?.data?.currentId;
+                return JSON.stringify({ isLoggedIn: ok, accountHint: j?.data?.aliyunId ?? null });
+              });
+            })
+            .catch((e) => JSON.stringify({ isLoggedIn: false, error: String(e) }));
         })()"#,
-        _ => r#"(async()=>JSON.stringify({ isLoggedIn: false, error: 'unsupported-channel' }))()"#,
+        _ => r#"(function(){ return Promise.resolve(JSON.stringify({ isLoggedIn: false, error: 'unsupported-channel' })); })()"#,
     }
 }
 

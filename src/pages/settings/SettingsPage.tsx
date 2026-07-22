@@ -201,10 +201,10 @@ export function SettingsPage() {
                 min={0}
                 max={10240}
                 step={16}
-                value={logCapture.query.data?.body_max_size_mb ?? 128}
+                value={logCapture.query.data?.body_max_size_mb ?? 512}
                 disabled={logCapture.query.isLoading || logCapture.mutation.isPending}
-                onChange={(value) => {
-                  const num = typeof value === "number" ? value : parseInt(String(value), 10);
+                onBlur={(event) => {
+                  const num = parseInt(String((event.target as HTMLInputElement).value), 10);
                   if (!Number.isNaN(num)) void updateLogCapture("body_max_size_mb", Math.max(0, Math.min(10240, num)));
                 }}
                 suffix="MB"

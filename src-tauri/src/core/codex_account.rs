@@ -443,9 +443,20 @@ fn merge_account_report(existing: &mut CodexAccountReport, duplicate: CodexAccou
     existing.signed_in |= duplicate.signed_in;
     existing.is_current |= duplicate.is_current;
     existing.stale &= duplicate.stale;
+    // 时效数据（用量、积分、限流等）必须让较新快照整体覆盖。若只在新值为
+    // None 时保留旧值，就会把新快照的 `updated_at` 和旧快照的用量拼成一条
+    // "时间最新、数据最旧"的混合记录（例如 updated_at 已是 16:02，primary
+    // 却仍是旧快照的 26，导致前端 100 - 26 = 74% 误显示为新快照的剩余量）。
     if duplicate.updated_at > existing.updated_at {
         existing.updated_at = duplicate.updated_at.clone();
+        existing.primary = duplicate.primary;
+        existing.secondary = duplicate.secondary;
+        existing.credits = duplicate.credits;
+        existing.rate_limit_reset_credits = duplicate.rate_limit_reset_credits;
+        existing.rate_limit_reached_type = duplicate.rate_limit_reached_type;
+        existing.error = duplicate.error;
     }
+    // 稳定元数据：与快照时间无关，仅作补全。
     if existing.auth_mode.is_none() {
         existing.auth_mode = duplicate.auth_mode;
     }
@@ -454,24 +465,6 @@ fn merge_account_report(existing: &mut CodexAccountReport, duplicate: CodexAccou
     }
     if existing.plan_type.is_none() {
         existing.plan_type = duplicate.plan_type;
-    }
-    if existing.primary.is_none() {
-        existing.primary = duplicate.primary;
-    }
-    if existing.secondary.is_none() {
-        existing.secondary = duplicate.secondary;
-    }
-    if existing.credits.is_none() {
-        existing.credits = duplicate.credits;
-    }
-    if existing.rate_limit_reset_credits.is_none() {
-        existing.rate_limit_reset_credits = duplicate.rate_limit_reset_credits;
-    }
-    if existing.rate_limit_reached_type.is_none() {
-        existing.rate_limit_reached_type = duplicate.rate_limit_reached_type;
-    }
-    if existing.error.is_none() {
-        existing.error = duplicate.error;
     }
 }
 
@@ -1413,6 +1406,72 @@ mod tests {
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].account_id, "user-canonical");
         assert!(accounts[0].is_current);
+    }
+
+    #[test]
+    fn merges_usage_from_newer_snapshot_when_deduplicating_same_account() {
+        // 复现：同一 iCloud 账号的两份快照——旧 app_server（used_percent=26）
+        // 与新 oauth（used_percent=70）。合并后 primary 必须取新快照的 70，
+        // 前端 100 - 70 = 30% 才是正确剩余量；旧逻辑会把新 updated_at 与旧
+        // 用量拼成混合记录，误显示为 100 - 26 = 74%。
+        let mut older = parse_oauth_usage(
+            &json!({
+                "account_id": "user-1",
+                "email": "same@example.com",
+                "plan_type": "plus",
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 26,
+                        "limit_window_seconds": 604800,
+                        "reset_at": 1784952500_i64
+                    }
+                }
+            }),
+            None,
+        )
+        .expect("parse older snapshot");
+        older.source = "app_server".to_string();
+        older.updated_at = "2026-07-22T15:00:00Z".to_string();
+
+        let mut newer = parse_oauth_usage(
+            &json!({
+                "account_id": "user-1",
+                "email": "same@example.com",
+                "plan_type": "plus",
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 70,
+                        "limit_window_seconds": 604800,
+                        "reset_at": 1784952600_i64
+                    }
+                }
+            }),
+            None,
+        )
+        .expect("parse newer snapshot");
+        newer.updated_at = "2026-07-22T16:02:00Z".to_string();
+
+        let merged = |mut accounts: Vec<CodexAccountReport>| {
+            deduplicate_accounts(&mut accounts);
+            accounts
+        };
+
+        let forward = merged(vec![older.clone(), newer.clone()]);
+        assert_eq!(forward.len(), 1);
+        assert_eq!(
+            forward[0].primary.as_ref().map(|window| window.used_percent),
+            Some(70.0)
+        );
+        assert_eq!(forward[0].updated_at, "2026-07-22T16:02:00Z");
+
+        // 顺序相反时，较新快照作为 existing，结果仍应一致。
+        let reverse = merged(vec![newer, older]);
+        assert_eq!(reverse.len(), 1);
+        assert_eq!(
+            reverse[0].primary.as_ref().map(|window| window.used_percent),
+            Some(70.0)
+        );
+        assert_eq!(reverse[0].updated_at, "2026-07-22T16:02:00Z");
     }
 
     #[test]

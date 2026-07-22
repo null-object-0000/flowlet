@@ -475,10 +475,17 @@ function ScrapeConsolePanel({
 
   async function handleScrape() {
     if (onScrape) {
-      await onScrape(account.id);
-    } else {
-      await startScrape(account.id);
+      // onScrape 直接调 scrapeBalance mutation,绕过 hook 的 startScrape。
+      // 需要自行捕获错误并转为 UI 可见的 Toast/状态,避免静默失败。
+      try {
+        await onScrape(account.id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        Toast.error(t("抓取失败：{message}", { message }));
+      }
+      return;
     }
+    await startScrape(account.id);
   }
 
   async function handleRetry() {

@@ -30,11 +30,12 @@ type Props = {
   onTestConnection: (input: TestInput) => Promise<void>;
   onSaveBalanceSnapshot: (snapshot: AccountBalanceSnapshot) => Promise<void>;
   onSyncBalance: (accountId: string) => Promise<void>;
+  onScrape: (accountId: string) => Promise<void>;
 };
 
 export function AccountManagementSideSheet(props: Props) {
   const { language, t } = useAppPreferences();
-  const { request, accounts, snapshots, presets, busy, onClose, onSaveAccounts, onTestConnection, onSaveBalanceSnapshot, onSyncBalance } = props;
+  const { request, accounts, snapshots, presets, busy, onClose, onSaveAccounts, onTestConnection, onSaveBalanceSnapshot, onSyncBalance, onScrape } = props;
   const [search, setSearch] = useState("");
   const [editor, setEditor] = useState<AccountEditorMode | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChannelAccount | null>(null);
@@ -153,6 +154,7 @@ export function AccountManagementSideSheet(props: Props) {
         onSave={saveEditor}
         onTestConnection={onTestConnection}
         onSyncBalance={onSyncBalance}
+        onScrape={onScrape}
       /> : null}
       <Modal title={t("确认删除账号")} visible={deleteTarget != null} zIndex={APP_OVERLAY_Z_INDEX.modal} footer={null} onCancel={() => setDeleteTarget(null)}>
         <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>

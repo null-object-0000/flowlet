@@ -190,9 +190,18 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "supports_balance_query": false,         // 是否支持查询余额
   "supports_quota_query": false,           // 是否支持查询额度
   "supports_usage_query": false,           // 是否支持查询用量
+  "supports_scrape_balance": true,         // 是否支持控制台抓取套餐余量
   "endpoints": {                           // 端点 URL 覆盖（可选）
     "models": "https://api.longcat.chat/openai/v1/models",
     "model_detail": "https://api.longcat.chat/openai/v1/models/{id}"
+  },
+  "scrape": {                              // 控制台抓取配置(可选)
+    "token_pack": {                        // 模式 key(longcat: token_pack / pay_as_you_go;qwen: token_plan)
+      "console_url": "https://longcat.chat/platform/usage?tab=token",
+      "interceptor_js": "...",             // 注入页面的拦截器 JS(IIFE)
+      "extractor_js": "function extract(raw){ ... }",  // 解析器 JS(函数声明)
+      "aggregate": false                   // 是否需聚合多份响应后再调 extractor
+    }
   }
 }
 ```
@@ -218,7 +227,9 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `supports_balance_query` | `bool` | 否 | `false` | 是否支持查询账户余额 |
 | `supports_quota_query` | `bool` | 否 | `false` | 是否支持查询额度 |
 | `supports_usage_query` | `bool` | 否 | `false` | 是否支持查询用量 |
+| `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"` |
+| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式(如 `"token_pack"` / `"pay_as_you_go"` / `"token_plan"`),value 为 `{ console_url, interceptor_js, extractor_js, aggregate? }` |
 
 **端点解析优先级**：
 

@@ -42,6 +42,7 @@ describe("AccountManagementSideSheet", () => {
         onTestConnection={vi.fn().mockResolvedValue(undefined)}
         onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -82,6 +83,7 @@ describe("AccountManagementSideSheet", () => {
         onTestConnection={vi.fn().mockResolvedValue(undefined)}
         onSaveBalanceSnapshot={onSaveBalanceSnapshot}
         onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -143,6 +145,7 @@ describe("AccountManagementSideSheet", () => {
         onTestConnection={vi.fn().mockResolvedValue(undefined)}
         onSaveBalanceSnapshot={onSaveBalanceSnapshot}
         onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -172,6 +175,7 @@ describe("AccountManagementSideSheet", () => {
         onTestConnection={vi.fn().mockResolvedValue(undefined)}
         onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSyncBalance={onSyncBalance}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -204,6 +208,7 @@ describe("AccountManagementSideSheet", () => {
         onTestConnection={vi.fn().mockResolvedValue(undefined)}
         onSaveBalanceSnapshot={onSaveBalanceSnapshot}
         onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -255,6 +260,7 @@ describe("AccountManagementSideSheet", () => {
         onTestConnection={vi.fn().mockResolvedValue(undefined)}
         onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 

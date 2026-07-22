@@ -273,9 +273,9 @@ impl Storage {
             r#"
             INSERT INTO account_balance_snapshots (
                 id, account_id, balance, currency, token_pack_total, token_pack_used,
-                token_pack_remaining, token_pack_expire_at, token_packs, source, synced_at, remark,
-                created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                token_pack_remaining, token_pack_expire_at, token_packs, raw_scraped_json, source,
+                synced_at, remark, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             "#,
             params![
                 snapshot.id,
@@ -287,6 +287,7 @@ impl Storage {
                 snapshot.token_pack_remaining,
                 snapshot.token_pack_expire_at,
                 snapshot.token_packs,
+                snapshot.raw_scraped_json,
                 snapshot.source,
                 snapshot.synced_at,
                 snapshot.remark,
@@ -307,8 +308,8 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT id, account_id, balance, currency, token_pack_total, token_pack_used,
-                    token_pack_remaining, token_pack_expire_at, token_packs, source, synced_at, remark,
-                    created_at, updated_at
+                    token_pack_remaining, token_pack_expire_at, token_packs, raw_scraped_json, source,
+                    synced_at, remark, created_at, updated_at
              FROM account_balance_snapshots
              WHERE account_id = ?1
              ORDER BY created_at DESC
@@ -325,11 +326,12 @@ impl Storage {
                 token_pack_remaining: row.get(6)?,
                 token_pack_expire_at: row.get(7)?,
                 token_packs: row.get(8)?,
-                source: row.get(9)?,
-                synced_at: row.get(10)?,
-                remark: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                raw_scraped_json: row.get(9)?,
+                source: row.get(10)?,
+                synced_at: row.get(11)?,
+                remark: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         })?;
         let mut snapshots = Vec::new();
@@ -347,8 +349,8 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT s.id, s.account_id, s.balance, s.currency, s.token_pack_total, s.token_pack_used,
-                    s.token_pack_remaining, s.token_pack_expire_at, s.token_packs, s.source, s.synced_at, s.remark,
-                    s.created_at, s.updated_at
+                    s.token_pack_remaining, s.token_pack_expire_at, s.token_packs, raw_scraped_json, s.source,
+                    s.synced_at, s.remark, s.created_at, s.updated_at
              FROM account_balance_snapshots s
              INNER JOIN (
                  SELECT account_id, MAX(created_at) AS max_created
@@ -368,11 +370,12 @@ impl Storage {
                 token_pack_remaining: row.get(6)?,
                 token_pack_expire_at: row.get(7)?,
                 token_packs: row.get(8)?,
-                source: row.get(9)?,
-                synced_at: row.get(10)?,
-                remark: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                raw_scraped_json: row.get(9)?,
+                source: row.get(10)?,
+                synced_at: row.get(11)?,
+                remark: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         })?;
         let mut snapshots = Vec::new();

@@ -248,6 +248,8 @@ pub struct ChannelPreset {
     pub supports_balance_query: bool,
     pub supports_quota_query: bool,
     pub supports_usage_query: bool,
+    // 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量。
+    pub supports_scrape_balance: bool,
     // 渠道平台查看 API Key 的跳转地址（如控制台页面）
     pub platform_url: Option<String>,
     pub created_at: String,
@@ -273,6 +275,7 @@ impl Default for ChannelPreset {
             supports_balance_query: false,
             supports_quota_query: false,
             supports_usage_query: false,
+            supports_scrape_balance: false,
             platform_url: None,
             created_at: String::new(),
             updated_at: String::new(),
@@ -288,6 +291,7 @@ impl ChannelPreset {
             vendor: "longcat".to_string(),
             supports_model_list: true,
             supports_model_detail: true,
+            supports_scrape_balance: true,
             platform_url: Some("https://longcat.chat/platform/api_keys".to_string()),
             ..Default::default()
         }
@@ -358,6 +362,7 @@ impl ChannelPreset {
             supports_balance_query: false,
             supports_quota_query: false,
             supports_usage_query: false,
+            supports_scrape_balance: true,
             ..Default::default()
         }
     }
@@ -690,6 +695,8 @@ pub struct AccountBalanceSnapshot {
     pub token_pack_expire_at: Option<String>,
     // LongCat 多资源包原始数据（JSON 数组），按消耗顺序排列。单资源包场景为 None。
     pub token_packs: Option<String>,
+    // 控制台抓取的完整拦截 payload(聚合模式为 {mode_key: raw, ...})。用于调试/未来重解析。
+    pub raw_scraped_json: Option<String>,
     pub source: String,
     pub synced_at: Option<String>,
     pub remark: Option<String>,

@@ -62,7 +62,8 @@ impl Storage {
             "SELECT id, name, vendor, supported_protocols, openai_base_url, anthropic_base_url,
                     openai_auth, anthropic_auth, default_model, small_model, timeout_seconds, supports_model_list,
                     supports_model_detail, supports_balance_query,
-                    supports_quota_query, supports_usage_query, platform_url, created_at, updated_at
+                    supports_quota_query, supports_usage_query, supports_scrape_balance,
+                    platform_url, created_at, updated_at
              FROM channel_presets ORDER BY id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -86,9 +87,10 @@ impl Storage {
                 supports_balance_query: row.get::<_, i64>(13)? != 0,
                 supports_quota_query: row.get::<_, i64>(14)? != 0,
                 supports_usage_query: row.get::<_, i64>(15)? != 0,
-                platform_url: row.get(16)?,
-                created_at: row.get(17)?,
-                updated_at: row.get(18)?,
+                supports_scrape_balance: row.get::<_, i64>(16)? != 0,
+                platform_url: row.get(17)?,
+                created_at: row.get(18)?,
+                updated_at: row.get(19)?,
             })
         })?;
         let mut presets = Vec::new();
@@ -225,6 +227,24 @@ impl Storage {
             connection.execute(
                 "UPDATE channel_presets SET supports_balance_query = ?1 WHERE id = ?2",
                 params![preset.supports_balance_query as i64, preset.id.as_str()],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 将 config.json 中各渠道的 supports_scrape_balance 同步到 SQLite（升级迁移）。
+    pub fn ensure_preset_scrape_balance(
+        &self,
+        presets: &[ChannelPreset],
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        for preset in presets {
+            connection.execute(
+                "UPDATE channel_presets SET supports_scrape_balance = ?1 WHERE id = ?2",
+                params![preset.supports_scrape_balance as i64, preset.id.as_str()],
             )?;
         }
         Ok(())

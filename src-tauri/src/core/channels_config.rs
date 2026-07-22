@@ -72,10 +72,35 @@ pub struct ChannelJson {
     pub supports_quota_query: bool,
     #[serde(default)]
     pub supports_usage_query: bool,
+    /// 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量。
+    #[serde(default)]
+    pub supports_scrape_balance: bool,
     /// 渠道级端点覆盖，key 例如 "models" / "model_detail" / "balance"。
     /// 优先于此处的配置，缺失时回退到 openai_base_url 拼接逻辑。
     #[serde(default)]
     pub endpoints: std::collections::HashMap<String, String>,
+    /// 控制台抓取配置。key 为渠道内的抓取模式(如 longcat 的 "token_pack" /
+    /// "pay_as_you_go"、qwen 的 "token_plan"),value 为该模式的抓取配置。
+    #[serde(default)]
+    pub scrape: std::collections::HashMap<String, ScrapeModeJson>,
+}
+
+/// 单个抓取模式的配置(一份 interceptor_js + 一份 extractor_js + 入口页面)。
+#[derive(Debug, Deserialize, Clone)]
+pub struct ScrapeModeJson {
+    /// 后台 webview 导航到此 URL,页面需自发调用目标 API。
+    pub console_url: String,
+    /// 注入到页面的拦截器 JS(IIFE),monkeypatch fetch/XHR 并把匹配响应通过
+    /// window.__TAURI_INTERNALS__.invoke("handle_intercepted_response", ...) 回传。
+    pub interceptor_js: String,
+    /// 解析器 JS(函数声明),函数名需与运行时约定一致:
+    ///   - 单响应模式:function extract(raw) -> 结构化对象
+    ///   - 聚合模式(aggregate=true):function extract(bundle) -> 结构化对象
+    pub extractor_js: String,
+    /// 是否需要 Rust 侧聚合多份响应后再调 extractor。
+    /// true 时 extractor_js 的函数接收 {mode_key: raw_response, ...}。
+    #[serde(default)]
+    pub aggregate: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -102,6 +127,15 @@ pub struct ModelPriceJson {
     pub price_version: Option<String>,
 }
 
+/// 运行时抓取模式配置(从 ScrapeModeJson 解析后存到这里)。
+#[derive(Debug, Clone)]
+pub struct ScrapeModeConfig {
+    pub console_url: String,
+    pub interceptor_js: String,
+    pub extractor_js: String,
+    pub aggregate: bool,
+}
+
 // ─── 运行时渠道配置 ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -113,6 +147,8 @@ pub struct ChannelsConfig {
         std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
     /// 每个渠道的端点覆盖，key 为 channel_id → (endpoint_key → url)
     pub endpoints: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    /// 每个渠道的抓取配置，key 为 channel_id → (mode_key → ScrapeModeConfig)。
+    pub scrape: std::collections::HashMap<String, std::collections::HashMap<String, ScrapeModeConfig>>,
 }
 
 impl ChannelsConfig {
@@ -137,6 +173,33 @@ impl ChannelsConfig {
             .map(|c| (c.id.clone(), c.endpoints.clone()))
             .collect();
 
+        // 提前提取 scrape 配置(避免与下面的 into_iter 同周期 move json.channels)
+        let scrape: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, ScrapeModeConfig>,
+        > = json
+            .channels
+            .iter()
+            .map(|c| {
+                let modes: std::collections::HashMap<String, ScrapeModeConfig> = c
+                    .scrape
+                    .iter()
+                    .map(|(mode_key, mode_json)| {
+                        (
+                            mode_key.clone(),
+                            ScrapeModeConfig {
+                                console_url: mode_json.console_url.clone(),
+                                interceptor_js: mode_json.interceptor_js.clone(),
+                                extractor_js: mode_json.extractor_js.clone(),
+                                aggregate: mode_json.aggregate,
+                            },
+                        )
+                    })
+                    .collect();
+                (c.id.clone(), modes)
+            })
+            .collect();
+
         let presets: Vec<ChannelPreset> = json
             .channels
             .into_iter()
@@ -159,6 +222,7 @@ impl ChannelsConfig {
                     supports_balance_query: c.supports_balance_query,
                     supports_quota_query: c.supports_quota_query,
                     supports_usage_query: c.supports_usage_query,
+                    supports_scrape_balance: c.supports_scrape_balance,
                     platform_url: c.platform_url,
                     created_at: now.clone(),
                     updated_at: now.clone(),
@@ -205,7 +269,25 @@ impl ChannelsConfig {
             default_exposed_models: json.default_exposed_models,
             flowlet_tiers,
             endpoints,
+            scrape,
         })
+    }
+
+    /// 获取指定渠道、指定模式的抓取配置。
+    pub fn scrape_config(
+        &self,
+        channel_id: &str,
+        mode_key: &str,
+    ) -> Option<&ScrapeModeConfig> {
+        self.scrape.get(channel_id)?.get(mode_key)
+    }
+
+    /// 获取指定渠道的所有抓取模式 key 列表(用于 UI 或服务端分发)。
+    pub fn scrape_mode_keys(&self, channel_id: &str) -> Vec<String> {
+        self.scrape
+            .get(channel_id)
+            .map(|modes| modes.keys().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// 从指定渠道的 endpoints 覆盖中读取一个端点 URL，缺失时调用

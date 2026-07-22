@@ -12,6 +12,7 @@ pub mod metrics;
 pub mod presets;
 pub mod proxy;
 pub mod rate_limiter;
+pub mod scrape_console;
 pub mod storage;
 pub mod sync;
 pub mod usage;

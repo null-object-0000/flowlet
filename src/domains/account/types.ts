@@ -40,6 +40,7 @@ export type AccountBalanceSnapshot = {
   token_pack_remaining: number | null;
   token_pack_expire_at: string | null;
   token_packs?: string | null;
+  raw_scraped_json?: string | null;
   source: string;
   synced_at: string | null;
   remark: string | null;

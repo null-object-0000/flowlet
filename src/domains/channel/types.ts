@@ -22,6 +22,7 @@ export type ChannelPreset = {
   supports_balance_query: boolean;
   supports_quota_query: boolean;
   supports_usage_query: boolean;
+  supports_scrape_balance: boolean;
   created_at: string;
   updated_at: string;
 };

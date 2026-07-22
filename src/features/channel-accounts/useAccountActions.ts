@@ -72,7 +72,14 @@ export function useAccountActions(presets: ChannelPreset[]) {
     },
   });
 
-  return { saveAll, testConnection, syncModels, queryBalance, saveBalanceSnapshot };
+  const scrapeBalance = useMutation({
+    mutationFn: (accountId: string) => accountCommands.scrapeBalance(accountId),
+    onSuccess: () => {
+      void qc.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
+    },
+  });
+
+  return { saveAll, testConnection, syncModels, queryBalance, saveBalanceSnapshot, scrapeBalance };
 }
 
 type AutoRefreshOperation = {

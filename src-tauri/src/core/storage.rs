@@ -799,6 +799,20 @@ impl Storage {
             "token_packs",
             "TEXT",
         )?;
+        // 余额快照：补充控制台抓取的完整拦截 payload(用于调试/重解析)
+        add_column_if_missing(
+            &connection,
+            "account_balance_snapshots",
+            "raw_scraped_json",
+            "TEXT",
+        )?;
+        // 渠道模板：补充控制台抓取能力标志
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "supports_scrape_balance",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
 
         // 渠道账号：补充 Base URL 覆盖字段
         add_column_if_missing(&connection, "channel_accounts", "base_url_override", "TEXT")?;

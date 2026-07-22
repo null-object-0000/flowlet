@@ -44,7 +44,7 @@ export function TaskLogsPage() {
     </header>
     <section className={styles.toolbar} aria-label={t("任务筛选")}>
       <Select style={{ width: "100%" }} insetLabel={t("状态")} value={filter.status || "__all__"} optionList={statusOptions(t)} onChange={(value) => setFilter((current) => ({ ...current, status: value === "__all__" ? "" : String(value) as BackgroundJobsFilter["status"], page: 1 }))} />
-      <Select style={{ width: "100%" }} insetLabel={t("任务类型")} value={filter.jobType || "__all__"} optionList={[{ value: "__all__", label: t("全部类型") }, { value: "body-cleanup", label: t("请求 Body 过期清理") }, { value: "agent-data-sync", label: t("Agent 数据同步") }, { value: "codex-account-sync", label: t("Codex 账号同步") }]} onChange={(value) => setFilter((current) => ({ ...current, jobType: value === "__all__" ? "" : String(value), page: 1 }))} />
+      <Select style={{ width: "100%" }} insetLabel={t("任务类型")} value={filter.jobType || "__all__"} optionList={[{ value: "__all__", label: t("全部类型") }, { value: "body-cleanup", label: t("Body 清理") }, { value: "agent-data-sync", label: t("Agent 数据同步") }, { value: "codex-account-sync", label: t("Codex 账号同步") }]} onChange={(value) => setFilter((current) => ({ ...current, jobType: value === "__all__" ? "" : String(value), page: 1 }))} />
       <span className={styles.toolbarMeta}>{tasks.isFetching ? t("正在刷新任务日志…") : t("共 {count} 条", { count: tasks.data?.total ?? 0 })}</span>
       <div className={styles.toolbarActions}>
         <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconDelete />} loading={cleanup.isPending} onClick={confirmCleanup}>{t("清理日志")}</Button>

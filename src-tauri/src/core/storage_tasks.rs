@@ -179,11 +179,11 @@ impl Storage {
         self.create_job(
             &job_id,
             "body-cleanup",
-            "请求 Body 过期清理",
+            "Body 清理",
             "按保留策略自动清理过期与超限的请求/响应 Body",
             "scheduled",
             2,
-            "开始按保留策略自动清理请求 Body",
+            "开始按保留策略自动清理请求与响应 Body",
         )?;
 
         let before_bytes = self.get_total_body_size_bytes().unwrap_or(0);
@@ -280,7 +280,7 @@ impl Storage {
             "succeeded",
             &summary,
             &format!(
-                "Body 过期清理完成：过期 {} 条，超限 {} 条，清理前 {:.1} MB → 清理后 {:.1} MB",
+                "Body 清理完成：过期 {} 条，超限 {} 条，清理前 {:.1} MB → 清理后 {:.1} MB",
                 expired_cleared,
                 pruned,
                 before_bytes as f64 / 1048576.0,

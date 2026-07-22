@@ -11,6 +11,7 @@ import {
   useClaudeCodeEnvironment,
   useClaudeCodeGlobalConfig,
   useCodexAccountAuthorization,
+  useCodexAccountRefresh,
   useCodexAccounts,
   useOpenCodeEnvironment,
   useOpenCodeGlobalConfig,
@@ -70,6 +71,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const piEnvironment = usePiEnvironment();
   const chatGptEnvironment = useChatGptDesktopEnvironment();
   const codexAccounts = useCodexAccounts(selectedAgent === "chatgpt-desktop");
+  const codexAccountRefresh = useCodexAccountRefresh();
   const codexAccountAuthorization = useCodexAccountAuthorization();
   const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
   const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
@@ -208,9 +210,9 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         error={chatGptEnvironment.error?.message}
         onRefresh={() => void chatGptEnvironment.refetch()}
         accounts={codexAccounts.data}
-        accountLoading={codexAccounts.isFetching}
-        accountError={codexAccounts.error?.message}
-        onRefreshAccount={() => void codexAccounts.refetch()}
+        accountLoading={codexAccountRefresh.isPending}
+        accountError={codexAccountRefresh.error?.message}
+        onRefreshAccount={() => void codexAccountRefresh.mutate()}
         accountAuthorizationBusy={codexAccountAuthorization.isPending}
         onAuthorizeAccount={() => void authorizeCodexAccount()}
         onClose={() => setSelectedAgent(null)}

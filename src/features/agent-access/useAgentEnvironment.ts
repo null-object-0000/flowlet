@@ -55,21 +55,26 @@ export function useChatGptDesktopEnvironment() {
   });
 }
 
+// Codex 账号与用量现在由 CodexAccountAutoSync 周期性后台同步刷新本地快照，
+// 因此打开 Agent 弹窗时只读取缓存快照，不再主动发起网络请求；只有用户手动点
+// "刷新用量"时，才通过 useCodexAccountRefresh 触发实时网络刷新。
 export function useCodexAccounts(enabled = true) {
-  const queryClient = useQueryClient();
   const queryKey = queryKeys.agent.codexAccount();
   return useQuery({
     queryKey,
-    queryFn: async () => {
-      const cached = await listCachedCodexAccounts();
-      if (cached.accounts.length > 0) {
-        queryClient.setQueryData(queryKey, cached);
-      }
-      return queryCodexAccounts();
-    },
+    queryFn: listCachedCodexAccounts,
     enabled,
-    staleTime: 5 * 60_000,
+    staleTime: 0,
     retry: false,
+  });
+}
+
+export function useCodexAccountRefresh() {
+  const queryClient = useQueryClient();
+  const queryKey = queryKeys.agent.codexAccount();
+  return useMutation({
+    mutationFn: queryCodexAccounts,
+    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
   });
 }
 

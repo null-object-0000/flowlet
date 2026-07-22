@@ -191,6 +191,11 @@ vi.mock("./useAgentEnvironment", () => ({
     isFetching: false,
     refetch,
   }),
+  useCodexAccountRefresh: () => ({
+    isPending: false,
+    error: null,
+    mutate: vi.fn(),
+  }),
   useCodexAccountAuthorization: () => ({
     isPending: false,
     mutateAsync,

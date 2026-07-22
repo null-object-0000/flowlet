@@ -2,6 +2,9 @@ import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import type { AppError } from "../../shared/errors/AppError";
 import type { AccountBalanceResult, AccountBalanceSnapshot, ChannelAccount, ModelSyncResult } from "./types";
 
+const SCRAPE_LOGIN_TIMEOUT_MS = 45_000;
+const SCRAPE_BALANCE_TIMEOUT_MS = 60_000;
+
 /** Account command adapter. Pages/features call these; never spell
  *  "save_channel_accounts" / "test_connection" / "sync_models" / "query_balance"
  *  directly. */
@@ -64,13 +67,13 @@ export const accountCommands = {
     invokeCommand<void>("close_scrape_console", { accountId }).catch(
       toAppErr("account_scrape_failed"),
     ),
-  /** 探测当前 webview 是否已登录控制台。未登录时 Rust 侧会自动弹出 webview。 */
+  /** 刷新控制台并等待页面业务响应。需要登录或页面未触发目标接口时 Rust 会展示 webview。 */
   probeScrapeLogin: (accountId: string): Promise<ScrapeLoginStatus> =>
-    invokeCommand<ScrapeLoginStatus>("probe_scrape_login", { accountId }).catch(
+    invokeCommand<ScrapeLoginStatus>("probe_scrape_login", { accountId }, SCRAPE_LOGIN_TIMEOUT_MS).catch(
       toAppErr("account_scrape_failed"),
     ),
   scrapeBalance: (accountId: string): Promise<ScrapeBalanceResult> =>
-    invokeCommand<ScrapeBalanceResult>("scrape_balance", { accountId }).catch(
+    invokeCommand<ScrapeBalanceResult>("scrape_balance", { accountId }, SCRAPE_BALANCE_TIMEOUT_MS).catch(
       toAppErr("account_scrape_failed"),
     ),
 };
@@ -94,6 +97,8 @@ export type ScrapeLoginStatus = {
   is_logged_in: boolean;
   channel_id: string;
   account_hint: string | null;
+  probe_state: "captured" | "login_required" | "console_action_required" | "capture_timeout";
+  message: string | null;
 };
 
 function toAppErr(code: string) {

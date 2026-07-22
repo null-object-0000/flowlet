@@ -22,6 +22,7 @@ import styles from "./AccountEditorDrawer.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { useScrapeConsole } from "./useScrapeConsole";
+import type { ScrapeBalanceResult } from "../../domains/account/commands";
 
 const { Text } = Typography;
 
@@ -41,7 +42,7 @@ type Props = {
   onSave: (account: ChannelAccount, snapshot: AccountResourceSnapshotDraft | null) => Promise<void>;
   onTestConnection: (input: TestInput) => Promise<void>;
   onSyncBalance: (accountId: string) => Promise<void>;
-  onScrape?: (accountId: string) => Promise<void>;
+  onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
 };
 
 export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance, onScrape }: Props) {
@@ -265,21 +266,23 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                 {isEdit ? <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} onClick={() => void handleSync()}>{t("刷新")}</Button> : null}
               </div>
             </div>
-          ) : supportsScrape ? (
-            <div className={styles.resourcePanel}>
-              <div className={styles.resourceHeading}>
-                <strong>{t("控制台抓取")}</strong>
-                <span className={styles.manualBadge}>{t("手动触发")}</span>
-              </div>
-              <ScrapeConsolePanel
-                account={draft}
-                snapshot={snapshot}
-                onScrape={onScrape}
-                t={t}
-              />
-            </div>
           ) : (
             <>
+              {supportsScrape ? (
+                <div className={styles.resourcePanel}>
+                  <div className={styles.resourceHeading}>
+                    <strong>{t("控制台自动同步")}</strong>
+                    <span className={styles.autoBadge}>{t("WebView")}</span>
+                  </div>
+                  <ScrapeConsolePanel
+                    account={draft}
+                    enabled={isEdit}
+                    snapshot={snapshot}
+                    onScrape={onScrape}
+                    t={t}
+                  />
+                </div>
+              ) : null}
               {resourceOptions.length ? (
                 <div className={styles.modeOptions}>
                   {resourceOptions.map((option) => (
@@ -461,34 +464,28 @@ function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, m
 /** 控制台抓取面板:触发按钮 + 最近一次抓取结果展示。 */
 function ScrapeConsolePanel({
   account,
+  enabled,
   snapshot,
   onScrape,
   t,
 }: {
   account: ChannelAccount;
+  enabled: boolean;
   snapshot?: AccountBalanceSnapshot;
-  onScrape?: (accountId: string) => Promise<void>;
+  onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
   t: (k: string, params?: Record<string, string | number> | undefined) => string;
 }) {
-  const { startScrape, retryScrape, lastResult, isScraping, needLogin, error, statusText } = useScrapeConsole();
-  const isEdit = Boolean(account.id);
-
+  const {
+    startScrape,
+    retryScrape,
+    lastResult,
+    isScraping,
+    needLogin,
+    consoleActionMessage,
+    error,
+    statusText,
+  } = useScrapeConsole(onScrape);
   async function handleScrape() {
-    if (onScrape) {
-      // onScrape 直接调 scrapeBalance mutation,绕过 hook 的 startScrape。
-      // 需要自行捕获错误并转为 UI 可见的 Toast/状态,避免静默失败。
-      // 注意:错误可能是 AppError 对象({code, message})而非 Error 实例,
-      // 直接取 message 属性,避免 String(err) 得到 "[object Object]"。
-      try {
-        await onScrape(account.id);
-      } catch (err) {
-        const message = err && typeof err === "object" && "message" in err
-          ? String((err as { message: unknown }).message)
-          : err instanceof Error ? err.message : String(err);
-        Toast.error(t("抓取失败：{message}", { message }));
-      }
-      return;
-    }
     await startScrape(account.id);
   }
 
@@ -509,7 +506,7 @@ function ScrapeConsolePanel({
           size="small"
           icon={<IconRefresh />}
           loading={isScraping}
-          disabled={!isEdit}
+          disabled={!enabled}
           onClick={() => void handleScrape()}
         >
           {t("登录控制台抓取")}
@@ -518,9 +515,17 @@ function ScrapeConsolePanel({
       </div>
       {needLogin ? (
         <div className={styles.scrapeError}>
-          {t("未登录官方控制台,请在弹出的窗口中完成登录。")}
+          {t("检测到控制台登录页，请在弹出的窗口中完成登录。")}
           <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
             {t("登录完成,重新抓取")}
+          </Button>
+        </div>
+      ) : null}
+      {consoleActionMessage ? (
+        <div className={styles.scrapeError}>
+          {consoleActionMessage}
+          <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
+            {t("重新抓取")}
           </Button>
         </div>
       ) : null}
@@ -571,7 +576,7 @@ function ScrapeConsolePanel({
       ) : null}
       {!scrapeDisplay && !(fallbackDisplay && fallbackDisplay.source === "scrape") && !error ? (
         <span className={styles.scrapeHint}>
-          {t("点击上方按钮登录官方控制台,自动抓取套餐余量。抓取前请确认浏览器已登录该渠道。")}
+          {t("点击上方按钮即可同步套餐余量；如尚未登录，将自动打开控制台登录窗口。")}
         </span>
       ) : null}
     </div>

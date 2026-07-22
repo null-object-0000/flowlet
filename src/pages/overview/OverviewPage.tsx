@@ -139,7 +139,7 @@ export function OverviewPage() {
         onTestConnection={(input) => accountActions.testConnection.mutateAsync(input)}
         onSaveBalanceSnapshot={(snapshot) => accountActions.saveBalanceSnapshot.mutateAsync(snapshot)}
         onSyncBalance={(accountId) => accountActions.queryBalance.mutateAsync(accountId).then(() => undefined)}
-        onScrape={(accountId) => accountActions.scrapeBalance.mutateAsync(accountId).then(() => undefined)}
+        onScrape={(accountId) => accountActions.scrapeBalance.mutateAsync(accountId)}
       />
     </main>
   );

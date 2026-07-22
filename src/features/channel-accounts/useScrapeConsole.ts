@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useCallback, useRef, useState } from "react";
 import { accountCommands, type ScrapeBalanceResult } from "../../domains/account/commands";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
@@ -10,90 +9,75 @@ type ScrapeState =
   | "collecting"
   | "extracting"
   | "need-login"
+  | "need-console-action"
   | "success"
   | "error";
-
-/** 抓取结果事件(scrape:result 载荷)。 */
-type ScrapeResultEvent = { accountId: string; data: ScrapeBalanceResult };
-/** 需要登录事件(scrape:need-login 载荷)。保留监听用于兼容/调试,
- *  但当前 need-login 态主要由 probeScrapeLogin 返回值驱动。 */
-type ScrapeNeedLoginEvent = { accountId: string; channelId: string };
 
 /**
  * 控制台抓取的 UX 编排 Hook。
  * 状态机:idle → opening → navigating → collecting → extracting → success/error。
- * 登录态由 probeScrapeLogin 显式探测:未登录则弹出 webview 并转入 need-login 态,
- * 等用户登录后点「登录完成,重新抓取」重试。
+ * probeScrapeLogin 会等待网络监听就绪并刷新页面。明确进入登录页时转入
+ * need-login；监听已就绪但未捕获目标响应时转入 need-console-action，让用户在
+ * 已展示的控制台中完成登录、验证码或等待页面加载，不能将其直接等同于未登录。
  */
-export function useScrapeConsole() {
+export function useScrapeConsole(runScrape?: (accountId: string) => Promise<ScrapeBalanceResult>) {
   const { t } = useAppPreferences();
   const [state, setState] = useState<ScrapeState>("idle");
   const [lastResult, setLastResult] = useState<ScrapeBalanceResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
+  const [consoleActionMessage, setConsoleActionMessage] = useState<string | null>(null);
   const activeAccountId = useRef<string | null>(null);
-
-  // 订阅 Rust 事件
-  useEffect(() => {
-    const unreturnsResult = listen<ScrapeResultEvent>("scrape:result", (event) => {
-      const payload = event.payload;
-      if (activeAccountId.current && payload.accountId !== activeAccountId.current) {
-        return;
-      }
-      setLastResult(payload.data);
-      setNeedLogin(false);
-      setState("success");
-      activeAccountId.current = null;
-    });
-    const unreturnsNeedLogin = listen<ScrapeNeedLoginEvent>("scrape:need-login", (event) => {
-      const payload = event.payload;
-      if (activeAccountId.current && payload.accountId !== activeAccountId.current) {
-        return;
-      }
-      setNeedLogin(true);
-      setState("need-login");
-    });
-    return () => {
-      void unreturnsResult.then((unlisten) => unlisten());
-      void unreturnsNeedLogin.then((unlisten) => unlisten());
-    };
-  }, []);
 
   const startScrape = useCallback(async (accountId: string) => {
     activeAccountId.current = accountId;
     setError(null);
     setNeedLogin(false);
+    setConsoleActionMessage(null);
     setState("opening");
     try {
       // 先打开后台 webview(隐藏)
       await accountCommands.openScrapeConsole(accountId);
-      setState("navigating");
-      // 显式探测登录态:未登录则弹出 webview 并转入 need-login 态,等用户登录后重试
+      setState("collecting");
+      // 只有明确进入登录页才断言需要登录；监听已就绪后的捕获超时则提示用户
+      // 在已展示的控制台中处理登录、验证码或页面加载，再主动重试。
       const status = await accountCommands.probeScrapeLogin(accountId);
-      if (!status.is_logged_in) {
+      if (status.probe_state === "login_required") {
         setNeedLogin(true);
         setState("need-login");
         // 不清除 activeAccountId,retryScrape 会重用
         return;
       }
-      // 已登录:继续拦截+收集+提取
-      const result = await accountCommands.scrapeBalance(accountId);
+      if (status.probe_state === "console_action_required") {
+        const message = status.message ?? t("未捕获到控制台业务响应，请在已打开的控制台中检查页面后重新抓取。");
+        setConsoleActionMessage(message);
+        setState("need-console-action");
+        return;
+      }
+      if (status.probe_state === "capture_timeout") {
+        throw new Error(status.message ?? t("控制台页面监听初始化失败，请重新抓取。"));
+      }
+      // 已捕获完整业务响应，继续提取并保存。
+      const result = await (runScrape ?? accountCommands.scrapeBalance)(accountId);
       setLastResult(result);
       setNeedLogin(false);
       setState("success");
       activeAccountId.current = null;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = err && typeof err === "object" && "message" in err
+        ? String((err as { message: unknown }).message)
+        : err instanceof Error ? err.message : String(err);
       setError(message);
       setState("error");
       activeAccountId.current = null;
     }
-  }, []);
+  }, [runScrape, t]);
 
-  /** 用户完成登录后重试:直接再跑一次 scrape_balance(会重新探测登录态)。 */
+  /** 用户完成登录后重试：重新建立监听 ACK、刷新并抓取。 */
   const retryScrape = useCallback(async (accountId: string) => {
     setError(null);
     setNeedLogin(false);
+    setConsoleActionMessage(null);
     await startScrape(accountId);
   }, [startScrape]);
 
@@ -101,15 +85,21 @@ export function useScrapeConsole() {
     setState("idle");
     setError(null);
     setNeedLogin(false);
+    setConsoleActionMessage(null);
   }, []);
 
-  const isScraping = state !== "idle" && state !== "success" && state !== "error" && state !== "need-login";
+  const isScraping = state !== "idle"
+    && state !== "success"
+    && state !== "error"
+    && state !== "need-login"
+    && state !== "need-console-action";
 
   return {
     state,
     lastResult,
     error,
     needLogin,
+    consoleActionMessage,
     isScraping,
     startScrape,
     retryScrape,
@@ -126,7 +116,7 @@ function statusText(state: ScrapeState, error: string | null, t: (k: string) => 
     case "navigating":
       return t("正在加载控制台页面...");
     case "collecting":
-      return t("正在拦截接口响应...");
+      return t("正在刷新控制台并等待接口响应...");
     case "extracting":
       return t("正在解析数据...");
     case "error":

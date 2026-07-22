@@ -10,6 +10,7 @@ import styles from "./AccountManagementSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { formatCompactNumber } from "../../shared/formatters/number";
+import type { ScrapeBalanceResult } from "../../domains/account/commands";
 
 const { Text } = Typography;
 
@@ -30,7 +31,7 @@ type Props = {
   onTestConnection: (input: TestInput) => Promise<void>;
   onSaveBalanceSnapshot: (snapshot: AccountBalanceSnapshot) => Promise<void>;
   onSyncBalance: (accountId: string) => Promise<void>;
-  onScrape: (accountId: string) => Promise<void>;
+  onScrape: (accountId: string) => Promise<ScrapeBalanceResult>;
 };
 
 export function AccountManagementSideSheet(props: Props) {

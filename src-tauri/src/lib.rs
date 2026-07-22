@@ -36,6 +36,11 @@ struct AppState {
     scrape_webviews: Arc<Mutex<std::collections::HashMap<String, tauri::WebviewWindow>>>,
     /// per-account 待处理拦截响应缓冲(抓取过程中临时存放)。
     scrape_pending: Arc<Mutex<std::collections::HashMap<String, Vec<(String, String)>>>>,
+    /// per-account 当前 document-start 拦截器就绪标识。
+    scrape_ready:
+        Arc<Mutex<std::collections::HashMap<String, core::scrape_console::ScrapeInterceptorReady>>>,
+    /// per-account 已成功安装的原生 WebView 网络监听。它跨页面导航保持有效。
+    scrape_native_ready: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 struct ProxyStartupConfig {
@@ -353,6 +358,8 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         agent_source_watcher: Arc::new(Mutex::new(None)),
         scrape_webviews: Arc::new(Mutex::new(std::collections::HashMap::new())),
         scrape_pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        scrape_ready: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        scrape_native_ready: Arc::new(Mutex::new(std::collections::HashSet::new())),
     };
     tracing::info!(
         t_ms = _t0.elapsed().as_millis() as u64,
@@ -762,6 +769,7 @@ pub fn run() {
             commands::open_scrape_console,
             commands::close_scrape_console,
             commands::handle_intercepted_response,
+            commands::handle_scrape_interceptor_ready,
             commands::probe_scrape_login,
             commands::scrape_balance,
             commands::account_stats,

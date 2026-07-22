@@ -44,3 +44,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "chrono
 uuid = { version = "1", features = ["v4", "serde"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+# Tauri 的高层 on_web_resource_request 只覆盖自定义协议；控制台是外部 HTTPS，
+# 因此 Windows 直接订阅 WebView2 的 WebResourceResponseReceived 读取响应 body。
+webview2-com = "0.38.2"
+windows = { version = "0.61", features = ["Win32_System_Com"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Ubuntu 使用 WebKitGTK 的 resource-load-started + WebResource::data 获取页面
+# 自己发出的 HTTPS 响应，不复刻 Cookie、签名或请求头。
+webkit2gtk = "2.0.2"

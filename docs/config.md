@@ -200,7 +200,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "scrape": {                              // 控制台抓取配置(可选)
     "token_pack": {                        // 模式 key(longcat: token_pack / pay_as_you_go;qwen: token_plan)
       "console_url": "https://longcat.chat/platform/usage?tab=token",
-      "interceptor_js": "...",             // 注入页面的拦截器 JS(IIFE)
+      "interceptor_js": "...",             // document-start 注入的响应拦截器 JS(IIFE)
       "extractor_js": "function extract(raw){ ... }",  // 解析器 JS(函数声明)
       "aggregate": false                   // 是否需聚合多份响应后再调 extractor
     }
@@ -231,7 +231,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `supports_usage_query` | `bool` | 否 | `false` | 是否支持查询用量 |
 | `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"` |
-| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式(如 `"token_pack"` / `"pay_as_you_go"` / `"token_plan"`),value 为 `{ console_url, interceptor_js, extractor_js, aggregate? }` |
+| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式(如 `"token_pack"` / `"pay_as_you_go"` / `"token_plan"`),value 为 `{ console_url, interceptor_js, extractor_js, aggregate? }`。页面始终自行生成 Cookie、签名和 Header；Windows/Linux 优先从原生 WebView 网络层读取目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。每轮确认原生监听 ready 或注入 ACK 后刷新；ready 超时立即结束。未捕获响应不会被判定为未登录；若监听已就绪，则展示控制台供用户完成登录、验证码或等待页面加载后重试。 |
 
 **端点解析优先级**：
 

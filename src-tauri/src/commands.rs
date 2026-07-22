@@ -13,7 +13,7 @@ use crate::core::sync::{
 };
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Clone, serde::Serialize)]
 struct ExportProgress {
@@ -1711,7 +1711,6 @@ use crate::core::scrape_console::{
 
 /// 抓取结果(前端展示用)。
 #[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ScrapeBalanceResult {
     pub balance: Option<f64>,
     pub currency: Option<String>,
@@ -1727,12 +1726,24 @@ pub struct ScrapeBalanceResult {
 
 /// 登录态探测结果。
 #[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ScrapeLoginStatus {
     pub is_logged_in: bool,
     pub channel_id: String,
     /// 登录后的账户标识(如有,用于 UI 展示)。
     pub account_hint: Option<String>,
+    /// captured / login_required / console_action_required / capture_timeout。
+    /// 未捕获不能等同于未登录。
+    pub probe_state: ScrapeProbeState,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScrapeProbeState {
+    Captured,
+    LoginRequired,
+    ConsoleActionRequired,
+    CaptureTimeout,
 }
 
 /// 创建 per-account 后台抓取 webview(隐藏)。
@@ -1742,14 +1753,18 @@ pub(super) async fn open_scrape_console(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<(), String> {
-    // 已存在则直接返回
+    // 已存在且仍注册在 Tauri 中才复用。用户直接关闭登录窗口时，HashMap 中的
+    // WebviewWindow 句柄可能短暂残留，不能把它当成可用窗口。
     {
-        let guard = state
+        let mut guard = state
             .scrape_webviews
             .lock()
             .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-        if guard.contains_key(&account_id) {
-            return Ok(());
+        if let Some(window) = guard.get(&account_id) {
+            if app.get_webview_window(window.label()).is_some() && window.is_visible().is_ok() {
+                return Ok(());
+            }
+            guard.remove(&account_id);
         }
     }
 
@@ -1766,11 +1781,73 @@ pub(super) async fn open_scrape_console(
             .channels_config
             .lock()
             .map_err(|_| "锁定渠道配置失败".to_string())?;
-        resolve_scrape_mode(&config, &account.channel_id, account.resource_mode.as_deref())
-            .ok_or("该账号所属渠道不支持控制台抓取")?
+        resolve_scrape_mode(
+            &config,
+            &account.channel_id,
+            account.resource_mode.as_deref(),
+        )
+        .ok_or("该账号所属渠道不支持控制台抓取")?
     };
 
-    let window = build_scrape_webview(&app, &account_id, &mode)?;
+    let channel_id = {
+        let accounts = state
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号失败".to_string())?;
+        accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .map(|account| account.channel_id.clone())
+            .ok_or("账号不存在")?
+    };
+    let window = build_scrape_webview(&app, &account_id, &channel_id, &mode)?;
+    #[cfg(windows)]
+    if let Err(error) = scrape_console::install_windows_response_capture(
+        &window,
+        account_id.clone(),
+        state.scrape_pending.clone(),
+        state.scrape_native_ready.clone(),
+    ) {
+        tracing::warn!(
+            account_id = %account_id,
+            error = %error,
+            "调度 WebView2 原生监听失败，将使用页面注入 fallback"
+        );
+    }
+    #[cfg(target_os = "linux")]
+    if let Err(error) = scrape_console::install_linux_response_capture(
+        &window,
+        account_id.clone(),
+        state.scrape_pending.clone(),
+        state.scrape_native_ready.clone(),
+    ) {
+        tracing::warn!(
+            account_id = %account_id,
+            error = %error,
+            "调度 WebKitGTK 原生监听失败，将使用页面注入 fallback"
+        );
+    }
+    let cleanup_account_id = account_id.clone();
+    let scrape_webviews = state.scrape_webviews.clone();
+    let scrape_pending = state.scrape_pending.clone();
+    let scrape_ready = state.scrape_ready.clone();
+    let scrape_native_ready = state.scrape_native_ready.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+            if let Ok(mut guard) = scrape_webviews.lock() {
+                guard.remove(&cleanup_account_id);
+            }
+            if let Ok(mut guard) = scrape_pending.lock() {
+                guard.remove(&cleanup_account_id);
+            }
+            if let Ok(mut guard) = scrape_ready.lock() {
+                guard.remove(&cleanup_account_id);
+            }
+            if let Ok(mut guard) = scrape_native_ready.lock() {
+                guard.remove(&cleanup_account_id);
+            }
+        }
+    });
 
     let mut guard = state
         .scrape_webviews
@@ -1786,73 +1863,274 @@ pub(super) async fn close_scrape_console(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<(), String> {
-    let mut guard = state
-        .scrape_webviews
-        .lock()
-        .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-    if let Some(window) = guard.remove(&account_id) {
+    let window = {
+        let mut guard = state
+            .scrape_webviews
+            .lock()
+            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+        guard.remove(&account_id)
+    };
+    if let Some(window) = window {
         let _ = window.close();
     }
+    if let Ok(mut guard) = state.scrape_pending.lock() {
+        guard.remove(&account_id);
+    }
+    if let Ok(mut guard) = state.scrape_ready.lock() {
+        guard.remove(&account_id);
+    }
+    if let Ok(mut guard) = state.scrape_native_ready.lock() {
+        guard.remove(&account_id);
+    }
+    Ok(())
+}
+
+/// document-start 拦截器安装完成后的 ACK。账号从 webview label 推导，不能由页面伪造。
+#[tauri::command]
+pub(super) async fn handle_scrape_interceptor_ready(
+    webview: tauri::WebviewWindow,
+    state: tauri::State<'_, AppState>,
+    channel_id: String,
+    document_id: String,
+    page_url: String,
+) -> Result<(), String> {
+    let account_id = webview
+        .label()
+        .strip_prefix("scrape-")
+        .filter(|value| !value.is_empty())
+        .ok_or("只允许抓取控制台窗口报告监听状态")?
+        .to_string();
+    if document_id.len() > 128 || page_url.len() > 4096 {
+        return Err("抓取监听状态参数过长".to_string());
+    }
+    {
+        let accounts = state
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号失败".to_string())?;
+        let account = accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .ok_or("抓取窗口对应账号不存在")?;
+        if account.channel_id != channel_id {
+            return Err("抓取监听渠道与账号不匹配".to_string());
+        }
+    }
+    let mut guard = state
+        .scrape_ready
+        .lock()
+        .map_err(|_| "锁定抓取监听状态失败".to_string())?;
+    guard.insert(
+        account_id.clone(),
+        crate::core::scrape_console::ScrapeInterceptorReady {
+            document_id: document_id.clone(),
+            page_url: page_url.clone(),
+        },
+    );
+    tracing::debug!(
+        account_id = %account_id,
+        channel_id = %channel_id,
+        document_id = %document_id,
+        page_url = %page_url,
+        "控制台抓取监听已就绪"
+    );
     Ok(())
 }
 
 /// 页面 JS 通过 IPC 回传拦截到的响应体。
 #[tauri::command]
 pub(super) async fn handle_intercepted_response(
+    webview: tauri::WebviewWindow,
     state: tauri::State<'_, AppState>,
     channel_id: String,
     url: String,
     body: String,
 ) -> Result<(), String> {
+    const MAX_SCRAPED_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+    let account_id = webview
+        .label()
+        .strip_prefix("scrape-")
+        .filter(|value| !value.is_empty())
+        .ok_or("只允许抓取控制台窗口回传响应")?
+        .to_string();
+    if body.len() > MAX_SCRAPED_RESPONSE_BYTES {
+        return Err("抓取响应超过 8 MB，已拒绝写入缓冲".to_string());
+    }
+    {
+        let accounts = state
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号失败".to_string())?;
+        let account = accounts
+            .iter()
+            .find(|account| account.id == account_id)
+            .ok_or("抓取窗口对应账号不存在")?;
+        if account.channel_id != channel_id {
+            return Err("抓取响应渠道与账号不匹配".to_string());
+        }
+    }
     let mut guard = state
         .scrape_pending
         .lock()
         .map_err(|_| "锁定抓取缓冲失败".to_string())?;
-    let entry = guard.entry(channel_id).or_default();
+    let entry = guard.entry(account_id.clone()).or_default();
     // 按 URL 分类去重:同类型响应只保留最新
     let kind = classify_response_url(&url);
     entry.retain(|(u, _)| classify_response_url(u) != kind);
+    tracing::info!(
+        account_id = %account_id,
+        channel_id = %channel_id,
+        response_kind = %kind,
+        response_url = %url,
+        body_bytes = body.len(),
+        "控制台抓取捕获到页面业务响应"
+    );
     entry.push((url, body));
     Ok(())
 }
 
-/// 登录态探测脚本:在目标控制台域上发一次 account-info 请求,解析响应判断是否已登录。
-/// 已登录 → 返回 is_logged_in=true;未登录/跳转登录页 → is_logged_in=false。
-///
-/// 注意:必须用 .then() 链而非 async/await。eval_with_callback 的回调拿到的是脚本
-/// 的返回值,async 函数返回 Promise,而 JSON.stringify(Promise) = "{}",导致解析失败。
-fn probe_login_script(channel_id: &str) -> &'static str {
-    match channel_id {
-        // LongCat:/api/v1/user-current → code===0 && data.loginStatus===1
-        "longcat" => r#"(function(){
-          return fetch('/api/v1/user-current', { credentials: 'include', headers: { 'x-requested-with': 'XMLHttpRequest' } })
-            .then((res) => {
-              if (!res.ok) return JSON.stringify({ isLoggedIn: false });
-              return res.json().then((j) => {
-                const ok = j?.code === 0 && j?.data?.loginStatus === 1;
-                return JSON.stringify({ isLoggedIn: ok, accountHint: j?.data?.name ?? null });
-              });
-            })
-            .catch((e) => JSON.stringify({ isLoggedIn: false, error: String(e) }));
-        })()"#,
-        // Qwen:platform-home.qianwenai.com/api/account/info.json → code==="200" && data.currentId
-        "qwen" => r#"(function(){
-          return fetch('https://platform-home.qianwenai.com/api/account/info.json', { credentials: 'include' })
-            .then((res) => {
-              if (!res.ok) return JSON.stringify({ isLoggedIn: false });
-              return res.json().then((j) => {
-                const ok = j?.code === '200' && j?.data?.currentId;
-                return JSON.stringify({ isLoggedIn: ok, accountHint: j?.data?.aliyunId ?? null });
-              });
-            })
-            .catch((e) => JSON.stringify({ isLoggedIn: false, error: String(e) }));
-        })()"#,
-        _ => r#"(function(){ return Promise.resolve(JSON.stringify({ isLoggedIn: false, error: 'unsupported-channel' })); })()"#,
+#[cfg(test)]
+mod scrape_capture_tests {
+    use super::{is_explicit_login_url, scrape_responses_complete};
+    use crate::core::scrape_console::ScrapeModeRuntime;
+
+    #[test]
+    fn completed_business_response_is_login_evidence() {
+        let mode = ScrapeModeRuntime {
+            console_url: "https://longcat.chat/platform/usage?tab=token".to_string(),
+            interceptor_js: String::new(),
+            extractor_js: String::new(),
+            aggregate: false,
+        };
+        let responses = vec![
+            (
+                "https://longcat.chat/api/irrelevant".to_string(),
+                r#"{"code":0}"#.to_string(),
+            ),
+            (
+                "https://longcat.chat/api/pay/quota/metering/token-packs/summary".to_string(),
+                r#"{"code":0,"data":{"currentLot":{}}}"#.to_string(),
+            ),
+        ];
+
+        assert!(scrape_responses_complete(&responses, &mode));
+    }
+
+    #[test]
+    fn capture_timeout_is_not_login_evidence() {
+        assert!(!is_explicit_login_url(
+            "qwen",
+            "https://platform.qianwenai.com/home/billing/subscription/token-plan-individual"
+        ));
+        assert!(!is_explicit_login_url(
+            "longcat",
+            "https://longcat.chat/platform/usage?tab=token"
+        ));
+    }
+
+    #[test]
+    fn explicit_login_pages_are_login_evidence() {
+        assert!(is_explicit_login_url(
+            "qwen",
+            "https://account.aliyun.com/login/login.htm"
+        ));
+        assert!(is_explicit_login_url(
+            "longcat",
+            "https://longcat.chat/login"
+        ));
     }
 }
 
-/// 探测当前 webview 是否已登录控制台。
-/// 流程:确保 webview 存在 → 导航到控制台 URL → 等页面加载 → eval 探测脚本 → 返回登录态。
+fn has_complete_scrape_capture(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+    mode: &crate::core::scrape_console::ScrapeModeRuntime,
+) -> Result<bool, String> {
+    let guard = state
+        .scrape_pending
+        .lock()
+        .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+    let Some(responses) = guard.get(account_id) else {
+        return Ok(false);
+    };
+    Ok(scrape_responses_complete(responses, mode))
+}
+
+fn scrape_responses_complete(
+    responses: &[(String, String)],
+    mode: &crate::core::scrape_console::ScrapeModeRuntime,
+) -> bool {
+    let slots = responses
+        .iter()
+        .filter_map(|(url, body)| {
+            serde_json::from_str::<serde_json::Value>(body)
+                .ok()
+                .map(|_| (classify_response_url(url).to_string(), body.clone()))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    scrape_console::aggregate_complete(&slots, mode)
+}
+
+fn collect_scrape_slots(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let guard = state
+        .scrape_pending
+        .lock()
+        .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+    Ok(guard
+        .get(account_id)
+        .into_iter()
+        .flatten()
+        .filter_map(|(url, body)| {
+            serde_json::from_str::<serde_json::Value>(body)
+                .ok()
+                .map(|_| (classify_response_url(url).to_string(), body.clone()))
+        })
+        .collect())
+}
+
+fn scrape_interceptor_ready(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+) -> Result<Option<crate::core::scrape_console::ScrapeInterceptorReady>, String> {
+    let guard = state
+        .scrape_ready
+        .lock()
+        .map_err(|_| "锁定抓取监听状态失败".to_string())?;
+    Ok(guard.get(account_id).cloned())
+}
+
+fn native_scrape_capture_ready(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+) -> Result<bool, String> {
+    let guard = state
+        .scrape_native_ready
+        .lock()
+        .map_err(|_| "锁定原生抓取监听状态失败".to_string())?;
+    Ok(guard.contains(account_id))
+}
+
+/// 只识别明确的登录页面。目标响应未出现、页面加载慢或拦截器异常都不能据此判定未登录。
+fn is_explicit_login_url(channel_id: &str, page_url: &str) -> bool {
+    let url = page_url.to_ascii_lowercase();
+    let has_login_path = url.contains("/login")
+        || url.contains("/signin")
+        || url.contains("/sign-in")
+        || url.contains("passport")
+        || url.contains("oauth");
+    match channel_id {
+        "qwen" => has_login_path || url.contains("account.aliyun.com"),
+        "longcat" => has_login_path,
+        _ => false,
+    }
+}
+
+/// 刷新控制台并通过页面自身发起的业务请求判断是否已登录。
+/// 拦截器是 WebView initialization_script，会在每次导航的页面脚本之前安装；
+/// 因此必须先清缓冲，再导航刷新，随后等待目标业务响应。
 #[tauri::command]
 pub(super) async fn probe_scrape_login(
     app: AppHandle,
@@ -1862,7 +2140,7 @@ pub(super) async fn probe_scrape_login(
     // 1. 确保 webview 存在(会解析 channel_id)
     open_scrape_console(app.clone(), state.clone(), account_id.clone()).await?;
 
-    let (channel_id, console_url) = {
+    let (channel_id, mode) = {
         let accounts = state
             .accounts
             .lock()
@@ -1875,74 +2153,158 @@ pub(super) async fn probe_scrape_login(
             .channels_config
             .lock()
             .map_err(|_| "锁定渠道配置失败".to_string())?;
-        let mode = resolve_scrape_mode(&config, &account.channel_id, account.resource_mode.as_deref())
-            .ok_or("该账号所属渠道不支持控制台抓取")?;
-        (account.channel_id.clone(), mode.console_url.clone())
+        let mode = resolve_scrape_mode(
+            &config,
+            &account.channel_id,
+            account.resource_mode.as_deref(),
+        )
+        .ok_or("该账号所属渠道不支持控制台抓取")?;
+        (account.channel_id.clone(), mode)
     };
-
-    // 2. 导航到控制台 URL
+    tracing::info!(
+        account_id = %account_id,
+        channel_id = %channel_id,
+        native_ready = native_scrape_capture_ready(&state, &account_id)?,
+        "开始刷新控制台并等待业务响应"
+    );
+    // 2. 先清空旧响应和旧 document ACK，再强制导航到控制台。
+    {
+        let mut guard = state
+            .scrape_pending
+            .lock()
+            .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+        guard.remove(&account_id);
+    }
+    {
+        let mut guard = state
+            .scrape_ready
+            .lock()
+            .map_err(|_| "锁定抓取监听状态失败".to_string())?;
+        guard.remove(&account_id);
+    }
     {
         let guard = state
             .scrape_webviews
             .lock()
             .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-        let window = guard
-            .get(&account_id)
-            .ok_or("抓取 webview 不存在")?;
-        let url = console_url
+        let window = guard.get(&account_id).ok_or("抓取 webview 不存在")?;
+        let url = mode
+            .console_url
             .parse()
-            .map_err(|e| format!("URL 解析失败: {e}"))?;
+            .map_err(|error| format!("控制台 URL 解析失败: {error}"))?;
         window
             .navigate(url)
-            .map_err(|e| format!("导航失败: {e}"))?;
+            .map_err(|error| format!("刷新控制台失败: {error}"))?;
     }
 
-    // 3. eval 探测脚本(页面加载后 fetch 当前用户接口)
-    let probe_js = probe_login_script(&channel_id);
-    let raw_result = {
-        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-        {
-            let guard = state
-                .scrape_webviews
-                .lock()
-                .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-            let window = guard
-                .get(&account_id)
-                .ok_or("抓取 webview 不存在")?;
-            let tx_cell = std::cell::Cell::new(Some(tx));
-            let _ = window.eval_with_callback(probe_js, move |s| {
-                if let Some(tx) = tx_cell.take() {
-                    let _ = tx.send(s);
-                }
+    // 3. 先等当前 document 的监听 ACK。响应可能先于 ACK 回传，因此完整响应也可直接
+    // 作为监听已生效的证据。这里超时只说明监听/页面初始化失败，不代表未登录。
+    let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let ready = loop {
+        if has_complete_scrape_capture(&state, &account_id, &mode)? {
+            break Some(crate::core::scrape_console::ScrapeInterceptorReady {
+                document_id: "captured-response".to_string(),
+                page_url: mode.console_url.clone(),
             });
         }
-        // 探测超时 15s(含页面加载 + fetch)
-        match tokio::time::timeout(std::time::Duration::from_secs(15), rx).await {
-            Ok(Ok(s)) => s,
-            Ok(Err(_)) => return Err("探测回调通道关闭".to_string()),
-            Err(_) => return Err("登录态探测超时".to_string()),
+        if native_scrape_capture_ready(&state, &account_id)? {
+            break Some(crate::core::scrape_console::ScrapeInterceptorReady {
+                document_id: "native-webview-listener".to_string(),
+                page_url: mode.console_url.clone(),
+            });
         }
+        if let Some(ready) = scrape_interceptor_ready(&state, &account_id)? {
+            break Some(ready);
+        }
+        if std::time::Instant::now() >= ready_deadline {
+            break None;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     };
 
-    // 4. 解析探测结果
-    #[derive(serde::Deserialize)]
-    struct ProbeResp {
-        #[serde(rename = "isLoggedIn")]
-        is_logged_in: bool,
-        #[serde(rename = "accountHint")]
-        account_hint: Option<String>,
+    // 4. ACK 后等待页面自身发起目标业务请求。监听已就绪但没有收齐时，需要展示
+    // 控制台让用户处理页面；监听本身未就绪才是 capture_timeout。
+    if ready.is_some() {
+        let capture_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !has_complete_scrape_capture(&state, &account_id, &mode)?
+            && std::time::Instant::now() < capture_deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
     }
-    let parsed: ProbeResp = serde_json::from_str(&raw_result)
-        .map_err(|e| format!("探测输出解析失败: {e}, raw={raw_result}"))?;
+
+    let captured = has_complete_scrape_capture(&state, &account_id, &mode)?;
+    let current_page_url = {
+        let guard = state
+            .scrape_webviews
+            .lock()
+            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+        guard
+            .get(&account_id)
+            .and_then(|window| window.url().ok())
+            .map(|url| url.to_string())
+            .or_else(|| ready.as_ref().map(|value| value.page_url.clone()))
+            .unwrap_or_default()
+    };
+    let probe_state = if captured {
+        ScrapeProbeState::Captured
+    } else if is_explicit_login_url(&channel_id, &current_page_url) {
+        ScrapeProbeState::LoginRequired
+    } else if ready.is_some() {
+        ScrapeProbeState::ConsoleActionRequired
+    } else {
+        ScrapeProbeState::CaptureTimeout
+    };
+
+    if matches!(
+        probe_state,
+        ScrapeProbeState::ConsoleActionRequired | ScrapeProbeState::CaptureTimeout
+    ) {
+        let captured_kinds = collect_scrape_slots(&state, &account_id)?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        tracing::warn!(
+            account_id = %account_id,
+            channel_id = %channel_id,
+            native_ready = native_scrape_capture_ready(&state, &account_id)?,
+            interceptor_ready = ready.is_some(),
+            ready_document_id = ready.as_ref().map(|value| value.document_id.as_str()),
+            current_page_url = %current_page_url,
+            ?captured_kinds,
+            "控制台刷新后未捕获到完整业务响应"
+        );
+    }
 
     let status = ScrapeLoginStatus {
-        is_logged_in: parsed.is_logged_in,
+        is_logged_in: probe_state == ScrapeProbeState::Captured,
         channel_id,
-        account_hint: parsed.account_hint,
+        account_hint: None,
+        probe_state,
+        message: match probe_state {
+            ScrapeProbeState::Captured => None,
+            ScrapeProbeState::LoginRequired => {
+                Some("检测到控制台登录页，请在弹出的窗口中完成登录。".to_string())
+            }
+            ScrapeProbeState::ConsoleActionRequired => {
+                Some(
+                    "未捕获到套餐接口响应，已打开控制台窗口。请在窗口中完成登录或等待页面加载后，再重新抓取。"
+                        .to_string(),
+                )
+            }
+            ScrapeProbeState::CaptureTimeout => {
+                Some("控制台页面监听初始化失败，请重新抓取。".to_string())
+            }
+        },
     };
 
-    // 未登录 → 把 webview 移到可见区域,让用户登录
-    if !status.is_logged_in {
+    // 明确进入登录页时必须展示窗口；监听已就绪但业务接口没有触发时，也展示控制台
+    // 供用户完成登录、验证码或等待页面加载。后者是 console_action_required，
+    // 不声称用户未登录。
+    if matches!(
+        status.probe_state,
+        ScrapeProbeState::LoginRequired | ScrapeProbeState::ConsoleActionRequired
+    ) {
         surface_scrape_webview(&state, &account_id)?;
     }
 
@@ -1982,14 +2344,7 @@ pub(super) async fn scrape_balance(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<ScrapeBalanceResult, String> {
-    // 1. 探测登录态(内部会确保 webview 存在 + 导航 + eval 探测脚本)
-    let login_status = probe_scrape_login(app.clone(), state.clone(), account_id.clone()).await?;
-    if !login_status.is_logged_in {
-        // 未登录:probe_scrape_login 已经把 webview 移到可见区域,直接返回错误
-        return Err("请先登录官方控制台(已弹出登录窗口)".to_string());
-    }
-
-    // 2. 解析模式配置
+    // 1. 解析模式配置。
     let mode = {
         let accounts = state
             .accounts
@@ -2003,65 +2358,42 @@ pub(super) async fn scrape_balance(
             .channels_config
             .lock()
             .map_err(|_| "锁定渠道配置失败".to_string())?;
-        resolve_scrape_mode(&config, &account.channel_id, account.resource_mode.as_deref())
-            .ok_or("该账号所属渠道不支持控制台抓取")?
+        resolve_scrape_mode(
+            &config,
+            &account.channel_id,
+            account.resource_mode.as_deref(),
+        )
+        .ok_or("该账号所属渠道不支持控制台抓取")?
     };
 
-    // 3. 清空该账号旧的待处理缓冲
-    {
-        let mut guard = state
-            .scrape_pending
-            .lock()
-            .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+    // 2. 前端通常已调用 probe_scrape_login 完成一次“清缓冲 → 刷新 → 捕获”。
+    // 直接调用本 command 时若没有完整响应，则在这里执行同一流程一次。
+    if !has_complete_scrape_capture(&state, &account_id, &mode)? {
+        let login_status =
+            probe_scrape_login(app.clone(), state.clone(), account_id.clone()).await?;
+        match login_status.probe_state {
+            ScrapeProbeState::Captured => {}
+            ScrapeProbeState::LoginRequired => {
+                return Err("请先登录官方控制台（已弹出登录窗口）".to_string());
+            }
+            ScrapeProbeState::ConsoleActionRequired | ScrapeProbeState::CaptureTimeout => {
+                return Err(login_status
+                    .message
+                    .unwrap_or_else(|| "未捕获到控制台业务响应，请重试".to_string()));
+            }
+        }
+    }
+
+    // 3. 消费 probe 阶段捕获的同一批响应，不再二次刷新页面。
+    let slots = collect_scrape_slots(&state, &account_id)?;
+    if !scrape_console::aggregate_complete(&slots, &mode) {
+        return Err("未收到完整的控制台业务响应，请重试".to_string());
+    }
+    if let Ok(mut guard) = state.scrape_pending.lock() {
         guard.remove(&account_id);
     }
 
-    // 4. 导航到控制台 URL(触发页面自发调 API)
-    {
-        let guard = state
-            .scrape_webviews
-            .lock()
-            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-        let window = guard
-            .get(&account_id)
-            .ok_or("抓取 webview 不存在")?;
-        let url = mode
-            .console_url
-            .parse()
-            .map_err(|e| format!("URL 解析失败: {e}"))?;
-        window
-            .navigate(url)
-            .map_err(|e| format!("导航失败: {e}"))?;
-    }
-
-    // 5. 收集窗口:等待拦截响应到位(简单轮询,5s 窗口)
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let slots = loop {
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            break None;
-        }
-        {
-            let guard = state
-                .scrape_pending
-                .lock()
-                .map_err(|_| "锁定抓取缓冲失败".to_string())?;
-            if let Some(pending) = guard.get(&account_id) {
-                let mut map = std::collections::HashMap::new();
-                for (url, body) in pending {
-                    map.insert(classify_response_url(url).to_string(), body.clone());
-                }
-                if scrape_console::aggregate_complete(&map, &mode) {
-                    break Some(map);
-                }
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    };
-
-    let slots = slots.ok_or("抓取超时:未收到目标 API 响应,请确认已登录或重试")?;
-
-    // 6. 执行 extractor
+    // 4. 执行 extractor
     let extractor_call = if mode.aggregate {
         let bundle = scrape_console::build_aggregate_bundle(&slots);
         format!(
@@ -2075,9 +2407,7 @@ pub(super) async fn scrape_balance(
         } else {
             "token_packs_summary"
         };
-        let raw = slots
-            .get(target_key)
-            .ok_or("未找到目标响应")?;
+        let raw = slots.get(target_key).ok_or("未找到目标响应")?;
         format!(
             "(function(){{ try {{ return JSON.stringify(({})({})); }} catch(e) {{ return JSON.stringify({{error:String(e)}}); }} }})()",
             mode.extractor_js, raw
@@ -2093,9 +2423,7 @@ pub(super) async fn scrape_balance(
                 .scrape_webviews
                 .lock()
                 .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-            let window = guard
-                .get(&account_id)
-                .ok_or("抓取 webview 不存在")?;
+            let window = guard.get(&account_id).ok_or("抓取 webview 不存在")?;
             // eval_with_callback 的回调是 Fn(不是 FnOnce),用 Cell 绕过 move 限制
             let tx_cell = std::cell::Cell::new(Some(tx));
             let _ = window.eval_with_callback(extractor_call_clone, move |s| {
@@ -2104,7 +2432,7 @@ pub(super) async fn scrape_balance(
                 }
             });
         } // guard 在这里 drop
-        // 等待回调,超时 10s
+          // 等待回调,超时 10s
         match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
             Ok(Ok(s)) => s,
             Ok(Err(_)) => return Err("extractor 回调通道关闭".to_string()),
@@ -2113,8 +2441,14 @@ pub(super) async fn scrape_balance(
     };
 
     // 7. 解析 extractor 输出
-    let parsed: serde_json::Value = serde_json::from_str(&raw_result)
+    let mut parsed: serde_json::Value = serde_json::from_str(&raw_result)
         .map_err(|e| format!("extractor 输出解析失败: {e}, raw={raw_result}"))?;
+    // WebView2 会把 JS 字符串返回值再次 JSON 序列化；兼容配置中返回
+    // JSON.stringify(...) 的 extractor，避免把结果误判成普通字符串。
+    if let Some(encoded) = parsed.as_str() {
+        parsed = serde_json::from_str(encoded)
+            .map_err(|e| format!("extractor 字符串结果解析失败: {e}, raw={raw_result}"))?;
+    }
     if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
         return Err(format!("extractor 执行错误: {err}"));
     }
@@ -2165,7 +2499,7 @@ pub(super) async fn scrape_balance(
         .save_balance_snapshot(&snapshot)
         .map_err(|e| format!("保存余额快照失败: {e}"))?;
 
-    // 9. 发事件通知前端
+    // 9. 返回前端；调用方通过 command 返回值更新状态。
     let result = ScrapeBalanceResult {
         balance,
         currency,
@@ -2178,8 +2512,6 @@ pub(super) async fn scrape_balance(
         source: "scrape".to_string(),
         synced_at: now,
     };
-    let _ = app.emit("scrape:result", &result);
-
     // 10. 隐藏 webview(保活供下次抓取)
     {
         let guard = state

@@ -5,12 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // command strings anywhere else in the UI.
 
 const invokeMock = vi.fn(
-  (cmd: string, args?: Record<string, unknown>): Promise<unknown> => Promise.resolve(undefined),
+  (cmd: string, args?: Record<string, unknown>, timeoutMs?: number): Promise<unknown> => Promise.resolve(undefined),
 );
 
 vi.mock("../../platform/tauri/client", () => ({
-  invokeCommand: (cmd: string, args?: Record<string, unknown>): Promise<unknown> =>
-    invokeMock(cmd, args),
+  invokeCommand: (cmd: string, args?: Record<string, unknown>, timeoutMs?: number): Promise<unknown> =>
+    timeoutMs === undefined ? invokeMock(cmd, args) : invokeMock(cmd, args, timeoutMs),
   toAppError: (err: unknown, code: string) => ({ code, message: String(err), retryable: true }),
 }));
 
@@ -69,6 +69,22 @@ describe("accountCommands contract", () => {
     invokeMock.mockResolvedValueOnce([]);
     await accountCommands.latestBalanceSnapshots();
     expect(invokeMock).toHaveBeenCalledWith("latest_balance_snapshots", undefined);
+  });
+
+  it("uses long-running timeouts for WebView probing and scraping", async () => {
+    await accountCommands.probeScrapeLogin("account-longcat");
+    expect(invokeMock).toHaveBeenLastCalledWith(
+      "probe_scrape_login",
+      { accountId: "account-longcat" },
+      45_000,
+    );
+
+    await accountCommands.scrapeBalance("account-longcat");
+    expect(invokeMock).toHaveBeenLastCalledWith(
+      "scrape_balance",
+      { accountId: "account-longcat" },
+      60_000,
+    );
   });
 });
 

@@ -422,10 +422,10 @@ function extractQwen(bundle) {
 1. **触发**:用户点「抓取余额」(仅 `supports_scrape_balance && !supports_balance_query` 时显示)
 2. **解析配置**:读 account → channel preset → scrape config
 3. **ensure webview**:查 AppState map 是否已有 `scrape-{account_id}`,无则创建(隐藏 + `initialization_script`)
-4. **导航**:`webview.navigate(console_url)`,`initialization_script` 自动重注入
-5. **等页面**:await `on_page_load(Finished)`,超时 15s
-6. **拦截器触发**:页面自发调 API 时,monkeypatch 的 fetch/XHR 捕获匹配响应,实时 IPC 回传,Rust 缓冲到 per-account buffer
-7. **检测需登录**:`on_navigation` 检测到跳转登录 URL / API 返回 401 / 拦截器超时未触发 → 发 `scrape:need-login` + 弹出 webview
+4. **准备本轮抓取**:清空该账号的旧响应和旧 document ACK，再调用 `webview.navigate(console_url)` 强制刷新
+5. **确认监听就绪**:Windows/Linux 以原生监听安装成功为 ready；fallback 则由 `initialization_script` 在 document-start 安装 fetch/XHR 后通过 `handle_scrape_interceptor_ready` 回传 document id。只有 ready 后才开始计算业务响应超时；ready 自身超时后立即返回，不再串行追加一轮响应等待
+6. **捕获页面请求**:页面自行完成 Cookie、签名和 Header 组装并调用 API；Windows 由 WebView2 `WebResourceResponseReceived`、Linux 由 WebKitGTK `resource-load-started` + `WebResource::data` 在网络层读取目标响应；macOS 及原生监听安装失败时使用 document-start fetch/XHR fallback
+7. **区分状态**:收齐目标响应为 `captured`；明确导航到登录 URL 为 `login_required`；监听已就绪但未收齐响应为 `console_action_required`，展示 webview 供用户完成登录、验证码或等待页面加载后主动重试；监听未就绪为 `capture_timeout`。未捕获响应不得被表述为用户未登录
 8. **跑 extractor**:单响应(LongCat)直接 `eval_with_callback`;三响应(Qwen)等收齐后合并计算
 9. **写快照**:`source="scrape"`、`synced_at=now`、`remark="控制台抓取"`、`raw_scraped_json`、解析数值 → `token_pack_*` / `balance`+`currency`
 10. **发事件**:`scrape:result` / `scrape:error`
@@ -435,9 +435,10 @@ function extractQwen(bundle) {
 
 | 风险 | 缓解 |
 |------|------|
-| 拦截器未触发 | `raw_scraped_json` 列 + 调试覆盖层;JS 作为配置数据可无重编更新 |
-| 登录检测误判 | 三信号组合(nav 到登录 URL / 401 / 超时),任一触发就弹出,误判无害 |
-| 页面导航时序竞争 | `eval` 前 await `on_page_load(Finished)`;收集窗口去抖 2-3s;整体超时 20s |
+| 拦截器未触发 | document-start 安装后必须回传 ready ACK；未就绪返回独立捕获错误 |
+| 登录检测误判 | “未捕获”与“未登录”分离；只有明确登录 URL 才断言需要登录。未捕获时可展示控制台供用户处理，但文案不得声称其未登录 |
+| 页面导航时序竞争 | 每轮先清响应与 ACK，再刷新；监听 ACK 到达后才启动响应等待窗口 |
+| 平台 WebView 能力不一致 | Windows/Linux 使用各自公开原生响应 API；macOS 的 WKWebView 无等价公开 HTTPS 子请求 body API，保留 document-start 注入 |
 | 隐藏窗口可靠性 | `.visible(false)` 创建,WebView2 离屏也渲染 |
 | WebView2 机器人检测 | 设合理 userAgent;加载真实控制台页 |
 | Windows eval 吞异常 | 所有注入 JS 和 extractor 必须 try/catch 返回 JSON 串 |

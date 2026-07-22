@@ -66,6 +66,29 @@ describe("AccountManagementSideSheet", () => {
     ]);
   });
 
+  it("keeps manual resource maintenance when console scraping is supported", async () => {
+    render(
+      <AccountManagementSideSheet
+        request={{ kind: "edit", accountId: account.id }}
+        accounts={[account]}
+        snapshots={[]}
+        presets={[{ ...preset, supports_scrape_balance: true, supports_balance_query: false }]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText("控制台自动同步")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /登录控制台抓取/ })).toBeInTheDocument();
+    expect(screen.getByText("点击上方按钮即可同步套餐余量；如尚未登录，将自动打开控制台登录窗口。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "管理资源包" })).toBeInTheDocument();
+  });
+
   it("opens the full create drawer and saves manual resource information", async () => {
     const user = userEvent.setup();
     const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();

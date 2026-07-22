@@ -88,6 +88,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
    *  账号级 Base URL 覆盖，切回按量付费时仅清除仍是 Token Plan 地址的覆盖，
    *  保留用户在高级设置中自定义的地址（如团队版专属 URL）。 */
   function selectResourceMode(nextMode: AccountResourceMode) {
+    // 账号保存后资源模式不允许切换（避免与已维护的资源数据/订阅端点冲突）。
+    if (isEdit) return;
     if (currentDraft.channel_id !== QWEN_CHANNEL_ID) {
       update({ resource_mode: nextMode });
       return;
@@ -268,6 +270,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                     <ModeOption
                       key={option.value}
                       selected={resourceMode === option.value}
+                      disabled={isEdit}
                       title={t(option.title)}
                       description={t(option.description)}
                       onClick={() => selectResourceMode(option.value)}
@@ -347,8 +350,8 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
   return <div className={styles.field}><span>{label}</span>{children}</div>;
 }
 
-function ModeOption({ selected, title, description, onClick }: { selected: boolean; title: string; description: string; onClick: () => void }) {
-  return <button type="button" className={`${styles.modeOption} ${selected ? styles.selected : ""}`} aria-pressed={selected} onClick={onClick}><i /><span><strong>{title}</strong><small>{description}</small></span></button>;
+function ModeOption({ selected, disabled, title, description, onClick }: { selected: boolean; disabled?: boolean; title: string; description: string; onClick: () => void }) {
+  return <button type="button" className={`${styles.modeOption} ${selected ? styles.selected : ""}`} aria-pressed={selected} disabled={disabled} onClick={onClick}><i /><span><strong>{title}</strong><small>{description}</small></span></button>;
 }
 
 function defaultResourceMode(channelId: string): AccountResourceMode {

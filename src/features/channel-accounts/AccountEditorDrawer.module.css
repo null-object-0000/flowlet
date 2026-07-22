@@ -27,6 +27,8 @@
 .modeOption > i { width: 18px; height: 18px; border: 1.5px solid var(--flowlet-color-border); border-radius: 50%; display: grid; place-items: center; }
 .modeOption.selected > i { border-color: var(--semi-color-primary); }
 .modeOption:hover, .modeOption.selected { border-color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); }
+.modeOption:disabled { cursor: not-allowed; opacity: 0.55; }
+.modeOption:disabled:hover { border-color: var(--flowlet-color-border); background: var(--semi-color-bg-2); }
 .modeOption.selected > i::after { width: 8px; height: 8px; border-radius: 50%; background: var(--semi-color-primary); content: ""; }
 .modeOption > span { display: grid; gap: 4px; }
 .modeOption.selected strong { color: var(--semi-color-primary); }

@@ -738,8 +738,12 @@ pub struct RequestLogRow {
     pub attempt_seq: i64,
     pub req_headers_json: Option<String>,
     pub req_body_b64: Option<String>,
+    pub req_body_cleared_at: Option<String>,
+    pub req_body_cleanup_reason: Option<String>,
     pub res_headers_json: Option<String>,
     pub res_body_b64: Option<String>,
+    pub res_body_cleared_at: Option<String>,
+    pub res_body_cleanup_reason: Option<String>,
     pub is_last_attempt: bool,
     /// Usage data is joined lazily for the final attempt. Intermediate attempts
     /// normally keep these fields empty because usage belongs to the request.

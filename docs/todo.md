@@ -12,7 +12,7 @@
 - [x] 是否开启 1m 的配置可以让用户自己选择吧，你看是放在模型服务里好还是放在具体某个 agent 接入详情弹窗里好 —— 已放在 Claude Code 接入详情「全局配置」中（`[1m]` 是客户端侧上下文预算配置、且为 Claude Code 专属机制，不属于模型能力，故不放模型服务页）。「1M 长上下文」开关默认关闭，开启后主模型环境变量写入 `[1m]` 后缀，配置片段与 inspect 状态同步；代理层防御性剥离入站 `[1m]` 后缀并剔除 `context-1m` beta 头
 - [ ] Explore(Map OpenCode session implementation) Initializing… Error: flowlet-pro is temporarily unavailable, so auto mode cannot determine the safety of Agent right now. Wait briefly and then try this action again. If it keeps failing, continue with other tasks that don't require this action and come back to it later. Note: reading files, searching code, and other read-only operations do not require the classifier and can still be used.
 - [ ] 支持检查 Agent 最新版本号，并提示用户可以升级，如果可以的话再加上更新版本记录（并支持翻译成目标语言）
-- [-] 现在 Codex 有定时同步，所以打开 Agent 弹窗详情就不自动触发刷新同步了，除非用户自己手动强制刷新
+- [x] 现在 Codex 有定时同步，所以打开 Agent 弹窗详情就不自动触发刷新同步了，除非用户自己手动强制刷新
 
 ## 请求日志
 

@@ -107,14 +107,21 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
             <div className={styles.tabContent}>
               <AttemptSelector rows={rows} selectedRow={selectedRow} onSelect={setSelectedAttemptId} compact />
               <CapturedSection title={t("请求 Headers")} value={formatCapturedJson(selectedRow.req_headers_json, language)} />
-              <CapturedSection title={t("请求 Body")} value={formatCapturedBody(selectedRow.req_body_b64, language)} />
+              <CapturedSection title={t("请求 Body")} value={formatCapturedBody(selectedRow.req_body_b64, language, {
+                clearedAt: selectedRow.req_body_cleared_at,
+                cleanupReason: selectedRow.req_body_cleanup_reason,
+              })} />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={t("响应")} itemKey="response">
             <div className={styles.tabContent}>
               <AttemptSelector rows={rows} selectedRow={selectedRow} onSelect={setSelectedAttemptId} compact />
               <CapturedSection title={t("响应 Headers")} value={formatCapturedJson(selectedRow.res_headers_json, language)} />
-              <CapturedSection title={t("响应 Body")} value={formatCapturedBody(selectedRow.res_body_b64, language)} />
+              <CapturedSection title={t("响应 Body")} value={formatCapturedBody(selectedRow.res_body_b64, language, {
+                clearedAt: selectedRow.res_body_cleared_at,
+                cleanupReason: selectedRow.res_body_cleanup_reason,
+                pending: selectedRow.is_stream && selectedRow.duration_ms == null,
+              })} />
             </div>
           </Tabs.TabPane>
         </Tabs>

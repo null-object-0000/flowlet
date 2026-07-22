@@ -19,6 +19,13 @@ describe("request log presentation", () => {
     expect(rendered).toContain("private");
   });
 
+  it("distinguishes cleaned and pending bodies from content that was never captured", () => {
+    expect(formatCapturedBody(null, "zh-CN", { clearedAt: "2026-07-22T10:00:00Z", cleanupReason: "retention" })).toContain("数据过期");
+    expect(formatCapturedBody(null, "zh-CN", { clearedAt: "2026-07-22T10:00:00Z", cleanupReason: "size_limit" })).toContain("存储空间");
+    expect(formatCapturedBody(null, "zh-CN", { pending: true })).toContain("等待流式响应完成");
+    expect(formatCapturedBody(null)).toContain("未捕获");
+  });
+
   it("preserves credentials embedded in error text", () => {
     expect(safeLogText("authorization=Bearer abcdef")).toContain("abcdef");
   });

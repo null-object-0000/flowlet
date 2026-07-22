@@ -194,7 +194,7 @@ export function SettingsPage() {
             <div className={styles.logCaptureRow}>
               <span>
                 <strong>{t("Body 体积上限")}</strong>
-                <small>{t("Body 数据总占用超过此值时，自动清理最老的 10%（仅清理已有完整 Token 统计的记录）；0 = 不限制")}</small>
+                <small>{t("超过上限时，自动清理至少 1 小时前且已完成 Token 计算的最老 Body；近期数据可能暂时超过上限；0 = 不限制")}</small>
               </span>
               <InputNumber
                 aria-label={t("Body 体积上限")}
@@ -290,7 +290,7 @@ export function SettingsPage() {
 const STORAGE_CATEGORY_LABELS = {
   configuration: "配置与账号",
   requestLogs: "请求日志",
-  bodyData: "请求与响应 Body（过期自动清理）",
+  bodyData: "请求与响应 Body（按策略自动清理）",
   usage: "用量与费用",
   agentSessions: "Agent 会话",
   backgroundTasks: "后台任务",

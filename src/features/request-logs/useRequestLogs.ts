@@ -33,6 +33,10 @@ export function useRequestLogDetail(requestId: string | null) {
     queryKey: queryKeys.requestLog.detail(requestId ?? ""),
     queryFn: () => requestLogCommands.detail(requestId!),
     enabled: Boolean(requestId),
+    refetchInterval: (query) => {
+      const rows = query.state.data;
+      return rows?.some((row) => row.is_stream && row.duration_ms == null) ? 1_000 : false;
+    },
   });
 }
 

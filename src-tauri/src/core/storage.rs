@@ -6,6 +6,9 @@ use std::{
 };
 use thiserror::Error;
 
+/// 体积上限是软限制：最近一小时的 Body 始终保留，避免用户刚完成请求就看不到详情。
+const BODY_SIZE_PRUNE_MIN_AGE_HOURS: i64 = 1;
+
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("数据库错误: {0}")]
@@ -253,7 +256,7 @@ impl Storage {
 
     /// 清理超过保留天数的请求/响应 Body 数据。
     ///
-    /// 仅清除已有完整 Token 用量统计的记录（usage_records.input_tokens IS NOT NULL），
+    /// 仅清除已有完整 Token 用量统计的记录（输入、输出 Token 均已计算），
     /// 确保数据修复（reanalyze_captured_usage）不会因 Body 提前清理而丢失可重解析对象。
     ///
     /// 返回清除 Body 的记录数。
@@ -272,17 +275,23 @@ impl Storage {
         // 仅清理：
         // 1. 超过保留期限
         // 2. req_body_b64 或 res_body_b64 非空
-        // 3. 已有完整的 Token 统计（usage_records 存在且 input_tokens IS NOT NULL）
+        // 3. 已有完整的 Token 统计（usage_records 的输入、输出 Token 均非空）
         let cleared = connection.execute(
             &format!(
                 r#"UPDATE request_logs
-                SET req_body_b64 = NULL, res_body_b64 = NULL
+                SET req_body_cleared_at = CASE WHEN req_body_b64 IS NOT NULL THEN datetime('now') ELSE req_body_cleared_at END,
+                    req_body_cleanup_reason = CASE WHEN req_body_b64 IS NOT NULL THEN 'retention' ELSE req_body_cleanup_reason END,
+                    res_body_cleared_at = CASE WHEN res_body_b64 IS NOT NULL THEN datetime('now') ELSE res_body_cleared_at END,
+                    res_body_cleanup_reason = CASE WHEN res_body_b64 IS NOT NULL THEN 'retention' ELSE res_body_cleanup_reason END,
+                    req_body_b64 = NULL,
+                    res_body_b64 = NULL
                 WHERE created_at < {}
                   AND (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
                   AND EXISTS (
                     SELECT 1 FROM usage_records ur
                     WHERE ur.request_id = request_logs.request_id
                       AND ur.input_tokens IS NOT NULL
+                      AND ur.output_tokens IS NOT NULL
                   )"#,
                 cutoff
             ),
@@ -311,7 +320,8 @@ impl Storage {
     }
 
     /// 按体积上限清理最老的 Body 数据（单次清理，不长期持锁）。
-    /// 仅清除已有完整 Token 统计的记录（usage_records.input_tokens IS NOT NULL）。
+    /// 仅清除至少一小时前、输入与输出 Token 均已计算的记录。
+    /// 如果近期 Body 自身超过上限，则允许暂时超限，不牺牲刚完成请求的可排查性。
     ///
     /// 清理策略（按体积而非记录数）：
     /// - 当前体积已低于 target_bytes * (1 - prune_ratio) 时直接返回 0
@@ -352,11 +362,13 @@ impl Storage {
         // 符合条件记录总数（决定批大小）
         let total_eligible: i64 = connection.query_row(
             r#"SELECT COUNT(*) FROM request_logs
-               WHERE (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
+               WHERE created_at < datetime('now', '-1 hour')
+                 AND (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
                  AND EXISTS (
                    SELECT 1 FROM usage_records ur
                    WHERE ur.request_id = request_logs.request_id
                      AND ur.input_tokens IS NOT NULL
+                     AND ur.output_tokens IS NOT NULL
                  )"#,
             [],
             |row| row.get(0),
@@ -373,18 +385,26 @@ impl Storage {
         let cleared = connection.execute(
             &format!(
                 r#"UPDATE request_logs
-                SET req_body_b64 = NULL, res_body_b64 = NULL
+                SET req_body_cleared_at = CASE WHEN req_body_b64 IS NOT NULL THEN datetime('now') ELSE req_body_cleared_at END,
+                    req_body_cleanup_reason = CASE WHEN req_body_b64 IS NOT NULL THEN 'size_limit' ELSE req_body_cleanup_reason END,
+                    res_body_cleared_at = CASE WHEN res_body_b64 IS NOT NULL THEN datetime('now') ELSE res_body_cleared_at END,
+                    res_body_cleanup_reason = CASE WHEN res_body_b64 IS NOT NULL THEN 'size_limit' ELSE res_body_cleanup_reason END,
+                    req_body_b64 = NULL,
+                    res_body_b64 = NULL
                 WHERE rowid IN (
                   SELECT rl.rowid FROM request_logs rl
-                  WHERE (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL)
+                  WHERE rl.created_at < datetime('now', '-{} hours')
+                    AND (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL)
                     AND EXISTS (
                       SELECT 1 FROM usage_records ur
                       WHERE ur.request_id = rl.request_id
                         AND ur.input_tokens IS NOT NULL
+                        AND ur.output_tokens IS NOT NULL
                     )
                   ORDER BY rl.created_at ASC
                   LIMIT {}
                 )"#,
+                BODY_SIZE_PRUNE_MIN_AGE_HOURS,
                 batch_size
             ),
             [],
@@ -969,8 +989,22 @@ impl Storage {
         )?;
         add_column_if_missing(&connection, "request_logs", "req_headers_json", "TEXT")?;
         add_column_if_missing(&connection, "request_logs", "req_body_b64", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "req_body_cleared_at", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "req_body_cleanup_reason",
+            "TEXT",
+        )?;
         add_column_if_missing(&connection, "request_logs", "res_headers_json", "TEXT")?;
         add_column_if_missing(&connection, "request_logs", "res_body_b64", "TEXT")?;
+        add_column_if_missing(&connection, "request_logs", "res_body_cleared_at", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "res_body_cleanup_reason",
+            "TEXT",
+        )?;
         add_column_if_missing(
             &connection,
             "request_logs",

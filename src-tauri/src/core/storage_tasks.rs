@@ -214,7 +214,8 @@ impl Storage {
         };
         self.update_job_progress(&job_id, 1, 2)?;
 
-        // 第二步：超限清理（体积超过上限时，按最老优先原则循环清理，直到低于目标）
+        // 第二步：超限清理（体积超过上限时，只清理至少一小时前的完整记录）。
+        // 最近一小时是安全窗口；若近期数据自身超过上限，允许暂时超限。
         let mut pruned = 0usize;
         if capture.body_max_size_mb > 0 {
             let max_bytes = capture.body_max_size_mb * 1024 * 1024;
@@ -230,7 +231,7 @@ impl Storage {
                             "info",
                             "超限清理",
                             &format!(
-                                "体积 {} MB 超过上限 {} MB，按最老优先原则清理 {} 条后降至 {} MB",
+                                "体积 {} MB 超过上限 {} MB，保留最近 1 小时并按最老优先清理 {} 条后为 {} MB",
                                 current / 1024 / 1024,
                                 capture.body_max_size_mb,
                                 n,

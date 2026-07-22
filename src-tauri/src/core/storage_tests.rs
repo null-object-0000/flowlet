@@ -932,6 +932,10 @@ fn cleanup_expired_body_data_keeps_incomplete_usage_records() {
     let old_with_usage_log = logs.iter().find(|l| l.request_id == "old-with-usage").unwrap();
     assert!(old_with_usage_log.req_body_b64.is_none(), "有完整统计的过期记录应清除 Body");
     assert!(old_with_usage_log.res_body_b64.is_none(), "有完整统计的过期记录应清除 Body");
+    assert!(old_with_usage_log.req_body_cleared_at.is_some());
+    assert_eq!(old_with_usage_log.req_body_cleanup_reason.as_deref(), Some("retention"));
+    assert!(old_with_usage_log.res_body_cleared_at.is_some());
+    assert_eq!(old_with_usage_log.res_body_cleanup_reason.as_deref(), Some("retention"));
 
     drop(storage);
     for suffix in ["", "-wal", "-shm"] {
@@ -1059,14 +1063,13 @@ fn prune_oldest_body_data_removes_oldest_first() {
     storage.test_set_log_created_at_days_ago("req-0", 12).expect("set req-0");
     storage.test_set_log_created_at_days_ago("req-1", 11).expect("set req-1");
 
-    // 当前 10 条约 200 KB/条（req + res），总计 ~2000 KB
-    // 目标上限 1000 KB，prune_ratio=0.5 → 目标压到 1000 * (1 - 0.5) = 500 KB 以下
-    // 循环清理直到低于目标（每次删最老的 50%，即 5 条 → 5 条 → ...）
+    // 当前 10 条约 200 KB/条（req + res），总计 ~2000 KB。
+    // 只有两条超过一小时，空间清理必须保留其余近期记录，即使因此暂时超过软上限。
     let target_bytes = 1000 * 1024;
     let pruned = storage
         .prune_oldest_body_data_to_goal(target_bytes, 0.5, 50)
         .expect("prune");
-    assert!(pruned >= 7, "应清理足够多的老记录，实际删了 {pruned} 条");
+    assert_eq!(pruned, 2, "应只清理超过安全窗口的两条记录");
 
     // 验证最老的记录被清理
     let logs = storage.list_request_logs().expect("list");
@@ -1074,12 +1077,17 @@ fn prune_oldest_body_data_removes_oldest_first() {
     assert!(req0.req_body_b64.is_none(), "req-0 应被清理");
     let req1 = logs.iter().find(|l| l.request_id == "req-1").unwrap();
     assert!(req1.req_body_b64.is_none(), "req-1 应被清理");
+    assert_eq!(req0.req_body_cleanup_reason.as_deref(), Some("size_limit"));
+    assert_eq!(req1.res_body_cleanup_reason.as_deref(), Some("size_limit"));
 
-    // 验证清理后体积低于目标
+    // 验证近期记录仍保留；软上限不能以牺牲最新请求的可排查性为代价。
+    let recent = logs.iter().find(|l| l.request_id == "req-9").unwrap();
+    assert!(recent.req_body_b64.is_some(), "最近一小时的请求 Body 必须保留");
+    assert!(recent.res_body_b64.is_some(), "最近一小时的响应 Body 必须保留");
     let remaining_bytes = storage.get_total_body_size_bytes().expect("size");
     assert!(
-        remaining_bytes < target_bytes,
-        "清理后 {} KB 应低于目标 {} KB",
+        remaining_bytes > target_bytes,
+        "近期数据超过软上限时应暂时保留，当前 {} KB，上限 {} KB",
         remaining_bytes / 1024,
         target_bytes / 1024
     );

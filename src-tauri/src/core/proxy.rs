@@ -1253,9 +1253,9 @@ async fn build_response(
     log.res_body_b64 = None;
 
     if is_stream {
-        // 流式：先发一条日志（duration 暂按 ttfb 兜底），再注册 stream 结束回调
-        // 补 duration / res_body_b64。
-        log.duration_ms = log.duration_ms.or(Some(ttfb_ms));
+        // 流式：先发一条未完成日志，duration_ms 保持 NULL；流结束后再补
+        // duration / res_body_b64。前端据此只在请求尚未完成时刷新详情。
+        log.duration_ms = None;
         record_request_log(storage.clone(), log);
 
         let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();

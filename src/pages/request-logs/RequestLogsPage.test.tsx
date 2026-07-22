@@ -33,7 +33,9 @@ const row: RequestLogRow = {
   fallback_count: 0, route_reason: "primary", created_at: "2026-07-15 06:00:00", ttfb_ms: 120,
   ttft_ms: 200, duration_ms: 860, attempt_seq: 1, req_headers_json: JSON.stringify({ Authorization: "Bearer secret-key" }),
   req_body_b64: btoa(JSON.stringify({ model: "flowlet-pro" })), res_headers_json: JSON.stringify({ "content-type": "application/json" }),
+  req_body_cleared_at: null, req_body_cleanup_reason: null,
   res_body_b64: btoa(JSON.stringify({ ok: true })), is_last_attempt: true,
+  res_body_cleared_at: null, res_body_cleanup_reason: null,
   input_tokens: 100, input_cached_tokens: 60, input_uncached_tokens: 40, output_tokens: 50, total_tokens: 150, estimated_cost: 0.0012,
 };
 

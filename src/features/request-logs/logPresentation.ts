@@ -100,8 +100,18 @@ export function formatCapturedJson(value?: string | null, language: AppLanguage 
   }
 }
 
-export function formatCapturedBody(value?: string | null, language: AppLanguage = "zh-CN") {
-  if (!value) return `— ${translate(language, "未捕获")}`;
+export function formatCapturedBody(
+  value?: string | null,
+  language: AppLanguage = "zh-CN",
+  state: { clearedAt?: string | null; cleanupReason?: string | null; pending?: boolean } = {},
+) {
+  if (!value) {
+    if (state.clearedAt) {
+      return `— ${translate(language, state.cleanupReason === "size_limit" ? "因存储空间限制已自动清理" : "数据过期已自动清理")}`;
+    }
+    if (state.pending) return `— ${translate(language, "正在等待流式响应完成")}`;
+    return `— ${translate(language, "未捕获")}`;
+  }
   try {
     const binary = atob(value);
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));

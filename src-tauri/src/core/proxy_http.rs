@@ -481,7 +481,7 @@ pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::Lo
                 body_max_size_mb: lc
                     .get("body_max_size_mb")
                     .and_then(|v| v.as_i64())
-                    .unwrap_or(128),
+                    .unwrap_or(512),
                 body_prune_ratio: lc
                     .get("body_prune_ratio")
                     .and_then(|v| v.as_f64())
@@ -723,6 +723,12 @@ pub(super) fn prepare_captured_res_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_capture_missing_size_limit_uses_512_mb_default() {
+        let config = extract_log_capture(&serde_json::json!({ "log_capture": {} }));
+        assert_eq!(config.body_max_size_mb, 512);
+    }
 
     #[test]
     fn sanitize_headers_redacts_bearer() {

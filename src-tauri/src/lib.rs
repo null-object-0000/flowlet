@@ -664,9 +664,10 @@ pub fn run() {
             let timer_storage = state.storage.clone();
             let timer_config_path = state.config_path.clone();
             tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15 * 60));
+                let period = std::time::Duration::from_secs(15 * 60);
+                let mut interval =
+                    tokio::time::interval_at(tokio::time::Instant::now() + period, period);
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                // 第一次 tick 立即触发，等价于启动后 15 分钟开始（interval 的首次 tick 是 15 分钟后）
                 loop {
                     interval.tick().await;
                     let storage = timer_storage.clone();

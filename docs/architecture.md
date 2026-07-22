@@ -438,6 +438,13 @@ Claude Code / OpenCode 会话归因回填、已捕获响应用量重解析、未
 直接透传：代理先移除两者，再按目标渠道的 Bearer 或 X-API-Key 鉴权策略写入所选
 账号的实际 API Key；`Host` / HTTP/2 `:authority` 则由最终上游 URL 生成。
 
+请求与响应 Body 可按保留期限和总体积上限自动清理。`request_logs` 分别通过
+`req_body_cleared_at` / `req_body_cleanup_reason` 与
+`res_body_cleared_at` / `res_body_cleanup_reason` 保存清理时间及原因，前端不得把
+已清理数据展示为“未捕获”。清理只处理输入、输出 Token 均已完成计算的记录；
+体积上限是软限制，最近一小时的 Body 始终保留。流式日志在响应结束前保持
+`duration_ms = NULL`，详情页仅在该状态下短周期刷新，结束后停止轮询。
+
 上游返回 403 时，代理会检查结构化错误体；若错误码为 `account_deactivated` 或消息明确
 表示 `api key is disabled`，当前账号会被标记为凭据不可用，并继续尝试同一聚合模型的
 下一个候选（包括跨渠道降级）。该状态视为可恢复的临时停用：后续每个新请求仍会探测

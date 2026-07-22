@@ -4,9 +4,11 @@
 .header h3, .header p { margin: 0; }
 .header h3 { font-size: 20px; font-weight: 740; letter-spacing: -.025em; }
 .header p { margin-top: 3px; font-size: 12px; }
-.toolbar { min-height: 42px; padding: 5px; display: grid; grid-template-columns: 180px 210px minmax(120px,1fr) auto; align-items: center; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
-.toolbarMeta { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-.toolbarActions { display: flex; align-items: center; gap: 6px; }
+.toolbar { min-height: 42px; padding: 5px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
+.toolbar > :global(.semi-select) { width: 180px; flex: none; }
+.toolbarMeta { margin-left: 4px; color: var(--flowlet-color-text-tertiary); font-size: 11px; white-space: nowrap; }
+.toolbarSpacer { flex: 1; }
+.toolbarActions { display: flex; align-items: center; gap: 6px; flex: none; }
 .tableCard { min-height: 0; display: grid; grid-template-rows: 38px minmax(0,1fr) 38px; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .grid { display: grid; grid-template-columns: 120px minmax(190px,1fr) 90px 80px 90px 80px; align-items: center; gap: 10px; padding: 0 14px; text-align: left; }
 .head { color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: 11px; font-weight: 650; }

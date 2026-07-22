@@ -54,7 +54,7 @@ describe("RequestLogsPage", () => {
     const logRow = screen.getByRole("button", { name: `查看请求 ${row.request_id}` });
     expect(logRow).toHaveTextContent("/anthropic/v1/messages");
     expect(screen.getByText("请求数")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新" })).not.toHaveTextContent("刷新");
+    expect(screen.getByRole("button", { name: "刷新数据" })).not.toHaveTextContent("刷新数据");
     expect(screen.getAllByText("150")).toHaveLength(2);
     expect(screen.getByText("缓存命中率 60.0%")).toBeInTheDocument();
     await user.hover(within(logRow).getByText("150"));

@@ -5,7 +5,9 @@ import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionNativeUsage, type AgentSessionRow } from "../../domains/agent-session/types";
 import { useAgentSessionNativeSummary, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
-import { useAgentDataSync, useAgentSyncSchedule, useAgentSyncStatus } from "../../features/background-tasks/useBackgroundTasks";
+import { useAgentDataSync, useAgentSyncStatus } from "../../features/background-tasks/useBackgroundTasks";
+import { RefreshControl } from "../../shared/ui/RefreshControl";
+import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
@@ -22,11 +24,11 @@ export function AgentSessionsPage() {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<AgentSessionFilter>(DEFAULT_AGENT_SESSION_FILTER);
   const [searchDraft, setSearchDraft] = useState("");
+  const refresh = useRefreshControl({ intervalMs: 15_000 });
   const [selectedSession, setSelectedSession] = useState<AgentSessionRow | null>(null);
-  const sessions = useAgentSessions(filter);
+  const sessions = useAgentSessions(filter, refresh.autoRefresh);
   const syncAgentData = useAgentDataSync();
   const syncStatus = useAgentSyncStatus();
-  const nextSyncAt = useAgentSyncSchedule();
   const [lastJobId, setLastJobId] = useState<string | null>(null);
   const page = sessions.data;
   const checkedTimes = syncStatus.data?.sources.map((source) => source.lastCheckedAt).filter((value): value is string => Boolean(value)).sort() ?? [];
@@ -48,6 +50,16 @@ export function AgentSessionsPage() {
           <Title heading={3} style={{ margin: 0 }}>{t("会话管理")}</Title>
           <Paragraph type="tertiary" style={{ margin: 0 }}>{t("统一查看 Agent 本地会话与 Flowlet 请求观测")}</Paragraph>
         </div>
+        <RefreshControl
+          autoRefresh={refresh.autoRefresh}
+          onToggleAutoRefresh={refresh.toggleAutoRefresh}
+          isFetching={sessions.isFetching}
+          lastUpdatedAt={sessions.dataUpdatedAt}
+          intervalMs={refresh.intervalMs}
+          onRefresh={() => void sessions.refetch()}
+          language={language}
+          t={t}
+        />
       </header>
 
       <section className={styles.toolbar} aria-label={t("会话筛选")}>
@@ -77,7 +89,7 @@ export function AgentSessionsPage() {
           ]}
           onChange={(value) => setFilter((current) => ({ ...current, flowletStatus: value === "__all__" ? "" : String(value) as AgentSessionFilter["flowletStatus"], page: 1 }))}
         />
-        <span className={styles.syncMeta} title={syncStatusTitle}>{syncStatus.data?.running ? t("正在同步 Agent 数据…") : syncStatus.data?.sources.some((source) => source.failedCount > 0) ? t("部分客户端同步异常") : latestCheckedAt ? t("上次 {last} · 下次 {next}", { last: formatTimestamp(latestCheckedAt, language), next: nextSyncAt ? formatTimestamp(new Date(nextSyncAt).toISOString(), language) : "—" }) : t("自动同步：前台每 1 分钟，后台每 5 分钟")}</span>
+        <span className={styles.toolbarSpacer} />
         <div className={styles.syncActions}>{lastJobId ? <Button type="tertiary" onClick={() => navigate(`/tasks?jobId=${encodeURIComponent(lastJobId)}`)}>{t("查看任务")}</Button> : null}<Button
           className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
           icon={<IconRefresh />}

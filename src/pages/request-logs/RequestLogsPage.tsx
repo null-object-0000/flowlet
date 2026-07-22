@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Pagination, Select, Toast, Tooltip, Typography } from "@douyinfe/semi-ui-19";
-import { IconDelete, IconRefresh, IconSearch } from "@douyinfe/semi-icons";
+import { IconDelete, IconSearch } from "@douyinfe/semi-icons";
 import { DEFAULT_REQUEST_LOG_FILTER, type RequestLogFilter, type RequestLogStatusFilter, type RequestLogTimeRange } from "../../domains/request-log/types";
 import { ClearRequestLogsModal } from "../../features/request-logs/ClearRequestLogsModal";
 import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLogDetailSideSheet";
 import { RequestLogTable } from "../../features/request-logs/RequestLogTable";
 import { formatDuration, formatPercentage, formatTokenRate, safeLogText } from "../../features/request-logs/logPresentation";
 import { useRequestLogActions, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
+import { RefreshControl } from "../../shared/ui/RefreshControl";
+import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import styles from "./RequestLogsPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
@@ -26,11 +28,11 @@ export function RequestLogsPage() {
   const initialSearch = initialSearchFromHash();
   const [filter, setFilter] = useState<RequestLogFilter>(() => ({ ...DEFAULT_REQUEST_LOG_FILTER, search: initialSearch }));
   const [searchDraft, setSearchDraft] = useState(initialSearch);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const refresh = useRefreshControl({ intervalMs: 5_000 });
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [clientSelectValue, setClientSelectValue] = useState("__all__");
-  const logs = useRequestLogs(filter, autoRefresh);
+  const logs = useRequestLogs(filter, refresh.autoRefresh);
   const models = useRequestLogModels();
   const clients = useRequestLogClients();
   const actions = useRequestLogActions();
@@ -65,9 +67,16 @@ export function RequestLogsPage() {
     <main className={styles.page}>
       <header className={styles.header}>
         <div><Title heading={3} style={{ margin: 0 }}>{t("请求日志")}</Title><Paragraph type="tertiary" style={{ margin: 0 }}>{t("查看代理服务的实时请求、模型路由和 Token 消耗")}</Paragraph></div>
-        <button type="button" className={`${styles.liveIndicator} ${autoRefresh ? styles.live : ""}`} onClick={() => setAutoRefresh((value) => !value)}>
-          <i />{t(autoRefresh ? "实时更新中" : "实时更新已暂停")}
-        </button>
+        <RefreshControl
+          autoRefresh={refresh.autoRefresh}
+          onToggleAutoRefresh={refresh.toggleAutoRefresh}
+          isFetching={logs.isFetching}
+          lastUpdatedAt={logs.dataUpdatedAt}
+          intervalMs={refresh.intervalMs}
+          onRefresh={() => void logs.refetch()}
+          language={language}
+          t={t}
+        />
       </header>
 
       <section className={styles.stats} aria-label={t("日志统计")}>
@@ -148,9 +157,6 @@ export function RequestLogsPage() {
         </div>
         <span className={styles.toolbarSpacer} />
         <Tooltip content={t("清理历史日志")}><Button aria-label={t("清理历史日志")} icon={<IconDelete />} type="danger" theme="borderless" onClick={() => setClearOpen(true)} /></Tooltip>
-        <Tooltip content={t("刷新")}>
-          <Button aria-label={t("刷新")} icon={<IconRefresh />} type="tertiary" theme="borderless" loading={logs.isFetching} onClick={() => void logs.refetch()} />
-        </Tooltip>
       </section>
 
       <section className={styles.tableCard}>

@@ -3,12 +3,12 @@ import { agentSessionCommands } from "../../domains/agent-session/commands";
 import type { AgentSessionFilter, AgentSessionRow } from "../../domains/agent-session/types";
 import { queryKeys } from "../../shared/query-keys";
 
-export function useAgentSessions(filter: AgentSessionFilter) {
+export function useAgentSessions(filter: AgentSessionFilter, autoRefresh: boolean) {
   return useQuery({
     queryKey: queryKeys.agentSession.list(filter),
     queryFn: () => agentSessionCommands.list(filter),
     placeholderData: keepPreviousData,
-    refetchInterval: 15_000,
+    refetchInterval: autoRefresh ? 15_000 : false,
   });
 }
 

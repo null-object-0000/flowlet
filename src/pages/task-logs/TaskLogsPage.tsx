@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Modal, Pagination, Progress, Select, SideSheet, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
-import { IconDelete, IconRefresh } from "@douyinfe/semi-icons";
+import { IconDelete } from "@douyinfe/semi-icons";
 import { useSearchParams } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { DEFAULT_BACKGROUND_JOBS_FILTER, type BackgroundJobRow, type BackgroundJobsFilter } from "../../domains/background-task/types";
 import { useBackgroundTaskDetail, useBackgroundTasks, useCancelBackgroundTask, useCleanupBackgroundTasks } from "../../features/background-tasks/useBackgroundTasks";
+import { RefreshControl } from "../../shared/ui/RefreshControl";
+import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { formatTimestamp } from "../../shared/formatters/datetime";
@@ -17,7 +19,8 @@ type Translate = (key: string, variables?: Record<string, string | number>) => s
 export function TaskLogsPage() {
   const { language, t } = useAppPreferences();
   const [filter, setFilter] = useState<BackgroundJobsFilter>(DEFAULT_BACKGROUND_JOBS_FILTER);
-  const tasks = useBackgroundTasks(filter);
+  const refresh = useRefreshControl({ intervalMs: 10_000 });
+  const tasks = useBackgroundTasks(filter, refresh.autoRefresh);
   const now = useElapsedNow(Boolean(tasks.data?.rows.some((job) => job.status === "running")));
   const cleanup = useCleanupBackgroundTasks();
   const [searchParams] = useSearchParams();
@@ -41,14 +44,24 @@ export function TaskLogsPage() {
   return <main className={styles.page}>
     <header className={styles.header}>
       <div><Title heading={3}>{t("任务日志")}</Title><Paragraph type="tertiary">{t("查看后台处理任务的进度、性能、结果与错误")}</Paragraph></div>
+      <RefreshControl
+        autoRefresh={refresh.autoRefresh}
+        onToggleAutoRefresh={refresh.toggleAutoRefresh}
+        isFetching={tasks.isFetching}
+        lastUpdatedAt={tasks.dataUpdatedAt}
+        intervalMs={refresh.intervalMs}
+        onRefresh={() => void tasks.refetch()}
+        language={language}
+        t={t}
+      />
     </header>
     <section className={styles.toolbar} aria-label={t("任务筛选")}>
       <Select style={{ width: "100%" }} insetLabel={t("状态")} value={filter.status || "__all__"} optionList={statusOptions(t)} onChange={(value) => setFilter((current) => ({ ...current, status: value === "__all__" ? "" : String(value) as BackgroundJobsFilter["status"], page: 1 }))} />
       <Select style={{ width: "100%" }} insetLabel={t("任务类型")} value={filter.jobType || "__all__"} optionList={[{ value: "__all__", label: t("全部类型") }, { value: "body-cleanup", label: t("Body 清理") }, { value: "agent-data-sync", label: t("Agent 数据同步") }, { value: "codex-account-sync", label: t("Codex 账号同步") }]} onChange={(value) => setFilter((current) => ({ ...current, jobType: value === "__all__" ? "" : String(value), page: 1 }))} />
       <span className={styles.toolbarMeta}>{tasks.isFetching ? t("正在刷新任务日志…") : t("共 {count} 条", { count: tasks.data?.total ?? 0 })}</span>
+      <span className={styles.toolbarSpacer} />
       <div className={styles.toolbarActions}>
         <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconDelete />} loading={cleanup.isPending} onClick={confirmCleanup}>{t("清理日志")}</Button>
-        <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconRefresh />} loading={tasks.isFetching} onClick={() => void tasks.refetch()}>{t("刷新")}</Button>
       </div>
     </section>
     <section className={styles.tableCard}>

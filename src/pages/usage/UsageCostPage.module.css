@@ -1,8 +1,9 @@
 .page { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; }
-.pageHeading { min-height: 44px; display: flex; align-items: center; gap: 8px; }
-.pageHeading > div { min-width: 0; flex: 1; }
+.pageHeading { min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.pageHeading > div:first-child { min-width: 0; flex: 1; }
 .pageHeading h3 { margin: 0; color: var(--flowlet-color-text); font-size: 20px; line-height: 1.2; }
 .pageHeading p { margin: 3px 0 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
+.pageHeading > :global(.semi-select) { width: 130px; flex: none; }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
 .stat { min-width: 0; min-height: 84px; padding: 10px 13px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 5px; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .stat > span { min-width: 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }

@@ -5,7 +5,7 @@ import type { BackgroundJobsFilter } from "../../domains/background-task/types";
 import { queryKeys } from "../../shared/query-keys";
 import { AGENT_SYNC_SCHEDULE_EVENT, getNextAgentSyncAt } from "./AgentDataAutoSync";
 
-export function useBackgroundTasks(filter: BackgroundJobsFilter) { return useQuery({ queryKey: queryKeys.backgroundTask.list(filter), queryFn: () => backgroundTaskCommands.list(filter), refetchInterval: 10_000 }); }
+export function useBackgroundTasks(filter: BackgroundJobsFilter, autoRefresh: boolean) { return useQuery({ queryKey: queryKeys.backgroundTask.list(filter), queryFn: () => backgroundTaskCommands.list(filter), refetchInterval: autoRefresh ? 10_000 : false }); }
 export function useAgentSyncStatus() { return useQuery({ queryKey: queryKeys.backgroundTask.agentSyncStatus(), queryFn: backgroundTaskCommands.agentSyncStatus, refetchInterval: 15_000 }); }
 export function useAgentSyncSchedule() {
   const [nextAt, setNextAt] = useState<number | null>(getNextAgentSyncAt);

@@ -1,0 +1,52 @@
+.cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/**
+ * Auto-refresh toggle pill. Mirrors the original request-log live indicator:
+ * a 7×7 dot on the left (green + glow when live, grey when paused) and a
+ * status label on the right. Clicking toggles auto-refresh.
+ */
+.toggle {
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .18s ease, border-color .18s ease, background-color .18s ease;
+}
+
+.toggle:hover {
+  border-color: rgba(23, 105, 255, .28);
+  color: var(--flowlet-color-text);
+}
+
+.toggle i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--flowlet-color-text-tertiary);
+  transition: background-color .18s ease, box-shadow .18s ease;
+}
+
+.toggle.live i {
+  background: var(--flowlet-color-success);
+  box-shadow: 0 0 0 4px rgba(47, 166, 74, .1);
+}
+
+.timing {
+  font-size: 11px;
+  color: var(--flowlet-color-text-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

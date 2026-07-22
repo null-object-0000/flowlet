@@ -5,6 +5,8 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod } from "../../domains/usage/types";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
+import { RefreshControl } from "../../shared/ui/RefreshControl";
+import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { buildUsageHeatmap, filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay, type UsageHeatmap } from "./usagePresentation";
 import styles from "./UsageCostPage.module.css";
@@ -16,7 +18,8 @@ type TrendMetric = "cost" | "tokens";
 
 export function UsageCostPage() {
   const { language, t } = useAppPreferences();
-  const usage = useUsageSummary();
+  const refresh = useRefreshControl({ intervalMs: 30_000 });
+  const usage = useUsageSummary(refresh.autoRefresh);
   const [period, setPeriod] = useState<UsagePeriod>("month");
   const [metric, setMetric] = useState<TrendMetric>("tokens");
   const rows = useMemo(() => filterUsageRows(usage.query.data ?? [], period), [period, usage.query.data]);
@@ -48,6 +51,16 @@ export function UsageCostPage() {
   return <main className={styles.page}>
     <header className={styles.pageHeading}>
       <div><Title heading={3}>{t("用量成本")}</Title><Paragraph>{t("查看模型、渠道与账号维度的 Token 消耗和预估费用")}</Paragraph></div>
+      <RefreshControl
+        autoRefresh={refresh.autoRefresh}
+        onToggleAutoRefresh={refresh.toggleAutoRefresh}
+        isFetching={usage.query.isFetching}
+        lastUpdatedAt={usage.query.dataUpdatedAt}
+        intervalMs={refresh.intervalMs}
+        onRefresh={() => void usage.query.refetch()}
+        language={language}
+        t={t}
+      />
       <Select
         value={period}
         aria-label={t("统计周期")}

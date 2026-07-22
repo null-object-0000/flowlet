@@ -30,3 +30,19 @@ export function formatTimestamp(value: string, language: TimestampLanguage): str
     hour12: false,
   });
 }
+
+/**
+ * Time-of-day only, down to seconds (e.g. "14:05:09"). Used by the refresh
+ * control's "上次/下次" labels where the date is redundant and horizontal
+ * space is tight. Unparseable values pass through unchanged.
+ */
+export function formatTime(value: string, language: TimestampLanguage): string {
+  const date = parseTimestamp(value);
+  if (!date) return value;
+  return date.toLocaleString(language, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}

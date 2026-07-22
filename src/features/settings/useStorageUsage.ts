@@ -13,6 +13,8 @@ interface StorageUsageProgressEvent {
 const EMPTY_STORAGE_USAGE: StorageUsageSummary = {
   totalBytes: 0,
   databaseBytes: 0,
+  reclaimableBytes: 0,
+  autoVacuumMode: 0,
   walBytes: 0,
   sharedMemoryBytes: 0,
   configBytes: 0,

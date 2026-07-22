@@ -182,7 +182,7 @@ impl Storage {
             "Body 清理",
             "按保留策略自动清理过期与超限的请求/响应 Body",
             "scheduled",
-            2,
+            3,
             "开始按保留策略自动清理请求与响应 Body",
         )?;
 
@@ -212,7 +212,7 @@ impl Storage {
                 0
             }
         };
-        self.update_job_progress(&job_id, 1, 2)?;
+        self.update_job_progress(&job_id, 1, 3)?;
 
         // 第二步：超限清理（体积超过上限时，只清理至少一小时前的完整记录）。
         // 最近一小时是安全窗口；若近期数据自身超过上限，允许暂时超限。
@@ -263,6 +263,43 @@ impl Storage {
         } else {
             let _ = self.add_job_event(&job_id, "info", "超限清理", "体积上限设为 0（不限制），跳过");
         }
+        self.update_job_progress(&job_id, 2, 3)?;
+
+        // 第三步：新库或已执行过一次完整优化的旧库，按固定上限增量归还磁盘页。
+        // 旧库 auto_vacuum=NONE 时安全跳过，由设置页提示用户先执行一次完整优化。
+        let incremental_reclaimed = match self.incremental_vacuum(
+            super::storage_maintenance::SCHEDULED_INCREMENTAL_VACUUM_BYTES,
+        ) {
+            Ok(bytes) => {
+                let message = match self.database_maintenance_stats() {
+                    Ok(stats) if stats.auto_vacuum_mode == 2 => format!(
+                        "本轮归还 {:.1} MB，剩余可回收 {:.1} MB",
+                        bytes as f64 / 1048576.0,
+                        stats.reclaimable_bytes as f64 / 1048576.0
+                    ),
+                    Ok(_) => {
+                        "当前数据库尚未启用增量回收，请在设置页执行一次“优化存储”"
+                            .to_string()
+                    }
+                    Err(error) => format!(
+                        "本轮归还 {:.1} MB；读取剩余空间失败：{error}",
+                        bytes as f64 / 1048576.0
+                    ),
+                };
+                let _ = self.add_job_event(&job_id, "info", "空间回收", &message);
+                bytes
+            }
+            Err(error) => {
+                let _ = self.add_job_event(
+                    &job_id,
+                    "warning",
+                    "空间回收",
+                    &format!("增量回收失败：{error}"),
+                );
+                0
+            }
+        };
+        self.update_job_progress(&job_id, 3, 3)?;
 
         let after_bytes = self.get_total_body_size_bytes().unwrap_or(0);
         let summary = serde_json::json!({
@@ -274,6 +311,7 @@ impl Storage {
             "retentionDays": capture.body_retention_days,
             "maxSizeMb": capture.body_max_size_mb,
             "pruneRatio": capture.body_prune_ratio,
+            "incrementalReclaimedBytes": incremental_reclaimed,
         })
         .to_string();
         self.finish_job(

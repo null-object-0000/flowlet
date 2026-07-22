@@ -5,6 +5,7 @@ import type { AppError } from "../../shared/errors/AppError";
 import { toAppError } from "../../platform/tauri/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../../shared/query-keys";
+import { isProxyAutoStartSuspended } from "./proxyAutoStartSuspension";
 
 /**
  * Front-end-owned proxy auto-start. Product rules (AGENTS.md §3):
@@ -26,6 +27,7 @@ export function useProxyAutoStart(opts: { enabled: boolean }) {
 
   useEffect(() => {
     if (!opts.enabled) return;
+    if (isProxyAutoStartSuspended()) return;
     if (autoStartAttempted.current) return;
     if (status.isLoading || !status.data) return;
     if (status.data.running) return;

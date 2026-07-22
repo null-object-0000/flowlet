@@ -567,6 +567,37 @@ pub fn run() {
                 "setup: state managed"
             );
 
+            // 主窗口使用独立的 WebView 数据目录，避免控制台抓取窗口访问外部站点时
+            // 产生的大量 HTTP / JS 缓存拖慢应用冷启动。旧的默认 EBWebView 目录
+            // 继续由抓取窗口使用，因此不会丢失 LongCat / Qwen 等控制台登录态。
+            let main_window_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|config| config.label == "main")
+                .cloned()
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "tauri.conf.json 缺少 main 窗口配置",
+                    )
+                })?;
+            let main_webview_data_dir = app.path().app_local_data_dir()?.join("main-webview");
+            let main_webview_t0 = std::time::Instant::now();
+            tracing::info!(
+                data_dir = %main_webview_data_dir.display(),
+                "setup: 开始创建主 WebView"
+            );
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window_config)?
+                .data_directory(main_webview_data_dir.clone())
+                .build()?;
+            tracing::info!(
+                data_dir = %main_webview_data_dir.display(),
+                t_ms = main_webview_t0.elapsed().as_millis() as u64,
+                "setup: 主 WebView 创建完成"
+            );
+
             let app_handle = app.handle();
             match core::agent_source_watcher::start_agent_source_watcher(app_handle.clone()) {
                 Ok(watcher) => {
@@ -785,6 +816,7 @@ pub fn run() {
             commands::import_all_data,
             commands::db_stats,
             commands::storage_usage_summary,
+            commands::compact_database,
             commands::read_app_meta,
             commands::write_app_meta,
             commands::cleanup_old_logs,

@@ -9,6 +9,7 @@ import { useDataImport, useDataExport } from "../../features/settings/useDataImp
 import { useDataRepair } from "../../features/settings/useDataRepair";
 import { useLogCaptureSetting } from "../../features/settings/useLogCaptureSetting";
 import { useStorageUsage } from "../../features/settings/useStorageUsage";
+import { useStorageMaintenance } from "../../features/settings/useStorageMaintenance";
 import styles from "./SettingsPageStatic.module.css";
 
 const { Paragraph, Title } = Typography;
@@ -26,6 +27,7 @@ export function SettingsPage() {
   const logCapture = useLogCaptureSetting();
   const repair = useDataRepair();
   const storageUsage = useStorageUsage();
+  const storageMaintenance = useStorageMaintenance();
   const { mutateAsync: exportAsync, isPending: exportPending, progress: exportProgress } = useDataExport();
   const dataImport = useDataImport();
   const [repairTimeRange, setRepairTimeRange] = useState<DataRepairTimeRange>("all");
@@ -87,6 +89,24 @@ export function SettingsPage() {
           if (error instanceof Error && error.message === "CANCELLED") return;
           const message = error && typeof error === "object" && "message" in error ? String(error.message) : String(error);
           Toast.error(t("数据导入失败：{message}", { message }));
+        }
+      },
+    });
+  }
+
+  function handleOptimizeStorage() {
+    Modal.confirm({
+      title: t("确认优化存储"),
+      content: t("优化会暂时暂停本地代理、重写数据库并在完成后恢复代理。期间请勿退出 Flowlet。确定继续？"),
+      okText: t("开始优化"),
+      cancelText: t("取消"),
+      onOk: async () => {
+        try {
+          const result = await storageMaintenance.mutateAsync();
+          Toast.success(t("存储优化完成，已回收 {size}", { size: formatBytes(result.reclaimedBytes) }));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          Toast.error(t("存储优化失败：{message}", { message }));
         }
       },
     });
@@ -228,7 +248,12 @@ export function SettingsPage() {
 
         <SettingSection title={t("数据管理")} description={t("修复、备份或恢复 Flowlet 的本地数据")} icon={<IconFolder />}>
           <div className={styles.managementContent}>
-            <StorageUsagePanel query={storageUsage} t={t} />
+            <StorageUsagePanel
+              query={storageUsage}
+              maintenance={storageMaintenance}
+              onOptimize={handleOptimizeStorage}
+              t={t}
+            />
 
             <div className={styles.repairPanel}>
               <div className={styles.repairIntro}>
@@ -296,9 +321,20 @@ const STORAGE_CATEGORY_LABELS = {
   backgroundTasks: "后台任务",
 } as const;
 
-function StorageUsagePanel({ query, t }: { query: ReturnType<typeof useStorageUsage>; t: ReturnType<typeof useAppPreferences>["t"] }) {
+function StorageUsagePanel({
+  query,
+  maintenance,
+  onOptimize,
+  t,
+}: {
+  query: ReturnType<typeof useStorageUsage>;
+  maintenance: ReturnType<typeof useStorageMaintenance>;
+  onOptimize: () => void;
+  t: ReturnType<typeof useAppPreferences>["t"];
+}) {
   const displayData = query.isCounting ? query.progress : (query.data ?? query.progress);
   const databaseTotal = Math.max(displayData.databaseBytes, 1);
+  const hasReclaimableSpace = displayData.reclaimableBytes >= 1024 * 1024;
   return (
     <div className={styles.storagePanel}>
       <div className={styles.storageHeader}>
@@ -308,6 +344,19 @@ function StorageUsagePanel({ query, t }: { query: ReturnType<typeof useStorageUs
         </span>
         <div className={styles.storageTotal}>
           {query.isCounting ? <small><i />{t("正在统计")}</small> : null}
+          {!query.isCounting && hasReclaimableSpace ? (
+            <small className={styles.storageReclaimable}>
+              {t("可回收 {size}", { size: formatBytes(displayData.reclaimableBytes) })}
+            </small>
+          ) : null}
+          <Button
+            size="small"
+            loading={maintenance.isPending}
+            disabled={query.isCounting || !hasReclaimableSpace}
+            onClick={onOptimize}
+          >
+            {t("优化存储")}
+          </Button>
           <b>{formatBytes(displayData.totalBytes)}</b>
         </div>
       </div>
@@ -332,7 +381,13 @@ function StorageUsagePanel({ query, t }: { query: ReturnType<typeof useStorageUs
               </div>
             ))}
           </div>
-          <small className={styles.storageNote}>{t(query.isCounting ? "正在逐页统计，记录数和占用会持续更新。" : "分类占用按数据库页统计；总占用还包含空闲页和临时文件。")}</small>
+          <small className={styles.storageNote}>
+            {t(query.isCounting
+              ? "正在逐页统计，记录数和占用会持续更新。"
+              : displayData.autoVacuumMode === 2
+                ? "分类占用按数据库页统计；清理产生的空闲页会在后续任务中增量回收。"
+                : "分类占用按数据库页统计；首次优化后将启用自动增量回收。")}
+          </small>
         </>
       ) : null}
     </div>

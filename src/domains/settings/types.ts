@@ -13,6 +13,7 @@ export interface LogCaptureConfig {
 export type StorageUsageCategoryKey =
   | "configuration"
   | "requestLogs"
+  | "bodyData"
   | "usage"
   | "agentSessions"
   | "backgroundTasks";
@@ -26,11 +27,28 @@ export interface StorageUsageCategory {
 export interface StorageUsageSummary {
   totalBytes: number;
   databaseBytes: number;
+  reclaimableBytes: number;
+  autoVacuumMode: number;
   walBytes: number;
   sharedMemoryBytes: number;
   configBytes: number;
   categorizedBytes: number;
   categories: StorageUsageCategory[];
+}
+
+export interface DatabaseMaintenanceStats {
+  databaseBytes: number;
+  pageSize: number;
+  pageCount: number;
+  freelistCount: number;
+  reclaimableBytes: number;
+  autoVacuumMode: number;
+}
+
+export interface DatabaseCompactionResult {
+  before: DatabaseMaintenanceStats;
+  after: DatabaseMaintenanceStats;
+  reclaimedBytes: number;
 }
 
 /** One entry of `channels_config.model_prices` in config.json — only the

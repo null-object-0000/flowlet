@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "create": false,
         "title": "Flowlet",
         "userAgent": "Flowlet/0.1.0",
         "width": 1200,

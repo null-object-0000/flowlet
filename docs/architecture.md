@@ -41,6 +41,7 @@ Flowlet Desktop
   │        ├─ proxy_tests.rs           代理测试
   │        ├─ rate_limiter.rs          客户端级别速率限制
   │        ├─ storage.rs               SQLite 存储与迁移
+  │        ├─ storage_maintenance.rs   SQLite 完整压缩与增量空间回收
   │        ├─ storage_config.rs        渠道 / 账号 / 模型配置读写
   │        ├─ storage_usage.rs         用量与会话聚合查询
   │        ├─ storage_stats.rs         统计查询

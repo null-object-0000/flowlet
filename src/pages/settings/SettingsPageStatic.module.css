@@ -230,6 +230,15 @@
   font-size: 11px;
 }
 
+.storageTotal > .storageReclaimable {
+  color: var(--semi-color-warning);
+  white-space: nowrap;
+}
+
+.storageTotal button {
+  flex: none;
+}
+
 .storageTotal > small i {
   width: 7px;
   height: 7px;

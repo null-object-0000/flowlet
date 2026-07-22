@@ -1,6 +1,6 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import type { LogCaptureConfig } from "./types";
-import type { ModelPriceCurrencyEntry, ModelPriceInfo, ModelPriceTierInfo, StorageUsageSummary } from "./types";
+import type { DatabaseCompactionResult, ModelPriceCurrencyEntry, ModelPriceInfo, ModelPriceTierInfo, StorageUsageSummary } from "./types";
 
 export async function getLogCaptureConfig(): Promise<LogCaptureConfig> {
   try {
@@ -64,6 +64,14 @@ export async function getStorageUsage(scanId: string) {
     return await invokeCommand<StorageUsageSummary>("storage_usage_summary", { scanId });
   } catch (error) {
     throw toAppError(error, "storage_usage_read_failed");
+  }
+}
+
+export async function compactDatabase(): Promise<DatabaseCompactionResult> {
+  try {
+    return await invokeCommand<DatabaseCompactionResult>("compact_database", undefined, Number.POSITIVE_INFINITY);
+  } catch (error) {
+    throw toAppError(error, "database_compaction_failed");
   }
 }
 

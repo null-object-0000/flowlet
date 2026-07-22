@@ -27,9 +27,12 @@ mod storage_config;
 mod storage_stats;
 #[path = "storage_tasks.rs"]
 mod storage_tasks;
+#[path = "storage_maintenance.rs"]
+mod storage_maintenance;
 #[path = "storage_usage.rs"]
 mod storage_usage;
 pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
+pub use storage_maintenance::{DatabaseCompactionResult, DatabaseMaintenanceStats};
 pub use storage_tasks::{
     AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
     BackgroundJobsFilter, BackgroundJobsPage, CleanupBackgroundJobsResult,
@@ -44,7 +47,15 @@ pub struct Storage {
 
 impl Storage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
+        let is_new_database = std::fs::metadata(path.as_ref())
+            .map(|metadata| metadata.len() == 0)
+            .unwrap_or(true);
         let connection = Connection::open(path.as_ref())?;
+        if is_new_database {
+            // auto_vacuum 必须在建表前启用；新库直接使用增量模式，后续清理任务
+            // 可以分批归还空闲页，不需要周期性重写整个数据库。
+            connection.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?;
+        }
         connection.execute_batch("PRAGMA journal_mode = WAL;")?;
         let storage = Self {
             connection: Arc::new(Mutex::new(connection)),

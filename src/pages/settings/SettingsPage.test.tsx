@@ -42,6 +42,8 @@ vi.mock("../../features/settings/useStorageUsage", () => ({
     data: {
       totalBytes: 1_572_864,
       databaseBytes: 1_500_000,
+      reclaimableBytes: 1_100_000,
+      autoVacuumMode: 2,
       walBytes: 72_000,
       sharedMemoryBytes: 0,
       configBytes: 864,
@@ -60,6 +62,8 @@ vi.mock("../../features/settings/useStorageUsage", () => ({
     progress: {
       totalBytes: 0,
       databaseBytes: 0,
+      reclaimableBytes: 0,
+      autoVacuumMode: 0,
       walBytes: 0,
       sharedMemoryBytes: 0,
       configBytes: 0,
@@ -67,6 +71,13 @@ vi.mock("../../features/settings/useStorageUsage", () => ({
       categories: [],
     },
     refetch: vi.fn(),
+  }),
+}));
+
+vi.mock("../../features/settings/useStorageMaintenance", () => ({
+  useStorageMaintenance: () => ({
+    isPending: false,
+    mutateAsync: vi.fn(),
   }),
 }));
 
@@ -98,6 +109,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("1.5 MB")).toBeInTheDocument();
     expect(screen.getByText("配置与账号")).toBeInTheDocument();
     expect(screen.getByText("Agent 会话")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "优化存储" })).toBeEnabled();
     expect(screen.getByText("导入备份会覆盖现有数据，并自动重启代理。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出数据" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入数据" })).toBeInTheDocument();

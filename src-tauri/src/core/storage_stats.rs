@@ -20,6 +20,8 @@ pub struct StorageUsageCategory {
 pub struct StorageUsageSummary {
     pub total_bytes: i64,
     pub database_bytes: i64,
+    pub reclaimable_bytes: i64,
+    pub auto_vacuum_mode: i64,
     pub wal_bytes: i64,
     pub shared_memory_bytes: i64,
     pub config_bytes: i64,
@@ -177,6 +179,15 @@ fn build_summary(
     config_bytes: i64,
     completed: bool,
 ) -> StorageUsageSummary {
+    let page_size = connection
+        .query_row("PRAGMA page_size", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0);
+    let freelist_count = connection
+        .query_row("PRAGMA freelist_count", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0);
+    let auto_vacuum_mode = connection
+        .query_row("PRAGMA auto_vacuum", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0);
     let mut categories = vec![
         summarize_category(
             table_stats,
@@ -236,6 +247,8 @@ fn build_summary(
             categorized_bytes
         },
         database_bytes,
+        reclaimable_bytes: page_size.saturating_mul(freelist_count),
+        auto_vacuum_mode,
         wal_bytes,
         shared_memory_bytes,
         config_bytes,

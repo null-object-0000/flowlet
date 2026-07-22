@@ -7,7 +7,7 @@ vi.mock("../../platform/tauri/client", () => ({
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
-import { getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, parseModelPriceCurrencies, setAutostartEnabled } from "./commands";
+import { compactDatabase, getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, parseModelPriceCurrencies, setAutostartEnabled } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
 
@@ -35,6 +35,13 @@ describe("settings command contract", () => {
     invokeMock.mockResolvedValueOnce(summary);
     await expect(getStorageUsage("scan-1")).resolves.toBe(summary);
     expect(invokeMock).toHaveBeenCalledWith("storage_usage_summary", { scanId: "scan-1" });
+  });
+
+  it("runs database compaction through the typed settings boundary", async () => {
+    const result = { before: { databaseBytes: 2048 }, after: { databaseBytes: 1024 }, reclaimedBytes: 1024 };
+    invokeMock.mockResolvedValueOnce(result);
+    await expect(compactDatabase()).resolves.toBe(result);
+    expect(invokeMock).toHaveBeenCalledWith("compact_database");
   });
 
   it("reads model price currencies through the read_config command", async () => {

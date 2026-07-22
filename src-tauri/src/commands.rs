@@ -1090,6 +1090,29 @@ pub(super) async fn storage_usage_summary(
 }
 
 #[tauri::command]
+pub(super) async fn compact_database(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::storage::DatabaseCompactionResult, String> {
+    if state.proxy.status().running {
+        return Err("优化数据库前必须先暂停代理服务".to_string());
+    }
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        tracing::info!("开始完整压缩数据库并启用增量空间回收");
+        let result = storage.compact_database().map_err(|error| error.to_string())?;
+        tracing::info!(
+            before_mb = format!("{:.1}", result.before.database_bytes as f64 / 1048576.0),
+            after_mb = format!("{:.1}", result.after.database_bytes as f64 / 1048576.0),
+            reclaimed_mb = format!("{:.1}", result.reclaimed_bytes as f64 / 1048576.0),
+            "数据库完整压缩完成"
+        );
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("数据库优化任务失败：{error}"))?
+}
+
+#[tauri::command]
 pub(super) fn read_config(state: tauri::State<'_, AppState>) -> Result<String, String> {
     let path = &state.config_path;
     crate::core::proxy::read_config_raw(path)

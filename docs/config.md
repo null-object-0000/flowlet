@@ -124,13 +124,20 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 - 缺失任何字段时使用上述默认值。
 - 修改后立即生效（热读），无需重启代理。
-- Body 以 base64 形式存入 SQLite。
+- Body 在版本化 `.flcap` 压缩帧中以 base64 表示原始字节，文件位于 SQLite 同目录的
+  `request-captures/`；SQLite 只保存随机读取所需的相对路径、offset、长度和校验和。
+- 新请求的 `req_body_b64` / `res_body_b64` SQLite 列保持 `NULL`；旧数据库中尚未迁移的
+  Body 仍可由详情与数据修复链路兼容读取。
 - UI 不再二次脱敏，展示和复制的内容与 SQLite 捕获内容一致。
 - 清理仅针对输入、输出 Token 均已完成计算的记录，确保未完成计算的记录仍可重解析。
-- 应用启动 15 分钟后执行第一次清理，之后每 15 分钟执行一次；任务在后台线程运行，并写入任务日志。每轮完成 Body 清理后，已启用增量回收的数据库最多向文件系统归还 64 MB 空闲页，避免长时间锁库。
+- 应用启动 15 分钟后执行第一次清理，之后每 15 分钟执行一次；任务在后台线程运行，并写入任务日志。每轮先把最多 200 条旧 SQLite Body 搬迁到捕获文件，文件引用提交成功后才清空旧列；随后执行过期和超限清理。完成后，已启用增量回收的数据库最多向文件系统归还 64 MB 空闲页，避免长时间锁库。
 - 过期清理与体积上限清理都会记录请求、响应 Body 各自的清理时间与原因，详情页可区分“未捕获”“数据过期被清理”和“因空间上限被清理”。
 - 体积上限是软限制：只清理至少一小时前的 Body，最近一小时的数据始终保留；若近期数据本身超过上限，则允许暂时超限，优先保证最新请求可排查。
-- Body 被清除为 `NULL` 后，SQLite 会先把对应页放入 freelist。新建数据库默认使用 `auto_vacuum = INCREMENTAL`；旧数据库需要在设置页执行一次“优化存储”，完整压缩并切换到增量模式。完整优化期间前端会暂停代理，完成或失败后恢复原运行状态；后续定时任务只做每轮最多 64 MB 的增量回收。
+- 文件 Body 清理通过重写仍有有效记录的 segment 完成：SQLite 引用事务提交后才删除旧
+  segment，不能只标记“已清理”而在文件中留下原文。旧 SQLite Body 被清除后仍会先把
+  对应页放入 freelist；新建数据库默认使用 `auto_vacuum = INCREMENTAL`，旧数据库需要在
+  设置页执行一次“优化存储”，完整压缩并切换到增量模式。完整优化期间前端会暂停代理，
+  完成或失败后恢复原运行状态；后续定时任务只做每轮最多 64 MB 的增量回收。
 
 ---
 
@@ -231,7 +238,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `supports_usage_query` | `bool` | 否 | `false` | 是否支持查询用量 |
 | `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"` |
-| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式(如 `"token_pack"` / `"pay_as_you_go"` / `"token_plan"`),value 为 `{ console_url, interceptor_js, extractor_js, aggregate? }`。页面始终自行生成 Cookie、签名和 Header；Windows/Linux 优先从原生 WebView 网络层读取目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。每轮确认原生监听 ready 或注入 ACK 后刷新；ready 超时立即结束。未捕获响应不会被判定为未登录；若监听已就绪，则展示控制台供用户完成登录、验证码或等待页面加载后重试。 |
+| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式(如 `"token_pack"` / `"pay_as_you_go"` / `"token_plan"`),value 为 `{ console_url, interceptor_js, extractor_js, aggregate? }`。`extractor_js` 返回统一汇总字段；LongCat `token_pack` 还返回完整 `token_packs` 数组，原始接口 payload 单独写入 `raw_scraped_json`。页面始终自行生成 Cookie、签名和 Header；Windows/Linux 优先从原生 WebView 网络层读取目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。每轮确认原生监听 ready 或注入 ACK 后刷新；ready 超时立即结束。未捕获响应不会被判定为未登录；用户手动刷新时展示控制台供其完成登录、验证码或等待页面加载，周期自动同步则保持窗口隐藏并把失败写入任务日志。 |
 
 **端点解析优先级**：
 

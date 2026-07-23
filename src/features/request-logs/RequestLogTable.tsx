@@ -49,7 +49,7 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
             </span>
             <span className={styles.primaryCell}>
               <strong title={row.public_model || row.virtual_model || ""}>{row.public_model || row.virtual_model || "-"}</strong>
-              <small title={`${row.method} ${row.path}`}><b>{row.method}</b> {row.path}</small>
+              <small title={`${row.method} ${row.path}`}><b>{row.method}</b> {row.path.split("?")[0]}</small>
             </span>
             <span className={styles.primaryCell}>
               <strong>{row.channel_name || row.channel_id || t("未路由")}</strong>

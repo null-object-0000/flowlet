@@ -97,7 +97,9 @@ fn value_contains_output_token(value: &serde_json::Value) -> bool {
     if non_empty_string(value.get("delta"))
         || non_empty_string(value.get("completion"))
         || non_empty_string(value.pointer("/delta/text"))
+        || non_empty_string(value.pointer("/delta/thinking"))
         || non_empty_string(value.pointer("/content_block/text"))
+        || non_empty_string(value.pointer("/content_block/thinking"))
     {
         return true;
     }
@@ -368,9 +370,17 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}
 
 "#;
+        let anthropic_thinking = br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"I need to"}}
+
+"#;
 
         assert!(!contains_sse_output_token(metadata));
         assert!(contains_sse_output_token(output));
         assert!(contains_sse_output_token(anthropic));
+        assert!(contains_sse_output_token(anthropic_thinking));
     }
 }

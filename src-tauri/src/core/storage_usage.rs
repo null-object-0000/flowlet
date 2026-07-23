@@ -1056,7 +1056,9 @@ impl Storage {
                 rl.req_headers_json, rl.req_body_b64, rl.req_body_cleared_at, rl.req_body_cleanup_reason,
                 rl.res_headers_json, rl.res_body_b64, rl.res_body_cleared_at, rl.res_body_cleanup_reason,
                 rl.is_last_attempt,
-                ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost,
+                ur.input_tokens, ur.output_tokens,
+                COALESCE(ur.total_tokens, ur.input_tokens + ur.output_tokens) AS total_tokens,
+                ur.estimated_cost,
                 rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
@@ -2055,7 +2057,7 @@ impl Storage {
                      AND rl.duration_ms > rl.ttft_ms
                     THEN 1000.0 * ur.output_tokens / (rl.duration_ms - rl.ttft_ms)
                 END),
-                COALESCE(SUM(ur.total_tokens), 0),
+                COALESCE(SUM(COALESCE(ur.total_tokens, ur.input_tokens + ur.output_tokens)), 0),
                 COALESCE(SUM(ur.input_tokens), 0),
                 COALESCE(SUM(ur.input_cached_tokens), 0),
                 COALESCE(SUM(ur.input_uncached_tokens), 0),
@@ -2107,7 +2109,9 @@ impl Storage {
                 rl.route_reason, rl.created_at,
                 rl.ttfb_ms, rl.duration_ms, rl.attempt_seq,
                 rl.is_last_attempt,
-                ur.input_tokens, ur.output_tokens, ur.total_tokens, ur.estimated_cost,
+                ur.input_tokens, ur.output_tokens,
+                COALESCE(ur.total_tokens, ur.input_tokens + ur.output_tokens) AS total_tokens,
+                ur.estimated_cost,
                 rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id

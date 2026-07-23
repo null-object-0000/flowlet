@@ -624,6 +624,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 priority: 0,
                 remark: None,
                 resource_mode: None,
+                resource_sync_mode: "manual".to_string(),
                 base_url_override: None,
                 anthropic_base_url_override: None,
                 last_used_at: None,

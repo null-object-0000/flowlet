@@ -1,8 +1,32 @@
 use super::Storage;
 use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
-    LogsFilter, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
+    ChannelAccount, LogsFilter, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
 };
+
+#[test]
+fn channel_account_resource_sync_mode_round_trips() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate account schema");
+    let account = ChannelAccount {
+        id: "account-auto-sync".to_string(),
+        channel_id: "longcat".to_string(),
+        name: "LongCat".to_string(),
+        api_key: "sk-test".to_string(),
+        resource_mode: Some("token_pack".to_string()),
+        resource_sync_mode: "auto".to_string(),
+        ..Default::default()
+    };
+
+    storage
+        .save_channel_accounts(&[account])
+        .expect("save account");
+    let accounts = storage.list_channel_accounts().expect("list accounts");
+
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].resource_sync_mode, "auto");
+}
 use base64::Engine;
 use rusqlite::Connection;
 
@@ -1026,6 +1050,123 @@ fn get_total_body_size_bytes_counts_only_non_null() {
     assert_eq!(size, size2, "null body should not affect total size");
 
     drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}
+
+#[test]
+fn request_bodies_live_in_capture_files_and_stream_updates_replace_the_reference() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet_test_capture_file_{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let storage = Storage::open(&path).expect("open storage");
+    let capture_root = storage.capture_store.root_path().to_path_buf();
+    let mut log = body_request_log("stream-capture");
+    log.is_stream = true;
+    log.duration_ms = None;
+    log.res_body_b64 = None;
+    let request_log_id = storage.insert_request_log(&log).expect("insert log");
+
+    {
+        let connection = storage.connection.lock().unwrap();
+        let sqlite_bodies: (Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT req_body_b64, res_body_b64 FROM request_logs WHERE id = ?1",
+                [&request_log_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(sqlite_bodies, (None, None));
+        let state: String = connection
+            .query_row(
+                "SELECT state FROM request_capture_refs WHERE request_log_id = ?1",
+                [&request_log_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "ready");
+    }
+
+    storage
+        .update_request_log_timing(
+            "stream-capture",
+            10,
+            Some(20),
+            30,
+            Some(r#"{"content-type":"text/event-stream"}"#.to_string()),
+            Some("c3RyZWFtLWRvbmU=".to_string()),
+            None,
+            None,
+        )
+        .expect("update stream capture");
+
+    let rows = storage
+        .list_request_logs_by_request_id("stream-capture")
+        .expect("read detail");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].req_body_b64.as_deref(), Some("aGVsbG8="));
+    assert_eq!(rows[0].res_body_b64.as_deref(), Some("c3RyZWFtLWRvbmU="));
+    assert_eq!(rows[0].capture_state.as_deref(), Some("ready"));
+
+    drop(storage);
+    let _ = std::fs::remove_dir_all(capture_root);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}
+
+#[test]
+fn migrates_legacy_sqlite_bodies_only_after_creating_a_ready_file_reference() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet_test_capture_migration_{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let storage = Storage::open(&path).expect("open storage");
+    let capture_root = storage.capture_store.root_path().to_path_buf();
+    let request_log_id = storage
+        .insert_request_log(&body_request_log("legacy-capture"))
+        .expect("insert seed");
+    {
+        let connection = storage.connection.lock().unwrap();
+        connection
+            .execute(
+                "DELETE FROM request_capture_refs WHERE request_log_id = ?1",
+                [&request_log_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE request_logs SET req_body_b64 = 'aGVsbG8=', res_body_b64 = 'd29ybGQ=' WHERE id = ?1",
+                [&request_log_id],
+            )
+            .unwrap();
+    }
+
+    assert_eq!(storage.migrate_legacy_body_data(10).unwrap(), 1);
+    {
+        let connection = storage.connection.lock().unwrap();
+        let values: (Option<String>, Option<String>, String) = connection
+            .query_row(
+                r#"SELECT rl.req_body_b64, rl.res_body_b64, refs.state
+                   FROM request_logs rl
+                   JOIN request_capture_refs refs ON refs.request_log_id = rl.id
+                   WHERE rl.id = ?1"#,
+                [&request_log_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(values, (None, None, "ready".to_string()));
+    }
+    let rows = storage
+        .list_request_logs_by_request_id("legacy-capture")
+        .unwrap();
+    assert_eq!(rows[0].req_body_b64.as_deref(), Some("aGVsbG8="));
+    assert_eq!(rows[0].res_body_b64.as_deref(), Some("d29ybGQ="));
+
+    drop(storage);
+    let _ = std::fs::remove_dir_all(capture_root);
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
     }

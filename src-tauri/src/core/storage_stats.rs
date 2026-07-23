@@ -25,6 +25,7 @@ pub struct StorageUsageSummary {
     pub wal_bytes: i64,
     pub shared_memory_bytes: i64,
     pub config_bytes: i64,
+    pub capture_bytes: i64,
     pub categorized_bytes: i64,
     pub categories: Vec<StorageUsageCategory>,
 }
@@ -54,6 +55,7 @@ impl Storage {
         let wal_bytes = file_size(&sidecar_path(self.db_path.as_ref(), "-wal"));
         let shared_memory_bytes = file_size(&sidecar_path(self.db_path.as_ref(), "-shm"));
         let config_bytes = config_bytes.max(0);
+        let (capture_files, capture_bytes) = self.capture_store.disk_usage();
 
         if self.db_path.as_os_str() == ":memory:" {
             let connection = self
@@ -66,6 +68,8 @@ impl Storage {
                 wal_bytes,
                 shared_memory_bytes,
                 config_bytes,
+                capture_files,
+                capture_bytes,
                 &mut on_progress,
             )
         } else {
@@ -80,6 +84,8 @@ impl Storage {
                 wal_bytes,
                 shared_memory_bytes,
                 config_bytes,
+                capture_files,
+                capture_bytes,
                 &mut on_progress,
             )
         }
@@ -94,6 +100,8 @@ fn summarize_connection<F>(
     wal_bytes: i64,
     shared_memory_bytes: i64,
     config_bytes: i64,
+    capture_files: i64,
+    capture_bytes: i64,
     on_progress: &mut F,
 ) -> Result<StorageUsageSummary, StorageError>
 where
@@ -113,6 +121,8 @@ where
             wal_bytes,
             shared_memory_bytes,
             config_bytes,
+            capture_files,
+            capture_bytes,
             false,
         ));
     })?;
@@ -123,6 +133,8 @@ where
         wal_bytes,
         shared_memory_bytes,
         config_bytes,
+        capture_files,
+        capture_bytes,
         true,
     );
     on_progress(summary.clone());
@@ -177,6 +189,8 @@ fn build_summary(
     wal_bytes: i64,
     shared_memory_bytes: i64,
     config_bytes: i64,
+    capture_files: i64,
+    capture_bytes: i64,
     completed: bool,
 ) -> StorageUsageSummary {
     let page_size = connection
@@ -202,7 +216,11 @@ fn build_summary(
                 "app_meta",
             ],
         ),
-        summarize_category(table_stats, "requestLogs", &["request_logs"]),
+        summarize_category(
+            table_stats,
+            "requestLogs",
+            &["request_logs", "request_capture_refs"],
+        ),
         summarize_category(
             table_stats,
             "usage",
@@ -220,13 +238,20 @@ fn build_summary(
         ),
     ];
     categories[0].allocated_bytes += config_bytes;
+    categories.push(StorageUsageCategory {
+        key: "requestCaptures".to_string(),
+        row_count: capture_files,
+        allocated_bytes: capture_bytes,
+    });
 
     // Body 数据单独统计：直接查询 req_body_b64 + res_body_b64 的实际字节数。
     // 这部分是可清理的（定时任务目标），混在 request_logs 的页统计里看不清楚。
     if let Ok((body_bytes, body_rows)) = connection.query_row(
-        r#"SELECT COALESCE(SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, ''))), 0),
-                  COUNT(*) FILTER (WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
-           FROM request_logs"#,
+        r#"SELECT
+             COALESCE((SELECT SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, ''))) FROM request_logs), 0)
+               + COALESCE((SELECT SUM(req_body_bytes + res_body_bytes) FROM request_capture_refs WHERE state = 'ready'), 0),
+             (SELECT COUNT(*) FROM request_logs WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
+               + (SELECT COUNT(*) FROM request_capture_refs WHERE state = 'ready' AND (req_body_bytes > 0 OR res_body_bytes > 0))"#,
         [],
         |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
     ) {
@@ -242,7 +267,7 @@ fn build_summary(
     let categorized_bytes = categories.iter().map(|item| item.allocated_bytes).sum();
     StorageUsageSummary {
         total_bytes: if completed {
-            database_bytes + wal_bytes + shared_memory_bytes + config_bytes
+            database_bytes + wal_bytes + shared_memory_bytes + config_bytes + capture_bytes
         } else {
             categorized_bytes
         },
@@ -252,6 +277,7 @@ fn build_summary(
         wal_bytes,
         shared_memory_bytes,
         config_bytes,
+        capture_bytes,
         categorized_bytes,
         categories,
     }
@@ -318,7 +344,11 @@ mod tests {
 
         assert!(summary.total_bytes > summary.config_bytes);
         assert_eq!(summary.config_bytes, 256);
-        assert_eq!(summary.categories.len(), 5);
+        assert_eq!(summary.categories.len(), 6);
+        assert!(summary
+            .categories
+            .iter()
+            .any(|category| category.key == "requestCaptures"));
         let request_logs = summary
             .categories
             .iter()

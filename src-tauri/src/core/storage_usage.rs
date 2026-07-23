@@ -1,4 +1,7 @@
 use super::{Storage, StorageError};
+use super::request_capture::{
+    RequestCapturePointer, RequestCaptureRecord,
+};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentSessionRepairResult, AgentSessionRow,
     AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter, LogsPageResult,
@@ -8,11 +11,18 @@ use crate::core::config::{
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_response_usage, extract_stream_usage};
 use base64::Engine;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 
 const MAX_AGENT_SESSION_ID_BYTES: usize = 512;
 type AgentSessionKey = (String, String);
+
+#[derive(Debug)]
+struct StoredCaptureRef {
+    pointer: Option<RequestCapturePointer>,
+    state: String,
+    failure_reason: Option<String>,
+}
 
 fn agent_session_key(row: &AgentSessionRow) -> AgentSessionKey {
     (row.agent_type.clone(), row.session_id.clone())
@@ -407,64 +417,293 @@ impl Storage {
 
     // ─── Request Logs ────────────────────────────────────────────────────────
 
-    pub fn insert_request_log(&self, log: &RequestLogInput) -> Result<(), StorageError> {
+    pub fn insert_request_log(&self, log: &RequestLogInput) -> Result<String, StorageError> {
+        let request_log_id = uuid::Uuid::new_v4().simple().to_string();
+        let record = RequestCaptureRecord::from_log(request_log_id.clone(), log);
+        {
+            // Capture-file and SQLite maintenance always acquire locks in this order.
+            // This prevents a segment compaction (writer -> DB) from deadlocking with
+            // a request insert (DB -> writer).
+            let writer_guard = self.capture_store.lock_writer()?;
+            let mut connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                r#"
+                INSERT INTO request_logs (
+                    id, request_id, agent_type, agent_session_id, parent_agent_session_id,
+                    client_id, client_name, channel_id, channel_name,
+                    account_id, account_name, client_protocol, upstream_protocol,
+                    virtual_model, public_model, upstream_model, request_type, method, path,
+                    status, latency_ms, is_stream, error_message, fallback_count,
+                    route_reason, created_at,
+                    ttfb_ms, duration_ms, attempt_seq, req_headers_json, req_body_b64,
+                    res_headers_json, res_body_b64, is_last_attempt, upstream_url
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                    ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, datetime('now'),
+                    ?26, ?27, ?28, ?29, NULL, ?30, NULL, ?31, ?32
+                )
+                "#,
+                params![
+                    request_log_id,
+                    log.request_id,
+                    log.agent_type,
+                    log.agent_session_id,
+                    log.parent_agent_session_id,
+                    log.client_id,
+                    log.client_name,
+                    log.channel_id,
+                    log.channel_name,
+                    log.account_id,
+                    log.account_name,
+                    log.client_protocol,
+                    log.upstream_protocol,
+                    log.virtual_model,
+                    log.public_model,
+                    log.upstream_model,
+                    log.request_type,
+                    log.method,
+                    log.path,
+                    log.status,
+                    log.latency_ms,
+                    log.is_stream as i64,
+                    log.error_message,
+                    log.fallback_count,
+                    log.route_reason,
+                    log.ttfb_ms,
+                    log.duration_ms,
+                    log.attempt_seq,
+                    log.req_headers_json,
+                    log.res_headers_json,
+                    log.is_last_attempt as i64,
+                    log.upstream_url,
+                ],
+            )?;
+            transaction.execute(
+                r#"INSERT INTO request_capture_refs (
+                    request_log_id, state, format_version, req_body_bytes, res_body_bytes,
+                    created_at, updated_at
+                ) VALUES (?1, 'pending', 1, 0, 0, datetime('now'), datetime('now'))"#,
+                [&request_log_id],
+            )?;
+            match self.capture_store.append_locked(&record, &writer_guard) {
+                Ok(pointer) => {
+                    transaction.execute(
+                        r#"UPDATE request_capture_refs
+                           SET storage_key = ?2, frame_offset = ?3, frame_length = ?4,
+                               checksum = ?5, format_version = ?6, state = 'ready',
+                               failure_reason = NULL, req_body_bytes = ?7, res_body_bytes = ?8,
+                               finalized_at = datetime('now'), updated_at = datetime('now')
+                           WHERE request_log_id = ?1"#,
+                        params![
+                            request_log_id,
+                            pointer.storage_key,
+                            pointer.offset as i64,
+                            pointer.length as i64,
+                            pointer.checksum,
+                            pointer.format_version as i64,
+                            pointer.req_body_bytes,
+                            pointer.res_body_bytes,
+                        ],
+                    )?;
+                }
+                Err(error) => {
+                    let reason = error.to_string();
+                    transaction.execute(
+                        r#"UPDATE request_capture_refs
+                           SET state = 'failed', failure_reason = ?2, updated_at = datetime('now')
+                           WHERE request_log_id = ?1"#,
+                        params![request_log_id, reason],
+                    )?;
+                    tracing::warn!(request_log_id, "写入请求明细文件失败: {reason}");
+                }
+            }
+            transaction.commit()?;
+        }
+        Ok(request_log_id)
+    }
+
+    fn set_request_capture_ready(
+        &self,
+        request_log_id: &str,
+        pointer: &RequestCapturePointer,
+    ) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         connection.execute(
-            r#"
-            INSERT INTO request_logs (
-                id, request_id, agent_type, agent_session_id, parent_agent_session_id,
-                client_id, client_name, channel_id, channel_name,
-                account_id, account_name, client_protocol, upstream_protocol,
-                virtual_model, public_model, upstream_model, request_type, method, path,
-                status, latency_ms, is_stream, error_message, fallback_count,
-                route_reason, created_at,
-                ttfb_ms, duration_ms, attempt_seq, req_headers_json, req_body_b64,
-                res_headers_json, res_body_b64, is_last_attempt, upstream_url
-            ) VALUES (
-                lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, datetime('now'),
-                ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33
-            )
-            "#,
+            r#"UPDATE request_capture_refs
+               SET storage_key = ?2,
+                   frame_offset = ?3,
+                   frame_length = ?4,
+                   checksum = ?5,
+                   format_version = ?6,
+                   state = 'ready',
+                   failure_reason = NULL,
+                   req_body_bytes = ?7,
+                   res_body_bytes = ?8,
+                   finalized_at = datetime('now'),
+                   updated_at = datetime('now')
+               WHERE request_log_id = ?1"#,
             params![
-                log.request_id,
-                log.agent_type,
-                log.agent_session_id,
-                log.parent_agent_session_id,
-                log.client_id,
-                log.client_name,
-                log.channel_id,
-                log.channel_name,
-                log.account_id,
-                log.account_name,
-                log.client_protocol,
-                log.upstream_protocol,
-                log.virtual_model,
-                log.public_model,
-                log.upstream_model,
-                log.request_type,
-                log.method,
-                log.path,
-                log.status,
-                log.latency_ms,
-                log.is_stream as i64,
-                log.error_message,
-                log.fallback_count,
-                log.route_reason,
-                log.ttfb_ms,
-                log.duration_ms,
-                log.attempt_seq,
-                log.req_headers_json,
-                log.req_body_b64,
-                log.res_headers_json,
-                log.res_body_b64,
-                log.is_last_attempt as i64,
-                log.upstream_url,
+                request_log_id,
+                pointer.storage_key,
+                pointer.offset as i64,
+                pointer.length as i64,
+                pointer.checksum,
+                pointer.format_version as i64,
+                pointer.req_body_bytes,
+                pointer.res_body_bytes,
             ],
         )?;
+        Ok(())
+    }
+
+    fn set_request_capture_failed(
+        &self,
+        request_log_id: &str,
+        reason: &str,
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection.execute(
+            r#"UPDATE request_capture_refs
+               SET state = 'failed', failure_reason = ?2, updated_at = datetime('now')
+               WHERE request_log_id = ?1"#,
+            params![request_log_id, reason],
+        )?;
+        Ok(())
+    }
+
+    fn request_capture_ref(
+        &self,
+        request_log_id: &str,
+    ) -> Result<Option<StoredCaptureRef>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection
+            .query_row(
+                r#"SELECT storage_key, frame_offset, frame_length, checksum,
+                          format_version, state, req_body_bytes, res_body_bytes, failure_reason
+                   FROM request_capture_refs
+                   WHERE request_log_id = ?1"#,
+                [request_log_id],
+                |row| {
+                    let storage_key: Option<String> = row.get(0)?;
+                    let offset: Option<i64> = row.get(1)?;
+                    let length: Option<i64> = row.get(2)?;
+                    let checksum: Option<String> = row.get(3)?;
+                    let format_version: i64 = row.get(4)?;
+                    let state: String = row.get(5)?;
+                    let req_body_bytes: i64 = row.get(6)?;
+                    let res_body_bytes: i64 = row.get(7)?;
+                    let failure_reason: Option<String> = row.get(8)?;
+                    let pointer = match (storage_key, offset, length, checksum) {
+                        (Some(storage_key), Some(offset), Some(length), Some(checksum))
+                            if offset >= 0 && length >= 0 =>
+                        {
+                            Some(RequestCapturePointer {
+                                storage_key,
+                                offset: offset as u64,
+                                length: length as u64,
+                                checksum,
+                                format_version: format_version as u16,
+                                req_body_bytes,
+                                res_body_bytes,
+                            })
+                        }
+                        _ => None,
+                    };
+                    Ok(StoredCaptureRef {
+                        pointer,
+                        state,
+                        failure_reason,
+                    })
+                },
+            )
+            .optional()
+            .map_err(StorageError::from)
+    }
+
+    fn read_request_capture(
+        &self,
+        request_log_id: &str,
+    ) -> Result<Option<RequestCaptureRecord>, StorageError> {
+        let writer_guard = self.capture_store.lock_writer()?;
+        self.read_request_capture_locked(request_log_id, &writer_guard)
+    }
+
+    fn read_request_capture_locked(
+        &self,
+        request_log_id: &str,
+        _writer_guard: &std::sync::MutexGuard<'_, ()>,
+    ) -> Result<Option<RequestCaptureRecord>, StorageError> {
+        let Some(reference) = self.request_capture_ref(request_log_id)? else {
+            return Ok(None);
+        };
+        if reference.state != "ready" {
+            return Ok(None);
+        }
+        let Some(pointer) = reference.pointer else {
+            return Ok(None);
+        };
+        match self.capture_store.read(&pointer) {
+            Ok(record) if record.request_log_id == request_log_id => Ok(Some(record)),
+            Ok(_) => {
+                self.mark_request_capture_corrupt(request_log_id, "日志 ID 与捕获记录不一致")?;
+                Ok(None)
+            }
+            Err(error) => {
+                let reason = error.to_string();
+                self.mark_request_capture_corrupt(request_log_id, &reason)?;
+                tracing::warn!(request_log_id, "读取请求明细文件失败: {reason}");
+                Ok(None)
+            }
+        }
+    }
+
+    fn mark_request_capture_corrupt(
+        &self,
+        request_log_id: &str,
+        reason: &str,
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection.execute(
+            r#"UPDATE request_capture_refs
+               SET state = 'corrupt', failure_reason = ?2, updated_at = datetime('now')
+               WHERE request_log_id = ?1"#,
+            params![request_log_id, reason],
+        )?;
+        Ok(())
+    }
+
+    fn hydrate_request_capture(&self, row: &mut RequestLogRow) -> Result<(), StorageError> {
+        if let Some(reference) = self.request_capture_ref(&row.id)? {
+            row.capture_state = Some(reference.state);
+            row.capture_failure_reason = reference.failure_reason;
+        }
+        if let Some(record) = self.read_request_capture(&row.id)? {
+            row.req_headers_json = row.req_headers_json.take().or(record.req_headers_json);
+            row.req_body_b64 = record.req_body_b64;
+            row.res_headers_json = row.res_headers_json.take().or(record.res_headers_json);
+            row.res_body_b64 = record.res_body_b64;
+        } else if row.capture_state.as_deref() == Some("ready") {
+            if let Some(reference) = self.request_capture_ref(&row.id)? {
+                row.capture_state = Some(reference.state);
+                row.capture_failure_reason = reference.failure_reason;
+            }
+        }
         Ok(())
     }
 
@@ -699,6 +938,8 @@ impl Storage {
                 res_body_b64: row.get(31)?,
                 res_body_cleared_at: row.get(32)?,
                 res_body_cleanup_reason: row.get(33)?,
+                capture_state: None,
+                capture_failure_reason: None,
                 is_last_attempt: row.get::<_, i64>(34)? != 0,
                 ttft_ms: row.get(35)?,
                 upstream_url: row.get(36)?,
@@ -713,6 +954,11 @@ impl Storage {
         let mut logs = Vec::new();
         for row in rows {
             logs.push(row?);
+        }
+        drop(stmt);
+        drop(connection);
+        for log in &mut logs {
+            self.hydrate_request_capture(log)?;
         }
         Ok(logs)
     }
@@ -854,6 +1100,8 @@ impl Storage {
                 res_body_b64: row.get(31)?,
                 res_body_cleared_at: row.get(32)?,
                 res_body_cleanup_reason: row.get(33)?,
+                capture_state: None,
+                capture_failure_reason: None,
                 is_last_attempt: row.get::<_, i64>(34)? != 0,
                 input_tokens: row.get(35)?,
                 output_tokens: row.get(36)?,
@@ -869,6 +1117,11 @@ impl Storage {
         for row in rows {
             logs.push(row?);
         }
+        drop(stmt);
+        drop(connection);
+        for log in &mut logs {
+            self.hydrate_request_capture(log)?;
+        }
         Ok(logs)
     }
 
@@ -883,37 +1136,75 @@ impl Storage {
         error_message: Option<String>,
         route_reason: Option<String>,
     ) -> Result<(), StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        connection.execute(
-            r#"
-            UPDATE request_logs
-            SET ttfb_ms = ?2,
-                ttft_ms = ?3,
-                duration_ms = ?4,
-                res_headers_json = ?5,
-                res_body_b64 = ?6,
-                res_body_cleared_at = CASE WHEN ?6 IS NOT NULL THEN NULL ELSE res_body_cleared_at END,
-                res_body_cleanup_reason = CASE WHEN ?6 IS NOT NULL THEN NULL ELSE res_body_cleanup_reason END,
-                error_message = COALESCE(?7, error_message),
-                route_reason = COALESCE(?8, route_reason)
-            WHERE request_id = ?1
-              AND is_last_attempt = 1
-              AND is_stream = 1
-            "#,
-            params![
-                request_id,
-                ttfb_ms,
-                ttft_ms,
-                duration_ms,
-                res_headers_json,
-                res_body_b64,
-                error_message,
-                route_reason,
-            ],
-        )?;
+        let request_log_id = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            connection.execute(
+                r#"
+                UPDATE request_logs
+                SET ttfb_ms = ?2,
+                    ttft_ms = ?3,
+                    duration_ms = ?4,
+                    res_headers_json = ?5,
+                    res_body_b64 = CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM request_capture_refs refs
+                            WHERE refs.request_log_id = request_logs.id
+                        ) THEN NULL
+                        ELSE ?6
+                    END,
+                    res_body_cleared_at = CASE WHEN ?6 IS NOT NULL THEN NULL ELSE res_body_cleared_at END,
+                    res_body_cleanup_reason = CASE WHEN ?6 IS NOT NULL THEN NULL ELSE res_body_cleanup_reason END,
+                    error_message = COALESCE(?7, error_message),
+                    route_reason = COALESCE(?8, route_reason)
+                WHERE request_id = ?1
+                  AND is_last_attempt = 1
+                  AND is_stream = 1
+                "#,
+                params![
+                    request_id,
+                    ttfb_ms,
+                    ttft_ms,
+                    duration_ms,
+                    res_headers_json,
+                    res_body_b64,
+                    error_message,
+                    route_reason,
+                ],
+            )?;
+            connection
+                .query_row(
+                    r#"SELECT id FROM request_logs
+                       WHERE request_id = ?1 AND is_last_attempt = 1 AND is_stream = 1
+                       ORDER BY created_at DESC LIMIT 1"#,
+                    [request_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+        };
+
+        if let Some(request_log_id) = request_log_id {
+            let writer_guard = self.capture_store.lock_writer()?;
+            if let Some(mut record) =
+                self.read_request_capture_locked(&request_log_id, &writer_guard)?
+            {
+                record.res_headers_json = res_headers_json;
+                record.res_body_b64 = res_body_b64;
+                record.error_message = error_message.or(record.error_message);
+                record.route_reason = route_reason.or(record.route_reason);
+                record.incomplete = false;
+                match self.capture_store.append_locked(&record, &writer_guard) {
+                    Ok(pointer) => self.set_request_capture_ready(&request_log_id, &pointer)?,
+                    Err(error) => {
+                        let reason = error.to_string();
+                        self.set_request_capture_failed(&request_log_id, &reason)?;
+                        tracing::warn!(request_log_id, "补写流式请求明细文件失败: {reason}");
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1007,6 +1298,7 @@ impl Storage {
     /// complete SSE `[DONE]` marker.
     pub fn reanalyze_captured_usage(&self, time_range: &str) -> Result<usize, StorageError> {
         struct CapturedUsageRow {
+            request_log_id: String,
             request_id: String,
             client_id: Option<String>,
             client_name: Option<String>,
@@ -1019,7 +1311,7 @@ impl Storage {
             virtual_model: Option<String>,
             upstream_model: Option<String>,
             is_stream: bool,
-            res_body_b64: String,
+            res_body_b64: Option<String>,
         }
 
         let rows = {
@@ -1030,13 +1322,14 @@ impl Storage {
             let mut stmt = connection.prepare(&format!(
                 r#"
                 SELECT
-                    rl.request_id, rl.client_id, rl.client_name,
+                    rl.id, rl.request_id, rl.client_id, rl.client_name,
                     rl.channel_id, rl.channel_name, rl.account_id, rl.account_name,
                     rl.client_protocol, rl.upstream_protocol,
                     rl.virtual_model, rl.upstream_model, rl.is_stream, rl.res_body_b64
                 FROM request_logs rl
+                LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
                 WHERE rl.is_last_attempt = 1
-                  AND rl.res_body_b64 IS NOT NULL
+                  AND (rl.res_body_b64 IS NOT NULL OR (refs.state = 'ready' AND refs.res_body_bytes > 0))
                   AND {}
                 "#,
                 repair_time_clause("rl.created_at", time_range)
@@ -1044,19 +1337,20 @@ impl Storage {
             let rows = stmt
                 .query_map([], |row| {
                     Ok(CapturedUsageRow {
-                        request_id: row.get(0)?,
-                        client_id: row.get(1)?,
-                        client_name: row.get(2)?,
-                        channel_id: row.get(3)?,
-                        channel_name: row.get(4)?,
-                        account_id: row.get(5)?,
-                        account_name: row.get(6)?,
-                        client_protocol: row.get(7)?,
-                        upstream_protocol: row.get(8)?,
-                        virtual_model: row.get(9)?,
-                        upstream_model: row.get(10)?,
-                        is_stream: row.get::<_, i64>(11)? != 0,
-                        res_body_b64: row.get(12)?,
+                        request_log_id: row.get(0)?,
+                        request_id: row.get(1)?,
+                        client_id: row.get(2)?,
+                        client_name: row.get(3)?,
+                        channel_id: row.get(4)?,
+                        channel_name: row.get(5)?,
+                        account_id: row.get(6)?,
+                        account_name: row.get(7)?,
+                        client_protocol: row.get(8)?,
+                        upstream_protocol: row.get(9)?,
+                        virtual_model: row.get(10)?,
+                        upstream_model: row.get(11)?,
+                        is_stream: row.get::<_, i64>(12)? != 0,
+                        res_body_b64: row.get(13)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1064,8 +1358,16 @@ impl Storage {
         };
 
         let mut parsed = 0usize;
-        for row in rows {
-            let Ok(body) = base64::engine::general_purpose::STANDARD.decode(&row.res_body_b64)
+        for mut row in rows {
+            if row.res_body_b64.is_none() {
+                row.res_body_b64 = self
+                    .read_request_capture(&row.request_log_id)?
+                    .and_then(|record| record.res_body_b64);
+            }
+            let Some(res_body_b64) = row.res_body_b64.as_deref() else {
+                continue;
+            };
+            let Ok(body) = base64::engine::general_purpose::STANDARD.decode(res_body_b64)
             else {
                 continue;
             };
@@ -1102,6 +1404,114 @@ impl Storage {
         }
 
         Ok(parsed)
+    }
+
+    /// Incrementally moves legacy SQLite Body columns into capture files. The file frame
+    /// is written and its checksum/reference committed before the legacy columns become NULL.
+    pub fn migrate_legacy_body_data(&self, batch_size: usize) -> Result<usize, StorageError> {
+        let batch_size = batch_size.clamp(1, 500) as i64;
+        let records = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let mut stmt = connection.prepare(
+                r#"SELECT
+                     rl.id, rl.request_id, rl.attempt_seq, rl.created_at,
+                     rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id,
+                     rl.client_id, rl.client_name, rl.channel_id, rl.channel_name,
+                     rl.account_id, rl.account_name, rl.client_protocol, rl.upstream_protocol,
+                     rl.virtual_model, rl.public_model, rl.upstream_model, rl.request_type,
+                     rl.method, rl.path, rl.upstream_url, rl.status, rl.is_stream,
+                     rl.error_message, rl.route_reason, rl.req_headers_json, rl.req_body_b64,
+                     rl.res_headers_json, rl.res_body_b64, rl.duration_ms
+                   FROM request_logs rl
+                   WHERE (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL)
+                     AND NOT EXISTS (
+                       SELECT 1 FROM request_capture_refs refs WHERE refs.request_log_id = rl.id
+                     )
+                   ORDER BY rl.created_at ASC
+                   LIMIT ?1"#,
+            )?;
+            let rows = stmt
+                .query_map([batch_size], |row| {
+                    Ok(RequestCaptureRecord {
+                    format_version: 1,
+                    request_log_id: row.get(0)?,
+                    request_id: row.get(1)?,
+                    attempt_seq: row.get(2)?,
+                    captured_at: row.get(3)?,
+                    agent_type: row.get(4)?,
+                    agent_session_id: row.get(5)?,
+                    parent_agent_session_id: row.get(6)?,
+                    client_id: row.get(7)?,
+                    client_name: row.get(8)?,
+                    channel_id: row.get(9)?,
+                    channel_name: row.get(10)?,
+                    account_id: row.get(11)?,
+                    account_name: row.get(12)?,
+                    client_protocol: row.get(13)?,
+                    upstream_protocol: row.get(14)?,
+                    virtual_model: row.get(15)?,
+                    public_model: row.get(16)?,
+                    upstream_model: row.get(17)?,
+                    request_type: row.get(18)?,
+                    method: row.get(19)?,
+                    path: row.get(20)?,
+                    upstream_url: row.get(21)?,
+                    status: row.get(22)?,
+                    is_stream: row.get::<_, i64>(23)? != 0,
+                    error_message: row.get(24)?,
+                    route_reason: row.get(25)?,
+                    req_headers_json: row.get(26)?,
+                    req_body_b64: row.get(27)?,
+                    res_headers_json: row.get(28)?,
+                    res_body_b64: row.get(29)?,
+                    incomplete: row.get::<_, Option<i64>>(30)?.is_none()
+                        && row.get::<_, i64>(23)? != 0,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+
+        let mut migrated = 0usize;
+        for record in records {
+            let writer_guard = self.capture_store.lock_writer()?;
+            let pointer = self.capture_store.append_locked(&record, &writer_guard)?;
+            let mut connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let transaction = connection.transaction()?;
+            let inserted = transaction.execute(
+                r#"INSERT OR IGNORE INTO request_capture_refs (
+                     request_log_id, storage_key, frame_offset, frame_length, checksum,
+                     format_version, state, failure_reason, req_body_bytes, res_body_bytes,
+                     finalized_at, created_at, updated_at
+                   ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'ready', NULL, ?7, ?8,
+                             datetime('now'), datetime('now'), datetime('now'))"#,
+                params![
+                    record.request_log_id,
+                    pointer.storage_key,
+                    pointer.offset as i64,
+                    pointer.length as i64,
+                    pointer.checksum,
+                    pointer.format_version as i64,
+                    pointer.req_body_bytes,
+                    pointer.res_body_bytes,
+                ],
+            )?;
+            if inserted == 1 {
+                transaction.execute(
+                    "UPDATE request_logs SET req_body_b64 = NULL, res_body_b64 = NULL WHERE id = ?1",
+                    [&record.request_log_id],
+                )?;
+                transaction.commit()?;
+                migrated += 1;
+            }
+        }
+        Ok(migrated)
     }
 
     pub fn analyze_unknown_usage(&self, time_range: &str) -> Result<usize, StorageError> {
@@ -1752,6 +2162,8 @@ impl Storage {
                 res_body_b64: None,
                 res_body_cleared_at: None,
                 res_body_cleanup_reason: None,
+                capture_state: None,
+                capture_failure_reason: None,
                 is_last_attempt: row.get::<_, i64>(26)? != 0,
                 input_tokens: row.get(27)?,
                 output_tokens: row.get(28)?,

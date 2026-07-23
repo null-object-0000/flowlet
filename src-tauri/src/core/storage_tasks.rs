@@ -182,13 +182,37 @@ impl Storage {
             "Body 清理",
             "按保留策略自动清理过期与超限的请求/响应 Body",
             "scheduled",
-            3,
+            4,
             "开始按保留策略自动清理请求与响应 Body",
         )?;
 
         let before_bytes = self.get_total_body_size_bytes().unwrap_or(0);
 
-        // 第一步：过期清理（超过保留天数的 Body 自动清除）
+        // 第一步：每轮小批量搬迁旧 SQLite Body。新文件引用提交后才清空旧列，
+        // 中断时未完成的记录会在下一轮继续，不阻塞代理启动。
+        let migrated = match self.migrate_legacy_body_data(200) {
+            Ok(count) => {
+                let _ = self.add_job_event(
+                    &job_id,
+                    "info",
+                    "旧数据迁移",
+                    &format!("本轮已把 {count} 条旧 SQLite Body 搬迁到请求明细文件"),
+                );
+                count
+            }
+            Err(error) => {
+                let _ = self.add_job_event(
+                    &job_id,
+                    "warning",
+                    "旧数据迁移",
+                    &format!("旧 Body 搬迁失败：{error}"),
+                );
+                0
+            }
+        };
+        self.update_job_progress(&job_id, 1, 4)?;
+
+        // 第二步：过期清理（超过保留天数的 Body 自动清除）
         let expired_cleared = match self.cleanup_expired_body_data(capture.body_retention_days) {
             Ok(n) => {
                 let _ = self.add_job_event(
@@ -212,9 +236,9 @@ impl Storage {
                 0
             }
         };
-        self.update_job_progress(&job_id, 1, 3)?;
+        self.update_job_progress(&job_id, 2, 4)?;
 
-        // 第二步：超限清理（体积超过上限时，只清理至少一小时前的完整记录）。
+        // 第三步：超限清理（体积超过上限时，只清理至少一小时前的完整记录）。
         // 最近一小时是安全窗口；若近期数据自身超过上限，允许暂时超限。
         let mut pruned = 0usize;
         if capture.body_max_size_mb > 0 {
@@ -263,9 +287,9 @@ impl Storage {
         } else {
             let _ = self.add_job_event(&job_id, "info", "超限清理", "体积上限设为 0（不限制），跳过");
         }
-        self.update_job_progress(&job_id, 2, 3)?;
+        self.update_job_progress(&job_id, 3, 4)?;
 
-        // 第三步：新库或已执行过一次完整优化的旧库，按固定上限增量归还磁盘页。
+        // 第四步：新库或已执行过一次完整优化的旧库，按固定上限增量归还磁盘页。
         // 旧库 auto_vacuum=NONE 时安全跳过，由设置页提示用户先执行一次完整优化。
         let incremental_reclaimed = match self.incremental_vacuum(
             super::storage_maintenance::SCHEDULED_INCREMENTAL_VACUUM_BYTES,
@@ -299,11 +323,12 @@ impl Storage {
                 0
             }
         };
-        self.update_job_progress(&job_id, 3, 3)?;
+        self.update_job_progress(&job_id, 4, 4)?;
 
         let after_bytes = self.get_total_body_size_bytes().unwrap_or(0);
         let summary = serde_json::json!({
             "expiredCleared": expired_cleared,
+            "legacyMigrated": migrated,
             "pruned": pruned,
             "beforeBytes": before_bytes,
             "afterBytes": after_bytes,

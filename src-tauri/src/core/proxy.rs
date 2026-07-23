@@ -1256,7 +1256,7 @@ async fn build_response(
         // 流式：先发一条未完成日志，duration_ms 保持 NULL；流结束后再补
         // duration / res_body_b64。前端据此只在请求尚未完成时刷新详情。
         log.duration_ms = None;
-        record_request_log(storage.clone(), log);
+        record_request_log_and_wait(storage.clone(), log).await;
 
         let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
         let res_content_encoding = proxy_http::content_encoding_value(&headers);
@@ -1461,6 +1461,15 @@ fn record_request_log(storage: Storage, log: RequestLogInput) {
             tracing::warn!("写入请求日志失败: {err}");
         }
     });
+}
+
+async fn record_request_log_and_wait(storage: Storage, log: RequestLogInput) {
+    let result = tokio::task::spawn_blocking(move || storage.insert_request_log(&log)).await;
+    match result {
+        Ok(Ok(_)) => {}
+        Ok(Err(err)) => tracing::warn!("写入请求日志失败: {err}"),
+        Err(err) => tracing::warn!("请求日志写入任务失败: {err}"),
+    }
 }
 
 // ─── Streaming response body capture ────────────────────────────────────────

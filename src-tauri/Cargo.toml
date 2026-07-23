@@ -30,6 +30,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
@@ -44,6 +45,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "chrono
 uuid = { version = "1", features = ["v4", "serde"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
+zstd = "0.13"
 
 [target.'cfg(windows)'.dependencies]
 # Tauri 的高层 on_web_resource_request 只覆盖自定义协议；控制台是外部 HTTPS，

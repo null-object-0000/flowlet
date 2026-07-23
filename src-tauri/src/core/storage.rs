@@ -1,10 +1,15 @@
 use super::config::{AuthStrategy, ConfigBundle, ModelPrice};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::{
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use thiserror::Error;
+
+#[path = "request_capture.rs"]
+mod request_capture;
+use request_capture::RequestCaptureStore;
 
 /// 体积上限是软限制：最近一小时的 Body 始终保留，避免用户刚完成请求就看不到详情。
 const BODY_SIZE_PRUNE_MIN_AGE_HOURS: i64 = 1;
@@ -19,6 +24,8 @@ pub enum StorageError {
     InvalidImport(String),
     #[error("数据库状态锁定失败")]
     LockFailed,
+    #[error("请求明细存储错误: {0}")]
+    RequestCapture(#[from] request_capture::RequestCaptureError),
 }
 
 #[path = "storage_config.rs"]
@@ -43,6 +50,7 @@ pub struct Storage {
     connection: Arc<Mutex<Connection>>,
     prices: Arc<Mutex<Vec<ModelPrice>>>,
     db_path: Arc<PathBuf>,
+    capture_store: Arc<RequestCaptureStore>,
 }
 
 impl Storage {
@@ -56,11 +64,12 @@ impl Storage {
             // 可以分批归还空闲页，不需要周期性重写整个数据库。
             connection.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?;
         }
-        connection.execute_batch("PRAGMA journal_mode = WAL;")?;
+        connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
         let storage = Self {
             connection: Arc::new(Mutex::new(connection)),
             prices: Arc::new(Mutex::new(Vec::new())),
             db_path: Arc::new(path.as_ref().to_path_buf()),
+            capture_store: Arc::new(RequestCaptureStore::for_database(path.as_ref())),
         };
         storage.migrate()?;
         Ok(storage)
@@ -84,6 +93,7 @@ impl Storage {
             connection: Arc::new(Mutex::new(connection)),
             prices: Arc::new(Mutex::new(Vec::new())),
             db_path: Arc::new(PathBuf::from(":memory:")),
+            capture_store: Arc::new(RequestCaptureStore::for_test()),
         }
     }
 
@@ -175,7 +185,7 @@ impl Storage {
             }
             std::fs::rename(&staged, target)?;
             let connection = Connection::open(target)?;
-            connection.execute_batch("PRAGMA journal_mode = WAL;")?;
+            connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
             Ok(connection)
         })();
 
@@ -194,7 +204,8 @@ impl Storage {
                 };
 
                 let restore_connection_result = Connection::open(target).and_then(|connection| {
-                    connection.execute_batch("PRAGMA journal_mode = WAL;")?;
+                    connection
+                        .execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
                     Ok(connection)
                 });
 
@@ -241,12 +252,29 @@ impl Storage {
 
     /// 清理指定天数之前的请求日志和用量记录，返回删除的记录数
     pub fn cleanup_old_logs(&self, keep_days: i64) -> Result<(usize, usize), StorageError> {
+        let cutoff = format!("datetime('now', '-{} days')", keep_days);
+
+        let request_log_ids = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let mut stmt = connection.prepare(&format!(
+                "SELECT id FROM request_logs WHERE created_at < {cutoff}"
+            ))?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        // 先从捕获 segment 中移除敏感 Body，再删除 SQLite 索引。日志清理失败时
+        // 最多保留不含 Body 的明细，不会出现数据库已删但文件仍保留原始报文。
+        self.clear_body_data_by_log_ids(&request_log_ids, "log_retention")?;
+
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-
-        let cutoff = format!("datetime('now', '-{} days')", keep_days);
 
         let deleted_logs = connection.execute(
             &format!("DELETE FROM request_logs WHERE created_at < {}", cutoff),
@@ -276,40 +304,35 @@ impl Storage {
             // -1 = 永久保留，不做清理
             return Ok(0);
         }
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-
         let cutoff = format!("datetime('now', '-{} days')", retention_days);
-
-        // 仅清理：
-        // 1. 超过保留期限
-        // 2. req_body_b64 或 res_body_b64 非空
-        // 3. 已有完整的 Token 统计（usage_records 的输入、输出 Token 均非空）
-        let cleared = connection.execute(
-            &format!(
-                r#"UPDATE request_logs
-                SET req_body_cleared_at = CASE WHEN req_body_b64 IS NOT NULL THEN datetime('now') ELSE req_body_cleared_at END,
-                    req_body_cleanup_reason = CASE WHEN req_body_b64 IS NOT NULL THEN 'retention' ELSE req_body_cleanup_reason END,
-                    res_body_cleared_at = CASE WHEN res_body_b64 IS NOT NULL THEN datetime('now') ELSE res_body_cleared_at END,
-                    res_body_cleanup_reason = CASE WHEN res_body_b64 IS NOT NULL THEN 'retention' ELSE res_body_cleanup_reason END,
-                    req_body_b64 = NULL,
-                    res_body_b64 = NULL
-                WHERE created_at < {}
-                  AND (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
-                  AND EXISTS (
-                    SELECT 1 FROM usage_records ur
-                    WHERE ur.request_id = request_logs.request_id
-                      AND ur.input_tokens IS NOT NULL
-                      AND ur.output_tokens IS NOT NULL
-                  )"#,
+        let ids = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let mut stmt = connection.prepare(&format!(
+                r#"SELECT rl.id
+                   FROM request_logs rl
+                   LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
+                   WHERE rl.created_at < {}
+                     AND (
+                       rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
+                       OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0))
+                     )
+                     AND EXISTS (
+                       SELECT 1 FROM usage_records ur
+                       WHERE ur.request_id = rl.request_id
+                         AND ur.input_tokens IS NOT NULL
+                         AND ur.output_tokens IS NOT NULL
+                     )"#,
                 cutoff
-            ),
-            [],
-        )?;
-
-        Ok(cleared)
+            ))?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        self.clear_body_data_by_log_ids(&ids, "retention")
     }
 
     /// 获取当前 Body 数据总占用字节数（req_body_b64 + res_body_b64 的 length 之和）。
@@ -320,9 +343,17 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
 
         let size: i64 = connection.query_row(
-            r#"SELECT COALESCE(SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, ''))), 0)
-               FROM request_logs
-               WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL"#,
+            r#"SELECT
+                 COALESCE((
+                   SELECT SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, '')))
+                   FROM request_logs
+                   WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL
+                 ), 0)
+                 + COALESCE((
+                   SELECT SUM(req_body_bytes + res_body_bytes)
+                   FROM request_capture_refs
+                   WHERE state = 'ready'
+                 ), 0)"#,
             [],
             |row| row.get(0),
         )?;
@@ -345,11 +376,6 @@ impl Storage {
         target_bytes: i64,
         prune_ratio: f64,
     ) -> Result<usize, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-
         let prune_ratio = prune_ratio.clamp(0.0, 1.0);
         if prune_ratio <= 0.0 {
             return Ok(0);
@@ -359,25 +385,25 @@ impl Storage {
         let goal_bytes = ((target_bytes as f64) * (1.0 - prune_ratio)).max(0.0) as i64;
 
         // 当前体积
-        let current_bytes: i64 = connection.query_row(
-            r#"SELECT COALESCE(SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, ''))), 0)
-               FROM request_logs
-               WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL"#,
-            [],
-            |row| row.get(0),
-        )?;
+        let current_bytes = self.get_total_body_size_bytes()?;
         if current_bytes <= goal_bytes {
             return Ok(0);
         }
 
         // 符合条件记录总数（决定批大小）
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
         let total_eligible: i64 = connection.query_row(
-            r#"SELECT COUNT(*) FROM request_logs
-               WHERE created_at < datetime('now', '-1 hour')
-                 AND (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)
+            r#"SELECT COUNT(*) FROM request_logs rl
+               LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
+               WHERE rl.created_at < datetime('now', '-1 hour')
+                 AND (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
+                      OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0)))
                  AND EXISTS (
                    SELECT 1 FROM usage_records ur
-                   WHERE ur.request_id = request_logs.request_id
+                   WHERE ur.request_id = rl.request_id
                      AND ur.input_tokens IS NOT NULL
                      AND ur.output_tokens IS NOT NULL
                  )"#,
@@ -392,36 +418,212 @@ impl Storage {
         let batch_size = ((total_eligible as f64) * prune_ratio).ceil() as i64;
         let batch_size = std::cmp::max(batch_size, 1);
 
-        // 单次清理最老的这批（不长期持锁）
-        let cleared = connection.execute(
-            &format!(
-                r#"UPDATE request_logs
-                SET req_body_cleared_at = CASE WHEN req_body_b64 IS NOT NULL THEN datetime('now') ELSE req_body_cleared_at END,
-                    req_body_cleanup_reason = CASE WHEN req_body_b64 IS NOT NULL THEN 'size_limit' ELSE req_body_cleanup_reason END,
-                    res_body_cleared_at = CASE WHEN res_body_b64 IS NOT NULL THEN datetime('now') ELSE res_body_cleared_at END,
-                    res_body_cleanup_reason = CASE WHEN res_body_b64 IS NOT NULL THEN 'size_limit' ELSE res_body_cleanup_reason END,
-                    req_body_b64 = NULL,
-                    res_body_b64 = NULL
-                WHERE rowid IN (
-                  SELECT rl.rowid FROM request_logs rl
-                  WHERE rl.created_at < datetime('now', '-{} hours')
-                    AND (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL)
-                    AND EXISTS (
-                      SELECT 1 FROM usage_records ur
-                      WHERE ur.request_id = rl.request_id
-                        AND ur.input_tokens IS NOT NULL
-                        AND ur.output_tokens IS NOT NULL
-                    )
-                  ORDER BY rl.created_at ASC
-                  LIMIT {}
-                )"#,
-                BODY_SIZE_PRUNE_MIN_AGE_HOURS,
-                batch_size
-            ),
-            [],
-        )?;
+        let ids = {
+            let mut stmt = connection.prepare(&format!(
+                r#"SELECT rl.id FROM request_logs rl
+                   LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
+                   WHERE rl.created_at < datetime('now', '-{} hours')
+                     AND (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
+                          OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0)))
+                     AND EXISTS (
+                       SELECT 1 FROM usage_records ur
+                       WHERE ur.request_id = rl.request_id
+                         AND ur.input_tokens IS NOT NULL
+                         AND ur.output_tokens IS NOT NULL
+                     )
+                   ORDER BY rl.created_at ASC
+                   LIMIT {}"#,
+                BODY_SIZE_PRUNE_MIN_AGE_HOURS, batch_size
+            ))?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        drop(connection);
+        self.clear_body_data_by_log_ids(&ids, "size_limit")
+    }
 
-        Ok(cleared)
+    fn clear_body_data_by_log_ids(
+        &self,
+        request_log_ids: &[String],
+        reason: &str,
+    ) -> Result<usize, StorageError> {
+        if request_log_ids.is_empty() {
+            return Ok(0);
+        }
+        let targets = request_log_ids.iter().cloned().collect::<HashSet<_>>();
+        let mut segments = HashMap::<String, Vec<String>>::new();
+        {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            for request_log_id in request_log_ids {
+                let storage_key = connection
+                    .query_row(
+                        r#"SELECT storage_key FROM request_capture_refs
+                           WHERE request_log_id = ?1 AND state = 'ready'"#,
+                        [request_log_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                if let Some(storage_key) = storage_key {
+                    segments
+                        .entry(storage_key)
+                        .or_default()
+                        .push(request_log_id.clone());
+                }
+            }
+        }
+
+        let mut cleared = HashSet::<String>::new();
+        for storage_key in segments.keys() {
+            let writer_guard = self.capture_store.lock_writer()?;
+            let live = {
+                let connection = self
+                    .connection
+                    .lock()
+                    .map_err(|_| StorageError::LockFailed)?;
+                let mut stmt = connection.prepare(
+                    r#"SELECT request_log_id, frame_offset, frame_length, checksum,
+                              format_version, req_body_bytes, res_body_bytes
+                       FROM request_capture_refs
+                       WHERE storage_key = ?1 AND state = 'ready'
+                       ORDER BY frame_offset"#,
+                )?;
+                let rows = stmt
+                    .query_map([storage_key], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            request_capture::RequestCapturePointer {
+                                storage_key: storage_key.clone(),
+                                offset: row.get::<_, i64>(1)? as u64,
+                                length: row.get::<_, i64>(2)? as u64,
+                                checksum: row.get(3)?,
+                                format_version: row.get::<_, i64>(4)? as u16,
+                                req_body_bytes: row.get(5)?,
+                                res_body_bytes: row.get(6)?,
+                            },
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                rows
+            };
+            let mut records = Vec::with_capacity(live.len());
+            let mut ids = Vec::with_capacity(live.len());
+            let mut body_presence = Vec::with_capacity(live.len());
+            for (request_log_id, pointer) in &live {
+                let mut record = self.capture_store.read(pointer)?;
+                let had_req_body = record.req_body_b64.is_some();
+                let had_res_body = record.res_body_b64.is_some();
+                if targets.contains(request_log_id)
+                    && (had_req_body || had_res_body)
+                {
+                    record.req_body_b64 = None;
+                    record.res_body_b64 = None;
+                    cleared.insert(request_log_id.clone());
+                }
+                ids.push(request_log_id.clone());
+                body_presence.push((had_req_body, had_res_body));
+                records.push(record);
+            }
+            if records.is_empty() {
+                continue;
+            }
+            let pointers = self.capture_store.rewrite_segment_locked(
+                storage_key,
+                &records,
+                &writer_guard,
+            )?;
+            let update_result = (|| -> Result<(), StorageError> {
+                let mut connection = self
+                    .connection
+                    .lock()
+                    .map_err(|_| StorageError::LockFailed)?;
+                let transaction = connection.transaction()?;
+                for ((request_log_id, (had_req_body, had_res_body)), pointer) in ids
+                    .iter()
+                    .zip(body_presence.iter())
+                    .zip(pointers.iter())
+                {
+                    transaction.execute(
+                        r#"UPDATE request_capture_refs
+                           SET storage_key = ?2, frame_offset = ?3, frame_length = ?4,
+                               checksum = ?5, format_version = ?6,
+                               req_body_bytes = ?7, res_body_bytes = ?8,
+                               state = ?9, failure_reason = NULL, updated_at = datetime('now')
+                           WHERE request_log_id = ?1"#,
+                        rusqlite::params![
+                            request_log_id,
+                            pointer.storage_key,
+                            pointer.offset as i64,
+                            pointer.length as i64,
+                            pointer.checksum,
+                            pointer.format_version as i64,
+                            pointer.req_body_bytes,
+                            pointer.res_body_bytes,
+                            if targets.contains(request_log_id) {
+                                "cleared"
+                            } else {
+                                "ready"
+                            },
+                        ],
+                    )?;
+                    if targets.contains(request_log_id) {
+                        transaction.execute(
+                            r#"UPDATE request_logs
+                               SET req_body_cleared_at = CASE WHEN ?2 THEN datetime('now') ELSE req_body_cleared_at END,
+                                   req_body_cleanup_reason = CASE WHEN ?2 THEN ?4 ELSE req_body_cleanup_reason END,
+                                   res_body_cleared_at = CASE WHEN ?3 THEN datetime('now') ELSE res_body_cleared_at END,
+                                   res_body_cleanup_reason = CASE WHEN ?3 THEN ?4 ELSE res_body_cleanup_reason END,
+                                   req_body_b64 = NULL, res_body_b64 = NULL
+                               WHERE id = ?1"#,
+                            rusqlite::params![
+                                request_log_id,
+                                had_req_body,
+                                had_res_body,
+                                reason,
+                            ],
+                        )?;
+                    }
+                }
+                transaction.commit()?;
+                Ok(())
+            })();
+            if let Err(error) = update_result {
+                if let Some(pointer) = pointers.first() {
+                    let _ = self
+                        .capture_store
+                        .remove_segment_locked(&pointer.storage_key, &writer_guard);
+                }
+                return Err(error);
+            }
+            self.capture_store
+                .remove_segment_locked(storage_key, &writer_guard)?;
+        }
+
+        // Historical rows without file references remain supported during migration.
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        for request_log_id in request_log_ids {
+            let changed = connection.execute(
+                r#"UPDATE request_logs
+                   SET req_body_cleared_at = CASE WHEN req_body_b64 IS NOT NULL THEN datetime('now') ELSE req_body_cleared_at END,
+                       req_body_cleanup_reason = CASE WHEN req_body_b64 IS NOT NULL THEN ?2 ELSE req_body_cleanup_reason END,
+                       res_body_cleared_at = CASE WHEN res_body_b64 IS NOT NULL THEN datetime('now') ELSE res_body_cleared_at END,
+                       res_body_cleanup_reason = CASE WHEN res_body_b64 IS NOT NULL THEN ?2 ELSE res_body_cleanup_reason END,
+                       req_body_b64 = NULL, res_body_b64 = NULL
+                   WHERE id = ?1 AND (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)"#,
+                rusqlite::params![request_log_id, reason],
+            )?;
+            if changed > 0 {
+                cleared.insert(request_log_id.clone());
+            }
+        }
+        Ok(cleared.len())
     }
 
     /// 按体积上限循环清理最老的 Body 数据，直到低于目标或无记录可删。
@@ -545,6 +747,7 @@ impl Storage {
                 priority          INTEGER NOT NULL DEFAULT 0,
                 remark            TEXT,
                 resource_mode     TEXT,
+                resource_sync_mode TEXT NOT NULL DEFAULT 'manual',
                 base_url_override TEXT,
                 anthropic_base_url_override TEXT,
                 last_used_at      TEXT,
@@ -675,6 +878,23 @@ impl Storage {
                 estimated_cost        REAL,
                 analyzed_at           TEXT,
                 created_at            TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS request_capture_refs (
+                request_log_id   TEXT PRIMARY KEY,
+                storage_key      TEXT,
+                frame_offset     INTEGER,
+                frame_length     INTEGER,
+                checksum         TEXT,
+                format_version   INTEGER NOT NULL DEFAULT 1,
+                state            TEXT NOT NULL DEFAULT 'pending',
+                failure_reason   TEXT,
+                req_body_bytes   INTEGER NOT NULL DEFAULT 0,
+                res_body_bytes   INTEGER NOT NULL DEFAULT 0,
+                finalized_at     TEXT,
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL,
+                FOREIGN KEY (request_log_id) REFERENCES request_logs(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS app_meta (
@@ -909,6 +1129,12 @@ impl Storage {
             )?;
         }
         add_column_if_missing(&connection, "channel_accounts", "resource_mode", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "resource_sync_mode",
+            "TEXT NOT NULL DEFAULT 'manual'",
+        )?;
 
         // 旧版本 request_logs 只记录了少量字段；后续索引和日志页面依赖这些基础列。
         add_column_if_missing(
@@ -1098,13 +1324,14 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_usage_records_request_id     ON usage_records(request_id);
             CREATE INDEX IF NOT EXISTS idx_usage_records_created_at     ON usage_records(created_at);
             CREATE INDEX IF NOT EXISTS idx_usage_channel_upstream_model ON usage_records(channel_id, upstream_model);
+            CREATE INDEX IF NOT EXISTS idx_request_capture_refs_state  ON request_capture_refs(state, updated_at);
             "#,
         )?;
         tracing::info!("migrate: 建表完成, 开始建索引");
 
         // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
         connection.execute(
-            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.19', datetime('now'))
+            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.23', datetime('now'))
              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
             [],
         )?;

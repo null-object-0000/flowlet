@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTimestamp, parseTimestamp } from "./datetime";
+import { formatFullTimestamp, formatTimestamp, parseTimestamp } from "./datetime";
 
 describe("parseTimestamp", () => {
   it("accepts ISO 8601 values unchanged", () => {
@@ -36,5 +36,16 @@ describe("formatTimestamp", () => {
 
   it("passes unparseable values through unchanged", () => {
     expect(formatTimestamp("not-a-date", "zh-CN")).toBe("not-a-date");
+  });
+});
+
+describe("formatFullTimestamp", () => {
+  it("converts a UTC synchronization instant to the requested timezone", () => {
+    expect(formatFullTimestamp("2026-07-23T04:35:26Z", "zh-CN", "Asia/Shanghai"))
+      .toBe("2026/07/23 12:35:26");
+  });
+
+  it("passes unparseable values through unchanged", () => {
+    expect(formatFullTimestamp("not-a-date", "zh-CN")).toBe("not-a-date");
   });
 });

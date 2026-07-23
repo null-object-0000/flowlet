@@ -32,6 +32,30 @@ export function formatTimestamp(value: string, language: TimestampLanguage): str
 }
 
 /**
+ * Full local timestamp for detail views where the calendar date matters.
+ * The backend stores UTC instants; omitting `timeZone` intentionally converts
+ * them to the operating system's local timezone.
+ */
+export function formatFullTimestamp(
+  value: string,
+  language: TimestampLanguage,
+  timeZone?: string,
+): string {
+  const date = parseTimestamp(value);
+  if (!date) return value;
+  return date.toLocaleString(language, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone,
+  });
+}
+
+/**
  * Time-of-day only, down to seconds (e.g. "14:05:09"). Used by the refresh
  * control's "上次/下次" labels where the date is redundant and horizontal
  * space is tight. Unparseable values pass through unchanged.

@@ -8,10 +8,17 @@ import { formatCompactNumber } from "../../shared/formatters/number";
 
 export type LongCatPack = {
   lotId?: number;
+  bizOrderNo?: string;
   totalToken?: number;
   consumedToken?: number;
   remainingToken?: number;
+  frozenToken?: number;
+  consumedRatio?: number;
+  effectiveTime?: string;
   expireTime?: string;
+  remainSeconds?: number;
+  consumeOrder?: number;
+  modelScope?: string;
   status?: string;
   source?: string;
   grantCategory?: string;
@@ -168,7 +175,7 @@ export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {
         {packs.length ? (
           <div className={styles.tableScroll}>
             <table className={styles.table}>
-              <thead><tr><th>#</th><th>{t("总量")}</th><th>{t("已消耗")}</th><th>{t("剩余")}</th><th>{t("到期时间")}</th><th>{t("状态")}</th><th>{t("操作")}</th></tr></thead>
+              <thead><tr><th>#</th><th>{t("总量")}</th><th>{t("已消耗")}</th><th>{t("剩余")}</th><th>{t("到期时间 / 状态")}</th><th>{t("操作")}</th></tr></thead>
               <tbody>
                 {packs.map((pack, index) => (
                   <tr key={pack.lotId ?? index}>
@@ -176,8 +183,12 @@ export function LongCatPackManager({ initialPacks, onCancel, onSave }: Props) {
                     <td><NumberInput label={t("资源包 {index} 总量", { index: index + 1 })} value={pack.totalToken} onChange={(value) => updatePack(index, { totalToken: value })} /></td>
                     <td><NumberInput label={t("资源包 {index} 已消耗", { index: index + 1 })} value={pack.consumedToken} onChange={(value) => updatePack(index, { consumedToken: value })} /></td>
                     <td><NumberInput label={t("资源包 {index} 剩余", { index: index + 1 })} value={pack.remainingToken} onChange={(value) => updatePack(index, { remainingToken: value })} /></td>
-                    <td><Input aria-label={t("资源包 {index} 到期时间", { index: index + 1 })} type="date" value={pack.expireTime?.slice(0, 10) ?? ""} onChange={(value) => updatePack(index, { expireTime: value ? `${value}T23:59:59` : undefined })} /></td>
-                    <td><Input aria-label={t("资源包 {index} 状态", { index: index + 1 })} value={pack.status ?? ""} placeholder="ACTIVE" onChange={(value) => updatePack(index, { status: value || undefined })} /></td>
+                    <td>
+                      <div className={styles.expireStatusCell}>
+                        <Input aria-label={t("资源包 {index} 到期时间", { index: index + 1 })} type="date" value={pack.expireTime?.slice(0, 10) ?? ""} onChange={(value) => updatePack(index, { expireTime: value ? `${value}T23:59:59` : undefined })} />
+                        <Input aria-label={t("资源包 {index} 状态", { index: index + 1 })} value={pack.status ?? ""} placeholder="ACTIVE" onChange={(value) => updatePack(index, { status: value || undefined })} />
+                      </div>
+                    </td>
                     <td><Button aria-label={t("删除资源包 {index}", { index: index + 1 })} icon={<IconDelete />} theme="borderless" type="danger" onClick={() => removePack(index)} /></td>
                   </tr>
                 ))}

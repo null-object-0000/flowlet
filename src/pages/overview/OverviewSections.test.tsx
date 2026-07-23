@@ -74,8 +74,8 @@ describe("OverviewSections", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("共 1 个账号")).toBeInTheDocument();
-    expect(screen.getByText("共 1 个模型")).toBeInTheDocument();
+    expect(screen.getByText("已启用 1 / 共 1 个账号")).toBeInTheDocument();
+    expect(screen.getByText("已启用 1 / 共 1 个模型")).toBeInTheDocument();
     expect(screen.getByText("客户端访问信息")).toBeInTheDocument();
     expect(screen.getByText("AI Agent 接入")).toBeInTheDocument();
   });

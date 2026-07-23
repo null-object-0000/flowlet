@@ -36,7 +36,7 @@ describe("OverviewExposedModelsCard", () => {
       />,
     );
 
-    expect(screen.getByText("共 1 个模型")).toBeInTheDocument();
+    expect(screen.getByText("已启用 1 / 共 2 个模型")).toBeInTheDocument();
     expect(screen.getByText("deepseek-v4-pro")).toBeInTheDocument();
     expect(screen.getAllByText("1 个可用账号")).toHaveLength(2);
     expect(screen.getByText("deepseek-v4-flash")).toBeInTheDocument();

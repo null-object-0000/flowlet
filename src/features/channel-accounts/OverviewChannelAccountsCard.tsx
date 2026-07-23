@@ -22,10 +22,11 @@ type Props = {
 export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onViewAll, onEdit }: Props) {
   const { language, t } = useAppPreferences();
   const snapshotByAccount = new Map(snapshots.map((snapshot) => [snapshot.account_id, snapshot]));
+  const enabledCount = accounts.filter((a) => a.enabled).length;
 
   return (
     <OverviewModuleCard
-      title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("共 {count} 个账号", { count: accounts.length })}</em></span>}
+      title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("已启用 {enabled} / 共 {total} 个账号", { enabled: enabledCount, total: accounts.length })}</em></span>}
       headerExtra={(
         <div className={styles.headerActions}>
           <OverviewActionLink leadingIcon={<IconPlus />} onClick={onCreate}>{t("新增账号")}</OverviewActionLink>

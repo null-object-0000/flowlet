@@ -7,6 +7,9 @@
 .section h3 { margin: 0; color: var(--semi-color-text-0); font-size: 17px; }
 .sectionHeading > span { display: grid; gap: 4px; }
 .sectionHeading small, .enabledRow small, .advancedToggle small { color: var(--semi-color-text-2); font-size: 12px; font-weight: 400; }
+.resourceModeHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.resourceModeMeta { display: flex; align-items: center; gap: 9px; color: var(--semi-color-text-1); font-size: 12px; }
+.resourceModeMeta small { color: var(--semi-color-text-2); }
 .field { display: grid; gap: 7px; color: var(--semi-color-text-1); font-size: 13px; }
 .basicFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .field > span small { color: var(--semi-color-text-2); font-weight: 400; }
@@ -51,6 +54,29 @@
 .packSummary { display: grid; grid-template-columns: 1.2fr repeat(4, minmax(0, 1fr)); gap: 12px; padding: 11px 12px; border-radius: 7px; background: var(--semi-color-fill-0); color: var(--semi-color-text-2); font-size: 12px; }
 .packSummary > strong, .packSummary > span { display: grid; align-content: center; gap: 4px; }
 .packSummary b { color: var(--semi-color-text-0); font-weight: 600; }
+.longCatResourcePanel { display: grid; gap: 14px; }
+.longCatSummaryCard { padding: 14px 16px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--semi-color-bg-2); display: grid; gap: 12px; }
+.longCatSummaryHeading { display: flex; align-items: center; gap: 9px; }
+.longCatSummaryHeading > strong { color: var(--semi-color-text-0); font-size: 14px; }
+.longCatSummaryGrid { display: grid; grid-template-columns: 1.3fr 1.45fr 1fr 1fr; }
+.longCatSummaryGrid > div { min-width: 0; padding: 0 16px; border-left: 1px solid var(--flowlet-color-border); display: grid; align-content: center; gap: 5px; }
+.longCatSummaryGrid > div:first-child { padding-left: 0; border-left: 0; }
+.longCatSummaryGrid > div:last-child { padding-right: 0; }
+.longCatSummaryGrid small { color: var(--semi-color-text-2); font-size: 11px; }
+.longCatSummaryGrid strong { color: var(--semi-color-text-0); font-size: 14px; font-weight: 600; }
+.longCatRemaining strong { font-size: 21px; }
+.longCatProgress > strong { color: var(--semi-color-text-1); font-size: 12px; }
+.longCatSyncSection { display: grid; gap: 9px; }
+.longCatSyncSection > strong, .longCatDetails > strong { color: var(--semi-color-text-0); font-size: 14px; }
+.longCatSyncControls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 16px; }
+.longCatSyncControls > .modeOptions { min-width: 0; }
+.longCatSyncControls > button { align-self: center; min-width: 118px; }
+.longCatDetails { display: grid; gap: 9px; }
+.longCatTableScroll { overflow-x: auto; border: 1px solid var(--flowlet-color-border); border-radius: 8px; }
+.longCatTable { width: 100%; min-width: 720px; border-collapse: collapse; color: var(--semi-color-text-1); font-size: 12px; }
+.longCatTable th, .longCatTable td { height: 38px; padding: 0 12px; border-bottom: 1px solid var(--flowlet-color-border); text-align: left; white-space: nowrap; }
+.longCatTable th { background: var(--semi-color-fill-0); color: var(--semi-color-text-2); font-weight: 500; }
+.longCatTable tbody tr:last-child td { border-bottom: 0; }
 .advanced { padding: 0; border: 1px solid var(--flowlet-color-border); border-radius: 8px; overflow: hidden; }
 .advancedToggle { width: 100%; min-height: 58px; padding: 0 14px; border: 0; background: var(--semi-color-bg-2); display: flex; align-items: center; justify-content: space-between; color: var(--semi-color-text-0); text-align: left; cursor: pointer; }
 .advancedToggle > span { display: grid; gap: 4px; }
@@ -65,15 +91,6 @@
 .scrapeResult > span { display: flex; justify-content: space-between; color: var(--semi-color-text-1); font-size: 13px; }
 .scrapeResult b { color: var(--semi-color-text-0); font-weight: 600; }
 .scrapeSynced { color: var(--semi-color-text-2); font-size: 12px; }
-.scrapedPackDetails { display: grid; gap: 8px; padding-top: 2px; }
-.scrapedPackDetails > strong { color: var(--semi-color-text-0); font-size: 13px; }
-.scrapedPackTableScroll { overflow-x: auto; border: 1px solid var(--flowlet-color-border); border-radius: 7px; }
-.scrapedPackTable { width: 100%; min-width: 680px; border-collapse: collapse; color: var(--semi-color-text-1); font-size: 12px; }
-.scrapedPackTable th, .scrapedPackTable td { padding: 8px 10px; border-bottom: 1px solid var(--flowlet-color-border); text-align: left; white-space: nowrap; }
-.scrapedPackTable th { background: var(--semi-color-fill-0); color: var(--semi-color-text-2); font-weight: 500; }
-.scrapedPackTable tbody tr:last-child td { border-bottom: 0; }
-.scrapedPackTable td:first-child { display: grid; gap: 2px; }
-.scrapedPackTable td:first-child small { color: var(--semi-color-text-2); }
 .qwenPlanDetails { display: grid; gap: 12px; }
 .qwenPlanHeading { display: flex; align-items: center; gap: 8px; }
 .qwenPlanHeading > strong { color: var(--semi-color-text-0); font-size: 14px; }
@@ -94,6 +111,12 @@
 .footer button { height: 40px; }
 @media (max-width: 620px) {
   .channelRow, .modeOptions, .resourceGrid, .basicFields, .urlGrid, .qwenSubscriptionGrid, .qwenQuotaMetrics { grid-template-columns: 1fr; }
+  .resourceModeHeading, .resourceModeMeta { align-items: flex-start; flex-direction: column; }
+  .longCatSummaryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 14px; }
+  .longCatSummaryGrid > div { padding: 0 10px; }
+  .longCatSummaryGrid > div:nth-child(3) { padding-left: 0; border-left: 0; }
+  .longCatSyncControls { grid-template-columns: 1fr; }
+  .longCatSyncControls > button { width: 100%; }
   .packManageRow { align-items: flex-start; flex-direction: column; }
   .packSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

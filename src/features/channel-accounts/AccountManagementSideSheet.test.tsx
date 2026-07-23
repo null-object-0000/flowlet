@@ -52,7 +52,7 @@ describe("AccountManagementSideSheet", () => {
     expect(await screen.findByText("编辑渠道账号")).toBeInTheDocument();
     expect(screen.queryByText(/渠道账号管理/)).not.toBeInTheDocument();
     expect(screen.queryByText("选择渠道")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /LongCat/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^LongCat$/ })).not.toBeInTheDocument();
     const apiKeyInput = screen.getByLabelText("API Key");
     expect(apiKeyInput).toHaveValue("secret-key");
     expect(apiKeyInput).toHaveAttribute("type", "password");
@@ -96,7 +96,7 @@ describe("AccountManagementSideSheet", () => {
     expect(screen.getByRole("button", { name: /^自动同步/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "管理资源包" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^refresh立即刷新$/ })).toBeInTheDocument();
-    expect(screen.getByText("系统每 5 分钟自动同步一次；如登录失效，请点击“立即刷新”完成登录。")).toBeInTheDocument();
+    expect(screen.getByText("尚未同步资源包，请点击“立即刷新”。")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     expect(onSaveAccounts).toHaveBeenCalledWith([
       expect.objectContaining({ id: account.id, resource_sync_mode: "auto" }),
@@ -143,10 +143,13 @@ describe("AccountManagementSideSheet", () => {
       />,
     );
 
-    expect(await screen.findByText("共 2 个资源包")).toBeInTheDocument();
+    expect(await screen.findByText("资源包明细")).toBeInTheDocument();
+    expect(screen.getByText("剩余 38.9%")).toBeInTheDocument();
     expect(screen.getByText("151724")).toBeInTheDocument();
     expect(screen.getByText("159869")).toBeInTheDocument();
     expect(screen.getAllByText("FREE_PACK")).toHaveLength(2);
+    expect(screen.getByText("生效中")).toBeInTheDocument();
+    expect(screen.getByText("待使用")).toBeInTheDocument();
   });
 
   it("shows the complete Qwen Token Plan subscription and both quota windows", async () => {
@@ -258,7 +261,8 @@ describe("AccountManagementSideSheet", () => {
     await user.type(screen.getByLabelText("资源包 1 已消耗"), "250");
     await user.type(screen.getByLabelText("资源包 1 剩余"), "750");
     await user.click(screen.getByRole("button", { name: "保存资源包" }));
-    expect(screen.getByText("已维护 1 个资源包")).toBeInTheDocument();
+    expect(screen.getByText("资源包明细")).toBeInTheDocument();
+    expect(screen.getByText("生效中")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存账号" }));
 
     expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({ channel_id: "longcat", api_key: "sk-test", resource_mode: "token_pack", resource_sync_mode: "manual" })]);
@@ -309,7 +313,7 @@ describe("AccountManagementSideSheet", () => {
       />,
     );
 
-    expect(await screen.findByText("2026-07-30")).toBeInTheDocument();
+    expect((await screen.findAllByText("2026-07-30")).length).toBeGreaterThan(0);
     expect(screen.queryByText("2026-07-29")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     expect(onSaveBalanceSnapshot).toHaveBeenCalledWith(expect.objectContaining({
@@ -425,8 +429,10 @@ describe("AccountManagementSideSheet", () => {
     );
 
     expect(await screen.findByText("Token Plan 订阅信息")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /API 按量付费/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Token Plan/ })).toBeDisabled();
+    expect(screen.getByText("计费模式")).toBeInTheDocument();
+    expect(screen.getByText("Token Plan")).toBeInTheDocument();
+    expect(screen.getByText("创建后不可修改")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /API 按量付费/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存修改" }));
 
     expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({

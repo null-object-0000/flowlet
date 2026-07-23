@@ -41,7 +41,7 @@ describe("OverviewChannelAccountsCard", () => {
       />,
     );
 
-    expect(screen.getByText("共 1 个账号")).toBeInTheDocument();
+    expect(screen.getByText("已启用 1 / 共 1 个账号")).toBeInTheDocument();
     expect(screen.getByText(/资源包 4398\.7万 Tokens.*有效期至 2026-07-30/)).toBeInTheDocument();
     expect(screen.getByText("启用")).toBeInTheDocument();
 

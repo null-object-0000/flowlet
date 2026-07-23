@@ -23,7 +23,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { useScrapeConsole } from "./useScrapeConsole";
 import type { ScrapeBalanceResult } from "../../domains/account/commands";
-import { formatFullTimestamp } from "../../shared/formatters/datetime";
+import { formatFullTimestamp, parseTimestamp } from "../../shared/formatters/datetime";
 import {
   parseQwenTokenPlanDetails,
   type QwenQuotaWindow,
@@ -69,6 +69,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const resourceMode = draft?.resource_mode ?? defaultResourceMode(draft?.channel_id ?? "");
   const resourceSyncMode = draft.resource_sync_mode ?? "manual";
   const isResourceAutoSync = supportsScrape && resourceSyncMode === "auto";
+  const isLongCatTokenPack = draft.channel_id === "longcat" && resourceMode === "token_pack";
   const tokenRemaining = useMemo(() => {
     const total = optionalNumber(resource.tokenTotal);
     const used = optionalNumber(resource.tokenUsed);
@@ -191,7 +192,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       visible
       motion={false}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
-      width="min(760px, 94vw)"
+      width="min(980px, 94vw)"
       title={(
         <div className={styles.title}>
           <strong>{t(isEdit ? "编辑渠道账号" : "新增渠道账号")}</strong>
@@ -266,7 +267,16 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         </section>
 
         <section className={styles.section}>
-          <div className={styles.sectionHeading}><span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span></div>
+          <div className={`${styles.sectionHeading} ${styles.resourceModeHeading}`}>
+            <span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
+            {isEdit && resourceOptions.length ? (
+              <div className={styles.resourceModeMeta}>
+                <span>{t("计费模式")}</span>
+                <Tag color="blue">{t(resourceMode === "token_pack" ? "Token 资源包" : resourceMode === "token_plan" ? "Token Plan" : "API 按量付费")}</Tag>
+                <small>{t("创建后不可修改")}</small>
+              </div>
+            ) : null}
+          </div>
           {autoSyncBalance ? (
             <div className={styles.resourcePanel}>
               <div className={styles.resourceHeading}><strong>{t("按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
@@ -277,7 +287,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             </div>
           ) : (
             <>
-              {resourceOptions.length ? (
+              {resourceOptions.length && !isEdit ? (
                 <div className={styles.modeOptions}>
                   {resourceOptions.map((option) => (
                     <ModeOption
@@ -291,7 +301,21 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   ))}
                 </div>
               ) : null}
-              <div className={styles.resourcePanel}>
+              {isLongCatTokenPack ? (
+                <LongCatTokenPackPanel
+                  accountId={draft.id}
+                  enabled={isEdit}
+                  syncMode={resourceSyncMode}
+                  snapshot={snapshot}
+                  manualPacks={maintainedPacks}
+                  onSyncModeChange={(value) => update({ resource_sync_mode: value })}
+                  onManage={() => setPackManagerOpen(true)}
+                  onScrape={onScrape}
+                  language={language}
+                  t={t}
+                />
+              ) : (
+                <div className={styles.resourcePanel}>
                 <div className={styles.resourceHeading}>
                   <strong>{t(resourceMode === "token_pack" ? "资源包信息" : resourceMode === "token_plan" ? "Token Plan 订阅信息" : "按量付费信息")}</strong>
                   <span className={isResourceAutoSync ? styles.autoBadge : resourceMode === "token_plan" ? styles.planBadge : styles.manualBadge}>{t(isResourceAutoSync ? "自动同步" : resourceMode === "token_plan" ? "订阅" : "手动维护")}</span>
@@ -351,7 +375,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                     <Field label={t("货币")}><Input aria-label={t("货币")} value={resource.currency} onChange={(value) => setResource({ ...resource, currency: value })} placeholder="CNY" /></Field>
                   </div>
                 )}
-              </div>
+                </div>
+              )}
             </>
           )}
         </section>
@@ -488,6 +513,204 @@ function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, m
   };
 }
 
+function LongCatTokenPackPanel({
+  accountId,
+  enabled,
+  syncMode,
+  snapshot,
+  manualPacks,
+  onSyncModeChange,
+  onManage,
+  onScrape,
+  language,
+  t,
+}: {
+  accountId: string;
+  enabled: boolean;
+  syncMode: AccountResourceSyncMode;
+  snapshot?: AccountBalanceSnapshot;
+  manualPacks: LongCatPack[];
+  onSyncModeChange: (value: AccountResourceSyncMode) => void;
+  onManage: () => void;
+  onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
+  language: "zh-CN" | "en-US";
+  t: (k: string, params?: Record<string, string | number> | undefined) => string;
+}) {
+  const {
+    startScrape,
+    retryScrape,
+    lastResult,
+    isScraping,
+    needLogin,
+    consoleActionMessage,
+    error,
+    statusText,
+  } = useScrapeConsole(onScrape);
+  const freshResult = syncMode === "auto" ? lastResult : null;
+  const synchronizedPacks = parseStoredLongCatPacks(freshResult?.token_packs ?? snapshot?.token_packs);
+  const packs = syncMode === "manual" ? manualPacks : synchronizedPacks;
+  const hasData = freshResult?.token_total != null
+    || snapshot?.token_pack_total != null
+    || packs.length > 0;
+  const calculated = summarizeLongCatPacks(packs);
+  const total = freshResult?.token_total
+    ?? (syncMode === "manual" ? calculated.total : snapshot?.token_pack_total)
+    ?? calculated.total;
+  const used = freshResult?.token_used
+    ?? (syncMode === "manual" ? calculated.used : snapshot?.token_pack_used)
+    ?? calculated.used;
+  const remaining = freshResult?.token_remaining
+    ?? (syncMode === "manual" ? calculated.remaining : snapshot?.token_pack_remaining)
+    ?? calculated.remaining;
+  const expireAt = freshResult?.token_pack_expire_at
+    ?? (syncMode === "manual" ? calculated.expireAt : snapshot?.token_pack_expire_at)
+    ?? calculated.expireAt;
+  const syncedAt = freshResult?.synced_at ?? snapshot?.synced_at;
+  const remainingPercent = total > 0 ? Math.max(0, Math.min(100, remaining / total * 100)) : 0;
+  const activeIndex = Math.max(0, packs.findIndex((pack) => (pack.consumedToken ?? 0) > 0));
+
+  async function handleScrape() {
+    if (!accountId) return;
+    await startScrape(accountId);
+  }
+
+  async function handleRetry() {
+    if (!accountId) return;
+    await retryScrape(accountId);
+  }
+
+  return (
+    <div className={styles.longCatResourcePanel}>
+      <div className={styles.longCatSummaryCard}>
+        <div className={styles.longCatSummaryHeading}>
+          <strong>{t("资源包信息")}</strong>
+          <Tag size="small" color={syncMode === "auto" ? "green" : "orange"}>{t(syncMode === "auto" ? "自动同步" : "手动维护")}</Tag>
+        </div>
+        <div className={styles.longCatSummaryGrid}>
+          <div className={styles.longCatRemaining}>
+            <small>{t("剩余额度")}</small>
+            <strong>{hasData ? formatResourceTokenValue(remaining, language) : "-"}</strong>
+          </div>
+          <div className={styles.longCatProgress}>
+            <strong>{hasData ? t("剩余 {percent}%", { percent: remainingPercent.toFixed(1) }) : "-"}</strong>
+            <Progress aria-label={t("资源包剩余比例")} percent={remainingPercent} size="small" showInfo={false} />
+            <small>{t("总量")} {hasData ? formatResourceTokenValue(total, language) : "-"}</small>
+          </div>
+          <div>
+            <small>{t("最早到期")}</small>
+            <strong>{expireAt?.slice(0, 10) ?? "-"}</strong>
+          </div>
+          <div>
+            <small>{t("最近同步")}</small>
+            <strong>{syncedAt ? formatLocalDate(syncedAt) : "-"}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.longCatSyncSection}>
+        <strong>{t("同步方式")}</strong>
+        <div className={styles.longCatSyncControls}>
+          <div className={styles.modeOptions}>
+            <ModeOption
+              selected={syncMode === "auto"}
+              title={t("自动同步")}
+              description={t("从 LongCat 定期同步资源包数据")}
+              onClick={() => onSyncModeChange("auto")}
+            />
+            <ModeOption
+              selected={syncMode === "manual"}
+              title={t("手动维护")}
+              description={t("手动导入或维护资源包数据")}
+              onClick={() => onSyncModeChange("manual")}
+            />
+          </div>
+          {syncMode === "auto" ? (
+            <Button
+              icon={<IconRefresh />}
+              loading={isScraping}
+              disabled={!enabled}
+              onClick={() => void handleScrape()}
+            >
+              {t("立即刷新")}
+            </Button>
+          ) : (
+            <Button onClick={onManage}>{t("管理资源包")}</Button>
+          )}
+        </div>
+        {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
+        {needLogin ? (
+          <div className={styles.scrapeError}>
+            {t("检测到控制台登录页，请在弹出的窗口中完成登录。")}
+            <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
+              {t("登录完成,重新抓取")}
+            </Button>
+          </div>
+        ) : null}
+        {consoleActionMessage ? (
+          <div className={styles.scrapeError}>
+            {consoleActionMessage}
+            <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
+              {t("重新抓取")}
+            </Button>
+          </div>
+        ) : null}
+        {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
+      </div>
+
+      <div className={styles.longCatDetails}>
+        <strong>{t("资源包明细")}</strong>
+        {packs.length ? (
+          <div className={styles.longCatTableScroll}>
+            <table className={styles.longCatTable}>
+              <thead>
+                <tr>
+                  <th>{t("资源包 ID")}</th>
+                  <th>{t("类型")}</th>
+                  <th>{t("总量")}</th>
+                  <th>{t("已用")}</th>
+                  <th>{t("到期日期")}</th>
+                  <th>{t("状态")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {packs.map((pack, index) => {
+                  const displayStatus = longCatPackDisplayStatus(pack, index, activeIndex, t);
+                  return (
+                    <tr key={pack.lotId ?? index}>
+                      <td>{pack.lotId ?? index + 1}</td>
+                      <td>{pack.source ?? pack.grantCategory ?? "-"}</td>
+                      <td>{formatResourceTokenValue(pack.totalToken ?? 0, language)}</td>
+                      <td>{formatResourceTokenValue(pack.consumedToken ?? 0, language)}</td>
+                      <td>{pack.expireTime?.slice(0, 10) ?? "-"}</td>
+                      <td><Tag size="small" color={displayStatus.color}>{displayStatus.label}</Tag></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <span className={styles.packEmpty}>{t(syncMode === "auto" ? "尚未同步资源包，请点击“立即刷新”。" : "尚未维护资源包，请点击“管理资源包”添加或导入。")}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function longCatPackDisplayStatus(
+  pack: LongCatPack,
+  index: number,
+  activeIndex: number,
+  t: (key: string) => string,
+): { label: string; color: "green" | "orange" | "grey" } {
+  if (pack.status && pack.status !== "ACTIVE") {
+    return { label: t(pack.status), color: "grey" };
+  }
+  return index === activeIndex
+    ? { label: t("生效中"), color: "green" }
+    : { label: t("待使用"), color: "orange" };
+}
+
 /** 控制台抓取面板:触发按钮 + 最近一次抓取结果展示。 */
 function ScrapeConsolePanel({
   account,
@@ -525,9 +748,6 @@ function ScrapeConsolePanel({
   // 优先展示 hook 最近的抓取结果(ScrapeBalanceResult),否则回退到父组件传入的 snapshot
   const scrapeDisplay = lastResult;
   const fallbackDisplay = snapshot;
-  const scrapedPacks = account.channel_id === "longcat"
-    ? parseStoredLongCatPacks(scrapeDisplay?.token_packs ?? fallbackDisplay?.token_packs)
-    : [];
   const qwenDetails = account.channel_id === QWEN_CHANNEL_ID
     ? parseQwenTokenPlanDetails(scrapeDisplay?.raw_scraped_json ?? fallbackDisplay?.raw_scraped_json)
     : null;
@@ -612,40 +832,6 @@ function ScrapeConsolePanel({
       {qwenDetails ? (
         <QwenTokenPlanDetailsPanel details={qwenDetails} language={language} t={t} />
       ) : null}
-      {scrapedPacks.length ? (
-        <div className={styles.scrapedPackDetails}>
-          <strong>{t("共 {count} 个资源包", { count: scrapedPacks.length })}</strong>
-          <div className={styles.scrapedPackTableScroll}>
-            <table className={styles.scrapedPackTable}>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>{t("总量")}</th>
-                  <th>{t("已消耗")}</th>
-                  <th>{t("剩余")}</th>
-                  <th>{t("到期时间")}</th>
-                  <th>{t("状态")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scrapedPacks.map((pack, index) => (
-                  <tr key={pack.lotId ?? index}>
-                    <td>
-                      <b>{pack.lotId ?? index + 1}</b>
-                      <small>{pack.source ?? pack.grantCategory ?? "-"}</small>
-                    </td>
-                    <td>{formatResourceTokens(pack.totalToken ?? null, language)}</td>
-                    <td>{formatResourceTokens(pack.consumedToken ?? null, language)}</td>
-                    <td>{formatResourceTokens(pack.remainingToken ?? null, language)}</td>
-                    <td>{pack.expireTime ?? "-"}</td>
-                    <td>{pack.status ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
       {!scrapeDisplay && !(fallbackDisplay && fallbackDisplay.source === "scrape") && !error ? (
         <span className={styles.scrapeHint}>
           {t("系统每 5 分钟自动同步一次；如登录失效，请点击“立即刷新”完成登录。")}
@@ -723,6 +909,19 @@ function QwenQuotaCard({
 
 function formatResourceTokens(value: number | null, language: "zh-CN" | "en-US") {
   return value == null ? "-" : `${formatTokenCount(Math.max(0, value), language)} Tokens`;
+}
+
+function formatResourceTokenValue(value: number, language: "zh-CN" | "en-US") {
+  return `${formatTokenCount(Math.max(0, value), language)} Token`;
+}
+
+function formatLocalDate(value: string) {
+  const date = parseTimestamp(value);
+  if (!date) return value.slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatCredits(value: number, language: "zh-CN" | "en-US") {

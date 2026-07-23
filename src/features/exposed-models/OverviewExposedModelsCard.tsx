@@ -23,9 +23,10 @@ export function OverviewExposedModelsCard({ routes, accounts, channels, busyMode
   const { t } = useAppPreferences();
   const models = buildOverviewExposedModels(routes, accounts, channels);
   const enabledCount = models.filter((model) => model.enabled).length;
+  const totalCount = models.length;
 
   return (
-    <OverviewModuleCard title={<span className={styles.cardTitle}>{t("开放模型")} <em>{t("共 {count} 个模型", { count: enabledCount })}</em></span>} action={t("管理模型")} onAction={onManage}>
+    <OverviewModuleCard title={<span className={styles.cardTitle}>{t("开放模型")} <em>{t("已启用 {enabled} / 共 {total} 个模型", { enabled: enabledCount, total: totalCount })}</em></span>} action={t("管理模型")} onAction={onManage}>
       {models.length > 0 ? (
         <div className={styles.list}>
           {models.map((model) => {

@@ -17,6 +17,7 @@ const account = {
   enabled: true,
   credential_status: "healthy",
   resource_mode: "token_pack",
+  resource_sync_mode: "manual",
 } as ChannelAccount;
 
 const preset = {
@@ -66,12 +67,71 @@ describe("AccountManagementSideSheet", () => {
     ]);
   });
 
-  it("keeps manual resource maintenance when console scraping is supported", async () => {
+  it("combines manual maintenance and automatic synchronization in resource package information", async () => {
+    const user = userEvent.setup();
+    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
+    const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
     render(
       <AccountManagementSideSheet
         request={{ kind: "edit", accountId: account.id }}
         accounts={[account]}
         snapshots={[]}
+        presets={[{ ...preset, supports_scrape_balance: true, supports_balance_query: false }]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={onSaveAccounts}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={onSaveBalanceSnapshot}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText("资源包信息")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^手动维护/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "管理资源包" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^refresh立即刷新$/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^自动同步/ }));
+    expect(screen.getByRole("button", { name: /^自动同步/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "管理资源包" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^refresh立即刷新$/ })).toBeInTheDocument();
+    expect(screen.getByText("系统每 5 分钟自动同步一次；如登录失效，请点击“立即刷新”完成登录。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    expect(onSaveAccounts).toHaveBeenCalledWith([
+      expect.objectContaining({ id: account.id, resource_sync_mode: "auto" }),
+    ]);
+    expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("shows LongCat resource package details saved by automatic synchronization", async () => {
+    const autoAccount: ChannelAccount = { ...account, resource_sync_mode: "auto" };
+    const tokenPacks = JSON.stringify([
+      { lotId: 151724, source: "FREE_PACK", totalToken: 50_000_000, consumedToken: 36_679_022, remainingToken: 13_320_978, expireTime: "2026-07-30 01:00:31", status: "ACTIVE" },
+      { lotId: 159869, source: "FREE_PACK", totalToken: 10_000_000, consumedToken: 0, remainingToken: 10_000_000, expireTime: "2026-07-30 09:42:47", status: "ACTIVE" },
+    ]);
+
+    render(
+      <AccountManagementSideSheet
+        request={{ kind: "edit", accountId: autoAccount.id }}
+        accounts={[autoAccount]}
+        snapshots={[{
+          id: "snapshot-scrape",
+          account_id: autoAccount.id,
+          balance: null,
+          currency: null,
+          token_pack_total: 60_000_000,
+          token_pack_used: 36_679_022,
+          token_pack_remaining: 23_320_978,
+          token_pack_expire_at: "2026-07-30 01:00:31",
+          token_packs: tokenPacks,
+          raw_scraped_json: null,
+          source: "scrape",
+          synced_at: "2026-07-23T04:35:26Z",
+          remark: "控制台抓取",
+          created_at: "2026-07-23T04:35:26Z",
+          updated_at: "2026-07-23T04:35:26Z",
+        }]}
         presets={[{ ...preset, supports_scrape_balance: true, supports_balance_query: false }]}
         busy={false}
         onClose={vi.fn()}
@@ -83,10 +143,87 @@ describe("AccountManagementSideSheet", () => {
       />,
     );
 
-    expect(await screen.findByText("控制台自动同步")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /登录控制台抓取/ })).toBeInTheDocument();
-    expect(screen.getByText("点击上方按钮即可同步套餐余量；如尚未登录，将自动打开控制台登录窗口。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "管理资源包" })).toBeInTheDocument();
+    expect(await screen.findByText("共 2 个资源包")).toBeInTheDocument();
+    expect(screen.getByText("151724")).toBeInTheDocument();
+    expect(screen.getByText("159869")).toBeInTheDocument();
+    expect(screen.getAllByText("FREE_PACK")).toHaveLength(2);
+  });
+
+  it("shows the complete Qwen Token Plan subscription and both quota windows", async () => {
+    const qwenAccount: ChannelAccount = {
+      ...account,
+      id: "account-qwen-auto",
+      channel_id: "qwen",
+      name: "千问 Token Plan",
+      resource_mode: "token_plan",
+      resource_sync_mode: "auto",
+    };
+    const raw = JSON.stringify({
+      subscription: qwenResponse({
+        specCode: "standard",
+        remainingDays: 28,
+        startTime: 1784512320000,
+        endTime: 1787241600000,
+        autoRenewFlag: false,
+        status: "VALID",
+      }),
+      quota_config: qwenResponse({
+        standard: { five_hour: 3000, weekly: 10000 },
+      }),
+      usage: qwenResponse({
+        per5HourPercentage: 0,
+        per1WeekPercentage: 0.789,
+        per1WeekResetTime: 1785130440000,
+      }),
+    });
+
+    render(
+      <AccountManagementSideSheet
+        request={{ kind: "edit", accountId: qwenAccount.id }}
+        accounts={[qwenAccount]}
+        snapshots={[{
+          id: "snapshot-qwen",
+          account_id: qwenAccount.id,
+          balance: null,
+          currency: null,
+          token_pack_total: 10000,
+          token_pack_used: 7890,
+          token_pack_remaining: 2110,
+          token_pack_expire_at: new Date(1787241600000).toISOString(),
+          token_packs: null,
+          raw_scraped_json: raw,
+          source: "scrape",
+          synced_at: "2026-07-23T05:33:04Z",
+          remark: "控制台抓取",
+          created_at: "2026-07-23T05:33:04Z",
+          updated_at: "2026-07-23T05:33:04Z",
+        }]}
+        presets={[{
+          ...preset,
+          id: "qwen",
+          name: "千问 Qwen",
+          supports_scrape_balance: true,
+          supports_balance_query: false,
+        }]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText("个人版 Standard 套餐")).toBeInTheDocument();
+    expect(screen.getByText("生效中")).toBeInTheDocument();
+    expect(screen.getByText("28 天")).toBeInTheDocument();
+    expect(screen.getByText("每 5 小时额度")).toBeInTheDocument();
+    expect(screen.getByText("每 7 天额度")).toBeInTheDocument();
+    expect(screen.getByText("100.0%")).toBeInTheDocument();
+    expect(screen.getByText("21.1%")).toBeInTheDocument();
+    expect(screen.getAllByText("3,000 Credits")).toHaveLength(2);
+    expect(screen.getByText("2,110 Credits")).toBeInTheDocument();
   });
 
   it("opens the full create drawer and saves manual resource information", async () => {
@@ -124,14 +261,14 @@ describe("AccountManagementSideSheet", () => {
     expect(screen.getByText("已维护 1 个资源包")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存账号" }));
 
-    expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({ channel_id: "longcat", api_key: "sk-test", resource_mode: "token_pack" })]);
+    expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({ channel_id: "longcat", api_key: "sk-test", resource_mode: "token_pack", resource_sync_mode: "manual" })]);
     expect(onSaveBalanceSnapshot).toHaveBeenCalledWith(expect.objectContaining({
       token_pack_total: 1000,
       token_pack_used: 250,
       token_pack_remaining: 750,
       token_packs: expect.stringContaining('"totalToken":1000'),
     }));
-  });
+  }, 10_000);
   it("repairs a timezone-shifted snapshot expiry from the stored package data", async () => {
     const user = userEvent.setup();
     const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
@@ -300,3 +437,7 @@ describe("AccountManagementSideSheet", () => {
     })]);
   });
 });
+
+function qwenResponse(data: Record<string, unknown>) {
+  return { data: { DataV2: { data: { data } } } };
+}

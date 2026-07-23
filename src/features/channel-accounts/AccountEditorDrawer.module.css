@@ -34,6 +34,8 @@
 .modeOption.selected strong { color: var(--semi-color-primary); }
 .resourcePanel { padding: 14px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--semi-color-bg-2); display: grid; gap: 14px; }
 .resourceHeading { display: flex; align-items: center; gap: 9px; }
+.syncModeSection { display: grid; gap: 8px; }
+.syncModeLabel { color: var(--semi-color-text-1); font-size: 13px; font-weight: 600; }
 .autoBadge, .manualBadge, .planBadge { padding: 2px 7px; border-radius: 10px; font-size: 11px; }
 .autoBadge { color: var(--semi-color-success); background: var(--semi-color-success-light-default); }
 .manualBadge { color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); }
@@ -63,11 +65,35 @@
 .scrapeResult > span { display: flex; justify-content: space-between; color: var(--semi-color-text-1); font-size: 13px; }
 .scrapeResult b { color: var(--semi-color-text-0); font-weight: 600; }
 .scrapeSynced { color: var(--semi-color-text-2); font-size: 12px; }
+.scrapedPackDetails { display: grid; gap: 8px; padding-top: 2px; }
+.scrapedPackDetails > strong { color: var(--semi-color-text-0); font-size: 13px; }
+.scrapedPackTableScroll { overflow-x: auto; border: 1px solid var(--flowlet-color-border); border-radius: 7px; }
+.scrapedPackTable { width: 100%; min-width: 680px; border-collapse: collapse; color: var(--semi-color-text-1); font-size: 12px; }
+.scrapedPackTable th, .scrapedPackTable td { padding: 8px 10px; border-bottom: 1px solid var(--flowlet-color-border); text-align: left; white-space: nowrap; }
+.scrapedPackTable th { background: var(--semi-color-fill-0); color: var(--semi-color-text-2); font-weight: 500; }
+.scrapedPackTable tbody tr:last-child td { border-bottom: 0; }
+.scrapedPackTable td:first-child { display: grid; gap: 2px; }
+.scrapedPackTable td:first-child small { color: var(--semi-color-text-2); }
+.qwenPlanDetails { display: grid; gap: 12px; }
+.qwenPlanHeading { display: flex; align-items: center; gap: 8px; }
+.qwenPlanHeading > strong { color: var(--semi-color-text-0); font-size: 14px; }
+.qwenSubscriptionGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.qwenSubscriptionGrid > span, .qwenQuotaMetrics > span { display: grid; gap: 3px; }
+.qwenSubscriptionGrid small, .qwenQuotaMetrics small { color: var(--semi-color-text-2); font-size: 11px; }
+.qwenSubscriptionGrid b, .qwenQuotaMetrics b { color: var(--semi-color-text-0); font-size: 12px; font-weight: 600; }
+.qwenQuotaGrid { display: grid; gap: 10px; }
+.qwenQuotaCard { display: grid; gap: 8px; padding: 11px 12px; border: 1px solid var(--flowlet-color-border); border-radius: 7px; background: var(--semi-color-bg-1); }
+.qwenQuotaHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.qwenQuotaHeading strong { color: var(--semi-color-text-0); font-size: 13px; }
+.qwenQuotaHeading b { color: var(--semi-color-primary); font-size: 14px; }
+.qwenQuotaMetrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.qwenResetTime { display: flex; justify-content: space-between; gap: 12px; color: var(--semi-color-text-2); font-size: 11px; }
+.qwenResetTime b { color: var(--semi-color-text-1); font-weight: 500; }
 .scrapeHint { color: var(--semi-color-text-2); font-size: 12px; line-height: 1.5; }
 .footer { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 12px; }
 .footer button { height: 40px; }
 @media (max-width: 620px) {
-  .channelRow, .modeOptions, .resourceGrid, .basicFields, .urlGrid { grid-template-columns: 1fr; }
+  .channelRow, .modeOptions, .resourceGrid, .basicFields, .urlGrid, .qwenSubscriptionGrid, .qwenQuotaMetrics { grid-template-columns: 1fr; }
   .packManageRow { align-items: flex-start; flex-direction: column; }
   .packSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

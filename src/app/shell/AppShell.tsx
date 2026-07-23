@@ -5,6 +5,7 @@ import { Sidebar } from "./Sidebar";
 import { WindowControls } from "./WindowControls";
 import { AgentDataAutoSync } from "../../features/background-tasks/AgentDataAutoSync";
 import { CodexAccountAutoSync } from "../../features/background-tasks/CodexAccountAutoSync";
+import { ChannelResourceAutoSync } from "../../features/background-tasks/ChannelResourceAutoSync";
 
 const { Sider, Content } = Layout;
 
@@ -14,6 +15,7 @@ export function AppShell() {
       <WindowControls />
       <AgentDataAutoSync />
       <CodexAccountAutoSync />
+      <ChannelResourceAutoSync />
       <Layout className={styles.shell}>
         <Sider className={styles.sidebar}>
           <Sidebar />

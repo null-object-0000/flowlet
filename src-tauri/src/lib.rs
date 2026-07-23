@@ -803,6 +803,7 @@ pub fn run() {
             commands::handle_scrape_interceptor_ready,
             commands::probe_scrape_login,
             commands::scrape_balance,
+            commands::sync_scrape_balances,
             commands::account_stats,
             commands::is_autostart_enabled,
             commands::enable_autostart,

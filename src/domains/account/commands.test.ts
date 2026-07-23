@@ -75,15 +75,25 @@ describe("accountCommands contract", () => {
     await accountCommands.probeScrapeLogin("account-longcat");
     expect(invokeMock).toHaveBeenLastCalledWith(
       "probe_scrape_login",
-      { accountId: "account-longcat" },
+      { accountId: "account-longcat", interactive: true },
       45_000,
     );
 
     await accountCommands.scrapeBalance("account-longcat");
     expect(invokeMock).toHaveBeenLastCalledWith(
       "scrape_balance",
-      { accountId: "account-longcat" },
+      { accountId: "account-longcat", interactive: true },
       60_000,
+    );
+  });
+
+  it("runs periodic WebView resource synchronization in non-interactive mode", async () => {
+    invokeMock.mockResolvedValueOnce({ started: true, accounts: 1, synced: 1, failed: 0 });
+    await accountCommands.syncScrapeBalances("background");
+    expect(invokeMock).toHaveBeenCalledWith(
+      "sync_scrape_balances",
+      { triggerSource: "background" },
+      600_000,
     );
   });
 });

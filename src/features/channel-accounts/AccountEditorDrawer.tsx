@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { Button, Input, Select, SideSheet, Space, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Input, Progress, Select, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { toAppError } from "../../platform/tauri/client";
-import type { AccountBalanceSnapshot, AccountResourceMode, ChannelAccount } from "../../domains/account/types";
+import type { AccountBalanceSnapshot, AccountResourceMode, AccountResourceSyncMode, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import {
   QWEN_CHANNEL_ID,
@@ -23,6 +23,12 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { useScrapeConsole } from "./useScrapeConsole";
 import type { ScrapeBalanceResult } from "../../domains/account/commands";
+import { formatFullTimestamp } from "../../shared/formatters/datetime";
+import {
+  parseQwenTokenPlanDetails,
+  type QwenQuotaWindow,
+  type QwenTokenPlanDetails,
+} from "./qwenTokenPlanDetails";
 
 const { Text } = Typography;
 
@@ -61,6 +67,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
   const resourceOptions = resourceModeOptions(draft?.channel_id ?? "");
   const resourceMode = draft?.resource_mode ?? defaultResourceMode(draft?.channel_id ?? "");
+  const resourceSyncMode = draft.resource_sync_mode ?? "manual";
+  const isResourceAutoSync = supportsScrape && resourceSyncMode === "auto";
   const tokenRemaining = useMemo(() => {
     const total = optionalNumber(resource.tokenTotal);
     const used = optionalNumber(resource.tokenUsed);
@@ -82,6 +90,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       channel_id: channelId,
       name: count === 0 ? t("{name} 主账号", { name: next?.name ?? t("渠道") }) : t("{name} 账号 {count}", { name: next?.name ?? t("渠道"), count: count + 1 }),
       resource_mode: defaultResourceMode(channelId),
+      resource_sync_mode: "manual",
       base_url_override: null,
       anthropic_base_url_override: null,
     });
@@ -157,7 +166,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           base_url_override: currentDraft.base_url_override?.trim() || null,
           anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
         },
-        autoSyncBalance ? null : createSnapshotDraft(currentDraft, resource, resourceMode, tokenRemaining),
+        autoSyncBalance || isResourceAutoSync ? null : createSnapshotDraft(currentDraft, resource, resourceMode, tokenRemaining),
       );
     } finally {
       setSaving(false);
@@ -257,7 +266,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         </section>
 
         <section className={styles.section}>
-          <div className={styles.sectionHeading}><span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : resourceOptions.length ? "保存后按所选模式维护资源信息" : "手动维护按量付费余额")}</small></span></div>
+          <div className={styles.sectionHeading}><span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span></div>
           {autoSyncBalance ? (
             <div className={styles.resourcePanel}>
               <div className={styles.resourceHeading}><strong>{t("按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
@@ -268,21 +277,6 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             </div>
           ) : (
             <>
-              {supportsScrape ? (
-                <div className={styles.resourcePanel}>
-                  <div className={styles.resourceHeading}>
-                    <strong>{t("控制台自动同步")}</strong>
-                    <span className={styles.autoBadge}>{t("WebView")}</span>
-                  </div>
-                  <ScrapeConsolePanel
-                    account={draft}
-                    enabled={isEdit}
-                    snapshot={snapshot}
-                    onScrape={onScrape}
-                    t={t}
-                  />
-                </div>
-              ) : null}
               {resourceOptions.length ? (
                 <div className={styles.modeOptions}>
                   {resourceOptions.map((option) => (
@@ -300,9 +294,34 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
               <div className={styles.resourcePanel}>
                 <div className={styles.resourceHeading}>
                   <strong>{t(resourceMode === "token_pack" ? "资源包信息" : resourceMode === "token_plan" ? "Token Plan 订阅信息" : "按量付费信息")}</strong>
-                  <span className={resourceMode === "token_plan" ? styles.planBadge : styles.manualBadge}>{t(resourceMode === "token_plan" ? "订阅" : "手动维护")}</span>
+                  <span className={isResourceAutoSync ? styles.autoBadge : resourceMode === "token_plan" ? styles.planBadge : styles.manualBadge}>{t(isResourceAutoSync ? "自动同步" : resourceMode === "token_plan" ? "订阅" : "手动维护")}</span>
                 </div>
-                {resourceMode === "token_pack" ? (
+                {supportsScrape ? (
+                  <div className={styles.syncModeSection}>
+                    <span className={styles.syncModeLabel}>{t("维护方式")}</span>
+                    <div className={styles.modeOptions}>
+                      {resourceSyncModeOptions().map((option) => (
+                        <ModeOption
+                          key={option.value}
+                          selected={resourceSyncMode === option.value}
+                          title={t(option.title)}
+                          description={t(option.description)}
+                          onClick={() => update({ resource_sync_mode: option.value })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {isResourceAutoSync ? (
+                  <ScrapeConsolePanel
+                    account={draft}
+                    enabled={isEdit}
+                    snapshot={snapshot}
+                    onScrape={onScrape}
+                    language={language}
+                    t={t}
+                  />
+                ) : resourceMode === "token_pack" ? (
                   <div className={styles.packSection}>
                     {draft.channel_id === "longcat" ? (
                       <div className={styles.packManageRow}>
@@ -382,7 +401,7 @@ function defaultResourceMode(channelId: string): AccountResourceMode {
 function resourceModeOptions(channelId: string): { value: AccountResourceMode; title: string; description: string }[] {
   if (channelId === "longcat") {
     return [
-      { value: "token_pack", title: "Token 资源包", description: "预付费，手动维护资源包信息" },
+      { value: "token_pack", title: "Token 资源包", description: "预付费，维护资源包余量与有效期" },
       { value: "pay_as_you_go", title: "API 按量付费", description: "后付费，手动维护余额" },
     ];
   }
@@ -393,6 +412,13 @@ function resourceModeOptions(channelId: string): { value: AccountResourceMode; t
     ];
   }
   return [];
+}
+
+function resourceSyncModeOptions(): { value: AccountResourceSyncMode; title: string; description: string }[] {
+  return [
+    { value: "auto", title: "自动同步", description: "每 5 分钟从官方控制台同步，也可立即刷新" },
+    { value: "manual", title: "手动维护", description: "自行添加、导入和更新资源信息" },
+  ];
 }
 
 function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPreset[], language: "zh-CN" | "en-US"): ChannelAccount {
@@ -409,6 +435,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     priority: accounts.length,
     remark: "",
     resource_mode: defaultResourceMode(mode.channelId),
+    resource_sync_mode: "manual",
     base_url_override: null,
     anthropic_base_url_override: null,
     last_used_at: null,
@@ -467,12 +494,14 @@ function ScrapeConsolePanel({
   enabled,
   snapshot,
   onScrape,
+  language,
   t,
 }: {
   account: ChannelAccount;
   enabled: boolean;
   snapshot?: AccountBalanceSnapshot;
   onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
+  language: "zh-CN" | "en-US";
   t: (k: string, params?: Record<string, string | number> | undefined) => string;
 }) {
   const {
@@ -496,6 +525,12 @@ function ScrapeConsolePanel({
   // 优先展示 hook 最近的抓取结果(ScrapeBalanceResult),否则回退到父组件传入的 snapshot
   const scrapeDisplay = lastResult;
   const fallbackDisplay = snapshot;
+  const scrapedPacks = account.channel_id === "longcat"
+    ? parseStoredLongCatPacks(scrapeDisplay?.token_packs ?? fallbackDisplay?.token_packs)
+    : [];
+  const qwenDetails = account.channel_id === QWEN_CHANNEL_ID
+    ? parseQwenTokenPlanDetails(scrapeDisplay?.raw_scraped_json ?? fallbackDisplay?.raw_scraped_json)
+    : null;
 
   return (
     <div className={styles.scrapePanel}>
@@ -509,7 +544,7 @@ function ScrapeConsolePanel({
           disabled={!enabled}
           onClick={() => void handleScrape()}
         >
-          {t("登录控制台抓取")}
+          {t("立即刷新")}
         </Button>
         {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
       </div>
@@ -532,24 +567,24 @@ function ScrapeConsolePanel({
       {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
       {scrapeDisplay ? (
         <div className={styles.scrapeResult}>
-          {scrapeDisplay.plan_name ? <strong>{scrapeDisplay.plan_name}</strong> : null}
+          {!qwenDetails && scrapeDisplay.plan_name ? <strong>{scrapeDisplay.plan_name}</strong> : null}
           {scrapeDisplay.balance != null ? (
             <span>{t("余额")} <b>{scrapeDisplay.balance} {scrapeDisplay.currency ?? ""}</b></span>
           ) : null}
-          {scrapeDisplay.token_total != null ? (
-            <span>{t("总额")} <b>{formatResourceTokens(scrapeDisplay.token_total, "zh-CN")}</b></span>
+          {!qwenDetails && scrapeDisplay.token_total != null ? (
+            <span>{t("总额")} <b>{formatResourceTokens(scrapeDisplay.token_total, language)}</b></span>
           ) : null}
-          {scrapeDisplay.token_used != null ? (
-            <span>{t("已用")} <b>{formatResourceTokens(scrapeDisplay.token_used, "zh-CN")}</b></span>
+          {!qwenDetails && scrapeDisplay.token_used != null ? (
+            <span>{t("已用")} <b>{formatResourceTokens(scrapeDisplay.token_used, language)}</b></span>
           ) : null}
-          {scrapeDisplay.token_remaining != null ? (
-            <span>{t("剩余")} <b>{formatResourceTokens(scrapeDisplay.token_remaining, "zh-CN")}</b></span>
+          {!qwenDetails && scrapeDisplay.token_remaining != null ? (
+            <span>{t("剩余")} <b>{formatResourceTokens(scrapeDisplay.token_remaining, language)}</b></span>
           ) : null}
-          {scrapeDisplay.token_pack_expire_at ? (
+          {!qwenDetails && scrapeDisplay.token_pack_expire_at ? (
             <span>{t("到期")} <b>{scrapeDisplay.token_pack_expire_at.slice(0, 10)}</b></span>
           ) : null}
           {scrapeDisplay.synced_at ? (
-            <span className={styles.scrapeSynced}>{t("同步时间")} <b>{scrapeDisplay.synced_at.slice(0, 19).replace("T", " ")}</b></span>
+            <span className={styles.scrapeSynced}>{t("同步时间")} <b>{formatFullTimestamp(scrapeDisplay.synced_at, language)}</b></span>
           ) : null}
         </div>
       ) : fallbackDisplay && fallbackDisplay.source === "scrape" ? (
@@ -557,32 +592,139 @@ function ScrapeConsolePanel({
           {fallbackDisplay.balance != null ? (
             <span>{t("余额")} <b>{fallbackDisplay.balance} {fallbackDisplay.currency ?? ""}</b></span>
           ) : null}
-          {fallbackDisplay.token_pack_total != null ? (
-            <span>{t("总额")} <b>{formatResourceTokens(fallbackDisplay.token_pack_total, "zh-CN")}</b></span>
+          {!qwenDetails && fallbackDisplay.token_pack_total != null ? (
+            <span>{t("总额")} <b>{formatResourceTokens(fallbackDisplay.token_pack_total, language)}</b></span>
           ) : null}
-          {fallbackDisplay.token_pack_used != null ? (
-            <span>{t("已用")} <b>{formatResourceTokens(fallbackDisplay.token_pack_used, "zh-CN")}</b></span>
+          {!qwenDetails && fallbackDisplay.token_pack_used != null ? (
+            <span>{t("已用")} <b>{formatResourceTokens(fallbackDisplay.token_pack_used, language)}</b></span>
           ) : null}
-          {fallbackDisplay.token_pack_remaining != null ? (
-            <span>{t("剩余")} <b>{formatResourceTokens(fallbackDisplay.token_pack_remaining, "zh-CN")}</b></span>
+          {!qwenDetails && fallbackDisplay.token_pack_remaining != null ? (
+            <span>{t("剩余")} <b>{formatResourceTokens(fallbackDisplay.token_pack_remaining, language)}</b></span>
           ) : null}
-          {fallbackDisplay.token_pack_expire_at ? (
+          {!qwenDetails && fallbackDisplay.token_pack_expire_at ? (
             <span>{t("到期")} <b>{fallbackDisplay.token_pack_expire_at.slice(0, 10)}</b></span>
           ) : null}
           {fallbackDisplay.synced_at ? (
-            <span className={styles.scrapeSynced}>{t("同步时间")} <b>{fallbackDisplay.synced_at.slice(0, 19).replace("T", " ")}</b></span>
+            <span className={styles.scrapeSynced}>{t("同步时间")} <b>{formatFullTimestamp(fallbackDisplay.synced_at, language)}</b></span>
           ) : null}
+        </div>
+      ) : null}
+      {qwenDetails ? (
+        <QwenTokenPlanDetailsPanel details={qwenDetails} language={language} t={t} />
+      ) : null}
+      {scrapedPacks.length ? (
+        <div className={styles.scrapedPackDetails}>
+          <strong>{t("共 {count} 个资源包", { count: scrapedPacks.length })}</strong>
+          <div className={styles.scrapedPackTableScroll}>
+            <table className={styles.scrapedPackTable}>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>{t("总量")}</th>
+                  <th>{t("已消耗")}</th>
+                  <th>{t("剩余")}</th>
+                  <th>{t("到期时间")}</th>
+                  <th>{t("状态")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scrapedPacks.map((pack, index) => (
+                  <tr key={pack.lotId ?? index}>
+                    <td>
+                      <b>{pack.lotId ?? index + 1}</b>
+                      <small>{pack.source ?? pack.grantCategory ?? "-"}</small>
+                    </td>
+                    <td>{formatResourceTokens(pack.totalToken ?? null, language)}</td>
+                    <td>{formatResourceTokens(pack.consumedToken ?? null, language)}</td>
+                    <td>{formatResourceTokens(pack.remainingToken ?? null, language)}</td>
+                    <td>{pack.expireTime ?? "-"}</td>
+                    <td>{pack.status ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
       {!scrapeDisplay && !(fallbackDisplay && fallbackDisplay.source === "scrape") && !error ? (
         <span className={styles.scrapeHint}>
-          {t("点击上方按钮即可同步套餐余量；如尚未登录，将自动打开控制台登录窗口。")}
+          {t("系统每 5 分钟自动同步一次；如登录失效，请点击“立即刷新”完成登录。")}
         </span>
       ) : null}
     </div>
   );
 }
 
+function QwenTokenPlanDetailsPanel({
+  details,
+  language,
+  t,
+}: {
+  details: QwenTokenPlanDetails;
+  language: "zh-CN" | "en-US";
+  t: (k: string, params?: Record<string, string | number> | undefined) => string;
+}) {
+  const planName = `${details.specCode.charAt(0).toUpperCase()}${details.specCode.slice(1)}`;
+  const valid = details.status === "VALID";
+  return (
+    <div className={styles.qwenPlanDetails}>
+      <div className={styles.qwenPlanHeading}>
+        <strong>{t("个人版 {name} 套餐", { name: planName })}</strong>
+        {details.status ? <Tag size="small" color={valid ? "green" : "orange"}>{t(valid ? "生效中" : details.status)}</Tag> : null}
+      </div>
+      <div className={styles.qwenSubscriptionGrid}>
+        <QwenInfo label={t("自动续费")} value={details.autoRenew == null ? "-" : t(details.autoRenew ? "已开启" : "已关闭")} />
+        <QwenInfo label={t("剩余天数")} value={details.remainingDays == null ? "-" : t("{count} 天", { count: details.remainingDays })} />
+        <QwenInfo label={t("到期时间")} value={details.expireAt ? formatFullTimestamp(details.expireAt, language) : "-"} />
+      </div>
+      <div className={styles.qwenQuotaGrid}>
+        <QwenQuotaCard title={t("每 5 小时额度")} quota={details.fiveHour} language={language} t={t} />
+        <QwenQuotaCard title={t("每 7 天额度")} quota={details.sevenDay} language={language} t={t} />
+      </div>
+    </div>
+  );
+}
+
+function QwenInfo({ label, value }: { label: string; value: string }) {
+  return <span><small>{label}</small><b>{value}</b></span>;
+}
+
+function QwenQuotaCard({
+  title,
+  quota,
+  language,
+  t,
+}: {
+  title: string;
+  quota: QwenQuotaWindow | null;
+  language: "zh-CN" | "en-US";
+  t: (k: string, params?: Record<string, string | number> | undefined) => string;
+}) {
+  if (!quota) return null;
+  const percent = Math.round(quota.remainingPercent * 10) / 10;
+  return (
+    <section className={styles.qwenQuotaCard}>
+      <div className={styles.qwenQuotaHeading}>
+        <strong>{title}</strong>
+        <b>{percent.toFixed(1)}%</b>
+      </div>
+      <Progress aria-label={`${title} ${t("剩余")}`} percent={percent} size="small" showInfo={false} />
+      <div className={styles.qwenQuotaMetrics}>
+        <QwenInfo label={t("剩余额度")} value={formatCredits(quota.remaining, language)} />
+        <QwenInfo label={t("已使用")} value={formatCredits(quota.used, language)} />
+        <QwenInfo label={t("总额度")} value={formatCredits(quota.total, language)} />
+      </div>
+      <span className={styles.qwenResetTime}>
+        {t("额度重置时间")} <b>{quota.resetAt ? formatFullTimestamp(quota.resetAt, language) : "-"}</b>
+      </span>
+    </section>
+  );
+}
+
 function formatResourceTokens(value: number | null, language: "zh-CN" | "en-US") {
   return value == null ? "-" : `${formatTokenCount(Math.max(0, value), language)} Tokens`;
+}
+
+function formatCredits(value: number, language: "zh-CN" | "en-US") {
+  return `${Math.max(0, value).toLocaleString(language, { maximumFractionDigits: 0 })} Credits`;
 }

@@ -43,6 +43,14 @@ impl Drop for CodexAccountSyncGuard {
         CODEX_ACCOUNT_SYNC_RUNNING.store(false, Ordering::Release);
     }
 }
+
+static SCRAPE_BALANCE_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+struct ScrapeBalanceSyncGuard;
+impl Drop for ScrapeBalanceSyncGuard {
+    fn drop(&mut self) {
+        SCRAPE_BALANCE_SYNC_RUNNING.store(false, Ordering::Release);
+    }
+}
 use tauri_plugin_autostart::ManagerExt;
 
 // ─── Agent Environment Commands ────────────────────────────────────────────
@@ -1742,6 +1750,7 @@ pub struct ScrapeBalanceResult {
     pub token_used: Option<i64>,
     pub token_remaining: Option<i64>,
     pub token_pack_expire_at: Option<String>,
+    pub token_packs: Option<String>,
     pub raw_scraped_json: Option<String>,
     pub source: String,
     pub synced_at: String,
@@ -2014,7 +2023,7 @@ pub(super) async fn handle_intercepted_response(
 
 #[cfg(test)]
 mod scrape_capture_tests {
-    use super::{is_explicit_login_url, scrape_responses_complete};
+    use super::{captured_longcat_token_packs, is_explicit_login_url, scrape_responses_complete};
     use crate::core::scrape_console::ScrapeModeRuntime;
 
     #[test]
@@ -2061,6 +2070,22 @@ mod scrape_capture_tests {
             "longcat",
             "https://longcat.chat/login"
         ));
+    }
+
+    #[test]
+    fn preserves_longcat_current_and_other_lots_as_snapshot_details() {
+        let slots = std::collections::HashMap::from([(
+            "token_packs_summary".to_string(),
+            r#"{"code":0,"data":{"currentLot":{"lotId":151724,"totalToken":50000000},"estimate":{"windowDays":7},"otherLots":[{"lotId":159869,"totalToken":10000000}]}}"#
+                .to_string(),
+        )]);
+
+        let token_packs = captured_longcat_token_packs(&slots).expect("token packs");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&token_packs).expect("valid token packs json");
+        assert_eq!(parsed.as_array().map(Vec::len), Some(2));
+        assert_eq!(parsed[0]["lotId"], 151724);
+        assert_eq!(parsed[1]["lotId"], 159869);
     }
 }
 
@@ -2114,6 +2139,29 @@ fn collect_scrape_slots(
         .collect())
 }
 
+/// 从 LongCat 原始响应兜底提取完整资源包数组。除了兼容旧版外部
+/// config.json 中尚未返回 token_packs 的 extractor，也保证资源包明细
+/// 不会因为汇总解析器被自定义而丢失。
+fn captured_longcat_token_packs(
+    slots: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let raw = slots.get("token_packs_summary")?;
+    let root = serde_json::from_str::<serde_json::Value>(raw).ok()?;
+    let data = root.get("data").unwrap_or(&root);
+    let mut lots = Vec::new();
+    if let Some(current) = data.get("currentLot").filter(|value| value.is_object()) {
+        lots.push(current.clone());
+    }
+    if let Some(others) = data.get("otherLots").and_then(|value| value.as_array()) {
+        lots.extend(others.iter().filter(|value| value.is_object()).cloned());
+    }
+    if lots.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&lots).ok()
+    }
+}
+
 fn scrape_interceptor_ready(
     state: &tauri::State<'_, AppState>,
     account_id: &str,
@@ -2159,7 +2207,9 @@ pub(super) async fn probe_scrape_login(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     account_id: String,
+    interactive: Option<bool>,
 ) -> Result<ScrapeLoginStatus, String> {
+    let interactive = interactive.unwrap_or(true);
     // 1. 确保 webview 存在(会解析 channel_id)
     open_scrape_console(app.clone(), state.clone(), account_id.clone()).await?;
 
@@ -2307,13 +2357,21 @@ pub(super) async fn probe_scrape_login(
         message: match probe_state {
             ScrapeProbeState::Captured => None,
             ScrapeProbeState::LoginRequired => {
-                Some("检测到控制台登录页，请在弹出的窗口中完成登录。".to_string())
+                Some(if interactive {
+                    "检测到控制台登录页，请在弹出的窗口中完成登录。".to_string()
+                } else {
+                    "控制台登录状态已失效，本轮自动同步已跳过。请手动刷新并重新登录。"
+                        .to_string()
+                })
             }
             ScrapeProbeState::ConsoleActionRequired => {
-                Some(
+                Some(if interactive {
                     "未捕获到套餐接口响应，已打开控制台窗口。请在窗口中完成登录或等待页面加载后，再重新抓取。"
-                        .to_string(),
-                )
+                        .to_string()
+                } else {
+                    "未捕获到套餐接口响应，本轮自动同步已跳过。请手动刷新检查控制台。"
+                        .to_string()
+                })
             }
             ScrapeProbeState::CaptureTimeout => {
                 Some("控制台页面监听初始化失败，请重新抓取。".to_string())
@@ -2324,7 +2382,7 @@ pub(super) async fn probe_scrape_login(
     // 明确进入登录页时必须展示窗口；监听已就绪但业务接口没有触发时，也展示控制台
     // 供用户完成登录、验证码或等待页面加载。后者是 console_action_required，
     // 不声称用户未登录。
-    if matches!(
+    if interactive && matches!(
         status.probe_state,
         ScrapeProbeState::LoginRequired | ScrapeProbeState::ConsoleActionRequired
     ) {
@@ -2366,7 +2424,9 @@ pub(super) async fn scrape_balance(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     account_id: String,
+    interactive: Option<bool>,
 ) -> Result<ScrapeBalanceResult, String> {
+    let interactive = interactive.unwrap_or(true);
     // 1. 解析模式配置。
     let mode = {
         let accounts = state
@@ -2392,12 +2452,21 @@ pub(super) async fn scrape_balance(
     // 2. 前端通常已调用 probe_scrape_login 完成一次“清缓冲 → 刷新 → 捕获”。
     // 直接调用本 command 时若没有完整响应，则在这里执行同一流程一次。
     if !has_complete_scrape_capture(&state, &account_id, &mode)? {
-        let login_status =
-            probe_scrape_login(app.clone(), state.clone(), account_id.clone()).await?;
+        let login_status = probe_scrape_login(
+            app.clone(),
+            state.clone(),
+            account_id.clone(),
+            Some(interactive),
+        )
+        .await?;
         match login_status.probe_state {
             ScrapeProbeState::Captured => {}
             ScrapeProbeState::LoginRequired => {
-                return Err("请先登录官方控制台（已弹出登录窗口）".to_string());
+                return Err(if interactive {
+                    "请先登录官方控制台（已弹出登录窗口）".to_string()
+                } else {
+                    "控制台登录状态已失效，请手动刷新并重新登录".to_string()
+                });
             }
             ScrapeProbeState::ConsoleActionRequired | ScrapeProbeState::CaptureTimeout => {
                 return Err(login_status
@@ -2495,9 +2564,23 @@ pub(super) async fn scrape_balance(
         .get("token_expire_at")
         .and_then(|v| v.as_str())
         .map(String::from);
+    let token_packs = parsed
+        .get("token_packs")
+        .filter(|value| value.is_array())
+        .and_then(|value| serde_json::to_string(value).ok())
+        .or_else(|| captured_longcat_token_packs(&slots));
 
     let now = chrono::Utc::now().to_rfc3339();
-    let raw_scraped_json = serde_json::to_string(&parsed).ok();
+    let raw_scraped_json = if mode.aggregate {
+        serde_json::to_string(&scrape_console::build_aggregate_bundle(&slots)).ok()
+    } else {
+        let target_key = if mode.console_url.contains("tab=api") {
+            "api_usage_summary"
+        } else {
+            "token_packs_summary"
+        };
+        slots.get(target_key).cloned()
+    };
 
     // 8. 写快照
     let snapshot = AccountBalanceSnapshot {
@@ -2509,7 +2592,7 @@ pub(super) async fn scrape_balance(
         token_pack_used: token_used,
         token_pack_remaining: token_remaining,
         token_pack_expire_at: token_pack_expire_at.clone(),
-        token_packs: None,
+        token_packs: token_packs.clone(),
         raw_scraped_json: raw_scraped_json.clone(),
         source: "scrape".to_string(),
         synced_at: Some(now.clone()),
@@ -2531,6 +2614,7 @@ pub(super) async fn scrape_balance(
         token_used,
         token_remaining,
         token_pack_expire_at: token_pack_expire_at.clone(),
+        token_packs,
         raw_scraped_json,
         source: "scrape".to_string(),
         synced_at: now,
@@ -2547,4 +2631,156 @@ pub(super) async fn scrape_balance(
     }
 
     Ok(result)
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrapeBalanceSyncResult {
+    pub started: bool,
+    pub job_id: Option<String>,
+    pub accounts: usize,
+    pub synced: usize,
+    pub failed: usize,
+    pub message: String,
+}
+
+/// 周期同步所有启用了 WebView 自动同步的渠道账号。后台运行时保持窗口隐藏，
+/// 登录失效或页面需要交互只记入任务日志，等待用户从账号编辑页手动刷新处理。
+#[tauri::command]
+pub(super) async fn sync_scrape_balances(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    trigger_source: String,
+) -> Result<ScrapeBalanceSyncResult, String> {
+    let accounts = {
+        let accounts = state
+            .accounts
+            .lock()
+            .map_err(|_| "读取账号失败".to_string())?;
+        let config = state
+            .channels_config
+            .lock()
+            .map_err(|_| "锁定渠道配置失败".to_string())?;
+        accounts
+            .iter()
+            .filter(|account| {
+                account.enabled
+                    && account.resource_sync_mode == "auto"
+                    && resolve_scrape_mode(
+                        &config,
+                        &account.channel_id,
+                        account.resource_mode.as_deref(),
+                    )
+                    .is_some()
+            })
+            .map(|account| (account.id.clone(), account.name.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    if accounts.is_empty() {
+        return Ok(ScrapeBalanceSyncResult {
+            started: false,
+            job_id: None,
+            accounts: 0,
+            synced: 0,
+            failed: 0,
+            message: "没有启用控制台自动同步的账号".to_string(),
+        });
+    }
+    if SCRAPE_BALANCE_SYNC_RUNNING
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Ok(ScrapeBalanceSyncResult {
+            started: false,
+            job_id: None,
+            accounts: accounts.len(),
+            synced: 0,
+            failed: 0,
+            message: "已有渠道资源自动同步正在运行".to_string(),
+        });
+    }
+    let _guard = ScrapeBalanceSyncGuard;
+    let started_at = std::time::Instant::now();
+    let job_id = uuid::Uuid::new_v4().to_string();
+    state
+        .storage
+        .create_job(
+            &job_id,
+            "channel-resource-sync",
+            "渠道资源自动同步",
+            "同步账号资源",
+            &trigger_source,
+            accounts.len(),
+            &format!("开始同步 {} 个启用自动同步的渠道账号", accounts.len()),
+        )
+        .map_err(|error| format!("创建渠道资源同步任务失败：{error}"))?;
+
+    let mut synced = 0usize;
+    let mut failed = 0usize;
+    for (index, (account_id, account_name)) in accounts.iter().enumerate() {
+        match scrape_balance(
+            app.clone(),
+            state.clone(),
+            account_id.clone(),
+            Some(false),
+        )
+        .await
+        {
+            Ok(_) => {
+                synced += 1;
+                let _ = state.storage.add_job_event(
+                    &job_id,
+                    "info",
+                    "同步账号资源",
+                    &format!("{account_name} 同步成功"),
+                );
+            }
+            Err(error) => {
+                failed += 1;
+                let _ = state.storage.add_job_event(
+                    &job_id,
+                    "warning",
+                    "同步账号资源",
+                    &format!("{account_name} 同步失败：{error}"),
+                );
+            }
+        }
+        let _ = state.storage.update_job_progress(
+            &job_id,
+            (index + 1) as i64,
+            accounts.len() as i64,
+        );
+    }
+
+    let duration_ms = started_at.elapsed().as_millis() as u64;
+    let summary = serde_json::json!({
+        "accounts": accounts.len(),
+        "syncedAccounts": synced,
+        "failedAccounts": failed,
+        "durationMs": duration_ms,
+    })
+    .to_string();
+    state
+        .storage
+        .finish_job(
+            &job_id,
+            if failed > 0 {
+                "succeeded_with_warnings"
+            } else {
+                "succeeded"
+            },
+            &summary,
+            &format!("渠道资源同步完成：成功 {synced} 个，失败 {failed} 个"),
+        )
+        .map_err(|error| format!("完成渠道资源同步任务失败：{error}"))?;
+
+    Ok(ScrapeBalanceSyncResult {
+        started: true,
+        job_id: Some(job_id),
+        accounts: accounts.len(),
+        synced,
+        failed,
+        message: format!("渠道资源同步完成：成功 {synced} 个，失败 {failed} 个"),
+    })
 }

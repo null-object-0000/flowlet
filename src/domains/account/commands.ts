@@ -68,13 +68,17 @@ export const accountCommands = {
       toAppErr("account_scrape_failed"),
     ),
   /** 刷新控制台并等待页面业务响应。需要登录或页面未触发目标接口时 Rust 会展示 webview。 */
-  probeScrapeLogin: (accountId: string): Promise<ScrapeLoginStatus> =>
-    invokeCommand<ScrapeLoginStatus>("probe_scrape_login", { accountId }, SCRAPE_LOGIN_TIMEOUT_MS).catch(
+  probeScrapeLogin: (accountId: string, interactive = true): Promise<ScrapeLoginStatus> =>
+    invokeCommand<ScrapeLoginStatus>("probe_scrape_login", { accountId, interactive }, SCRAPE_LOGIN_TIMEOUT_MS).catch(
       toAppErr("account_scrape_failed"),
     ),
-  scrapeBalance: (accountId: string): Promise<ScrapeBalanceResult> =>
-    invokeCommand<ScrapeBalanceResult>("scrape_balance", { accountId }, SCRAPE_BALANCE_TIMEOUT_MS).catch(
+  scrapeBalance: (accountId: string, interactive = true): Promise<ScrapeBalanceResult> =>
+    invokeCommand<ScrapeBalanceResult>("scrape_balance", { accountId, interactive }, SCRAPE_BALANCE_TIMEOUT_MS).catch(
       toAppErr("account_scrape_failed"),
+    ),
+  syncScrapeBalances: (triggerSource: string): Promise<ScrapeBalanceSyncResult> =>
+    invokeCommand<ScrapeBalanceSyncResult>("sync_scrape_balances", { triggerSource }, 10 * 60_000).catch(
+      toAppErr("account_scrape_sync_failed"),
     ),
 };
 
@@ -87,6 +91,7 @@ export type ScrapeBalanceResult = {
   token_used: number | null;
   token_remaining: number | null;
   token_pack_expire_at: string | null;
+  token_packs: string | null;
   raw_scraped_json: string | null;
   source: string;
   synced_at: string;
@@ -99,6 +104,15 @@ export type ScrapeLoginStatus = {
   account_hint: string | null;
   probe_state: "captured" | "login_required" | "console_action_required" | "capture_timeout";
   message: string | null;
+};
+
+export type ScrapeBalanceSyncResult = {
+  started: boolean;
+  jobId: string | null;
+  accounts: number;
+  synced: number;
+  failed: number;
+  message: string;
 };
 
 function toAppErr(code: string) {

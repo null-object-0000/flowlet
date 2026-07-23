@@ -53,6 +53,8 @@ export type RequestLogRow = {
   res_body_b64: string | null;
   res_body_cleared_at: string | null;
   res_body_cleanup_reason: string | null;
+  capture_state?: "pending" | "ready" | "failed" | "cleared" | "corrupt" | null;
+  capture_failure_reason?: string | null;
   is_last_attempt: boolean;
   input_tokens: number | null;
   input_cached_tokens: number | null;

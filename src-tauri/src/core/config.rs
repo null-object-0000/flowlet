@@ -396,6 +396,10 @@ fn default_credential_status() -> AccountCredentialStatus {
     ACCOUNT_CREDENTIAL_HEALTHY.to_string()
 }
 
+fn default_resource_sync_mode() -> String {
+    "manual".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelAccount {
     pub id: String,
@@ -407,6 +411,9 @@ pub struct ChannelAccount {
     pub remark: Option<String>,
     #[serde(default)]
     pub resource_mode: Option<String>,
+    /// Resource data maintenance strategy: manual or auto.
+    #[serde(default = "default_resource_sync_mode")]
+    pub resource_sync_mode: String,
     /// Account-level OpenAI-compatible upstream URL override.
     pub base_url_override: Option<String>,
     /// Account-level Anthropic-compatible upstream URL override.
@@ -431,6 +438,7 @@ impl Default for ChannelAccount {
             priority: 0,
             remark: None,
             resource_mode: None,
+            resource_sync_mode: default_resource_sync_mode(),
             base_url_override: None,
             anthropic_base_url_override: None,
             last_used_at: None,
@@ -744,6 +752,8 @@ pub struct RequestLogRow {
     pub res_body_b64: Option<String>,
     pub res_body_cleared_at: Option<String>,
     pub res_body_cleanup_reason: Option<String>,
+    pub capture_state: Option<String>,
+    pub capture_failure_reason: Option<String>,
     pub is_last_attempt: bool,
     /// Usage data is joined lazily for the final attempt. Intermediate attempts
     /// normally keep these fields empty because usage belongs to the request.

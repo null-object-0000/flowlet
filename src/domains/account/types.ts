@@ -3,6 +3,7 @@
 export type AccountCredentialStatus = "healthy" | "invalid_key";
 
 export type AccountResourceMode = "token_pack" | "pay_as_you_go" | "token_plan";
+export type AccountResourceSyncMode = "manual" | "auto";
 
 export type ChannelAccount = {
   id: string;
@@ -13,6 +14,7 @@ export type ChannelAccount = {
   priority: number;
   remark: string | null;
   resource_mode: AccountResourceMode | null;
+  resource_sync_mode: AccountResourceSyncMode;
   base_url_override: string | null;
   anthropic_base_url_override: string | null;
   last_used_at: string | null;
@@ -66,6 +68,7 @@ export function newAccount(channelId: string, index: number): ChannelAccount {
     priority: index,
     remark: "",
     resource_mode: null,
+    resource_sync_mode: "manual",
     base_url_override: null,
     anthropic_base_url_override: null,
     last_used_at: null,

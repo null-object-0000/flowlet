@@ -14,6 +14,7 @@ export type StorageUsageCategoryKey =
   | "configuration"
   | "requestLogs"
   | "bodyData"
+  | "requestCaptures"
   | "usage"
   | "agentSessions"
   | "backgroundTasks";
@@ -32,6 +33,7 @@ export interface StorageUsageSummary {
   walBytes: number;
   sharedMemoryBytes: number;
   configBytes: number;
+  captureBytes: number;
   categorizedBytes: number;
   categories: StorageUsageCategory[];
 }

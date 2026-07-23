@@ -47,6 +47,7 @@ vi.mock("../../features/settings/useStorageUsage", () => ({
       walBytes: 72_000,
       sharedMemoryBytes: 0,
       configBytes: 864,
+      captureBytes: 0,
       categorizedBytes: 800_000,
       categories: [
         { key: "configuration", rowCount: 12, allocatedBytes: 8_192 },
@@ -67,6 +68,7 @@ vi.mock("../../features/settings/useStorageUsage", () => ({
       walBytes: 0,
       sharedMemoryBytes: 0,
       configBytes: 0,
+      captureBytes: 0,
       categorizedBytes: 0,
       categories: [],
     },

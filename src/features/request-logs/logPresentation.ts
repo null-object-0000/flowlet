@@ -103,12 +103,20 @@ export function formatCapturedJson(value?: string | null, language: AppLanguage 
 export function formatCapturedBody(
   value?: string | null,
   language: AppLanguage = "zh-CN",
-  state: { clearedAt?: string | null; cleanupReason?: string | null; pending?: boolean } = {},
+  state: {
+    clearedAt?: string | null;
+    cleanupReason?: string | null;
+    pending?: boolean;
+    captureState?: RequestLogRow["capture_state"];
+  } = {},
 ) {
   if (!value) {
     if (state.clearedAt) {
       return `— ${translate(language, state.cleanupReason === "size_limit" ? "因存储空间限制已自动清理" : "数据过期已自动清理")}`;
     }
+    if (state.captureState === "failed") return `— ${translate(language, "请求明细文件写入失败")}`;
+    if (state.captureState === "corrupt") return `— ${translate(language, "请求明细文件损坏或缺失")}`;
+    if (state.captureState === "pending" && !state.pending) return `— ${translate(language, "正在写入请求明细")}`;
     if (state.pending) return `— ${translate(language, "正在等待流式响应完成")}`;
     return `— ${translate(language, "未捕获")}`;
   }

@@ -316,6 +316,7 @@ const STORAGE_CATEGORY_LABELS = {
   configuration: "配置与账号",
   requestLogs: "请求日志",
   bodyData: "请求与响应 Body（按策略自动清理）",
+  requestCaptures: "请求明细文件",
   usage: "用量与费用",
   agentSessions: "Agent 会话",
   backgroundTasks: "后台任务",

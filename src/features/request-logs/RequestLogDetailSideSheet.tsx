@@ -110,6 +110,7 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
               <CapturedSection title={t("请求 Body")} value={formatCapturedBody(selectedRow.req_body_b64, language, {
                 clearedAt: selectedRow.req_body_cleared_at,
                 cleanupReason: selectedRow.req_body_cleanup_reason,
+                captureState: selectedRow.capture_state,
               })} />
             </div>
           </Tabs.TabPane>
@@ -121,6 +122,7 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
                 clearedAt: selectedRow.res_body_cleared_at,
                 cleanupReason: selectedRow.res_body_cleanup_reason,
                 pending: selectedRow.is_stream && selectedRow.duration_ms == null,
+                captureState: selectedRow.capture_state,
               })} />
             </div>
           </Tabs.TabPane>

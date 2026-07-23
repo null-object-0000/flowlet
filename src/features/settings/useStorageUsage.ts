@@ -18,10 +18,12 @@ const EMPTY_STORAGE_USAGE: StorageUsageSummary = {
   walBytes: 0,
   sharedMemoryBytes: 0,
   configBytes: 0,
+  captureBytes: 0,
   categorizedBytes: 0,
   categories: [
     { key: "configuration", rowCount: 0, allocatedBytes: 0 },
     { key: "requestLogs", rowCount: 0, allocatedBytes: 0 },
+    { key: "requestCaptures", rowCount: 0, allocatedBytes: 0 },
     { key: "usage", rowCount: 0, allocatedBytes: 0 },
     { key: "agentSessions", rowCount: 0, allocatedBytes: 0 },
     { key: "backgroundTasks", rowCount: 0, allocatedBytes: 0 },

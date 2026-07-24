@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getModelPriceCurrencies } from "../../domains/settings/commands";
+import { backgroundTaskCommands } from "../../domains/background-task/commands";
 import type { UsageSummaryRow } from "../../domains/usage/types";
 import { queryKeys } from "../../shared/query-keys";
 
@@ -10,17 +10,17 @@ function priceKey(channelId: string, model: string) {
 }
 
 /**
- * Resolve the currency a usage row's estimated cost is denominated in, from
- * config.json `channels_config.model_prices`. Model-level lookup keys on
+ * Resolve the currency a usage row's estimated cost is denominated in,
+ * from the local models-cn catalog. Model-level lookup keys on
  * channel + upstream model; the channel-level fallback serves aggregates that
  * group by channel only. Both functions keep stable identities across renders
  * so downstream memos do not recompute needlessly.
  */
 export function useModelPriceCurrencyLookup() {
   const query = useQuery({
-    queryKey: queryKeys.settings.modelPriceCurrencies(),
-    queryFn: getModelPriceCurrencies,
-    staleTime: 5 * 60 * 1000,
+    queryKey: queryKeys.modelCatalog.catalog(),
+    queryFn: backgroundTaskCommands.getModelsCnCurrencies,
+    staleTime: 10 * 60 * 1000,
     networkMode: "always",
     refetchOnWindowFocus: false,
     retry: false,
@@ -29,10 +29,14 @@ export function useModelPriceCurrencyLookup() {
   return useMemo(() => {
     const byModel = new Map<string, string>();
     const byChannel = new Map<string, string>();
-    for (const entry of query.data ?? []) {
-      if (!entry.currency) continue;
-      byModel.set(priceKey(entry.channel_id, entry.upstream_model), entry.currency);
-      if (!byChannel.has(entry.channel_id)) byChannel.set(entry.channel_id, entry.currency);
+    for (const [key, currency] of query.data ?? []) {
+      // key 格式为 "channel_id:upstream_model"
+      const separator = key.indexOf(":");
+      if (separator <= 0) continue;
+      const channelId = key.slice(0, separator);
+      const upstreamModel = key.slice(separator + 1);
+      byModel.set(priceKey(channelId, upstreamModel), currency);
+      if (!byChannel.has(channelId)) byChannel.set(channelId, currency);
     }
     return {
       modelCurrencyOf: (row: UsageSummaryRow) =>

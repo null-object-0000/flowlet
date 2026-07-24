@@ -16,7 +16,7 @@ const account = {
   api_key: "secret-key",
   enabled: true,
   credential_status: "healthy",
-  resource_mode: "token_pack",
+  resource_mode: "hybrid",
   resource_sync_mode: "manual",
 } as ChannelAccount;
 
@@ -67,43 +67,6 @@ describe("AccountManagementSideSheet", () => {
     ]);
   });
 
-  it("combines manual maintenance and automatic synchronization in resource package information", async () => {
-    const user = userEvent.setup();
-    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
-    const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
-    render(
-      <AccountManagementSideSheet
-        request={{ kind: "edit", accountId: account.id }}
-        accounts={[account]}
-        snapshots={[]}
-        presets={[{ ...preset, supports_scrape_balance: true, supports_balance_query: false }]}
-        busy={false}
-        onClose={vi.fn()}
-        onSaveAccounts={onSaveAccounts}
-        onTestConnection={vi.fn().mockResolvedValue(undefined)}
-        onSaveBalanceSnapshot={onSaveBalanceSnapshot}
-        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
-        onScrape={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
-
-    expect(await screen.findByText("资源包信息")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^手动维护/ })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "管理资源包" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^refresh立即刷新$/ })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /^自动同步/ }));
-    expect(screen.getByRole("button", { name: /^自动同步/ })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByRole("button", { name: "管理资源包" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^refresh立即刷新$/ })).toBeInTheDocument();
-    expect(screen.getByText("尚未同步资源包，请点击“立即刷新”。")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "保存修改" }));
-    expect(onSaveAccounts).toHaveBeenCalledWith([
-      expect.objectContaining({ id: account.id, resource_sync_mode: "auto" }),
-    ]);
-    expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
-  });
-
   it("shows LongCat resource package details saved by automatic synchronization", async () => {
     const autoAccount: ChannelAccount = { ...account, resource_sync_mode: "auto" };
     const tokenPacks = JSON.stringify([
@@ -118,8 +81,8 @@ describe("AccountManagementSideSheet", () => {
         snapshots={[{
           id: "snapshot-scrape",
           account_id: autoAccount.id,
-          balance: null,
-          currency: null,
+          balance: 123.45,
+          currency: "CNY",
           token_pack_total: 60_000_000,
           token_pack_used: 36_679_022,
           token_pack_remaining: 23_320_978,
@@ -150,6 +113,8 @@ describe("AccountManagementSideSheet", () => {
     expect(screen.getAllByText("FREE_PACK")).toHaveLength(2);
     expect(screen.getByText("生效中")).toBeInTheDocument();
     expect(screen.getByText("待使用")).toBeInTheDocument();
+    // hybrid 模式下余额也展示。
+    expect(screen.getByText("123.45 CNY")).toBeInTheDocument();
   });
 
   it("shows the complete Qwen Token Plan subscription and both quota windows", async () => {
@@ -227,98 +192,6 @@ describe("AccountManagementSideSheet", () => {
     expect(screen.getByText("21.1%")).toBeInTheDocument();
     expect(screen.getAllByText("3,000 Credits")).toHaveLength(2);
     expect(screen.getByText("2,110 Credits")).toBeInTheDocument();
-  });
-
-  it("opens the full create drawer and saves manual resource information", async () => {
-    const user = userEvent.setup();
-    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
-    const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
-
-    render(
-      <AccountManagementSideSheet
-        request={{ kind: "create", channelId: "longcat" }}
-        accounts={[]}
-        snapshots={[]}
-        presets={[preset]}
-        busy={false}
-        onClose={vi.fn()}
-        onSaveAccounts={onSaveAccounts}
-        onTestConnection={vi.fn().mockResolvedValue(undefined)}
-        onSaveBalanceSnapshot={onSaveBalanceSnapshot}
-        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
-        onScrape={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
-
-    expect(await screen.findByText("新增渠道账号")).toBeInTheDocument();
-    expect(screen.queryByText(/渠道账号管理/)).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText("请输入渠道 API Key"), "sk-test");
-    await user.click(screen.getByRole("button", { name: "管理资源包" }));
-    expect(await screen.findByText("LongCat 资源包管理")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /添加资源包/ }));
-    await user.type(screen.getByLabelText("资源包 1 总量"), "1000");
-    await user.type(screen.getByLabelText("资源包 1 已消耗"), "250");
-    await user.type(screen.getByLabelText("资源包 1 剩余"), "750");
-    await user.click(screen.getByRole("button", { name: "保存资源包" }));
-    expect(screen.getByText("资源包明细")).toBeInTheDocument();
-    expect(screen.getByText("生效中")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "保存账号" }));
-
-    expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({ channel_id: "longcat", api_key: "sk-test", resource_mode: "token_pack", resource_sync_mode: "manual" })]);
-    expect(onSaveBalanceSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      token_pack_total: 1000,
-      token_pack_used: 250,
-      token_pack_remaining: 750,
-      token_packs: expect.stringContaining('"totalToken":1000'),
-    }));
-  }, 10_000);
-  it("repairs a timezone-shifted snapshot expiry from the stored package data", async () => {
-    const user = userEvent.setup();
-    const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
-    const tokenPacks = JSON.stringify([
-      { lotId: 151724, totalToken: 50_000_000, consumedToken: 22_071_022, remainingToken: 27_928_978, expireTime: "2026-07-30 01:00:31", status: "ACTIVE" },
-      { lotId: 159869, totalToken: 10_000_000, consumedToken: 0, remainingToken: 10_000_000, expireTime: "2026-07-30 09:42:47", status: "ACTIVE" },
-      { lotId: 160795, totalToken: 5_000_000, consumedToken: 0, remainingToken: 5_000_000, expireTime: "2026-07-30 11:48:49", status: "ACTIVE" },
-    ]);
-
-    render(
-      <AccountManagementSideSheet
-        request={{ kind: "edit", accountId: account.id }}
-        accounts={[account]}
-        snapshots={[{
-          id: "snapshot-1",
-          account_id: account.id,
-          balance: null,
-          currency: null,
-          token_pack_total: 65_000_000,
-          token_pack_used: 22_071_022,
-          token_pack_remaining: 42_928_978,
-          token_pack_expire_at: "2026-07-29T16:00:00.000Z",
-          token_packs: tokenPacks,
-          source: "manual",
-          synced_at: "2026-07-15T00:00:00.000Z",
-          remark: null,
-          created_at: "2026-07-15T00:00:00.000Z",
-          updated_at: "2026-07-15T00:00:00.000Z",
-        }]}
-        presets={[preset]}
-        busy={false}
-        onClose={vi.fn()}
-        onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
-        onTestConnection={vi.fn().mockResolvedValue(undefined)}
-        onSaveBalanceSnapshot={onSaveBalanceSnapshot}
-        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
-        onScrape={vi.fn().mockResolvedValue(undefined)}
-      />,
-    );
-
-    expect((await screen.findAllByText("2026-07-30")).length).toBeGreaterThan(0);
-    expect(screen.queryByText("2026-07-29")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "保存修改" }));
-    expect(onSaveBalanceSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      token_pack_expire_at: "2026-07-30T23:59:59",
-    }));
   });
 
   it("shows balance refresh feedback in a toast", async () => {

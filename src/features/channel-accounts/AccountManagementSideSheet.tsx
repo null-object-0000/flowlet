@@ -190,9 +190,17 @@ function getStatus(account: ChannelAccount, t: (source: string) => string): { la
 
 function resourceDetails(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string) => string, language: "zh-CN" | "en-US") {
   if (isQwenTokenPlanAccount(account)) return [{ label: t("订阅"), value: "Token Plan" }];
-  const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
+  // LongCat hybrid:同时展示资源包剩余、有效期与账户余额。
+  if (account.channel_id === "longcat") {
+    const rows: { label: string; value: string }[] = [];
+    rows.push({ label: t("剩余"), value: snapshot?.token_pack_remaining == null ? "-" : `${formatCompactNumber(snapshot.token_pack_remaining, language)} Tokens` });
+    if (snapshot?.token_pack_expire_at) rows.push({ label: t("有效期"), value: snapshot.token_pack_expire_at.slice(0, 10) });
+    rows.push({ label: t("余额"), value: snapshot?.balance == null ? "-" : `${snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`.trim() });
+    return rows;
+  }
+  const tokenPack = (account.resource_mode ?? "pay_as_you_go") === "token_pack";
   if (!tokenPack) return [{ label: t("余额"), value: snapshot?.balance == null ? "-" : `${snapshot.balance} ${snapshot.currency ?? ""}`.trim() }];
   const rows = [{ label: t("剩余"), value: snapshot?.token_pack_remaining == null ? "-" : `${formatCompactNumber(snapshot.token_pack_remaining, language)} Tokens` }];
-  if (snapshot?.token_pack_expire_at) rows.push({ label: t("有效期"), value: snapshot.token_pack_expire_at.split("T")[0] });
+  if (snapshot?.token_pack_expire_at) rows.push({ label: t("有效期"), value: snapshot.token_pack_expire_at.slice(0, 10) });
   return rows;
 }

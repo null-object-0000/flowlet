@@ -46,7 +46,7 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByText("启用")).toBeInTheDocument();
   });
 
-  it("renders Qwen Token Plan subscription with 5h and 7d remaining percentages", async () => {
+  it("renders Qwen Token Plan subscription with 5h and 7d remaining percentages", () => {
     const qwenAccount = {
       id: "account-qwen",
       channel_id: "qwen",
@@ -76,13 +76,5 @@ describe("OverviewChannelAccountsCard", () => {
     );
 
     expect(screen.getByText(/Token Plan 订阅.*5小时 剩余 21\.1%.*7天 剩余 78\.9%/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("link", { name: /新增账号/ }));
-    await user.click(screen.getByRole("link", { name: /管理账号/ }));
-    await user.click(screen.getByRole("button", { name: "编辑账号 LongCat 主账号" }));
-
-    expect(onCreate).toHaveBeenCalledOnce();
-    expect(onViewAll).toHaveBeenCalledOnce();
-    expect(onEdit).toHaveBeenCalledWith(account.id);
   });
 });

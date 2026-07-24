@@ -82,13 +82,23 @@ function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
     if (details?.sevenDay) parts.push(t("7天 剩余 {percent}%", { percent: details.sevenDay.remainingPercent.toFixed(1) }));
     return parts.join(" · ");
   }
-  const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
+  // LongCat hybrid:同时展示资源包剩余与账户余额。
+  if (account.channel_id === "longcat") {
+    const packs = snapshot?.token_pack_remaining == null ? "" : t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
+    const balance = snapshot?.balance == null ? "" : t("余额 {value}", { value: `${snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}${snapshot?.currency ? ` ${snapshot.currency}` : ""}` });
+    return [packs, balance].filter(Boolean).join(" · ") || "-";
+  }
+  const tokenPack = (account.resource_mode ?? "pay_as_you_go") === "token_pack";
   if (tokenPack) return t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
   const balance = snapshot?.balance == null ? "-" : snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 });
   return t("余额 {value}", { value: `${balance}${snapshot?.currency ? ` ${snapshot.currency}` : ""}` });
 }
 
 function expirySummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string): string {
-  const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
+  // LongCat hybrid 仍展示资源包有效期。
+  if (account.channel_id === "longcat") {
+    return snapshot?.token_pack_expire_at ? ` · ${t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) })}` : "";
+  }
+  const tokenPack = (account.resource_mode ?? "pay_as_you_go") === "token_pack";
   return tokenPack && snapshot?.token_pack_expire_at ? ` · ${t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) })}` : "";
 }

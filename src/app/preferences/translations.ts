@@ -634,6 +634,8 @@ const english: Record<string, string> = {
   "后付费，手动维护余额": "Postpaid; maintain the balance manually.",
   "资源包信息": "Package information",
   "计费模式": "Billing mode",
+  "混合": "Hybrid",
+  "优先使用资源包，用尽后自动扣除余额": "Uses token packages first, then pay-as-you-go balance.",
   "创建后不可修改": "Cannot be changed after creation",
   "同步方式": "Synchronization",
   "从 LongCat 定期同步资源包数据": "Periodically sync package data from LongCat.",

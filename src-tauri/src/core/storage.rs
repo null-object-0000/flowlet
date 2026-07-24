@@ -33,7 +33,7 @@ mod storage_config;
 #[path = "storage_stats.rs"]
 mod storage_stats;
 #[path = "storage_tasks.rs"]
-mod storage_tasks;
+pub(crate) mod storage_tasks;
 #[path = "storage_maintenance.rs"]
 mod storage_maintenance;
 #[path = "storage_usage.rs"]
@@ -42,7 +42,7 @@ pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
 pub use storage_maintenance::{DatabaseCompactionResult, DatabaseMaintenanceStats};
 pub use storage_tasks::{
     AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
-    BackgroundJobsFilter, BackgroundJobsPage, CleanupBackgroundJobsResult,
+    BackgroundJobsFilter, BackgroundJobsPage, CleanupBackgroundJobsResult, ModelsCnSyncResult,
 };
 
 #[derive(Clone)]
@@ -1134,6 +1134,13 @@ impl Storage {
             "channel_accounts",
             "resource_sync_mode",
             "TEXT NOT NULL DEFAULT 'manual'",
+        )?;
+
+        // LongCat 统一为 hybrid 模式(同时抓取 token 资源包与按量余额)。
+        // 把旧值 token_pack / pay_as_you_go / null 统一迁移为 hybrid。
+        connection.execute(
+            "UPDATE channel_accounts SET resource_mode = 'hybrid' WHERE channel_id = 'longcat'",
+            [],
         )?;
 
         // 旧版本 request_logs 只记录了少量字段；后续索引和日志页面依赖这些基础列。

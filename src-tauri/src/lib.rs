@@ -263,15 +263,40 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         "step: routes + balance cleanup"
     );
 
-    // 初始化价格预设：仅从 config.json 加载到内存，作为费用的唯一真实来源。
-    // 不再写入数据库——价格表已移除，费用计算直接在内存中完成。
-    let prices = channels_config.prices.clone();
-    storage.set_prices(prices);
-    tracing::trace!(
-        t_ms = _t0.elapsed().as_millis() as u64,
-        count = channels_config.prices.len(),
-        "step: prices loaded from config"
-    );
+    // 初始化价格预设：优先从 config.json 加载；若为空（已迁移到 models-cn），
+    // 则从本地 models-cn.json 文件生成价格表，作为费用估算的真实来源。
+    let config_prices = channels_config.prices.clone();
+    if config_prices.is_empty() {
+        // config.json 无价格，尝试从本地 models-cn.json 文件生成
+        let models_cn_prices = if let Some(catalog_json) = crate::core::storage::storage_tasks::read_models_cn_file() {
+            match crate::core::storage::storage_tasks::build_prices_from_models_cn_catalog(&catalog_json) {
+                Ok(prices) if !prices.is_empty() => {
+                    tracing::info!(count = prices.len(), "从 models-cn.json 加载价格表");
+                    prices
+                }
+                Ok(_) => {
+                    tracing::warn!("models-cn.json 中无有效价格数据");
+                    Vec::new()
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "从 models-cn.json 生成价格表失败");
+                    Vec::new()
+                }
+            }
+        } else {
+            tracing::warn!("本地无 models-cn.json 且 config.json 无价格，成本估算将不可用");
+            Vec::new()
+        };
+        storage.set_prices(models_cn_prices);
+    } else {
+        let count = config_prices.len();
+        storage.set_prices(config_prices);
+        tracing::trace!(
+            t_ms = _t0.elapsed().as_millis() as u64,
+            count,
+            "step: prices loaded from config"
+        );
+    }
 
     // 初始化路由规则
     tracing::trace!(
@@ -737,6 +762,36 @@ pub fn run() {
                 }
             });
 
+            // 定时 models-cn 目录同步：启动后 1 小时触发第一次，之后每 1 小时跑一次。
+            // 结果写入 background_jobs 任务日志。
+            let models_cn_timer_storage = state.storage.clone();
+            tauri::async_runtime::spawn(async move {
+                let period = std::time::Duration::from_secs(60 * 60);
+                let mut interval =
+                    tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                let source_url = "https://null-object-0000.github.io/models-cn/api.json".to_string();
+                loop {
+                    interval.tick().await;
+                    let storage = models_cn_timer_storage.clone();
+                    let url = source_url.clone();
+                    match crate::core::storage::storage_tasks::sync_models_cn_catalog(&storage, &url, "scheduled").await {
+                        Ok(sync_result) => {
+                            tracing::info!(
+                                started = sync_result.started,
+                                skipped = sync_result.skipped,
+                                providers = sync_result.provider_count,
+                                models = sync_result.model_count,
+                                "scheduled models-cn sync finished"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "scheduled models-cn sync failed");
+                        }
+                    }
+                }
+            });
+
             tracing::info!(
                 t_ms = setup_t0.elapsed().as_millis() as u64,
                 "✅ setup 完成 — invoke_handler + Tauri event loop 接管"
@@ -785,6 +840,9 @@ pub fn run() {
             commands::get_agent_sync_status,
             commands::cancel_background_job,
             commands::cleanup_background_jobs,
+            commands::sync_models_cn_catalog,
+            commands::get_models_cn_catalog,
+            commands::get_models_cn_currencies,
             commands::probe_cost_ledger_sources,
             commands::list_agent_session_clients,
             commands::list_request_log_clients,

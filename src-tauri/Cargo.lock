@@ -1129,6 +1129,7 @@ dependencies = [
  "dirs 5.0.1",
  "flate2",
  "futures-util",
+ "hex",
  "jsonc-parser",
  "notify",
  "reqwest 0.12.28",

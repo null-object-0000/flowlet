@@ -36,7 +36,13 @@
 .detailHeader > span:last-child { min-width: 0; display: grid; gap: 3px; }
 .detailHeader strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; }
 .detailHeader small { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
-.detailBody { min-height: 0; overflow: auto; padding: 11px 13px; }
+.detailBody { min-height: 0; overflow: auto; padding: 0; }
+.detailTabs { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.detailTabs > :global(.semi-tabs-content) { min-height: 0; overflow: auto; padding: 11px 13px; }
+.routingTab { min-height: 0; overflow: auto; }
+.routingTabInner { padding: 11px 13px; }
+.tabContent { display: grid; gap: 13px; }
+.priceBadge { margin-bottom: 7px; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; color: var(--flowlet-color-success); background: color-mix(in srgb, var(--flowlet-color-success) 12%, transparent); font-size: var(--flowlet-font-size-caption); font-weight: 650; }
 .detailSection { margin-bottom: 13px; }
 .detailSection > header { margin-bottom: 7px; display: flex; align-items: center; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .detailSection > header span { margin-left: auto; color: var(--flowlet-color-text-tertiary); }

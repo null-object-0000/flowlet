@@ -31,6 +31,10 @@ export const queryKeys = {
     candidates: () => [...queryKeys.model.all, "candidates"] as const,
     exposureMode: () => [...queryKeys.model.all, "exposure-mode"] as const,
   },
+  modelCatalog: {
+    all: ["model-catalog"] as const,
+    catalog: () => [...queryKeys.modelCatalog.all, "catalog"] as const,
+  },
   route: {
     all: ["route"] as const,
     candidates: () => [...queryKeys.route.all, "candidates"] as const,

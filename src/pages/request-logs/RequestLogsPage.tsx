@@ -126,24 +126,34 @@ export function RequestLogsPage() {
             const model = raw.slice(separator + 1);
             apply({ model, modelKind: kind === "upstream" ? "upstream" : "public" });
           }}
+          // Semi UI Select 单选内部用 Map<label,option> 判定选中，要求 label 全局唯一。
+          // 同名模型在两个 OptGroup 下 label 会冲突，导致两个分组都被画勾。
+          // 这里 label 携带维度前缀仅供 Semi 内部区分；显示文本由 renderOptionItem
+          // 自定义为纯模型名，避免前缀污染下拉列表和触发器。
           aria-label="模型筛选"
         >
           <Select.Option value="__all__">{t("全部模型")}</Select.Option>
           {publicModels.length > 0 ? (
             <Select.OptGroup key="public" label={t("对外模型")}>
               {publicModels.map((model) => (
-                <Select.Option key={`public-${model}`} value={`public:${model}`}>
-                  {model}
-                </Select.Option>
+                <Select.Option
+                  key={`public-${model}`}
+                  value={`public:${model}`}
+                  label={t("对外模型") + " · " + model}
+                  renderOptionItem={() => model}
+                />
               ))}
             </Select.OptGroup>
           ) : null}
           {upstreamModels.length > 0 ? (
             <Select.OptGroup key="upstream" label={t("路由模型")}>
               {upstreamModels.map((model) => (
-                <Select.Option key={`upstream-${model}`} value={`upstream:${model}`}>
-                  {model}
-                </Select.Option>
+                <Select.Option
+                  key={`upstream-${model}`}
+                  value={`upstream:${model}`}
+                  label={t("路由模型") + " · " + model}
+                  renderOptionItem={() => model}
+                />
               ))}
             </Select.OptGroup>
           ) : null}

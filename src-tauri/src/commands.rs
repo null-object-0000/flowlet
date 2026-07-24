@@ -681,6 +681,34 @@ pub(super) async fn probe_cost_ledger_sources(
     .map_err(|error| format!("探测成本账本数据源失败：{error}"))
 }
 
+/// 手动触发 models-cn 目录同步。拉取远程数据保存到本地，写入任务日志。
+#[tauri::command]
+pub(super) async fn sync_models_cn_catalog(
+    state: tauri::State<'_, AppState>,
+    source_url: String,
+    trigger_source: String,
+) -> Result<crate::core::storage::storage_tasks::ModelsCnSyncResult, String> {
+    let storage = state.storage.clone();
+    crate::core::storage::storage_tasks::sync_models_cn_catalog(&storage, &source_url, &trigger_source)
+        .await
+}
+
+/// 读取本地 models-cn 目录文件。返回 None 表示文件不存在。
+#[tauri::command]
+pub(super) fn get_models_cn_catalog(
+    _state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    Ok(crate::core::storage::storage_tasks::read_models_cn_file())
+}
+
+/// 从本地 models-cn 目录提取 channel_id:upstream_model → currency 映射。
+#[tauri::command]
+pub(super) fn get_models_cn_currencies(
+    _state: tauri::State<'_, AppState>,
+) -> Result<Vec<(String, String)>, String> {
+    crate::core::storage::storage_tasks::get_models_cn_currencies()
+}
+
 #[tauri::command]
 pub(super) fn list_agent_session_clients(
     state: tauri::State<'_, AppState>,
@@ -2030,9 +2058,11 @@ mod scrape_capture_tests {
     fn completed_business_response_is_login_evidence() {
         let mode = ScrapeModeRuntime {
             console_url: "https://longcat.chat/platform/usage?tab=token".to_string(),
+            console_url_secondary: None,
             interceptor_js: String::new(),
             extractor_js: String::new(),
             aggregate: false,
+            required_slots: vec![],
         };
         let responses = vec![
             (
@@ -2240,7 +2270,10 @@ pub(super) async fn probe_scrape_login(
         native_ready = native_scrape_capture_ready(&state, &account_id)?,
         "开始刷新控制台并等待业务响应"
     );
-    // 2. 先清空旧响应和旧 document ACK，再强制导航到控制台。
+    // 2. 先清空旧响应和旧 document ACK，再依次导航到各控制台页面。
+    //    LongCat hybrid 模式下 token 资源包与按量余额分属不同标签页(?tab=token /
+    //    ?tab=api),需多阶段导航;响应累积在同一个 scrape_pending 缓冲中,按 URL
+    //    分类到不同槽位(token_packs_summary / api_usage_summary)。
     {
         let mut guard = state
             .scrape_pending
@@ -2255,57 +2288,94 @@ pub(super) async fn probe_scrape_login(
             .map_err(|_| "锁定抓取监听状态失败".to_string())?;
         guard.remove(&account_id);
     }
-    {
-        let guard = state
-            .scrape_webviews
-            .lock()
-            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-        let window = guard.get(&account_id).ok_or("抓取 webview 不存在")?;
-        let url = mode
-            .console_url
-            .parse()
-            .map_err(|error| format!("控制台 URL 解析失败: {error}"))?;
-        window
-            .navigate(url)
-            .map_err(|error| format!("刷新控制台失败: {error}"))?;
+
+    let mut phase_urls: Vec<&str> = vec![mode.console_url.as_str()];
+    if let Some(secondary) = mode.console_url_secondary.as_ref() {
+        phase_urls.push(secondary.as_str());
     }
 
-    // 3. 先等当前 document 的监听 ACK。响应可能先于 ACK 回传，因此完整响应也可直接
-    // 作为监听已生效的证据。这里超时只说明监听/页面初始化失败，不代表未登录。
-    let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let ready = loop {
-        if has_complete_scrape_capture(&state, &account_id, &mode)? {
-            break Some(crate::core::scrape_console::ScrapeInterceptorReady {
-                document_id: "captured-response".to_string(),
-                page_url: mode.console_url.clone(),
-            });
-        }
-        if native_scrape_capture_ready(&state, &account_id)? {
-            break Some(crate::core::scrape_console::ScrapeInterceptorReady {
-                document_id: "native-webview-listener".to_string(),
-                page_url: mode.console_url.clone(),
-            });
-        }
-        if let Some(ready) = scrape_interceptor_ready(&state, &account_id)? {
-            break Some(ready);
-        }
-        if std::time::Instant::now() >= ready_deadline {
-            break None;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    };
+    // 跨阶段累积已捕获的槽位 kind,用于判断本阶段是否产生新响应。
+    let mut captured_kinds = std::collections::HashSet::<String>::new();
+    let mut ready_for_last_phase = None;
+    let mut last_interceptor_page_url = String::new();
 
-    // 4. ACK 后等待页面自身发起目标业务请求。监听已就绪但没有收齐时，需要展示
-    // 控制台让用户处理页面；监听本身未就绪才是 capture_timeout。
-    if ready.is_some() {
-        let capture_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        while !has_complete_scrape_capture(&state, &account_id, &mode)?
-            && std::time::Instant::now() < capture_deadline
+    for phase_url in phase_urls {
+        // 每个阶段重新等待本页面的拦截器 ACK(导航会触发新 document 注入拦截器)。
         {
+            let mut guard = state
+                .scrape_ready
+                .lock()
+                .map_err(|_| "锁定抓取监听状态失败".to_string())?;
+            guard.remove(&account_id);
+        }
+        {
+            let guard = state
+                .scrape_webviews
+                .lock()
+                .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+            let window = guard.get(&account_id).ok_or("抓取 webview 不存在")?;
+            let url = phase_url
+                .parse()
+                .map_err(|error| format!("控制台 URL 解析失败: {error}"))?;
+            window
+                .navigate(url)
+                .map_err(|error| format!("刷新控制台失败: {error}"))?;
+        }
+        last_interceptor_page_url = phase_url.to_string();
+
+        // 3. 先等当前 document 的监听 ACK。响应可能先于 ACK 回传，因此完整响应也可直接
+        // 作为监听已生效的证据。这里超时只说明监听/页面初始化失败，不代表未登录。
+        let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let ready = loop {
+            if has_complete_scrape_capture(&state, &account_id, &mode)? {
+                break Some(crate::core::scrape_console::ScrapeInterceptorReady {
+                    document_id: "captured-response".to_string(),
+                    page_url: phase_url.to_string(),
+                });
+            }
+            if native_scrape_capture_ready(&state, &account_id)? {
+                break Some(crate::core::scrape_console::ScrapeInterceptorReady {
+                    document_id: "native-webview-listener".to_string(),
+                    page_url: phase_url.to_string(),
+                });
+            }
+            if let Some(ready) = scrape_interceptor_ready(&state, &account_id)? {
+                break Some(ready);
+            }
+            // 任意槽位已捕获也可作为监听已生效的证据(多阶段模式下全量聚合此时尚未齐备)。
+            if collect_scrape_slots(&state, &account_id)?.keys().next().is_some() {
+                break Some(crate::core::scrape_console::ScrapeInterceptorReady {
+                    document_id: "captured-slot".to_string(),
+                    page_url: phase_url.to_string(),
+                });
+            }
+            if std::time::Instant::now() >= ready_deadline {
+                break None;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        };
+        ready_for_last_phase = ready.clone();
+
+        // 4. 监听就绪后,等待本阶段产生新的响应槽位。多阶段模式下不必等全量聚合,
+        //    只要本阶段带来新槽位即可进入下一阶段;最终由 aggregate_complete 统一校验。
+        if ready.is_some() {
+            let capture_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while std::time::Instant::now() < capture_deadline {
+                let mut grew = false;
+                for kind in collect_scrape_slots(&state, &account_id)?.keys() {
+                    if captured_kinds.insert(kind.clone()) {
+                        grew = true;
+                    }
+                }
+                if grew {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
         }
     }
 
+    let ready = ready_for_last_phase;
     let captured = has_complete_scrape_capture(&state, &account_id, &mode)?;
     let current_page_url = {
         let guard = state
@@ -2316,7 +2386,14 @@ pub(super) async fn probe_scrape_login(
             .get(&account_id)
             .and_then(|window| window.url().ok())
             .map(|url| url.to_string())
-            .or_else(|| ready.as_ref().map(|value| value.page_url.clone()))
+            .or_else(|| {
+                ready
+                    .as_ref()
+                    .map(|value| value.page_url.clone())
+                    .or_else(|| {
+                        (!last_interceptor_page_url.is_empty()).then_some(last_interceptor_page_url)
+                    })
+            })
             .unwrap_or_default()
     };
     let probe_state = if captured {

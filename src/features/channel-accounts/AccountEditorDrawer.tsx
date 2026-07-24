@@ -11,19 +11,17 @@ import {
   QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
 } from "../../domains/channel/types";
 import {
-  formatTokenCount,
-  LongCatPackManager,
   parseStoredLongCatPacks,
-  toLongCatPackExpireAt,
   summarizeLongCatPacks,
   type LongCatPack,
-} from "./LongCatPackManager";
+} from "./longCatPacks";
 import styles from "./AccountEditorDrawer.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { useScrapeConsole } from "./useScrapeConsole";
 import type { ScrapeBalanceResult } from "../../domains/account/commands";
 import { formatFullTimestamp, parseTimestamp } from "../../shared/formatters/datetime";
+import { formatCompactNumber } from "../../shared/formatters/number";
 import {
   parseQwenTokenPlanDetails,
   type QwenQuotaWindow,
@@ -59,7 +57,6 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [packManagerOpen, setPackManagerOpen] = useState(false);
 
   const channel = presets.find((item) => item.id === draft?.channel_id);
   const isEdit = mode.kind === "edit";
@@ -67,15 +64,16 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
   const resourceOptions = resourceModeOptions(draft?.channel_id ?? "");
   const resourceMode = draft?.resource_mode ?? defaultResourceMode(draft?.channel_id ?? "");
-  const resourceSyncMode = draft.resource_sync_mode ?? "manual";
+  // LongCat 统一为 hybrid 模式(同时抓取 token 资源包与按量余额),强制自动同步；
+  // 其他渠道保留手动/自动切换。
+  const isLongCatHybrid = draft.channel_id === "longcat" && resourceMode === "hybrid";
+  const resourceSyncMode = isLongCatHybrid ? "auto" : (draft.resource_sync_mode ?? "manual");
   const isResourceAutoSync = supportsScrape && resourceSyncMode === "auto";
-  const isLongCatTokenPack = draft.channel_id === "longcat" && resourceMode === "token_pack";
   const tokenRemaining = useMemo(() => {
     const total = optionalNumber(resource.tokenTotal);
     const used = optionalNumber(resource.tokenUsed);
     return optionalNumber(resource.tokenRemaining) ?? (total != null && used != null ? Math.max(0, total - used) : snapshot?.token_pack_remaining ?? null);
   }, [resource.tokenRemaining, resource.tokenTotal, resource.tokenUsed, snapshot?.token_pack_remaining]);
-  const maintainedPacks = useMemo(() => parseStoredLongCatPacks(resource.tokenPacks), [resource.tokenPacks]);
 
   const currentDraft = draft;
 
@@ -91,7 +89,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       channel_id: channelId,
       name: count === 0 ? t("{name} 主账号", { name: next?.name ?? t("渠道") }) : t("{name} 账号 {count}", { name: next?.name ?? t("渠道"), count: count + 1 }),
       resource_mode: defaultResourceMode(channelId),
-      resource_sync_mode: "manual",
+      resource_sync_mode: channelId === "longcat" ? "auto" : "manual",
       base_url_override: null,
       anthropic_base_url_override: null,
     });
@@ -172,19 +170,6 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     } finally {
       setSaving(false);
     }
-  }
-
-  function handleSavePacks(packs: LongCatPack[]) {
-    const summary = summarizeLongCatPacks(packs);
-    setResource((current) => ({
-      ...current,
-      tokenTotal: String(summary.total),
-      tokenUsed: String(summary.used),
-      tokenRemaining: String(summary.remaining),
-      tokenExpire: summary.expireAt?.slice(0, 10) ?? "",
-      tokenPacks: JSON.stringify(packs),
-    }));
-    setPackManagerOpen(false);
   }
 
   return (
@@ -268,11 +253,11 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
 
         <section className={styles.section}>
           <div className={`${styles.sectionHeading} ${styles.resourceModeHeading}`}>
-            <span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
-            {isEdit && resourceOptions.length ? (
+            <span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
+            {isEdit && (resourceOptions.length || isLongCatHybrid) ? (
               <div className={styles.resourceModeMeta}>
                 <span>{t("计费模式")}</span>
-                <Tag color="blue">{t(resourceMode === "token_pack" ? "Token 资源包" : resourceMode === "token_plan" ? "Token Plan" : "API 按量付费")}</Tag>
+                <Tag color="blue">{t(resourceMode === "hybrid" ? "混合" : resourceMode === "token_pack" ? "Token 资源包" : resourceMode === "token_plan" ? "Token Plan" : "API 按量付费")}</Tag>
                 <small>{t("创建后不可修改")}</small>
               </div>
             ) : null}
@@ -301,15 +286,11 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   ))}
                 </div>
               ) : null}
-              {isLongCatTokenPack ? (
+              {isLongCatHybrid ? (
                 <LongCatTokenPackPanel
                   accountId={draft.id}
                   enabled={isEdit}
-                  syncMode={resourceSyncMode}
                   snapshot={snapshot}
-                  manualPacks={maintainedPacks}
-                  onSyncModeChange={(value) => update({ resource_sync_mode: value })}
-                  onManage={() => setPackManagerOpen(true)}
                   onScrape={onScrape}
                   language={language}
                   t={t}
@@ -345,24 +326,6 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                     language={language}
                     t={t}
                   />
-                ) : resourceMode === "token_pack" ? (
-                  <div className={styles.packSection}>
-                    {draft.channel_id === "longcat" ? (
-                      <div className={styles.packManageRow}>
-                        <Button onClick={() => setPackManagerOpen(true)}>{t("管理资源包")}</Button>
-                        <span>{t("导入、添加、编辑或删除 LongCat 资源包，支持 JSON 批量导入。")}</span>
-                      </div>
-                    ) : null}
-                    {maintainedPacks.length ? (
-                      <div className={styles.packSummary}>
-                        <strong>{t("已维护 {count} 个资源包", { count: maintainedPacks.length })}</strong>
-                        <span>{t("总量")} <b>{formatResourceTokens(optionalNumber(resource.tokenTotal), language)}</b></span>
-                        <span>{t("已消耗")} <b>{formatResourceTokens(optionalNumber(resource.tokenUsed), language)}</b></span>
-                        <span>{t("剩余")} <b>{formatResourceTokens(tokenRemaining, language)}</b></span>
-                        <span>{t("最早到期")} <b>{resource.tokenExpire || "-"}</b></span>
-                      </div>
-                    ) : <span className={styles.packEmpty}>{t("尚未维护资源包，请点击“管理资源包”添加或导入。")}</span>}
-                  </div>
                 ) : resourceMode === "token_plan" ? (
                   <div className={styles.tokenPlanInfo}>
                     <span>{t("Token Plan 以 Credits 统一计量，额度与剩余量请在千问 Token Plan 控制台查看。")}</span>
@@ -398,13 +361,6 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         </section>
 
       </div>
-      {packManagerOpen ? (
-        <LongCatPackManager
-          initialPacks={maintainedPacks}
-          onCancel={() => setPackManagerOpen(false)}
-          onSave={handleSavePacks}
-        />
-      ) : null}
     </SideSheet>
   );
 }
@@ -418,17 +374,15 @@ function ModeOption({ selected, disabled, title, description, onClick }: { selec
 }
 
 function defaultResourceMode(channelId: string): AccountResourceMode {
-  return channelId === "longcat" ? "token_pack" : "pay_as_you_go";
+  return channelId === "longcat" ? "hybrid" : "pay_as_you_go";
 }
 
-/** 各渠道可选的资源模式。LongCat 支持 Token 资源包；千问支持 Token Plan
- *  订阅（专属 sk-sp Key 与套餐端点）；其余渠道只有按量付费。 */
+/** 各渠道可选的资源模式。LongCat 为 hybrid(同时抓取资源包与余额),不在选择器中
+ *  出现；千问支持 Token Plan 订阅（专属 sk-sp Key 与套餐端点）；其余渠道只有按量付费。 */
 function resourceModeOptions(channelId: string): { value: AccountResourceMode; title: string; description: string }[] {
+  // LongCat 统一 hybrid,不再提供计费模式切换。
   if (channelId === "longcat") {
-    return [
-      { value: "token_pack", title: "Token 资源包", description: "预付费，维护资源包余量与有效期" },
-      { value: "pay_as_you_go", title: "API 按量付费", description: "后付费，手动维护余额" },
-    ];
+    return [];
   }
   if (channelId === QWEN_CHANNEL_ID) {
     return [
@@ -460,7 +414,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     priority: accounts.length,
     remark: "",
     resource_mode: defaultResourceMode(mode.channelId),
-    resource_sync_mode: "manual",
+    resource_sync_mode: mode.channelId === "longcat" ? "auto" : "manual",
     base_url_override: null,
     anthropic_base_url_override: null,
     last_used_at: null,
@@ -493,20 +447,19 @@ function optionalNumber(value: string): number | null {
 
 function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, mode: AccountResourceMode, remaining: number | null): AccountResourceSnapshotDraft | null {
   // Token Plan 订阅额度只能在千问控制台查看，本地不维护快照。
-  if (mode === "token_plan") return null;
-  const hasValue = mode === "token_pack"
-    ? Boolean(resource.tokenTotal.trim() || resource.tokenUsed.trim() || resource.tokenExpire.trim() || resource.tokenPacks.trim())
-    : Boolean(resource.balance.trim());
+  // LongCat hybrid 由控制台自动同步(资源包 + 余额),不再走手动快照路径。
+  if (mode === "token_plan" || mode === "token_pack" || mode === "hybrid") return null;
+  const hasValue = Boolean(resource.balance.trim());
   if (!hasValue) return null;
   return {
     account_id: account.id,
-    balance: mode === "pay_as_you_go" ? optionalNumber(resource.balance) : null,
-    currency: mode === "pay_as_you_go" ? resource.currency.trim() || null : null,
-    token_pack_total: mode === "token_pack" ? optionalNumber(resource.tokenTotal) : null,
-    token_pack_used: mode === "token_pack" ? optionalNumber(resource.tokenUsed) : null,
-    token_pack_remaining: mode === "token_pack" ? remaining : null,
-    token_pack_expire_at: mode === "token_pack" ? toLongCatPackExpireAt(resource.tokenExpire) : null,
-    token_packs: mode === "token_pack" && resource.tokenPacks ? resource.tokenPacks : null,
+    balance: optionalNumber(resource.balance),
+    currency: resource.currency.trim() || null,
+    token_pack_total: null,
+    token_pack_used: null,
+    token_pack_remaining: null,
+    token_pack_expire_at: null,
+    token_packs: null,
     source: "manual",
     synced_at: new Date().toISOString(),
     remark: null,
@@ -516,22 +469,14 @@ function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, m
 function LongCatTokenPackPanel({
   accountId,
   enabled,
-  syncMode,
   snapshot,
-  manualPacks,
-  onSyncModeChange,
-  onManage,
   onScrape,
   language,
   t,
 }: {
   accountId: string;
   enabled: boolean;
-  syncMode: AccountResourceSyncMode;
   snapshot?: AccountBalanceSnapshot;
-  manualPacks: LongCatPack[];
-  onSyncModeChange: (value: AccountResourceSyncMode) => void;
-  onManage: () => void;
   onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
   language: "zh-CN" | "en-US";
   t: (k: string, params?: Record<string, string | number> | undefined) => string;
@@ -546,26 +491,28 @@ function LongCatTokenPackPanel({
     error,
     statusText,
   } = useScrapeConsole(onScrape);
-  const freshResult = syncMode === "auto" ? lastResult : null;
+  const freshResult = lastResult;
   const synchronizedPacks = parseStoredLongCatPacks(freshResult?.token_packs ?? snapshot?.token_packs);
-  const packs = syncMode === "manual" ? manualPacks : synchronizedPacks;
+  const packs = synchronizedPacks;
   const hasData = freshResult?.token_total != null
     || snapshot?.token_pack_total != null
     || packs.length > 0;
   const calculated = summarizeLongCatPacks(packs);
   const total = freshResult?.token_total
-    ?? (syncMode === "manual" ? calculated.total : snapshot?.token_pack_total)
+    ?? snapshot?.token_pack_total
     ?? calculated.total;
   const used = freshResult?.token_used
-    ?? (syncMode === "manual" ? calculated.used : snapshot?.token_pack_used)
+    ?? snapshot?.token_pack_used
     ?? calculated.used;
   const remaining = freshResult?.token_remaining
-    ?? (syncMode === "manual" ? calculated.remaining : snapshot?.token_pack_remaining)
+    ?? snapshot?.token_pack_remaining
     ?? calculated.remaining;
   const expireAt = freshResult?.token_pack_expire_at
-    ?? (syncMode === "manual" ? calculated.expireAt : snapshot?.token_pack_expire_at)
+    ?? snapshot?.token_pack_expire_at
     ?? calculated.expireAt;
   const syncedAt = freshResult?.synced_at ?? snapshot?.synced_at;
+  const balance = freshResult?.balance ?? snapshot?.balance;
+  const balanceCurrency = freshResult?.currency ?? snapshot?.currency;
   const remainingPercent = total > 0 ? Math.max(0, Math.min(100, remaining / total * 100)) : 0;
   const activeIndex = Math.max(0, packs.findIndex((pack) => (pack.consumedToken ?? 0) > 0));
 
@@ -584,7 +531,7 @@ function LongCatTokenPackPanel({
       <div className={styles.longCatSummaryCard}>
         <div className={styles.longCatSummaryHeading}>
           <strong>{t("资源包信息")}</strong>
-          <Tag size="small" color={syncMode === "auto" ? "green" : "orange"}>{t(syncMode === "auto" ? "自动同步" : "手动维护")}</Tag>
+          <Tag size="small" color="green">{t("自动同步")}</Tag>
         </div>
         <div className={styles.longCatSummaryGrid}>
           <div className={styles.longCatRemaining}>
@@ -595,6 +542,10 @@ function LongCatTokenPackPanel({
             <strong>{hasData ? t("剩余 {percent}%", { percent: remainingPercent.toFixed(1) }) : "-"}</strong>
             <Progress aria-label={t("资源包剩余比例")} percent={remainingPercent} size="small" showInfo={false} />
             <small>{t("总量")} {hasData ? formatResourceTokenValue(total, language) : "-"}</small>
+          </div>
+          <div>
+            <small>{t("账户余额")}</small>
+            <strong>{balance == null ? "-" : `${balance} ${balanceCurrency ?? ""}`.trim()}</strong>
           </div>
           <div>
             <small>{t("最早到期")}</small>
@@ -608,53 +559,34 @@ function LongCatTokenPackPanel({
       </div>
 
       <div className={styles.longCatSyncSection}>
-        <strong>{t("同步方式")}</strong>
         <div className={styles.longCatSyncControls}>
-          <div className={styles.modeOptions}>
-            <ModeOption
-              selected={syncMode === "auto"}
-              title={t("自动同步")}
-              description={t("从 LongCat 定期同步资源包数据")}
-              onClick={() => onSyncModeChange("auto")}
-            />
-            <ModeOption
-              selected={syncMode === "manual"}
-              title={t("手动维护")}
-              description={t("手动导入或维护资源包数据")}
-              onClick={() => onSyncModeChange("manual")}
-            />
-          </div>
-          {syncMode === "auto" ? (
-            <Button
-              icon={<IconRefresh />}
-              loading={isScraping}
-              disabled={!enabled}
-              onClick={() => void handleScrape()}
-            >
-              {t("立即刷新")}
-            </Button>
-          ) : (
-            <Button onClick={onManage}>{t("管理资源包")}</Button>
-          )}
+          <Button
+            icon={<IconRefresh />}
+            loading={isScraping}
+            disabled={!enabled}
+            onClick={() => void handleScrape()}
+          >
+            {t("立即刷新")}
+          </Button>
+          {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
+          {needLogin ? (
+            <div className={styles.scrapeError}>
+              {t("检测到控制台登录页，请在弹出的窗口中完成登录。")}
+              <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
+                {t("登录完成,重新抓取")}
+              </Button>
+            </div>
+          ) : null}
+          {consoleActionMessage ? (
+            <div className={styles.scrapeError}>
+              {consoleActionMessage}
+              <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
+                {t("重新抓取")}
+              </Button>
+            </div>
+          ) : null}
+          {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
         </div>
-        {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
-        {needLogin ? (
-          <div className={styles.scrapeError}>
-            {t("检测到控制台登录页，请在弹出的窗口中完成登录。")}
-            <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
-              {t("登录完成,重新抓取")}
-            </Button>
-          </div>
-        ) : null}
-        {consoleActionMessage ? (
-          <div className={styles.scrapeError}>
-            {consoleActionMessage}
-            <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
-              {t("重新抓取")}
-            </Button>
-          </div>
-        ) : null}
-        {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
       </div>
 
       <div className={styles.longCatDetails}>
@@ -690,7 +622,7 @@ function LongCatTokenPackPanel({
             </table>
           </div>
         ) : (
-          <span className={styles.packEmpty}>{t(syncMode === "auto" ? "尚未同步资源包，请点击“立即刷新”。" : "尚未维护资源包，请点击“管理资源包”添加或导入。")}</span>
+          <span className={styles.packEmpty}>{t("尚未同步资源包，请点击“立即刷新”。")}</span>
         )}
       </div>
     </div>
@@ -908,11 +840,11 @@ function QwenQuotaCard({
 }
 
 function formatResourceTokens(value: number | null, language: "zh-CN" | "en-US") {
-  return value == null ? "-" : `${formatTokenCount(Math.max(0, value), language)} Tokens`;
+  return value == null ? "-" : `${formatCompactNumber(Math.max(0, value), language)} Tokens`;
 }
 
 function formatResourceTokenValue(value: number, language: "zh-CN" | "en-US") {
-  return `${formatTokenCount(Math.max(0, value), language)} Token`;
+  return `${formatCompactNumber(Math.max(0, value), language)} Token`;
 }
 
 function formatLocalDate(value: string) {

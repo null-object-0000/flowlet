@@ -90,6 +90,10 @@ pub struct ChannelJson {
 pub struct ScrapeModeJson {
     /// 后台 webview 导航到此 URL,页面需自发调用目标 API。
     pub console_url: String,
+    /// 可选的第二次导航 URL。多阶段抓取模式下,主 URL 捕获完成后会导航到此
+    /// URL 继续捕获(用于 LongCat 等 token 资源包与余额分属不同标签页的场景)。
+    #[serde(default)]
+    pub console_url_secondary: Option<String>,
     /// 注入到页面的拦截器 JS(IIFE),monkeypatch fetch/XHR 并把匹配响应通过
     /// window.__TAURI_INTERNALS__.invoke("handle_intercepted_response", ...) 回传。
     pub interceptor_js: String,
@@ -101,6 +105,10 @@ pub struct ScrapeModeJson {
     /// true 时 extractor_js 的函数接收 {mode_key: raw_response, ...}。
     #[serde(default)]
     pub aggregate: bool,
+    /// 聚合模式要求的响应槽位列表。aggregate=true 时,只有这些槽位全部到位
+    /// 才视为捕获完成。key 与 classify_response_url 返回值一致。
+    #[serde(default)]
+    pub required_slots: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -131,9 +139,11 @@ pub struct ModelPriceJson {
 #[derive(Debug, Clone)]
 pub struct ScrapeModeConfig {
     pub console_url: String,
+    pub console_url_secondary: Option<String>,
     pub interceptor_js: String,
     pub extractor_js: String,
     pub aggregate: bool,
+    pub required_slots: Vec<String>,
 }
 
 // ─── 运行时渠道配置 ─────────────────────────────────────────────────────────
@@ -189,9 +199,11 @@ impl ChannelsConfig {
                             mode_key.clone(),
                             ScrapeModeConfig {
                                 console_url: mode_json.console_url.clone(),
+                                console_url_secondary: mode_json.console_url_secondary.clone(),
                                 interceptor_js: mode_json.interceptor_js.clone(),
                                 extractor_js: mode_json.extractor_js.clone(),
                                 aggregate: mode_json.aggregate,
+                                required_slots: mode_json.required_slots.clone(),
                             },
                         )
                     })

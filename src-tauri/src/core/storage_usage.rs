@@ -1244,11 +1244,13 @@ impl Storage {
         &self,
         time_range: &str,
     ) -> Result<AgentSessionRepairResult, StorageError> {
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
+        // 先于连接锁之外完成查询，仅把批量更新包装在单个事务中持锁，
+        // 避免长时间持锁阻塞请求写入端。
         let rows: Vec<(String, String)> = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
             let mut stmt = connection.prepare(&format!(
                 r#"
                 SELECT request_id, MAX(req_headers_json)
@@ -1270,6 +1272,10 @@ impl Storage {
         let mut repaired_logs = 0usize;
         // 批量更新包装在单个事务中：避免逐行自动提交引发万次 fsync，
         // 历史数据量较大时这是导致前端“点修复后整个应用卡顿”的主因。
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
         let transaction = connection.transaction()?;
         for (request_id, headers_json) in rows {
             let Some((agent_type, session_id, parent_session_id)) =
@@ -1363,16 +1369,32 @@ impl Storage {
             rows
         };
 
-        let mut parsed = 0usize;
-        // 先于连接锁之外完成逐行的 base64 解码、SSE/JSON 响应解析与捕获体读取，
-        // 避免长时间持锁阻塞请求写入端。仅把最终落库阶段放入事务批量提交，
-        // 否则逐行自动提交同样会引发大量 fsync 造成前端卡顿。
+        // 先于连接锁之外完成逐行的捕获体读取、base64 解码、SSE/JSON 响应解析，
+        // 避免长时间持锁阻塞请求写入端，同时避免在连接锁内嵌套获取捕获体写锁
+        // （insert_request_log 先取写锁再取连接锁，反向持锁有死锁风险）。
+        // 仅把最终落库阶段放入事务批量提交，否则逐行自动提交同样会引发大量 fsync 造成前端卡顿。
+        struct ParsedUsage {
+            request_id: String,
+            client_id: Option<String>,
+            client_name: Option<String>,
+            channel_id: Option<String>,
+            channel_name: Option<String>,
+            account_id: Option<String>,
+            account_name: Option<String>,
+            client_protocol: String,
+            upstream_protocol: String,
+            virtual_model: Option<String>,
+            upstream_model: Option<String>,
+            input_tokens: Option<i64>,
+            input_cached_tokens: Option<i64>,
+            input_uncached_tokens: Option<i64>,
+            input_cache_write_tokens: Option<i64>,
+            output_tokens: Option<i64>,
+            total_tokens: Option<i64>,
+            estimated_cost: Option<f64>,
+        }
         let prices = self.prices();
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let transaction = connection.transaction()?;
+        let mut parsed_rows: Vec<ParsedUsage> = Vec::new();
         for mut row in rows {
             if row.res_body_b64.is_none() {
                 row.res_body_b64 = self
@@ -1406,7 +1428,35 @@ impl Storage {
                 usage.input_cache_write_tokens,
                 usage.output_tokens,
             );
-            let request_id = row.request_id.clone();
+            parsed_rows.push(ParsedUsage {
+                request_id: row.request_id,
+                client_id: row.client_id,
+                client_name: row.client_name,
+                channel_id: row.channel_id,
+                channel_name: row.channel_name,
+                account_id: row.account_id,
+                account_name: row.account_name,
+                client_protocol: row.client_protocol,
+                upstream_protocol: row.upstream_protocol,
+                virtual_model: row.virtual_model,
+                upstream_model: row.upstream_model,
+                input_tokens: usage.input_tokens,
+                input_cached_tokens: usage.input_cached_tokens,
+                input_uncached_tokens: usage.input_uncached_tokens,
+                input_cache_write_tokens: usage.input_cache_write_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total_tokens,
+                estimated_cost,
+            });
+        }
+
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let transaction = connection.transaction()?;
+        let mut parsed = 0usize;
+        for row in &parsed_rows {
             let updated = transaction.execute(
                 r#"
                 UPDATE usage_records
@@ -1443,13 +1493,13 @@ impl Storage {
                     row.upstream_protocol,
                     row.virtual_model,
                     row.upstream_model,
-                    usage.input_tokens,
-                    usage.input_cached_tokens,
-                    usage.input_uncached_tokens,
-                    usage.input_cache_write_tokens,
-                    usage.output_tokens,
-                    usage.total_tokens,
-                    estimated_cost,
+                    row.input_tokens,
+                    row.input_cached_tokens,
+                    row.input_uncached_tokens,
+                    row.input_cache_write_tokens,
+                    row.output_tokens,
+                    row.total_tokens,
+                    row.estimated_cost,
                 ],
             )?;
             if updated == 0 {
@@ -1468,7 +1518,7 @@ impl Storage {
                     )
                     "#,
                     params![
-                        request_id,
+                        row.request_id,
                         row.client_id,
                         row.client_name,
                         row.channel_id,
@@ -1479,13 +1529,13 @@ impl Storage {
                         row.upstream_protocol,
                         row.virtual_model,
                         row.upstream_model,
-                        usage.input_tokens,
-                        usage.input_cached_tokens,
-                        usage.input_uncached_tokens,
-                        usage.input_cache_write_tokens,
-                        usage.output_tokens,
-                        usage.total_tokens,
-                        estimated_cost,
+                        row.input_tokens,
+                        row.input_cached_tokens,
+                        row.input_uncached_tokens,
+                        row.input_cache_write_tokens,
+                        row.output_tokens,
+                        row.total_tokens,
+                        row.estimated_cost,
                     ],
                 )?;
             }
@@ -1763,12 +1813,7 @@ impl Storage {
         // 先于连接锁之外读取价格快照，避免死锁（连接锁与价格锁是两把不同的锁）。
         let prices = self.prices();
 
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-
-        // 取出所有待回填的费用记录主键与用量字段，在锁外完成定价以避免长时间持锁。
+        // 先于连接锁之外取出所有待回填的费用记录主键与用量字段，避免长时间持锁阻塞请求写入端。
         struct RecalcRow {
             request_id: String,
             channel_id: Option<String>,
@@ -1780,6 +1825,10 @@ impl Storage {
             output_tokens: Option<i64>,
         }
         let rows: Vec<RecalcRow> = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
             let mut stmt = connection.prepare(&format!(
                 "SELECT ur.request_id, ur.channel_id, ur.upstream_model, ur.input_tokens,
                         ur.input_cached_tokens, ur.input_uncached_tokens, ur.input_cache_write_tokens, ur.output_tokens
@@ -1808,6 +1857,10 @@ impl Storage {
         let mut updated = 0usize;
         // 单事务批量回填费用：避免逐行自动提交造成大量 fsync，
         // 否则历史记录较多时同样会让前端在修复阶段明显卡顿。
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
         let transaction = connection.transaction()?;
         for row in rows {
             let Some(cost) = estimate_cost(

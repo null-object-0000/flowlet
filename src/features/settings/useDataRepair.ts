@@ -20,13 +20,19 @@ export function useDataRepair() {
   const [state, setState] = useState<DataRepairState>(initialState);
   const runningRef = useRef(false);
 
+  // 分批、错峰失效修复后受影响的查询，避免一次性失效触发大量并发 refetch
+  // 造成前端在修复完成后再次卡顿。
   const refreshAffectedQueries = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.all }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.requestLog.all }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.usage.all }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.settings.storageUsage() }),
-    ]);
+    const batches = [
+      [queryKeys.agentSession.all, queryKeys.requestLog.all],
+      [queryKeys.usage.all],
+      [queryKeys.settings.storageUsage()],
+    ];
+    for (const batch of batches) {
+      await Promise.all(batch.map((key) => queryClient.invalidateQueries({ queryKey: key })));
+      // 每批之间让出事件循环，给请求写入端留出落库窗口，同时让前端渐进刷新。
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
   }, [queryClient]);
 
   const reset = useCallback(() => {

@@ -546,16 +546,12 @@ fn account_identity(account_id: Option<&str>, email: Option<&str>) -> String {
 }
 
 async fn query_current_codex_account() -> Result<CodexAccountReport, String> {
-    // 优先用 app-server 判定"当前账号"：它通过 account/read 反映 Codex 应用
-    // 的实时登录态；而 OAuth 路径读取的 ~/.codex/auth.json 在账号切换后可能
-    // 滞后（旧 token 仍有效），导致当前账号 tag 挂在旧账号上。app-server 失败
-    // 时再回退到 OAuth，与原有行为兼容。
-    match query_codex_account_via_app_server(None).await {
+    match query_codex_account_via_oauth().await {
         Ok(report) => Ok(report),
-        Err(app_server_error) => match query_codex_account_via_oauth().await {
+        Err(oauth_error) => match query_codex_account_via_app_server(None).await {
             Ok(report) => Ok(report),
-            Err(oauth_error) => Err(format!(
-                "Codex 账号查询失败。app-server：{app_server_error}；OAuth 会话：{oauth_error}"
+            Err(app_server_error) => Err(format!(
+                "Codex 账号查询失败。OAuth 会话：{oauth_error}；app-server：{app_server_error}"
             )),
         },
     }

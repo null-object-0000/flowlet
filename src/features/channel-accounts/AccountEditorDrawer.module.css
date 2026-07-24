@@ -54,27 +54,32 @@
 .packSummary { display: grid; grid-template-columns: 1.2fr repeat(4, minmax(0, 1fr)); gap: 12px; padding: 11px 12px; border-radius: 7px; background: var(--semi-color-fill-0); color: var(--semi-color-text-2); font-size: 12px; }
 .packSummary > strong, .packSummary > span { display: grid; align-content: center; gap: 4px; }
 .packSummary b { color: var(--semi-color-text-0); font-weight: 600; }
-.longCatResourcePanel { display: grid; gap: 14px; }
-.longCatSummaryCard { padding: 14px 16px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--semi-color-bg-2); display: grid; gap: 12px; }
+.longCatResourcePanel { display: grid; gap: 12px; }
+.longCatSummaryCard { padding: 12px 14px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--semi-color-bg-2); display: grid; gap: 10px; }
 .longCatSummaryHeading { display: flex; align-items: center; gap: 9px; }
 .longCatSummaryHeading > strong { color: var(--semi-color-text-0); font-size: 14px; }
-.longCatSummaryGrid { display: grid; grid-template-columns: 1.3fr 1.45fr 1fr 1fr; }
-.longCatSummaryGrid > div { min-width: 0; padding: 0 16px; border-left: 1px solid var(--flowlet-color-border); display: grid; align-content: center; gap: 5px; }
+.longCatSummaryGrid { display: grid; grid-template-columns: 1.3fr 1.4fr 0.95fr 0.95fr; }
+.longCatSummaryGrid > div { min-width: 0; padding: 0 12px; border-left: 1px solid var(--flowlet-color-border); display: grid; align-content: center; gap: 4px; }
 .longCatSummaryGrid > div:first-child { padding-left: 0; border-left: 0; }
 .longCatSummaryGrid > div:last-child { padding-right: 0; }
 .longCatSummaryGrid small { color: var(--semi-color-text-2); font-size: 11px; }
-.longCatSummaryGrid strong { color: var(--semi-color-text-0); font-size: 14px; font-weight: 600; }
-.longCatRemaining strong { font-size: 21px; }
+.longCatSummaryGrid strong { color: var(--semi-color-text-0); font-size: 13px; font-weight: 600; }
+.longCatRemaining strong { font-size: 18px; white-space: nowrap; }
 .longCatProgress > strong { color: var(--semi-color-text-1); font-size: 12px; }
-.longCatSyncSection { display: grid; gap: 9px; }
+.longCatSyncSection { display: grid; gap: 8px; }
 .longCatSyncSection > strong, .longCatDetails > strong { color: var(--semi-color-text-0); font-size: 14px; }
-.longCatSyncControls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 16px; }
+.longCatSyncControls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 10px; }
 .longCatSyncControls > .modeOptions { min-width: 0; }
-.longCatSyncControls > button { align-self: center; min-width: 118px; }
-.longCatDetails { display: grid; gap: 9px; }
+.longCatSyncControls .modeOptions { gap: 8px; }
+.longCatSyncControls .modeOption { min-height: 54px; padding: 8px 10px; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; }
+.longCatSyncControls .modeOption > i { width: 16px; height: 16px; }
+.longCatSyncControls .modeOption > i::after { width: 7px; height: 7px; }
+.longCatSyncControls .modeOption > span { gap: 2px; }
+.longCatSyncControls > button { align-self: center; min-width: 96px; }
+.longCatDetails { display: grid; gap: 8px; }
 .longCatTableScroll { overflow-x: auto; border: 1px solid var(--flowlet-color-border); border-radius: 8px; }
-.longCatTable { width: 100%; min-width: 720px; border-collapse: collapse; color: var(--semi-color-text-1); font-size: 12px; }
-.longCatTable th, .longCatTable td { height: 38px; padding: 0 12px; border-bottom: 1px solid var(--flowlet-color-border); text-align: left; white-space: nowrap; }
+.longCatTable { width: 100%; min-width: 620px; border-collapse: collapse; color: var(--semi-color-text-1); font-size: 12px; }
+.longCatTable th, .longCatTable td { height: 34px; padding: 0 9px; border-bottom: 1px solid var(--flowlet-color-border); text-align: left; white-space: nowrap; }
 .longCatTable th { background: var(--semi-color-fill-0); color: var(--semi-color-text-2); font-weight: 500; }
 .longCatTable tbody tr:last-child td { border-bottom: 0; }
 .advanced { padding: 0; border: 1px solid var(--flowlet-color-border); border-radius: 8px; overflow: hidden; }

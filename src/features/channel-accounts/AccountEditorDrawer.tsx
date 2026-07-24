@@ -192,7 +192,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       visible
       motion={false}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
-      width="min(980px, 94vw)"
+      width="min(760px, 94vw)"
       title={(
         <div className={styles.title}>
           <strong>{t(isEdit ? "编辑渠道账号" : "新增渠道账号")}</strong>

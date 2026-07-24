@@ -12,8 +12,8 @@ afterEach(() => invokeMock.mockReset());
 
 describe("backgroundTaskCommands contract", () => {
   it("maps task pagination and filters to the Rust contract", async () => {
-    await backgroundTaskCommands.list({ page: 2, pageSize: 20, status: "failed", jobType: "agent-data-sync" });
-    expect(invokeMock).toHaveBeenCalledWith("list_background_jobs", { filter: { page: 2, page_size: 20, status: "failed", job_type: "agent-data-sync" } }, undefined);
+    await backgroundTaskCommands.list({ page: 2, pageSize: 20, status: "failed", jobType: "agent-data-sync", triggerSource: "manual" });
+    expect(invokeMock).toHaveBeenCalledWith("list_background_jobs", { filter: { page: 2, page_size: 20, status: "failed", job_type: "agent-data-sync", trigger_source: "manual" } }, undefined);
   });
   it("starts a forced manual Agent sync with the long-running timeout", async () => {
     await backgroundTaskCommands.syncAgentData(true, "manual");

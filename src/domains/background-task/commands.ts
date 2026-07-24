@@ -2,7 +2,7 @@ import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import type { AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobsFilter, BackgroundJobsPage, CleanupBackgroundJobsResult, CodexAccountSyncResult } from "./types";
 
 export const backgroundTaskCommands = {
-  list: (filter: BackgroundJobsFilter) => invokeCommand<BackgroundJobsPage>("list_background_jobs", { filter: { page: filter.page, page_size: filter.pageSize, status: filter.status, job_type: filter.jobType } }).catch((error) => { throw toAppError(error, "task_list_failed"); }),
+  list: (filter: BackgroundJobsFilter) => invokeCommand<BackgroundJobsPage>("list_background_jobs", { filter: { page: filter.page, page_size: filter.pageSize, status: filter.status, job_type: filter.jobType, trigger_source: filter.triggerSource } }).catch((error) => { throw toAppError(error, "task_list_failed"); }),
   detail: (jobId: string) => invokeCommand<BackgroundJobDetail>("get_background_job_detail", { jobId }).catch((error) => { throw toAppError(error, "task_detail_failed"); }),
   syncAgentData: (force: boolean, triggerSource: string) => invokeCommand<AgentDataSyncResult>("sync_agent_data", { force, triggerSource }, 120_000).catch((error) => { throw toAppError(error, "agent_sync_failed"); }),
   syncCodexAccounts: (triggerSource: string) => invokeCommand<CodexAccountSyncResult>("sync_codex_accounts", { triggerSource }, 120_000).catch((error) => { throw toAppError(error, "codex_account_sync_failed"); }),

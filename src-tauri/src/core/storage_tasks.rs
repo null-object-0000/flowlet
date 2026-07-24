@@ -40,6 +40,8 @@ pub struct BackgroundJobsFilter {
     pub status: String,
     #[serde(default)]
     pub job_type: String,
+    #[serde(default)]
+    pub trigger_source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -364,14 +366,15 @@ impl Storage {
         let offset = (page - 1) * page_size;
         let status = filter.status.trim();
         let job_type = filter.job_type.trim();
+        let trigger_source = filter.trigger_source.trim();
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        let total = connection.query_row("SELECT COUNT(*) FROM background_jobs WHERE (?1 = '' OR status = ?1) AND (?2 = '' OR job_type = ?2)", params![status, job_type], |row| row.get(0))?;
-        let mut stmt = connection.prepare("SELECT id, job_type, title, trigger_source, status, stage, progress_current, progress_total, summary_json, error_message, created_at, started_at, finished_at, updated_at, cancel_requested FROM background_jobs WHERE (?1 = '' OR status = ?1) AND (?2 = '' OR job_type = ?2) ORDER BY created_at DESC LIMIT ?3 OFFSET ?4")?;
+        let total = connection.query_row("SELECT COUNT(*) FROM background_jobs WHERE (?1 = '' OR status = ?1) AND (?2 = '' OR job_type = ?2) AND (?3 = '' OR trigger_source = ?3)", params![status, job_type, trigger_source], |row| row.get(0))?;
+        let mut stmt = connection.prepare("SELECT id, job_type, title, trigger_source, status, stage, progress_current, progress_total, summary_json, error_message, created_at, started_at, finished_at, updated_at, cancel_requested FROM background_jobs WHERE (?1 = '' OR status = ?1) AND (?2 = '' OR job_type = ?2) AND (?3 = '' OR trigger_source = ?3) ORDER BY created_at DESC LIMIT ?4 OFFSET ?5")?;
         let rows = stmt
-            .query_map(params![status, job_type, page_size, offset], map_job)?
+            .query_map(params![status, job_type, trigger_source, page_size, offset], map_job)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(BackgroundJobsPage {
             rows,
@@ -1186,6 +1189,7 @@ mod tests {
                 page_size: 10,
                 status: "running".into(),
                 job_type: "agent-data-sync".into(),
+                trigger_source: "".into(),
             })
             .unwrap();
         assert_eq!(running.total, 1);
@@ -1249,6 +1253,7 @@ mod tests {
                 page_size: 10,
                 status: "".into(),
                 job_type: "codex-account-sync".into(),
+                trigger_source: "".into(),
             })
             .unwrap();
         assert_eq!(codex_jobs.total, 1);
@@ -1260,6 +1265,7 @@ mod tests {
                 page_size: 10,
                 status: "".into(),
                 job_type: "agent-data-sync".into(),
+                trigger_source: "".into(),
             })
             .unwrap();
         assert_eq!(agent_jobs.total, 0);
@@ -1379,6 +1385,7 @@ mod tests {
                 page_size: 10,
                 status: "running".into(),
                 job_type: "agent-data-sync".into(),
+                trigger_source: "".into(),
             })
             .unwrap();
         assert!(query_started.elapsed() < Duration::from_millis(250));

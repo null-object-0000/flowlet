@@ -139,11 +139,9 @@ vi.mock("./useAgentEnvironment", () => ({
   }),
   useCodexAccounts: () => ({
     data: {
-      current_account_id: "account-1",
       accounts: [{
         account_id: "account-1",
         signed_in: true,
-        is_current: true,
         auth_mode: "chatgpt",
         email: "user@example.com",
         plan_type: "plus",
@@ -174,7 +172,6 @@ vi.mock("./useAgentEnvironment", () => ({
       }, {
         account_id: "account-2",
         signed_in: true,
-        is_current: false,
         auth_mode: "chatgpt",
         email: "count-only@example.com",
         plan_type: "free",
@@ -324,7 +321,6 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe")).toBeInTheDocument();
     expect(screen.queryByText("全局配置")).not.toBeInTheDocument();
     expect(screen.getByText("user@example.com")).toBeInTheDocument();
-    expect(screen.getByText("当前账号")).toBeInTheDocument();
     expect(screen.getByText("Plus")).toBeInTheDocument();
     expect(screen.getByText("5 小时用量")).toBeInTheDocument();
     expect(screen.getByText("每周用量")).toBeInTheDocument();

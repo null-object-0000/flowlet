@@ -4,11 +4,9 @@ import type { CodexAccountsReport } from "../../domains/agent/types";
 import { ChatGptDesktopSideSheet } from "./ChatGptDesktopSideSheet";
 
 const cachedAccounts: CodexAccountsReport = {
-  current_account_id: "user-1",
   accounts: [{
     account_id: "user-1",
     signed_in: true,
-    is_current: true,
     auth_mode: "chatgpt",
     email: "cached@example.com",
     plan_type: "plus",

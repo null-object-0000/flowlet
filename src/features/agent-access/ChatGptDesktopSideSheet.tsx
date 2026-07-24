@@ -199,7 +199,6 @@ function CodexAccountCard({ account, language }: { account: CodexAccountReport; 
       <div className={styles.codexAccountHeader}>
         <strong title={account.email || undefined}>{account.email || t("已登录")}</strong>
         <span className={styles.accountTags}>
-          {account.is_current ? <Tag color="green">{t("当前账号")}</Tag> : null}
           {account.stale ? <Tag color="orange">{t("数据已过期")}</Tag> : null}
         </span>
       </div>

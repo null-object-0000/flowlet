@@ -47,7 +47,6 @@ pub struct CodexRateLimitResetCredits {
 pub struct CodexAccountReport {
     pub account_id: String,
     pub signed_in: bool,
-    pub is_current: bool,
     pub auth_mode: Option<String>,
     pub email: Option<String>,
     pub plan_type: Option<String>,
@@ -66,7 +65,6 @@ pub struct CodexAccountReport {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CodexAccountsReport {
     pub accounts: Vec<CodexAccountReport>,
-    pub current_account_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -98,21 +96,8 @@ pub fn list_cached_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
 
     sort_accounts(&mut accounts);
     deduplicate_accounts(&mut accounts);
-    let current_index = accounts
-        .iter()
-        .enumerate()
-        .filter(|(_, account)| account.is_current)
-        .max_by(|(_, left), (_, right)| left.updated_at.cmp(&right.updated_at))
-        .map(|(index, _)| index);
-    for (index, account) in accounts.iter_mut().enumerate() {
-        account.is_current = Some(index) == current_index;
-    }
-    let current_account_id = current_index.map(|index| accounts[index].account_id.clone());
 
-    Ok(CodexAccountsReport {
-        accounts,
-        current_account_id,
-    })
+    Ok(CodexAccountsReport { accounts })
 }
 
 pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsReport, String> {
@@ -123,7 +108,6 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
     let current_error = current_result.as_ref().err().cloned();
     let mut current = current_result.ok().filter(|report| report.signed_in);
     if let Some(report) = current.as_mut() {
-        report.is_current = true;
         if is_fallback_account_id(report) {
             if let Some(account_id) = canonical_managed_account_id(managed_root, report) {
                 report.account_id = account_id;
@@ -133,8 +117,9 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
             persist_managed_profile(managed_root, &auth, report)?;
         }
     }
-    let current_account_id_hint = current.as_ref().map(|report| report.account_id.clone());
-    let current_email = current.as_ref().and_then(|report| normalized_email(report));
+    // 用于去重：避免原生登录账号在托管目录中重复出现。
+    let native_account_id_hint = current.as_ref().map(|report| report.account_id.clone());
+    let native_email = current.as_ref().and_then(|report| normalized_email(report));
     let mut accounts = current.into_iter().collect::<Vec<_>>();
 
     let entries = std::fs::read_dir(managed_root)
@@ -160,11 +145,11 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
                         .map(str::to_owned)
                 })
             });
-        let matches_current_email = stored_snapshot
+        let matches_native_email = stored_snapshot
             .as_ref()
             .and_then(normalized_email)
-            .is_some_and(|email| current_email.as_deref() == Some(email.as_str()));
-        if stored_id.as_deref() == current_account_id_hint.as_deref() || matches_current_email {
+            .is_some_and(|email| native_email.as_deref() == Some(email.as_str()));
+        if stored_id.as_deref() == native_account_id_hint.as_deref() || matches_native_email {
             continue;
         }
 
@@ -181,7 +166,6 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
                     }
                     app_server_result => {
                         if let Some(mut snapshot) = stored_snapshot {
-                            snapshot.is_current = false;
                             snapshot.stale = true;
                             snapshot.error = Some(match app_server_result {
                                 Ok(_) => "登录凭据已失效，请在 Codex 中重新登录该账号后刷新"
@@ -200,20 +184,13 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
 
     sort_accounts(&mut accounts);
     deduplicate_accounts(&mut accounts);
-    let current_account_id = accounts
-        .iter()
-        .find(|account| account.is_current)
-        .map(|account| account.account_id.clone());
     if accounts.is_empty() {
         if let Some(error) = current_error {
             return Err(error);
         }
     }
 
-    Ok(CodexAccountsReport {
-        accounts,
-        current_account_id,
-    })
+    Ok(CodexAccountsReport { accounts })
 }
 
 /// Cheap pre-check for scheduled sync: skip network and process work entirely
@@ -301,7 +278,6 @@ pub async fn sync_codex_accounts(
                 "accounts": total,
                 "staleAccounts": stale,
                 "failedAccounts": failed,
-                "currentAccountId": report.current_account_id,
                 "durationMs": started_at.elapsed().as_millis() as u64,
             })
             .to_string();
@@ -339,11 +315,7 @@ pub async fn sync_codex_accounts(
 
 fn sort_accounts(accounts: &mut [CodexAccountReport]) {
     accounts.sort_by(|left, right| {
-        right
-            .is_current
-            .cmp(&left.is_current)
-            .then_with(|| left.stale.cmp(&right.stale))
-            .then_with(|| left.email.cmp(&right.email))
+        left.stale.cmp(&right.stale).then_with(|| left.email.cmp(&right.email))
     });
 }
 
@@ -441,7 +413,6 @@ fn merge_account_report(existing: &mut CodexAccountReport, duplicate: CodexAccou
         existing.account_id = duplicate.account_id.clone();
     }
     existing.signed_in |= duplicate.signed_in;
-    existing.is_current |= duplicate.is_current;
     existing.stale &= duplicate.stale;
     // 时效数据（用量、积分、限流等）必须让较新快照整体覆盖。若只在新值为
     // None 时保留旧值，就会把新快照的 `updated_at` 和旧快照的用量拼成一条
@@ -685,7 +656,6 @@ async fn read_codex_account_report(
         return Ok(CodexAccountReport {
             account_id: String::new(),
             signed_in: false,
-            is_current: false,
             auth_mode: None,
             email: None,
             plan_type: None,
@@ -721,7 +691,6 @@ async fn read_codex_account_report(
             .map(str::to_owned)
             .unwrap_or_else(|| account_identity(None, email.as_deref())),
         signed_in: true,
-        is_current: false,
         auth_mode,
         email,
         plan_type: rate_limits
@@ -834,7 +803,6 @@ fn parse_oauth_usage(
             .map(str::to_owned)
             .unwrap_or_else(|| account_identity(None, email.as_deref())),
         signed_in: true,
-        is_current: false,
         auth_mode: Some("chatgpt".to_string()),
         email,
         plan_type,
@@ -1372,19 +1340,17 @@ mod tests {
             Some("workspace-hint"),
         )
         .expect("parse current account");
-        current.is_current = true;
         let managed = current.clone();
         let mut accounts = vec![current, managed];
 
         deduplicate_accounts(&mut accounts);
 
         assert_eq!(accounts.len(), 1);
-        assert!(accounts[0].is_current);
     }
 
     #[test]
-    fn deduplicates_email_fallback_and_canonical_id_while_preserving_current() {
-        let mut current = parse_oauth_usage(
+    fn deduplicates_email_fallback_and_canonical_id_while_preserving_native_flag() {
+        let mut native = parse_oauth_usage(
             &json!({
                 "email": "Same@Example.com",
                 "plan_type": "plus"
@@ -1392,8 +1358,7 @@ mod tests {
             None,
         )
         .expect("parse current account");
-        current.is_current = true;
-        current.source = "app_server".to_string();
+        native.source = "app_server".to_string();
         let managed = parse_oauth_usage(
             &json!({
                 "account_id": "user-canonical",
@@ -1403,13 +1368,12 @@ mod tests {
             None,
         )
         .expect("parse managed account");
-        let mut accounts = vec![current, managed];
+        let mut accounts = vec![native, managed];
 
         deduplicate_accounts(&mut accounts);
 
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].account_id, "user-canonical");
-        assert!(accounts[0].is_current);
     }
 
     #[test]
@@ -1546,7 +1510,6 @@ mod tests {
         .expect("parse canonical account");
         let mut fallback = canonical.clone();
         fallback.account_id = "same@example.com".to_string();
-        fallback.is_current = true;
         fallback.updated_at = "2026-07-19T15:04:00Z".to_string();
         let mut pending = canonical.clone();
         pending.account_id = "pending-account".to_string();
@@ -1563,8 +1526,6 @@ mod tests {
 
         assert_eq!(report.accounts.len(), 1);
         assert_eq!(report.accounts[0].account_id, "user-canonical");
-        assert!(report.accounts[0].is_current);
-        assert_eq!(report.current_account_id.as_deref(), Some("user-canonical"));
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1618,6 +1579,7 @@ mod tests {
                 page_size: 10,
                 status: String::new(),
                 job_type: String::new(),
+                trigger_source: String::new(),
             })
             .expect("list jobs");
         assert_eq!(page.total, 0, "skipped syncs must not pollute the task log");

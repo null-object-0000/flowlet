@@ -60,7 +60,6 @@ export type CodexRateLimitResetCredits = {
 export type CodexAccountReport = {
   account_id: string;
   signed_in: boolean;
-  is_current: boolean;
   auth_mode?: string | null;
   email?: string | null;
   plan_type?: string | null;
@@ -77,7 +76,6 @@ export type CodexAccountReport = {
 
 export type CodexAccountsReport = {
   accounts: CodexAccountReport[];
-  current_account_id?: string | null;
 };
 
 export type AgentGlobalConfigState =

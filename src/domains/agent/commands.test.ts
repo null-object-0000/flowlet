@@ -44,7 +44,7 @@ describe("agent commands", () => {
   });
 
   it("queries Codex account data through the typed Tauri boundary", async () => {
-    vi.mocked(invoke).mockResolvedValue({ accounts: [], current_account_id: null });
+    vi.mocked(invoke).mockResolvedValue({ accounts: [] });
 
     await queryCodexAccounts();
 
@@ -52,7 +52,7 @@ describe("agent commands", () => {
   });
 
   it("reads cached Codex account snapshots through the typed Tauri boundary", async () => {
-    vi.mocked(invoke).mockResolvedValue({ accounts: [], current_account_id: null });
+    vi.mocked(invoke).mockResolvedValue({ accounts: [] });
 
     await listCachedCodexAccounts();
 

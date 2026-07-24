@@ -162,16 +162,17 @@ fn estimate_usage_cost(
     }) else {
         return unpriced_estimate(turn_count);
     };
-    // 按会话总输入 Token 选档；无分级时回退扁平单价。
+    // input_tokens 为未缓存输入，cached_input_tokens 与 cache_write_input_tokens 为缓存命中与缓存写入。
+    // 总输入 = 未缓存 + 缓存命中 + 缓存写入，用于按会话总输入 Token 选档；无分级时回退扁平单价。
+    let total_input = usage
+        .input_tokens
+        .saturating_add(usage.cached_input_tokens)
+        .saturating_add(usage.cache_write_input_tokens);
     let (uncached_price, cached_price, cache_write_price, output_price) =
-        price.resolve_prices(Some(usage.input_tokens));
+        price.resolve_prices(Some(total_input));
+    let uncached_input = usage.input_tokens.max(0) as f64;
     let cached_input = usage.cached_input_tokens.max(0) as f64;
     let cache_write_input = usage.cache_write_input_tokens.max(0) as f64;
-    let uncached_input = usage
-        .input_tokens
-        .saturating_sub(usage.cached_input_tokens)
-        .saturating_sub(usage.cache_write_input_tokens)
-        .max(0) as f64;
     let output = usage.output_tokens.max(0) as f64;
     AgentSessionCostEstimate {
         amount: Some(

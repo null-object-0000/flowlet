@@ -295,8 +295,10 @@ function timelineStatusLabel(status: string, t: (key: string) => string) {
 }
 
 function formatCacheHitRate(usage: AgentSessionNativeUsage, language: "zh-CN" | "en-US") {
-  if (usage.inputTokens <= 0) return "—";
-  return new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 1 }).format(usage.cachedInputTokens / usage.inputTokens);
+  // input_tokens 在各 Agent 原生数据中均为「未缓存输入」，总输入需加上缓存命中和缓存写入。
+  const totalInput = usage.inputTokens + usage.cachedInputTokens + usage.cacheWriteInputTokens;
+  if (totalInput <= 0) return "—";
+  return new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 1 }).format(usage.cachedInputTokens / totalInput);
 }
 
 function formatDuration(milliseconds: number, language: "zh-CN" | "en-US") {

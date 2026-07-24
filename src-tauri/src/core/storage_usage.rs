@@ -1244,7 +1244,7 @@ impl Storage {
         &self,
         time_range: &str,
     ) -> Result<AgentSessionRepairResult, StorageError> {
-        let connection = self
+        let mut connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
@@ -1268,13 +1268,16 @@ impl Storage {
         let scanned_requests = rows.len();
         let mut repaired_requests = 0usize;
         let mut repaired_logs = 0usize;
+        // 批量更新包装在单个事务中：避免逐行自动提交引发万次 fsync，
+        // 历史数据量较大时这是导致前端“点修复后整个应用卡顿”的主因。
+        let transaction = connection.transaction()?;
         for (request_id, headers_json) in rows {
             let Some((agent_type, session_id, parent_session_id)) =
                 agent_session_from_json(&headers_json)
             else {
                 continue;
             };
-            repaired_logs += connection.execute(
+            repaired_logs += transaction.execute(
                 r#"
                 UPDATE request_logs
                 SET agent_type = ?2,
@@ -1286,6 +1289,7 @@ impl Storage {
             )?;
             repaired_requests += 1;
         }
+        transaction.commit()?;
 
         Ok(AgentSessionRepairResult {
             scanned_requests,
@@ -1360,6 +1364,15 @@ impl Storage {
         };
 
         let mut parsed = 0usize;
+        // 先于连接锁之外完成逐行的 base64 解码、SSE/JSON 响应解析与捕获体读取，
+        // 避免长时间持锁阻塞请求写入端。仅把最终落库阶段放入事务批量提交，
+        // 否则逐行自动提交同样会引发大量 fsync 造成前端卡顿。
+        let prices = self.prices();
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let transaction = connection.transaction()?;
         for mut row in rows {
             if row.res_body_b64.is_none() {
                 row.res_body_b64 = self
@@ -1383,27 +1396,102 @@ impl Storage {
                 continue;
             };
 
-            self.upsert_usage_record(&UsageRecordInput {
-                request_id: row.request_id,
-                client_id: row.client_id,
-                client_name: row.client_name,
-                channel_id: row.channel_id,
-                channel_name: row.channel_name,
-                account_id: row.account_id,
-                account_name: row.account_name,
-                client_protocol: row.client_protocol,
-                upstream_protocol: row.upstream_protocol,
-                virtual_model: row.virtual_model,
-                upstream_model: row.upstream_model,
-                input_tokens: usage.input_tokens,
-                input_cached_tokens: usage.input_cached_tokens,
-                input_uncached_tokens: usage.input_uncached_tokens,
-                input_cache_write_tokens: usage.input_cache_write_tokens,
-                output_tokens: usage.output_tokens,
-                total_tokens: usage.total_tokens,
-            })?;
+            let estimated_cost = estimate_cost(
+                &prices,
+                row.channel_id.as_deref(),
+                row.upstream_model.as_deref(),
+                usage.input_tokens,
+                usage.input_cached_tokens,
+                usage.input_uncached_tokens,
+                usage.input_cache_write_tokens,
+                usage.output_tokens,
+            );
+            let request_id = row.request_id.clone();
+            let updated = transaction.execute(
+                r#"
+                UPDATE usage_records
+                SET
+                    client_id = ?2,
+                    client_name = ?3,
+                    channel_id = ?4,
+                    channel_name = ?5,
+                    account_id = ?6,
+                    account_name = ?7,
+                    client_protocol = ?8,
+                    upstream_protocol = ?9,
+                    virtual_model = ?10,
+                    upstream_model = ?11,
+                    input_tokens = ?12,
+                    input_cached_tokens = ?13,
+                    input_uncached_tokens = ?14,
+                    input_cache_write_tokens = ?15,
+                    output_tokens = ?16,
+                    total_tokens = ?17,
+                    estimated_cost = ?18,
+                    analyzed_at = datetime('now')
+                WHERE request_id = ?1
+                "#,
+                params![
+                    row.request_id,
+                    row.client_id,
+                    row.client_name,
+                    row.channel_id,
+                    row.channel_name,
+                    row.account_id,
+                    row.account_name,
+                    row.client_protocol,
+                    row.upstream_protocol,
+                    row.virtual_model,
+                    row.upstream_model,
+                    usage.input_tokens,
+                    usage.input_cached_tokens,
+                    usage.input_uncached_tokens,
+                    usage.input_cache_write_tokens,
+                    usage.output_tokens,
+                    usage.total_tokens,
+                    estimated_cost,
+                ],
+            )?;
+            if updated == 0 {
+                transaction.execute(
+                    r#"
+                    INSERT INTO usage_records (
+                        id, request_id, client_id, client_name, channel_id, channel_name,
+                        account_id, account_name, client_protocol, upstream_protocol,
+                        virtual_model, upstream_model, input_tokens, input_cached_tokens,
+                        input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
+                        estimated_cost, analyzed_at, created_at
+                    ) VALUES (
+                        lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+                        datetime('now'), datetime('now')
+                    )
+                    "#,
+                    params![
+                        request_id,
+                        row.client_id,
+                        row.client_name,
+                        row.channel_id,
+                        row.channel_name,
+                        row.account_id,
+                        row.account_name,
+                        row.client_protocol,
+                        row.upstream_protocol,
+                        row.virtual_model,
+                        row.upstream_model,
+                        usage.input_tokens,
+                        usage.input_cached_tokens,
+                        usage.input_uncached_tokens,
+                        usage.input_cache_write_tokens,
+                        usage.output_tokens,
+                        usage.total_tokens,
+                        estimated_cost,
+                    ],
+                )?;
+            }
             parsed += 1;
         }
+        transaction.commit()?;
 
         Ok(parsed)
     }
@@ -1675,7 +1763,7 @@ impl Storage {
         // 先于连接锁之外读取价格快照，避免死锁（连接锁与价格锁是两把不同的锁）。
         let prices = self.prices();
 
-        let connection = self
+        let mut connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
@@ -1718,6 +1806,9 @@ impl Storage {
         };
 
         let mut updated = 0usize;
+        // 单事务批量回填费用：避免逐行自动提交造成大量 fsync，
+        // 否则历史记录较多时同样会让前端在修复阶段明显卡顿。
+        let transaction = connection.transaction()?;
         for row in rows {
             let Some(cost) = estimate_cost(
                 &prices,
@@ -1731,13 +1822,14 @@ impl Storage {
             ) else {
                 continue;
             };
-            let n = connection.execute(
+            let n = transaction.execute(
                 "UPDATE usage_records SET estimated_cost = ?2, analyzed_at = datetime('now')
                  WHERE request_id = ?1",
                 params![row.request_id, cost],
             )?;
             updated += n;
         }
+        transaction.commit()?;
         Ok(updated)
     }
 

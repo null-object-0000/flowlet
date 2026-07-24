@@ -2,6 +2,7 @@ import { Button, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronRight, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { isQwenTokenPlanAccount } from "../../domains/channel/types";
+import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
 import { OverviewActionLink } from "../../shared/ui/OverviewActionLink";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
@@ -74,7 +75,13 @@ function accountStatus(account: ChannelAccount, t: (source: string) => string): 
 }
 
 function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): string {
-  if (isQwenTokenPlanAccount(account)) return t("Token Plan 订阅");
+  if (isQwenTokenPlanAccount(account)) {
+    const details = parseQwenTokenPlanDetails(snapshot?.raw_scraped_json);
+    const parts = [t("Token Plan 订阅")];
+    if (details?.fiveHour) parts.push(t("5小时 剩余 {percent}%", { percent: details.fiveHour.remainingPercent.toFixed(1) }));
+    if (details?.sevenDay) parts.push(t("7天 剩余 {percent}%", { percent: details.sevenDay.remainingPercent.toFixed(1) }));
+    return parts.join(" · ");
+  }
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
   if (tokenPack) return t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
   const balance = snapshot?.balance == null ? "-" : snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -83,5 +90,5 @@ function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
 
 function expirySummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string): string {
   const tokenPack = (account.resource_mode ?? (account.channel_id === "longcat" ? "token_pack" : "pay_as_you_go")) === "token_pack";
-  return tokenPack && snapshot?.token_pack_expire_at ? ` · ${t("有效期至 {date}", { date: snapshot.token_pack_expire_at.split("T")[0] })}` : "";
+  return tokenPack && snapshot?.token_pack_expire_at ? ` · ${t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) })}` : "";
 }

@@ -44,6 +44,38 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByText("已启用 1 / 共 1 个账号")).toBeInTheDocument();
     expect(screen.getByText(/资源包 4398\.7万 Tokens.*有效期至 2026-07-30/)).toBeInTheDocument();
     expect(screen.getByText("启用")).toBeInTheDocument();
+  });
+
+  it("renders Qwen Token Plan subscription with 5h and 7d remaining percentages", async () => {
+    const qwenAccount = {
+      id: "account-qwen",
+      channel_id: "qwen",
+      name: "千问 Token Plan",
+      api_key: "sk-sp-configured",
+      enabled: true,
+      credential_status: "healthy",
+      resource_mode: "token_plan",
+    } as ChannelAccount;
+    const qwenSnapshot = {
+      account_id: qwenAccount.id,
+      raw_scraped_json: JSON.stringify({
+        subscription: { data: { DataV2: { data: { data: { status: "VALID", remainingDays: 28 } } } } },
+        quota_config: { data: { DataV2: { data: { data: { standard: { five_hour: 3000, weekly: 10000 } } } } } },
+        usage: { data: { DataV2: { data: { data: { per5HourPercentage: 0.789, per1WeekPercentage: 0.211 } } } } },
+      }),
+    } as AccountBalanceSnapshot;
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[qwenAccount]}
+        snapshots={[qwenSnapshot]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Token Plan 订阅.*5小时 剩余 21\.1%.*7天 剩余 78\.9%/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: /新增账号/ }));
     await user.click(screen.getByRole("link", { name: /管理账号/ }));

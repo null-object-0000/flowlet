@@ -120,9 +120,9 @@ export function ModelServicesPage() {
     setSyncApplying(true);
     try {
       await channelCommands.applySyncPresets();
-      await channels.refetch();
+      await Promise.all([channels.refetch(), routes.refetch(), accounts.refetch()]);
       closeSyncPresets();
-    } catch (error) {
+    } catch {
       // 失败时保留 modal 显示错误
     } finally {
       setSyncApplying(false);

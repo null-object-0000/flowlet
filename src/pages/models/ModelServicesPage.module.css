@@ -38,9 +38,10 @@
 .detailHeader small { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .detailBody { min-height: 0; overflow: auto; padding: 0; }
 .detailTabs { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+/* 让 Tabs 标签栏与内容边距对齐，避免 semi-ui 默认的左缩进。 */
+.detailTabs :global(.semi-tabs-bar) { padding-left: 13px; padding-right: 13px; }
 .detailTabs > :global(.semi-tabs-content) { min-height: 0; overflow: auto; padding: 11px 13px; }
 .routingTab { min-height: 0; overflow: auto; }
-.routingTabInner { padding: 11px 13px; }
 .tabContent { display: grid; gap: 13px; }
 .priceBadge { margin-bottom: 7px; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; color: var(--flowlet-color-success); background: color-mix(in srgb, var(--flowlet-color-success) 12%, transparent); font-size: var(--flowlet-font-size-caption); font-weight: 650; }
 .detailSection { margin-bottom: 13px; }
@@ -53,6 +54,7 @@
 .configRow > strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--flowlet-font-size-body-strong); }
 .configRow > strong.priceCell { overflow: visible; white-space: normal; display: grid; justify-items: start; gap: 2px; }
 .priceCell small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); font-weight: 500; }
+.priceOriginal { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-body); font-weight: 500; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--flowlet-color-text-tertiary) 70%, transparent); }
 .infoFootnote { padding: 6px 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; border-top: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
 .infoFootnote a { color: var(--semi-color-primary); text-decoration: none; }
 .infoFootnote a:hover { text-decoration: underline; }
@@ -71,4 +73,24 @@
 .routeCopy strong { font-size: var(--flowlet-font-size-body); }
 .routeCopy small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
 .detailFooter { min-height: 42px; padding: 0 13px; display: flex; align-items: center; border-top: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
+.syncBody { display: grid; gap: 11px; }
+.syncSummary { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
+.syncCounts { display: inline-flex; gap: 5px; }
+.syncCounts .added, .syncCounts .removed, .syncCounts .updated { padding: 1px 6px; border-radius: 5px; font-size: var(--flowlet-font-size-caption); font-weight: 650; }
+.syncList { max-height: 320px; overflow: auto; display: grid; gap: 6px; border: 1px solid var(--flowlet-color-border); border-radius: 9px; background: var(--flowlet-color-surface-muted); }
+.syncRow { padding: 7px 10px; display: grid; grid-template-columns: 50px minmax(140px, 1fr) minmax(0, 2fr); align-items: center; gap: 8px; border-bottom: 1px solid var(--flowlet-color-border); }
+.syncRow:last-child { border-bottom: 0; }
+.syncStatus { justify-self: start; padding: 1px 6px; border-radius: 5px; font-size: var(--flowlet-font-size-caption); font-weight: 650; }
+.syncName { display: grid; gap: 1px; min-width: 0; }
+.syncName strong { font-size: var(--flowlet-font-size-body-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.syncName small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
+.syncDetail { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--flowlet-font-size-caption); }
+.syncBefore { color: var(--flowlet-color-text-tertiary); text-decoration: line-through; }
+.syncArrow { color: var(--flowlet-color-text-tertiary); }
+.syncAfter { color: var(--flowlet-color-text); font-weight: 500; }
+.added { color: var(--flowlet-color-success); background: color-mix(in srgb, var(--flowlet-color-success) 12%, transparent); }
+.removed { color: var(--flowlet-color-danger, #d32f2f); background: color-mix(in srgb, var(--flowlet-color-danger, #d32f2f) 12%, transparent); }
+.updated { color: var(--flowlet-color-warning, #f59e0b); background: color-mix(in srgb, var(--flowlet-color-warning, #f59e0b) 12%, transparent); }
+.syncEmpty { min-height: 80px; display: grid; place-items: center; color: var(--flowlet-color-text-tertiary); text-align: center; }
+.syncFooter { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 920px) { .workspace { grid-template-columns: 1fr; overflow: auto; } .detailCard { min-height: 360px; } }

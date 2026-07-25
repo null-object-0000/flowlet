@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateCapabilitiesIntersection,
+  aggregateMaxPrice,
+  aggregateMaxStandardPrice,
+  aggregateMinLimits,
   estimateCost,
   findModelByAlias,
   findModelInCatalog,
@@ -9,9 +13,9 @@ import {
   resolvePrice,
   selectOfficialPrice,
 } from "./pricing";
-import type { ModelsCnModel, ModelsCnPrice, ModelsCnProvider } from "./types";
+import type { ModelsCnModel, ModelsCnPrice, ModelsCnProvider, ResolvedModel, ResolvedPrice } from "./types";
 
-function makePrice(overrides: Partial<Parameters<typeof resolvePrice>[0]> = {}) {
+function makeResolvedPrice(overrides: Partial<Parameters<typeof resolvePrice>[0]> = {}) {
   return resolvePrice({
     market: "china",
     currency: "CNY",
@@ -60,16 +64,17 @@ function makeModel(overrides: Partial<ModelsCnModel> = {}): ModelsCnModel {
 }
 
 describe("selectOfficialPrice", () => {
-  it("selects china + CNY + standard as highest priority", () => {
+  it("selects china + CNY + promotional as highest priority", () => {
+    // promotional 优先：厂商官网当前生效的是促销价（如 LongCat-2.0 输入 2 / 输出 8）。
     const prices = [
       { market: "international", currency: "USD", unit: "1M_tokens", rateType: "standard", input: { standard: 0.14 }, output: 0.28, sourceUrl: "u1" },
       { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 1 }, output: 2, sourceUrl: "u2" },
       { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "promotional", input: { standard: 0.5 }, output: 1, sourceUrl: "u3" },
     ] as const;
     const selected = selectOfficialPrice([...prices]);
-    expect(selected?.sourceUrl).toBe("u2");
+    expect(selected?.sourceUrl).toBe("u3");
     expect(selected?.currency).toBe("CNY");
-    expect(selected?.rateType).toBe("standard");
+    expect(selected?.rateType).toBe("promotional");
   });
 
   it("falls back to promotional when no standard exists", () => {
@@ -112,7 +117,7 @@ describe("resolvePrice", () => {
 
 describe("estimateCost", () => {
   it("estimates uncached cost by default", () => {
-    const price = makePrice();
+    const price = makeResolvedPrice();
     const estimate = estimateCost(price, { inputTokens: 2_000_000, outputTokens: 500_000 });
     expect(estimate).not.toBeNull();
     expect(estimate?.inputCost).toBeCloseTo(2, 6);
@@ -122,7 +127,7 @@ describe("estimateCost", () => {
   });
 
   it("applies cache hit price only when useCache = true AND inputCached exists", () => {
-    const price = makePrice({ input: { standard: 1, cacheHit: 0.02 } });
+    const price = makeResolvedPrice({ input: { standard: 1, cacheHit: 0.02 } });
     const estimate = estimateCost(price, { inputTokens: 2_000_000, outputTokens: 500_000, useCache: true });
     expect(estimate?.cacheApplied).toBe(true);
     expect(estimate?.inputCost).toBeCloseTo(0.04, 6);
@@ -130,14 +135,14 @@ describe("estimateCost", () => {
   });
 
   it("does NOT apply cache when inputCached is null even if useCache = true", () => {
-    const price = makePrice({ input: { standard: 1 } });
+    const price = makeResolvedPrice({ input: { standard: 1 } });
     const estimate = estimateCost(price, { inputTokens: 1_000_000, outputTokens: 100_000, useCache: true });
     expect(estimate?.cacheApplied).toBe(false);
     expect(estimate?.inputRate).toBe(1);
   });
 
   it("does NOT apply cache when useCache = false even if inputCached exists", () => {
-    const price = makePrice({ input: { standard: 1, cacheHit: 0.02 } });
+    const price = makeResolvedPrice({ input: { standard: 1, cacheHit: 0.02 } });
     const estimate = estimateCost(price, { inputTokens: 1_000_000, outputTokens: 100_000, useCache: false });
     expect(estimate?.cacheApplied).toBe(false);
     expect(estimate?.inputRate).toBe(1);
@@ -146,7 +151,7 @@ describe("estimateCost", () => {
   it("returns null when price is null", () => {
     // estimateCost expects ResolvedPrice not null; this tests the guard in caller
     // We test the type by passing a valid price here.
-    const price = makePrice();
+    const price = makeResolvedPrice();
     expect(estimateCost(price, { inputTokens: 0, outputTokens: 0 })?.totalCost).toBe(0);
   });
 });
@@ -209,6 +214,122 @@ describe("findModelInCatalog", () => {
     const catalog = { providers: [makeProvider({ models: [makeModel()] })] };
     expect(findModelInCatalog(catalog, "deepseek", "nope")).toBeNull();
     expect(findModelInCatalog(catalog, "missing", "deepseek-v4-flash")).toBeNull();
+  });
+});
+
+/** 构造一个最简 ResolvedModel，便于聚合测试只关注目标字段。 */
+function makeResolved(overrides: Partial<ResolvedModel> = {}): ResolvedModel {
+  return {
+    providerId: "p",
+    providerName: "P",
+    modelId: "m",
+    modelName: "M",
+    limits: { contextTokens: null, maxOutputTokens: null },
+    capabilities: { thinking: false, toolCalls: false, jsonOutput: false },
+    aliases: [],
+    officialPrice: null,
+    allPrices: [],
+    supplementedFromModelsDev: false,
+    modelsDevReferenceUrl: null,
+    ...overrides,
+  };
+}
+
+function makeAggPrice(overrides: Partial<ResolvedPrice> = {}): ResolvedPrice {
+  return {
+    market: "china",
+    currency: "CNY",
+    unit: "1M_tokens",
+    rateType: "promotional",
+    inputUncached: 2,
+    inputCached: 0.04,
+    inputCacheWrite: null,
+    output: 8,
+    sourceUrl: "https://example.com",
+    retrievedAt: null,
+    ...overrides,
+  };
+}
+
+describe("aggregateMinLimits", () => {
+  it("returns the minimum of each limit across sub-models", () => {
+    const subs = [
+      makeResolved({ limits: { contextTokens: 100_000, maxOutputTokens: 8_000 } }),
+      makeResolved({ limits: { contextTokens: 50_000, maxOutputTokens: 16_000 } }),
+      makeResolved({ limits: { contextTokens: 200_000, maxOutputTokens: 4_000 } }),
+    ];
+    expect(aggregateMinLimits(subs)).toEqual({ contextTokens: 50_000, maxOutputTokens: 4_000 });
+  });
+
+  it("ignores null limits when computing min", () => {
+    const subs = [
+      makeResolved({ limits: { contextTokens: 100_000, maxOutputTokens: null } }),
+      makeResolved({ limits: { contextTokens: null, maxOutputTokens: 8_000 } }),
+    ];
+    expect(aggregateMinLimits(subs)).toEqual({ contextTokens: 100_000, maxOutputTokens: 8_000 });
+  });
+});
+
+describe("aggregateCapabilitiesIntersection", () => {
+  it("returns true only when every sub-model supports the capability", () => {
+    const subs = [
+      makeResolved({ capabilities: { thinking: true, toolCalls: true, jsonOutput: true } }),
+      makeResolved({ capabilities: { thinking: true, toolCalls: false, jsonOutput: true } }),
+    ];
+    expect(aggregateCapabilitiesIntersection(subs)).toEqual({ thinking: true, toolCalls: false, jsonOutput: true });
+  });
+
+  it("returns all-false for empty sub-models", () => {
+    expect(aggregateCapabilitiesIntersection([])).toEqual({ thinking: false, toolCalls: false, jsonOutput: false });
+  });
+});
+
+describe("aggregateMaxPrice", () => {
+  it("returns the max of each price component across sub-models", () => {
+    const subs = [
+      makeResolved({ officialPrice: makeAggPrice({ inputUncached: 2, output: 8, inputCached: 0.04 }) }),
+      makeResolved({ officialPrice: makeAggPrice({ inputUncached: 5, output: 20, inputCached: 0.1 }) }),
+    ];
+    const result = aggregateMaxPrice(subs);
+    expect(result?.inputUncached).toBe(5);
+    expect(result?.output).toBe(20);
+    expect(result?.inputCached).toBe(0.1);
+  });
+
+  it("returns null when currencies differ", () => {
+    const subs = [
+      makeResolved({ officialPrice: makeAggPrice({ currency: "CNY" }) }),
+      makeResolved({ officialPrice: makeAggPrice({ currency: "USD" }) }),
+    ];
+    expect(aggregateMaxPrice(subs)).toBeNull();
+  });
+
+  it("drops cacheHit when any sub-model lacks it", () => {
+    const subs = [
+      makeResolved({ officialPrice: makeAggPrice({ inputCached: 0.04 }) }),
+      makeResolved({ officialPrice: makeAggPrice({ inputCached: null }) }),
+    ];
+    expect(aggregateMaxPrice(subs)?.inputCached).toBeNull();
+  });
+});
+
+describe("aggregateMaxStandardPrice", () => {
+  it("returns null when no sub-model has a standard price", () => {
+    const subs = [
+      makeResolved({ allPrices: [{ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "promotional", input: { standard: 2 }, output: 8, sourceUrl: "u" }] }),
+    ];
+    expect(aggregateMaxStandardPrice(subs)).toBeNull();
+  });
+
+  it("picks the max from standard prices across sub-models", () => {
+    const subs = [
+      makeResolved({ allPrices: [{ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 5, cacheHit: 0.1 }, output: 20, sourceUrl: "u" }] }),
+      makeResolved({ allPrices: [{ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 10, cacheHit: 0.5 }, output: 50, sourceUrl: "u" }] }),
+    ];
+    const result = aggregateMaxStandardPrice(subs);
+    expect(result?.inputUncached).toBe(10);
+    expect(result?.output).toBe(50);
+    expect(result?.inputCached).toBe(0.5);
   });
 });
 

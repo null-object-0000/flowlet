@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Input, Select, Switch, Tabs, Typography } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconHandle, IconRefresh, IconSearch } from "@douyinfe/semi-icons";
+import { Button, Input, Modal, Select, Switch, Tabs, Typography } from "@douyinfe/semi-ui-19";
+import { IconHandle, IconRefresh, IconSearch } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useAccounts, useChannelPresets } from "../../features/channel-accounts";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
@@ -8,19 +8,47 @@ import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useChannelModels, useModelPrices, useRouteCandidates } from "../../features/exposed-models/useModels";
 import { buildModelServiceItems, type ModelRouteGroup, type ModelServiceItem } from "./modelServiceView";
 import { buildModelBasicInfo, type ModelBasicInfo } from "./modelBasicInfo";
-import { filterModelServiceItems, reorderModelRouteGroups, type ModelStatusFilter } from "./modelServiceInteractions";
+import { buildChannelFilterOptions, filterModelServiceItems, reorderModelRouteGroups, type ModelStatusFilter } from "./modelServiceInteractions";
 import type { ChannelModel } from "../../domains/model/types";
 import type { ModelPriceInfo } from "../../domains/settings/types";
 import { formatCompactNumber, type NumberLanguage } from "../../shared/formatters/number";
 import { formatCostAmount } from "../../shared/formatters/cost";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
-import { useLocalModelsCnCatalog, resolveChannelModel, parseCatalogJson } from "../../domains/modelCatalog";
-import type { ResolvedModel } from "../../domains/modelCatalog";
-import { backgroundTaskCommands } from "../../domains/background-task/commands";
+import {
+  useLocalModelsCnCatalog,
+  resolveChannelModel,
+  parseCatalogJson,
+  aggregateMinLimits,
+  aggregateCapabilitiesIntersection,
+  aggregateMaxPrice,
+  aggregateMaxStandardPrice,
+  PROVIDER_BY_CHANNEL,
+} from "../../domains/modelCatalog";
+import type { ModelsCnPrice, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
+import { useModelsCnCatalogSync } from "../../features/background-tasks/useBackgroundTasks";
+import { channelCommands, type PresetSyncPreview } from "../../domains/channel/commands";
 import styles from "./ModelServicesPage.module.css";
 
 const { Paragraph, Text, Title } = Typography;
+
+/** 把聚合模型 helper 产出的 ResolvedPrice（扁平 input* 字段）转回 ModelsCnPrice 形态，
+ *  方便 UI 统一按 input.standard / input.cacheHit 访问。sourceUrl 仅作兜底。 */
+function priceFromResolvedStandard(p: ResolvedPrice): ModelsCnPrice {
+  return {
+    market: p.market,
+    currency: p.currency,
+    unit: p.unit,
+    rateType: "standard",
+    input: {
+      standard: p.inputUncached,
+      cacheHit: p.inputCached ?? undefined,
+      explicitCacheCreation: p.inputCacheWrite ?? undefined,
+    },
+    output: p.output,
+    sourceUrl: p.sourceUrl,
+  };
+}
 
 export function ModelServicesPage() {
   const { language, t } = useAppPreferences();
@@ -32,6 +60,7 @@ export function ModelServicesPage() {
   const prices = useModelPrices();
   // models-cn 目录：只读本地（由后台定时任务拉取）。本地无数据时 catalog 为 null。
   const catalogEntry = useLocalModelsCnCatalog();
+  const syncModelsCnCatalog = useModelsCnCatalogSync();
   const actions = useModelActions();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ModelStatusFilter>("all");
@@ -65,8 +94,40 @@ export function ModelServicesPage() {
   const loading = accounts.isLoading || channels.isLoading || routes.isLoading || channelModels.isLoading;
   const error = accounts.error ?? channels.error ?? routes.error ?? channelModels.error;
 
-  const refresh = () => void Promise.all([accounts.refetch(), channels.refetch(), routes.refetch(), channelModels.refetch(), prices.refetch(), catalogEntry.refetch()]);
-  const syncModelsCn = () => void backgroundTaskCommands.syncModelsCnCatalog("https://null-object-0000.github.io/models-cn/api.json", "manual");
+  const [syncPreview, setSyncPreview] = useState<PresetSyncPreview | null>(null);
+  const [syncPending, setSyncPending] = useState(false);
+  const [syncApplying, setSyncApplying] = useState(false);
+
+  const refresh = () => void Promise.all([accounts.refetch(), routes.refetch(), channelModels.refetch(), prices.refetch(), catalogEntry.refetch()]);
+  const syncModelsCn = () => syncModelsCnCatalog.mutate({ sourceUrl: "https://null-object-0000.github.io/models-cn/api.json", triggerSource: "manual" });
+  const openSyncPresets = async () => {
+    setSyncPending(true);
+    try {
+      const preview = await channelCommands.previewSyncPresets();
+      setSyncPreview(preview);
+    } catch (error) {
+      setSyncPreview({ hasChanges: false, addedCount: 0, removedCount: 0, updatedCount: 0, items: [], error: String(error) } as PresetSyncPreview & { error: string });
+    } finally {
+      setSyncPending(false);
+    }
+  };
+  const closeSyncPresets = () => setSyncPreview(null);
+  const applySyncPresets = async () => {
+    if (!syncPreview?.hasChanges) {
+      closeSyncPresets();
+      return;
+    }
+    setSyncApplying(true);
+    try {
+      await channelCommands.applySyncPresets();
+      await channels.refetch();
+      closeSyncPresets();
+    } catch (error) {
+      // 失败时保留 modal 显示错误
+    } finally {
+      setSyncApplying(false);
+    }
+  };
   const toggleModel = (model: ModelServiceItem, enabled: boolean) => {
     actions.toggleExposedModel.mutate({ routes: routes.data ?? [], routeIds: model.routeIds, modelId: model.publicModel, enabled });
   };
@@ -90,7 +151,7 @@ export function ModelServicesPage() {
     <main className={styles.page}>
       <header className={styles.pageHeading}>
         <div><Title heading={3}>{t("模型服务")}</Title><Paragraph>{t("管理对外模型名称、渠道路由与可用状态")}</Paragraph></div>
-        <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconRefresh />} onClick={refresh} loading={loading}>{t("刷新模型")}</Button>
+        <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconRefresh />} onClick={openSyncPresets} loading={syncPending}>{t("刷新模型")}</Button>
       </header>
 
       <section className={styles.stats} aria-label={t("模型服务统计")}>
@@ -110,7 +171,7 @@ export function ModelServicesPage() {
               aria-label={t("渠道类型")}
               optionList={[
                 { value: "all", label: t("全部渠道") },
-                ...(channels.data ?? []).map((channel) => ({ value: channel.id, label: channel.name })),
+                ...buildChannelFilterOptions(models),
               ]}
               onChange={(value) => setChannelFilter(String(value))}
             />
@@ -160,6 +221,7 @@ export function ModelServicesPage() {
           prices={prices.data ?? []}
           catalogJson={catalogEntry.data ?? null}
           catalogLoading={catalogEntry.isLoading}
+          syncModelsCnPending={syncModelsCnCatalog.isPending}
           onSyncModelsCn={syncModelsCn}
           language={language}
           busy={busyModel != null}
@@ -168,7 +230,87 @@ export function ModelServicesPage() {
           t={t}
         />
       </div> : null}
+
+      {syncPreview ? (
+        <PresetSyncModal
+          t={t}
+          preview={syncPreview}
+          applying={syncApplying}
+          onCancel={closeSyncPresets}
+          onConfirm={applySyncPresets}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function PresetSyncModal({ t, preview, applying, onCancel, onConfirm }: {
+  t: (source: string, values?: Record<string, string | number>) => string;
+  preview: PresetSyncPreview;
+  applying: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const statusLabel = (status: string) => {
+    if (status === "added") return t("新增");
+    if (status === "removed") return t("移除");
+    return t("更新");
+  };
+  const statusTone = (status: string) => {
+    if (status === "added") return styles.added;
+    if (status === "removed") return styles.removed;
+    return styles.updated;
+  };
+  return (
+    <Modal
+      title={t("同步渠道预设")}
+      visible
+      onCancel={onCancel}
+      footer={(
+        <div className={styles.syncFooter}>
+          <Button onClick={onCancel}>{t("取消")}</Button>
+          <Button
+            theme="solid"
+            type="primary"
+            disabled={!preview.hasChanges}
+            loading={applying}
+            onClick={onConfirm}
+          >
+            {t("确认同步")}
+          </Button>
+        </div>
+      )}
+    >
+      <div className={styles.syncBody}>
+        {preview.hasChanges ? (
+          <>
+            <p className={styles.syncSummary}>
+              {t("发现以下渠道预设变更：")}
+              <span className={styles.syncCounts}>
+                {preview.addedCount > 0 ? <span className={styles.added}>+{preview.addedCount}</span> : null}
+                {preview.removedCount > 0 ? <span className={styles.removed}>-{preview.removedCount}</span> : null}
+                {preview.updatedCount > 0 ? <span className={styles.updated}>~{preview.updatedCount}</span> : null}
+              </span>
+            </p>
+            <div className={styles.syncList}>
+              {preview.items.map((item) => (
+                <div className={styles.syncRow} key={`${item.status}-${item.id}`}>
+                  <span className={`${styles.syncStatus} ${statusTone(item.status)}`}>{statusLabel(item.status)}</span>
+                  <span className={styles.syncName}><strong>{item.name}</strong><small>{item.id}</small></span>
+                  <span className={styles.syncDetail}>
+                    {item.before ? <span className={styles.syncBefore}>{item.before}</span> : null}
+                    {item.before && item.after ? <span className={styles.syncArrow}>→</span> : null}
+                    {item.after ? <span className={styles.syncAfter}>{item.after}</span> : null}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className={styles.syncEmpty}>{t("无变更，渠道预设已是最新。")}</div>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -181,7 +323,7 @@ function ModelLogo({ model }: { model: ModelServiceItem }) {
   return <FlowletLogo variant="model" />;
 }
 
-function ModelDetail({ model, accounts, channels, channelModels, prices, catalogJson, catalogLoading, onSyncModelsCn, language, busy, onToggleRoute, onReorderRoute, t }: {
+function ModelDetail({ model, accounts, channels, channelModels, prices, catalogJson, catalogLoading, syncModelsCnPending, onSyncModelsCn, language, busy, onToggleRoute, onReorderRoute, t }: {
   model: ModelServiceItem | null;
   accounts: ReturnType<typeof useAccounts>["data"] extends (infer T)[] | undefined ? T[] : never;
   channels: ReturnType<typeof useChannelPresets>["data"] extends (infer T)[] | undefined ? T[] : never;
@@ -189,6 +331,7 @@ function ModelDetail({ model, accounts, channels, channelModels, prices, catalog
   prices: ModelPriceInfo[];
   catalogJson: string | null;
   catalogLoading: boolean;
+  syncModelsCnPending: boolean;
   onSyncModelsCn: () => void;
   language: NumberLanguage;
   busy: boolean;
@@ -216,14 +359,60 @@ function ModelDetail({ model, accounts, channels, channelModels, prices, catalog
   // 保证每次渲染 hook 调用顺序一致（Rules of Hooks）。
   const catalog = useMemo(() => (catalogJson ? parseCatalogJson(catalogJson) : null), [catalogJson]);
 
-  // 解析 models-cn 官方数据（直接渠道模型）。
-  const resolved: ResolvedModel | null = useMemo(() => {
+  // 直接渠道模型的 models-cn 官方数据。
+  const directResolved: ResolvedModel | null = useMemo(() => {
     if (!model || model.kind !== "direct" || !catalog) return null;
     const channelId = model.channelId ?? model.routeGroups[0]?.channelId;
     const upstream = model.routeGroups[0]?.upstreamModel ?? model.publicModel;
     if (!channelId) return null;
     return resolveChannelModel(catalog, channelId, upstream);
   }, [catalog, model]);
+
+  // 聚合模型（flowlet-pro/flowlet-flash）：汇总旗下所有已启用子路由的 limits/caps/prices。
+  // limits 取最小值（木桶效应）、caps 取交集（只承诺所有子模型都支持的能力）、
+  // prices 取最大值（展示最坏情况下的成本上限）。
+  const aggregateResolved: ResolvedModel | null = useMemo(() => {
+    if (!model || model.kind !== "aggregate" || !catalog) return null;
+    const subModels: ResolvedModel[] = [];
+    for (const route of model.routeGroups) {
+      const providerId = PROVIDER_BY_CHANNEL[route.channelId];
+      if (!providerId) continue;
+      const resolved = resolveChannelModel(catalog, route.channelId, route.upstreamModel);
+      if (resolved) subModels.push(resolved);
+    }
+    if (subModels.length === 0) return null;
+    const officialPrice = aggregateMaxPrice(subModels);
+    const limits = aggregateMinLimits(subModels);
+    const capabilities = aggregateCapabilitiesIntersection(subModels);
+    return {
+      providerId: "flowlet",
+      providerName: "Flowlet",
+      modelId: model.publicModel,
+      modelName: model.publicModel,
+      limits,
+      capabilities,
+      aliases: [],
+      officialPrice,
+      allPrices: [],
+      supplementedFromModelsDev: false,
+      modelsDevReferenceUrl: null,
+    };
+  }, [catalog, model]);
+
+  // 当前模型实际使用的 resolved 数据源。
+  const resolved = model?.kind === "aggregate" ? aggregateResolved : directResolved;
+
+  // 聚合模型的划价展示：用旗下子模型的 standard 价格取最大值，与当前（promotional）对比。
+  const aggregateStandardPrice = useMemo(() => {
+    if (!model || model.kind !== "aggregate" || !catalog || !resolved?.officialPrice) return null;
+    const subModels: ResolvedModel[] = [];
+    for (const route of model.routeGroups) {
+      const resolvedSub = resolveChannelModel(catalog, route.channelId, route.upstreamModel);
+      if (resolvedSub) subModels.push(resolvedSub);
+    }
+    if (subModels.length === 0) return null;
+    return aggregateMaxStandardPrice(subModels);
+  }, [catalog, model, resolved?.officialPrice]);
 
   // 基础信息：优先 models-cn 官方值，缺失降级到渠道同步。
   const basicInfo: ModelBasicInfo | null = useMemo(
@@ -235,97 +424,88 @@ function ModelDetail({ model, accounts, channels, channelModels, prices, catalog
 
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
-  const copy = () => void navigator.clipboard.writeText(model.publicModel);
   const canReorder = !busy && model.routeGroups.length > 1;
+
+  // 聚合模型（flowlet-pro/flowlet-flash）没有厂商官方价格，不展示"立即同步"。
+  const showPricingSync = model.kind === "direct";
 
   return <section className={styles.detailCard}>
     <header className={styles.detailHeader}><ModelLogo model={model} /><span><strong>{model.publicModel}</strong><small>{model.availableAccountCount > 0 ? t("{count} 个可用账号", { count: model.availableAccountCount }) : t("无可用账号")}</small></span></header>
     <div className={styles.detailBody}>
-      <DetailSection title={t("基础配置")}>
-        <div className={styles.configRow}><span>{t("对外模型名称")}</span><strong>{model.publicModel}</strong><Button theme="borderless" icon={<IconCopy />} aria-label={t("复制模型名称")} onClick={copy} /></div>
-      </DetailSection>
-
-      {model.kind === "direct" ? (
-        <Tabs className={styles.detailTabs} type="line" activeKey={activeTab} onChange={(key) => setActiveTab(String(key))} tabPaneMotion={false}>
-          <Tabs.TabPane tab={t("基础信息")} itemKey="basic">
-            <ModelBasicInfoTab basicInfo={basicInfo} resolved={resolved} language={language} t={t} />
-          </Tabs.TabPane>
-          <Tabs.TabPane tab={t("价格信息")} itemKey="pricing">
-            <ModelPricingTab resolved={resolved} hasCatalog={catalog !== null} catalogLoading={catalogLoading} onSync={onSyncModelsCn} t={t} />
-          </Tabs.TabPane>
-          <Tabs.TabPane tab={t("渠道路由")} itemKey="routing" className={styles.routingTab}>
-            <div className={styles.routingTabInner}>
-              <DetailSection title={t("渠道路由")} note={t("拖动路由可调整优先级")}>
-                {model.routeGroups.map((routeGroup, index) => {
-                  const account = accountById.get(routeGroup.accountId);
-                  const usable = Boolean(account?.enabled && account.api_key.trim() && account.credential_status !== "invalid_key");
-                  const moveByKeyboard = (direction: -1 | 1) => {
-                    const target = model.routeGroups[index + direction];
-                    if (target) onReorderRoute(model.publicModel, routeGroup.key, target.key);
-                  };
-                  return <div
-                    className={`${styles.routeRow} ${draggedRouteKey === routeGroup.key ? styles.dragging : ""} ${dragTargetKey === routeGroup.key ? styles.dragTarget : ""}`}
-                    key={routeGroup.key}
-                    onPointerEnter={() => {
-                      if (canReorder && draggedRouteKey && draggedRouteKey !== routeGroup.key) setDragTargetKey(routeGroup.key);
-                    }}
-                    onPointerUp={() => {
-                      const sourceKey = draggedRouteKey;
-                      setDraggedRouteKey(null);
+      <Tabs className={styles.detailTabs} type="line" activeKey={activeTab} onChange={(key) => setActiveTab(String(key))} tabPaneMotion={false}>
+        <Tabs.TabPane tab={t("基础信息")} itemKey="basic">
+          <ModelBasicInfoTab basicInfo={basicInfo} resolved={resolved} isAggregate={model.kind === "aggregate"} language={language} t={t} />
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={t("价格信息")} itemKey="pricing">
+          <ModelPricingTab
+            resolved={resolved}
+            standardPrice={model.kind === "direct" ? undefined : aggregateStandardPrice}
+            hasCatalog={catalog !== null}
+            catalogLoading={catalogLoading}
+            showSyncButton={showPricingSync}
+            isAggregate={model.kind === "aggregate"}
+            syncPending={syncModelsCnPending}
+            onSync={onSyncModelsCn}
+            t={t}
+          />
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={t("渠道路由")} itemKey="routing" className={styles.routingTab}>
+          <DetailSection title={t("渠道路由")} note={t("拖动路由可调整优先级")}>
+              {model.routeGroups.map((routeGroup, index) => {
+                const account = accountById.get(routeGroup.accountId);
+                const usable = Boolean(account?.enabled && account.api_key.trim() && account.credential_status !== "invalid_key");
+                const moveByKeyboard = (direction: -1 | 1) => {
+                  const target = model.routeGroups[index + direction];
+                  if (target) onReorderRoute(model.publicModel, routeGroup.key, target.key);
+                };
+                return <div
+                  className={`${styles.routeRow} ${draggedRouteKey === routeGroup.key ? styles.dragging : ""} ${dragTargetKey === routeGroup.key ? styles.dragTarget : ""}`}
+                  key={routeGroup.key}
+                  onPointerEnter={() => {
+                    if (canReorder && draggedRouteKey && draggedRouteKey !== routeGroup.key) setDragTargetKey(routeGroup.key);
+                  }}
+                  onPointerUp={() => {
+                    const sourceKey = draggedRouteKey;
+                    setDraggedRouteKey(null);
+                    setDragTargetKey(null);
+                    if (canReorder && sourceKey && sourceKey !== routeGroup.key) {
+                      onReorderRoute(model.publicModel, sourceKey, routeGroup.key);
+                    }
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={`${styles.dragHandle} ${!canReorder ? styles.dragHandleInactive : ""}`}
+                    disabled={busy}
+                    aria-disabled={!canReorder}
+                    aria-label={t("拖动调整路由 {name} 的优先级", { name: routeGroup.upstreamModel })}
+                    title={model.routeGroups.length > 1 ? t("拖动调整优先级") : t("当前只有一条路由，无需排序")}
+                    onPointerDown={(event) => {
+                      if (!canReorder || event.button !== 0) return;
+                      event.preventDefault();
+                      setDraggedRouteKey(routeGroup.key);
                       setDragTargetKey(null);
-                      if (canReorder && sourceKey && sourceKey !== routeGroup.key) {
-                        onReorderRoute(model.publicModel, sourceKey, routeGroup.key);
+                    }}
+                    onKeyDown={(event) => {
+                      if (!canReorder) return;
+                      if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        moveByKeyboard(-1);
+                      } else if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        moveByKeyboard(1);
                       }
                     }}
-                  >
-                    <button
-                      type="button"
-                      className={`${styles.dragHandle} ${!canReorder ? styles.dragHandleInactive : ""}`}
-                      disabled={busy}
-                      aria-disabled={!canReorder}
-                      aria-label={t("拖动调整路由 {name} 的优先级", { name: routeGroup.upstreamModel })}
-                      title={model.routeGroups.length > 1 ? t("拖动调整优先级") : t("当前只有一条路由，无需排序")}
-                      onPointerDown={(event) => {
-                        if (!canReorder || event.button !== 0) return;
-                        event.preventDefault();
-                        setDraggedRouteKey(routeGroup.key);
-                        setDragTargetKey(null);
-                      }}
-                      onKeyDown={(event) => {
-                        if (!canReorder) return;
-                        if (event.key === "ArrowUp") {
-                          event.preventDefault();
-                          moveByKeyboard(-1);
-                        } else if (event.key === "ArrowDown") {
-                          event.preventDefault();
-                          moveByKeyboard(1);
-                        }
-                      }}
-                    ><IconHandle /></button>
-                    <span className={styles.priority}>{index + 1}</span>
-                    <span className={styles.routeCopy}><strong>{channelById.get(routeGroup.channelId)?.name ?? routeGroup.channelId} · {account?.name ?? routeGroup.accountId}</strong><small>{routeGroup.upstreamModel}</small></span>
-                    <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
-                    <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />
-                  </div>;
-                })}
-              </DetailSection>
-            </div>
-          </Tabs.TabPane>
-        </Tabs>
-      ) : (
-        <DetailSection title={t("渠道路由")} note={t("拖动路由可调整优先级")}>
-          {model.routeGroups.map((routeGroup, index) => {
-            const account = accountById.get(routeGroup.accountId);
-            const usable = Boolean(account?.enabled && account.api_key.trim() && account.credential_status !== "invalid_key");
-            return <div className={styles.routeRow} key={routeGroup.key}>
-              <span className={styles.priority}>{index + 1}</span>
-              <span className={styles.routeCopy}><strong>{channelById.get(routeGroup.channelId)?.name ?? routeGroup.channelId} · {account?.name ?? routeGroup.accountId}</strong><small>{routeGroup.upstreamModel}</small></span>
-              <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
-              <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />
-            </div>;
-          })}
-        </DetailSection>
-      )}
+                  ><IconHandle /></button>
+                  <span className={styles.priority}>{index + 1}</span>
+                  <span className={styles.routeCopy}><strong>{channelById.get(routeGroup.channelId)?.name ?? routeGroup.channelId} · {account?.name ?? routeGroup.accountId}</strong><small>{routeGroup.upstreamModel}</small></span>
+                  <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
+                  <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />
+                </div>;
+              })}
+            </DetailSection>
+        </Tabs.TabPane>
+      </Tabs>
     </div>
     <footer className={styles.detailFooter}>{t("配置变更会立即保存并热更新到本地代理")}</footer>
   </section>;
@@ -335,25 +515,32 @@ function DetailSection({ title, note, children }: { title: string; note?: string
   return <section className={styles.detailSection}><header><strong>{title}</strong>{note ? <span>{note}</span> : null}</header><div className={styles.configBox}>{children}</div></section>;
 }
 
-/** 基础信息 Tab：上下文窗口、最大输出、能力。优先展示 models-cn 官方值。 */
-function ModelBasicInfoTab({ basicInfo, resolved, language, t }: {
+/** 基础信息 Tab：上下文窗口、最大输出、能力。优先展示 models-cn 官方值。
+ *  聚合模型（flowlet-pro/flowlet-flash）：limits 取旗下子模型最小值（木桶效应），
+ *  capabilities 取交集（只承诺所有子模型都支持的能力）。 */
+function ModelBasicInfoTab({ basicInfo, resolved, isAggregate, language, t }: {
   basicInfo: ModelBasicInfo | null;
   resolved: ResolvedModel | null;
+  isAggregate: boolean;
   language: NumberLanguage;
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
-  // 优先 models-cn 官方值，缺失降级到渠道同步（basicInfo）。
-  const contextTokens = resolved?.limits.contextTokens ?? basicInfo?.contextWindow ?? null;
-  const maxOutputTokens = resolved?.limits.maxOutputTokens ?? basicInfo?.maxOutputTokens ?? null;
+  // 聚合模型不参与 basicInfo（仅 direct 使用）。
+  const contextTokens = resolved?.limits.contextTokens ?? (isAggregate ? null : basicInfo?.contextWindow) ?? null;
+  const maxOutputTokens = resolved?.limits.maxOutputTokens ?? (isAggregate ? null : basicInfo?.maxOutputTokens) ?? null;
   const caps = resolved?.capabilities;
   return (
     <div className={styles.tabContent}>
+      {isAggregate ? (
+        <div className={styles.infoFootnote}>{t("聚合模型参数取旗下已启用子模型的最小值（木桶效应）。")}</div>
+      ) : null}
       <DetailSection title={t("模型参数")}>
         <div className={styles.configRow}><span>{t("上下文窗口")}</span><strong>{formatCompactNumber(contextTokens, language)}</strong></div>
         <div className={styles.configRow}><span>{t("最大输出")}</span><strong>{formatCompactNumber(maxOutputTokens, language)}</strong></div>
       </DetailSection>
       {caps ? (
         <DetailSection title={t("模型能力")}>
+          {isAggregate ? <div className={styles.infoFootnote}>{t("仅展示所有子模型都支持的能力。")}</div> : null}
           <div className={styles.configRow}><span>{t("推理")}</span><strong>{caps.thinking ? t("支持") : t("不支持")}</strong></div>
           <div className={styles.configRow}><span>{t("工具调用")}</span><strong>{caps.toolCalls ? t("支持") : t("不支持")}</strong></div>
           <div className={styles.configRow}><span>{t("JSON 输出")}</span><strong>{caps.jsonOutput ? t("支持") : t("不支持")}</strong></div>
@@ -377,11 +564,17 @@ function ModelBasicInfoTab({ basicInfo, resolved, language, t }: {
 }
 
 /** 价格信息 Tab：展示 models-cn 官方价格（与渠道账号无关的厂商直销价）。
- *  数据完全来自 models-cn，不再有 config.json 降级。 */
-function ModelPricingTab({ resolved, hasCatalog, catalogLoading, onSync, t }: {
+ *  数据完全来自 models-cn，不再有 config.json 降级。
+ *  聚合模型（flowlet-pro/flowlet-flash）：价格取旗下子模型的最大值（展示最坏情况
+ *  下的成本上限），standard 价格也取最大值用于划价展示。 */
+function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCatalog, catalogLoading, showSyncButton, isAggregate, syncPending, onSync, t }: {
   resolved: ResolvedModel | null;
+  standardPrice?: ResolvedPrice | null;
   hasCatalog: boolean;
   catalogLoading: boolean;
+  showSyncButton: boolean;
+  isAggregate: boolean;
+  syncPending: boolean;
   onSync: () => void;
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
@@ -392,40 +585,66 @@ function ModelPricingTab({ resolved, hasCatalog, catalogLoading, onSync, t }: {
   if (!price) {
     return (
       <div className={styles.tabContent}>
-        {hasCatalog ? (
+        {hasCatalog || !showSyncButton ? (
           <div className={styles.empty}>{t("暂无官方价格数据")}</div>
         ) : (
           <div className={styles.empty}>
             <span>{catalogLoading ? t("正在加载 models-cn 数据…") : t("本地暂无 models-cn 数据，后台定时任务将自动拉取。")}</span>
-            <Button theme="borderless" type="tertiary" size="small" onClick={onSync}>{t("立即同步")}</Button>
+            <Button theme="borderless" type="tertiary" size="small" onClick={onSync} loading={syncPending}>{t("立即同步")}</Button>
           </div>
         )}
       </div>
     );
   }
 
-  // 官方价格展示。
-  const inputPrice = `${formatPrice(price.inputUncached, price.currency)} / ${unitLabel}`;
-  const outputPrice = `${formatPrice(price.output, price.currency)} / ${unitLabel}`;
-  const hasCache = price.inputCached != null;
+  // 划价展示用的 standard 价格：聚合模型用外部传入（子模型 standard 最大值），
+  // 直接模型从 allPrices 中取同市场同币种的 standard。统一按 ModelsCnPrice 形态
+  // 处理，便于直接访问 input.standard / input.cacheHit。
+  const standardPrice: ModelsCnPrice | null = standardPriceOverride
+    ? priceFromResolvedStandard(standardPriceOverride)
+    : (resolved?.allPrices ?? []).find((p) => p.market === price.market && p.currency === price.currency && p.rateType === "standard") ?? null;
+  const showOriginal = (standardPrice?.input.standard ?? null) !== null && standardPrice?.input.standard !== price.inputUncached;
+
   return (
     <div className={styles.tabContent}>
+      {isAggregate ? <div className={styles.infoFootnote}>{t("聚合模型价格取旗下已启用子模型的最大值（成本上限）。")}</div> : null}
       <DetailSection title={t("官方价格")}>
-        {price.rateType === "promotional" ? <div className={styles.priceBadge}>{t("优惠价")}</div> : null}
-        <div className={styles.configRow}><span>{t("输入定价")}</span><strong className={styles.priceCell}>{inputPrice}{hasCache ? <small>{t("缓存 {price}", { price: formatPrice(price.inputCached as number, price.currency) })}</small> : null}{price.inputCacheWrite != null ? <small>{t("写入 {price}", { price: formatPrice(price.inputCacheWrite, price.currency) })}</small> : null}</strong></div>
-        <div className={styles.configRow}><span>{t("输出定价")}</span><strong>{outputPrice}</strong></div>
-        <div className={styles.configRow}><span>{t("市场")}</span><strong>{price.market === "china" ? t("中国大陆") : t("国际")}</strong></div>
+        <div className={styles.configRow}>
+          <span>{t("输入定价")}</span>
+          <strong className={styles.priceCell}>
+            {showOriginal ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.standard, price.currency)}</span> : null}
+            <span>{formatPrice(price.inputUncached, price.currency)} / {unitLabel}</span>
+          </strong>
+        </div>
+        {price.inputCached != null ? (
+          <div className={styles.configRow}>
+            <span>{t("缓存命中")}</span>
+            <strong className={styles.priceCell}>
+              {showOriginal && standardPrice?.input.cacheHit != null && standardPrice.input.cacheHit !== price.inputCached
+                ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.cacheHit, price.currency)}</span>
+                : null}
+              <span>{formatPrice(price.inputCached, price.currency)} / {unitLabel}</span>
+            </strong>
+          </div>
+        ) : null}
+        {price.inputCacheWrite != null ? (
+          <div className={styles.configRow}>
+            <span>{t("缓存写入")}</span>
+            <strong className={styles.priceCell}>
+              <span>{formatPrice(price.inputCacheWrite, price.currency)} / {unitLabel}</span>
+            </strong>
+          </div>
+        ) : null}
+        <div className={styles.configRow}>
+          <span>{t("输出定价")}</span>
+          <strong className={styles.priceCell}>
+            {showOriginal && standardPrice?.output != null && standardPrice.output !== price.output
+              ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.output, price.currency)}</span>
+              : null}
+            <span>{formatPrice(price.output, price.currency)} / {unitLabel}</span>
+          </strong>
+        </div>
       </DetailSection>
-      {resolved?.allPrices && resolved.allPrices.length > 1 ? (
-        <DetailSection title={t("其他市场价格")}>
-          {resolved.allPrices.filter((p) => p !== resolved.allPrices[0]).map((p, idx) => (
-            <div className={styles.configRow} key={`${p.market}-${p.currency}-${idx}`}>
-              <span>{p.market === "china" ? t("中国大陆") : t("国际")}</span>
-              <strong>{t("{rate} {currency} / {unit} ({type})", { rate: p.input.standard, currency: p.currency, unit: t("百万 tokens"), type: p.rateType === "standard" ? t("标准价") : t("优惠价") })}</strong>
-            </div>
-          ))}
-        </DetailSection>
-      ) : null}
       <div className={styles.infoFootnote}>
         {price.retrievedAt ? <span>{t("抓取时间")}: {price.retrievedAt}</span> : null}
         {price.sourceUrl ? <a href={price.sourceUrl} target="_blank" rel="noreferrer">{t("价格来源")}</a> : null}

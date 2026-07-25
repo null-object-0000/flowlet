@@ -837,10 +837,19 @@ pub(super) fn preview_sync_channel_presets(
         }
     }
 
-    // 检测已有渠道新增的暴露模型（config 里有但数据库里尚无路由）
+    // 检测已有账号的渠道新增的暴露模型（config 里有但数据库里尚无路由）。
+    // 没有账号的渠道不参与检测——用户还没配账号，不提前生成路由。
     let existing_routes = storage.list_route_candidates().map_err(|e| e.to_string())?;
+    let existing_accounts = storage.list_channel_accounts().map_err(|e| e.to_string())?;
+    let channels_with_accounts: std::collections::HashSet<&str> = existing_accounts
+        .iter()
+        .map(|a| a.channel_id.as_str())
+        .collect();
     let mut new_exposed_models: Vec<NewExposedModel> = Vec::new();
     for preset in &new_presets {
+        if !channels_with_accounts.contains(preset.id.as_str()) {
+            continue;
+        }
         let exposed = channels_config.default_exposed_models(&preset.id);
         let existing_upstreams: std::collections::HashSet<&str> = existing_routes
             .iter()

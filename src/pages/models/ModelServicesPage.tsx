@@ -321,7 +321,7 @@ function PresetSyncModal({ t, preview, applying, onCancel, onConfirm }: {
                   {preview.newExposedModels.map((m) => (
                     <div className={styles.syncRow} key={`new-${m.channelId}-${m.modelId}`}>
                       <span className={`${styles.syncStatus} ${styles.added}`}>{t("新增")}</span>
-                      <span className={styles.syncName}><strong>{m.channelName}</strong><small>{m.channelId}</small></span>
+                      <span className={styles.syncName}>{m.channelName}</span>
                       <span className={styles.syncDetail}>
                         <span className={styles.syncAfter}>{m.modelId}</span>
                       </span>

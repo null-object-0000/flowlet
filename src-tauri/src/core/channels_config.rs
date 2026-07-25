@@ -514,9 +514,14 @@ fn route_signature(route: &RouteCandidate) -> String {
 }
 
 /// 千问 Token Plan 账号的默认开放模型。
-/// qwen3.8-max-preview 仅 Token Plan 可用；按量付费账号使用渠道级
-/// `default_exposed_models.qwen`。
-const QWEN_TOKEN_PLAN_DEFAULT_MODELS: [&str; 2] = ["qwen3.8-max-preview", "qwen3.6-flash"];
+/// 与 default_exposed_models.qwen 保持一致，包含全部个人版可用模型。
+const QWEN_TOKEN_PLAN_DEFAULT_MODELS: [&str; 5] = [
+    "qwen3.8-max-preview",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-plus",
+    "qwen3.6-flash",
+];
 
 /// 判断账号是否为千问 Token Plan 订阅模式（sk-sp 专属 Key + 套餐端点，
 /// 通过账号级 Base URL 覆盖接入）。

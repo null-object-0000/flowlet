@@ -728,7 +728,18 @@ pub struct PresetSyncPreview {
     pub added_count: usize,
     pub removed_count: usize,
     pub updated_count: usize,
+    /// 已有渠道新增的暴露模型（需要生成路由才会在下拉出现）。
+    pub new_exposed_models: Vec<NewExposedModel>,
     pub items: Vec<PresetDiffItem>,
+}
+
+/// 已有渠道新出现的 config 暴露模型（数据库里尚无对应路由）。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewExposedModel {
+    pub channel_id: String,
+    pub channel_name: String,
+    pub model_id: String,
 }
 
 /// 预览 config.json 与数据库渠道预设的差异（不写入）。
@@ -826,27 +837,70 @@ pub(super) fn preview_sync_channel_presets(
         }
     }
 
+    // 检测已有渠道新增的暴露模型（config 里有但数据库里尚无路由）
+    let existing_routes = storage.list_route_candidates().map_err(|e| e.to_string())?;
+    let mut new_exposed_models: Vec<NewExposedModel> = Vec::new();
+    for preset in &new_presets {
+        let exposed = channels_config.default_exposed_models(&preset.id);
+        let existing_upstreams: std::collections::HashSet<&str> = existing_routes
+            .iter()
+            .filter(|r| r.channel_id == preset.id)
+            .map(|r| r.upstream_model.as_str())
+            .collect();
+        for model_id in &exposed {
+            if !existing_upstreams.contains(model_id.as_str()) {
+                new_exposed_models.push(NewExposedModel {
+                    channel_id: preset.id.clone(),
+                    channel_name: preset.name.clone(),
+                    model_id: model_id.clone(),
+                });
+            }
+        }
+    }
+
     let added_count = items.iter().filter(|i| i.status == "added").count();
     let removed_count = items.iter().filter(|i| i.status == "removed").count();
     let updated_count = items.iter().filter(|i| i.status == "updated").count();
+    let has_changes = !items.is_empty() || !new_exposed_models.is_empty();
 
     Ok(PresetSyncPreview {
-        has_changes: !items.is_empty(),
+        has_changes,
         added_count,
         removed_count,
         updated_count,
+        new_exposed_models,
         items,
     })
 }
 
-/// 把 config.json 渠道预设同步到数据库。新增渠道默认禁用，已有渠道保留启用状态。
+/// 把 config.json 渠道预设同步到数据库，并补齐新增暴露模型的默认路由。
+/// 新增渠道默认禁用，已有渠道保留启用状态。
 #[tauri::command]
 pub(super) fn apply_sync_channel_presets(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let storage = state.storage.clone();
     let config_path = state.config_path.clone();
-    crate::migrate_channel_presets_from_config(&storage, &config_path, false)
+    crate::migrate_channel_presets_from_config(&storage, &config_path, true)?;
+
+    // 同步完成后，为新暴露模型补齐默认路由
+    let config_raw = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取 config.json 失败：{e}"))?;
+    let config_value: serde_json::Value = serde_json::from_str(&config_raw)
+        .map_err(|e| format!("解析 config.json 失败：{e}"))?;
+    let channels_config = crate::core::channels_config::ChannelsConfig::from_config_json(&config_value)
+        .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
+
+    let existing_routes = storage.list_route_candidates().map_err(|e| e.to_string())?;
+    let accounts = storage.list_channel_accounts().map_err(|e| e.to_string())?;
+    let presets = storage.list_channel_presets().map_err(|e| e.to_string())?;
+    let merged = channels_config.merge_default_routes(&existing_routes, &accounts, &presets);
+    if merged.len() != existing_routes.len() {
+        storage.save_route_candidates(&merged).map_err(|e| e.to_string())?;
+        tracing::info!(added = merged.len() - existing_routes.len(), "新增暴露模型默认路由已补齐");
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

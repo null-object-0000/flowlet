@@ -11,12 +11,20 @@ export type PresetDiffItem = {
   after: string | null;
 };
 
+/** 已有渠道新增的暴露模型（需要生成路由才会在下拉出现）。 */
+export type NewExposedModel = {
+  channelId: string;
+  channelName: string;
+  modelId: string;
+};
+
 /** config.json 与数据库渠道预设的对比结果。 */
 export type PresetSyncPreview = {
   hasChanges: boolean;
   addedCount: number;
   removedCount: number;
   updatedCount: number;
+  newExposedModels: NewExposedModel[];
   items: PresetDiffItem[];
 };
 

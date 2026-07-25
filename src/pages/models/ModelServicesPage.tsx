@@ -105,8 +105,8 @@ export function ModelServicesPage() {
     try {
       const preview = await channelCommands.previewSyncPresets();
       setSyncPreview(preview);
-    } catch (error) {
-      setSyncPreview({ hasChanges: false, addedCount: 0, removedCount: 0, updatedCount: 0, items: [], error: String(error) } as PresetSyncPreview & { error: string });
+    } catch {
+      setSyncPreview(null);
     } finally {
       setSyncPending(false);
     }
@@ -284,27 +284,52 @@ function PresetSyncModal({ t, preview, applying, onCancel, onConfirm }: {
       <div className={styles.syncBody}>
         {preview.hasChanges ? (
           <>
-            <p className={styles.syncSummary}>
-              {t("发现以下渠道预设变更：")}
-              <span className={styles.syncCounts}>
-                {preview.addedCount > 0 ? <span className={styles.added}>+{preview.addedCount}</span> : null}
-                {preview.removedCount > 0 ? <span className={styles.removed}>-{preview.removedCount}</span> : null}
-                {preview.updatedCount > 0 ? <span className={styles.updated}>~{preview.updatedCount}</span> : null}
-              </span>
-            </p>
-            <div className={styles.syncList}>
-              {preview.items.map((item) => (
-                <div className={styles.syncRow} key={`${item.status}-${item.id}`}>
-                  <span className={`${styles.syncStatus} ${statusTone(item.status)}`}>{statusLabel(item.status)}</span>
-                  <span className={styles.syncName}><strong>{item.name}</strong><small>{item.id}</small></span>
-                  <span className={styles.syncDetail}>
-                    {item.before ? <span className={styles.syncBefore}>{item.before}</span> : null}
-                    {item.before && item.after ? <span className={styles.syncArrow}>→</span> : null}
-                    {item.after ? <span className={styles.syncAfter}>{item.after}</span> : null}
+            {preview.items.length > 0 ? (
+              <>
+                <p className={styles.syncSummary}>
+                  {t("发现以下渠道预设变更：")}
+                  <span className={styles.syncCounts}>
+                    {preview.addedCount > 0 ? <span className={styles.added}>+{preview.addedCount}</span> : null}
+                    {preview.removedCount > 0 ? <span className={styles.removed}>-{preview.removedCount}</span> : null}
+                    {preview.updatedCount > 0 ? <span className={styles.updated}>~{preview.updatedCount}</span> : null}
                   </span>
+                </p>
+                <div className={styles.syncList}>
+                  {preview.items.map((item) => (
+                    <div className={styles.syncRow} key={`${item.status}-${item.id}`}>
+                      <span className={`${styles.syncStatus} ${statusTone(item.status)}`}>{statusLabel(item.status)}</span>
+                      <span className={styles.syncName}><strong>{item.name}</strong><small>{item.id}</small></span>
+                      <span className={styles.syncDetail}>
+                        {item.before ? <span className={styles.syncBefore}>{item.before}</span> : null}
+                        {item.before && item.after ? <span className={styles.syncArrow}>→</span> : null}
+                        {item.after ? <span className={styles.syncAfter}>{item.after}</span> : null}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            ) : null}
+            {preview.newExposedModels.length > 0 ? (
+              <>
+                <p className={styles.syncSummary}>
+                  {t("以下渠道新增暴露模型（同步后自动生成路由）：")}
+                  <span className={styles.syncCounts}>
+                    <span className={styles.added}>+{preview.newExposedModels.length}</span>
+                  </span>
+                </p>
+                <div className={styles.syncList}>
+                  {preview.newExposedModels.map((m) => (
+                    <div className={styles.syncRow} key={`new-${m.channelId}-${m.modelId}`}>
+                      <span className={`${styles.syncStatus} ${styles.added}`}>{t("新增")}</span>
+                      <span className={styles.syncName}><strong>{m.channelName}</strong><small>{m.channelId}</small></span>
+                      <span className={styles.syncDetail}>
+                        <span className={styles.syncAfter}>{m.modelId}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
           </>
         ) : (
           <div className={styles.syncEmpty}>{t("无变更，渠道预设已是最新。")}</div>

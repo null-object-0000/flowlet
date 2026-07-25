@@ -3,6 +3,7 @@ import { calculateCacheHitRate, calculateOutputTokenRate, formatDuration, format
 import styles from "./RequestLogTable.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
+import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 
@@ -77,7 +78,17 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
             >
               <CompactNumber className={styles.tokenTotal} value={row.total_tokens} language={language} />
             </TokenBreakdownTooltip>
-            <span className={styles.number}>{formatCost(row.estimated_cost)}</span>
+            <CostBreakdownTooltip
+              t={t}
+              total={row.estimated_cost}
+              inputUncached={row.estimated_input_uncached_cost}
+              inputCached={row.estimated_input_cached_cost}
+              inputCacheWrite={row.estimated_input_cache_write_cost}
+              output={row.estimated_output_cost}
+              currency="CNY"
+            >
+              <span className={styles.number}>{formatCost(row.estimated_cost)}</span>
+            </CostBreakdownTooltip>
           </button>
         )) : null}
       </div>

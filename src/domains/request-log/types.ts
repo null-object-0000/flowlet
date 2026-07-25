@@ -62,6 +62,10 @@ export type RequestLogRow = {
   output_tokens: number | null;
   total_tokens: number | null;
   estimated_cost: number | null;
+  estimated_input_uncached_cost: number | null;
+  estimated_input_cached_cost: number | null;
+  estimated_input_cache_write_cost: number | null;
+  estimated_output_cost: number | null;
 };
 
 export type RequestLogSummary = {

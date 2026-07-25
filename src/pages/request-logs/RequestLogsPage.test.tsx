@@ -37,6 +37,7 @@ const row: RequestLogRow = {
   res_body_b64: btoa(JSON.stringify({ ok: true })), is_last_attempt: true,
   res_body_cleared_at: null, res_body_cleanup_reason: null,
   input_tokens: 100, input_cached_tokens: 60, input_uncached_tokens: 40, output_tokens: 50, total_tokens: 150, estimated_cost: 0.0012,
+  estimated_input_uncached_cost: 0.0004, estimated_input_cached_cost: 0.00024, estimated_input_cache_write_cost: null, estimated_output_cost: 0.0004,
 };
 
 beforeEach(() => {

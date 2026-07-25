@@ -10,6 +10,7 @@ import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
+import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
 import { formatTimestamp } from "../../shared/formatters/datetime";
@@ -176,7 +177,15 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
           />
         </TokenBreakdownTooltip>
       ) : <span>—</span>}
-      <span title={!row.flowletObserved && nativeUsage ? nativeCostTitle(nativeUsage, t) : undefined}>{row.flowletObserved ? `¥${row.estimatedCost.toFixed(4)}` : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}</span>
+      <CostBreakdownTooltip
+        t={t}
+        total={row.flowletObserved ? row.estimatedCost : nativeUsage?.cost ?? nativeUsage?.apiEquivalent?.amount ?? null}
+        currency="CNY"
+        apiEquivalent={nativeUsage?.apiEquivalent ?? null}
+        planConsumption={nativeUsage?.planConsumption ?? null}
+      >
+        <span>{row.flowletObserved ? `¥${row.estimatedCost.toFixed(4)}` : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}</span>
+      </CostBreakdownTooltip>
       <span className={!row.flowletObserved ? styles.localOnly : row.errorCount > 0 ? styles.warning : styles.success}>{!row.flowletObserved ? t("本地会话") : row.errorCount > 0 ? t("{count} 次失败", { count: row.errorCount }) : t("正常")}</span>
     </button>
   );
@@ -223,14 +232,6 @@ function nativeTokenBreakdown(agentType: AgentSessionRow["agentType"], usage: Ag
       ? Math.max(0, Math.min(1, usage.cachedInputTokens / measuredInput))
       : null,
   };
-}
-
-function nativeCostTitle(usage: AgentSessionNativeUsage, t: (key: string, variables?: Record<string, string | number>) => string) {
-  const parts: string[] = [];
-  if (usage.apiEquivalent) parts.push(t("API 等价价值：{value}", { value: formatCostAmount(usage.apiEquivalent, 4) }));
-  if (usage.planConsumption) parts.push(t("套餐消耗：{value}", { value: formatCostAmount(usage.planConsumption, 4) }));
-  if (usage.cost != null) parts.push(t("原生实际费用：{value}", { value: formatNativeCost(usage, 4) }));
-  return parts.join(" · ") || undefined;
 }
 
 function nativeCostDisplay(usage: AgentSessionNativeUsage) {

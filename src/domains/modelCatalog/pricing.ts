@@ -13,12 +13,14 @@ import type {
 } from "./types";
 
 /** 价格选取优先级评分。分数越高越优先。
- *  规则：china > international，CNY > USD，standard > promotional。 */
+ *  规则：china > international，CNY > USD，promotional > standard。
+ *  promotional 优先：厂商当前生效的是促销价（如 LongCat-2.0 的
+ *  输入 2 / 缓存命中 0.04 / 输出 8），standard 仅作兜底参考。 */
 function priceScore(price: ModelsCnPrice): number {
   let score = 0;
   if (price.market === "china") score += 4;
   if (price.currency === "CNY") score += 2;
-  if (price.rateType === "standard") score += 1;
+  if (price.rateType === "promotional") score += 1;
   return score;
 }
 
@@ -182,4 +184,94 @@ export function findModelByAlias(
     }
   }
   return null;
+}
+
+/** Flowlet 聚合模型（flowlet-pro / flowlet-flash）下属已启用路由的渠道+上游模型。 */
+export type AggregateSubModel = {
+  channelId: string;
+  upstreamModel: string;
+};
+
+/** 聚合模型的 limits：取旗下所有已启用子模型的最小值（木桶效应——聚合模型能
+ *  保证的能力上限由最弱的子模型决定）。null 视为无穷大，不参与 min。 */
+export function aggregateMinLimits(subModels: ResolvedModel[]): ResolvedModelLimits {
+  let contextTokens: number | null = null;
+  let maxOutputTokens: number | null = null;
+  for (const m of subModels) {
+    if (m.limits.contextTokens != null) contextTokens = contextTokens == null ? m.limits.contextTokens : Math.min(contextTokens, m.limits.contextTokens);
+    if (m.limits.maxOutputTokens != null) maxOutputTokens = maxOutputTokens == null ? m.limits.maxOutputTokens : Math.min(maxOutputTokens, m.limits.maxOutputTokens);
+  }
+  return { contextTokens, maxOutputTokens };
+}
+
+/** 聚合模型的能力：取旗下所有已启用子模型的交集——只有全部子模型都支持的能力
+ *  才会对外展示为"支持"（聚合模型不能承诺任何单一子模型做不到的事）。 */
+export function aggregateCapabilitiesIntersection(subModels: ResolvedModel[]): ResolvedModelCapabilities {
+  return {
+    thinking: subModels.length > 0 && subModels.every((m) => m.capabilities.thinking),
+    toolCalls: subModels.length > 0 && subModels.every((m) => m.capabilities.toolCalls),
+    jsonOutput: subModels.length > 0 && subModels.every((m) => m.capabilities.jsonOutput),
+  };
+}
+
+/** 聚合模型的价格：取旗下所有已启用子模型的最大值（展示最坏情况下的成本上限）。
+ *  仅当所有子模型都使用同一币种时返回有效价格，币种混杂返回 null。 */
+export function aggregateMaxPrice(subModels: ResolvedModel[]): ResolvedPrice | null {
+  const withPrice = subModels.filter((m) => m.officialPrice != null);
+  if (withPrice.length === 0) return null;
+  // 币种必须一致，否则无法做有意义的聚合。
+  const firstCurrency = withPrice[0].officialPrice!.currency;
+  if (!withPrice.every((m) => m.officialPrice!.currency === firstCurrency)) return null;
+  const maxInputUncached = Math.max(...withPrice.map((m) => m.officialPrice!.inputUncached));
+  const maxOutput = Math.max(...withPrice.map((m) => m.officialPrice!.output));
+  // 缓存价：仅当全部子模型都有该字段才聚合，否则视为 null。
+  const allCacheHit = withPrice.every((m) => m.officialPrice!.inputCached != null);
+  const allCacheWrite = withPrice.every((m) => m.officialPrice!.inputCacheWrite != null);
+  const maxCacheHit = allCacheHit ? Math.max(...withPrice.map((m) => m.officialPrice!.inputCached as number)) : null;
+  const maxCacheWrite = allCacheWrite ? Math.max(...withPrice.map((m) => m.officialPrice!.inputCacheWrite as number)) : null;
+  // 任一子模型是 promotional 则聚合视为 promotional（更贴近用户真实负担）。
+  const anyPromotional = withPrice.some((m) => m.officialPrice!.rateType === "promotional");
+  // 任一子模型是 china 则聚合视为 china（Flowlet 仅服务国内）。
+  const anyChina = withPrice.some((m) => m.officialPrice!.market === "china");
+  const sample = withPrice[0].officialPrice!;
+  return {
+    market: anyChina ? "china" : sample.market,
+    currency: firstCurrency,
+    unit: sample.unit,
+    rateType: anyPromotional ? "promotional" : "standard",
+    inputUncached: maxInputUncached,
+    inputCached: maxCacheHit,
+    inputCacheWrite: maxCacheWrite,
+    output: maxOutput,
+    sourceUrl: sample.sourceUrl,
+    retrievedAt: null,
+  };
+}
+
+/** 聚合模型的 standard 价格（用于划价展示）。同 aggregateMaxPrice 取 max，但从
+ *  各子模型的 standard 价格中聚合。币种混杂返回 null。 */
+export function aggregateMaxStandardPrice(subModels: ResolvedModel[]): ResolvedPrice | null {
+  const stdPrices = subModels
+    .map((m) => (m.allPrices ?? []).find((p) => p.rateType === "standard"))
+    .filter((p): p is NonNullable<typeof p> => p != null);
+  if (stdPrices.length === 0) return null;
+  const firstCurrency = stdPrices[0].currency;
+  if (!stdPrices.every((p) => p.currency === firstCurrency)) return null;
+  const maxInputUncached = Math.max(...stdPrices.map((p) => p.input.standard));
+  const maxOutput = Math.max(...stdPrices.map((p) => p.output));
+  const allCacheHit = stdPrices.every((p) => p.input.cacheHit != null);
+  const maxCacheHit = allCacheHit ? Math.max(...stdPrices.map((p) => p.input.cacheHit as number)) : null;
+  const sample = stdPrices[0];
+  return {
+    market: sample.market,
+    currency: firstCurrency,
+    unit: sample.unit,
+    rateType: "standard",
+    inputUncached: maxInputUncached,
+    inputCached: maxCacheHit,
+    inputCacheWrite: null,
+    output: maxOutput,
+    sourceUrl: sample.sourceUrl,
+    retrievedAt: null,
+  };
 }

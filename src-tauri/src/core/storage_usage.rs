@@ -163,8 +163,19 @@ fn agent_session_from_json(headers_json: &str) -> Option<(String, String, Option
     ))
 }
 
+/// 单次用量记录的费用估算 breakdown。
+#[derive(Debug, Clone, Copy)]
+pub struct CostBreakdown {
+    pub total: f64,
+    pub input_uncached: f64,
+    pub input_cached: f64,
+    pub input_cache_write: f64,
+    pub output: f64,
+}
+
 /// 根据内存中的价格表（仅来自 config.json）计算单次用量记录的费用估算。
 /// 公式与旧版 SQL 子查询一致：未命中缓存输入 / 命中缓存输入 / 输出，按每百万 token 计价。
+/// 返回 breakdown，便于前端 tooltip 展示明细。
 fn estimate_cost(
     prices: &[ModelPrice],
     channel_id: Option<&str>,
@@ -174,7 +185,7 @@ fn estimate_cost(
     input_uncached_tokens: Option<i64>,
     input_cache_write_tokens: Option<i64>,
     output_tokens: Option<i64>,
-) -> Option<f64> {
+) -> Option<CostBreakdown> {
     let channel_id = channel_id?;
     let upstream_model = upstream_model?;
     let price = prices
@@ -193,12 +204,18 @@ fn estimate_cost(
     let input_cached = input_cached_tokens.unwrap_or(0).max(0) as f64;
     let output = output_tokens.unwrap_or(0).max(0) as f64;
 
-    let cost = input_uncached * uncached_price / 1_000_000.0
-        + input_cached * cached_price / 1_000_000.0
-        + cache_write * cache_write_price.unwrap_or(uncached_price) / 1_000_000.0
-        + output * output_price / 1_000_000.0;
+    let input_uncached_cost = input_uncached * uncached_price / 1_000_000.0;
+    let input_cached_cost = input_cached * cached_price / 1_000_000.0;
+    let input_cache_write_cost = cache_write * cache_write_price.unwrap_or(uncached_price) / 1_000_000.0;
+    let output_cost = output * output_price / 1_000_000.0;
 
-    Some(cost)
+    Some(CostBreakdown {
+        total: input_uncached_cost + input_cached_cost + input_cache_write_cost + output_cost,
+        input_uncached: input_uncached_cost,
+        input_cached: input_cached_cost,
+        input_cache_write: input_cache_write_cost,
+        output: output_cost,
+    })
 }
 
 impl Storage {
@@ -949,6 +966,10 @@ impl Storage {
                 output_tokens: None,
                 total_tokens: None,
                 estimated_cost: None,
+                estimated_input_uncached_cost: None,
+                estimated_input_cached_cost: None,
+                estimated_input_cache_write_cost: None,
+                estimated_output_cost: None,
             })
         })?;
         let mut logs = Vec::new();
@@ -1059,6 +1080,8 @@ impl Storage {
                 ur.input_tokens, ur.output_tokens,
                 COALESCE(ur.total_tokens, ur.input_tokens + ur.output_tokens) AS total_tokens,
                 ur.estimated_cost,
+                ur.estimated_input_uncached_cost, ur.estimated_input_cached_cost,
+                ur.estimated_input_cache_write_cost, ur.estimated_output_cost,
                 rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
@@ -1109,10 +1132,14 @@ impl Storage {
                 output_tokens: row.get(36)?,
                 total_tokens: row.get(37)?,
                 estimated_cost: row.get(38)?,
-                ttft_ms: row.get(39)?,
-                input_cached_tokens: row.get(40)?,
-                input_uncached_tokens: row.get(41)?,
-                upstream_url: row.get(42)?,
+                estimated_input_uncached_cost: row.get(39)?,
+                estimated_input_cached_cost: row.get(40)?,
+                estimated_input_cache_write_cost: row.get(41)?,
+                estimated_output_cost: row.get(42)?,
+                ttft_ms: row.get(43)?,
+                input_cached_tokens: row.get(44)?,
+                input_uncached_tokens: row.get(45)?,
+                upstream_url: row.get(46)?,
             })
         })?;
         let mut logs = Vec::new();
@@ -1392,6 +1419,10 @@ impl Storage {
             output_tokens: Option<i64>,
             total_tokens: Option<i64>,
             estimated_cost: Option<f64>,
+            estimated_input_uncached_cost: Option<f64>,
+            estimated_input_cached_cost: Option<f64>,
+            estimated_input_cache_write_cost: Option<f64>,
+            estimated_output_cost: Option<f64>,
         }
         let prices = self.prices();
         let mut parsed_rows: Vec<ParsedUsage> = Vec::new();
@@ -1446,7 +1477,11 @@ impl Storage {
                 input_cache_write_tokens: usage.input_cache_write_tokens,
                 output_tokens: usage.output_tokens,
                 total_tokens: usage.total_tokens,
-                estimated_cost,
+                estimated_cost: estimated_cost.map(|c| c.total),
+                estimated_input_uncached_cost: estimated_cost.map(|c| c.input_uncached),
+                estimated_input_cached_cost: estimated_cost.map(|c| c.input_cached),
+                estimated_input_cache_write_cost: estimated_cost.map(|c| c.input_cache_write),
+                estimated_output_cost: estimated_cost.map(|c| c.output),
             });
         }
 
@@ -1478,6 +1513,10 @@ impl Storage {
                     output_tokens = ?16,
                     total_tokens = ?17,
                     estimated_cost = ?18,
+                    estimated_input_uncached_cost = ?19,
+                    estimated_input_cached_cost = ?20,
+                    estimated_input_cache_write_cost = ?21,
+                    estimated_output_cost = ?22,
                     analyzed_at = datetime('now')
                 WHERE request_id = ?1
                 "#,
@@ -1500,6 +1539,10 @@ impl Storage {
                     row.output_tokens,
                     row.total_tokens,
                     row.estimated_cost,
+                    row.estimated_input_uncached_cost,
+                    row.estimated_input_cached_cost,
+                    row.estimated_input_cache_write_cost,
+                    row.estimated_output_cost,
                 ],
             )?;
             if updated == 0 {
@@ -1510,10 +1553,11 @@ impl Storage {
                         account_id, account_name, client_protocol, upstream_protocol,
                         virtual_model, upstream_model, input_tokens, input_cached_tokens,
                         input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
-                        estimated_cost, analyzed_at, created_at
+                        estimated_cost, estimated_input_uncached_cost, estimated_input_cached_cost,
+                        estimated_input_cache_write_cost, estimated_output_cost, analyzed_at, created_at
                     ) VALUES (
                         lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
                         datetime('now'), datetime('now')
                     )
                     "#,
@@ -1536,6 +1580,10 @@ impl Storage {
                         row.output_tokens,
                         row.total_tokens,
                         row.estimated_cost,
+                        row.estimated_input_uncached_cost,
+                        row.estimated_input_cached_cost,
+                        row.estimated_input_cache_write_cost,
+                        row.estimated_output_cost,
                     ],
                 )?;
             }
@@ -1718,6 +1766,11 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
 
+        let (total, input_uncached, input_cached, input_cache_write, output) = match estimated_cost {
+            Some(c) => (Some(c.total), Some(c.input_uncached), Some(c.input_cached), Some(c.input_cache_write), Some(c.output)),
+            None => (None, None, None, None, None),
+        };
+
         let updated = connection.execute(
             &format!(
                 r#"
@@ -1740,6 +1793,10 @@ impl Storage {
                     output_tokens = ?16,
                     total_tokens = ?17,
                     estimated_cost = ?18,
+                    estimated_input_uncached_cost = ?19,
+                    estimated_input_cached_cost = ?20,
+                    estimated_input_cache_write_cost = ?21,
+                    estimated_output_cost = ?22,
                     analyzed_at = datetime('now')
                 WHERE request_id = ?1
                 "#,
@@ -1762,7 +1819,11 @@ impl Storage {
                 usage.input_cache_write_tokens,
                 usage.output_tokens,
                 usage.total_tokens,
-                estimated_cost,
+                total,
+                input_uncached,
+                input_cached,
+                input_cache_write,
+                output,
             ],
         )?;
 
@@ -1775,10 +1836,11 @@ impl Storage {
                         account_id, account_name, client_protocol, upstream_protocol,
                         virtual_model, upstream_model, input_tokens, input_cached_tokens,
                         input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
-                        estimated_cost, analyzed_at, created_at
+                        estimated_cost, estimated_input_uncached_cost, estimated_input_cached_cost,
+                        estimated_input_cache_write_cost, estimated_output_cost, analyzed_at, created_at
                     ) VALUES (
                         lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
                         datetime('now'), datetime('now')
                     )
                     "#,
@@ -1801,7 +1863,11 @@ impl Storage {
                     usage.input_cache_write_tokens,
                     usage.output_tokens,
                     usage.total_tokens,
-                    estimated_cost,
+                    total,
+                    input_uncached,
+                    input_cached,
+                    input_cache_write,
+                    output,
                 ],
             )?;
         }
@@ -1876,9 +1942,11 @@ impl Storage {
                 continue;
             };
             let n = transaction.execute(
-                "UPDATE usage_records SET estimated_cost = ?2, analyzed_at = datetime('now')
+                "UPDATE usage_records SET estimated_cost = ?2, estimated_input_uncached_cost = ?3,
+                 estimated_input_cached_cost = ?4, estimated_input_cache_write_cost = ?5,
+                 estimated_output_cost = ?6, analyzed_at = datetime('now')
                  WHERE request_id = ?1",
-                params![row.request_id, cost],
+                params![row.request_id, cost.total, cost.input_uncached, cost.input_cached, cost.input_cache_write, cost.output],
             )?;
             updated += n;
         }
@@ -2257,6 +2325,8 @@ impl Storage {
                 ur.input_tokens, ur.output_tokens,
                 COALESCE(ur.total_tokens, ur.input_tokens + ur.output_tokens) AS total_tokens,
                 ur.estimated_cost,
+                ur.estimated_input_uncached_cost, ur.estimated_input_cached_cost,
+                ur.estimated_input_cache_write_cost, ur.estimated_output_cost,
                 rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
@@ -2318,10 +2388,14 @@ impl Storage {
                 output_tokens: row.get(28)?,
                 total_tokens: row.get(29)?,
                 estimated_cost: row.get(30)?,
-                ttft_ms: row.get(31)?,
-                input_cached_tokens: row.get(32)?,
-                input_uncached_tokens: row.get(33)?,
-                upstream_url: row.get(34)?,
+                estimated_input_uncached_cost: row.get(31)?,
+                estimated_input_cached_cost: row.get(32)?,
+                estimated_input_cache_write_cost: row.get(33)?,
+                estimated_output_cost: row.get(34)?,
+                ttft_ms: row.get(35)?,
+                input_cached_tokens: row.get(36)?,
+                input_uncached_tokens: row.get(37)?,
+                upstream_url: row.get(38)?,
             })
         })?;
 
@@ -2419,6 +2493,17 @@ mod estimate_cost_tests {
         }
     }
 
+    fn max_preview_price() -> ModelPrice {
+        ModelPrice {
+            channel_id: "qwen".to_string(),
+            upstream_model: "qwen3.8-max-preview".to_string(),
+            input_uncached_price: 6.0,
+            input_cached_price: 1.2,
+            output_price: 24.0,
+            ..Default::default()
+        }
+    }
+
     fn tiered_price() -> ModelPrice {
         ModelPrice {
             channel_id: "qwen".to_string(),
@@ -2446,6 +2531,17 @@ mod estimate_cost_tests {
         }
     }
 
+    fn qwen37_max_price() -> ModelPrice {
+        ModelPrice {
+            channel_id: "qwen".to_string(),
+            upstream_model: "qwen3.7-max".to_string(),
+            input_uncached_price: 4.0,
+            input_cached_price: 0.8,
+            output_price: 16.0,
+            ..Default::default()
+        }
+    }
+
     fn approx(actual: f64, expected: f64) {
         assert!(
             (actual - expected).abs() < 1e-9,
@@ -2468,7 +2564,49 @@ mod estimate_cost_tests {
         )
         .unwrap();
         // 1M uncached * 1.2 + 1M output * 7.2 = 1.2 + 7.2
-        approx(cost, 8.4);
+        approx(cost.total, 8.4);
+    }
+
+    #[test]
+    fn prices_qwen38_max_preview() {
+        let prices = vec![max_preview_price()];
+        let cost = estimate_cost(
+            &prices,
+            Some("qwen"),
+            Some("qwen3.8-max-preview"),
+            Some(1_000_000),
+            Some(400_000),
+            Some(600_000),
+            None,
+            Some(1_000_000),
+        )
+        .unwrap();
+        // 600k uncached * 6.0 + 400k cached * 1.2 + 1M output * 24.0 = 3.6 + 0.48 + 24.0 = 28.08
+        approx(cost.total, 28.08);
+        approx(cost.input_uncached, 3.6);
+        approx(cost.input_cached, 0.48);
+        approx(cost.output, 24.0);
+    }
+
+    #[test]
+    fn prices_qwen37_max() {
+        let prices = vec![qwen37_max_price()];
+        let cost = estimate_cost(
+            &prices,
+            Some("qwen"),
+            Some("qwen3.7-max"),
+            Some(500_000),
+            Some(200_000),
+            Some(300_000),
+            None,
+            Some(500_000),
+        )
+        .unwrap();
+        // 300k uncached * 4.0 + 200k cached * 0.8 + 500k output * 16.0 = 1.2 + 0.16 + 8.0 = 9.36
+        approx(cost.total, 9.36);
+        approx(cost.input_uncached, 1.2);
+        approx(cost.input_cached, 0.16);
+        approx(cost.output, 8.0);
     }
 
     #[test]
@@ -2513,7 +2651,7 @@ mod estimate_cost_tests {
         )
         .unwrap();
         // tier ≤256k: 100k*1.6/1e6 + 10k*6.4/1e6 = 0.16 + 0.064
-        approx(cost, 0.224);
+        approx(cost.total, 0.224);
     }
 
     #[test]
@@ -2531,7 +2669,7 @@ mod estimate_cost_tests {
         )
         .unwrap();
         // tier >256k: 500k*4.8/1e6 + 10k*19.2/1e6 = 2.4 + 0.192
-        approx(cost, 2.592);
+        approx(cost.total, 2.592);
     }
 
     #[test]
@@ -2548,7 +2686,7 @@ mod estimate_cost_tests {
             Some(0),
         )
         .unwrap();
-        approx(at_limit, 262144.0 * 1.6 / 1_000_000.0);
+        approx(at_limit.total, 262144.0 * 1.6 / 1_000_000.0);
         let over_limit = estimate_cost(
             &prices,
             Some("qwen"),
@@ -2560,7 +2698,7 @@ mod estimate_cost_tests {
             Some(0),
         )
         .unwrap();
-        approx(over_limit, 262145.0 * 4.8 / 1_000_000.0);
+        approx(over_limit.total, 262145.0 * 4.8 / 1_000_000.0);
     }
 
     #[test]
@@ -2580,7 +2718,7 @@ mod estimate_cost_tests {
             Some(10_000),
         )
         .unwrap();
-        approx(cost, 0.1616);
+        approx(cost.total, 0.1616);
     }
 
     #[test]

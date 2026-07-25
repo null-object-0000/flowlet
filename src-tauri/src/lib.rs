@@ -584,7 +584,24 @@ pub fn run() {
             tracing::info!("tauri setup 开始");
 
             let config_path = app.path().resource_dir()?.join("config.json");
-            let state = build_app_state(app_database_path(app), config_path);
+
+            // 首次启动：把随包打包的 models-cn.json 从资源目录复制到 exe 旁，
+            // 让用户开箱即用，无需手动触发同步。
+            let bundled_models_cn = app.path().resource_dir()?.join("models-cn.json");
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            if let Some(exe_dir) = exe_dir {
+                let target = exe_dir.join("models-cn.json");
+                if !target.exists() && bundled_models_cn.exists() {
+                    match std::fs::copy(&bundled_models_cn, &target) {
+                        Ok(_) => tracing::info!("首次启动：已复制内置 models-cn.json 到 exe 目录"),
+                        Err(error) => tracing::warn!(%error, "复制内置 models-cn.json 失败"),
+                    }
+                }
+            }
+
+            let state = build_app_state(app_database_path(app), config_path.clone());
             app.manage(state.clone());
             let state_for_tray = state.clone();
             tracing::info!(
@@ -843,6 +860,8 @@ pub fn run() {
             commands::sync_models_cn_catalog,
             commands::get_models_cn_catalog,
             commands::get_models_cn_currencies,
+            commands::preview_sync_channel_presets,
+            commands::apply_sync_channel_presets,
             commands::probe_cost_ledger_sources,
             commands::list_agent_session_clients,
             commands::list_request_log_clients,
@@ -923,6 +942,62 @@ fn update_tray_tooltip(app: &AppHandle, running: bool) {
     if let Some(ref t) = *tray_guard {
         let _ = t.set_tooltip(Some(tooltip));
     }
+}
+
+/// 把 config.json 渠道预设同步到数据库。
+/// `disable_newly_added` 为 true 时，新增渠道（数据库里没有的）会被设为 disabled，
+/// 已有渠道保留原启用状态；为 false 时全量按 config 写入。
+fn migrate_channel_presets_from_config(storage: &Storage, config_path: &std::path::Path, disable_newly_added: bool) -> Result<(), String> {
+    let config_raw = std::fs::read_to_string(config_path)
+        .map_err(|e| format!("读取 config.json 失败：{e}"))?;
+
+    // 重新解析 config.json 并同步渠道预设
+    let config_value: serde_json::Value = serde_json::from_str(&config_raw)
+        .map_err(|e| format!("解析 config.json 失败：{e}"))?;
+    let channels_config = core::channels_config::ChannelsConfig::from_config_json(&config_value)
+        .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
+
+    // 内置渠道始终保留
+    let mut presets = channels_config.presets.clone();
+    let builtin = core::presets::builtin_channel_presets();
+    for bp in &builtin {
+        if !presets.iter().any(|p| p.id == bp.id) {
+            presets.push(bp.clone());
+        }
+    }
+
+    // 读取现有渠道，建立 ID → enabled 映射
+    let existing = storage.list_channel_presets()
+        .map_err(|e| format!("读取现有渠道预设失败：{e}"))?;
+    let existing_map: std::collections::HashMap<&str, bool> =
+        existing.iter().map(|p| (p.id.as_str(), p.enabled)).collect();
+
+    // 新增渠道默认禁用（用户需手动启用并配置 API Key）
+    if disable_newly_added {
+        for preset in &mut presets {
+            if !existing_map.contains_key(preset.id.as_str()) {
+                preset.enabled = false;
+                tracing::info!(channel = %preset.id, "新增渠道默认禁用");
+            } else {
+                // 已有渠道保留原启用状态
+                preset.enabled = existing_map[preset.id.as_str()];
+            }
+        }
+    } else {
+        // 不强制禁用新增时，已有渠道保留原状态，新增渠道按 config 默认值（通常 true）
+        for preset in &mut presets {
+            if let Some(&enabled) = existing_map.get(preset.id.as_str()) {
+                preset.enabled = enabled;
+            }
+        }
+    }
+
+    // 全量替换渠道预设（save_channel_presets 内部先 DELETE 再 INSERT）
+    storage.save_channel_presets(&presets)
+        .map_err(|e| format!("保存渠道预设失败：{e}"))?;
+
+    tracing::info!(count = presets.len(), disable_newly_added, "渠道预设同步完成");
+    Ok(())
 }
 
 /// 内部启动代理逻辑（供托盘菜单调用）

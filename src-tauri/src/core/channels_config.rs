@@ -412,7 +412,9 @@ impl ChannelsConfig {
                     .filter(|account| {
                         account.channel_id == preset.id
                             && account.enabled
-                            && !account.api_key.trim().is_empty()
+                            // Token Plan 账号无传统 API Key，用 resource_mode 判定
+                            && (!account.api_key.trim().is_empty()
+                                || is_qwen_token_plan_account(account))
                     })
                     .enumerate()
                 {

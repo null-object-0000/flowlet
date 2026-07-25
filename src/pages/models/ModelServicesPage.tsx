@@ -628,7 +628,8 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
   const standardPrice: ModelsCnPrice | null = standardPriceOverride
     ? priceFromResolvedStandard(standardPriceOverride)
     : (resolved?.allPrices ?? []).find((p) => p.market === price.market && p.currency === price.currency && p.rateType === "standard") ?? null;
-  const showOriginal = (standardPrice?.input.standard ?? null) !== null && standardPrice?.input.standard !== price.inputUncached;
+  // 只要存在 standard 价格就展示划价（含等于的情况，让用户看到原价）
+  const hasStandard = standardPrice != null;
 
   return (
     <div className={styles.tabContent}>
@@ -637,7 +638,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
         <div className={styles.configRow}>
           <span>{t("输入定价")}</span>
           <strong className={styles.priceCell}>
-            {showOriginal ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.standard, price.currency)}</span> : null}
+            {hasStandard ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.standard, price.currency)}</span> : null}
             <span>{formatPrice(price.inputUncached, price.currency)} / {unitLabel}</span>
           </strong>
         </div>
@@ -645,7 +646,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
           <div className={styles.configRow}>
             <span>{t("缓存命中")}</span>
             <strong className={styles.priceCell}>
-              {showOriginal && standardPrice?.input.cacheHit != null && standardPrice.input.cacheHit !== price.inputCached
+              {hasStandard && standardPrice?.input.cacheHit != null
                 ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.cacheHit, price.currency)}</span>
                 : null}
               <span>{formatPrice(price.inputCached, price.currency)} / {unitLabel}</span>
@@ -656,6 +657,9 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
           <div className={styles.configRow}>
             <span>{t("缓存写入")}</span>
             <strong className={styles.priceCell}>
+              {hasStandard && standardPrice?.input.explicitCacheCreation != null
+                ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.explicitCacheCreation, price.currency)}</span>
+                : null}
               <span>{formatPrice(price.inputCacheWrite, price.currency)} / {unitLabel}</span>
             </strong>
           </div>
@@ -663,9 +667,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
         <div className={styles.configRow}>
           <span>{t("输出定价")}</span>
           <strong className={styles.priceCell}>
-            {showOriginal && standardPrice?.output != null && standardPrice.output !== price.output
-              ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.output, price.currency)}</span>
-              : null}
+            {hasStandard ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.output, price.currency)}</span> : null}
             <span>{formatPrice(price.output, price.currency)} / {unitLabel}</span>
           </strong>
         </div>

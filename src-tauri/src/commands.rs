@@ -709,6 +709,146 @@ pub(super) fn get_models_cn_currencies(
     crate::core::storage::storage_tasks::get_models_cn_currencies()
 }
 
+/// 单条渠道预设变更项。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetDiffItem {
+    pub id: String,
+    pub name: String,
+    pub status: String, // "added" | "removed" | "updated"
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+/// config.json 与数据库渠道预设的对比结果。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetSyncPreview {
+    pub has_changes: bool,
+    pub added_count: usize,
+    pub removed_count: usize,
+    pub updated_count: usize,
+    pub items: Vec<PresetDiffItem>,
+}
+
+/// 预览 config.json 与数据库渠道预设的差异（不写入）。
+#[tauri::command]
+pub(super) fn preview_sync_channel_presets(
+    state: tauri::State<'_, AppState>,
+) -> Result<PresetSyncPreview, String> {
+    let storage = state.storage.clone();
+    let config_path = state.config_path.clone();
+    let config_raw = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取 config.json 失败：{e}"))?;
+    let config_value: serde_json::Value = serde_json::from_str(&config_raw)
+        .map_err(|e| format!("解析 config.json 失败：{e}"))?;
+    let channels_config = crate::core::channels_config::ChannelsConfig::from_config_json(&config_value)
+        .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
+
+    let mut new_presets = channels_config.presets.clone();
+    let builtin = crate::core::presets::builtin_channel_presets();
+    for bp in &builtin {
+        if !new_presets.iter().any(|p| p.id == bp.id) {
+            new_presets.push(bp.clone());
+        }
+    }
+
+    let existing = storage.list_channel_presets().map_err(|e| e.to_string())?;
+    let existing_map: std::collections::HashMap<&str, &ChannelPreset> =
+        existing.iter().map(|p| (p.id.as_str(), p)).collect();
+    let new_map: std::collections::HashMap<&str, &ChannelPreset> =
+        new_presets.iter().map(|p| (p.id.as_str(), p)).collect();
+
+    let mut items: Vec<PresetDiffItem> = Vec::new();
+
+    // 新增
+    for np in &new_presets {
+        if !existing_map.contains_key(np.id.as_str()) {
+            items.push(PresetDiffItem {
+                id: np.id.clone(),
+                name: np.name.clone(),
+                status: "added".to_string(),
+                before: None,
+                after: Some(format!("{}/{}", np.name, np.default_model)),
+            });
+        }
+    }
+
+    // 移除
+    for ep in &existing {
+        if !new_map.contains_key(ep.id.as_str()) && !builtin.iter().any(|b| b.id == ep.id) {
+            items.push(PresetDiffItem {
+                id: ep.id.clone(),
+                name: ep.name.clone(),
+                status: "removed".to_string(),
+                before: Some(format!("{}/{}", ep.name, ep.default_model)),
+                after: None,
+            });
+        }
+    }
+
+    // 更新（同 ID 但字段变化）
+    for np in &new_presets {
+        if let Some(ep) = existing_map.get(np.id.as_str()) {
+            let mut changes: Vec<String> = Vec::new();
+            if np.name != ep.name {
+                changes.push(format!("名称：{} → {}", ep.name, np.name));
+            }
+            if np.default_model != ep.default_model {
+                changes.push(format!(
+                    "默认模型：{} → {}",
+                    ep.default_model,
+                    np.default_model
+                ));
+            }
+            if np.small_model != ep.small_model {
+                let ep_small = ep.small_model.as_deref().unwrap_or("-");
+                let np_small = np.small_model.as_deref().unwrap_or("-");
+                if ep_small != np_small {
+                    changes.push(format!("小型模型：{} → {}", ep_small, np_small));
+                }
+            }
+            if np.platform_url != ep.platform_url {
+                changes.push("平台地址已更新".to_string());
+            }
+            if np.supported_protocols != ep.supported_protocols {
+                changes.push("支持协议已变更".to_string());
+            }
+            if !changes.is_empty() {
+                items.push(PresetDiffItem {
+                    id: np.id.clone(),
+                    name: np.name.clone(),
+                    status: "updated".to_string(),
+                    before: Some(format!("{}/{}", ep.name, ep.default_model)),
+                    after: Some(changes.join("；")),
+                });
+            }
+        }
+    }
+
+    let added_count = items.iter().filter(|i| i.status == "added").count();
+    let removed_count = items.iter().filter(|i| i.status == "removed").count();
+    let updated_count = items.iter().filter(|i| i.status == "updated").count();
+
+    Ok(PresetSyncPreview {
+        has_changes: !items.is_empty(),
+        added_count,
+        removed_count,
+        updated_count,
+        items,
+    })
+}
+
+/// 把 config.json 渠道预设同步到数据库。新增渠道默认禁用，已有渠道保留启用状态。
+#[tauri::command]
+pub(super) fn apply_sync_channel_presets(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let storage = state.storage.clone();
+    let config_path = state.config_path.clone();
+    crate::migrate_channel_presets_from_config(&storage, &config_path, false)
+}
+
 #[tauri::command]
 pub(super) fn list_agent_session_clients(
     state: tauri::State<'_, AppState>,

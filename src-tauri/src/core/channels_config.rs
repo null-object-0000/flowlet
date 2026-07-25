@@ -236,6 +236,7 @@ impl ChannelsConfig {
                     supports_usage_query: c.supports_usage_query,
                     supports_scrape_balance: c.supports_scrape_balance,
                     platform_url: c.platform_url,
+                    enabled: true,
                     created_at: now.clone(),
                     updated_at: now.clone(),
                 }

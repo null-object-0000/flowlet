@@ -252,8 +252,14 @@ pub struct ChannelPreset {
     pub supports_scrape_balance: bool,
     // 渠道平台查看 API Key 的跳转地址（如控制台页面）
     pub platform_url: Option<String>,
+    #[serde(default = "default_preset_enabled")]
+    pub enabled: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn default_preset_enabled() -> bool {
+    true
 }
 
 impl Default for ChannelPreset {
@@ -277,6 +283,7 @@ impl Default for ChannelPreset {
             supports_usage_query: false,
             supports_scrape_balance: false,
             platform_url: None,
+            enabled: true,
             created_at: String::new(),
             updated_at: String::new(),
         }
@@ -293,6 +300,7 @@ impl ChannelPreset {
             supports_model_detail: true,
             supports_scrape_balance: true,
             platform_url: Some("https://longcat.chat/platform/api_keys".to_string()),
+            enabled: true,
             ..Default::default()
         }
     }
@@ -303,6 +311,7 @@ impl ChannelPreset {
             name: "Kimi".to_string(),
             vendor: "moonshot".to_string(),
             platform_url: Some("https://platform.kimi.com/console/api-keys".to_string()),
+            enabled: true,
             supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
             openai_base_url: "https://api.moonshot.cn/v1".to_string(),
             anthropic_base_url: "https://api.moonshot.cn/anthropic".to_string(),
@@ -325,6 +334,7 @@ impl ChannelPreset {
             name: "DeepSeek".to_string(),
             vendor: "deepseek".to_string(),
             platform_url: Some("https://platform.deepseek.com/api_keys".to_string()),
+            enabled: true,
             supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
             openai_base_url: "https://api.deepseek.com".to_string(),
             anthropic_base_url: "https://api.deepseek.com/anthropic".to_string(),
@@ -350,6 +360,7 @@ impl ChannelPreset {
             name: "千问 Qwen".to_string(),
             vendor: "qwen".to_string(),
             platform_url: Some("https://platform.qianwenai.com/home/api-keys".to_string()),
+            enabled: true,
             supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
             openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
             anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic".to_string(),
@@ -763,6 +774,10 @@ pub struct RequestLogRow {
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
     pub estimated_cost: Option<f64>,
+    pub estimated_input_uncached_cost: Option<f64>,
+    pub estimated_input_cached_cost: Option<f64>,
+    pub estimated_input_cache_write_cost: Option<f64>,
+    pub estimated_output_cost: Option<f64>,
 }
 
 // ─── Request Log Page (paginated + filtered) ─────────────────────────────────

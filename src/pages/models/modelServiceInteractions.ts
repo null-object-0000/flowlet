@@ -21,6 +21,24 @@ export function filterModelServiceItems(
   });
 }
 
+/** 渠道下拉筛选器选项：只展示已有路由（即有账号且配置了 API Key）的渠道。
+ *  避免 config.json 里新增但用户还没配账号的渠道提前出现在下拉列表里。 */
+export function buildChannelFilterOptions(
+  models: ModelServiceItem[],
+): Array<{ id: string; name: string }> {
+  const channelIdToName = new Map<string, string>();
+  for (const model of models) {
+    for (const route of model.routes) {
+      if (!channelIdToName.has(route.channel_id)) {
+        channelIdToName.set(route.channel_id, model.channelName ?? route.channel_id);
+      }
+    }
+  }
+  return [...channelIdToName.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function reorderModelRouteGroups(
   routes: RouteCandidate[],
   modelId: string,

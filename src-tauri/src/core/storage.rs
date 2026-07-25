@@ -734,6 +734,7 @@ impl Storage {
                 supports_balance_query INTEGER NOT NULL DEFAULT 0,
                 supports_quota_query   INTEGER NOT NULL DEFAULT 0,
                 supports_usage_query   INTEGER NOT NULL DEFAULT 0,
+                enabled         INTEGER NOT NULL DEFAULT 1,
                 created_at      TEXT NOT NULL,
                 updated_at      TEXT NOT NULL
             );
@@ -876,6 +877,10 @@ impl Storage {
                 output_tokens         INTEGER,
                 total_tokens          INTEGER,
                 estimated_cost        REAL,
+                estimated_input_uncached_cost  REAL,
+                estimated_input_cached_cost    REAL,
+                estimated_input_cache_write_cost REAL,
+                estimated_output_cost          REAL,
                 analyzed_at           TEXT,
                 created_at            TEXT NOT NULL
             );
@@ -1305,7 +1310,12 @@ impl Storage {
         add_column_if_missing(&connection, "usage_records", "output_tokens", "INTEGER")?;
         add_column_if_missing(&connection, "usage_records", "total_tokens", "INTEGER")?;
         add_column_if_missing(&connection, "usage_records", "estimated_cost", "REAL")?;
+        add_column_if_missing(&connection, "usage_records", "estimated_input_uncached_cost", "REAL")?;
+        add_column_if_missing(&connection, "usage_records", "estimated_input_cached_cost", "REAL")?;
+        add_column_if_missing(&connection, "usage_records", "estimated_input_cache_write_cost", "REAL")?;
+        add_column_if_missing(&connection, "usage_records", "estimated_output_cost", "REAL")?;
         add_column_if_missing(&connection, "usage_records", "analyzed_at", "TEXT")?;
+        add_column_if_missing(&connection, "channel_presets", "enabled", "INTEGER NOT NULL DEFAULT 1")?;
         add_column_if_missing(
             &connection,
             "usage_records",

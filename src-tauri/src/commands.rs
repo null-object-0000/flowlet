@@ -901,8 +901,42 @@ pub(super) fn apply_sync_channel_presets(
         .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
 
     let existing_routes = storage.list_route_candidates().map_err(|e| e.to_string())?;
-    let accounts = storage.list_channel_accounts().map_err(|e| e.to_string())?;
+    let mut accounts = storage.list_channel_accounts().map_err(|e| e.to_string())?;
     let presets = storage.list_channel_presets().map_err(|e| e.to_string())?;
+
+    // 为有账号但 merge_default_routes 过滤掉的渠道（如 Token Plan 账号无传统 API Key）
+    // 补齐一个"占位账号"，让路由能够生成。占位账号 enabled=false，不会参与实际转发。
+    let qwen_has_account = accounts.iter().any(|a| a.channel_id == "qwen");
+    let qwen_has_usable_account = accounts.iter().any(|a| {
+        a.channel_id == "qwen" && a.enabled && !a.api_key.trim().is_empty()
+    });
+    if qwen_has_account && !qwen_has_usable_account {
+        // 检查是否已有占位
+        let placeholder_exists = accounts.iter().any(|a| a.id == "account-qwen-placeholder");
+        if !placeholder_exists {
+            let now = chrono::Utc::now().to_rfc3339();
+            accounts.push(crate::core::config::ChannelAccount {
+                id: "account-qwen-placeholder".to_string(),
+                channel_id: "qwen".to_string(),
+                name: "千问占位（请配置 Token Plan 账号）".to_string(),
+                api_key: "placeholder".to_string(),
+                enabled: false,
+                priority: 999,
+                remark: Some("占位账号，用于生成默认路由".to_string()),
+                resource_mode: None,
+                resource_sync_mode: "manual".to_string(),
+                base_url_override: None,
+                anthropic_base_url_override: None,
+                last_used_at: None,
+                last_error: None,
+                credential_status: crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            });
+            storage.save_channel_accounts(&accounts).map_err(|e| e.to_string())?;
+        }
+    }
+
     let merged = channels_config.merge_default_routes(&existing_routes, &accounts, &presets);
     if merged.len() != existing_routes.len() {
         storage.save_route_candidates(&merged).map_err(|e| e.to_string())?;

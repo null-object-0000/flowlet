@@ -205,11 +205,13 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
     "model_detail": "https://api.longcat.chat/openai/v1/models/{id}"
   },
   "scrape": {                              // 控制台抓取配置(可选)
-    "token_pack": {                        // 模式 key(longcat: token_pack / pay_as_you_go;qwen: token_plan)
+    "hybrid": {                            // 模式 key(longcat: hybrid;qwen: token_plan)
       "console_url": "https://longcat.chat/platform/usage?tab=token",
+      "console_url_secondary": "https://longcat.chat/platform/usage?tab=api",
       "interceptor_js": "...",             // document-start 注入的响应拦截器 JS(IIFE)
-      "extractor_js": "function extract(raw){ ... }",  // 解析器 JS(函数声明)
-      "aggregate": false                   // 是否需聚合多份响应后再调 extractor
+      "extractor_js": "function extract(bundle){ ... }", // 解析器 JS(函数声明)
+      "aggregate": true,                   // 是否需聚合多份响应后再调 extractor
+      "required_slots": ["token_packs_summary", "api_usage_summary"]
     }
   }
 }
@@ -238,7 +240,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `supports_usage_query` | `bool` | 否 | `false` | 是否支持查询用量 |
 | `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"` |
-| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式(如 `"token_pack"` / `"pay_as_you_go"` / `"token_plan"`),value 为 `{ console_url, interceptor_js, extractor_js, aggregate? }`。`extractor_js` 返回统一汇总字段；LongCat `token_pack` 还返回完整 `token_packs` 数组，原始接口 payload 单独写入 `raw_scraped_json`。页面始终自行生成 Cookie、签名和 Header；Windows/Linux 优先从原生 WebView 网络层读取目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。每轮确认原生监听 ready 或注入 ACK 后刷新；ready 超时立即结束。未捕获响应不会被判定为未登录；用户手动刷新时展示控制台供其完成登录、验证码或等待页面加载，周期自动同步则保持窗口隐藏并把失败写入任务日志。 |
+| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"`），value 可包含 `console_url`、可选的 `console_url_secondary`、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组，原始接口 payload 单独写入 `raw_scraped_json`。页面始终自行生成 Cookie、签名和 Header；Windows/Linux 优先从原生 WebView 网络层读取精确匹配的目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。 |
 
 **端点解析优先级**：
 

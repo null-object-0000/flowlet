@@ -332,24 +332,65 @@ pub fn install_linux_response_capture(
 }
 
 /// 根据响应 URL 判断它属于哪个抓取阶段(用于聚合模式分槽)。
-/// 注意:
-/// - URL 可能含 URL 编码(%2F = /),所以同时匹配编码与解码形式。
-/// - 顺序有讲究:具体的复合路径(如 api-usage/summary)优先于泛匹配(如 usage)。
+/// 这里只允许精确的业务 API 路径。不能用 `contains("usage")` 之类的宽泛
+/// 规则，否则 LongCat 的控制台 document、监控埋点和用量明细都会被误认为
+/// 套餐响应，导致多阶段抓取提前结束。
 pub fn classify_response_url(url: &str) -> &'static str {
-    if url.contains("subscription") && !url.contains("token-plan-individual") {
+    let normalized = url.to_ascii_lowercase().replace("%2f", "/");
+    if normalized.contains("/tokenplan/personal/api/v2/subscription") {
         "subscription"
-    } else if url.contains("quota-config") {
+    } else if normalized.contains("/tokenplan/personal/api/v2/quota-config") {
         "quota_config"
-    } else if url.contains("token-packs/summary") {
+    } else if normalized.contains("/api/pay/quota/metering/token-packs/summary") {
         "token_packs_summary"
-    } else if url.contains("api-usage/summary") {
+    } else if normalized.contains("/api/pay/quota/metering/api-usage/summary") {
         "api_usage_summary"
-    } else if url.contains("usage") {
-        // 覆盖 /usage 与 %2Fusage 两种形式
+    } else if normalized.contains("/tokenplan/personal/api/v2/usage") {
         "usage"
     } else {
         "unknown"
     }
+}
+
+/// 当前导航阶段必须等到的响应槽位。
+///
+/// - 单页面聚合模式（Qwen）必须在本阶段收齐全部 required_slots；
+/// - 多页面聚合模式（LongCat）按配置顺序让每个页面等待自己的槽位；
+/// - 配置无法一一对应时，最后一个阶段兜底等待全部必需槽位。
+pub fn required_slots_for_phase(
+    mode: &ScrapeModeRuntime,
+    phase_index: usize,
+    phase_count: usize,
+) -> Vec<String> {
+    if !mode.aggregate || mode.required_slots.is_empty() {
+        return Vec::new();
+    }
+    if phase_count <= 1 {
+        return mode.required_slots.clone();
+    }
+    if mode.required_slots.len() == phase_count {
+        return mode
+            .required_slots
+            .get(phase_index)
+            .cloned()
+            .into_iter()
+            .collect();
+    }
+    if phase_index + 1 == phase_count {
+        return mode.required_slots.clone();
+    }
+    Vec::new()
+}
+
+pub fn missing_required_slots(
+    slots: &HashMap<String, String>,
+    required_slots: &[String],
+) -> Vec<String> {
+    required_slots
+        .iter()
+        .filter(|slot| !slots.contains_key(slot.as_str()))
+        .cloned()
+        .collect()
 }
 
 /// 聚合模式:检查是否收齐所有必需的响应槽。
@@ -363,7 +404,9 @@ pub fn aggregate_complete(slots: &HashMap<String, String>, mode: &ScrapeModeRunt
                 .keys()
                 .any(|k| k == "token_packs_summary" || k == "api_usage_summary");
         }
-        mode.required_slots.iter().all(|slot| slots.contains_key(slot))
+        mode.required_slots
+            .iter()
+            .all(|slot| slots.contains_key(slot))
     } else {
         slots
             .keys()
@@ -389,15 +432,15 @@ mod tests {
     #[test]
     fn test_classify_response_url() {
         assert_eq!(
-            classify_response_url("https://cs-data.qianwenai.com/data/api.json?...%2Fsubscription"),
+            classify_response_url("https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fsubscription"),
             "subscription"
         );
         assert_eq!(
-            classify_response_url("https://cs-data.qianwenai.com/data/api.json?...%2Fquota-config"),
+            classify_response_url("https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fquota-config"),
             "quota_config"
         );
         assert_eq!(
-            classify_response_url("https://cs-data.qianwenai.com/data/api.json?...%2Fusage"),
+            classify_response_url("https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fusage"),
             "usage"
         );
         assert_eq!(
@@ -409,6 +452,64 @@ mod tests {
         assert_eq!(
             classify_response_url("https://longcat.chat/api/pay/quota/metering/api-usage/summary"),
             "api_usage_summary"
+        );
+        assert_eq!(
+            classify_response_url("https://longcat.chat/platform/usage?tab=token"),
+            "unknown"
+        );
+        assert_eq!(
+            classify_response_url(
+                "https://catfront.dianping.com/api/pvts?pageurl=longcat.chat%2Fplatform%2Fusage"
+            ),
+            "unknown"
+        );
+        assert_eq!(
+            classify_response_url(
+                "https://longcat.chat/api/pay/quota/metering/token-usage/overview/details"
+            ),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn waits_for_all_qwen_slots_but_one_slot_per_longcat_phase() {
+        let qwen = ScrapeModeRuntime {
+            console_url:
+                "https://platform.qianwenai.com/home/billing/subscription/token-plan-individual"
+                    .to_string(),
+            console_url_secondary: None,
+            interceptor_js: String::new(),
+            extractor_js: String::new(),
+            aggregate: true,
+            required_slots: vec![
+                "subscription".to_string(),
+                "quota_config".to_string(),
+                "usage".to_string(),
+            ],
+        };
+        assert_eq!(
+            required_slots_for_phase(&qwen, 0, 1),
+            vec!["subscription", "quota_config", "usage"]
+        );
+
+        let longcat = ScrapeModeRuntime {
+            console_url: "https://longcat.chat/platform/usage?tab=token".to_string(),
+            console_url_secondary: Some("https://longcat.chat/platform/usage?tab=api".to_string()),
+            interceptor_js: String::new(),
+            extractor_js: String::new(),
+            aggregate: true,
+            required_slots: vec![
+                "token_packs_summary".to_string(),
+                "api_usage_summary".to_string(),
+            ],
+        };
+        assert_eq!(
+            required_slots_for_phase(&longcat, 0, 2),
+            vec!["token_packs_summary"]
+        );
+        assert_eq!(
+            required_slots_for_phase(&longcat, 1, 2),
+            vec!["api_usage_summary"]
         );
     }
 
@@ -465,8 +566,14 @@ mod tests {
         };
         let mode = resolve_scrape_mode(&config, "longcat", Some("hybrid")).unwrap();
         assert!(mode.aggregate);
-        assert_eq!(mode.console_url_secondary.as_deref(), Some("https://longcat.chat/platform/usage?tab=api"));
-        assert_eq!(mode.required_slots, vec!["token_packs_summary", "api_usage_summary"]);
+        assert_eq!(
+            mode.console_url_secondary.as_deref(),
+            Some("https://longcat.chat/platform/usage?tab=api")
+        );
+        assert_eq!(
+            mode.required_slots,
+            vec!["token_packs_summary", "api_usage_summary"]
+        );
     }
 
     #[test]

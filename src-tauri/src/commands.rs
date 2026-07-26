@@ -689,8 +689,12 @@ pub(super) async fn sync_models_cn_catalog(
     trigger_source: String,
 ) -> Result<crate::core::storage::storage_tasks::ModelsCnSyncResult, String> {
     let storage = state.storage.clone();
-    crate::core::storage::storage_tasks::sync_models_cn_catalog(&storage, &source_url, &trigger_source)
-        .await
+    crate::core::storage::storage_tasks::sync_models_cn_catalog(
+        &storage,
+        &source_url,
+        &trigger_source,
+    )
+    .await
 }
 
 /// 读取本地 models-cn 目录文件。返回 None 表示文件不存在。
@@ -749,12 +753,13 @@ pub(super) fn preview_sync_channel_presets(
 ) -> Result<PresetSyncPreview, String> {
     let storage = state.storage.clone();
     let config_path = state.config_path.clone();
-    let config_raw = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("读取 config.json 失败：{e}"))?;
-    let config_value: serde_json::Value = serde_json::from_str(&config_raw)
-        .map_err(|e| format!("解析 config.json 失败：{e}"))?;
-    let channels_config = crate::core::channels_config::ChannelsConfig::from_config_json(&config_value)
-        .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
+    let config_raw =
+        std::fs::read_to_string(&config_path).map_err(|e| format!("读取 config.json 失败：{e}"))?;
+    let config_value: serde_json::Value =
+        serde_json::from_str(&config_raw).map_err(|e| format!("解析 config.json 失败：{e}"))?;
+    let channels_config =
+        crate::core::channels_config::ChannelsConfig::from_config_json(&config_value)
+            .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
 
     let mut new_presets = channels_config.presets.clone();
     let builtin = crate::core::presets::builtin_channel_presets();
@@ -808,8 +813,7 @@ pub(super) fn preview_sync_channel_presets(
             if np.default_model != ep.default_model {
                 changes.push(format!(
                     "默认模型：{} → {}",
-                    ep.default_model,
-                    np.default_model
+                    ep.default_model, np.default_model
                 ));
             }
             if np.small_model != ep.small_model {
@@ -885,20 +889,19 @@ pub(super) fn preview_sync_channel_presets(
 /// 把 config.json 渠道预设同步到数据库，并补齐新增暴露模型的默认路由。
 /// 新增渠道默认禁用，已有渠道保留启用状态。
 #[tauri::command]
-pub(super) fn apply_sync_channel_presets(
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+pub(super) fn apply_sync_channel_presets(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let storage = state.storage.clone();
     let config_path = state.config_path.clone();
     crate::migrate_channel_presets_from_config(&storage, &config_path, true)?;
 
     // 同步完成后，为新暴露模型补齐默认路由
-    let config_raw = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("读取 config.json 失败：{e}"))?;
-    let config_value: serde_json::Value = serde_json::from_str(&config_raw)
-        .map_err(|e| format!("解析 config.json 失败：{e}"))?;
-    let channels_config = crate::core::channels_config::ChannelsConfig::from_config_json(&config_value)
-        .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
+    let config_raw =
+        std::fs::read_to_string(&config_path).map_err(|e| format!("读取 config.json 失败：{e}"))?;
+    let config_value: serde_json::Value =
+        serde_json::from_str(&config_raw).map_err(|e| format!("解析 config.json 失败：{e}"))?;
+    let channels_config =
+        crate::core::channels_config::ChannelsConfig::from_config_json(&config_value)
+            .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
 
     let existing_routes = storage.list_route_candidates().map_err(|e| e.to_string())?;
     let accounts = storage.list_channel_accounts().map_err(|e| e.to_string())?;
@@ -906,8 +909,13 @@ pub(super) fn apply_sync_channel_presets(
 
     let merged = channels_config.merge_default_routes(&existing_routes, &accounts, &presets);
     if merged.len() != existing_routes.len() {
-        storage.save_route_candidates(&merged).map_err(|e| e.to_string())?;
-        tracing::info!(added = merged.len() - existing_routes.len(), "新增暴露模型默认路由已补齐");
+        storage
+            .save_route_candidates(&merged)
+            .map_err(|e| e.to_string())?;
+        tracing::info!(
+            added = merged.len() - existing_routes.len(),
+            "新增暴露模型默认路由已补齐"
+        );
     }
 
     Ok(())
@@ -1339,7 +1347,9 @@ pub(super) async fn compact_database(
     let storage = state.storage.clone();
     tauri::async_runtime::spawn_blocking(move || {
         tracing::info!("开始完整压缩数据库并启用增量空间回收");
-        let result = storage.compact_database().map_err(|error| error.to_string())?;
+        let result = storage
+            .compact_database()
+            .map_err(|error| error.to_string())?;
         tracing::info!(
             before_mb = format!("{:.1}", result.before.database_bytes as f64 / 1048576.0),
             after_mb = format!("{:.1}", result.after.database_bytes as f64 / 1048576.0),
@@ -1427,9 +1437,7 @@ pub(super) fn prune_oldest_body_data(
 }
 
 #[tauri::command]
-pub(super) fn get_total_body_size_bytes(
-    state: tauri::State<'_, AppState>,
-) -> Result<i64, String> {
+pub(super) fn get_total_body_size_bytes(state: tauri::State<'_, AppState>) -> Result<i64, String> {
     state
         .storage
         .get_total_body_size_bytes()
@@ -2498,12 +2506,23 @@ pub(super) async fn probe_scrape_login(
         phase_urls.push(secondary.as_str());
     }
 
-    // 跨阶段累积已捕获的槽位 kind,用于判断本阶段是否产生新响应。
-    let mut captured_kinds = std::collections::HashSet::<String>::new();
+    let phase_count = phase_urls.len();
     let mut ready_for_last_phase = None;
     let mut last_interceptor_page_url = String::new();
 
-    for phase_url in phase_urls {
+    for (phase_index, phase_url) in phase_urls.into_iter().enumerate() {
+        let expected_slots =
+            scrape_console::required_slots_for_phase(&mode, phase_index, phase_count);
+        let phase_started_at = std::time::Instant::now();
+        tracing::info!(
+            account_id = %account_id,
+            channel_id = %channel_id,
+            phase = phase_index + 1,
+            phases = phase_count,
+            page_url = %phase_url,
+            ?expected_slots,
+            "开始控制台抓取阶段"
+        );
         // 每个阶段重新等待本页面的拦截器 ACK(导航会触发新 document 注入拦截器)。
         {
             let mut guard = state
@@ -2547,7 +2566,11 @@ pub(super) async fn probe_scrape_login(
                 break Some(ready);
             }
             // 任意槽位已捕获也可作为监听已生效的证据(多阶段模式下全量聚合此时尚未齐备)。
-            if collect_scrape_slots(&state, &account_id)?.keys().next().is_some() {
+            if collect_scrape_slots(&state, &account_id)?
+                .keys()
+                .next()
+                .is_some()
+            {
                 break Some(crate::core::scrape_console::ScrapeInterceptorReady {
                     document_id: "captured-slot".to_string(),
                     page_url: phase_url.to_string(),
@@ -2560,22 +2583,52 @@ pub(super) async fn probe_scrape_login(
         };
         ready_for_last_phase = ready.clone();
 
-        // 4. 监听就绪后,等待本阶段产生新的响应槽位。多阶段模式下不必等全量聚合,
-        //    只要本阶段带来新槽位即可进入下一阶段;最终由 aggregate_complete 统一校验。
+        // 4. 监听就绪后等待本阶段明确需要的响应。不能以“出现任意新槽位”作为
+        //    完成条件：LongCat 页面会产生大量 usage 页面/埋点响应，Qwen 的三个接口
+        //    也可能相差几十毫秒到达。
         if ready.is_some() {
             let capture_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
             while std::time::Instant::now() < capture_deadline {
-                let mut grew = false;
-                for kind in collect_scrape_slots(&state, &account_id)?.keys() {
-                    if captured_kinds.insert(kind.clone()) {
-                        grew = true;
-                    }
-                }
-                if grew {
+                let slots = collect_scrape_slots(&state, &account_id)?;
+                let phase_complete = if expected_slots.is_empty() {
+                    !slots.is_empty()
+                } else {
+                    expected_slots.iter().all(|slot| slots.contains_key(slot))
+                };
+                if phase_complete {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             }
+        }
+
+        let slots = collect_scrape_slots(&state, &account_id)?;
+        let captured_kinds = slots.keys().cloned().collect::<Vec<_>>();
+        let missing_phase_slots = scrape_console::missing_required_slots(&slots, &expected_slots);
+        if missing_phase_slots.is_empty() {
+            tracing::info!(
+                account_id = %account_id,
+                channel_id = %channel_id,
+                phase = phase_index + 1,
+                phases = phase_count,
+                elapsed_ms = phase_started_at.elapsed().as_millis() as u64,
+                ?expected_slots,
+                ?captured_kinds,
+                "控制台抓取阶段完成"
+            );
+        } else {
+            tracing::warn!(
+                account_id = %account_id,
+                channel_id = %channel_id,
+                phase = phase_index + 1,
+                phases = phase_count,
+                elapsed_ms = phase_started_at.elapsed().as_millis() as u64,
+                page_url = %phase_url,
+                ?expected_slots,
+                ?missing_phase_slots,
+                ?captured_kinds,
+                "控制台抓取阶段等待目标响应超时"
+            );
         }
     }
 
@@ -2610,14 +2663,14 @@ pub(super) async fn probe_scrape_login(
         ScrapeProbeState::CaptureTimeout
     };
 
+    let captured_slots = collect_scrape_slots(&state, &account_id)?;
+    let captured_kinds = captured_slots.keys().cloned().collect::<Vec<_>>();
+    let missing_slots =
+        scrape_console::missing_required_slots(&captured_slots, &mode.required_slots);
     if matches!(
         probe_state,
         ScrapeProbeState::ConsoleActionRequired | ScrapeProbeState::CaptureTimeout
     ) {
-        let captured_kinds = collect_scrape_slots(&state, &account_id)?
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
         tracing::warn!(
             account_id = %account_id,
             channel_id = %channel_id,
@@ -2626,9 +2679,16 @@ pub(super) async fn probe_scrape_login(
             ready_document_id = ready.as_ref().map(|value| value.document_id.as_str()),
             current_page_url = %current_page_url,
             ?captured_kinds,
+            ?missing_slots,
             "控制台刷新后未捕获到完整业务响应"
         );
     }
+
+    let missing_hint = if missing_slots.is_empty() {
+        String::new()
+    } else {
+        format!("（缺少：{}）", missing_slots.join(", "))
+    };
 
     let status = ScrapeLoginStatus {
         is_logged_in: probe_state == ScrapeProbeState::Captured,
@@ -2637,23 +2697,16 @@ pub(super) async fn probe_scrape_login(
         probe_state,
         message: match probe_state {
             ScrapeProbeState::Captured => None,
-            ScrapeProbeState::LoginRequired => {
-                Some(if interactive {
-                    "检测到控制台登录页，请在弹出的窗口中完成登录。".to_string()
-                } else {
-                    "控制台登录状态已失效，本轮自动同步已跳过。请手动刷新并重新登录。"
-                        .to_string()
-                })
-            }
-            ScrapeProbeState::ConsoleActionRequired => {
-                Some(if interactive {
-                    "未捕获到套餐接口响应，已打开控制台窗口。请在窗口中完成登录或等待页面加载后，再重新抓取。"
-                        .to_string()
-                } else {
-                    "未捕获到套餐接口响应，本轮自动同步已跳过。请手动刷新检查控制台。"
-                        .to_string()
-                })
-            }
+            ScrapeProbeState::LoginRequired => Some(if interactive {
+                "检测到控制台登录页，请在弹出的窗口中完成登录。".to_string()
+            } else {
+                "控制台登录状态已失效，本轮自动同步已跳过。请手动刷新并重新登录。".to_string()
+            }),
+            ScrapeProbeState::ConsoleActionRequired => Some(if interactive {
+                format!("未捕获到完整套餐接口响应{missing_hint}，已打开控制台窗口。请在窗口中完成登录或等待页面加载后，再重新抓取。")
+            } else {
+                format!("未捕获到完整套餐接口响应{missing_hint}，本轮自动同步已跳过。请手动刷新检查控制台。")
+            }),
             ScrapeProbeState::CaptureTimeout => {
                 Some("控制台页面监听初始化失败，请重新抓取。".to_string())
             }
@@ -2663,10 +2716,12 @@ pub(super) async fn probe_scrape_login(
     // 明确进入登录页时必须展示窗口；监听已就绪但业务接口没有触发时，也展示控制台
     // 供用户完成登录、验证码或等待页面加载。后者是 console_action_required，
     // 不声称用户未登录。
-    if interactive && matches!(
-        status.probe_state,
-        ScrapeProbeState::LoginRequired | ScrapeProbeState::ConsoleActionRequired
-    ) {
+    if interactive
+        && matches!(
+            status.probe_state,
+            ScrapeProbeState::LoginRequired | ScrapeProbeState::ConsoleActionRequired
+        )
+    {
         surface_scrape_webview(&state, &account_id)?;
     }
 
@@ -2954,7 +3009,21 @@ pub(super) async fn sync_scrape_balances(
                     )
                     .is_some()
             })
-            .map(|account| (account.id.clone(), account.name.clone()))
+            .map(|account| {
+                let channel_name = config
+                    .presets
+                    .iter()
+                    .find(|preset| preset.id == account.channel_id)
+                    .map(|preset| preset.name.clone())
+                    .unwrap_or_else(|| account.channel_id.clone());
+                (
+                    account.id.clone(),
+                    account.name.clone(),
+                    account.channel_id.clone(),
+                    channel_name,
+                    account.resource_mode.clone(),
+                )
+            })
             .collect::<Vec<_>>()
     };
 
@@ -2999,22 +3068,28 @@ pub(super) async fn sync_scrape_balances(
 
     let mut synced = 0usize;
     let mut failed = 0usize;
-    for (index, (account_id, account_name)) in accounts.iter().enumerate() {
-        match scrape_balance(
-            app.clone(),
-            state.clone(),
-            account_id.clone(),
-            Some(false),
-        )
-        .await
-        {
+    for (index, (account_id, account_name, channel_id, channel_name, resource_mode)) in
+        accounts.iter().enumerate()
+    {
+        let account_suffix = account_id.rsplit('-').next().unwrap_or(account_id);
+        let account_label = format!("{channel_name} · {account_name} · {account_suffix}");
+        tracing::info!(
+            job_id = %job_id,
+            account_id = %account_id,
+            account_name = %account_name,
+            channel_id = %channel_id,
+            channel_name = %channel_name,
+            resource_mode = ?resource_mode,
+            "开始同步渠道账号资源"
+        );
+        match scrape_balance(app.clone(), state.clone(), account_id.clone(), Some(false)).await {
             Ok(_) => {
                 synced += 1;
                 let _ = state.storage.add_job_event(
                     &job_id,
                     "info",
                     "同步账号资源",
-                    &format!("{account_name} 同步成功"),
+                    &format!("{account_label} 同步成功"),
                 );
             }
             Err(error) => {
@@ -3023,15 +3098,14 @@ pub(super) async fn sync_scrape_balances(
                     &job_id,
                     "warning",
                     "同步账号资源",
-                    &format!("{account_name} 同步失败：{error}"),
+                    &format!("{account_label} 同步失败：{error}"),
                 );
             }
         }
-        let _ = state.storage.update_job_progress(
-            &job_id,
-            (index + 1) as i64,
-            accounts.len() as i64,
-        );
+        let _ =
+            state
+                .storage
+                .update_job_progress(&job_id, (index + 1) as i64, accounts.len() as i64);
     }
 
     let duration_ms = started_at.elapsed().as_millis() as u64;

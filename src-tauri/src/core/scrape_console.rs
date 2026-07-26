@@ -10,6 +10,7 @@
 
 use crate::core::channels_config::ChannelsConfig;
 use std::collections::HashMap;
+use tauri::Manager;
 #[cfg(any(windows, target_os = "linux"))]
 use std::sync::{Arc, Mutex};
 
@@ -58,6 +59,9 @@ pub fn resolve_scrape_mode(
 }
 
 /// 构建 per-account 后台抓取 webview(隐藏)。
+/// 每个账号使用独立的 data_directory,从而拥有完全隔离的 cookie / localStorage /
+/// 缓存与登录态。多个抓取窗口共享默认 EBWebView 目录时,后一个窗口会继承前一个
+/// 窗口的登录态,导致自动刷新读到错误账号的余额。
 pub fn build_scrape_webview(
     app: &tauri::AppHandle,
     account_id: &str,
@@ -90,10 +94,24 @@ pub fn build_scrape_webview(
 }})();"#,
         mode.interceptor_js, channel_id_json
     );
+    // per-account 隔离的 WebView 数据目录。路径位于 app_local_data_dir 下,与主窗口
+    // (main-webview) 同等模式。目录不存在时主动创建,避免 Tauri 直接报错。
+    let data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("解析应用数据目录失败: {error}"))?
+        .join(format!("scrape-webview-{account_id}"));
+    if let Some(parent) = data_dir.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("创建抓取 webview 数据父目录失败: {error}"))?;
+    }
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|error| format!("创建抓取 webview 数据目录失败: {error}"))?;
     let window = tauri::webview::WebviewWindowBuilder::new(app, label, url)
         .title("Flowlet · 控制台抓取")
         .inner_size(900.0, 720.0)
         .visible(false)
+        .data_directory(data_dir)
         .initialization_script(interceptor)
         .initialization_script_for_all_frames("window.__flowlet_scrape_active = true;".to_string())
         .build()

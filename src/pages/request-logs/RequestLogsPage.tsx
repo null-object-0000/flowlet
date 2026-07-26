@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Pagination, Select, Toast, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconSearch } from "@douyinfe/semi-icons";
+import { useLocation, useNavigate } from "react-router-dom";
 import { DEFAULT_REQUEST_LOG_FILTER, type RequestLogFilter, type RequestLogStatusFilter, type RequestLogTimeRange } from "../../domains/request-log/types";
 import { ClearRequestLogsModal } from "../../features/request-logs/ClearRequestLogsModal";
 import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLogDetailSideSheet";
@@ -25,6 +26,8 @@ const TIME_OPTIONS: Array<{ value: RequestLogTimeRange; label: string }> = [
 
 export function RequestLogsPage() {
   const { language, t } = useAppPreferences();
+  const location = useLocation();
+  const navigate = useNavigate();
   const initialSearch = initialSearchFromHash();
   const [filter, setFilter] = useState<RequestLogFilter>(() => ({ ...DEFAULT_REQUEST_LOG_FILTER, search: initialSearch }));
   const [searchDraft, setSearchDraft] = useState(initialSearch);
@@ -50,6 +53,15 @@ export function RequestLogsPage() {
     }, 280);
     return () => window.clearTimeout(timer);
   }, [searchDraft]);
+
+  // 详情弹窗内的会话 ID 链接会写入 location.search（HashRouter 下走
+  // history.pushState，不会触发 hashchange），所以这里监听 react-router 的
+  // location 对象来同步搜索词。这样同页点击会话 ID 链接也能立即触发筛选。
+  useEffect(() => {
+    const search = new URLSearchParams(location.search).get("search") ?? "";
+    setSearchDraft((current) => current === search ? current : search);
+    setFilter((current) => current.search === search ? current : { ...current, search, page: 1 });
+  }, [location]);
 
   const apply = (patch: Partial<RequestLogFilter>) => setFilter((current) => ({ ...current, ...patch, page: patch.page ?? 1 }));
 
@@ -178,7 +190,17 @@ export function RequestLogsPage() {
         </footer>
       </section>
 
-      {selectedRequestId ? <RequestLogDetailSideSheet key={selectedRequestId} requestId={selectedRequestId} onClose={() => setSelectedRequestId(null)} /> : null}
+      {selectedRequestId ? (
+        <RequestLogDetailSideSheet
+          key={selectedRequestId}
+          requestId={selectedRequestId}
+          onClose={() => setSelectedRequestId(null)}
+          onNavigate={(path) => {
+            setSelectedRequestId(null);
+            navigate(path);
+          }}
+        />
+      ) : null}
       {clearOpen ? <ClearRequestLogsModal total={page?.total ?? 0} loading={actions.cleanup.isPending} onCancel={() => setClearOpen(false)} onConfirm={(keepDays) => void cleanup(keepDays)} /> : null}
     </main>
   );

@@ -8,9 +8,15 @@ const mocks = vi.hoisted(() => ({
   useDetail: vi.fn(),
   cleanup: vi.fn(),
   refetch: vi.fn(),
+  navigate: vi.fn(),
+  useLocation: vi.fn(),
 }));
 
 vi.mock("lottie-web", () => ({ default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) } }));
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => mocks.navigate,
+  useLocation: () => mocks.useLocation(),
+}));
 vi.mock("../../features/channel-accounts", () => ({
   useChannelPresets: () => ({ data: [{ id: "longcat", name: "LongCat" }], isLoading: false }),
 }));
@@ -38,12 +44,14 @@ const row: RequestLogRow = {
   res_body_cleared_at: null, res_body_cleanup_reason: null,
   input_tokens: 100, input_cached_tokens: 60, input_uncached_tokens: 40, output_tokens: 50, total_tokens: 150, estimated_cost: 0.0012,
   estimated_input_uncached_cost: 0.0004, estimated_input_cached_cost: 0.00024, estimated_input_cache_write_cost: null, estimated_output_cost: 0.0004,
+  agent_type: "claude-code", agent_session_id: "session-123", parent_agent_session_id: null,
 };
 
 beforeEach(() => {
   mocks.useLogs.mockReturnValue({ data: { rows: [row], total: 1, page: 1, pageSize: 8, summary: { requestCount: 1, successCount: 1, errorCount: 0, averageDurationMs: 860, averageTtftMs: 200, averageOutputTokensPerSecond: 75.76, knownTokens: 150, inputTokens: 100, inputCachedTokens: 60, inputUncachedTokens: 40, cacheHitRate: 0.6, estimatedCost: 0.0012 } }, isLoading: false, isFetching: false, isError: false, dataUpdatedAt: 1, refetch: mocks.refetch });
   mocks.useDetail.mockReturnValue({ data: [row], isLoading: false, isError: false, isSuccess: true, refetch: mocks.refetch });
   mocks.cleanup.mockResolvedValue([1, 0]);
+  mocks.useLocation.mockReturnValue({ search: "", hash: "" });
 });
 
 describe("RequestLogsPage", () => {
@@ -111,5 +119,53 @@ describe("RequestLogsPage", () => {
     expect(await screen.findByText("http://127.0.0.1:18640/anthropic/v1/messages")).toBeInTheDocument();
     expect(screen.getByText("未发往上游（路由前失败）")).toBeInTheDocument();
     expect(screen.queryByText("旧日志未记录")).not.toBeInTheDocument();
+  });
+
+  it("exposes the session ID with copy and click-to-filter in the overview", async () => {
+    const user = userEvent.setup();
+    mocks.useDetail.mockReturnValue({
+      data: [{ ...row, agent_session_id: "session-123", agent_type: "claude-code", parent_agent_session_id: null }],
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: mocks.refetch,
+    });
+    // 点击会话 ID 链接后，RequestLogsPage 通过 navigate 写入 search 参数；这里模拟
+    // react-router 的 useLocation 返回更新后的 search，驱动筛选 effect 同步到 filter。
+    mocks.useLocation.mockReturnValue({ search: "?search=session-123", hash: "" });
+
+    render(<RequestLogsPage />);
+    await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
+
+    expect(await screen.findByText("请求详情")).toBeInTheDocument();
+    expect(screen.getByText("会话 ID")).toBeInTheDocument();
+    expect(screen.getByText("session-123")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制会话 ID" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "查看会话 session-123 的请求日志" }));
+    expect(mocks.navigate).toHaveBeenLastCalledWith("/logs?search=session-123");
+
+    // 关键：search 参数同步到搜索框并触发筛选，不能只导航不筛选。
+    expect(await screen.findByDisplayValue("session-123")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({ search: "session-123", page: 1 }), true));
+  });
+
+  it("shows a placeholder session ID row without link or copy when the log has no session", async () => {
+    const user = userEvent.setup();
+    mocks.useDetail.mockReturnValue({
+      data: [{ ...row, agent_session_id: null, agent_type: null, parent_agent_session_id: null }],
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: mocks.refetch,
+    });
+
+    render(<RequestLogsPage />);
+    await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
+
+    expect(await screen.findByText("请求详情")).toBeInTheDocument();
+    expect(screen.getByText("会话 ID")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "复制会话 ID" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /查看会话/ })).not.toBeInTheDocument();
   });
 });

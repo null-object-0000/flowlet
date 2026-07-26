@@ -108,8 +108,8 @@ export function AccountManagementSideSheet(props: Props) {
         visible
         motion={false}
         zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
-        title={<div><strong>{t("渠道账号管理")}</strong><small>{t("共 {total} 个账号，{enabled} 个已启用", { total: accounts.length, enabled: accounts.filter((item) => item.enabled).length })}</small></div>}
-        width="min(720px, 94vw)"
+        title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("已启用 {enabled} / 共 {total} 个账号", { enabled: accounts.filter((item) => item.enabled).length, total: accounts.length })}</em></span>}
+        width="min(760px, 96vw)"
         footer={(
           <Space style={{ justifyContent: "flex-end", width: "100%" }}>
             <Button onClick={closeManager}>{t("关闭")}</Button>

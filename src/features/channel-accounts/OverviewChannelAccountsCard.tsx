@@ -51,7 +51,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
                     <Text strong className={styles.nameText}>{account.name || account.channel_id}</Text>
                     {nameLineSummary(account, snapshot, t, language) && (
                       <Text type="tertiary" size="small" className={styles.nameSuffix}>
-                        {nameLineSummary(account, snapshot, t, language)}
+                        <span className={styles.nameSuffixDot}>{nameLineSummary(account, snapshot, t, language)}</span>
                       </Text>
                     )}
                   </span>
@@ -61,7 +61,10 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
                       const hasSecondary = Boolean(parts.secondary);
                       return (
                         <>
-                          <span className={styles.resourcePrimary} title={parts.primary}>{parts.primary}</span>
+                          <span className={styles.resourcePrimary}>
+                            {parts.label && <span className={styles.resourceLabel}>{parts.label}</span>}
+                            {parts.value && <span className={styles.resourceValue} title={parts.value}>{parts.value}</span>}
+                          </span>
                           {hasSecondary && <span className={styles.resourceSeparator}>·</span>}
                           {hasSecondary && <span className={styles.resourceSecondary} title={parts.secondary}>{parts.secondary}</span>}
                         </>
@@ -92,27 +95,30 @@ function accountStatus(account: ChannelAccount, t: (source: string) => string): 
   return { label: t("启用"), color: "green" };
 }
 
-type ResourceSummaryColumn = { primary: string; secondary: string };
+type ResourceSummaryColumn = { label: string; value: string; secondary: string };
+function formatBalance(value: number, currency: string | undefined, language: "zh-CN" | "en-US"): string {
+  return value.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): ResourceSummaryColumn {
   if (isQwenTokenPlanAccount(account)) {
     const details = parseQwenTokenPlanDetails(snapshot?.raw_scraped_json);
     const sevenDay = details?.sevenDay ? t("7天 剩余 {percent}%", { percent: details.sevenDay.remainingPercent.toFixed(1) }) : "";
     const fiveHour = details?.fiveHour ? t("5小时 剩余 {percent}%", { percent: details.fiveHour.remainingPercent.toFixed(1) }) : "";
-    return { primary: sevenDay, secondary: fiveHour };
+    return { label: "", value: sevenDay, secondary: fiveHour };
   }
   // LongCat hybrid:主列展示余额，副列展示资源包剩余。
   if (account.channel_id === "longcat") {
-    const balance = snapshot?.balance == null ? "" : t("余额 {value}", { value: `${snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}${snapshot?.currency ? ` ${snapshot.currency}` : ""}` });
+    const balanceText = snapshot?.balance == null ? "" : `${formatBalance(snapshot.balance, snapshot.currency, language)}${snapshot.currency ? ` ${snapshot.currency}` : ""}`;
     const packs = snapshot?.token_pack_remaining == null ? "" : t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
-    return { primary: balance, secondary: packs };
+    return { label: t("余额"), value: balanceText, secondary: packs };
   }
   const tokenPack = (account.resource_mode ?? "pay_as_you_go") === "token_pack";
   if (tokenPack) {
     const packs = snapshot?.token_pack_remaining == null ? "" : t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
-    return { primary: "", secondary: packs };
+    return { label: "", value: "", secondary: packs };
   }
-  const balance = snapshot?.balance == null ? "" : snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return { primary: snapshot?.balance == null ? "" : t("余额 {value}", { value: `${balance}${snapshot?.currency ? ` ${snapshot.currency}` : ""}` }), secondary: "" };
+  const balanceText = snapshot?.balance == null ? "" : `${formatBalance(snapshot.balance, snapshot.currency, language)}${snapshot.currency ? ` ${snapshot.currency}` : ""}`;
+  return { label: snapshot?.balance == null ? "" : t("余额"), value: balanceText, secondary: "" };
 }
 
 function nameLineSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): string {

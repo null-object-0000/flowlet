@@ -85,13 +85,15 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     if (isEdit) return;
     const next = presets.find((item) => item.id === channelId);
     const count = accounts.filter((item) => item.channel_id === channelId).length;
+    // 千问默认 Token Plan 订阅，需配套专属端点。
+    const isQwenTokenPlan = channelId === QWEN_CHANNEL_ID && defaultResourceMode(channelId) === "token_plan";
     update({
       channel_id: channelId,
       name: count === 0 ? t("{name} 主账号", { name: next?.name ?? t("渠道") }) : t("{name} 账号 {count}", { name: next?.name ?? t("渠道"), count: count + 1 }),
       resource_mode: defaultResourceMode(channelId),
       resource_sync_mode: channelId === "longcat" ? "auto" : "manual",
-      base_url_override: null,
-      anthropic_base_url_override: null,
+      base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
+      anthropic_base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
     });
     setResource(resourceDraft());
   }
@@ -266,7 +268,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             <div className={styles.resourcePanel}>
               <div className={styles.resourceHeading}><strong>{t("按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
               <div className={styles.balanceRow}>
-                <span><small>{t("账户余额")}</small><strong>{snapshot?.balance == null ? t("尚未同步") : `${snapshot.balance} ${snapshot.currency ?? ""}`}</strong></span>
+                <span><small>{t("账户余额")}</small><strong>{snapshot?.balance == null ? t("尚未同步") : `${snapshot.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`}</strong></span>
                 {isEdit ? <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} onClick={() => void handleSync()}>{t("刷新")}</Button> : null}
               </div>
             </div>
@@ -374,19 +376,22 @@ function ModeOption({ selected, disabled, title, description, onClick }: { selec
 }
 
 function defaultResourceMode(channelId: string): AccountResourceMode {
-  return channelId === "longcat" ? "hybrid" : "pay_as_you_go";
+  if (channelId === "longcat") return "hybrid";
+  if (channelId === QWEN_CHANNEL_ID) return "token_plan";
+  return "pay_as_you_go";
 }
 
 /** 各渠道可选的资源模式。LongCat 为 hybrid(同时抓取资源包与余额),不在选择器中
- *  出现；千问支持 Token Plan 订阅（专属 sk-sp Key 与套餐端点）；其余渠道只有按量付费。 */
+ *  出现；千问仅支持 Token Plan 订阅（专属 sk-sp Key 与套餐端点），不提供按量付费；
+ *  其余渠道只有按量付费。 */
 function resourceModeOptions(channelId: string): { value: AccountResourceMode; title: string; description: string }[] {
   // LongCat 统一 hybrid,不再提供计费模式切换。
   if (channelId === "longcat") {
     return [];
   }
+  // 千问仅支持 Token Plan 订阅，不提供按量付费/手动维护余额入口。
   if (channelId === QWEN_CHANNEL_ID) {
     return [
-      { value: "pay_as_you_go", title: "API 按量付费", description: "后付费，手动维护余额" },
       { value: "token_plan", title: "Token Plan", description: "订阅套餐，sk-sp 专属 Key，按 Credits 计量" },
     ];
   }

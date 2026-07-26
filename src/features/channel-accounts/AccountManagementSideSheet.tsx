@@ -181,11 +181,11 @@ function resourceDetails(account: ChannelAccount, snapshot: AccountBalanceSnapsh
     const rows: { label: string; value: string }[] = [];
     rows.push({ label: t("剩余"), value: snapshot?.token_pack_remaining == null ? "-" : `${formatCompactNumber(snapshot.token_pack_remaining, language)} Tokens` });
     if (snapshot?.token_pack_expire_at) rows.push({ label: t("有效期"), value: snapshot.token_pack_expire_at.slice(0, 10) });
-    rows.push({ label: t("余额"), value: snapshot?.balance == null ? "-" : `${snapshot.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`.trim() });
+    rows.push({ label: t("余额"), value: snapshot?.balance == null ? "-" : `${snapshot.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`.trim() });
     return rows;
   }
   const tokenPack = (account.resource_mode ?? "pay_as_you_go") === "token_pack";
-  if (!tokenPack) return [{ label: t("余额"), value: snapshot?.balance == null ? "-" : `${snapshot.balance} ${snapshot.currency ?? ""}`.trim() }];
+  if (!tokenPack) return [{ label: t("余额"), value: snapshot?.balance == null ? "-" : `${snapshot.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`.trim() }];
   const rows = [{ label: t("剩余"), value: snapshot?.token_pack_remaining == null ? "-" : `${formatCompactNumber(snapshot.token_pack_remaining, language)} Tokens` }];
   if (snapshot?.token_pack_expire_at) rows.push({ label: t("有效期"), value: snapshot.token_pack_expire_at.slice(0, 10) });
   return rows;

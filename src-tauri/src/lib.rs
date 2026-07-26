@@ -895,8 +895,6 @@ pub fn run() {
             commands::account_routing_scores,
             commands::export_config,
             commands::import_config,
-            commands::export_all_data,
-            commands::import_all_data,
             commands::db_stats,
             commands::storage_usage_summary,
             commands::compact_database,

@@ -43,22 +43,6 @@ export async function setAutostartEnabled(enabled: boolean) {
   }
 }
 
-export async function exportAllData(destPath: string) {
-  try {
-    await invokeCommand<void>("export_all_data", { destPath }, Number.POSITIVE_INFINITY);
-  } catch (error) {
-    throw toAppError(error, "data_export_failed");
-  }
-}
-
-export async function importAllData(sourcePath: string) {
-  try {
-    await invokeCommand<void>("import_all_data", { sourcePath }, Number.POSITIVE_INFINITY);
-  } catch (error) {
-    throw toAppError(error, "data_import_failed");
-  }
-}
-
 export async function getStorageUsage(scanId: string) {
   try {
     return await invokeCommand<StorageUsageSummary>("storage_usage_summary", { scanId });

@@ -42,16 +42,19 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
         {accounts.map((account) => {
           const snapshot = snapshotByAccount.get(account.id);
           const status = accountStatus(account, t);
+          const nameSummary = nameLineSummary(account, snapshot, t, language);
+          const accountName = account.name || account.channel_id;
           return (
             <div className={styles.row} key={account.id}>
               <button className={styles.rowMain} type="button" onClick={() => onEdit(account.id)}>
                 <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
                 <span className={styles.accountText}>
                   <span className={styles.nameRow}>
-                    <Text strong className={styles.nameText}>{account.name || account.channel_id}</Text>
-                    {nameLineSummary(account, snapshot, t, language) && (
-                      <span className={styles.nameSuffixDot}>{nameLineSummary(account, snapshot, t, language)}</span>
-                    )}
+                    <Text strong className={nameSummary ? styles.namePrimary : styles.nameText} title={accountName}>
+                      {accountName}
+                    </Text>
+                    {nameSummary && <span className={styles.resourceSeparator}>·</span>}
+                    {nameSummary && <span className={styles.nameSecondary} title={nameSummary}>{nameSummary}</span>}
                   </span>
                   <span className={styles.resourceSummary}>
                     {(() => {
@@ -75,7 +78,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
               <Button
                 icon={<IconMore />}
                 theme="borderless"
-                aria-label={t("编辑账号 {name}", { name: account.name || account.channel_id })}
+                aria-label={t("编辑账号 {name}", { name: accountName })}
                 onClick={() => onEdit(account.id)}
               />
             </div>
@@ -125,25 +128,25 @@ function nameLineSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
     if (!snapshot?.token_pack_expire_at) return "";
     // 官方过期时间为当天 23:59:59，若到期日已是当天则展示为 23:59:59。
     if (isToday(snapshot.token_pack_expire_at)) {
-      return ` · ${t("有效期至 {time}", { time: END_OF_DAY })}`;
+      return t("有效期至 {time}", { time: END_OF_DAY });
     }
-    return ` · ${t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) })}`;
+    return t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) });
   }
   // Qwen Token Plan 将 7 天重置时间放到账号名称行。
   if (isQwenTokenPlanAccount(account)) {
     const details = parseQwenTokenPlanDetails(snapshot?.raw_scraped_json);
     if (!details?.sevenDay?.resetAt) return "";
     if (isToday(details.sevenDay.resetAt)) {
-      return ` · ${t("七天重置 {time}", { time: formatTime(details.sevenDay.resetAt, language) })}`;
+      return t("七天重置 {time}", { time: formatTime(details.sevenDay.resetAt, language) });
     }
-    return ` · ${t("七天重置 {date}", { date: details.sevenDay.resetAt.slice(0, 10) })}`;
+    return t("七天重置 {date}", { date: details.sevenDay.resetAt.slice(0, 10) });
   }
   const tokenPack = (account.resource_mode ?? "pay_as_you_go") === "token_pack";
   if (!tokenPack || !snapshot?.token_pack_expire_at) return "";
   if (isToday(snapshot.token_pack_expire_at)) {
-    return ` · ${t("有效期至 {time}", { time: END_OF_DAY })}`;
+    return t("有效期至 {time}", { time: END_OF_DAY });
   }
-  return ` · ${t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) })}`;
+  return t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) });
 }
 
 const END_OF_DAY = "23:59:59";

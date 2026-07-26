@@ -616,6 +616,7 @@ const english: Record<string, string> = {
   "余额同步失败：{message}": "Failed to synchronize balance: {message}",
   "账号已保存，但自动更新失败：{message}": "Account saved, but automatic refresh failed: {message}",
   "请填写账号名称和 API Key": "Enter an account name and API key",
+  "账号名称最多 {max} 个字符宽度（中文按 2 个计算）": "Account names can use up to {max} display units (CJK characters count as 2)",
   "编辑渠道账号": "Edit Channel Account",
   "新增渠道账号": "Add Channel Account",
   "更新 {name} 的连接与资源信息": "Update connection and resource information for {name}",

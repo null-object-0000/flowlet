@@ -27,6 +27,11 @@ import {
   type QwenQuotaWindow,
   type QwenTokenPlanDetails,
 } from "./qwenTokenPlanDetails";
+import {
+  ACCOUNT_NAME_MAX_DISPLAY_UNITS,
+  getAccountNameDisplayUnits,
+  truncateAccountName,
+} from "./accountName";
 
 const { Text } = Typography;
 
@@ -153,8 +158,13 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   }
 
   async function handleSave() {
-    if (!currentDraft.name.trim() || (!isEdit && !currentDraft.api_key.trim())) {
+    const normalizedName = currentDraft.name.trim();
+    if (!normalizedName || (!isEdit && !currentDraft.api_key.trim())) {
       Toast.warning(t("请填写账号名称和 API Key"));
+      return;
+    }
+    if (getAccountNameDisplayUnits(normalizedName) > ACCOUNT_NAME_MAX_DISPLAY_UNITS) {
+      Toast.warning(t("账号名称最多 {max} 个字符宽度（中文按 2 个计算）", { max: ACCOUNT_NAME_MAX_DISPLAY_UNITS }));
       return;
     }
     setSaving(true);
@@ -162,7 +172,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       await onSave(
         {
           ...currentDraft,
-          name: currentDraft.name.trim(),
+          name: normalizedName,
           api_key: currentDraft.api_key.trim(),
           base_url_override: currentDraft.base_url_override?.trim() || null,
           anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
@@ -238,8 +248,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           <div className={styles.basicFields}>
             <Field label={t("账号名称")}>
               <div className={styles.nameInput}>
-                <Input aria-label={t("账号名称")} maxLength={50} value={draft.name} onChange={(value) => update({ name: value })} />
-                <span>{draft.name.length} / 50</span>
+                <Input aria-label={t("账号名称")} value={draft.name} onChange={(value) => update({ name: truncateAccountName(value) })} />
+                <span>{getAccountNameDisplayUnits(draft.name)} / {ACCOUNT_NAME_MAX_DISPLAY_UNITS}</span>
               </div>
             </Field>
 

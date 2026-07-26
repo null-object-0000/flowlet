@@ -594,6 +594,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
     let state = ProxyAppState {
         shared: ProxySharedConfig {
             channels: Arc::new(Mutex::new(vec![ChannelPreset {
+                enabled: true,
                 id: "longcat".to_string(),
                 name: "LongCat".to_string(),
                 vendor: "longcat".to_string(),

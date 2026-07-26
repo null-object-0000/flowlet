@@ -48,6 +48,9 @@
 }
 
 .accountText {
+  /* Keep the compact overview column independent from the editor's input limit. */
+  --overview-account-primary-width: 104px;
+
   min-width: 0;
   width: 100%;
   display: grid;
@@ -60,11 +63,14 @@
   overflow: hidden;
 }
 
-.nameRow { display: flex; align-items: baseline; min-width: 0; gap: 8px; }
-.nameRow > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nameSuffixDot { width: 96px; flex: none; display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nameRow { display: flex; align-items: baseline; min-width: 0; gap: 6px; }
+.nameText,
+.namePrimary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nameText { flex: 1; }
+.namePrimary { width: var(--overview-account-primary-width); flex: none; }
+.nameSecondary { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 12px; font-weight: 400; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .resourceSummary { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--flowlet-color-text-secondary); font-size: 12px; line-height: 18px; }
-.resourcePrimary { width: 96px; flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: 4px; min-width: 0; }
+.resourcePrimary { width: var(--overview-account-primary-width); flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: 4px; min-width: 0; }
 .resourceLabel { flex: none; }
 .resourceValue { min-width: 0; font-variant-numeric: tabular-nums; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .resourceSeparator { flex: none; color: var(--flowlet-color-text-tertiary); }

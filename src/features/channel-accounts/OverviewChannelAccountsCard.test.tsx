@@ -76,7 +76,10 @@ describe("OverviewChannelAccountsCard", () => {
       />,
     );
 
-    expect(screen.getByText(/5小时 剩余 21\.1%.*7天 剩余 78\.9%/)).toBeInTheDocument();
+    const sevenDay = screen.getByText("7天 剩余 78.9%");
+    const fiveHour = screen.getByText("5小时 剩余 21.1%");
+    expect(sevenDay.parentElement?.parentElement).toContainElement(fiveHour);
+    expect(sevenDay.compareDocumentPosition(fiveHour) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText(/七天重置 2026-07-29/)).toBeInTheDocument();
     expect(screen.queryByText(/Token Plan 订阅/)).not.toBeInTheDocument();
   });

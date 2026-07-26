@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
@@ -18,14 +18,19 @@ vi.mock("../../features/settings/useAutostartSetting", () => ({
   }),
 }));
 
-vi.mock("../../features/settings/useDataImportExport", () => ({
-  useDataExport: () => ({
-    isPending: false,
-    mutateAsync: vi.fn().mockRejectedValue(new Error("CANCELLED")),
-  }),
-  useDataImport: () => ({
-    isPending: false,
-    mutateAsync: vi.fn().mockRejectedValue(new Error("CANCELLED")),
+vi.mock("../../features/settings/useLogCaptureSetting", () => ({
+  useLogCaptureSetting: () => ({
+    query: {
+      data: {
+        capture_req_body: true,
+        capture_res_body: true,
+        body_retention_days: 3,
+        body_max_size_mb: 512,
+        redact_sensitive_headers: false,
+      },
+      isLoading: false,
+    },
+    mutation: { isPending: false, mutateAsync: vi.fn().mockResolvedValue(undefined) },
   }),
 }));
 
@@ -83,6 +88,13 @@ vi.mock("../../features/settings/useStorageMaintenance", () => ({
   }),
 }));
 
+vi.mock("../../features/settings/useAppMeta", () => ({
+  useAppMeta: () => ({
+    data: { version: "0.1.0", dataDir: "/tmp/flowlet", diagnostics: { os: "windows", database: "healthy", proxy: "running" } },
+    isLoading: false,
+  }),
+}));
+
 import { SettingsPage } from "./SettingsPage";
 
 function renderWithQueryClient(ui: React.ReactElement) {
@@ -93,27 +105,32 @@ function renderWithQueryClient(ui: React.ReactElement) {
 }
 
 describe("SettingsPage", () => {
-  it("uses the reference layout sections without changing preference behavior", () => {
+  it("renders the settings layout with search", () => {
     renderWithQueryClient(<SettingsPage />);
     expect(screen.getByRole("heading", { name: "应用设置" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "通用" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByPlaceholderText("搜索设置")).toBeInTheDocument();
+  });
+
+  it("shows general tab content by default", () => {
+    renderWithQueryClient(<SettingsPage />);
     expect(screen.getByText("显示语言")).toBeInTheDocument();
-    expect(screen.getByText("界面外观")).toBeInTheDocument();
-    expect(screen.getByText("系统启动")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "显示语言" })).toHaveTextContent("简体中文");
-    expect(screen.getByRole("combobox", { name: "界面外观" })).toHaveTextContent("跟随系统");
-    expect(screen.getByRole("switch", { name: "开机启动" })).toBeInTheDocument();
-    expect(screen.queryByText("本地数据修复")).not.toBeInTheDocument();
-    expect(screen.getByText("根据已捕获的请求与响应，补全会话归因、Token 用量和预估费用。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "开始修复" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "修复时间范围" })).toHaveTextContent("全部时间");
-    expect(screen.getByText("数据管理")).toBeInTheDocument();
-    expect(screen.getByText("存储占用")).toBeInTheDocument();
-    expect(screen.getByText("1.5 MB")).toBeInTheDocument();
-    expect(screen.getByText("配置与账号")).toBeInTheDocument();
-    expect(screen.getByText("Agent 会话")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "优化存储" })).toBeEnabled();
-    expect(screen.getByText("导入备份会覆盖现有数据，并自动重启代理。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导出数据" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导入数据" })).toBeInTheDocument();
+    expect(screen.getByText("界面主题")).toBeInTheDocument();
+  });
+
+  it("switches content when a different tab is selected", async () => {
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "数据捕获" }));
+    expect(await screen.findByText("记录请求 Body")).toBeInTheDocument();
+    expect(screen.getByText("推荐开启")).toBeInTheDocument();
+  });
+
+  it("filters settings by search keyword", async () => {
+    renderWithQueryClient(<SettingsPage />);
+    const search = screen.getByPlaceholderText("搜索设置") as HTMLInputElement;
+    fireEvent.change(search, { target: { value: "主题" } });
+    await screen.findByText("界面主题");
+    expect(screen.getByText("界面主题")).toBeVisible();
+    expect(screen.getByText("登录后自动启动 Flowlet")).not.toBeVisible();
   });
 });

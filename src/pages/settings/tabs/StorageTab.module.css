@@ -1,0 +1,122 @@
+.summaryCard {
+  margin-top: 18px;
+  background: linear-gradient(135deg, #f7faff, #f3f7ff);
+  border: 1px solid #dfe9fb;
+  border-radius: 11px;
+  padding: 16px 17px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.summaryMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.summaryLabel {
+  font-size: 12px;
+  color: var(--flowlet-color-text-tertiary);
+}
+
+.summaryValue {
+  font-size: 24px;
+  font-weight: 760;
+  margin-top: 4px;
+  letter-spacing: -0.4px;
+}
+
+.summaryMeta {
+  font-size: 12px;
+  color: var(--flowlet-color-text-tertiary);
+  margin-top: 4px;
+}
+
+.progressTrack {
+  height: 7px;
+  background: #e5eaf2;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 11px;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #1769ff, #69a0ff);
+  border-radius: 999px;
+}
+
+.summaryActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.recommend {
+  font-size: 11px;
+  color: #7b5c13;
+  background: #fff6d9;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 14px;
+  font-size: 12px;
+}
+
+.table th {
+  color: var(--flowlet-color-text-tertiary);
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 9px;
+  background: #f8fafc;
+  border-top: 1px solid var(--flowlet-color-border);
+  border-bottom: 1px solid var(--flowlet-color-border);
+}
+
+.table td {
+  padding: 11px 9px;
+  border-bottom: 1px solid #edf0f4;
+  color: var(--flowlet-color-text);
+}
+
+.num {
+  text-align: right;
+}
+
+.action {
+  text-align: right;
+}
+
+.dataName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 620;
+}
+
+.dataDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: #68a0ff;
+  flex: 0 0 auto;
+}
+
+.tableAction {
+  border: 0;
+  background: transparent;
+  color: var(--flowlet-color-primary);
+  font-size: 12px;
+  padding: 4px 5px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tableAction:hover {
+  background: var(--semi-color-primary-light-default);
+}

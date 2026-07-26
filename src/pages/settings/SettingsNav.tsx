@@ -1,4 +1,4 @@
-import { IconCamera, IconSave, IconSetting, IconWrench } from "@douyinfe/semi-icons";
+import { IconCamera, IconSetting, IconWrench } from "@douyinfe/semi-icons";
 
 function IconDatabase() {
   return (
@@ -22,7 +22,7 @@ function IconInfo() {
 import styles from "./SettingsNav.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
-export type SettingsTab = "general" | "capture" | "storage" | "maintenance" | "backup" | "about";
+export type SettingsTab = "general" | "capture" | "storage" | "maintenance" | "about";
 
 type NavItem = {
   key: SettingsTab;
@@ -35,7 +35,6 @@ const NAV_ITEMS: NavItem[] = [
   { key: "capture", label: "数据捕获", icon: <IconCamera /> },
   { key: "storage", label: "存储管理", icon: <IconDatabase /> },
   { key: "maintenance", label: "数据维护", icon: <IconWrench /> },
-  { key: "backup", label: "备份与恢复", icon: <IconSave /> },
 ];
 
 export function SettingsNav({ active, onChange }: { active: SettingsTab; onChange: (tab: SettingsTab) => void }) {
@@ -78,7 +77,6 @@ export function useSettingsTabMeta(): Record<SettingsTab, { title: string; desc:
     capture: { title: t("数据捕获"), desc: t("控制请求 / 响应内容的捕获、保留和脱敏策略") },
     storage: { title: t("存储管理"), desc: t("查看本地数据占用并清理不再需要的内容") },
     maintenance: { title: t("数据维护"), desc: t("检查并修复历史统计数据") },
-    backup: { title: t("备份与恢复"), desc: t("导出、导入并定期备份 Flowlet 本地数据") },
     about: { title: t("关于 Flowlet"), desc: t("版本信息、数据目录与诊断工具") },
   };
 }

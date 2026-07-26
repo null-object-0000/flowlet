@@ -1,0 +1,12 @@
+.policySection {
+  transition: opacity 0.2s ease, pointer-events 0.2s ease;
+}
+
+.policyDisabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.smallSelect {
+  min-width: 118px;
+}

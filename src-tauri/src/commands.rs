@@ -2709,12 +2709,13 @@ pub(super) fn get_app_version() -> String {
 }
 
 #[tauri::command]
-pub(super) fn get_app_data_dir(app_handle: tauri::AppHandle) -> Result<String, String> {
-    app_handle
-        .path()
-        .app_data_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|error| error.to_string())
+pub(super) fn get_app_data_dir() -> String {
+    // 数据目录与 exe 同级，便携/安装模式统一。
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    exe_dir.to_string_lossy().to_string()
 }
 
 #[tauri::command]

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Button, Input, Modal, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
-import { IconDelete, IconMore, IconPlus, IconSearch } from "@douyinfe/semi-icons";
+import { Button, Modal, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { IconDelete, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import { isQwenTokenPlanAccount } from "../../domains/channel/types";
@@ -37,21 +37,12 @@ type Props = {
 export function AccountManagementSideSheet(props: Props) {
   const { language, t } = useAppPreferences();
   const { request, accounts, snapshots, presets, busy, onClose, onSaveAccounts, onTestConnection, onSaveBalanceSnapshot, onSyncBalance, onScrape } = props;
-  const [search, setSearch] = useState("");
   const [editor, setEditor] = useState<AccountEditorMode | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChannelAccount | null>(null);
   const snapshotByAccount = useMemo(() => new Map(snapshots.map((item) => [item.account_id, item])), [snapshots]);
   const channelName = useMemo(() => new Map(presets.map((item) => [item.id, item.name])), [presets]);
   const requestedEditor = resolveRequestedEditor(request, accounts, presets);
   const activeEditor = request?.kind === "list" ? editor : requestedEditor;
-
-  const filtered = accounts.filter((account) => {
-    const keyword = search.trim().toLowerCase();
-    return !keyword
-      || account.name.toLowerCase().includes(keyword)
-      || account.channel_id.toLowerCase().includes(keyword)
-      || channelName.get(account.channel_id)?.toLowerCase().includes(keyword);
-  });
 
   const save = async (next: ChannelAccount[], message: string) => {
     try {
@@ -70,7 +61,6 @@ export function AccountManagementSideSheet(props: Props) {
   };
 
   const closeManager = () => {
-    setSearch("");
     setEditor(null);
     onClose();
   };
@@ -119,13 +109,9 @@ export function AccountManagementSideSheet(props: Props) {
         onCancel={closeManager}
       >
         <div className={styles.body}>
-          <div className={styles.toolbar}>
-            <Input prefix={<IconSearch />} value={search} onChange={setSearch} placeholder={t("搜索账号名称或渠道")} aria-label={t("搜索账号")} />
-            <Text type="tertiary">{t("共 {count} 条", { count: filtered.length })}</Text>
-          </div>
           <div className={styles.list}>
-            {filtered.length === 0 ? <div className={styles.empty}>{accounts.length ? t("没有匹配“{search}”的账号", { search }) : t("还没有配置渠道账号")}</div> : null}
-            {filtered.map((account) => {
+            {accounts.length === 0 ? <div className={styles.empty}>{t("还没有配置渠道账号")}</div> : null}
+            {accounts.map((account) => {
               const status = getStatus(account, t);
               return (
                 <div className={styles.row} key={account.id}>

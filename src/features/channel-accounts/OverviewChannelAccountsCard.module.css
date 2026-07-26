@@ -60,6 +60,11 @@
   white-space: nowrap;
 }
 
+.resourceSummary { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--flowlet-color-text-secondary); font-size: 12px; line-height: 18px; }
+.resourcePrimary { width: 96px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resourceSeparator { flex: none; color: var(--flowlet-color-text-tertiary); }
+.resourceSecondary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 760px) {
   .row {
     padding: 0 8px;

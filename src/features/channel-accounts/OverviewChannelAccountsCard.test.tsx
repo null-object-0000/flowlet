@@ -42,7 +42,8 @@ describe("OverviewChannelAccountsCard", () => {
     );
 
     expect(screen.getByText("已启用 1 / 共 1 个账号")).toBeInTheDocument();
-    expect(screen.getByText(/资源包 4398\.7万 Tokens.*有效期至 2026-07-30/)).toBeInTheDocument();
+    expect(screen.getByText(/资源包 4398\.7万 Tokens/)).toBeInTheDocument();
+    expect(screen.getByText(/有效期至 2026-07-30/)).toBeInTheDocument();
     expect(screen.getByText("启用")).toBeInTheDocument();
   });
 
@@ -61,7 +62,7 @@ describe("OverviewChannelAccountsCard", () => {
       raw_scraped_json: JSON.stringify({
         subscription: { data: { DataV2: { data: { data: { status: "VALID", remainingDays: 28 } } } } },
         quota_config: { data: { DataV2: { data: { data: { standard: { five_hour: 3000, weekly: 10000 } } } } } },
-        usage: { data: { DataV2: { data: { data: { per5HourPercentage: 0.789, per1WeekPercentage: 0.211 } } } } },
+        usage: { data: { DataV2: { data: { data: { per5HourPercentage: 0.789, per1WeekPercentage: 0.211, per1WeekResetTime: 1785331200000 } } } } },
       }),
     } as AccountBalanceSnapshot;
 
@@ -75,6 +76,66 @@ describe("OverviewChannelAccountsCard", () => {
       />,
     );
 
-    expect(screen.getByText(/Token Plan 订阅.*5小时 剩余 21\.1%.*7天 剩余 78\.9%/)).toBeInTheDocument();
+    expect(screen.getByText(/5小时 剩余 21\.1%.*7天 剩余 78\.9%/)).toBeInTheDocument();
+    expect(screen.getByText(/七天重置 2026-07-29/)).toBeInTheDocument();
+    expect(screen.queryByText(/Token Plan 订阅/)).not.toBeInTheDocument();
+  });
+
+  it("renders LongCat expiry as end-of-day clock time when expiring today", () => {
+    vi.setSystemTime(new Date("2026-07-30T10:00:00Z"));
+    const todayIso = new Date().toISOString();
+    const todaySnapshot = {
+      account_id: account.id,
+      token_pack_remaining: 43_987_000,
+      token_pack_expire_at: todayIso,
+    } as AccountBalanceSnapshot;
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[account]}
+        snapshots={[todaySnapshot]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/有效期至 23:59:59/)).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("renders Qwen reset time as clock time when resetting today", () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
+    const resetAt = new Date().toISOString();
+    const qwenAccount = {
+      id: "account-qwen",
+      channel_id: "qwen",
+      name: "千问 Token Plan",
+      api_key: "sk-sp-configured",
+      enabled: true,
+      credential_status: "healthy",
+      resource_mode: "token_plan",
+    } as ChannelAccount;
+    const qwenSnapshot = {
+      account_id: qwenAccount.id,
+      raw_scraped_json: JSON.stringify({
+        subscription: { data: { DataV2: { data: { data: { status: "VALID", remainingDays: 28 } } } } },
+        quota_config: { data: { DataV2: { data: { data: { standard: { five_hour: 3000, weekly: 10000 } } } } } },
+        usage: { data: { DataV2: { data: { data: { per5HourPercentage: 0.789, per1WeekPercentage: 0.211, per1WeekResetTime: new Date(resetAt).getTime() } } } } },
+      }),
+    } as AccountBalanceSnapshot;
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[qwenAccount]}
+        snapshots={[qwenSnapshot]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/七天重置 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument();
+    vi.useRealTimers();
   });
 });

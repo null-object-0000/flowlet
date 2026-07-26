@@ -16,13 +16,13 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
-      "概览",
+      "运行概览",
       "模型服务",
       "请求日志",
       "会话管理",
       "任务日志",
       "用量成本",
-      "设置",
+      "应用设置",
     ]);
     expect(screen.queryByText(/服务运行中|代理服务运行中/)).not.toBeInTheDocument();
   });

@@ -50,9 +50,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
                   <span className={styles.nameRow}>
                     <Text strong className={styles.nameText}>{account.name || account.channel_id}</Text>
                     {nameLineSummary(account, snapshot, t, language) && (
-                      <Text type="tertiary" size="small" className={styles.nameSuffix}>
-                        <span className={styles.nameSuffixDot}>{nameLineSummary(account, snapshot, t, language)}</span>
-                      </Text>
+                      <span className={styles.nameSuffixDot}>{nameLineSummary(account, snapshot, t, language)}</span>
                     )}
                   </span>
                   <span className={styles.resourceSummary}>

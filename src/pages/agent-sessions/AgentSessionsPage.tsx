@@ -66,7 +66,6 @@ export function AgentSessionsPage() {
       <section className={styles.toolbar} aria-label={t("会话筛选")}>
         <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索会话标题、ID 或项目目录")} showClear onChange={setSearchDraft} />
         <Select
-          style={{ width: "100%" }}
           insetLabel={t("客户端")}
           value={filter.agentType || "__all__"}
           optionList={[
@@ -80,7 +79,6 @@ export function AgentSessionsPage() {
           onChange={(value) => setFilter((current) => ({ ...current, agentType: value === "__all__" ? "" : String(value) as AgentSessionFilter["agentType"], page: 1 }))}
         />
         <Select
-          style={{ width: "100%" }}
           insetLabel={t("Flowlet 状态")}
           value={filter.flowletStatus || "__all__"}
           optionList={[

@@ -20,6 +20,8 @@ pub struct ScrapeModeRuntime {
     pub console_url: String,
     /// 可选的第二次导航 URL。多阶段抓取时,主 URL 捕获完成后导航到此 URL。
     pub console_url_secondary: Option<String>,
+    /// 可选的第三次导航 URL。三阶段抓取时,第二 URL 捕获完成后导航到此 URL。
+    pub console_url_tertiary: Option<String>,
     pub interceptor_js: String,
     pub extractor_js: String,
     pub aggregate: bool,
@@ -51,6 +53,7 @@ pub fn resolve_scrape_mode(
     Some(ScrapeModeRuntime {
         console_url: cfg.console_url.clone(),
         console_url_secondary: cfg.console_url_secondary.clone(),
+        console_url_tertiary: cfg.console_url_tertiary.clone(),
         interceptor_js: cfg.interceptor_js.clone(),
         extractor_js: cfg.extractor_js.clone(),
         aggregate: cfg.aggregate,
@@ -359,6 +362,12 @@ pub fn classify_response_url(url: &str) -> &'static str {
         "subscription"
     } else if normalized.contains("/tokenplan/personal/api/v2/quota-config") {
         "quota_config"
+    } else if normalized
+        .contains("/api/pay/commercial/entitlements/token-packs/list")
+    {
+        // 必须在 token-packs/summary 之前判断,但二者路径不同无冲突。
+        // 放在前面是为了让"token-packs"前缀的匹配更明确可读。
+        "token_packs_list"
     } else if normalized.contains("/api/pay/quota/metering/token-packs/summary") {
         "token_packs_summary"
     } else if normalized.contains("/api/pay/quota/metering/api-usage/summary") {
@@ -468,6 +477,12 @@ mod tests {
             "token_packs_summary"
         );
         assert_eq!(
+            classify_response_url(
+                "https://longcat.chat/api/pay/commercial/entitlements/token-packs/list"
+            ),
+            "token_packs_list"
+        );
+        assert_eq!(
             classify_response_url("https://longcat.chat/api/pay/quota/metering/api-usage/summary"),
             "api_usage_summary"
         );
@@ -496,6 +511,7 @@ mod tests {
                 "https://platform.qianwenai.com/home/billing/subscription/token-plan-individual"
                     .to_string(),
             console_url_secondary: None,
+            console_url_tertiary: None,
             interceptor_js: String::new(),
             extractor_js: String::new(),
             aggregate: true,
@@ -513,21 +529,27 @@ mod tests {
         let longcat = ScrapeModeRuntime {
             console_url: "https://longcat.chat/platform/usage?tab=token".to_string(),
             console_url_secondary: Some("https://longcat.chat/platform/usage?tab=api".to_string()),
+            console_url_tertiary: Some("https://longcat.chat/platform/fuel_pack".to_string()),
             interceptor_js: String::new(),
             extractor_js: String::new(),
             aggregate: true,
             required_slots: vec![
                 "token_packs_summary".to_string(),
                 "api_usage_summary".to_string(),
+                "token_packs_list".to_string(),
             ],
         };
         assert_eq!(
-            required_slots_for_phase(&longcat, 0, 2),
+            required_slots_for_phase(&longcat, 0, 3),
             vec!["token_packs_summary"]
         );
         assert_eq!(
-            required_slots_for_phase(&longcat, 1, 2),
+            required_slots_for_phase(&longcat, 1, 3),
             vec!["api_usage_summary"]
+        );
+        assert_eq!(
+            required_slots_for_phase(&longcat, 2, 3),
+            vec!["token_packs_list"]
         );
     }
 
@@ -551,6 +573,58 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_scrape_mode_longcat_hybrid_three_phase() {
+        use crate::core::channels_config::{ChannelsConfig, ScrapeModeConfig};
+        use crate::core::config::ChannelPreset;
+        use std::collections::HashMap;
+        let mut modes = HashMap::new();
+        modes.insert(
+            "hybrid".to_string(),
+            ScrapeModeConfig {
+                console_url: "https://longcat.chat/platform/usage?tab=token".to_string(),
+                console_url_secondary: Some(
+                    "https://longcat.chat/platform/usage?tab=api".to_string(),
+                ),
+                console_url_tertiary: Some(
+                    "https://longcat.chat/platform/fuel_pack".to_string(),
+                ),
+                interceptor_js: String::new(),
+                extractor_js: String::new(),
+                aggregate: true,
+                required_slots: vec![
+                    "token_packs_summary".to_string(),
+                    "api_usage_summary".to_string(),
+                    "token_packs_list".to_string(),
+                ],
+            },
+        );
+        let mut scrape = HashMap::new();
+        scrape.insert("longcat".to_string(), modes);
+        let config = ChannelsConfig {
+            presets: vec![ChannelPreset::longcat()],
+            prices: vec![],
+            default_exposed_models: HashMap::new(),
+            flowlet_tiers: HashMap::new(),
+            endpoints: HashMap::new(),
+            scrape,
+        };
+        let mode = resolve_scrape_mode(&config, "longcat", Some("hybrid")).unwrap();
+        assert!(mode.aggregate);
+        assert_eq!(
+            mode.console_url_secondary.as_deref(),
+            Some("https://longcat.chat/platform/usage?tab=api")
+        );
+        assert_eq!(
+            mode.console_url_tertiary.as_deref(),
+            Some("https://longcat.chat/platform/fuel_pack")
+        );
+        assert_eq!(
+            mode.required_slots,
+            vec!["token_packs_summary", "api_usage_summary", "token_packs_list"]
+        );
+    }
+
+    #[test]
     fn test_resolve_scrape_mode_longcat_hybrid_runtime() {
         use crate::core::channels_config::{ChannelsConfig, ScrapeModeConfig};
         use crate::core::config::ChannelPreset;
@@ -563,6 +637,7 @@ mod tests {
                 console_url_secondary: Some(
                     "https://longcat.chat/platform/usage?tab=api".to_string(),
                 ),
+                console_url_tertiary: None,
                 interceptor_js: String::new(),
                 extractor_js: String::new(),
                 aggregate: true,
@@ -588,6 +663,7 @@ mod tests {
             mode.console_url_secondary.as_deref(),
             Some("https://longcat.chat/platform/usage?tab=api")
         );
+        assert!(mode.console_url_tertiary.is_none());
         assert_eq!(
             mode.required_slots,
             vec!["token_packs_summary", "api_usage_summary"]
@@ -600,6 +676,7 @@ mod tests {
         let mode_qwen = ScrapeModeRuntime {
             console_url: "https://example.com".to_string(),
             console_url_secondary: None,
+            console_url_tertiary: None,
             interceptor_js: String::new(),
             extractor_js: String::new(),
             aggregate: true,
@@ -609,21 +686,24 @@ mod tests {
                 "usage".to_string(),
             ],
         };
-        // LongCat hybrid:聚合模式,要求 token_packs_summary + api_usage_summary
+        // LongCat hybrid:三阶段聚合模式,要求 token_packs_summary + api_usage_summary + token_packs_list
         let mode_longcat = ScrapeModeRuntime {
             console_url: "https://longcat.chat/platform/usage?tab=token".to_string(),
             console_url_secondary: Some("https://longcat.chat/platform/usage?tab=api".to_string()),
+            console_url_tertiary: Some("https://longcat.chat/platform/fuel_pack".to_string()),
             interceptor_js: String::new(),
             extractor_js: String::new(),
             aggregate: true,
             required_slots: vec![
                 "token_packs_summary".to_string(),
                 "api_usage_summary".to_string(),
+                "token_packs_list".to_string(),
             ],
         };
         let mode_single = ScrapeModeRuntime {
             console_url: "https://example.com".to_string(),
             console_url_secondary: None,
+            console_url_tertiary: None,
             interceptor_js: String::new(),
             extractor_js: String::new(),
             aggregate: false,
@@ -636,6 +716,9 @@ mod tests {
         // LongCat hybrid 只有一个槽位时仍不完整
         assert!(!aggregate_complete(&slots, &mode_longcat));
         slots.insert("api_usage_summary".to_string(), "{}".to_string());
+        // 仍缺少 token_packs_list,还不完整
+        assert!(!aggregate_complete(&slots, &mode_longcat));
+        slots.insert("token_packs_list".to_string(), "{}".to_string());
         assert!(aggregate_complete(&slots, &mode_longcat));
         // 千问在仅有 LongCat 槽位时不完整
         assert!(!aggregate_complete(&slots, &mode_qwen));

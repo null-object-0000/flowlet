@@ -1834,6 +1834,7 @@ mod scrape_capture_tests {
         let mode = ScrapeModeRuntime {
             console_url: "https://longcat.chat/platform/usage?tab=token".to_string(),
             console_url_secondary: None,
+            console_url_tertiary: None,
             interceptor_js: String::new(),
             extractor_js: String::new(),
             aggregate: false,
@@ -2067,6 +2068,9 @@ pub(super) async fn probe_scrape_login(
     let mut phase_urls: Vec<&str> = vec![mode.console_url.as_str()];
     if let Some(secondary) = mode.console_url_secondary.as_ref() {
         phase_urls.push(secondary.as_str());
+    }
+    if let Some(tertiary) = mode.console_url_tertiary.as_ref() {
+        phase_urls.push(tertiary.as_str());
     }
 
     let phase_count = phase_urls.len();

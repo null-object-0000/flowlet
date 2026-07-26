@@ -1,7 +1,7 @@
 # 控制台抓取套餐余量需求文档
 
-> 状态:需求已确认,待实施
-> 最后更新:2026-07-21
+> 状态:需求已确认,已实施(含第三阶段历史资源包列表)
+> 最后更新:2026-07-26
 > 作者:经用户抓包核实
 
 ## 1. 背景与目标
@@ -82,9 +82,93 @@ config 里配 per-channel 的 JS `extractor` 函数,把捕获的 JSON 映射成�
 | 同上 | `token_pack_used` | Σ `consumedToken` |
 | 同上 | `token_pack_remaining` | Σ `remainingToken` |
 | 全部 lots 最早 `expireTime` | `token_pack_expire_at` | min(`expireTime`) |
-| `currentLot + otherLots` | `token_packs` | 按接口顺序保存完整 lot 数组，供自动同步模式展示资源包明细 |
+| `currentLot + otherLots` + 历史端点补缺 | `token_packs` | 见 §3.1.1 去重合并策略 |
 | 整份响应 | `raw_scraped_json` | 完整 payload |
 | 固定 | `plan_name` | `"LongCat 资源包"` |
+
+#### 3.1.1 LongCat —— token_pack 历史列表(第三阶段,补全已用尽/已过期包)
+
+> 仅 `/api/pay/quota/metering/token-packs/summary` 只能拿到 **ACTIVE** 资源包
+> (`currentLot` + `otherLots`,均为活跃状态)。已用尽(`statusCode=4`)或已过期
+> 的包不会出现在 summary 中。为补全历史资源包,第三阶段导航到 `/platform/fuel_pack`,
+> 拦截 `/api/pay/commercial/entitlements/token-packs/list` 端点。
+
+| 项目 | 值 |
+|------|-----|
+| **页面 URL** | `https://longcat.chat/platform/fuel_pack` |
+| **目标接口** | `GET https://longcat.chat/api/pay/commercial/entitlements/token-packs/list` |
+| **鉴权** | `credentials: include`,cookie 由 webview 自动携带 |
+
+**响应结构**(实测):
+```jsonc
+{
+  "code": 0, "msg": "success",
+  "data": {
+    "userId": 306948724, "activeCount": 0, "historyCount": 3, "total": 3,
+    "pageNo": 1, "pageSize": 9, "totalPage": 1,
+    "items": [
+      {
+        "resourceId": "2071803119104245853",
+        "packageId": "2071803119104245853",
+        "productId": "2071525606881435657",
+        "skuId": "2071801467190579219",
+        "skuCode": "d5ebc27f-a243-419e-ad55-615582df235c",
+        "packageName": "问卷Token包",
+        "sourceTypeCode": 4,     // 4=下发, 9=实名奖励, ...
+        "sourceTypeText": "下发",
+        "statusCode": 4,         // 4=已用尽
+        "statusText": "已用尽",
+        "totalTokenAmount": 5000000,
+        "usedTokenAmount": 5000000,
+        "remainTokenAmount": 0,
+        "usagePercent": 100,
+        "validDays": 30,
+        "validStartTime": "2026-06-30T03:48:49.000+00:00",
+        "validEndTime": "2026-07-30T03:48:49.000+00:00",
+        "validEndDateText": "2026-07-30",
+        "applicableModels": ["LongCat-2.0"],
+        "acquireTime": "2026-06-30T03:48:49.000+00:00",
+        "acquireDateText": "2026-06-30",
+        "receiveTime": "2026-06-30T03:48:49.000+00:00",
+        "canReceive": false
+      }
+      // ...historyCount 个历史资源包
+    ]
+  }
+}
+```
+
+**去重合并策略**(已在 extractor 中实现):
+
+1. **活跃包优先**:第一阶段 `token-packs/summary` 的 `currentLot + otherLots`
+   作为权威来源,计算 `token_pack_total/used/remaining/expire_at`,并放入
+   `token_packs` 数组。
+2. **历史端点补缺**:第三阶段 `token-packs/list` 的 `items` 按 `resourceId`
+   去重 —— 仅追加 **lotId 在 summary 中不存在** 的资源包(即已用尽/已过期的历史
+   包),不重复已统计过的活跃包。
+3. **历史包不汇总**:历史包的 token 数值**不加入** `token_pack_total/used/remaining`,
+   避免重复计数(活跃包已包含在 summary 汇总中)。历史包仅以 `_fromList: true`
+   标记追加到 `token_packs` 明细数组,供 UI 展示完整历史。
+
+**字段映射**(历史包 → `token_packs` 数组元素):
+
+| 历史端点字段 | token_packs 数组元素字段 | 说明 |
+|---|---|---|
+| `resourceId` / `packageId` | `lotId` | 统一 ID 字段,便于前端复用 `LongCatPack.lotId` |
+| `packageName` | `packageName` | 人类可读名称(如"问卷Token包") |
+| `sourceTypeCode` / `sourceTypeText` | `sourceTypeCode` / `sourceTypeText` | 来源(下发/实名奖励等) |
+| `statusCode` / `statusText` | `statusCode` / `statusText` | 状态(4=已用尽) |
+| `totalTokenAmount` | `totalToken` | 总量 |
+| `usedTokenAmount` | `consumedToken` | 已消耗 |
+| `remainTokenAmount` | `remainingToken` | 剩余 |
+| `validEndTime` | `expireTime` | 到期时间 |
+| `validStartTime` | `validStartTime` | 生效时间 |
+| `acquireTime` / `acquireDateText` | `acquireTime` / `acquireDateText` | 获取时间 |
+| `usagePercent` | `usagePercent` | 消耗百分比 |
+| `validDays` | `validDays` | 有效天数 |
+| `applicableModels` | `applicableModels` | 适用模型 |
+| `skuCode` / `productId` | `skuCode` / `productId` | SKU/产品 ID |
+| 固定 | `_fromList: true` | 标记来自历史端点,便于 UI 区分 |
 
 ### 3.2 LongCat —— pay_as_you_go 模式(按量付费)
 
@@ -207,7 +291,10 @@ usage:
 
 ## 4. 拦截器与解析器 JS
 
-### 4.1 LongCat interceptor(双端点共用)
+### 4.1 LongCat interceptor(三端点共用)
+
+> 拦截器在三个阶段页面都会注入(document-start),但只有匹配目标 URL 的响应才会
+> 回传。三个目标端点分别对应三个导航阶段。
 
 ```js
 (() => {
@@ -215,7 +302,8 @@ usage:
     if (window.location.origin !== 'https://longcat.chat') return 'ok-not-target';
     const TARGETS = [
       '/api/pay/quota/metering/token-packs/summary',
-      '/api/pay/quota/metering/api-usage/summary'
+      '/api/pay/quota/metering/api-usage/summary',
+      '/api/pay/commercial/entitlements/token-packs/list'
     ];
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const matches = (url) => TARGETS.some((t) => url.includes(t));
@@ -432,14 +520,17 @@ function extractQwen(bundle) {
 1. **触发**:用户点「抓取余额」(仅 `supports_scrape_balance && !supports_balance_query` 时显示)
 2. **解析配置**:读 account → channel preset → scrape config
 3. **ensure webview**:查 AppState map 是否已有 `scrape-{account_id}`,无则创建(隐藏 + `initialization_script`)
-4. **准备本轮抓取**:清空该账号的旧响应和旧 document ACK，再调用 `webview.navigate(console_url)` 强制刷新
-5. **确认监听就绪**:Windows/Linux 以原生监听安装成功为 ready；fallback 则由 `initialization_script` 在 document-start 安装 fetch/XHR 后通过 `handle_scrape_interceptor_ready` 回传 document id。只有 ready 后才开始计算业务响应超时；ready 自身超时后立即返回，不再串行追加一轮响应等待
-6. **捕获页面请求**:页面自行完成 Cookie、签名和 Header 组装并调用 API；Windows 由 WebView2 `WebResourceResponseReceived`、Linux 由 WebKitGTK `resource-load-started` + `WebResource::data` 在网络层读取目标响应；macOS 及原生监听安装失败时使用 document-start fetch/XHR fallback
-7. **区分状态**:收齐目标响应为 `captured`；明确导航到登录 URL 为 `login_required`；监听已就绪但未收齐响应为 `console_action_required`，展示 webview 供用户完成登录、验证码或等待页面加载后主动重试；监听未就绪为 `capture_timeout`。未捕获响应不得被表述为用户未登录
-8. **跑 extractor**:单响应(LongCat)直接 `eval_with_callback`;三响应(Qwen)等收齐后合并计算
-9. **写快照**:`source="scrape"`、`synced_at=now`、`remark="控制台抓取"`、`raw_scraped_json`、解析数值 → `token_pack_*` / `balance`+`currency`
-10. **发事件**:`scrape:result` / `scrape:error`
-11. **再隐藏**:`webview.hide()`,句柄留 map
+4. **准备本轮抓取**:清空该账号的旧响应和旧 document ACK
+5. **多阶段导航**:按配置顺序依次导航到每个 `console_url`(LongCat 三阶段:token 资源包 → 按量余额 → fuel_pack 历史列表;Qwen 单阶段三响应)。每个阶段:
+   - 重新等待本页面的拦截器 ACK(导航会触发新 document 注入拦截器)
+   - 监听就绪后等待本阶段明确需要的响应(`required_slots_for_phase` 按 phase_index 分槽)
+6. **确认监听就绪**:Windows/Linux 以原生监听安装成功为 ready；fallback 则由 `initialization_script` 在 document-start 安装 fetch/XHR 后通过 `handle_scrape_interceptor_ready` 回传 document id。只有 ready 后才开始计算业务响应超时；ready 自身超时后立即返回，不再串行追加一轮响应等待
+7. **捕获页面请求**:页面自行完成 Cookie、签名和 Header 组装并调用 API；Windows 由 WebView2 `WebResourceResponseReceived`、Linux 由 WebKitGTK `resource-load-started` + `WebResource::data` 在网络层读取目标响应；macOS 及原生监听安装失败时使用 document-start fetch/XHR fallback
+8. **区分状态**:收齐目标响应为 `captured`；明确导航到登录 URL 为 `login_required`；监听已就绪但未收齐响应为 `console_action_required`，展示 webview 供用户完成登录、验证码或等待页面加载后主动重试；监听未就绪为 `capture_timeout`。未捕获响应不得被表述为用户未登录
+9. **跑 extractor**:单响应直接 `eval_with_callback`；聚合模式(LongCat 三阶段、Qwen 三响应)等收齐后合并计算
+10. **写快照**:`source="scrape"`、`synced_at=now`、`remark="控制台抓取"`、`raw_scraped_json`、解析数值 → `token_pack_*` / `balance`+`currency`
+11. **发事件**:`scrape:result` / `scrape:error`
+12. **再隐藏**:`webview.hide()`,句柄留 map
 
 账号资源信息不再把“控制台自动同步”作为独立模块展示。支持抓取的资源模式在同一个资源信息模块内选择 `manual`（手动维护）或 `auto`（自动同步）：自动模式在应用启动 30 秒后首次运行，之后每 5 分钟同步，并保留“立即刷新”入口。周期任务保持 WebView 隐藏，登录失效或页面需要交互时只写 `channel-resource-sync` 任务日志；用户主动刷新时才展示 WebView。
 

@@ -94,6 +94,11 @@ pub struct ScrapeModeJson {
     /// URL 继续捕获(用于 LongCat 等 token 资源包与余额分属不同标签页的场景)。
     #[serde(default)]
     pub console_url_secondary: Option<String>,
+    /// 可选的第三次导航 URL。三阶段抓取模式下,第二 URL 捕获完成后会导航到此
+    /// URL 继续捕获(用于 LongCat 加载 `/platform/fuel_pack` 以获取完整资源包
+    /// 列表,包含已用尽/已过期的包)。
+    #[serde(default)]
+    pub console_url_tertiary: Option<String>,
     /// 注入到页面的拦截器 JS(IIFE),monkeypatch fetch/XHR 并把匹配响应通过
     /// window.__TAURI_INTERNALS__.invoke("handle_intercepted_response", ...) 回传。
     pub interceptor_js: String,
@@ -140,6 +145,7 @@ pub struct ModelPriceJson {
 pub struct ScrapeModeConfig {
     pub console_url: String,
     pub console_url_secondary: Option<String>,
+    pub console_url_tertiary: Option<String>,
     pub interceptor_js: String,
     pub extractor_js: String,
     pub aggregate: bool,
@@ -200,6 +206,7 @@ impl ChannelsConfig {
                             ScrapeModeConfig {
                                 console_url: mode_json.console_url.clone(),
                                 console_url_secondary: mode_json.console_url_secondary.clone(),
+                                console_url_tertiary: mode_json.console_url_tertiary.clone(),
                                 interceptor_js: mode_json.interceptor_js.clone(),
                                 extractor_js: mode_json.extractor_js.clone(),
                                 aggregate: mode_json.aggregate,
@@ -859,5 +866,45 @@ mod tests {
         assert!(plan_routes.iter().any(|route| {
             route.virtual_model_id == "flowlet-pro" && route.upstream_model == "qwen3.8-max-preview"
         }));
+    }
+
+    #[test]
+    fn embedded_longcat_hybrid_scrape_config_has_three_phases() {
+        // 验证 config.json 中 LongCat hybrid 模式已配置三阶段导航:
+        // - 第一阶段: token 资源包汇总(?tab=token)
+        // - 第二阶段: 按量余额(?tab=api)
+        // - 第三阶段: 完整资源包列表(含已用尽/已过期,/platform/fuel_pack)
+        let json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let modes = config.scrape.get("longcat").expect("longcat scrape 配置");
+        let hybrid = modes.get("hybrid").expect("longcat hybrid 模式");
+        assert_eq!(
+            hybrid.console_url, "https://longcat.chat/platform/usage?tab=token",
+            "第一阶段应导航到 token 资源包汇总"
+        );
+        assert_eq!(
+            hybrid.console_url_secondary.as_deref(),
+            Some("https://longcat.chat/platform/usage?tab=api"),
+            "第二阶段应导航到按量余额"
+        );
+        assert_eq!(
+            hybrid.console_url_tertiary.as_deref(),
+            Some("https://longcat.chat/platform/fuel_pack"),
+            "第三阶段应导航到 fuel_pack 捕获完整资源包列表"
+        );
+        assert_eq!(
+            hybrid.required_slots,
+            vec!["token_packs_summary", "api_usage_summary", "token_packs_list"],
+            "三阶段聚合需要三个槽位全部到位"
+        );
+        assert!(hybrid.aggregate);
+        // 拦截器必须同时拦截三个目标端点
+        assert!(hybrid.interceptor_js.contains("/api/pay/quota/metering/token-packs/summary"));
+        assert!(hybrid.interceptor_js.contains("/api/pay/quota/metering/api-usage/summary"));
+        assert!(hybrid
+            .interceptor_js
+            .contains("/api/pay/commercial/entitlements/token-packs/list"));
+        // extractor 必须引用 token_packs_list 槽位(去重合并逻辑)
+        assert!(hybrid.extractor_js.contains("token_packs_list"));
     }
 }

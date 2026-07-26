@@ -13,6 +13,8 @@
   border-right: 1px solid var(--flowlet-color-border);
   background: var(--flowlet-color-sidebar-bg);
   backdrop-filter: blur(24px) saturate(130%);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .content {

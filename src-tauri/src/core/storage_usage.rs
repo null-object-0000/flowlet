@@ -2131,6 +2131,30 @@ impl Storage {
         Ok(summary)
     }
 
+    /// 今日 Token 消耗总量（仅一个整数）。
+    ///
+    /// 与 `usage_summary` 不同，这个查询只返回单个聚合值，不带分组、不带
+    /// `request_logs` JOIN，并利用 `idx_usage_records_created_at` 索引做范围
+    /// 扫描。持锁时间极短，专门喂给概览页顶部 service-strip 的「今日消耗」，
+    /// 避免每 30s 拉全量汇总表把主线程卡死。
+    pub fn usage_today_tokens(&self) -> Result<i64, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let tokens: i64 = connection.query_row(
+            r#"
+            SELECT coalesce(sum(total_tokens), 0)
+            FROM usage_records
+            WHERE created_at >= date('now', 'localtime')
+              AND created_at < date('now', 'localtime', '+1 day')
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(tokens)
+    }
+
     // ─── Account Stats ───────────────────────────────────────────────────────
 
     pub fn account_stats(&self) -> Result<Vec<AccountStatsRow>, StorageError> {

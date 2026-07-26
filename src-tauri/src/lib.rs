@@ -851,6 +851,7 @@ pub fn run() {
             commands::repair_unknown_usage,
             commands::repair_usage_costs,
             commands::usage_summary,
+            commands::usage_today_tokens,
             commands::list_request_logs,
             commands::list_agent_sessions,
             commands::list_agent_session_children,

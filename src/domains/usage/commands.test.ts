@@ -17,4 +17,10 @@ describe("usageCommands contract", () => {
     expect(await usageCommands.summary()).toEqual([]);
     expect(invokeMock).toHaveBeenCalledWith("usage_summary", undefined);
   });
+
+  it("reads today total tokens through the typed Tauri boundary", async () => {
+    invokeMock.mockResolvedValueOnce(12345);
+    expect(await usageCommands.todayTokens()).toEqual(12345);
+    expect(invokeMock).toHaveBeenCalledWith("usage_today_tokens", undefined);
+  });
 });

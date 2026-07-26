@@ -497,6 +497,19 @@ pub(super) fn usage_summary(
     state.storage.usage_summary().map_err(|err| err.to_string())
 }
 
+/// 概览页「今日消耗」专用：只返回今日 Token 消耗总量（单个整数）。
+/// 使用 `async fn` 避免同步命令占用 Tauri 主线程；底层查询走索引范围
+/// 扫描、不带分组、不带 JOIN，持锁时间极短，不会卡住窗口拖动。
+#[tauri::command]
+pub(super) async fn usage_today_tokens(
+    state: tauri::State<'_, AppState>,
+) -> Result<i64, String> {
+    state
+        .storage
+        .usage_today_tokens()
+        .map_err(|err| err.to_string())
+}
+
 #[tauri::command]
 pub(super) fn list_request_logs(
     state: tauri::State<'_, AppState>,

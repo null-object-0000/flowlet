@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Button, Card, Space, Typography } from "@douyinfe/semi-ui-19";
 import { IconPlus } from "@douyinfe/semi-icons";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
@@ -8,8 +8,7 @@ import { useRouteCandidates } from "../../features/exposed-models/useModels";
 import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
 import { useProxyOverviewLifecycle } from "../../features/proxy-lifecycle/useProxyOverviewLifecycle";
-import { useUsageSummary } from "../../features/usage/useUsageSummary";
-import { localDateKey } from "../../pages/usage/usagePresentation";
+import { useTodayTokens } from "../../features/usage/useTodayTokens";
 import { deriveConfigurationStatus } from "../../domains/model/types";
 import { OverviewGrid } from "./OverviewGrid";
 import { OverviewServiceStrip } from "./OverviewServiceStrip";
@@ -34,13 +33,9 @@ export function OverviewPage() {
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
   const configurationStatus = deriveConfigurationStatus(accounts.data ?? [], routes.data ?? []);
 
-  const { query: usageSummary } = useUsageSummary(true);
-  const todayTokens = useMemo(() => {
-    const rows = usageSummary.data ?? [];
-    const today = localDateKey(new Date());
-    const total = rows.filter((row) => row.date === today).reduce((sum, row) => sum + row.known_tokens, 0);
-    return total > 0 ? total : null;
-  }, [usageSummary.data]);
+  // 概览页顶部「今日消耗」：用专用轻量接口，只拉今日 Token 总数（一个整数）。
+  // 不要复用 useUsageSummary —— 那个拉全量分组明细，每 30s 卡窗口拖动。
+  const { tokens: todayTokens } = useTodayTokens(true);
 
   const onboarding = (
     <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>

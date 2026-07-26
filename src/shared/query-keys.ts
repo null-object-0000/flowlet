@@ -74,6 +74,7 @@ export const queryKeys = {
   usage: {
     all: ["usage"] as const,
     summary: () => [...queryKeys.usage.all, "summary"] as const,
+    todayTokens: () => [...queryKeys.usage.all, "today-tokens"] as const,
     accountStats: () => [...queryKeys.usage.all, "account-stats"] as const,
     latestBalanceSnapshots: () => [...queryKeys.usage.all, "latest-balance-snapshots"] as const,
   },

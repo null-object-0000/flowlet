@@ -1,0 +1,68 @@
+.row {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 0;
+}
+
+.row + .row {
+  border-top: 1px solid #eef1f5;
+}
+
+.copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.name {
+  font-size: 13px;
+  font-weight: 620;
+  color: #202632;
+}
+
+.help {
+  font-size: 12px;
+  color: var(--flowlet-color-text-tertiary);
+  margin-top: 5px;
+  line-height: 1.45;
+}
+
+.control {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #edf7f1;
+  color: #26844b;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.section {
+  padding: 18px 0 4px;
+}
+
+.section + .section {
+  border-top: 1px solid var(--flowlet-color-border);
+  margin-top: 14px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.sectionNote {
+  font-size: 12px;
+  color: var(--flowlet-color-text-tertiary);
+  margin-bottom: 10px;
+}

@@ -3139,3 +3139,29 @@ pub(super) async fn sync_scrape_balances(
         message: format!("渠道资源同步完成：成功 {synced} 个，失败 {failed} 个"),
     })
 }
+
+#[tauri::command]
+pub(super) fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
+pub(super) fn get_app_data_dir(app_handle: tauri::AppHandle) -> Result<String, String> {
+    app_handle
+        .path()
+        .app_data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(super) fn get_app_diagnostics(state: tauri::State<'_, AppState>) -> serde_json::Value {
+    let os = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+    let proxy = proxy_status(state);
+    let proxy_status = if proxy.running { "running" } else { "stopped" };
+    serde_json::json!({
+        "os": os,
+        "database": "healthy",
+        "proxy": proxy_status,
+    })
+}

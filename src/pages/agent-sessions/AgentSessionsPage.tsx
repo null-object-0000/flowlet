@@ -12,7 +12,7 @@ import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
-import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
+import { formatCostAmount, formatCostCny, formatNativeCost } from "../../shared/formatters/cost";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSessionDetailSideSheet";
@@ -179,10 +179,19 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
         t={t}
         total={row.flowletObserved ? row.estimatedCost : nativeUsage?.cost ?? nativeUsage?.apiEquivalent?.amount ?? null}
         currency="CNY"
+        inputUncached={row.flowletObserved ? row.estimatedInputUncachedCost : undefined}
+        inputCached={row.flowletObserved ? row.estimatedInputCachedCost : undefined}
+        inputCacheWrite={row.flowletObserved ? row.estimatedInputCacheWriteCost : undefined}
+        output={row.flowletObserved ? row.estimatedOutputCost : undefined}
         apiEquivalent={nativeUsage?.apiEquivalent ?? null}
         planConsumption={nativeUsage?.planConsumption ?? null}
       >
-        <span>{row.flowletObserved ? `¥${row.estimatedCost.toFixed(4)}` : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}</span>
+        <span
+          className={styles.tokenTotal}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {row.flowletObserved ? formatCostCny(row.estimatedCost) : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}
+        </span>
       </CostBreakdownTooltip>
       <span className={!row.flowletObserved ? styles.localOnly : row.errorCount > 0 ? styles.warning : styles.success}>{!row.flowletObserved ? t("本地会话") : row.errorCount > 0 ? t("{count} 次失败", { count: row.errorCount }) : t("正常")}</span>
     </button>

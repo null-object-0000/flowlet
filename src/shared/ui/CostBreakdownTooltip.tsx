@@ -20,7 +20,7 @@ type Props = {
 };
 
 export function CostBreakdownTooltip({ children, total, inputUncached, inputCached, inputCacheWrite, output, currency, apiEquivalent, planConsumption, t }: Props) {
-  const fmt = (v: number | null, digits = 2) => formatCostAmount({ amount: v, currency }, v != null && v < 0.01 ? 6 : digits);
+  const fmt = (v: number | null) => formatCostAmount({ amount: v, currency }, 4);
   const hasBreakup = inputUncached != null || inputCached != null || inputCacheWrite != null || output != null;
   const hasNativeMeta = apiEquivalent?.amount != null || planConsumption?.amount != null;
   return (

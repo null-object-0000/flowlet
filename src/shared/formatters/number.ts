@@ -21,7 +21,7 @@ export function formatCompactNumber(
 ) {
   const fallback = options.fallback ?? "—";
   if (value == null || !Number.isFinite(value)) return fallback;
-  const maximumFractionDigits = options.maximumFractionDigits ?? 1;
+  const maximumFractionDigits = options.maximumFractionDigits ?? 2;
   const absolute = Math.abs(value);
 
   if (language === "zh-CN") {
@@ -47,7 +47,7 @@ function formatScaled(
 ) {
   const scaled = new Intl.NumberFormat(language, {
     maximumFractionDigits,
-    minimumFractionDigits: 0,
+    minimumFractionDigits: maximumFractionDigits,
     useGrouping: false,
   }).format(value / divisor);
   return `${scaled}${suffix}`;

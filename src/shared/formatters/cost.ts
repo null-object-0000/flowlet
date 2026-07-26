@@ -12,6 +12,17 @@ export function formatNativeCost(value: NativeCostValue, digits = 6) {
   return formatCostAmount({ amount: value.cost, currency: value.costCurrency }, digits);
 }
 
+/** Format a cost for display across request logs / session / usage pages:
+ *  always 4 decimals, trailing zeros kept (e.g. "¥0.0200", "$1.2000"). */
+export function formatCost(value: number | null, currency: string | null): string {
+  return formatCostAmount({ amount: value, currency }, 4);
+}
+
+/** Request-log cost: no currency field in that domain, hardcoded ¥. 4 decimals. */
+export function formatCostCny(value: number | null): string {
+  return formatCostAmount({ amount: value, currency: "CNY" }, 4);
+}
+
 export function formatCostAmount(value: CostAmountValue, digits = 6) {
   if (value.amount == null || !Number.isFinite(value.amount)) return "—";
   const amount = value.amount.toFixed(digits);

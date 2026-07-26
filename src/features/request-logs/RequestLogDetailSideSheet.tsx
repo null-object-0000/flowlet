@@ -20,6 +20,7 @@ import { useRequestLogDetail } from "./useRequestLogs";
 import styles from "./RequestLogDetailSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatInteger } from "../../shared/formatters/number";
+import { formatCostCny } from "../../shared/formatters/cost";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 
 const JSON_VIEWER_OPTIONS = { readOnly: true, autoWrap: true } as const;
@@ -95,7 +96,7 @@ export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { 
                   <DetailItem label="TTFT" value={formatDuration(finalRow.ttft_ms)} />
                   <DetailItem label={t("生成耗时")} value={formatGenerationDuration(finalRow)} />
                   <DetailItem label={t("输出速率")} value={formatTokenRate(calculateOutputTokenRate(finalRow))} />
-                  <DetailItem label={t("预估费用")} value={formatCost(finalRow.estimated_cost)} />
+                  <DetailItem label={t("预估费用")} value={formatCostCny(finalRow.estimated_cost)} />
                 </div>
               </DetailSection>
 
@@ -275,11 +276,6 @@ function DetailState({ title, description, action }: { title: string; descriptio
 }
 
 const formatNumber = formatInteger;
-
-function formatCost(value: number | null) {
-  if (value == null) return "—";
-  return `¥${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}`;
-}
 
 function formatGenerationDuration(row: RequestLogRow) {
   if (row.duration_ms == null || row.ttft_ms == null || row.duration_ms < row.ttft_ms) return "—";

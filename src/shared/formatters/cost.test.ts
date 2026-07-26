@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dominantCostCurrency, formatCostAmount, formatMultiCurrencyCost, formatNativeCost } from "./cost";
+import { dominantCostCurrency, formatCost, formatCostAmount, formatCostCny, formatMultiCurrencyCost, formatNativeCost } from "./cost";
 
 describe("formatNativeCost", () => {
   it("formats Codex native estimates in credits", () => {
@@ -17,6 +17,26 @@ describe("formatNativeCost", () => {
   it("keeps API equivalent values in their original currency", () => {
     expect(formatCostAmount({ amount: 3.2, currency: "USD" }, 2)).toBe("$3.20");
     expect(formatCostAmount({ amount: 3.2, currency: "CNY" }, 2)).toBe("¥3.20");
+  });
+});
+
+describe("formatCost", () => {
+  it("always uses 4 decimals with trailing zeros", () => {
+    expect(formatCost(0.02, "CNY")).toBe("¥0.0200");
+    expect(formatCost(1.2, "USD")).toBe("$1.2000");
+    expect(formatCost(0.0012, "CNY")).toBe("¥0.0012");
+  });
+
+  it("renders null as em dash", () => {
+    expect(formatCost(null, "CNY")).toBe("—");
+  });
+});
+
+describe("formatCostCny", () => {
+  it("hardcodes ¥ and 4 decimals for the request-log domain", () => {
+    expect(formatCostCny(0.02)).toBe("¥0.0200");
+    expect(formatCostCny(1.2)).toBe("¥1.2000");
+    expect(formatCostCny(null)).toBe("—");
   });
 });
 

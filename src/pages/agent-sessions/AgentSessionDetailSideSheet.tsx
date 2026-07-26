@@ -204,8 +204,8 @@ function NativeUsageSection({
             <Metric label={t("缓存命中率")} value={formatCacheHitRate(data.usage, language)} />
             <Metric label={t("缓存写入")} value={formatCompactNumber(data.usage.cacheWriteInputTokens, language)} />
             <Metric label={t("推理")} value={formatCompactNumber(data.usage.reasoningTokens, language)} />
-            <Metric label={t("API 等价价值")} value={data.usage.apiEquivalent ? formatCostAmount(data.usage.apiEquivalent) : "—"} />
-            <Metric label={t("套餐消耗")} value={data.usage.planConsumption ? formatCostAmount(data.usage.planConsumption) : "—"} />
+            <Metric label={t("API 等价价值")} value={data.usage.apiEquivalent ? formatCostAmount(data.usage.apiEquivalent, 4) : "—"} />
+            <Metric label={t("套餐消耗")} value={data.usage.planConsumption ? formatCostAmount(data.usage.planConsumption, 4) : "—"} />
             {data.usage.cost != null ? <Metric label={t("原生实际费用")} value={formatNativeCost(data.usage)} /> : null}
           </div>
           {data.models.length > 0 ? <p className={styles.usageModels}>{t("模型：{models}", { models: data.models.join("、") })}</p> : null}
@@ -264,8 +264,8 @@ function EventUsage({ usage, language }: { usage: AgentSessionNativeUsage; langu
         <span key={label}>{label} {formatCompactNumber(value, language)}</span>
       ))}
       {usage.inputTokens > 0 ? <span>{t("缓存命中率")} {formatCacheHitRate(usage, language)}</span> : null}
-      {usage.apiEquivalent?.amount != null ? <span>{t("API 等价")} {formatCostAmount(usage.apiEquivalent)}</span> : null}
-      {usage.planConsumption?.amount != null ? <span>{t("套餐消耗")} {formatCostAmount(usage.planConsumption)}</span> : null}
+      {usage.apiEquivalent?.amount != null ? <span>{t("API 等价")} {formatCostAmount(usage.apiEquivalent, 4)}</span> : null}
+      {usage.planConsumption?.amount != null ? <span>{t("套餐消耗")} {formatCostAmount(usage.planConsumption, 4)}</span> : null}
       {usage.cost != null ? <span>{t("原生实际费用")} {formatNativeCost(usage)}</span> : null}
     </div>
   );

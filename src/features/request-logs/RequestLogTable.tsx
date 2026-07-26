@@ -6,6 +6,7 @@ import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { formatTimestamp } from "../../shared/formatters/datetime";
+import { formatCostCny } from "../../shared/formatters/cost";
 
 type Props = {
   rows: RequestLogRow[];
@@ -87,7 +88,7 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
               output={row.estimated_output_cost}
               currency="CNY"
             >
-              <span className={styles.tokenTotal}>{formatCost(row.estimated_cost)}</span>
+              <span className={styles.tokenTotal}>{formatCostCny(row.estimated_cost)}</span>
             </CostBreakdownTooltip>
           </button>
         )) : null}
@@ -110,7 +111,3 @@ function SkeletonRow({ index }: { index: number }) {
   );
 }
 
-function formatCost(value: number | null) {
-  if (value == null) return "—";
-  return `¥${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}`;
-}

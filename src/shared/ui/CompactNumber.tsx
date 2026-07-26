@@ -15,7 +15,7 @@ export function CompactNumber({
   value,
   language,
   fallback = "—",
-  maximumFractionDigits = 1,
+  maximumFractionDigits = 2,
   showExactTitle = true,
   prefix,
   suffix,

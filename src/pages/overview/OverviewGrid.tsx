@@ -6,9 +6,8 @@ import type { ProxyBindConfig } from "../../domains/proxy/types";
 import { OverviewAgentAccessCard } from "../../features/agent-access/OverviewAgentAccessCard";
 import { OverviewChannelAccountsCard } from "../../features/channel-accounts/OverviewChannelAccountsCard";
 import type { AccountManagerRequest } from "../../features/channel-accounts/AccountManagementSideSheet";
-import { OverviewClientAccessCard } from "../../features/client-access/OverviewClientAccessCard";
 import { OverviewExposedModelsCard } from "../../features/exposed-models/OverviewExposedModelsCard";
-import styles from "./OverviewSections.module.css";
+import styles from "./OverviewGrid.module.css";
 
 type Props = {
   accounts: ChannelAccount[];
@@ -16,19 +15,38 @@ type Props = {
   balanceSnapshots: AccountBalanceSnapshot[];
   routes: RouteCandidate[];
   baseUrl: string;
-  bindConfig: ProxyBindConfig;
+  bindConfig?: ProxyBindConfig;
   proxyRunning: boolean;
+  hasAccounts: boolean;
   onAccountRequest: (request: AccountManagerRequest) => void;
   busyModelId?: string;
   onToggleModel: (routeIds: string[], modelId: string, enabled: boolean) => void;
+  onboarding: React.ReactNode;
 };
 
-export function OverviewSections({ accounts, channels, balanceSnapshots, routes, baseUrl, bindConfig, proxyRunning, onAccountRequest, busyModelId, onToggleModel }: Props) {
+export function OverviewGrid({
+  accounts,
+  channels,
+  balanceSnapshots,
+  routes,
+  baseUrl,
+  bindConfig,
+  proxyRunning,
+  hasAccounts,
+  onAccountRequest,
+  busyModelId,
+  onToggleModel,
+  onboarding,
+}: Props) {
   const navigate = useNavigate();
 
+  if (!hasAccounts) {
+    return <div className={styles.onboarding}>{onboarding}</div>;
+  }
+
   return (
-    <div className={styles.sections}>
-      <div className={`${styles.grid} ${styles.primary}`}>
+    <div className={styles.grid}>
+      <div className={styles.accountCard}>
         <OverviewChannelAccountsCard
           accounts={accounts}
           snapshots={balanceSnapshots}
@@ -36,6 +54,8 @@ export function OverviewSections({ accounts, channels, balanceSnapshots, routes,
           onViewAll={() => onAccountRequest({ kind: "list" })}
           onEdit={(accountId) => onAccountRequest({ kind: "edit", accountId })}
         />
+      </div>
+      <div className={styles.modelsCard}>
         <OverviewExposedModelsCard
           routes={routes}
           accounts={accounts}
@@ -45,16 +65,8 @@ export function OverviewSections({ accounts, channels, balanceSnapshots, routes,
           onToggle={onToggleModel}
         />
       </div>
-      <div className={`${styles.grid} ${styles.secondary}`}>
-        <OverviewClientAccessCard
-          baseUrl={baseUrl}
-          bindConfig={bindConfig}
-          running={proxyRunning}
-        />
-        <OverviewAgentAccessCard
-          baseUrl={baseUrl}
-          clientToken={bindConfig.default_client_token}
-        />
+      <div className={styles.agentCard}>
+        <OverviewAgentAccessCard baseUrl={baseUrl} clientToken={bindConfig?.default_client_token} />
       </div>
     </div>
   );

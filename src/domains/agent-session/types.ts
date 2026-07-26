@@ -34,6 +34,10 @@ export type AgentSessionRow = {
   outputTokens: number;
   unknownUsageCount: number;
   estimatedCost: number;
+  estimatedInputUncachedCost: number;
+  estimatedInputCachedCost: number;
+  estimatedInputCacheWriteCost: number;
+  estimatedOutputCost: number;
   nativeSummary?: AgentSessionNativeSummary | null;
   nativeSyncedAt?: string | null;
 };

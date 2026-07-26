@@ -1382,6 +1382,10 @@ mod tests {
             output_tokens: 0,
             unknown_usage_count: 0,
             estimated_cost: 0.0,
+            estimated_input_uncached_cost: 0.0,
+            estimated_input_cached_cost: 0.0,
+            estimated_input_cache_write_cost: 0.0,
+            estimated_output_cost: 0.0,
             native_summary: None,
             native_synced_at: None,
         }

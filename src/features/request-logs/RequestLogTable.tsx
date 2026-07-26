@@ -87,7 +87,7 @@ export function RequestLogTable({ rows, loading, onOpenDetail }: Props) {
               output={row.estimated_output_cost}
               currency="CNY"
             >
-              <span className={styles.number}>{formatCost(row.estimated_cost)}</span>
+              <span className={styles.tokenTotal}>{formatCost(row.estimated_cost)}</span>
             </CostBreakdownTooltip>
           </button>
         )) : null}

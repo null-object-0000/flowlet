@@ -819,7 +819,11 @@ impl Storage {
                 COALESCE(SUM(CASE WHEN ur.input_cached_tokens IS NOT NULL THEN ur.input_tokens ELSE 0 END), 0),
                 COALESCE(SUM(ur.output_tokens), 0),
                 SUM(CASE WHEN ur.total_tokens IS NULL THEN 1 ELSE 0 END),
-                COALESCE(SUM(ur.estimated_cost), 0)
+                COALESCE(SUM(ur.estimated_cost), 0),
+                COALESCE(SUM(ur.estimated_input_uncached_cost), 0),
+                COALESCE(SUM(ur.estimated_input_cached_cost), 0),
+                COALESCE(SUM(ur.estimated_input_cache_write_cost), 0),
+                COALESCE(SUM(ur.estimated_output_cost), 0)
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             WHERE rl.is_last_attempt = 1
@@ -855,6 +859,10 @@ impl Storage {
                 output_tokens: row.get(15)?,
                 unknown_usage_count: row.get(16)?,
                 estimated_cost: row.get(17)?,
+                estimated_input_uncached_cost: row.get(18)?,
+                estimated_input_cached_cost: row.get(19)?,
+                estimated_input_cache_write_cost: row.get(20)?,
+                estimated_output_cost: row.get(21)?,
                 native_summary: None,
                 native_synced_at: None,
             })
@@ -912,7 +920,8 @@ impl Storage {
                 ttfb_ms, duration_ms, attempt_seq,
                 req_headers_json, req_body_b64, req_body_cleared_at, req_body_cleanup_reason,
                 res_headers_json, res_body_b64, res_body_cleared_at, res_body_cleanup_reason,
-                is_last_attempt, ttft_ms, upstream_url
+                is_last_attempt, ttft_ms, upstream_url,
+                agent_type, agent_session_id, parent_agent_session_id
             FROM request_logs
             WHERE is_last_attempt = 1
             ORDER BY created_at DESC
@@ -970,6 +979,9 @@ impl Storage {
                 estimated_input_cached_cost: None,
                 estimated_input_cache_write_cost: None,
                 estimated_output_cost: None,
+                agent_type: row.get(37)?,
+                agent_session_id: row.get(38)?,
+                parent_agent_session_id: row.get(39)?,
             })
         })?;
         let mut logs = Vec::new();
@@ -1082,7 +1094,8 @@ impl Storage {
                 ur.estimated_cost,
                 ur.estimated_input_uncached_cost, ur.estimated_input_cached_cost,
                 ur.estimated_input_cache_write_cost, ur.estimated_output_cost,
-                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url
+                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url,
+                rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             WHERE rl.request_id = ?1
@@ -1140,6 +1153,9 @@ impl Storage {
                 input_cached_tokens: row.get(44)?,
                 input_uncached_tokens: row.get(45)?,
                 upstream_url: row.get(46)?,
+                agent_type: row.get(47)?,
+                agent_session_id: row.get(48)?,
+                parent_agent_session_id: row.get(49)?,
             })
         })?;
         let mut logs = Vec::new();
@@ -1330,6 +1346,104 @@ impl Storage {
             repaired_logs,
             skipped_requests: scanned_requests.saturating_sub(repaired_requests),
         })
+    }
+
+    /// 回填历史请求的费用分类明细。
+    ///
+    /// 早期版本只写入 `estimated_cost` 总数，4 个分类列（未缓存输入/缓存命中/
+    /// 缓存写入/输出）为 NULL。此函数扫描这些遗留记录，按已存的 token 数与
+    /// 渠道/模型单价重算分类明细，使会话费用明细之和与总费用对齐。
+    pub fn backfill_cost_breakdown(&self) -> Result<usize, StorageError> {
+        let prices = self.prices();
+        let rows = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let mut stmt = connection.prepare(
+                r#"
+                SELECT
+                    id, channel_id, upstream_model,
+                    input_tokens, input_cached_tokens, input_uncached_tokens,
+                    input_cache_write_tokens, output_tokens
+                FROM usage_records
+                WHERE estimated_cost IS NOT NULL
+                  AND estimated_input_uncached_cost IS NULL
+                "#,
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+
+        if rows.is_empty() {
+            return Ok(0);
+        }
+
+        let mut updates: Vec<(String, Option<f64>, Option<f64>, Option<f64>, Option<f64>)> =
+            Vec::new();
+        for (id, channel_id, upstream_model, input_tokens, input_cached_tokens, input_uncached_tokens, input_cache_write_tokens, output_tokens) in &rows {
+            let breakdown = estimate_cost(
+                &prices,
+                channel_id.as_deref(),
+                upstream_model.as_deref(),
+                *input_tokens,
+                *input_cached_tokens,
+                *input_uncached_tokens,
+                *input_cache_write_tokens,
+                *output_tokens,
+            );
+            let Some(breakdown) = breakdown else { continue };
+            updates.push((
+                id.clone(),
+                Some(breakdown.input_uncached),
+                Some(breakdown.input_cached),
+                Some(breakdown.input_cache_write),
+                Some(breakdown.output),
+            ));
+        }
+
+        let updated = {
+            let mut connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let transaction = connection.transaction()?;
+            let mut count = 0usize;
+            for (id, uncached, cached, cache_write, output) in &updates {
+                count += transaction.execute(
+                    r#"
+                    UPDATE usage_records
+                    SET estimated_input_uncached_cost = ?2,
+                        estimated_input_cached_cost = ?3,
+                        estimated_input_cache_write_cost = ?4,
+                        estimated_output_cost = ?5
+                    WHERE id = ?1
+                    "#,
+                    params![id, uncached, cached, cache_write, output],
+                )?;
+            }
+            transaction.commit()?;
+            count
+        };
+
+        tracing::info!(
+            "backfill_cost_breakdown: 扫描 {} 条遗留记录, 回填 {} 条分类明细",
+            rows.len(),
+            updated
+        );
+        Ok(updated)
     }
 
     /// Reparse captured response bodies in the selected period, including
@@ -2327,7 +2441,8 @@ impl Storage {
                 ur.estimated_cost,
                 ur.estimated_input_uncached_cost, ur.estimated_input_cached_cost,
                 ur.estimated_input_cache_write_cost, ur.estimated_output_cost,
-                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url
+                rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url,
+                rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             {where_sql}
@@ -2396,6 +2511,9 @@ impl Storage {
                 input_cached_tokens: row.get(36)?,
                 input_uncached_tokens: row.get(37)?,
                 upstream_url: row.get(38)?,
+                agent_type: row.get(39)?,
+                agent_session_id: row.get(40)?,
+                parent_agent_session_id: row.get(41)?,
             })
         })?;
 
@@ -2452,6 +2570,10 @@ mod agent_session_filter_tests {
             output_tokens: 0,
             unknown_usage_count: 0,
             estimated_cost: 0.0,
+            estimated_input_uncached_cost: 0.0,
+            estimated_input_cached_cost: 0.0,
+            estimated_input_cache_write_cost: 0.0,
+            estimated_output_cost: 0.0,
             native_summary: None,
             native_synced_at: None,
         }

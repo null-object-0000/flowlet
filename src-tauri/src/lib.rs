@@ -298,6 +298,11 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         );
     }
 
+    // 回填历史请求的费用分类明细（早期版本只有总数、缺分类）。幂等，仅补齐 NULL 列。
+    if let Err(error) = storage.backfill_cost_breakdown() {
+        tracing::warn!(error = %error, "费用分类明细回填失败");
+    }
+
     // 初始化路由规则
     tracing::trace!(
         t_ms = _t0.elapsed().as_millis() as u64,

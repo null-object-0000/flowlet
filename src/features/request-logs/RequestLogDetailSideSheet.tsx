@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { Button, CodeHighlight, JsonViewer, SideSheet, Tabs, Tag, Toast } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
+import { Button, CodeHighlight, JsonViewer, SideSheet, Tabs, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-19";
+import { IconCopy, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import type { RequestLogRow } from "../../domains/request-log/types";
 import {
   calculateCacheHitRate,
@@ -25,13 +25,14 @@ import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 const JSON_VIEWER_OPTIONS = { readOnly: true, autoWrap: true } as const;
 type Translate = (source: string, variables?: Record<string, string | number>) => string;
 
-export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: string; onClose: () => void }) {
+export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { requestId: string; onClose: () => void; onNavigate?: (path: string) => void }) {
   const { language, t } = useAppPreferences();
   const detail = useRequestLogDetail(requestId);
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
   const rows = detail.data ?? [];
   const finalRow = rows.length ? rows[rows.length - 1] : undefined;
   const selectedRow = rows.find((row) => row.id === selectedAttemptId) ?? finalRow;
+  const sessionId = finalRow?.agent_session_id ?? null;
 
   return (
     <SideSheet
@@ -67,6 +68,13 @@ export function RequestLogDetailSideSheet({ requestId, onClose }: { requestId: s
                   <DetailItem label={t("客户端")} value={selectedRow.client_name || selectedRow.client_id || t("未知客户端")} />
                   <DetailItem label={t("客户端协议")} value={selectedRow.client_protocol || "-"} />
                   <DetailItem label={t("HTTP 状态")} value={selectedRow.status?.toString() || t("失败")} />
+                  <DetailItem
+                    label={t("会话 ID")}
+                    value={sessionId || "-"}
+                    copyable={Boolean(sessionId)}
+                    wide
+                    onOpen={sessionId ? () => onNavigate?.(`/logs?search=${encodeURIComponent(sessionId)}`) : undefined}
+                  />
                 </div>
               </DetailSection>
 
@@ -146,7 +154,7 @@ function DetailSection({ title, children }: { title: string; children: ReactNode
   return <section className={styles.section}><strong className={styles.sectionTitle}>{title}</strong>{children}</section>;
 }
 
-function DetailItem({ label, value, wide = false, copyable = false }: { label: string; value: string; wide?: boolean; copyable?: boolean }) {
+function DetailItem({ label, value, wide = false, copyable = false, onOpen }: { label: string; value: string; wide?: boolean; copyable?: boolean; onOpen?: () => void }) {
   const { t } = useAppPreferences();
   const copy = async () => {
     try {
@@ -160,7 +168,21 @@ function DetailItem({ label, value, wide = false, copyable = false }: { label: s
     <div className={`${styles.detailItem} ${wide ? styles.detailItemWide : ""}`}>
       <span>{label}</span>
       <div className={styles.detailItemValue}>
-        <strong title={value}>{value}</strong>
+        {onOpen ? (
+          <Tooltip content={t("查看该会话的请求日志")}>
+            <Button
+              className={styles.valueLink}
+              aria-label={t("查看会话 {id} 的请求日志", { id: value })}
+              type="primary"
+              theme="borderless"
+              size="small"
+              onClick={onOpen}
+            >
+              <span className={styles.linkText} title={value}>{value}</span>
+              <IconExternalOpen />
+            </Button>
+          </Tooltip>
+        ) : <strong title={value}>{value}</strong>}
         {copyable ? <Button aria-label={t("复制{label}", { label })} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copy()} /> : null}
       </div>
     </div>

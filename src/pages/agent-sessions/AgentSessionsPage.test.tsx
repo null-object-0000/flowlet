@@ -38,6 +38,10 @@ const session: AgentSessionRow = {
   outputTokens: 2000,
   unknownUsageCount: 1,
   estimatedCost: 0.25,
+  estimatedInputUncachedCost: 0.12,
+  estimatedInputCachedCost: 0.04,
+  estimatedInputCacheWriteCost: 0.02,
+  estimatedOutputCost: 0.07,
 };
 
 const childSession: AgentSessionRow = {

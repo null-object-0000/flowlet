@@ -778,6 +778,11 @@ pub struct RequestLogRow {
     pub estimated_input_cached_cost: Option<f64>,
     pub estimated_input_cache_write_cost: Option<f64>,
     pub estimated_output_cost: Option<f64>,
+    /// Agent 渠道类型（agent_type）。由代理在识别 x-flowlet-client 门控后从
+    /// x-flowlet-session 头提取，转发上游前剥离，用于请求日志按会话归并与筛选。
+    pub agent_type: Option<String>,
+    pub agent_session_id: Option<String>,
+    pub parent_agent_session_id: Option<String>,
 }
 
 // ─── Request Log Page (paginated + filtered) ─────────────────────────────────
@@ -1110,6 +1115,10 @@ pub struct AgentSessionRow {
     pub output_tokens: i64,
     pub unknown_usage_count: i64,
     pub estimated_cost: f64,
+    pub estimated_input_uncached_cost: f64,
+    pub estimated_input_cached_cost: f64,
+    pub estimated_input_cache_write_cost: f64,
+    pub estimated_output_cost: f64,
     pub native_summary: Option<AgentSessionNativeSummary>,
     pub native_synced_at: Option<String>,
 }

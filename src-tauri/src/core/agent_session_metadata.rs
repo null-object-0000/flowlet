@@ -171,6 +171,10 @@ pub fn merge_agent_session_catalog(
             native.output_tokens = observed.output_tokens;
             native.unknown_usage_count = observed.unknown_usage_count;
             native.estimated_cost = observed.estimated_cost;
+            native.estimated_input_uncached_cost = observed.estimated_input_uncached_cost;
+            native.estimated_input_cached_cost = observed.estimated_input_cached_cost;
+            native.estimated_input_cache_write_cost = observed.estimated_input_cache_write_cost;
+            native.estimated_output_cost = observed.estimated_output_cost;
             native.flowlet_observed = true;
         } else {
             merged.insert(key, observed);
@@ -720,6 +724,10 @@ fn native_row(
         output_tokens: 0,
         unknown_usage_count: 0,
         estimated_cost: 0.0,
+        estimated_input_uncached_cost: 0.0,
+        estimated_input_cached_cost: 0.0,
+        estimated_input_cache_write_cost: 0.0,
+        estimated_output_cost: 0.0,
         native_summary: None,
         native_synced_at: None,
     }

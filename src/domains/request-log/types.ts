@@ -66,6 +66,12 @@ export type RequestLogRow = {
   estimated_input_cached_cost: number | null;
   estimated_input_cache_write_cost: number | null;
   estimated_output_cost: number | null;
+  /** Agent 渠道类型（agent_type）。用于判断会话归属，与 agent_session_id 配合使用。 */
+  agent_type: string | null;
+  /** Agent 会话标识。由代理从 x-flowlet-session 头提取，用于按会话归并与筛选。 */
+  agent_session_id: string | null;
+  /** 父 Agent 会话标识（用于嵌套会话场景）。 */
+  parent_agent_session_id: string | null;
 };
 
 export type RequestLogSummary = {

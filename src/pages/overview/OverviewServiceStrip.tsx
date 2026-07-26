@@ -3,6 +3,7 @@ import { Button, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconEyeClosed, IconEyeOpened, IconLink } from "@douyinfe/semi-icons";
 import type { ProxyBindConfig, ProxyRuntimeState, ProxyStatus } from "../../domains/proxy/types";
 import { formatDuration, getProxyPhaseLabel } from "../../features/proxy-lifecycle/proxyStatusPresentation";
+import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import styles from "./OverviewServiceStrip.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -39,6 +40,11 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
   }, [running]);
 
   const uptimeText = startedAt && running ? formatDuration(Date.now() - startedAt.getTime(), language) : undefined;
+  // 悬浮到「已运行 …」时展示具体启动时刻（到秒）。status?.started_at 是 UTC 瞬时，
+  // formatFullTimestamp 会按操作系统本地时区转换。
+  const startedAtTitle = running && status?.started_at
+    ? t("启动于 {time}", { time: formatFullTimestamp(status.started_at, language) })
+    : undefined;
 
   const endpoint = protocol === "openai" ? `${baseUrl}/v1` : `${baseUrl}/anthropic`;
 
@@ -71,7 +77,7 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
             <div className={styles.statusSub}>
               {t("本地代理")} ·{" "}
               {uptimeText ? (
-                <span className={styles.uptimeInline}>{t("已运行 {time}", { time: uptimeText })}</span>
+                <span className={styles.uptimeInline} title={startedAtTitle}>{t("已运行 {time}", { time: uptimeText })}</span>
               ) : (
                 t("已停止")
               )}

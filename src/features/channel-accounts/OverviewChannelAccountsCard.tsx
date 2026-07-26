@@ -96,7 +96,7 @@ function accountStatus(account: ChannelAccount, t: (source: string) => string): 
 }
 
 type ResourceSummaryColumn = { label: string; value: string; secondary: string };
-function formatBalance(value: number, currency: string | undefined, language: "zh-CN" | "en-US"): string {
+function formatBalance(value: number, currency: string | null | undefined, language: "zh-CN" | "en-US"): string {
   return value.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): ResourceSummaryColumn {

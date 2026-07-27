@@ -373,17 +373,19 @@ fn infer_claude_runtime_status(path: &Path) -> String {
             }
             Some("assistant") => {
                 let message = value.get("message").unwrap_or(&Value::Null);
-                let waiting_for_question = message
+                let waiting_for_user = message
                     .get("content")
                     .and_then(Value::as_array)
                     .is_some_and(|blocks| {
                         blocks.iter().any(|block| {
                             block.get("type").and_then(Value::as_str) == Some("tool_use")
-                                && block.get("name").and_then(Value::as_str)
-                                    == Some("AskUserQuestion")
+                                && block
+                                    .get("name")
+                                    .and_then(Value::as_str)
+                                    .is_some_and(claude_tool_waits_for_user)
                         })
                     });
-                status = if waiting_for_question {
+                status = if waiting_for_user {
                     "waiting_user"
                 } else if message.get("stop_reason").and_then(Value::as_str) == Some("tool_use") {
                     "running"
@@ -409,6 +411,10 @@ fn infer_claude_runtime_status(path: &Path) -> String {
             .and_then(|metadata| metadata.modified().ok()),
         SystemTime::now(),
     )
+}
+
+fn claude_tool_waits_for_user(tool_name: &str) -> bool {
+    matches!(tool_name, "AskUserQuestion" | "ExitPlanMode")
 }
 
 fn apply_claude_runtime_freshness(
@@ -1059,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn infers_claude_question_without_treating_normal_tool_as_confirmation() {
+    fn infers_claude_interaction_tools_without_treating_normal_tool_as_confirmation() {
         let path =
             std::env::temp_dir().join(format!("flowlet-claude-state-{}.jsonl", Uuid::new_v4()));
         fs::write(
@@ -1075,6 +1081,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(infer_claude_runtime_status(&path), "waiting_user");
+
+        fs::write(
+            &path,
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"tool_use\",\"content\":[{\"type\":\"tool_use\",\"name\":\"ExitPlanMode\"}]}}\n",
+        )
+        .unwrap();
+        assert_eq!(infer_claude_runtime_status(&path), "waiting_user");
+
+        fs::write(
+            &path,
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"tool_use\",\"content\":[{\"type\":\"tool_use\",\"name\":\"ExitPlanMode\"}]}}\n{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tool-plan\",\"content\":\"User has approved your plan.\"}]}}\n",
+        )
+        .unwrap();
+        assert_eq!(infer_claude_runtime_status(&path), "running");
         fs::remove_file(path).unwrap();
     }
 

@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
+import type { CodexAccountReport } from "../../domains/agent/types";
 import type { RouteCandidate } from "../../domains/model/types";
 import type { ProxyBindConfig } from "../../domains/proxy/types";
 import { OverviewAgentAccessCard } from "../../features/agent-access/OverviewAgentAccessCard";
@@ -13,6 +14,7 @@ type Props = {
   accounts: ChannelAccount[];
   channels: ChannelPreset[];
   balanceSnapshots: AccountBalanceSnapshot[];
+  codexAccounts?: CodexAccountReport[];
   routes: RouteCandidate[];
   baseUrl: string;
   bindConfig?: ProxyBindConfig;
@@ -28,6 +30,7 @@ export function OverviewGrid({
   accounts,
   channels,
   balanceSnapshots,
+  codexAccounts,
   routes,
   baseUrl,
   bindConfig,
@@ -50,6 +53,7 @@ export function OverviewGrid({
         <OverviewChannelAccountsCard
           accounts={accounts}
           snapshots={balanceSnapshots}
+          codexAccounts={codexAccounts}
           onCreate={() => onAccountRequest({ kind: "create", channelId: "longcat" })}
           onViewAll={() => onAccountRequest({ kind: "list" })}
           onEdit={(accountId) => onAccountRequest({ kind: "edit", accountId })}

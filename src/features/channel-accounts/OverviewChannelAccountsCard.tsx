@@ -1,8 +1,10 @@
 import { Button, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronRight, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
-import { isQwenTokenPlanAccount } from "../../domains/channel/types";
+import { isQwenTokenPlanAccount, isChatGptAccount, CHATGPT_CHANNEL_ID } from "../../domains/channel/types";
+import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
+import { codexAccountToPseudoChannelAccount, getCodexUsageDisplay, getCodexNameSummary } from "./codexPseudoAccount";
 import { OverviewActionLink } from "../../shared/ui/OverviewActionLink";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
@@ -16,15 +18,22 @@ const { Text } = Typography;
 type Props = {
   accounts: ChannelAccount[];
   snapshots: AccountBalanceSnapshot[];
+  codexAccounts?: CodexAccountReport[];
   onCreate: () => void;
   onViewAll: () => void;
   onEdit: (accountId: string) => void;
 };
 
-export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onViewAll, onEdit }: Props) {
+export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts, onCreate, onViewAll, onEdit }: Props) {
   const { language, t } = useAppPreferences();
   const snapshotByAccount = new Map(snapshots.map((snapshot) => [snapshot.account_id, snapshot]));
   const enabledCount = accounts.filter((a) => a.enabled).length;
+
+  // 将 Codex 账号转为伪渠道账号，排在所有正常账号后面。
+  const codexPseudoAccounts = (codexAccounts ?? []).map((report, index) =>
+    codexAccountToPseudoChannelAccount(report, index),
+  );
+  const allAccounts = [...accounts, ...codexPseudoAccounts];
 
   return (
     <OverviewModuleCard
@@ -39,48 +48,93 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, onCreate, onV
       )}
     >
       <div className={styles.list}>
-        {accounts.map((account) => {
+        {allAccounts.map((account) => {
           const snapshot = snapshotByAccount.get(account.id);
-          const status = accountStatus(account, t);
-          const nameSummary = nameLineSummary(account, snapshot, t, language);
+          const isCodex = isChatGptAccount(account);
+          const codexReport = isCodex
+            ? codexAccounts?.find((r) => `codex-${r.account_id}` === account.id)
+            : undefined;
+          const status = isCodex
+            ? { label: t("自动同步"), color: "green" as const }
+            : accountStatus(account, t);
+          const nameSummary = isCodex && codexReport
+            ? getCodexNameSummary(codexReport)
+            : nameLineSummary(account, snapshot, t, language);
           const accountName = account.name || account.channel_id;
           return (
             <div className={styles.row} key={account.id}>
-              <button className={styles.rowMain} type="button" onClick={() => onEdit(account.id)}>
-                <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
-                <span className={styles.accountText}>
-                  <span className={styles.nameRow}>
-                    <Text strong className={nameSummary ? styles.namePrimary : styles.nameText} title={accountName}>
-                      {accountName}
-                    </Text>
-                    {nameSummary && <span className={styles.resourceSeparator}>·</span>}
-                    {nameSummary && <span className={styles.nameSecondary} title={nameSummary}>{nameSummary}</span>}
+              {isCodex ? (
+                <div className={styles.rowMain}>
+                  <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
+                  <span className={styles.accountText}>
+                    <span className={styles.nameRow}>
+                      <Text strong className={nameSummary ? styles.namePrimary : styles.nameText} title={accountName}>
+                        {accountName}
+                      </Text>
+                      {nameSummary && <span className={styles.resourceSeparator}>·</span>}
+                      {nameSummary && <span className={styles.nameSecondary} title={nameSummary}>{nameSummary}</span>}
+                    </span>
+                    <span className={styles.resourceSummary}>
+                      {(() => {
+                        const parts = codexReport
+                          ? { label: "", ...getCodexUsageDisplay(codexReport, t) }
+                          : resourceSummary(account, snapshot, t, language);
+                        const hasSecondary = Boolean(parts.secondary);
+                        return (
+                          <>
+                            <span className={styles.resourcePrimary}>
+                              {parts.label && <span className={styles.resourceLabel}>{parts.label}</span>}
+                              {parts.value && <span className={styles.resourceValue} title={parts.value}>{parts.value}</span>}
+                            </span>
+                            {hasSecondary && <span className={styles.resourceSeparator}>·</span>}
+                            {hasSecondary && <span className={styles.resourceSecondary} title={parts.secondary}>{parts.secondary}</span>}
+                          </>
+                        );
+                      })()}
+                    </span>
                   </span>
-                  <span className={styles.resourceSummary}>
-                    {(() => {
-                      const parts = resourceSummary(account, snapshot, t, language);
-                      const hasSecondary = Boolean(parts.secondary);
-                      return (
-                        <>
-                          <span className={styles.resourcePrimary}>
-                            {parts.label && <span className={styles.resourceLabel}>{parts.label}</span>}
-                            {parts.value && <span className={styles.resourceValue} title={parts.value}>{parts.value}</span>}
-                          </span>
-                          {hasSecondary && <span className={styles.resourceSeparator}>·</span>}
-                          {hasSecondary && <span className={styles.resourceSecondary} title={parts.secondary}>{parts.secondary}</span>}
-                        </>
-                      );
-                    })()}
+                </div>
+              ) : (
+                <button className={styles.rowMain} type="button" onClick={() => onEdit(account.id)}>
+                  <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
+                  <span className={styles.accountText}>
+                    <span className={styles.nameRow}>
+                      <Text strong className={nameSummary ? styles.namePrimary : styles.nameText} title={accountName}>
+                        {accountName}
+                      </Text>
+                      {nameSummary && <span className={styles.resourceSeparator}>·</span>}
+                      {nameSummary && <span className={styles.nameSecondary} title={nameSummary}>{nameSummary}</span>}
+                    </span>
+                    <span className={styles.resourceSummary}>
+                      {(() => {
+                        const parts = resourceSummary(account, snapshot, t, language);
+                        const hasSecondary = Boolean(parts.secondary);
+                        return (
+                          <>
+                            <span className={styles.resourcePrimary}>
+                              {parts.label && <span className={styles.resourceLabel}>{parts.label}</span>}
+                              {parts.value && <span className={styles.resourceValue} title={parts.value}>{parts.value}</span>}
+                            </span>
+                            {hasSecondary && <span className={styles.resourceSeparator}>·</span>}
+                            {hasSecondary && <span className={styles.resourceSecondary} title={parts.secondary}>{parts.secondary}</span>}
+                          </>
+                        );
+                      })()}
+                    </span>
                   </span>
-                </span>
-              </button>
+                </button>
+              )}
               <Tag color={status.color}>{status.label}</Tag>
-              <Button
-                icon={<IconMore />}
-                theme="borderless"
-                aria-label={t("编辑账号 {name}", { name: accountName })}
-                onClick={() => onEdit(account.id)}
-              />
+              {isCodex ? (
+                <span className={styles.rowSpacer} aria-hidden="true" />
+              ) : (
+                <Button
+                  icon={<IconMore />}
+                  theme="borderless"
+                  aria-label={t("编辑账号 {name}", { name: accountName })}
+                  onClick={() => onEdit(account.id)}
+                />
+              )}
             </div>
           );
         })}

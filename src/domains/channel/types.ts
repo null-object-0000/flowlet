@@ -6,6 +6,11 @@ export type AuthStrategy = "bearer" | "x_api_key";
 
 export const CUSTOM_CHANNEL_ID = "custom";
 
+/** ChatGPT (Codex) 伪装渠道 ID。Codex 账号由 Rust 端自动发现和同步，
+ *  不需要用户手动创建。前端仅在概览页底部作为非交互式展示项呈现，
+ *  不在账号管理弹窗中出现。 */
+export const CHATGPT_CHANNEL_ID = "chatgpt";
+
 export type ChannelPreset = {
   id: string;
   name: string;
@@ -130,4 +135,10 @@ export function canonicalModelId(modelId: string | null | undefined): string | n
 /** 判断账号是否为千问 Token Plan 模式。 */
 export function isQwenTokenPlanAccount(account: { channel_id: string; resource_mode: string | null }): boolean {
   return account.channel_id === QWEN_CHANNEL_ID && account.resource_mode === "token_plan";
+}
+
+/** 判断是否为 ChatGPT (Codex) 伪账号。Codex 账号由 Rust 端同步，
+ *  前端不可编辑、不参与路由，仅在概览页底部作为非交互展示项。 */
+export function isChatGptAccount(account: { channel_id: string; resource_mode: string | null }): boolean {
+  return account.channel_id === CHATGPT_CHANNEL_ID && account.resource_mode === "codex";
 }

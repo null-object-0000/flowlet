@@ -3,7 +3,7 @@ import { Button, Modal, SideSheet, Space, Switch, Tag, Toast, Typography } from 
 import { IconDelete, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
-import { isQwenTokenPlanAccount } from "../../domains/channel/types";
+import { isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
 import { AccountEditorDrawer, type AccountEditorMode, type AccountResourceSnapshotDraft } from "./AccountEditorDrawer";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./AccountManagementSideSheet.module.css";
@@ -111,7 +111,7 @@ export function AccountManagementSideSheet(props: Props) {
         <div className={styles.body}>
           <div className={styles.list}>
             {accounts.length === 0 ? <div className={styles.empty}>{t("还没有配置渠道账号")}</div> : null}
-            {accounts.map((account) => {
+            {accounts.filter((a) => !isChatGptAccount(a)).map((account) => {
               const status = getStatus(account, t);
               return (
                 <div className={styles.row} key={account.id}>

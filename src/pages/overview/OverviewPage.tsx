@@ -3,6 +3,7 @@ import { Button, Card, Space, Typography } from "@douyinfe/semi-ui-19";
 import { IconPlus } from "@douyinfe/semi-icons";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
 import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
+import { useCodexAccounts } from "../../features/agent-access/useAgentEnvironment";
 import { AccountManagementSideSheet, type AccountManagerRequest } from "../../features/channel-accounts/AccountManagementSideSheet";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
 import { useModelActions } from "../../features/exposed-models/useModelActions";
@@ -30,6 +31,7 @@ export function OverviewPage() {
   const proxy = useProxyOverviewLifecycle(!accounts.isLoading);
   const hasAccounts = (accounts.data?.length ?? 0) > 0;
   const balanceSnapshots = useLatestBalanceSnapshots(hasAccounts);
+  const codexAccounts = useCodexAccounts(hasAccounts);
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
   const configurationStatus = deriveConfigurationStatus(accounts.data ?? [], routes.data ?? []);
 
@@ -99,6 +101,7 @@ export function OverviewPage() {
           accounts={accounts.data ?? []}
           channels={presets.data ?? []}
           balanceSnapshots={balanceSnapshots.data ?? []}
+          codexAccounts={codexAccounts.data?.accounts}
           routes={routes.data ?? []}
           baseUrl={baseUrl}
           bindConfig={bindConfig.data}

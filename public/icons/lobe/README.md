@@ -17,4 +17,5 @@ Vendored files:
 - `opencode.svg`
 - `openai.svg`
 - `codex.svg`
+- `codex-color.svg`
 - `pi.svg`

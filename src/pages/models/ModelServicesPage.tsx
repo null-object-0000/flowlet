@@ -68,7 +68,22 @@ function StrategyPriceValue({ current, standard, rateType, currency }: {
   );
 }
 
-function PricingStrategyTable({ rows, t }: {
+function StrategyPriceMetric({ label, current, standard, rateType, currency }: {
+  label: string;
+  current: number | undefined;
+  standard: number | undefined;
+  rateType: ModelsCnPrice["rateType"];
+  currency: string;
+}) {
+  return (
+    <div className={styles.strategyMetric}>
+      <span>{label}</span>
+      <StrategyPriceValue current={current} standard={standard} rateType={rateType} currency={currency} />
+    </div>
+  );
+}
+
+function PricingStrategyCards({ rows, t }: {
   rows: PricingStrategyRow[];
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
@@ -82,59 +97,27 @@ function PricingStrategyTable({ rows, t }: {
   const currency = rows[0].current.currency;
 
   return (
-    <div className={styles.pricingTableWrap}>
-      <table className={styles.pricingTable}>
-        <thead>
-          <tr>
-            <th>{t("输入区间")}</th>
-            <th>{t("输入定价")}</th>
-            {showImplicitCache ? <th>{t("隐式缓存")}</th> : null}
-            {showExplicitCache ? <th>{t("显式缓存")}</th> : null}
-            <th>{t("输出定价")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key}>
-              <td className={styles.rangeCell}>{row.inputTokenRange?.label ?? t("全部输入")}</td>
-              <td>
-                <StrategyPriceValue
-                  current={row.current.input.standard}
-                  standard={row.standard?.input.standard}
-                  rateType={row.current.rateType}
-                  currency={currency}
-                />
-              </td>
-              {showImplicitCache ? (
-                <td>
-                  <StrategyPriceValue
-                    current={row.current.input.cacheHit}
-                    standard={row.standard?.input.cacheHit}
-                    rateType={row.current.rateType}
-                    currency={currency}
-                  />
-                </td>
-              ) : null}
-              {showExplicitCache ? (
-                <td>
-                  <span className={styles.explicitCachePrices}>
-                    <span><small>{t("创建")}</small><StrategyPriceValue current={row.current.input.explicitCacheCreation} standard={row.standard?.input.explicitCacheCreation} rateType={row.current.rateType} currency={currency} /></span>
-                    <span><small>{t("命中")}</small><StrategyPriceValue current={row.current.input.explicitCacheHit} standard={row.standard?.input.explicitCacheHit} rateType={row.current.rateType} currency={currency} /></span>
-                  </span>
-                </td>
-              ) : null}
-              <td>
-                <StrategyPriceValue
-                  current={row.current.output}
-                  standard={row.standard?.output}
-                  rateType={row.current.rateType}
-                  currency={currency}
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className={styles.pricingTierList}>
+      {rows.map((row) => (
+        <section className={styles.pricingTier} key={row.key}>
+          <header>
+            <strong>{row.inputTokenRange?.label ?? t("全部输入")}</strong>
+          </header>
+          <div className={styles.strategyMetrics}>
+            <StrategyPriceMetric label={t("输入")} current={row.current.input.standard} standard={row.standard?.input.standard} rateType={row.current.rateType} currency={currency} />
+            <StrategyPriceMetric label={t("输出")} current={row.current.output} standard={row.standard?.output} rateType={row.current.rateType} currency={currency} />
+            {showImplicitCache ? (
+              <StrategyPriceMetric label={t("隐式命中")} current={row.current.input.cacheHit} standard={row.standard?.input.cacheHit} rateType={row.current.rateType} currency={currency} />
+            ) : null}
+            {showExplicitCache ? (
+              <>
+                <StrategyPriceMetric label={t("显式创建")} current={row.current.input.explicitCacheCreation} standard={row.standard?.input.explicitCacheCreation} rateType={row.current.rateType} currency={currency} />
+                <StrategyPriceMetric label={t("显式命中")} current={row.current.input.explicitCacheHit} standard={row.standard?.input.explicitCacheHit} rateType={row.current.rateType} currency={currency} />
+              </>
+            ) : null}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -750,7 +733,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
               <span>{t("按输入长度分段计价")}</span>
               <strong>{price.currency} / {unitLabel}</strong>
             </div>
-            <PricingStrategyTable rows={strategyRows} t={t} />
+            <PricingStrategyCards rows={strategyRows} t={t} />
           </>
         ) : (
           <>

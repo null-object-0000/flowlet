@@ -11,6 +11,8 @@ use std::time::SystemTime;
 
 const MAX_CLAUDE_TRANSCRIPT_BYTES: usize = 1024 * 1024;
 const MAX_RUNTIME_STATUS_BYTES: u64 = 256 * 1024;
+const CLAUDE_RUNNING_FRESHNESS_SECS: u64 = 30 * 60;
+const CLAUDE_WAITING_USER_FRESHNESS_SECS: u64 = 24 * 60 * 60;
 const OPENCODE_EMPTY_ASSISTANT_GRACE_MILLIS: i64 = 30_000;
 const EMPTY_SESSION_TIME: &str = "1970-01-01T00:00:00Z";
 
@@ -213,13 +215,16 @@ fn list_claude_native_sessions_from(projects_root: &Path) -> Vec<AgentSessionRow
                 classify_claude_session_path(projects_root, &path)?;
             let file_metadata = fs::metadata(&path).ok()?;
             let metadata = cached_claude_metadata(&mut cache, &path, &file_metadata)?;
+            let runtime_status = apply_claude_runtime_freshness(
+                metadata.runtime_status.as_deref().unwrap_or("unknown"),
+                file_metadata.modified().ok(),
+                SystemTime::now(),
+            );
             Some(native_row(
                 "claude-code",
                 session_id,
                 parent_session_id.or(metadata.parent_session_id),
-                metadata
-                    .runtime_status
-                    .unwrap_or_else(|| "unknown".to_string()),
+                runtime_status,
                 metadata.title,
                 metadata.project_path,
                 metadata.native_started_at,
@@ -397,7 +402,33 @@ fn infer_claude_runtime_status(path: &Path) -> String {
             _ => {}
         }
     }
-    status.to_string()
+    apply_claude_runtime_freshness(
+        status,
+        fs::metadata(path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok()),
+        SystemTime::now(),
+    )
+}
+
+fn apply_claude_runtime_freshness(
+    status: &str,
+    modified_at: Option<SystemTime>,
+    now: SystemTime,
+) -> String {
+    let max_age_secs = match status {
+        "running" => CLAUDE_RUNNING_FRESHNESS_SECS,
+        "waiting_user" => CLAUDE_WAITING_USER_FRESHNESS_SECS,
+        _ => return status.to_string(),
+    };
+    let is_stale = modified_at
+        .and_then(|modified_at| now.duration_since(modified_at).ok())
+        .is_some_and(|age| age.as_secs() > max_age_secs);
+    if is_stale {
+        "idle".to_string()
+    } else {
+        status.to_string()
+    }
 }
 
 fn string_field(value: &Value, field: &str) -> Option<String> {
@@ -1081,6 +1112,43 @@ mod tests {
 
         assert_eq!(infer_claude_runtime_status(&path), "idle");
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn expires_stale_claude_running_and_waiting_states() {
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(200_000);
+        assert_eq!(
+            apply_claude_runtime_freshness(
+                "running",
+                Some(now - std::time::Duration::from_secs(CLAUDE_RUNNING_FRESHNESS_SECS + 1)),
+                now,
+            ),
+            "idle"
+        );
+        assert_eq!(
+            apply_claude_runtime_freshness(
+                "waiting_user",
+                Some(now - std::time::Duration::from_secs(CLAUDE_WAITING_USER_FRESHNESS_SECS + 1,)),
+                now,
+            ),
+            "idle"
+        );
+        assert_eq!(
+            apply_claude_runtime_freshness(
+                "running",
+                Some(now - std::time::Duration::from_secs(CLAUDE_RUNNING_FRESHNESS_SECS - 1)),
+                now,
+            ),
+            "running"
+        );
+        assert_eq!(
+            apply_claude_runtime_freshness(
+                "waiting_user",
+                Some(now - std::time::Duration::from_secs(CLAUDE_WAITING_USER_FRESHNESS_SECS - 1,)),
+                now,
+            ),
+            "waiting_user"
+        );
     }
 
     #[test]

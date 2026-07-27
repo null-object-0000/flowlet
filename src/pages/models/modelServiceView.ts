@@ -1,5 +1,9 @@
 import type { ChannelAccount } from "../../domains/account/types";
-import type { ChannelPreset } from "../../domains/channel/types";
+import {
+  canonicalModelId,
+  officialChannelIdForModel,
+  type ChannelPreset,
+} from "../../domains/channel/types";
 import type { RouteCandidate } from "../../domains/model/types";
 
 export type ModelRouteGroup = {
@@ -52,10 +56,16 @@ export function buildModelServiceItems(
   }
 
   for (const route of routes) {
-    const aggregate = route.virtual_model_id === "flowlet-pro" || route.virtual_model_id === "flowlet-flash";
-    const current = groups.get(route.virtual_model_id) ?? {
+    const normalizedPublicModel = route.virtual_model_id.trim().toLowerCase();
+    const aggregate = normalizedPublicModel === "flowlet-pro" || normalizedPublicModel === "flowlet-flash";
+    const publicModel = aggregate
+      ? normalizedPublicModel
+      : canonicalModelId(route.virtual_model_id) ?? route.virtual_model_id.trim();
+    const groupKey = publicModel.toLowerCase();
+    const ownerChannelId = officialChannelIdForModel(publicModel) ?? route.channel_id;
+    const current = groups.get(groupKey) ?? {
       item: {
-        publicModel: route.virtual_model_id,
+        publicModel,
         kind: aggregate ? "aggregate" : "direct",
         routeIds: [],
         routes: [],
@@ -63,8 +73,8 @@ export function buildModelServiceItems(
         enabled: false,
         available: false,
         availableAccountCount: 0,
-        channelId: aggregate ? undefined : route.channel_id,
-        channelName: aggregate ? undefined : channelById.get(route.channel_id)?.name ?? route.channel_id,
+        channelId: aggregate ? undefined : ownerChannelId,
+        channelName: aggregate ? undefined : channelById.get(ownerChannelId)?.name ?? ownerChannelId,
       },
       accountIds: new Set<string>(),
     };
@@ -76,7 +86,7 @@ export function buildModelServiceItems(
       current.item.available = true;
       current.accountIds.add(account.id);
     }
-    groups.set(route.virtual_model_id, current);
+    groups.set(groupKey, current);
   }
 
   return [...groups.values()]

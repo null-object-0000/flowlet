@@ -296,14 +296,23 @@ impl Storage {
                 }
                 _ => (ACCOUNT_CREDENTIAL_HEALTHY.to_string(), None),
             };
+            let synced_models_json = account
+                .synced_models
+                .as_ref()
+                .and_then(|models| serde_json::to_string(models).ok());
+            let exposed_models_json = account
+                .exposed_models
+                .as_ref()
+                .and_then(|models| serde_json::to_string(models).ok());
             tx.execute(
                 r#"
                 INSERT INTO channel_accounts (
                     id, channel_id, name, api_key, enabled, priority,
                     remark, resource_mode, resource_sync_mode, base_url_override,
                     anthropic_base_url_override, last_used_at, last_error,
-                    credential_status, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                    credential_status, synced_models, models_synced_at, exposed_models,
+                    created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
                 "#,
                 params![
                     account.id,
@@ -320,6 +329,9 @@ impl Storage {
                     account.last_used_at,
                     last_error,
                     credential_status,
+                    synced_models_json,
+                    account.models_synced_at,
+                    exposed_models_json,
                     account.created_at,
                     account.updated_at,
                 ],
@@ -337,10 +349,17 @@ impl Storage {
         let mut stmt = connection.prepare(
             "SELECT id, channel_id, name, api_key, enabled, priority,
                     remark, resource_mode, resource_sync_mode, base_url_override, anthropic_base_url_override,
-                    last_used_at, last_error, credential_status, created_at, updated_at
+                    last_used_at, last_error, credential_status, synced_models, models_synced_at, exposed_models,
+                    created_at, updated_at
              FROM channel_accounts ORDER BY channel_id ASC, priority ASC, id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
+            let synced_models: Option<Vec<String>> = row
+                .get::<_, Option<String>>(14)?
+                .and_then(|json| serde_json::from_str(&json).ok());
+            let exposed_models: Option<Vec<String>> = row
+                .get::<_, Option<String>>(16)?
+                .and_then(|json| serde_json::from_str(&json).ok());
             Ok(ChannelAccount {
                 id: row.get(0)?,
                 channel_id: row.get(1)?,
@@ -358,8 +377,11 @@ impl Storage {
                 credential_status: row
                     .get::<_, String>(13)
                     .unwrap_or_else(|_| "healthy".to_string()),
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
+                synced_models,
+                models_synced_at: row.get(15)?,
+                exposed_models,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         })?;
         let mut accounts = Vec::new();

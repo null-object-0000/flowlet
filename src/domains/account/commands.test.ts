@@ -42,14 +42,22 @@ describe("accountCommands contract", () => {
     });
   });
 
-  it("syncModels -> sync_models with { accountId }", async () => {
+  it("fetchChannelModels -> fetch_channel_models with connection params (camelCase)", async () => {
     invokeMock.mockResolvedValueOnce({
       models_synced: 2,
       models: [{ model: "x" }],
       errors: [],
     });
-    const r = await accountCommands.syncModels("a1");
-    expect(invokeMock).toHaveBeenCalledWith("sync_models", { accountId: "a1" });
+    const r = await accountCommands.fetchChannelModels({
+      channel_id: "deepseek",
+      api_key: "sk",
+      base_url_override: "https://custom.example/v1",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("fetch_channel_models", {
+      channelId: "deepseek",
+      apiKey: "sk",
+      baseUrlOverride: "https://custom.example/v1",
+    });
     expect(r.models_synced).toBe(2);
   });
 

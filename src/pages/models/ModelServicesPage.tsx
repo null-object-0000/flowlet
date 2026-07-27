@@ -23,7 +23,6 @@ import {
   aggregateCapabilitiesIntersection,
   aggregateMaxPrice,
   aggregateMaxStandardPrice,
-  PROVIDER_BY_CHANNEL,
 } from "../../domains/modelCatalog";
 import type { ModelsCnPrice, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
 import { useModelsCnCatalogSync } from "../../features/background-tasks/useBackgroundTasks";
@@ -171,7 +170,7 @@ export function ModelServicesPage() {
               aria-label={t("渠道类型")}
               optionList={[
                 { value: "all", label: t("全部渠道") },
-                ...buildChannelFilterOptions(models),
+                ...buildChannelFilterOptions(models, channels.data ?? []),
               ]}
               onChange={(value) => setChannelFilter(String(value))}
             />
@@ -400,8 +399,6 @@ function ModelDetail({ model, accounts, channels, channelModels, prices, catalog
     if (!model || model.kind !== "aggregate" || !catalog) return null;
     const subModels: ResolvedModel[] = [];
     for (const route of model.routeGroups) {
-      const providerId = PROVIDER_BY_CHANNEL[route.channelId];
-      if (!providerId) continue;
       const resolved = resolveChannelModel(catalog, route.channelId, route.upstreamModel);
       if (resolved) subModels.push(resolved);
     }

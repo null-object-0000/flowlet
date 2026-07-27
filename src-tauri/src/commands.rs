@@ -9,7 +9,7 @@ use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
 use crate::core::sync::{
     query_deepseek_balance, query_kimi_balance, sync_deepseek_models, sync_kimi_models,
-    sync_longcat_models, sync_qwen_models, test_channel_connection,
+    sync_longcat_models, sync_openai_compatible_models, sync_qwen_models, test_channel_connection,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
@@ -491,10 +491,21 @@ pub(super) fn repair_usage_costs(
 }
 
 #[tauri::command]
-pub(super) fn usage_summary(
+pub(super) async fn usage_summary(
     state: tauri::State<'_, AppState>,
+    period: String,
 ) -> Result<Vec<UsageSummaryRow>, String> {
-    state.storage.usage_summary().map_err(|err| err.to_string())
+    if !matches!(
+        period.as_str(),
+        "all" | "year" | "quarter" | "month" | "week"
+    ) {
+        return Err(format!("不支持的用量统计周期：{period}"));
+    }
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || storage.usage_summary(&period))
+        .await
+        .map_err(|err| format!("读取用量统计任务失败：{err}"))?
+        .map_err(|err| err.to_string())
 }
 
 /// 概览页「今日消耗」专用：只返回今日 Token 消耗总量（单个整数）。
@@ -1114,29 +1125,39 @@ pub(super) async fn query_balance(
     Ok(result)
 }
 
+/// 用连接参数拉取某渠道上游的模型列表（底层 /models 能力）。
+///
+/// 与 test_connection 一样接收连接参数而非 account_id，因此新建（尚未保存）的账号
+/// 也能拉取。成功后把结果写入 `channel_models` 目录（供模型服务页展示），但**不**写
+/// 账号的 `synced_models` / `exposed_models`——那些由账号编辑器保存时按用户勾选持久化。
 #[tauri::command]
-pub(super) async fn sync_models(
+pub(super) async fn fetch_channel_models(
     state: tauri::State<'_, AppState>,
-    account_id: String,
+    channel_id: String,
+    api_key: String,
+    base_url_override: Option<String>,
 ) -> Result<ModelSyncResult, String> {
-    let account = {
-        let accounts = state
-            .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        accounts
-            .iter()
-            .find(|a| a.id == account_id)
-            .ok_or("账号不存在")?
-            .clone()
+    let account = ChannelAccount {
+        id: String::new(),
+        channel_id: channel_id.clone(),
+        api_key,
+        base_url_override,
+        enabled: true,
+        ..Default::default()
     };
 
-    let channel_id = account.channel_id.clone();
     let config = state
         .channels_config
         .lock()
         .map_err(|_| "锁定渠道运行时配置失败".to_string())?
         .clone();
+    let preset = state
+        .channels
+        .lock()
+        .map_err(|_| "读取渠道模板失败".to_string())?
+        .iter()
+        .find(|preset| preset.id == channel_id)
+        .cloned();
 
     let result = match channel_id.as_str() {
         "deepseek" => tauri::async_runtime::spawn_blocking(move || {
@@ -1175,17 +1196,28 @@ pub(super) async fn sync_models(
         })
         .await
         .map_err(|e| format!("任务执行失败: {e}"))?,
+        "custom" => {
+            let preset = preset.ok_or_else(|| "自定义渠道模板不存在".to_string())?;
+            tauri::async_runtime::spawn_blocking(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap_or_else(|_| panic!("创建运行时失败"));
+                rt.block_on(sync_openai_compatible_models(&account, &preset))
+            })
+            .await
+            .map_err(|e| format!("任务执行失败: {e}"))?
+        }
         _ => {
             return Ok(ModelSyncResult {
                 models_synced: 0,
                 models: Vec::new(),
-                errors: vec![
-                    "当前仅 DeepSeek、LongCat、Kimi 和千问 Qwen 支持模型列表同步".to_string(),
-                ],
+                errors: vec!["当前渠道不支持拉取模型列表".to_string()],
             });
         }
     };
 
+    // 更新渠道模型目录（按 channel_id 替换），供模型服务页展示该渠道上游实际提供的模型。
     if result.errors.is_empty() {
         let mut models = state
             .storage
@@ -1199,11 +1231,6 @@ pub(super) async fn sync_models(
             .storage
             .save_channel_models(&models)
             .map_err(|err| err.to_string())?;
-        let _ = state.storage.update_account_last_used(&account_id);
-    } else if let Some(first_err) = result.errors.first() {
-        let _ = state
-            .storage
-            .update_account_last_error(&account_id, first_err);
     }
 
     Ok(result)
@@ -1809,24 +1836,25 @@ pub(super) async fn handle_intercepted_response(
         .lock()
         .map_err(|_| "锁定抓取缓冲失败".to_string())?;
     let entry = guard.entry(account_id.clone()).or_default();
-    // 按 URL 分类去重:同类型响应只保留最新
     let kind = classify_response_url(&url);
-    entry.retain(|(u, _)| classify_response_url(u) != kind);
+    let body_bytes = body.len();
+    scrape_console::record_captured_response(entry, url.clone(), body);
     tracing::info!(
         account_id = %account_id,
         channel_id = %channel_id,
         response_kind = %kind,
         response_url = %url,
-        body_bytes = body.len(),
+        body_bytes,
         "控制台抓取捕获到页面业务响应"
     );
-    entry.push((url, body));
     Ok(())
 }
 
 #[cfg(test)]
 mod scrape_capture_tests {
-    use super::{captured_longcat_token_packs, is_explicit_login_url, scrape_responses_complete};
+    use super::{
+        is_explicit_login_url, merge_longcat_token_packs, scrape_responses_complete,
+    };
     use crate::core::scrape_console::ScrapeModeRuntime;
 
     #[test]
@@ -1886,12 +1914,65 @@ mod scrape_capture_tests {
                 .to_string(),
         )]);
 
-        let token_packs = captured_longcat_token_packs(&slots).expect("token packs");
+        let token_packs = merge_longcat_token_packs(&slots, None).expect("token packs");
         let parsed: serde_json::Value =
             serde_json::from_str(&token_packs).expect("valid token packs json");
         assert_eq!(parsed.as_array().map(Vec::len), Some(2));
         assert_eq!(parsed[0]["lotId"], 151724);
         assert_eq!(parsed[1]["lotId"], 159869);
+    }
+
+    #[test]
+    fn deduplicates_longcat_summary_and_list_by_cep_business_order() {
+        let slots = std::collections::HashMap::from([
+            (
+                "token_packs_summary".to_string(),
+                r#"{"code":0,"data":{"currentLot":{"lotId":160795,"bizOrderNo":"CEP-2071803119104245853","totalToken":5000000,"consumedToken":5000000,"remainingToken":0,"status":"EXHAUSTED"},"otherLots":[]}}"#.to_string(),
+            ),
+            (
+                "token_packs_list".to_string(),
+                r#"{"code":0,"data":{"items":[{"resourceId":"2071803119104245853","packageId":"2071803119104245853","packageName":"问卷Token包","statusCode":4,"statusText":"已用尽","totalTokenAmount":5000000,"usedTokenAmount":5000000,"remainTokenAmount":0},{"resourceId":"2071771394512937000","packageId":"2071771394512937000","packageName":"实名奖励Token1000万资源包","statusCode":4,"statusText":"已用尽","totalTokenAmount":10000000,"usedTokenAmount":10000000,"remainTokenAmount":0}]}}"#.to_string(),
+            ),
+        ]);
+
+        let packs = merge_longcat_token_packs(&slots, None).expect("merged packs");
+        let parsed: Vec<serde_json::Value> =
+            serde_json::from_str(&packs).expect("valid merged packs");
+        assert_eq!(parsed.len(), 2, "summary 与对应 list item 不应重复");
+        let matched = parsed
+            .iter()
+            .find(|pack| pack["packageId"] == "2071803119104245853")
+            .expect("matched summary pack");
+        assert_eq!(matched["lotId"], 160795, "保留 summary 内部 lotId");
+        assert_eq!(matched["packageName"], "问卷Token包");
+        assert_eq!(matched["statusText"], "已用尽");
+        assert_eq!(matched["totalToken"], 5_000_000);
+        assert!(
+            matched.get("_fromList").is_none(),
+            "匹配项仍是 summary 权威记录，不应标记为纯 list 补充项"
+        );
+
+        // 即使旧 extractor 已经把 list item 作为重复项追加，Rust 最终归一化仍应去重。
+        let extracted = serde_json::to_string(&[
+            serde_json::json!({
+                "lotId": 160795,
+                "bizOrderNo": "CEP-2071803119104245853",
+                "totalToken": 5_000_000
+            }),
+            serde_json::json!({
+                "lotId": "2071803119104245853",
+                "packageName": "问卷Token包",
+                "statusCode": 4,
+                "statusText": "已用尽",
+                "_fromList": true
+            }),
+        ])
+        .unwrap();
+        let normalized =
+            merge_longcat_token_packs(&slots, Some(&extracted)).expect("normalized packs");
+        let normalized: Vec<serde_json::Value> =
+            serde_json::from_str(&normalized).expect("valid normalized packs");
+        assert_eq!(normalized.len(), 2);
     }
 }
 
@@ -1917,9 +1998,9 @@ fn scrape_responses_complete(
     let slots = responses
         .iter()
         .filter_map(|(url, body)| {
-            serde_json::from_str::<serde_json::Value>(body)
-                .ok()
-                .map(|_| (classify_response_url(url).to_string(), body.clone()))
+            let kind = classify_response_url(url);
+            scrape_console::captured_response_satisfies_slot(kind, body)
+                .then(|| (kind.to_string(), body.clone()))
         })
         .collect::<std::collections::HashMap<_, _>>();
     scrape_console::aggregate_complete(&slots, mode)
@@ -1938,33 +2019,209 @@ fn collect_scrape_slots(
         .into_iter()
         .flatten()
         .filter_map(|(url, body)| {
-            serde_json::from_str::<serde_json::Value>(body)
-                .ok()
-                .map(|_| (classify_response_url(url).to_string(), body.clone()))
+            let kind = classify_response_url(url);
+            scrape_console::captured_response_satisfies_slot(kind, body)
+                .then(|| (kind.to_string(), body.clone()))
         })
         .collect())
 }
 
-/// 从 LongCat 原始响应兜底提取完整资源包数组。除了兼容旧版外部
-/// config.json 中尚未返回 token_packs 的 extractor，也保证资源包明细
-/// 不会因为汇总解析器被自定义而丢失。
-fn captured_longcat_token_packs(
+/// 从 LongCat 原始响应兜底提取并归一化完整资源包数组。
+///
+/// summary 的 lotId 是内部批次 ID，list 的 resourceId/packageId 是套餐资源 ID，
+/// 二者不能直接比较。跨接口关联使用：
+/// `summary.bizOrderNo == "CEP-" + list.packageId`。
+/// list 响应负责补充名称、展示状态等字段，但 summary 的额度数值保持权威。
+fn merge_longcat_token_packs(
     slots: &std::collections::HashMap<String, String>,
+    extracted: Option<&str>,
 ) -> Option<String> {
-    let raw = slots.get("token_packs_summary")?;
-    let root = serde_json::from_str::<serde_json::Value>(raw).ok()?;
-    let data = root.get("data").unwrap_or(&root);
-    let mut lots = Vec::new();
-    if let Some(current) = data.get("currentLot").filter(|value| value.is_object()) {
-        lots.push(current.clone());
+    let mut candidates = Vec::new();
+    // summary 始终先进入候选，确保额度数值和内部 lotId 为权威来源；旧 extractor
+    // 即使只返回 list 明细，也会在后续按 bizOrderNo/packageId 合并到 summary。
+    if let Some(raw) = slots.get("token_packs_summary") {
+        if let Ok(root) = serde_json::from_str::<serde_json::Value>(raw) {
+            let data = root.get("data").unwrap_or(&root);
+            if let Some(current) = data.get("currentLot").filter(|value| value.is_object()) {
+                candidates.push(current.clone());
+            }
+            if let Some(others) = data.get("otherLots").and_then(|value| value.as_array()) {
+                candidates.extend(
+                    others
+                        .iter()
+                        .filter(|value| value.is_object())
+                        .cloned(),
+                );
+            }
+        }
     }
-    if let Some(others) = data.get("otherLots").and_then(|value| value.as_array()) {
-        lots.extend(others.iter().filter(|value| value.is_object()).cloned());
+    if let Some(extracted) =
+        extracted.and_then(|raw| serde_json::from_str::<Vec<serde_json::Value>>(raw).ok())
+    {
+        candidates.extend(extracted);
     }
-    if lots.is_empty() {
+
+    if let Some(raw) = slots.get("token_packs_list") {
+        if let Ok(root) = serde_json::from_str::<serde_json::Value>(raw) {
+            let data = root.get("data").unwrap_or(&root);
+            if let Some(items) = data.get("items").and_then(|value| value.as_array()) {
+                candidates.extend(items.iter().filter_map(longcat_list_item_as_pack));
+            }
+        }
+    }
+
+    let mut packs = Vec::<serde_json::Value>::new();
+    let mut indexes = std::collections::HashMap::<String, usize>::new();
+    for candidate in candidates {
+        let keys = longcat_pack_identity_keys(&candidate);
+        let existing_index = keys.iter().find_map(|key| indexes.get(key).copied());
+        if let Some(index) = existing_index {
+            merge_longcat_pack_details(&mut packs[index], candidate);
+            for key in longcat_pack_identity_keys(&packs[index]) {
+                indexes.insert(key, index);
+            }
+        } else {
+            let index = packs.len();
+            packs.push(candidate);
+            for key in longcat_pack_identity_keys(&packs[index]) {
+                indexes.insert(key, index);
+            }
+        }
+    }
+
+    if packs.is_empty() {
         None
     } else {
-        serde_json::to_string(&lots).ok()
+        serde_json::to_string(&packs).ok()
+    }
+}
+
+fn longcat_list_item_as_pack(item: &serde_json::Value) -> Option<serde_json::Value> {
+    let resource_id = item.get("resourceId").or_else(|| item.get("packageId"))?;
+    let mut pack = serde_json::Map::new();
+    pack.insert("lotId".to_string(), resource_id.clone());
+    pack.insert("packageId".to_string(), resource_id.clone());
+    pack.insert("_fromList".to_string(), serde_json::Value::Bool(true));
+    let mappings = [
+        ("packageName", "packageName"),
+        ("sourceTypeCode", "sourceTypeCode"),
+        ("sourceTypeText", "sourceTypeText"),
+        ("statusCode", "statusCode"),
+        ("statusText", "statusText"),
+        ("displayStatusCode", "displayStatusCode"),
+        ("displayStatusText", "displayStatusText"),
+        ("totalTokenAmount", "totalToken"),
+        ("usedTokenAmount", "consumedToken"),
+        ("remainTokenAmount", "remainingToken"),
+        ("validEndTime", "expireTime"),
+        ("validStartTime", "validStartTime"),
+        ("acquireTime", "acquireTime"),
+        ("acquireDateText", "acquireDateText"),
+        ("usagePercent", "usagePercent"),
+        ("validDays", "validDays"),
+        ("applicableModels", "applicableModels"),
+        ("skuCode", "skuCode"),
+        ("productId", "productId"),
+    ];
+    for (source, target) in mappings {
+        if let Some(value) = item.get(source) {
+            pack.insert(target.to_string(), value.clone());
+        }
+    }
+    Some(serde_json::Value::Object(pack))
+}
+
+fn longcat_pack_identity_keys(pack: &serde_json::Value) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Some(biz_order_no) = pack.get("bizOrderNo").and_then(|value| value.as_str()) {
+        keys.push(format!("biz:{biz_order_no}"));
+        if let Some(package_id) = biz_order_no.strip_prefix("CEP-") {
+            keys.push(format!("package:{package_id}"));
+        }
+    }
+    if let Some(package_id) = pack
+        .get("packageId")
+        .or_else(|| pack.get("resourceId"))
+        .and_then(json_scalar_string)
+    {
+        keys.push(format!("package:{package_id}"));
+        keys.push(format!("biz:CEP-{package_id}"));
+    } else if pack
+        .get("_fromList")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        if let Some(package_id) = pack.get("lotId").and_then(json_scalar_string) {
+            keys.push(format!("package:{package_id}"));
+            keys.push(format!("biz:CEP-{package_id}"));
+        }
+    }
+    if let Some(lot_id) = pack.get("lotId").and_then(json_scalar_string) {
+        keys.push(format!("lot:{lot_id}"));
+    }
+    keys
+}
+
+fn json_scalar_string(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .or_else(|| value.as_u64().map(|value| value.to_string()))
+        .or_else(|| value.as_i64().map(|value| value.to_string()))
+}
+
+fn merge_longcat_pack_details(target: &mut serde_json::Value, incoming: serde_json::Value) {
+    let target_from_list = target
+        .get("_fromList")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let incoming_from_list = incoming
+        .get("_fromList")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+
+    if target_from_list && !incoming_from_list {
+        let previous = std::mem::replace(target, incoming);
+        enrich_longcat_pack_from_list(target, &previous);
+    } else if incoming_from_list {
+        enrich_longcat_pack_from_list(target, &incoming);
+    }
+}
+
+fn enrich_longcat_pack_from_list(target: &mut serde_json::Value, list_pack: &serde_json::Value) {
+    let Some(target) = target.as_object_mut() else {
+        return;
+    };
+    let Some(list_pack) = list_pack.as_object() else {
+        return;
+    };
+    let package_id = list_pack
+        .get("packageId")
+        .or_else(|| list_pack.get("lotId"))
+        .cloned();
+    if let Some(package_id) = package_id {
+        target.insert("packageId".to_string(), package_id);
+    }
+    for field in [
+        "packageName",
+        "sourceTypeCode",
+        "sourceTypeText",
+        "statusCode",
+        "statusText",
+        "displayStatusCode",
+        "displayStatusText",
+        "validStartTime",
+        "acquireTime",
+        "acquireDateText",
+        "usagePercent",
+        "validDays",
+        "applicableModels",
+        "skuCode",
+        "productId",
+    ] {
+        if let Some(value) = list_pack.get(field) {
+            target.insert(field.to_string(), value.clone());
+        }
     }
 }
 
@@ -1988,6 +2245,48 @@ fn native_scrape_capture_ready(
         .lock()
         .map_err(|_| "锁定原生抓取监听状态失败".to_string())?;
     Ok(guard.contains(account_id))
+}
+
+fn scrape_interaction_required(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+) -> Result<bool, String> {
+    let guard = state
+        .scrape_interaction_required
+        .lock()
+        .map_err(|_| "锁定控制台交互状态失败".to_string())?;
+    Ok(guard.contains(account_id))
+}
+
+fn set_scrape_interaction_required(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+    required: bool,
+) -> Result<(), String> {
+    let mut guard = state
+        .scrape_interaction_required
+        .lock()
+        .map_err(|_| "锁定控制台交互状态失败".to_string())?;
+    if required {
+        guard.insert(account_id.to_string());
+    } else {
+        guard.remove(account_id);
+    }
+    Ok(())
+}
+
+fn current_scrape_page_url(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+) -> Result<Option<String>, String> {
+    let guard = state
+        .scrape_webviews
+        .lock()
+        .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+    Ok(guard
+        .get(account_id)
+        .and_then(|window| window.url().ok())
+        .map(|url| url.to_string()))
 }
 
 /// 只识别明确的登录页面。目标响应未出现、页面加载慢或拦截器异常都不能据此判定未登录。
@@ -2016,9 +2315,8 @@ pub(super) async fn probe_scrape_login(
     interactive: Option<bool>,
 ) -> Result<ScrapeLoginStatus, String> {
     let interactive = interactive.unwrap_or(true);
-    // 1. 确保 webview 存在(会解析 channel_id)
-    open_scrape_console(app.clone(), state.clone(), account_id.clone()).await?;
-
+    // 1. 先解析账号与抓取模式。交互式刷新从这里开始占用该账号，直到完整抓取成功；
+    //    后台轮次看到这个标记后必须跳过，不能重新导航用户正在登录的 WebView。
     let (channel_id, mode) = {
         let accounts = state
             .accounts
@@ -2040,13 +2338,28 @@ pub(super) async fn probe_scrape_login(
         .ok_or("该账号所属渠道不支持控制台抓取")?;
         (account.channel_id.clone(), mode)
     };
+    if interactive {
+        set_scrape_interaction_required(&state, &account_id, true)?;
+    } else if scrape_interaction_required(&state, &account_id)? {
+        return Ok(ScrapeLoginStatus {
+            is_logged_in: false,
+            channel_id,
+            account_hint: None,
+            probe_state: ScrapeProbeState::LoginRequired,
+            message: Some("账号正在等待控制台登录或人工处理，本轮自动同步已跳过。".to_string()),
+        });
+    }
+
+    // 2. 确保 webview 存在。
+    open_scrape_console(app.clone(), state.clone(), account_id.clone()).await?;
+
     tracing::info!(
         account_id = %account_id,
         channel_id = %channel_id,
         native_ready = native_scrape_capture_ready(&state, &account_id)?,
         "开始刷新控制台并等待业务响应"
     );
-    // 2. 先清空旧响应和旧 document ACK，再依次导航到各控制台页面。
+    // 3. 先清空旧响应和旧 document ACK，再依次导航到各控制台页面。
     //    LongCat hybrid 模式下 token 资源包与按量余额分属不同标签页(?tab=token /
     //    ?tab=api),需多阶段导航;响应累积在同一个 scrape_pending 缓冲中,按 URL
     //    分类到不同槽位(token_packs_summary / api_usage_summary)。
@@ -2076,8 +2389,12 @@ pub(super) async fn probe_scrape_login(
     let phase_count = phase_urls.len();
     let mut ready_for_last_phase = None;
     let mut last_interceptor_page_url = String::new();
+    let mut explicit_login_page_url = None;
 
-    for (phase_index, phase_url) in phase_urls.into_iter().enumerate() {
+    'phases: for (phase_index, phase_url) in phase_urls.into_iter().enumerate() {
+        if !interactive && scrape_interaction_required(&state, &account_id)? {
+            break;
+        }
         let expected_slots =
             scrape_console::required_slots_for_phase(&mode, phase_index, phase_count);
         let phase_started_at = std::time::Instant::now();
@@ -2113,10 +2430,19 @@ pub(super) async fn probe_scrape_login(
         }
         last_interceptor_page_url = phase_url.to_string();
 
-        // 3. 先等当前 document 的监听 ACK。响应可能先于 ACK 回传，因此完整响应也可直接
+        // 4. 先等当前 document 的监听 ACK。响应可能先于 ACK 回传，因此完整响应也可直接
         // 作为监听已生效的证据。这里超时只说明监听/页面初始化失败，不代表未登录。
         let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let ready = loop {
+            if let Some(page_url) = current_scrape_page_url(&state, &account_id)? {
+                if is_explicit_login_url(&channel_id, &page_url) {
+                    explicit_login_page_url = Some(page_url);
+                    break None;
+                }
+            }
+            if !interactive && scrape_interaction_required(&state, &account_id)? {
+                break None;
+            }
             if has_complete_scrape_capture(&state, &account_id, &mode)? {
                 break Some(crate::core::scrape_console::ScrapeInterceptorReady {
                     document_id: "captured-response".to_string(),
@@ -2149,13 +2475,27 @@ pub(super) async fn probe_scrape_login(
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         };
         ready_for_last_phase = ready.clone();
+        if explicit_login_page_url.is_some()
+            || (!interactive && scrape_interaction_required(&state, &account_id)?)
+        {
+            break 'phases;
+        }
 
-        // 4. 监听就绪后等待本阶段明确需要的响应。不能以“出现任意新槽位”作为
+        // 5. 监听就绪后等待本阶段明确需要的响应。不能以“出现任意新槽位”作为
         //    完成条件：LongCat 页面会产生大量 usage 页面/埋点响应，Qwen 的三个接口
         //    也可能相差几十毫秒到达。
         if ready.is_some() {
             let capture_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
             while std::time::Instant::now() < capture_deadline {
+                if let Some(page_url) = current_scrape_page_url(&state, &account_id)? {
+                    if is_explicit_login_url(&channel_id, &page_url) {
+                        explicit_login_page_url = Some(page_url);
+                        break;
+                    }
+                }
+                if !interactive && scrape_interaction_required(&state, &account_id)? {
+                    break;
+                }
                 let slots = collect_scrape_slots(&state, &account_id)?;
                 let phase_complete = if expected_slots.is_empty() {
                     !slots.is_empty()
@@ -2167,6 +2507,11 @@ pub(super) async fn probe_scrape_login(
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             }
+        }
+        if explicit_login_page_url.is_some()
+            || (!interactive && scrape_interaction_required(&state, &account_id)?)
+        {
+            break 'phases;
         }
 
         let slots = collect_scrape_slots(&state, &account_id)?;
@@ -2201,25 +2546,17 @@ pub(super) async fn probe_scrape_login(
 
     let ready = ready_for_last_phase;
     let captured = has_complete_scrape_capture(&state, &account_id, &mode)?;
-    let current_page_url = {
-        let guard = state
-            .scrape_webviews
-            .lock()
-            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-        guard
-            .get(&account_id)
-            .and_then(|window| window.url().ok())
-            .map(|url| url.to_string())
-            .or_else(|| {
-                ready
-                    .as_ref()
-                    .map(|value| value.page_url.clone())
-                    .or_else(|| {
-                        (!last_interceptor_page_url.is_empty()).then_some(last_interceptor_page_url)
-                    })
-            })
-            .unwrap_or_default()
-    };
+    let current_page_url = explicit_login_page_url
+        .or(current_scrape_page_url(&state, &account_id)?)
+        .or_else(|| {
+            ready
+                .as_ref()
+                .map(|value| value.page_url.clone())
+                .or_else(|| {
+                    (!last_interceptor_page_url.is_empty()).then_some(last_interceptor_page_url)
+                })
+        })
+        .unwrap_or_default();
     let probe_state = if captured {
         ScrapeProbeState::Captured
     } else if is_explicit_login_url(&channel_id, &current_page_url) {
@@ -2229,6 +2566,14 @@ pub(super) async fn probe_scrape_login(
     } else {
         ScrapeProbeState::CaptureTimeout
     };
+    if matches!(
+        probe_state,
+        ScrapeProbeState::LoginRequired | ScrapeProbeState::ConsoleActionRequired
+    ) {
+        // 后台轮次首次发现登录失效/需要人工处理后也要记住该状态，后续周期直接
+        // 跳过，直到用户手动刷新并完整抓取成功。
+        set_scrape_interaction_required(&state, &account_id, true)?;
+    }
 
     let captured_slots = collect_scrape_slots(&state, &account_id)?;
     let captured_kinds = captured_slots.keys().cloned().collect::<Vec<_>>();
@@ -2330,6 +2675,9 @@ pub(super) async fn scrape_balance(
     interactive: Option<bool>,
 ) -> Result<ScrapeBalanceResult, String> {
     let interactive = interactive.unwrap_or(true);
+    if !interactive && scrape_interaction_required(&state, &account_id)? {
+        return Err("账号正在等待控制台登录或人工处理，本轮自动同步已跳过".to_string());
+    }
     // 1. 解析模式配置。
     let mode = {
         let accounts = state
@@ -2467,11 +2815,12 @@ pub(super) async fn scrape_balance(
         .get("token_expire_at")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let token_packs = parsed
+    let extracted_token_packs = parsed
         .get("token_packs")
         .filter(|value| value.is_array())
-        .and_then(|value| serde_json::to_string(value).ok())
-        .or_else(|| captured_longcat_token_packs(&slots));
+        .and_then(|value| serde_json::to_string(value).ok());
+    let token_packs =
+        merge_longcat_token_packs(&slots, extracted_token_packs.as_deref());
 
     let now = chrono::Utc::now().to_rfc3339();
     let raw_scraped_json = if mode.aggregate {
@@ -2531,6 +2880,9 @@ pub(super) async fn scrape_balance(
         if let Some(window) = guard.get(&account_id) {
             let _ = window.hide();
         }
+    }
+    if interactive {
+        set_scrape_interaction_required(&state, &account_id, false)?;
     }
 
     Ok(result)
@@ -2594,14 +2946,29 @@ pub(super) async fn sync_scrape_balances(
             .collect::<Vec<_>>()
     };
 
-    if accounts.is_empty() {
+    let waiting_for_interaction = {
+        let guard = state
+            .scrape_interaction_required
+            .lock()
+            .map_err(|_| "锁定控制台交互状态失败".to_string())?;
+        accounts
+            .iter()
+            .filter(|(account_id, ..)| guard.contains(account_id))
+            .count()
+    };
+
+    if accounts.is_empty() || waiting_for_interaction == accounts.len() {
         return Ok(ScrapeBalanceSyncResult {
             started: false,
             job_id: None,
             accounts: 0,
             synced: 0,
             failed: 0,
-            message: "没有启用控制台自动同步的账号".to_string(),
+            message: if waiting_for_interaction > 0 {
+                format!("{waiting_for_interaction} 个账号正在等待登录或人工处理，本轮已跳过")
+            } else {
+                "没有启用控制台自动同步的账号".to_string()
+            },
         });
     }
     if SCRAPE_BALANCE_SYNC_RUNNING
@@ -2635,6 +3002,7 @@ pub(super) async fn sync_scrape_balances(
 
     let mut synced = 0usize;
     let mut failed = 0usize;
+    let mut skipped = 0usize;
     for (index, (account_id, account_name, channel_id, channel_name, resource_mode)) in
         accounts.iter().enumerate()
     {
@@ -2649,6 +3017,21 @@ pub(super) async fn sync_scrape_balances(
             resource_mode = ?resource_mode,
             "开始同步渠道账号资源"
         );
+        if scrape_interaction_required(&state, account_id)? {
+            skipped += 1;
+            let _ = state.storage.add_job_event(
+                &job_id,
+                "info",
+                "跳过账号资源同步",
+                &format!("{account_label} 正在等待登录或人工处理，本轮已跳过"),
+            );
+            let _ = state.storage.update_job_progress(
+                &job_id,
+                (index + 1) as i64,
+                accounts.len() as i64,
+            );
+            continue;
+        }
         match scrape_balance(app.clone(), state.clone(), account_id.clone(), Some(false)).await {
             Ok(_) => {
                 synced += 1;
@@ -2680,6 +3063,7 @@ pub(super) async fn sync_scrape_balances(
         "accounts": accounts.len(),
         "syncedAccounts": synced,
         "failedAccounts": failed,
+        "skippedAccounts": skipped,
         "durationMs": duration_ms,
     })
     .to_string();
@@ -2693,7 +3077,10 @@ pub(super) async fn sync_scrape_balances(
                 "succeeded"
             },
             &summary,
-            &format!("渠道资源同步完成：成功 {synced} 个，失败 {failed} 个"),
+            &format!(
+                "渠道资源同步完成：成功 {synced} 个，失败 {failed} 个，跳过 {} 个",
+                skipped
+            ),
         )
         .map_err(|error| format!("完成渠道资源同步任务失败：{error}"))?;
 
@@ -2703,7 +3090,10 @@ pub(super) async fn sync_scrape_balances(
         accounts: accounts.len(),
         synced,
         failed,
-        message: format!("渠道资源同步完成：成功 {synced} 个，失败 {failed} 个"),
+        message: format!(
+            "渠道资源同步完成：成功 {synced} 个，失败 {failed} 个，跳过 {} 个",
+            skipped
+        ),
     })
 }
 

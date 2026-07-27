@@ -1,4 +1,5 @@
 import type { RouteCandidate } from "../../domains/model/types";
+import type { ChannelPreset } from "../../domains/channel/types";
 import { buildModelRouteGroups, type ModelServiceItem } from "./modelServiceView";
 
 export type ModelStatusFilter = "all" | "enabled" | "disabled";
@@ -25,12 +26,14 @@ export function filterModelServiceItems(
  *  避免 config.json 里新增但用户还没配账号的渠道提前出现在下拉列表里。 */
 export function buildChannelFilterOptions(
   models: ModelServiceItem[],
+  channels: ChannelPreset[] = [],
 ): Array<{ id: string; name: string }> {
+  const channelNames = new Map(channels.map((channel) => [channel.id, channel.name]));
   const channelIdToName = new Map<string, string>();
   for (const model of models) {
     for (const route of model.routes) {
       if (!channelIdToName.has(route.channel_id)) {
-        channelIdToName.set(route.channel_id, model.channelName ?? route.channel_id);
+        channelIdToName.set(route.channel_id, channelNames.get(route.channel_id) ?? route.channel_id);
       }
     }
   }

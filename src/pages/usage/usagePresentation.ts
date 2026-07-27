@@ -1,4 +1,5 @@
 import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
+import { canonicalModelId, officialChannelIdForModel } from "../../domains/channel/types";
 
 export type UsageAggregate = {
   cost: number;
@@ -67,11 +68,15 @@ export function summarizeUsage(rows: UsageSummaryRow[], currencyOf?: CostCurrenc
 export function groupUsageByModel(rows: UsageSummaryRow[], currencyOf?: CostCurrencyLookup): UsageBreakdown[] {
   return groupUsage(
     rows,
-    (row) => `${row.channel_id ?? "unknown-channel"}::${row.upstream_model ?? "unknown-model"}`,
-    (row) => row.upstream_model ?? "未知模型",
-    (row) => row.channel_id ?? "unknown-channel",
+    (row) => canonicalModelKey(row.upstream_model),
+    (row) => canonicalModelId(row.upstream_model) ?? row.upstream_model ?? "未知模型",
+    (row) => officialChannelIdForModel(row.upstream_model) ?? row.channel_id ?? "unknown-channel",
     currencyOf,
   );
+}
+
+function canonicalModelKey(modelId: string | null): string {
+  return (canonicalModelId(modelId) ?? modelId?.trim() ?? "unknown-model").toLowerCase();
 }
 
 export function groupUsageByChannel(rows: UsageSummaryRow[], currencyOf?: CostCurrencyLookup): UsageBreakdown[] {

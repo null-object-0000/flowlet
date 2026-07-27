@@ -20,6 +20,14 @@ export type ChannelAccount = {
   last_used_at: string | null;
   last_error: string | null;
   credential_status: AccountCredentialStatus;
+  /** 最近一次 /models 拉取得到的该账号上游模型 ID 列表（候选池）。仅用于编辑器预填
+   *  候选，null 表示尚未拉取。 */
+  synced_models: string[] | null;
+  /** 最近一次 /models 拉取成功的时间（ISO），与 synced_models 配套。 */
+  models_synced_at: string | null;
+  /** 用户显式勾选要开放的上游模型 ID 列表（已收敛到渠道白名单内）。
+   *  null = 尚未用新流程配置（路由保持现状）；数组（可为空）= 按此列表严格对账路由。 */
+  exposed_models: string[] | null;
   created_at: string;
   updated_at: string;
 };
@@ -74,6 +82,9 @@ export function newAccount(channelId: string, index: number): ChannelAccount {
     last_used_at: null,
     last_error: null,
     credential_status: "healthy",
+    synced_models: null,
+    models_synced_at: null,
+    exposed_models: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };

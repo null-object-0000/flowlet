@@ -1,7 +1,6 @@
+use super::request_capture::{RequestCapturePointer, RequestCaptureRecord};
 use super::{Storage, StorageError};
-use super::request_capture::{
-    RequestCapturePointer, RequestCaptureRecord,
-};
+use crate::core::channels_config::official_channel_id_for_model;
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentSessionRepairResult, AgentSessionRow,
     AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter, LogsPageResult,
@@ -188,9 +187,21 @@ fn estimate_cost(
 ) -> Option<CostBreakdown> {
     let channel_id = channel_id?;
     let upstream_model = upstream_model?;
+    // 实际渠道的显式价格优先；自定义渠道没有独立价格时，按模型 ID 回退到
+    // 官方归属渠道的基准价格。路由渠道仍原样保留用于渠道/账号维度统计。
     let price = prices
         .iter()
-        .find(|p| p.channel_id == channel_id && p.upstream_model == upstream_model)?;
+        .find(|p| {
+            p.channel_id.eq_ignore_ascii_case(channel_id)
+                && p.upstream_model.eq_ignore_ascii_case(upstream_model)
+        })
+        .or_else(|| {
+            let owner_channel_id = official_channel_id_for_model(upstream_model)?;
+            prices.iter().find(|p| {
+                p.channel_id.eq_ignore_ascii_case(owner_channel_id)
+                    && p.upstream_model.eq_ignore_ascii_case(upstream_model)
+            })
+        })?;
 
     // 按请求总输入 Token 选档；无分级时回退扁平单价。
     let (uncached_price, cached_price, cache_write_price, output_price) =
@@ -914,7 +925,7 @@ impl Storage {
             r#"
             SELECT
                 id, request_id, client_id, client_name, channel_id, channel_name,
-                account_id, account_name, client_protocol, upstream_protocol,
+                account_id, COALESCE((SELECT name FROM channel_accounts WHERE id = account_id), account_name) AS account_name, client_protocol, upstream_protocol,
                 virtual_model, public_model, upstream_model, request_type, method, path,
                 status, latency_ms, is_stream, error_message, fallback_count,
                 route_reason, created_at,
@@ -1082,7 +1093,7 @@ impl Storage {
             r#"
             SELECT
                 rl.id, rl.request_id, rl.client_id, rl.client_name, rl.channel_id, rl.channel_name,
-                rl.account_id, rl.account_name, rl.client_protocol, rl.upstream_protocol,
+                rl.account_id, COALESCE(ca.name, rl.account_name) AS account_name, rl.client_protocol, rl.upstream_protocol,
                 rl.virtual_model, rl.public_model, rl.upstream_model, rl.request_type, rl.method, rl.path,
                 rl.status, rl.latency_ms, rl.is_stream, rl.error_message, rl.fallback_count,
                 rl.route_reason, rl.created_at,
@@ -1099,6 +1110,7 @@ impl Storage {
                 rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+            LEFT JOIN channel_accounts ca ON ca.id = rl.account_id
             WHERE rl.request_id = ?1
             ORDER BY rl.attempt_seq ASC, rl.created_at ASC
             "#,
@@ -2069,12 +2081,59 @@ impl Storage {
         Ok(updated)
     }
 
-    pub fn usage_summary(&self) -> Result<Vec<UsageSummaryRow>, StorageError> {
+    pub fn usage_summary(&self, period: &str) -> Result<Vec<UsageSummaryRow>, StorageError> {
+        // 保留 request_logs.created_at 作为统计日期来源：历史修复可能在请求发生后才
+        // 补写 usage_records，直接使用 usage_records.created_at 会把历史用量归到修复日。
+        // period 只接受 command 边界校验后的固定枚举值，下面的片段不包含用户输入。
+        let period_clause = match period {
+            "week" => {
+                r#"
+                AND request_logs.created_at >= datetime(
+                    'now', 'localtime', 'start of day',
+                    printf('-%d days', (CAST(strftime('%w', 'now', 'localtime') AS INTEGER) + 6) % 7),
+                    'utc'
+                )
+                AND request_logs.created_at < datetime(
+                    'now', 'localtime', 'start of day',
+                    printf('-%d days', (CAST(strftime('%w', 'now', 'localtime') AS INTEGER) + 6) % 7),
+                    '+7 days', 'utc'
+                )
+            "#
+            }
+            "month" => {
+                r#"
+                AND request_logs.created_at >= datetime('now', 'localtime', 'start of month', 'utc')
+                AND request_logs.created_at < datetime('now', 'localtime', 'start of month', '+1 month', 'utc')
+            "#
+            }
+            "quarter" => {
+                r#"
+                AND request_logs.created_at >= datetime(
+                    'now', 'localtime', 'start of month',
+                    printf('-%d months', (CAST(strftime('%m', 'now', 'localtime') AS INTEGER) - 1) % 3),
+                    'utc'
+                )
+                AND request_logs.created_at < datetime(
+                    'now', 'localtime', 'start of month',
+                    printf('-%d months', (CAST(strftime('%m', 'now', 'localtime') AS INTEGER) - 1) % 3),
+                    '+3 months', 'utc'
+                )
+            "#
+            }
+            "year" => {
+                r#"
+                AND request_logs.created_at >= datetime('now', 'localtime', 'start of year', 'utc')
+                AND request_logs.created_at < datetime('now', 'localtime', 'start of year', '+1 year', 'utc')
+            "#
+            }
+            "all" => "",
+            _ => "",
+        };
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        let mut stmt = connection.prepare(
+        let sql = format!(
             r#"
             SELECT
                 strftime('%Y-%m-%d', request_logs.created_at, 'localtime') AS usage_date,
@@ -2083,7 +2142,7 @@ impl Storage {
                 usage_records.channel_id,
                 usage_records.channel_name,
                 usage_records.account_id,
-                usage_records.account_name,
+                COALESCE(ca.name, usage_records.account_name) AS account_name,
                 usage_records.upstream_model,
                 count(*) AS request_count,
                 coalesce(sum(usage_records.total_tokens), 0) AS known_tokens,
@@ -2097,11 +2156,15 @@ impl Storage {
             FROM usage_records
             LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
                                   AND request_logs.is_last_attempt = 1
+            LEFT JOIN channel_accounts ca ON ca.id = usage_records.account_id
+            WHERE 1 = 1
+            {period_clause}
             GROUP BY usage_date, usage_records.client_id, usage_records.channel_id,
                      usage_records.account_id, usage_records.upstream_model
             ORDER BY usage_date DESC, request_count DESC
             "#,
-        )?;
+        );
+        let mut stmt = connection.prepare(&sql)?;
         let rows = stmt.query_map([], |row| {
             Ok(UsageSummaryRow {
                 date: row
@@ -2167,7 +2230,7 @@ impl Storage {
             r#"
             SELECT
                 rl.account_id,
-                rl.account_name,
+                COALESCE(ca.name, rl.account_name) AS account_name,
                 rl.channel_id,
                 rl.channel_name,
                 count(*) AS total_requests,
@@ -2201,6 +2264,7 @@ impl Storage {
                 max(rl.created_at) AS last_used_at
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+            LEFT JOIN channel_accounts ca ON ca.id = rl.account_id
             WHERE rl.account_id IS NOT NULL
             GROUP BY rl.account_id
             ORDER BY total_requests DESC
@@ -2370,7 +2434,7 @@ impl Storage {
             for value in &raw_params[base..base + 6] {
                 refs.push(value);
             }
-            Some("(rl.path LIKE ? OR rl.request_id = ? OR rl.error_message LIKE ? OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ? OR COALESCE(rl.account_name, rl.account_id, '') LIKE ? OR COALESCE(rl.agent_session_id, '') LIKE ?)")
+            Some("(rl.path LIKE ? OR rl.request_id = ? OR rl.error_message LIKE ? OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ? OR COALESCE(ca.name, rl.account_name, rl.account_id, '') LIKE ? OR COALESCE(rl.agent_session_id, '') LIKE ?)")
         };
 
         let mut clauses: Vec<&str> = vec!["rl.is_last_attempt = 1"];
@@ -2421,6 +2485,7 @@ impl Storage {
                 COALESCE(SUM(ur.estimated_cost), 0)
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+            LEFT JOIN channel_accounts ca ON ca.id = rl.account_id
             {where_sql}
             "#,
         );
@@ -2455,7 +2520,7 @@ impl Storage {
             r#"
             SELECT
                 rl.id, rl.request_id, rl.client_id, rl.client_name, rl.channel_id, rl.channel_name,
-                rl.account_id, rl.account_name, rl.client_protocol, rl.upstream_protocol,
+                rl.account_id, COALESCE(ca.name, rl.account_name) AS account_name, rl.client_protocol, rl.upstream_protocol,
                 rl.virtual_model, rl.public_model, rl.upstream_model, rl.request_type, rl.method, rl.path,
                 rl.status, rl.latency_ms, rl.is_stream, rl.error_message, rl.fallback_count,
                 rl.route_reason, rl.created_at,
@@ -2470,6 +2535,7 @@ impl Storage {
                 rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+            LEFT JOIN channel_accounts ca ON ca.id = rl.account_id
             {where_sql}
             ORDER BY rl.created_at DESC
             LIMIT ? OFFSET ?
@@ -2573,6 +2639,7 @@ mod agent_session_filter_tests {
         AgentSessionRow {
             agent_type: agent_type.to_string(),
             session_id: "session-1".to_string(),
+            runtime_status: "unknown".to_string(),
             title: None,
             project_path: None,
             parent_session_id: None,
@@ -2711,6 +2778,23 @@ mod estimate_cost_tests {
         )
         .unwrap();
         // 1M uncached * 1.2 + 1M output * 7.2 = 1.2 + 7.2
+        approx(cost.total, 8.4);
+    }
+
+    #[test]
+    fn custom_channel_falls_back_to_the_models_official_price() {
+        let prices = vec![flat_price()];
+        let cost = estimate_cost(
+            &prices,
+            Some("custom"),
+            Some("qwen3.6-flash"),
+            Some(1_000_000),
+            Some(0),
+            Some(1_000_000),
+            None,
+            Some(1_000_000),
+        )
+        .unwrap();
         approx(cost.total, 8.4);
     }
 

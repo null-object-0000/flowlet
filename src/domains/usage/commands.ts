@@ -1,9 +1,9 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { UsageSummaryRow } from "./types";
+import type { UsagePeriod, UsageSummaryRow } from "./types";
 
 export const usageCommands = {
-  summary: (): Promise<UsageSummaryRow[]> =>
-    invokeCommand<UsageSummaryRow[]>("usage_summary").catch(toUsageError("usage_summary_failed")),
+  summary: (period: UsagePeriod): Promise<UsageSummaryRow[]> =>
+    invokeCommand<UsageSummaryRow[]>("usage_summary", { period }).catch(toUsageError("usage_summary_failed")),
   // 概览页「今日消耗」专用：只拉取今日 Token 总数（单个整数），避免每 30s
   // 拉全量汇总表。底层走索引范围扫描，持锁时间极短。
   todayTokens: (): Promise<number> =>

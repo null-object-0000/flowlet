@@ -1,5 +1,6 @@
 import type { ChannelModel } from "../../domains/model/types";
 import type { ModelPriceInfo } from "../../domains/settings/types";
+import { officialChannelIdForModel } from "../../domains/channel/types";
 import type { ModelServiceItem } from "./modelServiceView";
 
 /** 直接渠道模型的产品级基础信息：上下文/最大输出限制（来自渠道模型同步）
@@ -25,8 +26,11 @@ export function buildModelBasicInfo(
   if (model.kind !== "direct") return null;
   // 直接模型满足 virtual_model_id === upstream_model（见 proxy_http.rs
   // /models 暴露逻辑），publicModel 可作上游名兜底。
-  const channelId = model.channelId ?? model.routeGroups[0]?.channelId;
-  const upstream = model.routeGroups[0]?.upstreamModel ?? model.publicModel;
+  const channelId =
+    officialChannelIdForModel(model.publicModel)
+    ?? model.channelId
+    ?? model.routeGroups[0]?.channelId;
+  const upstream = model.publicModel;
   if (!channelId) {
     return { contextWindow: null, maxOutputTokens: null, price: null };
   }

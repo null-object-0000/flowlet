@@ -1,5 +1,5 @@
 use super::channels_config::ChannelsConfig;
-use super::config::{ChannelAccount, ChannelModel, ProtocolType};
+use super::config::{AuthStrategy, ChannelAccount, ChannelModel, ChannelPreset, ProtocolType};
 use super::presets::{BalanceQueryResult, ModelSyncResult};
 use reqwest::Client;
 use serde::Deserialize;
@@ -39,6 +39,16 @@ pub struct DeepSeekModelEntry {
     object: String,
     #[serde(default)]
     owned_by: Option<String>,
+    /// 上游模型创建时间（Unix 秒）。OpenAI 兼容 /models 的标准字段；
+    /// 部分渠道列表不返回时为 None。
+    #[serde(default)]
+    created: Option<u64>,
+}
+
+/// 按上游模型创建时间倒序排列（新模型在前）；缺失 created 的排在最后，
+/// 稳定排序保证无时间戳的模型之间保持接口返回的原始顺序。
+fn sort_by_created_desc<T>(entries: &mut [T], created: impl Fn(&T) -> Option<u64>) {
+    entries.sort_by(|a, b| created(b).cmp(&created(a)));
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +175,17 @@ fn openai_models_url(base_url: &str) -> String {
     } else {
         format!("{base}/v1/models")
     }
+}
+
+/// 解析账号的 /models 端点 URL：优先使用账号级 Base URL 覆盖（千问 Token Plan 等
+/// 套餐专属端点），未覆盖时使用渠道配置的端点。与 test_channel_connection 保持一致。
+fn account_models_url(account: &ChannelAccount, config: &ChannelsConfig) -> Option<String> {
+    account
+        .base_url_override
+        .as_deref()
+        .filter(|url| !url.trim().is_empty())
+        .map(openai_models_url)
+        .or_else(|| config.models_endpoint_url(&account.channel_id))
 }
 
 /// 查询 DeepSeek 余额
@@ -413,8 +434,19 @@ pub async fn sync_deepseek_models(
         }
     };
 
+    let url = match account_models_url(account, &config) {
+        Some(url) => url,
+        None => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("不支持同步模型的渠道: {}", account.channel_id)],
+            }
+        }
+    };
+
     let response = client
-        .get(&config.deepseek_models_endpoint())
+        .get(&url)
         .header(
             "Authorization",
             format!("Bearer {}", account.api_key.trim()),
@@ -456,11 +488,12 @@ pub async fn sync_deepseek_models(
 
     match serde_json::from_str::<DeepSeekModelsResponse>(&body) {
         Ok(data) => {
-            let models: Vec<DeepSeekModelEntry> = data
+            let mut models: Vec<DeepSeekModelEntry> = data
                 .data
                 .into_iter()
                 .filter(|m| !m.id.trim().is_empty())
                 .collect();
+            sort_by_created_desc(&mut models, |m| m.created);
             let synced_at = chrono::Utc::now().to_rfc3339();
             let channel_models = models
                 .into_iter()
@@ -476,6 +509,132 @@ pub async fn sync_deepseek_models(
             models_synced: 0,
             models: Vec::new(),
             errors: vec![format!("解析响应失败: {err}")],
+        },
+    }
+}
+
+/// 同步通用 OpenAI-compatible 渠道的 `/models`。
+///
+/// 自定义渠道没有渠道级默认地址，必须由账号提供 OpenAI Base URL 覆盖。
+pub async fn sync_openai_compatible_models(
+    account: &ChannelAccount,
+    preset: &ChannelPreset,
+) -> ModelSyncResult {
+    if account.api_key.trim().is_empty() {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec!["API Key 未配置".to_string()],
+        };
+    }
+
+    let Some(base_url) = account
+        .base_url_override
+        .as_deref()
+        .filter(|url| !url.trim().is_empty())
+        .or_else(|| {
+            (!preset.openai_base_url.trim().is_empty()).then_some(preset.openai_base_url.as_str())
+        })
+    else {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec!["请先填写 OpenAI Base URL".to_string()],
+        };
+    };
+    let url = openai_models_url(base_url);
+    let client = match Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            preset.timeout_seconds.unwrap_or(15),
+        ))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("创建 HTTP 客户端失败: {error}")],
+            }
+        }
+    };
+
+    let request = match preset.openai_auth {
+        AuthStrategy::Bearer => client.get(&url).header(
+            "Authorization",
+            format!("Bearer {}", account.api_key.trim()),
+        ),
+        AuthStrategy::XApiKey => client.get(&url).header("x-api-key", account.api_key.trim()),
+    }
+    .header("Accept", "application/json");
+
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("GET {url} 请求失败: {error}")],
+            }
+        }
+    };
+    let status = response.status();
+    let body = match response.text().await {
+        Ok(body) => body,
+        Err(error) => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("读取响应失败: {error}")],
+            }
+        }
+    };
+    if !status.is_success() {
+        return ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec![format!("GET {url} → HTTP {}", status.as_u16())],
+        };
+    }
+
+    match serde_json::from_str::<DeepSeekModelsResponse>(&body) {
+        Ok(data) => {
+            let mut entries: Vec<DeepSeekModelEntry> = data
+                .data
+                .into_iter()
+                .filter(|entry| !entry.id.trim().is_empty())
+                .collect();
+            sort_by_created_desc(&mut entries, |entry| entry.created);
+            let synced_at = chrono::Utc::now().to_rfc3339();
+            let protocols = preset.supported_protocols.clone();
+            let models = entries
+                .into_iter()
+                .map(|entry| ChannelModel {
+                    id: format!("{}-{}", account.channel_id, entry.id),
+                    channel_id: account.channel_id.clone(),
+                    model: entry.id.clone(),
+                    display_name: Some(entry.id),
+                    supported_protocols: protocols.clone(),
+                    context_window: None,
+                    max_output_tokens: None,
+                    supports_stream: true,
+                    enabled: true,
+                    source: "synced".to_string(),
+                    synced_at: Some(synced_at.clone()),
+                    created_at: synced_at.clone(),
+                    updated_at: synced_at.clone(),
+                })
+                .collect::<Vec<_>>();
+            ModelSyncResult {
+                models_synced: models.len(),
+                models,
+                errors: Vec::new(),
+            }
+        }
+        Err(error) => ModelSyncResult {
+            models_synced: 0,
+            models: Vec::new(),
+            errors: vec![format!("解析 OpenAI-compatible 模型列表失败: {error}")],
         },
     }
 }
@@ -507,8 +666,19 @@ pub async fn sync_kimi_models(
         }
     };
 
+    let url = match account_models_url(account, &config) {
+        Some(url) => url,
+        None => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("不支持同步模型的渠道: {}", account.channel_id)],
+            }
+        }
+    };
+
     let response = client
-        .get(&config.kimi_models_endpoint())
+        .get(&url)
         .header(
             "Authorization",
             format!("Bearer {}", account.api_key.trim()),
@@ -551,10 +721,14 @@ pub async fn sync_kimi_models(
     match serde_json::from_str::<KimiModelsResponse>(&body) {
         Ok(data) => {
             let synced_at = chrono::Utc::now().to_rfc3339();
-            let models: Vec<_> = data
+            let mut entries: Vec<KimiModelEntry> = data
                 .data
                 .into_iter()
                 .filter(|m| !m.id.trim().is_empty())
+                .collect();
+            sort_by_created_desc(&mut entries, |m| m.created);
+            let models: Vec<_> = entries
+                .into_iter()
                 .map(|m| kimi_channel_model(m.id, m.context_length, &synced_at))
                 .collect();
             ModelSyncResult {
@@ -599,8 +773,19 @@ pub async fn sync_qwen_models(
         }
     };
 
+    let url = match account_models_url(account, &config) {
+        Some(url) => url,
+        None => {
+            return ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("不支持同步模型的渠道: {}", account.channel_id)],
+            }
+        }
+    };
+
     let response = client
-        .get(&config.qwen_models_endpoint())
+        .get(&url)
         .header(
             "Authorization",
             format!("Bearer {}", account.api_key.trim()),
@@ -643,10 +828,14 @@ pub async fn sync_qwen_models(
     match serde_json::from_str::<DeepSeekModelsResponse>(&body) {
         Ok(data) => {
             let synced_at = chrono::Utc::now().to_rfc3339();
-            let models: Vec<_> = data
+            let mut entries: Vec<DeepSeekModelEntry> = data
                 .data
                 .into_iter()
                 .filter(|m| !m.id.trim().is_empty())
+                .collect();
+            sort_by_created_desc(&mut entries, |m| m.created);
+            let models: Vec<_> = entries
+                .into_iter()
                 .map(|m| qwen_channel_model(m.id, &synced_at))
                 .collect();
             ModelSyncResult {
@@ -725,8 +914,8 @@ pub async fn sync_longcat_models(
         Err(result) => return result,
     };
 
-    // 2) 解析列表
-    let entries: Vec<DeepSeekModelEntry> =
+    // 2) 解析列表（按上游创建时间倒序，新模型在前）
+    let mut entries: Vec<DeepSeekModelEntry> =
         match serde_json::from_str::<DeepSeekModelsResponse>(&list_response.body) {
             Ok(resp) => resp
                 .data
@@ -741,17 +930,29 @@ pub async fn sync_longcat_models(
                 };
             }
         };
+    sort_by_created_desc(&mut entries, |m| m.created);
 
-    // 3) 逐个拉取详情
+    // 3) 逐个拉取详情。账号级 Base URL 覆盖（如千问 Token Plan 专属端点）时，
+    //    配置中的详情模板（{id}）与覆盖端点不匹配，退化为仅列表信息。
     let synced_at = chrono::Utc::now().to_rfc3339();
     let mut channel_models: Vec<ChannelModel> = Vec::new();
     let errors: Vec<String> = Vec::new();
+    let uses_custom_endpoint = account
+        .base_url_override
+        .as_ref()
+        .map(|url| !url.trim().is_empty())
+        .unwrap_or(false);
 
     for entry in &entries {
-        if let Some(detail) = fetch_longcat_detail(&client, account, &entry.id, config).await {
+        let detail = if uses_custom_endpoint {
+            None
+        } else {
+            fetch_longcat_detail(&client, account, &entry.id, config).await
+        };
+        if let Some(detail) = detail {
             channel_models.push(longcat_channel_model(entry.id.clone(), detail, &synced_at));
         } else {
-            // 详情拉取失败时退化为仅列表信息
+            // 详情拉取失败 / 使用自定义端点时退化为仅列表信息
             channel_models.push(longcat_channel_model_from_id(entry.id.clone(), &synced_at));
         }
     }
@@ -782,8 +983,19 @@ async fn fetch_longcat_list(
     account: &ChannelAccount,
     config: &ChannelsConfig,
 ) -> Result<LongCatListResponse, ModelSyncResult> {
+    let url = match account_models_url(account, config) {
+        Some(url) => url,
+        None => {
+            return Err(ModelSyncResult {
+                models_synced: 0,
+                models: Vec::new(),
+                errors: vec![format!("不支持同步模型的渠道: {}", account.channel_id)],
+            });
+        }
+    };
+
     let response = client
-        .get(&config.longcat_models_endpoint())
+        .get(&url)
         .header(
             "Authorization",
             format!("Bearer {}", account.api_key.trim()),
@@ -973,13 +1185,31 @@ mod tests {
     fn parse_deepseek_models_response() {
         let json = r#"{
             "data": [
-                {"id": "deepseek-v4-flash", "object": "model", "owned_by": "deepseek"},
+                {"id": "deepseek-v4-flash", "object": "model", "owned_by": "deepseek", "created": 1700000000},
                 {"id": "deepseek-v4-pro", "object": "model", "owned_by": "deepseek"}
             ]
         }"#;
         let data: DeepSeekModelsResponse = serde_json::from_str(json).unwrap();
         assert_eq!(data.data.len(), 2);
         assert_eq!(data.data[0].id, "deepseek-v4-flash");
+        assert_eq!(data.data[0].created, Some(1700000000));
+        // 上游不返回 created 时为 None，不报错。
+        assert_eq!(data.data[1].created, None);
+    }
+
+    #[test]
+    fn sort_models_by_created_desc_with_missing_last_and_stable() {
+        let mut entries = vec![
+            DeepSeekModelEntry { id: "old".to_string(), object: String::new(), owned_by: None, created: Some(100) },
+            DeepSeekModelEntry { id: "no-time-1".to_string(), object: String::new(), owned_by: None, created: None },
+            DeepSeekModelEntry { id: "newest".to_string(), object: String::new(), owned_by: None, created: Some(300) },
+            DeepSeekModelEntry { id: "no-time-2".to_string(), object: String::new(), owned_by: None, created: None },
+            DeepSeekModelEntry { id: "mid".to_string(), object: String::new(), owned_by: None, created: Some(200) },
+        ];
+        sort_by_created_desc(&mut entries, |m| m.created);
+        let order: Vec<&str> = entries.iter().map(|m| m.id.as_str()).collect();
+        // 有时间戳的按新到旧排列；缺失的排在最后且保持原始相对顺序。
+        assert_eq!(order, vec!["newest", "mid", "old", "no-time-1", "no-time-2"]);
     }
 
     #[test]
@@ -1100,5 +1330,62 @@ mod tests {
         let params = data.supported_parameters.unwrap();
         assert!(params.contains(&"stream".to_string()));
         assert!(params.contains(&"tools".to_string()));
+    }
+
+    #[test]
+    fn account_models_url_uses_override_and_normalizes_v1() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "qwen",
+                    "name": "千问 Qwen",
+                    "vendor": "qwen",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "anthropic_base_url": "https://dashscope.aliyuncs.com/apps/anthropic"
+                }]
+            }
+        });
+        let config = crate::core::channels_config::ChannelsConfig::from_config_json(&json).unwrap();
+
+        // 无覆盖时使用渠道配置端点。
+        let default_account = ChannelAccount {
+            id: "a".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            account_models_url(&default_account, &config).as_deref(),
+            Some("https://dashscope.aliyuncs.com/compatible-mode/v1/models")
+        );
+
+        // 千问 Token Plan 等账号级 Base URL 覆盖优先，且 /v1 结尾不重复拼接。
+        let override_account = ChannelAccount {
+            id: "a-plan".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk-sp".to_string(),
+            base_url_override: Some(
+                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1".to_string(),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(
+            account_models_url(&override_account, &config).as_deref(),
+            Some("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models")
+        );
+
+        // 覆盖端点不以 /v1 结尾时自动补 /v1/models。
+        let override_no_v1 = ChannelAccount {
+            id: "a-custom".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk".to_string(),
+            base_url_override: Some("https://example.com/custom".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            account_models_url(&override_no_v1, &config).as_deref(),
+            Some("https://example.com/custom/v1/models")
+        );
     }
 }

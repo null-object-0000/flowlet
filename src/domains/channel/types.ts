@@ -4,6 +4,8 @@ export type ProtocolType = "openai" | "anthropic";
 
 export type AuthStrategy = "bearer" | "x_api_key";
 
+export const CUSTOM_CHANNEL_ID = "custom";
+
 export type ChannelPreset = {
   id: string;
   name: string;
@@ -28,7 +30,9 @@ export type ChannelPreset = {
 };
 
 /** Per-channel default exposed upstream models. Must stay in sync with
- *  config.json channels_config.default_exposed_models. */
+ *  config.json channels_config.default_exposed_models。
+ *  仅用于渠道预设的配置漂移检测（preset-sync），不再作为开放模型的白名单。
+ *  白名单请使用 FLOWLET_SUPPORTED_MODELS（所有渠道的并集）。 */
 export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   longcat: ["LongCat-2.0"],
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
@@ -36,8 +40,23 @@ export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   qwen: ["qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"],
 };
 
+/** Token Plan 个人版账号的默认开放模型（qwen3.8-max-preview 仅 Token Plan 可用）。
+ *  按量付费账号使用 DEFAULT_EXPOSED_MODELS_BY_CHANNEL.qwen。
+ *  必须与 src-tauri/src/core/channels_config.rs 的
+ *  QWEN_TOKEN_PLAN_DEFAULT_MODELS 保持一致。 */
+export const QWEN_TOKEN_PLAN_DEFAULT_MODELS = ["qwen3.8-max-preview", "qwen3.6-flash"];
+
+/** Flowlet 支持开放的上游模型全集（所有渠道的并集）。
+ *  任意渠道账号只要底层 /models 返回了其中的模型，就可勾选开放——不再按渠道区分。
+ *  必须与 src-tauri/src/core/channels_config.rs 的 supported_models() 保持一致。 */
+export const FLOWLET_SUPPORTED_MODELS: string[] = Array.from(new Set([
+  ...Object.values(DEFAULT_EXPOSED_MODELS_BY_CHANNEL).flat(),
+  ...QWEN_TOKEN_PLAN_DEFAULT_MODELS,
+]));
+
 /** Per-channel Flowlet aggregate tier mapping. Must stay in sync with
- *  config.json channels_config.flowlet_tiers. */
+ *  config.json channels_config.flowlet_tiers。
+ *  仅作为数据源；路由生成请使用 FLOWLET_TIERS_BY_MODEL（按模型全局查找，不按渠道区分）。 */
 export const FLOWLET_TIERS_BY_CHANNEL_MODEL: Record<string, Record<string, Array<"pro" | "flash">>> = {
   longcat: {
     "longcat-2.0": ["pro", "flash"],
@@ -59,8 +78,19 @@ export const FLOWLET_TIERS_BY_CHANNEL_MODEL: Record<string, Record<string, Array
   },
 };
 
+/** Flowlet 聚合档位的全局模型映射（所有渠道的并集）。
+ *  同一上游模型在任何渠道账号下都应得到相同的聚合档位，与「我们总共支持哪些模型」
+ *  的全局白名单语义一致。路由生成应使用此映射，而非按渠道查找。 */
+export const FLOWLET_TIERS_BY_MODEL: Record<string, Array<"pro" | "flash">> = Object.fromEntries(
+  Object.values(FLOWLET_TIERS_BY_CHANNEL_MODEL).flatMap((channel) => Object.entries(channel)),
+);
+
 export function defaultExposedModels(channel: ChannelPreset): string[] {
   return DEFAULT_EXPOSED_MODELS_BY_CHANNEL[channel.id] ?? [channel.default_model].filter(Boolean);
+}
+
+export function isCustomChannel(channel: Pick<ChannelPreset, "id" | "vendor"> | undefined): boolean {
+  return channel?.id === CUSTOM_CHANNEL_ID || channel?.vendor === "custom";
 }
 
 // ─── 千问 Qwen Token Plan ────────────────────────────────────────────────────
@@ -72,13 +102,29 @@ export function defaultExposedModels(channel: ChannelPreset): string[] {
 export const QWEN_CHANNEL_ID = "qwen";
 export const QWEN_TOKEN_PLAN_OPENAI_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1";
 export const QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic";
-export const QWEN_TOKEN_PLAN_CONSOLE_URL = "https://platform.qianwenai.com/home/billing/subscription/token-plan-individual";
 
-/** Token Plan 个人版账号的默认开放模型（qwen3.8-max-preview 仅 Token Plan 可用）。
- *  按量付费账号使用 DEFAULT_EXPOSED_MODELS_BY_CHANNEL.qwen。
- *  必须与 src-tauri/src/core/channels_config.rs 的
- *  QWEN_TOKEN_PLAN_DEFAULT_MODELS 保持一致。 */
-export const QWEN_TOKEN_PLAN_DEFAULT_MODELS = ["qwen3.8-max-preview", "qwen3.6-flash"];
+/** 模型身份与实际承载请求的渠道相互独立。
+ *  自定义渠道只提供路由，不改变模型品牌、官方规格或基准价格归属。 */
+const OFFICIAL_CHANNEL_BY_MODEL = new Map<string, string>([
+  ...Object.entries(DEFAULT_EXPOSED_MODELS_BY_CHANNEL).flatMap(([channelId, models]) =>
+    models.map((model) => [model.trim().toLowerCase(), channelId] as const)),
+  ...QWEN_TOKEN_PLAN_DEFAULT_MODELS.map((model) =>
+    [model.trim().toLowerCase(), QWEN_CHANNEL_ID] as const),
+]);
+
+const CANONICAL_MODEL_BY_ID = new Map<string, string>(
+  FLOWLET_SUPPORTED_MODELS.map((model) => [model.trim().toLowerCase(), model]),
+);
+
+export function officialChannelIdForModel(modelId: string | null | undefined): string | null {
+  if (!modelId?.trim()) return null;
+  return OFFICIAL_CHANNEL_BY_MODEL.get(modelId.trim().toLowerCase()) ?? null;
+}
+
+export function canonicalModelId(modelId: string | null | undefined): string | null {
+  if (!modelId?.trim()) return null;
+  return CANONICAL_MODEL_BY_ID.get(modelId.trim().toLowerCase()) ?? null;
+}
 
 /** 判断账号是否为千问 Token Plan 模式。 */
 export function isQwenTokenPlanAccount(account: { channel_id: string; resource_mode: string | null }): boolean {

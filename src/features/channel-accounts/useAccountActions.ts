@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Toast } from "@douyinfe/semi-ui-19";
 import { accountCommands } from "../../domains/account/commands";
-import { mergeDefaultRoutes, modelCommands } from "../../domains/model/commands";
+import { modelCommands, reconcileAccountRoutes, routesDiffer } from "../../domains/model/commands";
+import { isQwenTokenPlanAccount } from "../../domains/channel/types";
 import { queryKeys } from "../../shared/query-keys";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
@@ -26,18 +27,20 @@ export function useAccountActions(presets: ChannelPreset[]) {
       const refresh = await refreshSavedAccounts(saved, presets);
       return { saved, ...refresh };
     },
-    onSuccess: ({ saved, balanceRequested, modelsRequested, routesUpdated, failures }) => {
+    onSuccess: ({ saved, balanceRequested, routesUpdated, failures }) => {
       qc.setQueryData(queryKeys.account.list(), saved);
       void refetchAccounts();
       if (balanceRequested) {
         void qc.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
       }
-      if (modelsRequested) {
-        void qc.refetchQueries({ queryKey: queryKeys.model.channelModels(), exact: true });
-      }
       if (routesUpdated) {
         void qc.refetchQueries({ queryKey: queryKeys.model.candidates(), exact: true });
       }
+      // 请求日志/用量里的账号名是请求时刻的快照，展示与搜索由 Rust 查询连表
+      // channel_accounts 解析当前名。改名保存后失效相关查询，使打开中的日志/
+      // 用量页立即按新名重新连表展示。
+      void qc.invalidateQueries({ queryKey: queryKeys.requestLog.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.usage.all });
       if (failures.length > 0) {
         Toast.warning(t("账号已保存，但自动更新失败：{message}", {
           message: failures.map((failure) => `${failure.accountName}: ${failure.message}`).join("；"),
@@ -49,13 +52,6 @@ export function useAccountActions(presets: ChannelPreset[]) {
   const testConnection = useMutation({
     mutationFn: (input: { channel_id: string; api_key: string; base_url_override?: string | null }) =>
       accountCommands.testConnection(input),
-  });
-
-  const syncModels = useMutation({
-    mutationFn: (accountId: string) => accountCommands.syncModels(accountId),
-    onSuccess: () => {
-      void qc.refetchQueries({ queryKey: queryKeys.model.channelModels(), exact: true });
-    },
   });
 
   const queryBalance = useMutation({
@@ -79,29 +75,29 @@ export function useAccountActions(presets: ChannelPreset[]) {
     },
   });
 
-  return { saveAll, testConnection, syncModels, queryBalance, saveBalanceSnapshot, scrapeBalance };
+  return { saveAll, testConnection, queryBalance, saveBalanceSnapshot, scrapeBalance };
 }
 
 type AutoRefreshOperation = {
   accountId: string;
   accountName: string;
-  kind: "balance" | "models";
+  kind: "balance";
   run: () => Promise<void>;
 };
 
 type AutoRefreshFailureKind = AutoRefreshOperation["kind"] | "routes";
 export type AccountAutoRefreshResult = {
   balanceRequested: boolean;
-  modelsRequested: boolean;
   routesUpdated: boolean;
   failures: Array<{ accountId: string; accountName: string; kind: AutoRefreshFailureKind; message: string }>;
 };
 
 /**
  * Keep post-save network work outside the Rust persistence command: saving is
- * authoritative even when an upstream balance/model endpoint is temporarily
- * unavailable. Every eligible account is refreshed in parallel, matching the
- * legacy save flow while also restoring the missing model synchronization.
+ * authoritative even when an upstream balance endpoint is temporarily
+ * unavailable. Model exposure is NOT synced here — the user pulls /models and
+ * selects exposed models explicitly in the account editor; on save we only
+ * reconcile routes against each account's selected `exposed_models`.
  */
 export async function refreshSavedAccounts(
   accounts: ChannelAccount[],
@@ -115,7 +111,10 @@ export async function refreshSavedAccounts(
     const preset = presetById.get(account.channel_id);
     if (!preset) continue;
 
-    const usesCustomOpenAiEndpoint = Boolean(account.base_url_override?.trim());
+    // 千问 Token Plan 账号的 Base URL 覆盖是套餐专属端点（非用户自定义），应参与余额查询；
+    // 其余用户自定义 OpenAI 端点账号跳过（无法保证余额接口语义一致）。
+    const usesCustomOpenAiEndpoint =
+      Boolean(account.base_url_override?.trim()) && !isQwenTokenPlanAccount(account);
 
     if (preset.supports_balance_query && !usesCustomOpenAiEndpoint) {
       operations.push({
@@ -128,17 +127,6 @@ export async function refreshSavedAccounts(
         },
       });
     }
-    if (preset.supports_model_list && !usesCustomOpenAiEndpoint) {
-      operations.push({
-        accountId: account.id,
-        accountName: account.name,
-        kind: "models",
-        run: async () => {
-          const result = await accountCommands.syncModels(account.id);
-          if (result.errors.length > 0) throw new Error(result.errors[0]);
-        },
-      });
-    }
   }
 
   const settled = await Promise.allSettled(operations.map((operation) => operation.run()));
@@ -148,24 +136,25 @@ export async function refreshSavedAccounts(
     kind: operations[index].kind,
     message: result.reason instanceof Error ? result.reason.message : String(result.reason),
   }] : []);
-  const routeAccount = accounts.find((account) => {
-    const preset = presetById.get(account.channel_id);
-    return account.enabled && Boolean(account.api_key.trim()) && preset?.supports_model_list === true;
-  });
+
+  // 路由对账：exposed_models 为 null 的账号（尚未用新流程配置）路由保持原样；
+  // 已配置的账号按其勾选列表增删路由（保留已有启停/优先级）。
+  const configured = accounts.filter((account) => account.exposed_models != null);
   let routesUpdated = false;
 
-  if (routeAccount) {
+  if (configured.length > 0) {
+    const anchor = configured[0];
     try {
       const existingRoutes = await modelCommands.listRouteCandidates();
-      const nextRoutes = mergeDefaultRoutes(existingRoutes, accounts, presets);
-      if (nextRoutes.length !== existingRoutes.length) {
+      const nextRoutes = reconcileAccountRoutes(existingRoutes, accounts, presets);
+      if (routesDiffer(existingRoutes, nextRoutes)) {
         await modelCommands.saveRouteCandidates(nextRoutes);
         routesUpdated = true;
       }
     } catch (error) {
       failures.push({
-        accountId: routeAccount.id,
-        accountName: routeAccount.name,
+        accountId: anchor.id,
+        accountName: anchor.name,
         kind: "routes",
         message: error instanceof Error ? error.message : String(error),
       });
@@ -173,8 +162,7 @@ export async function refreshSavedAccounts(
   }
 
   return {
-    balanceRequested: operations.some((operation) => operation.kind === "balance"),
-    modelsRequested: operations.some((operation) => operation.kind === "models"),
+    balanceRequested: operations.length > 0,
     routesUpdated,
     failures,
   };

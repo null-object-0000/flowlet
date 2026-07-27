@@ -6,7 +6,7 @@ const SCRAPE_LOGIN_TIMEOUT_MS = 45_000;
 const SCRAPE_BALANCE_TIMEOUT_MS = 60_000;
 
 /** Account command adapter. Pages/features call these; never spell
- *  "save_channel_accounts" / "test_connection" / "sync_models" / "query_balance"
+ *  "save_channel_accounts" / "test_connection" / "fetch_channel_models" / "query_balance"
  *  directly. */
 
 export const accountCommands = {
@@ -34,10 +34,21 @@ export const accountCommands = {
       baseUrlOverride: input.base_url_override ?? null,
     }).catch(toAppErr("account_test_failed")),
 
-  syncModels: (accountId: string): Promise<ModelSyncResult> =>
+  /** 用连接参数拉取渠道上游的模型列表（底层 /models）。与 testConnection 一样接收
+   *  连接参数而非 accountId，故新建（未保存）账号也能拉取。返回上游模型列表，供
+   *  账号编辑器展示并勾选要开放的模型；不直接改写账号的 synced/exposed 字段。 */
+  fetchChannelModels: (input: {
+    channel_id: string;
+    api_key: string;
+    base_url_override?: string | null;
+  }): Promise<ModelSyncResult> =>
     invokeCommand<{ models_synced: number; models: { model: string; display_name?: string | null }[]; errors: string[] }>(
-      "sync_models",
-      { accountId },
+      "fetch_channel_models",
+      {
+        channelId: input.channel_id,
+        apiKey: input.api_key,
+        baseUrlOverride: input.base_url_override ?? null,
+      },
     )
       .then((r) => ({ models_synced: r.models_synced, models: r.models, errors: r.errors }))
       .catch(toAppErr("account_sync_failed")),

@@ -3,6 +3,7 @@
 
 import type { ModelsCnCatalog } from "./types";
 import { findModelInCatalog, resolveModel } from "./pricing";
+import { officialChannelIdForModel } from "../channel/types";
 
 /** 解析本地存储的 JSON 字符串为 ModelsCnCatalog。解析失败返回 null。 */
 export function parseCatalogJson(json: string): ModelsCnCatalog | null {
@@ -38,7 +39,8 @@ export function resolveChannelModel(
   channelId: string,
   upstreamModel: string,
 ): ReturnType<typeof resolveModel> | null {
-  const providerId = PROVIDER_BY_CHANNEL[channelId];
+  const ownerChannelId = officialChannelIdForModel(upstreamModel) ?? channelId;
+  const providerId = PROVIDER_BY_CHANNEL[ownerChannelId];
   if (!providerId) return null;
   const found = findModelInCatalog(catalog, providerId, upstreamModel);
   if (!found) return null;

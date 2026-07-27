@@ -41,6 +41,10 @@ struct AppState {
         Arc<Mutex<std::collections::HashMap<String, core::scrape_console::ScrapeInterceptorReady>>>,
     /// per-account 已成功安装的原生 WebView 网络监听。它跨页面导航保持有效。
     scrape_native_ready: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// 正在等待用户登录/处理控制台页面的账号。交互式刷新开始时即加入，
+    /// 只有一次交互式抓取完整成功后才移除；后台同步必须跳过这些账号，
+    /// 避免在用户登录过程中重新导航同一个 WebView。
+    scrape_interaction_required: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 struct ProxyStartupConfig {
@@ -298,6 +302,31 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         );
     }
 
+    // 模型身份与路由渠道拆分后的单次历史费用修复：过去自定义渠道上的官方模型
+    // 因 channel_id 无价格而被记为 0。价格表可用时按“实际渠道显式价格优先，
+    // 否则官方模型价格”重算一次；标记成功后不再增加后续启动成本。
+    const MODEL_OWNERSHIP_COST_REPAIR_KEY: &str = "model_ownership_cost_repair_v1";
+    let ownership_cost_repaired = storage
+        .get_app_meta(MODEL_OWNERSHIP_COST_REPAIR_KEY)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("done");
+    if !ownership_cost_repaired && !storage.prices().is_empty() {
+        match storage.recalculate_usage_costs("all") {
+            Ok(updated) => {
+                if let Err(error) = storage.set_app_meta(MODEL_OWNERSHIP_COST_REPAIR_KEY, "done") {
+                    tracing::warn!(error = %error, "记录模型归属费用修复标记失败");
+                } else {
+                    tracing::info!(updated, "已按模型官方归属重算历史费用");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "按模型官方归属重算历史费用失败");
+            }
+        }
+    }
+
     // 回填历史请求的费用分类明细（早期版本只有总数、缺分类）。幂等，仅补齐 NULL 列。
     if let Err(error) = storage.backfill_cost_breakdown() {
         tracing::warn!(error = %error, "费用分类明细回填失败");
@@ -390,6 +419,7 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         scrape_pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
         scrape_ready: Arc::new(Mutex::new(std::collections::HashMap::new())),
         scrape_native_ready: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        scrape_interaction_required: Arc::new(Mutex::new(std::collections::HashSet::new())),
     };
     tracing::info!(
         t_ms = _t0.elapsed().as_millis() as u64,
@@ -876,7 +906,7 @@ pub fn run() {
             commands::get_log_capture_config,
             commands::set_log_capture_config,
             commands::query_balance,
-            commands::sync_models,
+            commands::fetch_channel_models,
             commands::save_balance_snapshot,
             commands::list_balance_snapshots,
             commands::latest_balance_snapshots,

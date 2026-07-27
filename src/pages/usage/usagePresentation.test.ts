@@ -48,12 +48,18 @@ describe("usage presentation", () => {
     expect(summarizeUsage(rows, currencyOf).costByCurrency).toEqual({ CNY: 0.2, USD: 0.5 });
   });
 
-  it("keeps identical model names from different channels separate for branding", () => {
+  it("merges identical model IDs across route channels under the official model brand", () => {
     const result = groupUsageByModel([
       rows[0],
-      { ...rows[0], channel_id: "longcat", channel_name: "LongCat" },
+      { ...rows[0], channel_id: "custom", channel_name: "自定义渠道" },
     ]);
-    expect(result).toHaveLength(2);
-    expect(result.map((item) => item.brandId)).toEqual(expect.arrayContaining(["deepseek", "longcat"]));
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(expect.objectContaining({
+      key: "deepseek-v4-pro",
+      label: "deepseek-v4-pro",
+      brandId: "deepseek",
+      requests: 6,
+      tokens: 2400,
+    }));
   });
 });

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { backgroundTaskCommands } from "../../domains/background-task/commands";
 import type { UsageSummaryRow } from "../../domains/usage/types";
+import { officialChannelIdForModel } from "../../domains/channel/types";
 import { queryKeys } from "../../shared/query-keys";
 
 /** Same convention as the usage breakdown grouping key. */
@@ -41,10 +42,24 @@ export function useModelPriceCurrencyLookup() {
     return {
       modelCurrencyOf: (row: UsageSummaryRow) =>
         row.channel_id && row.upstream_model
-          ? byModel.get(priceKey(row.channel_id, row.upstream_model)) ?? null
+          ? byModel.get(priceKey(row.channel_id, row.upstream_model))
+            ?? byModel.get(priceKey(
+              officialChannelIdForModel(row.upstream_model) ?? row.channel_id,
+              row.upstream_model,
+            ))
+            ?? null
           : null,
       channelCurrencyOf: (row: UsageSummaryRow) =>
-        row.channel_id ? byChannel.get(row.channel_id) ?? null : null,
+        row.channel_id
+          ? byChannel.get(row.channel_id)
+            ?? (row.upstream_model
+              ? byModel.get(priceKey(
+                officialChannelIdForModel(row.upstream_model) ?? row.channel_id,
+                row.upstream_model,
+              ))
+              : null)
+            ?? null
+          : null,
     };
   }, [query.data]);
 }

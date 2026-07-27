@@ -1,6 +1,8 @@
 export type LongCatPack = {
-  lotId?: number;
+  lotId?: string | number;
+  packageId?: string | number;
   bizOrderNo?: string;
+  packageName?: string;
   totalToken?: number;
   consumedToken?: number;
   remainingToken?: number;
@@ -12,8 +14,15 @@ export type LongCatPack = {
   consumeOrder?: number;
   modelScope?: string;
   status?: string;
+  statusCode?: number;
+  statusText?: string;
+  displayStatusCode?: number;
+  displayStatusText?: string;
   source?: string;
+  sourceTypeCode?: number;
+  sourceTypeText?: string;
   grantCategory?: string;
+  _fromList?: boolean;
 };
 
 export function parseStoredLongCatPacks(value?: string | null): LongCatPack[] {

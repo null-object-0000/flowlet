@@ -27,6 +27,122 @@ fn channel_account_resource_sync_mode_round_trips() {
     assert_eq!(accounts.len(), 1);
     assert_eq!(accounts[0].resource_sync_mode, "auto");
 }
+
+#[test]
+fn migration_forces_qwen_token_plan_resource_sync_to_auto() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    connection
+        .execute_batch(
+            r#"
+            CREATE TABLE channel_accounts (
+                id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                priority INTEGER NOT NULL DEFAULT 0,
+                remark TEXT,
+                resource_mode TEXT,
+                resource_sync_mode TEXT NOT NULL DEFAULT 'manual',
+                base_url_override TEXT,
+                anthropic_base_url_override TEXT,
+                last_used_at TEXT,
+                last_error TEXT,
+                credential_status TEXT NOT NULL DEFAULT 'healthy',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO channel_accounts (
+                id, channel_id, name, api_key, resource_mode, resource_sync_mode, created_at, updated_at
+            ) VALUES (
+                'account-qwen-plan', 'qwen', 'Qwen Token Plan', 'sk-sp-test',
+                'token_plan', 'manual', '2026-07-27T00:00:00Z', '2026-07-27T00:00:00Z'
+            );
+            "#,
+        )
+        .expect("seed legacy qwen account");
+    let storage = Storage::from_connection_for_test(connection);
+
+    storage.migrate().expect("migrate account schema");
+
+    let accounts = storage.list_channel_accounts().expect("list accounts");
+    assert_eq!(accounts[0].resource_sync_mode, "auto");
+}
+
+#[test]
+fn channel_account_model_selection_round_trips() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate account schema");
+
+    // 初始未拉取、未勾选。
+    let account = ChannelAccount {
+        id: "account-synced".to_string(),
+        channel_id: "deepseek".to_string(),
+        name: "DeepSeek".to_string(),
+        api_key: "sk-test".to_string(),
+        ..Default::default()
+    };
+    storage
+        .save_channel_accounts(&[account])
+        .expect("save account");
+    let accounts = storage.list_channel_accounts().expect("list accounts");
+    assert_eq!(accounts[0].synced_models, None);
+    assert_eq!(accounts[0].models_synced_at, None);
+    assert_eq!(accounts[0].exposed_models, None);
+
+    // 保存携带候选池（synced_models）与用户勾选（exposed_models）的账号。
+    let configured = ChannelAccount {
+        id: "account-synced".to_string(),
+        channel_id: "deepseek".to_string(),
+        name: "DeepSeek".to_string(),
+        api_key: "sk-test".to_string(),
+        synced_models: Some(vec![
+            "deepseek-v4-flash".to_string(),
+            "deepseek-v4-pro".to_string(),
+            "deepseek-chat".to_string(),
+        ]),
+        models_synced_at: Some("2026-07-27T10:00:00Z".to_string()),
+        exposed_models: Some(vec!["deepseek-v4-flash".to_string()]),
+        ..Default::default()
+    };
+    storage
+        .save_channel_accounts(&[configured])
+        .expect("save configured account");
+
+    let accounts = storage.list_channel_accounts().expect("list accounts");
+    assert_eq!(
+        accounts[0].synced_models,
+        Some(vec![
+            "deepseek-v4-flash".to_string(),
+            "deepseek-v4-pro".to_string(),
+            "deepseek-chat".to_string()
+        ])
+    );
+    assert_eq!(
+        accounts[0].models_synced_at,
+        Some("2026-07-27T10:00:00Z".to_string())
+    );
+    assert_eq!(
+        accounts[0].exposed_models,
+        Some(vec!["deepseek-v4-flash".to_string()])
+    );
+
+    // 空勾选列表（用户主动全部取消）也能往返，区别于 None（未配置）。
+    let cleared = ChannelAccount {
+        id: "account-synced".to_string(),
+        channel_id: "deepseek".to_string(),
+        name: "DeepSeek".to_string(),
+        api_key: "sk-test".to_string(),
+        exposed_models: Some(vec![]),
+        ..Default::default()
+    };
+    storage
+        .save_channel_accounts(&[cleared])
+        .expect("save cleared account");
+    let accounts = storage.list_channel_accounts().expect("list accounts");
+    assert_eq!(accounts[0].exposed_models, Some(vec![]));
+}
 use base64::Engine;
 use rusqlite::Connection;
 
@@ -1242,4 +1358,137 @@ fn prune_oldest_body_data_removes_oldest_first() {
 fn base64(input: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(input)
+}
+
+#[test]
+fn request_log_queries_resolve_current_account_name_and_fall_back_to_snapshot() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    let mut account = ChannelAccount {
+        id: "account-1".to_string(),
+        channel_id: "longcat".to_string(),
+        name: "主账号-旧名".to_string(),
+        api_key: "sk-test".to_string(),
+        ..Default::default()
+    };
+    storage
+        .save_channel_accounts(&[account.clone()])
+        .expect("save account");
+
+    // 请求日志与用量记录保存请求时刻的账号名快照；查询时连表 channel_accounts
+    // 解析当前名，账号被删除后回退到该快照。
+    let mut log = request_log_for_repair("req-rename", 0, true);
+    log.account_id = Some("account-1".to_string());
+    log.account_name = Some("主账号-旧名".to_string());
+    storage.insert_request_log(&log).expect("insert request log");
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "req-rename".to_string(),
+            client_id: Some("opencode".to_string()),
+            client_name: Some("OpenCode".to_string()),
+            channel_id: Some("longcat".to_string()),
+            channel_name: Some("LongCat".to_string()),
+            account_id: Some("account-1".to_string()),
+            account_name: Some("主账号-旧名".to_string()),
+            client_protocol: "openai".to_string(),
+            upstream_protocol: "openai".to_string(),
+            virtual_model: Some("flowlet-pro".to_string()),
+            upstream_model: Some("LongCat-2.0".to_string()),
+            input_tokens: Some(10),
+            input_cached_tokens: None,
+            input_uncached_tokens: Some(10),
+            input_cache_write_tokens: None,
+            output_tokens: Some(5),
+            total_tokens: Some(15),
+        })
+        .expect("upsert usage record");
+
+    let search_by = |storage: &Storage, keyword: &str| {
+        storage
+            .list_request_logs_page(LogsFilter {
+                search: keyword.to_string(),
+                ..model_filter("", "")
+            })
+            .expect("search request logs")
+    };
+    assert_eq!(search_by(&storage, "主账号-旧名").total, 1);
+    assert_eq!(search_by(&storage, "主账号-新名").total, 0);
+
+    // 改名只是一次普通的小保存（不批量改写历史日志）；查询连表解析出当前名，
+    // 因此展示与按新名搜索立即生效。
+    account.name = "主账号-新名".to_string();
+    storage
+        .save_channel_accounts(&[account])
+        .expect("rename account");
+
+    let page = search_by(&storage, "主账号-新名");
+    assert_eq!(page.total, 1, "按新账号名搜索应命中历史记录");
+    assert_eq!(page.rows[0].account_name.as_deref(), Some("主账号-新名"));
+    assert_eq!(search_by(&storage, "主账号-旧名").total, 0, "账号仍在时旧名不应命中");
+
+    let usage = storage.usage_summary("all").expect("usage summary");
+    let usage_row = usage
+        .iter()
+        .find(|row| row.account_id.as_deref() == Some("account-1"))
+        .expect("usage row for account-1");
+    assert_eq!(usage_row.account_name.as_deref(), Some("主账号-新名"));
+
+    // 删除账号后连表取不到当前名，回退到请求时刻保存的快照名（仍是旧名，
+    // 因为改名并不会批量改写历史快照）。
+    storage.save_channel_accounts(&[]).expect("delete account");
+    let after_delete = search_by(&storage, "主账号-旧名");
+    assert_eq!(after_delete.total, 1, "删除账号后应按快照名回退命中");
+    assert_eq!(
+        after_delete.rows[0].account_name.as_deref(),
+        Some("主账号-旧名"),
+        "删除账号后展示请求时刻的快照名"
+    );
+}
+
+#[test]
+fn usage_summary_filters_at_the_database_boundary() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    for request_id in ["usage-current", "usage-old"] {
+        storage
+            .insert_request_log(&request_log_for_repair(request_id, 0, true))
+            .expect("insert request log");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: request_id.to_string(),
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                ..empty_usage_input(request_id)
+            })
+            .expect("insert usage");
+    }
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET created_at = '2020-01-01T00:00:00Z'
+             WHERE request_id = 'usage-old'",
+            [],
+        )
+        .expect("age one request");
+
+    let current_month = storage.usage_summary("month").expect("month summary");
+    assert_eq!(
+        current_month
+            .iter()
+            .map(|row| row.request_count)
+            .sum::<i64>(),
+        1
+    );
+    let all_time = storage.usage_summary("all").expect("all-time summary");
+    assert_eq!(
+        all_time.iter().map(|row| row.request_count).sum::<i64>(),
+        2
+    );
 }

@@ -243,6 +243,12 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"` |
 | `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"`），value 可包含 `console_url`、可选的 `console_url_secondary`、可选的 `console_url_tertiary`（第三阶段导航 URL，用于 LongCat 加载 `/platform/fuel_pack` 补全已用尽/已过期的历史资源包）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组（活跃包来自第一阶段 `token-packs/summary`，历史包来自第三阶段 `token-packs/list`，按 `lotId=resourceId` 去重合并，历史包以 `_fromList: true` 标记），原始接口 payload 单独写入 `raw_scraped_json`。页面始终自行生成 Cookie、签名和 Header；Windows/Linux 优先从原生 WebView 网络层读取精确匹配的目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。 |
 
+内置 `custom` 模板用于中转站等完全自定义账号。渠道级 Base URL 保持为空，
+真实地址保存在账号的 `base_url_override` / `anthropic_base_url_override`；至少填写
+一个协议地址，Flowlet 只为实际填写地址的协议生成路由。OpenAI-compatible 使用
+Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI `/models`
+拉取，并统一受全局白名单约束；不提供手工添加、余额、额度、价格或控制台抓取能力。
+
 **端点解析优先级**：
 
 1. `endpoints[key]` 显式覆盖（优先）
@@ -316,13 +322,30 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 **行为**：
 
-- 用于初始化时的默认模型开放列表。
-- 前端可通过 `getDefaultExposedModels(channel)` 读取。
-- 千问 Token Plan 账号（`resource_mode = "token_plan"`）不使用此处的渠道级默认列表，
-  而是由代码级常量 `QWEN_TOKEN_PLAN_DEFAULT_MODELS`
-  （`src/domains/channel/types.ts` 与 `src-tauri/src/core/channels_config.rs` 各一份，
-  必须手动保持一致）提供套餐专属默认模型 `["qwen3.8-max-preview", "qwen3.6-flash"]`，
-  因为 `qwen3.8-max-preview` 仅 Token Plan 可用。
+- 该字段是各渠道「默认提供哪些模型」的描述性列表，**不再直接作为开放模型的白名单**。
+  真正的白名单是 `supported_models()`：所有渠道列表的并集，加上代码级常量
+  `QWEN_TOKEN_PLAN_DEFAULT_MODELS`（`["qwen3.8-max-preview", "qwen3.6-flash"]`）。
+  前端对应常量 `FLOWLET_SUPPORTED_MODELS`（`src/domains/channel/types.ts`），两者必须一致。
+- 白名单**不按渠道区分**：任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放。
+  例如千问套餐端点也会返回 `deepseek-v4-pro`，该模型在全局白名单内，故可勾选。
+- 一个账号开放哪些模型由**用户显式选择**：在账号编辑器里手动「拉取模型列表」
+  （底层 `/models`，Rust command `fetch_channel_models`），编辑器展示全量上游模型、
+  白名单之外的模型展示但禁用勾选，用户勾选后保存到 `channel_accounts.exposed_models`。
+- 实际为账号生成的路由 = 全局白名单 **∩ 最近一次 `/models` 返回的
+  `synced_models` ∩ 用户勾选的 `exposed_models`**。
+  - 白名单之外的模型**绝不生成路由**（即使上游 `/models` 返回了、用户也看得到，仍不可勾选）。
+  - `exposed_models` 为 `NULL`（尚未用新流程配置）的账号**保持路由现状不动**（老账号升级不受影响）；
+    为空数组的账号**不开放任何模型**。
+- `channel_accounts.synced_models` / `models_synced_at` 保存最近一次 `/models` 结果，
+  既作为编辑器候选池缓存，也作为已配置账号生成路由时的来源校验；未在
+  `synced_models` 中的模型不会生成或保留路由。
+- 保存账号时前端按 `exposed_models` 对账路由：删除取消勾选的路由、补齐新勾选的路由，
+  保留用户已有的启停状态、优先级和时间戳。
+- 合并逻辑前后端各一份：`src-tauri/src/core/channels_config.rs` 的 `merge_default_routes`
+  与 `src/domains/model/commands.ts` 的 `mergeDefaultRoutes`，行为必须一致（只追加缺失路由，
+  不覆盖用户已有的启停状态、优先级和时间戳；删除动作由前端 `reconcileAccountRoutes` 在保存时执行）。
+- `custom` 渠道不例外：模型必须来自该账号 `/models` 返回结果，并与全局白名单取交集；
+  白名单外模型展示为“不支持”且禁用勾选，不能进入 `exposed_models` 或生成路由。
 
 ### 6.4 `flowlet_tiers` — Flowlet 档位映射
 

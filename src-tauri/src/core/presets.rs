@@ -7,6 +7,7 @@ pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
         ChannelPreset::deepseek(),
         ChannelPreset::kimi(),
         ChannelPreset::qwen(),
+        ChannelPreset::custom(),
     ]
 }
 

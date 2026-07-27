@@ -209,38 +209,64 @@ Channel
 * 开放模型必须明确绑定可用账号；
 * 模型对外名称是 `virtual_model_id`；
 * 模型上游名称是 `upstream_model`；
+* 模型身份和官方归属由规范化模型 ID 决定，不由实际承载请求的渠道决定；
+* 自定义/中转渠道只能成为模型的 Route Candidate，不得生成“自定义渠道品牌”的同名模型；
+* 模型列表与模型用量按规范化模型 ID 全局合并；渠道、账号维度仍保留实际路由归属；
+* 官方规格、品牌和基准价格按模型官方归属解析；自定义渠道存在显式价格时优先使用，
+  否则回退到该模型的官方基准价格；
 * 普通用户主要管理“开放模型”，不是复杂路由；
 * Route Candidate、Route Rule 等高级能力不要主导普通页面的信息架构。
 
-默认开放模型：
+Flowlet 支持的模型（全局白名单，不按渠道区分）：
 
 ```text
-LongCat:
 - LongCat-2.0
-
-DeepSeek:
 - deepseek-v4-flash
 - deepseek-v4-pro
-
-Kimi:
 - kimi-k3
 - kimi-k2.7-code
-
-千问 Qwen（按量付费账号）:
+- qwen3.8-max-preview
 - qwen3.7-max
 - qwen3.7-plus
 - qwen3.6-plus
 - qwen3.6-flash
-
-千问 Qwen（Token Plan 账号，resource_mode = "token_plan"）:
-- qwen3.8-max-preview
-- qwen3.6-flash
 ```
 
+这是 Flowlet **总共支持哪些模型**（前端 `FLOWLET_SUPPORTED_MODELS` 与 Rust
+`ChannelsConfig::supported_models()` 的并集），不是按渠道切分的列表。
+任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放——**不再按渠道区分**。
+
+一个账号开放哪些模型由**用户显式选择**，流程为：
+
+1. 用户在账号编辑器里点「拉取模型列表」→ 调底层 `/models`（Rust command
+   `fetch_channel_models`，用连接参数拉取，不依赖账号是否已保存）；
+2. 编辑器展示 `/models` 返回的**全量**上游模型，白名单之外的模型展示但**禁用勾选**；
+3. 用户勾选要开放的模型 → 保存到 `channel_accounts.exposed_models`；
+4. 保存账号时前端按 `exposed_models` **对账**路由（删除取消勾选的、补齐新勾选的，
+   保留已有启停/优先级）。一个都不勾 → 该账号不开放任何模型。
+
+实际生成的路由 = 全局白名单 **∩ 最近一次 `/models` 返回的 `synced_models`
+∩ 用户勾选的 `exposed_models`**：未被 `/models` 返回或白名单外的模型绝不生成路由。
+
+`custom` 自定义渠道同样遵守全局白名单：用于中转站等非内置服务，账号级至少填写
+一个 OpenAI/Anthropic Base URL，只为已填写地址的协议生成路由；模型必须来自该账号
+标准 OpenAI-compatible `/models` 的实际返回结果。白名单内模型可勾选，白名单外模型
+必须展示为“不支持”并禁用勾选，不允许手工添加模型 ID。
+
+`exposed_models` 的语义（保证向后兼容）：
+
+* `null` = 尚未用新流程配置过 → 路由保持原样不动（老账号升级不受影响，启动补齐与保存对账都跳过它）；
+* 数组（可为空）= 按此列表严格对账路由。
+
+`channel_accounts.synced_models` 是候选池缓存和最近一次 `/models` 的来源凭据：
+记录最近一次拉取结果，既供编辑器预填，也参与已配置账号的路由生成校验。合并逻辑位于 Rust
+`channels_config.merge_default_routes` 与前端 `mergeDefaultRoutes`（只追加缺失路由，
+不覆盖用户已有状态；删除动作由前端 `reconcileAccountRoutes` 在保存时执行）。
+
 千问 Qwen 是单渠道双资源模式：渠道级端点为按量付费地址；
-Token Plan 账号（sk-sp 前缀 Key）通过账号级 Base URL 覆盖接入套餐专属端点，
-默认开放模型由代码级常量（`QWEN_TOKEN_PLAN_DEFAULT_MODELS`，前端 TS 与
-Rust `channels_config.rs` 各一份，必须同步维护）提供。
+Token Plan 账号（sk-sp 前缀 Key）通过账号级 Base URL 覆盖接入套餐专属端点。
+Token Plan 账号拉取 `/models` 时使用账号级覆盖端点；由于其套餐端点也会返回
+DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即可选，不在则禁用）。
 
 ---
 

@@ -1140,11 +1140,22 @@ impl Storage {
             "resource_sync_mode",
             "TEXT NOT NULL DEFAULT 'manual'",
         )?;
+        // 渠道账号：最近一次 /models 拉取的候选池（synced_models + 时间），
+        // 以及用户显式勾选要开放的模型列表（exposed_models）。
+        add_column_if_missing(&connection, "channel_accounts", "synced_models", "TEXT")?;
+        add_column_if_missing(&connection, "channel_accounts", "models_synced_at", "TEXT")?;
+        add_column_if_missing(&connection, "channel_accounts", "exposed_models", "TEXT")?;
 
         // LongCat 统一为 hybrid 模式(同时抓取 token 资源包与按量余额)。
         // 把旧值 token_pack / pay_as_you_go / null 统一迁移为 hybrid。
         connection.execute(
             "UPDATE channel_accounts SET resource_mode = 'hybrid' WHERE channel_id = 'longcat'",
+            [],
+        )?;
+        // Qwen Token Plan 的额度只允许从官方控制台自动同步，不再保留手动维护模式。
+        // 每次启动都执行该幂等归一化，兼容历史数据库和外部配置导入的旧值。
+        connection.execute(
+            "UPDATE channel_accounts SET resource_sync_mode = 'auto' WHERE channel_id = 'qwen' AND resource_mode = 'token_plan'",
             [],
         )?;
 
@@ -1330,6 +1341,7 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_request_logs_created_at       ON request_logs(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_request_logs_request_id       ON request_logs(request_id);
             CREATE INDEX IF NOT EXISTS idx_request_logs_is_last_attempt  ON request_logs(is_last_attempt);
+            CREATE INDEX IF NOT EXISTS idx_request_logs_usage_summary    ON request_logs(request_id, is_last_attempt, created_at);
             CREATE INDEX IF NOT EXISTS idx_request_logs_page             ON request_logs(is_last_attempt, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_request_logs_client           ON request_logs(client_id);
             CREATE INDEX IF NOT EXISTS idx_request_logs_account          ON request_logs(account_id, created_at);

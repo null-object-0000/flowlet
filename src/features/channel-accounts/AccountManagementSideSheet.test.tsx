@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ChannelAccount } from "../../domains/account/types";
@@ -72,6 +72,7 @@ describe("AccountManagementSideSheet", () => {
     const tokenPacks = JSON.stringify([
       { lotId: 151724, source: "FREE_PACK", totalToken: 50_000_000, consumedToken: 36_679_022, remainingToken: 13_320_978, expireTime: "2026-07-30 01:00:31", status: "ACTIVE" },
       { lotId: 159869, source: "FREE_PACK", totalToken: 10_000_000, consumedToken: 0, remainingToken: 10_000_000, expireTime: "2026-07-30 09:42:47", status: "ACTIVE" },
+      { lotId: "2071803119104245853", packageName: "问卷Token包", totalToken: 5_000_000, consumedToken: 5_000_000, remainingToken: 0, expireTime: "2026-07-30T03:48:49.000+00:00", statusCode: 4, statusText: "已用尽", _fromList: true },
     ]);
 
     render(
@@ -107,24 +108,33 @@ describe("AccountManagementSideSheet", () => {
     );
 
     expect(await screen.findByText("资源包明细")).toBeInTheDocument();
+    const detailsTable = screen.getByRole("table");
+    expect(within(detailsTable).getByRole("columnheader", { name: "总量 Token" })).toBeInTheDocument();
+    expect(within(detailsTable).getByRole("columnheader", { name: "已用 Token" })).toBeInTheDocument();
+    expect(within(detailsTable).getAllByText("500.00万")).toHaveLength(2);
     expect(screen.getByText("剩余 38.9%")).toBeInTheDocument();
     expect(screen.getByText("151724")).toBeInTheDocument();
     expect(screen.getByText("159869")).toBeInTheDocument();
     expect(screen.getAllByText("FREE_PACK")).toHaveLength(2);
     expect(screen.getByText("生效中")).toBeInTheDocument();
     expect(screen.getByText("待使用")).toBeInTheDocument();
+    expect(screen.getByText("2071803119104245853")).toBeInTheDocument();
+    expect(screen.getByText("问卷Token包")).toBeInTheDocument();
+    expect(screen.getByText("已用尽")).toBeInTheDocument();
     // hybrid 模式下余额也展示。
     expect(screen.getByText("123.45 CNY")).toBeInTheDocument();
   });
 
   it("shows the complete Qwen Token Plan subscription and both quota windows", async () => {
+    const user = userEvent.setup();
+    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
     const qwenAccount: ChannelAccount = {
       ...account,
       id: "account-qwen-auto",
       channel_id: "qwen",
       name: "千问 Token Plan",
       resource_mode: "token_plan",
-      resource_sync_mode: "auto",
+      resource_sync_mode: "manual",
     };
     const raw = JSON.stringify({
       subscription: qwenResponse({
@@ -140,6 +150,7 @@ describe("AccountManagementSideSheet", () => {
       }),
       usage: qwenResponse({
         per5HourPercentage: 0,
+        per5HourResetTime: 1785112440000,
         per1WeekPercentage: 0.789,
         per1WeekResetTime: 1785130440000,
       }),
@@ -175,7 +186,7 @@ describe("AccountManagementSideSheet", () => {
         }]}
         busy={false}
         onClose={vi.fn()}
-        onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
+        onSaveAccounts={onSaveAccounts}
         onTestConnection={vi.fn().mockResolvedValue(undefined)}
         onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
         onSyncBalance={vi.fn().mockResolvedValue(undefined)}
@@ -184,14 +195,27 @@ describe("AccountManagementSideSheet", () => {
     );
 
     expect(await screen.findByText("个人版 Standard 套餐")).toBeInTheDocument();
-    expect(screen.getByText("生效中")).toBeInTheDocument();
-    expect(screen.getByText("28 天")).toBeInTheDocument();
-    expect(screen.getByText("每 5 小时额度")).toBeInTheDocument();
-    expect(screen.getByText("每 7 天额度")).toBeInTheDocument();
-    expect(screen.getByText("100.0%")).toBeInTheDocument();
-    expect(screen.getByText("21.1%")).toBeInTheDocument();
-    expect(screen.getAllByText("3,000 Credits")).toHaveLength(2);
-    expect(screen.getByText("2,110 Credits")).toBeInTheDocument();
+    expect(screen.getByText("自动同步")).toBeInTheDocument();
+    expect(screen.getByText("5 小时 100.0%")).toBeInTheDocument();
+    expect(screen.getByText("总量 3,000 Credits")).toBeInTheDocument();
+    expect(screen.getByLabelText("5 小时额度")).toBeInTheDocument();
+    expect(screen.getByText("7 天 21.1%")).toBeInTheDocument();
+    expect(screen.getByText("总量 10,000 Credits")).toBeInTheDocument();
+    expect(screen.getByLabelText("7 天额度")).toBeInTheDocument();
+    expect(screen.getAllByText("额度充值时间")).toHaveLength(2);
+    expect(screen.getByText("套餐到期")).toBeInTheDocument();
+    expect(screen.getByText("最近同步")).toBeInTheDocument();
+    expect(screen.getByText("套餐到期").parentElement?.parentElement)
+      .toBe(screen.getByText("最近同步").parentElement?.parentElement);
+    expect(screen.queryByText("手动维护")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    expect(onSaveAccounts).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: qwenAccount.id,
+        resource_sync_mode: "auto",
+      }),
+    ]);
   });
 
   it("shows balance refresh feedback in a toast", async () => {
@@ -259,6 +283,7 @@ describe("AccountManagementSideSheet", () => {
       channel_id: "qwen",
       api_key: "sk-sp-test",
       resource_mode: "token_plan",
+      resource_sync_mode: "auto",
       base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
       anthropic_base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
     })]);

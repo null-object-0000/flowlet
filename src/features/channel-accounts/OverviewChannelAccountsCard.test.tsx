@@ -42,9 +42,32 @@ describe("OverviewChannelAccountsCard", () => {
     );
 
     expect(screen.getByText("已启用 1 / 共 1 个账号")).toBeInTheDocument();
-    expect(screen.getByText(/资源包 4398\.7万 Tokens/)).toBeInTheDocument();
+    expect(screen.getByText(/资源包 4398\.70万 Tokens/)).toBeInTheDocument();
     expect(screen.getByText(/有效期至 2026-07-30/)).toBeInTheDocument();
     expect(screen.getByText("启用")).toBeInTheDocument();
+  });
+
+  it("renders LongCat resource pack row with 0 tokens when the pack is fully consumed", () => {
+    const exhaustedSnapshot = {
+      account_id: account.id,
+      balance: 0,
+      currency: "CNY",
+      token_pack_remaining: 0,
+    } as AccountBalanceSnapshot;
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[account]}
+        snapshots={[exhaustedSnapshot]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    // 资源包用尽时剩余为 0，概览页应像余额一样照常展示，而不是隐藏资源包行。
+    expect(screen.getByText(/资源包 0 Tokens/)).toBeInTheDocument();
+    expect(screen.getByText(/余额/)).toBeInTheDocument();
   });
 
   it("renders Qwen Token Plan subscription with 5h and 7d remaining percentages", () => {

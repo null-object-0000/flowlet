@@ -205,18 +205,20 @@ fn attach_webview2_response_capture(
                     match read_webview2_response_body(&content) {
                         Ok(body) => {
                             let kind = classify_response_url(&response_url);
+                            let body_bytes = body.len();
                             if let Ok(mut guard) = response_pending.lock() {
                                 let entry = guard.entry(response_account_id.clone()).or_default();
-                                entry.retain(|(existing_url, _)| {
-                                    classify_response_url(existing_url) != kind
-                                });
-                                entry.push((response_url.clone(), body.clone()));
+                                record_captured_response(
+                                    entry,
+                                    response_url.clone(),
+                                    body,
+                                );
                             }
                             tracing::info!(
                                 account_id = %response_account_id,
                                 response_kind = %kind,
                                 response_url = %response_url,
-                                body_bytes = body.len(),
+                                body_bytes,
                                 capture_backend = "webview2",
                                 "控制台抓取捕获到原生网络响应"
                             );
@@ -307,19 +309,21 @@ pub fn install_linux_response_capture(
                                     return;
                                 };
                                 let kind = classify_response_url(&response_url);
+                                let body_bytes = body.len();
                                 if let Ok(mut guard) = response_pending.lock() {
                                     let entry =
                                         guard.entry(response_account_id.clone()).or_default();
-                                    entry.retain(|(existing_url, _)| {
-                                        classify_response_url(existing_url) != kind
-                                    });
-                                    entry.push((response_url.clone(), body.clone()));
+                                    record_captured_response(
+                                        entry,
+                                        response_url.clone(),
+                                        body,
+                                    );
                                 }
                                 tracing::info!(
                                     account_id = %response_account_id,
                                     response_kind = %kind,
                                     response_url = %response_url,
-                                    body_bytes = body.len(),
+                                    body_bytes,
                                     capture_backend = "webkitgtk",
                                     "控制台抓取捕获到原生网络响应"
                                 );
@@ -377,6 +381,165 @@ pub fn classify_response_url(url: &str) -> &'static str {
     } else {
         "unknown"
     }
+}
+
+/// 把一条业务响应写入账号缓冲。
+///
+/// 大多数槽位仍采用“同类型最新响应覆盖旧响应”。LongCat 的 fuel_pack 页面会对
+/// `token-packs/list` 并行发出不同筛选条件的 POST 请求（例如完整历史列表，以及
+/// `statusCodes=[1], pageSize=1` 的活跃包探测），因此该槽位必须按 resourceId 合并，
+/// 不能让较小的筛选响应覆盖完整历史列表。
+pub fn record_captured_response(
+    entry: &mut Vec<(String, String)>,
+    url: String,
+    body: String,
+) {
+    let kind = classify_response_url(&url);
+    if kind == "token_packs_list" {
+        if let Some(index) = entry
+            .iter()
+            .position(|(existing_url, _)| classify_response_url(existing_url) == kind)
+        {
+            if let Some(merged) = merge_longcat_token_pack_list(&entry[index].1, &body) {
+                entry[index] = (url, merged);
+                return;
+            }
+        }
+    }
+    entry.retain(|(existing_url, _)| classify_response_url(existing_url) != kind);
+    entry.push((url, body));
+}
+
+/// 判断已捕获的响应是否足以让当前槽位完成。
+///
+/// 对 LongCat 历史列表，如果响应声明存在历史包，就必须实际包含当前页应有的历史
+/// items。这样活跃包探测请求不会抢先满足第三阶段，完整历史响应到达后才继续提取。
+pub fn captured_response_satisfies_slot(kind: &str, body: &str) -> bool {
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    if kind != "token_packs_list" {
+        return true;
+    }
+    if root
+        .get("code")
+        .and_then(serde_json::Value::as_i64)
+        .is_some_and(|code| code != 0)
+    {
+        return false;
+    }
+    let data = root.get("data").unwrap_or(&root);
+    let Some(items) = data.get("items").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    let history_count = data
+        .get("historyCount")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let page_size = data
+        .get("pageSize")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(history_count as u64) as usize;
+    if history_count == 0 {
+        // fuel_pack 的完整列表使用正常分页（当前为 pageSize=9）；页面还会额外发出
+        // pageSize=1 的活跃包探测。即使当前没有历史包，也要等完整列表响应，
+        // 不能让探测请求抢先结束阶段。
+        return page_size > 1;
+    }
+    let expected_history_items = history_count.min(page_size.max(1));
+    let has_status_codes = items.iter().any(|item| {
+        item.get("statusCode").is_some() || item.get("displayStatusCode").is_some()
+    });
+    let captured_history_items = if has_status_codes {
+        items
+            .iter()
+            .filter(|item| {
+                item.get("statusCode")
+                    .or_else(|| item.get("displayStatusCode"))
+                    .and_then(serde_json::Value::as_i64)
+                    .is_some_and(|status| status != 1)
+            })
+            .count()
+    } else {
+        items.len()
+    };
+    captured_history_items >= expected_history_items
+}
+
+fn merge_longcat_token_pack_list(existing: &str, incoming: &str) -> Option<String> {
+    let mut existing_root = serde_json::from_str::<serde_json::Value>(existing).ok()?;
+    let incoming_root = serde_json::from_str::<serde_json::Value>(incoming).ok()?;
+    let existing_data = existing_root.get("data").unwrap_or(&existing_root);
+    let incoming_data = incoming_root.get("data").unwrap_or(&incoming_root);
+    let existing_items = existing_data
+        .get("items")
+        .and_then(serde_json::Value::as_array)?
+        .clone();
+    let incoming_items = incoming_data
+        .get("items")
+        .and_then(serde_json::Value::as_array)?
+        .clone();
+
+    let mut merged_items = Vec::new();
+    let mut item_indexes = HashMap::<String, usize>::new();
+    for item in existing_items.into_iter().chain(incoming_items) {
+        let key = longcat_pack_item_key(&item)
+            .unwrap_or_else(|| serde_json::to_string(&item).unwrap_or_default());
+        if let Some(index) = item_indexes.get(&key).copied() {
+            merged_items[index] = item;
+        } else {
+            item_indexes.insert(key, merged_items.len());
+            merged_items.push(item);
+        }
+    }
+
+    let count_fields = [
+        "activeCount",
+        "historyCount",
+        "total",
+        "pageSize",
+        "totalPage",
+    ];
+    let merged_counts = count_fields.map(|field| {
+        let existing_value = existing_data
+            .get(field)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let incoming_value = incoming_data
+            .get(field)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        (field, existing_value.max(incoming_value))
+    });
+    let merged_len = merged_items.len() as u64;
+    let data = if existing_root.get("data").is_some() {
+        existing_root.get_mut("data")?
+    } else {
+        &mut existing_root
+    };
+    let data = data.as_object_mut()?;
+    data.insert(
+        "items".to_string(),
+        serde_json::Value::Array(merged_items),
+    );
+    for (field, mut value) in merged_counts {
+        if field == "total" {
+            value = value.max(merged_len);
+        }
+        data.insert(
+            field.to_string(),
+            serde_json::Value::Number(serde_json::Number::from(value)),
+        );
+    }
+    serde_json::to_string(&existing_root).ok()
+}
+
+fn longcat_pack_item_key(item: &serde_json::Value) -> Option<String> {
+    let id = item.get("resourceId").or_else(|| item.get("packageId"))?;
+    id.as_str()
+        .map(ToOwned::to_owned)
+        .or_else(|| id.as_u64().map(|value| value.to_string()))
+        .or_else(|| id.as_i64().map(|value| value.to_string()))
 }
 
 /// 当前导航阶段必须等到的响应槽位。
@@ -502,6 +665,85 @@ mod tests {
             ),
             "unknown"
         );
+    }
+
+    #[test]
+    fn longcat_list_waits_for_history_response_and_merges_parallel_filters() {
+        let url =
+            "https://longcat.chat/api/pay/commercial/entitlements/token-packs/list";
+        let active_probe = r#"{
+          "code":0,
+          "data":{
+            "activeCount":1,
+            "historyCount":3,
+            "total":1,
+            "pageNo":1,
+            "pageSize":1,
+            "totalPage":1,
+            "items":[{"resourceId":"active-1","statusCode":1,"statusText":"生效中"}]
+          }
+        }"#;
+        let history_list = r#"{
+          "code":0,
+          "data":{
+            "activeCount":1,
+            "historyCount":3,
+            "total":3,
+            "pageNo":1,
+            "pageSize":9,
+            "totalPage":1,
+            "items":[
+              {"resourceId":"history-1","statusCode":4,"statusText":"已用尽"},
+              {"resourceId":"history-2","statusCode":4,"statusText":"已用尽"},
+              {"resourceId":"history-3","statusCode":4,"statusText":"已用尽"}
+            ]
+          }
+        }"#;
+
+        assert!(!captured_response_satisfies_slot(
+            "token_packs_list",
+            active_probe
+        ));
+        assert!(captured_response_satisfies_slot(
+            "token_packs_list",
+            history_list
+        ));
+        assert!(!captured_response_satisfies_slot(
+            "token_packs_list",
+            r#"{"code":0,"data":{"activeCount":0,"historyCount":0,"total":0,"pageSize":1,"items":[]}}"#
+        ));
+        assert!(captured_response_satisfies_slot(
+            "token_packs_list",
+            r#"{"code":0,"data":{"activeCount":0,"historyCount":0,"total":0,"pageSize":9,"items":[]}}"#
+        ));
+
+        for responses in [
+            [active_probe, history_list],
+            [history_list, active_probe],
+        ] {
+            let mut entry = Vec::new();
+            for body in responses {
+                record_captured_response(&mut entry, url.to_string(), body.to_string());
+            }
+            assert_eq!(entry.len(), 1);
+            assert!(captured_response_satisfies_slot(
+                "token_packs_list",
+                &entry[0].1
+            ));
+            let merged: serde_json::Value =
+                serde_json::from_str(&entry[0].1).expect("merged list response");
+            let items = merged["data"]["items"]
+                .as_array()
+                .expect("merged items");
+            assert_eq!(items.len(), 4);
+            assert_eq!(
+                items
+                    .iter()
+                    .filter(|item| item["statusCode"].as_i64() == Some(4))
+                    .count(),
+                3
+            );
+        }
     }
 
     #[test]

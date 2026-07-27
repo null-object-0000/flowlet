@@ -7,8 +7,8 @@
 ## 1. 背景与目标
 
 Flowlet 当前只对 **DeepSeek / Kimi** 提供 API 式余额自动同步(`supports_balance_query=true`)。
-**LongCat**(Token 资源包 / 按量付费余额)和 **千问 Qwen Token Plan**(Credits 订阅)的套餐余量**只在官方控制台可见**,
-没有公开 API——用户在账号编辑器里只能手动维护,是典型痛点。
+**LongCat**(Token 资源包 / 按量付费余额)和 **千问 Qwen Token Plan**(订阅额度)的套餐余量**只在官方控制台可见**,
+没有公开 API——早期版本只能由用户手动维护，是需要由控制台抓取解决的典型痛点。
 
 **目标**:在 Flowlet 内**后台加载**这些提供商的官方控制台,注入 JS **拦截页面自己的 API 请求**,
 用页面自身的**结构化响应**解析出套餐余量,结果作为 `source="scrape"` 写入已有的 `account_balance_snapshots` 余额快照表,
@@ -86,6 +86,13 @@ config 里配 per-channel 的 JS `extractor` 函数,把捕获的 JSON 映射成�
 | 整份响应 | `raw_scraped_json` | 完整 payload |
 | 固定 | `plan_name` | `"LongCat 资源包"` |
 
+**0 与 null 的语义**:只要账号存在资源包(活跃 lot 或历史列表非空),
+`token_pack_remaining` 就写入真实剩余值——包括用尽时的 `0`,
+前端概览页据此照常展示「资源包 0 Tokens」,与余额为 0 时照常展示一致;
+仅当账号从未有过任何资源包(summary 无活跃 lot 且历史列表为空)时才写 `null`,
+前端此时隐藏资源包行。`token_pack_total` / `token_pack_used` 仅统计活跃 lot:
+无活跃 lot 时为 `null`,有活跃 lot 时即使为 `0` 也写真实值。
+
 #### 3.1.1 LongCat —— token_pack 历史列表(第三阶段,补全已用尽/已过期包)
 
 > 仅 `/api/pay/quota/metering/token-packs/summary` 只能拿到 **ACTIVE** 资源包
@@ -96,7 +103,7 @@ config 里配 per-channel 的 JS `extractor` 函数,把捕获的 JSON 映射成�
 | 项目 | 值 |
 |------|-----|
 | **页面 URL** | `https://longcat.chat/platform/fuel_pack` |
-| **目标接口** | `GET https://longcat.chat/api/pay/commercial/entitlements/token-packs/list` |
+| **目标接口** | `POST https://longcat.chat/api/pay/commercial/entitlements/token-packs/list` |
 | **鉴权** | `credentials: include`,cookie 由 webview 自动携带 |
 
 **响应结构**(实测):
@@ -143,9 +150,14 @@ config 里配 per-channel 的 JS `extractor` 函数,把捕获的 JSON 映射成�
 1. **活跃包优先**:第一阶段 `token-packs/summary` 的 `currentLot + otherLots`
    作为权威来源,计算 `token_pack_total/used/remaining/expire_at`,并放入
    `token_packs` 数组。
-2. **历史端点补缺**:第三阶段 `token-packs/list` 的 `items` 按 `resourceId`
-   去重 —— 仅追加 **lotId 在 summary 中不存在** 的资源包(即已用尽/已过期的历史
-   包),不重复已统计过的活跃包。
+2. **历史端点补缺**:第三阶段 `token-packs/list` 的 `items` 不能直接用
+   `resourceId/packageId` 与 summary 的 `lotId` 比较；`lotId` 是内部批次 ID，
+   跨接口稳定关联键为
+   `summary.bizOrderNo == "CEP-" + list.packageId`。匹配项保留 summary 的额度数值，
+   并由 list 补充 `packageName`、`statusText` 等展示字段；未匹配项才作为历史包追加。
+   `fuel_pack` 页面会对同一 POST 端点并行发送不同筛选条件（例如完整历史列表与
+   `statusCodes=[1], pageSize=1` 的活跃包探测）；捕获层必须按 `resourceId` 合并
+   这些响应，且在实际收齐当前页历史包前不得判定第三阶段完成。
 3. **历史包不汇总**:历史包的 token 数值**不加入** `token_pack_total/used/remaining`,
    避免重复计数(活跃包已包含在 summary 汇总中)。历史包仅以 `_fromList: true`
    标记追加到 `token_packs` 明细数组,供 UI 展示完整历史。
@@ -280,11 +292,12 @@ usage:
 | 三份响应合并 | `raw_scraped_json` | `{subscription, quota_config, usage}` |
 | 固定 | `plan_name` | `"Token Plan 个人版(" + specCode + ")"` |
 
-账号自动同步界面还会从 `raw_scraped_json` 展示官网同等信息:
+账号自动同步界面还会从 `raw_scraped_json` 提取官网同等信息，并以 LongCat 资源包摘要卡的密度展示：
 
-- `subscription.specCode / status / autoRenewFlag / remainingDays / endTime`:套餐档位、状态、自动续费、剩余天数和到期时间;
-- `quota_config[specCode].five_hour + usage.per5HourPercentage / per5HourResetTime`:每 5 小时额度的总额、已用、剩余比例和重置时间;
-- `quota_config[specCode].weekly + usage.per1WeekPercentage / per1WeekResetTime`:每 7 天额度的总额、已用、剩余比例和重置时间。
+- 第一列：`quota_config[specCode].five_hour + usage.per5HourPercentage / per5HourResetTime`，上方展示 5 小时额度剩余比例与 Credits 总量，中间展示进度条，底部展示额度充值时间；
+- 第二列：`quota_config[specCode].weekly + usage.per1WeekPercentage / per1WeekResetTime`，采用完全相同的结构展示 7 天额度剩余比例、Credits 总量、进度条和额度充值时间；
+- 第三列：`subscription.endTime`，展示整个套餐的到期时间；
+- 第四列：余额快照 `synced_at`，展示最近同步时间。
 
 两个窗口必须同时展示，因为任一窗口额度耗尽都会暂停服务。历史上只保存汇总结果、没有完整
 `raw_scraped_json` 的快照无法反推双窗口明细，需要重新同步一次。
@@ -355,10 +368,12 @@ function extractLongCatTokenPack(raw) {
         earliestExpire = lot.expireTime;
       }
     }
+    // 走到这里 lots 必非空：total/used/remaining 即使为 0 也是真实值，不得折叠成 null
+    // （剩余 0 = 资源包用尽，前端需照常展示「资源包 0 Tokens」；见 §3.1「0 与 null 的语义」）。
     return {
       balance: null, currency: null, plan_name: 'LongCat 资源包',
-      token_total: total || null, token_used: used || null,
-      token_remaining: remaining || null,
+      token_total: total, token_used: used,
+      token_remaining: remaining,
       token_expire_at: earliestExpire
     };
   } catch (e) { return null; }
@@ -532,7 +547,7 @@ function extractQwen(bundle) {
 11. **发事件**:`scrape:result` / `scrape:error`
 12. **再隐藏**:`webview.hide()`,句柄留 map
 
-账号资源信息不再把“控制台自动同步”作为独立模块展示。支持抓取的资源模式在同一个资源信息模块内选择 `manual`（手动维护）或 `auto`（自动同步）：自动模式在应用启动 30 秒后首次运行，之后每 5 分钟同步，并保留“立即刷新”入口。周期任务保持 WebView 隐藏，登录失效或页面需要交互时只写 `channel-resource-sync` 任务日志；用户主动刷新时才展示 WebView。
+账号资源信息不再把“控制台自动同步”作为独立模块展示。Qwen Token Plan 与 LongCat hybrid 固定使用 `auto`，不提供手动维护入口；其他支持抓取的资源模式仍可按能力选择 `manual` 或 `auto`。自动模式在应用启动 30 秒后首次运行，之后每 5 分钟同步，并保留“立即刷新”入口。周期任务保持 WebView 隐藏，登录失效或页面需要交互时只写 `channel-resource-sync` 任务日志，并将该账号保留在“等待人工交互”状态；后续周期必须跳过该账号，不得刷新或隐藏用户正在操作的登录窗口。用户主动刷新时才展示 WebView，且只有完整抓取成功后才恢复该账号的周期同步。
 
 ## 9. 风险与缓解
 

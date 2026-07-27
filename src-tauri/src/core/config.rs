@@ -378,6 +378,32 @@ impl ChannelPreset {
         }
     }
 
+    /// 通用中转站/自定义渠道。真实上游地址保存在账号级 Base URL 覆盖中，
+    /// 因此渠道模板自身不提供默认端点。
+    pub fn custom() -> Self {
+        Self {
+            id: "custom".to_string(),
+            name: "自定义渠道".to_string(),
+            vendor: "custom".to_string(),
+            platform_url: None,
+            enabled: true,
+            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+            openai_base_url: String::new(),
+            anthropic_base_url: String::new(),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::XApiKey,
+            default_model: String::new(),
+            small_model: None,
+            supports_model_list: true,
+            supports_model_detail: false,
+            supports_balance_query: false,
+            supports_quota_query: false,
+            supports_usage_query: false,
+            supports_scrape_balance: false,
+            ..Default::default()
+        }
+    }
+
     pub fn base_url_for(&self, protocol: &ProtocolType) -> &str {
         match protocol {
             ProtocolType::OpenAi => &self.openai_base_url,
@@ -434,6 +460,17 @@ pub struct ChannelAccount {
     pub last_error: Option<String>,
     #[serde(default = "default_credential_status")]
     pub credential_status: AccountCredentialStatus,
+    /// 最近一次 /models 拉取得到的该账号上游模型 ID 列表（候选池，JSON 数组）。
+    /// 仅用于在账号编辑器中预填候选列表，None 表示尚未拉取。
+    #[serde(default)]
+    pub synced_models: Option<Vec<String>>,
+    /// 最近一次 /models 拉取成功的时间（RFC3339），与 synced_models 配套。
+    #[serde(default)]
+    pub models_synced_at: Option<String>,
+    /// 用户显式勾选要开放的上游模型 ID 列表（已收敛到渠道白名单内）。
+    /// None 表示尚未用新流程配置过（路由保持现状）；Some（可为空）表示按此列表严格对账路由。
+    #[serde(default)]
+    pub exposed_models: Option<Vec<String>>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -455,6 +492,9 @@ impl Default for ChannelAccount {
             last_used_at: None,
             last_error: None,
             credential_status: ACCOUNT_CREDENTIAL_HEALTHY.to_string(),
+            synced_models: None,
+            models_synced_at: None,
+            exposed_models: None,
             created_at: String::new(),
             updated_at: String::new(),
         }

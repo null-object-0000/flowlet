@@ -19,9 +19,10 @@ type TrendMetric = "cost" | "tokens";
 export function UsageCostPage() {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 30_000 });
-  const usage = useUsageSummary(refresh.autoRefresh);
   const [period, setPeriod] = useState<UsagePeriod>("month");
+  const usage = useUsageSummary(period, refresh.autoRefresh);
   const [metric, setMetric] = useState<TrendMetric>("tokens");
+  const initialLoading = usage.query.isPending && usage.query.data == null;
   const rows = useMemo(() => filterUsageRows(usage.query.data ?? [], period), [period, usage.query.data]);
   const priceLookup = useModelPriceCurrencyLookup();
   const { modelCurrencyOf, channelCurrencyOf } = priceLookup;
@@ -75,6 +76,7 @@ export function UsageCostPage() {
       />
     </header>
 
+    {initialLoading ? <UsageCostSkeleton loadingLabel={t("正在加载用量…")} /> : <>
     <section className={styles.stats} aria-label={t("用量统计")}>
       <Stat label={t("{period}预估费用", { period: periodLabel })} value={totalCostLabel} meta={t("基于已知价格")} />
       <Stat label={t("{period} Token 消耗", { period: periodLabel })} value={formatCompact(summary.tokens, language)} meta={t("输入 {input} · 输出 {output}", { input: formatCompact(summary.inputTokens, language), output: formatCompact(summary.outputTokens, language) })} />
@@ -152,7 +154,43 @@ export function UsageCostPage() {
         </section>
       </aside>
     </div> : null}
+    </>}
   </main>;
+}
+
+function UsageCostSkeleton({ loadingLabel }: { loadingLabel: string }) {
+  return <>
+    <section className={styles.stats} aria-label={loadingLabel} aria-busy="true">
+      {Array.from({ length: 4 }, (_, index) => <div className={styles.stat} key={index} aria-hidden="true">
+        <span className={`${styles.skeletonLine} ${styles.skeletonLabel}`} />
+        <span className={`${styles.skeletonLine} ${styles.skeletonValue}`} />
+        <span className={`${styles.skeletonLine} ${styles.skeletonMeta}`} />
+      </div>)}
+    </section>
+    <div className={styles.workspace} aria-hidden="true">
+      <section className={`${styles.mainCard} ${styles.skeletonCard}`}>
+        <header className={styles.cardHeader}><span className={`${styles.skeletonLine} ${styles.skeletonHeading}`} /></header>
+        <div className={styles.skeletonTrend}>
+          <span className={`${styles.skeletonLine} ${styles.skeletonTotal}`} />
+          <div className={styles.skeletonChart} />
+        </div>
+        <div className={styles.skeletonRows}>
+          {Array.from({ length: 4 }, (_, index) => <div key={index}><span /><span /><span /><span /></div>)}
+        </div>
+      </section>
+      <aside className={styles.side}>
+        <section className={`${styles.coverageCard} ${styles.skeletonSideCard}`}>
+          <span className={`${styles.skeletonLine} ${styles.skeletonHeading}`} />
+          <span className={`${styles.skeletonLine} ${styles.skeletonValue}`} />
+          <span className={`${styles.skeletonLine} ${styles.skeletonTrack}`} />
+        </section>
+        <section className={`${styles.channelCard} ${styles.skeletonSideCard}`}>
+          <span className={`${styles.skeletonLine} ${styles.skeletonHeading}`} />
+          {Array.from({ length: 4 }, (_, index) => <span className={`${styles.skeletonLine} ${styles.skeletonChannel}`} key={index} />)}
+        </section>
+      </aside>
+    </div>
+  </>;
 }
 
 function Stat({ label, value, meta, tooltip }: { label: string; value: string; meta: string; tooltip?: React.ReactNode }) {

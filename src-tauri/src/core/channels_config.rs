@@ -11,6 +11,22 @@ use serde::Deserialize;
 pub const DEFAULT_CONFIG_JSON: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config.json"));
 
+/// Flowlet 支持模型的官方归属。实际请求可以经任意渠道账号转发，但模型品牌、
+/// 官方规格和基准价格始终由模型 ID 决定，不由路由渠道决定。
+pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static str> {
+    match model_id.trim().to_lowercase().as_str() {
+        "longcat-2.0" => Some("longcat"),
+        "deepseek-v4-flash" | "deepseek-v4-pro" => Some("deepseek"),
+        "kimi-k3" | "kimi-k2.7-code" => Some("kimi"),
+        "qwen3.8-max-preview"
+        | "qwen3.7-max"
+        | "qwen3.7-plus"
+        | "qwen3.6-plus"
+        | "qwen3.6-flash" => Some("qwen"),
+        _ => None,
+    }
+}
+
 // ─── JSON 反序列化结构 ─────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone)]
@@ -378,7 +394,7 @@ impl ChannelsConfig {
         })
     }
 
-    /// 获取模型所属的全部 Flowlet 档位。
+    /// 获取模型所属的全部 Flowlet 档位（按渠道查找，保留以兼容旧调用点）。
     pub fn flowlet_tiers(&self, channel_id: &str, model: &str) -> Vec<String> {
         let normalized = model.trim().to_lowercase();
         self.flowlet_tiers
@@ -388,7 +404,20 @@ impl ChannelsConfig {
             .unwrap_or_default()
     }
 
-    /// 获取默认开放模型列表
+    /// 获取模型所属的全部 Flowlet 档位（全局查找，不按渠道区分）。
+    /// 同一上游模型在任何渠道账号下都应得到相同的聚合档位，与「我们总共支持哪些模型」
+    /// 的全局白名单语义一致。用于路由生成。
+    pub fn flowlet_tiers_for_model(&self, model: &str) -> Vec<String> {
+        let normalized = model.trim().to_lowercase();
+        self.flowlet_tiers
+            .values()
+            .find_map(|channel_tiers| channel_tiers.get(&normalized).cloned())
+            .unwrap_or_default()
+    }
+
+    /// 获取默认开放模型列表（按渠道）。
+    /// 仅用于渠道预设的配置漂移检测（preset-sync），不再作为开放模型的白名单。
+    /// 白名单请使用 supported_models()（所有渠道的并集）。
     pub fn default_exposed_models(&self, channel_id: &str) -> Vec<String> {
         self.default_exposed_models
             .get(channel_id)
@@ -396,10 +425,33 @@ impl ChannelsConfig {
             .unwrap_or_default()
     }
 
-    /// 为现有账号补齐配置声明的直连模型与 Flowlet 聚合模型路由。
+    /// Flowlet 支持开放的上游模型全集（所有渠道的并集，含 Token Plan 专属模型）。
+    /// 任意渠道账号只要底层 /models 返回了其中的模型，就可勾选开放——不再按渠道区分。
+    /// 必须与 src/domains/channel/types.ts 的 FLOWLET_SUPPORTED_MODELS 保持一致。
+    pub fn supported_models(&self) -> Vec<String> {
+        let mut models: Vec<String> = self
+            .default_exposed_models
+            .values()
+            .flatten()
+            .cloned()
+            .chain(QWEN_TOKEN_PLAN_DEFAULT_MODELS.iter().map(|m| m.to_string()))
+            .collect();
+        // 去重（保持首次出现顺序）
+        let mut seen = std::collections::HashSet::new();
+        models.retain(|m| seen.insert(m.clone()));
+        models
+    }
+
+    /// 为现有账号补齐「用户已勾选开放」的直连模型与 Flowlet 聚合模型路由。
     ///
-    /// 只追加缺失签名，不覆盖用户已有的启停状态、优先级和时间戳。
-    /// 千问 Token Plan 账号使用套餐专属默认模型（qwen3.8-max-preview 仅订阅可用）。
+    /// 只追加缺失签名，不覆盖用户已有的启停状态、优先级和时间戳（删除取消勾选的
+    /// 路由由前端保存时的对账逻辑负责）。
+    ///
+    /// 候选上游模型 = 用户在账号编辑器中勾选的 `exposed_models` ∩ 最近一次
+    /// `/models` 返回的 `synced_models` ∩ 全局支持模型集。白名单不按渠道区分——
+    /// 任意账号只要其 `/models` 返回了 Flowlet 支持的模型，就可勾选开放。
+    /// - `exposed_models = None`：账号尚未用新流程配置过，不生成任何路由（保持现状）。
+    /// - `exposed_models = Some(list)`（可为空）：仅为列表中的模型补齐路由。
     pub fn merge_default_routes(
         &self,
         existing: &[RouteCandidate],
@@ -410,9 +462,10 @@ impl ChannelsConfig {
         let mut signatures: std::collections::HashSet<String> =
             existing.iter().map(route_signature).collect();
         let now = chrono::Utc::now().to_rfc3339();
+        // 所有渠道（包括 custom）统一使用全局支持模型白名单。
+        let whitelist = self.supported_models();
 
         for preset in presets {
-            let channel_models = self.default_exposed_models(&preset.id);
             for protocol in &preset.supported_protocols {
                 for (account_index, account) in accounts
                     .iter()
@@ -425,18 +478,50 @@ impl ChannelsConfig {
                     })
                     .enumerate()
                 {
-                    let plan_models;
-                    let upstream_models: &[String] = if is_qwen_token_plan_account(account) {
-                        plan_models = QWEN_TOKEN_PLAN_DEFAULT_MODELS
-                            .iter()
-                            .map(|model| model.to_string())
-                            .collect::<Vec<String>>();
-                        &plan_models
+                    let protocol_has_endpoint = if preset.vendor == "custom" {
+                        match protocol {
+                            ProtocolType::OpenAi => account
+                                .base_url_override
+                                .as_deref()
+                                .is_some_and(|url| !url.trim().is_empty()),
+                            ProtocolType::Anthropic => account
+                                .anthropic_base_url_override
+                                .as_deref()
+                                .is_some_and(|url| !url.trim().is_empty()),
+                        }
                     } else {
-                        &channel_models
+                        true
+                    };
+                    if !protocol_has_endpoint {
+                        continue;
+                    }
+                    // 候选 = exposed_models ∩ synced_models ∩ 全局支持模型集。
+                    // exposed_models 为 None（未配置）或空 → 不生成路由。
+                    let exposed = account.exposed_models.as_deref().unwrap_or(&[]);
+                    let exposed_set: std::collections::HashSet<String> =
+                        exposed.iter().map(|m| m.trim().to_lowercase()).collect();
+                    let synced_set: std::collections::HashSet<String> = account
+                        .synced_models
+                        .as_deref()
+                        .unwrap_or(&[])
+                        .iter()
+                        .map(|m| m.trim().to_lowercase())
+                        .collect();
+                    let upstream_models: Vec<String> = if exposed.is_empty() {
+                        Vec::new()
+                    } else {
+                        whitelist
+                            .iter()
+                            .filter(|m| {
+                                let key = m.trim().to_lowercase();
+                                exposed_set.contains(&key) && synced_set.contains(&key)
+                            })
+                            .cloned()
+                            .collect()
                     };
                     for (model_index, upstream_model) in upstream_models.iter().enumerate() {
-                        let tiers = self.flowlet_tiers(&preset.id, upstream_model);
+                        // 档位映射按模型全局查找（不按渠道），与全局白名单语义一致。
+                        let tiers = self.flowlet_tiers_for_model(upstream_model);
                         let public_models: Vec<String> = std::iter::once(upstream_model.clone())
                             .chain(tiers.into_iter().map(|tier| format!("flowlet-{tier}")))
                             .collect();
@@ -520,15 +605,9 @@ fn route_signature(route: &RouteCandidate) -> String {
     .join("\0")
 }
 
-/// 千问 Token Plan 账号的默认开放模型。
-/// 与 default_exposed_models.qwen 保持一致，包含全部个人版可用模型。
-const QWEN_TOKEN_PLAN_DEFAULT_MODELS: [&str; 5] = [
-    "qwen3.8-max-preview",
-    "qwen3.7-max",
-    "qwen3.7-plus",
-    "qwen3.6-plus",
-    "qwen3.6-flash",
-];
+/// 千问 Token Plan 账号的默认开放模型（套餐专属：qwen3.8-max-preview 仅订阅可用）。
+/// 必须与 src/domains/channel/types.ts 的 QWEN_TOKEN_PLAN_DEFAULT_MODELS 保持一致。
+const QWEN_TOKEN_PLAN_DEFAULT_MODELS: [&str; 2] = ["qwen3.8-max-preview", "qwen3.6-flash"];
 
 /// 判断账号是否为千问 Token Plan 订阅模式（sk-sp 专属 Key + 套餐端点，
 /// 通过账号级 Base URL 覆盖接入）。
@@ -757,6 +836,8 @@ mod tests {
             channel_id: "longcat".to_string(),
             api_key: "sk-test".to_string(),
             enabled: true,
+            exposed_models: Some(vec!["LongCat-2.0".to_string()]),
+            synced_models: Some(vec!["LongCat-2.0".to_string()]),
             ..Default::default()
         };
 
@@ -802,7 +883,100 @@ mod tests {
     }
 
     #[test]
-    fn qwen_token_plan_account_gets_plan_default_models() {
+    fn merge_default_routes_uses_global_supported_models_any_channel() {
+        // 白名单为全局支持模型集（所有渠道的并集），不再按渠道/套餐区分。
+        // 本测试验证：千问账号勾选「其它渠道的模型」(deepseek-v4-pro) 也能生成路由。
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [
+                    {
+                        "id": "qwen",
+                        "name": "千问 Qwen",
+                        "vendor": "qwen",
+                        "supported_protocols": ["openai", "anthropic"],
+                        "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "anthropic_base_url": "https://dashscope.aliyuncs.com/apps/anthropic"
+                    },
+                    {
+                        "id": "deepseek",
+                        "name": "DeepSeek",
+                        "vendor": "deepseek",
+                        "supported_protocols": ["openai", "anthropic"],
+                        "openai_base_url": "https://api.deepseek.com/v1",
+                        "anthropic_base_url": "https://api.deepseek.com"
+                    }
+                ],
+                "default_exposed_models": {
+                    "qwen": ["qwen3.7-max", "qwen3.6-flash"],
+                    "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"]
+                },
+                "flowlet_tiers": {
+                    "qwen": {
+                        "qwen3.7-max": "pro",
+                        "qwen3.6-flash": "flash",
+                        "qwen3.8-max-preview": "pro"
+                    },
+                    "deepseek": {
+                        "deepseek-v4-pro": "pro",
+                        "deepseek-v4-flash": "flash"
+                    }
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+
+        // 千问账号勾选了原属 DeepSeek 渠道的 deepseek-v4-pro：全局白名单下应可开放。
+        let qwen_account = ChannelAccount {
+            id: "qwen-cross".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec![
+                "deepseek-v4-pro".to_string(),
+                "qwen3.6-flash".to_string(),
+            ]),
+            synced_models: Some(vec![
+                "deepseek-v4-pro".to_string(),
+                "qwen3.6-flash".to_string(),
+            ]),
+            ..Default::default()
+        };
+        let routes = config.merge_default_routes(&[], &[qwen_account], &config.presets);
+        let upstream_models: std::collections::HashSet<&str> =
+            routes.iter().map(|r| r.upstream_model.as_str()).collect();
+        assert_eq!(
+            upstream_models,
+            std::collections::HashSet::from(["deepseek-v4-pro", "qwen3.6-flash"])
+        );
+        // deepseek-v4-pro 应进入 flowlet-pro 聚合路由（沿用 deepseek 渠道的档位映射）。
+        assert!(routes.iter().any(|route| {
+            route.virtual_model_id == "flowlet-pro" && route.upstream_model == "deepseek-v4-pro"
+        }));
+        // 全局白名单外的模型仍被防御过滤。
+        let with_stranger = ChannelAccount {
+            id: "qwen-stranger".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec![
+                "deepseek-v4-pro".to_string(),
+                "some-random-model".to_string(),
+            ]),
+            synced_models: Some(vec![
+                "deepseek-v4-pro".to_string(),
+                "some-random-model".to_string(),
+            ]),
+            ..Default::default()
+        };
+        let routes = config.merge_default_routes(&[], &[with_stranger], &config.presets);
+        let upstream_models: std::collections::HashSet<&str> =
+            routes.iter().map(|r| r.upstream_model.as_str()).collect();
+        assert!(!upstream_models.contains("some-random-model"));
+        assert!(upstream_models.contains("deepseek-v4-pro"));
+    }
+
+    #[test]
+    fn supported_models_is_union_of_all_channels_plus_token_plan() {
         let json = serde_json::json!({
             "channels_config": {
                 "channels": [{
@@ -815,57 +989,190 @@ mod tests {
                 }],
                 "default_exposed_models": {
                     "qwen": ["qwen3.7-max", "qwen3.6-flash"]
-                },
-                "flowlet_tiers": {
-                    "qwen": {
-                        "qwen3.7-max": "pro",
-                        "qwen3.6-flash": "flash",
-                        "qwen3.8-max-preview": "pro"
-                    }
                 }
             }
         });
         let config = ChannelsConfig::from_config_json(&json).unwrap();
-        let payg_account = ChannelAccount {
-            id: "qwen-payg".to_string(),
-            channel_id: "qwen".to_string(),
+        let supported: std::collections::HashSet<String> = config.supported_models().into_iter().collect();
+        // 渠道列表 + Token Plan 专属模型(qwen3.8-max-preview) 的并集。
+        for expected in ["qwen3.7-max", "qwen3.6-flash", "qwen3.8-max-preview"] {
+            assert!(supported.contains(expected), "缺少支持的模型: {expected}");
+        }
+        // 去重：qwen3.6-flash 同时出现在渠道列表与 Token Plan 列表，只出现一次。
+        assert_eq!(
+            config.supported_models().iter().filter(|m| *m == "qwen3.6-flash").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn merge_default_routes_uses_user_selected_exposed_models() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "deepseek",
+                    "name": "DeepSeek",
+                    "vendor": "deepseek",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "https://api.deepseek.com/v1",
+                    "anthropic_base_url": "https://api.deepseek.com"
+                }],
+                "default_exposed_models": {
+                    "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"]
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+
+        // 1) exposed_models = None（尚未配置）→ 不生成任何路由，保持现状。
+        let unconfigured = ChannelAccount {
+            id: "deepseek-new".to_string(),
+            channel_id: "deepseek".to_string(),
             api_key: "sk-test".to_string(),
             enabled: true,
-            resource_mode: Some("pay_as_you_go".to_string()),
             ..Default::default()
         };
-        let plan_account = ChannelAccount {
-            id: "qwen-plan".to_string(),
-            channel_id: "qwen".to_string(),
-            api_key: "sk-sp-test".to_string(),
+        assert!(config
+            .merge_default_routes(&[], &[unconfigured], &config.presets)
+            .is_empty());
+
+        // 2) 仅为用户勾选的模型生成路由；与白名单取交集做防御（白名单外即使被勾选也过滤）。
+        let selected = ChannelAccount {
+            id: "deepseek-selected".to_string(),
+            channel_id: "deepseek".to_string(),
+            api_key: "sk-test".to_string(),
             enabled: true,
-            resource_mode: Some("token_plan".to_string()),
+            exposed_models: Some(vec![
+                "deepseek-v4-flash".to_string(),
+                "deepseek-chat".to_string(), // 白名单外，应被过滤
+            ]),
+            synced_models: Some(vec![
+                "deepseek-v4-flash".to_string(),
+                "deepseek-chat".to_string(),
+            ]),
+            ..Default::default()
+        };
+        let routes = config.merge_default_routes(&[], &[selected], &config.presets);
+        let upstream_models: std::collections::HashSet<&str> =
+            routes.iter().map(|r| r.upstream_model.as_str()).collect();
+        assert_eq!(
+            upstream_models,
+            std::collections::HashSet::from(["deepseek-v4-flash"])
+        );
+        // 未勾选的 deepseek-v4-pro 不应出现。
+        assert!(!upstream_models.contains("deepseek-v4-pro"));
+        // 白名单外的 deepseek-chat 不应出现。
+        assert!(!upstream_models.contains("deepseek-chat"));
+
+        // 3) exposed_models 为空列表 → 不开放任何模型。
+        let none_selected = ChannelAccount {
+            id: "deepseek-empty".to_string(),
+            channel_id: "deepseek".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec![]),
+            synced_models: Some(vec![]),
+            ..Default::default()
+        };
+        assert!(config
+            .merge_default_routes(&[], &[none_selected], &config.presets)
+            .is_empty());
+
+        // 4) 只追加不删除：已有路由保留（删除取消勾选由前端对账负责）。
+        let existing = routes.first().cloned().unwrap();
+        let existing_id = existing.id.clone();
+        let selected_account = ChannelAccount {
+            id: "deepseek-selected".to_string(),
+            channel_id: "deepseek".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            synced_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            ..Default::default()
+        };
+        let merged = config.merge_default_routes(&[existing], &[selected_account], &config.presets);
+        assert_eq!(merged.len(), routes.len());
+        assert!(merged.iter().any(|r| r.id == existing_id));
+
+        // 5) 即使模型在全局白名单且仍被勾选，只要最新 /models 未返回，也不生成路由。
+        let missing_from_models = ChannelAccount {
+            id: "deepseek-stale".to_string(),
+            channel_id: "deepseek".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec!["deepseek-v4-pro".to_string()]),
+            synced_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            ..Default::default()
+        };
+        assert!(
+            config
+                .merge_default_routes(&[], &[missing_from_models], &config.presets)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn custom_channel_uses_global_whitelist_and_only_configured_protocols() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "custom",
+                    "name": "自定义渠道",
+                    "vendor": "custom",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "",
+                    "anthropic_base_url": ""
+                }],
+                "default_exposed_models": {
+                    "deepseek": ["deepseek-v4-pro"]
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let account = ChannelAccount {
+            id: "custom-relay".to_string(),
+            channel_id: "custom".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            base_url_override: Some("https://relay.example/v1".to_string()),
+            anthropic_base_url_override: None,
+            exposed_models: Some(vec![
+                "deepseek-v4-pro".to_string(),
+                "relay-proprietary-model".to_string(),
+            ]),
+            synced_models: Some(vec![
+                "deepseek-v4-pro".to_string(),
+                "relay-proprietary-model".to_string(),
+            ]),
             ..Default::default()
         };
 
-        let payg_routes = config.merge_default_routes(&[], &[payg_account], &config.presets);
-        let payg_models: std::collections::HashSet<&str> = payg_routes
-            .iter()
-            .map(|route| route.upstream_model.as_str())
-            .collect();
-        assert_eq!(
-            payg_models,
-            std::collections::HashSet::from(["qwen3.7-max", "qwen3.6-flash"])
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].upstream_model, "deepseek-v4-pro");
+        assert_eq!(routes[0].client_protocol, ProtocolType::OpenAi);
+        assert!(
+            routes
+                .iter()
+                .all(|route| route.upstream_model != "relay-proprietary-model")
         );
+    }
 
-        let plan_routes = config.merge_default_routes(&[], &[plan_account], &config.presets);
-        let plan_models: std::collections::HashSet<&str> = plan_routes
+    #[test]
+    fn embedded_config_contains_custom_channel_template() {
+        let json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let custom = config
+            .presets
             .iter()
-            .map(|route| route.upstream_model.as_str())
-            .collect();
-        assert_eq!(
-            plan_models,
-            std::collections::HashSet::from(["qwen3.8-max-preview", "qwen3.6-flash"])
-        );
-        // Token Plan 旗舰模型应进入 flowlet-pro 聚合路由
-        assert!(plan_routes.iter().any(|route| {
-            route.virtual_model_id == "flowlet-pro" && route.upstream_model == "qwen3.8-max-preview"
-        }));
+            .find(|preset| preset.id == "custom")
+            .expect("missing custom channel");
+        assert_eq!(custom.vendor, "custom");
+        assert!(custom.openai_base_url.is_empty());
+        assert!(custom.anthropic_base_url.is_empty());
+        assert!(custom.supports_model_list);
+        assert_eq!(custom.openai_auth, AuthStrategy::Bearer);
+        assert_eq!(custom.anthropic_auth, AuthStrategy::XApiKey);
     }
 
     #[test]

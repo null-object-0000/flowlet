@@ -66,6 +66,12 @@ describe("resolveChannelModel", () => {
     expect(resolved?.providerId).toBe("moonshot-cn");
   });
 
+  it("resolves a model carried by a custom channel through its official owner", () => {
+    const resolved = resolveChannelModel(makeCatalog(), "custom", "deepseek-v4-flash");
+    expect(resolved?.providerId).toBe("deepseek");
+    expect(resolved?.modelId).toBe("deepseek-v4-flash");
+  });
+
   it("returns null for unknown channel", () => {
     expect(resolveChannelModel(makeCatalog(), "unknown", "x")).toBeNull();
   });

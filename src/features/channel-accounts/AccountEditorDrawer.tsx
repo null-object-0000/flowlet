@@ -1,14 +1,17 @@
 import { useMemo, useState } from "react";
-import { Button, Input, Progress, Select, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Checkbox, Input, Progress, Select, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { toAppError } from "../../platform/tauri/client";
-import type { AccountBalanceSnapshot, AccountResourceMode, AccountResourceSyncMode, ChannelAccount } from "../../domains/account/types";
+import { accountCommands } from "../../domains/account/commands";
+import type { AccountBalanceSnapshot, AccountResourceMode, AccountResourceSyncMode, ChannelAccount, ModelSyncResult } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import {
+  CUSTOM_CHANNEL_ID,
+  FLOWLET_SUPPORTED_MODELS,
   QWEN_CHANNEL_ID,
   QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL,
-  QWEN_TOKEN_PLAN_CONSOLE_URL,
   QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
+  isCustomChannel,
 } from "../../domains/channel/types";
 import {
   parseStoredLongCatPacks,
@@ -25,7 +28,6 @@ import { formatCompactNumber } from "../../shared/formatters/number";
 import {
   parseQwenTokenPlanDetails,
   type QwenQuotaWindow,
-  type QwenTokenPlanDetails,
 } from "./qwenTokenPlanDetails";
 import {
   ACCOUNT_NAME_MAX_DISPLAY_UNITS,
@@ -58,21 +60,33 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const { language, t } = useAppPreferences();
   const [draft, setDraft] = useState<ChannelAccount>(() => createDraft(mode, accounts, presets, language));
   const [resource, setResource] = useState<ResourceDraft>(() => resourceDraft(snapshot));
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => mode.kind === "edit" && mode.account.channel_id === CUSTOM_CHANNEL_ID,
+  );
   const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 最近一次 /models 拉取返回的全量上游模型（含白名单外的）。编辑已保存账号时用
+  // synced_models 预填（无 display_name），新建账号为 null 直到用户手动拉取。
+  const [candidates, setCandidates] = useState<ModelSyncResult["models"] | null>(
+    () => mode.kind === "edit" && mode.account.synced_models
+      ? mode.account.synced_models.map((model) => ({ model }))
+      : null,
+  );
+  const [fetchingModels, setFetchingModels] = useState(false);
 
   const channel = presets.find((item) => item.id === draft?.channel_id);
+  const customChannel = isCustomChannel(channel);
   const isEdit = mode.kind === "edit";
   const autoSyncBalance = channel?.supports_balance_query === true;
   const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
   const resourceOptions = resourceModeOptions(draft?.channel_id ?? "");
   const resourceMode = draft?.resource_mode ?? defaultResourceMode(draft?.channel_id ?? "");
   // LongCat 统一为 hybrid 模式(同时抓取 token 资源包与按量余额),强制自动同步；
-  // 其他渠道保留手动/自动切换。
   const isLongCatHybrid = draft.channel_id === "longcat" && resourceMode === "hybrid";
-  const resourceSyncMode = isLongCatHybrid ? "auto" : (draft.resource_sync_mode ?? "manual");
+  // Qwen Token Plan 的额度只来自官方控制台，也固定为自动同步，不再提供手动维护路径。
+  const isQwenTokenPlan = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "token_plan";
+  const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan ? "auto" : (draft.resource_sync_mode ?? "manual");
   const isResourceAutoSync = supportsScrape && resourceSyncMode === "auto";
   const tokenRemaining = useMemo(() => {
     const total = optionalNumber(resource.tokenTotal);
@@ -91,15 +105,16 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     const next = presets.find((item) => item.id === channelId);
     const count = accounts.filter((item) => item.channel_id === channelId).length;
     // 千问默认 Token Plan 订阅，需配套专属端点。
-    const isQwenTokenPlan = channelId === QWEN_CHANNEL_ID && defaultResourceMode(channelId) === "token_plan";
+    const nextIsQwenTokenPlan = channelId === QWEN_CHANNEL_ID && defaultResourceMode(channelId) === "token_plan";
     update({
       channel_id: channelId,
       name: count === 0 ? t("{name} 主账号", { name: next?.name ?? t("渠道") }) : t("{name} 账号 {count}", { name: next?.name ?? t("渠道"), count: count + 1 }),
       resource_mode: defaultResourceMode(channelId),
-      resource_sync_mode: channelId === "longcat" ? "auto" : "manual",
-      base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
-      anthropic_base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
+      resource_sync_mode: channelId === "longcat" || nextIsQwenTokenPlan ? "auto" : "manual",
+      base_url_override: nextIsQwenTokenPlan ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
+      anthropic_base_url_override: nextIsQwenTokenPlan ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
     });
+    if (channelId === CUSTOM_CHANNEL_ID) setAdvancedOpen(true);
     setResource(resourceDraft());
   }
 
@@ -133,6 +148,10 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       Toast.warning(t("请先填写 API Key"));
       return;
     }
+    if (customChannel && !currentDraft.base_url_override?.trim()) {
+      Toast.warning(t("测试连接需要先填写 OpenAI Base URL"));
+      return;
+    }
     setTesting(true);
     try {
       await onTestConnection({ channel_id: currentDraft.channel_id, api_key: currentDraft.api_key.trim(), base_url_override: currentDraft.base_url_override });
@@ -157,10 +176,84 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     }
   }
 
+  // 所有渠道（包括 custom）统一受 Flowlet 全局支持模型白名单保护。
+  // /models 返回的白名单外模型仍展示，但禁用勾选并标记为不支持。
+  const modelWhitelist = FLOWLET_SUPPORTED_MODELS;
+  const whitelistSet = useMemo(
+    () => new Set(modelWhitelist.map((model) => model.trim().toLowerCase())),
+    [modelWhitelist],
+  );
+
+  /** 手动拉取底层 /models：用草稿当前的连接参数（故新建未保存的账号也可拉取）。
+   *  全量结果进入 candidates 供展示勾选；IDs 同步写入 draft.synced_models，
+   *  并清理已不在本次结果或全局白名单内的旧选择。 */
+  async function handleFetchModels() {
+    if (!currentDraft.api_key.trim()) {
+      Toast.warning(t("请先填写 API Key"));
+      return;
+    }
+    if (customChannel && !currentDraft.base_url_override?.trim()) {
+      Toast.warning(t("拉取模型列表需要先填写 OpenAI Base URL"));
+      return;
+    }
+    setFetchingModels(true);
+    try {
+      const result = await accountCommands.fetchChannelModels({
+        channel_id: currentDraft.channel_id,
+        api_key: currentDraft.api_key.trim(),
+        base_url_override: currentDraft.base_url_override,
+      });
+      const models = result.models.filter((item) => item.model.trim());
+      const returnedSet = new Set(models.map((item) => item.model.trim().toLowerCase()));
+      setCandidates(models);
+      update({
+        synced_models: models.map((item) => item.model),
+        models_synced_at: new Date().toISOString(),
+        exposed_models: currentDraft.exposed_models == null
+          ? null
+          : currentDraft.exposed_models.filter((model) => {
+            const key = model.trim().toLowerCase();
+            return returnedSet.has(key) && whitelistSet.has(key);
+          }),
+      });
+      if (result.errors.length > 0) {
+        Toast.warning(t("模型列表已获取，但部分请求失败：{message}", { message: result.errors[0] }));
+      } else {
+        Toast.success(t("已获取 {count} 个上游模型", { count: models.length }));
+      }
+    } catch (error) {
+      Toast.error(t("拉取模型列表失败：{message}", { message: toAppError(error, "account_sync_failed").message }));
+    } finally {
+      setFetchingModels(false);
+    }
+  }
+
+  const selectedModels = currentDraft.exposed_models ?? [];
+  const selectedSet = useMemo(
+    () => new Set((currentDraft.exposed_models ?? []).map((model) => model.trim().toLowerCase())),
+    [currentDraft.exposed_models],
+  );
+
+  function toggleExposedModel(model: string, checked: boolean) {
+    const key = model.trim().toLowerCase();
+    const next = checked
+      ? [...selectedModels, model]
+      : selectedModels.filter((item) => item.trim().toLowerCase() !== key);
+    update({ exposed_models: next });
+  }
+
   async function handleSave() {
     const normalizedName = currentDraft.name.trim();
     if (!normalizedName || (!isEdit && !currentDraft.api_key.trim())) {
       Toast.warning(t("请填写账号名称和 API Key"));
+      return;
+    }
+    if (
+      customChannel
+      && !currentDraft.base_url_override?.trim()
+      && !currentDraft.anthropic_base_url_override?.trim()
+    ) {
+      Toast.warning(t("自定义渠道至少需要填写一个协议的 Base URL"));
       return;
     }
     if (getAccountNameDisplayUnits(normalizedName) > ACCOUNT_NAME_MAX_DISPLAY_UNITS) {
@@ -174,6 +267,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           ...currentDraft,
           name: normalizedName,
           api_key: currentDraft.api_key.trim(),
+          resource_sync_mode: isQwenTokenPlan || isLongCatHybrid ? "auto" : currentDraft.resource_sync_mode,
           base_url_override: currentDraft.base_url_override?.trim() || null,
           anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
         },
@@ -220,7 +314,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   {presets.map((item) => (
                     <Select.Option key={item.id} value={item.id}>
                       <span className={styles.channelOptionLabel}>
-                        {item.id === "kimi" ? (
+                        {item.id === CUSTOM_CHANNEL_ID ? (
+                          <span className={styles.customChannelIcon}>↗</span>
+                        ) : item.id === "kimi" ? (
                           <span className={styles.kimiSwatch}><img src={`/icons/lobe/${item.id}-color.svg`} alt="" className={styles.logoIcon} /></span>
                         ) : (
                           <img src={`/icons/lobe/${item.id}-color.svg`} alt="" className={styles.logoIcon} />
@@ -265,7 +361,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
 
         <section className={styles.section}>
           <div className={`${styles.sectionHeading} ${styles.resourceModeHeading}`}>
-            <span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
+            <span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
             {isEdit && (resourceOptions.length || isLongCatHybrid) ? (
               <div className={styles.resourceModeMeta}>
                 <span>{t("计费模式")}</span>
@@ -307,11 +403,20 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   language={language}
                   t={t}
                 />
+              ) : isQwenTokenPlan ? (
+                <QwenTokenPlanPanel
+                  account={draft}
+                  enabled={isEdit}
+                  snapshot={snapshot}
+                  onScrape={onScrape}
+                  language={language}
+                  t={t}
+                />
               ) : (
                 <div className={styles.resourcePanel}>
                 <div className={styles.resourceHeading}>
-                  <strong>{t(resourceMode === "token_pack" ? "资源包信息" : resourceMode === "token_plan" ? "Token Plan 订阅信息" : "按量付费信息")}</strong>
-                  <span className={isResourceAutoSync ? styles.autoBadge : resourceMode === "token_plan" ? styles.planBadge : styles.manualBadge}>{t(isResourceAutoSync ? "自动同步" : resourceMode === "token_plan" ? "订阅" : "手动维护")}</span>
+                  <strong>{t(resourceMode === "token_pack" ? "资源包信息" : "按量付费信息")}</strong>
+                  <span className={isResourceAutoSync ? styles.autoBadge : styles.manualBadge}>{t(isResourceAutoSync ? "自动同步" : "手动维护")}</span>
                 </div>
                 {supportsScrape ? (
                   <div className={styles.syncModeSection}>
@@ -338,12 +443,6 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                     language={language}
                     t={t}
                   />
-                ) : resourceMode === "token_plan" ? (
-                  <div className={styles.tokenPlanInfo}>
-                    <span>{t("Token Plan 以 Credits 统一计量，额度与剩余量请在千问 Token Plan 控制台查看。")}</span>
-                    <span>{t("仅限 Claude Code、Qwen Code 等 AI 编程工具交互式使用，禁止用于自动化脚本或应用后端。")}</span>
-                    <Text link={{ href: QWEN_TOKEN_PLAN_CONSOLE_URL, target: "_blank", rel: "noreferrer" }} icon={<IconExternalOpen />} size="small">{t("打开 Token Plan 控制台")}</Text>
-                  </div>
                 ) : (
                   <div className={styles.resourceGrid}>
                     <Field label={t("账户余额")}><Input aria-label={t("账户余额")} type="number" value={resource.balance} onChange={(value) => setResource({ ...resource, balance: value })} placeholder={t("手动填写")} /></Field>
@@ -356,6 +455,58 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           )}
         </section>
 
+        {channel?.supports_model_list ? (
+          <section className={styles.section}>
+            <div className={styles.modelHeading}>
+              <span>
+                <h3>{t("开放模型")}</h3>
+                <small>{t("拉取上游模型后勾选要通过本账号开放的模型；不支持的模型不可选，一个都不选则该账号不开放任何模型")}</small>
+              </span>
+              <Button
+                size="small"
+                icon={<IconRefresh />}
+                loading={fetchingModels}
+                onClick={() => void handleFetchModels()}
+              >
+                {t("拉取模型列表")}
+              </Button>
+            </div>
+            {candidates == null ? (
+              <span className={styles.packEmpty}>{t("尚未拉取模型列表，点击“拉取模型列表”从渠道获取。")}</span>
+            ) : candidates.length === 0 ? (
+              <span className={styles.packEmpty}>{t("该渠道未返回任何模型。")}</span>
+            ) : (
+              <div className={styles.modelList}>
+                {candidates.map((candidate) => {
+                  const key = candidate.model.trim().toLowerCase();
+                  const supported = whitelistSet.has(key);
+                  const checked = selectedSet.has(key);
+                  return (
+                    <label
+                      key={candidate.model}
+                      className={`${styles.modelItem} ${supported ? "" : styles.modelUnsupported}`}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        disabled={!supported}
+                        onChange={(event) => toggleExposedModel(candidate.model, event.target.checked === true)}
+                      />
+                      <span className={styles.modelName}>{candidate.model}</span>
+                      {candidate.display_name && candidate.display_name.trim() && candidate.display_name !== candidate.model ? (
+                        <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }}>{candidate.display_name}</Text>
+                      ) : null}
+                      {supported ? null : <Tag size="small" color="grey">{t("不支持")}</Tag>}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {draft.models_synced_at ? (
+              <Text type="tertiary" size="small">{t("最近拉取：{time}", { time: formatFullTimestamp(draft.models_synced_at, language) })}</Text>
+            ) : null}
+          </section>
+        ) : null}
+
         <section className={`${styles.section} ${styles.advanced}`}>
           <button type="button" className={styles.advancedToggle} onClick={() => setAdvancedOpen((value) => !value)}>
             <span><strong>{t("高级设置")}</strong><small>{t("自定义连接地址与测试账号状态")}</small></span>
@@ -364,10 +515,12 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           {advancedOpen ? (
             <div className={styles.advancedContent}>
               <div className={styles.urlGrid}>
-                <Field label={t("OpenAI Base URL 覆盖（可选）")}><Input aria-label={t("OpenAI Base URL 覆盖（可选）")} value={draft.base_url_override ?? ""} placeholder={channel?.openai_base_url} onChange={(value) => update({ base_url_override: value || null })} showClear /></Field>
-                <Field label={t("Anthropic Base URL 覆盖（可选）")}><Input aria-label={t("Anthropic Base URL 覆盖（可选）")} value={draft.anthropic_base_url_override ?? ""} placeholder={channel?.anthropic_base_url} onChange={(value) => update({ anthropic_base_url_override: value || null })} showClear /></Field>
+                <Field label={t(customChannel ? "OpenAI Base URL" : "OpenAI Base URL 覆盖（可选）")}><Input aria-label={t(customChannel ? "OpenAI Base URL" : "OpenAI Base URL 覆盖（可选）")} value={draft.base_url_override ?? ""} placeholder={channel?.openai_base_url || "https://example.com/v1"} onChange={(value) => update({ base_url_override: value || null })} showClear /></Field>
+                <Field label={t(customChannel ? "Anthropic Base URL" : "Anthropic Base URL 覆盖（可选）")}><Input aria-label={t(customChannel ? "Anthropic Base URL" : "Anthropic Base URL 覆盖（可选）")} value={draft.anthropic_base_url_override ?? ""} placeholder={channel?.anthropic_base_url || "https://example.com/anthropic"} onChange={(value) => update({ anthropic_base_url_override: value || null })} showClear /></Field>
               </div>
-              <Text type="tertiary" size="small">{t("填写 API Key 后可测试真实上游连接。")}</Text>
+              <Text type="tertiary" size="small">{t(customChannel
+                ? "只会为已填写 Base URL 的协议生成路由；OpenAI 使用 Bearer，Anthropic 使用 x-api-key。"
+                : "填写 API Key 后可测试真实上游连接。")}</Text>
             </div>
           ) : null}
         </section>
@@ -416,10 +569,15 @@ function resourceSyncModeOptions(): { value: AccountResourceSyncMode; title: str
 }
 
 function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPreset[], language: "zh-CN" | "en-US"): ChannelAccount {
-  if (mode.kind === "edit") return { ...mode.account };
+  if (mode.kind === "edit") {
+    const forceAutoSync = mode.account.channel_id === "longcat"
+      || (mode.account.channel_id === QWEN_CHANNEL_ID && mode.account.resource_mode === "token_plan");
+    return { ...mode.account, resource_sync_mode: forceAutoSync ? "auto" : mode.account.resource_sync_mode };
+  }
   const channel = presets.find((item) => item.id === mode.channelId);
   const count = accounts.filter((item) => item.channel_id === mode.channelId).length;
   const now = new Date().toISOString();
+  const isQwenTokenPlan = mode.channelId === QWEN_CHANNEL_ID;
   return {
     id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     channel_id: mode.channelId,
@@ -429,12 +587,15 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     priority: accounts.length,
     remark: "",
     resource_mode: defaultResourceMode(mode.channelId),
-    resource_sync_mode: mode.channelId === "longcat" ? "auto" : "manual",
-    base_url_override: null,
-    anthropic_base_url_override: null,
+    resource_sync_mode: mode.channelId === "longcat" || isQwenTokenPlan ? "auto" : "manual",
+    base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
+    anthropic_base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
     last_used_at: null,
     last_error: null,
     credential_status: "healthy",
+    synced_models: null,
+    models_synced_at: null,
+    exposed_models: null,
     created_at: now,
     updated_at: now,
   };
@@ -613,8 +774,8 @@ function LongCatTokenPackPanel({
                 <tr>
                   <th>{t("资源包 ID")}</th>
                   <th>{t("类型")}</th>
-                  <th>{t("总量")}</th>
-                  <th>{t("已用")}</th>
+                  <th>{t("总量 Token")}</th>
+                  <th>{t("已用 Token")}</th>
                   <th>{t("到期日期")}</th>
                   <th>{t("状态")}</th>
                 </tr>
@@ -623,11 +784,11 @@ function LongCatTokenPackPanel({
                 {packs.map((pack, index) => {
                   const displayStatus = longCatPackDisplayStatus(pack, index, activeIndex, t);
                   return (
-                    <tr key={pack.lotId ?? index}>
-                      <td>{pack.lotId ?? index + 1}</td>
-                      <td>{pack.source ?? pack.grantCategory ?? "-"}</td>
-                      <td>{formatResourceTokenValue(pack.totalToken ?? 0, language)}</td>
-                      <td>{formatResourceTokenValue(pack.consumedToken ?? 0, language)}</td>
+                      <tr key={pack.packageId ?? pack.lotId ?? index}>
+                        <td>{pack.packageId ?? pack.lotId ?? index + 1}</td>
+                      <td>{pack.packageName ?? pack.source ?? pack.grantCategory ?? pack.sourceTypeText ?? "-"}</td>
+                      <td>{formatResourceTokenAmount(pack.totalToken ?? 0, language)}</td>
+                      <td>{formatResourceTokenAmount(pack.consumedToken ?? 0, language)}</td>
                       <td>{pack.expireTime?.slice(0, 10) ?? "-"}</td>
                       <td><Tag size="small" color={displayStatus.color}>{displayStatus.label}</Tag></td>
                     </tr>
@@ -650,6 +811,14 @@ function longCatPackDisplayStatus(
   activeIndex: number,
   t: (key: string) => string,
 ): { label: string; color: "green" | "orange" | "grey" } {
+  const listStatusText = pack.displayStatusText ?? pack.statusText;
+  const listStatusCode = pack.displayStatusCode ?? pack.statusCode;
+  if (listStatusText) {
+    return { label: t(listStatusText), color: listStatusCode === 1 ? "green" : "grey" };
+  }
+  if (listStatusCode != null && listStatusCode !== 1) {
+    return { label: t("已结束"), color: "grey" };
+  }
   if (pack.status && pack.status !== "ACTIVE") {
     return { label: t(pack.status), color: "grey" };
   }
@@ -695,10 +864,6 @@ function ScrapeConsolePanel({
   // 优先展示 hook 最近的抓取结果(ScrapeBalanceResult),否则回退到父组件传入的 snapshot
   const scrapeDisplay = lastResult;
   const fallbackDisplay = snapshot;
-  const qwenDetails = account.channel_id === QWEN_CHANNEL_ID
-    ? parseQwenTokenPlanDetails(scrapeDisplay?.raw_scraped_json ?? fallbackDisplay?.raw_scraped_json)
-    : null;
-
   return (
     <div className={styles.scrapePanel}>
       <div className={styles.scrapeToolbar}>
@@ -734,20 +899,20 @@ function ScrapeConsolePanel({
       {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
       {scrapeDisplay ? (
         <div className={styles.scrapeResult}>
-          {!qwenDetails && scrapeDisplay.plan_name ? <strong>{scrapeDisplay.plan_name}</strong> : null}
+          {scrapeDisplay.plan_name ? <strong>{scrapeDisplay.plan_name}</strong> : null}
           {scrapeDisplay.balance != null ? (
             <span>{t("余额")} <b>{scrapeDisplay.balance} {scrapeDisplay.currency ?? ""}</b></span>
           ) : null}
-          {!qwenDetails && scrapeDisplay.token_total != null ? (
+          {scrapeDisplay.token_total != null ? (
             <span>{t("总额")} <b>{formatResourceTokens(scrapeDisplay.token_total, language)}</b></span>
           ) : null}
-          {!qwenDetails && scrapeDisplay.token_used != null ? (
+          {scrapeDisplay.token_used != null ? (
             <span>{t("已用")} <b>{formatResourceTokens(scrapeDisplay.token_used, language)}</b></span>
           ) : null}
-          {!qwenDetails && scrapeDisplay.token_remaining != null ? (
+          {scrapeDisplay.token_remaining != null ? (
             <span>{t("剩余")} <b>{formatResourceTokens(scrapeDisplay.token_remaining, language)}</b></span>
           ) : null}
-          {!qwenDetails && scrapeDisplay.token_pack_expire_at ? (
+          {scrapeDisplay.token_pack_expire_at ? (
             <span>{t("到期")} <b>{scrapeDisplay.token_pack_expire_at.slice(0, 10)}</b></span>
           ) : null}
           {scrapeDisplay.synced_at ? (
@@ -759,25 +924,22 @@ function ScrapeConsolePanel({
           {fallbackDisplay.balance != null ? (
             <span>{t("余额")} <b>{fallbackDisplay.balance} {fallbackDisplay.currency ?? ""}</b></span>
           ) : null}
-          {!qwenDetails && fallbackDisplay.token_pack_total != null ? (
+          {fallbackDisplay.token_pack_total != null ? (
             <span>{t("总额")} <b>{formatResourceTokens(fallbackDisplay.token_pack_total, language)}</b></span>
           ) : null}
-          {!qwenDetails && fallbackDisplay.token_pack_used != null ? (
+          {fallbackDisplay.token_pack_used != null ? (
             <span>{t("已用")} <b>{formatResourceTokens(fallbackDisplay.token_pack_used, language)}</b></span>
           ) : null}
-          {!qwenDetails && fallbackDisplay.token_pack_remaining != null ? (
+          {fallbackDisplay.token_pack_remaining != null ? (
             <span>{t("剩余")} <b>{formatResourceTokens(fallbackDisplay.token_pack_remaining, language)}</b></span>
           ) : null}
-          {!qwenDetails && fallbackDisplay.token_pack_expire_at ? (
+          {fallbackDisplay.token_pack_expire_at ? (
             <span>{t("到期")} <b>{fallbackDisplay.token_pack_expire_at.slice(0, 10)}</b></span>
           ) : null}
           {fallbackDisplay.synced_at ? (
             <span className={styles.scrapeSynced}>{t("同步时间")} <b>{formatFullTimestamp(fallbackDisplay.synced_at, language)}</b></span>
           ) : null}
         </div>
-      ) : null}
-      {qwenDetails ? (
-        <QwenTokenPlanDetailsPanel details={qwenDetails} language={language} t={t} />
       ) : null}
       {!scrapeDisplay && !(fallbackDisplay && fallbackDisplay.source === "scrape") && !error ? (
         <span className={styles.scrapeHint}>
@@ -788,69 +950,141 @@ function ScrapeConsolePanel({
   );
 }
 
-function QwenTokenPlanDetailsPanel({
-  details,
+function QwenTokenPlanPanel({
+  account,
+  enabled,
+  snapshot,
+  onScrape,
   language,
   t,
 }: {
-  details: QwenTokenPlanDetails;
+  account: ChannelAccount;
+  enabled: boolean;
+  snapshot?: AccountBalanceSnapshot;
+  onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
   language: "zh-CN" | "en-US";
   t: (k: string, params?: Record<string, string | number> | undefined) => string;
 }) {
-  const planName = `${details.specCode.charAt(0).toUpperCase()}${details.specCode.slice(1)}`;
-  const valid = details.status === "VALID";
+  const {
+    startScrape,
+    retryScrape,
+    lastResult,
+    isScraping,
+    needLogin,
+    consoleActionMessage,
+    error,
+    statusText,
+  } = useScrapeConsole(onScrape);
+  const details = parseQwenTokenPlanDetails(lastResult?.raw_scraped_json ?? snapshot?.raw_scraped_json);
+  const syncedAt = lastResult?.synced_at ?? snapshot?.synced_at;
+  const planName = details
+    ? `${details.specCode.charAt(0).toUpperCase()}${details.specCode.slice(1)}`
+    : "";
+  const fiveHour = details?.fiveHour;
+  const sevenDay = details?.sevenDay;
+
+  async function handleScrape() {
+    await startScrape(account.id);
+  }
+
+  async function handleRetry() {
+    await retryScrape(account.id);
+  }
+
   return (
-    <div className={styles.qwenPlanDetails}>
-      <div className={styles.qwenPlanHeading}>
-        <strong>{t("个人版 {name} 套餐", { name: planName })}</strong>
-        {details.status ? <Tag size="small" color={valid ? "green" : "orange"}>{t(valid ? "生效中" : details.status)}</Tag> : null}
+    <div className={styles.longCatResourcePanel}>
+      <div className={styles.longCatSummaryCard}>
+        <div className={styles.longCatSummaryHeading}>
+          <strong>{details ? t("个人版 {name} 套餐", { name: planName }) : t("Token Plan 订阅信息")}</strong>
+          <Tag size="small" color="green">{t("自动同步")}</Tag>
+        </div>
+        <div className={`${styles.longCatSummaryGrid} ${styles.qwenSummaryGrid}`}>
+          <QwenQuotaProgress period={t("5 小时")} quota={fiveHour} language={language} t={t} />
+          <QwenQuotaProgress period={t("7 天")} quota={sevenDay} language={language} t={t} />
+          <div className={styles.qwenTimeSummary}>
+            <span>
+              <small>{t("套餐到期")}</small>
+              <strong>{details?.expireAt ? formatFullTimestamp(details.expireAt, language) : "-"}</strong>
+            </span>
+            <span>
+              <small>{t("最近同步")}</small>
+              <strong>{syncedAt ? formatLocalDate(syncedAt) : "-"}</strong>
+            </span>
+          </div>
+        </div>
       </div>
-      <div className={styles.qwenSubscriptionGrid}>
-        <QwenInfo label={t("自动续费")} value={details.autoRenew == null ? "-" : t(details.autoRenew ? "已开启" : "已关闭")} />
-        <QwenInfo label={t("剩余天数")} value={details.remainingDays == null ? "-" : t("{count} 天", { count: details.remainingDays })} />
-        <QwenInfo label={t("到期时间")} value={details.expireAt ? formatFullTimestamp(details.expireAt, language) : "-"} />
-      </div>
-      <div className={styles.qwenQuotaGrid}>
-        <QwenQuotaCard title={t("每 5 小时额度")} quota={details.fiveHour} language={language} t={t} />
-        <QwenQuotaCard title={t("每 7 天额度")} quota={details.sevenDay} language={language} t={t} />
+
+      <div className={styles.longCatSyncSection}>
+        <div className={styles.longCatSyncControls}>
+          <Button
+            icon={<IconRefresh />}
+            loading={isScraping}
+            disabled={!enabled}
+            onClick={() => void handleScrape()}
+          >
+            {t("立即刷新")}
+          </Button>
+          {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
+          {needLogin ? (
+            <div className={styles.scrapeError}>
+              {t("检测到控制台登录页，请在弹出的窗口中完成登录。")}
+              <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
+                {t("登录完成,重新抓取")}
+              </Button>
+            </div>
+          ) : null}
+          {consoleActionMessage ? (
+            <div className={styles.scrapeError}>
+              {consoleActionMessage}
+              <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
+                {t("重新抓取")}
+              </Button>
+            </div>
+          ) : null}
+          {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
+          {!details && !error ? (
+            <span className={styles.scrapeHint}>
+              {t("系统每 5 分钟自动同步一次；如登录失效，请点击“立即刷新”完成登录。")}
+            </span>
+          ) : null}
+        </div>
       </div>
     </div>
   );
 }
 
-function QwenInfo({ label, value }: { label: string; value: string }) {
-  return <span><small>{label}</small><b>{value}</b></span>;
-}
-
-function QwenQuotaCard({
-  title,
+function QwenQuotaProgress({
+  period,
   quota,
   language,
   t,
 }: {
-  title: string;
-  quota: QwenQuotaWindow | null;
+  period: string;
+  quota: QwenQuotaWindow | null | undefined;
   language: "zh-CN" | "en-US";
   t: (k: string, params?: Record<string, string | number> | undefined) => string;
 }) {
-  if (!quota) return null;
-  const percent = Math.round(quota.remainingPercent * 10) / 10;
+  const percent = quota ? Math.round(quota.remainingPercent * 10) / 10 : null;
   return (
-    <section className={styles.qwenQuotaCard}>
-      <div className={styles.qwenQuotaHeading}>
-        <strong>{title}</strong>
-        <b>{percent.toFixed(1)}%</b>
+    <div className={styles.qwenProgress}>
+      <div className={styles.qwenProgressHeading}>
+        <strong>
+          {percent == null
+            ? t("{period} -", { period })
+            : t("{period} {percent}%", { period, percent: percent.toFixed(1) })}
+        </strong>
+        <small>{t("总量")} {quota ? formatCredits(quota.total, language) : "-"}</small>
       </div>
-      <Progress aria-label={`${title} ${t("剩余")}`} percent={percent} size="small" showInfo={false} />
-      <div className={styles.qwenQuotaMetrics}>
-        <QwenInfo label={t("剩余额度")} value={formatCredits(quota.remaining, language)} />
-        <QwenInfo label={t("已使用")} value={formatCredits(quota.used, language)} />
-        <QwenInfo label={t("总额度")} value={formatCredits(quota.total, language)} />
-      </div>
-      <span className={styles.qwenResetTime}>
-        {t("额度重置时间")} <b>{quota.resetAt ? formatFullTimestamp(quota.resetAt, language) : "-"}</b>
-      </span>
-    </section>
+      <Progress
+        aria-label={t("{period}额度", { period })}
+        percent={percent ?? 0}
+        size="small"
+        showInfo={false}
+      />
+      <small className={styles.qwenResetTime}>
+        {t("额度充值时间")} <b>{quota?.resetAt ? formatFullTimestamp(quota.resetAt, language) : "-"}</b>
+      </small>
+    </div>
   );
 }
 
@@ -862,6 +1096,14 @@ function formatResourceTokenValue(value: number, language: "zh-CN" | "en-US") {
   return `${formatCompactNumber(Math.max(0, value), language)} Token`;
 }
 
+function formatResourceTokenAmount(value: number, language: "zh-CN" | "en-US") {
+  return formatCompactNumber(Math.max(0, value), language);
+}
+
+function formatCredits(value: number, language: "zh-CN" | "en-US") {
+  return `${Math.max(0, value).toLocaleString(language, { maximumFractionDigits: 0 })} Credits`;
+}
+
 function formatLocalDate(value: string) {
   const date = parseTimestamp(value);
   if (!date) return value.slice(0, 16);
@@ -870,8 +1112,4 @@ function formatLocalDate(value: string) {
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
   return `${month}月${day}日 ${hour}:${minute}`;
-}
-
-function formatCredits(value: number, language: "zh-CN" | "en-US") {
-  return `${Math.max(0, value).toLocaleString(language, { maximumFractionDigits: 0 })} Credits`;
 }

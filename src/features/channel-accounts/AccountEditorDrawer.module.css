@@ -16,6 +16,7 @@
 .labelRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .channelRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
 .channelOptionLabel { display: inline-flex; align-items: center; gap: 8px; }
+.customChannelIcon { width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 6px; color: var(--flowlet-color-primary); background: var(--flowlet-color-fill); font-size: 14px; font-weight: 700; }
 .logoIcon { width: 18px; height: 18px; flex-shrink: 0; border-radius: 4px; }
 .kimiSwatch { width: 18px; height: 18px; flex-shrink: 0; border-radius: 4px; background: #1a1a1a; display: inline-flex; align-items: center; justify-content: center; }
 .kimiSwatch .logoIcon { width: 14px; height: 14px; }
@@ -39,15 +40,12 @@
 .resourceHeading { display: flex; align-items: center; gap: 9px; }
 .syncModeSection { display: grid; gap: 8px; }
 .syncModeLabel { color: var(--semi-color-text-1); font-size: 13px; font-weight: 600; }
-.autoBadge, .manualBadge, .planBadge { padding: 2px 7px; border-radius: 10px; font-size: 11px; }
+.autoBadge, .manualBadge { padding: 2px 7px; border-radius: 10px; font-size: 11px; }
 .autoBadge { color: var(--semi-color-success); background: var(--semi-color-success-light-default); }
 .manualBadge { color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); }
-.planBadge { color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); }
 .balanceRow { display: flex; align-items: center; justify-content: space-between; }
 .balanceRow > span { display: grid; gap: 5px; }
 .balanceRow small { color: var(--semi-color-text-2); }
-.tokenPlanInfo { display: grid; gap: 8px; color: var(--semi-color-text-2); font-size: 12px; }
-.tokenPlanInfo > span { line-height: 1.6; }
 .packEmpty { color: var(--semi-color-text-2); font-size: 12px; }
 .longCatResourcePanel { display: grid; gap: 12px; }
 .longCatSummaryCard { padding: 12px 14px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--semi-color-bg-2); display: grid; gap: 10px; }
@@ -91,26 +89,31 @@
 .scrapeResult > span { display: flex; justify-content: space-between; color: var(--semi-color-text-1); font-size: 13px; }
 .scrapeResult b { color: var(--semi-color-text-0); font-weight: 600; }
 .scrapeSynced { color: var(--semi-color-text-2); font-size: 12px; }
-.qwenPlanDetails { display: grid; gap: 12px; }
-.qwenPlanHeading { display: flex; align-items: center; gap: 8px; }
-.qwenPlanHeading > strong { color: var(--semi-color-text-0); font-size: 14px; }
-.qwenSubscriptionGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.qwenSubscriptionGrid > span, .qwenQuotaMetrics > span { display: grid; gap: 3px; }
-.qwenSubscriptionGrid small, .qwenQuotaMetrics small { color: var(--semi-color-text-2); font-size: 11px; }
-.qwenSubscriptionGrid b, .qwenQuotaMetrics b { color: var(--semi-color-text-0); font-size: 12px; font-weight: 600; }
-.qwenQuotaGrid { display: grid; gap: 10px; }
-.qwenQuotaCard { display: grid; gap: 8px; padding: 11px 12px; border: 1px solid var(--flowlet-color-border); border-radius: 7px; background: var(--semi-color-bg-1); }
-.qwenQuotaHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.qwenQuotaHeading strong { color: var(--semi-color-text-0); font-size: 13px; }
-.qwenQuotaHeading b { color: var(--semi-color-primary); font-size: 14px; }
-.qwenQuotaMetrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.qwenResetTime { display: flex; justify-content: space-between; gap: 12px; color: var(--semi-color-text-2); font-size: 11px; }
-.qwenResetTime b { color: var(--semi-color-text-1); font-weight: 500; }
+.qwenSummaryGrid { grid-template-columns: minmax(0, 1.65fr) minmax(0, 1.65fr) minmax(0, 1.15fr); }
+.qwenProgress { display: grid; gap: 5px; }
+.qwenProgressHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.qwenProgressHeading strong { color: var(--semi-color-text-1); font-size: 12px; white-space: nowrap; }
+.qwenProgressHeading small { text-align: right; }
+.qwenResetTime { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.qwenResetTime b { color: var(--semi-color-text-1); font-weight: 500; text-align: right; }
+.qwenTimeSummary { gap: 8px; }
+.qwenTimeSummary > span { display: grid; gap: 2px; }
 .scrapeHint { color: var(--semi-color-text-2); font-size: 12px; line-height: 1.5; }
+.modelHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.modelHeading > span { display: grid; gap: 4px; }
+.modelHeading > button { flex-shrink: 0; margin-top: 2px; }
+.modelList { max-height: 260px; overflow-y: auto; padding: 4px 0; display: grid; gap: 2px; }
+.modelItem { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 34px; padding: 0 10px; border-radius: 6px; cursor: pointer; }
+.modelItem:hover { background: var(--semi-color-fill-0); }
+.modelName { flex-shrink: 0; max-width: 55%; overflow: hidden; color: var(--semi-color-text-0); font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
+.modelItem > :global(.semi-typography) { flex: 1; min-width: 0; }
+.modelUnsupported { opacity: 0.6; cursor: not-allowed; }
+.modelUnsupported:hover { background: transparent; }
+.modelUnsupported .modelName { color: var(--semi-color-text-2); }
 .footer { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 12px; }
 .footer button { height: 40px; }
 @media (max-width: 620px) {
-  .channelRow, .modeOptions, .resourceGrid, .basicFields, .urlGrid, .qwenSubscriptionGrid, .qwenQuotaMetrics { grid-template-columns: 1fr; }
+  .channelRow, .modeOptions, .resourceGrid, .basicFields, .urlGrid { grid-template-columns: 1fr; }
   .resourceModeHeading, .resourceModeMeta { align-items: flex-start; flex-direction: column; }
   .longCatSummaryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 14px; }
   .longCatSummaryGrid > div { padding: 0 10px; }

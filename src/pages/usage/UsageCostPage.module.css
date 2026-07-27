@@ -94,4 +94,24 @@
 .channelCard footer strong { margin-left: auto; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
 .empty, .state { display: grid; place-items: center; align-content: center; gap: 8px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-body); }
 .state { min-height: 140px; }
+.skeletonLine, .skeletonRows span, .skeletonChart { position: relative; display: block; overflow: hidden; border-radius: 5px; background: var(--semi-color-fill-0); }
+.skeletonLine::after, .skeletonRows span::after, .skeletonChart::after { position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.68), transparent); transform: translateX(-100%); animation: usageShimmer 1.25s ease-in-out infinite; content: ""; }
+.skeletonLabel { width: 42%; height: 9px; }
+.skeletonValue { width: 58%; height: 20px; }
+.skeletonMeta { width: 70%; height: 8px; }
+.skeletonHeading { width: 112px; height: 11px; }
+.skeletonTotal { width: 170px; height: 20px; }
+.skeletonCard { pointer-events: none; }
+.skeletonTrend { min-height: 0; padding: 15px 13px 10px; display: grid; grid-template-rows: 24px minmax(0, 1fr); gap: 13px; border-bottom: 1px solid var(--flowlet-color-border); }
+.skeletonChart { border-radius: 8px; }
+.skeletonRows { min-height: 0; padding: 7px 13px; display: grid; align-content: start; gap: 1px; overflow: hidden; }
+.skeletonRows > div { min-height: 43px; display: grid; grid-template-columns: minmax(132px, 1fr) 58px 76px 72px; align-items: center; gap: 12px; border-bottom: 1px solid var(--flowlet-color-border); }
+.skeletonRows span { width: 68%; height: 8px; }
+.skeletonSideCard { padding: 13px; display: flex; flex-direction: column; gap: 14px; pointer-events: none; }
+.skeletonSideCard.channelCard { display: flex; }
+.skeletonSideCard .skeletonValue { width: 38%; height: 24px; margin-top: 5px; }
+.skeletonTrack { width: 100%; height: 8px; border-radius: 99px; }
+.skeletonChannel { width: 100%; height: 38px; border-radius: 8px; }
+@keyframes usageShimmer { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .skeletonLine::after, .skeletonRows span::after, .skeletonChart::after { animation: none; } }
 @media (max-width: 920px) { .workspace { grid-template-columns: 1fr; overflow: auto; } .side { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto; } }

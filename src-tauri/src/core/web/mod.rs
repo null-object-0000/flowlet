@@ -159,7 +159,7 @@ async fn logs_handler(State(state): State<Arc<WebState>>) -> Json<Vec<RequestLog
 }
 
 async fn usage_handler(State(state): State<Arc<WebState>>) -> Json<Vec<UsageSummaryRow>> {
-    Json(state.storage.usage_summary().unwrap_or_default())
+    Json(state.storage.usage_summary("all").unwrap_or_default())
 }
 
 async fn stats_handler(State(state): State<Arc<WebState>>) -> Json<Vec<AccountStatsRow>> {

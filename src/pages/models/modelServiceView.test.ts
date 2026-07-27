@@ -44,4 +44,31 @@ describe("buildModelServiceItems", () => {
       "flowlet-flash",
     ]);
   });
+
+  it("keeps one official model identity when custom and official channels route the same model", () => {
+    const accounts = [
+      { id: "custom-account", enabled: true, api_key: "relay-key", credential_status: "healthy" },
+      { id: "qwen-account", enabled: true, api_key: "qwen-key", credential_status: "healthy" },
+    ] as ChannelAccount[];
+    const channels = [
+      { id: "custom", name: "自定义渠道" },
+      { id: "qwen", name: "千问 Qwen" },
+    ] as ChannelPreset[];
+    const routes = [
+      { id: "custom-route", virtual_model_id: "qwen3.7-plus", upstream_model: "qwen3.7-plus", channel_id: "custom", account_id: "custom-account", client_protocol: "openai", priority: 0, enabled: true },
+      { id: "qwen-route", virtual_model_id: "qwen3.7-plus", upstream_model: "qwen3.7-plus", channel_id: "qwen", account_id: "qwen-account", client_protocol: "openai", priority: 1, enabled: true },
+    ] as RouteCandidate[];
+
+    const directModels = buildModelServiceItems(routes, accounts, channels)
+      .filter((model) => model.kind === "direct");
+
+    expect(directModels).toHaveLength(1);
+    expect(directModels[0]).toEqual(expect.objectContaining({
+      publicModel: "qwen3.7-plus",
+      channelId: "qwen",
+      channelName: "千问 Qwen",
+      availableAccountCount: 2,
+    }));
+    expect(directModels[0].routeGroups.map((group) => group.channelId)).toEqual(["custom", "qwen"]);
+  });
 });

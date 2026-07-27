@@ -22,6 +22,14 @@
 .success { color: var(--flowlet-color-success); }
 .warning { color: var(--semi-color-warning); }
 .localOnly { color: var(--flowlet-color-text-tertiary); }
+.statusCell { display: grid; justify-items: start; gap: 3px; overflow: visible; }
+.statusCell :global(.semi-tag) { max-width: 100%; margin: 0; }
+.statusCell :global(.semi-tag-content) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusCell small { font-size: 9px; white-space: nowrap; }
+.statusHint { color: var(--flowlet-color-text-tertiary); }
+.runtimeActive { font-weight: 650; }
+.runtimeWaiting { font-weight: 650; }
+.runtimeIdle, .runtimeUnknown { color: var(--flowlet-color-text-tertiary); }
 .state { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: var(--flowlet-color-text-secondary); }
 .state strong { color: var(--flowlet-color-text); }
 .skeleton { cursor: default; }

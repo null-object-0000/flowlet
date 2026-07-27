@@ -1,5 +1,6 @@
 export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi";
 export type AgentSessionFlowletStatus = "" | "observed" | "native";
+export type AgentSessionRuntimeStatus = "idle" | "running" | "waiting_user" | "unknown";
 
 export type AgentSessionFilter = {
   page: number;
@@ -12,6 +13,7 @@ export type AgentSessionFilter = {
 export type AgentSessionRow = {
   agentType: AgentSessionType;
   sessionId: string;
+  runtimeStatus: AgentSessionRuntimeStatus;
   title: string | null;
   projectPath: string | null;
   parentSessionId: string | null;

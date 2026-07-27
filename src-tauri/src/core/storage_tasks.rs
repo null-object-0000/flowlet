@@ -1360,6 +1360,7 @@ mod tests {
         AgentSessionRow {
             agent_type: "opencode".into(),
             session_id: "session-1".into(),
+            runtime_status: "idle".into(),
             title: Some("Task".into()),
             project_path: None,
             parent_session_id: None,

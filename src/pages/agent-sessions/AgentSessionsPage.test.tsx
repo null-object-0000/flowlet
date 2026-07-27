@@ -16,6 +16,7 @@ vi.mock("../../features/background-tasks/useBackgroundTasks", () => ({
 const session: AgentSessionRow = {
   agentType: "opencode",
   sessionId: "ses_native_test",
+  runtimeStatus: "idle",
   title: "Native session title",
   projectPath: "D:\\GitHub\\flowlet",
   parentSessionId: null,
@@ -174,6 +175,14 @@ describe("AgentSessionsPage", () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     expect(screen.getByLabelText("Token 明细：总计 1.2万，缓存命中率 50.0%")).toHaveAttribute("title", "12,000");
+  });
+
+  it("shows the native runtime state separately from request health", () => {
+    listedSessions = [{ ...session, runtimeStatus: "waiting_user" }];
+    render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
+
+    expect(screen.getByText("等待用户确认")).toBeInTheDocument();
+    expect(screen.getByText("1 次失败")).toBeInTheDocument();
   });
 
   it("shows native turn and token summaries for sessions not observed by Flowlet", () => {

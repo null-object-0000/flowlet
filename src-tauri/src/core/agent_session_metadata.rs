@@ -4,16 +4,19 @@ use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, Metadata};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
 const MAX_CLAUDE_TRANSCRIPT_BYTES: usize = 1024 * 1024;
+const MAX_RUNTIME_STATUS_BYTES: u64 = 256 * 1024;
+const OPENCODE_EMPTY_ASSISTANT_GRACE_MILLIS: i64 = 30_000;
 const EMPTY_SESSION_TIME: &str = "1970-01-01T00:00:00Z";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct NativeSessionMetadata {
+    runtime_status: Option<String>,
     title: Option<String>,
     project_path: Option<String>,
     parent_session_id: Option<String>,
@@ -214,6 +217,9 @@ fn list_claude_native_sessions_from(projects_root: &Path) -> Vec<AgentSessionRow
                 "claude-code",
                 session_id,
                 parent_session_id.or(metadata.parent_session_id),
+                metadata
+                    .runtime_status
+                    .unwrap_or_else(|| "unknown".to_string()),
                 metadata.title,
                 metadata.project_path,
                 metadata.native_started_at,
@@ -346,7 +352,52 @@ fn read_claude_transcript(path: &Path) -> Option<NativeSessionMetadata> {
         .and_then(|value| value.modified().ok())
         .map(DateTime::<Utc>::from)
         .map(|value| value.to_rfc3339());
+    metadata.runtime_status = Some(infer_claude_runtime_status(path));
     Some(metadata)
+}
+
+fn infer_claude_runtime_status(path: &Path) -> String {
+    let mut status = "idle";
+    for value in read_jsonl_tail(path) {
+        match value.get("type").and_then(Value::as_str) {
+            // Claude Code 的斜杠命令等本地命令会在 `system/local_command`
+            // 之后写入 `isMeta: true` 的 synthetic user 记录。它不会发起模型轮次，
+            // 不能覆盖前一个 end_turn / turn_duration 的空闲状态。
+            Some("user") if value.get("isMeta").and_then(Value::as_bool) != Some(true) => {
+                status = "running";
+            }
+            Some("assistant") => {
+                let message = value.get("message").unwrap_or(&Value::Null);
+                let waiting_for_question = message
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .is_some_and(|blocks| {
+                        blocks.iter().any(|block| {
+                            block.get("type").and_then(Value::as_str) == Some("tool_use")
+                                && block.get("name").and_then(Value::as_str)
+                                    == Some("AskUserQuestion")
+                        })
+                    });
+                status = if waiting_for_question {
+                    "waiting_user"
+                } else if message.get("stop_reason").and_then(Value::as_str) == Some("tool_use") {
+                    "running"
+                } else {
+                    "idle"
+                };
+            }
+            Some("system")
+                if matches!(
+                    value.get("subtype").and_then(Value::as_str),
+                    Some("turn_duration" | "away_summary")
+                ) =>
+            {
+                status = "idle";
+            }
+            _ => {}
+        }
+    }
+    status.to_string()
 }
 
 fn string_field(value: &Value, field: &str) -> Option<String> {
@@ -455,11 +506,73 @@ fn read_codex_session(
         agent_type,
         session_id,
         parent_session_id,
+        infer_codex_runtime_status(path),
         title,
         string_field(payload, "cwd"),
         string_field(payload, "timestamp").or_else(|| string_field(&value, "timestamp")),
         native_updated_at,
     ))
+}
+
+fn infer_codex_runtime_status(path: &Path) -> String {
+    let mut status = "idle";
+    let mut turn_running = false;
+    let mut pending_user_input = HashSet::new();
+    for value in read_jsonl_tail(path) {
+        let top_type = value.get("type").and_then(Value::as_str);
+        let payload = value.get("payload").unwrap_or(&Value::Null);
+        if top_type == Some("event_msg") {
+            match payload.get("type").and_then(Value::as_str) {
+                Some("task_started" | "turn_started") => {
+                    turn_running = true;
+                    pending_user_input.clear();
+                    status = "running";
+                }
+                Some("task_complete" | "turn_complete" | "task_aborted" | "turn_aborted") => {
+                    turn_running = false;
+                    pending_user_input.clear();
+                    status = "idle";
+                }
+                Some(
+                    "exec_approval_request" | "apply_patch_approval_request" | "request_user_input",
+                ) if turn_running => status = "waiting_user",
+                _ => {}
+            }
+            continue;
+        }
+        if top_type != Some("response_item") {
+            continue;
+        }
+        match payload.get("type").and_then(Value::as_str) {
+            Some("function_call")
+                if string_field(payload, "name").as_deref() == Some("request_user_input") =>
+            {
+                if let Some(call_id) = string_field(payload, "call_id") {
+                    pending_user_input.insert(call_id);
+                }
+                status = "waiting_user";
+            }
+            Some("function_call_output" | "custom_tool_call_output") => {
+                if let Some(call_id) = string_field(payload, "call_id") {
+                    pending_user_input.remove(&call_id);
+                }
+                status = if pending_user_input.is_empty() {
+                    "running"
+                } else {
+                    "waiting_user"
+                };
+            }
+            Some("function_call" | "custom_tool_call") => {
+                status = if pending_user_input.is_empty() {
+                    "running"
+                } else {
+                    "waiting_user"
+                };
+            }
+            _ => {}
+        }
+    }
+    status.to_string()
 }
 
 fn list_opencode_native_sessions() -> Vec<AgentSessionRow> {
@@ -505,9 +618,23 @@ fn list_opencode_native_sessions_from(database_path: &Path) -> Vec<AgentSessionR
         return Vec::new();
     };
     let _ = connection.busy_timeout(std::time::Duration::from_millis(750));
-    let Ok(mut statement) = connection
-        .prepare("SELECT id, title, directory, parent_id, time_created, time_updated FROM session")
-    else {
+    let Ok(mut statement) = connection.prepare(
+        r#"
+        SELECT
+            s.id, s.title, s.directory, s.parent_id, s.time_created, s.time_updated,
+            lm.data,
+            lm.time_updated,
+            EXISTS(SELECT 1 FROM part p WHERE p.message_id = lm.id)
+        FROM session s
+        LEFT JOIN message lm ON lm.id = (
+            SELECT latest.id
+            FROM message latest
+            WHERE latest.session_id = s.id
+            ORDER BY latest.time_created DESC
+            LIMIT 1
+        )
+        "#,
+    ) else {
         return Vec::new();
     };
     let Ok(mapped) = statement.query_map([], |row| {
@@ -517,10 +644,25 @@ fn list_opencode_native_sessions_from(database_path: &Path) -> Vec<AgentSessionR
         let parent_session_id: Option<String> = row.get(3)?;
         let created_at: Option<i64> = row.get(4)?;
         let updated_at: Option<i64> = row.get(5)?;
+        let latest_message: Option<String> = row.get(6)?;
+        let latest_message_updated_at: Option<i64> = row.get(7)?;
+        let latest_message_has_parts: bool = row.get(8)?;
         Ok(native_row(
             "opencode",
             session_id,
             parent_session_id,
+            latest_message
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .map(|message| {
+                    infer_opencode_runtime_status(
+                        &message,
+                        latest_message_has_parts,
+                        latest_message_updated_at,
+                        Utc::now().timestamp_millis(),
+                    )
+                })
+                .unwrap_or_else(|| "idle".to_string()),
             title,
             project_path,
             created_at.and_then(format_unix_millis),
@@ -530,6 +672,36 @@ fn list_opencode_native_sessions_from(database_path: &Path) -> Vec<AgentSessionR
         return Vec::new();
     };
     mapped.flatten().collect()
+}
+
+fn infer_opencode_runtime_status(
+    message: &Value,
+    has_parts: bool,
+    updated_at: Option<i64>,
+    now_millis: i64,
+) -> String {
+    match message.get("role").and_then(Value::as_str) {
+        Some("user") => "running",
+        Some("assistant")
+            if message
+                .get("time")
+                .and_then(|time| time.get("completed"))
+                .is_none()
+                && message.get("error").is_none() =>
+        {
+            let empty_assistant_is_recent = updated_at.is_some_and(|updated_at| {
+                now_millis.saturating_sub(updated_at) <= OPENCODE_EMPTY_ASSISTANT_GRACE_MILLIS
+            });
+            if has_parts || empty_assistant_is_recent {
+                "running"
+            } else {
+                "idle"
+            }
+        }
+        Some("assistant") => "idle",
+        _ => "unknown",
+    }
+    .to_string()
 }
 
 fn list_pi_native_sessions() -> Vec<AgentSessionRow> {
@@ -635,11 +807,33 @@ fn read_pi_session_summary(path: &Path) -> Option<AgentSessionRow> {
         "pi",
         session_id,
         parent_session_id,
+        infer_pi_runtime_status(path),
         title,
         project_path,
         native_started_at,
         native_updated_at,
     ))
+}
+
+fn infer_pi_runtime_status(path: &Path) -> String {
+    let mut status = "idle";
+    for value in read_jsonl_tail(path) {
+        if value.get("type").and_then(Value::as_str) != Some("message") {
+            continue;
+        }
+        let message = value.get("message").unwrap_or(&Value::Null);
+        status = match message.get("role").and_then(Value::as_str) {
+            Some("user" | "toolResult") => "running",
+            Some("assistant")
+                if message.get("stopReason").and_then(Value::as_str) == Some("toolUse") =>
+            {
+                "running"
+            }
+            Some("assistant") => "idle",
+            _ => status,
+        };
+    }
+    status.to_string()
 }
 
 // 从派生会话的 parentSession 文件路径中提取来源会话的 UUID。
@@ -690,6 +884,7 @@ fn native_row(
     agent_type: &str,
     session_id: String,
     parent_session_id: Option<String>,
+    runtime_status: String,
     title: Option<String>,
     project_path: Option<String>,
     native_started_at: Option<String>,
@@ -702,6 +897,7 @@ fn native_row(
     AgentSessionRow {
         agent_type: agent_type.to_string(),
         session_id,
+        runtime_status,
         title,
         project_path,
         parent_session_id,
@@ -731,6 +927,31 @@ fn native_row(
         native_summary: None,
         native_synced_at: None,
     }
+}
+
+fn read_jsonl_tail(path: &Path) -> Vec<Value> {
+    let Ok(mut file) = File::open(path) else {
+        return Vec::new();
+    };
+    let Ok(length) = file.metadata().map(|metadata| metadata.len()) else {
+        return Vec::new();
+    };
+    let start = length.saturating_sub(MAX_RUNTIME_STATUS_BYTES);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return Vec::new();
+    }
+    let mut bytes = Vec::with_capacity((length - start) as usize);
+    if file.read_to_end(&mut bytes).is_err() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = text.lines();
+    if start > 0 {
+        lines.next();
+    }
+    lines
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect()
 }
 
 fn session_key(row: &AgentSessionRow) -> (String, String) {
@@ -767,6 +988,161 @@ fn format_unix_millis(value: i64) -> Option<String> {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn infers_codex_running_waiting_and_idle_runtime_states() {
+        let path =
+            std::env::temp_dir().join(format!("flowlet-codex-state-{}.jsonl", Uuid::new_v4()));
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"call_id\":\"tool-1\",\"name\":\"exec\"}}\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(infer_codex_runtime_status(&path), "running");
+
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"question-1\",\"name\":\"request_user_input\"}}\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(infer_codex_runtime_status(&path), "waiting_user");
+
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"question-1\",\"name\":\"request_user_input\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"question-1\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"}}\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(infer_codex_runtime_status(&path), "idle");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn infers_claude_question_without_treating_normal_tool_as_confirmation() {
+        let path =
+            std::env::temp_dir().join(format!("flowlet-claude-state-{}.jsonl", Uuid::new_v4()));
+        fs::write(
+            &path,
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"tool_use\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Read\"}]}}\n",
+        )
+        .unwrap();
+        assert_eq!(infer_claude_runtime_status(&path), "running");
+
+        fs::write(
+            &path,
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"tool_use\",\"content\":[{\"type\":\"tool_use\",\"name\":\"AskUserQuestion\"}]}}\n",
+        )
+        .unwrap();
+        assert_eq!(infer_claude_runtime_status(&path), "waiting_user");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn keeps_claude_idle_after_local_command_meta_user_record() {
+        let path =
+            std::env::temp_dir().join(format!("flowlet-claude-local-{}.jsonl", Uuid::new_v4()));
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"end_turn\",\"content\":[]}}\n",
+                "{\"type\":\"system\",\"subtype\":\"turn_duration\"}\n",
+                "{\"type\":\"system\",\"subtype\":\"local_command\",\"content\":\"local command\"}\n",
+                "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":\"local result\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(infer_claude_runtime_status(&path), "idle");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn keeps_claude_idle_when_away_summary_follows_unanswered_user_record() {
+        let path =
+            std::env::temp_dir().join(format!("flowlet-claude-away-{}.jsonl", Uuid::new_v4()));
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"follow up\"}}\n",
+                "{\"type\":\"system\",\"subtype\":\"away_summary\"}\n"
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(infer_claude_runtime_status(&path), "idle");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn infers_opencode_completion_and_pi_tool_execution() {
+        assert_eq!(
+            infer_opencode_runtime_status(
+                &serde_json::json!({
+                    "role": "assistant",
+                    "time": {"created": 1}
+                }),
+                false,
+                Some(1),
+                100_000
+            ),
+            "idle"
+        );
+        assert_eq!(
+            infer_opencode_runtime_status(
+                &serde_json::json!({
+                    "role": "assistant",
+                    "time": {"created": 1}
+                }),
+                false,
+                Some(90_000),
+                100_000
+            ),
+            "running"
+        );
+        assert_eq!(
+            infer_opencode_runtime_status(
+                &serde_json::json!({
+                    "role": "assistant",
+                    "time": {"created": 1}
+                }),
+                true,
+                Some(1),
+                100_000
+            ),
+            "running"
+        );
+        assert_eq!(
+            infer_opencode_runtime_status(
+                &serde_json::json!({
+                    "role": "assistant",
+                    "time": {"created": 1, "completed": 2}
+                }),
+                true,
+                Some(2),
+                100_000
+            ),
+            "idle"
+        );
+
+        let path = std::env::temp_dir().join(format!("flowlet-pi-state-{}.jsonl", Uuid::new_v4()));
+        fs::write(
+            &path,
+            "{\"type\":\"message\",\"message\":{\"role\":\"assistant\",\"stopReason\":\"toolUse\"}}\n",
+        )
+        .unwrap();
+        assert_eq!(infer_pi_runtime_status(&path), "running");
+        fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn lists_claude_root_and_subagent_sessions_without_message_content() {
@@ -820,6 +1196,14 @@ mod tests {
                     id TEXT PRIMARY KEY, title TEXT, directory TEXT, parent_id TEXT,
                     time_created INTEGER, time_updated INTEGER
                 );
+                CREATE TABLE message (
+                    id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                    time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
+                    data TEXT NOT NULL
+                );
+                CREATE TABLE part (
+                    id TEXT PRIMARY KEY, message_id TEXT NOT NULL
+                );
                 INSERT INTO session VALUES (
                     'ses_main', 'Native title', 'D:\\work\\flowlet', NULL,
                     1752825600000, 1752829200000
@@ -827,7 +1211,16 @@ mod tests {
                 INSERT INTO session VALUES (
                     'ses_child', 'Child title', 'D:\\work\\flowlet', 'ses_main',
                     1752825700000, 1752829300000
-                );",
+                );
+                INSERT INTO message VALUES (
+                    'msg_main', 'ses_main', 1752829200000, 1752829200000,
+                    '{\"role\":\"assistant\",\"time\":{\"created\":1752829200000}}'
+                );
+                INSERT INTO message VALUES (
+                    'msg_child', 'ses_child', 1752829300000, 1752829400000,
+                    '{\"role\":\"assistant\",\"time\":{\"created\":1752829300000,\"completed\":1752829400000}}'
+                );
+                INSERT INTO part VALUES ('part_main', 'msg_main');",
             )
             .unwrap();
         drop(connection);
@@ -840,6 +1233,18 @@ mod tests {
                 .find(|row| row.session_id == "ses_child")
                 .and_then(|row| row.parent_session_id.as_deref()),
             Some("ses_main")
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.session_id == "ses_main")
+                .map(|row| row.runtime_status.as_str()),
+            Some("running")
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.session_id == "ses_child")
+                .map(|row| row.runtime_status.as_str()),
+            Some("idle")
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -971,6 +1376,7 @@ mod tests {
             "opencode",
             "ses_main".to_string(),
             None,
+            "running".to_string(),
             Some("Native title".to_string()),
             Some("D:\\work\\flowlet".to_string()),
             Some("2026-07-18T08:00:00Z".to_string()),

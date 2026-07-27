@@ -837,6 +837,7 @@ impl Storage {
             Ok(AgentSessionRow {
                 agent_type: row.get(0)?,
                 session_id: row.get(1)?,
+                runtime_status: "unknown".to_string(),
                 title: None,
                 project_path: None,
                 parent_session_id: row.get(2)?,

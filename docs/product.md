@@ -519,6 +519,16 @@ Flowlet 在代理入口结构化提取该字段，与 OpenCode 共用会话列�
 费用和失败聚合。Claude Code 恢复会话时沿用原 ID，因此恢复前后的请求会归入同一会话。
 功能上线前已捕获请求头的历史日志可通过设置页数据修复回填；未捕获请求头的数据无法恢复。
 
+会话列表同时以只读方式解析 Agent 原生运行事件，运行态与请求成功/失败状态分开展示：
+`running` 表示 Agent 正在自动执行，`waiting_user` 表示当前明确等待用户确认或回答，
+`idle` 表示当前没有未完成的原生轮次，`unknown` 表示原生数据不足以判断。Codex 可从
+`task_started` / `task_complete` 和未完成的 `request_user_input` 判断；Claude Code 可从
+消息轮次、`AskUserQuestion`、`turn_duration`、`away_summary` 以及本地命令的 meta 标记判断；
+OpenCode 根据原生 message 完成时间和 part 活性判断，长期未产生任何 part 的空助手占位消息
+不视为运行中；Pi 根据当前活动分支的消息与工具调用判断。Claude Code 普通工具权限弹窗、
+OpenCode 与 Pi 的用户确认
+目前没有稳定落入其会话存储，因此这些场景保守显示为运行中，不推测为等待确认。
+
 Claude Code、OpenCode、ChatGPT（Codex）Desktop 和 Codex CLI 的原生会话详情均支持按需只读
 时间线。不同 Agent 的本地格式统一展示为用户消息、助手回复、思考摘要、工具调用、工具结果和
 错误；内容不导入 Flowlet 数据库，并设置文件、事件数和单条内容上限。

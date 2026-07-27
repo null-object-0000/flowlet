@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Pagination, Select, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Input, Pagination, Select, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconRefresh, IconSearch } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -193,8 +193,32 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
           {row.flowletObserved ? formatCostCny(row.estimatedCost) : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}
         </span>
       </CostBreakdownTooltip>
-      <span className={!row.flowletObserved ? styles.localOnly : row.errorCount > 0 ? styles.warning : styles.success}>{!row.flowletObserved ? t("本地会话") : row.errorCount > 0 ? t("{count} 次失败", { count: row.errorCount }) : t("正常")}</span>
+      <SessionStatus row={row} />
     </button>
+  );
+}
+
+function SessionStatus({ row }: { row: AgentSessionRow }) {
+  const { t } = useAppPreferences();
+  const presentation = {
+    running: { label: t("自动运行中"), color: "green" as const, className: styles.runtimeActive },
+    waiting_user: { label: t("等待用户确认"), color: "orange" as const, className: styles.runtimeWaiting },
+    idle: { label: t("空闲"), color: "grey" as const, className: styles.runtimeIdle },
+    unknown: { label: t("无法判断"), color: "grey" as const, className: styles.runtimeUnknown },
+  }[row.runtimeStatus];
+  const health = !row.flowletObserved
+    ? t("本地会话")
+    : row.errorCount > 0
+      ? t("{count} 次失败", { count: row.errorCount })
+      : t("请求正常");
+
+  return (
+    <span className={styles.statusCell}>
+      <Tag size="small" color={presentation.color} className={presentation.className}>
+        {presentation.label}
+      </Tag>
+      <small className={row.flowletObserved && row.errorCount > 0 ? styles.warning : styles.statusHint}>{health}</small>
+    </span>
   );
 }
 

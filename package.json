@@ -11,6 +11,7 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "node scripts/fetch-models-cn.mjs && tauri build && node scripts/build-portable.mjs",
+    "tauri:build:portable": "node scripts/fetch-models-cn.mjs && tauri build --no-bundle && node scripts/build-portable.mjs",
     "tauri:portable": "node scripts/build-portable.mjs",
     "check": "tsc --noEmit",
     "test": "vitest run --config src/vitest.config.ts",

@@ -524,6 +524,7 @@ Flowlet 在代理入口结构化提取该字段，与 OpenCode 共用会话列�
 `idle` 表示当前没有未完成的原生轮次，`unknown` 表示原生数据不足以判断。Codex 可从
 `task_started` / `task_complete` 和未完成的 `request_user_input` 判断；Claude Code 可从
 消息轮次、`AskUserQuestion`、`turn_duration`、`away_summary` 以及本地命令的 meta 标记判断；
+自动运行状态连续 30 分钟没有原生文件更新时收敛为空闲，等待用户确认状态保留 24 小时；
 OpenCode 根据原生 message 完成时间和 part 活性判断，长期未产生任何 part 的空助手占位消息
 不视为运行中；Pi 根据当前活动分支的消息与工具调用判断。Claude Code 普通工具权限弹窗、
 OpenCode 与 Pi 的用户确认

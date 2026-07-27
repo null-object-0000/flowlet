@@ -11,7 +11,7 @@ import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./OverviewChannelAccountsCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber } from "../../shared/formatters/number";
-import { formatTime, parseTimestamp } from "../../shared/formatters/datetime";
+import { formatTime, formatFullTimestamp, parseTimestamp } from "../../shared/formatters/datetime";
 
 const { Text } = Typography;
 
@@ -68,7 +68,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
                   <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
                   <span className={styles.accountText}>
                     <span className={styles.nameRow}>
-                      <Text strong className={nameSummary ? styles.namePrimary : styles.nameText} title={accountName}>
+                      <Text strong className={styles.nameText} title={accountName}>
                         {accountName}
                       </Text>
                       {nameSummary && <span className={styles.resourceSeparator}>·</span>}
@@ -76,9 +76,17 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
                     </span>
                     <span className={styles.resourceSummary}>
                       {(() => {
-                        const parts = codexReport
-                          ? { label: "", ...getCodexUsageDisplay(codexReport, t) }
-                          : resourceSummary(account, snapshot, t, language);
+                        const usageParts = codexReport
+                          ? getCodexUsageDisplay(codexReport, t)
+                          : { value: "", secondary: "" };
+                        const updated = codexReport
+                          ? formatFullTimestamp(codexReport.updated_at, language)
+                          : "";
+                        const parts = {
+                          label: "",
+                          value: usageParts.value,
+                          secondary: [usageParts.secondary, updated].filter(Boolean).join(" · "),
+                        };
                         const hasSecondary = Boolean(parts.secondary);
                         return (
                           <>

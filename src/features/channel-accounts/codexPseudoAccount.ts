@@ -64,8 +64,8 @@ function getWindowLabel(
   const remaining = Math.max(0, Math.round(100 - window.used_percent));
   const label =
     window.window_duration_mins <= 360
-      ? t("5小时 剩余 {percent}%", { percent: remaining })
-      : t("每周 剩余 {percent}%", { percent: remaining });
+      ? t("5小时用量剩余 {percent}%", { percent: remaining })
+      : t("每周用量剩余 {percent}%", { percent: remaining });
   return label;
 }
 

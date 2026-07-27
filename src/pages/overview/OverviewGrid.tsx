@@ -21,6 +21,7 @@ type Props = {
   proxyRunning: boolean;
   hasAccounts: boolean;
   onAccountRequest: (request: AccountManagerRequest) => void;
+  onOpenCodexAgent?: () => void;
   busyModelId?: string;
   onToggleModel: (routeIds: string[], modelId: string, enabled: boolean) => void;
   onboarding: React.ReactNode;
@@ -37,6 +38,7 @@ export function OverviewGrid({
   proxyRunning,
   hasAccounts,
   onAccountRequest,
+  onOpenCodexAgent,
   busyModelId,
   onToggleModel,
   onboarding,
@@ -57,6 +59,7 @@ export function OverviewGrid({
           onCreate={() => onAccountRequest({ kind: "create", channelId: "longcat" })}
           onViewAll={() => onAccountRequest({ kind: "list" })}
           onEdit={(accountId) => onAccountRequest({ kind: "edit", accountId })}
+          onOpenCodexAgent={onOpenCodexAgent}
         />
       </div>
       <div className={styles.modelsCard}>

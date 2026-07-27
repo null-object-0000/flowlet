@@ -18,7 +18,7 @@ export function ChannelBrandLogo({ channelId, name }: { channelId: string; name:
     return <span className={`${styles.logo} ${styles.deepseek}`} aria-hidden="true"><i /></span>;
   }
   if (channelId === "chatgpt") {
-    return <span className={`${styles.logo} ${styles.chatgpt}`} aria-hidden="true"><img src="/icons/lobe/codex-color.svg" alt="" /></span>;
+    return <span className={`${styles.logo} ${styles.chatgpt}`} aria-hidden="true"><i /></span>;
   }
   return <span className={`${styles.logo} ${styles.fallback}`} aria-hidden="true">{name.trim().charAt(0).toUpperCase() || "?"}</span>;
 }

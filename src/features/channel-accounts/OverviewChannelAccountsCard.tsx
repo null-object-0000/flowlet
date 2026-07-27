@@ -22,9 +22,10 @@ type Props = {
   onCreate: () => void;
   onViewAll: () => void;
   onEdit: (accountId: string) => void;
+  onOpenCodexAgent?: () => void;
 };
 
-export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts, onCreate, onViewAll, onEdit }: Props) {
+export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts, onCreate, onViewAll, onEdit, onOpenCodexAgent }: Props) {
   const { language, t } = useAppPreferences();
   const snapshotByAccount = new Map(snapshots.map((snapshot) => [snapshot.account_id, snapshot]));
   const enabledCount = accounts.filter((a) => a.enabled).length;
@@ -64,7 +65,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
           return (
             <div className={styles.row} key={account.id}>
               {isCodex ? (
-                <div className={styles.rowMain}>
+                <button className={styles.rowMain} type="button" onClick={onOpenCodexAgent}>
                   <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
                   <span className={styles.accountText}>
                     <span className={styles.nameRow}>
@@ -98,7 +99,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
                       })()}
                     </span>
                   </span>
-                </div>
+                </button>
               ) : (
                 <button className={styles.rowMain} type="button" onClick={() => onEdit(account.id)}>
                   <ChannelBrandLogo channelId={account.channel_id} name={account.name} />

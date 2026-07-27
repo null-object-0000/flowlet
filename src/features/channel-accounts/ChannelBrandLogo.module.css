@@ -55,14 +55,17 @@
 }
 
 .chatgpt {
-  background: #f0faf7;
+  color: var(--flowlet-color-text);
+  background: var(--flowlet-color-surface-muted);
   border: 1px solid var(--flowlet-color-border);
 }
 
-.chatgpt img {
-  width: 32px;
-  height: 32px;
-  transform: scale(0.7);
+.chatgpt i {
+  width: 21px;
+  height: 21px;
+  background: currentColor;
+  -webkit-mask: url("/icons/lobe/openai.svg") center / contain no-repeat;
+  mask: url("/icons/lobe/openai.svg") center / contain no-repeat;
 }
 
 .fallback {

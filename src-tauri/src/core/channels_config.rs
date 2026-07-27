@@ -21,6 +21,7 @@ pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static s
         "qwen3.8-max-preview"
         | "qwen3.7-max"
         | "qwen3.7-plus"
+        | "qwen3.7-flash"
         | "qwen3.6-plus"
         | "qwen3.6-flash" => Some("qwen"),
         _ => None,

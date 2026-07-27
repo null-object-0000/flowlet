@@ -37,7 +37,7 @@ export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   longcat: ["LongCat-2.0"],
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
   kimi: ["kimi-k3", "kimi-k2.7-code"],
-  qwen: ["qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"],
+  qwen: ["qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
 };
 
 /** Token Plan 个人版账号的默认开放模型（qwen3.8-max-preview 仅 Token Plan 可用）。
@@ -73,6 +73,7 @@ export const FLOWLET_TIERS_BY_CHANNEL_MODEL: Record<string, Record<string, Array
     "qwen3.8-max-preview": ["pro"],
     "qwen3.7-plus": ["pro"],
     "qwen3.7-max": ["pro"],
+    "qwen3.7-flash": ["flash"],
     "qwen3.6-plus": ["pro"],
     "qwen3.6-flash": ["flash"],
   },

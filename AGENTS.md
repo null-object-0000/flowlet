@@ -228,6 +228,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - qwen3.8-max-preview
 - qwen3.7-max
 - qwen3.7-plus
+- qwen3.7-flash
 - qwen3.6-plus
 - qwen3.6-flash
 ```

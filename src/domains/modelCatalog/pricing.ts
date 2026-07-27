@@ -59,6 +59,77 @@ export function resolvePrice(price: ModelsCnPrice): ResolvedPrice {
   };
 }
 
+/** 是否存在可展示的真实优惠。
+ *  只有数据明确标记为 promotional，且标准价确实高于当前价时才显示划线原价；
+ *  相等、涨价、非有限数值或浮点误差范围内的差异都不视为优惠。 */
+export function isPromotionalDiscount(
+  rateType: ModelsCnPrice["rateType"],
+  standardAmount: number,
+  currentAmount: number,
+): boolean {
+  if (
+    rateType !== "promotional"
+    || !Number.isFinite(standardAmount)
+    || !Number.isFinite(currentAmount)
+  ) {
+    return false;
+  }
+  const tolerance = Math.max(Math.abs(standardAmount), Math.abs(currentAmount), 1) * 1e-9;
+  return standardAmount - currentAmount > tolerance;
+}
+
+/** 同一输入区间下合并后的展示价格。促销价作为当前价，标准价仅用于真实优惠划价。 */
+export interface PricingStrategyRow {
+  key: string;
+  inputTokenRange: ModelsCnPrice["inputTokenRange"] | null;
+  current: ModelsCnPrice;
+  standard: ModelsCnPrice | null;
+}
+
+/** 将同市场、币种下的 prices[] 按输入区间合并成完整价格策略。
+ *  models-cn 会把 standard / promotional 作为两条记录返回；UI 不应重复两行，
+ *  而应在同一格中展示当前促销价及（确有降价时）标准原价。 */
+export function buildPricingStrategyRows(
+  prices: ModelsCnPrice[],
+  market: ModelsCnPrice["market"],
+  currency: ModelsCnPrice["currency"],
+): PricingStrategyRow[] {
+  const groups = new Map<string, ModelsCnPrice[]>();
+  for (const price of prices) {
+    if (price.market !== market || price.currency !== currency) continue;
+    const range = price.inputTokenRange;
+    const key = JSON.stringify([
+      price.unit,
+      range?.minExclusive ?? null,
+      range?.maxInclusive ?? null,
+      range?.label ?? "",
+    ]);
+    const group = groups.get(key);
+    if (group) group.push(price);
+    else groups.set(key, [price]);
+  }
+
+  return [...groups.entries()]
+    .map(([key, group]) => {
+      const promotional = group.find((price) => price.rateType === "promotional");
+      const standard = group.find((price) => price.rateType === "standard") ?? null;
+      const current = promotional ?? standard ?? group[0];
+      return {
+        key,
+        inputTokenRange: current.inputTokenRange ?? null,
+        current,
+        standard: promotional ? standard : null,
+      };
+    })
+    .sort((a, b) => {
+      const aMin = a.inputTokenRange?.minExclusive ?? -1;
+      const bMin = b.inputTokenRange?.minExclusive ?? -1;
+      if (aMin !== bMin) return aMin - bMin;
+      return (a.inputTokenRange?.maxInclusive ?? Number.MAX_SAFE_INTEGER)
+        - (b.inputTokenRange?.maxInclusive ?? Number.MAX_SAFE_INTEGER);
+    });
+}
+
 /** 解析模型能力。缺失字段默认 false（保守降级）。 */
 export function resolveCapabilities(capabilities: ModelsCnModel["capabilities"]): ResolvedModelCapabilities {
   return {

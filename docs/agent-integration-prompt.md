@@ -47,7 +47,10 @@
 - 币种直接展示 `currency` 字段（CNY / USD），不自动换算。
 - 市场价（`market = "china"`）优先于国际价。
 - 优惠价（`rateType = "promotional"`）需明确标注，不得伪装为标准价。
+- 只有 `rateType = "promotional"` 且同维度标准价确实高于当前价时才展示划线原价；
+  输入、缓存命中、缓存写入和输出价格分别判断，相等时不得划线。
 - 所有价格展示必须附带来源（`source_url`）与抓取时间（`retrievedAt` / `price_version`）。
+- `retrievedAt` 是 UTC 时间点，界面展示时必须转换为操作系统本地时区。
 
 ## 5. 可测试性要求
 
@@ -71,7 +74,7 @@
 | Tab | 内容 | 数据来源 |
 |-----|------|----------|
 | 基础信息 | 上下文窗口、最大输出、能力（thinking/toolCalls 等）、别名 | models-cn `limits` + `capabilities`，缺失降级到渠道同步 |
-| 价格信息 | 官方价格（按上述规则选取）、缓存价、来源、抓取时间 | models-cn `prices[]`，缺失降级到 `config.json` |
+| 价格信息 | 官方完整价格策略（按输入区间合并标准价与促销价）、隐式缓存、显式缓存创建/命中、输出价、来源、抓取时间 | models-cn `prices[]` |
 | 渠道路由 | 已有路由账号、优先级、启用状态 | 本项目路由配置（不变） |
 
 聚合模型（`flowlet-pro` / `flowlet-flash`）保持原有「渠道路由」面板，不强制 Tab。

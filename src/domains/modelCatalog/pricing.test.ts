@@ -4,9 +4,11 @@ import {
   aggregateMaxPrice,
   aggregateMaxStandardPrice,
   aggregateMinLimits,
+  buildPricingStrategyRows,
   estimateCost,
   findModelByAlias,
   findModelInCatalog,
+  isPromotionalDiscount,
   resolveCapabilities,
   resolveLimits,
   resolveModel,
@@ -112,6 +114,50 @@ describe("resolvePrice", () => {
     expect(p.inputCacheWrite).toBe(1.5);
     const p2 = resolvePrice({ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 1 }, output: 2, sourceUrl: "u" });
     expect(p2.inputCacheWrite).toBeNull();
+  });
+});
+
+describe("isPromotionalDiscount", () => {
+  it("shows an original price only for a real promotional reduction", () => {
+    expect(isPromotionalDiscount("promotional", 1, 0.8)).toBe(true);
+    expect(isPromotionalDiscount("promotional", 1, 1)).toBe(false);
+    expect(isPromotionalDiscount("promotional", 1, 1.2)).toBe(false);
+    expect(isPromotionalDiscount("standard", 1, 0.8)).toBe(false);
+  });
+
+  it("ignores floating-point noise", () => {
+    expect(isPromotionalDiscount("promotional", 1, 1 - 1e-12)).toBe(false);
+  });
+});
+
+describe("buildPricingStrategyRows", () => {
+  it("merges standard and promotional prices for the same input range", () => {
+    const base = {
+      market: "china",
+      currency: "CNY",
+      unit: "1M_tokens",
+      inputTokenRange: { label: "输入<=256k", maxInclusive: 256_000 },
+      sourceUrl: "u",
+    } as const;
+    const rows = buildPricingStrategyRows([
+      { ...base, rateType: "standard", input: { standard: 2, cacheHit: 0.4, explicitCacheCreation: 2.5, explicitCacheHit: 0.2 }, output: 8 },
+      { ...base, rateType: "promotional", input: { standard: 1.6, cacheHit: 0.32, explicitCacheCreation: 2, explicitCacheHit: 0.16 }, output: 6.4 },
+    ], "china", "CNY");
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].current.rateType).toBe("promotional");
+    expect(rows[0].standard?.input.explicitCacheHit).toBe(0.2);
+  });
+
+  it("sorts tiers by their lower input boundary and filters other markets", () => {
+    const prices: ModelsCnPrice[] = [
+      { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", inputTokenRange: { label: "256k-1m", minExclusive: 256_000, maxInclusive: 1_000_000 }, input: { standard: 6 }, output: 24, sourceUrl: "u" },
+      { market: "international", currency: "USD", unit: "1M_tokens", rateType: "standard", input: { standard: 1 }, output: 2, sourceUrl: "u" },
+      { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", inputTokenRange: { label: "<=256k", maxInclusive: 256_000 }, input: { standard: 2 }, output: 8, sourceUrl: "u" },
+    ];
+    const rows = buildPricingStrategyRows(prices, "china", "CNY");
+
+    expect(rows.map((row) => row.inputTokenRange?.label)).toEqual(["<=256k", "256k-1m"]);
   });
 });
 

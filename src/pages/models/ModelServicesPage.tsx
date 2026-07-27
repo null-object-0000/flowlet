@@ -13,6 +13,7 @@ import type { ChannelModel } from "../../domains/model/types";
 import type { ModelPriceInfo } from "../../domains/settings/types";
 import { formatCompactNumber, type NumberLanguage } from "../../shared/formatters/number";
 import { formatCostAmount } from "../../shared/formatters/cost";
+import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import {
@@ -23,8 +24,10 @@ import {
   aggregateCapabilitiesIntersection,
   aggregateMaxPrice,
   aggregateMaxStandardPrice,
+  buildPricingStrategyRows,
+  isPromotionalDiscount,
 } from "../../domains/modelCatalog";
-import type { ModelsCnPrice, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
+import type { ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
 import { useModelsCnCatalogSync } from "../../features/background-tasks/useBackgroundTasks";
 import { channelCommands, type PresetSyncPreview } from "../../domains/channel/commands";
 import styles from "./ModelServicesPage.module.css";
@@ -47,6 +50,93 @@ function priceFromResolvedStandard(p: ResolvedPrice): ModelsCnPrice {
     output: p.output,
     sourceUrl: p.sourceUrl,
   };
+}
+
+function StrategyPriceValue({ current, standard, rateType, currency }: {
+  current: number | undefined;
+  standard: number | undefined;
+  rateType: ModelsCnPrice["rateType"];
+  currency: string;
+}) {
+  if (current == null) return <span className={styles.priceUnavailable}>—</span>;
+  const showOriginal = standard != null && isPromotionalDiscount(rateType, standard, current);
+  return (
+    <span className={styles.strategyPrice}>
+      {showOriginal ? <span className={styles.priceOriginal}>{formatCostAmount({ amount: standard, currency }, 2)}</span> : null}
+      <strong>{formatCostAmount({ amount: current, currency }, 2)}</strong>
+    </span>
+  );
+}
+
+function PricingStrategyTable({ rows, t }: {
+  rows: PricingStrategyRow[];
+  t: (source: string, values?: Record<string, string | number>) => string;
+}) {
+  const showImplicitCache = rows.some((row) => row.current.input.cacheHit != null || row.standard?.input.cacheHit != null);
+  const showExplicitCache = rows.some((row) => (
+    row.current.input.explicitCacheCreation != null
+    || row.current.input.explicitCacheHit != null
+    || row.standard?.input.explicitCacheCreation != null
+    || row.standard?.input.explicitCacheHit != null
+  ));
+  const currency = rows[0].current.currency;
+
+  return (
+    <div className={styles.pricingTableWrap}>
+      <table className={styles.pricingTable}>
+        <thead>
+          <tr>
+            <th>{t("输入区间")}</th>
+            <th>{t("输入定价")}</th>
+            {showImplicitCache ? <th>{t("隐式缓存")}</th> : null}
+            {showExplicitCache ? <th>{t("显式缓存")}</th> : null}
+            <th>{t("输出定价")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td className={styles.rangeCell}>{row.inputTokenRange?.label ?? t("全部输入")}</td>
+              <td>
+                <StrategyPriceValue
+                  current={row.current.input.standard}
+                  standard={row.standard?.input.standard}
+                  rateType={row.current.rateType}
+                  currency={currency}
+                />
+              </td>
+              {showImplicitCache ? (
+                <td>
+                  <StrategyPriceValue
+                    current={row.current.input.cacheHit}
+                    standard={row.standard?.input.cacheHit}
+                    rateType={row.current.rateType}
+                    currency={currency}
+                  />
+                </td>
+              ) : null}
+              {showExplicitCache ? (
+                <td>
+                  <span className={styles.explicitCachePrices}>
+                    <span><small>{t("创建")}</small><StrategyPriceValue current={row.current.input.explicitCacheCreation} standard={row.standard?.input.explicitCacheCreation} rateType={row.current.rateType} currency={currency} /></span>
+                    <span><small>{t("命中")}</small><StrategyPriceValue current={row.current.input.explicitCacheHit} standard={row.standard?.input.explicitCacheHit} rateType={row.current.rateType} currency={currency} /></span>
+                  </span>
+                </td>
+              ) : null}
+              <td>
+                <StrategyPriceValue
+                  current={row.current.output}
+                  standard={row.standard?.output}
+                  rateType={row.current.rateType}
+                  currency={currency}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export function ModelServicesPage() {
@@ -468,6 +558,7 @@ function ModelDetail({ model, accounts, channels, channelModels, prices, catalog
             isAggregate={model.kind === "aggregate"}
             syncPending={syncModelsCnPending}
             onSync={onSyncModelsCn}
+            language={language}
             t={t}
           />
         </Tabs.TabPane>
@@ -589,7 +680,7 @@ function ModelBasicInfoTab({ basicInfo, resolved, isAggregate, language, t }: {
  *  数据完全来自 models-cn，不再有 config.json 降级。
  *  聚合模型（flowlet-pro/flowlet-flash）：价格取旗下子模型的最大值（展示最坏情况
  *  下的成本上限），standard 价格也取最大值用于划价展示。 */
-function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCatalog, catalogLoading, showSyncButton, isAggregate, syncPending, onSync, t }: {
+function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCatalog, catalogLoading, showSyncButton, isAggregate, syncPending, onSync, language, t }: {
   resolved: ResolvedModel | null;
   standardPrice?: ResolvedPrice | null;
   hasCatalog: boolean;
@@ -598,6 +689,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
   isAggregate: boolean;
   syncPending: boolean;
   onSync: () => void;
+  language: NumberLanguage;
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
   const price = resolved?.officialPrice;
@@ -625,17 +717,47 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
   const standardPrice: ModelsCnPrice | null = standardPriceOverride
     ? priceFromResolvedStandard(standardPriceOverride)
     : (resolved?.allPrices ?? []).find((p) => p.market === price.market && p.currency === price.currency && p.rateType === "standard") ?? null;
-  // 只要存在 standard 价格就展示划价（含等于的情况，让用户看到原价）
-  const hasStandard = standardPrice != null;
+  const strategyRows = !isAggregate
+    ? buildPricingStrategyRows(resolved?.allPrices ?? [], price.market, price.currency)
+    : [];
+  const showDetailedStrategy = strategyRows.length > 1 || strategyRows.some((row) => (
+    row.inputTokenRange != null
+    || row.current.input.explicitCacheCreation != null
+    || row.current.input.explicitCacheHit != null
+    || row.standard?.input.explicitCacheCreation != null
+    || row.standard?.input.explicitCacheHit != null
+  ));
+  const showInputOriginal = standardPrice != null
+    && isPromotionalDiscount(price.rateType, standardPrice.input.standard, price.inputUncached);
+  const showCachedOriginal = standardPrice?.input.cacheHit != null
+    && isPromotionalDiscount(price.rateType, standardPrice.input.cacheHit, price.inputCached ?? 0);
+  const showCacheWriteOriginal = standardPrice?.input.explicitCacheCreation != null
+    && isPromotionalDiscount(
+      price.rateType,
+      standardPrice.input.explicitCacheCreation,
+      price.inputCacheWrite ?? 0,
+    );
+  const showOutputOriginal = standardPrice != null
+    && isPromotionalDiscount(price.rateType, standardPrice.output, price.output);
 
   return (
     <div className={styles.tabContent}>
       {isAggregate ? <div className={styles.infoFootnote}>{t("聚合模型价格取旗下已启用子模型的最大值（成本上限）。")}</div> : null}
       <DetailSection title={t("官方价格")}>
-        <div className={styles.configRow}>
+        {showDetailedStrategy ? (
+          <>
+            <div className={styles.pricingStrategyMeta}>
+              <span>{t("按输入长度分段计价")}</span>
+              <strong>{price.currency} / {unitLabel}</strong>
+            </div>
+            <PricingStrategyTable rows={strategyRows} t={t} />
+          </>
+        ) : (
+          <>
+          <div className={styles.configRow}>
           <span>{t("输入定价")}</span>
           <strong className={styles.priceCell}>
-            {hasStandard ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.standard, price.currency)}</span> : null}
+            {showInputOriginal ? <span className={styles.priceOriginal}>{formatPrice(standardPrice.input.standard, price.currency)}</span> : null}
             <span>{formatPrice(price.inputUncached, price.currency)} / {unitLabel}</span>
           </strong>
         </div>
@@ -643,8 +765,8 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
           <div className={styles.configRow}>
             <span>{t("缓存命中")}</span>
             <strong className={styles.priceCell}>
-              {hasStandard && standardPrice?.input.cacheHit != null
-                ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.cacheHit, price.currency)}</span>
+              {showCachedOriginal && standardPrice?.input.cacheHit != null
+                ? <span className={styles.priceOriginal}>{formatPrice(standardPrice.input.cacheHit, price.currency)}</span>
                 : null}
               <span>{formatPrice(price.inputCached, price.currency)} / {unitLabel}</span>
             </strong>
@@ -654,8 +776,8 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
           <div className={styles.configRow}>
             <span>{t("缓存写入")}</span>
             <strong className={styles.priceCell}>
-              {hasStandard && standardPrice?.input.explicitCacheCreation != null
-                ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.input.explicitCacheCreation, price.currency)}</span>
+              {showCacheWriteOriginal && standardPrice?.input.explicitCacheCreation != null
+                ? <span className={styles.priceOriginal}>{formatPrice(standardPrice.input.explicitCacheCreation, price.currency)}</span>
                 : null}
               <span>{formatPrice(price.inputCacheWrite, price.currency)} / {unitLabel}</span>
             </strong>
@@ -664,13 +786,15 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
         <div className={styles.configRow}>
           <span>{t("输出定价")}</span>
           <strong className={styles.priceCell}>
-            {hasStandard ? <span className={styles.priceOriginal}>{formatPrice(standardPrice!.output, price.currency)}</span> : null}
+            {showOutputOriginal ? <span className={styles.priceOriginal}>{formatPrice(standardPrice.output, price.currency)}</span> : null}
             <span>{formatPrice(price.output, price.currency)} / {unitLabel}</span>
           </strong>
         </div>
+          </>
+        )}
       </DetailSection>
       <div className={styles.infoFootnote}>
-        {price.retrievedAt ? <span>{t("抓取时间")}: {price.retrievedAt}</span> : null}
+        {price.retrievedAt ? <span>{t("抓取时间")}: {formatFullTimestamp(price.retrievedAt, language)}</span> : null}
         {price.sourceUrl ? <a href={price.sourceUrl} target="_blank" rel="noreferrer">{t("价格来源")}</a> : null}
       </div>
       {resolved?.supplementedFromModelsDev ? (

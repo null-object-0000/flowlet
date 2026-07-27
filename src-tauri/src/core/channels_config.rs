@@ -445,7 +445,8 @@ impl ChannelsConfig {
     /// 为现有账号补齐「用户已勾选开放」的直连模型与 Flowlet 聚合模型路由。
     ///
     /// 只追加缺失签名，不覆盖用户已有的启停状态、优先级和时间戳（删除取消勾选的
-    /// 路由由前端保存时的对账逻辑负责）。
+    /// 路由由前端保存时的对账逻辑负责）。全局最早创建账号的新路由默认开启，后续
+    /// 所有官方或自定义账号的新路由默认关闭，等待用户手动开启。
     ///
     /// 候选上游模型 = 用户在账号编辑器中勾选的 `exposed_models` ∩ 最近一次
     /// `/models` 返回的 `synced_models` ∩ 全局支持模型集。白名单不按渠道区分——
@@ -464,6 +465,17 @@ impl ChannelsConfig {
         let now = chrono::Utc::now().to_rfc3339();
         // 所有渠道（包括 custom）统一使用全局支持模型白名单。
         let whitelist = self.supported_models();
+        // 账号列表从 SQLite 读取时按渠道排序，不能用数组下标判断“第一个账号”。
+        // 使用全局 created_at（同时间再按 id）确定最早账号；仅它的新路由默认开启。
+        let first_account_id = accounts
+            .iter()
+            .min_by(|a, b| {
+                a.created_at
+                    .trim()
+                    .cmp(b.created_at.trim())
+                    .then_with(|| a.id.cmp(&b.id))
+            })
+            .map(|account| account.id.as_str());
 
         for preset in presets {
             for protocol in &preset.supported_protocols {
@@ -553,7 +565,7 @@ impl ChannelsConfig {
                                 upstream_model: upstream_model.clone(),
                                 client_protocol: protocol.clone(),
                                 priority: account_index as i64,
-                                enabled: true,
+                                enabled: first_account_id == Some(account.id.as_str()),
                                 created_at: now.clone(),
                                 updated_at: now.clone(),
                             };
@@ -854,6 +866,71 @@ mod tests {
                 vec!["LongCat-2.0", "flowlet-pro", "flowlet-flash"]
             );
         }
+    }
+
+    #[test]
+    fn merge_default_routes_enables_only_the_globally_first_account() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "longcat",
+                    "name": "LongCat",
+                    "vendor": "longcat",
+                    "supported_protocols": ["openai"]
+                }],
+                "default_exposed_models": {
+                    "longcat": ["LongCat-2.0"]
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let later = ChannelAccount {
+            id: "account-later".to_string(),
+            channel_id: "longcat".to_string(),
+            api_key: "sk-later".to_string(),
+            enabled: true,
+            exposed_models: Some(vec!["LongCat-2.0".to_string()]),
+            synced_models: Some(vec!["LongCat-2.0".to_string()]),
+            created_at: "2026-07-02T00:00:00Z".to_string(),
+            ..Default::default()
+        };
+        let first = ChannelAccount {
+            id: "account-first".to_string(),
+            channel_id: "longcat".to_string(),
+            api_key: "sk-first".to_string(),
+            enabled: true,
+            exposed_models: Some(vec!["LongCat-2.0".to_string()]),
+            synced_models: Some(vec!["LongCat-2.0".to_string()]),
+            created_at: "2026-07-01T00:00:00Z".to_string(),
+            ..Default::default()
+        };
+
+        // 故意把后创建账号放在前面，避免测试意外依赖数组或渠道排序。
+        let routes =
+            config.merge_default_routes(&[], &[later, first], &config.presets);
+
+        assert_eq!(
+            routes
+                .iter()
+                .filter(|route| route.account_id == "account-first")
+                .count(),
+            1
+        );
+        assert_eq!(
+            routes
+                .iter()
+                .filter(|route| route.account_id == "account-later")
+                .count(),
+            1
+        );
+        assert!(routes
+            .iter()
+            .filter(|route| route.account_id == "account-first")
+            .all(|route| route.enabled));
+        assert!(routes
+            .iter()
+            .filter(|route| route.account_id == "account-later")
+            .all(|route| !route.enabled));
     }
 
     #[test]

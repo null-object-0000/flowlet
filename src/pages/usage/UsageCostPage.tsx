@@ -52,16 +52,6 @@ export function UsageCostPage() {
   return <main className={styles.page}>
     <header className={styles.pageHeading}>
       <div><Title heading={3}>{t("用量成本")}</Title><Paragraph>{t("查看模型、渠道与账号维度的 Token 消耗和预估费用")}</Paragraph></div>
-      <RefreshControl
-        autoRefresh={refresh.autoRefresh}
-        onToggleAutoRefresh={refresh.toggleAutoRefresh}
-        isFetching={usage.query.isFetching}
-        lastUpdatedAt={usage.query.dataUpdatedAt}
-        intervalMs={refresh.intervalMs}
-        onRefresh={() => void usage.query.refetch()}
-        language={language}
-        t={t}
-      />
       <Select
         value={period}
         aria-label={t("统计周期")}
@@ -73,6 +63,16 @@ export function UsageCostPage() {
           { value: "week", label: t("本周") },
         ]}
         onChange={(value) => setPeriod(value as UsagePeriod)}
+      />
+      <RefreshControl
+        autoRefresh={refresh.autoRefresh}
+        onToggleAutoRefresh={refresh.toggleAutoRefresh}
+        isFetching={usage.query.isFetching}
+        lastUpdatedAt={usage.query.dataUpdatedAt}
+        intervalMs={refresh.intervalMs}
+        onRefresh={() => void usage.query.refetch()}
+        language={language}
+        t={t}
       />
     </header>
 

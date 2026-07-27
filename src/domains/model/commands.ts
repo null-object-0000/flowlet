@@ -41,6 +41,16 @@ export function buildDefaultRoutes(
   accounts: ChannelAccount[],
   protocol: ProtocolType,
 ): RouteCandidate[] {
+  const firstAccountId = accounts
+    .reduce<ChannelAccount | null>((first, account) => {
+      if (!first) return account;
+      const createdOrder = (account.created_at?.trim() ?? "")
+        .localeCompare(first.created_at?.trim() ?? "");
+      return createdOrder < 0 || (createdOrder === 0 && account.id.localeCompare(first.id) < 0)
+        ? account
+        : first;
+    }, null)
+    ?.id;
   const usable = accounts.filter((a) => {
     if (a.channel_id !== channelId || !a.enabled || !a.api_key.trim()) return false;
     return protocol === "openai"
@@ -66,7 +76,9 @@ export function buildDefaultRoutes(
           upstream_model: up,
           client_protocol: protocol,
           priority: j,
-          enabled: true,
+          // 仅全局第一个渠道账号的新路由默认开启；后续账号仍自动补齐路由，
+          // 但需要用户在模型服务页手动开启。
+          enabled: acc.id === firstAccountId,
           created_at: now,
           updated_at: now,
         });
@@ -98,7 +110,9 @@ function defaultModelsForAccount(_channelId: string, account: ChannelAccount): s
 /** Add only missing direct-model and Flowlet aggregate routes for each account's
  *  selected `exposed_models`. Existing routes are returned unchanged so
  *  user-controlled enabled state, priority and timestamps survive. Removing
- *  deselected models is the caller's job (see the save-time reconciliation). */
+ *  deselected models is the caller's job (see the save-time reconciliation).
+ *  New routes are enabled only for the globally earliest account; routes added
+ *  for every later official or custom account start disabled. */
 export function mergeDefaultRoutes(
   existing: RouteCandidate[],
   accounts: ChannelAccount[],

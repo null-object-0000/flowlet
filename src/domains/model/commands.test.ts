@@ -57,6 +57,30 @@ describe("mergeDefaultRoutes", () => {
       ["flowlet-pro", "anthropic"],
     ]);
     expect(new Set(routes.map((route) => route.id))).toHaveLength(8);
+    expect(routes.every((route) => route.enabled)).toBe(true);
+  });
+
+  it("keeps later accounts in routing but disables all of their new routes", () => {
+    const firstAccount = {
+      ...account,
+      id: "account-first",
+      created_at: "2026-07-01T00:00:00Z",
+    } as ChannelAccount;
+    const laterAccount = {
+      ...account,
+      id: "account-later",
+      created_at: "2026-07-02T00:00:00Z",
+    } as ChannelAccount;
+
+    // 故意把后创建账号放在数组前面，验证判定基于全局创建时间而非渠道/数组排序。
+    const routes = mergeDefaultRoutes([], [laterAccount, firstAccount], [preset]);
+    const firstRoutes = routes.filter((route) => route.account_id === firstAccount.id);
+    const laterRoutes = routes.filter((route) => route.account_id === laterAccount.id);
+
+    expect(firstRoutes.length).toBeGreaterThan(0);
+    expect(firstRoutes.every((route) => route.enabled)).toBe(true);
+    expect(laterRoutes.length).toBeGreaterThan(0);
+    expect(laterRoutes.every((route) => !route.enabled)).toBe(true);
   });
 
   it("produces no routes for an account never configured in the new flow (exposed_models = null)", () => {
@@ -194,6 +218,39 @@ describe("mergeDefaultRoutes", () => {
     expect(new Set(routes.map((route) => route.upstream_model))).toEqual(new Set(["deepseek-v4-pro"]));
     expect(routes.every((route) => route.client_protocol === "openai")).toBe(true);
     expect(routes.some((route) => route.upstream_model === "relay-proprietary-model")).toBe(false);
+  });
+
+  it("also creates custom-channel routes disabled when another account already exists", () => {
+    const customPreset = {
+      id: "custom",
+      vendor: "custom",
+      supported_protocols: ["openai"],
+    } as ChannelPreset;
+    const firstOfficialAccount = {
+      ...account,
+      id: "account-first-official",
+      created_at: "2026-07-01T00:00:00Z",
+    } as ChannelAccount;
+    const laterCustomAccount = {
+      ...account,
+      id: "account-later-custom",
+      channel_id: "custom",
+      base_url_override: "https://relay.example/v1",
+      anthropic_base_url_override: null,
+      exposed_models: ["deepseek-v4-pro"],
+      synced_models: ["deepseek-v4-pro"],
+      created_at: "2026-07-02T00:00:00Z",
+    } as ChannelAccount;
+
+    const routes = mergeDefaultRoutes(
+      [],
+      [laterCustomAccount, firstOfficialAccount],
+      [customPreset],
+    );
+
+    expect(routes.length).toBeGreaterThan(0);
+    expect(routes.every((route) => route.account_id === laterCustomAccount.id)).toBe(true);
+    expect(routes.every((route) => !route.enabled)).toBe(true);
   });
 
   it("does not build a route for a supported model missing from the account's latest /models result", () => {

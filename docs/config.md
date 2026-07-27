@@ -341,6 +341,8 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
   `synced_models` 中的模型不会生成或保留路由。
 - 保存账号时前端按 `exposed_models` 对账路由：删除取消勾选的路由、补齐新勾选的路由，
   保留用户已有的启停状态、优先级和时间戳。
+- 自动补齐路由时，只有全局最早创建的渠道账号的新路由默认开启；后续新增的任何官方
+  或自定义渠道账号，其新路由默认关闭并等待用户手动开启。已有路由的启停状态不追溯修改。
 - 合并逻辑前后端各一份：`src-tauri/src/core/channels_config.rs` 的 `merge_default_routes`
   与 `src/domains/model/commands.ts` 的 `mergeDefaultRoutes`，行为必须一致（只追加缺失路由，
   不覆盖用户已有的启停状态、优先级和时间戳；删除动作由前端 `reconcileAccountRoutes` 在保存时执行）。
@@ -377,7 +379,8 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 
 **行为**：账号保存后的默认路由合并会根据该映射，将上游模型同时加入
 一个或多个聚合模型；已有路由的启用状态和优先级保持不变，
-只补充缺失的账号、协议和聚合路由。
+只补充缺失的账号、协议和聚合路由。补充出来的路由仅在属于全局最早创建账号时
+默认开启；后续账号的直接路由和聚合路由均默认关闭。
 
 **tier 取值**：`"pro"` | `"flash"`。
 

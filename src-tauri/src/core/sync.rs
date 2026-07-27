@@ -3,6 +3,7 @@ use super::config::{AuthStrategy, ChannelAccount, ChannelModel, ChannelPreset, P
 use super::presets::{BalanceQueryResult, ModelSyncResult};
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Deserialize)]
 struct DeepSeekBalanceResponse {
@@ -49,6 +50,129 @@ pub struct DeepSeekModelEntry {
 /// 稳定排序保证无时间戳的模型之间保持接口返回的原始顺序。
 fn sort_by_created_desc<T>(entries: &mut [T], created: impl Fn(&T) -> Option<u64>) {
     entries.sort_by(|a, b| created(b).cmp(&created(a)));
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelReleaseDate {
+    unix_seconds: i64,
+    rfc3339: String,
+}
+
+/// Kimi 当前的 `/models` 会给列表中的所有模型返回相同的 `created`，这个值不能代表
+/// 各模型发布时间。仅当上游时间戳无法区分模型时，使用 models-cn 的 createdAt，
+/// 或 calibration.modelsDev 中对 createdAt 的参考值进行补全。
+fn sort_kimi_models_by_created_desc(
+    entries: &mut [KimiModelEntry],
+    release_dates: &HashMap<String, ModelReleaseDate>,
+) -> bool {
+    let upstream_created_count = entries
+        .iter()
+        .filter_map(|entry| entry.created)
+        .collect::<HashSet<_>>()
+        .len();
+    if upstream_created_count > 1 {
+        sort_by_created_desc(entries, |entry| entry.created);
+        return true;
+    }
+
+    entries.sort_by(|a, b| {
+        let a_release = release_dates.get(&a.id).map(|date| date.unix_seconds);
+        let b_release = release_dates.get(&b.id).map(|date| date.unix_seconds);
+        b_release.cmp(&a_release).then_with(|| a.id.cmp(&b.id))
+    });
+    false
+}
+
+fn load_models_cn_release_dates(provider_id: &str) -> HashMap<String, ModelReleaseDate> {
+    let Some(catalog) = crate::core::storage::storage_tasks::read_models_cn_file()
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+    else {
+        return HashMap::new();
+    };
+    models_cn_release_dates_from_catalog(&catalog, provider_id)
+}
+
+fn models_cn_release_dates_from_catalog(
+    catalog: &serde_json::Value,
+    provider_id: &str,
+) -> HashMap<String, ModelReleaseDate> {
+    let mut result = HashMap::new();
+    if let Some(provider) = catalog
+        .get("providers")
+        .and_then(|providers| providers.as_array())
+        .and_then(|providers| {
+            providers
+                .iter()
+                .find(|provider| provider.get("id").and_then(|id| id.as_str()) == Some(provider_id))
+        })
+    {
+        for model in provider
+            .get("models")
+            .and_then(|models| models.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let Some(model_id) = model.get("id").and_then(|id| id.as_str()) else {
+                continue;
+            };
+            if let Some(release_date) = model
+                .get("createdAt")
+                .and_then(|value| value.as_str())
+                .and_then(parse_model_release_date)
+            {
+                result.insert(model_id.to_string(), release_date);
+            }
+        }
+    }
+
+    for model in catalog
+        .pointer("/calibration/modelsDev/models")
+        .and_then(|models| models.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|model| model.get("provider").and_then(|value| value.as_str()) == Some(provider_id))
+    {
+        let Some(model_id) = model.get("model").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if result.contains_key(model_id) {
+            continue;
+        }
+        let release_date = model
+            .get("checks")
+            .and_then(|checks| checks.as_array())
+            .into_iter()
+            .flatten()
+            .find(|check| check.get("field").and_then(|value| value.as_str()) == Some("createdAt"))
+            .and_then(|check| check.get("reference"))
+            .and_then(|value| value.as_str())
+            .and_then(parse_model_release_date);
+        if let Some(release_date) = release_date {
+            result.insert(model_id.to_string(), release_date);
+        }
+    }
+
+    result
+}
+
+fn parse_model_release_date(value: &str) -> Option<ModelReleaseDate> {
+    let normalized = match value.len() {
+        7 => format!("{value}-01"),
+        10 => value.to_string(),
+        _ => {
+            let date = chrono::DateTime::parse_from_rfc3339(value).ok()?;
+            return Some(ModelReleaseDate {
+                unix_seconds: date.timestamp(),
+                rfc3339: date.to_rfc3339(),
+            });
+        }
+    };
+    let date = chrono::NaiveDate::parse_from_str(&normalized, "%Y-%m-%d").ok()?;
+    let datetime = date.and_hms_opt(0, 0, 0)?.and_utc();
+    Some(ModelReleaseDate {
+        unix_seconds: datetime.timestamp(),
+        rfc3339: datetime.to_rfc3339(),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -726,10 +850,21 @@ pub async fn sync_kimi_models(
                 .into_iter()
                 .filter(|m| !m.id.trim().is_empty())
                 .collect();
-            sort_by_created_desc(&mut entries, |m| m.created);
+            let release_dates = load_models_cn_release_dates("moonshot-cn");
+            let uses_upstream_created =
+                sort_kimi_models_by_created_desc(&mut entries, &release_dates);
             let models: Vec<_> = entries
                 .into_iter()
-                .map(|m| kimi_channel_model(m.id, m.context_length, &synced_at))
+                .map(|m| {
+                    let release_date = if uses_upstream_created {
+                        m.created
+                            .and_then(|seconds| chrono::DateTime::from_timestamp(seconds as i64, 0))
+                            .map(|date| date.to_rfc3339())
+                    } else {
+                        release_dates.get(&m.id).map(|date| date.rfc3339.clone())
+                    };
+                    kimi_channel_model(m.id, m.context_length, release_date.as_deref(), &synced_at)
+                })
                 .collect();
             ModelSyncResult {
                 models_synced: models.len(),
@@ -1125,7 +1260,12 @@ fn deepseek_channel_model(model: String, synced_at: &str) -> ChannelModel {
     }
 }
 
-fn kimi_channel_model(model: String, context_length: Option<i64>, synced_at: &str) -> ChannelModel {
+fn kimi_channel_model(
+    model: String,
+    context_length: Option<i64>,
+    release_date: Option<&str>,
+    synced_at: &str,
+) -> ChannelModel {
     ChannelModel {
         id: format!("kimi-{model}"),
         channel_id: "kimi".to_string(),
@@ -1138,7 +1278,7 @@ fn kimi_channel_model(model: String, context_length: Option<i64>, synced_at: &st
         enabled: true,
         source: "synced".to_string(),
         synced_at: Some(synced_at.to_string()),
-        created_at: synced_at.to_string(),
+        created_at: release_date.unwrap_or(synced_at).to_string(),
         updated_at: synced_at.to_string(),
     }
 }
@@ -1200,16 +1340,165 @@ mod tests {
     #[test]
     fn sort_models_by_created_desc_with_missing_last_and_stable() {
         let mut entries = vec![
-            DeepSeekModelEntry { id: "old".to_string(), object: String::new(), owned_by: None, created: Some(100) },
-            DeepSeekModelEntry { id: "no-time-1".to_string(), object: String::new(), owned_by: None, created: None },
-            DeepSeekModelEntry { id: "newest".to_string(), object: String::new(), owned_by: None, created: Some(300) },
-            DeepSeekModelEntry { id: "no-time-2".to_string(), object: String::new(), owned_by: None, created: None },
-            DeepSeekModelEntry { id: "mid".to_string(), object: String::new(), owned_by: None, created: Some(200) },
+            DeepSeekModelEntry {
+                id: "old".to_string(),
+                object: String::new(),
+                owned_by: None,
+                created: Some(100),
+            },
+            DeepSeekModelEntry {
+                id: "no-time-1".to_string(),
+                object: String::new(),
+                owned_by: None,
+                created: None,
+            },
+            DeepSeekModelEntry {
+                id: "newest".to_string(),
+                object: String::new(),
+                owned_by: None,
+                created: Some(300),
+            },
+            DeepSeekModelEntry {
+                id: "no-time-2".to_string(),
+                object: String::new(),
+                owned_by: None,
+                created: None,
+            },
+            DeepSeekModelEntry {
+                id: "mid".to_string(),
+                object: String::new(),
+                owned_by: None,
+                created: Some(200),
+            },
         ];
         sort_by_created_desc(&mut entries, |m| m.created);
         let order: Vec<&str> = entries.iter().map(|m| m.id.as_str()).collect();
         // 有时间戳的按新到旧排列；缺失的排在最后且保持原始相对顺序。
-        assert_eq!(order, vec!["newest", "mid", "old", "no-time-1", "no-time-2"]);
+        assert_eq!(
+            order,
+            vec!["newest", "mid", "old", "no-time-1", "no-time-2"]
+        );
+    }
+
+    #[test]
+    fn sort_kimi_models_uses_models_cn_dates_when_upstream_timestamps_are_equal() {
+        let entry = |id: &str, created| KimiModelEntry {
+            id: id.to_string(),
+            object: None,
+            created,
+            owned_by: None,
+            context_length: None,
+            supports_image_in: None,
+            supports_video_in: None,
+            supports_reasoning: None,
+        };
+        let mut entries = vec![
+            entry("moonshot-v1-8k", Some(200)),
+            entry("kimi-k2.7-code", Some(200)),
+            entry("kimi-k3", Some(200)),
+            entry("kimi-k2.6", Some(200)),
+        ];
+        let release_dates = HashMap::from([
+            (
+                "kimi-k3".to_string(),
+                parse_model_release_date("2026-07-16").unwrap(),
+            ),
+            (
+                "kimi-k2.7-code".to_string(),
+                parse_model_release_date("2026-06-12").unwrap(),
+            ),
+            (
+                "kimi-k2.6".to_string(),
+                parse_model_release_date("2026-04-21").unwrap(),
+            ),
+        ]);
+
+        let used_upstream = sort_kimi_models_by_created_desc(&mut entries, &release_dates);
+
+        let order: Vec<&str> = entries.iter().map(|entry| entry.id.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "moonshot-v1-8k",]
+        );
+        assert!(!used_upstream);
+    }
+
+    #[test]
+    fn sort_kimi_models_still_prioritizes_newer_timestamp() {
+        let entry = |id: &str, created| KimiModelEntry {
+            id: id.to_string(),
+            object: None,
+            created,
+            owned_by: None,
+            context_length: None,
+            supports_image_in: None,
+            supports_video_in: None,
+            supports_reasoning: None,
+        };
+        let mut entries = vec![
+            entry("kimi-k3", Some(100)),
+            entry("moonshot-v1-8k", Some(200)),
+        ];
+        let release_dates = HashMap::from([(
+            "kimi-k3".to_string(),
+            parse_model_release_date("2026-07-16").unwrap(),
+        )]);
+
+        let used_upstream = sort_kimi_models_by_created_desc(&mut entries, &release_dates);
+
+        assert_eq!(entries[0].id, "moonshot-v1-8k");
+        assert_eq!(entries[1].id, "kimi-k3");
+        assert!(used_upstream);
+    }
+
+    #[test]
+    fn parses_models_cn_full_and_month_release_dates() {
+        let full = parse_model_release_date("2026-07-16").unwrap();
+        let month = parse_model_release_date("2026-01").unwrap();
+
+        assert_eq!(full.rfc3339, "2026-07-16T00:00:00+00:00");
+        assert_eq!(month.rfc3339, "2026-01-01T00:00:00+00:00");
+        assert!(full.unix_seconds > month.unix_seconds);
+    }
+
+    #[test]
+    fn reads_models_cn_release_dates_with_official_value_first() {
+        let catalog = serde_json::json!({
+            "providers": [{
+                "id": "moonshot-cn",
+                "models": [
+                    {"id": "kimi-k3", "createdAt": "2026-07-16"},
+                    {"id": "kimi-k2.7-code"}
+                ]
+            }],
+            "calibration": {
+                "modelsDev": {
+                    "models": [
+                        {
+                            "provider": "moonshot-cn",
+                            "model": "kimi-k3",
+                            "checks": [{"field": "createdAt", "reference": "2026-07-01"}]
+                        },
+                        {
+                            "provider": "moonshot-cn",
+                            "model": "kimi-k2.7-code",
+                            "checks": [{"field": "createdAt", "reference": "2026-06-12"}]
+                        }
+                    ]
+                }
+            }
+        });
+
+        let dates = models_cn_release_dates_from_catalog(&catalog, "moonshot-cn");
+
+        assert_eq!(
+            dates.get("kimi-k3").unwrap().rfc3339,
+            "2026-07-16T00:00:00+00:00"
+        );
+        assert_eq!(
+            dates.get("kimi-k2.7-code").unwrap().rfc3339,
+            "2026-06-12T00:00:00+00:00"
+        );
     }
 
     #[test]
@@ -1245,7 +1534,7 @@ mod tests {
         let entry = data.data.into_iter().next().unwrap();
         assert_eq!(entry.id, "kimi-k3");
         assert_eq!(entry.context_length, Some(1_048_576));
-        let model = kimi_channel_model(entry.id, entry.context_length, "now");
+        let model = kimi_channel_model(entry.id, entry.context_length, None, "now");
         assert_eq!(
             model.supported_protocols,
             vec![ProtocolType::OpenAi, ProtocolType::Anthropic]

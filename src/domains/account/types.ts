@@ -60,7 +60,7 @@ export type AccountBalanceSnapshot = {
 
 export type ModelSyncResult = {
   models_synced: number;
-  models: { model: string; display_name?: string | null }[];
+  models: { model: string; display_name?: string | null; created_at?: string | null }[];
   errors: string[];
 };
 

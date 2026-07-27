@@ -849,6 +849,7 @@ const english: Record<string, string> = {
   "按预估费用排序": "Sorted by estimated cost",
   "暂无渠道用量": "No channel usage",
   "总计 {count} 个渠道": "{count} channels total",
+  "总计 {count} 个渠道/账号": "{count} channels/accounts total",
   "显示语言": "Display language",
   "选择界面显示语言，修改后立即生效": "Choose the interface language. Changes apply immediately.",
   "界面外观": "Appearance",

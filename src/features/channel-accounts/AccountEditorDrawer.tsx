@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Checkbox, Input, Progress, Select, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Checkbox, Input, Pagination, Progress, Select, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { toAppError } from "../../platform/tauri/client";
 import { accountCommands } from "../../domains/account/commands";
@@ -65,6 +65,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   );
   const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [modelPage, setModelPage] = useState(1);
+  const MODELS_PER_PAGE = 12;
   const [saving, setSaving] = useState(false);
   // 最近一次 /models 拉取返回的全量上游模型（含白名单外的）。编辑已保存账号时用
   // synced_models 预填（无 display_name），新建账号为 null 直到用户手动拉取。
@@ -206,6 +208,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       const models = result.models.filter((item) => item.model.trim());
       const returnedSet = new Set(models.map((item) => item.model.trim().toLowerCase()));
       setCandidates(models);
+      setModelPage(1);
       update({
         synced_models: models.map((item) => item.model),
         models_synced_at: new Date().toISOString(),
@@ -476,30 +479,57 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             ) : candidates.length === 0 ? (
               <span className={styles.packEmpty}>{t("该渠道未返回任何模型。")}</span>
             ) : (
-              <div className={styles.modelList}>
-                {candidates.map((candidate) => {
-                  const key = candidate.model.trim().toLowerCase();
-                  const supported = whitelistSet.has(key);
-                  const checked = selectedSet.has(key);
+              <>
+                {(() => {
+                  const sorted = [...candidates].sort((a, b) => {
+                    const aSupported = whitelistSet.has(a.model.trim().toLowerCase());
+                    const bSupported = whitelistSet.has(b.model.trim().toLowerCase());
+                    return Number(bSupported) - Number(aSupported);
+                  });
+                  const startIndex = (modelPage - 1) * MODELS_PER_PAGE;
+                  const paged = sorted.slice(startIndex, startIndex + MODELS_PER_PAGE);
+                  const totalPages = Math.ceil(sorted.length / MODELS_PER_PAGE);
                   return (
-                    <label
-                      key={candidate.model}
-                      className={`${styles.modelItem} ${supported ? "" : styles.modelUnsupported}`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        disabled={!supported}
-                        onChange={(event) => toggleExposedModel(candidate.model, event.target.checked === true)}
-                      />
-                      <span className={styles.modelName}>{candidate.model}</span>
-                      {candidate.display_name && candidate.display_name.trim() && candidate.display_name !== candidate.model ? (
-                        <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }}>{candidate.display_name}</Text>
-                      ) : null}
-                      {supported ? null : <Tag size="small" color="grey">{t("不支持")}</Tag>}
-                    </label>
+                    <>
+                      <div className={styles.modelList}>
+                        {paged.map((candidate) => {
+                          const key = candidate.model.trim().toLowerCase();
+                          const supported = whitelistSet.has(key);
+                          const checked = selectedSet.has(key);
+                          return (
+                            <label
+                              key={candidate.model}
+                              className={`${styles.modelItem} ${supported ? "" : styles.modelUnsupported}`}
+                            >
+                              <Checkbox
+                                checked={checked}
+                                disabled={!supported}
+                                onChange={(event) => toggleExposedModel(candidate.model, event.target.checked === true)}
+                              />
+                              <span className={styles.modelName}>{candidate.model}</span>
+                              {candidate.display_name && candidate.display_name.trim() && candidate.display_name !== candidate.model ? (
+                                <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }}>{candidate.display_name}</Text>
+                              ) : null}
+                              {supported ? null : <Tag size="small" color="grey">{t("不支持")}</Tag>}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {totalPages > 1 && (
+                        <div className={styles.modelPagination}>
+                          <Pagination
+                            size="small"
+                            total={sorted.length}
+                            currentPage={modelPage}
+                            pageSize={MODELS_PER_PAGE}
+                            onPageChange={(page) => setModelPage(page)}
+                          />
+                        </div>
+                      )}
+                    </>
                   );
-                })}
-              </div>
+                })()}
+              </>
             )}
             {draft.models_synced_at ? (
               <Text type="tertiary" size="small">{t("最近拉取：{time}", { time: formatFullTimestamp(draft.models_synced_at, language) })}</Text>

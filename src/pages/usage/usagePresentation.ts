@@ -80,7 +80,23 @@ function canonicalModelKey(modelId: string | null): string {
 }
 
 export function groupUsageByChannel(rows: UsageSummaryRow[], currencyOf?: CostCurrencyLookup): UsageBreakdown[] {
-  return groupUsage(rows, (row) => row.channel_id ?? "unknown-channel", (row) => row.channel_name ?? row.channel_id ?? "未知渠道", undefined, currencyOf);
+  return groupUsage(
+    rows,
+    (row) => {
+      const channelId = row.channel_id ?? "unknown-channel";
+      if (channelId.trim().toLowerCase() !== "custom") return channelId;
+      const accountKey = row.account_id?.trim() || row.account_name?.trim() || "unknown-account";
+      return `custom::${accountKey}`;
+    },
+    (row) => {
+      if (row.channel_id?.trim().toLowerCase() === "custom") {
+        return row.account_name?.trim() || row.account_id?.trim() || row.channel_name || "自定义渠道";
+      }
+      return row.channel_name ?? row.channel_id ?? "未知渠道";
+    },
+    (row) => row.channel_id ?? "unknown-channel",
+    currencyOf,
+  );
 }
 
 export function groupUsageByDay(rows: UsageSummaryRow[]): UsageDay[] {

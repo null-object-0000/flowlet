@@ -62,4 +62,30 @@ describe("usage presentation", () => {
       tokens: 2400,
     }));
   });
+
+  it("groups custom channel costs by account while keeping built-in channels merged", () => {
+    const result = groupUsageByChannel([
+      { ...rows[0], channel_id: "custom", channel_name: "自定义渠道", account_id: "custom-a", account_name: "Friday AI" },
+      { ...rows[1], channel_id: "custom", channel_name: "自定义渠道", account_id: "custom-b", account_name: "备用中转" },
+      { ...rows[0], account_id: "deepseek-a", account_name: "DeepSeek A" },
+      { ...rows[1], account_id: "deepseek-b", account_name: "DeepSeek B" },
+    ]);
+
+    expect(result).toHaveLength(3);
+    expect(result.find((item) => item.key === "custom::custom-a")).toEqual(expect.objectContaining({
+      label: "Friday AI",
+      brandId: "custom",
+      requests: 3,
+    }));
+    expect(result.find((item) => item.key === "custom::custom-b")).toEqual(expect.objectContaining({
+      label: "备用中转",
+      brandId: "custom",
+      requests: 2,
+    }));
+    expect(result.find((item) => item.key === "deepseek")).toEqual(expect.objectContaining({
+      label: "DeepSeek",
+      brandId: "deepseek",
+      requests: 5,
+    }));
+  });
 });

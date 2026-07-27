@@ -135,7 +135,7 @@ export function UsageCostPage() {
         <section className={styles.channelCard}>
           <header><strong>{t("渠道成本")}</strong><span>{t("按预估费用排序")}</span></header>
           <div className={styles.channelList}>{channels.length === 0 ? <div className={styles.empty}>{t("暂无渠道用量")}</div> : channels.map((channel) => <div className={styles.channelRow} key={channel.key}>
-            <ChannelBrandLogo channelId={channel.key} name={channel.label} />
+            <ChannelBrandLogo channelId={channel.brandId ?? channel.key} name={channel.label} />
             <span>
               <strong>{channel.label}</strong>
               <Tooltip content={<div className={styles.channelUsageTooltip}>
@@ -150,7 +150,7 @@ export function UsageCostPage() {
             </span>
             <span><strong title={formatCost(channel.cost, channel.currency)}>{formatCost(channel.cost, channel.currency)}</strong><small>{formatPercent(channel.share)}</small></span>
           </div>)}</div>
-          <footer><span>{t("总计 {count} 个渠道", { count: channels.length })}</span><strong>{totalCostLabel}</strong></footer>
+          <footer><span>{t("总计 {count} 个渠道/账号", { count: channels.length })}</span><strong>{totalCostLabel}</strong></footer>
         </section>
       </aside>
     </div> : null}

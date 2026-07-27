@@ -66,6 +66,9 @@ export function useCodexAccounts(enabled = true) {
     enabled,
     staleTime: 0,
     retry: false,
+    // 概览页把 Codex 伪装为渠道账号展示，需要定期从缓存快照中读取最新数据。
+    // CodexAccountAutoSync 每 5 分钟写一次新快照，这里每 30 秒读一次。
+    refetchInterval: 30_000,
   });
 }
 

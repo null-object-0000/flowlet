@@ -1,7 +1,7 @@
 import { Button, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronRight, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
-import { isQwenTokenPlanAccount, isChatGptAccount, CHATGPT_CHANNEL_ID } from "../../domains/channel/types";
+import { isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
 import { codexAccountToPseudoChannelAccount, getCodexUsageDisplay, getCodexNameSummary } from "./codexPseudoAccount";
@@ -11,7 +11,7 @@ import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./OverviewChannelAccountsCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber } from "../../shared/formatters/number";
-import { formatTime, formatFullTimestamp, parseTimestamp } from "../../shared/formatters/datetime";
+import { formatTime, parseTimestamp } from "../../shared/formatters/datetime";
 
 const { Text } = Typography;
 
@@ -55,7 +55,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
             ? codexAccounts?.find((r) => `codex-${r.account_id}` === account.id)
             : undefined;
           const status = isCodex
-            ? { label: t("自动同步"), color: "green" as const }
+            ? { label: "", color: "green" as const }
             : accountStatus(account, t);
           const nameSummary = isCodex && codexReport
             ? getCodexNameSummary(codexReport)
@@ -68,24 +68,21 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
                   <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
                   <span className={styles.accountText}>
                     <span className={styles.nameRow}>
-                      <Text strong className={styles.nameText} title={accountName}>
-                        {accountName}
-                      </Text>
-                      {nameSummary && <span className={styles.resourceSeparator}>·</span>}
-                      {nameSummary && <span className={styles.nameSecondary} title={nameSummary}>{nameSummary}</span>}
+                      <span className={styles.codexNameWrapper}>
+                        <Text strong title={accountName}>{accountName}</Text>
+                        {nameSummary && <span className={styles.resourceSeparator}>·</span>}
+                        {nameSummary && <span className={styles.nameSecondary}>{nameSummary}</span>}
+                      </span>
                     </span>
                     <span className={styles.resourceSummary}>
                       {(() => {
                         const usageParts = codexReport
-                          ? getCodexUsageDisplay(codexReport, t)
-                          : { value: "", secondary: "" };
-                        const updated = codexReport
-                          ? formatFullTimestamp(codexReport.updated_at, language)
-                          : "";
+                          ? getCodexUsageDisplay(codexReport, t, language)
+                          : { value: "", secondary: "", resetAt: null };
                         const parts = {
                           label: "",
                           value: usageParts.value,
-                          secondary: [usageParts.secondary, updated].filter(Boolean).join(" · "),
+                          secondary: [usageParts.secondary, usageParts.resetAt].filter(Boolean).join(" · "),
                         };
                         const hasSecondary = Boolean(parts.secondary);
                         return (
@@ -132,7 +129,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
                   </span>
                 </button>
               )}
-              <Tag color={status.color}>{status.label}</Tag>
+              {status.label ? <Tag color={status.color}>{status.label}</Tag> : <span className={styles.rowSpacer} aria-hidden="true" />}
               {isCodex ? (
                 <span className={styles.rowSpacer} aria-hidden="true" />
               ) : (

@@ -1,6 +1,7 @@
 import type { CodexAccountReport, CodexUsageWindow } from "../../domains/agent/types";
 import type { ChannelAccount } from "../../domains/account/types";
 import { CHATGPT_CHANNEL_ID } from "../../domains/channel/types";
+import { formatFullTimestamp } from "../../shared/formatters/datetime";
 
 /**
  * 将一个 Codex 账号报告（来自 Rust `list_cached_codex_accounts`）
@@ -43,10 +44,16 @@ export function codexAccountToPseudoChannelAccount(
 export function getCodexUsageDisplay(
   report: CodexAccountReport,
   t: (source: string, variables?: Record<string, string | number>) => string,
-): { value: string; secondary: string } {
+  language: "zh-CN" | "en-US",
+): { value: string; secondary: string; resetAt: string | null } {
   const primary = getWindowLabel(report.primary, t);
   const secondary = getWindowLabel(report.secondary, t);
-  return { value: primary, secondary };
+  // 用量窗口重置时间：优先 primary，其次 secondary。
+  const resetWindow = report.primary ?? report.secondary;
+  const resetAt = resetWindow?.resets_at
+    ? formatFullTimestamp(new Date(resetWindow.resets_at * 1000).toISOString(), language)
+    : null;
+  return { value: primary, secondary, resetAt };
 }
 
 function getWindowLabel(

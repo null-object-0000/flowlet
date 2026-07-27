@@ -76,6 +76,20 @@
 .resourceSeparator { flex: none; color: var(--flowlet-color-text-tertiary); }
 .resourceSecondary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.codexNameWrapper {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.codexNameWrapper > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .row {
     padding: 0 8px;

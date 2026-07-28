@@ -763,6 +763,74 @@ pub fn run() {
                 *tray_guard = Some(tray);
             }
 
+            // S3 设备用量后台同步：启动后 1 分钟首次检查，之后每 15 分钟执行一次。
+            // 未配置时静默跳过；与手动同步重叠时由共享 guard 去重。窗口隐藏到托盘后
+            // Tauri runtime 仍然存活，因此定时同步会继续运行，退出 Flowlet 时停止。
+            let s3_timer_storage = state.storage.clone();
+            let s3_timer_identity = state.device_identity.clone();
+            tauri::async_runtime::spawn(async move {
+                let period = crate::core::device_sync::AUTO_SYNC_INTERVAL;
+                let mut interval = tokio::time::interval_at(
+                    tokio::time::Instant::now()
+                        + crate::core::device_sync::AUTO_SYNC_INITIAL_DELAY,
+                    period,
+                );
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    interval.tick().await;
+                    let storage = s3_timer_storage.clone();
+                    let configured = tauri::async_runtime::spawn_blocking(move || {
+                        crate::core::device_sync::load_config(&storage)
+                            .map(|config| config.is_some())
+                    })
+                    .await;
+                    match configured {
+                        Ok(Ok(true)) => {}
+                        Ok(Ok(false)) => continue,
+                        Ok(Err(error)) => {
+                            tracing::warn!(error = %error, "scheduled S3 device sync config check failed");
+                            continue;
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "scheduled S3 device sync config task panicked");
+                            continue;
+                        }
+                    }
+
+                    let identity = match s3_timer_identity.lock() {
+                        Ok(identity) => identity.clone(),
+                        Err(_) => {
+                            tracing::warn!("scheduled S3 device sync could not read device identity");
+                            continue;
+                        }
+                    };
+                    match crate::core::device_sync::run_configured_sync(
+                        s3_timer_storage.clone(),
+                        identity,
+                    )
+                    .await
+                    {
+                        Ok(result) => {
+                            tracing::info!(
+                                remote_devices = result.remote_devices,
+                                imported_devices = result.imported_devices,
+                                imported_days = result.imported_days,
+                                failed_objects = result.failed_objects,
+                                "scheduled S3 device sync finished"
+                            );
+                        }
+                        Err(error)
+                            if error == crate::core::device_sync::SYNC_ALREADY_RUNNING_ERROR =>
+                        {
+                            tracing::debug!("scheduled S3 device sync skipped because another sync is running");
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "scheduled S3 device sync failed");
+                        }
+                    }
+                }
+            });
+
             // 定时 Body 清理：启动后 15 分钟触发第一次，之后每 15 分钟跑一次。
             // 启动时不做任何清理动作，全部交给定时任务。
             // 每次清理在 spawn_blocking 中执行（不阻塞主线程），结果写入 background_jobs。

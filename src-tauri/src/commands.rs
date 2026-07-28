@@ -686,71 +686,13 @@ pub(super) async fn test_s3_sync_connection(
 pub(super) async fn sync_device_usage_s3(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::device_sync::S3DeviceSyncResult, String> {
-    let _guard = crate::core::device_sync::acquire_sync_guard()?;
     let storage = state.storage.clone();
     let identity = state
         .device_identity
         .lock()
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
-    let now = chrono::Utc::now().to_rfc3339();
-    let previous = crate::core::device_sync::load_status(&storage);
-    crate::core::device_sync::save_status(
-        &storage,
-        &crate::core::device_sync::S3SyncStatus {
-            status: "running".to_string(),
-            last_attempt_at: Some(now.clone()),
-            last_success_at: previous.last_success_at.clone(),
-            message: "正在同步设备用量".to_string(),
-            remote_devices: previous.remote_devices,
-            imported_devices: 0,
-            imported_days: 0,
-            failed_objects: 0,
-        },
-    );
-
-    match crate::core::device_sync::sync_device_usage(storage.clone(), identity).await {
-        Ok(result) => {
-            let status = if result.failed_objects == 0 {
-                "success"
-            } else {
-                "partial"
-            };
-            crate::core::device_sync::save_status(
-                &storage,
-                &crate::core::device_sync::S3SyncStatus {
-                    status: status.to_string(),
-                    last_attempt_at: Some(now.clone()),
-                    last_success_at: Some(chrono::Utc::now().to_rfc3339()),
-                    message: format!(
-                        "同步完成：发现 {} 台远端设备，导入 {} 天，失败 {} 个对象",
-                        result.remote_devices, result.imported_days, result.failed_objects
-                    ),
-                    remote_devices: result.remote_devices,
-                    imported_devices: result.imported_devices,
-                    imported_days: result.imported_days,
-                    failed_objects: result.failed_objects,
-                },
-            );
-            Ok(result)
-        }
-        Err(error) => {
-            crate::core::device_sync::save_status(
-                &storage,
-                &crate::core::device_sync::S3SyncStatus {
-                    status: "failed".to_string(),
-                    last_attempt_at: Some(now),
-                    last_success_at: previous.last_success_at,
-                    message: error.clone(),
-                    remote_devices: previous.remote_devices,
-                    imported_devices: 0,
-                    imported_days: 0,
-                    failed_objects: 0,
-                },
-            );
-            Err(error)
-        }
-    }
+    crate::core::device_sync::run_configured_sync(storage, identity).await
 }
 
 fn read_device_usage_bundle(path: &str) -> Result<DeviceUsageBundle, String> {

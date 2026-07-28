@@ -15,8 +15,12 @@ const CURRENT_ETAG_KEY: &str = "device_sync_s3_current_etag_v1";
 const KEYRING_SERVICE: &str = "Flowlet Device Sync";
 const MAX_REMOTE_BUNDLE_BYTES: u64 = 4 * 1024 * 1024;
 const SIGNED_URL_TTL: Duration = Duration::from_secs(60);
+pub const AUTO_SYNC_INITIAL_DELAY: Duration = Duration::from_secs(60);
+pub const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
+pub const SYNC_ALREADY_RUNNING_ERROR: &str = "设备用量同步正在运行";
 static SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
 
+#[derive(Debug)]
 pub struct DeviceSyncGuard;
 
 impl Drop for DeviceSyncGuard {
@@ -29,7 +33,7 @@ pub fn acquire_sync_guard() -> Result<DeviceSyncGuard, String> {
     SYNC_RUNNING
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .map(|_| DeviceSyncGuard)
-        .map_err(|_| "设备用量同步正在运行".to_string())
+        .map_err(|_| SYNC_ALREADY_RUNNING_ERROR.to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -208,6 +212,13 @@ impl S3SyncConfig {
         format!("{}{device_id}/snapshot.json", self.object_prefix())
     }
 
+    fn supports_conditional_put(&self) -> bool {
+        Url::parse(&self.endpoint)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+            .is_none_or(|host| !host.ends_with(".aliyuncs.com"))
+    }
+
     fn credential_username(&self) -> String {
         let mut digest = Sha256::new();
         digest.update(self.endpoint.as_bytes());
@@ -223,6 +234,7 @@ struct S3Store {
     bucket: Bucket,
     credentials: Credentials,
     client: Client,
+    supports_conditional_put: bool,
 }
 
 impl S3Store {
@@ -244,6 +256,7 @@ impl S3Store {
             bucket,
             credentials: Credentials::new(&config.access_key_id, secret),
             client,
+            supports_conditional_put: config.supports_conditional_put(),
         })
     }
 
@@ -324,11 +337,17 @@ impl S3Store {
         body: Vec<u8>,
         etag: Option<&str>,
     ) -> Result<Option<String>, String> {
+        // Alibaba Cloud OSS accepts S3-compatible PutObject requests but does
+        // not support If-Match on PutObject. The caller already compares the
+        // saved and current remote ETags before reaching this write, so OSS
+        // keeps that best-effort conflict check and omits only the unsupported
+        // conditional request header.
+        let conditional_etag = etag.filter(|_| self.supports_conditional_put);
         let mut action = self.bucket.put_object(Some(&self.credentials), key);
         action
             .headers_mut()
             .insert("content-type", "application/json");
-        if let Some(etag) = etag {
+        if let Some(etag) = conditional_etag {
             action.headers_mut().insert("if-match", etag.to_string());
         }
         let url = action.sign(SIGNED_URL_TTL);
@@ -337,7 +356,7 @@ impl S3Store {
             .put(url)
             .header("content-type", "application/json")
             .body(body);
-        if let Some(etag) = etag {
+        if let Some(etag) = conditional_etag {
             request = request.header("if-match", etag);
         }
         let response = request
@@ -379,7 +398,37 @@ async fn checked_response(
     if response.status().is_success() {
         return Ok(response);
     }
-    Err(format!("{action}失败（HTTP {}）", response.status().as_u16()))
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let detail = s3_error_detail(&body);
+    Err(format!(
+        "{action}失败（HTTP {}{}）",
+        status.as_u16(),
+        detail
+    ))
+}
+
+fn s3_error_detail(body: &str) -> String {
+    let code = xml_element(body, "Code");
+    let request_id = xml_element(body, "RequestId");
+    match (code, request_id) {
+        (Some(code), Some(request_id)) => {
+            format!("，Code: {code}，RequestId: {request_id}")
+        }
+        (Some(code), None) => format!("，Code: {code}"),
+        (None, Some(request_id)) => format!("，RequestId: {request_id}"),
+        (None, None) => String::new(),
+    }
+}
+
+fn xml_element<'a>(body: &'a str, name: &str) -> Option<&'a str> {
+    let start_tag = format!("<{name}>");
+    let end_tag = format!("</{name}>");
+    let start = body.find(&start_tag)? + start_tag.len();
+    let end = body[start..].find(&end_tag)? + start;
+    let value = body[start..end].trim();
+    (!value.is_empty() && value.chars().count() <= 256 && !value.chars().any(char::is_control))
+        .then_some(value)
 }
 
 fn credential_entry(config: &S3SyncConfig) -> Result<keyring::Entry, String> {
@@ -637,6 +686,71 @@ pub async fn sync_device_usage(
     })
 }
 
+pub async fn run_configured_sync(
+    storage: Storage,
+    identity: DeviceIdentity,
+) -> Result<S3DeviceSyncResult, String> {
+    let _guard = acquire_sync_guard()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let previous = load_status(&storage);
+    save_status(
+        &storage,
+        &S3SyncStatus {
+            status: "running".to_string(),
+            last_attempt_at: Some(now.clone()),
+            last_success_at: previous.last_success_at.clone(),
+            message: "正在同步设备用量".to_string(),
+            remote_devices: previous.remote_devices,
+            imported_devices: 0,
+            imported_days: 0,
+            failed_objects: 0,
+        },
+    );
+
+    match sync_device_usage(storage.clone(), identity).await {
+        Ok(result) => {
+            let status = if result.failed_objects == 0 {
+                "success"
+            } else {
+                "partial"
+            };
+            save_status(
+                &storage,
+                &S3SyncStatus {
+                    status: status.to_string(),
+                    last_attempt_at: Some(now),
+                    last_success_at: Some(chrono::Utc::now().to_rfc3339()),
+                    message: format!(
+                        "同步完成：发现 {} 台远端设备，导入 {} 天，失败 {} 个对象",
+                        result.remote_devices, result.imported_days, result.failed_objects
+                    ),
+                    remote_devices: result.remote_devices,
+                    imported_devices: result.imported_devices,
+                    imported_days: result.imported_days,
+                    failed_objects: result.failed_objects,
+                },
+            );
+            Ok(result)
+        }
+        Err(error) => {
+            save_status(
+                &storage,
+                &S3SyncStatus {
+                    status: "failed".to_string(),
+                    last_attempt_at: Some(now),
+                    last_success_at: previous.last_success_at,
+                    message: error.clone(),
+                    remote_devices: previous.remote_devices,
+                    imported_devices: 0,
+                    imported_days: 0,
+                    failed_objects: 0,
+                },
+            );
+            Err(error)
+        }
+    }
+}
+
 pub fn save_status(storage: &Storage, status: &S3SyncStatus) {
     if let Ok(raw) = serde_json::to_string(status) {
         let _ = storage.set_app_meta(STATUS_KEY, &raw);
@@ -696,7 +810,31 @@ mod tests {
         let mut valid = input("https://s3.oss-cn-shanghai.aliyuncs.com");
         valid.region = "cn-shanghai".to_string();
         valid.path_style = false;
-        assert!(S3SyncConfig::from_input(&valid).is_ok());
+        let config = S3SyncConfig::from_input(&valid).unwrap();
+        assert!(!config.supports_conditional_put());
+        assert!(S3SyncConfig::from_input(&input("https://example.com"))
+            .unwrap()
+            .supports_conditional_put());
+    }
+
+    #[test]
+    fn extracts_safe_s3_error_identifiers() {
+        let body = "<Error><Code>InvalidArgument</Code><Message>unsupported header</Message><RequestId>abc-123</RequestId><AccessKeyId>do-not-copy</AccessKeyId></Error>";
+        let detail = s3_error_detail(body);
+        assert_eq!(detail, "，Code: InvalidArgument，RequestId: abc-123");
+        assert!(!detail.contains("AccessKeyId"));
+        assert!(!detail.contains("unsupported header"));
+    }
+
+    #[test]
+    fn sync_guard_rejects_overlap_and_recovers_after_drop() {
+        let first = acquire_sync_guard().unwrap();
+        assert_eq!(
+            acquire_sync_guard().unwrap_err(),
+            SYNC_ALREADY_RUNNING_ERROR
+        );
+        drop(first);
+        assert!(acquire_sync_guard().is_ok());
     }
 
     #[test]

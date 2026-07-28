@@ -174,7 +174,7 @@ describe("AgentSessionsPage", () => {
   it("shows request-style token details and aggregate cache hit rate", () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
-    expect(screen.getByLabelText("Token 明细：总计 1.2万，缓存命中率 50.0%")).toHaveAttribute("title", "12,000");
+    expect(screen.getByLabelText("Token 明细：总计 1.20万，缓存命中率 50.0%")).toHaveAttribute("title", "12,000");
   });
 
   it("shows the native runtime state separately from request health", () => {
@@ -199,7 +199,7 @@ describe("AgentSessionsPage", () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     expect(screen.getByTitle("Agent 原生 turn 数：2")).toHaveTextContent("2");
-    expect(screen.getByLabelText("Token 明细：总计 13.5万，缓存命中率 16.0%")).toHaveAttribute("title", "135,000");
+    expect(screen.getByLabelText("Token 明细：总计 13.50万，缓存命中率 16.0%")).toHaveAttribute("title", "135,000");
   });
 
   it("offers Codex and an independent Flowlet observation filter", () => {
@@ -302,7 +302,7 @@ describe("AgentSessionsPage", () => {
     fireEvent.click(screen.getByText("时间线"));
     expect(screen.getByText("Agent 轮次 · Agent 原生")).toBeInTheDocument();
     expect(screen.getByText(/状态：已完成 · 耗时 1 min · 首 Token 1\.3 s/)).toBeInTheDocument();
-    expect(screen.getByText("缓存命中率 30%")).toBeInTheDocument();
+    expect(screen.getByText("缓存命中率 22.2%")).toBeInTheDocument();
   });
 });
 

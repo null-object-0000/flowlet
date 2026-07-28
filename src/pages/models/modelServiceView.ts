@@ -30,6 +30,44 @@ export type ModelServiceItem = {
   channelName?: string;
 };
 
+/** 渠道模型(直接模型)被聚合模型引用的一条关系:
+ *  聚合模型的某个路由组以上游模型名指向该渠道模型。 */
+export type ModelAggregateRelation = {
+  aggregateModel: string;
+  routeGroupKey: string;
+  priority: number;
+  enabled: boolean;
+};
+
+/** 与 buildModelServiceItems 的 publicModel 归一化保持一致:
+ *  官方规范化 ID 优先,否则 trim,统一小写作为分组/匹配键。 */
+export function normalizePublicModelKey(modelId: string): string {
+  return (canonicalModelId(modelId) ?? modelId.trim()).toLowerCase();
+}
+
+/** 汇总所有聚合模型(flowlet-pro/flowlet-flash)的路由引用关系,
+ *  返回 key 为规范化渠道模型 ID 的映射,供「路由关系」视图和筛选使用。 */
+export function buildAggregateRelations(
+  models: ModelServiceItem[],
+): Map<string, ModelAggregateRelation[]> {
+  const relations = new Map<string, ModelAggregateRelation[]>();
+  for (const model of models) {
+    if (model.kind !== "aggregate") continue;
+    model.routeGroups.forEach((group, index) => {
+      const key = normalizePublicModelKey(group.upstreamModel);
+      const list = relations.get(key) ?? [];
+      list.push({
+        aggregateModel: model.publicModel,
+        routeGroupKey: group.key,
+        priority: index + 1,
+        enabled: group.enabled,
+      });
+      relations.set(key, list);
+    });
+  }
+  return relations;
+}
+
 export function buildModelServiceItems(
   routes: RouteCandidate[],
   accounts: ChannelAccount[],
@@ -61,7 +99,7 @@ export function buildModelServiceItems(
     const publicModel = aggregate
       ? normalizedPublicModel
       : canonicalModelId(route.virtual_model_id) ?? route.virtual_model_id.trim();
-    const groupKey = publicModel.toLowerCase();
+    const groupKey = normalizePublicModelKey(route.virtual_model_id);
     const ownerChannelId = officialChannelIdForModel(publicModel) ?? route.channel_id;
     const current = groups.get(groupKey) ?? {
       item: {

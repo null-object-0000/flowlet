@@ -2,6 +2,7 @@ use super::config::{
     classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType,
     ProxyBindConfig, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
+use super::power::{ActivityPermit, ActivityTracker};
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
 use super::usage::{
@@ -280,6 +281,8 @@ struct ProxyAppState {
     pub rate_limiter: RateLimiter,
     pub capture: LogCaptureConfig,
     pub bind_config: Arc<Mutex<ProxyBindConfig>>,
+    /// 活动请求计数：有请求转发上游期间抑制系统自动待机（Windows）
+    pub activity: ActivityTracker,
     /// 本地 config.json 文件路径，每次请求热读 UA rules 用
     pub config_path: std::path::PathBuf,
 }
@@ -380,6 +383,13 @@ impl ProxyController {
             .with_state(ProxyAppState {
                 shared,
                 client: Client::builder()
+                    // Windows 待机/网络切换会在连接池里留下僵尸连接（无 RST 的半开连接），
+                    // 恢复后复用会静默挂起。限制空闲连接存活、开启 TCP keepalive 探针、
+                    // 约束新建连接耗时，让恢复后的首批请求快速自愈。
+                    // 见 docs/windows-suspend-resume-network-resilience.md。
+                    .pool_idle_timeout(Duration::from_secs(60))
+                    .tcp_keepalive(Duration::from_secs(30))
+                    .connect_timeout(Duration::from_secs(10))
                     .build()
                     .map_err(|err| ProxyError::StartFailed(err.to_string()))?,
                 storage,
@@ -387,6 +397,7 @@ impl ProxyController {
                 rate_limiter,
                 capture,
                 bind_config: Arc::new(Mutex::new(bind_config)),
+                activity: ActivityTracker::new(),
                 config_path,
             });
 
@@ -681,6 +692,12 @@ async fn forward_request(
         record_request_log(state.storage, log);
         return Ok(response);
     }
+
+    // 请求即将转发上游：持有活动凭证抑制系统自动待机，直到本次请求（含 SSE 流）结束。
+    // Windows S0 待机会冻结进程、断网杀死进行中的流，见
+    // docs/windows-suspend-resume-network-resilience.md。
+    let activity_permit = state.activity.track();
+
     let mut last_network_error: Option<ProxyForwardError> = None;
     let mut fallback_count = 0;
 
@@ -951,6 +968,7 @@ async fn forward_request(
                     &detected_protocol,
                     &state.capture,
                     timeout_seconds,
+                    activity_permit,
                 )
                 .await;
             }
@@ -1223,6 +1241,8 @@ async fn build_response(
     protocol: &ProtocolType,
     capture: &LogCaptureConfig,
     timeout_seconds: u64,
+    // 活动凭证：流式路径移交流状态持有至流结束；非流式随本函数返回释放
+    activity_permit: ActivityPermit,
 ) -> Result<Response, ProxyForwardError> {
     let status = upstream_response.status();
     let headers = upstream_response.headers().clone();
@@ -1267,6 +1287,7 @@ async fn build_response(
             log_context.send_at,
             res_content_encoding,
             Duration::from_secs(timeout_seconds),
+            activity_permit,
         );
 
         let usage_capture = UsageCapture {
@@ -1487,6 +1508,8 @@ struct StreamDone {
 /// 包装上游 body 字节流：捕获最多 capture.max_body_bytes 的响应体字节
 /// 与 SSE 首尾片段文本摘要；每次等待下一块数据使用空闲超时，
 /// 流结束时通过 tx_done 回写 StreamDone。
+/// activity_permit 随流状态持有，流终结（完成/出错/客户端断开）时才归还，
+/// 保证整个流式生命周期内系统不会自动待机。
 fn capture_timed_stream(
     inner: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
     tx_done: tokio::sync::oneshot::Sender<StreamDone>,
@@ -1494,6 +1517,7 @@ fn capture_timed_stream(
     request_started_at: Instant,
     res_content_encoding: Option<String>,
     idle_timeout: Duration,
+    activity_permit: ActivityPermit,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
     let inner = Box::pin(inner);
     let state = TimedStreamState {
@@ -1513,6 +1537,7 @@ fn capture_timed_stream(
         first_line: None,
         last_line: None,
         line_count: 0,
+        _activity_permit: activity_permit,
     };
     let tx_done = std::sync::Arc::new(std::sync::Mutex::new(Some(tx_done)));
     futures_util::stream::unfold((state, tx_done), move |(mut state, tx_done)| async move {
@@ -1653,6 +1678,8 @@ struct TimedStreamState {
     first_line: Option<String>,
     last_line: Option<String>,
     line_count: usize,
+    /// 流式请求的活动凭证：随状态存活，流被 drop 时才归还计数
+    _activity_permit: ActivityPermit,
 }
 
 /// 流式响应结束后由 spawn task 调用，补写 duration / res_body_b64

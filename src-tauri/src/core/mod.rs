@@ -9,6 +9,7 @@ pub mod config;
 pub mod cost_ledger_source_probe;
 pub mod logging;
 pub mod metrics;
+pub mod power;
 pub mod presets;
 pub mod proxy;
 pub mod rate_limiter;

@@ -659,6 +659,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
         rate_limiter: RateLimiter::new(600),
         capture: LogCaptureConfig::default(),
         bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
+        activity: ActivityTracker::new(),
         config_path: std::path::PathBuf::from("/tmp/flowlet_test_config.json"),
     };
 
@@ -1216,6 +1217,7 @@ async fn missing_account_returns_structured_error_and_log() {
         rate_limiter: RateLimiter::new(600),
         capture: LogCaptureConfig::default(),
         bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
+        activity: ActivityTracker::new(),
         config_path: db_path.with_extension("json"),
     };
     let request = Request::builder()
@@ -1546,6 +1548,7 @@ fn build_test_state(
         rate_limiter: RateLimiter::new(600),
         capture: LogCaptureConfig::default(),
         bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
+        activity: ActivityTracker::new(),
         config_path: std::path::PathBuf::from("/tmp/flowlet_test_config.json"),
     }
 }
@@ -1582,6 +1585,7 @@ async fn streaming_idle_timeout_resets_after_each_chunk() {
         Instant::now(),
         None,
         std::time::Duration::from_millis(200),
+        ActivityTracker::new().track(),
     );
     futures_util::pin_mut!(stream);
 
@@ -1610,6 +1614,7 @@ async fn streaming_idle_timeout_reports_stream_failure() {
         Instant::now(),
         None,
         std::time::Duration::from_millis(40),
+        ActivityTracker::new().track(),
     );
     futures_util::pin_mut!(stream);
 

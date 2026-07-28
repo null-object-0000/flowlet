@@ -21,8 +21,8 @@
 .detailItemValue { min-width: 0; display: flex; align-items: center; gap: 6px; }
 .detailItemValue strong { min-width: 0; flex: 1; overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .detailItemValue :global(.semi-button) { flex: none; }
-.valueLink { min-width: 0; max-width: 100%; padding: 0 3px; justify-content: flex-start; color: var(--flowlet-color-text); }
-.linkText { min-width: 0; overflow: hidden; color: var(--flowlet-color-text); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.valueLink { min-width: 0; max-width: 100%; padding: 0 3px; justify-content: flex-start; }
+.linkText { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .errorBox { padding: 12px 14px; display: grid; gap: 5px; border-radius: 7px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); font-size: var(--flowlet-font-size-caption); }
 .errorBox span { line-height: 1.5; word-break: break-word; }
 .attemptHeader { display: flex; align-items: center; justify-content: space-between; }

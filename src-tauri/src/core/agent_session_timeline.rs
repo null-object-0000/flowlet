@@ -162,15 +162,17 @@ fn estimate_usage_cost(
     }) else {
         return unpriced_estimate(turn_count);
     };
-    // input_tokens 为未缓存输入，cached_input_tokens 与 cache_write_input_tokens 为缓存命中与缓存写入。
-    // 总输入 = 未缓存 + 缓存命中 + 缓存写入，用于按会话总输入 Token 选档；无分级时回退扁平单价。
-    let total_input = usage
-        .input_tokens
-        .saturating_add(usage.cached_input_tokens)
-        .saturating_add(usage.cache_write_input_tokens);
+    // 原生会话记录无法还原单次 API 调用的上下文大小，按 docs/config.md 的约定
+    // 统一使用标准基础价（第一档），不按会话累计输入越级到长上下文高档。
     let (uncached_price, cached_price, cache_write_price, output_price) =
-        price.resolve_prices(Some(total_input));
-    let uncached_input = usage.input_tokens.max(0) as f64;
+        price.resolve_prices(None);
+    // Codex 的 input_tokens 是含缓存命中与缓存写入的总输入，未缓存部分必须扣减，
+    // 避免缓存命中既按未缓存价、又按缓存命中价重复计费。
+    let uncached_input = usage
+        .input_tokens
+        .saturating_sub(usage.cached_input_tokens)
+        .saturating_sub(usage.cache_write_input_tokens)
+        .max(0) as f64;
     let cached_input = usage.cached_input_tokens.max(0) as f64;
     let cache_write_input = usage.cache_write_input_tokens.max(0) as f64;
     let output = usage.output_tokens.max(0) as f64;

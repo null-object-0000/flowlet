@@ -6,7 +6,7 @@ use rusty_s3::{Bucket, Credentials, UrlStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use url::Url;
 
 const CONFIG_KEY: &str = "device_sync_s3_config_v1";
@@ -689,8 +689,11 @@ pub async fn sync_device_usage(
 pub async fn run_configured_sync(
     storage: Storage,
     identity: DeviceIdentity,
+    trigger_source: &str,
 ) -> Result<S3DeviceSyncResult, String> {
     let _guard = acquire_sync_guard()?;
+    let started_at = Instant::now();
+    let job_id = create_sync_job(&storage, trigger_source)?;
     let now = chrono::Utc::now().to_rfc3339();
     let previous = load_status(&storage);
     save_status(
@@ -730,6 +733,34 @@ pub async fn run_configured_sync(
                     failed_objects: result.failed_objects,
                 },
             );
+            let duration_ms = started_at.elapsed().as_millis() as u64;
+            let summary = serde_json::json!({
+                "remoteDevices": result.remote_devices,
+                "importedDevices": result.imported_devices,
+                "importedDays": result.imported_days,
+                "unchangedDays": result.unchanged_days,
+                "failedObjects": result.failed_objects,
+                "uploadedKey": result.uploaded_key,
+                "durationMs": duration_ms,
+            })
+            .to_string();
+            let job_status = if result.failed_objects == 0 {
+                "succeeded"
+            } else {
+                "succeeded_with_warnings"
+            };
+            let _ = storage.update_job_progress(&job_id, 1, 1);
+            if let Err(error) = storage.finish_job(
+                &job_id,
+                job_status,
+                &summary,
+                &format!(
+                    "S3 设备同步完成：发现 {} 台远端设备，导入 {} 天，失败 {} 个对象",
+                    result.remote_devices, result.imported_days, result.failed_objects
+                ),
+            ) {
+                tracing::warn!(%error, job_id = %job_id, "failed to finish S3 device sync task log");
+            }
             Ok(result)
         }
         Err(error) => {
@@ -746,9 +777,28 @@ pub async fn run_configured_sync(
                     failed_objects: 0,
                 },
             );
+            if let Err(job_error) = storage.fail_job(&job_id, &error) {
+                tracing::warn!(error = %job_error, job_id = %job_id, "failed to record S3 device sync task failure");
+            }
             Err(error)
         }
     }
+}
+
+fn create_sync_job(storage: &Storage, trigger_source: &str) -> Result<String, String> {
+    let job_id = uuid::Uuid::new_v4().to_string();
+    storage
+        .create_job(
+            &job_id,
+            "device-s3-sync",
+            "S3 设备同步",
+            "同步设备用量",
+            trigger_source,
+            1,
+            "开始上传当前设备快照并读取其它设备快照",
+        )
+        .map_err(|error| format!("创建 S3 设备同步任务失败：{error}"))?;
+    Ok(job_id)
 }
 
 pub fn save_status(storage: &Storage, status: &S3SyncStatus) {
@@ -835,6 +885,24 @@ mod tests {
         );
         drop(first);
         assert!(acquire_sync_guard().is_ok());
+    }
+
+    #[test]
+    fn creates_device_sync_task_log_with_trigger_source() {
+        let storage =
+            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let job_id = create_sync_job(&storage, "background").unwrap();
+        let detail = storage
+            .get_background_job_detail(&job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.job.job_type, "device-s3-sync");
+        assert_eq!(detail.job.title, "S3 设备同步");
+        assert_eq!(detail.job.trigger_source, "background");
+        assert_eq!(detail.job.status, "running");
+        assert_eq!(detail.job.progress_total, 1);
+        assert_eq!(detail.events.len(), 1);
     }
 
     #[test]

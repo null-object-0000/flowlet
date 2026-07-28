@@ -692,7 +692,7 @@ pub(super) async fn sync_device_usage_s3(
         .lock()
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
-    crate::core::device_sync::run_configured_sync(storage, identity).await
+    crate::core::device_sync::run_configured_sync(storage, identity, "manual").await
 }
 
 fn read_device_usage_bundle(path: &str) -> Result<DeviceUsageBundle, String> {

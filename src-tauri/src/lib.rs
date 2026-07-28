@@ -807,6 +807,7 @@ pub fn run() {
                     match crate::core::device_sync::run_configured_sync(
                         s3_timer_storage.clone(),
                         identity,
+                        "background",
                     )
                     .await
                     {

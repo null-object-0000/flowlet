@@ -88,11 +88,16 @@
 .s3Form { display: grid; gap: 13px; }
 .s3Form label { display: grid; gap: 6px; }
 .s3Form label > span { color: var(--flowlet-color-text-secondary); font-size: 12px; font-weight: 620; }
+.s3FieldHint { color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.45; }
 .s3FormGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .s3SwitchRow, .s3TestRow { display: flex; align-items: center; gap: 16px; }
-.s3SwitchRow > div { min-width: 0; display: grid; gap: 3px; flex: 1; }
+.s3SwitchCopy { min-width: 0; display: grid; gap: 3px; flex: 1; }
+.s3SwitchControl { flex: none; }
 .s3SwitchRow strong { font-size: 12px; }
 .s3SwitchRow span, .s3TestRow span { color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.5; }
+.s3Permissions { padding: 9px 10px; display: grid; gap: 3px; border-radius: 8px; background: var(--flowlet-color-surface-muted); }
+.s3Permissions strong { font-size: 11px; }
+.s3Permissions span { color: var(--flowlet-color-text-secondary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .s3TestRow { padding-top: 11px; border-top: 1px solid var(--flowlet-color-border); }
 .s3TestRow span { flex: 1; }
 

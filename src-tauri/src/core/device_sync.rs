@@ -152,6 +152,29 @@ impl S3SyncConfig {
         if region.is_empty() || region.chars().count() > 64 {
             return Err("S3 Region 不能为空且不能超过 64 个字符".to_string());
         }
+        let endpoint_host = endpoint_url
+            .host_str()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if endpoint_host.ends_with(".aliyuncs.com")
+            && endpoint_host.starts_with(&format!("{}.", bucket.to_ascii_lowercase()))
+        {
+            return Err(
+                "阿里云 OSS Endpoint 不应包含 Bucket 名；上海地域请填写 https://s3.oss-cn-shanghai.aliyuncs.com"
+                    .to_string(),
+            );
+        }
+        if endpoint_host.ends_with(".aliyuncs.com")
+            && !endpoint_host.starts_with("s3.oss-")
+        {
+            return Err(
+                "阿里云 OSS 必须使用 S3-compatible Endpoint；上海地域请填写 https://s3.oss-cn-shanghai.aliyuncs.com"
+                    .to_string(),
+            );
+        }
+        if endpoint_host.ends_with(".aliyuncs.com") && region.eq_ignore_ascii_case("auto") {
+            return Err("阿里云 OSS Region 不能使用 auto；上海地域请填写 cn-shanghai".to_string());
+        }
         let prefix = input
             .prefix
             .trim()
@@ -451,7 +474,10 @@ pub async fn test_connection(
         None => read_secret(&config)?,
     };
     let store = S3Store::new(&config, &secret)?;
-    store.head_bucket().await?;
+    store
+        .head_bucket()
+        .await
+        .map_err(|error| format!("{error}；请确认已授予 Bucket 级 oss:HeadBucket 权限"))?;
     let test_prefix = if config.prefix.is_empty() {
         "flowlet/v1/tests/".to_string()
     } else {
@@ -648,6 +674,29 @@ mod tests {
         let error = S3SyncConfig::from_input(&input("http://example.com")).unwrap_err();
         assert!(error.contains("HTTPS"));
         assert!(S3SyncConfig::from_input(&input("http://127.0.0.1:9000")).is_ok());
+    }
+
+    #[test]
+    fn explains_aliyun_oss_endpoint_and_region_requirements() {
+        let bucket_endpoint =
+            S3SyncConfig::from_input(&input("https://flowlet-sync.oss-cn-shanghai.aliyuncs.com"))
+                .unwrap_err();
+        assert!(bucket_endpoint.contains("不应包含 Bucket 名"));
+
+        let auto_region =
+            S3SyncConfig::from_input(&input("https://s3.oss-cn-shanghai.aliyuncs.com"))
+                .unwrap_err();
+        assert!(auto_region.contains("不能使用 auto"));
+
+        let non_s3_endpoint =
+            S3SyncConfig::from_input(&input("https://oss-cn-shanghai.aliyuncs.com"))
+                .unwrap_err();
+        assert!(non_s3_endpoint.contains("S3-compatible Endpoint"));
+
+        let mut valid = input("https://s3.oss-cn-shanghai.aliyuncs.com");
+        valid.region = "cn-shanghai".to_string();
+        valid.path_style = false;
+        assert!(S3SyncConfig::from_input(&valid).is_ok());
     }
 
     #[test]

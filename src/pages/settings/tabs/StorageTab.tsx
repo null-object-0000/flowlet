@@ -8,6 +8,7 @@ import { useDeviceUsageTransfer, useKnownDevices, useS3SyncSettings } from "../.
 import type { DeviceUsageImportPreview, S3SyncConfigInput } from "../../../domains/device-sync/types";
 import { APP_OVERLAY_Z_INDEX } from "../../../shared/ui/overlayLayers";
 import { formatCompactNumber } from "../../../shared/formatters/number";
+import { errorMessage } from "../../../shared/errors/AppError";
 import styles from "./StorageTab.module.css";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -64,7 +65,7 @@ export function StorageTab() {
       await transfer.exportBundle.mutateAsync(path);
       Toast.success(t("设备用量已导出"));
     } catch (error) {
-      Toast.error(t("导出失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("导出失败：{message}", { message: errorMessage(error) }));
     }
   };
   const chooseImport = async () => {
@@ -79,7 +80,7 @@ export function StorageTab() {
       setImportPath(path);
       setPreview(result);
     } catch (error) {
-      Toast.error(t("读取导入文件失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("读取导入文件失败：{message}", { message: errorMessage(error) }));
     }
   };
   const applyImport = async () => {
@@ -90,7 +91,7 @@ export function StorageTab() {
       setImportPath(null);
       setPreview(null);
     } catch (error) {
-      Toast.error(t("导入失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("导入失败：{message}", { message: errorMessage(error) }));
     }
   };
   const applyRename = async () => {
@@ -100,7 +101,7 @@ export function StorageTab() {
       Toast.success(t("设备名称已更新"));
       setRenameValue(null);
     } catch (error) {
-      Toast.error(t("重命名失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("重命名失败：{message}", { message: errorMessage(error) }));
     }
   };
   const openS3Config = () => {
@@ -127,7 +128,7 @@ export function StorageTab() {
       Toast.success(t("S3 同步配置已保存"));
       setS3Draft(null);
     } catch (error) {
-      Toast.error(t("保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("保存失败：{message}", { message: errorMessage(error) }));
     }
   };
   const testS3Connection = async () => {
@@ -137,7 +138,7 @@ export function StorageTab() {
       const result = await transfer.testS3Connection.mutateAsync(config);
       Toast.success(result.message);
     } catch (error) {
-      Toast.error(t("连接测试失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("连接测试失败：{message}", { message: errorMessage(error) }));
     }
   };
   const syncS3 = async () => {
@@ -148,7 +149,7 @@ export function StorageTab() {
         days: result.importedDays,
       }));
     } catch (error) {
-      Toast.error(t("同步失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("同步失败：{message}", { message: errorMessage(error) }));
     }
   };
 
@@ -315,6 +316,7 @@ export function StorageTab() {
           <label>
             <span>Endpoint</span>
             <Input value={s3Draft.endpoint} placeholder="https://<account-id>.r2.cloudflarestorage.com" onChange={(endpoint) => setS3Draft({ ...s3Draft, endpoint })} />
+            <small className={styles.s3FieldHint}>{t("填写服务 Endpoint，不要包含 Bucket 名；阿里云 OSS 请使用 S3-compatible Endpoint。")}</small>
           </label>
           <div className={styles.s3FormGrid}>
             <label>
@@ -344,8 +346,21 @@ export function StorageTab() {
             />
           </label>
           <div className={styles.s3SwitchRow}>
-            <div><strong>{t("使用 Path-style 地址")}</strong><span>{t("MinIO 和部分兼容服务需要开启；AWS 通常关闭")}</span></div>
-            <Switch checked={s3Draft.pathStyle} onChange={(pathStyle) => setS3Draft({ ...s3Draft, pathStyle })} />
+            <div className={styles.s3SwitchCopy}>
+              <strong>{t("使用 Path-style 地址")}</strong>
+              <span id="s3-path-style-description">{t("MinIO 和部分兼容服务需要开启；AWS 通常关闭")}</span>
+            </div>
+            <Switch
+              className={styles.s3SwitchControl}
+              checked={s3Draft.pathStyle}
+              aria-label={t("使用 Path-style 地址")}
+              aria-describedby="s3-path-style-description"
+              onChange={(pathStyle) => setS3Draft({ ...s3Draft, pathStyle })}
+            />
+          </div>
+          <div className={styles.s3Permissions}>
+            <strong>{t("所需权限")}</strong>
+            <span>{t("Bucket：oss:HeadBucket、oss:GetBucketInfo、oss:ListObjects；对象：oss:GetObject、oss:PutObject、oss:DeleteObject")}</span>
           </div>
           <div className={styles.s3TestRow}>
             <span>{t("测试会临时写入、读取并删除一个小对象，以验证完整权限。")}</span>

@@ -208,5 +208,10 @@ describe("SettingsPage", () => {
     expect(screen.getByText("配置 S3-compatible 同步")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("flowlet-sync")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "测试连接" })).toBeInTheDocument();
+    expect(screen.getByText("Bucket：oss:HeadBucket、oss:GetBucketInfo、oss:ListObjects；对象：oss:GetObject、oss:PutObject、oss:DeleteObject")).toBeInTheDocument();
+    const pathStyle = screen.getByRole("switch", { name: "使用 Path-style 地址" });
+    expect(pathStyle).toBeChecked();
+    fireEvent.click(pathStyle);
+    expect(pathStyle).not.toBeChecked();
   });
 });

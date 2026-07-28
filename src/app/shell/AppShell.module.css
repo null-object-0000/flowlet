@@ -27,3 +27,9 @@
     radial-gradient(circle at 0 100%, var(--flowlet-color-shell-glow), transparent 30%),
     var(--flowlet-color-main-bg);
 }
+
+/* Semi Modal locks document.body, while Flowlet scrolls inside this shell
+   container. Lock the actual scroller whenever a modal mask is mounted. */
+:global(body:has(.semi-modal-mask)) .content {
+  overflow-y: hidden;
+}

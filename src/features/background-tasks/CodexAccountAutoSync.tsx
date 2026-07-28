@@ -10,8 +10,10 @@ import { queryKeys } from "../../shared/query-keys";
  *   也避免高频调用官方用量接口与 Codex app-server 进程；
  * - 每轮同步由 Rust 记入任务日志（job_type = codex-account-sync）；
  * - 未发现任何 Codex 账号时 Rust 直接跳过，不创建任务、不发起网络请求。
+ *
+ * CODEX_ACCOUNT_SYNC_INTERVAL_MS 同时用于账号卡片上“预计下次刷新”的悬浮提示。
  */
-const SYNC_INTERVAL = 5 * 60_000;
+export const CODEX_ACCOUNT_SYNC_INTERVAL_MS = 5 * 60_000;
 const FIRST_SYNC_DELAY = 20_000;
 
 export function CodexAccountAutoSync() {
@@ -26,7 +28,7 @@ export function CodexAccountAutoSync() {
         if (result.started) await Promise.all([client.invalidateQueries({ queryKey: queryKeys.agent.codexAccount() }), client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all })]);
       }
       catch { /* 自动同步失败不打断应用，下一轮继续。 */ }
-      if (!stopped) schedule(SYNC_INTERVAL);
+      if (!stopped) schedule(CODEX_ACCOUNT_SYNC_INTERVAL_MS);
     };
     schedule(FIRST_SYNC_DELAY);
     return () => { stopped = true; if (timer) window.clearTimeout(timer); };

@@ -292,6 +292,8 @@ const english: Record<string, string> = {
   "登录账号": "Signed-in account",
   "数据已过期": "Data stale",
   "最后更新": "Last updated",
+  "预计下次刷新：{time}": "Next refresh expected: {time}",
+  "数据即将自动刷新": "Data will refresh shortly",
   "刷新失败：{message}": "Refresh failed: {message}",
   "会员套餐": "Subscription plan",
   "登录方式": "Sign-in method",

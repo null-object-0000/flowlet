@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Select, SideSheet, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Select, SideSheet, Tabs, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
 import type { AgentEnvironmentReport, AgentSurface, CodexAccountReport, CodexAccountsReport, CodexRateLimitResetCredits, CodexUsageWindow } from "../../domains/agent/types";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { CODEX_ACCOUNT_SYNC_INTERVAL_MS } from "../background-tasks/CodexAccountAutoSync";
 import styles from "./AgentAccessSideSheet.module.css";
 
 const { Text, Title } = Typography;
@@ -187,12 +188,24 @@ function CodexAccountCard({ account, language }: { account: CodexAccountReport; 
   const hasResetCreditDetails = Boolean(
     resetCredits?.credits?.some((credit) => typeof credit.expires_at === "number"),
   );
-  const updatedAt = new Intl.DateTimeFormat(language, {
+  const updatedAtFormatter = new Intl.DateTimeFormat(language, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(account.updated_at));
+  });
+  const updatedAtMs = new Date(account.updated_at).getTime();
+  const updatedAt = updatedAtFormatter.format(new Date(account.updated_at));
+  // 自动同步每 5 分钟一轮（见 CodexAccountAutoSync），下次刷新时间按
+  // “上次更新 + 同步间隔”估算；手动刷新会提前更新时间但不重置定时器，
+  // 因此只是预估值。估算已过期（如应用刚启动、系统休眠）时提示即将刷新。
+  const nextRefreshLabel = Number.isNaN(updatedAtMs)
+    ? undefined
+    : updatedAtMs + CODEX_ACCOUNT_SYNC_INTERVAL_MS <= Date.now()
+      ? t("数据即将自动刷新")
+      : t("预计下次刷新：{time}", {
+          time: updatedAtFormatter.format(new Date(updatedAtMs + CODEX_ACCOUNT_SYNC_INTERVAL_MS)),
+        });
 
   return (
     <div className={styles.codexAccount}>
@@ -224,7 +237,12 @@ function CodexAccountCard({ account, language }: { account: CodexAccountReport; 
         ) : null}
         <div>
           <Text type="tertiary">{t("最后更新")}</Text>
-          <span>{updatedAt}</span>
+          <Tooltip
+            content={nextRefreshLabel ?? ""}
+            zIndex={APP_OVERLAY_Z_INDEX.sideSheet + 1}
+          >
+            <span>{updatedAt}</span>
+          </Tooltip>
         </div>
       </div>
       {account.error ? <Text className={styles.accountNotice} type="warning">{t("刷新失败：{message}", { message: account.error })}</Text> : null}

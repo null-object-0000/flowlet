@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CodexAccountsReport } from "../../domains/agent/types";
 import { ChatGptDesktopSideSheet } from "./ChatGptDesktopSideSheet";
+import { CODEX_ACCOUNT_SYNC_INTERVAL_MS } from "../background-tasks/CodexAccountAutoSync";
 
 const cachedAccounts: CodexAccountsReport = {
   accounts: [{
@@ -65,5 +67,54 @@ describe("ChatGptDesktopSideSheet cached account state", () => {
     expect(screen.getByText("cached@example.com")).toBeInTheDocument();
     expect(screen.getByText("刷新失败，当前展示上次更新的数据：network timeout")).toBeInTheDocument();
     expect(screen.queryByText("账号信息查询失败：network timeout")).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatGptDesktopSideSheet last-updated tooltip", () => {
+  const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  it("shows the estimated next refresh time when hovering the last-updated time", async () => {
+    const updatedAt = new Date(Date.now() - 60_000);
+    render(
+      <ChatGptDesktopSideSheet
+        visible
+        accounts={{ accounts: [{ ...cachedAccounts.accounts[0], updated_at: updatedAt.toISOString() }] }}
+        onRefresh={noop}
+        onRefreshAccount={noop}
+        onAuthorizeAccount={noop}
+        onClose={noop}
+        onCopy={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.hover(screen.getByText(timeFormatter.format(updatedAt)));
+
+    const expectedNext = timeFormatter.format(new Date(updatedAt.getTime() + CODEX_ACCOUNT_SYNC_INTERVAL_MS));
+    expect(await screen.findByText(`预计下次刷新：${expectedNext}`)).toBeInTheDocument();
+  });
+
+  it("shows a refresh-soon hint when the estimated next refresh has already passed", async () => {
+    render(
+      <ChatGptDesktopSideSheet
+        visible
+        accounts={cachedAccounts}
+        onRefresh={noop}
+        onRefreshAccount={noop}
+        onAuthorizeAccount={noop}
+        onClose={noop}
+        onCopy={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.hover(screen.getByText(timeFormatter.format(new Date("2026-07-18T10:00:00Z"))));
+
+    expect(await screen.findByText("数据即将自动刷新")).toBeInTheDocument();
   });
 });

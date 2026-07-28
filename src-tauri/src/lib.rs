@@ -6,6 +6,7 @@ use core::config::{
     ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig, RouteCandidate,
     RouteRule, VirtualModel,
 };
+use core::device_identity::DeviceIdentity;
 use core::presets::builtin_channel_presets;
 use core::proxy::ProxyController;
 use core::storage::Storage;
@@ -24,6 +25,8 @@ struct AppState {
     virtual_models: Arc<Mutex<Vec<VirtualModel>>>,
     rules: Arc<Mutex<Vec<RouteRule>>>,
     storage: Storage,
+    device_identity: Arc<Mutex<DeviceIdentity>>,
+    device_identity_dir: std::path::PathBuf,
     upstream_timeout_seconds: u64,
     capture: Arc<Mutex<LogCaptureConfig>>,
     bind_config: Arc<Mutex<ProxyBindConfig>>,
@@ -99,6 +102,12 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
         .join("codex-accounts");
+    let device_identity_dir = db_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    let device_identity = DeviceIdentity::load_or_create(&device_identity_dir)
+        .unwrap_or_else(|error| panic!("初始化设备身份失败: {error}"));
 
     tracing::info!(db_path = %db_path.display(), t_ms = _t0.elapsed().as_millis() as u64, "初始化 Storage");
 
@@ -267,40 +276,16 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         "step: routes + balance cleanup"
     );
 
-    // 初始化价格预设：优先从 config.json 加载；若为空（已迁移到 models-cn），
-    // 则从本地 models-cn.json 文件生成价格表，作为费用估算的真实来源。
-    let config_prices = channels_config.prices.clone();
-    if config_prices.is_empty() {
-        // config.json 无价格，尝试从本地 models-cn.json 文件生成
-        let models_cn_prices = if let Some(catalog_json) = crate::core::storage::storage_tasks::read_models_cn_file() {
-            match crate::core::storage::storage_tasks::build_prices_from_models_cn_catalog(&catalog_json) {
-                Ok(prices) if !prices.is_empty() => {
-                    tracing::info!(count = prices.len(), "从 models-cn.json 加载价格表");
-                    prices
-                }
-                Ok(_) => {
-                    tracing::warn!("models-cn.json 中无有效价格数据");
-                    Vec::new()
-                }
-                Err(error) => {
-                    tracing::warn!(error = %error, "从 models-cn.json 生成价格表失败");
-                    Vec::new()
-                }
-            }
-        } else {
-            tracing::warn!("本地无 models-cn.json 且 config.json 无价格，成本估算将不可用");
-            Vec::new()
-        };
-        storage.set_prices(models_cn_prices);
-    } else {
-        let count = config_prices.len();
-        storage.set_prices(config_prices);
-        tracing::trace!(
-            t_ms = _t0.elapsed().as_millis() as u64,
-            count,
-            "step: prices loaded from config"
-        );
-    }
+    // 初始化价格表：以本地 models-cn / models.dev 目录为主，config.json 的
+    // model_prices 仅补充目录未覆盖的 (channel_id, upstream_model)。
+    // 每次目录同步成功后也会用同样逻辑重建。
+    let price_count =
+        crate::core::storage::storage_tasks::rebuild_price_table(&storage, &config_path);
+    tracing::trace!(
+        t_ms = _t0.elapsed().as_millis() as u64,
+        count = price_count,
+        "step: prices rebuilt from catalogs + config"
+    );
 
     // 模型身份与路由渠道拆分后的单次历史费用修复：过去自定义渠道上的官方模型
     // 因 channel_id 无价格而被记为 0。价格表可用时按“实际渠道显式价格优先，
@@ -407,6 +392,8 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         virtual_models: Arc::new(Mutex::new(virtual_models)),
         rules: Arc::new(Mutex::new(rules)),
         storage,
+        device_identity: Arc::new(Mutex::new(device_identity)),
+        device_identity_dir,
         upstream_timeout_seconds: 120,
         capture: Arc::new(Mutex::new(capture)),
         bind_config: Arc::new(Mutex::new(bind_config)),
@@ -620,18 +607,21 @@ pub fn run() {
 
             let config_path = app.path().resource_dir()?.join("config.json");
 
-            // 首次启动：把随包打包的 models-cn.json 从资源目录复制到 exe 旁，
+            // 首次启动：把随包打包的模型目录文件从资源目录复制到 exe 旁，
             // 让用户开箱即用，无需手动触发同步。
-            let bundled_models_cn = app.path().resource_dir()?.join("models-cn.json");
+            let resource_dir = app.path().resource_dir()?;
             let exe_dir = std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()));
             if let Some(exe_dir) = exe_dir {
-                let target = exe_dir.join("models-cn.json");
-                if !target.exists() && bundled_models_cn.exists() {
-                    match std::fs::copy(&bundled_models_cn, &target) {
-                        Ok(_) => tracing::info!("首次启动：已复制内置 models-cn.json 到 exe 目录"),
-                        Err(error) => tracing::warn!(%error, "复制内置 models-cn.json 失败"),
+                for file_name in ["models-cn.json", "models-dev.json"] {
+                    let bundled = resource_dir.join(file_name);
+                    let target = exe_dir.join(file_name);
+                    if !target.exists() && bundled.exists() {
+                        match std::fs::copy(&bundled, &target) {
+                            Ok(_) => tracing::info!(file = file_name, "首次启动：已复制内置模型目录到 exe 目录"),
+                            Err(error) => tracing::warn!(file = file_name, %error, "复制内置模型目录失败"),
+                        }
                     }
                 }
             }
@@ -814,20 +804,22 @@ pub fn run() {
                 }
             });
 
-            // 定时 models-cn 目录同步：启动后 1 小时触发第一次，之后每 1 小时跑一次。
-            // 结果写入 background_jobs 任务日志。
-            let models_cn_timer_storage = state.storage.clone();
+            // 定时模型目录同步（models-cn + models.dev）：启动后 1 小时触发第一次，
+            // 之后每 1 小时跑一次。两个源相互独立，结果分别写入 background_jobs 任务日志。
+            let catalog_timer_storage = state.storage.clone();
+            let catalog_timer_config_path = state.config_path.clone();
             tauri::async_runtime::spawn(async move {
                 let period = std::time::Duration::from_secs(60 * 60);
                 let mut interval =
                     tokio::time::interval_at(tokio::time::Instant::now() + period, period);
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                let source_url = "https://null-object-0000.github.io/models-cn/api.json".to_string();
+                let models_cn_url = "https://null-object-0000.github.io/models-cn/api.json";
+                let models_dev_url = "https://models.dev/api.json";
                 loop {
                     interval.tick().await;
-                    let storage = models_cn_timer_storage.clone();
-                    let url = source_url.clone();
-                    match crate::core::storage::storage_tasks::sync_models_cn_catalog(&storage, &url, "scheduled").await {
+                    let storage = catalog_timer_storage.clone();
+                    let config_path = catalog_timer_config_path.clone();
+                    match crate::core::storage::storage_tasks::sync_models_cn_catalog(&storage, &config_path, models_cn_url, "scheduled").await {
                         Ok(sync_result) => {
                             tracing::info!(
                                 started = sync_result.started,
@@ -839,6 +831,22 @@ pub fn run() {
                         }
                         Err(error) => {
                             tracing::warn!(error = %error, "scheduled models-cn sync failed");
+                        }
+                    }
+                    let storage = catalog_timer_storage.clone();
+                    let config_path = catalog_timer_config_path.clone();
+                    match crate::core::storage::storage_tasks::sync_models_dev_catalog(&storage, &config_path, models_dev_url, "scheduled").await {
+                        Ok(sync_result) => {
+                            tracing::info!(
+                                started = sync_result.started,
+                                skipped = sync_result.skipped,
+                                providers = sync_result.provider_count,
+                                models = sync_result.model_count,
+                                "scheduled models.dev sync finished"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "scheduled models.dev sync failed");
                         }
                     }
                 }
@@ -882,6 +890,17 @@ pub fn run() {
             commands::repair_usage_costs,
             commands::usage_summary,
             commands::usage_today_tokens,
+            commands::device_usage_snapshot,
+            commands::list_known_devices,
+            commands::device_daily_usage,
+            commands::rename_current_device,
+            commands::get_s3_sync_settings,
+            commands::save_s3_sync_config,
+            commands::test_s3_sync_connection,
+            commands::sync_device_usage_s3,
+            commands::export_device_usage_bundle,
+            commands::preview_device_usage_import,
+            commands::import_device_usage_bundle,
             commands::list_request_logs,
             commands::list_agent_sessions,
             commands::list_agent_session_children,
@@ -894,6 +913,7 @@ pub fn run() {
             commands::cancel_background_job,
             commands::cleanup_background_jobs,
             commands::sync_models_cn_catalog,
+            commands::sync_models_dev_catalog,
             commands::get_models_cn_catalog,
             commands::get_models_cn_currencies,
             commands::preview_sync_channel_presets,

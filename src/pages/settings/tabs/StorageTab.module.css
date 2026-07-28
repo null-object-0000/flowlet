@@ -1,3 +1,101 @@
+.deviceSection {
+  margin-top: 18px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 11px;
+  background: var(--flowlet-color-surface);
+  overflow: hidden;
+}
+
+.sectionHeader {
+  min-height: 64px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--flowlet-color-border);
+}
+
+.sectionHeader > div:first-child { min-width: 0; display: grid; gap: 4px; }
+.sectionHeader strong { font-size: 14px; }
+.sectionHeader span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.deviceActions { margin-left: auto; display: flex; gap: 8px; flex: none; }
+.deviceList { display: grid; }
+.deviceCard {
+  min-height: 72px;
+  padding: 10px 14px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid var(--flowlet-color-border);
+}
+.deviceCard:last-child { border-bottom: 0; }
+.deviceGlyph {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--semi-color-primary);
+  background: var(--semi-color-primary-light-default);
+  font-size: 13px;
+  font-weight: 750;
+}
+.deviceCopy { min-width: 0; display: grid; gap: 3px; }
+.deviceTitle { display: flex; align-items: center; gap: 7px; }
+.deviceTitle strong { min-width: 0; overflow: hidden; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
+.deviceCopy code {
+  overflow: hidden;
+  color: var(--flowlet-color-text-secondary);
+  font: 11px/1.3 var(--flowlet-font-family-mono, monospace);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.deviceCopy > span, .deviceStats span { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.deviceStats { display: grid; justify-items: end; gap: 3px; font-variant-numeric: tabular-nums; }
+.deviceStats strong { font-size: 15px; }
+.deviceState { min-height: 64px; display: grid; place-items: center; color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.importPreview { display: grid; gap: 12px; }
+.importPreview > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: start; }
+.importPreview span { color: var(--flowlet-color-text-tertiary); }
+.importPreview code { overflow-wrap: anywhere; }
+.importWarning { margin: 0; padding: 9px 10px; border-radius: 8px; color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); }
+.renameForm { display: grid; gap: 10px; }
+.renameForm > span { color: var(--flowlet-color-text-secondary); font-size: 12px; line-height: 1.6; }
+
+.s3Section {
+  margin-top: 14px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 11px;
+  background: var(--flowlet-color-surface);
+  overflow: hidden;
+}
+
+.s3Summary {
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(100px, 1fr) minmax(100px, 1fr) minmax(130px, 1fr);
+  gap: 12px;
+}
+
+.s3Summary > div { min-width: 0; display: grid; gap: 4px; }
+.s3Summary span { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.s3Summary strong, .s3Summary code { overflow: hidden; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.s3Summary code { color: var(--flowlet-color-text-secondary); }
+.s3Summary p { grid-column: 1 / -1; margin: 0; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.s3Summary .s3Empty { grid-column: 1 / -1; min-height: 34px; display: flex; align-items: center; color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+
+.s3Form { display: grid; gap: 13px; }
+.s3Form label { display: grid; gap: 6px; }
+.s3Form label > span { color: var(--flowlet-color-text-secondary); font-size: 12px; font-weight: 620; }
+.s3FormGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.s3SwitchRow, .s3TestRow { display: flex; align-items: center; gap: 16px; }
+.s3SwitchRow > div { min-width: 0; display: grid; gap: 3px; flex: 1; }
+.s3SwitchRow strong { font-size: 12px; }
+.s3SwitchRow span, .s3TestRow span { color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.5; }
+.s3TestRow { padding-top: 11px; border-top: 1px solid var(--flowlet-color-border); }
+.s3TestRow span { flex: 1; }
+
 .summaryCard {
   margin-top: 18px;
   background: linear-gradient(135deg, #f7faff, #f3f7ff);

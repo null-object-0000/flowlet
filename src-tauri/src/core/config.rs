@@ -925,6 +925,24 @@ pub struct UsageRecordRow {
     pub created_at: String,
 }
 
+// ─── Usage Today Summary (for UI overview) ───────────────────────────────────
+
+/// 概览页顶部「今日消耗」的轻量聚合结果。
+///
+/// 只包含一条聚合行（总量 + 输入/缓存/未缓存/输出拆解 + 可计算缓存命中率的
+/// 分母），不带分组、不带 JOIN，走索引范围扫描，专门喂给 service-strip 的
+/// 悬浮明细，避免每 30s 拉全量汇总表。字段与 `UsageSummaryRow` 同义，
+/// 序列化沿用 snake_case，前端按相同约定读取。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageTodaySummary {
+    pub total_tokens: i64,
+    pub input_tokens: i64,
+    pub input_cached_tokens: i64,
+    pub input_uncached_tokens: i64,
+    pub cache_measured_input_tokens: i64,
+    pub output_tokens: i64,
+}
+
 // ─── Usage Summary Row (for UI) ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

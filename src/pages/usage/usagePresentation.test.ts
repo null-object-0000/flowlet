@@ -11,6 +11,7 @@ const rows = [
 describe("usage presentation", () => {
   it("filters local summary rows by selected period", () => {
     const now = new Date(2026, 6, 15, 12);
+    expect(filterUsageRows(rows, "today", now)).toHaveLength(1);
     expect(filterUsageRows(rows, "week", now)).toHaveLength(2);
     expect(filterUsageRows(rows, "month", now)).toHaveLength(2);
     expect(filterUsageRows(rows, "quarter", now)).toHaveLength(2);
@@ -20,11 +21,56 @@ describe("usage presentation", () => {
 
   it("builds calendar heatmaps for every natural time dimension", () => {
     const now = new Date(2026, 6, 15, 12);
-    expect(buildUsageHeatmap(rows, "week", now)).toEqual(expect.objectContaining({ bucketUnit: "day", columns: 7 }));
+    expect(buildUsageHeatmap(rows, "today", now)).toEqual(expect.objectContaining({ granularity: "hour", columns: 24 }));
+    expect(buildUsageHeatmap(rows, "today", now, "zh-CN", false)).toEqual(expect.objectContaining({ bucketUnit: "day", granularity: "day", columns: 7 }));
+    expect(buildUsageHeatmap(rows, "week", now)).toEqual(expect.objectContaining({ granularity: "week", columns: 24, rows: 7 }));
+    expect(buildUsageHeatmap(rows, "week", now, "zh-CN", false)).toEqual(expect.objectContaining({ bucketUnit: "day", granularity: "day", columns: 7 }));
     expect(buildUsageHeatmap(rows, "month", now).cells.length).toBeGreaterThanOrEqual(35);
     expect(buildUsageHeatmap(rows, "quarter", now).cells.length).toBeGreaterThan(80);
     expect(buildUsageHeatmap(rows, "year", now)).toEqual(expect.objectContaining({ bucketUnit: "day", rows: 7, columns: 53 }));
     expect(buildUsageHeatmap(rows, "all", now)).toEqual(expect.objectContaining({ bucketUnit: "month", columns: 12 }));
+  });
+
+  it("buckets today's hourly summary rows into 24 hour cells", () => {
+    const now = new Date(2026, 6, 15, 12);
+    const hourly = [
+      { ...rows[0], date: "2026-07-15T09:00:00", known_tokens: 100 },
+      { ...rows[0], date: "2026-07-15T14:00:00", known_tokens: 50 },
+      { ...rows[0], date: "2026-07-14T09:00:00", known_tokens: 999 },
+    ] as UsageSummaryRow[];
+    const heatmap = buildUsageHeatmap(hourly, "today", now);
+    expect(heatmap.cells).toHaveLength(24);
+    expect(heatmap.cells[9].tokens).toBe(100);
+    expect(heatmap.cells[14].tokens).toBe(50);
+    expect(heatmap.totalTokens).toBe(150);
+    expect(heatmap.labels).toEqual([0, 6, 12, 18, 23].map((hour) => expect.objectContaining({ column: hour + 1 })));
+  });
+
+  it("buckets the week's hourly rows into a 7×24 weekday grid", () => {
+    const now = new Date(2026, 6, 15, 12);
+    const hourly = [
+      { ...rows[0], date: "2026-07-13T09:00:00", known_tokens: 100 },
+      { ...rows[0], date: "2026-07-15T14:00:00", known_tokens: 50 },
+      { ...rows[0], date: "2026-07-12T09:00:00", known_tokens: 999 },
+    ] as UsageSummaryRow[];
+    const heatmap = buildUsageHeatmap(hourly, "week", now);
+    expect(heatmap.cells).toHaveLength(7 * 24);
+    expect(heatmap.rowLabels).toHaveLength(7);
+    expect(heatmap.cells[9].tokens).toBe(100);
+    expect(heatmap.cells[2 * 24 + 14].tokens).toBe(50);
+    expect(heatmap.totalTokens).toBe(150);
+    expect(heatmap.labels).toEqual([0, 3, 6, 9, 12, 15, 18, 21].map((hour) => expect.objectContaining({ column: hour + 1 })));
+    expect(heatmap.cells[2 * 24 + 12].outside).toBe(false);
+    expect(heatmap.cells[2 * 24 + 13].outside).toBe(true);
+    expect(heatmap.cells[6 * 24 + 23].outside).toBe(true);
+  });
+
+  it("renders today's day-granular shared rows as a single active calendar cell", () => {
+    const now = new Date(2026, 6, 15, 12);
+    const heatmap = buildUsageHeatmap(rows, "today", now, "zh-CN", false);
+    const active = heatmap.cells.filter((cell) => !cell.outside);
+    expect(active).toHaveLength(1);
+    expect(active[0]).toEqual(expect.objectContaining({ bucket: "2026-07-15", tokens: 1200 }));
   });
 
   it("aggregates totals and breakdown shares without fixture data", () => {

@@ -85,6 +85,13 @@
   white-space: nowrap;
 }
 
+.tokenValueTooltip {
+  width: fit-content;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 .tokenUnit {
   font-size: 10px;
   color: var(--flowlet-color-text-tertiary);

@@ -290,7 +290,7 @@ API Key 字段保留独立类型，方便后续接入系统密钥链或本地加
 
 当前渠道适配器已经承担测试连接、模型同步、余额和资源包等异步能力。新增能力仍应通过明确的 capability 声明暴露；不支持的能力返回明确状态，不得影响主代理请求链路。
 
-支持控制台抓取的账号使用 `channel_accounts.resource_sync_mode` 记录资源信息同步方式：`manual` 由用户维护余额或资源包，`auto` 由隐藏 WebView 使用页面自身的 Cookie、签名和请求周期同步。Qwen Token Plan 与 LongCat hybrid 固定使用 `auto`，账号编辑器不提供手动维护入口；SQLite 迁移会把历史 Qwen Token Plan 账号归一化为 `auto`。其他旧账号迁移后默认保持 `manual`。自动同步在应用启动约 30 秒后首次执行，之后每 5 分钟执行一轮；Rust 只筛选已启用、选择 `auto` 且当前资源模式存在抓取配置的账号，串行抓取并以 `job_type = channel-resource-sync` 写入任务日志。聚合抓取只接受精确匹配的业务 API，并按页面阶段等待配置声明的必需响应槽位，页面 document、监控埋点或普通用量明细不得触发阶段完成。后台同步遇到登录失效或验证码时不会弹出窗口，只记录渠道、账号标识和缺失槽位，并把该账号标记为等待人工交互；后续周期直接跳过，避免重新导航用户正在登录的同一个 WebView。用户从账号编辑页点击“立即刷新”并完整抓取成功后清除该标记，后续周期继续复用同一 WebView 登录态。
+支持控制台抓取的账号使用 `channel_accounts.resource_sync_mode` 记录资源信息同步方式：`manual` 由用户维护余额或资源包，`auto` 由隐藏 WebView 使用页面自身的 Cookie、签名和请求周期同步。Qwen Token Plan 与 LongCat hybrid 固定使用 `auto`，账号编辑器不提供手动维护入口；SQLite 迁移会把历史 Qwen Token Plan 账号归一化为 `auto`。其他旧账号迁移后默认保持 `manual`。自动同步在应用启动约 30 秒后首次执行，之后每 5 分钟执行一轮；Rust 只筛选已启用、选择 `auto` 且当前资源模式存在抓取配置的账号，串行抓取并以 `job_type = channel-resource-sync` 写入任务日志。聚合抓取只接受精确匹配的业务 API，并按页面阶段等待配置声明的必需响应槽位，页面 document、监控埋点或普通用量明细不得触发阶段完成。后台同步遇到登录失效或验证码时不会弹出窗口，只记录渠道、账号标识和缺失槽位，并把该账号标记为等待人工交互；后续周期直接跳过，避免重新导航用户正在登录的同一个 WebView。只要存在符合自动同步条件的账号，每轮调度都必须创建任务日志；等待人工交互的账号要逐个写入跳过原因，即使本轮全部账号都被跳过也要完成任务并汇总 `skippedAccounts`，不得在创建任务前静默返回。用户从账号编辑页点击“立即刷新”并完整抓取成功后清除该标记，后续周期继续复用同一 WebView 登录态。
 
 ### sync
 
@@ -328,8 +328,45 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 - `request_logs`
 - `request_capture_refs`
 - `usage_records`
+- `known_devices`
+- `device_daily_usage`
 - `account_balance_snapshots`
 - `app_meta`
+
+安装实例身份独立保存在 SQLite 同目录的 `flowlet-device.json`。首次启动生成 UUID，
+后续启动稳定复用；配置导入、数据库替换和普通数据包不得覆盖或携带该文件，避免把
+来源设备恢复成当前设备身份。设备身份格式无效时启动明确失败，不静默生成新 ID。
+身份文件同时保存用户可编辑的 `displayName` 和平台类型；默认名称只由平台和设备 ID
+短前缀组成，不采集主机名、用户名、MAC、序列号或硬件 ID。重命名只更新展示名称，
+不会改变 `deviceId`，保存后立即热生效。
+
+多设备共享的第一阶段只定义最小快照：`device_usage_snapshot` 返回设备 ID、身份
+创建时间、展示名称、平台、Flowlet 版本、快照生成时间、当前本地时区偏移，以及按设备
+本地自然日聚合的请求数和 Token 分项。它不包含费用、渠道账号、Header、Body 或 Agent
+原生内容，也暂不负责网络上传。
+每日行由现有 `request_logs` / `usage_records` 实时聚合，不新增事实表；历史用量修复后
+重新生成快照即可按 `(device_id, date)` 幂等覆盖远端日汇总，无需重启代理。
+
+设置页可把当前设备快照导出为版本化 `flowlet-device-usage` JSON 文件，并在另一设备先
+预览再导入。导入数据写入独立的 `known_devices` / `device_daily_usage` 只读共享区，
+不会进入当前设备的 `request_logs` / `usage_records`，也不会改变当前设备 ID。同一设备
+同一日期按快照生成时间幂等更新，旧快照不得覆盖新快照。用量页支持全部设备、当前设备和
+指定导入设备筛选；共享视图只展示请求数和 Token，每日摘要没有的费用、模型与渠道明细
+明确显示为不可用，禁止拿当前设备费用冒充全设备费用。
+设备展示名称、平台和应用版本同样按来源快照时间执行新者优先更新；旧版身份文件和缺少
+这些字段的旧导出包会生成安全的回退名称，并继续兼容导入。
+
+远程同步第一阶段使用通用 S3-compatible 适配器，连接信息存入 SQLite `app_meta`，
+`Secret Access Key` 单独存入 Windows Credential Manager、macOS Keychain 或 Linux
+Secret Service，不写入 `config.json`、导出包、任务日志或错误消息。配置保存、连接测试
+和手动同步均为热更新，不影响代理运行。
+
+远端对象布局为
+`<prefix>/flowlet/v1/devices/<deviceId>/snapshot.json`。每台设备只写自己的对象，
+同步时分页列举同一前缀、逐个下载并复用本地数据包校验与幂等导入；单个损坏对象只计入
+失败数，不阻断其它设备。覆盖已有当前设备对象时使用 ETag `If-Match` 条件写入，若对象
+被另一个写入者修改则停止覆盖并提示可能存在重复设备 ID。连接测试会在配置前缀下写入、
+读取并删除一个临时小对象，以同时验证列举、读、写和删除权限。
 
 请求日志采用 SQLite 索引 + `request-captures/` 明细文件的混合存储。`request_logs`
 保留列表筛选、会话聚合、路由、性能和 Header 等查询字段，新请求的请求/响应 Body
@@ -471,7 +508,13 @@ Claude Code / OpenCode 会话归因回填、已捕获响应用量重解析、未
 一次该账号，探测成功后立即恢复为 `healthy` 并清除错误。普通 403 仍保持终态，避免对
 权限或请求错误盲目重试；401 无效密钥仍需修改 Key 或显式测试连接成功后恢复。
 
-模型价格不写入 SQLite。`config.json` 的 `channels_config.model_prices` 在应用启动时加载到内存，是当前成本估算的唯一价格来源。
+模型价格不写入 SQLite。运行时价格表在内存中装配，来源按优先级为：本地 `models-cn.json`
+（国内厂商官方价，CNY，含 `inputTokenRange` 分级与促销价优选）与 `models-dev.json`
+（models.dev 国际官方价，USD；`openai` provider 映射为 `openai-api` 命名空间，并按
+1 USD = 25 CREDITS 派生 `codex-native` 套餐额度价），`config.json` 的
+`channels_config.model_prices` 仅补充目录未覆盖的 `(channel_id, upstream_model)`。
+两份目录文件随安装包内置到 exe 旁，后台任务每小时同步一次；价格表在启动时与每次
+目录同步成功后重建。
 
 ### 统一 AI 成本账本（目标架构）
 

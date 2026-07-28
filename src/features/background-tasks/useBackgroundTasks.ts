@@ -24,16 +24,29 @@ export function useAgentDataSync() {
 export function useCancelBackgroundTask() { const client = useQueryClient(); return useMutation({ mutationFn: backgroundTaskCommands.cancel, onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all }) }); }
 export function useCleanupBackgroundTasks() { const client = useQueryClient(); return useMutation({ mutationFn: backgroundTaskCommands.cleanup, onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all }) }); }
 /**
- * 手动触发 models-cn 目录同步。
- * 成功后刷新 model-catalog 缓存：既让 ModelServicesPage 的目录内容重拉，
+ * 手动触发模型目录同步（models-cn 国内官方价 + models.dev 国际官方价，双源并发）。
+ * 两个源相互独立：单个源失败不影响另一个，全部失败才算 mutation 失败。
+ * 结束后刷新 model-catalog 缓存：既让 ModelServicesPage 的目录内容重拉，
  * 也让 useModelPriceCurrencies 的币种映射（共用同一 queryKey）一并更新，
  * 避免"同步完成后前端仍以为本地无数据、需要重启"的问题。
  */
-export function useModelsCnCatalogSync() {
+export function useModelCatalogsSync() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (params: { sourceUrl: string; triggerSource: string }) =>
-      backgroundTaskCommands.syncModelsCnCatalog(params.sourceUrl, params.triggerSource),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.modelCatalog.all }),
+    mutationFn: async (params: { modelsCnUrl: string; modelsDevUrl: string; triggerSource: string }) => {
+      const [cn, dev] = await Promise.allSettled([
+        backgroundTaskCommands.syncModelsCnCatalog(params.modelsCnUrl, params.triggerSource),
+        backgroundTaskCommands.syncModelsDevCatalog(params.modelsDevUrl, params.triggerSource),
+      ]);
+      if (cn.status === "rejected" && dev.status === "rejected") {
+        throw cn.reason ?? dev.reason;
+      }
+      return {
+        modelsCn: cn.status === "fulfilled" ? cn.value : null,
+        modelsDev: dev.status === "fulfilled" ? dev.value : null,
+        failedSource: cn.status === "rejected" ? "models-cn" : dev.status === "rejected" ? "models.dev" : null,
+      };
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.modelCatalog.all }),
   });
 }

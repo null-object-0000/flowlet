@@ -4,12 +4,15 @@
 
 ## 1. 数据源与优先级
 
-| 优先级 | 数据源 | 用途 |
-|--------|--------|------|
-| 1（唯一） | `models-cn/api.json` 的 `providers[].models[].prices[]` | 中国大陆模型厂商官方价格与模型信息 |
-| 2 | `models-cn/api.json` 的 `calibration.modelsDev` | 官方字段缺失时的唯一允许补全来源 |
+| 范围 | 数据源 | 用途 |
+|------|--------|------|
+| 国内模型 | `models-cn/api.json` 的 `providers[].models[].prices[]` | 中国大陆模型厂商官方价格与模型信息 |
+| 国际模型 | `models.dev/api.json`（本地落盘为 `models-dev.json`） | OpenAI 等国际厂商官方价格，仅 Rust 侧用于成本估算（如 Codex 会话的 `openai-api` USD 等价与 `codex-native` CREDITS 派生） |
+| 补全 | `models-cn/api.json` 的 `calibration.modelsDev` | models-cn 官方字段缺失时的唯一允许补全来源 |
 
-**注意**：`config.json` 的 `model_prices` 已移除。价格数据完全来自 models-cn，成本估算也使用 models-cn 数据。
+**注意**：`config.json` 的 `model_prices` 不再是主要价格来源，仅补充两份目录未覆盖的
+`(channel_id, upstream_model)`（如自定义渠道显式价格）；与目录冲突时以目录为准。
+国内模型价格来自 models-cn，国际模型价格来自 models.dev，成本估算使用合并后的价格表。
 
 ### 字段缺失补全规则
 
@@ -22,10 +25,10 @@
 
 每条模型在 models-cn 中可能有多个 `prices[]` 条目（`market` × `currency` × `rateType` 组合）。选取规则：
 
-1. **首选** `market = "china"` + `currency = "CNY"` + `rateType = "standard"`。
-2. 若无标准价，取 `market = "china"` + `currency = "CNY"` + `rateType = "promotional"`（需在 UI 标注「优惠价」）。
+1. **首选** `market = "china"` + `currency = "CNY"` + `rateType = "promotional"`：促销价是厂商当前实际生效价（需在 UI 标注「优惠价」）。
+2. 若无促销价，取 `market = "china"` + `currency = "CNY"` + `rateType = "standard"`。
 3. 若中国大陆官方价完全缺失，才可回退到 `market = "international"` 条目，并明确标注币种（如 USD）。
-4. 同一模型若同时存在标准价与优惠价，默认展示标准价，优惠价作为辅助信息展示。
+4. 同一模型若同时存在标准价与促销价，促销价作为当前价展示与计价，标准价仅在确有降价时作为划线原价辅助展示。
 
 ## 3. 缓存命中价格
 
@@ -60,12 +63,11 @@
 
 ## 6. 前端接入方式
 
-- **后台定时任务拉取**：Rust 后端启动后 1 小时触发第一次同步，之后每 1 小时自动拉取 `https://null-object-0000.github.io/models-cn/api.json`，保存到本地 SQLite `models_cn_catalog` 表。每次同步写入 `background_jobs` 任务日志。
-- **前端只读本地**：前端通过 `get_models_cn_catalog` 命令读取本地最新目录，不发起远程请求。本地无数据时，不展示 models-cn 相关内容（基础信息 Tab 仅展示渠道同步数据，价格信息 Tab 展示空状态 + 「立即同步」按钮）。
-- **手动同步**：用户可点击「立即同步」按钮触发 `sync_models_cn_catalog` 命令，结果写入任务日志。
+- **后台定时任务拉取**：Rust 后端启动后 1 小时触发第一次同步，之后每 1 小时顺序拉取 `https://null-object-0000.github.io/models-cn/api.json` 与 `https://models.dev/api.json`，分别保存为 exe 旁 `models-cn.json` / `models-dev.json` 文件（**不是 SQLite 表**）。每次同步独立写入 `background_jobs` 任务日志，并在任一同步成功后用两份目录 + `config.json` 的 `model_prices` 重建运行时价格表。
+- **前端只读本地**：前端通过 `get_models_cn_catalog` 命令读取本地最新 models-cn 目录，不发起远程请求。本地无数据时，不展示 models-cn 相关内容（基础信息 Tab 仅展示渠道同步数据，价格信息 Tab 展示空状态 + 「立即同步」按钮）。models.dev 目录仅 Rust 侧用于成本估算，前端不直接消费。
+- **手动同步**：用户可点击「立即同步」按钮，前端并发触发 `sync_models_cn_catalog` + `sync_models_dev_catalog` 两个命令；单个源失败不影响另一个。
 - **内容去重**：同步前计算 SHA-256 hash，与本地最新数据比较，内容未变化则跳过保存（返回 `skipped: true`）。
 - 解析后建立 `(providerId, modelId)` → 模型详情 + 官方价格的索引。
-- 模型服务页「基础信息」与「价格信息」Tab 优先展示 models-cn 数据；`config.json` 的 `model_prices` 仅作为展示降级。
 
 ## 7. 直接渠道模型详情 Tab 结构
 

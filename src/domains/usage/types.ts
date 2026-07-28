@@ -18,4 +18,14 @@ export type UsageSummaryRow = {
   estimated_cost: number;
 };
 
-export type UsagePeriod = "all" | "year" | "quarter" | "month" | "week";
+export type UsagePeriod = "all" | "year" | "quarter" | "month" | "week" | "today";
+
+/** 概览页「今日消耗」轻量聚合：单条聚合行，供 service-strip 悬浮明细展示。 */
+export type UsageTodaySummary = {
+  total_tokens: number;
+  input_tokens: number;
+  input_cached_tokens: number;
+  input_uncached_tokens: number;
+  cache_measured_input_tokens: number;
+  output_tokens: number;
+};

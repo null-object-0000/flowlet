@@ -293,6 +293,9 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 | `input_cached_price` | `number` | 否 | `0` | 已缓存输入 token 单价 |
 | `input_cache_write_price` | `number \| null` | 否 | `null` | 缓存写入 token 单价；缺失时回退到未缓存输入单价 |
 | `output_price` | `number` | 否 | `0` | 输出 token 单价 |
+| `tiers` | `array` | 否 | `[]` | 按输入长度分级计价；非空时按请求总输入 Token 选档 |
+| `tiers[].up_to_input_tokens` | `number \| null` | 否 | `null` | 该档总输入 Token 闭区间上限；`null` 为无上限兜底档 |
+| `tiers[].input_uncached_price` / `input_cached_price` / `input_cache_write_price` / `output_price` | 同上 | 否 | 同上 | 该档内的单价，语义同扁平字段 |
 | `currency` | `string` | 否 | `"USD"` | 货币单位 |
 | `unit` | `string` | 否 | `"1M tokens"` | 计价单位 |
 | `source_url` | `string \| null` | 否 | `null` | 价格来源页面，用于解释预估依据 |
@@ -300,12 +303,17 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 
 **行为**：
 
-- 应用启动时从 `config.json` 解析并加载到运行时内存；SQLite 不再保存 `model_prices` 表。
+- 运行时价格表以两份本地模型目录为主装配：`models-cn.json`（国内厂商官方价，CNY）与
+  `models-dev.json`（models.dev 国际官方价，USD），两者随安装包内置到 exe 旁，并由后台任务
+  每小时自动同步更新；`config.json` 的 `model_prices` 仅补充目录未覆盖的
+  `(channel_id, upstream_model)`（例如自定义渠道的显式价格），与目录冲突时以目录为准。
+- 价格表在应用启动时与每次目录同步成功后重建（重建时会重新读取 `config.json`，
+  因此 config 价格改动最迟在下一次目录同步后生效，也可通过重启立即生效）；
+  SQLite 不保存 `model_prices` 表。
 - 用于离线成本估算（`estimated_cost`），不进入主请求链路。
-- `channel_id = "openai-api"` 是标准 OpenAI API 公开价格的保留命名空间，用于计算 Codex 原生会话的 API 等价价值；结果保留价格表原币种，不做汇率转换。
-- `channel_id = "codex-native"` 是 Codex 套餐消耗的保留价格命名空间，按官方 credits/百万 Token 费率独立估算；两个保留命名空间都不代表新增代理渠道。
+- `channel_id = "openai-api"` 是标准 OpenAI API 公开价格的保留命名空间，用于计算 Codex 原生会话的 API 等价价值；数据来自 `models-dev.json` 的 `openai` provider，结果保留价格表原币种，不做汇率转换。
+- `channel_id = "codex-native"` 是 Codex 套餐消耗的保留价格命名空间，由 `openai-api` 美元价按固定比例（1 USD = 25 CREDITS）派生；两个保留命名空间都不代表新增代理渠道，也无需在 `model_prices` 中手工维护。
 - Codex 原生预估只在会话能够确定唯一模型且对应价格表存在精确模型匹配时生成；无法确认模型或无公开价格的模型保持未计价，不做推测。API 等价价值采用标准基础 API 价格，不叠加无法从原生记录可靠确认的长上下文、Priority processing 或 Fast mode 等乘数。
-- `config.json` 是模型价格的唯一真实来源；修改后需要重启应用以重新加载运行时价格。
 
 ### 6.3 `default_exposed_models` — 默认开放模型
 

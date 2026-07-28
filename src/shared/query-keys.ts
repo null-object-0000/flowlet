@@ -78,6 +78,12 @@ export const queryKeys = {
     accountStats: () => [...queryKeys.usage.all, "account-stats"] as const,
     latestBalanceSnapshots: () => [...queryKeys.usage.all, "latest-balance-snapshots"] as const,
   },
+  deviceSync: {
+    all: ["device-sync"] as const,
+    devices: () => [...queryKeys.deviceSync.all, "devices"] as const,
+    dailyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "daily-usage", deviceId ?? "all"] as const,
+    s3Settings: () => [...queryKeys.deviceSync.all, "s3-settings"] as const,
+  },
   settings: {
     all: ["settings"] as const,
     autostart: () => [...queryKeys.settings.all, "autostart"] as const,

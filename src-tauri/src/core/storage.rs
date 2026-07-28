@@ -42,7 +42,7 @@ pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
 pub use storage_maintenance::{DatabaseCompactionResult, DatabaseMaintenanceStats};
 pub use storage_tasks::{
     AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
-    BackgroundJobsFilter, BackgroundJobsPage, CleanupBackgroundJobsResult, ModelsCnSyncResult,
+    BackgroundJobsFilter, BackgroundJobsPage, CatalogSyncResult, CleanupBackgroundJobsResult,
 };
 
 #[derive(Clone)]
@@ -908,6 +908,35 @@ impl Storage {
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS known_devices (
+                device_id               TEXT PRIMARY KEY,
+                device_created_at       TEXT NOT NULL,
+                display_name            TEXT NOT NULL DEFAULT '',
+                platform                TEXT NOT NULL DEFAULT 'unknown',
+                app_version             TEXT NOT NULL DEFAULT 'unknown',
+                timezone_offset_minutes INTEGER NOT NULL,
+                profile_generated_at    TEXT NOT NULL DEFAULT '',
+                first_seen_at           TEXT NOT NULL,
+                last_seen_at            TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS device_daily_usage (
+                device_id                   TEXT NOT NULL,
+                usage_date                  TEXT NOT NULL,
+                request_count               INTEGER NOT NULL,
+                known_tokens                INTEGER NOT NULL,
+                input_tokens                INTEGER NOT NULL,
+                input_cached_tokens         INTEGER NOT NULL,
+                input_uncached_tokens       INTEGER NOT NULL,
+                cache_measured_input_tokens INTEGER NOT NULL,
+                output_tokens               INTEGER NOT NULL,
+                unknown_count               INTEGER NOT NULL,
+                snapshot_generated_at       TEXT NOT NULL,
+                imported_at                 TEXT NOT NULL,
+                PRIMARY KEY (device_id, usage_date),
+                FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS agent_session_snapshots (
                 agent_type TEXT NOT NULL,
                 session_id TEXT NOT NULL,
@@ -1090,6 +1119,30 @@ impl Storage {
         )?;
         // 渠道模板：补充平台查看地址（API Key 管理页跳转）
         add_column_if_missing(&connection, "channel_presets", "platform_url", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "known_devices",
+            "display_name",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "known_devices",
+            "platform",
+            "TEXT NOT NULL DEFAULT 'unknown'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "known_devices",
+            "app_version",
+            "TEXT NOT NULL DEFAULT 'unknown'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "known_devices",
+            "profile_generated_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
 
         // 余额快照：补充 LongCat 多资源包原始数据（JSON 数组）
         add_column_if_missing(

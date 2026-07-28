@@ -96,9 +96,9 @@ OpenAI-compatible `/models` 的实际返回结果，并统一受 Flowlet 全局�
 
 同时按实际能力维护：
 
-- `channels_config.model_prices`；
 - `channels_config.default_exposed_models`；
-- `channels_config.flowlet_tiers`。
+- `channels_config.flowlet_tiers`；
+- `channels_config.model_prices`：仅当渠道厂商**未被** `models-cn.json` / `models-dev.json` 目录覆盖时才需要手工维护（例如自定义中转站）。国内厂商与 OpenAI 官方价格已由两份本地目录提供，请勿重复填写。
 
 `flowlet_tiers` 只声明明确进入 `flowlet-pro` 或 `flowlet-flash` 的模型，值为档位数组；同一个上游模型可以同时进入多个档位。不要根据模型名称猜档位，也不要把所有模型默认映射到同一档。
 

@@ -35,9 +35,10 @@ export function OverviewPage() {
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
   const configurationStatus = deriveConfigurationStatus(accounts.data ?? [], routes.data ?? []);
 
-  // 概览页顶部「今日消耗」：用专用轻量接口，只拉今日 Token 总数（一个整数）。
-  // 不要复用 useUsageSummary —— 那个拉全量分组明细，每 30s 卡窗口拖动。
-  const { tokens: todayTokens } = useTodayTokens(true);
+  // 概览页顶部「今日消耗」：用专用轻量接口，拉今日 Token 聚合（总量 + 输入/
+  // 输出/缓存拆解，单条聚合行），供总数展示与悬浮明细。不要复用
+  // useUsageSummary —— 那个拉全量分组明细，每 30s 卡窗口拖动。
+  const { summary: todayUsage } = useTodayTokens(true);
 
   const onboarding = (
     <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>
@@ -84,7 +85,7 @@ export function OverviewPage() {
         phase={proxy.phase}
         bindConfig={bindConfig.data}
         baseUrl={baseUrl}
-        todayTokens={todayTokens}
+        todayUsage={todayUsage}
         hasAccounts={hasAccounts}
         onOpenDetails={() => setDetailsVisible(true)}
       />

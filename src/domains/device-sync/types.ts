@@ -1,0 +1,105 @@
+export type DailyUsageTotal = {
+  date: string;
+  requestCount: number;
+  knownTokens: number;
+  inputTokens: number;
+  inputCachedTokens: number;
+  inputUncachedTokens: number;
+  cacheMeasuredInputTokens: number;
+  outputTokens: number;
+  unknownCount: number;
+};
+
+export type DeviceUsageSnapshot = {
+  schemaVersion: number;
+  deviceId: string;
+  deviceCreatedAt: string;
+  displayName: string;
+  platform: string;
+  appVersion: string;
+  generatedAt: string;
+  timezoneOffsetMinutes: number;
+  days: DailyUsageTotal[];
+};
+
+export type KnownDevice = {
+  deviceId: string;
+  deviceCreatedAt: string;
+  displayName: string;
+  platform: string;
+  appVersion: string;
+  isCurrent: boolean;
+  timezoneOffsetMinutes: number;
+  firstUsageDate: string | null;
+  lastUsageDate: string | null;
+  dayCount: number;
+  requestCount: number;
+  knownTokens: number;
+  lastSeenAt: string;
+};
+
+export type DeviceUsageImportPreview = {
+  deviceId: string;
+  deviceCreatedAt: string;
+  displayName: string;
+  platform: string;
+  appVersion: string;
+  generatedAt: string;
+  timezoneOffsetMinutes: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  dayCount: number;
+  newDays: number;
+  updatedDays: number;
+  unchangedDays: number;
+  sameAsCurrentDevice: boolean;
+};
+
+export type DeviceUsageImportResult = {
+  deviceId: string;
+  importedDays: number;
+  unchangedDays: number;
+};
+
+export type S3SyncConfigInput = {
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  accessKeyId: string;
+  secretAccessKey: string | null;
+  pathStyle: boolean;
+};
+
+export type S3SyncConfigView = Omit<S3SyncConfigInput, "secretAccessKey"> & {
+  secretConfigured: boolean;
+};
+
+export type S3SyncStatus = {
+  status: "never" | "running" | "success" | "partial" | "failed";
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  message: string;
+  remoteDevices: number;
+  importedDevices: number;
+  importedDays: number;
+  failedObjects: number;
+};
+
+export type S3SyncSettings = {
+  config: S3SyncConfigView | null;
+  status: S3SyncStatus;
+};
+
+export type S3ConnectionTestResult = {
+  message: string;
+};
+
+export type S3DeviceSyncResult = {
+  remoteDevices: number;
+  importedDevices: number;
+  importedDays: number;
+  unchangedDays: number;
+  failedObjects: number;
+  uploadedKey: string;
+};

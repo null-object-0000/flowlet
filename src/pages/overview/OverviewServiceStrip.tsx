@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconEyeClosed, IconEyeOpened, IconLink } from "@douyinfe/semi-icons";
 import type { ProxyBindConfig, ProxyRuntimeState, ProxyStatus } from "../../domains/proxy/types";
+import type { UsageTodaySummary } from "../../domains/usage/types";
 import { formatDuration, getProxyPhaseLabel } from "../../features/proxy-lifecycle/proxyStatusPresentation";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../shared/formatters/number";
+import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import styles from "./OverviewServiceStrip.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
@@ -17,12 +19,12 @@ type Props = {
   phase: ProxyRuntimeState;
   bindConfig: ProxyBindConfig | undefined;
   baseUrl: string;
-  todayTokens: number | null;
+  todayUsage: UsageTodaySummary | null;
   hasAccounts: boolean;
   onOpenDetails: () => void;
 };
 
-export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayTokens, hasAccounts, onOpenDetails }: Props) {
+export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, hasAccounts, onOpenDetails }: Props) {
   const { language, t } = useAppPreferences();
   const running = status?.running === true;
 
@@ -88,10 +90,7 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
 
       <div className={styles.cell}>
         <div className={styles.tokenLabel}>{t("今日消耗")}</div>
-        <div className={styles.tokenValue}>
-          {todayTokens == null ? "—" : formatCompactNumber(todayTokens, language)}
-          <span className={styles.tokenUnit}>{t("Tokens")}</span>
-        </div>
+        <TodayTokenValue usage={todayUsage} language={language} t={t} />
       </div>
 
       {hasAccounts ? (
@@ -176,6 +175,35 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
         </div>
       ) : null}
     </div>
+  );
+}
+
+function TodayTokenValue({ usage, language, t }: { usage: UsageTodaySummary | null; language: "zh-CN" | "en-US"; t: (source: string, variables?: Record<string, string | number>) => string }) {
+  const text = usage ? formatCompactNumber(usage.total_tokens, language) : "—";
+  const value = (
+    <div className={usage ? `${styles.tokenValue} ${styles.tokenValueTooltip}` : styles.tokenValue}>
+      {text}
+      <span className={styles.tokenUnit}>{t("Tokens")}</span>
+    </div>
+  );
+  if (!usage) return value;
+  return (
+    <TokenBreakdownTooltip
+      language={language}
+      t={t}
+      tokens={{
+        total: usage.total_tokens,
+        input: usage.input_tokens,
+        cachedInput: usage.input_cached_tokens,
+        uncachedInput: usage.input_uncached_tokens,
+        output: usage.output_tokens,
+        cacheHitRate: usage.cache_measured_input_tokens > 0
+          ? usage.input_cached_tokens / usage.cache_measured_input_tokens
+          : null,
+      }}
+    >
+      {value}
+    </TokenBreakdownTooltip>
   );
 }
 

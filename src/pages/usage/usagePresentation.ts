@@ -22,9 +22,10 @@ export type UsageHeatmap = {
   cells: UsageHeatmapCell[];
   columns: number;
   rows?: number;
+  rowLabels?: string[];
   labels: Array<{ column: number; label: string }>;
   bucketUnit: "day" | "month";
-  granularity: "hour" | "day" | "month" | "year";
+  granularity: "hour" | "day" | "month" | "year" | "week";
   totalTokens: number;
 };
 
@@ -118,15 +119,27 @@ export function groupUsageByDay(rows: UsageSummaryRow[]): UsageDay[] {
   return [...groups.entries()].map(([date, value]) => ({ date, ...value })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export function buildUsageHeatmap(rows: UsageSummaryRow[], period: UsagePeriod, now = new Date(), locale = "zh-CN"): UsageHeatmap {
+export function buildUsageHeatmap(rows: UsageSummaryRow[], period: UsagePeriod, now = new Date(), locale = "zh-CN", hourlyRows = true): UsageHeatmap {
   const filtered = filterUsageRows(rows, period, now);
+  if (period === "today") {
+    // 当前设备的今日汇总按小时分组，渲染 24 格小时热力图；共享设备只有
+    // 日粒度摘要，退化为所在周日历，避免把全天用量堆到 00:00 一格。
+    if (hourlyRows) return hourlyHeatmap(filtered, now);
+    return dailyCalendarHeatmap(filtered, startOfUsagePeriod("today", now), now, now, locale, "day");
+  }
+  if (period === "week") {
+    // 周维度同样按小时分组：7（周一至周日）×24（小时）分时热力图；
+    // 共享设备日粒度摘要退化为 7 格周日历。
+    if (hourlyRows) return weeklyHourlyHeatmap(filtered, now, locale);
+    return dailyCalendarHeatmap(filtered, startOfUsagePeriod("week", now), endOfUsagePeriod("week", now), now, locale, "day");
+  }
   if (period === "year") return yearlyDailyHeatmap(filtered, now, locale);
   if (period === "all") {
     return monthlyBucketHeatmap(filtered, period, now, locale);
   }
   const start = startOfUsagePeriod(period, now);
   const end = endOfUsagePeriod(period, now);
-  return dailyCalendarHeatmap(filtered, start, end, now, locale, period === "week" ? "day" : "month");
+  return dailyCalendarHeatmap(filtered, start, end, now, locale, "month");
 }
 
 function hourlyHeatmap(rows: UsageSummaryRow[], now: Date): UsageHeatmap {
@@ -139,6 +152,30 @@ function hourlyHeatmap(rows: UsageSummaryRow[], now: Date): UsageHeatmap {
   }
   const values = Array.from({ length: 24 }, (_, hour) => ({ bucket: `${today}T${String(hour).padStart(2, "0")}:00:00`, tokens: tokensByHour.get(hour) ?? 0, outside: false }));
   return finalizeHeatmap(values, 24, [0, 6, 12, 18, 23].map((hour) => ({ column: hour + 1, label: `${String(hour).padStart(2, "0")}:00` })), "hour");
+}
+
+/** 本周 7×24 分时热力图：行 = 周一至周日，列 = 00–23 时。
+ *  依赖后端按小时分组的汇总行（date 形如 2026-07-28T14:00:00）。 */
+function weeklyHourlyHeatmap(rows: UsageSummaryRow[], now: Date, locale: string): UsageHeatmap {
+  const tokensByDateHour = new Map<string, number>();
+  for (const row of rows) {
+    const key = row.date.slice(0, 13);
+    tokensByDateHour.set(key, (tokensByDateHour.get(key) ?? 0) + finite(row.known_tokens));
+  }
+  const start = startOfUsagePeriod("week", now);
+  const values: Array<{ bucket: string; tokens: number; outside: boolean }> = [];
+  for (let day = 0; day < 7; day += 1) {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + day);
+    for (let hour = 0; hour < 24; hour += 1) {
+      const key = `${localDateKey(date)}T${String(hour).padStart(2, "0")}`;
+      const cellStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour);
+      values.push({ bucket: `${key}:00:00`, tokens: tokensByDateHour.get(key) ?? 0, outside: cellStart > now });
+    }
+  }
+  const labels = [0, 3, 6, 9, 12, 15, 18, 21].map((hour) => ({ column: hour + 1, label: String(hour).padStart(2, "0") }));
+  const rowLabels = Array.from({ length: 7 }, (_, index) => new Date(2026, 6, 13 + index).toLocaleDateString(locale, { weekday: "short" }));
+  const heatmap = finalizeHeatmap(values, 24, labels, "week");
+  return { ...heatmap, rows: 7, rowLabels };
 }
 
 function weeklyHeatmap(rows: UsageSummaryRow[], now: Date): UsageHeatmap {
@@ -294,6 +331,7 @@ export function localDateKey(value: Date) {
 }
 
 function startOfUsagePeriod(period: Exclude<UsagePeriod, "all">, now: Date): Date {
+  if (period === "today") return new Date(now.getFullYear(), now.getMonth(), now.getDate());
   if (period === "year") return new Date(now.getFullYear(), 0, 1);
   if (period === "quarter") return new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
   if (period === "month") return new Date(now.getFullYear(), now.getMonth(), 1);

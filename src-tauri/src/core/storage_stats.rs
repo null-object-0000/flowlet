@@ -224,7 +224,12 @@ fn build_summary(
         summarize_category(
             table_stats,
             "usage",
-            &["usage_records", "account_balance_snapshots"],
+            &[
+                "usage_records",
+                "account_balance_snapshots",
+                "known_devices",
+                "device_daily_usage",
+            ],
         ),
         summarize_category(
             table_stats,

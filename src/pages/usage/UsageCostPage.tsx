@@ -2,13 +2,16 @@ import { useMemo, useState } from "react";
 import { Button, Select, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconInfoCircle } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { UsagePeriod } from "../../domains/usage/types";
+import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
+import type { DailyUsageTotal } from "../../domains/device-sync/types";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
+import { useDeviceDailyUsage, useKnownDevices } from "../../features/device-sync/useDeviceSync";
 import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
+import { TokenBreakdownContent, TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
-import { buildUsageHeatmap, filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay, type UsageHeatmap } from "./usagePresentation";
+import { buildUsageHeatmap, filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay, type UsageHeatmap, type UsageHeatmapCell } from "./usagePresentation";
 import styles from "./UsageCostPage.module.css";
 import { dominantCostCurrency, formatCost, formatMultiCurrencyCost } from "../../shared/formatters/cost";
 import { formatCompactNumber as formatCompact, formatInteger } from "../../shared/formatters/number";
@@ -20,38 +23,80 @@ export function UsageCostPage() {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 30_000 });
   const [period, setPeriod] = useState<UsagePeriod>("month");
+  const [deviceSelection, setDeviceSelection] = useState("current");
+  const devices = useKnownDevices();
+  const currentDevice = devices.data?.find((device) => device.isCurrent) ?? null;
+  const sharedView = deviceSelection !== "current";
+  const selectedDeviceId = deviceSelection === "all" ? null : deviceSelection === "current" ? currentDevice?.deviceId ?? null : deviceSelection;
+  const sharedUsage = useDeviceDailyUsage(selectedDeviceId, sharedView);
   const usage = useUsageSummary(period, refresh.autoRefresh);
   const [metric, setMetric] = useState<TrendMetric>("tokens");
-  const initialLoading = usage.query.isPending && usage.query.data == null;
-  const rows = useMemo(() => filterUsageRows(usage.query.data ?? [], period), [period, usage.query.data]);
+  const initialLoading = sharedView
+    ? sharedUsage.isPending && sharedUsage.data == null
+    : usage.query.isPending && usage.query.data == null;
+  const sourceRows = useMemo(
+    () => sharedView ? dailyTotalsToUsageRows(sharedUsage.data ?? []) : usage.query.data ?? [],
+    [sharedUsage.data, sharedView, usage.query.data],
+  );
+  const rows = useMemo(() => filterUsageRows(sourceRows, period), [period, sourceRows]);
   const priceLookup = useModelPriceCurrencyLookup();
   const { modelCurrencyOf, channelCurrencyOf } = priceLookup;
   const summary = useMemo(() => summarizeUsage(rows, modelCurrencyOf), [rows, modelCurrencyOf]);
   const days = useMemo(() => groupUsageByDay(rows), [rows]);
-  const activity = useMemo(() => buildUsageHeatmap(usage.query.data ?? [], period, new Date(), language), [language, period, usage.query.data]);
-  const models = useMemo(() => groupUsageByModel(rows, modelCurrencyOf), [rows, modelCurrencyOf]);
-  const channels = useMemo(() => groupUsageByChannel(rows, channelCurrencyOf), [rows, channelCurrencyOf]);
+  const activity = useMemo(() => buildUsageHeatmap(sourceRows, period, new Date(), language, !sharedView), [language, period, sharedView, sourceRows]);
+  const models = useMemo(() => sharedView ? [] : groupUsageByModel(rows, modelCurrencyOf), [rows, modelCurrencyOf, sharedView]);
+  const channels = useMemo(() => sharedView ? [] : groupUsageByChannel(rows, channelCurrencyOf), [rows, channelCurrencyOf, sharedView]);
   const totalCostLabel = formatMultiCurrencyCost(summary.costByCurrency);
   const chartCostCurrency = dominantCostCurrency(summary.costByCurrency);
   const cacheHitRate = summary.cacheMeasuredInputTokens > 0
     ? summary.cachedInputTokens / summary.cacheMeasuredInputTokens
     : null;
-  const cacheDetails = <div className={styles.channelUsageTooltip}>
-    <span><em>{t("输入 Token")}</em><strong>{formatCompact(summary.inputTokens, language)}</strong></span>
-    <span><em>{t("缓存输入 Token")}</em><strong>{formatCompact(summary.cachedInputTokens, language)}</strong></span>
-    <span><em>{t("未缓存输入 Token")}</em><strong>{formatCompact(summary.uncachedInputTokens, language)}</strong></span>
-  </div>;
+  const cacheDetails = <TokenBreakdownContent
+    language={language}
+    t={t}
+    tokens={{
+      total: summary.tokens,
+      input: summary.inputTokens,
+      cachedInput: summary.cachedInputTokens,
+      uncachedInput: summary.uncachedInputTokens,
+      output: summary.outputTokens,
+      cacheHitRate,
+    }}
+  />;
   const periodLabel = {
     all: t("全部时间"),
     year: t("今年"),
     quarter: t("本季度"),
     month: t("本月"),
     week: t("本周"),
+    today: t("今日"),
   }[period];
 
   return <main className={styles.page}>
     <header className={styles.pageHeading}>
-      <div><Title heading={3}>{t("用量成本")}</Title><Paragraph>{t("查看模型、渠道与账号维度的 Token 消耗和预估费用")}</Paragraph></div>
+      <div><Title heading={3}>{t("用量成本")}</Title><Paragraph>{sharedView ? t("共享设备仅展示每日请求与 Token 汇总") : t("查看模型、渠道与账号维度的 Token 消耗和预估费用")}</Paragraph></div>
+      <Select
+        className={styles.deviceSelect}
+        insetLabel={t("设备")}
+        value={deviceSelection}
+        aria-label={t("设备")}
+        optionList={[
+          { value: "all", label: t("全部设备") },
+          {
+            value: "current",
+            label: currentDevice ? `${t("当前设备")} · ${currentDevice.displayName}` : t("当前设备"),
+          },
+          ...(devices.data ?? []).filter((device) => !device.isCurrent).map((device) => ({
+            value: device.deviceId,
+            label: device.displayName,
+          })),
+        ]}
+        onChange={(value) => {
+          const next = String(value);
+          setDeviceSelection(next);
+          if (next !== "current") setMetric("tokens");
+        }}
+      />
       <Select
         value={period}
         aria-label={t("统计周期")}
@@ -61,6 +106,7 @@ export function UsageCostPage() {
           { value: "quarter", label: t("本季度") },
           { value: "month", label: t("本月") },
           { value: "week", label: t("本周") },
+          { value: "today", label: t("今日") },
         ]}
         onChange={(value) => setPeriod(value as UsagePeriod)}
       />
@@ -78,18 +124,18 @@ export function UsageCostPage() {
 
     {initialLoading ? <UsageCostSkeleton loadingLabel={t("正在加载用量…")} /> : <>
     <section className={styles.stats} aria-label={t("用量统计")}>
-      <Stat label={t("{period}预估费用", { period: periodLabel })} value={totalCostLabel} meta={t("基于已知价格")} />
+      <Stat label={t("{period}预估费用", { period: periodLabel })} value={sharedView ? "—" : totalCostLabel} meta={sharedView ? t("每日共享摘要不包含费用") : t("基于已知价格")} />
       <Stat label={t("{period} Token 消耗", { period: periodLabel })} value={formatCompact(summary.tokens, language)} meta={t("输入 {input} · 输出 {output}", { input: formatCompact(summary.inputTokens, language), output: formatCompact(summary.outputTokens, language) })} />
-      <Stat label={t("{period}请求量", { period: periodLabel })} value={formatInteger(summary.requests, language)} meta={t("本地代理记录")} />
+      <Stat label={t("{period}请求量", { period: periodLabel })} value={formatInteger(summary.requests, language)} meta={sharedView ? t("设备每日摘要") : t("本地代理记录")} />
       <Stat label={t("缓存命中率")} value={cacheHitRate == null ? "—" : formatPercent(cacheHitRate)} meta={t("缓存 {cached} · 未缓存 {uncached}", { cached: formatCompact(summary.cachedInputTokens, language), uncached: formatCompact(summary.uncachedInputTokens, language) })} tooltip={cacheDetails} />
     </section>
 
-    {usage.query.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{usage.query.error.message}</span><Button onClick={() => void usage.query.refetch()}>{t("重试")}</Button></div> : null}
-    {!usage.query.isError ? <div className={styles.workspace}>
+    {(sharedView ? sharedUsage.isError : usage.query.isError) ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{sharedView ? sharedUsage.error?.message : usage.query.error?.message}</span><Button onClick={() => void (sharedView ? sharedUsage.refetch() : usage.query.refetch())}>{t("重试")}</Button></div> : null}
+    {!(sharedView ? sharedUsage.isError : usage.query.isError) ? <div className={styles.workspace}>
       <section className={styles.mainCard}>
         <header className={styles.cardHeader}>
-          <div><strong>{t(metric === "tokens" ? "Token 活动" : "消耗趋势")}</strong><small>{t("{period}每日汇总", { period: periodLabel })}</small></div>
-          <div className={styles.segments}><button type="button" className={metric === "cost" ? styles.active : ""} onClick={() => setMetric("cost")}>{t("费用")}</button><button type="button" className={metric === "tokens" ? styles.active : ""} onClick={() => setMetric("tokens")}>Tokens</button></div>
+          <div><strong>{t(metric === "tokens" ? "Token 活动" : "消耗趋势")}</strong><small>{t(activity.granularity === "hour" ? "{period}按小时汇总" : activity.granularity === "week" ? "{period}分时汇总" : "{period}每日汇总", { period: periodLabel })}</small></div>
+          <div className={styles.segments}>{!sharedView ? <button type="button" className={metric === "cost" ? styles.active : ""} onClick={() => setMetric("cost")}>{t("费用")}</button> : null}<button type="button" className={metric === "tokens" ? styles.active : ""} onClick={() => setMetric("tokens")}>Tokens</button></div>
         </header>
         <div className={styles.trend}>
           <div className={styles.trendSummary}><strong>{metric === "cost" ? totalCostLabel : `${formatCompact(summary.tokens, language)} Tokens`}</strong><span>{periodLabel}{t("累计")}</span></div>
@@ -105,14 +151,20 @@ export function UsageCostPage() {
             {models.length === 0 ? <div className={styles.empty}>{t("暂无模型用量")}</div> : models.map((model) => <div className={styles.breakdownRow} key={model.key}>
               <span className={styles.modelCell}><ChannelBrandLogo channelId={model.brandId ?? "unknown-channel"} name={model.label} /><strong>{model.label}</strong></span>
               <span>{formatInteger(model.requests, language)}</span>
-              <Tooltip content={<div className={styles.channelUsageTooltip}>
-                <span><em>{t("输入 Token")}</em><strong>{formatCompact(model.inputTokens, language)}</strong></span>
-                <span><em>{t("输出 Token")}</em><strong>{formatCompact(model.outputTokens, language)}</strong></span>
-                <span><em>{t("缓存输入 Token")}</em><strong>{formatCompact(model.cachedInputTokens, language)}</strong></span>
-                <span><em>{t("未缓存输入 Token")}</em><strong>{formatCompact(model.uncachedInputTokens, language)}</strong></span>
-              </div>}>
+              <TokenBreakdownTooltip
+                language={language}
+                t={t}
+                tokens={{
+                  total: model.tokens,
+                  input: model.inputTokens,
+                  cachedInput: model.cachedInputTokens,
+                  uncachedInput: model.uncachedInputTokens,
+                  output: model.outputTokens,
+                  cacheHitRate: model.cacheMeasuredInputTokens > 0 ? model.cachedInputTokens / model.cacheMeasuredInputTokens : null,
+                }}
+              >
                 <span className={styles.modelTokens}>{formatCompact(model.tokens, language)}</span>
-              </Tooltip>
+              </TokenBreakdownTooltip>
               <span>{model.cacheMeasuredInputTokens > 0 ? formatPercent(model.cachedInputTokens / model.cacheMeasuredInputTokens) : "—"}</span>
               <span className={styles.costCell} title={formatCost(model.cost, model.currency)}>{formatCost(model.cost, model.currency)}</span>
               <span className={styles.share}><i><b style={{ width: `${Math.max(0, Math.min(100, model.share * 100))}%` }} /></i><em>{formatPercent(model.share)}</em></span>
@@ -138,15 +190,21 @@ export function UsageCostPage() {
             <ChannelBrandLogo channelId={channel.brandId ?? channel.key} name={channel.label} />
             <span>
               <strong>{channel.label}</strong>
-              <Tooltip content={<div className={styles.channelUsageTooltip}>
-                <span><em>{t("请求量")}</em><strong>{formatInteger(channel.requests, language)}</strong></span>
-                <span><em>{t("输入 Token")}</em><strong>{formatCompact(channel.inputTokens, language)}</strong></span>
-                <span><em>{t("输出 Token")}</em><strong>{formatCompact(channel.outputTokens, language)}</strong></span>
-                <span><em>{t("缓存输入 Token")}</em><strong>{formatCompact(channel.cachedInputTokens, language)}</strong></span>
-                <span><em>{t("未缓存输入 Token")}</em><strong>{formatCompact(channel.uncachedInputTokens, language)}</strong></span>
-              </div>}>
+              <TokenBreakdownTooltip
+                language={language}
+                t={t}
+                tokens={{
+                  total: channel.tokens,
+                  input: channel.inputTokens,
+                  cachedInput: channel.cachedInputTokens,
+                  uncachedInput: channel.uncachedInputTokens,
+                  output: channel.outputTokens,
+                  cacheHitRate: channel.cacheMeasuredInputTokens > 0 ? channel.cachedInputTokens / channel.cacheMeasuredInputTokens : null,
+                  requests: channel.requests,
+                }}
+              >
                 <small className={styles.channelTokens}>{formatCompact(channel.tokens, language)} Tokens</small>
-              </Tooltip>
+              </TokenBreakdownTooltip>
             </span>
             <span><strong title={formatCost(channel.cost, channel.currency)}>{formatCost(channel.cost, channel.currency)}</strong><small>{formatPercent(channel.share)}</small></span>
           </div>)}</div>
@@ -229,22 +287,69 @@ function TokenActivityHeatmap({ activity, language, lessLabel, moreLabel }: { ac
     ...columnStyle,
     ...(activity.rows ? { gridTemplateRows: `repeat(${activity.rows}, minmax(0, 1fr))` } : {}),
   };
-  return <div className={`${styles.heatmap} ${styles[`heatmap-${activity.granularity}`]} ${styles[`heatmap-${activity.bucketUnit}-buckets`]}`}>
-    <div className={styles.heatmapLabels} style={columnStyle}>
-      {activity.labels.map((label) => <span key={`${label.column}-${label.label}`} style={{ gridColumn: label.column }}>{label.label}</span>)}
-    </div>
-    <div className={styles.heatmapGrid} style={gridStyle}>
-      {activity.cells.map((cell) => {
-        const date = new Date(activity.bucketUnit === "month" ? `${cell.bucket}-01T00:00:00` : `${cell.bucket.slice(0, 10)}T00:00:00`);
-        const timeLabel = activity.bucketUnit === "month"
-          ? date.toLocaleDateString(language, { year: "numeric", month: "long" })
-          : date.toLocaleDateString(language);
-        const title = `${timeLabel} · ${formatInteger(cell.tokens, language)} Tokens`;
-        return <span key={cell.bucket} className={`${styles.heatmapCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""}`} title={title} aria-label={title} />;
-      })}
-    </div>
-    <div className={styles.heatmapLegend}><span>{lessLabel}</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`${styles.heatmapCell} ${styles[`heatLevel${level}`]}`} />)}<span>{moreLabel}</span></div>
+  const cells = activity.cells.map((cell) => {
+    const title = heatmapCellTitle(activity, cell, language);
+    return <span key={cell.bucket} className={`${styles.heatmapCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""}`} title={title} aria-label={title} />;
+  });
+  const axisLabels = <div className={styles.heatmapLabels} style={columnStyle}>
+    {activity.labels.map((label) => <span key={`${label.column}-${label.label}`} style={{ gridColumn: label.column }}>{label.label}</span>)}
   </div>;
+  // 周分时视图：左侧星期标签 + 7×24 网格 + 底部小时刻度，与其余周期的顶部标签布局不同。
+  if (activity.granularity === "week") {
+    return <div className={styles.heatmapWeek}>
+      <div className={styles.heatmapRowLabels}>{(activity.rowLabels ?? []).map((label) => <span key={label}>{label}</span>)}</div>
+      <div className={styles.heatmapGrid} style={gridStyle}>{cells}</div>
+      {axisLabels}
+      <HeatmapLegend lessLabel={lessLabel} moreLabel={moreLabel} />
+    </div>;
+  }
+  return <div className={`${styles.heatmap} ${styles[`heatmap-${activity.granularity}`]} ${styles[`heatmap-${activity.bucketUnit}-buckets`]}`}>
+    {axisLabels}
+    <div className={styles.heatmapGrid} style={gridStyle}>{cells}</div>
+    <HeatmapLegend lessLabel={lessLabel} moreLabel={moreLabel} />
+  </div>;
+}
+
+function HeatmapLegend({ lessLabel, moreLabel }: { lessLabel: string; moreLabel: string }) {
+  return <div className={styles.heatmapLegend}><span>{lessLabel}</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`${styles.heatmapCell} ${styles[`heatLevel${level}`]}`} />)}<span>{moreLabel}</span></div>;
+}
+
+function heatmapCellTitle(activity: UsageHeatmap, cell: UsageHeatmapCell, language: "zh-CN" | "en-US") {
+  if (activity.granularity === "hour") {
+    const timeLabel = new Date(cell.bucket).toLocaleString(language, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+    return `${timeLabel} · ${formatInteger(cell.tokens, language)} Tokens`;
+  }
+  if (activity.granularity === "week") {
+    const timeLabel = new Date(cell.bucket).toLocaleString(language, { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+    return `${timeLabel} · ${formatInteger(cell.tokens, language)} Tokens`;
+  }
+  const date = new Date(activity.bucketUnit === "month" ? `${cell.bucket}-01T00:00:00` : `${cell.bucket.slice(0, 10)}T00:00:00`);
+  const timeLabel = activity.bucketUnit === "month"
+    ? date.toLocaleDateString(language, { year: "numeric", month: "long" })
+    : date.toLocaleDateString(language);
+  return `${timeLabel} · ${formatInteger(cell.tokens, language)} Tokens`;
+}
+
+function dailyTotalsToUsageRows(days: DailyUsageTotal[]): UsageSummaryRow[] {
+  return days.map((day) => ({
+    date: day.date,
+    client_id: null,
+    client_name: null,
+    channel_id: null,
+    channel_name: null,
+    account_id: null,
+    account_name: null,
+    upstream_model: null,
+    request_count: day.requestCount,
+    known_tokens: day.knownTokens,
+    input_tokens: day.inputTokens,
+    input_cached_tokens: day.inputCachedTokens,
+    input_uncached_tokens: day.inputUncachedTokens,
+    cache_measured_input_tokens: day.cacheMeasuredInputTokens,
+    output_tokens: day.outputTokens,
+    unknown_count: day.unknownCount,
+    estimated_cost: 0,
+  }));
 }
 
 /** Cost cell formatter: currency symbol follows the model's pricing currency

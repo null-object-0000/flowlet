@@ -1025,12 +1025,14 @@ fn needs_agent_snapshot_refresh(
         })
 }
 
-// ─── models-cn 目录同步 ───────────────────────────────────────────────────
+// ─── 模型目录同步（models-cn / models.dev） ───────────────────────────────
 
-/// models-cn 同步结果。
+/// 模型目录同步结果。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelsCnSyncResult {
+pub struct CatalogSyncResult {
+    /// 目录来源标识："models-cn" / "models.dev"。
+    pub source: String,
     pub started: bool,
     pub job_id: Option<String>,
     pub skipped: bool,
@@ -1039,29 +1041,128 @@ pub struct ModelsCnSyncResult {
     pub message: String,
 }
 
-/// models-cn 本地文件路径（exe 同级目录）。
-pub fn models_cn_file_path() -> std::path::PathBuf {
-    let exe_dir = std::env::current_exe()
+/// 一个模型目录的同步规格：本地文件名、后台任务身份与统计方式。
+struct CatalogSpec {
+    /// 来源标识，写入同步结果与任务日志。
+    source: &'static str,
+    job_type: &'static str,
+    title: &'static str,
+    /// exe 同级的本地文件名。
+    file_name: &'static str,
+    /// 从解析后的目录 JSON 统计 (provider 数, 模型数)。
+    count: fn(&serde_json::Value) -> (usize, usize),
+}
+
+const MODELS_CN_SPEC: CatalogSpec = CatalogSpec {
+    source: "models-cn",
+    job_type: "models-cn-sync",
+    title: "models-cn 目录同步",
+    file_name: "models-cn.json",
+    count: count_models_cn_catalog,
+};
+
+const MODELS_DEV_SPEC: CatalogSpec = CatalogSpec {
+    source: "models.dev",
+    job_type: "models-dev-sync",
+    title: "models.dev 目录同步",
+    file_name: "models-dev.json",
+    count: count_models_dev_catalog,
+};
+
+/// 模型目录本地文件所在目录（exe 同级）。
+fn catalog_dir() -> std::path::PathBuf {
+    std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    exe_dir.join("models-cn.json")
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+/// models-cn 本地文件路径（exe 同级目录）。
+pub fn models_cn_file_path() -> std::path::PathBuf {
+    catalog_dir().join(MODELS_CN_SPEC.file_name)
+}
+
+/// models.dev 本地文件路径（exe 同级目录）。
+pub fn models_dev_file_path() -> std::path::PathBuf {
+    catalog_dir().join(MODELS_DEV_SPEC.file_name)
 }
 
 /// 读取本地 models-cn 目录文件。返回 None 表示文件不存在。
 pub fn read_models_cn_file() -> Option<String> {
-    let path = models_cn_file_path();
-    std::fs::read_to_string(&path).ok()
+    std::fs::read_to_string(models_cn_file_path()).ok()
 }
 
-/// 拉取 models-cn 目录并保存为本地 JSON 文件。
+/// 读取本地 models.dev 目录文件。返回 None 表示文件不存在。
+pub fn read_models_dev_file() -> Option<String> {
+    std::fs::read_to_string(models_dev_file_path()).ok()
+}
+
+/// models-cn 目录结构：{ "providers": [{ "models": [...] }] }。
+fn count_models_cn_catalog(json: &serde_json::Value) -> (usize, usize) {
+    let providers = json
+        .get("providers")
+        .and_then(|p| p.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let mut models = 0;
+    if let Some(providers) = json.get("providers").and_then(|p| p.as_array()) {
+        for provider in providers {
+            models += provider
+                .get("models")
+                .and_then(|m| m.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+        }
+    }
+    (providers, models)
+}
+
+/// models.dev 目录结构：{ "<providerId>": { "models": { "<modelId>": {...} } } }。
+fn count_models_dev_catalog(json: &serde_json::Value) -> (usize, usize) {
+    let Some(providers) = json.as_object() else {
+        return (0, 0);
+    };
+    let mut models = 0;
+    for provider in providers.values() {
+        models += provider
+            .get("models")
+            .and_then(|m| m.as_object())
+            .map(|o| o.len())
+            .unwrap_or(0);
+    }
+    (providers.len(), models)
+}
+
+/// 拉取 models-cn 目录并保存为本地 JSON 文件，成功后重建内存价格表。
 /// 若内容与上次一致（content_hash 相同）则跳过保存，返回 skipped=true。
 /// 所有运行信息写入后台任务日志。
 pub async fn sync_models_cn_catalog(
     storage: &Storage,
+    config_path: &std::path::Path,
     source_url: &str,
     trigger: &str,
-) -> Result<ModelsCnSyncResult, String> {
+) -> Result<CatalogSyncResult, String> {
+    sync_catalog_file(storage, config_path, &MODELS_CN_SPEC, source_url, trigger).await
+}
+
+/// 拉取 models.dev 目录并保存为本地 JSON 文件，成功后重建内存价格表。
+/// 语义与 models-cn 同步一致。
+pub async fn sync_models_dev_catalog(
+    storage: &Storage,
+    config_path: &std::path::Path,
+    source_url: &str,
+    trigger: &str,
+) -> Result<CatalogSyncResult, String> {
+    sync_catalog_file(storage, config_path, &MODELS_DEV_SPEC, source_url, trigger).await
+}
+
+async fn sync_catalog_file(
+    storage: &Storage,
+    config_path: &std::path::Path,
+    spec: &CatalogSpec,
+    source_url: &str,
+    trigger: &str,
+) -> Result<CatalogSyncResult, String> {
     // 1. 拉取远程数据（async reqwest）
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -1072,58 +1173,54 @@ pub async fn sync_models_cn_catalog(
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
-        .map_err(|e| format!("请求 models-cn 失败：{e}"))?;
+        .map_err(|e| format!("请求 {} 失败：{e}", spec.source))?;
     if !response.status().is_success() {
-        return Err(format!("models-cn 返回 HTTP {}", response.status()));
+        return Err(format!("{} 返回 HTTP {}", spec.source, response.status()));
     }
-    let body = response.text().await.map_err(|e| format!("读取 models-cn 响应失败：{e}"))?;
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("读取 {} 响应失败：{e}", spec.source))?;
 
     // 2. 计算内容 hash，与本地文件比较
-    let hash = sha2::Sha256::digest(body.as_bytes());
-    let content_hash = format!("sha256:{}", hex::encode(hash));
-    if let Some(existing) = read_models_cn_file() {
-        let existing_hash = format!("sha256:{}", hex::encode(sha2::Sha256::digest(existing.as_bytes())));
+    let file_path = catalog_dir().join(spec.file_name);
+    let content_hash = format!("sha256:{}", hex::encode(sha2::Sha256::digest(body.as_bytes())));
+    if let Ok(existing) = std::fs::read_to_string(&file_path) {
+        let existing_hash =
+            format!("sha256:{}", hex::encode(sha2::Sha256::digest(existing.as_bytes())));
         if existing_hash == content_hash {
-            return Ok(ModelsCnSyncResult {
+            return Ok(CatalogSyncResult {
+                source: spec.source.to_string(),
                 started: false,
                 job_id: None,
                 skipped: true,
                 provider_count: 0,
                 model_count: 0,
-                message: "models-cn 数据未变化，跳过保存".into(),
+                message: format!("{} 数据未变化，跳过保存", spec.source),
             });
         }
     }
 
     // 3. 解析 JSON 统计 provider/model 数量
     let json: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| format!("解析 models-cn JSON 失败：{e}"))?;
-    let providers = json.get("providers").and_then(|p| p.as_array()).map(|a| a.len()).unwrap_or(0);
-    let mut model_count = 0;
-    if let Some(providers) = json.get("providers").and_then(|p| p.as_array()) {
-        for provider in providers {
-            if let Some(models) = provider.get("models").and_then(|m| m.as_array()) {
-                model_count += models.len();
-            }
-        }
-    }
+        .map_err(|e| format!("解析 {} JSON 失败：{e}", spec.source))?;
+    let (provider_count, model_count) = (spec.count)(&json);
 
     // 4. 创建后台任务并记录事件
     let job_id = uuid::Uuid::new_v4().to_string();
     storage
         .create_job(
             &job_id,
-            "models-cn-sync",
-            "models-cn 目录同步",
+            spec.job_type,
+            spec.title,
             "拉取官方价格与模型信息",
             trigger,
             1,
-            &format!("开始拉取 models-cn 目录：{source_url}"),
+            &format!("开始拉取 {} 目录：{source_url}", spec.source),
         )
         .map_err(|e| e.to_string())?;
 
     // 5. 保存为本地 JSON 文件（原子写入：先写临时文件再 rename）
-    let file_path = models_cn_file_path();
     let tmp_path = file_path.with_extension("json.tmp");
     if let Err(error) = std::fs::write(&tmp_path, &body) {
         let error_string = format!("写入临时文件失败：{error}");
@@ -1138,7 +1235,7 @@ pub async fn sync_models_cn_catalog(
 
     storage.update_job_progress(&job_id, 1, 1).map_err(|e| e.to_string())?;
     let summary = serde_json::json!({
-        "providerCount": providers,
+        "providerCount": provider_count,
         "modelCount": model_count,
         "contentHash": content_hash,
         "sourceUrl": source_url,
@@ -1148,33 +1245,89 @@ pub async fn sync_models_cn_catalog(
             &job_id,
             "succeeded",
             &summary.to_string(),
-            &format!("models-cn 同步完成：{providers} 个厂商、{model_count} 个模型"),
+            &format!("{} 同步完成：{provider_count} 个厂商、{model_count} 个模型", spec.source),
         )
         .map_err(|e| e.to_string())?;
 
-    // 6. 同步成功后，用新目录刷新内存中的价格表（用于成本估算）
-    match build_prices_from_models_cn_catalog(&body) {
-        Ok(prices) => {
-            storage.set_prices(prices);
-        }
-        Err(error) => {
-            let _ = storage.add_job_event(
-                &job_id,
-                "warning",
-                "价格表更新",
-                &format!("从新目录生成价格表失败：{error}"),
-            );
-        }
-    }
+    // 6. 同步成功后，用两份本地目录 + config.json 重建内存价格表（用于成本估算）
+    let price_count = rebuild_price_table(storage, config_path);
+    let _ = storage.add_job_event(
+        &job_id,
+        "info",
+        "价格表更新",
+        &format!("已用最新目录重建价格表，共 {price_count} 条"),
+    );
 
-    Ok(ModelsCnSyncResult {
+    Ok(CatalogSyncResult {
+        source: spec.source.to_string(),
         started: true,
         job_id: Some(job_id),
         skipped: false,
-        provider_count: providers,
+        provider_count,
         model_count,
-        message: format!("同步完成：{providers} 个厂商、{model_count} 个模型"),
+        message: format!("同步完成：{provider_count} 个厂商、{model_count} 个模型"),
     })
+}
+
+// ─── 价格表装配 ─────────────────────────────────────────────────────────────
+
+/// 用本地目录文件（models-cn + models.dev）与 config.json 的 model_prices
+/// 重建内存价格表。合并语义：目录派生优先，config.json 仅补充目录未覆盖的
+/// (channel_id, upstream_model)（例如自定义渠道的显式价格）。
+/// 各来源失败互不影响，仅记录日志；返回最终价格条数。
+pub fn rebuild_price_table(storage: &Storage, config_path: &std::path::Path) -> usize {
+    let mut catalog_prices = Vec::new();
+    if let Some(catalog_json) = read_models_cn_file() {
+        match build_prices_from_models_cn_catalog(&catalog_json) {
+            Ok(built) => catalog_prices.extend(built),
+            Err(error) => tracing::warn!(error = %error, "从 models-cn.json 生成价格表失败"),
+        }
+    }
+    if let Some(catalog_json) = read_models_dev_file() {
+        match build_prices_from_models_dev_catalog(&catalog_json) {
+            Ok(built) => catalog_prices.extend(built),
+            Err(error) => tracing::warn!(error = %error, "从 models-dev.json 生成价格表失败"),
+        }
+    }
+
+    let config_prices = std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| {
+            crate::core::channels_config::ChannelsConfig::from_config_json(&value).ok()
+        })
+        .map(|config| config.prices)
+        .unwrap_or_default();
+
+    let prices = merge_price_tables(catalog_prices, config_prices);
+    let count = prices.len();
+    if count == 0 {
+        tracing::warn!("本地无模型目录且 config.json 无价格，成本估算将不可用");
+    } else {
+        tracing::info!(count, "价格表已重建（目录优先，config 补充）");
+    }
+    storage.set_prices(prices);
+    count
+}
+
+/// 合并目录派生价格与 config.json 价格：目录优先，config 仅补充未覆盖的 key。
+/// key 为 (channel_id, upstream_model)，大小写不敏感。
+fn merge_price_tables(
+    catalog_prices: Vec<crate::core::config::ModelPrice>,
+    config_prices: Vec<crate::core::config::ModelPrice>,
+) -> Vec<crate::core::config::ModelPrice> {
+    let mut keys = std::collections::HashSet::new();
+    let mut merged = Vec::new();
+    for price in catalog_prices.into_iter().chain(config_prices) {
+        let key = (
+            price.channel_id.to_lowercase(),
+            price.upstream_model.to_lowercase(),
+        );
+        if keys.insert(key) {
+            merged.push(price);
+        }
+    }
+    merged
 }
 
 // ─── models-cn → ModelPrice 转换 ──────────────────────────────────────────
@@ -1293,6 +1446,9 @@ pub fn get_models_cn_currencies() -> Result<Vec<(String, String)>, String> {
 }
 
 struct BestModelPrice {
+    market: String,
+    currency: String,
+    rate_type: String,
     input_standard: f64,
     input_cache_hit: f64,
     input_cache_write: Option<f64>,
@@ -1300,11 +1456,13 @@ struct BestModelPrice {
     source_url: Option<String>,
 }
 
-/// 从模型的 prices[] 中选取最优官方价：china + CNY + standard。
-/// 若无标准价则取 promotional。缓存价仅在 input.cacheHit 存在时使用。
+/// 从模型的 prices[] 中选取最优官方价：china + CNY + promotional。
+/// promotional 优先：厂商当前生效的是促销价，standard 仅作兜底参考
+/// （与前端 domains/modelCatalog/pricing.ts 的 priceScore 语义一致）。
+/// 缓存命中价仅在 input.cacheHit 存在时使用。
 fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPrice> {
     let prices = model.get("prices")?.as_array()?;
-    // 优先级：china+CNY+standard > china+CNY+promotional > 其他
+    // 优先级：china+CNY+promotional > china+CNY+standard > 其他
     let mut best: Option<&serde_json::Value> = None;
     let mut best_score = -1i32;
     for price in prices {
@@ -1318,7 +1476,7 @@ fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPric
         if currency == "CNY" {
             score += 2;
         }
-        if rate_type == "standard" {
+        if rate_type == "promotional" {
             score += 1;
         }
         if score > best_score {
@@ -1335,6 +1493,9 @@ fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPric
     let input_cache_write = input.get("explicitCacheCreation").and_then(|v| v.as_f64());
     let source_url = price.get("sourceUrl").and_then(|v| v.as_str()).map(String::from);
     Some(BestModelPrice {
+        market: price.get("market").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        currency: price.get("currency").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        rate_type: price.get("rateType").and_then(|v| v.as_str()).unwrap_or("").to_string(),
         input_standard,
         input_cache_hit,
         input_cache_write,
@@ -1343,11 +1504,226 @@ fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPric
     })
 }
 
-/// 构建分级价格。目前 models-cn 官方价多为扁平单价，暂不自动生成分级。
-/// 若未来需要，可按 inputTokenRange 字段扩展。
-fn build_price_tiers(_model: &serde_json::Value, _price: &BestModelPrice) -> Vec<crate::core::config::ModelPriceTier> {
-    // models-cn 当前未提供分级价格数据，返回空（使用扁平单价）。
-    Vec::new()
+/// 用与最优价同 (market, currency, rateType) 的 inputTokenRange 行构建分级价格。
+/// 至少两行区间数据才视为分级；按区间下限升序，最后一档 up_to=None 兜底。
+/// 无区间数据时返回空（使用扁平单价）。
+fn build_price_tiers(
+    model: &serde_json::Value,
+    best: &BestModelPrice,
+) -> Vec<crate::core::config::ModelPriceTier> {
+    let Some(prices) = model.get("prices").and_then(|p| p.as_array()) else {
+        return Vec::new();
+    };
+    let mut ranged: Vec<(i64, i64, f64, f64, Option<f64>, f64)> = Vec::new();
+    for price in prices {
+        let market = price.get("market").and_then(|v| v.as_str()).unwrap_or("");
+        let currency = price.get("currency").and_then(|v| v.as_str()).unwrap_or("");
+        let rate_type = price.get("rateType").and_then(|v| v.as_str()).unwrap_or("");
+        if market != best.market || currency != best.currency || rate_type != best.rate_type {
+            continue;
+        }
+        let Some(range) = price.get("inputTokenRange") else {
+            continue;
+        };
+        let Some(max_inclusive) = range.get("maxInclusive").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        let min_exclusive = range.get("minExclusive").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let Some(input) = price.get("input") else {
+            continue;
+        };
+        let Some(standard) = input.get("standard").and_then(|v| v.as_f64()) else {
+            continue;
+        };
+        let Some(output) = price.get("output").and_then(|v| v.as_f64()) else {
+            continue;
+        };
+        let cache_hit = input.get("cacheHit").and_then(|v| v.as_f64()).unwrap_or(standard);
+        let cache_write = input.get("explicitCacheCreation").and_then(|v| v.as_f64());
+        ranged.push((min_exclusive, max_inclusive, standard, cache_hit, cache_write, output));
+    }
+    if ranged.len() < 2 {
+        return Vec::new();
+    }
+    ranged.sort_by_key(|(min, max, _, _, _, _)| (*min, *max));
+    let last = ranged.len() - 1;
+    ranged
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, max_inclusive, standard, cache_hit, cache_write, output))| {
+            crate::core::config::ModelPriceTier {
+                up_to_input_tokens: if index == last { None } else { Some(max_inclusive) },
+                input_uncached_price: standard,
+                input_cached_price: cache_hit,
+                input_cache_write_price: cache_write,
+                output_price: output,
+            }
+        })
+        .collect()
+}
+
+// ─── models.dev → ModelPrice 转换 ─────────────────────────────────────────
+
+/// Codex 套餐额度（CREDITS）与 OpenAI API 美元价的换算比例。
+/// 与价格迁移前 config.json 内嵌的 codex-native 价格保持一致
+/// （如 gpt-5.6-sol 输入 5 USD/1M ↔ 125 CREDITS/1M）。
+const CODEX_CREDITS_PER_USD: f64 = 25.0;
+
+/// models.dev providerId → Flowlet channel_id 映射。
+/// 目前仅 OpenAI 官方 API 价用于 Codex 会话的 USD 等值估算。
+fn models_dev_provider_to_channel_id(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "openai" => Some("openai-api"),
+        _ => None,
+    }
+}
+
+/// 从 models.dev 目录 JSON 解析出 ModelPrice 列表，用于成本估算。
+/// 每个 openai 模型产出两条：openai-api（USD，官方 API 价）与
+/// codex-native（CREDITS，按 CODEX_CREDITS_PER_USD 派生的套餐额度消耗）。
+pub fn build_prices_from_models_dev_catalog(
+    catalog_json: &str,
+) -> Result<Vec<crate::core::config::ModelPrice>, String> {
+    let catalog: serde_json::Value = serde_json::from_str(catalog_json)
+        .map_err(|e| format!("解析 models.dev JSON 失败：{e}"))?;
+    let providers = catalog
+        .as_object()
+        .ok_or("models.dev 顶层必须是 provider 对象")?;
+    let mut prices = Vec::new();
+    let now = chrono::Utc::now().to_rfc3339();
+    for (provider_id, provider) in providers {
+        let Some(channel_id) = models_dev_provider_to_channel_id(provider_id) else {
+            continue;
+        };
+        let Some(models) = provider.get("models").and_then(|m| m.as_object()) else {
+            continue;
+        };
+        let source_url = provider
+            .get("doc")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| Some("https://models.dev/".to_string()));
+        for (model_id, model) in models {
+            if model_id.trim().is_empty() {
+                continue;
+            }
+            let Some(cost) = model.get("cost") else {
+                continue;
+            };
+            let Some(input) = cost.get("input").and_then(|v| v.as_f64()) else {
+                continue;
+            };
+            let Some(output) = cost.get("output").and_then(|v| v.as_f64()) else {
+                continue;
+            };
+            let cache_read = cost.get("cache_read").and_then(|v| v.as_f64());
+            let cache_write = cost.get("cache_write").and_then(|v| v.as_f64());
+            let tiers = build_models_dev_tiers(cost, input, cache_read, cache_write, output);
+            let usd_price = crate::core::config::ModelPrice {
+                id: format!("models-dev-{channel_id}-{model_id}"),
+                channel_id: channel_id.to_string(),
+                upstream_model: model_id.clone(),
+                input_uncached_price: input,
+                input_cached_price: cache_read.unwrap_or(input),
+                input_cache_write_price: cache_write,
+                output_price: output,
+                tiers,
+                currency: "USD".to_string(),
+                unit: "1M tokens".to_string(),
+                source_url: source_url.clone(),
+                price_version: Some(format!("models.dev {now}")),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            };
+            prices.push(scale_model_price(
+                &usd_price,
+                CODEX_CREDITS_PER_USD,
+                "codex-native",
+                "CREDITS",
+            ));
+            prices.push(usd_price);
+        }
+    }
+    Ok(prices)
+}
+
+/// models.dev cost.tiers 转 Flowlet 分级：base 价覆盖 ≤ 第一个 context size，
+/// 每个 tier 条目覆盖 > 其 size 的区间，最后一档 up_to=None 兜底。
+fn build_models_dev_tiers(
+    cost: &serde_json::Value,
+    base_input: f64,
+    base_cache_read: Option<f64>,
+    base_cache_write: Option<f64>,
+    base_output: f64,
+) -> Vec<crate::core::config::ModelPriceTier> {
+    let mut context_tiers: Vec<(i64, &serde_json::Value)> = cost
+        .get("tiers")
+        .and_then(|t| t.as_array())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let tier = entry.get("tier")?;
+                    if tier.get("type").and_then(|v| v.as_str()) != Some("context") {
+                        return None;
+                    }
+                    let size = tier.get("size").and_then(|v| v.as_i64())?;
+                    Some((size, entry))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if context_tiers.is_empty() {
+        return Vec::new();
+    }
+    context_tiers.sort_by_key(|(size, _)| *size);
+    let mut tiers = Vec::with_capacity(context_tiers.len() + 1);
+    tiers.push(crate::core::config::ModelPriceTier {
+        up_to_input_tokens: Some(context_tiers[0].0),
+        input_uncached_price: base_input,
+        input_cached_price: base_cache_read.unwrap_or(base_input),
+        input_cache_write_price: base_cache_write,
+        output_price: base_output,
+    });
+    for (index, (_, entry)) in context_tiers.iter().enumerate() {
+        let input = entry.get("input").and_then(|v| v.as_f64()).unwrap_or(base_input);
+        let output = entry.get("output").and_then(|v| v.as_f64()).unwrap_or(base_output);
+        let cache_read = entry.get("cache_read").and_then(|v| v.as_f64());
+        let cache_write = entry.get("cache_write").and_then(|v| v.as_f64());
+        tiers.push(crate::core::config::ModelPriceTier {
+            up_to_input_tokens: context_tiers.get(index + 1).map(|(size, _)| *size),
+            input_uncached_price: input,
+            input_cached_price: cache_read.unwrap_or(input),
+            input_cache_write_price: cache_write,
+            output_price: output,
+        });
+    }
+    tiers
+}
+
+/// 按比例缩放一条价格的全部金额字段，生成另一币种/命名空间的派生价格
+/// （如 openai-api USD → codex-native CREDITS）。
+fn scale_model_price(
+    price: &crate::core::config::ModelPrice,
+    factor: f64,
+    channel_id: &str,
+    currency: &str,
+) -> crate::core::config::ModelPrice {
+    let mut scaled = price.clone();
+    scaled.id = format!("models-dev-{channel_id}-{}", price.upstream_model);
+    scaled.channel_id = channel_id.to_string();
+    scaled.currency = currency.to_string();
+    scaled.input_uncached_price *= factor;
+    scaled.input_cached_price *= factor;
+    scaled.input_cache_write_price = scaled.input_cache_write_price.map(|v| v * factor);
+    scaled.output_price *= factor;
+    for tier in &mut scaled.tiers {
+        tier.input_uncached_price *= factor;
+        tier.input_cached_price *= factor;
+        tier.input_cache_write_price = tier.input_cache_write_price.map(|v| v * factor);
+        tier.output_price *= factor;
+    }
+    scaled
 }
 
 #[cfg(test)]
@@ -1730,5 +2106,217 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(detail.job.status, "cancelled");
+    }
+
+    // ─── 模型目录 → ModelPrice 构建 ───────────────────────────────────────
+
+    fn price(channel_id: &str, upstream_model: &str, input: f64, currency: &str) -> crate::core::config::ModelPrice {
+        crate::core::config::ModelPrice {
+            channel_id: channel_id.to_string(),
+            upstream_model: upstream_model.to_string(),
+            input_uncached_price: input,
+            currency: currency.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn find_price<'a>(
+        prices: &'a [crate::core::config::ModelPrice],
+        channel_id: &str,
+        model: &str,
+    ) -> &'a crate::core::config::ModelPrice {
+        prices
+            .iter()
+            .find(|p| p.channel_id == channel_id && p.upstream_model == model)
+            .unwrap_or_else(|| panic!("missing {channel_id} price for {model}"))
+    }
+
+    const MODELS_DEV_FIXTURE: &str = r#"{
+        "openai": {
+            "id": "openai",
+            "name": "OpenAI",
+            "doc": "https://platform.openai.com/docs/pricing",
+            "models": {
+                "gpt-5.6-sol": {
+                    "id": "gpt-5.6-sol",
+                    "cost": {"input": 5, "output": 30, "cache_read": 0.5, "cache_write": 6.25,
+                             "tiers": [{"input": 10, "output": 45, "cache_read": 1, "cache_write": 12.5,
+                                        "tier": {"type": "context", "size": 272000}}]},
+                    "limit": {"context": 1050000, "output": 128000}
+                },
+                "gpt-5.5": {"id": "gpt-5.5", "cost": {"input": 5, "output": 30, "cache_read": 0.5}},
+                "gpt-5-pro": {"id": "gpt-5-pro", "cost": {"input": 15, "output": 120}},
+                "gpt-free-no-cost": {"id": "gpt-free-no-cost"}
+            }
+        },
+        "anthropic": {
+            "id": "anthropic",
+            "models": {
+                "claude-x": {"id": "claude-x", "cost": {"input": 3, "output": 15}}
+            }
+        }
+    }"#;
+
+    #[test]
+    fn builds_openai_api_and_derived_codex_native_prices_from_models_dev() {
+        let prices = build_prices_from_models_dev_catalog(MODELS_DEV_FIXTURE).unwrap();
+
+        // openai → openai-api（USD），含缓存与分级映射。
+        let sol = find_price(&prices, "openai-api", "gpt-5.6-sol");
+        assert_eq!(sol.currency, "USD");
+        assert_eq!(sol.input_uncached_price, 5.0);
+        assert_eq!(sol.input_cached_price, 0.5);
+        assert_eq!(sol.input_cache_write_price, Some(6.25));
+        assert_eq!(sol.output_price, 30.0);
+        assert_eq!(
+            sol.source_url.as_deref(),
+            Some("https://platform.openai.com/docs/pricing")
+        );
+        assert_eq!(sol.tiers.len(), 2);
+        assert_eq!(sol.tiers[0].up_to_input_tokens, Some(272000));
+        assert_eq!(sol.tiers[0].input_uncached_price, 5.0);
+        assert_eq!(sol.tiers[1].up_to_input_tokens, None);
+        assert_eq!(sol.tiers[1].input_uncached_price, 10.0);
+        assert_eq!(sol.tiers[1].output_price, 45.0);
+
+        // codex-native 派生：全部金额 ×25，币种 CREDITS，分级同步缩放。
+        let sol_credits = find_price(&prices, "codex-native", "gpt-5.6-sol");
+        assert_eq!(sol_credits.currency, "CREDITS");
+        assert_eq!(sol_credits.input_uncached_price, 125.0);
+        assert_eq!(sol_credits.input_cached_price, 12.5);
+        assert_eq!(sol_credits.input_cache_write_price, Some(156.25));
+        assert_eq!(sol_credits.output_price, 750.0);
+        assert_eq!(sol_credits.tiers.len(), 2);
+        assert_eq!(sol_credits.tiers[1].input_uncached_price, 250.0);
+        assert_eq!(sol_credits.tiers[1].output_price, 1125.0);
+
+        // 无 cache_read 时缓存命中价回退为未缓存价；无 cache_write 保持 None。
+        let pro = find_price(&prices, "openai-api", "gpt-5-pro");
+        assert_eq!(pro.input_cached_price, 15.0);
+        assert_eq!(pro.input_cache_write_price, None);
+        assert!(pro.tiers.is_empty());
+        let mid = find_price(&prices, "openai-api", "gpt-5.5");
+        assert_eq!(mid.input_cache_write_price, None);
+
+        // 无 cost 的模型跳过；未映射的 provider 整体跳过。
+        assert!(!prices.iter().any(|p| p.upstream_model == "gpt-free-no-cost"));
+        assert!(!prices.iter().any(|p| p.upstream_model == "claude-x"));
+    }
+
+    #[test]
+    fn models_dev_prices_cover_current_codex_models_in_both_dimensions() {
+        let fixture = r#"{
+            "openai": {
+                "id": "openai",
+                "models": {
+                    "gpt-5.6-sol": {"id": "gpt-5.6-sol", "cost": {"input": 5, "output": 30, "cache_read": 0.5, "cache_write": 6.25}},
+                    "gpt-5.6-terra": {"id": "gpt-5.6-terra", "cost": {"input": 2.5, "output": 15, "cache_read": 0.25, "cache_write": 3.125}},
+                    "gpt-5.6-luna": {"id": "gpt-5.6-luna", "cost": {"input": 1, "output": 6, "cache_read": 0.1, "cache_write": 1.25}},
+                    "gpt-5.5": {"id": "gpt-5.5", "cost": {"input": 5, "output": 30, "cache_read": 0.5}}
+                }
+            }
+        }"#;
+        let prices = build_prices_from_models_dev_catalog(fixture).unwrap();
+        for model in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"] {
+            let api_price = find_price(&prices, "openai-api", model);
+            assert_eq!(api_price.currency, "USD");
+            assert!(api_price.input_uncached_price > 0.0);
+            assert!(api_price.output_price > 0.0);
+
+            let plan_price = find_price(&prices, "codex-native", model);
+            assert_eq!(plan_price.currency, "CREDITS");
+            assert!((plan_price.input_uncached_price - api_price.input_uncached_price * 25.0).abs() < 1e-9);
+            assert!((plan_price.output_price - api_price.output_price * 25.0).abs() < 1e-9);
+        }
+    }
+
+    const MODELS_CN_QWEN_FIXTURE: &str = r#"{
+        "providers": [{
+            "id": "qwen-cn",
+            "models": [
+                {"id": "qwen3.7-plus", "prices": [
+                    {"market": "china", "currency": "CNY", "unit": "1M_tokens", "rateType": "standard",
+                     "inputTokenRange": {"label": "输入<=256k", "maxInclusive": 256000},
+                     "input": {"standard": 2, "cacheHit": 0.4, "explicitCacheCreation": 2.5, "explicitCacheHit": 0.2},
+                     "output": 8, "sourceUrl": "https://example.com/qwen3.7-plus"},
+                    {"market": "china", "currency": "CNY", "unit": "1M_tokens", "rateType": "promotional",
+                     "inputTokenRange": {"label": "输入<=256k", "maxInclusive": 256000},
+                     "input": {"standard": 1.6, "cacheHit": 0.32, "explicitCacheCreation": 2, "explicitCacheHit": 0.16},
+                     "output": 6.4, "sourceUrl": "https://example.com/qwen3.7-plus"},
+                    {"market": "china", "currency": "CNY", "unit": "1M_tokens", "rateType": "standard",
+                     "inputTokenRange": {"label": "256k<输入<=1m", "minExclusive": 256000, "maxInclusive": 1000000},
+                     "input": {"standard": 6, "cacheHit": 1.2, "explicitCacheCreation": 7.5, "explicitCacheHit": 0.6},
+                     "output": 24, "sourceUrl": "https://example.com/qwen3.7-plus"},
+                    {"market": "china", "currency": "CNY", "unit": "1M_tokens", "rateType": "promotional",
+                     "inputTokenRange": {"label": "256k<输入<=1m", "minExclusive": 256000, "maxInclusive": 1000000},
+                     "input": {"standard": 4.8, "cacheHit": 0.96, "explicitCacheCreation": 6, "explicitCacheHit": 0.48},
+                     "output": 19.2, "sourceUrl": "https://example.com/qwen3.7-plus"}
+                ]},
+                {"id": "qwen3.7-max", "prices": [
+                    {"market": "china", "currency": "CNY", "unit": "1M_tokens", "rateType": "standard",
+                     "input": {"standard": 12, "cacheHit": 2.4, "explicitCacheCreation": 15, "explicitCacheHit": 1.2},
+                     "output": 36, "sourceUrl": "https://example.com/qwen3.7-max"},
+                    {"market": "china", "currency": "CNY", "unit": "1M_tokens", "rateType": "promotional",
+                     "input": {"standard": 6, "cacheHit": 1.2, "explicitCacheCreation": 7.5, "explicitCacheHit": 0.6},
+                     "output": 18, "sourceUrl": "https://example.com/qwen3.7-max"}
+                ]},
+                {"id": "qwen3.8-max-preview", "prices": []}
+            ]
+        }]
+    }"#;
+
+    #[test]
+    fn models_cn_builder_prefers_promotional_and_builds_input_range_tiers() {
+        let prices = build_prices_from_models_cn_catalog(MODELS_CN_QWEN_FIXTURE).unwrap();
+
+        // qwen3.7-max：promotional（厂商当前生效价）优先于 standard，扁平单价无分级。
+        let max = find_price(&prices, "qwen", "qwen3.7-max");
+        assert_eq!(max.currency, "CNY");
+        assert!(max.tiers.is_empty());
+        assert!((max.input_uncached_price - 6.0).abs() < 1e-9);
+        assert!((max.input_cached_price - 1.2).abs() < 1e-9);
+        assert!((max.input_cache_write_price.unwrap_or(0.0) - 7.5).abs() < 1e-9);
+        assert!((max.output_price - 18.0).abs() < 1e-9);
+
+        // qwen3.7-plus：按 inputTokenRange 生成 promotional 两档分级，长上下文档更贵。
+        let plus = find_price(&prices, "qwen", "qwen3.7-plus");
+        assert_eq!(plus.tiers.len(), 2);
+        assert_eq!(plus.tiers[0].up_to_input_tokens, Some(256000));
+        assert!((plus.tiers[0].input_uncached_price - 1.6).abs() < 1e-9);
+        assert!((plus.tiers[0].input_cached_price - 0.32).abs() < 1e-9);
+        assert!((plus.tiers[0].input_cache_write_price.unwrap_or(0.0) - 2.0).abs() < 1e-9);
+        assert!((plus.tiers[0].output_price - 6.4).abs() < 1e-9);
+        assert_eq!(plus.tiers[1].up_to_input_tokens, None);
+        assert!((plus.tiers[1].input_uncached_price - 4.8).abs() < 1e-9);
+        assert!((plus.tiers[1].output_price - 19.2).abs() < 1e-9);
+        assert!(plus.tiers[1].input_uncached_price > plus.tiers[0].input_uncached_price);
+        assert!(plus.tiers[1].output_price > plus.tiers[0].output_price);
+        // 扁平字段取最优（首个 promotional 行），与第一档一致。
+        assert!((plus.input_uncached_price - 1.6).abs() < 1e-9);
+        assert!((plus.output_price - 6.4).abs() < 1e-9);
+
+        // qwen3.8-max-preview：暂无公开单价，不生成价格条目。
+        assert!(!prices
+            .iter()
+            .any(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.8-max-preview"));
+    }
+
+    #[test]
+    fn merge_price_tables_prefers_catalogs_and_config_fills_gaps() {
+        let catalog = vec![
+            price("qwen", "qwen3.7-max", 6.0, "CNY"),
+            price("openai-api", "gpt-5.5", 5.0, "USD"),
+        ];
+        let config = vec![
+            // 与目录冲突：目录派生优先，config 陈旧值被覆盖。
+            price("qwen", "qwen3.7-max", 999.0, "CNY"),
+            // 目录未覆盖（如自定义渠道显式价格）：保留。
+            price("custom", "my-relay-model", 1.0, "USD"),
+        ];
+        let merged = merge_price_tables(catalog, config);
+        assert_eq!(merged.len(), 3);
+        assert!((find_price(&merged, "qwen", "qwen3.7-max").input_uncached_price - 6.0).abs() < 1e-9);
+        assert_eq!(find_price(&merged, "openai-api", "gpt-5.5").currency, "USD");
+        assert!((find_price(&merged, "custom", "my-relay-model").input_uncached_price - 1.0).abs() < 1e-9);
     }
 }

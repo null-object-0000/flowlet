@@ -18,9 +18,17 @@ describe("usageCommands contract", () => {
     expect(invokeMock).toHaveBeenCalledWith("usage_summary", { period: "month" });
   });
 
-  it("reads today total tokens through the typed Tauri boundary", async () => {
-    invokeMock.mockResolvedValueOnce(12345);
-    expect(await usageCommands.todayTokens()).toEqual(12345);
+  it("reads today token summary through the typed Tauri boundary", async () => {
+    const summary = {
+      total_tokens: 12345,
+      input_tokens: 10000,
+      input_cached_tokens: 8000,
+      input_uncached_tokens: 2000,
+      cache_measured_input_tokens: 10000,
+      output_tokens: 2345,
+    };
+    invokeMock.mockResolvedValueOnce(summary);
+    expect(await usageCommands.todayTokens()).toEqual(summary);
     expect(invokeMock).toHaveBeenCalledWith("usage_today_tokens", undefined);
   });
 });

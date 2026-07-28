@@ -85,8 +85,9 @@ src-tauri/target/
 src-tauri/gen/schemas/
 flowlet.sqlite
 src-tauri/flowlet.sqlite*
-# 随包内置的 models-cn.json（打包时由 scripts/fetch-models-cn.mjs 自动生成）
+# 随包内置的模型目录文件（打包时由 scripts/fetch-models-*.mjs 自动生成）
 src-tauri/models-cn.json
+src-tauri/models-dev.json
 .output
 
 # Gatsby files

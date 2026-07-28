@@ -95,6 +95,53 @@ vi.mock("../../features/settings/useAppMeta", () => ({
   }),
 }));
 
+vi.mock("../../features/device-sync/useDeviceSync", () => ({
+  useKnownDevices: () => ({
+    data: [{
+      deviceId: "8d58734f-0b71-49ea-b5a4-115b389a9ae7",
+      deviceCreatedAt: "2026-07-28T00:00:00Z",
+      displayName: "公司笔记本",
+      platform: "windows",
+      appVersion: "0.1.0",
+      isCurrent: true,
+      timezoneOffsetMinutes: 480,
+      firstUsageDate: "2026-07-28",
+      lastUsageDate: "2026-07-28",
+      dayCount: 1,
+      requestCount: 3,
+      knownTokens: 1200,
+      lastSeenAt: "2026-07-28T01:00:00Z",
+    }],
+    isLoading: false,
+    isError: false,
+  }),
+  useS3SyncSettings: () => ({
+    data: {
+      config: null,
+      status: {
+        status: "never",
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        message: "尚未同步",
+        remoteDevices: 0,
+        importedDevices: 0,
+        importedDays: 0,
+        failedObjects: 0,
+      },
+    },
+    isError: false,
+  }),
+  useDeviceUsageTransfer: () => ({
+    renameCurrentDevice: { isPending: false, mutateAsync: vi.fn() },
+    exportBundle: { isPending: false, mutateAsync: vi.fn() },
+    previewImport: { isPending: false, mutateAsync: vi.fn() },
+    importBundle: { isPending: false, mutateAsync: vi.fn() },
+    saveS3Config: { isPending: false, mutateAsync: vi.fn() },
+    testS3Connection: { isPending: false, mutateAsync: vi.fn() },
+    syncS3: { isPending: false, mutateAsync: vi.fn() },
+  }),
+}));
+
 import { SettingsPage } from "./SettingsPage";
 
 function renderWithQueryClient(ui: React.ReactElement) {
@@ -132,5 +179,34 @@ describe("SettingsPage", () => {
     await screen.findByText("界面主题");
     expect(screen.getByText("界面主题")).toBeVisible();
     expect(screen.getByText("登录后自动启动 Flowlet")).not.toBeVisible();
+  });
+
+  it("shows the current device in storage management", async () => {
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "存储管理" }));
+    expect(await screen.findByText("设备与用量共享")).toBeInTheDocument();
+    expect(screen.getByText("当前设备")).toBeInTheDocument();
+    expect(screen.getByText("公司笔记本")).toBeInTheDocument();
+    expect(screen.getByText("8d58734f-0b71-49ea-b5a4-115b389a9ae7")).toBeInTheDocument();
+  });
+
+  it("opens the current device rename dialog", async () => {
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "存储管理" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重命名" }));
+
+    expect(screen.getByText("重命名当前设备")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("例如：公司笔记本")).toHaveValue("公司笔记本");
+    expect(screen.getByText("设备名称用于导出和同步时区分设备，不会改变设备 ID。")).toBeInTheDocument();
+  });
+
+  it("opens the S3-compatible configuration dialog", async () => {
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "存储管理" }));
+    fireEvent.click(await screen.findByRole("button", { name: "配置 S3" }));
+
+    expect(screen.getByText("配置 S3-compatible 同步")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("flowlet-sync")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "测试连接" })).toBeInTheDocument();
   });
 });

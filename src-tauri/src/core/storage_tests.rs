@@ -3,6 +3,7 @@ use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
     ChannelAccount, LogsFilter, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
 };
+use crate::core::device_identity::DailyUsageTotal;
 
 #[test]
 fn channel_account_resource_sync_mode_round_trips() {
@@ -1491,4 +1492,263 @@ fn usage_summary_filters_at_the_database_boundary() {
         all_time.iter().map(|row| row.request_count).sum::<i64>(),
         2
     );
+}
+
+#[test]
+fn usage_summary_today_filters_to_today_and_groups_by_hour() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    for request_id in ["usage-today-a", "usage-today-b", "usage-yesterday"] {
+        storage
+            .insert_request_log(&request_log_for_repair(request_id, 0, true))
+            .expect("insert request log");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: request_id.to_string(),
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                ..empty_usage_input(request_id)
+            })
+            .expect("insert usage");
+    }
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET created_at = datetime('now', '-1 day')
+             WHERE request_id = 'usage-yesterday'",
+            [],
+        )
+        .expect("age one request to yesterday");
+
+    let today = storage.usage_summary("today").expect("today summary");
+    assert_eq!(
+        today.iter().map(|row| row.request_count).sum::<i64>(),
+        2,
+        "today 周期应只统计今日请求"
+    );
+    let local_today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    assert!(
+        today.iter().all(|row| {
+            row.date.starts_with(&local_today)
+                && row.date.len() == "YYYY-MM-DDTHH:00:00".len()
+                && row.date.ends_with(":00:00")
+        }),
+        "today 周期应按小时分组返回 2026-07-28T09:00:00 形式的日期，实际：{:?}",
+        today.iter().map(|row| row.date.as_str()).collect::<Vec<_>>()
+    );
+
+    // week 周期同样按小时分组，供前端 7×24 分时热力图使用。周一跑该测试时
+    // "昨天"落在上周，所以只断言今日数据完整包含且全部为小时粒度。
+    let week = storage.usage_summary("week").expect("week summary");
+    assert_eq!(
+        week.iter()
+            .filter(|row| row.date.starts_with(&local_today))
+            .map(|row| row.request_count)
+            .sum::<i64>(),
+        2
+    );
+    assert!(
+        week.iter().all(|row| {
+            row.date.len() == "YYYY-MM-DDTHH:00:00".len() && row.date.ends_with(":00:00")
+        }),
+        "week 周期应按小时分组返回日期，实际：{:?}",
+        week.iter().map(|row| row.date.as_str()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn usage_today_summary_aggregates_only_today_with_cache_denominator() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    // 两条今日记录：一条带缓存（计入缓存命中率分母），一条不带缓存（不计入分母）。
+    for (request_id, input, cached, uncached, output) in [
+        ("today-cached", 100, Some(80), 20, 30),
+        ("today-uncached", 50, None, 50, 10),
+    ] {
+        storage
+            .insert_request_log(&request_log_for_repair(request_id, 0, true))
+            .expect("insert request log");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: request_id.to_string(),
+                input_tokens: Some(input),
+                input_cached_tokens: cached,
+                input_uncached_tokens: Some(uncached),
+                output_tokens: Some(output),
+                total_tokens: Some(input + output),
+                ..empty_usage_input(request_id)
+            })
+            .expect("insert usage");
+    }
+    // 一条昨日记录，应被排除。
+    storage
+        .insert_request_log(&request_log_for_repair("yesterday-x", 0, true))
+        .expect("insert request log");
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "yesterday-x".to_string(),
+            input_tokens: Some(999),
+            output_tokens: Some(1),
+            total_tokens: Some(1000),
+            ..empty_usage_input("yesterday-x")
+        })
+        .expect("insert usage");
+
+    for (request_id, expr) in [
+        ("today-cached", "datetime('now', 'localtime')"),
+        ("today-uncached", "datetime('now', 'localtime')"),
+        ("yesterday-x", "datetime('now', 'localtime', '-1 day')"),
+    ] {
+        storage
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                &format!("UPDATE usage_records SET created_at = {expr} WHERE request_id = '{request_id}'"),
+                [],
+            )
+            .expect("set created_at");
+    }
+
+    let summary = storage.usage_today_summary().expect("today summary");
+    assert_eq!(summary.total_tokens, 190, "只统计今日两条记录的 total");
+    assert_eq!(summary.input_tokens, 150);
+    assert_eq!(summary.input_cached_tokens, 80);
+    assert_eq!(summary.input_uncached_tokens, 70);
+    assert_eq!(summary.output_tokens, 40);
+    assert_eq!(
+        summary.cache_measured_input_tokens, 100,
+        "只有带缓存字段的记录（input=100）计入缓存命中率分母"
+    );
+}
+
+#[test]
+fn daily_usage_totals_keep_days_separate_and_sum_token_breakdowns() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    for (request_id, created_at, input, cached, output) in [
+        ("daily-a", "2026-07-27T01:00:00Z", 10, Some(4), 5),
+        ("daily-b", "2026-07-27T02:00:00Z", 20, Some(5), 7),
+        ("daily-c", "2026-07-28T03:00:00Z", 30, None, 9),
+    ] {
+        storage
+            .insert_request_log(&request_log_for_repair(request_id, 0, true))
+            .expect("insert request log");
+        storage
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE request_logs SET created_at = ?1 WHERE request_id = ?2",
+                rusqlite::params![created_at, request_id],
+            )
+            .expect("set deterministic request date");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: request_id.to_string(),
+                input_tokens: Some(input),
+                input_cached_tokens: cached,
+                input_uncached_tokens: cached.map(|value| input - value),
+                output_tokens: Some(output),
+                total_tokens: Some(input + output),
+                ..empty_usage_input(request_id)
+            })
+            .expect("insert usage");
+    }
+
+    let totals = storage.daily_usage_totals().expect("daily usage totals");
+
+    assert_eq!(totals.len(), 2);
+    assert_eq!(totals[0].request_count, 2);
+    assert_eq!(totals[0].known_tokens, 42);
+    assert_eq!(totals[0].input_tokens, 30);
+    assert_eq!(totals[0].input_cached_tokens, 9);
+    assert_eq!(totals[0].input_uncached_tokens, 21);
+    assert_eq!(totals[0].cache_measured_input_tokens, 30);
+    assert_eq!(totals[0].output_tokens, 12);
+    assert_eq!(totals[1].request_count, 1);
+    assert_eq!(totals[1].known_tokens, 39);
+    assert_eq!(totals[1].cache_measured_input_tokens, 0);
+}
+
+#[test]
+fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    let first = DailyUsageTotal {
+        date: "2026-07-28".to_string(),
+        request_count: 2,
+        known_tokens: 30,
+        input_tokens: 20,
+        input_cached_tokens: 5,
+        input_uncached_tokens: 15,
+        cache_measured_input_tokens: 20,
+        output_tokens: 10,
+        unknown_count: 0,
+    };
+
+    let inserted = storage
+        .import_device_usage(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "2026-07-01T00:00:00Z",
+            "Office PC",
+            "windows",
+            "0.1.0",
+            "2026-07-28T10:00:00Z",
+            480,
+            std::slice::from_ref(&first),
+        )
+        .expect("import first snapshot");
+    assert_eq!(inserted.imported_days, 1);
+
+    let repeated = storage
+        .import_device_usage(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "2026-07-01T00:00:00Z",
+            "Office PC",
+            "windows",
+            "0.1.0",
+            "2026-07-28T10:00:00Z",
+            480,
+            std::slice::from_ref(&first),
+        )
+        .expect("repeat same snapshot");
+    assert_eq!(repeated.imported_days, 0);
+    assert_eq!(repeated.unchanged_days, 1);
+
+    let mut older = first.clone();
+    older.known_tokens = 1;
+    storage
+        .import_device_usage(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "2026-07-01T00:00:00Z",
+            "Old office name",
+            "windows",
+            "0.1.0",
+            "2026-07-28T09:00:00Z",
+            480,
+            &[older],
+        )
+        .expect("ignore older snapshot");
+
+    let rows = storage
+        .imported_daily_usage(Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+        .expect("read imported snapshot");
+    assert_eq!(rows, vec![first]);
+    let devices = storage
+        .imported_known_devices()
+        .expect("read imported device metadata");
+    assert_eq!(devices[0].display_name, "Office PC");
+    assert_eq!(devices[0].platform, "windows");
+    assert_eq!(devices[0].app_version, "0.1.0");
 }

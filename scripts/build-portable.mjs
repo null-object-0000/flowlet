@@ -96,12 +96,14 @@ function copyRequired() {
     console.warn("警告：未找到项目根目录 config.json");
   }
 
-  // 随包内置 models-cn.json，开箱即用
-  const MODELS_CN_SRC = join(SRC_TAURI, "models-cn.json");
-  if (existsSync(MODELS_CN_SRC)) {
-    copyFileSync(MODELS_CN_SRC, join(PORTABLE_DIR, "models-cn.json"));
-  } else {
-    console.warn("警告：未找到 src-tauri/models-cn.json（运行 tauri:build 时会自动拉取）");
+  // 随包内置模型目录文件，开箱即用
+  for (const fileName of ["models-cn.json", "models-dev.json"]) {
+    const catalogSrc = join(SRC_TAURI, fileName);
+    if (existsSync(catalogSrc)) {
+      copyFileSync(catalogSrc, join(PORTABLE_DIR, fileName));
+    } else {
+      console.warn(`警告：未找到 src-tauri/${fileName}（运行 tauri:build 时会自动拉取）`);
+    }
   }
 
   // 便携标记：有这个文件时，app_database_path() 会把数据目录切到程序旁边，不与本机共享

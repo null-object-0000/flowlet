@@ -5,9 +5,13 @@ use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentSessionRepairResult, AgentSessionRow,
     AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter, LogsPageResult,
     LogsSummary, ModelPrice, RequestLogInput, RequestLogModelOptions, RequestLogRow,
-    UsageRecordInput, UsageSummaryRow,
+    UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
 };
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
+use crate::core::device_identity::{
+    resolve_device_display_name, DailyUsageTotal, DeviceUsageImportPreview,
+    DeviceUsageImportResult, KnownDevice,
+};
 use crate::core::usage::{extract_response_usage, extract_stream_usage};
 use base64::Engine;
 use rusqlite::{params, OptionalExtension};
@@ -2084,9 +2088,18 @@ impl Storage {
     pub fn usage_summary(&self, period: &str) -> Result<Vec<UsageSummaryRow>, StorageError> {
         // 保留 request_logs.created_at 作为统计日期来源：历史修复可能在请求发生后才
         // 补写 usage_records，直接使用 usage_records.created_at 会把历史用量归到修复日。
-        // period 只接受 command 边界校验后的固定枚举值，下面的片段不包含用户输入。
-        let period_clause = match period {
-            "week" => {
+        // period 只接受 command 边界校验后的固定枚举值，下面的 match 片段不包含用户输入。
+        // "today"/"week" 按小时分组，给前端分时热力图提供粒度；其它周期按自然日分组。
+        let (date_expression, period_clause) = match period {
+            "today" => (
+                "strftime('%Y-%m-%dT%H:00:00', request_logs.created_at, 'localtime')",
+                r#"
+                AND request_logs.created_at >= datetime('now', 'localtime', 'start of day', 'utc')
+                AND request_logs.created_at < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')
+            "#,
+            ),
+            "week" => (
+                "strftime('%Y-%m-%dT%H:00:00', request_logs.created_at, 'localtime')",
                 r#"
                 AND request_logs.created_at >= datetime(
                     'now', 'localtime', 'start of day',
@@ -2098,15 +2111,17 @@ impl Storage {
                     printf('-%d days', (CAST(strftime('%w', 'now', 'localtime') AS INTEGER) + 6) % 7),
                     '+7 days', 'utc'
                 )
-            "#
-            }
-            "month" => {
+            "#,
+            ),
+            "month" => (
+                "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
                 r#"
                 AND request_logs.created_at >= datetime('now', 'localtime', 'start of month', 'utc')
                 AND request_logs.created_at < datetime('now', 'localtime', 'start of month', '+1 month', 'utc')
-            "#
-            }
-            "quarter" => {
+            "#,
+            ),
+            "quarter" => (
+                "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
                 r#"
                 AND request_logs.created_at >= datetime(
                     'now', 'localtime', 'start of month',
@@ -2118,16 +2133,16 @@ impl Storage {
                     printf('-%d months', (CAST(strftime('%m', 'now', 'localtime') AS INTEGER) - 1) % 3),
                     '+3 months', 'utc'
                 )
-            "#
-            }
-            "year" => {
+            "#,
+            ),
+            "year" => (
+                "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
                 r#"
                 AND request_logs.created_at >= datetime('now', 'localtime', 'start of year', 'utc')
                 AND request_logs.created_at < datetime('now', 'localtime', 'start of year', '+1 year', 'utc')
-            "#
-            }
-            "all" => "",
-            _ => "",
+            "#,
+            ),
+            _ => ("strftime('%Y-%m-%d', request_logs.created_at, 'localtime')", ""),
         };
         let connection = self
             .connection
@@ -2136,7 +2151,7 @@ impl Storage {
         let sql = format!(
             r#"
             SELECT
-                strftime('%Y-%m-%d', request_logs.created_at, 'localtime') AS usage_date,
+                {date_expression} AS usage_date,
                 usage_records.client_id,
                 usage_records.client_name,
                 usage_records.channel_id,
@@ -2195,28 +2210,350 @@ impl Storage {
         Ok(summary)
     }
 
-    /// 今日 Token 消耗总量（仅一个整数）。
+    /// 今日 Token 消耗聚合（总量 + 输入/缓存/未缓存/输出拆解）。
     ///
-    /// 与 `usage_summary` 不同，这个查询只返回单个聚合值，不带分组、不带
+    /// 与 `usage_summary` 不同，这个查询只返回单条聚合行，不带分组、不带
     /// `request_logs` JOIN，并利用 `idx_usage_records_created_at` 索引做范围
-    /// 扫描。持锁时间极短，专门喂给概览页顶部 service-strip 的「今日消耗」，
-    /// 避免每 30s 拉全量汇总表把主线程卡死。
-    pub fn usage_today_tokens(&self) -> Result<i64, StorageError> {
+    /// 扫描。持锁时间极短，专门喂给概览页顶部 service-strip 的「今日消耗」
+    /// 悬浮明细（总消耗 + 缓存命中率 + 输入/输出拆解），避免每 30s 拉全量
+    /// 汇总表把主线程卡死。`cache_measured_input_tokens` 的分母语义与
+    /// `usage_summary` 完全一致：只有明确返回缓存字段的请求（`input_cached_tokens`
+    /// 非空）才计入可计算缓存命中率的输入分母。
+    pub fn usage_today_summary(&self) -> Result<UsageTodaySummary, StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        let tokens: i64 = connection.query_row(
+        let summary = connection.query_row(
             r#"
-            SELECT coalesce(sum(total_tokens), 0)
+            SELECT
+                coalesce(sum(total_tokens), 0),
+                coalesce(sum(input_tokens), 0),
+                coalesce(sum(input_cached_tokens), 0),
+                coalesce(sum(input_uncached_tokens), 0),
+                coalesce(sum(CASE WHEN input_cached_tokens IS NOT NULL THEN input_tokens ELSE 0 END), 0),
+                coalesce(sum(output_tokens), 0)
             FROM usage_records
             WHERE created_at >= date('now', 'localtime')
               AND created_at < date('now', 'localtime', '+1 day')
             "#,
             [],
-            |row| row.get(0),
+            |row| {
+                Ok(UsageTodaySummary {
+                    total_tokens: row.get(0)?,
+                    input_tokens: row.get(1)?,
+                    input_cached_tokens: row.get(2)?,
+                    input_uncached_tokens: row.get(3)?,
+                    cache_measured_input_tokens: row.get(4)?,
+                    output_tokens: row.get(5)?,
+                })
+            },
         )?;
-        Ok(tokens)
+        Ok(summary)
+    }
+
+    /// 为本地导出和未来设备同步生成按设备本地自然日聚合的最小用量数据。
+    /// 返回全部历史日汇总；即使历史 Token 被修复，下一次快照也会自然覆盖同一
+    /// `(device_id, date)` 的远端汇总，无需维护逐行同步游标。
+    pub fn daily_usage_totals(&self) -> Result<Vec<DailyUsageTotal>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            r#"
+            SELECT
+                strftime(
+                    '%Y-%m-%d',
+                    COALESCE(request_logs.created_at, usage_records.created_at),
+                    'localtime'
+                ) AS usage_date,
+                count(*) AS request_count,
+                coalesce(sum(usage_records.total_tokens), 0) AS known_tokens,
+                coalesce(sum(usage_records.input_tokens), 0) AS input_tokens,
+                coalesce(sum(usage_records.input_cached_tokens), 0) AS input_cached_tokens,
+                coalesce(sum(usage_records.input_uncached_tokens), 0) AS input_uncached_tokens,
+                coalesce(sum(
+                    CASE
+                        WHEN usage_records.input_cached_tokens IS NOT NULL
+                        THEN usage_records.input_tokens
+                        ELSE 0
+                    END
+                ), 0) AS cache_measured_input_tokens,
+                coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
+                sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count
+            FROM usage_records
+            LEFT JOIN request_logs
+                   ON request_logs.request_id = usage_records.request_id
+                  AND request_logs.is_last_attempt = 1
+            GROUP BY usage_date
+            ORDER BY usage_date ASC
+            "#,
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(DailyUsageTotal {
+                date: row
+                    .get::<_, Option<String>>(0)?
+                    .unwrap_or_else(|| "unknown".to_string()),
+                request_count: row.get(1)?,
+                known_tokens: row.get(2)?,
+                input_tokens: row.get(3)?,
+                input_cached_tokens: row.get(4)?,
+                input_uncached_tokens: row.get(5)?,
+                cache_measured_input_tokens: row.get(6)?,
+                output_tokens: row.get(7)?,
+                unknown_count: row.get(8)?,
+            })
+        })?;
+
+        let mut totals = Vec::new();
+        for row in rows {
+            totals.push(row?);
+        }
+        Ok(totals)
+    }
+
+    pub fn preview_device_usage_import(
+        &self,
+        current_device_id: &str,
+        device_id: &str,
+        device_created_at: &str,
+        display_name: &str,
+        platform: &str,
+        app_version: &str,
+        generated_at: &str,
+        timezone_offset_minutes: i32,
+        days: &[DailyUsageTotal],
+    ) -> Result<DeviceUsageImportPreview, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let mut new_days = 0;
+        let mut updated_days = 0;
+        let mut unchanged_days = 0;
+        let mut statement = connection.prepare(
+            "SELECT request_count, known_tokens, input_tokens, input_cached_tokens,
+                    input_uncached_tokens, cache_measured_input_tokens, output_tokens, unknown_count,
+                    snapshot_generated_at
+             FROM device_daily_usage WHERE device_id = ?1 AND usage_date = ?2",
+        )?;
+        for day in days {
+            let existing = statement
+                .query_row(params![device_id, day.date], |row| {
+                    Ok((
+                        DailyUsageTotal {
+                            date: day.date.clone(),
+                            request_count: row.get(0)?,
+                            known_tokens: row.get(1)?,
+                            input_tokens: row.get(2)?,
+                            input_cached_tokens: row.get(3)?,
+                            input_uncached_tokens: row.get(4)?,
+                            cache_measured_input_tokens: row.get(5)?,
+                            output_tokens: row.get(6)?,
+                            unknown_count: row.get(7)?,
+                        },
+                        row.get::<_, String>(8)?,
+                    ))
+                })
+                .optional()?;
+            match existing {
+                None => new_days += 1,
+                Some((_, existing_generated_at))
+                    if existing_generated_at.as_str() > generated_at =>
+                {
+                    unchanged_days += 1
+                }
+                Some((existing, _)) if existing == *day => unchanged_days += 1,
+                Some(_) => updated_days += 1,
+            }
+        }
+        Ok(DeviceUsageImportPreview {
+            device_id: device_id.to_string(),
+            device_created_at: device_created_at.to_string(),
+            display_name: display_name.to_string(),
+            platform: platform.to_string(),
+            app_version: app_version.to_string(),
+            generated_at: generated_at.to_string(),
+            timezone_offset_minutes,
+            first_date: days.first().map(|day| day.date.clone()),
+            last_date: days.last().map(|day| day.date.clone()),
+            day_count: days.len(),
+            new_days,
+            updated_days,
+            unchanged_days,
+            same_as_current_device: current_device_id == device_id,
+        })
+    }
+
+    pub fn import_device_usage(
+        &self,
+        device_id: &str,
+        device_created_at: &str,
+        display_name: &str,
+        platform: &str,
+        app_version: &str,
+        generated_at: &str,
+        timezone_offset_minutes: i32,
+        days: &[DailyUsageTotal],
+    ) -> Result<DeviceUsageImportResult, StorageError> {
+        let preview = self.preview_device_usage_import(
+            "",
+            device_id,
+            device_created_at,
+            display_name,
+            platform,
+            app_version,
+            generated_at,
+            timezone_offset_minutes,
+            days,
+        )?;
+        let mut connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO known_devices (
+                device_id, device_created_at, display_name, platform, app_version,
+                timezone_offset_minutes, profile_generated_at, first_seen_at, last_seen_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), ?7)
+             ON CONFLICT(device_id) DO UPDATE SET
+                device_created_at = excluded.device_created_at,
+                display_name = excluded.display_name,
+                platform = excluded.platform,
+                app_version = excluded.app_version,
+                timezone_offset_minutes = excluded.timezone_offset_minutes,
+                profile_generated_at = excluded.profile_generated_at,
+                last_seen_at = excluded.last_seen_at
+             WHERE excluded.profile_generated_at >= known_devices.profile_generated_at",
+            params![
+                device_id,
+                device_created_at,
+                display_name,
+                platform,
+                app_version,
+                timezone_offset_minutes,
+                generated_at
+            ],
+        )?;
+        for day in days {
+            transaction.execute(
+                "INSERT INTO device_daily_usage (
+                    device_id, usage_date, request_count, known_tokens, input_tokens,
+                    input_cached_tokens, input_uncached_tokens, cache_measured_input_tokens,
+                    output_tokens, unknown_count, snapshot_generated_at, imported_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'))
+                 ON CONFLICT(device_id, usage_date) DO UPDATE SET
+                    request_count = excluded.request_count,
+                    known_tokens = excluded.known_tokens,
+                    input_tokens = excluded.input_tokens,
+                    input_cached_tokens = excluded.input_cached_tokens,
+                    input_uncached_tokens = excluded.input_uncached_tokens,
+                    cache_measured_input_tokens = excluded.cache_measured_input_tokens,
+                    output_tokens = excluded.output_tokens,
+                    unknown_count = excluded.unknown_count,
+                    snapshot_generated_at = excluded.snapshot_generated_at,
+                    imported_at = datetime('now')
+                 WHERE excluded.snapshot_generated_at >= device_daily_usage.snapshot_generated_at",
+                params![
+                    device_id,
+                    day.date,
+                    day.request_count,
+                    day.known_tokens,
+                    day.input_tokens,
+                    day.input_cached_tokens,
+                    day.input_uncached_tokens,
+                    day.cache_measured_input_tokens,
+                    day.output_tokens,
+                    day.unknown_count,
+                    generated_at,
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(DeviceUsageImportResult {
+            device_id: device_id.to_string(),
+            imported_days: preview.new_days + preview.updated_days,
+            unchanged_days: preview.unchanged_days,
+        })
+    }
+
+    pub fn imported_known_devices(&self) -> Result<Vec<KnownDevice>, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT d.device_id, d.device_created_at, d.display_name, d.platform, d.app_version,
+                    d.timezone_offset_minutes,
+                    min(u.usage_date), max(u.usage_date), count(u.usage_date),
+                    coalesce(sum(u.request_count), 0), coalesce(sum(u.known_tokens), 0),
+                    d.last_seen_at
+             FROM known_devices d
+             LEFT JOIN device_daily_usage u ON u.device_id = d.device_id
+             GROUP BY d.device_id
+             ORDER BY d.last_seen_at DESC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let device_id: String = row.get(0)?;
+            let display_name: String = row.get(2)?;
+            let platform: String = row.get(3)?;
+            Ok(KnownDevice {
+                display_name: resolve_device_display_name(
+                    &display_name,
+                    &platform,
+                    &device_id,
+                ),
+                device_id,
+                device_created_at: row.get(1)?,
+                platform,
+                app_version: row.get(4)?,
+                is_current: false,
+                timezone_offset_minutes: row.get(5)?,
+                first_usage_date: row.get(6)?,
+                last_usage_date: row.get(7)?,
+                day_count: row.get(8)?,
+                request_count: row.get(9)?,
+                known_tokens: row.get(10)?,
+                last_seen_at: row.get(11)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn imported_daily_usage(
+        &self,
+        device_id: Option<&str>,
+    ) -> Result<Vec<DailyUsageTotal>, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::LockFailed)?;
+        let sql = if device_id.is_some() {
+            "SELECT usage_date, sum(request_count), sum(known_tokens), sum(input_tokens),
+                    sum(input_cached_tokens), sum(input_uncached_tokens),
+                    sum(cache_measured_input_tokens), sum(output_tokens), sum(unknown_count)
+             FROM device_daily_usage WHERE device_id = ?1 GROUP BY usage_date ORDER BY usage_date"
+        } else {
+            "SELECT usage_date, sum(request_count), sum(known_tokens), sum(input_tokens),
+                    sum(input_cached_tokens), sum(input_uncached_tokens),
+                    sum(cache_measured_input_tokens), sum(output_tokens), sum(unknown_count)
+             FROM device_daily_usage GROUP BY usage_date ORDER BY usage_date"
+        };
+        let mut statement = connection.prepare(sql)?;
+        let map_row = |row: &rusqlite::Row<'_>| {
+            Ok(DailyUsageTotal {
+                date: row.get(0)?,
+                request_count: row.get(1)?,
+                known_tokens: row.get(2)?,
+                input_tokens: row.get(3)?,
+                input_cached_tokens: row.get(4)?,
+                input_uncached_tokens: row.get(5)?,
+                cache_measured_input_tokens: row.get(6)?,
+                output_tokens: row.get(7)?,
+                unknown_count: row.get(8)?,
+            })
+        };
+        let mut totals = Vec::new();
+        if let Some(device_id) = device_id {
+            for row in statement.query_map([device_id], map_row)? {
+                totals.push(row?);
+            }
+        } else {
+            for row in statement.query_map([], map_row)? {
+                totals.push(row?);
+            }
+        }
+        Ok(totals)
     }
 
     // ─── Account Stats ───────────────────────────────────────────────────────

@@ -3,7 +3,11 @@ use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
     LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ProxyBindConfig,
     RequestLogModelOptions, RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow,
-    VirtualModel,
+    UsageTodaySummary, VirtualModel,
+};
+use crate::core::device_identity::{
+    DailyUsageTotal, DeviceUsageBundle, DeviceUsageImportPreview, DeviceUsageImportResult,
+    DeviceUsageSnapshot, KnownDevice,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::proxy::ProxyStatus;
@@ -497,7 +501,7 @@ pub(super) async fn usage_summary(
 ) -> Result<Vec<UsageSummaryRow>, String> {
     if !matches!(
         period.as_str(),
-        "all" | "year" | "quarter" | "month" | "week"
+        "all" | "year" | "quarter" | "month" | "week" | "today"
     ) {
         return Err(format!("不支持的用量统计周期：{period}"));
     }
@@ -508,17 +512,379 @@ pub(super) async fn usage_summary(
         .map_err(|err| err.to_string())
 }
 
-/// 概览页「今日消耗」专用：只返回今日 Token 消耗总量（单个整数）。
+/// 概览页「今日消耗」专用：返回今日 Token 聚合（总量 + 输入/缓存/输出拆解），
+/// 供 service-strip 悬浮明细展示总消耗、缓存命中率与输入/输出拆解。
 /// 使用 `async fn` 避免同步命令占用 Tauri 主线程；底层查询走索引范围
 /// 扫描、不带分组、不带 JOIN，持锁时间极短，不会卡住窗口拖动。
 #[tauri::command]
 pub(super) async fn usage_today_tokens(
     state: tauri::State<'_, AppState>,
-) -> Result<i64, String> {
+) -> Result<UsageTodaySummary, String> {
     state
         .storage
-        .usage_today_tokens()
+        .usage_today_summary()
         .map_err(|err| err.to_string())
+}
+
+/// 返回可供本地导出或未来同步上传的最小设备用量快照。
+#[tauri::command]
+pub(super) async fn device_usage_snapshot(
+    state: tauri::State<'_, AppState>,
+) -> Result<DeviceUsageSnapshot, String> {
+    let storage = state.storage.clone();
+    let identity = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .clone();
+    let days = tauri::async_runtime::spawn_blocking(move || storage.daily_usage_totals())
+        .await
+        .map_err(|error| format!("生成设备每日用量任务失败：{error}"))?
+        .map_err(|error| error.to_string())?;
+    Ok(DeviceUsageSnapshot::new(&identity, days))
+}
+
+#[tauri::command]
+pub(super) async fn list_known_devices(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<KnownDevice>, String> {
+    let storage = state.storage.clone();
+    let identity = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let current_days = storage.daily_usage_totals().map_err(|error| error.to_string())?;
+        let mut devices = storage.imported_known_devices().map_err(|error| error.to_string())?;
+        devices.retain(|device| device.device_id != identity.device_id);
+        devices.insert(0, KnownDevice {
+            device_id: identity.device_id,
+            device_created_at: identity.created_at,
+            display_name: identity.display_name,
+            platform: identity.platform,
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            is_current: true,
+            timezone_offset_minutes: chrono::Local::now().offset().local_minus_utc() / 60,
+            first_usage_date: current_days.first().map(|day| day.date.clone()),
+            last_usage_date: current_days.last().map(|day| day.date.clone()),
+            day_count: current_days.len() as i64,
+            request_count: current_days.iter().map(|day| day.request_count).sum(),
+            known_tokens: current_days.iter().map(|day| day.known_tokens).sum(),
+            last_seen_at: chrono::Utc::now().to_rfc3339(),
+        });
+        Ok(devices)
+    })
+    .await
+    .map_err(|error| format!("读取设备目录任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn device_daily_usage(
+    state: tauri::State<'_, AppState>,
+    device_id: Option<String>,
+) -> Result<Vec<DailyUsageTotal>, String> {
+    let storage = state.storage.clone();
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if device_id.as_deref() == Some(current_device_id.as_str()) {
+            return storage.daily_usage_totals().map_err(|error| error.to_string());
+        }
+        if let Some(device_id) = device_id.as_deref() {
+            return storage
+                .imported_daily_usage(Some(device_id))
+                .map_err(|error| error.to_string());
+        }
+        let current = storage.daily_usage_totals().map_err(|error| error.to_string())?;
+        let imported = storage.imported_daily_usage(None).map_err(|error| error.to_string())?;
+        let mut by_date = std::collections::BTreeMap::<String, DailyUsageTotal>::new();
+        for day in current.into_iter().chain(imported) {
+            let total = by_date.entry(day.date.clone()).or_insert(DailyUsageTotal {
+                date: day.date.clone(),
+                request_count: 0,
+                known_tokens: 0,
+                input_tokens: 0,
+                input_cached_tokens: 0,
+                input_uncached_tokens: 0,
+                cache_measured_input_tokens: 0,
+                output_tokens: 0,
+                unknown_count: 0,
+            });
+            total.request_count += day.request_count;
+            total.known_tokens += day.known_tokens;
+            total.input_tokens += day.input_tokens;
+            total.input_cached_tokens += day.input_cached_tokens;
+            total.input_uncached_tokens += day.input_uncached_tokens;
+            total.cache_measured_input_tokens += day.cache_measured_input_tokens;
+            total.output_tokens += day.output_tokens;
+            total.unknown_count += day.unknown_count;
+        }
+        Ok(by_date.into_values().collect())
+    })
+    .await
+    .map_err(|error| format!("读取设备每日用量任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn rename_current_device(
+    state: tauri::State<'_, AppState>,
+    display_name: String,
+) -> Result<(), String> {
+    let identity = state.device_identity.clone();
+    let data_dir = state.device_identity_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        identity
+            .lock()
+            .map_err(|_| "更新当前设备身份失败".to_string())?
+            .update_display_name(&data_dir, &display_name)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("重命名当前设备任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn get_s3_sync_settings(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::device_sync::S3SyncSettings, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::core::device_sync::load_settings(&storage)
+    })
+    .await
+    .map_err(|_| "读取 S3 同步设置任务失败".to_string())?
+}
+
+#[tauri::command]
+pub(super) async fn save_s3_sync_config(
+    state: tauri::State<'_, AppState>,
+    config: crate::core::device_sync::S3SyncConfigInput,
+) -> Result<crate::core::device_sync::S3SyncSettings, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::core::device_sync::save_config(&storage, &config)?;
+        crate::core::device_sync::load_settings(&storage)
+    })
+    .await
+    .map_err(|_| "保存 S3 同步设置任务失败".to_string())?
+}
+
+#[tauri::command]
+pub(super) async fn test_s3_sync_connection(
+    _state: tauri::State<'_, AppState>,
+    config: crate::core::device_sync::S3SyncConfigInput,
+) -> Result<crate::core::device_sync::S3ConnectionTestResult, String> {
+    crate::core::device_sync::test_connection(&config).await
+}
+
+#[tauri::command]
+pub(super) async fn sync_device_usage_s3(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::device_sync::S3DeviceSyncResult, String> {
+    let _guard = crate::core::device_sync::acquire_sync_guard()?;
+    let storage = state.storage.clone();
+    let identity = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .clone();
+    let now = chrono::Utc::now().to_rfc3339();
+    let previous = crate::core::device_sync::load_status(&storage);
+    crate::core::device_sync::save_status(
+        &storage,
+        &crate::core::device_sync::S3SyncStatus {
+            status: "running".to_string(),
+            last_attempt_at: Some(now.clone()),
+            last_success_at: previous.last_success_at.clone(),
+            message: "正在同步设备用量".to_string(),
+            remote_devices: previous.remote_devices,
+            imported_devices: 0,
+            imported_days: 0,
+            failed_objects: 0,
+        },
+    );
+
+    match crate::core::device_sync::sync_device_usage(storage.clone(), identity).await {
+        Ok(result) => {
+            let status = if result.failed_objects == 0 {
+                "success"
+            } else {
+                "partial"
+            };
+            crate::core::device_sync::save_status(
+                &storage,
+                &crate::core::device_sync::S3SyncStatus {
+                    status: status.to_string(),
+                    last_attempt_at: Some(now.clone()),
+                    last_success_at: Some(chrono::Utc::now().to_rfc3339()),
+                    message: format!(
+                        "同步完成：发现 {} 台远端设备，导入 {} 天，失败 {} 个对象",
+                        result.remote_devices, result.imported_days, result.failed_objects
+                    ),
+                    remote_devices: result.remote_devices,
+                    imported_devices: result.imported_devices,
+                    imported_days: result.imported_days,
+                    failed_objects: result.failed_objects,
+                },
+            );
+            Ok(result)
+        }
+        Err(error) => {
+            crate::core::device_sync::save_status(
+                &storage,
+                &crate::core::device_sync::S3SyncStatus {
+                    status: "failed".to_string(),
+                    last_attempt_at: Some(now),
+                    last_success_at: previous.last_success_at,
+                    message: error.clone(),
+                    remote_devices: previous.remote_devices,
+                    imported_devices: 0,
+                    imported_days: 0,
+                    failed_objects: 0,
+                },
+            );
+            Err(error)
+        }
+    }
+}
+
+fn read_device_usage_bundle(path: &str) -> Result<DeviceUsageBundle, String> {
+    const MAX_BUNDLE_BYTES: u64 = 4 * 1024 * 1024;
+    let metadata = std::fs::metadata(path).map_err(|error| format!("读取导入文件失败：{error}"))?;
+    if metadata.len() > MAX_BUNDLE_BYTES {
+        return Err("设备用量文件超过 4 MB 限制".to_string());
+    }
+    let bytes = std::fs::read(path).map_err(|error| format!("读取导入文件失败：{error}"))?;
+    DeviceUsageBundle::from_bytes(&bytes)
+}
+
+#[tauri::command]
+pub(super) async fn export_device_usage_bundle(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    let storage = state.storage.clone();
+    let identity = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let days = storage.daily_usage_totals().map_err(|error| error.to_string())?;
+        let bundle = DeviceUsageBundle::new(DeviceUsageSnapshot::new(&identity, days));
+        let bytes = serde_json::to_vec_pretty(&bundle)
+            .map_err(|error| format!("生成设备用量文件失败：{error}"))?;
+        let target = std::path::PathBuf::from(&path);
+        let parent = target.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let temporary = parent.join(format!(
+            ".flowlet-usage-{}.tmp",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::write(&temporary, bytes)
+            .map_err(|error| format!("写入设备用量临时文件失败：{error}"))?;
+        let backup = parent.join(format!(
+            ".flowlet-usage-{}.backup",
+            uuid::Uuid::new_v4().simple()
+        ));
+        if target.exists() {
+            std::fs::rename(&target, &backup)
+                .map_err(|error| format!("准备覆盖设备用量文件失败：{error}"))?;
+        }
+        match std::fs::rename(&temporary, &target) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&backup);
+                Ok(())
+            }
+            Err(error) => {
+                let _ = std::fs::remove_file(&temporary);
+                if backup.exists() {
+                    let _ = std::fs::rename(&backup, &target);
+                }
+                Err(format!("保存设备用量文件失败：{error}"))
+            }
+        }
+    })
+    .await
+    .map_err(|error| format!("导出设备用量任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn preview_device_usage_import(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<DeviceUsageImportPreview, String> {
+    let storage = state.storage.clone();
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let bundle = read_device_usage_bundle(&path)?;
+        let snapshot = bundle.snapshot;
+        let display_name = snapshot.resolved_display_name();
+        let platform = snapshot.resolved_platform();
+        let app_version = snapshot.resolved_app_version();
+        storage
+            .preview_device_usage_import(
+                &current_device_id,
+                &snapshot.device_id,
+                &snapshot.device_created_at,
+                &display_name,
+                &platform,
+                &app_version,
+                &snapshot.generated_at,
+                snapshot.timezone_offset_minutes,
+                &snapshot.days,
+            )
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("预览设备用量导入任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn import_device_usage_bundle(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<DeviceUsageImportResult, String> {
+    let storage = state.storage.clone();
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let bundle = read_device_usage_bundle(&path)?;
+        let snapshot = bundle.snapshot;
+        if snapshot.device_id == current_device_id {
+            return Err("不能把当前设备的用量重新导入为远程设备".to_string());
+        }
+        let display_name = snapshot.resolved_display_name();
+        let platform = snapshot.resolved_platform();
+        let app_version = snapshot.resolved_app_version();
+        storage
+            .import_device_usage(
+                &snapshot.device_id,
+                &snapshot.device_created_at,
+                &display_name,
+                &platform,
+                &app_version,
+                &snapshot.generated_at,
+                snapshot.timezone_offset_minutes,
+                &snapshot.days,
+            )
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("导入设备用量任务失败：{error}"))?
 }
 
 #[tauri::command]
@@ -704,10 +1070,30 @@ pub(super) async fn sync_models_cn_catalog(
     state: tauri::State<'_, AppState>,
     source_url: String,
     trigger_source: String,
-) -> Result<crate::core::storage::storage_tasks::ModelsCnSyncResult, String> {
+) -> Result<crate::core::storage::storage_tasks::CatalogSyncResult, String> {
     let storage = state.storage.clone();
+    let config_path = state.config_path.clone();
     crate::core::storage::storage_tasks::sync_models_cn_catalog(
         &storage,
+        &config_path,
+        &source_url,
+        &trigger_source,
+    )
+    .await
+}
+
+/// 手动触发 models.dev 目录同步。拉取远程数据保存到本地，写入任务日志。
+#[tauri::command]
+pub(super) async fn sync_models_dev_catalog(
+    state: tauri::State<'_, AppState>,
+    source_url: String,
+    trigger_source: String,
+) -> Result<crate::core::storage::storage_tasks::CatalogSyncResult, String> {
+    let storage = state.storage.clone();
+    let config_path = state.config_path.clone();
+    crate::core::storage::storage_tasks::sync_models_dev_catalog(
+        &storage,
+        &config_path,
         &source_url,
         &trigger_source,
     )
@@ -1853,7 +2239,8 @@ pub(super) async fn handle_intercepted_response(
 #[cfg(test)]
 mod scrape_capture_tests {
     use super::{
-        is_explicit_login_url, merge_longcat_token_packs, scrape_responses_complete,
+        channel_resource_sync_completion_status, is_explicit_login_url, merge_longcat_token_packs,
+        scrape_responses_complete,
     };
     use crate::core::scrape_console::ScrapeModeRuntime;
 
@@ -1904,6 +2291,19 @@ mod scrape_capture_tests {
             "longcat",
             "https://longcat.chat/login"
         ));
+    }
+
+    #[test]
+    fn channel_resource_sync_reports_skipped_accounts_as_warnings() {
+        assert_eq!(
+            channel_resource_sync_completion_status(0, 2),
+            "succeeded_with_warnings"
+        );
+        assert_eq!(
+            channel_resource_sync_completion_status(1, 0),
+            "succeeded_with_warnings"
+        );
+        assert_eq!(channel_resource_sync_completion_status(0, 0), "succeeded");
     }
 
     #[test]
@@ -2899,6 +3299,14 @@ pub struct ScrapeBalanceSyncResult {
     pub message: String,
 }
 
+fn channel_resource_sync_completion_status(failed: usize, skipped: usize) -> &'static str {
+    if failed > 0 || skipped > 0 {
+        "succeeded_with_warnings"
+    } else {
+        "succeeded"
+    }
+}
+
 /// 周期同步所有启用了 WebView 自动同步的渠道账号。后台运行时保持窗口隐藏，
 /// 登录失效或页面需要交互只记入任务日志，等待用户从账号编辑页手动刷新处理。
 #[tauri::command]
@@ -2946,29 +3354,14 @@ pub(super) async fn sync_scrape_balances(
             .collect::<Vec<_>>()
     };
 
-    let waiting_for_interaction = {
-        let guard = state
-            .scrape_interaction_required
-            .lock()
-            .map_err(|_| "锁定控制台交互状态失败".to_string())?;
-        accounts
-            .iter()
-            .filter(|(account_id, ..)| guard.contains(account_id))
-            .count()
-    };
-
-    if accounts.is_empty() || waiting_for_interaction == accounts.len() {
+    if accounts.is_empty() {
         return Ok(ScrapeBalanceSyncResult {
             started: false,
             job_id: None,
             accounts: 0,
             synced: 0,
             failed: 0,
-            message: if waiting_for_interaction > 0 {
-                format!("{waiting_for_interaction} 个账号正在等待登录或人工处理，本轮已跳过")
-            } else {
-                "没有启用控制台自动同步的账号".to_string()
-            },
+            message: "没有启用控制台自动同步的账号".to_string(),
         });
     }
     if SCRAPE_BALANCE_SYNC_RUNNING
@@ -3021,7 +3414,7 @@ pub(super) async fn sync_scrape_balances(
             skipped += 1;
             let _ = state.storage.add_job_event(
                 &job_id,
-                "info",
+                "warning",
                 "跳过账号资源同步",
                 &format!("{account_label} 正在等待登录或人工处理，本轮已跳过"),
             );
@@ -3071,11 +3464,7 @@ pub(super) async fn sync_scrape_balances(
         .storage
         .finish_job(
             &job_id,
-            if failed > 0 {
-                "succeeded_with_warnings"
-            } else {
-                "succeeded"
-            },
+            channel_resource_sync_completion_status(failed, skipped),
             &summary,
             &format!(
                 "渠道资源同步完成：成功 {synced} 个，失败 {failed} 个，跳过 {} 个",

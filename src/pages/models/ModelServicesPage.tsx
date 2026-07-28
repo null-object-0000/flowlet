@@ -28,7 +28,7 @@ import {
   isPromotionalDiscount,
 } from "../../domains/modelCatalog";
 import type { ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
-import { useModelsCnCatalogSync } from "../../features/background-tasks/useBackgroundTasks";
+import { useModelCatalogsSync } from "../../features/background-tasks/useBackgroundTasks";
 import { channelCommands, type PresetSyncPreview } from "../../domains/channel/commands";
 import styles from "./ModelServicesPage.module.css";
 
@@ -132,7 +132,7 @@ export function ModelServicesPage() {
   const prices = useModelPrices();
   // models-cn 目录：只读本地（由后台定时任务拉取）。本地无数据时 catalog 为 null。
   const catalogEntry = useLocalModelsCnCatalog();
-  const syncModelsCnCatalog = useModelsCnCatalogSync();
+  const syncModelCatalogs = useModelCatalogsSync();
   const actions = useModelActions();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ModelStatusFilter>("all");
@@ -171,7 +171,7 @@ export function ModelServicesPage() {
   const [syncApplying, setSyncApplying] = useState(false);
 
   const refresh = () => void Promise.all([accounts.refetch(), routes.refetch(), channelModels.refetch(), prices.refetch(), catalogEntry.refetch()]);
-  const syncModelsCn = () => syncModelsCnCatalog.mutate({ sourceUrl: "https://null-object-0000.github.io/models-cn/api.json", triggerSource: "manual" });
+  const syncCatalogs = () => syncModelCatalogs.mutate({ modelsCnUrl: "https://null-object-0000.github.io/models-cn/api.json", modelsDevUrl: "https://models.dev/api.json", triggerSource: "manual" });
   const openSyncPresets = async () => {
     setSyncPending(true);
     try {
@@ -293,8 +293,8 @@ export function ModelServicesPage() {
           prices={prices.data ?? []}
           catalogJson={catalogEntry.data ?? null}
           catalogLoading={catalogEntry.isLoading}
-          syncModelsCnPending={syncModelsCnCatalog.isPending}
-          onSyncModelsCn={syncModelsCn}
+          syncCatalogsPending={syncModelCatalogs.isPending}
+          onSyncCatalogs={syncCatalogs}
           language={language}
           busy={busyModel != null}
           onToggleRoute={toggleRoute}
@@ -420,7 +420,7 @@ function ModelLogo({ model }: { model: ModelServiceItem }) {
   return <FlowletLogo variant="model" />;
 }
 
-function ModelDetail({ model, accounts, channels, channelModels, prices, catalogJson, catalogLoading, syncModelsCnPending, onSyncModelsCn, language, busy, onToggleRoute, onReorderRoute, t }: {
+function ModelDetail({ model, accounts, channels, channelModels, prices, catalogJson, catalogLoading, syncCatalogsPending, onSyncCatalogs, language, busy, onToggleRoute, onReorderRoute, t }: {
   model: ModelServiceItem | null;
   accounts: ReturnType<typeof useAccounts>["data"] extends (infer T)[] | undefined ? T[] : never;
   channels: ReturnType<typeof useChannelPresets>["data"] extends (infer T)[] | undefined ? T[] : never;
@@ -428,8 +428,8 @@ function ModelDetail({ model, accounts, channels, channelModels, prices, catalog
   prices: ModelPriceInfo[];
   catalogJson: string | null;
   catalogLoading: boolean;
-  syncModelsCnPending: boolean;
-  onSyncModelsCn: () => void;
+  syncCatalogsPending: boolean;
+  onSyncCatalogs: () => void;
   language: NumberLanguage;
   busy: boolean;
   onToggleRoute: (modelId: string, routeGroup: ModelRouteGroup, enabled: boolean) => void;
@@ -539,8 +539,8 @@ function ModelDetail({ model, accounts, channels, channelModels, prices, catalog
             catalogLoading={catalogLoading}
             showSyncButton={showPricingSync}
             isAggregate={model.kind === "aggregate"}
-            syncPending={syncModelsCnPending}
-            onSync={onSyncModelsCn}
+            syncPending={syncCatalogsPending}
+            onSync={onSyncCatalogs}
             language={language}
             t={t}
           />

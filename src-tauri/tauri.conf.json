@@ -43,7 +43,8 @@
     ],
     "resources": {
       "../config.json": "config.json",
-      "models-cn.json": "models-cn.json"
+      "models-cn.json": "models-cn.json",
+      "models-dev.json": "models-dev.json"
     }
   }
 }

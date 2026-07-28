@@ -9,7 +9,7 @@ vi.mock("@douyinfe/semi-ui-19", () => ({
 import { TokenBreakdownTooltip } from "./TokenBreakdownTooltip";
 
 describe("TokenBreakdownTooltip", () => {
-  it("renders the shared token breakdown and missing-detail count", () => {
+  it("renders total and cache hit rate first, then the detailed breakdown", () => {
     render(
       <TokenBreakdownTooltip
         language="zh-CN"
@@ -28,11 +28,37 @@ describe("TokenBreakdownTooltip", () => {
       </TokenBreakdownTooltip>,
     );
 
-    expect(screen.getByText(/总 Token/)).toHaveTextContent("1,200");
+    expect(screen.getByText(/总消耗 Token/)).toHaveTextContent("1,200");
+    expect(screen.getByText("缓存命中率").parentElement).toHaveTextContent("50.0%");
     expect(screen.getByText("缓存输入 Token").parentElement).toHaveTextContent("400");
     expect(screen.getByText("未缓存输入 Token").parentElement).toHaveTextContent("600");
     expect(screen.getByText("输出 Token").parentElement).toHaveTextContent("200");
-    expect(screen.getByText("缓存命中率").parentElement).toHaveTextContent("50.0%");
     expect(screen.getByText("无 Token 明细请求").parentElement).toHaveTextContent("1");
+
+    // 结构顺序：总消耗 Token → 缓存命中率 → 明细（输入/输出等）。
+    const texts = screen.getAllByText(/总消耗 Token|缓存命中率|输入 Token|输出 Token/).map((node) => node.textContent);
+    expect(texts).toEqual(["总消耗 Token 1,200", "缓存命中率", "输入 Token", "缓存输入 Token", "未缓存输入 Token", "输出 Token"]);
+  });
+
+  it("renders the optional request count when provided", () => {
+    render(
+      <TokenBreakdownTooltip
+        language="zh-CN"
+        t={(source) => source}
+        tokens={{
+          total: 1200,
+          input: 1000,
+          cachedInput: 400,
+          uncachedInput: 600,
+          output: 200,
+          cacheHitRate: 0.5,
+          requests: 827,
+        }}
+      >
+        <span>1,200</span>
+      </TokenBreakdownTooltip>,
+    );
+
+    expect(screen.getByText("请求量").parentElement).toHaveTextContent("827");
   });
 });

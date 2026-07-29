@@ -55,8 +55,8 @@
 
 .configRow code,
 .codeBlock {
-  color: #0759d6;
-  background: #edf3ff;
+  color: var(--flowlet-color-code-text);
+  background: var(--flowlet-color-code-bg);
   font-family: "Cascadia Code", Consolas, monospace;
 }
 
@@ -397,9 +397,13 @@
 }
 
 .tip {
-  color: #344766;
-  background: #fffaf0;
-  border-color: #f3dfb3;
+  color: var(--flowlet-color-warning-text);
+  background: var(--flowlet-color-warning-surface);
+  border-color: var(--flowlet-color-warning-border);
+}
+
+.tip h5 {
+  color: var(--flowlet-color-warning-strong);
 }
 
 .tip ul {

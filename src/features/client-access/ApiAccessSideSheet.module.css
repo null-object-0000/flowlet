@@ -57,22 +57,26 @@
 }
 
 .security {
-  border-color: #f3e4c2;
-  background: #fff8ec;
+  border-color: var(--flowlet-color-warning-border);
+  background: var(--flowlet-color-warning-surface);
+}
+
+.security .sectionTitle {
+  color: var(--flowlet-color-warning-strong);
 }
 
 .security ul {
   margin: 0;
   padding-left: 18px;
-  color: #6f4a14;
+  color: var(--flowlet-color-warning-text);
   font-size: 13px;
   line-height: 1.6;
 }
 
 .security code {
   padding: 1px 6px;
-  color: #7a4a0c;
-  background: #f8ebc8;
+  color: var(--flowlet-color-warning-strong);
+  background: color-mix(in srgb, var(--flowlet-color-warning-strong) 12%, transparent);
 }
 
 @media (max-width: 640px) {

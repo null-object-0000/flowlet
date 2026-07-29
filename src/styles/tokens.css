@@ -23,6 +23,12 @@
   --flowlet-color-text-tertiary: #9199a7;
   --flowlet-color-primary: #1769ff;
   --flowlet-color-success: #2fa64a;
+  --flowlet-color-code-bg: #edf3ff;
+  --flowlet-color-code-text: #0759d6;
+  --flowlet-color-warning-surface: #fff8ec;
+  --flowlet-color-warning-border: #f3dfb3;
+  --flowlet-color-warning-text: #6f4a14;
+  --flowlet-color-warning-strong: #7a4a0c;
   --flowlet-color-shell-glow: rgba(214, 231, 255, 0.4);
   --flowlet-radius-control: 7px;
   --flowlet-radius-card: 12px;
@@ -85,6 +91,12 @@ body[theme-mode="dark"] {
   --flowlet-color-text-tertiary: #7e8a9c;
   --flowlet-color-primary: #4d8dff;
   --flowlet-color-success: #4fbe68;
+  --flowlet-color-code-bg: #131d2c;
+  --flowlet-color-code-text: #8cb7ff;
+  --flowlet-color-warning-surface: rgba(181, 123, 32, 0.13);
+  --flowlet-color-warning-border: rgba(235, 177, 76, 0.3);
+  --flowlet-color-warning-text: #e8c582;
+  --flowlet-color-warning-strong: #ffd78b;
   --flowlet-color-shell-glow: rgba(45, 91, 160, 0.18);
   --flowlet-shadow-card: 0 12px 28px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.16);
   --flowlet-shadow-floating: 0 28px 80px rgba(0, 0, 0, 0.5);

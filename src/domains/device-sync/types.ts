@@ -111,6 +111,7 @@ export type S3SyncStatus = {
   importedDevices: number;
   importedDays: number;
   failedObjects: number;
+  failureDetails?: string[];
 };
 
 export type S3SyncSettings = {
@@ -137,4 +138,5 @@ export type S3DevicePullResult = {
   importedDays: number;
   unchangedDays: number;
   failedObjects: number;
+  failureDetails?: string[];
 };

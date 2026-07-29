@@ -8,6 +8,23 @@ const scannerMocks = vi.hoisted(() => ({
   unregister: vi.fn<() => Promise<void>>(),
 }));
 
+const syncMocks = vi.hoisted(() => ({
+  settings: {
+    config: null,
+    status: {
+      status: "never",
+      lastAttemptAt: null as string | null,
+      lastSuccessAt: null as string | null,
+      message: "尚未同步",
+      remoteDevices: 0,
+      importedDevices: 0,
+      importedDays: 0,
+      failedObjects: 0,
+      failureDetails: [] as string[],
+    },
+  },
+}));
+
 vi.mock("@tauri-apps/api/app", () => ({
   onBackButtonPress: vi.fn(async (handler: () => void) => {
     scannerMocks.backHandler = handler;
@@ -30,7 +47,7 @@ vi.mock("lottie-web", () => ({
 
 vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileS3Settings: () => ({
-    data: { config: null },
+    data: syncMocks.settings,
   }),
   useMobileDeviceSyncActions: () => ({
     saveS3Config: { isPending: false, mutateAsync: vi.fn() },
@@ -52,6 +69,17 @@ describe("MobileSettingsPage scanner", () => {
     scannerMocks.cancel.mockReset().mockImplementation(() => new Promise<void>(() => undefined));
     scannerMocks.scan.mockReset().mockImplementation(() => new Promise<never>(() => undefined));
     scannerMocks.unregister.mockReset().mockResolvedValue(undefined);
+    syncMocks.settings.status = {
+      status: "never",
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      message: "尚未同步",
+      remoteDevices: 0,
+      importedDevices: 0,
+      importedDays: 0,
+      failedObjects: 0,
+      failureDetails: [],
+    };
     delete document.body.dataset.flowletScanning;
   });
 
@@ -81,5 +109,24 @@ describe("MobileSettingsPage scanner", () => {
     expect(screen.queryByRole("dialog", { name: "扫描连接二维码" })).not.toBeInTheDocument();
     expect(document.body).not.toHaveAttribute("data-flowlet-scanning");
     expect(scannerMocks.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("shows the concrete object failure returned by the latest refresh", () => {
+    syncMocks.settings.status = {
+      status: "partial",
+      lastAttemptAt: "2026-07-29T19:20:54Z",
+      lastSuccessAt: "2026-07-29T19:20:54Z",
+      message: "刷新完成：读取 2 台设备；1 个对象失败",
+      remoteDevices: 2,
+      importedDevices: 1,
+      importedDays: 0,
+      failedObjects: 1,
+      failureDetails: ["设备 device-1：不支持的设备用量快照版本：3"],
+    };
+
+    render(<MobileSettingsPage />);
+
+    expect(screen.getByText("失败详情")).toBeInTheDocument();
+    expect(screen.getByText("设备 device-1：不支持的设备用量快照版本：3")).toBeInTheDocument();
   });
 });

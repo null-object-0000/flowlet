@@ -85,6 +85,8 @@ pub struct S3SyncStatus {
     pub imported_devices: usize,
     pub imported_days: usize,
     pub failed_objects: usize,
+    #[serde(default)]
+    pub failure_details: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -192,6 +194,7 @@ pub struct S3DevicePullResult {
     pub imported_days: usize,
     pub unchanged_days: usize,
     pub failed_objects: usize,
+    pub failure_details: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -214,6 +217,7 @@ impl Default for S3SyncStatus {
             imported_devices: 0,
             imported_days: 0,
             failed_objects: 0,
+            failure_details: Vec::new(),
         }
     }
 }
@@ -696,21 +700,32 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
         .collect::<Vec<_>>();
 
     let mut bundles = Vec::new();
-    let mut failed_objects = 0usize;
+    let mut failure_details = Vec::new();
     for object in &remote_objects {
+        let object_label = snapshot_object_label(&object.key);
         if object.size > MAX_REMOTE_BUNDLE_BYTES {
-            failed_objects += 1;
+            failure_details.push(format!("{object_label}：快照超过 4 MB 限制"));
             continue;
         }
-        match store
-            .get(&object.key)
-            .await
-            .and_then(|bytes| DeviceUsageBundle::from_bytes(&bytes))
-        {
-            Ok(bundle) if config.snapshot_key(&bundle.snapshot.device_id) == object.key => {
-                bundles.push(bundle)
+        let bundle = match store.get(&object.key).await {
+            Ok(bytes) => match DeviceUsageBundle::from_bytes(&bytes) {
+                Ok(bundle) => bundle,
+                Err(error) => {
+                    tracing::warn!(object_key = %object.key, %error, "failed to parse S3 device snapshot");
+                    failure_details.push(format!("{object_label}：{error}"));
+                    continue;
+                }
+            },
+            Err(error) => {
+                tracing::warn!(object_key = %object.key, %error, "failed to download S3 device snapshot");
+                failure_details.push(format!("{object_label}：{error}"));
+                continue;
             }
-            Ok(_) | Err(_) => failed_objects += 1,
+        };
+        if config.snapshot_key(&bundle.snapshot.device_id) == object.key {
+            bundles.push(bundle);
+        } else {
+            failure_details.push(format!("{object_label}：快照 deviceId 与对象路径不一致"));
         }
     }
 
@@ -719,9 +734,10 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
         let mut imported_devices = 0usize;
         let mut imported_days = 0usize;
         let mut unchanged_days = 0usize;
-        let mut import_failures = 0usize;
+        let mut import_failures = Vec::new();
         for bundle in bundles {
             let snapshot = bundle.snapshot;
+            let device_label = snapshot.resolved_display_name();
             let result = match import_storage.import_device_usage(
                 snapshot.schema_version,
                 &snapshot.device_id,
@@ -736,8 +752,9 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
                 &snapshot.sessions,
             ) {
                 Ok(result) => result,
-                Err(_) => {
-                    import_failures += 1;
+                Err(error) => {
+                    tracing::warn!(device_id = %snapshot.device_id, %error, "failed to import S3 device snapshot");
+                    import_failures.push(format!("{device_label}：导入失败：{error}"));
                     continue;
                 }
             };
@@ -755,13 +772,23 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
     .await
     .map_err(|_| "导入远端设备快照任务失败".to_string())?;
 
+    failure_details.extend(import_result.3);
     Ok(S3DevicePullResult {
         remote_devices: remote_objects.len(),
         imported_devices: import_result.0,
         imported_days: import_result.1,
         unchanged_days: import_result.2,
-        failed_objects: failed_objects + import_result.3,
+        failed_objects: failure_details.len(),
+        failure_details,
     })
+}
+
+fn snapshot_object_label(key: &str) -> String {
+    key.strip_suffix("/snapshot.json")
+        .and_then(|prefix| prefix.rsplit('/').next())
+        .filter(|device_id| !device_id.is_empty())
+        .map(|device_id| format!("设备 {device_id}"))
+        .unwrap_or_else(|| "未知设备快照".to_string())
 }
 
 pub async fn run_configured_pull(storage: Storage) -> Result<S3DevicePullResult, String> {
@@ -779,6 +806,7 @@ pub async fn run_configured_pull(storage: Storage) -> Result<S3DevicePullResult,
             imported_devices: 0,
             imported_days: 0,
             failed_objects: 0,
+            failure_details: Vec::new(),
         },
     );
 
@@ -796,13 +824,22 @@ pub async fn run_configured_pull(storage: Storage) -> Result<S3DevicePullResult,
                     last_attempt_at: Some(now),
                     last_success_at: Some(chrono::Utc::now().to_rfc3339()),
                     message: format!(
-                        "刷新完成：读取 {} 台设备，导入 {} 天，失败 {} 个对象",
-                        result.remote_devices, result.imported_days, result.failed_objects
+                        "刷新完成：读取 {} 台设备，更新 {} 台，新增或更新 {} 天，{} 天未变化{}",
+                        result.remote_devices,
+                        result.imported_devices,
+                        result.imported_days,
+                        result.unchanged_days,
+                        if result.failed_objects == 0 {
+                            String::new()
+                        } else {
+                            format!("；{} 个对象失败", result.failed_objects)
+                        }
                     ),
                     remote_devices: result.remote_devices,
                     imported_devices: result.imported_devices,
                     imported_days: result.imported_days,
                     failed_objects: result.failed_objects,
+                    failure_details: result.failure_details.clone(),
                 },
             );
             Ok(result)
@@ -819,6 +856,7 @@ pub async fn run_configured_pull(storage: Storage) -> Result<S3DevicePullResult,
                     imported_devices: 0,
                     imported_days: 0,
                     failed_objects: 0,
+                    failure_details: Vec::new(),
                 },
             );
             Err(error)
@@ -986,6 +1024,7 @@ pub async fn run_configured_sync(
             imported_devices: 0,
             imported_days: 0,
             failed_objects: 0,
+            failure_details: Vec::new(),
         },
     );
 
@@ -1010,6 +1049,7 @@ pub async fn run_configured_sync(
                     imported_devices: result.imported_devices,
                     imported_days: result.imported_days,
                     failed_objects: result.failed_objects,
+                    failure_details: Vec::new(),
                 },
             );
             let duration_ms = started_at.elapsed().as_millis() as u64;
@@ -1054,6 +1094,7 @@ pub async fn run_configured_sync(
                     imported_devices: 0,
                     imported_days: 0,
                     failed_objects: 0,
+                    failure_details: Vec::new(),
                 },
             );
             if let Err(job_error) = storage.fail_job(&job_id, &error) {
@@ -1201,6 +1242,26 @@ mod tests {
         let serialized = serde_json::to_string(&config).unwrap();
         assert!(!serialized.contains("secret"));
         assert!(!serialized.contains("secretAccessKey"));
+    }
+
+    #[test]
+    fn old_sync_status_deserializes_without_failure_details() {
+        let status: S3SyncStatus = serde_json::from_value(serde_json::json!({
+            "status": "partial",
+            "lastAttemptAt": "2026-07-29T19:20:54Z",
+            "lastSuccessAt": "2026-07-29T19:20:54Z",
+            "message": "刷新完成",
+            "remoteDevices": 2,
+            "importedDevices": 1,
+            "importedDays": 0,
+            "failedObjects": 1
+        }))
+        .unwrap();
+        assert!(status.failure_details.is_empty());
+        assert_eq!(
+            snapshot_object_label("users/demo/flowlet/v1/devices/device-1/snapshot.json"),
+            "设备 device-1"
+        );
     }
 
     #[test]

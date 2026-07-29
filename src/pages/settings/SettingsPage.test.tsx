@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toast } from "@douyinfe/semi-ui-19";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppPreferencesProvider } from "../../app/preferences/AppPreferences";
 
@@ -10,6 +11,10 @@ vi.mock("lottie-web", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn().mockResolvedValue(null),
   open: vi.fn().mockResolvedValue(null),
+}));
+
+const deviceSyncMocks = vi.hoisted(() => ({
+  refetchKnownDevices: vi.fn().mockResolvedValue({ isError: false }),
 }));
 
 vi.mock("../../features/settings/useAutostartSetting", () => ({
@@ -115,6 +120,8 @@ vi.mock("../../features/device-sync/useDeviceSync", () => ({
     }],
     isLoading: false,
     isError: false,
+    isFetching: false,
+    refetch: deviceSyncMocks.refetchKnownDevices,
   }),
   useS3SyncSettings: () => ({
     data: {
@@ -154,7 +161,11 @@ function renderWithQueryClient(ui: React.ReactElement) {
 }
 
 describe("SettingsPage", () => {
-  afterEach(() => localStorage.clear());
+  afterEach(() => {
+    localStorage.clear();
+    Toast.destroyAll();
+    deviceSyncMocks.refetchKnownDevices.mockClear();
+  });
 
   it("renders the settings layout with search", () => {
     renderWithQueryClient(<SettingsPage />);
@@ -203,6 +214,42 @@ describe("SettingsPage", () => {
     expect(screen.getByText("重命名当前设备")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("例如：公司笔记本")).toHaveValue("公司笔记本");
     expect(screen.getByText("设备名称用于导出和同步时区分设备，不会改变设备 ID。")).toBeInTheDocument();
+  });
+
+  it.each([
+    "从文件导入用量",
+    "导出当前设备",
+    "刷新设备列表",
+  ])("closes the device actions menu after selecting %s", async (action) => {
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
+    fireEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+    fireEvent.click(await screen.findByText(action));
+
+    await waitFor(() => expect(screen.queryByText("从文件导入用量")).not.toBeInTheDocument());
+  });
+
+  it("refreshes the device list and reports completion", async () => {
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
+    fireEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+    fireEvent.click(await screen.findByText("刷新设备列表"));
+
+    await waitFor(() => expect(deviceSyncMocks.refetchKnownDevices).toHaveBeenCalled());
+    expect(await screen.findByText("设备列表已刷新")).toBeInTheDocument();
+  });
+
+  it("reports a device list refresh failure", async () => {
+    deviceSyncMocks.refetchKnownDevices.mockResolvedValueOnce({
+      isError: true,
+      error: new Error("database unavailable"),
+    });
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
+    fireEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+    fireEvent.click(await screen.findByText("刷新设备列表"));
+
+    expect(await screen.findByText("刷新设备列表失败：database unavailable")).toBeInTheDocument();
   });
 
   it("opens the S3-compatible configuration dialog", async () => {

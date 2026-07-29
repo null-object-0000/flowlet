@@ -51,6 +51,19 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.syncFailureDetails {
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--semi-color-danger) 28%, var(--flowlet-color-border));
+  border-radius: 9px;
+  color: var(--flowlet-color-text-secondary);
+  background: color-mix(in srgb, var(--semi-color-danger) 7%, var(--flowlet-color-surface));
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.syncFailureDetails strong { color: var(--semi-color-danger); font-size: 12px; }
 .deviceList { display: grid; gap: 9px; }
 .device {
   padding: 13px;

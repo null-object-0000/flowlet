@@ -103,6 +103,19 @@ export function SyncTab() {
     }
   };
 
+  const refreshDevices = async () => {
+    try {
+      const result = await devices.refetch();
+      if (result.isError) {
+        Toast.error(t("刷新设备列表失败：{message}", { message: errorMessage(result.error) }));
+        return;
+      }
+      Toast.success(t("设备列表已刷新"));
+    } catch (error) {
+      Toast.error(t("刷新设备列表失败：{message}", { message: errorMessage(error) }));
+    }
+  };
+
   const applyUsageImport = async () => {
     if (!importPath || !preview) return;
     try {
@@ -279,15 +292,27 @@ export function SyncTab() {
             <Dropdown
               position="bottomRight"
               trigger="click"
+              clickToHide
               render={(
                 <Dropdown.Menu>
                   <Dropdown.Item onClick={() => void chooseUsageImport()}>{t("从文件导入用量")}</Dropdown.Item>
                   <Dropdown.Item onClick={() => void exportUsage()}>{t("导出当前设备")}</Dropdown.Item>
-                  <Dropdown.Item onClick={() => void devices.refetch()}>{t("刷新设备列表")}</Dropdown.Item>
+                  <Dropdown.Item
+                    disabled={devices.isFetching}
+                    icon={<IconRefresh />}
+                    onClick={() => void refreshDevices()}
+                  >
+                    {t(devices.isFetching ? "正在刷新设备列表…" : "刷新设备列表")}
+                  </Dropdown.Item>
                 </Dropdown.Menu>
               )}
             >
-              <Button icon={<IconMore />} theme="outline" aria-label={t("更多操作")} />
+              <Button
+                icon={<IconMore />}
+                theme="outline"
+                loading={devices.isFetching}
+                aria-label={t("更多操作")}
+              />
             </Dropdown>
             <Button
               icon={<IconPlus />}
@@ -334,6 +359,7 @@ export function SyncTab() {
                   <Dropdown
                     position="bottomRight"
                     trigger="click"
+                    clickToHide
                     render={(
                       <Dropdown.Menu>
                         <Dropdown.Item onClick={() => setRenameValue(device.displayName)}>{t("重命名")}</Dropdown.Item>

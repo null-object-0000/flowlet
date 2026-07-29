@@ -211,6 +211,14 @@ export function MobileSettingsPage() {
           <div className={styles.status} data-state={syncStatusState}><i /><span>{syncStatusText}</span></div>
           <time>{syncStatus?.lastSuccessAt ? formatFullTimestamp(syncStatus.lastSuccessAt, language) : t("尚未成功刷新")}</time>
         </div>
+        {syncStatus?.failureDetails?.length ? (
+          <div className={styles.syncFailureDetails}>
+            <strong>{t("失败详情")}</strong>
+            {syncStatus.failureDetails.map((detail, index) => (
+              <span key={`${index}-${detail}`}>{detail}</span>
+            ))}
+          </div>
+        ) : null}
       </article>
 
       <article className={styles.card}>

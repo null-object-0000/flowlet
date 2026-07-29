@@ -1083,7 +1083,15 @@ fn run_mobile() {
     use tauri::Manager as _;
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_barcode_scanner::init())
         .setup(|app| {
+            #[cfg(target_os = "android")]
+            {
+                let credential_store = android_native_keyring_store::Store::new()
+                    .map_err(|error| format!("初始化 Android 系统凭据库失败：{error}"))?;
+                keyring_core::set_default_store(credential_store);
+            }
+
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let storage = Storage::open(data_dir.join("flowlet-mobile.sqlite"))

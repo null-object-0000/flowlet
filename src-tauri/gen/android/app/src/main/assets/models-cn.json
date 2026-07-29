@@ -1,0 +1,3488 @@
+{
+  "schemaVersion": "1.0",
+  "providers": [
+    {
+      "schemaVersion": "1.0",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:54:33.728Z",
+        "lastAttemptAt": "2026-07-27T04:54:33.728Z",
+        "consecutiveFailures": 0
+      },
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "displayNames": {
+        "zh-CN": "深度求索",
+        "en": "DeepSeek"
+      },
+      "ownedBy": "deepseek",
+      "baseUrls": {
+        "openai": "https://api.deepseek.com",
+        "anthropic": "https://api.deepseek.com/anthropic"
+      },
+      "models": [
+        {
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek-V4-Flash",
+          "aliases": [
+            {
+              "id": "deepseek-chat",
+              "mode": "non-thinking"
+            },
+            {
+              "id": "deepseek-reasoner",
+              "mode": "thinking"
+            }
+          ],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "fimCompletion": "non-thinking-only"
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 384000,
+            "concurrency": 2500
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.02,
+                "standard": 1
+              },
+              "output": 2,
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.0028,
+                "standard": 0.14
+              },
+              "output": 0.28,
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/"
+            }
+          ]
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek-V4-Pro",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "fimCompletion": "non-thinking-only"
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 384000,
+            "concurrency": 500
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.025,
+                "standard": 3
+              },
+              "output": 6,
+              "sourceUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.003625,
+                "standard": 0.435
+              },
+              "output": 0.87,
+              "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing/"
+            }
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+          "kind": "pricing",
+          "locale": "zh-CN",
+          "currency": "CNY",
+          "retrievedAt": "2026-07-27T04:54:33.728Z",
+          "contentHash": "sha256:b7827418447438f8d7ce38dd172cceef7b2c7f5bbb17e0898d21ee2358ffdf52"
+        },
+        {
+          "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+          "kind": "pricing",
+          "locale": "en",
+          "currency": "USD",
+          "retrievedAt": "2026-07-27T04:54:33.728Z",
+          "contentHash": "sha256:435c51b06e70ec16f93eeb3309d5dee34574cf1ab69ee8bc3a451069ec873e07"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "1.0",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:54:33.743Z",
+        "lastAttemptAt": "2026-07-27T04:54:33.743Z",
+        "consecutiveFailures": 0
+      },
+      "id": "longcat",
+      "name": "LongCat",
+      "displayNames": {
+        "zh-CN": "美团",
+        "en": "Meituan"
+      },
+      "ownedBy": "longcat",
+      "baseUrls": {
+        "openai": "https://api.longcat.chat/openai",
+        "anthropic": "https://api.longcat.chat/anthropic"
+      },
+      "models": [
+        {
+          "id": "LongCat-2.0",
+          "name": "LongCat-2.0",
+          "createdAt": "2026-03-12T16:00:00.000Z",
+          "tokenizer": "Other",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "max_tokens",
+              "temperature",
+              "top_p",
+              "stream",
+              "tools",
+              "tool_choice",
+              "thinking"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1048576,
+            "maxOutputTokens": 131072
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.1,
+                "standard": 5
+              },
+              "output": 20,
+              "sourceUrl": "https://longcat.chat/platform/docs/zh/pricing/long-cat-2.0"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "promotional",
+              "input": {
+                "cacheHit": 0.04,
+                "standard": 2
+              },
+              "output": 8,
+              "sourceUrl": "https://longcat.chat/platform/docs/zh/pricing/long-cat-2.0"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.015,
+                "standard": 0.75
+              },
+              "output": 2.95,
+              "sourceUrl": "https://longcat.chat/platform/docs/pricing/long-cat-2.0"
+            },
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "promotional",
+              "input": {
+                "cacheHit": 0.006,
+                "standard": 0.3
+              },
+              "output": 1.2,
+              "sourceUrl": "https://longcat.chat/platform/docs/pricing/long-cat-2.0"
+            }
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://longcat.chat/platform/docs/zh/pricing/long-cat-2.0",
+          "kind": "pricing",
+          "locale": "zh-CN",
+          "currency": "CNY",
+          "retrievedAt": "2026-07-22T03:33:15.688Z",
+          "contentHash": "sha256:e439bc7e04c6fc070198ff89fd1bb375cb550b562653062be487a599ad1dfb55"
+        },
+        {
+          "url": "https://longcat.chat/platform/docs/pricing/long-cat-2.0",
+          "kind": "pricing",
+          "locale": "en",
+          "currency": "USD",
+          "retrievedAt": "2026-07-22T03:33:15.688Z",
+          "contentHash": "sha256:0432f7e7ebe087b0fce0efedcd9c0796c9baf20019487dfd6223b183b4067d95"
+        },
+        {
+          "url": "https://longcat.chat/platform/docs/zh/api/model",
+          "kind": "model-metadata",
+          "locale": "zh-CN",
+          "retrievedAt": "2026-07-22T03:33:15.688Z",
+          "contentHash": "sha256:ebc0917bc2daf3eab9f936dd813e1db4568e97fdb0737e5dd923184d35c8545e"
+        },
+        {
+          "url": "https://longcat.chat/platform/docs/",
+          "kind": "model-metadata",
+          "locale": "en",
+          "retrievedAt": "2026-07-22T03:33:15.688Z",
+          "contentHash": "sha256:f1de634787fe5cc0fe96b0b7f617755847d22b30d06aee392ffb5787d7c9f1c9"
+        },
+        {
+          "url": "https://api.longcat.chat/openai/v1/models/LongCat-2.0",
+          "kind": "model-metadata",
+          "locale": "en",
+          "retrievedAt": "2026-07-22T03:54:28.935Z",
+          "contentHash": "sha256:ebc0917bc2daf3eab9f936dd813e1db4568e97fdb0737e5dd923184d35c8545e"
+        },
+        {
+          "url": "https://api.longcat.chat/openai/v1/models",
+          "kind": "model-metadata",
+          "locale": "en",
+          "retrievedAt": "2026-07-22T03:54:28.935Z",
+          "contentHash": "sha256:7a6f62083d26fb847782a0074648e388a16f6afef83ac0007d75c19b9a9568cc"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "1.0",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:54:33.747Z",
+        "lastAttemptAt": "2026-07-27T04:54:33.747Z",
+        "consecutiveFailures": 0
+      },
+      "id": "moonshot-cn",
+      "name": "Kimi China",
+      "displayNames": {
+        "zh-CN": "月之暗面",
+        "en": "Moonshot AI"
+      },
+      "ownedBy": "moonshot",
+      "baseUrls": {
+        "openai": "https://api.moonshot.cn/v1"
+      },
+      "models": [
+        {
+          "id": "kimi-k3",
+          "name": "Kimi K3",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking"
+            ],
+            "reasoningEfforts": [
+              "low",
+              "high",
+              "max"
+            ],
+            "dynamicTools": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "reasoning_effort",
+              "tool_choice",
+              "temperature",
+              "top_p",
+              "n",
+              "presence_penalty",
+              "frequency_penalty"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 1048576,
+            "maxOutputTokens": 1048576
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 2,
+                "standard": 20
+              },
+              "output": 100,
+              "sourceUrl": "https://platform.kimi.com/docs/pricing/chat-k3"
+            }
+          ]
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "name": "Kimi K2.7 Code",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking"
+            ],
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "thinking",
+              "tool_choice",
+              "temperature",
+              "top_p",
+              "n",
+              "presence_penalty",
+              "frequency_penalty"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 262144
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 1.3,
+                "standard": 6.5
+              },
+              "output": 27,
+              "sourceUrl": "https://platform.kimi.com/docs/pricing/chat-k27-code"
+            }
+          ]
+        },
+        {
+          "id": "kimi-k2.7-code-highspeed",
+          "name": "Kimi K2.7 Code HighSpeed",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking"
+            ],
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "thinking",
+              "tool_choice",
+              "temperature",
+              "top_p",
+              "n",
+              "presence_penalty",
+              "frequency_penalty"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 262144
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 2.6,
+                "standard": 13
+              },
+              "output": 54,
+              "sourceUrl": "https://platform.kimi.com/docs/pricing/chat-k27-code"
+            }
+          ]
+        },
+        {
+          "id": "kimi-k2.6",
+          "name": "Kimi K2.6",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking",
+              "non-thinking"
+            ],
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "thinking",
+              "tool_choice",
+              "temperature",
+              "top_p",
+              "n",
+              "presence_penalty",
+              "frequency_penalty"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 262144,
+            "maxOutputTokens": 262144
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 1.1,
+                "standard": 6.5
+              },
+              "output": 27,
+              "sourceUrl": "https://platform.kimi.com/docs/pricing/chat-k26"
+            }
+          ]
+        },
+        {
+          "id": "kimi-k2.5",
+          "name": "Kimi K2.5",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking",
+              "non-thinking"
+            ],
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "thinking",
+              "temperature"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 262144,
+            "maxOutputTokens": 262144
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.7,
+                "standard": 4
+              },
+              "output": 21,
+              "sourceUrl": "https://platform.kimi.com/docs/pricing/chat-k25"
+            }
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://platform.kimi.com/docs/pricing/chat-k3",
+          "kind": "pricing",
+          "locale": "zh-CN",
+          "currency": "CNY",
+          "retrievedAt": "2026-07-22T05:31:27.415Z",
+          "contentHash": "sha256:f1a8edf8fc920053c3687815b370f517a3701bbc8b7a7c4042cadd099eb703c0"
+        },
+        {
+          "url": "https://platform.kimi.com/docs/pricing/chat-k27-code",
+          "kind": "pricing",
+          "locale": "zh-CN",
+          "currency": "CNY",
+          "retrievedAt": "2026-07-22T05:31:27.415Z",
+          "contentHash": "sha256:2cab6e43a4b9c7d17d6eec7cac683fefaa23200bc216cef8dc36da8401b38655"
+        },
+        {
+          "url": "https://platform.kimi.com/docs/pricing/chat-k26",
+          "kind": "pricing",
+          "locale": "zh-CN",
+          "currency": "CNY",
+          "retrievedAt": "2026-07-22T05:31:27.415Z",
+          "contentHash": "sha256:14dab7e484e3641a5fc7e3d2181e773ff08432406446ecc80808b0324bb1d9c9"
+        },
+        {
+          "url": "https://platform.kimi.com/docs/pricing/chat-k25",
+          "kind": "pricing",
+          "locale": "zh-CN",
+          "currency": "CNY",
+          "retrievedAt": "2026-07-22T05:31:27.415Z",
+          "contentHash": "sha256:b1d3c6a83977c1b340e306e13f61a3dde0f7785618683d884a6e716c5820f2a8"
+        },
+        {
+          "url": "https://platform.kimi.com/docs/api/models-overview",
+          "kind": "model-metadata",
+          "locale": "zh-CN",
+          "retrievedAt": "2026-07-23T10:27:45.894Z",
+          "contentHash": "sha256:78fbeea94388bf3486cd9d30681b657a721d9fb883e7ac1a4e8e831e3b046003"
+        },
+        {
+          "url": "https://platform.kimi.com/docs/guide/troubleshooting#kimi",
+          "kind": "model-metadata",
+          "locale": "zh-CN",
+          "retrievedAt": "2026-07-23T10:27:45.894Z",
+          "contentHash": "sha256:bf2a303082cb6e98335c69386cf6ac1746a9165700152e4bab45d29a422bca43"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "1.0",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:54:33.752Z",
+        "lastAttemptAt": "2026-07-27T04:54:33.752Z",
+        "consecutiveFailures": 0
+      },
+      "id": "moonshot-intl",
+      "name": "Kimi International",
+      "displayNames": {
+        "zh-CN": "月之暗面",
+        "en": "Moonshot AI"
+      },
+      "ownedBy": "moonshot",
+      "baseUrls": {
+        "openai": "https://api.moonshot.ai/v1"
+      },
+      "models": [
+        {
+          "id": "kimi-k3",
+          "name": "Kimi K3",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking"
+            ],
+            "reasoningEfforts": [
+              "low",
+              "high",
+              "max"
+            ],
+            "dynamicTools": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "reasoning_effort",
+              "tool_choice",
+              "temperature",
+              "top_p",
+              "n",
+              "presence_penalty",
+              "frequency_penalty"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 1048576,
+            "maxOutputTokens": 1048576
+          },
+          "prices": [
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.3,
+                "standard": 3
+              },
+              "output": 15,
+              "sourceUrl": "https://platform.kimi.ai/docs/pricing/chat-k3"
+            }
+          ]
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "name": "Kimi K2.7 Code",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking"
+            ],
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "thinking",
+              "tool_choice",
+              "temperature",
+              "top_p",
+              "n",
+              "presence_penalty",
+              "frequency_penalty"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 262144
+          },
+          "prices": [
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.19,
+                "standard": 0.95
+              },
+              "output": 4,
+              "sourceUrl": "https://platform.kimi.ai/docs/pricing/chat-k27-code"
+            }
+          ]
+        },
+        {
+          "id": "kimi-k2.7-code-highspeed",
+          "name": "Kimi K2.7 Code HighSpeed",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking"
+            ],
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "thinking",
+              "tool_choice",
+              "temperature",
+              "top_p",
+              "n",
+              "presence_penalty",
+              "frequency_penalty"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 262144
+          },
+          "prices": [
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.38,
+                "standard": 1.9
+              },
+              "output": 8,
+              "sourceUrl": "https://platform.kimi.ai/docs/pricing/chat-k27-code"
+            }
+          ]
+        },
+        {
+          "id": "kimi-k2.6",
+          "name": "Kimi K2.6",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking",
+              "non-thinking"
+            ],
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "thinking",
+              "tool_choice",
+              "temperature",
+              "top_p",
+              "n",
+              "presence_penalty",
+              "frequency_penalty"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 262144,
+            "maxOutputTokens": 262144
+          },
+          "prices": [
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.16,
+                "standard": 0.95
+              },
+              "output": 4,
+              "sourceUrl": "https://platform.kimi.ai/docs/pricing/chat-k26"
+            }
+          ]
+        },
+        {
+          "id": "kimi-k2.5",
+          "name": "Kimi K2.5",
+          "capabilities": {
+            "thinking": true,
+            "thinkingModes": [
+              "thinking",
+              "non-thinking"
+            ],
+            "jsonOutput": true,
+            "toolCalls": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ],
+            "supportedParameters": [
+              "thinking",
+              "temperature"
+            ]
+          },
+          "aliases": [],
+          "limits": {
+            "contextTokens": 262144,
+            "maxOutputTokens": 262144
+          },
+          "prices": [
+            {
+              "market": "international",
+              "currency": "USD",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "cacheHit": 0.1,
+                "standard": 0.6
+              },
+              "output": 3,
+              "sourceUrl": "https://platform.kimi.ai/docs/pricing/chat-k25"
+            }
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://platform.kimi.ai/docs/pricing/chat-k3",
+          "kind": "pricing",
+          "locale": "en",
+          "currency": "USD",
+          "retrievedAt": "2026-07-23T09:12:31.262Z",
+          "contentHash": "sha256:df6b4de65d4135072941381d0e627c1eb17efdd659f0b052181e7206beeac00e"
+        },
+        {
+          "url": "https://platform.kimi.ai/docs/pricing/chat-k27-code",
+          "kind": "pricing",
+          "locale": "en",
+          "currency": "USD",
+          "retrievedAt": "2026-07-23T09:12:31.262Z",
+          "contentHash": "sha256:5213733dc22098ecbfd47a9e349e4fd49e903371bc0122314fe30fed9aacdb4d"
+        },
+        {
+          "url": "https://platform.kimi.ai/docs/pricing/chat-k26",
+          "kind": "pricing",
+          "locale": "en",
+          "currency": "USD",
+          "retrievedAt": "2026-07-23T09:12:31.262Z",
+          "contentHash": "sha256:0117b5bacedecd716ded845938a84abd60193984bf1e211eac7135c6559f0bb4"
+        },
+        {
+          "url": "https://platform.kimi.ai/docs/pricing/chat-k25",
+          "kind": "pricing",
+          "locale": "en",
+          "currency": "USD",
+          "retrievedAt": "2026-07-23T09:12:31.262Z",
+          "contentHash": "sha256:4057729c1e319745050485749ac3921be302e1c3e565de7ecc90438fd66e37d5"
+        },
+        {
+          "url": "https://platform.kimi.ai/docs/api/models-overview",
+          "kind": "model-metadata",
+          "locale": "en",
+          "retrievedAt": "2026-07-23T09:12:31.262Z",
+          "contentHash": "sha256:d00d9c13f347cf185e3e6a8c0633cea7b08cad4700f6d7f445546ad14539978a"
+        },
+        {
+          "url": "https://platform.kimi.ai/docs/guide/troubleshooting#kimi",
+          "kind": "model-metadata",
+          "locale": "en",
+          "retrievedAt": "2026-07-23T09:12:31.262Z",
+          "contentHash": "sha256:e21138bff0a69cc1ea905f558e22accd56e124ff64772f681135889d89394043"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "1.0",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:54:33.755Z",
+        "lastAttemptAt": "2026-07-27T04:54:33.755Z",
+        "consecutiveFailures": 0
+      },
+      "id": "qwen-cn",
+      "name": "Qwen China",
+      "displayNames": {
+        "zh-CN": "阿里巴巴",
+        "en": "Alibaba"
+      },
+      "ownedBy": "alibaba",
+      "baseUrls": {
+        "openai": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      },
+      "models": [
+        {
+          "id": "qwen3.7-flash",
+          "name": "Qwen3.7-Flash",
+          "createdAt": "2026-07-20T17:02:37.000+00:00",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "inputModalities": [
+              "image",
+              "text",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 65536,
+            "requestsPerMinute": 30000,
+            "tokensPerMinute": 5000000
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "输入<=32k",
+                "maxInclusive": 32000
+              },
+              "input": {
+                "standard": 0.2,
+                "cacheHit": 0.04,
+                "explicitCacheCreation": 0.25,
+                "explicitCacheHit": 0.02
+              },
+              "output": 0.8,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-flash"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "32k<输入<=256k",
+                "minExclusive": 32000,
+                "maxInclusive": 256000
+              },
+              "input": {
+                "standard": 0.6,
+                "cacheHit": 0.12,
+                "explicitCacheCreation": 0.75,
+                "explicitCacheHit": 0.06
+              },
+              "output": 2.4,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-flash"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "256k<输入<=1m",
+                "minExclusive": 256000,
+                "maxInclusive": 1000000
+              },
+              "input": {
+                "standard": 1.2,
+                "cacheHit": 0.24,
+                "explicitCacheCreation": 1.5,
+                "explicitCacheHit": 0.12
+              },
+              "output": 4.8,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-flash"
+            }
+          ]
+        },
+        {
+          "id": "qwen3.7-plus",
+          "name": "Qwen3.7-Plus",
+          "createdAt": "2026-06-01T12:46:50.000+00:00",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "inputModalities": [
+              "image",
+              "text",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 65536,
+            "requestsPerMinute": 30000,
+            "tokensPerMinute": 5000000
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "输入<=256k",
+                "maxInclusive": 256000
+              },
+              "input": {
+                "standard": 2,
+                "cacheHit": 0.4,
+                "explicitCacheCreation": 2.5,
+                "explicitCacheHit": 0.2
+              },
+              "output": 8,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-plus"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "promotional",
+              "inputTokenRange": {
+                "label": "输入<=256k",
+                "maxInclusive": 256000
+              },
+              "input": {
+                "standard": 1.6,
+                "cacheHit": 0.32,
+                "explicitCacheCreation": 2,
+                "explicitCacheHit": 0.16
+              },
+              "output": 6.4,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-plus"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "256k<输入<=1m",
+                "minExclusive": 256000,
+                "maxInclusive": 1000000
+              },
+              "input": {
+                "standard": 6,
+                "cacheHit": 1.2,
+                "explicitCacheCreation": 7.5,
+                "explicitCacheHit": 0.6
+              },
+              "output": 24,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-plus"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "promotional",
+              "inputTokenRange": {
+                "label": "256k<输入<=1m",
+                "minExclusive": 256000,
+                "maxInclusive": 1000000
+              },
+              "input": {
+                "standard": 4.8,
+                "cacheHit": 0.96,
+                "explicitCacheCreation": 6,
+                "explicitCacheHit": 0.48
+              },
+              "output": 19.2,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-plus"
+            }
+          ]
+        },
+        {
+          "id": "qwen3.7-max",
+          "name": "Qwen3.7-Max",
+          "createdAt": "2026-05-21T06:37:11.000+00:00",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "inputModalities": [
+              "text"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 65536,
+            "requestsPerMinute": 30000,
+            "tokensPerMinute": 5000000
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "input": {
+                "standard": 12,
+                "cacheHit": 2.4,
+                "explicitCacheCreation": 15,
+                "explicitCacheHit": 1.2
+              },
+              "output": 36,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-max"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "promotional",
+              "input": {
+                "standard": 6,
+                "cacheHit": 1.2,
+                "explicitCacheCreation": 7.5,
+                "explicitCacheHit": 0.6
+              },
+              "output": 18,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.7-max"
+            }
+          ]
+        },
+        {
+          "id": "qwen3.6-plus",
+          "name": "Qwen3.6-Plus",
+          "createdAt": "2026-04-01T11:55:34.000+00:00",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "inputModalities": [
+              "image",
+              "text",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 65536,
+            "requestsPerMinute": 30000,
+            "tokensPerMinute": 5000000
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "输入<=256k",
+                "maxInclusive": 256000
+              },
+              "input": {
+                "standard": 2,
+                "explicitCacheCreation": 2.5,
+                "explicitCacheHit": 0.2
+              },
+              "output": 12,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.6-plus"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "256k<输入<=1m",
+                "minExclusive": 256000,
+                "maxInclusive": 1000000
+              },
+              "input": {
+                "standard": 8,
+                "explicitCacheCreation": 10,
+                "explicitCacheHit": 0.8
+              },
+              "output": 48,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.6-plus"
+            }
+          ]
+        },
+        {
+          "id": "qwen3.5-plus",
+          "name": "Qwen3.5-Plus",
+          "createdAt": "2026-02-15T09:15:31.000+00:00",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 65536,
+            "requestsPerMinute": 30000,
+            "tokensPerMinute": 5000000
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "输入<=128k",
+                "maxInclusive": 128000
+              },
+              "input": {
+                "standard": 0.8,
+                "explicitCacheCreation": 1,
+                "explicitCacheHit": 0.08
+              },
+              "output": 4.8,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.5-plus"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "128k<输入<=256k",
+                "minExclusive": 128000,
+                "maxInclusive": 256000
+              },
+              "input": {
+                "standard": 2,
+                "explicitCacheCreation": 2.5,
+                "explicitCacheHit": 0.2
+              },
+              "output": 12,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.5-plus"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "256k<输入<=1m",
+                "minExclusive": 256000,
+                "maxInclusive": 1000000
+              },
+              "input": {
+                "standard": 4,
+                "explicitCacheCreation": 5,
+                "explicitCacheHit": 0.4
+              },
+              "output": 24,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.5-plus"
+            }
+          ]
+        },
+        {
+          "id": "qwen3.6-max-preview",
+          "name": "Qwen3.6-Max",
+          "createdAt": "2026-04-20T07:44:55.000+00:00",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "inputModalities": [
+              "text"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 262144,
+            "maxOutputTokens": 65536,
+            "requestsPerMinute": 600
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "输入<=128k",
+                "maxInclusive": 128000
+              },
+              "input": {
+                "standard": 9,
+                "explicitCacheCreation": 11.25,
+                "explicitCacheHit": 0.9
+              },
+              "output": 54,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.6-max-preview"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "128k<输入<=256k",
+                "minExclusive": 128000,
+                "maxInclusive": 256000
+              },
+              "input": {
+                "standard": 15,
+                "explicitCacheCreation": 18.75,
+                "explicitCacheHit": 1.5
+              },
+              "output": 90,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.6-max-preview"
+            }
+          ]
+        },
+        {
+          "id": "qwen3.5-flash",
+          "name": "Qwen3.5-Flash",
+          "createdAt": "2026-02-23T03:28:01.000+00:00",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "inputModalities": [
+              "text",
+              "image",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 65536,
+            "requestsPerMinute": 30000,
+            "tokensPerMinute": 10000000
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "输入<=128k",
+                "maxInclusive": 128000
+              },
+              "input": {
+                "standard": 0.2,
+                "explicitCacheCreation": 0.25,
+                "explicitCacheHit": 0.02
+              },
+              "output": 2,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.5-flash"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "128k<输入<=256k",
+                "minExclusive": 128000,
+                "maxInclusive": 256000
+              },
+              "input": {
+                "standard": 0.8,
+                "explicitCacheCreation": 1,
+                "explicitCacheHit": 0.08
+              },
+              "output": 8,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.5-flash"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "256k<输入<=1m",
+                "minExclusive": 256000,
+                "maxInclusive": 1000000
+              },
+              "input": {
+                "standard": 1.2,
+                "explicitCacheCreation": 1.5,
+                "explicitCacheHit": 0.12
+              },
+              "output": 12,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.5-flash"
+            }
+          ]
+        },
+        {
+          "id": "qwen3.6-flash",
+          "name": "Qwen3.6-Flash",
+          "createdAt": "2026-04-16T14:02:00.000+00:00",
+          "aliases": [],
+          "capabilities": {
+            "thinking": true,
+            "jsonOutput": true,
+            "toolCalls": true,
+            "chatPrefixCompletion": true,
+            "inputModalities": [
+              "image",
+              "text",
+              "video"
+            ],
+            "outputModalities": [
+              "text"
+            ]
+          },
+          "limits": {
+            "contextTokens": 1000000,
+            "maxOutputTokens": 65536,
+            "requestsPerMinute": 30000,
+            "tokensPerMinute": 10000000
+          },
+          "prices": [
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "输入<=256k",
+                "maxInclusive": 256000
+              },
+              "input": {
+                "standard": 1.2,
+                "explicitCacheCreation": 1.5,
+                "explicitCacheHit": 0.12
+              },
+              "output": 7.2,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.6-flash"
+            },
+            {
+              "market": "china",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "rateType": "standard",
+              "inputTokenRange": {
+                "label": "256k<输入<=1m",
+                "minExclusive": 256000,
+                "maxInclusive": 1000000
+              },
+              "input": {
+                "standard": 4.8,
+                "explicitCacheCreation": 6,
+                "explicitCacheHit": 0.48
+              },
+              "output": 28.8,
+              "sourceUrl": "https://www.qianwenai.com/models/qwen3.6-flash"
+            }
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://www.qianwenai.com/models",
+          "kind": "model-metadata",
+          "locale": "zh-CN",
+          "retrievedAt": "2026-07-27T04:54:33.755Z",
+          "contentHash": "sha256:af70d67608fa813cdf7ecc9bbb72bbfb1be617aa23848660c1125555a81a3e24"
+        },
+        {
+          "url": "https://www.qianwenai.com/models",
+          "kind": "pricing",
+          "locale": "zh-CN",
+          "currency": "CNY",
+          "retrievedAt": "2026-07-27T04:54:33.755Z",
+          "contentHash": "sha256:ed0bf9d6503d5986d00c3630c62d8bc6758751c1d27e2910f8d782bb1cabda99"
+        }
+      ]
+    }
+  ],
+  "inventories": [
+    {
+      "schemaVersion": "1.0",
+      "provider": "deepseek",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:55:15.140Z",
+        "lastAttemptAt": "2026-07-27T04:55:15.140Z",
+        "consecutiveFailures": 0
+      },
+      "source": {
+        "url": "https://api.deepseek.com/models",
+        "retrievedAt": "2026-07-22T03:54:30.941Z",
+        "contentHash": "sha256:e15d3716480a21e2b713a22101c631246403499f4f42c77f35cdb0f5e325f870"
+      },
+      "models": [
+        {
+          "id": "deepseek-v4-flash",
+          "ownedBy": "deepseek"
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "ownedBy": "deepseek"
+        }
+      ],
+      "comparison": {
+        "status": "mismatch",
+        "pricedAndListed": [
+          "deepseek-v4-flash",
+          "deepseek-v4-pro"
+        ],
+        "aliasesAndListed": [],
+        "listedWithoutPricing": [],
+        "pricedButNotListed": [],
+        "activeAliasesNotListed": [
+          "deepseek-chat",
+          "deepseek-reasoner"
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "provider": "longcat",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:55:15.702Z",
+        "lastAttemptAt": "2026-07-27T04:55:15.702Z",
+        "consecutiveFailures": 0
+      },
+      "source": {
+        "url": "https://api.longcat.chat/openai/v1/models",
+        "retrievedAt": "2026-07-22T03:54:31.353Z",
+        "contentHash": "sha256:12443b91064162be4496ca30e75aff54006c5a2a6fe2505ebc28057831d193f4"
+      },
+      "models": [
+        {
+          "id": "LongCat-2.0",
+          "ownedBy": "LongCat",
+          "displayName": "LongCat-2.0",
+          "contextTokens": 1048576,
+          "maxOutputTokens": 131072
+        }
+      ],
+      "comparison": {
+        "status": "match",
+        "pricedAndListed": [
+          "LongCat-2.0"
+        ],
+        "aliasesAndListed": [],
+        "listedWithoutPricing": [],
+        "pricedButNotListed": [],
+        "activeAliasesNotListed": []
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "provider": "moonshot-cn",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:55:16.039Z",
+        "lastAttemptAt": "2026-07-27T04:55:16.039Z",
+        "consecutiveFailures": 0
+      },
+      "source": {
+        "url": "https://api.moonshot.cn/v1/models",
+        "retrievedAt": "2026-07-23T09:12:43.934Z",
+        "contentHash": "sha256:3f659883640ea7f7bdd4f2c370984fe76ceba22f9855fecc779f57e20a332bfc"
+      },
+      "models": [
+        {
+          "id": "kimi-k2.5",
+          "ownedBy": "moonshot",
+          "contextTokens": 262144
+        },
+        {
+          "id": "kimi-k2.6",
+          "ownedBy": "moonshot",
+          "contextTokens": 262144
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "ownedBy": "moonshot",
+          "contextTokens": 262144
+        },
+        {
+          "id": "kimi-k2.7-code-highspeed",
+          "ownedBy": "moonshot",
+          "contextTokens": 262144
+        },
+        {
+          "id": "kimi-k3",
+          "ownedBy": "moonshot",
+          "contextTokens": 1048576
+        }
+      ],
+      "comparison": {
+        "status": "match",
+        "pricedAndListed": [
+          "kimi-k2.5",
+          "kimi-k2.6",
+          "kimi-k2.7-code",
+          "kimi-k2.7-code-highspeed",
+          "kimi-k3"
+        ],
+        "aliasesAndListed": [],
+        "listedWithoutPricing": [],
+        "pricedButNotListed": [],
+        "activeAliasesNotListed": []
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "provider": "moonshot-intl",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:55:19.610Z",
+        "lastAttemptAt": "2026-07-27T04:55:19.610Z",
+        "consecutiveFailures": 0
+      },
+      "source": {
+        "url": "https://api.moonshot.ai/v1/models",
+        "retrievedAt": "2026-07-23T09:12:44.157Z",
+        "contentHash": "sha256:3b62322cca3b0a7d1ea876508bf70eaa0ec578109fdb5e3f11c9e79c031e4faf"
+      },
+      "models": [
+        {
+          "id": "kimi-k2.6",
+          "ownedBy": "moonshot",
+          "contextTokens": 262144
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "ownedBy": "moonshot",
+          "contextTokens": 262144
+        }
+      ],
+      "comparison": {
+        "status": "mismatch",
+        "pricedAndListed": [
+          "kimi-k2.6",
+          "kimi-k2.7-code"
+        ],
+        "aliasesAndListed": [],
+        "listedWithoutPricing": [],
+        "pricedButNotListed": [
+          "kimi-k2.5",
+          "kimi-k2.7-code-highspeed",
+          "kimi-k3"
+        ],
+        "activeAliasesNotListed": []
+      }
+    }
+  ],
+  "calibration": {
+    "modelsDev": {
+      "schemaVersion": "1.0",
+      "health": {
+        "status": "healthy",
+        "lastSuccessfulAt": "2026-07-27T04:55:14.507Z",
+        "lastAttemptAt": "2026-07-27T04:55:14.507Z",
+        "consecutiveFailures": 0
+      },
+      "source": {
+        "url": "https://models.dev/api.json",
+        "retrievedAt": "2026-07-23T09:12:32.157Z",
+        "contentHash": "sha256:e9926385749117ce78195aa9446a5fd2cac1227937817790273fe296ad9fe2b8"
+      },
+      "models": [
+        {
+          "provider": "deepseek",
+          "model": "deepseek-v4-flash",
+          "referenceProvider": "deepseek",
+          "referenceModel": "deepseek-v4-flash",
+          "referenceUrl": "https://models.dev/models/deepseek/deepseek-v4-flash/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-04-24",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1000000,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 384000,
+              "reference": 384000,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": null,
+              "reference": [
+                "text"
+              ],
+              "status": "missing"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": null,
+              "reference": [
+                "text"
+              ],
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": 0.14,
+              "reference": 0.14,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": 0.0028,
+              "reference": 0.0028,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": 0.28,
+              "reference": 0.28,
+              "status": "match"
+            }
+          ]
+        },
+        {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "referenceProvider": "deepseek",
+          "referenceModel": "deepseek-v4-pro",
+          "referenceUrl": "https://models.dev/models/deepseek/deepseek-v4-pro/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-04-24",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1000000,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 384000,
+              "reference": 384000,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": null,
+              "reference": [
+                "text"
+              ],
+              "status": "missing"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": null,
+              "reference": [
+                "text"
+              ],
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": 0.435,
+              "reference": 0.435,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": 0.003625,
+              "reference": 0.003625,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": 0.87,
+              "reference": 0.87,
+              "status": "match"
+            }
+          ]
+        },
+        {
+          "provider": "longcat",
+          "model": "LongCat-2.0",
+          "referenceProvider": "longcat",
+          "referenceModel": "LongCat-2.0",
+          "referenceUrl": "https://models.dev/models/meituan/longcat-2.0/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2026-03-12",
+              "reference": "2026-06-30",
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1048576,
+              "reference": 1000000,
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 131072,
+              "reference": 131072,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": 0.75,
+              "reference": 0.75,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": 0.015,
+              "reference": 0.015,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": 2.95,
+              "reference": 2.95,
+              "status": "match"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-cn",
+          "model": "kimi-k3",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k3",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k3/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-07-16",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1048576,
+              "reference": 1048576,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 1048576,
+              "reference": 131072,
+              "status": "mismatch"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 3,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.3,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 15,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-cn",
+          "model": "kimi-k2.7-code",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k2.7-code",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k2.7-code/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-06-12",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": null,
+              "reference": 262144,
+              "status": "missing"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 0.95,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.19,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 4,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-cn",
+          "model": "kimi-k2.7-code-highspeed",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k2.7-code-highspeed",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k2.7-code-highspeed/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-06-12",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": null,
+              "reference": 262144,
+              "status": "missing"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 1.9,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.38,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 8,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-cn",
+          "model": "kimi-k2.6",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k2.6",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k2.6/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-04-21",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 0.95,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.16,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 4,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-cn",
+          "model": "kimi-k2.5",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k2.5",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k2.5/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-01",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 0.6,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.1,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 3,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-intl",
+          "model": "kimi-k3",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k3",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k3/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-07-16",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1048576,
+              "reference": 1048576,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 1048576,
+              "reference": 131072,
+              "status": "mismatch"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": 3,
+              "reference": 3,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": 0.3,
+              "reference": 0.3,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": 15,
+              "reference": 15,
+              "status": "match"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-intl",
+          "model": "kimi-k2.7-code",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k2.7-code",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k2.7-code/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-06-12",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": null,
+              "reference": 262144,
+              "status": "missing"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": 0.95,
+              "reference": 0.95,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": 0.19,
+              "reference": 0.19,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": 4,
+              "reference": 4,
+              "status": "match"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-intl",
+          "model": "kimi-k2.7-code-highspeed",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k2.7-code-highspeed",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k2.7-code-highspeed/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-06-12",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": null,
+              "reference": 262144,
+              "status": "missing"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": 1.9,
+              "reference": 1.9,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": 0.38,
+              "reference": 0.38,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": 8,
+              "reference": 8,
+              "status": "match"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-intl",
+          "model": "kimi-k2.6",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k2.6",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k2.6/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-04-21",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": 0.95,
+              "reference": 0.95,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": 0.16,
+              "reference": 0.16,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": 4,
+              "reference": 4,
+              "status": "match"
+            }
+          ]
+        },
+        {
+          "provider": "moonshot-intl",
+          "model": "kimi-k2.5",
+          "referenceProvider": "moonshotai",
+          "referenceModel": "kimi-k2.5",
+          "referenceUrl": "https://models.dev/models/moonshotai/kimi-k2.5/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": null,
+              "reference": "2026-01",
+              "status": "missing"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": 0.6,
+              "reference": 0.6,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": 0.1,
+              "reference": 0.1,
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": 3,
+              "reference": 3,
+              "status": "match"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3.7-plus",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3.7-plus",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3.7-plus/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2026-06-01",
+              "reference": "2026-06-02",
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1000000,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "image",
+                "text",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 0.5,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.05,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 3,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3.7-max",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3.7-max",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3.7-max/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2026-05-21",
+              "reference": "2026-05-21",
+              "status": "match"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1000000,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 2.5,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.5,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 7.5,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3.6-plus",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3.6-plus",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3.6-plus/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2026-04-01",
+              "reference": "2026-04-02",
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1000000,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "image",
+                "text",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 0.5,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.05,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 3,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3.5-plus",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3.5-plus",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3.5-plus/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2026-02-15",
+              "reference": "2026-02-16",
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1000000,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text",
+                "image",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 0.4,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": null,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 2.4,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3-max",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3-max",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3-max/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2025-09-23",
+              "reference": "2025-09-23",
+              "status": "match"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": false,
+              "status": "mismatch"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 1.2,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": null,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 6,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3.6-max-preview",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3.6-max-preview",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3.6-max-preview/",
+          "status": "partial",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2026-04-20",
+              "reference": "2026-04-20",
+              "status": "match"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 262144,
+              "reference": 262144,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 1.3,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": 0.13,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 7.8,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3.6-flash",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3.6-flash",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3.6-flash/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2026-04-16",
+              "reference": "2026-04-27",
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1000000,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "image",
+                "text",
+                "video"
+              ],
+              "reference": [
+                "text",
+                "image",
+                "video"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 0.1875,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": null,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 1.125,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3-coder-plus",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3-coder-plus",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3-coder-plus/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2025-07-22",
+              "reference": "2025-07-23",
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1048576,
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": null,
+              "reference": false,
+              "status": "missing"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 1,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": null,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 5,
+              "status": "missing"
+            }
+          ]
+        },
+        {
+          "provider": "qwen-cn",
+          "model": "qwen3-coder-flash",
+          "referenceProvider": "alibaba",
+          "referenceModel": "qwen3-coder-flash",
+          "referenceUrl": "https://models.dev/models/alibaba/qwen3-coder-flash/",
+          "status": "mismatch",
+          "checks": [
+            {
+              "field": "createdAt",
+              "official": "2025-08-04",
+              "reference": "2025-07-28",
+              "status": "mismatch"
+            },
+            {
+              "field": "limits.contextTokens",
+              "official": 1000000,
+              "reference": 1000000,
+              "status": "match"
+            },
+            {
+              "field": "limits.maxOutputTokens",
+              "official": 65536,
+              "reference": 65536,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.thinking",
+              "official": null,
+              "reference": false,
+              "status": "missing"
+            },
+            {
+              "field": "capabilities.toolCalls",
+              "official": true,
+              "reference": true,
+              "status": "match"
+            },
+            {
+              "field": "capabilities.inputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "capabilities.outputModalities",
+              "official": [
+                "text"
+              ],
+              "reference": [
+                "text"
+              ],
+              "status": "match"
+            },
+            {
+              "field": "prices.USD.input.standard",
+              "official": null,
+              "reference": 0.3,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.input.cacheHit",
+              "official": null,
+              "reference": null,
+              "status": "missing"
+            },
+            {
+              "field": "prices.USD.output",
+              "official": null,
+              "reference": 1.5,
+              "status": "missing"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

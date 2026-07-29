@@ -961,6 +961,7 @@ async fn resolve_codex_executable() -> PathBuf {
             if installation.surface == crate::core::agent_environment::AgentSurface::Cli {
                 return PathBuf::from(installation.executable_path);
             }
+            #[cfg(any(windows, target_os = "macos"))]
             let install_dir = PathBuf::from(installation.install_dir);
             #[cfg(windows)]
             {

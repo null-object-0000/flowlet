@@ -5,6 +5,7 @@ use crate::core::agent_session_timeline::{
 };
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
+#[cfg(desktop)]
 use sha2::Digest;
 use std::time::{Duration, Instant};
 
@@ -1042,6 +1043,7 @@ pub struct CatalogSyncResult {
 }
 
 /// 一个模型目录的同步规格：本地文件名、后台任务身份与统计方式。
+#[cfg(desktop)]
 struct CatalogSpec {
     /// 来源标识，写入同步结果与任务日志。
     source: &'static str,
@@ -1053,6 +1055,7 @@ struct CatalogSpec {
     count: fn(&serde_json::Value) -> (usize, usize),
 }
 
+#[cfg(desktop)]
 const MODELS_CN_SPEC: CatalogSpec = CatalogSpec {
     source: "models-cn",
     job_type: "models-cn-sync",
@@ -1061,6 +1064,7 @@ const MODELS_CN_SPEC: CatalogSpec = CatalogSpec {
     count: count_models_cn_catalog,
 };
 
+#[cfg(desktop)]
 const MODELS_DEV_SPEC: CatalogSpec = CatalogSpec {
     source: "models.dev",
     job_type: "models-dev-sync",
@@ -1079,10 +1083,11 @@ fn catalog_dir() -> std::path::PathBuf {
 
 /// models-cn 本地文件路径（exe 同级目录）。
 pub fn models_cn_file_path() -> std::path::PathBuf {
-    catalog_dir().join(MODELS_CN_SPEC.file_name)
+    catalog_dir().join("models-cn.json")
 }
 
 /// models.dev 本地文件路径（exe 同级目录）。
+#[cfg(desktop)]
 pub fn models_dev_file_path() -> std::path::PathBuf {
     catalog_dir().join(MODELS_DEV_SPEC.file_name)
 }
@@ -1093,11 +1098,13 @@ pub fn read_models_cn_file() -> Option<String> {
 }
 
 /// 读取本地 models.dev 目录文件。返回 None 表示文件不存在。
+#[cfg(desktop)]
 pub fn read_models_dev_file() -> Option<String> {
     std::fs::read_to_string(models_dev_file_path()).ok()
 }
 
 /// models-cn 目录结构：{ "providers": [{ "models": [...] }] }。
+#[cfg(desktop)]
 fn count_models_cn_catalog(json: &serde_json::Value) -> (usize, usize) {
     let providers = json
         .get("providers")
@@ -1118,6 +1125,7 @@ fn count_models_cn_catalog(json: &serde_json::Value) -> (usize, usize) {
 }
 
 /// models.dev 目录结构：{ "<providerId>": { "models": { "<modelId>": {...} } } }。
+#[cfg(desktop)]
 fn count_models_dev_catalog(json: &serde_json::Value) -> (usize, usize) {
     let Some(providers) = json.as_object() else {
         return (0, 0);
@@ -1136,6 +1144,7 @@ fn count_models_dev_catalog(json: &serde_json::Value) -> (usize, usize) {
 /// 拉取 models-cn 目录并保存为本地 JSON 文件，成功后重建内存价格表。
 /// 若内容与上次一致（content_hash 相同）则跳过保存，返回 skipped=true。
 /// 所有运行信息写入后台任务日志。
+#[cfg(desktop)]
 pub async fn sync_models_cn_catalog(
     storage: &Storage,
     config_path: &std::path::Path,
@@ -1147,6 +1156,7 @@ pub async fn sync_models_cn_catalog(
 
 /// 拉取 models.dev 目录并保存为本地 JSON 文件，成功后重建内存价格表。
 /// 语义与 models-cn 同步一致。
+#[cfg(desktop)]
 pub async fn sync_models_dev_catalog(
     storage: &Storage,
     config_path: &std::path::Path,
@@ -1156,6 +1166,7 @@ pub async fn sync_models_dev_catalog(
     sync_catalog_file(storage, config_path, &MODELS_DEV_SPEC, source_url, trigger).await
 }
 
+#[cfg(desktop)]
 async fn sync_catalog_file(
     storage: &Storage,
     config_path: &std::path::Path,
@@ -1275,6 +1286,7 @@ async fn sync_catalog_file(
 /// 重建内存价格表。合并语义：目录派生优先，config.json 仅补充目录未覆盖的
 /// (channel_id, upstream_model)（例如自定义渠道的显式价格）。
 /// 各来源失败互不影响，仅记录日志；返回最终价格条数。
+#[cfg(desktop)]
 pub fn rebuild_price_table(storage: &Storage, config_path: &std::path::Path) -> usize {
     let mut catalog_prices = Vec::new();
     if let Some(catalog_json) = read_models_cn_file() {
@@ -1312,6 +1324,7 @@ pub fn rebuild_price_table(storage: &Storage, config_path: &std::path::Path) -> 
 
 /// 合并目录派生价格与 config.json 价格：目录优先，config 仅补充未覆盖的 key。
 /// key 为 (channel_id, upstream_model)，大小写不敏感。
+#[cfg(desktop)]
 fn merge_price_tables(
     catalog_prices: Vec<crate::core::config::ModelPrice>,
     config_prices: Vec<crate::core::config::ModelPrice>,
@@ -1333,6 +1346,7 @@ fn merge_price_tables(
 // ─── models-cn → ModelPrice 转换 ──────────────────────────────────────────
 
 /// models-cn providerId → Flowlet channel_id 映射（仅覆盖有官方价格的国内厂商）。
+#[cfg(desktop)]
 fn provider_id_to_channel_id(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         "longcat" => Some("longcat"),
@@ -1345,6 +1359,7 @@ fn provider_id_to_channel_id(provider_id: &str) -> Option<&'static str> {
 
 /// 从 models-cn 目录 JSON 解析出 ModelPrice 列表，用于成本估算。
 /// 仅提取中国大陆官方价（market=china, currency=CNY, rateType=standard）。
+#[cfg(desktop)]
 pub fn build_prices_from_models_cn_catalog(
     catalog_json: &str,
 ) -> Result<Vec<crate::core::config::ModelPrice>, String> {
@@ -1397,6 +1412,7 @@ pub fn build_prices_from_models_cn_catalog(
 }
 
 /// 从本地 models-cn 目录提取 channel_id → currency 映射，用于用量页币种显示。
+#[cfg(desktop)]
 pub fn get_models_cn_currencies() -> Result<Vec<(String, String)>, String> {
     let Some(catalog_json) = read_models_cn_file() else {
         return Ok(Vec::new());
@@ -1445,6 +1461,7 @@ pub fn get_models_cn_currencies() -> Result<Vec<(String, String)>, String> {
     Ok(result)
 }
 
+#[cfg(desktop)]
 struct BestModelPrice {
     market: String,
     currency: String,
@@ -1460,6 +1477,7 @@ struct BestModelPrice {
 /// promotional 优先：厂商当前生效的是促销价，standard 仅作兜底参考
 /// （与前端 domains/modelCatalog/pricing.ts 的 priceScore 语义一致）。
 /// 缓存命中价仅在 input.cacheHit 存在时使用。
+#[cfg(desktop)]
 fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPrice> {
     let prices = model.get("prices")?.as_array()?;
     // 优先级：china+CNY+promotional > china+CNY+standard > 其他
@@ -1507,6 +1525,7 @@ fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPric
 /// 用与最优价同 (market, currency, rateType) 的 inputTokenRange 行构建分级价格。
 /// 至少两行区间数据才视为分级；按区间下限升序，最后一档 up_to=None 兜底。
 /// 无区间数据时返回空（使用扁平单价）。
+#[cfg(desktop)]
 fn build_price_tiers(
     model: &serde_json::Value,
     best: &BestModelPrice,
@@ -1567,10 +1586,12 @@ fn build_price_tiers(
 /// Codex 套餐额度（CREDITS）与 OpenAI API 美元价的换算比例。
 /// 与价格迁移前 config.json 内嵌的 codex-native 价格保持一致
 /// （如 gpt-5.6-sol 输入 5 USD/1M ↔ 125 CREDITS/1M）。
+#[cfg(desktop)]
 const CODEX_CREDITS_PER_USD: f64 = 25.0;
 
 /// models.dev providerId → Flowlet channel_id 映射。
 /// 目前仅 OpenAI 官方 API 价用于 Codex 会话的 USD 等值估算。
+#[cfg(desktop)]
 fn models_dev_provider_to_channel_id(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         "openai" => Some("openai-api"),
@@ -1581,6 +1602,7 @@ fn models_dev_provider_to_channel_id(provider_id: &str) -> Option<&'static str> 
 /// 从 models.dev 目录 JSON 解析出 ModelPrice 列表，用于成本估算。
 /// 每个 openai 模型产出两条：openai-api（USD，官方 API 价）与
 /// codex-native（CREDITS，按 CODEX_CREDITS_PER_USD 派生的套餐额度消耗）。
+#[cfg(desktop)]
 pub fn build_prices_from_models_dev_catalog(
     catalog_json: &str,
 ) -> Result<Vec<crate::core::config::ModelPrice>, String> {
@@ -1649,6 +1671,7 @@ pub fn build_prices_from_models_dev_catalog(
 
 /// models.dev cost.tiers 转 Flowlet 分级：base 价覆盖 ≤ 第一个 context size，
 /// 每个 tier 条目覆盖 > 其 size 的区间，最后一档 up_to=None 兜底。
+#[cfg(desktop)]
 fn build_models_dev_tiers(
     cost: &serde_json::Value,
     base_input: f64,
@@ -1703,6 +1726,7 @@ fn build_models_dev_tiers(
 
 /// 按比例缩放一条价格的全部金额字段，生成另一币种/命名空间的派生价格
 /// （如 openai-api USD → codex-native CREDITS）。
+#[cfg(desktop)]
 fn scale_model_price(
     price: &crate::core::config::ModelPrice,
     factor: f64,

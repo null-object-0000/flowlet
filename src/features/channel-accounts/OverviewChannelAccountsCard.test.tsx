@@ -71,6 +71,8 @@ describe("OverviewChannelAccountsCard", () => {
   });
 
   it("renders Qwen Token Plan subscription with 5h and 7d remaining percentages", () => {
+    // 固定为重置日前一天，避免测试在 2026-07-29 当天运行时切换为“仅时间”展示。
+    vi.setSystemTime(new Date("2026-07-28T10:00:00Z"));
     const qwenAccount = {
       id: "account-qwen",
       channel_id: "qwen",
@@ -105,6 +107,7 @@ describe("OverviewChannelAccountsCard", () => {
     expect(sevenDay.compareDocumentPosition(fiveHour) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText(/七天重置 2026-07-29/)).toBeInTheDocument();
     expect(screen.queryByText(/Token Plan 订阅/)).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("renders LongCat expiry as end-of-day clock time when expiring today", () => {

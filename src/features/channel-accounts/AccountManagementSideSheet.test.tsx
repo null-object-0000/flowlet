@@ -47,7 +47,7 @@ describe("AccountManagementSideSheet", () => {
       />,
     );
 
-    expect(screen.getByText(/渠道账号管理/)).toBeInTheDocument();
+    expect(screen.getByText(/^渠道账号$/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "编辑账号 主账号" }));
     expect(await screen.findByText("编辑渠道账号")).toBeInTheDocument();
     expect(screen.queryByText(/渠道账号管理/)).not.toBeInTheDocument();

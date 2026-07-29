@@ -19,7 +19,7 @@ type Props = {
   accounts: ChannelAccount[];
   snapshots: AccountBalanceSnapshot[];
   codexAccounts?: CodexAccountReport[];
-  onCreate: () => void;
+  onCreate: (channelId: string) => void;
   onViewAll: () => void;
   onEdit: (accountId: string) => void;
   onOpenCodexAgent?: () => void;
@@ -39,16 +39,16 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
   return (
     <OverviewModuleCard
       title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("已启用 {enabled} / 共 {total} 个账号", { enabled: enabledCount, total: accounts.length })}</em></span>}
-      headerExtra={(
+      headerExtra={allAccounts.length > 0 ? (
         <div className={styles.headerActions}>
-          <OverviewActionLink leadingIcon={<IconPlus />} onClick={onCreate}>{t("新增账号")}</OverviewActionLink>
+          <OverviewActionLink leadingIcon={<IconPlus />} onClick={() => onCreate("longcat")}>{t("新增账号")}</OverviewActionLink>
           <OverviewActionLink trailingIcon={<IconChevronRight />} onClick={onViewAll}>
             {t("管理账号")}
           </OverviewActionLink>
         </div>
-      )}
+      ) : undefined}
     >
-      <div className={styles.list}>
+      {allAccounts.length > 0 ? <div className={styles.list}>
         {allAccounts.map((account) => {
           const snapshot = snapshotByAccount.get(account.id);
           const isCodex = isChatGptAccount(account);
@@ -144,10 +144,39 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
             </div>
           );
         })}
-      </div>
+      </div> : (
+        <div className={styles.emptyState}>
+          <div className={styles.emptyCopy}>
+            <strong>{t("选择一个渠道添加首个账号")}</strong>
+            <span>{t("API Key 仅保存在本机，保存前可以先测试连接。")}</span>
+          </div>
+          <div className={styles.channelOptions}>
+            {EMPTY_CHANNEL_OPTIONS.map((channel) => (
+              <button
+                key={channel.id}
+                type="button"
+                className={styles.channelOption}
+                aria-label={t(channel.actionLabel)}
+                onClick={() => onCreate(channel.id)}
+              >
+                <ChannelBrandLogo channelId={channel.id} name={channel.name} />
+                <span><strong>{channel.name}</strong><small>{t("添加账号")}</small></span>
+                <IconPlus aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </OverviewModuleCard>
   );
 }
+
+const EMPTY_CHANNEL_OPTIONS = [
+  { id: "longcat", name: "LongCat", actionLabel: "添加 LongCat" },
+  { id: "deepseek", name: "DeepSeek", actionLabel: "添加 DeepSeek" },
+  { id: "kimi", name: "Kimi", actionLabel: "添加 Kimi" },
+  { id: "qwen", name: "Qwen", actionLabel: "添加 Qwen" },
+];
 
 function accountStatus(account: ChannelAccount, t: (source: string) => string): { label: string; color: "green" | "red" | "grey" } {
   if (!account.enabled) return { label: t("停用"), color: "grey" };

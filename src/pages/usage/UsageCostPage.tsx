@@ -4,7 +4,7 @@ import { IconInfoCircle } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
 import type { DailyUsageTotal } from "../../domains/device-sync/types";
-import { useUsageSummary } from "../../features/usage/useUsageSummary";
+import { useAgentNativeUsageSummary, useUsageSummary } from "../../features/usage/useUsageSummary";
 import { useDeviceDailyUsage, useKnownDevices } from "../../features/device-sync/useDeviceSync";
 import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
@@ -12,17 +12,21 @@ import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { TokenBreakdownContent, TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { buildUsageHeatmap, filterUsageRows, groupUsageByChannel, groupUsageByDay, groupUsageByModel, summarizeUsage, type UsageDay, type UsageHeatmap, type UsageHeatmapCell } from "./usagePresentation";
+import { filterAgentNativeUsageRows, groupAgentNativeUsage, summarizeAgentNativeUsage, type AgentNativeUsageBreakdown, type AgentNativeUsageTotals } from "./nativeUsagePresentation";
+import { summarizeCombinedUsage, type CombinedUsageTotals } from "./combinedUsagePresentation";
 import styles from "./UsageCostPage.module.css";
 import { dominantCostCurrency, formatCost, formatMultiCurrencyCost } from "../../shared/formatters/cost";
 import { formatCompactNumber as formatCompact, formatInteger } from "../../shared/formatters/number";
 
 const { Paragraph, Title } = Typography;
 type TrendMetric = "cost" | "tokens";
+type UsageSource = "flowlet" | "native" | "combined";
 
 export function UsageCostPage() {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 30_000 });
   const [period, setPeriod] = useState<UsagePeriod>("month");
+  const [usageSource, setUsageSource] = useState<UsageSource>("flowlet");
   const [deviceSelection, setDeviceSelection] = useState("current");
   const devices = useKnownDevices();
   const currentDevice = devices.data?.find((device) => device.isCurrent) ?? null;
@@ -30,8 +34,9 @@ export function UsageCostPage() {
   const selectedDeviceId = deviceSelection === "all" ? null : deviceSelection === "current" ? currentDevice?.deviceId ?? null : deviceSelection;
   const sharedUsage = useDeviceDailyUsage(selectedDeviceId, sharedView);
   const usage = useUsageSummary(period, refresh.autoRefresh);
+  const nativeUsage = useAgentNativeUsageSummary(refresh.autoRefresh, usageSource !== "flowlet");
   const [metric, setMetric] = useState<TrendMetric>("tokens");
-  const initialLoading = sharedView
+  const flowletInitialLoading = sharedView
     ? sharedUsage.isPending && sharedUsage.data == null
     : usage.query.isPending && usage.query.data == null;
   const sourceRows = useMemo(
@@ -46,6 +51,16 @@ export function UsageCostPage() {
   const activity = useMemo(() => buildUsageHeatmap(sourceRows, period, new Date(), language, !sharedView), [language, period, sharedView, sourceRows]);
   const models = useMemo(() => sharedView ? [] : groupUsageByModel(rows, modelCurrencyOf), [rows, modelCurrencyOf, sharedView]);
   const channels = useMemo(() => sharedView ? [] : groupUsageByChannel(rows, channelCurrencyOf), [rows, channelCurrencyOf, sharedView]);
+  const nativeRows = useMemo(
+    () => filterAgentNativeUsageRows(nativeUsage.data ?? [], period),
+    [nativeUsage.data, period],
+  );
+  const nativeSummary = useMemo(() => summarizeAgentNativeUsage(nativeRows), [nativeRows]);
+  const nativeAgents = useMemo(() => groupAgentNativeUsage(nativeRows), [nativeRows]);
+  const combinedSummary = useMemo(
+    () => summarizeCombinedUsage(summary, nativeSummary),
+    [nativeSummary, summary],
+  );
   const totalCostLabel = formatMultiCurrencyCost(summary.costByCurrency);
   const chartCostCurrency = dominantCostCurrency(summary.costByCurrency);
   const cacheHitRate = summary.cacheMeasuredInputTokens > 0
@@ -71,11 +86,43 @@ export function UsageCostPage() {
     week: t("本周"),
     today: t("今日"),
   }[period];
+  const nativeSourceActive = usageSource !== "flowlet";
+  const combinedLoading = flowletInitialLoading || (nativeUsage.isPending && nativeUsage.data == null);
+  const refreshIsFetching = usageSource === "flowlet"
+    ? usage.query.isFetching
+    : usageSource === "native"
+      ? nativeUsage.isFetching
+      : usage.query.isFetching || nativeUsage.isFetching;
+  const refreshUpdatedAt = usageSource === "flowlet"
+    ? usage.query.dataUpdatedAt
+    : usageSource === "native"
+      ? nativeUsage.dataUpdatedAt
+      : oldestUpdatedAt(usage.query.dataUpdatedAt, nativeUsage.dataUpdatedAt);
 
   return <main className={styles.page}>
     <header className={styles.pageHeading}>
-      <div><Title heading={3}>{t("用量成本")}</Title><Paragraph>{sharedView ? t("共享设备仅展示每日请求与 Token 汇总") : t("查看模型、渠道与账号维度的 Token 消耗和预估费用")}</Paragraph></div>
+      <div><Title heading={3}>{t("用量成本")}</Title><Paragraph>{
+        usageSource === "combined"
+          ? t("汇总当前设备经过 Flowlet 与 Agent 原生会话的 Token 和 API 等价价值")
+          : usageSource === "native"
+            ? t("查看未经过 Flowlet 的 Agent 原生 Token、费用与 API 等价价值")
+            : sharedView
+              ? t("共享设备仅展示每日请求与 Token 汇总")
+              : t("查看模型、渠道与账号维度的 Token 消耗和预估费用")
+      }</Paragraph></div>
       <Select
+        className={styles.sourceSelect}
+        insetLabel={t("来源")}
+        value={usageSource}
+        aria-label={t("使用来源")}
+        optionList={[
+          { value: "flowlet", label: t("经过 Flowlet") },
+          { value: "native", label: t("Agent 原生") },
+          { value: "combined", label: t("综合") },
+        ]}
+        onChange={(value) => setUsageSource(value as UsageSource)}
+      />
+      {usageSource === "flowlet" ? <Select
         className={styles.deviceSelect}
         insetLabel={t("设备")}
         value={deviceSelection}
@@ -96,7 +143,7 @@ export function UsageCostPage() {
           setDeviceSelection(next);
           if (next !== "current") setMetric("tokens");
         }}
-      />
+      /> : null}
       <Select
         value={period}
         aria-label={t("统计周期")}
@@ -113,16 +160,42 @@ export function UsageCostPage() {
       <RefreshControl
         autoRefresh={refresh.autoRefresh}
         onToggleAutoRefresh={refresh.toggleAutoRefresh}
-        isFetching={usage.query.isFetching}
-        lastUpdatedAt={usage.query.dataUpdatedAt}
+        isFetching={refreshIsFetching}
+        lastUpdatedAt={refreshUpdatedAt}
         intervalMs={refresh.intervalMs}
-        onRefresh={() => void usage.query.refetch()}
+        onRefresh={() => {
+          if (usageSource === "combined") {
+            void Promise.all([usage.query.refetch(), nativeUsage.refetch()]);
+            return;
+          }
+          void (nativeSourceActive ? nativeUsage.refetch() : usage.query.refetch());
+        }}
         language={language}
         t={t}
       />
     </header>
 
-    {initialLoading ? <UsageCostSkeleton loadingLabel={t("正在加载用量…")} /> : <>
+    {usageSource === "combined" ? <CombinedUsageContent
+      language={language}
+      t={t}
+      periodLabel={periodLabel}
+      summary={combinedSummary}
+      flowletUnknown={summary.unknown}
+      nativeSummary={nativeSummary}
+      loading={combinedLoading}
+      flowletError={usage.query.error}
+      nativeError={nativeUsage.error}
+      onRetry={() => void Promise.all([usage.query.refetch(), nativeUsage.refetch()])}
+    /> : usageSource === "native" ? <AgentNativeUsageContent
+      language={language}
+      t={t}
+      periodLabel={periodLabel}
+      summary={nativeSummary}
+      agents={nativeAgents}
+      loading={nativeUsage.isPending && nativeUsage.data == null}
+      error={nativeUsage.error}
+      onRetry={() => void nativeUsage.refetch()}
+    /> : flowletInitialLoading ? <UsageCostSkeleton loadingLabel={t("正在加载用量…")} /> : <>
     <section className={styles.stats} aria-label={t("用量统计")}>
       <Stat label={t("{period}预估费用", { period: periodLabel })} value={sharedView ? "—" : totalCostLabel} meta={sharedView ? t("每日共享摘要不包含费用") : t("基于已知价格")} />
       <Stat label={t("{period} Token 消耗", { period: periodLabel })} value={formatCompact(summary.tokens, language)} meta={t("输入 {input} · 输出 {output}", { input: formatCompact(summary.inputTokens, language), output: formatCompact(summary.outputTokens, language) })} />
@@ -216,6 +289,278 @@ export function UsageCostPage() {
   </main>;
 }
 
+function CombinedUsageContent({
+  language,
+  t,
+  periodLabel,
+  summary,
+  flowletUnknown,
+  nativeSummary,
+  loading,
+  flowletError,
+  nativeError,
+  onRetry,
+}: {
+  language: "zh-CN" | "en-US";
+  t: ReturnType<typeof useAppPreferences>["t"];
+  periodLabel: string;
+  summary: CombinedUsageTotals;
+  flowletUnknown: number;
+  nativeSummary: AgentNativeUsageTotals;
+  loading: boolean;
+  flowletError: Error | null;
+  nativeError: Error | null;
+  onRetry: () => void;
+}) {
+  if (loading) return <UsageCostSkeleton loadingLabel={t("正在加载综合用量…")} />;
+  const totalValue = formatCurrencyMap(summary.apiEquivalentValueByCurrency);
+  const flowletValue = formatCurrencyMap(summary.flowletValueByCurrency);
+  const nativeValue = formatCurrencyMap(summary.nativeValueByCurrency);
+  const flowletCoverage = summary.requests > 0
+    ? (summary.requests - flowletUnknown) / summary.requests
+    : null;
+  const nativePricingTurns = nativeSummary.pricedTurns + nativeSummary.unpricedTurns;
+  const nativePricingCoverage = nativePricingTurns > 0
+    ? nativeSummary.pricedTurns / nativePricingTurns
+    : null;
+  const flowletTokenShare = summary.tokens > 0 ? summary.flowletTokens / summary.tokens : null;
+  const errors = [flowletError, nativeError].filter((error): error is Error => error != null);
+
+  return <>
+    <section className={styles.stats} aria-label={t("综合用量统计")}>
+      <Stat
+        label={t("{period} API 等价总价值", { period: periodLabel })}
+        value={totalValue}
+        meta={t("Flowlet {flowlet} · 原生 {native}", { flowlet: flowletValue, native: nativeValue })}
+      />
+      <Stat
+        label={t("{period} Token 消耗", { period: periodLabel })}
+        value={formatCompact(summary.tokens, language)}
+        meta={t("Flowlet {flowlet} · 原生 {native}", {
+          flowlet: formatCompact(summary.flowletTokens, language),
+          native: formatCompact(summary.nativeTokens, language),
+        })}
+      />
+      <Stat
+        label={t("{period}使用规模", { period: periodLabel })}
+        value={`${formatInteger(summary.requests, language)} / ${formatInteger(summary.nativeTurns, language)}`}
+        meta={t("Flowlet 请求 / Agent 原生轮次")}
+      />
+      <Stat
+        label={t("数据覆盖")}
+        value={flowletCoverage == null ? "—" : formatPercent(flowletCoverage)}
+        meta={t("Flowlet 用量覆盖 · 原生计价 {coverage}", {
+          coverage: nativePricingCoverage == null ? "—" : formatPercent(nativePricingCoverage),
+        })}
+      />
+    </section>
+
+    {errors.length > 0 ? <div className={styles.state}>
+      <strong>{t("综合用量加载失败")}</strong>
+      <span>{errors.map((error) => error.message).join(" · ")}</span>
+      <Button onClick={onRetry}>{t("重试")}</Button>
+    </div> : <div className={styles.workspace}>
+      <section className={`${styles.mainCard} ${styles.nativeMainCard}`}>
+        <header className={styles.cardHeader}>
+          <div>
+            <strong>{t("来源拆分")}</strong>
+            <small>{t("Token 可相加；价值按原币合并，不进行汇率换算")}</small>
+          </div>
+        </header>
+        <div className={styles.combinedBreakdown}>
+          <div className={styles.combinedBreakdownHead}>
+            <span>{t("来源")}</span>
+            <span>{t("使用规模")}</span>
+            <span>Tokens</span>
+            <span>{t("API 等价价值")}</span>
+            <span>{t("归集方式")}</span>
+          </div>
+          <div className={styles.breakdownList}>
+            <div className={styles.combinedBreakdownRow}>
+              <span className={styles.combinedSourceCell}>
+                <i>F</i>
+                <span><strong>{t("经过 Flowlet")}</strong><small>{t("代理请求记录")}</small></span>
+              </span>
+              <span>{t("{count} 次请求", { count: formatInteger(summary.requests, language) })}</span>
+              <span className={styles.modelTokens} title={`${formatInteger(summary.flowletTokens, language)} Tokens`}>{formatCompact(summary.flowletTokens, language)}</span>
+              <span className={styles.costCell} title={flowletValue}>{flowletValue}</span>
+              <span>{t("按请求发生时间精确归集")}</span>
+            </div>
+            <div className={styles.combinedBreakdownRow}>
+              <span className={styles.combinedSourceCell}>
+                <i>A</i>
+                <span><strong>{t("Agent 原生")}</strong><small>{t("未被 Flowlet 观测的根会话")}</small></span>
+              </span>
+              <span>{t("{sessions} 会话 · {turns} 轮", {
+                sessions: formatInteger(summary.nativeSessions, language),
+                turns: formatInteger(summary.nativeTurns, language),
+              })}</span>
+              <span className={styles.modelTokens} title={`${formatInteger(summary.nativeTokens, language)} Tokens`}>{formatCompact(summary.nativeTokens, language)}</span>
+              <span className={styles.costCell} title={nativeValue}>{nativeValue}</span>
+              <span>{t("按会话最近活动日近似归集")}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside className={styles.side}>
+        <section className={styles.coverageCard}>
+          <header>
+            <strong>{t("Token 来源占比")}</strong>
+            <Tooltip content={t("仅按 Token 数量计算，不代表实际支付金额")}>
+              <IconInfoCircle className={styles.hintIcon} role="img" aria-label={t("Token 来源占比说明")} />
+            </Tooltip>
+          </header>
+          <div className={styles.coverageValue}>
+            <strong>{flowletTokenShare == null ? "—" : formatPercent(flowletTokenShare)}</strong>
+            <span>{t("Token 经过 Flowlet")}</span>
+          </div>
+          <div className={styles.coverageTrack}><i style={{ width: `${flowletTokenShare == null ? 0 : flowletTokenShare * 100}%` }} /></div>
+        </section>
+        <section className={`${styles.channelCard} ${styles.nativeScopeCard}`}>
+          <header><strong>{t("综合统计口径")}</strong><span>{t("保守去重")}</span></header>
+          <div className={styles.nativeScopeBody}>
+            <p>{t("综合视图仅统计当前设备；原生会话不会同步到其他设备。")}</p>
+            <p>{t("已被 Flowlet 观测的会话只使用代理请求数据，原生摘要不会重复累加。")}</p>
+            <p>{t("综合总价值仅合并 Flowlet 预估费用与原生 API 等价价值。")}</p>
+            <p>{t("原生实际费用与套餐消耗保持独立，不计入综合总价值。")}</p>
+            <p>{t("原生数据按会话最近活动日筛选，周期边界属于近似统计。")}</p>
+            {nativeSummary.truncatedSessions > 0 ? <p className={styles.warningText}>{t("{count} 个会话摘要可能被截断", { count: nativeSummary.truncatedSessions })}</p> : null}
+          </div>
+          <footer><span>{t("两类来源合计")}</span><strong>{formatCompact(summary.tokens, language)} Tokens</strong></footer>
+        </section>
+      </aside>
+    </div>}
+  </>;
+}
+
+function AgentNativeUsageContent({
+  language,
+  t,
+  periodLabel,
+  summary,
+  agents,
+  loading,
+  error,
+  onRetry,
+}: {
+  language: "zh-CN" | "en-US";
+  t: ReturnType<typeof useAppPreferences>["t"];
+  periodLabel: string;
+  summary: AgentNativeUsageTotals;
+  agents: AgentNativeUsageBreakdown[];
+  loading: boolean;
+  error: Error | null;
+  onRetry: () => void;
+}) {
+  if (loading) return <UsageCostSkeleton loadingLabel={t("正在加载 Agent 原生用量…")} />;
+  const usageCoverage = summary.sessions > 0 ? summary.sessionsWithUsage / summary.sessions : null;
+  const pricingTurns = summary.pricedTurns + summary.unpricedTurns;
+  const pricingCoverage = pricingTurns > 0 ? summary.pricedTurns / pricingTurns : null;
+  const nativeCost = formatCurrencyMap(summary.nativeCostByCurrency);
+  const apiEquivalent = formatCurrencyMap(summary.apiEquivalentByCurrency);
+  const planConsumption = formatCurrencyMap(summary.planConsumptionByCurrency);
+
+  return <>
+    <section className={styles.stats} aria-label={t("Agent 原生用量统计")}>
+      <Stat
+        label={t("{period} API 等价价值", { period: periodLabel })}
+        value={apiEquivalent}
+        meta={nativeCost === "—" ? t("不是实际支付金额") : t("原生上报费用 {cost}", { cost: nativeCost })}
+      />
+      <Stat
+        label={t("{period} Token 消耗", { period: periodLabel })}
+        value={formatCompact(summary.tokens, language)}
+        meta={t("输入 {input} · 输出 {output}", {
+          input: formatCompact(summary.inputTokens, language),
+          output: formatCompact(summary.outputTokens, language),
+        })}
+      />
+      <Stat
+        label={t("{period}原生会话", { period: periodLabel })}
+        value={formatInteger(summary.sessions, language)}
+        meta={t("{turns} 个 Agent 轮次", { turns: formatInteger(summary.turns, language) })}
+      />
+      <Stat
+        label={t("计价覆盖率")}
+        value={pricingCoverage == null ? "—" : formatPercent(pricingCoverage)}
+        meta={planConsumption === "—" ? t("按可匹配公开价格的轮次") : t("套餐消耗 {cost}", { cost: planConsumption })}
+      />
+    </section>
+
+    {error ? <div className={styles.state}>
+      <strong>{t("Agent 原生用量加载失败")}</strong>
+      <span>{error.message}</span>
+      <Button onClick={onRetry}>{t("重试")}</Button>
+    </div> : <div className={styles.workspace}>
+      <section className={`${styles.mainCard} ${styles.nativeMainCard}`}>
+        <header className={styles.cardHeader}>
+          <div>
+            <strong>{t("Agent 原生用量")}</strong>
+            <small>{t("仅统计未经过 Flowlet 的根会话，按最近活动日归集")}</small>
+          </div>
+        </header>
+        <div className={styles.nativeBreakdown}>
+          <div className={styles.nativeBreakdownHead}>
+            <span>Agent / {t("模型")}</span>
+            <span>{t("会话")}</span>
+            <span>{t("轮次")}</span>
+            <span>Tokens</span>
+            <span>{t("API 等价")}</span>
+            <span>{t("原生费用")}</span>
+          </div>
+          <div className={styles.breakdownList}>
+            {agents.length === 0 ? <div className={styles.empty}>{t("当前周期暂无 Agent 原生用量")}</div> : agents.map((agent) => {
+              const agentApiEquivalent = formatCurrencyMap(agent.apiEquivalentByCurrency);
+              const agentNativeCost = formatCurrencyMap(agent.nativeCostByCurrency);
+              return <div className={styles.nativeBreakdownRow} key={agent.agentType}>
+                <span className={styles.nativeAgentCell}>
+                  <i>{agentInitial(agent.agentType)}</i>
+                  <span>
+                    <strong>{agentLabel(agent.agentType)}</strong>
+                    <small title={agent.models.join(" · ")}>{agent.models.length > 0 ? agent.models.join(" · ") : t("模型未知")}</small>
+                  </span>
+                </span>
+                <span>{formatInteger(agent.sessions, language)}</span>
+                <span>{formatInteger(agent.turns, language)}</span>
+                <span className={styles.modelTokens} title={`${formatInteger(agent.tokens, language)} Tokens`}>{formatCompact(agent.tokens, language)}</span>
+                <span className={styles.costCell} title={agentApiEquivalent}>{agentApiEquivalent}</span>
+                <span className={styles.costCell} title={agentNativeCost}>{agentNativeCost}</span>
+              </div>;
+            })}
+          </div>
+        </div>
+      </section>
+
+      <aside className={styles.side}>
+        <section className={styles.coverageCard}>
+          <header>
+            <strong>{t("数据完整度")}</strong>
+            <Tooltip content={t("有原生 Token 摘要的会话占比；计价覆盖率另按可匹配公开价格的轮次计算")}>
+              <IconInfoCircle className={styles.hintIcon} role="img" aria-label={t("原生用量数据完整度说明")} />
+            </Tooltip>
+          </header>
+          <div className={styles.coverageValue}>
+            <strong>{usageCoverage == null ? "—" : formatPercent(usageCoverage)}</strong>
+            <span>{t("会话包含 Token 摘要")}</span>
+          </div>
+          <div className={styles.coverageTrack}><i style={{ width: `${usageCoverage == null ? 0 : usageCoverage * 100}%` }} /></div>
+        </section>
+        <section className={`${styles.channelCard} ${styles.nativeScopeCard}`}>
+          <header><strong>{t("统计口径")}</strong><span>{t("保守去重")}</span></header>
+          <div className={styles.nativeScopeBody}>
+            <p>{t("已被 Flowlet 观测的会话优先使用代理请求数据，不重复累加原生摘要。")}</p>
+            <p>{t("当前按会话最近活动日筛选，不代表 Token 的精确发生日期。")}</p>
+            <p>{t("API 等价价值、原生上报费用和套餐消耗彼此独立，不合并为实际成本。")}</p>
+            {summary.truncatedSessions > 0 ? <p className={styles.warningText}>{t("{count} 个会话摘要可能被截断", { count: summary.truncatedSessions })}</p> : null}
+          </div>
+          <footer><span>{t("总计 {count} 类 Agent", { count: agents.length })}</span><strong>{formatCompact(summary.tokens, language)} Tokens</strong></footer>
+        </section>
+      </aside>
+    </div>}
+  </>;
+}
+
 function UsageCostSkeleton({ loadingLabel }: { loadingLabel: string }) {
   return <>
     <section className={styles.stats} aria-label={loadingLabel} aria-busy="true">
@@ -249,6 +594,31 @@ function UsageCostSkeleton({ loadingLabel }: { loadingLabel: string }) {
       </aside>
     </div>
   </>;
+}
+
+function formatCurrencyMap(values: Record<string, number>) {
+  return Object.values(values).some((value) => Number.isFinite(value) && value > 0)
+    ? formatMultiCurrencyCost(values, 4)
+    : "—";
+}
+
+function oldestUpdatedAt(left: number | undefined, right: number | undefined) {
+  if (!left) return right;
+  if (!right) return left;
+  return Math.min(left, right);
+}
+
+function agentLabel(agentType: string) {
+  if (agentType === "claude-code") return "Claude Code";
+  if (agentType === "codex-desktop") return "ChatGPT";
+  if (agentType === "codex-cli") return "Codex CLI";
+  if (agentType === "opencode") return "OpenCode";
+  if (agentType === "pi") return "Pi";
+  return agentType;
+}
+
+function agentInitial(agentType: string) {
+  return agentLabel(agentType).slice(0, 1).toUpperCase();
 }
 
 function Stat({ label, value, meta, tooltip }: { label: string; value: string; meta: string; tooltip?: React.ReactNode }) {

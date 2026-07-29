@@ -9,7 +9,7 @@ describe("ChannelBrandLogo", () => {
   });
 
   it("uses the vendored Qwen color asset", () => {
-    const { container } = render(<ChannelBrandLogo channelId="qwen" name="千问 Qwen" />);
+    const { container } = render(<ChannelBrandLogo channelId="qwen" name="Qwen" />);
     expect(container.querySelector('img[src="/icons/lobe/qwen-color.svg"]')).toBeInTheDocument();
   });
 });

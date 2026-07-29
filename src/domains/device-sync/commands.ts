@@ -10,6 +10,7 @@ import type {
   S3DeviceSyncResult,
   S3SyncConfigInput,
   S3SyncSettings,
+  SharedAgentSession,
 } from "./types";
 
 export const deviceSyncCommands = {
@@ -60,6 +61,9 @@ export const mobileDeviceSyncCommands = {
   dailyUsage: (deviceId: string | null): Promise<DailyUsageTotal[]> =>
     invokeCommand<DailyUsageTotal[]>("shared_device_daily_usage", { deviceId })
       .catch(toDeviceSyncError("shared_device_daily_usage_failed")),
+  sessions: (deviceId: string | null): Promise<SharedAgentSession[]> =>
+    invokeCommand<SharedAgentSession[]>("list_shared_device_sessions", { deviceId })
+      .catch(toDeviceSyncError("shared_device_sessions_failed")),
   s3Settings: deviceSyncCommands.s3Settings,
   saveS3Config: deviceSyncCommands.saveS3Config,
   testS3Connection: (config: S3SyncConfigInput): Promise<S3ConnectionTestResult> =>

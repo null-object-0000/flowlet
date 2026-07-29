@@ -15,3 +15,16 @@ export function useUsageSummary(period: UsagePeriod, autoRefresh: boolean) {
   });
   return { query };
 }
+
+export function useAgentNativeUsageSummary(autoRefresh: boolean, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.usage.nativeSummary(),
+    queryFn: usageCommands.nativeSummary,
+    enabled,
+    networkMode: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+    staleTime: 15_000,
+    refetchInterval: autoRefresh ? 30_000 : false,
+  });
+}

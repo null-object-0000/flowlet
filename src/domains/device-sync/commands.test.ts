@@ -85,6 +85,10 @@ describe("deviceSyncCommands contract", () => {
     await mobileDeviceSyncCommands.dailyUsage(null);
     expect(invokeMock).toHaveBeenLastCalledWith("shared_device_daily_usage", { deviceId: null });
 
+    invokeMock.mockResolvedValueOnce([]);
+    await mobileDeviceSyncCommands.sessions("device-1");
+    expect(invokeMock).toHaveBeenLastCalledWith("list_shared_device_sessions", { deviceId: "device-1" });
+
     invokeMock.mockResolvedValueOnce({ message: "ok" });
     await mobileDeviceSyncCommands.testS3Connection(config);
     expect(invokeMock).toHaveBeenLastCalledWith("test_s3_read_connection", { config });

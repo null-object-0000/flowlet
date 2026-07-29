@@ -56,7 +56,11 @@ export function OverviewExposedModelsCard({ routes, accounts, channels, busyMode
           })}
         </div>
       ) : (
-        <div className={styles.empty}>{t("暂无模型。请同步或进入模型服务生成默认模型。")}</div>
+        <div className={styles.empty}>
+          {accounts.length === 0
+            ? t("添加渠道账号并选择开放模型后，这里会显示模型。")
+            : t("暂无开放模型，请前往模型服务选择要开放的模型。")}
+        </div>
       )}
     </OverviewModuleCard>
   );

@@ -10,6 +10,25 @@ export type DailyUsageTotal = {
   unknownCount: number;
 };
 
+export type SyncedAgentSession = {
+  agentType: "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi" | string;
+  sessionId: string;
+  runtimeStatus: "idle" | "running" | "waiting_user" | "unknown";
+  title: string | null;
+  clientName: string | null;
+  activityAt: string;
+  flowletObserved: boolean;
+  requestCount: number;
+  errorCount: number;
+  knownTokens: number;
+};
+
+export type SharedAgentSession = SyncedAgentSession & {
+  deviceId: string;
+  deviceDisplayName: string;
+  devicePlatform: string;
+};
+
 export type DeviceUsageSnapshot = {
   schemaVersion: number;
   deviceId: string;
@@ -20,6 +39,7 @@ export type DeviceUsageSnapshot = {
   generatedAt: string;
   timezoneOffsetMinutes: number;
   days: DailyUsageTotal[];
+  sessions: SyncedAgentSession[];
 };
 
 export type KnownDevice = {

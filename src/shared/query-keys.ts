@@ -75,6 +75,7 @@ export const queryKeys = {
   usage: {
     all: ["usage"] as const,
     summary: (period: string) => [...queryKeys.usage.all, "summary", period] as const,
+    nativeSummary: () => [...queryKeys.usage.all, "native-summary"] as const,
     todayTokens: () => [...queryKeys.usage.all, "today-tokens"] as const,
     accountStats: () => [...queryKeys.usage.all, "account-stats"] as const,
     latestBalanceSnapshots: () => [...queryKeys.usage.all, "latest-balance-snapshots"] as const,
@@ -89,6 +90,7 @@ export const queryKeys = {
     all: ["mobile-device-sync"] as const,
     devices: () => [...queryKeys.mobileDeviceSync.all, "devices"] as const,
     dailyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "daily-usage", deviceId ?? "all"] as const,
+    sessions: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "sessions", deviceId ?? "all"] as const,
     s3Settings: () => [...queryKeys.mobileDeviceSync.all, "s3-settings"] as const,
   },
   settings: {

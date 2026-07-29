@@ -52,7 +52,7 @@ describe("buildModelServiceItems", () => {
     ] as ChannelAccount[];
     const channels = [
       { id: "custom", name: "自定义渠道" },
-      { id: "qwen", name: "千问 Qwen" },
+      { id: "qwen", name: "Qwen" },
     ] as ChannelPreset[];
     const routes = [
       { id: "custom-route", virtual_model_id: "qwen3.7-plus", upstream_model: "qwen3.7-plus", channel_id: "custom", account_id: "custom-account", client_protocol: "openai", priority: 0, enabled: true },
@@ -66,7 +66,7 @@ describe("buildModelServiceItems", () => {
     expect(directModels[0]).toEqual(expect.objectContaining({
       publicModel: "qwen3.7-plus",
       channelId: "qwen",
-      channelName: "千问 Qwen",
+      channelName: "Qwen",
       availableAccountCount: 2,
     }));
     expect(directModels[0].routeGroups.map((group) => group.channelId)).toEqual(["custom", "qwen"]);

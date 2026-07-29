@@ -22,6 +22,20 @@ const routes = [
 const channels = [{ id: "deepseek", name: "DeepSeek" }] as ChannelPreset[];
 
 describe("OverviewExposedModelsCard", () => {
+  it("explains the empty model state when no account exists", () => {
+    render(
+      <OverviewExposedModelsCard
+        routes={[]}
+        accounts={[]}
+        channels={[]}
+        onManage={vi.fn()}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("添加渠道账号并选择开放模型后，这里会显示模型。")).toBeInTheDocument();
+  });
+
   it("groups routes by public model and saves all grouped switches together", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();

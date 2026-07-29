@@ -18,13 +18,10 @@ type Props = {
   routes: RouteCandidate[];
   baseUrl: string;
   bindConfig?: ProxyBindConfig;
-  proxyRunning: boolean;
-  hasAccounts: boolean;
   onAccountRequest: (request: AccountManagerRequest) => void;
   onOpenCodexAgent?: () => void;
   busyModelId?: string;
   onToggleModel: (routeIds: string[], modelId: string, enabled: boolean) => void;
-  onboarding: React.ReactNode;
 };
 
 export function OverviewGrid({
@@ -35,19 +32,12 @@ export function OverviewGrid({
   routes,
   baseUrl,
   bindConfig,
-  proxyRunning,
-  hasAccounts,
   onAccountRequest,
   onOpenCodexAgent,
   busyModelId,
   onToggleModel,
-  onboarding,
 }: Props) {
   const navigate = useNavigate();
-
-  if (!hasAccounts) {
-    return <div className={styles.onboarding}>{onboarding}</div>;
-  }
 
   return (
     <div className={styles.grid}>
@@ -56,7 +46,7 @@ export function OverviewGrid({
           accounts={accounts}
           snapshots={balanceSnapshots}
           codexAccounts={codexAccounts}
-          onCreate={() => onAccountRequest({ kind: "create", channelId: "longcat" })}
+          onCreate={(channelId) => onAccountRequest({ kind: "create", channelId })}
           onViewAll={() => onAccountRequest({ kind: "list" })}
           onEdit={(accountId) => onAccountRequest({ kind: "edit", accountId })}
           onOpenCodexAgent={onOpenCodexAgent}

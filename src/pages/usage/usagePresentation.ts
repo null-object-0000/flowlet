@@ -30,6 +30,14 @@ export type UsageHeatmap = {
 };
 
 export function filterUsageRows(rows: UsageSummaryRow[], period: UsagePeriod, now = new Date()): UsageSummaryRow[] {
+  return filterRowsByUsagePeriod(rows, period, now);
+}
+
+export function filterRowsByUsagePeriod<T extends { date: string }>(
+  rows: T[],
+  period: UsagePeriod,
+  now = new Date(),
+): T[] {
   const today = localDateKey(now);
   if (period === "all") return rows;
   const rangeStart = localDateKey(startOfUsagePeriod(period, now));

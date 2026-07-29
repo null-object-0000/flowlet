@@ -29,6 +29,18 @@ describe("app overlay layers", () => {
     config.mockRestore();
   });
 
+  it("keeps mobile feedback below the system safe area", () => {
+    const config = vi.spyOn(Toast, "config");
+
+    configureAppOverlayLayers({ mobile: true });
+
+    expect(config).toHaveBeenCalledWith({
+      zIndex: APP_OVERLAY_Z_INDEX.toast,
+      top: "calc(env(safe-area-inset-top, 0px) + 12px)",
+    });
+    config.mockRestore();
+  });
+
   it("starts window dragging from a SideSheet header blank area", () => {
     const startDragging = vi.fn<() => Promise<void>>().mockResolvedValue();
     const header = document.createElement("div");

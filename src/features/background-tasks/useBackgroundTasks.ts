@@ -19,7 +19,7 @@ export function useAgentSyncSchedule() {
 export function useBackgroundTaskDetail(jobId: string | null) { return useQuery({ queryKey: queryKeys.backgroundTask.detail(jobId ?? ""), queryFn: () => backgroundTaskCommands.detail(jobId!), enabled: Boolean(jobId), refetchInterval: (query) => query.state.data?.job.status === "running" ? 2_000 : false }); }
 export function useAgentDataSync() {
   const client = useQueryClient();
-  return useMutation({ mutationFn: ({ force, triggerSource }: { force: boolean; triggerSource: string }) => backgroundTaskCommands.syncAgentData(force, triggerSource), onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: queryKeys.agentSession.all }), client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all })]); } });
+  return useMutation({ mutationFn: ({ force, triggerSource }: { force: boolean; triggerSource: string }) => backgroundTaskCommands.syncAgentData(force, triggerSource), onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: queryKeys.agentSession.all }), client.invalidateQueries({ queryKey: queryKeys.usage.nativeSummary() }), client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all })]); } });
 }
 export function useCancelBackgroundTask() { const client = useQueryClient(); return useMutation({ mutationFn: backgroundTaskCommands.cancel, onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all }) }); }
 export function useCleanupBackgroundTasks() { const client = useQueryClient(); return useMutation({ mutationFn: backgroundTaskCommands.cleanup, onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all }) }); }

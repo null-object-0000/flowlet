@@ -25,6 +25,31 @@ const snapshot = {
 } as AccountBalanceSnapshot;
 
 describe("OverviewChannelAccountsCard", () => {
+  it("renders provider choices inside the empty card", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn();
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[]}
+        snapshots={[]}
+        onCreate={onCreate}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("选择一个渠道添加首个账号")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 LongCat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 DeepSeek" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 Kimi" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 Qwen" })).toBeInTheDocument();
+    expect(screen.queryByText("管理账号")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "添加 Qwen" }));
+    expect(onCreate).toHaveBeenCalledWith("qwen");
+  });
+
   it("renders legacy account summaries and routes all three actions", async () => {
     const user = userEvent.setup();
     const onCreate = vi.fn();

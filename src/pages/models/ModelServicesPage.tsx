@@ -14,7 +14,7 @@ import {
   type ModelServiceItem,
 } from "./modelServiceView";
 import { buildModelBasicInfo, type ModelBasicInfo } from "./modelBasicInfo";
-import { buildChannelFilterOptions, filterModelServiceItems, reorderModelRouteGroups, type ModelStatusFilter } from "./modelServiceInteractions";
+import { buildChannelFilterOptions, filterModelServiceItems, reorderModelRouteGroups } from "./modelServiceInteractions";
 import type { ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import type { ChannelModel } from "../../domains/model/types";
@@ -143,7 +143,6 @@ export function ModelServicesPage() {
   const syncModelCatalogs = useModelCatalogsSync();
   const actions = useModelActions();
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<ModelStatusFilter>("all");
   const [channelFilter, setChannelFilter] = useState("all");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
@@ -153,8 +152,8 @@ export function ModelServicesPage() {
   );
   const relations = useMemo(() => buildAggregateRelations(models), [models]);
   const filtered = useMemo(
-    () => filterModelServiceItems(models, search, status, channelFilter, relations),
-    [channelFilter, models, relations, search, status],
+    () => filterModelServiceItems(models, search, channelFilter),
+    [channelFilter, models, search],
   );
   const aggregateModels = useMemo(() => filtered.filter((model) => model.kind === "aggregate"), [filtered]);
   const directModels = useMemo(() => filtered.filter((model) => model.kind === "direct"), [filtered]);
@@ -173,7 +172,6 @@ export function ModelServicesPage() {
       ? actions.reorderRoutes.variables?.modelId
       : undefined;
   const enabledCount = models.filter((model) => model.enabled).length;
-  const availableCount = models.filter((model) => model.available).length;
   const aggregateCount = models.filter((model) => model.kind === "aggregate").length;
   const connectedChannelCount = useMemo(
     () => new Set((accounts.data ?? []).map((account) => account.channel_id)).size,
@@ -247,16 +245,27 @@ export function ModelServicesPage() {
       : t("{channel} · 渠道模型", { channel: model.channelName ?? model.channelId ?? "—" });
     return (
       <div
-        role="button"
-        tabIndex={0}
         key={model.publicModel}
         className={`${styles.modelRow} ${selectedModel === model.publicModel ? styles.selected : ""}`}
-        onClick={() => setSelectedModel(model.publicModel)}
-        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedModel(model.publicModel); }}
       >
-        <span className={styles.modelName}><ModelLogo model={model} /><span><strong>{model.publicModel}</strong><small>{typeLabel}</small></span></span>
-        <span className={`${styles.routeSummary} ${summaryMuted ? styles.routeSummaryMuted : ""}`}>{summary}</span>
-        <span className={model.available ? styles.healthy : styles.unavailable}>{t(model.available ? "可用" : "不可用")}</span>
+        <button
+          type="button"
+          className={styles.modelRowMain}
+          aria-pressed={selectedModel === model.publicModel}
+          onClick={() => setSelectedModel(model.publicModel)}
+        >
+          <span className={styles.modelName}><ModelLogo model={model} /><span><strong>{model.publicModel}</strong><small>{typeLabel}</small></span></span>
+          <span className={`${styles.routeSummary} ${summaryMuted ? styles.routeSummaryMuted : ""}`}>{summary}</span>
+        </button>
+        <span className={styles.rowEnable}>
+          <Switch
+            checked={model.enabled}
+            loading={busyModel === model.publicModel}
+            disabled={busyModel != null || model.routeIds.length === 0}
+            aria-label={t("{model} 对外开放", { model: model.publicModel })}
+            onChange={(checked) => toggleModel(model, checked)}
+          />
+        </span>
       </div>
     );
   };
@@ -271,7 +280,6 @@ export function ModelServicesPage() {
       <section className={styles.statsBar} aria-label={t("模型服务统计")}>
         <Stat label={t("对外模型")} value={models.length} />
         <Stat label={t("已启用")} value={enabledCount} tone="success" />
-        <Stat label={t("当前可用")} value={availableCount} />
         <Stat label={t("已接入渠道")} value={connectedChannelCount} />
         <span className={styles.statsKindPill}>{t("聚合模型 {aggregate} · 渠道模型 {direct}", { aggregate: aggregateCount, direct: models.length - aggregateCount })}</span>
       </section>
@@ -289,17 +297,6 @@ export function ModelServicesPage() {
                 ...buildChannelFilterOptions(models, channels.data ?? []),
               ]}
               onChange={(value) => setChannelFilter(String(value))}
-            />
-            <Select
-              value={status}
-              aria-label={t("模型状态")}
-              optionList={[
-                { value: "all", label: t("全部状态") },
-                { value: "available", label: t("当前可用") },
-                { value: "enabled", label: t("已对外启用") },
-                { value: "not-routed", label: t("未加入路由") },
-              ]}
-              onChange={(value) => setStatus(value as ModelStatusFilter)}
             />
           </div>
           <div className={styles.modelList}>
@@ -320,7 +317,7 @@ export function ModelServicesPage() {
           </div>
           <footer className={styles.listFooter}>
             <span>{t("当前显示 {visible} / 共 {total} 个模型", { visible: filtered.length, total: models.length })}</span>
-            <span>{t("选择模型后在右侧启用或配置")}</span>
+            <span>{t("选择模型后在右侧查看详情")}</span>
           </footer>
         </section>
 
@@ -337,7 +334,6 @@ export function ModelServicesPage() {
           onSyncCatalogs={syncCatalogs}
           language={language}
           pendingModel={busyModel}
-          onToggleModel={toggleModel}
           onToggleRoute={toggleRoute}
           onReorderRoute={reorderRoute}
           t={t}
@@ -425,7 +421,7 @@ function PresetSyncModal({ t, preview, applying, onCancel, onConfirm }: {
             {preview.newExposedModels.length > 0 ? (
               <>
                 <p className={styles.syncSummary}>
-                  {t("以下渠道新增暴露模型（同步后自动生成路由）：")}
+                  {t("以下模型缺少路由（同步后自动补齐）：")}
                   <span className={styles.syncCounts}>
                     <span className={styles.added}>+{preview.newExposedModels.length}</span>
                   </span>
@@ -461,7 +457,7 @@ function ModelLogo({ model }: { model: ModelServiceItem }) {
   return <FlowletLogo variant="model" />;
 }
 
-function ModelDetail({ model, relations, accounts, channels, channelModels, prices, catalogJson, catalogLoading, syncCatalogsPending, onSyncCatalogs, language, pendingModel, onToggleModel, onToggleRoute, onReorderRoute, t }: {
+function ModelDetail({ model, relations, accounts, channels, channelModels, prices, catalogJson, catalogLoading, syncCatalogsPending, onSyncCatalogs, language, pendingModel, onToggleRoute, onReorderRoute, t }: {
   model: ModelServiceItem | null;
   relations: Map<string, ModelAggregateRelation[]>;
   accounts: ChannelAccount[];
@@ -474,7 +470,6 @@ function ModelDetail({ model, relations, accounts, channels, channelModels, pric
   onSyncCatalogs: () => void;
   language: NumberLanguage;
   pendingModel: string | undefined;
-  onToggleModel: (model: ModelServiceItem, enabled: boolean) => void;
   onToggleRoute: (modelId: string, routeGroup: ModelRouteGroup, enabled: boolean) => void;
   onReorderRoute: (modelId: string, sourceKey: string, targetKey: string) => void;
   t: (source: string, values?: Record<string, string | number>) => string;
@@ -564,16 +559,6 @@ function ModelDetail({ model, relations, accounts, channels, channelModels, pric
     <header className={styles.detailHeader}>
       <ModelLogo model={model} />
       <span className={styles.detailTitle}><strong>{model.publicModel}</strong><small>{`${kindLabel} · ${accountLabel}`}</small></span>
-      <div className={styles.detailEnable}>
-        <span>{t("对外启用")}</span>
-        <Switch
-          checked={model.enabled}
-          loading={pendingModel === model.publicModel}
-          disabled={busy || model.routeIds.length === 0}
-          aria-label={t("{model} 对外开放", { model: model.publicModel })}
-          onChange={(checked) => onToggleModel(model, checked)}
-        />
-      </div>
     </header>
     <div className={styles.detailBody}>
       <Tabs className={styles.detailTabs} type="line" activeKey={activeTab} onChange={(key) => setActiveTab(String(key))} tabPaneMotion={false}>

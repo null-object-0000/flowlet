@@ -18,6 +18,12 @@ describe("usageCommands contract", () => {
     expect(invokeMock).toHaveBeenCalledWith("usage_summary", { period: "month" });
   });
 
+  it("reads Agent native usage through the typed Tauri boundary", async () => {
+    invokeMock.mockResolvedValueOnce([]);
+    expect(await usageCommands.nativeSummary()).toEqual([]);
+    expect(invokeMock).toHaveBeenCalledWith("agent_native_usage_summary", undefined);
+  });
+
   it("reads today token summary through the typed Tauri boundary", async () => {
     const summary = {
       total_tokens: 12345,

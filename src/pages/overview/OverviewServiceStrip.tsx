@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Toast } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconEyeClosed, IconEyeOpened, IconLink } from "@douyinfe/semi-icons";
 import type { ProxyBindConfig, ProxyRuntimeState, ProxyStatus } from "../../domains/proxy/types";
 import type { UsageTodaySummary } from "../../domains/usage/types";
@@ -10,8 +10,6 @@ import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import styles from "./OverviewServiceStrip.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
-const { Text } = Typography;
-
 type Protocol = "openai" | "anthropic";
 
 type Props = {
@@ -20,11 +18,10 @@ type Props = {
   bindConfig: ProxyBindConfig | undefined;
   baseUrl: string;
   todayUsage: UsageTodaySummary | null;
-  hasAccounts: boolean;
   onOpenDetails: () => void;
 };
 
-export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, hasAccounts, onOpenDetails }: Props) {
+export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, onOpenDetails }: Props) {
   const { language, t } = useAppPreferences();
   const running = status?.running === true;
 
@@ -93,87 +90,83 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
         <TodayTokenValue usage={todayUsage} language={language} t={t} />
       </div>
 
-      {hasAccounts ? (
-        <div className={styles.cell}>
-          <div className={styles.accessHead}>
-            <span className={styles.accessLabel}>{t("客户端接入")}</span>
-            <div className={styles.protocolSwitch}>
-              <button
-                type="button"
-                className={`${styles.protocolBtn} ${protocol === "openai" ? styles.protocolBtnActive : ""}`}
-                onClick={() => setProtocol("openai")}
-              >
-                OpenAI
-              </button>
-              <button
-                type="button"
-                className={`${styles.protocolBtn} ${protocol === "anthropic" ? styles.protocolBtnActive : ""}`}
-                onClick={() => setProtocol("anthropic")}
-              >
-                Anthropic
-              </button>
-            </div>
-            <button type="button" className={styles.accessDetail} onClick={onOpenDetails}>
-              {t("接入详情")}
+      <div className={styles.cell}>
+        <div className={styles.accessHead}>
+          <span className={styles.accessLabel}>{t("客户端接入")}</span>
+          <div className={styles.protocolSwitch}>
+            <button
+              type="button"
+              className={`${styles.protocolBtn} ${protocol === "openai" ? styles.protocolBtnActive : ""}`}
+              onClick={() => setProtocol("openai")}
+            >
+              OpenAI
+            </button>
+            <button
+              type="button"
+              className={`${styles.protocolBtn} ${protocol === "anthropic" ? styles.protocolBtnActive : ""}`}
+              onClick={() => setProtocol("anthropic")}
+            >
+              Anthropic
             </button>
           </div>
-          <div className={styles.inlineEndpoint}>
-            <div className={styles.inlineCode}>{endpoint}</div>
+          <button type="button" className={styles.accessDetail} onClick={onOpenDetails}>
+            {t("接入详情")}
+          </button>
+        </div>
+        <div className={styles.inlineEndpoint}>
+          <div className={styles.inlineCode}>{endpoint}</div>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            title={t("复制 Base URL")}
+            aria-label={t("复制 Base URL")}
+            onClick={() => void copy(endpoint, t("{label} 已复制", { label: t("客户端接入") }))}
+          >
+            <IconCopy aria-hidden="true" />
+          </button>
+          <Button
+            className={styles.iconBtn}
+            icon={<IconLink aria-hidden="true" />}
+            title={t("测试连接")}
+            aria-label={t("测试连接")}
+            loading={testing}
+            theme="borderless"
+            onClick={() => handleTest(protocol)}
+          />
+        </div>
+      </div>
+
+      <div className={styles.cell}>
+        <div className={styles.tokenCellLabel}>{t("客户端 Token")}</div>
+        <div className={styles.tokenRow}>
+          <div className={styles.tokenValueMasked}>
+            {clientToken ? (tokenVisible ? clientToken : "••••••••••••••••") : "—"}
+          </div>
+          {clientToken ? (
             <button
               type="button"
               className={styles.iconBtn}
-              title={t("复制 Base URL")}
-              aria-label={t("复制 Base URL")}
-              onClick={() => void copy(endpoint, t("{label} 已复制", { label: t("客户端接入") }))}
+              title={tokenVisible ? t("隐藏{label}", { label: t("客户端 Token") }) : t("显示{label}", { label: t("客户端 Token") })}
+              aria-label={tokenVisible ? t("隐藏{label}", { label: t("客户端 Token") }) : t("显示{label}", { label: t("客户端 Token") })}
+              aria-pressed={tokenVisible}
+              onClick={() => setTokenVisible((value) => !value)}
+            >
+              {tokenVisible ? <IconEyeClosed aria-hidden="true" /> : <IconEyeOpened aria-hidden="true" />}
+            </button>
+          ) : null}
+          {clientToken ? (
+            <button
+              type="button"
+              className={styles.iconBtn}
+              title={t("复制 Token")}
+              aria-label={t("复制 Token")}
+              onClick={() => void copy(clientToken, t("{label} 已复制", { label: t("客户端 Token") }))}
             >
               <IconCopy aria-hidden="true" />
             </button>
-            <Button
-              className={styles.iconBtn}
-              icon={<IconLink aria-hidden="true" />}
-              title={t("测试连接")}
-              aria-label={t("测试连接")}
-              loading={testing}
-              theme="borderless"
-              onClick={() => handleTest(protocol)}
-            />
-          </div>
+          ) : null}
         </div>
-      ) : null}
-
-      {hasAccounts ? (
-        <div className={styles.cell}>
-          <div className={styles.tokenCellLabel}>{t("客户端 Token")}</div>
-          <div className={styles.tokenRow}>
-            <div className={styles.tokenValueMasked}>
-              {clientToken ? (tokenVisible ? clientToken : "••••••••••••••••") : "—"}
-            </div>
-            {clientToken ? (
-              <button
-                type="button"
-                className={styles.iconBtn}
-                title={tokenVisible ? t("隐藏{label}", { label: t("客户端 Token") }) : t("显示{label}", { label: t("客户端 Token") })}
-                aria-label={tokenVisible ? t("隐藏{label}", { label: t("客户端 Token") }) : t("显示{label}", { label: t("客户端 Token") })}
-                aria-pressed={tokenVisible}
-                onClick={() => setTokenVisible((value) => !value)}
-              >
-                {tokenVisible ? <IconEyeClosed aria-hidden="true" /> : <IconEyeOpened aria-hidden="true" />}
-              </button>
-            ) : null}
-            {clientToken ? (
-              <button
-                type="button"
-                className={styles.iconBtn}
-                title={t("复制 Token")}
-                aria-label={t("复制 Token")}
-                onClick={() => void copy(clientToken, t("{label} 已复制", { label: t("客户端 Token") }))}
-              >
-                <IconCopy aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }

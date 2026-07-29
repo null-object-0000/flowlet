@@ -13,12 +13,22 @@ if (!root) {
 }
 const appRoot = root;
 
-applyInitialPreferences();
-configureAppOverlayLayers();
 const mobileTarget = import.meta.env.MODE === "mobile"
   || import.meta.env.VITE_FLOWLET_TARGET === "mobile"
   || import.meta.env.TAURI_ENV_PLATFORM === "android"
   || import.meta.env.TAURI_ENV_PLATFORM === "ios";
+
+if (mobileTarget) {
+  document
+    .querySelector<HTMLMetaElement>('meta[name="viewport"]')
+    ?.setAttribute(
+      "content",
+      "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover",
+    );
+}
+
+applyInitialPreferences();
+configureAppOverlayLayers({ mobile: mobileTarget });
 if (!mobileTarget) {
   void import("./platform/tauri/window").then(({ windowCommands }) => {
     configureSideSheetWindowDragging(windowCommands.startDragging);

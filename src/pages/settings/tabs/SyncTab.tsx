@@ -1,5 +1,5 @@
-import { IconCopy, IconQrCode } from "@douyinfe/semi-icons";
-import { Button, Input, Modal, SideSheet, Switch, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
+import { IconCopy, IconMore, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
+import { Button, Dropdown, Input, Modal, SideSheet, Switch, Tabs, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
@@ -23,6 +23,7 @@ import { APP_OVERLAY_Z_INDEX } from "../../../shared/ui/overlayLayers";
 import styles from "./SyncTab.module.css";
 
 type S3Draft = Omit<S3SyncConfigInput, "secretAccessKey"> & { secretAccessKey: string };
+type ConnectionTab = "qr" | "text" | "import";
 
 const EMPTY_S3_DRAFT: S3Draft = {
   endpoint: "",
@@ -45,6 +46,8 @@ export function SyncTab() {
   const [s3Draft, setS3Draft] = useState<S3Draft | null>(null);
   const [sharePackage, setSharePackage] = useState<{ text: string; qr: string } | null>(null);
   const [connectionText, setConnectionText] = useState<string | null>(null);
+  const [connectionTab, setConnectionTab] = useState<ConnectionTab | null>(null);
+  const [expiresIn, setExpiresIn] = useState(60);
 
   const parsedConnection = useMemo(() => {
     if (connectionText == null || !connectionText.trim()) return null;
@@ -57,8 +60,17 @@ export function SyncTab() {
 
   useEffect(() => {
     if (!sharePackage) return undefined;
-    const timer = window.setTimeout(() => setSharePackage(null), 60_000);
-    return () => window.clearTimeout(timer);
+    setExpiresIn(60);
+    const timer = window.setInterval(() => {
+      setExpiresIn((current) => {
+        if (current > 1) return current - 1;
+        window.clearInterval(timer);
+        setSharePackage(null);
+        setConnectionTab(null);
+        return 0;
+      });
+    }, 1_000);
+    return () => window.clearInterval(timer);
   }, [sharePackage]);
 
   const exportUsage = async () => {
@@ -167,7 +179,8 @@ export function SyncTab() {
     }
   };
 
-  const openShare = async () => {
+  const openShare = async (tab: Extract<ConnectionTab, "qr" | "text"> = "qr") => {
+    setConnectionTab(tab);
     try {
       const config = await transfer.exportS3ConnectionConfig.mutateAsync();
       setSharePackage({
@@ -175,8 +188,20 @@ export function SyncTab() {
         qr: serializeS3ConnectionPackage(config, true),
       });
     } catch (error) {
+      setConnectionTab(null);
       Toast.error(t("生成连接包失败：{message}", { message: errorMessage(error) }));
     }
+  };
+
+  const openConnectionImport = () => {
+    setConnectionText("");
+    setConnectionTab("import");
+  };
+
+  const closeConnectionDialog = () => {
+    setConnectionTab(null);
+    setSharePackage(null);
+    setConnectionText(null);
   };
 
   const copyConnectionText = async () => {
@@ -195,7 +220,7 @@ export function SyncTab() {
     try {
       await transfer.testS3Connection.mutateAsync(config);
       await transfer.saveS3Config.mutateAsync(config);
-      setConnectionText(null);
+      closeConnectionDialog();
       Toast.success(t("S3 连接配置已导入并通过测试"));
     } catch (error) {
       Toast.error(t("导入连接配置失败：{message}", { message: errorMessage(error) }));
@@ -208,10 +233,10 @@ export function SyncTab() {
         <header className={styles.sectionHeader}>
           <div>
             <div className={styles.deviceTitle}>
-              <strong>{t("S3-compatible 同步")}</strong>
+              <strong>{t("云端同步")}</strong>
               <SyncStatusTag status={settings.data?.status.status ?? "never"} />
             </div>
-            <span>{t("每台设备只写自己的快照对象，Secret Access Key 保存在系统凭据库")}</span>
+            <span>{t("将本地数据同步至 S3 兼容存储")}</span>
           </div>
           <div className={styles.actions}>
             <Button theme="outline" onClick={openS3Config}>{settings.data?.config ? t("修改配置") : t("配置 S3")}</Button>
@@ -232,63 +257,93 @@ export function SyncTab() {
             <div><span>Bucket</span><strong>{settings.data.config.bucket}</strong></div>
             <div><span>{t("路径")}</span><strong>{settings.data.config.prefix || "flowlet/"}</strong></div>
             <div><span>{t("最近同步")}</span><strong>{formatSyncTime(settings.data.status.lastSuccessAt)}</strong></div>
-            <p>{settings.data.status.message}</p>
           </> : <div className={styles.empty}>{t("尚未配置远程同步。支持 AWS S3、Cloudflare R2、Backblaze B2 和 MinIO。")}</div>}
           {settings.isError ? <div className={styles.empty}>{t("S3 同步设置加载失败")}</div> : null}
         </div>
-        <div className={styles.connectStrip}>
-          <div>
-            <strong>{t("快速连接其它设备")}</strong>
-            <span>{t("通过二维码连接手机，或复制完整连接文本到另一台桌面设备")}</span>
+        {settings.data?.config ? (
+          <div className={styles.syncFoot}>
+            <span className={styles.syncDot} />
+            <span>{settings.data.status.message}</span>
           </div>
-          <div className={styles.actions}>
-            <Button theme="outline" onClick={() => setConnectionText("")}>{t("导入连接文本")}</Button>
-            <Button
-              icon={<IconQrCode />}
-              type="primary"
-              theme="solid"
-              disabled={!settings.data?.config}
-              loading={transfer.exportS3ConnectionConfig.isPending}
-              onClick={() => void openShare()}
-            >
-              {t("连接新设备")}
-            </Button>
-          </div>
-        </div>
+        ) : null}
       </section>
 
       <section className={styles.card} data-keywords="设备 ID 导入 导出 多设备 用量">
         <header className={styles.sectionHeader}>
           <div>
-            <strong>{t("设备与用量共享")}</strong>
-            <span>{t("当前仅共享设备身份和每日 Token 汇总，不包含费用、账号或请求明细")}</span>
+            <strong>{t("设备与用量")}</strong>
+            <span>{t("跨设备汇总每日 Token 用量，不同步费用、账号及请求明细")}</span>
           </div>
           <div className={styles.actions}>
-            <Button theme="outline" onClick={() => void chooseUsageImport()} loading={transfer.previewImport.isPending}>{t("导入设备用量")}</Button>
-            <Button type="primary" theme="solid" onClick={() => void exportUsage()} loading={transfer.exportBundle.isPending}>{t("导出当前设备")}</Button>
+            <Button theme="outline" onClick={openConnectionImport}>{t("导入用量")}</Button>
+            <Dropdown
+              position="bottomRight"
+              trigger="click"
+              render={(
+                <Dropdown.Menu>
+                  <Dropdown.Item onClick={() => void chooseUsageImport()}>{t("从文件导入用量")}</Dropdown.Item>
+                  <Dropdown.Item onClick={() => void exportUsage()}>{t("导出当前设备")}</Dropdown.Item>
+                  <Dropdown.Item onClick={() => void devices.refetch()}>{t("刷新设备列表")}</Dropdown.Item>
+                </Dropdown.Menu>
+              )}
+            >
+              <Button icon={<IconMore />} theme="outline" aria-label={t("更多操作")} />
+            </Dropdown>
+            <Button
+              icon={<IconPlus />}
+              type="primary"
+              theme="solid"
+              disabled={!settings.data?.config}
+              loading={transfer.exportS3ConnectionConfig.isPending}
+              onClick={() => void openShare("qr")}
+            >
+              {t("连接新设备")}
+            </Button>
           </div>
         </header>
-        <div className={styles.deviceList}>
+        <div className={styles.deviceTable}>
+          <div className={styles.deviceHead} aria-hidden="true">
+            <span>{t("设备信息")}</span>
+            <span>{t("使用情况")}</span>
+            <span>{t("状态")}</span>
+            <span />
+          </div>
           {(devices.data ?? []).map((device) => (
-            <article className={styles.deviceCard} key={device.deviceId}>
-              <div className={styles.deviceGlyph}>{t(device.isCurrent ? "本" : "设")}</div>
-              <div className={styles.deviceCopy}>
-                <div className={styles.deviceTitle}>
+            <article className={styles.deviceRow} key={device.deviceId}>
+              <div className={styles.deviceMain} title={device.deviceId}>
+                <div className={styles.deviceGlyph}>{t(device.isCurrent ? "本" : "设")}</div>
+                <div className={styles.deviceCopy}>
                   <strong>{device.displayName}</strong>
-                  {device.isCurrent ? <Tag color="blue" size="small">{t("当前设备")}</Tag> : <Tag size="small">{t("已导入")}</Tag>}
-                  {device.isCurrent ? <Button theme="borderless" size="small" onClick={() => setRenameValue(device.displayName)}>{t("重命名")}</Button> : null}
+                  <span>
+                    {platformLabel(device.platform)}
+                    {device.appVersion !== "unknown" ? ` · Flowlet ${device.appVersion}` : ""}
+                    {" · "}
+                    {device.firstUsageDate && device.lastUsageDate ? `${device.firstUsageDate} — ${device.lastUsageDate}` : t("暂无用量")}
+                  </span>
                 </div>
-                <code title={device.deviceId}>{device.deviceId}</code>
-                <span>
-                  {platformLabel(device.platform)}
-                  {device.appVersion !== "unknown" ? ` · Flowlet ${device.appVersion}` : ""}
-                  {" · "}
-                  {device.firstUsageDate && device.lastUsageDate ? `${device.firstUsageDate} — ${device.lastUsageDate}` : t("暂无用量")}
-                </span>
               </div>
               <div className={styles.deviceStats}>
                 <strong>{formatCompactNumber(device.knownTokens, language)}</strong>
-                <span>Tokens · {t("{count} 次请求", { count: device.requestCount })}</span>
+                <span>{t("{count} 次请求", { count: device.requestCount })}</span>
+              </div>
+              <div className={styles.deviceState}>
+                {device.isCurrent ? <Tag color="blue" size="small">{t("当前设备")}</Tag> : <Tag size="small">{t("已导入")}</Tag>}
+              </div>
+              <div className={styles.deviceMenu}>
+                {device.isCurrent ? (
+                  <Dropdown
+                    position="bottomRight"
+                    trigger="click"
+                    render={(
+                      <Dropdown.Menu>
+                        <Dropdown.Item onClick={() => setRenameValue(device.displayName)}>{t("重命名")}</Dropdown.Item>
+                        <Dropdown.Item onClick={() => void exportUsage()}>{t("导出用量")}</Dropdown.Item>
+                      </Dropdown.Menu>
+                    )}
+                  >
+                    <Button icon={<IconMore />} theme="borderless" aria-label={t("设备操作：{name}", { name: device.displayName })} />
+                  </Dropdown>
+                ) : null}
               </div>
             </article>
           ))}
@@ -297,66 +352,99 @@ export function SyncTab() {
         </div>
       </section>
 
-      <SideSheet
+      <Modal
         title={(
-          <div className={styles.sideSheetTitle}>
+          <div className={styles.connectionTitle}>
             <strong>{t("连接新设备")}</strong>
-            <span>{t("使用二维码连接移动端，或复制连接文本到另一台桌面设备")}</span>
+            <span>{t("选择一种方式，将手机或另一台桌面设备连接到当前同步空间")}</span>
           </div>
         )}
-        visible={sharePackage != null}
+        visible={connectionTab != null}
         motion={false}
-        zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
-        width="min(720px, 96vw)"
+        zIndex={APP_OVERLAY_Z_INDEX.modal}
+        width={748}
         bodyStyle={{ padding: 0 }}
         footer={null}
-        onCancel={() => setSharePackage(null)}
+        onCancel={closeConnectionDialog}
       >
-        {sharePackage ? <div className={styles.shareSideSheetBody}>
-          <p className={styles.secretNotice}>{t("二维码和连接文本包含 Secret Access Key，将在 60 秒后自动关闭。仅在可信设备上使用，不要截图、转发或粘贴到聊天工具。")}</p>
-          <div className={styles.shareLayout}>
-            <div className={styles.qrPanel}>
-              <QRCodeSVG value={sharePackage.qr} size={224} level="M" marginSize={1} />
-              <span>{t("使用 Flowlet 移动端扫描")}</span>
+        <Tabs
+          className={styles.connectionTabs}
+          type="line"
+          activeKey={connectionTab ?? "qr"}
+          tabPaneMotion={false}
+          onChange={(key) => {
+            const next = key as ConnectionTab;
+            if (next === "import") {
+              setConnectionText((current) => current ?? "");
+              setConnectionTab(next);
+            } else if (sharePackage) {
+              setConnectionTab(next);
+            } else {
+              void openShare(next);
+            }
+          }}
+        >
+          <Tabs.TabPane tab={t("扫码连接")} itemKey="qr">
+            <div className={styles.qrLayout}>
+              <div className={styles.qrPanel}>
+                {sharePackage ? <QRCodeSVG value={sharePackage.qr} size={214} level="M" marginSize={1} /> : null}
+                <span>{t("使用 Flowlet 移动端扫描")}</span>
+              </div>
+              <div className={styles.connectGuide}>
+                <h3>{t("在另一台设备上完成连接")}</h3>
+                <ol>
+                  <li><span>1</span><p>{t("打开 Flowlet 移动端，进入「设置 → 同步管理」。")}</p></li>
+                  <li><span>2</span><p>{t("点击「扫码连接」，扫描左侧二维码。")}</p></li>
+                  <li><span>3</span><p>{t("确认设备名称后，即可开始同步每日用量。")}</p></li>
+                </ol>
+                <div className={styles.expireBox}>
+                  <span>{t("连接信息将在 {seconds} 秒后失效", { seconds: expiresIn })}</span>
+                  <Button icon={<IconRefresh />} theme="outline" loading={transfer.exportS3ConnectionConfig.isPending} onClick={() => void openShare("qr")}>{t("刷新二维码")}</Button>
+                </div>
+              </div>
             </div>
-            <div className={styles.textPanel}>
-              <TextArea value={sharePackage.text} readonly autosize={{ minRows: 18, maxRows: 24 }} />
-              <Button icon={<IconCopy />} type="primary" theme="solid" onClick={() => void copyConnectionText()}>{t("复制完整连接文本")}</Button>
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={t("连接文本")} itemKey="text">
+            <div className={styles.connectionPanel}>
+              <p className={styles.secretNotice}>{t("连接文本包含访问凭证，仅用于你信任的设备。界面默认隐藏 Secret，复制时会复制完整内容。")}</p>
+              <pre className={styles.connectionCode}>{sharePackage ? maskConnectionPackage(sharePackage.text) : ""}</pre>
+              <div className={styles.connectionFoot}>
+                <span>{t("该连接文本将在本弹窗关闭后失效")}</span>
+                <Button icon={<IconCopy />} type="primary" theme="solid" onClick={() => void copyConnectionText()}>{t("复制连接文本")}</Button>
+              </div>
             </div>
-          </div>
-        </div> : null}
-      </SideSheet>
-
-      <Modal
-        title={t("导入 S3 连接文本")}
-        visible={connectionText != null}
-        zIndex={APP_OVERLAY_Z_INDEX.modal}
-        width={580}
-        onCancel={() => setConnectionText(null)}
-        onOk={() => void importConnection()}
-        okText={t("测试并导入")}
-        cancelText={t("取消")}
-        okButtonProps={{
-          disabled: !parsedConnection?.config,
-          loading: transfer.testS3Connection.isPending || transfer.saveS3Config.isPending,
-        }}
-      >
-        <p className={styles.secretNotice}>{t("只导入来自可信设备的连接文本。导入前会验证 S3 的完整读写权限。")}</p>
-        <div className={styles.textPanel}>
-          <TextArea
-            autoFocus
-            value={connectionText ?? ""}
-            placeholder={t("粘贴 Flowlet S3 连接包 JSON")}
-            autosize={{ minRows: 10, maxRows: 10 }}
-            onChange={setConnectionText}
-          />
-          {parsedConnection ? <div className={styles.importResult}>
-            {parsedConnection.config ? <>
-              <strong>{parsedConnection.config.bucket}</strong>
-              <span>{parsedConnection.config.endpoint} · {parsedConnection.config.prefix || "flowlet/"}</span>
-            </> : <span className={styles.importError}>{parsedConnection.error}</span>}
-          </div> : null}
-        </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={t("导入连接")} itemKey="import">
+            <div className={styles.importPanel}>
+              <strong>{t("粘贴另一台设备生成的连接文本")}</strong>
+              <TextArea
+                autoFocus
+                value={connectionText ?? ""}
+                placeholder={t("粘贴 Flowlet S3 连接包 JSON")}
+                autosize={{ minRows: 10, maxRows: 10 }}
+                onChange={setConnectionText}
+              />
+              {parsedConnection ? <div className={styles.importResult}>
+                {parsedConnection.config ? <>
+                  <strong>{parsedConnection.config.bucket}</strong>
+                  <span>{parsedConnection.config.endpoint} · {parsedConnection.config.prefix || "flowlet/"}</span>
+                </> : <span className={styles.importError}>{parsedConnection.error}</span>}
+              </div> : null}
+              <div className={styles.connectionFoot}>
+                <span>{t("导入后仅共享设备身份与每日 Token 汇总")}</span>
+                <Button
+                  type="primary"
+                  theme="solid"
+                  disabled={!parsedConnection?.config}
+                  loading={transfer.testS3Connection.isPending || transfer.saveS3Config.isPending}
+                  onClick={() => void importConnection()}
+                >
+                  {t("校验并导入")}
+                </Button>
+              </div>
+            </div>
+          </Tabs.TabPane>
+        </Tabs>
       </Modal>
 
       <Modal
@@ -531,6 +619,21 @@ function formatSyncTime(value: string | null | undefined) {
   if (!value) return "—";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function maskConnectionPackage(value: string) {
+  try {
+    const data = JSON.parse(value) as { config?: { accessKeyId?: string; secretAccessKey?: string } };
+    if (data.config?.accessKeyId) {
+      data.config.accessKeyId = `${data.config.accessKeyId.slice(0, 12)}••••••`;
+    }
+    if (data.config?.secretAccessKey) {
+      data.config.secretAccessKey = "••••••••••••••••••••••••••••";
+    }
+    return JSON.stringify(data, null, 2);
+  } catch {
+    return value;
+  }
 }
 
 function SyncStatusTag({ status }: { status: string }) {

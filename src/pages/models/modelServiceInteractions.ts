@@ -1,30 +1,20 @@
 import type { RouteCandidate } from "../../domains/model/types";
 import type { ChannelPreset } from "../../domains/channel/types";
-import { buildModelRouteGroups, type ModelAggregateRelation, type ModelServiceItem } from "./modelServiceView";
+import { buildModelRouteGroups, type ModelServiceItem } from "./modelServiceView";
 
-export type ModelStatusFilter = "all" | "available" | "enabled" | "not-routed";
-
-/** 「未加入路由」= 渠道模型(直接模型)未被任何聚合模型引用。
- *  聚合模型本身是路由容器,不参与该筛选。 */
 export function filterModelServiceItems(
   models: ModelServiceItem[],
   search: string,
-  status: ModelStatusFilter,
   channelId: string,
-  relations: Map<string, ModelAggregateRelation[]> = new Map(),
 ): ModelServiceItem[] {
   const keyword = search.trim().toLowerCase();
   return models.filter((model) => {
-    const statusMatches = status === "all"
-      || (status === "available" ? model.available
-        : status === "enabled" ? model.enabled
-        : model.kind === "direct" && (relations.get(model.publicModel.toLowerCase()) ?? []).length === 0);
     const channelMatches = channelId === "all"
       || model.routes.some((route) => route.channel_id === channelId);
     const searchMatches = !keyword
       || model.publicModel.toLowerCase().includes(keyword)
       || model.routes.some((route) => route.upstream_model.toLowerCase().includes(keyword));
-    return statusMatches && channelMatches && searchMatches;
+    return channelMatches && searchMatches;
   });
 }
 

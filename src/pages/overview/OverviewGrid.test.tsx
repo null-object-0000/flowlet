@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { AccountBalanceSnapshot } from "../../domains/account/types";
@@ -82,7 +83,6 @@ describe("OverviewGrid", () => {
   const channels: ChannelPreset[] = [];
   const snapshots: AccountBalanceSnapshot[] = [];
   const bindConfig: ProxyBindConfig = { host: "127.0.0.1", port: 18640, allow_lan: false, default_client_token: "sk-demo" };
-  const onboarding = <div>onboarding-placeholder</div>;
 
   it("renders the three business modules when accounts exist", () => {
     render(
@@ -94,11 +94,8 @@ describe("OverviewGrid", () => {
           routes={[makeRoute()]}
           baseUrl="http://127.0.0.1:18640"
           bindConfig={bindConfig}
-          proxyRunning
-          hasAccounts
           onAccountRequest={vi.fn()}
           onToggleModel={vi.fn()}
-          onboarding={onboarding}
         />
       </MemoryRouter>,
     );
@@ -106,10 +103,11 @@ describe("OverviewGrid", () => {
     expect(screen.getByText("已启用 1 / 共 1 个账号")).toBeInTheDocument();
     expect(screen.getByText("已启用 1 / 共 1 个模型")).toBeInTheDocument();
     expect(screen.getByText("AI Agent 接入")).toBeInTheDocument();
-    expect(screen.queryByText("onboarding-placeholder")).not.toBeInTheDocument();
   });
 
-  it("renders the onboarding content when there are no accounts", () => {
+  it("keeps the full overview and routes empty account actions when there are no accounts", async () => {
+    const user = userEvent.setup();
+    const onAccountRequest = vi.fn();
     render(
       <MemoryRouter>
         <OverviewGrid
@@ -119,16 +117,18 @@ describe("OverviewGrid", () => {
           routes={[]}
           baseUrl="http://127.0.0.1:18640"
           bindConfig={bindConfig}
-          proxyRunning={false}
-          hasAccounts={false}
-          onAccountRequest={vi.fn()}
+          onAccountRequest={onAccountRequest}
           onToggleModel={vi.fn()}
-          onboarding={onboarding}
         />
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("onboarding-placeholder")).toBeInTheDocument();
-    expect(screen.queryByText("已启用 0 / 共 0 个账号")).not.toBeInTheDocument();
+    expect(screen.getByText("已启用 0 / 共 0 个账号")).toBeInTheDocument();
+    expect(screen.getByText("选择一个渠道添加首个账号")).toBeInTheDocument();
+    expect(screen.getByText("添加渠道账号并选择开放模型后，这里会显示模型。")).toBeInTheDocument();
+    expect(screen.getByText("AI Agent 接入")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "添加 DeepSeek" }));
+    expect(onAccountRequest).toHaveBeenCalledWith({ kind: "create", channelId: "deepseek" });
   });
 });

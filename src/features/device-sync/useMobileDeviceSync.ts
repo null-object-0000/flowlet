@@ -18,6 +18,14 @@ export function useMobileDailyUsage(deviceId: string | null) {
   });
 }
 
+export function useMobileSessions(deviceId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.mobileDeviceSync.sessions(deviceId),
+    queryFn: () => mobileDeviceSyncCommands.sessions(deviceId),
+    staleTime: 15_000,
+  });
+}
+
 export function useMobileS3Settings() {
   return useQuery({
     queryKey: queryKeys.mobileDeviceSync.s3Settings(),

@@ -33,7 +33,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { key: "general", label: "通用", icon: <IconSetting /> },
   { key: "capture", label: "数据捕获", icon: <IconCamera /> },
-  { key: "sync", label: "同步与共享", icon: <IconCloud /> },
+  { key: "sync", label: "同步管理", icon: <IconCloud /> },
   { key: "storage", label: "存储管理", icon: <IconDatabase /> },
   { key: "maintenance", label: "数据维护", icon: <IconWrench /> },
 ];
@@ -77,7 +77,7 @@ export function useSettingsTabMeta(): Record<SettingsTab, { title: string; desc:
   return {
     general: { title: t("通用设置"), desc: t("调整 Flowlet 的显示、主题与启动行为") },
     capture: { title: t("数据捕获"), desc: t("控制请求 / 响应内容的捕获、保留和脱敏策略") },
-    sync: { title: t("同步与共享"), desc: t("连接 S3 数据源并在多台设备之间共享每日用量") },
+    sync: { title: t("同步管理"), desc: t("管理云端同步、设备连接与用量汇总") },
     storage: { title: t("存储管理"), desc: t("查看本地数据占用并清理不再需要的内容") },
     maintenance: { title: t("数据维护"), desc: t("检查并修复历史统计数据") },
     about: { title: t("关于 Flowlet"), desc: t("版本信息、数据目录与诊断工具") },

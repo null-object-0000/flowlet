@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Button, Card, Space, Typography } from "@douyinfe/semi-ui-19";
-import { IconPlus } from "@douyinfe/semi-icons";
+import { Card } from "@douyinfe/semi-ui-19";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
 import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
 import { useCodexAccounts } from "../../features/agent-access/useAgentEnvironment";
@@ -10,13 +9,10 @@ import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
 import { useProxyOverviewLifecycle } from "../../features/proxy-lifecycle/useProxyOverviewLifecycle";
 import { useTodayTokens } from "../../features/usage/useTodayTokens";
-import { deriveConfigurationStatus } from "../../domains/model/types";
 import { OverviewGrid } from "./OverviewGrid";
 import { OverviewServiceStrip } from "./OverviewServiceStrip";
 import styles from "./OverviewPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-
-const { Paragraph, Text, Title } = Typography;
 
 export function OverviewPage() {
   const { t } = useAppPreferences();
@@ -33,47 +29,11 @@ export function OverviewPage() {
   const balanceSnapshots = useLatestBalanceSnapshots(hasAccounts);
   const codexAccounts = useCodexAccounts(hasAccounts);
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
-  const configurationStatus = deriveConfigurationStatus(accounts.data ?? [], routes.data ?? []);
 
   // 概览页顶部「今日消耗」：用专用轻量接口，拉今日 Token 聚合（总量 + 输入/
   // 输出/缓存拆解，单条聚合行），供总数展示与悬浮明细。不要复用
   // useUsageSummary —— 那个拉全量分组明细，每 30s 卡窗口拖动。
   const { summary: todayUsage } = useTodayTokens(true);
-
-  const onboarding = (
-    <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>
-      <Title heading={4} style={{ margin: 0 }}>
-        {t("开始接入")}
-      </Title>
-      <Paragraph type="tertiary" style={{ margin: 0 }}>
-        {t("Flowlet 会在本地启动一个代理，把你的渠道账号安全地提供给 AI 客户端和 Agent 使用。")}
-      </Paragraph>
-
-      <div className={styles.steps}>
-        <Step n={1} title={t("添加渠道账号")}>
-          {t("选择 LongCat、DeepSeek、Kimi 或千问 Qwen，填写 API Key 并测试连接。API Key 仅保存在本地配置中。")}
-        </Step>
-        <Step n={2} title={t("开放模型")}>
-          {t("选择要对外开放的模型。默认开放模型会随账号自动同步。")}
-        </Step>
-        <Step n={3} title={t("接入 AI 客户端")}>
-          {t("在 Claude Code、Cursor、Continue 等工具中填入本地 Base URL 和客户端 Token 即可使用。")}
-        </Step>
-      </div>
-
-      <Space>
-        <Button type="primary" icon={<IconPlus />} onClick={() => setAccountRequest({ kind: "create", channelId: "longcat" })}>
-          {t("添加 LongCat")}
-        </Button>
-        <Button onClick={() => setAccountRequest({ kind: "create", channelId: "deepseek" })}>{t("添加 DeepSeek")}</Button>
-        <Button onClick={() => setAccountRequest({ kind: "create", channelId: "kimi" })}>{t("添加 Kimi")}</Button>
-        <Button onClick={() => setAccountRequest({ kind: "create", channelId: "qwen" })}>{t("添加千问 Qwen")}</Button>
-        <Button type="tertiary" onClick={() => setAccountRequest({ kind: "list" })}>
-          {t("管理渠道账号")}
-        </Button>
-      </Space>
-    </Space>
-  );
 
   return (
     <main className={styles.page}>
@@ -86,7 +46,6 @@ export function OverviewPage() {
         bindConfig={bindConfig.data}
         baseUrl={baseUrl}
         todayUsage={todayUsage}
-        hasAccounts={hasAccounts}
         onOpenDetails={() => setDetailsVisible(true)}
       />
 
@@ -106,12 +65,9 @@ export function OverviewPage() {
           routes={routes.data ?? []}
           baseUrl={baseUrl}
           bindConfig={bindConfig.data}
-          proxyRunning={proxy.status.data?.running === true}
-          hasAccounts={hasAccounts}
           onAccountRequest={setAccountRequest}
           busyModelId={modelActions.toggleExposedModel.isPending ? modelActions.toggleExposedModel.variables?.modelId : undefined}
           onToggleModel={(routeIds, modelId, enabled) => modelActions.toggleExposedModel.mutate({ routes: routes.data ?? [], routeIds, modelId, enabled })}
-          onboarding={onboarding}
         />
       ) : null}
 
@@ -146,19 +102,5 @@ export function OverviewPage() {
         onScrape={(accountId) => accountActions.scrapeBalance.mutateAsync(accountId)}
       />
     </main>
-  );
-}
-
-function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
-  return (
-    <div className={styles.step}>
-      <span className={styles.stepNumber}>{n}</span>
-      <Space vertical align="start" spacing="loose">
-        <Text strong>{title}</Text>
-        <Text type="tertiary" size="small">
-          {children}
-        </Text>
-      </Space>
-    </div>
   );
 }

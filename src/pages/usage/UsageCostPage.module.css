@@ -4,6 +4,7 @@
 .pageHeading h3 { margin: 0; color: var(--flowlet-color-text); font-size: 20px; line-height: 1.2; }
 .pageHeading p { margin: 3px 0 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .pageHeading > :global(.semi-select) { width: 130px; flex: none; }
+.pageHeading > .sourceSelect { width: 156px; }
 .pageHeading > .deviceSelect { width: 190px; }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
 .stat { min-width: 0; min-height: 84px; padding: 10px 13px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 5px; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
@@ -14,6 +15,7 @@
 .workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) max(220px, calc((100% - 27px) / 4)); gap: 10px; }
 .mainCard, .coverageCard, .channelCard, .state { min-height: 0; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .mainCard { display: grid; grid-template-rows: 50px 215px minmax(0, 1fr); }
+.nativeMainCard { grid-template-rows: 50px minmax(0, 1fr); }
 .cardHeader { padding: 0 13px; display: flex; align-items: center; border-bottom: 1px solid var(--flowlet-color-border); }
 .cardHeader > div:first-child { min-width: 0; display: grid; gap: 2px; }
 .cardHeader strong { font-size: 14px; }
@@ -72,6 +74,26 @@
 .share > i { width: 38px; height: 5px; overflow: hidden; border-radius: 99px; background: var(--flowlet-color-border-strong); }
 .share b { display: block; height: 100%; border-radius: inherit; background: var(--semi-color-primary); }
 .share em { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); font-style: normal; }
+.nativeBreakdown { min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); }
+.nativeBreakdownHead, .nativeBreakdownRow { display: grid; grid-template-columns: minmax(180px, 1fr) 56px 56px 76px 94px 94px; align-items: center; gap: 9px; padding: 0 13px; }
+.nativeBreakdownHead { color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: var(--flowlet-font-size-caption); font-weight: 650; }
+.nativeBreakdownRow { min-height: 54px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
+.nativeAgentCell { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; }
+.nativeAgentCell > i { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--flowlet-color-primary); background: color-mix(in srgb, var(--flowlet-color-primary) 12%, var(--flowlet-color-surface-strong)); font-size: var(--flowlet-font-size-caption); font-style: normal; font-weight: 750; }
+.nativeAgentCell > span { min-width: 0; display: grid; gap: 2px; }
+.nativeAgentCell strong, .nativeAgentCell small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.nativeAgentCell strong { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
+.nativeAgentCell small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
+.combinedBreakdown { min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); }
+.combinedBreakdownHead, .combinedBreakdownRow { display: grid; grid-template-columns: minmax(156px, 1fr) minmax(118px, .8fr) 76px 118px minmax(130px, 1fr); align-items: center; gap: 10px; padding: 0 13px; }
+.combinedBreakdownHead { color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: var(--flowlet-font-size-caption); font-weight: 650; }
+.combinedBreakdownRow { min-height: 64px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
+.combinedSourceCell { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; }
+.combinedSourceCell > i { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--flowlet-color-primary); background: color-mix(in srgb, var(--flowlet-color-primary) 12%, var(--flowlet-color-surface-strong)); font-size: var(--flowlet-font-size-caption); font-style: normal; font-weight: 750; }
+.combinedSourceCell > span { min-width: 0; display: grid; gap: 2px; }
+.combinedSourceCell strong, .combinedSourceCell small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.combinedSourceCell strong { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
+.combinedSourceCell small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
 .side { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
 .coverageCard { padding: 13px; }
 .coverageCard header, .channelCard > header { display: flex; align-items: center; }
@@ -96,6 +118,10 @@
 .channelTokens, .modelTokens { width: fit-content; cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .channelCard footer { padding: 0 10px; display: flex; align-items: center; border-top: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
 .channelCard footer strong { margin-left: auto; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
+.nativeScopeCard { grid-template-rows: 46px minmax(0, 1fr) 36px; }
+.nativeScopeBody { min-height: 0; padding: 10px; overflow: auto; display: grid; align-content: start; gap: 9px; }
+.nativeScopeBody p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); line-height: 1.55; }
+.nativeScopeBody .warningText { color: var(--flowlet-color-warning-text); }
 .empty, .state { display: grid; place-items: center; align-content: center; gap: 8px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-body); }
 .state { min-height: 140px; }
 .skeletonLine, .skeletonRows span, .skeletonChart { position: relative; display: block; overflow: hidden; border-radius: 5px; background: var(--semi-color-fill-0); }

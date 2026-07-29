@@ -185,19 +185,20 @@ describe("SettingsPage", () => {
     expect(screen.getByText("登录后自动启动 Flowlet")).not.toBeVisible();
   });
 
-  it("shows the current device in sync and sharing", async () => {
+  it("shows the current device in sync management", async () => {
     renderWithQueryClient(<SettingsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "同步与共享" }));
-    expect(await screen.findByText("设备与用量共享")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
+    expect(await screen.findByText("设备与用量")).toBeInTheDocument();
     expect(screen.getByText("当前设备")).toBeInTheDocument();
     expect(screen.getByText("公司笔记本")).toBeInTheDocument();
-    expect(screen.getByText("8d58734f-0b71-49ea-b5a4-115b389a9ae7")).toBeInTheDocument();
+    expect(screen.getByTitle("8d58734f-0b71-49ea-b5a4-115b389a9ae7")).toBeInTheDocument();
   });
 
   it("opens the current device rename dialog", async () => {
     renderWithQueryClient(<SettingsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "同步与共享" }));
-    fireEvent.click(await screen.findByRole("button", { name: "重命名" }));
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
+    fireEvent.click(await screen.findByRole("button", { name: "设备操作：公司笔记本" }));
+    fireEvent.click(await screen.findByText("重命名"));
 
     expect(screen.getByText("重命名当前设备")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("例如：公司笔记本")).toHaveValue("公司笔记本");
@@ -206,7 +207,7 @@ describe("SettingsPage", () => {
 
   it("opens the S3-compatible configuration dialog", async () => {
     renderWithQueryClient(<SettingsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "同步与共享" }));
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
     fireEvent.click(await screen.findByRole("button", { name: "配置 S3" }));
 
     expect(screen.getByText("配置 S3-compatible 同步")).toBeInTheDocument();
@@ -219,6 +220,18 @@ describe("SettingsPage", () => {
     expect(pathStyle).not.toBeChecked();
   });
 
+  it("opens connection import inside the unified device dialog", async () => {
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
+    fireEvent.click(await screen.findByRole("button", { name: "导入用量" }));
+
+    expect(screen.getByText("选择一种方式，将手机或另一台桌面设备连接到当前同步空间")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "扫码连接" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "连接文本" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "导入连接" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByPlaceholderText("粘贴 Flowlet S3 连接包 JSON")).toBeInTheDocument();
+  });
+
   it("renders the settings navigation and general settings in English", () => {
     localStorage.setItem("flowlet.language", "en-US");
     renderWithQueryClient(
@@ -229,7 +242,7 @@ describe("SettingsPage", () => {
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search settings")).toBeInTheDocument();
-    for (const label of ["General", "Capture", "Sync & Sharing", "Storage", "Maintenance", "About"]) {
+    for (const label of ["General", "Capture", "Sync Management", "Storage", "Maintenance", "About"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByText("Display language")).toBeInTheDocument();

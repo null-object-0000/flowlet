@@ -40,28 +40,28 @@ describe("model service interactions", () => {
       },
     ] as ModelServiceItem[];
 
-    expect(filterModelServiceItems(models, "", "all", "kimi").map((model) => model.publicModel))
+    expect(filterModelServiceItems(models, "", "kimi").map((model) => model.publicModel))
       .toEqual(["flowlet-pro"]);
-    expect(filterModelServiceItems(models, "", "all", "deepseek").map((model) => model.publicModel))
+    expect(filterModelServiceItems(models, "", "deepseek").map((model) => model.publicModel))
       .toEqual(["deepseek-v4-pro"]);
   });
 
-  it("filters by availability, enabled state and aggregate membership", () => {
+  it("filters by model name and upstream model", () => {
     const models = [
-      { publicModel: "flowlet-pro", kind: "aggregate", enabled: true, available: false, routes: [], routeIds: [], routeGroups: [], availableAccountCount: 0 },
-      { publicModel: "deepseek-v4-pro", kind: "direct", enabled: false, available: true, routes: [], routeIds: [], routeGroups: [], availableAccountCount: 1 },
-      { publicModel: "qwen3.7-plus", kind: "direct", enabled: false, available: true, routes: [], routeIds: [], routeGroups: [], availableAccountCount: 1 },
+      {
+        publicModel: "flowlet-pro",
+        routes: [route("r1", "flowlet-pro", "kimi", "a1", "openai", 0)],
+      },
+      {
+        publicModel: "deepseek-v4-pro",
+        routes: [route("r2", "deepseek-v4-pro", "deepseek", "a2", "openai", 0)],
+      },
     ] as ModelServiceItem[];
-    const relations = new Map([
-      ["deepseek-v4-pro", [{ aggregateModel: "flowlet-pro", routeGroupKey: "k", priority: 1, enabled: true }]],
-    ]);
 
-    expect(filterModelServiceItems(models, "", "available", "all", relations).map((model) => model.publicModel))
-      .toEqual(["deepseek-v4-pro", "qwen3.7-plus"]);
-    expect(filterModelServiceItems(models, "", "enabled", "all", relations).map((model) => model.publicModel))
+    expect(filterModelServiceItems(models, "FLOWLET", "all").map((model) => model.publicModel))
       .toEqual(["flowlet-pro"]);
-    expect(filterModelServiceItems(models, "", "not-routed", "all", relations).map((model) => model.publicModel))
-      .toEqual(["qwen3.7-plus"]);
+    expect(filterModelServiceItems(models, "deepseek-model", "all").map((model) => model.publicModel))
+      .toEqual(["deepseek-v4-pro"]);
   });
 
   it("moves a route group and keeps both protocols at the same priority", () => {

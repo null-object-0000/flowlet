@@ -6,8 +6,13 @@ export const APP_OVERLAY_Z_INDEX = {
   toast: 1300,
 } as const;
 
-export function configureAppOverlayLayers() {
-  Toast.config({ zIndex: APP_OVERLAY_Z_INDEX.toast });
+export function configureAppOverlayLayers(options: { mobile?: boolean } = {}) {
+  Toast.config({
+    zIndex: APP_OVERLAY_Z_INDEX.toast,
+    ...(options.mobile
+      ? { top: "calc(env(safe-area-inset-top, 0px) + 12px)" }
+      : {}),
+  });
 }
 
 const SIDE_SHEET_DRAG_EXCLUDE_SELECTOR = [

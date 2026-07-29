@@ -16,7 +16,7 @@
 .workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.36fr) minmax(330px, .84fr); gap: 10px; }
 .listCard, .detailCard { min-height: 0; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .listCard { display: grid; grid-template-rows: 48px minmax(0, 1fr) 38px; }
-.toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 124px 116px; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--flowlet-color-border); }
+.toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 124px; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--flowlet-color-border); }
 .modelList { min-height: 0; overflow: auto; }
 
 /* 聚合模型 / 渠道模型 分组标题:滚动时吸顶 */
@@ -24,9 +24,12 @@
 .groupTitle ~ .groupTitle { border-top: 1px solid var(--flowlet-color-border); }
 .groupCount { font-weight: 500; opacity: .75; }
 
-.modelRow { display: grid; grid-template-columns: minmax(185px, 1fr) 150px 70px; align-items: center; gap: 10px; padding: 0 12px; width: 100%; min-height: 62px; border: 0; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.modelRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; width: 100%; min-height: 62px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: transparent; }
 .modelRow:hover { background: var(--semi-color-primary-light-default); }
 .modelRow.selected { background: linear-gradient(90deg, var(--semi-color-primary-light-default), transparent); box-shadow: inset 3px 0 0 var(--semi-color-primary); }
+.modelRowMain { min-width: 0; min-height: 61px; padding: 0 10px 0 12px; display: grid; grid-template-columns: minmax(185px, 1fr) minmax(150px, auto); align-items: center; gap: 10px; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.modelRowMain:focus-visible { outline: 2px solid var(--semi-color-primary); outline-offset: -3px; border-radius: 7px; }
+.rowEnable { padding: 0 12px 0 4px; display: flex; align-items: center; }
 .modelName { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .modelName > span:last-child { min-width: 0; display: grid; gap: 3px; }
 .modelName strong, .modelName small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -48,7 +51,6 @@
 .detailTitle { min-width: 0; display: grid; gap: 3px; }
 .detailTitle strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; }
 .detailTitle small { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
-.detailEnable { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
 .detailBody { min-height: 0; overflow: auto; padding: 0; }
 .detailTabs { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 /* 让 Tabs 标签栏与内容边距对齐,避免 semi-ui 默认的左缩进。 */

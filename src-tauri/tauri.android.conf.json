@@ -2,6 +2,10 @@
   "$schema": "https://schema.tauri.app/config/2",
   "identifier": "local.flowlet.mobile",
   "productName": "Flowlet",
+  "build": {
+    "beforeDevCommand": "npm run dev:mobile",
+    "beforeBuildCommand": "npm run build:mobile"
+  },
   "app": {
     "windows": [
       {

@@ -386,6 +386,11 @@ Shell 与精简的 Tauri 启动入口。`#[cfg(desktop)]` 注册代理、托盘�
 快照。移动前端通过 `VITE_FLOWLET_TARGET=mobile` 或 Tauri 的 Android/iOS 构建平台变量选择
 移动路由；Android 和 iOS 分别使用平台覆盖配置，但共享同一套移动页面与领域边界。
 
+Android 工程需在已安装 Android SDK/NDK 的开发机上先执行
+`npm run tauri:android:init`。之后使用 `npm run tauri:android:build` 生成 arm64 APK，
+或使用 `npm run tauri:android:build:aab` 生成 arm64 AAB。普通的
+`npm run tauri:build` 始终构建当前桌面宿主平台，不会同时生成 Android 包。
+
 请求日志采用 SQLite 索引 + `request-captures/` 明细文件的混合存储。`request_logs`
 保留列表筛选、会话聚合、路由、性能和 Header 等查询字段，新请求的请求/响应 Body
 不再写入 SQLite；`request_capture_refs` 保存日志行到 `.flcap` 压缩帧的相对路径、

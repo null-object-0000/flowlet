@@ -17,6 +17,10 @@
     "tauri:build": "node scripts/fetch-models-cn.mjs && node scripts/fetch-models-dev.mjs && tauri build && node scripts/build-portable.mjs",
     "tauri:build:portable": "node scripts/fetch-models-cn.mjs && node scripts/fetch-models-dev.mjs && tauri build --no-bundle && node scripts/build-portable.mjs",
     "tauri:portable": "node scripts/build-portable.mjs",
+    "tauri:android:init": "tauri android init",
+    "tauri:android:dev": "tauri android dev",
+    "tauri:android:build": "tauri android build --apk --target aarch64",
+    "tauri:android:build:aab": "tauri android build --aab --target aarch64",
     "check": "tsc --noEmit",
     "test": "vitest run --config src/vitest.config.ts",
     "test:watch": "vitest --config src/vitest.config.ts"

@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:mobile": "vite --mode mobile",
     "build": "tsc && vite build",
+    "build:mobile": "tsc && vite build --mode mobile",
     "preview": "vite preview",
     "fetch:models-cn": "node scripts/fetch-models-cn.mjs",
     "fetch:models-dev": "node scripts/fetch-models-dev.mjs",

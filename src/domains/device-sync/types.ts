@@ -103,3 +103,11 @@ export type S3DeviceSyncResult = {
   failedObjects: number;
   uploadedKey: string;
 };
+
+export type S3DevicePullResult = {
+  remoteDevices: number;
+  importedDevices: number;
+  importedDays: number;
+  unchangedDays: number;
+  failedObjects: number;
+};

@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mobile",
+  "description": "Permissions for the Flowlet mobile viewer.",
+  "windows": ["main"],
+  "platforms": ["android", "iOS"],
+  "permissions": [
+    "core:default"
+  ]
+}

@@ -377,6 +377,15 @@ ID。阿里云 OSS 的 PutObject 不支持 `If-Match`，因此在 ETag 比较通
 都以 `job_type = device-s3-sync` 写入 `background_jobs` / `background_job_events`，记录
 触发来源、完成摘要和失败原因；因互斥而跳过的定时检查不创建任务。
 
+移动查看器与桌面端保持在同一仓库和同一个 Rust crate 中，但使用独立的 React Router、
+Shell 与精简的 Tauri 启动入口。`#[cfg(desktop)]` 注册代理、托盘、Agent 与完整数据命令，
+`#[cfg(mobile)]` 只注册 S3 配置、只读连接测试、共享设备目录、每日汇总和远端刷新命令。
+移动端复用 `DeviceUsageBundle`、S3 适配器、SQLite 导入与聚合逻辑，不启动本地代理，也不
+扫描 Agent 数据。桌面同步继续执行“拉取其它设备 + 上传当前设备”，移动刷新只拉取
+`<prefix>/flowlet/v1/devices/*/snapshot.json` 并导入只读共享区，不为手机生成或上传空设备
+快照。移动前端通过 `VITE_FLOWLET_TARGET=mobile` 或 Tauri 的 Android/iOS 构建平台变量选择
+移动路由；Android 和 iOS 分别使用平台覆盖配置，但共享同一套移动页面与领域边界。
+
 请求日志采用 SQLite 索引 + `request-captures/` 明细文件的混合存储。`request_logs`
 保留列表筛选、会话聚合、路由、性能和 Header 等查询字段，新请求的请求/响应 Body
 不再写入 SQLite；`request_capture_refs` 保存日志行到 `.flcap` 压缩帧的相对路径、

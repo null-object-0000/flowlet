@@ -7,7 +7,7 @@ vi.mock("../../platform/tauri/client", () => ({
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
-import { deviceSyncCommands } from "./commands";
+import { deviceSyncCommands, mobileDeviceSyncCommands } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
 
@@ -61,5 +61,32 @@ describe("deviceSyncCommands contract", () => {
     invokeMock.mockResolvedValueOnce(undefined);
     await deviceSyncCommands.syncS3();
     expect(invokeMock).toHaveBeenLastCalledWith("sync_device_usage_s3", undefined);
+  });
+
+  it("keeps mobile viewer commands read-only", async () => {
+    const config = {
+      endpoint: "https://example.com",
+      region: "auto",
+      bucket: "flowlet-sync",
+      prefix: "users/me",
+      accessKeyId: "read-only-key",
+      secretAccessKey: "secret",
+      pathStyle: false,
+    };
+    invokeMock.mockResolvedValueOnce([]);
+    await mobileDeviceSyncCommands.devices();
+    expect(invokeMock).toHaveBeenLastCalledWith("list_shared_devices", undefined);
+
+    invokeMock.mockResolvedValueOnce([]);
+    await mobileDeviceSyncCommands.dailyUsage(null);
+    expect(invokeMock).toHaveBeenLastCalledWith("shared_device_daily_usage", { deviceId: null });
+
+    invokeMock.mockResolvedValueOnce({ message: "ok" });
+    await mobileDeviceSyncCommands.testS3Connection(config);
+    expect(invokeMock).toHaveBeenLastCalledWith("test_s3_read_connection", { config });
+
+    invokeMock.mockResolvedValueOnce({ remoteDevices: 1 });
+    await mobileDeviceSyncCommands.refreshS3();
+    expect(invokeMock).toHaveBeenLastCalledWith("refresh_shared_device_usage_s3", undefined);
   });
 });

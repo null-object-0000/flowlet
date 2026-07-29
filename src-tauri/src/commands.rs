@@ -580,6 +580,20 @@ pub(super) async fn list_known_devices(
 }
 
 #[tauri::command]
+pub(super) async fn list_shared_devices(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<KnownDevice>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_known_devices()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享设备目录任务失败：{error}"))?
+}
+
+#[tauri::command]
 pub(super) async fn device_daily_usage(
     state: tauri::State<'_, AppState>,
     device_id: Option<String>,
@@ -628,6 +642,21 @@ pub(super) async fn device_daily_usage(
     })
     .await
     .map_err(|error| format!("读取设备每日用量任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn shared_device_daily_usage(
+    state: tauri::State<'_, AppState>,
+    device_id: Option<String>,
+) -> Result<Vec<DailyUsageTotal>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_daily_usage(device_id.as_deref())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享设备每日用量任务失败：{error}"))?
 }
 
 #[tauri::command]
@@ -683,6 +712,14 @@ pub(super) async fn test_s3_sync_connection(
 }
 
 #[tauri::command]
+pub(super) async fn test_s3_read_connection(
+    _state: tauri::State<'_, AppState>,
+    config: crate::core::device_sync::S3SyncConfigInput,
+) -> Result<crate::core::device_sync::S3ConnectionTestResult, String> {
+    crate::core::device_sync::test_read_connection(&config).await
+}
+
+#[tauri::command]
 pub(super) async fn sync_device_usage_s3(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::device_sync::S3DeviceSyncResult, String> {
@@ -693,6 +730,13 @@ pub(super) async fn sync_device_usage_s3(
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
     crate::core::device_sync::run_configured_sync(storage, identity, "manual").await
+}
+
+#[tauri::command]
+pub(super) async fn refresh_shared_device_usage_s3(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::device_sync::S3DevicePullResult, String> {
+    crate::core::device_sync::run_configured_pull(state.storage.clone()).await
 }
 
 fn read_device_usage_bundle(path: &str) -> Result<DeviceUsageBundle, String> {

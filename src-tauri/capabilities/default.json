@@ -3,6 +3,7 @@
   "identifier": "default",
   "description": "Permissions for the main Flowlet desktop window.",
   "windows": ["main"],
+  "platforms": ["windows", "macOS", "linux"],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",

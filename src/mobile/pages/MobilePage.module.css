@@ -1,0 +1,67 @@
+.page { display: grid; gap: 14px; }
+.heading { display: flex; align-items: flex-start; gap: 12px; }
+.heading > div { min-width: 0; flex: 1; }
+.heading h2 { margin: 0; font-size: 23px; letter-spacing: -.03em; }
+.heading p { margin: 4px 0 0; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.45; }
+.heading button { flex: none; }
+.card {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 14px;
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+}
+.cardHeader { margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+.cardHeader > div { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.cardHeader strong { font-size: 15px; }
+.cardHeader span, .muted { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.stat { min-width: 0; padding: 14px; border-radius: 13px; background: var(--flowlet-color-surface-muted); }
+.stat span { display: block; color: var(--flowlet-color-text-secondary); font-size: 12px; }
+.stat strong { display: block; margin-top: 7px; overflow: hidden; font-size: 23px; line-height: 1; white-space: nowrap; text-overflow: ellipsis; }
+.stat small { display: block; margin-top: 6px; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.state { padding: 24px 18px; display: grid; place-items: center; gap: 7px; text-align: center; }
+.state strong { font-size: 15px; }
+.state span { color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.5; }
+.status { display: flex; align-items: center; gap: 8px; color: var(--flowlet-color-text-secondary); font-size: 12px; }
+.status i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--flowlet-color-text-tertiary); }
+.status[data-state="success"] i { background: var(--semi-color-success); }
+.status[data-state="partial"] i { background: var(--semi-color-warning); }
+.status[data-state="failed"] i { background: var(--semi-color-danger); }
+.status[data-state="running"] i { background: var(--semi-color-primary); box-shadow: 0 0 0 4px var(--flowlet-color-primary-soft); }
+.deviceList { display: grid; gap: 9px; }
+.device {
+  padding: 13px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 12px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 12px;
+  background: var(--flowlet-color-surface);
+}
+.device strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.device > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
+.device small { grid-column: 1 / -1; color: var(--flowlet-color-text-tertiary); }
+.controls { display: grid; grid-template-columns: minmax(0, 1fr) 116px; gap: 8px; }
+.controls > :global(.semi-select) { width: 100%; }
+.days { display: grid; gap: 2px; }
+.day { min-height: 50px; padding: 8px 2px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; border-bottom: 1px solid var(--flowlet-color-border); }
+.day:last-child { border-bottom: 0; }
+.day strong { font-size: 13px; }
+.day > span { font-weight: 650; font-variant-numeric: tabular-nums; }
+.day small { grid-column: 1 / -1; color: var(--flowlet-color-text-tertiary); }
+.form { display: grid; gap: 13px; }
+.form label { display: grid; gap: 6px; color: var(--flowlet-color-text-secondary); font-size: 12px; font-weight: 600; }
+.formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.switchRow { min-height: 46px; display: flex; align-items: center; gap: 12px; }
+.switchRow > div { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.switchRow strong { font-size: 13px; }
+.switchRow span { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.permissions { padding: 12px; display: grid; gap: 5px; border-radius: 10px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 11px; line-height: 1.5; }
+.permissions strong { color: var(--flowlet-color-text); font-size: 12px; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+
+@media (max-width: 380px) {
+  .controls, .formGrid, .actions { grid-template-columns: 1fr; }
+}

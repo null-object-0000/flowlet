@@ -1,22 +1,36 @@
+#[cfg(desktop)]
 mod commands;
 pub mod core;
+#[cfg(mobile)]
+mod mobile_commands;
 
+#[cfg(desktop)]
 use core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
+#[cfg(desktop)]
 use core::config::{
     ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig, RouteCandidate,
     RouteRule, VirtualModel,
 };
+#[cfg(desktop)]
 use core::device_identity::DeviceIdentity;
+#[cfg(desktop)]
 use core::presets::builtin_channel_presets;
+#[cfg(desktop)]
 use core::proxy::ProxyController;
 use core::storage::Storage;
+#[cfg(desktop)]
 use std::path::PathBuf;
+#[cfg(desktop)]
 use std::sync::{Arc, Mutex};
+#[cfg(desktop)]
 use tauri::menu::{Menu, MenuItem};
+#[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+#[cfg(desktop)]
 use tauri::{AppHandle, Manager};
 
 #[derive(Clone)]
+#[cfg(desktop)]
 struct AppState {
     proxy: ProxyController,
     channels: Arc<Mutex<Vec<ChannelPreset>>>,
@@ -50,6 +64,13 @@ struct AppState {
     scrape_interaction_required: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
+#[derive(Clone)]
+#[cfg(mobile)]
+struct MobileAppState {
+    storage: Storage,
+}
+
+#[cfg(desktop)]
 struct ProxyStartupConfig {
     shared: core::proxy::ProxySharedConfig,
     storage: Storage,
@@ -59,6 +80,7 @@ struct ProxyStartupConfig {
     config_path: std::path::PathBuf,
 }
 
+#[cfg(desktop)]
 impl AppState {
     fn proxy_startup_config(&self) -> Result<ProxyStartupConfig, String> {
         // 启动时传入 Arc 引用，而非 clone 数据副本 — 代理运行中与 UI 共享同一份配置
@@ -96,6 +118,7 @@ impl AppState {
 
 // ─── App Entry ──────────────────────────────────────────────────────────────
 
+#[cfg(desktop)]
 fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf) -> AppState {
     let _t0 = std::time::Instant::now();
     let codex_accounts_dir = db_path
@@ -415,6 +438,7 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     state
 }
 
+#[cfg(desktop)]
 pub(crate) fn load_bind_config_from_sqlite(storage: &Storage) -> ProxyBindConfig {
     storage
         .get_app_meta("proxy_bind_config")
@@ -426,6 +450,7 @@ pub(crate) fn load_bind_config_from_sqlite(storage: &Storage) -> ProxyBindConfig
 
 /// 数据库路径：始终放在 exe 同级目录下，与程序完全自包含。
 /// 不再区分「安装/便携」模式 — SQLite 和日志都在 exe 旁。
+#[cfg(desktop)]
 fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
     let exe_dir = std::env::current_exe()
         .ok()
@@ -441,6 +466,7 @@ fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
 }
 
 /// 从指定 config.json 文件解析其中的 channels_config 字段
+#[cfg(desktop)]
 pub fn load_channels_config_from(config_path: &std::path::Path) -> Result<ChannelsConfig, String> {
     let external_result = std::fs::read_to_string(config_path)
         .map_err(|e| format!("读取 config.json 失败 ({}): {}", config_path.display(), e))
@@ -466,6 +492,7 @@ pub fn load_channels_config_from(config_path: &std::path::Path) -> Result<Channe
 }
 
 /// 将内置 config.json 中外部配置可能缺失的渠道、价格、端点合并进运行时配置。
+#[cfg(desktop)]
 pub(crate) fn merge_builtin_config(mut external: ChannelsConfig) -> ChannelsConfig {
     let builtin = match parse_channels_config(DEFAULT_CONFIG_JSON, "应用内置 config.json") {
         Ok(cfg) => cfg,
@@ -515,13 +542,14 @@ pub(crate) fn merge_builtin_config(mut external: ChannelsConfig) -> ChannelsConf
     external
 }
 
+#[cfg(desktop)]
 fn parse_channels_config(content: &str, source: &str) -> Result<ChannelsConfig, String> {
     let json: serde_json::Value =
         serde_json::from_str(content).map_err(|e| format!("解析 {source} 失败: {e}"))?;
     ChannelsConfig::from_config_json(&json)
 }
 
-#[cfg(test)]
+#[cfg(all(test, desktop))]
 mod app_config_tests {
     use super::*;
 
@@ -556,6 +584,7 @@ mod app_config_tests {
     }
 }
 
+#[cfg(desktop)]
 fn migrate_legacy_database(db_path: &std::path::Path) {
     if db_path.exists() {
         return;
@@ -589,7 +618,16 @@ fn migrate_legacy_database(db_path: &std::path::Path) {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(desktop)]
+    run_desktop();
+    #[cfg(mobile)]
+    run_mobile();
+}
+
+#[cfg(desktop)]
+fn run_desktop() {
     // main.rs 会更早调用；保留这里可保证 flowlet_lib 被其他宿主直接调用时也有日志。
     let _ = crate::core::logging::init_file_logging();
     crate::core::logging::install_panic_hook();
@@ -961,12 +999,16 @@ pub fn run() {
             commands::usage_today_tokens,
             commands::device_usage_snapshot,
             commands::list_known_devices,
+            commands::list_shared_devices,
             commands::device_daily_usage,
+            commands::shared_device_daily_usage,
             commands::rename_current_device,
             commands::get_s3_sync_settings,
             commands::save_s3_sync_config,
             commands::test_s3_sync_connection,
+            commands::test_s3_read_connection,
             commands::sync_device_usage_s3,
+            commands::refresh_shared_device_usage_s3,
             commands::export_device_usage_bundle,
             commands::preview_device_usage_import,
             commands::import_device_usage_bundle,
@@ -1036,9 +1078,35 @@ pub fn run() {
         .expect("启动 Flowlet 失败");
 }
 
+#[cfg(mobile)]
+fn run_mobile() {
+    use tauri::Manager as _;
+
+    tauri::Builder::default()
+        .setup(|app| {
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
+            let storage = Storage::open(data_dir.join("flowlet-mobile.sqlite"))
+                .map_err(|error| error.to_string())?;
+            app.manage(MobileAppState { storage });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            mobile_commands::list_shared_devices,
+            mobile_commands::shared_device_daily_usage,
+            mobile_commands::get_s3_sync_settings,
+            mobile_commands::save_s3_sync_config,
+            mobile_commands::test_s3_read_connection,
+            mobile_commands::refresh_shared_device_usage_s3,
+        ])
+        .run(tauri::generate_context!())
+        .expect("启动 Flowlet Mobile 失败");
+}
+
 /// 切换主窗口显示/隐藏。显示时确保窗口被恢复到前台焦点状态。
 /// 仅 show + set_focus 可能无法把窗口带到前台，因此额外做 unminimize
 /// 和短暂置顶再取消的操作覆盖 Windows 等场景。
+#[cfg(desktop)]
 fn toggle_window_to_front(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -1054,6 +1122,7 @@ fn toggle_window_to_front(app: &AppHandle) {
 }
 
 /// 更新托盘 tooltip 显示代理状态
+#[cfg(desktop)]
 fn update_tray_tooltip(app: &AppHandle, running: bool) {
     let tooltip = if running {
         "Flowlet - 代理运行中 ✅"
@@ -1073,7 +1142,12 @@ fn update_tray_tooltip(app: &AppHandle, running: bool) {
 /// 把 config.json 渠道预设同步到数据库。
 /// `disable_newly_added` 为 true 时，新增渠道（数据库里没有的）会被设为 disabled，
 /// 已有渠道保留原启用状态；为 false 时全量按 config 写入。
-fn migrate_channel_presets_from_config(storage: &Storage, config_path: &std::path::Path, disable_newly_added: bool) -> Result<(), String> {
+#[cfg(desktop)]
+fn migrate_channel_presets_from_config(
+    storage: &Storage,
+    config_path: &std::path::Path,
+    disable_newly_added: bool,
+) -> Result<(), String> {
     let config_raw = std::fs::read_to_string(config_path)
         .map_err(|e| format!("读取 config.json 失败：{e}"))?;
 
@@ -1127,6 +1201,7 @@ fn migrate_channel_presets_from_config(storage: &Storage, config_path: &std::pat
 }
 
 /// 内部启动代理逻辑（供托盘菜单调用）
+#[cfg(desktop)]
 async fn start_proxy_internal(
     proxy: ProxyController,
     config: ProxyStartupConfig,

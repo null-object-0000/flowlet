@@ -108,6 +108,16 @@ pub struct S3DeviceSyncResult {
     pub uploaded_key: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S3DevicePullResult {
+    pub remote_devices: usize,
+    pub imported_devices: usize,
+    pub imported_days: usize,
+    pub unchanged_days: usize,
+    pub failed_objects: usize,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CurrentEtagState {
@@ -546,6 +556,179 @@ pub async fn test_connection(
     Ok(S3ConnectionTestResult {
         message: "连接、列举、写入、读取和删除权限均正常".to_string(),
     })
+}
+
+pub async fn test_read_connection(
+    input: &S3SyncConfigInput,
+) -> Result<S3ConnectionTestResult, String> {
+    let config = S3SyncConfig::from_input(input)?;
+    let provided_secret = input
+        .secret_access_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|secret| !secret.is_empty())
+        .map(str::to_string);
+    let secret = match provided_secret {
+        Some(secret) => secret,
+        None => read_secret(&config)?,
+    };
+    let store = S3Store::new(&config, &secret)?;
+    store
+        .head_bucket()
+        .await
+        .map_err(|error| format!("{error}；请确认已授予 Bucket 级读取权限"))?;
+    let objects = store.list(&config.object_prefix()).await?;
+    if let Some(object) = objects
+        .iter()
+        .find(|object| object.key.ends_with("/snapshot.json"))
+    {
+        let bytes = store.get(&object.key).await?;
+        DeviceUsageBundle::from_bytes(&bytes)?;
+        return Ok(S3ConnectionTestResult {
+            message: "Bucket、列举和快照读取权限均正常".to_string(),
+        });
+    }
+    Ok(S3ConnectionTestResult {
+        message: "Bucket 和列举权限正常；当前还没有设备快照可验证读取权限".to_string(),
+    })
+}
+
+pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, String> {
+    let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
+    let secret = read_secret(&config)?;
+    let store = S3Store::new(&config, &secret)?;
+    let objects = store.list(&config.object_prefix()).await?;
+    let remote_objects = objects
+        .into_iter()
+        .filter(|object| object.key.ends_with("/snapshot.json"))
+        .collect::<Vec<_>>();
+
+    let mut bundles = Vec::new();
+    let mut failed_objects = 0usize;
+    for object in &remote_objects {
+        if object.size > MAX_REMOTE_BUNDLE_BYTES {
+            failed_objects += 1;
+            continue;
+        }
+        match store
+            .get(&object.key)
+            .await
+            .and_then(|bytes| DeviceUsageBundle::from_bytes(&bytes))
+        {
+            Ok(bundle) if config.snapshot_key(&bundle.snapshot.device_id) == object.key => {
+                bundles.push(bundle)
+            }
+            Ok(_) | Err(_) => failed_objects += 1,
+        }
+    }
+
+    let import_storage = storage.clone();
+    let import_result = tauri::async_runtime::spawn_blocking(move || {
+        let mut imported_devices = 0usize;
+        let mut imported_days = 0usize;
+        let mut unchanged_days = 0usize;
+        let mut import_failures = 0usize;
+        for bundle in bundles {
+            let snapshot = bundle.snapshot;
+            let result = match import_storage.import_device_usage(
+                &snapshot.device_id,
+                &snapshot.device_created_at,
+                &snapshot.resolved_display_name(),
+                &snapshot.resolved_platform(),
+                &snapshot.resolved_app_version(),
+                &snapshot.generated_at,
+                snapshot.timezone_offset_minutes,
+                &snapshot.days,
+            ) {
+                Ok(result) => result,
+                Err(_) => {
+                    import_failures += 1;
+                    continue;
+                }
+            };
+            imported_devices += 1;
+            imported_days += result.imported_days;
+            unchanged_days += result.unchanged_days;
+        }
+        (
+            imported_devices,
+            imported_days,
+            unchanged_days,
+            import_failures,
+        )
+    })
+    .await
+    .map_err(|_| "导入远端设备快照任务失败".to_string())?;
+
+    Ok(S3DevicePullResult {
+        remote_devices: remote_objects.len(),
+        imported_devices: import_result.0,
+        imported_days: import_result.1,
+        unchanged_days: import_result.2,
+        failed_objects: failed_objects + import_result.3,
+    })
+}
+
+pub async fn run_configured_pull(storage: Storage) -> Result<S3DevicePullResult, String> {
+    let _guard = acquire_sync_guard()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let previous = load_status(&storage);
+    save_status(
+        &storage,
+        &S3SyncStatus {
+            status: "running".to_string(),
+            last_attempt_at: Some(now.clone()),
+            last_success_at: previous.last_success_at.clone(),
+            message: "正在读取远端设备用量".to_string(),
+            remote_devices: previous.remote_devices,
+            imported_devices: 0,
+            imported_days: 0,
+            failed_objects: 0,
+        },
+    );
+
+    match pull_device_usage(storage.clone()).await {
+        Ok(result) => {
+            let status = if result.failed_objects == 0 {
+                "success"
+            } else {
+                "partial"
+            };
+            save_status(
+                &storage,
+                &S3SyncStatus {
+                    status: status.to_string(),
+                    last_attempt_at: Some(now),
+                    last_success_at: Some(chrono::Utc::now().to_rfc3339()),
+                    message: format!(
+                        "刷新完成：读取 {} 台设备，导入 {} 天，失败 {} 个对象",
+                        result.remote_devices, result.imported_days, result.failed_objects
+                    ),
+                    remote_devices: result.remote_devices,
+                    imported_devices: result.imported_devices,
+                    imported_days: result.imported_days,
+                    failed_objects: result.failed_objects,
+                },
+            );
+            Ok(result)
+        }
+        Err(error) => {
+            save_status(
+                &storage,
+                &S3SyncStatus {
+                    status: "failed".to_string(),
+                    last_attempt_at: Some(now),
+                    last_success_at: previous.last_success_at,
+                    message: error.clone(),
+                    remote_devices: previous.remote_devices,
+                    imported_devices: 0,
+                    imported_days: 0,
+                    failed_objects: 0,
+                },
+            );
+            Err(error)
+        }
+    }
 }
 
 pub async fn sync_device_usage(

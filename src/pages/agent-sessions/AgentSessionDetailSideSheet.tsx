@@ -20,7 +20,7 @@ export function AgentSessionDetailSideSheet({
   onViewRequestLogs: (sessionId: string) => void;
 }) {
   const { language, t } = useAppPreferences();
-  const [activeTab, setActiveTab] = useState<"overview" | "timeline">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "recent">("overview");
   const title = sessionDisplayTitle(session);
   const children = useAgentSessionChildren(session);
   const timeline = useAgentSessionTimeline(session);
@@ -41,7 +41,7 @@ export function AgentSessionDetailSideSheet({
         type="line"
         activeKey={activeTab}
         tabPaneMotion={false}
-        onChange={(key) => setActiveTab(key as "overview" | "timeline")}
+        onChange={(key) => setActiveTab(key as "overview" | "recent")}
       >
         <Tabs.TabPane tab={t("概览")} itemKey="overview">
           <div className={styles.body}>
@@ -98,9 +98,9 @@ export function AgentSessionDetailSideSheet({
             />
           </div>
         </Tabs.TabPane>
-        <Tabs.TabPane tab={t("时间线")} itemKey="timeline">
+        <Tabs.TabPane tab={t("最近交互")} itemKey="recent">
           <div className={styles.body}>
-            <TimelineSection
+            <RecentInteractionSection
               data={timeline.data}
               loading={timeline.isLoading}
               fetching={timeline.isFetching}
@@ -115,7 +115,7 @@ export function AgentSessionDetailSideSheet({
   );
 }
 
-function TimelineSection({
+function RecentInteractionSection({
   data,
   loading,
   fetching,
@@ -131,38 +131,53 @@ function TimelineSection({
   onRetry: () => void;
 }) {
   const { t } = useAppPreferences();
+  const events = data ? latestInteractionEvents(data.events) : [];
   return (
     <section className={styles.section}>
       <div className={styles.timelineHeader}>
         <div>
-          <strong className={styles.sectionTitle}>{t("原生会话时间线")}</strong>
-          <span>{t("打开详情时从 Agent 本地数据按需只读，不写入 Flowlet 数据库")}</span>
+          <strong className={styles.sectionTitle}>{t("最近一次输入与输出")}</strong>
+          <span>{t("展示用户最近一次输入，以及此后 Agent 产生的全部回复、思考和工具活动")}</span>
         </div>
         <Button size="small" theme="borderless" loading={fetching && !loading} onClick={onRetry}>{t("刷新")}</Button>
       </div>
       {loading ? <div className={styles.timelineLoading}><span /><span /><span /></div> : null}
       {error ? (
         <div className={styles.childError}>
-          <span>{t("原生会话时间线加载失败：{message}", { message: error })}</span>
+          <span>{t("最近交互加载失败：{message}", { message: error })}</span>
           <Button size="small" onClick={onRetry}>{t("重试")}</Button>
         </div>
       ) : null}
       {!loading && !error && data && !data.sourceAvailable ? (
         <div className={styles.timelineEmpty}>{t("未找到可读取的原生会话数据")}</div>
       ) : null}
-      {!loading && !error && data?.sourceAvailable && data.events.length === 0 ? (
-        <div className={styles.timelineEmpty}>{t("该原生会话暂无可展示的消息或工具事件")}</div>
+      {!loading && !error && data?.sourceAvailable && events.length === 0 ? (
+        <div className={styles.timelineEmpty}>{t("未找到最近一次用户输入")}</div>
       ) : null}
-      {!loading && !error && data && data.events.length > 0 ? (
+      {!loading && !error && data && events.length > 0 ? (
         <>
-          {data.truncated ? <div className={styles.timelineNotice}>{t("会话内容较多，当前仅展示前 {count} 个事件", { count: data.events.length })}</div> : null}
+          {data.truncated ? <div className={styles.timelineNotice}>{t("原生内容受读取上限影响，最近交互可能不完整")}</div> : null}
           <div className={styles.timelineList}>
-            {data.events.map((event) => <TimelineEventCard key={event.id} event={event} language={language} />)}
+            {events.map((event) => <TimelineEventCard key={event.id} event={event} language={language} />)}
           </div>
         </>
       ) : null}
     </section>
   );
+}
+
+export function latestInteractionEvents(events: AgentSessionTimelineEvent[]) {
+  let lastUserMessageIndex = -1;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index].kind === "user-message") {
+      lastUserMessageIndex = index;
+      break;
+    }
+  }
+  if (lastUserMessageIndex < 0) return [];
+  return events
+    .slice(lastUserMessageIndex)
+    .filter((event) => event.kind !== "turn");
 }
 
 function NativeUsageSection({

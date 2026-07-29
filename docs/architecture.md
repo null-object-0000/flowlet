@@ -461,15 +461,16 @@ Claude Code 文件按路径、大小和修改时间缓存，未变化文件不�
 会话 ID 自动筛选。Codex 的 `archived_sessions` 当前不进入活跃会话列表，CLI 与 Desktop 作为
 两个独立筛选项展示。
 
-会话详情拆分为“概览”和“时间线”两个 Tab；详情打开时，前端通过独立 Query 按需调用
-`get_agent_session_timeline`，概览使用返回的原生累计用量，时间线复用同一份缓存数据。Rust 在阻塞任务中
+会话详情拆分为“概览”和“最近交互”两个 Tab；详情打开时，前端通过独立 Query 按需调用
+`get_agent_session_timeline`，概览使用返回的原生累计用量，最近交互复用同一份缓存数据，定位最后一条
+用户消息并仅展示该消息及其后的全部 Agent 输出。Rust 在阻塞任务中
 只读对应原生数据源：OpenCode 联查 `message` / `part`，Claude Code 解析目标 JSONL，Codex
 解析目标 rollout JSONL 的 `response_item`。不同来源统一返回用户消息、助手回复、思考摘要、
 工具调用、工具结果和错误六类事件，不写入 Flowlet SQLite，也不读取或展示 Codex developer
 指令。单次最多扫描 16 MiB、返回 300 个展示事件、每个事件内容最多 8000 字符；达到展示事件上限后
 仍继续扫描剩余记录中的轮次、模型与累计用量，详情页同时明确提示事件已截断，避免展示上限造成统计和
 费用低估。原生源不存在时返回“不可用”空结果，结构不兼容或读取失败时返回可重试错误。
-时间线结果同时返回 Agent 原生累计用量、模型集合和单事件用量。OpenCode 使用 `session` 的累计
+解析结果同时返回 Agent 原生累计用量、模型集合和单事件用量。OpenCode 使用 `session` 的累计
 Token / cost 与消息级 tokens；Claude Code 对去重后的助手回复 usage 聚合输入、输出、缓存创建和
 缓存读取；Codex 使用最新 `total_token_usage` 作为会话总量，并在
 `task_started` 到 `task_complete` 之间累加每次 `last_token_usage`，形成可核对的轮次用量，同时记录
@@ -478,7 +479,7 @@ Flowlet 请求观测始终分栏展示且不相加；OpenCode 原生提供的 co
 价格存在精确匹配时生成两个独立维度：优先展示 `openai-api` 标准基础 API 公开价计算的 API 等价价值，并保留
 USD 等原始计价币种；同时展示 `codex-native` 官方 credits 费率计算的套餐消耗。两者不做汇率换算，也不相加；
 无法从原生记录确认的长上下文、Priority processing 或 Fast mode 乘数不纳入基础估算。Claude Code 不在
-缺少可靠价格映射时伪造费用。完整时间线只在详情打开或用户主动刷新时读取；列表使用独立的
+缺少可靠价格映射时伪造费用。原生事件只在详情打开或用户主动刷新时读取，产品界面不提供完整历史回溯；列表使用独立的
 `get_agent_session_native_summary` 只返回 turn 数、累计用量和模型集合，不返回事件正文。同步快照存在时
 列表不再重复解析原始文件；缺少快照时按可见行懒加载并缓存 5 分钟。原生摘要达到读取上限时，列表用
 `≥` 明确表示计数或 Token 为下限。

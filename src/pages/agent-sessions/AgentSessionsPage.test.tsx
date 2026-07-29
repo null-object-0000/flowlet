@@ -91,6 +91,30 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
       },
       models: ["native-model"],
       events: [{
+        id: "old-user",
+        kind: "user-message",
+        source: "agent-native",
+        timestamp: "2026-07-18T07:00:00Z",
+        title: null,
+        content: "This earlier input should not be shown",
+        model: null,
+        status: null,
+        durationMs: null,
+        timeToFirstTokenMs: null,
+        usage: null,
+      }, {
+        id: "old-output",
+        kind: "assistant-message",
+        source: "agent-native",
+        timestamp: "2026-07-18T07:01:00Z",
+        title: null,
+        content: "This earlier output should not be shown",
+        model: null,
+        status: null,
+        durationMs: null,
+        timeToFirstTokenMs: null,
+        usage: null,
+      }, {
         id: "turn-1",
         kind: "turn",
         source: "agent-native",
@@ -112,12 +136,24 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
           costCurrency: null,
         },
       }, {
+        id: "latest-user",
+        kind: "user-message",
+        source: "agent-native",
+        timestamp: "2026-07-18T08:00:30Z",
+        title: null,
+        content: "Please inspect the routing bug",
+        model: null,
+        status: null,
+        durationMs: null,
+        timeToFirstTokenMs: null,
+        usage: null,
+      }, {
         id: "event-1",
         kind: "assistant-message",
         source: "agent-native",
         timestamp: "2026-07-18T08:01:00Z",
         title: null,
-        content: "Please inspect the routing bug",
+        content: "I found the route selection issue.",
         model: null,
         status: null,
         durationMs: null,
@@ -132,6 +168,30 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
           cost: null,
           costCurrency: null,
         },
+      }, {
+        id: "event-2",
+        kind: "tool-call",
+        source: "agent-native",
+        timestamp: "2026-07-18T08:02:00Z",
+        title: "cargo test",
+        content: "cargo test routing",
+        model: null,
+        status: "completed",
+        durationMs: null,
+        timeToFirstTokenMs: null,
+        usage: null,
+      }, {
+        id: "event-3",
+        kind: "assistant-message",
+        source: "agent-native",
+        timestamp: "2026-07-18T08:03:00Z",
+        title: null,
+        content: "The fix is complete and tests pass.",
+        model: null,
+        status: null,
+        durationMs: null,
+        timeToFirstTokenMs: null,
+        usage: null,
       }],
     },
     isLoading: false,
@@ -234,10 +294,14 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByText("Child session title")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
 
-    fireEvent.click(screen.getByRole("tab", { name: "时间线" }));
-    expect(screen.getByRole("tab", { name: "时间线" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("原生会话时间线")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "最近交互" }));
+    expect(screen.getByRole("tab", { name: "最近交互" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("最近一次输入与输出")).toBeInTheDocument();
     expect(screen.getByText("Please inspect the routing bug")).toBeInTheDocument();
+    expect(screen.getByText("I found the route selection issue.")).toBeInTheDocument();
+    expect(screen.getByText("The fix is complete and tests pass.")).toBeInTheDocument();
+    expect(screen.queryByText("This earlier input should not be shown")).not.toBeInTheDocument();
+    expect(screen.queryByText("This earlier output should not be shown")).not.toBeInTheDocument();
     expect(screen.getAllByLabelText("单次原生用量").some((element) => element.textContent?.includes("总计 720"))).toBe(true);
   });
 
@@ -292,17 +356,18 @@ describe("AgentSessionsPage", () => {
     expect(screen.getAllByText("—")).toHaveLength(7);
   });
 
-  it("shows Codex turn usage, latency and cache hit rate in the native timeline", () => {
+  it("shows every Agent output produced after the latest user input", () => {
     render(
       <MemoryRouter>
         <AgentSessionDetailSideSheet session={session} onClose={vi.fn()} onViewRequestLogs={vi.fn()} />
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByText("时间线"));
-    expect(screen.getByText("Agent 轮次 · Agent 原生")).toBeInTheDocument();
-    expect(screen.getByText(/状态：已完成 · 耗时 1 min · 首 Token 1\.3 s/)).toBeInTheDocument();
-    expect(screen.getByText("缓存命中率 22.2%")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("最近交互"));
+    expect(screen.getByText("用户消息 · Agent 原生")).toBeInTheDocument();
+    expect(screen.getAllByText("助手回复 · Agent 原生")).toHaveLength(2);
+    expect(screen.getByText("工具调用 · Agent 原生")).toBeInTheDocument();
+    expect(screen.getByText("缓存命中率 16.7%")).toBeInTheDocument();
   });
 });
 

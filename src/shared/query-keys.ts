@@ -90,6 +90,7 @@ export const queryKeys = {
     all: ["mobile-device-sync"] as const,
     devices: () => [...queryKeys.mobileDeviceSync.all, "devices"] as const,
     dailyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "daily-usage", deviceId ?? "all"] as const,
+    hourlyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "hourly-usage", deviceId ?? "all"] as const,
     sessions: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "sessions", deviceId ?? "all"] as const,
     s3Settings: () => [...queryKeys.mobileDeviceSync.all, "s3-settings"] as const,
   },

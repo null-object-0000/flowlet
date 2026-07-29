@@ -342,6 +342,7 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 - `usage_records`
 - `known_devices`
 - `device_daily_usage`
+- `device_hourly_usage`
 - `device_agent_sessions`
 - `account_balance_snapshots`
 - `app_meta`
@@ -355,16 +356,20 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 
 多设备共享使用最小设备快照：`device_usage_snapshot` 返回设备 ID、身份
 创建时间、展示名称、平台、Flowlet 版本、快照生成时间、当前本地时区偏移，以及按设备
-本地自然日聚合的请求数和 Token 分项。快照还携带经过限量的根会话摘要：`running` 与
+本地自然日聚合的请求数和 Token 分项。快照版本 2 额外携带最近 180 天按设备本地自然小时
+聚合的请求数与总 Token，供移动端周视图展示真实的 7×24 小时热力图；版本 1 快照继续兼容
+导入，只是没有小时视图数据。快照还携带经过限量的根会话摘要：`running` 与
 `waiting_user` 运行态会话全部保留；运行态不足 10 条时，按最近活跃时间用其它会话补足
 到 10 条；运行态超过 10 条时不截断。摘要只包含设备/会话寻址、标题、客户端、状态、
 最近活跃时间及请求与 Token 汇总，不包含项目路径、消息正文、提示词、工具调用、费用、
 渠道账号、Header 或 Body。
-每日行由现有 `request_logs` / `usage_records` 实时聚合，不新增事实表；历史用量修复后
-重新生成快照即可按 `(device_id, date)` 幂等覆盖远端日汇总，无需重启代理。
+日行和小时行都由现有 `request_logs` / `usage_records` 实时聚合，不新增当前设备事实表；
+导入的小时汇总写入只读共享表 `device_hourly_usage`。历史用量修复后重新生成快照即可按
+`(device_id, date)` 更新日汇总，并用较新的版本 2 快照整体替换该设备的小时窗口，无需重启代理。
 
 设置页可把当前设备快照导出为版本化 `flowlet-device-usage` JSON 文件，并在另一设备先
 预览再导入。导入数据写入独立的 `known_devices` / `device_daily_usage` /
+`device_hourly_usage` /
 `device_agent_sessions` 只读共享区，
 不会进入当前设备的 `request_logs` / `usage_records`，也不会改变当前设备 ID。同一设备
 同一日期按快照生成时间幂等更新，旧快照不得覆盖新快照。用量页支持全部设备、当前设备和
@@ -396,7 +401,7 @@ ID。阿里云 OSS 的 PutObject 不支持 `If-Match`，因此在 ETag 比较通
 
 移动查看器与桌面端保持在同一仓库和同一个 Rust crate 中，但使用独立的 React Router、
 Shell 与精简的 Tauri 启动入口。`#[cfg(desktop)]` 注册代理、托盘、Agent 与完整数据命令，
-`#[cfg(mobile)]` 只注册 S3 配置、只读连接测试、共享设备目录、每日汇总、会话摘要和远端刷新命令。
+`#[cfg(mobile)]` 只注册 S3 配置、只读连接测试、共享设备目录、日/小时汇总、会话摘要和远端刷新命令。
 移动端复用 `DeviceUsageBundle`、S3 适配器、SQLite 导入与聚合逻辑，不启动本地代理，也不
 扫描本机 Agent 数据。移动会话页只读取桌面设备已筛选并同步的摘要，支持按设备和运行状态
 筛选，不读取会话正文，也不把远端摘要合并进手机本机的 Agent 会话事实表。桌面同步继续

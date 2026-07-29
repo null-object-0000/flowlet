@@ -22,6 +22,7 @@ pub mod storage;
 pub mod sync;
 pub mod usage;
 pub mod web;
+pub mod webview_profile;
 
 // Re-export commonly used types for headless binary
 pub use metrics::Metrics;

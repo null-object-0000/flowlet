@@ -118,6 +118,9 @@ pub fn build_device_snapshot(
     let days = storage
         .daily_usage_totals()
         .map_err(|error| error.to_string())?;
+    let hours = storage
+        .hourly_usage_totals()
+        .map_err(|error| error.to_string())?;
     let sessions = storage
         .list_agent_sessions_for_device_sync()
         .map_err(|error| error.to_string())?
@@ -138,6 +141,7 @@ pub fn build_device_snapshot(
     Ok(DeviceUsageSnapshot::new(
         identity,
         days,
+        hours,
         select_sessions_for_sync(sessions),
     ))
 }
@@ -719,6 +723,7 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
         for bundle in bundles {
             let snapshot = bundle.snapshot;
             let result = match import_storage.import_device_usage(
+                snapshot.schema_version,
                 &snapshot.device_id,
                 &snapshot.device_created_at,
                 &snapshot.resolved_display_name(),
@@ -727,6 +732,7 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
                 &snapshot.generated_at,
                 snapshot.timezone_offset_minutes,
                 &snapshot.days,
+                &snapshot.hours,
                 &snapshot.sessions,
             ) {
                 Ok(result) => result,
@@ -886,6 +892,7 @@ pub async fn sync_device_usage(
         for bundle in bundles {
             let snapshot = bundle.snapshot;
             let result = match import_storage.import_device_usage(
+                snapshot.schema_version,
                 &snapshot.device_id,
                 &snapshot.device_created_at,
                 &snapshot.resolved_display_name(),
@@ -894,6 +901,7 @@ pub async fn sync_device_usage(
                 &snapshot.generated_at,
                 snapshot.timezone_offset_minutes,
                 &snapshot.days,
+                &snapshot.hours,
                 &snapshot.sessions,
             ) {
                 Ok(result) => result,

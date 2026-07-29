@@ -933,6 +933,17 @@ impl Storage {
                 FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS device_hourly_usage (
+                device_id             TEXT NOT NULL,
+                usage_hour            TEXT NOT NULL,
+                request_count         INTEGER NOT NULL,
+                known_tokens          INTEGER NOT NULL,
+                snapshot_generated_at TEXT NOT NULL,
+                imported_at           TEXT NOT NULL,
+                PRIMARY KEY (device_id, usage_hour),
+                FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS device_agent_sessions (
                 device_id             TEXT NOT NULL,
                 agent_type            TEXT NOT NULL,

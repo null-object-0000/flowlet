@@ -18,6 +18,14 @@ export function useMobileDailyUsage(deviceId: string | null) {
   });
 }
 
+export function useMobileHourlyUsage(deviceId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.mobileDeviceSync.hourlyUsage(deviceId),
+    queryFn: () => mobileDeviceSyncCommands.hourlyUsage(deviceId),
+    staleTime: 15_000,
+  });
+}
+
 export function useMobileSessions(deviceId: string | null) {
   return useQuery({
     queryKey: queryKeys.mobileDeviceSync.sessions(deviceId),

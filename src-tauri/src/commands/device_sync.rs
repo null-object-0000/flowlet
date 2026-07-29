@@ -1,6 +1,6 @@
 use crate::core::device_identity::{
     DailyUsageTotal, DeviceUsageBundle, DeviceUsageImportPreview, DeviceUsageImportResult,
-    DeviceUsageSnapshot, KnownDevice,
+    DeviceUsageSnapshot, HourlyUsageTotal, KnownDevice,
 };
 use crate::AppState;
 
@@ -148,6 +148,21 @@ pub(crate) async fn shared_device_daily_usage(
     })
     .await
     .map_err(|error| format!("读取共享设备每日用量任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn shared_device_hourly_usage(
+    state: tauri::State<'_, AppState>,
+    device_id: Option<String>,
+) -> Result<Vec<HourlyUsageTotal>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_hourly_usage(device_id.as_deref())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享设备小时用量任务失败：{error}"))?
 }
 
 #[tauri::command]
@@ -359,6 +374,7 @@ pub(crate) async fn import_device_usage_bundle(
         let app_version = snapshot.resolved_app_version();
         storage
             .import_device_usage(
+                snapshot.schema_version,
                 &snapshot.device_id,
                 &snapshot.device_created_at,
                 &display_name,
@@ -367,6 +383,7 @@ pub(crate) async fn import_device_usage_bundle(
                 &snapshot.generated_at,
                 snapshot.timezone_offset_minutes,
                 &snapshot.days,
+                &snapshot.hours,
                 &snapshot.sessions,
             )
             .map_err(|error| error.to_string())

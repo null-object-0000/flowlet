@@ -2,11 +2,10 @@ import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { Button, Select } from "@douyinfe/semi-ui-19";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { useMobileDailyUsage, useMobileDevices, useMobileDeviceSyncActions, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
-import { errorMessage } from "../../shared/errors/AppError";
-import { formatFullTimestamp } from "../../shared/formatters/datetime";
+import { useMobileDailyUsage, useMobileDevices, useMobileDeviceSyncActions, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import {
+  buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
   filterMobileUsage,
   formatMobileUsageRange,
@@ -22,10 +21,11 @@ export function MobileOverviewPage() {
   const [period, setPeriod] = useState<MobileUsagePeriod>("month");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const settings = useMobileS3Settings();
   const devices = useMobileDevices();
   const usage = useMobileDailyUsage(deviceId);
+  const hourlyUsage = useMobileHourlyUsage(deviceId);
   const actions = useMobileDeviceSyncActions();
   const autoRefreshStarted = useRef(false);
   const now = useMemo(() => new Date(), []);
@@ -46,11 +46,21 @@ export function MobileOverviewPage() {
     () => buildMobileUsageHeatmap(usage.data ?? [], period, periodOffset, now),
     [now, period, periodOffset, usage.data],
   );
+  const hourlyHeatmap = useMemo(
+    () => buildMobileWeeklyHourlyHeatmap(hourlyUsage.data ?? [], periodOffset, now),
+    [hourlyUsage.data, now, periodOffset],
+  );
   const selectedDay = useMemo(
     () => days.find((day) => day.date === selectedDate)
       ?? [...days].sort((left, right) => right.date.localeCompare(left.date))[0]
       ?? null,
     [days, selectedDate],
+  );
+  const selectedHourlyCell = useMemo(
+    () => hourlyHeatmap.cells.find((cell) => cell.hour === selectedHour)
+      ?? [...hourlyHeatmap.cells].reverse().find((cell) => cell.hasData)
+      ?? null,
+    [hourlyHeatmap.cells, selectedHour],
   );
   const weekdayLabels = useMemo(
     () => Array.from({ length: 7 }, (_, index) => new Date(2026, 6, 13 + index).toLocaleDateString(language, { weekday: "narrow" })),
@@ -60,19 +70,10 @@ export function MobileOverviewPage() {
   useEffect(() => {
     if (!settings.data?.config || autoRefreshStarted.current) return;
     autoRefreshStarted.current = true;
-    setRefreshError(null);
     void actions.refreshS3.mutateAsync().catch((error) => {
-      setRefreshError(errorMessage(error));
+      console.warn("Failed to refresh shared device usage", error);
     });
   }, [settings.data?.config]);
-
-  const status = settings.data?.status;
-  const statusState = refreshError ? "failed" : actions.refreshS3.isPending ? "running" : status?.status ?? "never";
-  const statusText = refreshError
-    ? t("自动刷新失败：{message}", { message: refreshError })
-    : actions.refreshS3.isPending
-      ? t("正在刷新远端数据…")
-      : status?.message ?? t("正在读取设置…");
 
   return (
     <section className={styles.page}>
@@ -88,19 +89,20 @@ export function MobileOverviewPage() {
       ) : null}
 
       <div className={styles.overviewFilters}>
-        <Select
-          value={deviceId ?? "__all__"}
-          aria-label={t("设备")}
-          optionList={[
-            { value: "__all__", label: t("全部设备") },
-            ...(devices.data ?? []).map((device) => ({ value: device.deviceId, label: device.displayName })),
-          ]}
-          onChange={(value) => {
-            setDeviceId(value === "__all__" ? null : String(value));
-            setSelectedDate(null);
-          }}
-        />
-        <div className={styles.periodToolbar}>
+        <div className={styles.filterRow}>
+          <Select
+            value={deviceId ?? "__all__"}
+            aria-label={t("设备")}
+            optionList={[
+              { value: "__all__", label: t("全部设备") },
+              ...(devices.data ?? []).map((device) => ({ value: device.deviceId, label: device.displayName })),
+            ]}
+            onChange={(value) => {
+              setDeviceId(value === "__all__" ? null : String(value));
+              setSelectedDate(null);
+              setSelectedHour(null);
+            }}
+          />
           <div className={styles.periodTabs} aria-label={t("统计维度")}>
             {(["week", "month"] as const).map((value) => (
               <button
@@ -111,12 +113,15 @@ export function MobileOverviewPage() {
                   setPeriod(value);
                   setPeriodOffset(0);
                   setSelectedDate(null);
+                  setSelectedHour(null);
                 }}
               >
                 {value === "week" ? t("周") : t("月")}
               </button>
             ))}
           </div>
+        </div>
+        <div className={styles.periodToolbar}>
           <div className={styles.rangeNavigator}>
             <Button
               theme="borderless"
@@ -126,6 +131,7 @@ export function MobileOverviewPage() {
               onClick={() => {
                 setPeriodOffset((offset) => offset - 1);
                 setSelectedDate(null);
+                setSelectedHour(null);
               }}
             />
             <strong>{rangeLabel}</strong>
@@ -138,15 +144,11 @@ export function MobileOverviewPage() {
               onClick={() => {
                 setPeriodOffset((offset) => Math.min(0, offset + 1));
                 setSelectedDate(null);
+                setSelectedHour(null);
               }}
             />
           </div>
         </div>
-      </div>
-
-      <div className={styles.syncStrip}>
-        <div className={styles.status} data-state={statusState}><i /><span>{statusText}</span></div>
-        <time>{status?.lastSuccessAt ? formatFullTimestamp(status.lastSuccessAt, language) : t("尚未成功刷新")}</time>
       </div>
 
       <div className={styles.stats}>
@@ -157,9 +159,42 @@ export function MobileOverviewPage() {
       </div>
 
       <article className={styles.card}>
-        <div className={styles.cardHeader}><div><strong>{t("每日 Token 热力图")}</strong><span>{t("点击日期查看当天汇总")}</span></div></div>
-        {usage.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{usage.error.message}</span></div> : null}
-        {!usage.isError ? (
+        <div className={styles.cardHeader}><div><strong>{t(period === "week" ? "每小时 Token 热力图" : "每日 Token 热力图")}</strong><span>{t(period === "week" ? "横轴为小时，纵轴为日期" : "点击日期查看当天汇总")}</span></div></div>
+        {period === "week" && hourlyUsage.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{hourlyUsage.error.message}</span></div> : null}
+        {period === "month" && usage.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{usage.error.message}</span></div> : null}
+        {period === "week" && !hourlyUsage.isError ? (
+          <>
+            <div className={styles.hourlyHeatmapScroller}>
+              <div className={styles.hourlyHeatmap}>
+                <span />
+                {Array.from({ length: 24 }, (_, hour) => (
+                  <span className={styles.hourLabel} key={hour}>{hour % 3 === 0 ? hour : ""}</span>
+                ))}
+                {weekdayLabels.flatMap((label, dayIndex) => [
+                  <span className={styles.hourDayLabel} key={`label-${dayIndex}`}>{label}</span>,
+                  ...hourlyHeatmap.cells.slice(dayIndex * 24, dayIndex * 24 + 24).map((cell) => {
+                    const title = `${cell.date} ${String(cell.hourOfDay).padStart(2, "0")}:00 · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}`;
+                    return (
+                      <button
+                        key={cell.hour}
+                        type="button"
+                        className={`${styles.hourCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""}`}
+                        disabled={!cell.hasData}
+                        aria-label={title}
+                        aria-pressed={selectedHourlyCell?.hour === cell.hour}
+                        title={title}
+                        onClick={() => setSelectedHour(cell.hour)}
+                      />
+                    );
+                  }),
+                ])}
+              </div>
+            </div>
+            <div className={styles.heatmapLegend}><span>{t("少")}</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`${styles.heatmapCell} ${styles[`heatLevel${level}`]}`} />)}<span>{t("多")}</span></div>
+            {!hourlyHeatmap.cells.some((cell) => cell.hasData) ? <div className={styles.emptyHint}>{t("当前周期暂无数据")}</div> : null}
+          </>
+        ) : null}
+        {period === "month" && !usage.isError ? (
           <>
             <div className={styles.heatmapLabels}>
               {weekdayLabels.map((label, index) => <span key={`${index}-${label}`}>{label}</span>)}
@@ -189,7 +224,14 @@ export function MobileOverviewPage() {
         ) : null}
       </article>
 
-      {selectedDay ? (
+      {period === "week" && selectedHourlyCell ? (
+        <article className={styles.selectedDay}>
+          <div><strong>{selectedHourlyCell.date} {String(selectedHourlyCell.hourOfDay).padStart(2, "0")}:00</strong><span>{formatCompactNumber(selectedHourlyCell.tokens, language)} Tokens</span></div>
+          <small>{t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })}</small>
+        </article>
+      ) : null}
+
+      {period === "month" && selectedDay ? (
         <article className={styles.selectedDay}>
           <div><strong>{selectedDay.date}</strong><span>{formatCompactNumber(selectedDay.knownTokens, language)} Tokens</span></div>
           <small>{t("{count} 次请求", { count: formatInteger(selectedDay.requestCount, language) })} · {t("输入 {input} · 输出 {output}", { input: formatCompactNumber(selectedDay.inputTokens, language), output: formatCompactNumber(selectedDay.outputTokens, language) })}</small>

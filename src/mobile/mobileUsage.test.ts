@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { DailyUsageTotal } from "../domains/device-sync/types";
+import type { DailyUsageTotal, HourlyUsageTotal } from "../domains/device-sync/types";
 import {
+  buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
   filterMobileUsage,
   formatMobileUsageRange,
@@ -72,6 +73,26 @@ describe("mobile usage aggregation", () => {
     expect(heatmap.cells[0]).toMatchObject({ date: "2026-07-27", tokens: 20, hasData: true });
     expect(heatmap.cells[2]).toMatchObject({ date: "2026-07-29", tokens: 80, level: 4 });
     expect(heatmap.cells[3]).toMatchObject({ date: "2026-07-30", outside: true, hasData: false });
+  });
+
+  it("builds a real 7 by 24 hourly heatmap for a week", () => {
+    const hours: HourlyUsageTotal[] = [
+      { hour: "2026-07-27T09:00:00", requestCount: 2, knownTokens: 20 },
+      { hour: "2026-07-29T11:00:00", requestCount: 3, knownTokens: 80 },
+    ];
+    const heatmap = buildMobileWeeklyHourlyHeatmap(
+      hours,
+      0,
+      new Date("2026-07-29T12:30:00"),
+    );
+
+    expect(heatmap.cells).toHaveLength(7 * 24);
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-27T09:00:00"))
+      .toMatchObject({ tokens: 20, requests: 2, hasData: true });
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T11:00:00"))
+      .toMatchObject({ tokens: 80, level: 4, hasData: true });
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T13:00:00"))
+      .toMatchObject({ outside: true, hasData: false });
   });
 
   it("builds a complete calendar grid for the selected month", () => {

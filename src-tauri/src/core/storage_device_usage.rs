@@ -1,7 +1,7 @@
 use super::{Storage, StorageError};
 use crate::core::device_identity::{
     resolve_device_display_name, DailyUsageTotal, DeviceUsageImportPreview,
-    DeviceUsageImportResult, KnownDevice, SharedAgentSession, SyncedAgentSession,
+    DeviceUsageImportResult, HourlyUsageTotal, KnownDevice, SharedAgentSession, SyncedAgentSession,
 };
 use rusqlite::{params, OptionalExtension};
 
@@ -65,6 +65,45 @@ impl Storage {
             totals.push(row?);
         }
         Ok(totals)
+    }
+
+    /// 最近 180 天按设备本地自然小时聚合的最小 Token 数据。
+    pub fn hourly_usage_totals(&self) -> Result<Vec<HourlyUsageTotal>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            r#"
+            SELECT
+                strftime(
+                    '%Y-%m-%dT%H:00:00',
+                    COALESCE(request_logs.created_at, usage_records.created_at),
+                    'localtime'
+                ) AS usage_hour,
+                count(*) AS request_count,
+                coalesce(sum(usage_records.total_tokens), 0) AS known_tokens
+            FROM usage_records
+            LEFT JOIN request_logs
+                   ON request_logs.request_id = usage_records.request_id
+                  AND request_logs.is_last_attempt = 1
+            WHERE COALESCE(request_logs.created_at, usage_records.created_at)
+                  >= datetime('now', 'localtime', 'start of day', '-180 days', 'utc')
+            GROUP BY usage_hour
+            ORDER BY usage_hour ASC
+            "#,
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(HourlyUsageTotal {
+                hour: row
+                    .get::<_, Option<String>>(0)?
+                    .unwrap_or_else(|| "unknown".to_string()),
+                request_count: row.get(1)?,
+                known_tokens: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -144,6 +183,7 @@ impl Storage {
     #[allow(clippy::too_many_arguments)]
     pub fn import_device_usage(
         &self,
+        snapshot_schema_version: u32,
         device_id: &str,
         device_created_at: &str,
         display_name: &str,
@@ -152,6 +192,7 @@ impl Storage {
         generated_at: &str,
         timezone_offset_minutes: i32,
         days: &[DailyUsageTotal],
+        hours: &[HourlyUsageTotal],
         sessions: &[SyncedAgentSession],
     ) -> Result<DeviceUsageImportResult, StorageError> {
         let preview = self.preview_device_usage_import(
@@ -194,7 +235,7 @@ impl Storage {
                 generated_at
             ],
         )?;
-        let import_sessions = transaction
+        let import_snapshot_details = transaction
             .query_row(
                 "SELECT profile_generated_at FROM known_devices WHERE device_id = ?1",
                 [device_id],
@@ -236,7 +277,28 @@ impl Storage {
                 ],
             )?;
         }
-        if import_sessions {
+        if import_snapshot_details && snapshot_schema_version >= 2 {
+            transaction.execute(
+                "DELETE FROM device_hourly_usage WHERE device_id = ?1",
+                [device_id],
+            )?;
+            for hour in hours {
+                transaction.execute(
+                    "INSERT INTO device_hourly_usage (
+                        device_id, usage_hour, request_count, known_tokens,
+                        snapshot_generated_at, imported_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+                    params![
+                        device_id,
+                        hour.hour,
+                        hour.request_count,
+                        hour.known_tokens,
+                        generated_at,
+                    ],
+                )?;
+            }
+        }
+        if import_snapshot_details {
             transaction.execute(
                 "DELETE FROM device_agent_sessions WHERE device_id = ?1",
                 [device_id],
@@ -340,6 +402,47 @@ impl Storage {
                 cache_measured_input_tokens: row.get(6)?,
                 output_tokens: row.get(7)?,
                 unknown_count: row.get(8)?,
+            })
+        };
+        let mut totals = Vec::new();
+        if let Some(device_id) = device_id {
+            for row in statement.query_map([device_id], map_row)? {
+                totals.push(row?);
+            }
+        } else {
+            for row in statement.query_map([], map_row)? {
+                totals.push(row?);
+            }
+        }
+        Ok(totals)
+    }
+
+    pub fn imported_hourly_usage(
+        &self,
+        device_id: Option<&str>,
+    ) -> Result<Vec<HourlyUsageTotal>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let sql = if device_id.is_some() {
+            "SELECT usage_hour, sum(request_count), sum(known_tokens)
+             FROM device_hourly_usage
+             WHERE device_id = ?1
+             GROUP BY usage_hour
+             ORDER BY usage_hour"
+        } else {
+            "SELECT usage_hour, sum(request_count), sum(known_tokens)
+             FROM device_hourly_usage
+             GROUP BY usage_hour
+             ORDER BY usage_hour"
+        };
+        let mut statement = connection.prepare(sql)?;
+        let map_row = |row: &rusqlite::Row<'_>| {
+            Ok(HourlyUsageTotal {
+                hour: row.get(0)?,
+                request_count: row.get(1)?,
+                known_tokens: row.get(2)?,
             })
         };
         let mut totals = Vec::new();

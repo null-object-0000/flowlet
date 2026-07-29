@@ -1,4 +1,4 @@
-import type { DailyUsageTotal } from "../domains/device-sync/types";
+import type { DailyUsageTotal, HourlyUsageTotal } from "../domains/device-sync/types";
 
 export type MobileUsagePeriod = "week" | "month";
 
@@ -21,6 +21,17 @@ export type MobileUsageHeatmapCell = {
 export type MobileUsageHeatmap = {
   cells: MobileUsageHeatmapCell[];
   columns: 7;
+};
+
+export type MobileHourlyHeatmapCell = {
+  hour: string;
+  date: string;
+  hourOfDay: number;
+  tokens: number;
+  requests: number;
+  level: 0 | 1 | 2 | 3 | 4;
+  outside: boolean;
+  hasData: boolean;
 };
 
 export function getMobileUsageRange(
@@ -91,6 +102,54 @@ export function buildMobileUsageHeatmap(
   }
 
   return { cells, columns: 7 };
+}
+
+export function buildMobileWeeklyHourlyHeatmap(
+  hours: HourlyUsageTotal[],
+  offset = 0,
+  now = new Date(),
+) {
+  const currentHour = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    now.getHours(),
+  );
+  const range = getMobileUsageRange("week", offset, currentHour);
+  const values = new Map(hours.map((item) => [item.hour, item]));
+  const inRange = hours.filter((item) => {
+    const date = item.hour.slice(0, 10);
+    return date >= range.startDate && date <= range.endDate;
+  });
+  const max = Math.max(0, ...inRange.map((item) => item.knownTokens));
+  const cells: MobileHourlyHeatmapCell[] = [];
+
+  for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+    const date = localDate(addLocalDays(range.start, dayIndex));
+    for (let hourOfDay = 0; hourOfDay < 24; hourOfDay += 1) {
+      const hour = `${date}T${String(hourOfDay).padStart(2, "0")}:00:00`;
+      const item = values.get(hour);
+      const future = offset === 0 && new Date(
+        range.start.getFullYear(),
+        range.start.getMonth(),
+        range.start.getDate() + dayIndex,
+        hourOfDay,
+      ) > currentHour;
+      const tokens = future ? 0 : item?.knownTokens ?? 0;
+      cells.push({
+        hour,
+        date,
+        hourOfDay,
+        tokens,
+        requests: future ? 0 : item?.requestCount ?? 0,
+        level: heatLevel(tokens, max),
+        outside: future,
+        hasData: !future && item !== undefined,
+      });
+    }
+  }
+
+  return { cells };
 }
 
 export function formatMobileUsageRange(

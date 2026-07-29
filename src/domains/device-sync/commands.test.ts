@@ -14,7 +14,7 @@ afterEach(() => invokeMock.mockReset());
 describe("deviceSyncCommands contract", () => {
   it("reads the minimal device usage snapshot through the typed Tauri boundary", async () => {
     const snapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       deviceId: "8d58734f-0b71-49ea-b5a4-115b389a9ae7",
       deviceCreatedAt: "2026-07-28T00:00:00Z",
       displayName: "Windows · 8D58",
@@ -23,6 +23,7 @@ describe("deviceSyncCommands contract", () => {
       generatedAt: "2026-07-28T01:00:00Z",
       timezoneOffsetMinutes: 480,
       days: [],
+      hours: [],
     };
     invokeMock.mockResolvedValueOnce(snapshot);
 
@@ -84,6 +85,10 @@ describe("deviceSyncCommands contract", () => {
     invokeMock.mockResolvedValueOnce([]);
     await mobileDeviceSyncCommands.dailyUsage(null);
     expect(invokeMock).toHaveBeenLastCalledWith("shared_device_daily_usage", { deviceId: null });
+
+    invokeMock.mockResolvedValueOnce([]);
+    await mobileDeviceSyncCommands.hourlyUsage("device-1");
+    expect(invokeMock).toHaveBeenLastCalledWith("shared_device_hourly_usage", { deviceId: "device-1" });
 
     invokeMock.mockResolvedValueOnce([]);
     await mobileDeviceSyncCommands.sessions("device-1");

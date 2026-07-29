@@ -7,7 +7,7 @@ use thiserror::Error;
 
 const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
 const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
-pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum DeviceIdentityError {
@@ -183,6 +183,16 @@ pub struct DailyUsageTotal {
     pub unknown_count: i64,
 }
 
+/// 单台设备按其本地自然小时计算的最小 Token 汇总。只同步最近 180 天，
+/// 供移动端周视图展示真实的 7×24 小时热力图。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HourlyUsageTotal {
+    pub hour: String,
+    pub request_count: i64,
+    pub known_tokens: i64,
+}
+
 /// 设备同步中携带的最小会话摘要。只包含列表展示与后续远程寻址所需字段，
 /// 不同步消息正文、提示词、工具调用或本地项目路径。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -226,6 +236,8 @@ pub struct DeviceUsageSnapshot {
     pub generated_at: String,
     pub timezone_offset_minutes: i32,
     pub days: Vec<DailyUsageTotal>,
+    #[serde(default)]
+    pub hours: Vec<HourlyUsageTotal>,
     #[serde(default)]
     pub sessions: Vec<SyncedAgentSession>,
 }
@@ -287,6 +299,7 @@ impl DeviceUsageSnapshot {
     pub fn new(
         identity: &DeviceIdentity,
         days: Vec<DailyUsageTotal>,
+        hours: Vec<HourlyUsageTotal>,
         sessions: Vec<SyncedAgentSession>,
     ) -> Self {
         Self {
@@ -299,6 +312,7 @@ impl DeviceUsageSnapshot {
             generated_at: Utc::now().to_rfc3339(),
             timezone_offset_minutes: Local::now().offset().local_minus_utc() / 60,
             days,
+            hours,
             sessions,
         }
     }
@@ -335,7 +349,9 @@ impl DeviceUsageBundle {
         {
             return Err("设备用量文件的 appVersion 无效".to_string());
         }
-        if self.snapshot.schema_version != DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION {
+        if self.snapshot.schema_version == 0
+            || self.snapshot.schema_version > DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION
+        {
             return Err(format!(
                 "不支持的设备用量快照版本：{}",
                 self.snapshot.schema_version
@@ -368,6 +384,18 @@ impl DeviceUsageBundle {
             .any(|value| *value < 0)
             {
                 return Err(format!("设备用量包含负数：{}", day.date));
+            }
+        }
+        let mut previous_hour: Option<&str> = None;
+        for hour in &self.snapshot.hours {
+            chrono::NaiveDateTime::parse_from_str(&hour.hour, "%Y-%m-%dT%H:00:00")
+                .map_err(|_| format!("设备小时用量时间无效：{}", hour.hour))?;
+            if previous_hour.is_some_and(|previous| previous >= hour.hour.as_str()) {
+                return Err("设备小时用量必须严格递增且不能重复".to_string());
+            }
+            previous_hour = Some(hour.hour.as_str());
+            if hour.request_count < 0 || hour.known_tokens < 0 {
+                return Err(format!("设备小时用量不能为负数：{}", hour.hour));
             }
         }
         let mut session_keys = std::collections::HashSet::new();

@@ -10,6 +10,12 @@ export type DailyUsageTotal = {
   unknownCount: number;
 };
 
+export type HourlyUsageTotal = {
+  hour: string;
+  requestCount: number;
+  knownTokens: number;
+};
+
 export type SyncedAgentSession = {
   agentType: "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi" | string;
   sessionId: string;
@@ -39,6 +45,7 @@ export type DeviceUsageSnapshot = {
   generatedAt: string;
   timezoneOffsetMinutes: number;
   days: DailyUsageTotal[];
+  hours: HourlyUsageTotal[];
   sessions: SyncedAgentSession[];
 };
 

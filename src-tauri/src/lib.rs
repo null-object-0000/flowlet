@@ -664,6 +664,24 @@ fn run_desktop() {
                 }
             }
 
+            let app_local_data_dir = app.path().app_local_data_dir()?;
+            let cache_prune_t0 = std::time::Instant::now();
+            let cache_report =
+                core::webview_profile::prune_oversized_webview_caches(&app_local_data_dir);
+            if cache_report.profiles_pruned > 0 || !cache_report.failures.is_empty() {
+                tracing::info!(
+                    profiles_scanned = cache_report.profiles_scanned,
+                    profiles_pruned = cache_report.profiles_pruned,
+                    pruned_mb = format!("{:.1}", cache_report.bytes_pruned as f64 / 1048576.0),
+                    failures = cache_report.failures.len(),
+                    t_ms = cache_prune_t0.elapsed().as_millis() as u64,
+                    "setup: WebView 运行时缓存整理完成"
+                );
+                for error in cache_report.failures {
+                    tracing::warn!(%error, "setup: WebView 缓存整理失败");
+                }
+            }
+
             let state = build_app_state(app_database_path(app), config_path.clone());
             app.manage(state.clone());
             let state_for_tray = state.clone();
@@ -672,9 +690,8 @@ fn run_desktop() {
                 "setup: state managed"
             );
 
-            // 主窗口使用独立的 WebView 数据目录，避免控制台抓取窗口访问外部站点时
-            // 产生的大量 HTTP / JS 缓存拖慢应用冷启动。旧的默认 EBWebView 目录
-            // 继续由抓取窗口使用，因此不会丢失 LongCat / Qwen 等控制台登录态。
+            // 主窗口与 per-account 控制台抓取窗口使用独立的 WebView 数据目录；
+            // 上方仅整理可再生缓存，Cookie / Local Storage 等登录态继续原位保留。
             let main_window_config = app
                 .config()
                 .app
@@ -688,15 +705,20 @@ fn run_desktop() {
                         "tauri.conf.json 缺少 main 窗口配置",
                     )
                 })?;
-            let main_webview_data_dir = app.path().app_local_data_dir()?.join("main-webview");
+            let main_webview_data_dir = app_local_data_dir.join("main-webview");
             let main_webview_t0 = std::time::Instant::now();
             tracing::info!(
                 data_dir = %main_webview_data_dir.display(),
                 "setup: 开始创建主 WebView"
             );
-            tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window_config)?
-                .data_directory(main_webview_data_dir.clone())
-                .build()?;
+            let main_webview_builder =
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window_config)?
+                    .data_directory(main_webview_data_dir.clone());
+            #[cfg(windows)]
+            let main_webview_builder = main_webview_builder.additional_browser_args(
+                core::webview_profile::WINDOWS_CACHE_LIMIT_BROWSER_ARGS,
+            );
+            main_webview_builder.build()?;
             tracing::info!(
                 data_dir = %main_webview_data_dir.display(),
                 t_ms = main_webview_t0.elapsed().as_millis() as u64,
@@ -1003,6 +1025,7 @@ fn run_desktop() {
             commands::list_shared_devices,
             commands::device_daily_usage,
             commands::shared_device_daily_usage,
+            commands::shared_device_hourly_usage,
             commands::rename_current_device,
             commands::get_s3_sync_settings,
             commands::export_s3_connection_config,
@@ -1104,6 +1127,7 @@ fn run_mobile() {
         .invoke_handler(tauri::generate_handler![
             mobile_commands::list_shared_devices,
             mobile_commands::shared_device_daily_usage,
+            mobile_commands::shared_device_hourly_usage,
             mobile_commands::list_shared_device_sessions,
             mobile_commands::get_s3_sync_settings,
             mobile_commands::save_s3_sync_config,

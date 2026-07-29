@@ -1,3 +1,4 @@
+import { IconRefresh } from "@douyinfe/semi-icons";
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { cancel, Format, checkPermissions, openAppSettings, requestPermissions, scan } from "@tauri-apps/plugin-barcode-scanner";
 import { Button, Input, Select, SideSheet, Switch, TextArea, Toast } from "@douyinfe/semi-ui-19";
@@ -10,6 +11,7 @@ import { parseS3ConnectionPackage } from "../../domains/device-sync/s3Connection
 import type { S3SyncConfigInput } from "../../domains/device-sync/types";
 import { useMobileDeviceSyncActions, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { errorMessage } from "../../shared/errors/AppError";
+import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import styles from "./MobilePage.module.css";
@@ -31,8 +33,11 @@ export function MobileSettingsPage() {
   const [draft, setDraft] = useState<S3SyncConfigInput>(emptyConfig);
   const [connectionText, setConnectionText] = useState<string | null>(null);
   const [manualConfigOpen, setManualConfigOpen] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const scannerActive = useRef(false);
+  const scannerSession = useRef(0);
+  const scannerBackButtonListener = useRef<Awaited<ReturnType<typeof onBackButtonPress>> | null>(null);
   const parsedConnection = useMemo(() => {
     if (connectionText == null || !connectionText.trim()) return null;
     try {
@@ -48,8 +53,13 @@ export function MobileSettingsPage() {
   }, [settings.data?.config]);
 
   useEffect(() => () => {
-    if (scannerActive.current) void cancel();
+    scannerSession.current += 1;
+    const shouldCancelNativeScanner = scannerActive.current;
+    scannerActive.current = false;
     clearScannerPresentation();
+    void scannerBackButtonListener.current?.unregister().catch(() => undefined);
+    scannerBackButtonListener.current = null;
+    if (shouldCancelNativeScanner) void cancel().catch(() => undefined);
   }, []);
 
   const valid = draft.endpoint.trim() && draft.region.trim() && draft.bucket.trim() && draft.accessKeyId.trim();
@@ -69,7 +79,18 @@ export function MobileSettingsPage() {
       Toast.error(t("连接测试失败：{message}", { message: errorMessage(error) }));
     }
   };
+  const refresh = async () => {
+    setRefreshError(null);
+    try {
+      await actions.refreshS3.mutateAsync();
+    } catch (error) {
+      setRefreshError(errorMessage(error));
+    }
+  };
   const scanConnection = async () => {
+    if (scannerActive.current) return;
+    const session = scannerSession.current + 1;
+    scannerSession.current = session;
     let backButtonListener: Awaited<ReturnType<typeof onBackButtonPress>> | null = null;
     try {
       let permission = await checkPermissions();
@@ -86,32 +107,55 @@ export function MobileSettingsPage() {
       setScanning(true);
       if (import.meta.env.TAURI_ENV_PLATFORM === "android") {
         backButtonListener = await onBackButtonPress(() => {
-          if (scannerActive.current) void cancel();
+          cancelScanning();
         });
+        if (session !== scannerSession.current) {
+          await backButtonListener.unregister().catch(() => undefined);
+          return;
+        }
+        scannerBackButtonListener.current = backButtonListener;
       }
       await waitForScannerOverlay();
+      if (session !== scannerSession.current) return;
       const result = await scan({
         cameraDirection: "back",
         formats: [Format.QRCode],
         windowed: true,
       });
-      setConnectionText(result.content);
+      if (session === scannerSession.current) {
+        setConnectionText(result.content);
+      }
     } catch (error) {
-      if (!isScannerCancellation(error)) {
+      if (session === scannerSession.current && !isScannerCancellation(error)) {
         Toast.error(t("扫描二维码失败：{message}", { message: errorMessage(error) }));
       }
     } finally {
-      scannerActive.current = false;
       await backButtonListener?.unregister().catch(() => undefined);
-      clearScannerPresentation();
-      setScanning(false);
+      if (scannerBackButtonListener.current === backButtonListener) {
+        scannerBackButtonListener.current = null;
+      }
+      if (session === scannerSession.current) {
+        finishScannerPresentation();
+      }
     }
   };
-  const cancelScanning = async () => {
-    if (!scannerActive.current) return;
-    await cancel().catch((error) => {
-      Toast.error(t("取消扫描失败：{message}", { message: errorMessage(error) }));
-    });
+  const finishScannerPresentation = () => {
+    scannerSession.current += 1;
+    scannerActive.current = false;
+    clearScannerPresentation();
+    setScanning(false);
+    const listener = scannerBackButtonListener.current;
+    scannerBackButtonListener.current = null;
+    void listener?.unregister().catch(() => undefined);
+  };
+  const cancelScanning = () => {
+    const shouldCancelNativeScanner = scannerActive.current;
+    finishScannerPresentation();
+    if (shouldCancelNativeScanner) {
+      void cancel().catch((error) => {
+        console.warn("Failed to cancel barcode scanner", error);
+      });
+    }
   };
   const importConnection = async () => {
     const config = parsedConnection?.config;
@@ -126,6 +170,17 @@ export function MobileSettingsPage() {
       Toast.error(t("导入连接配置失败：{message}", { message: errorMessage(error) }));
     }
   };
+  const syncStatus = settings.data?.status;
+  const syncStatusState = refreshError
+    ? "failed"
+    : actions.refreshS3.isPending
+      ? "running"
+      : syncStatus?.status ?? "never";
+  const syncStatusText = refreshError
+    ? t("刷新失败：{message}", { message: refreshError })
+    : actions.refreshS3.isPending
+      ? t("正在刷新远端数据…")
+      : syncStatus?.message ?? t("正在读取设置…");
 
   return (
     <section className={styles.page}>
@@ -136,6 +191,25 @@ export function MobileSettingsPage() {
         <div className={styles.actions}>
           <Button type="primary" theme="solid" loading={scanning} onClick={() => void scanConnection()}>{t("扫描二维码")}</Button>
           <Button onClick={() => setConnectionText("")}>{t("粘贴连接文本")}</Button>
+        </div>
+      </article>
+
+      <article className={styles.card}>
+        <div className={styles.cardHeader}>
+          <div><strong>{t("同步状态")}</strong><span>{t("从云端刷新设备、用量和会话摘要")}</span></div>
+          <Button
+            theme="borderless"
+            icon={<IconRefresh />}
+            loading={actions.refreshS3.isPending}
+            disabled={!settings.data?.config}
+            onClick={() => void refresh()}
+          >
+            {t("刷新")}
+          </Button>
+        </div>
+        <div className={styles.syncStrip}>
+          <div className={styles.status} data-state={syncStatusState}><i /><span>{syncStatusText}</span></div>
+          <time>{syncStatus?.lastSuccessAt ? formatFullTimestamp(syncStatus.lastSuccessAt, language) : t("尚未成功刷新")}</time>
         </div>
       </article>
 

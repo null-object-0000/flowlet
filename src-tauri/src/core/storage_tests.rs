@@ -3,7 +3,7 @@ use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
     ChannelAccount, LogsFilter, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
 };
-use crate::core::device_identity::{DailyUsageTotal, SyncedAgentSession};
+use crate::core::device_identity::{DailyUsageTotal, HourlyUsageTotal, SyncedAgentSession};
 
 #[test]
 fn channel_account_resource_sync_mode_round_trips() {
@@ -1850,6 +1850,12 @@ fn daily_usage_totals_keep_days_separate_and_sum_token_breakdowns() {
     assert_eq!(totals[1].request_count, 1);
     assert_eq!(totals[1].known_tokens, 39);
     assert_eq!(totals[1].cache_measured_input_tokens, 0);
+
+    let hours = storage.hourly_usage_totals().expect("hourly usage totals");
+    assert_eq!(hours.len(), 3);
+    assert_eq!(hours[0].known_tokens, 15);
+    assert_eq!(hours[1].known_tokens, 27);
+    assert_eq!(hours[2].known_tokens, 39);
 }
 
 #[test]
@@ -1868,9 +1874,15 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
         output_tokens: 10,
         unknown_count: 0,
     };
+    let first_hour = HourlyUsageTotal {
+        hour: "2026-07-28T18:00:00".to_string(),
+        request_count: 2,
+        known_tokens: 30,
+    };
 
     let inserted = storage
         .import_device_usage(
+            2,
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "2026-07-01T00:00:00Z",
             "Office PC",
@@ -1879,6 +1891,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             "2026-07-28T10:00:00Z",
             480,
             std::slice::from_ref(&first),
+            std::slice::from_ref(&first_hour),
             &[],
         )
         .expect("import first snapshot");
@@ -1886,6 +1899,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
 
     let repeated = storage
         .import_device_usage(
+            2,
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "2026-07-01T00:00:00Z",
             "Office PC",
@@ -1894,6 +1908,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             "2026-07-28T10:00:00Z",
             480,
             std::slice::from_ref(&first),
+            std::slice::from_ref(&first_hour),
             &[],
         )
         .expect("repeat same snapshot");
@@ -1904,6 +1919,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
     older.known_tokens = 1;
     storage
         .import_device_usage(
+            2,
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "2026-07-01T00:00:00Z",
             "Old office name",
@@ -1913,6 +1929,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             480,
             &[older],
             &[],
+            &[],
         )
         .expect("ignore older snapshot");
 
@@ -1920,6 +1937,10 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
         .imported_daily_usage(Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         .expect("read imported snapshot");
     assert_eq!(rows, vec![first]);
+    let hourly_rows = storage
+        .imported_hourly_usage(Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+        .expect("read imported hourly snapshot");
+    assert_eq!(hourly_rows, vec![first_hour]);
     let devices = storage
         .imported_known_devices()
         .expect("read imported device metadata");
@@ -1948,6 +1969,7 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
     let device_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     storage
         .import_device_usage(
+            2,
             device_id,
             "2026-07-01T00:00:00Z",
             "Work PC",
@@ -1955,6 +1977,7 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
             "0.1.0",
             "2026-07-29T10:00:00Z",
             480,
+            &[],
             &[],
             &[
                 session("running", "running", "2026-07-29T09:00:00Z"),
@@ -1964,6 +1987,7 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
         .expect("import sessions");
     storage
         .import_device_usage(
+            2,
             device_id,
             "2026-07-01T00:00:00Z",
             "Work PC",
@@ -1971,6 +1995,7 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
             "0.1.0",
             "2026-07-29T11:00:00Z",
             480,
+            &[],
             &[],
             &[session("new", "waiting_user", "2026-07-29T10:30:00Z")],
         )

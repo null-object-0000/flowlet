@@ -110,15 +110,32 @@ pub fn build_scrape_webview(
     }
     std::fs::create_dir_all(&data_dir)
         .map_err(|error| format!("创建抓取 webview 数据目录失败: {error}"))?;
-    let window = tauri::webview::WebviewWindowBuilder::new(app, label, url)
+    let build_t0 = std::time::Instant::now();
+    tracing::info!(
+        account_id,
+        channel_id,
+        data_dir = %data_dir.display(),
+        "开始创建控制台抓取 WebView"
+    );
+    let builder = tauri::webview::WebviewWindowBuilder::new(app, label, url)
         .title("Flowlet · 控制台抓取")
         .inner_size(900.0, 720.0)
         .visible(false)
         .data_directory(data_dir)
         .initialization_script(interceptor)
-        .initialization_script_for_all_frames("window.__flowlet_scrape_active = true;".to_string())
+        .initialization_script_for_all_frames("window.__flowlet_scrape_active = true;".to_string());
+    #[cfg(windows)]
+    let builder =
+        builder.additional_browser_args(super::webview_profile::WINDOWS_CACHE_LIMIT_BROWSER_ARGS);
+    let window = builder
         .build()
         .map_err(|e| format!("构建抓取 webview 失败: {e}"))?;
+    tracing::info!(
+        account_id,
+        channel_id,
+        t_ms = build_t0.elapsed().as_millis() as u64,
+        "控制台抓取 WebView 创建完成"
+    );
     Ok(window)
 }
 

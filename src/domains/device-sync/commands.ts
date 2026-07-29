@@ -4,6 +4,7 @@ import type {
   DeviceUsageImportPreview,
   DeviceUsageImportResult,
   DeviceUsageSnapshot,
+  HourlyUsageTotal,
   KnownDevice,
   S3ConnectionTestResult,
   S3DevicePullResult,
@@ -61,6 +62,9 @@ export const mobileDeviceSyncCommands = {
   dailyUsage: (deviceId: string | null): Promise<DailyUsageTotal[]> =>
     invokeCommand<DailyUsageTotal[]>("shared_device_daily_usage", { deviceId })
       .catch(toDeviceSyncError("shared_device_daily_usage_failed")),
+  hourlyUsage: (deviceId: string | null): Promise<HourlyUsageTotal[]> =>
+    invokeCommand<HourlyUsageTotal[]>("shared_device_hourly_usage", { deviceId })
+      .catch(toDeviceSyncError("shared_device_hourly_usage_failed")),
   sessions: (deviceId: string | null): Promise<SharedAgentSession[]> =>
     invokeCommand<SharedAgentSession[]>("list_shared_device_sessions", { deviceId })
       .catch(toDeviceSyncError("shared_device_sessions_failed")),

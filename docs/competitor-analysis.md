@@ -1,6 +1,6 @@
 # Flowlet 竞品分析报告
 
-> 快照时间：主要 GitHub 项目为 2026-07-28；CCPark npm 补充快照为 2026-07-29（Asia/Shanghai）。
+> 快照时间：原有 GitHub 项目为 2026-07-28；扩展扫描与 CCPark npm 补充快照为 2026-07-29（Asia/Shanghai）。
 >
 > 本报告优先使用竞品官方仓库、官方 README、官方文档和 GitHub API；动态数据均为快照，不等同于活跃用户或商业采用。
 >
@@ -12,8 +12,9 @@
 
 ## 一、结论摘要
 
-1. **Flowlet 的直接竞争者不止 cc-router 和 TiyGate。** 从“用户是否可以用它完成本地模型接入、多账号管理和 Agent 接入”判断，AIUsage、OpenCodex、CLIProxyAPI 生态、CC Switch、Free Claude Code 和 cc-router 都构成不同程度的直接替代。
-2. **当前最值得跟踪的三个对象是 AIUsage、OpenCodex 和 CLIProxyAPI 生态。**
+1. **Flowlet 的直接竞争者不止 cc-router 和 TiyGate。** 从“用户是否可以用它完成本地模型接入、多账号管理和 Agent 接入”判断，Claude Code Router、AIUsage、OpenCodex、CLIProxyAPI 生态、CC Switch、Free Claude Code 和 cc-router 都构成不同程度的直接替代。
+2. **当前最值得跟踪的四个对象是 Claude Code Router、AIUsage、OpenCodex 和 CLIProxyAPI 生态。**
+   - Claude Code Router 已从单一 Claude Code 路由器扩展为跨平台桌面控制面，覆盖多 Agent、Provider/模型/账号、路由、fallback、日志、Token、成本和 Trace；36.3k stars 使它成为本轮扫描中最重要的遗漏；
    - AIUsage 与 Flowlet 的功能重叠最深：账号、额度、代理、配置写入、用量成本和本地会话分析均已覆盖，但仅支持 macOS；
    - OpenCodex 在约一个多月内达到 5.3k stars，已具备 Provider 管理、协议转换、Codex/Claude 接入、ChatGPT 多账号额度感知分配和会话粘性；
    - CLIProxyAPI 不是完整桌面产品，却以 45.2k stars、OAuth 多账号代理内核和大量第三方前端形成平台型竞争。
@@ -23,6 +24,8 @@
 6. **不建议因竞品普遍做协议转换就改变 Flowlet 的协议边界。** 协议转换扩大 Provider 覆盖，也引入流式事件、工具调用、thinking/reasoning、缓存语义和错误映射的长期兼容负担。Flowlet 当前资源更适合把原生双协议链路做深。
 7. **当前优先级不应被 MCP/Skills 管理、本地 HTTPS 或分享小票打乱。** 通用 MCP/Prompt/Skills 管理仍是明确非目标；HTTPS 和用量导出有真实竞品案例，但应先用目标客户端和用户反馈验证需求。
 8. **CCPark 算相邻竞品，但不是当前核心模型代理竞品。** 它争夺的是“远程查看和接管终端 Agent”的会话/控制入口；当前公开资料未显示其管理模型渠道、账号池、开放模型、代理路由、请求成本或完整 Trace。短期直接威胁低，但对 Flowlet 的 Agent Session、远程观测和交互接管方向构成中等压力。
+9. **Token Monitor 是增长较快的用量与额度能力型竞品。** 它不提供模型代理、渠道账号或请求路由，因此不是 Flowlet 的同层替代；但它用 28+ AI 工具、本地会话解析、跨平台桌面组件、多设备同步和额度聚合，直接争夺“统一看 Token、成本和额度”的用户入口。Flowlet 不应复制它的工具数量竞赛，而应补齐成本账本、导出和轻量状态入口，并保持“代理真实请求证据 + Agent 原生会话”的差异。
+10. **高 Stars 项目必须按用户任务而不是规模分类。** LiteLLM、New API、One API、Portkey Gateway 都有 12k–55k stars，但主要解决服务端统一 API、协议转换、企业治理或二次分发；它们是架构和市场边界样本，不是 Flowlet 当前个人桌面主链路的直接替代。相反，ccusage 虽然只是 CLI，却以 17.6k stars 和 15 类 Agent 本地数据直接争夺用量入口，应纳入月度跟踪。
 
 ## 二、调研方法与判断标准
 
@@ -97,6 +100,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 
 | 产品 | Stars | 主要任务 | 与 Flowlet 的关系 |
 |---|---:|---|---|
+| [Claude Code Router](https://github.com/musistudio/claude-code-router) | 36,269 | 跨平台桌面/CLI/Docker，本地多 Agent 网关、Provider/账号、模型、路由、fallback、日志、成本和 Trace | **高规模、同层直接替代，本轮最重要遗漏** |
 | [AIUsage](https://github.com/sylearn/AIUsage) | 456 | 多 Provider 额度、四类代理、CLIProxyAPI 管理、配置接管、用量成本、调用分析 | **功能重叠最深，当前仅 macOS** |
 | [OpenCodex](https://github.com/lidge-jun/opencodex) | 5,371 | Codex/Claude 本地代理、40+ Provider、协议转换、账号池、额度感知分配、Dashboard | **快速增长的直接替代** |
 | [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 生态 | 45,238 | OAuth 多账号代理内核、多协议 API、Round-robin、SDK 和第三方前端 | **平台型竞争者，不是单一桌面产品** |
@@ -111,12 +115,17 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 | [TiyGate](https://github.com/tiylabs/tiygate) | 132 | N×N 协议网关、复杂策略、S3、桌面/Web/Docker | Flowlet 的“定位镜像”，更偏通用/企业网关 |
 | [CCS](https://github.com/kaitranntt/ccs) | 2,754 | 基于 CLIProxyAPI 的 Claude/Codex 多账号、OAuth、Dashboard | 值得作为 CLIProxyAPI 前端生态样本跟踪 |
 | [agent-vibes](https://github.com/funny-vibes/agent-vibes) | 346 | Claude/Cursor 接入免费或订阅后端，账号和 Analytics | 协议转换路线的细分替代 |
+| [ZCF](https://github.com/UfoMiao/zcf) | 6,078 | Claude Code/Codex 一键初始化、Provider/CCR/MCP/工作流安装 | 配置分发入口；更多是 CCR/ccusage 等能力的安装与编排层 |
+| [CC-Switch CLI](https://github.com/SaladDay/cc-switch-cli) | 4,447 | CC Switch 的 TUI/CLI 分支，Provider、OAuth 账号、代理、会话、用量和配置同步 | 不是独立产品家族，但扩大 CC Switch 的终端入口和生态覆盖 |
 
 ### 4.3 用量、成本与 Trace 能力型竞品
 
 | 产品 | Stars | 核心能力 | 对 Flowlet 的意义 |
 |---|---:|---|---|
+| [ccusage](https://github.com/ccusage/ccusage) | 17,565 | 15 类 coding agent 本地用量、日/周/月/会话报表、缓存拆分、价格覆盖和 JSON 输出 | **用量 CLI 的事实标准型入口** |
 | [CodeBurn](https://github.com/getagentseal/codeburn) | 8,973 | 31+ 工具本地解析、成本、检测器、预算 Guard、Yield | 成本分析和优化方法论标杆 |
+| [Claude Code Usage Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) | 8,542 | Claude Code 实时额度/成本监控、预测、历史仓库和证据来源标签 | 官方额度与本地估算分层值得借鉴 |
+| [Token Monitor](https://github.com/Javis603/token-monitor) | 1,026 | 28+ AI 工具本地用量、Provider 额度、会话/项目拆分、跨平台组件和自托管多设备同步 | **用量与额度入口的增长型能力竞品** |
 | [CodexBar](https://github.com/steipete/CodexBar) | 19,187 | macOS 菜单栏额度/使用状态和 Provider 适配 | 证明轻量状态入口有吸引力 |
 | [Vibe Usage](https://vibecafe.ai/usage) | 221（3 仓库合计） | 20+ 工具聚合、350+ 定价、云端 Dashboard、排行榜 | 抢占“看 Token/成本”的用户心智 |
 | [claude-tap](https://github.com/liaohch3/claude-tap) | 2,884 | 正向/反向代理、CA、完整 Trace、结构化 Diff、HTML 导出 | Trace 查看器的直接能力标杆 |
@@ -133,8 +142,20 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 | [OpenWork](https://github.com/different-ai/openwork) | 17,323 | Claude Cowork 开源替代、OpenCode 驱动 | 工作台和技能生态相邻 |
 | [Eigent](https://github.com/eigent-ai/eigent) | 14,676 | CAMEL 多 Agent Cowork Desktop | 工作台相邻 |
 | [XIAOCHUANGx](https://github.com/zhaozhaozhiyi/XIAOCHUANGx) | 248 | 多 Agent 企业业务流工作台 | 当前威胁低 |
+| [opcode（原 Claudia）](https://github.com/winfunc/opcode) | 22,314 | Claude Code GUI、会话恢复、Agent、用量、MCP、时间线和 Diff | 会话入口的高 Stars 历史样本；默认分支自 2025-10 后未更新，当前活跃威胁有限 |
 
 **分析判断：** 舰队层的增长说明多 Agent 并行正在形成用户场景，但不能由 Stars 或 npm 下载直接推导出 Flowlet 必然受益。CCPark 进一步证明“离开电脑后查看会话、回答问题和处理权限”正在形成独立产品层；它与 Flowlet 的模型流量控制边界不同，但会争夺 Agent 会话入口。需要验证这些用户是否会主动配置统一代理、是否需要按 Agent/会话拆账，以及订阅账号本身是否允许相应使用方式。
+
+### 4.5 高 Stars 通用网关：重要边界样本，不计入直接竞品
+
+| 项目 | Stars | 核心任务 | 为什么不计入当前直接竞品 |
+|---|---:|---|---|
+| [LiteLLM](https://github.com/BerriAI/litellm) | 55,010 | 100+ LLM API、协议适配、负载均衡、预算、日志和企业网关 | Python SDK/服务端控制面，不以个人桌面 Agent 接入和本地会话为主 |
+| [New API](https://github.com/QuantumNous/new-api) | 43,766 | 模型聚合与分发、OpenAI/Claude/Gemini 跨协议转换、计费和用户管理 | 面向集中式模型分发和多用户运营，产品边界显著大于 Flowlet |
+| [One API](https://github.com/songquanpeng/one-api) | 36,030 | 多 Provider API 管理、Key 分发、统一 OpenAI 接口 | 服务端二次分发系统，不解决 Agent 配置、原生会话和桌面生命周期 |
+| [Portkey Gateway](https://github.com/Portkey-AI/gateway) | 12,590 | 1,600+ 模型、Guardrails、路由和企业 AI Gateway | 以应用/企业网关和治理为主，不是本地个人 Agent 控制台 |
+
+这些项目说明“统一模型入口、路由、成本和治理”本身是大市场，但不能据此推导 Flowlet 应做 N×N 协议转换、多租户、Guardrails 或企业控制面。对 Flowlet 的价值是跟踪协议兼容、错误处理、价格语义和可观测性方法，而不是复制其功能广度。
 
 ## 五、核心能力对比
 
@@ -168,6 +189,9 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 | Flowlet | 代理日志 + 4 类 Agent 本地数据 | ✅ | ✅ 会话/请求/attempt | 公开价格估算；统一账本规划中 | Body 可选捕获；尚无完整流式重建/Diff |
 | AIUsage | 多代理归档 + Codex/OpenCode/Claude 本地数据 | ✅ 多来源 | ✅ 自有代理 | 模型价格和来源感知聚合 | 以用量和调用分析为主 |
 | CodeBurn | 31+ 工具本地文件 | ◐ 解析为统计任务 | — | ✅ 深度分析、预算和检测器 | — |
+| ccusage | 15 类 Agent 本地文件/数据库 | ✅ 会话级统计，不提供完整消息时间线 UI | — | ✅ 价格、缓存拆分、自定义价格和 JSON | — |
+| Claude Code Usage Monitor | Claude Code 本地数据 + 官方 statusline `rate_limits` | ◐ Claude 单工具用量与历史仓库 | — | ✅ 官方/本地估算/实验/未知来源标签和预测 | — |
+| Token Monitor | 28+ 工具本地日志/数据库 + Provider 额度接口 | ✅ Claude/Codex/OpenCode 可下钻 prompt 预览、逐回复 Token 和工具名 | — | ✅ 公开价格估算、缓存拆分、额度/余额和 CSV/JSON 导出 | 本地会话明细，不是代理真实请求/响应 Trace |
 | Vibe Usage | 20+ 工具本地聚合后上传 | ◐ 主要用于统计 | — | ✅ 350+ 定价与覆盖率 | — |
 | CodexBar | Provider/CLI 状态和历史 | — | — | 以额度和状态为主 | — |
 | claude-tap | 正向/反向代理流量 | — | ✅ | Token 明细，不以成本账本为核心 | ✅ 请求、响应、工具、Prompt、Diff、搜索、导出 |
@@ -175,7 +199,32 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 
 ## 六、重点竞品深度判断
 
-### 6.1 AIUsage：当前功能重叠最深
+### 6.1 Claude Code Router：本轮扫描中最重要的直接竞品
+
+**已验证事实**
+
+- 36,269 stars、3,033 forks，MIT；默认分支快照 `3b99fa239b58`，截至 2026-07-29 仍在更新；
+- 产品已从 Claude Code 路由脚本扩展为 macOS/Windows/Linux 桌面应用、CLI/Web UI 和 Docker，可让 Claude Code、Codex、OpenCode、Pi、Kimi CLI、Grok CLI、Kilo Code、ZCode 等使用同一本地端点；
+- Provider 支持预设和自定义端点、协议探测、模型发现、连接测试、登录导入、单 Key 与凭据池；
+- 路由支持 Header/Body 条件、前缀、请求改写、重试和有序 fallback；支持 OpenAI Chat/Responses、Anthropic Messages、Gemini 等协议与转换；
+- Agent Profile 可直接应用到多类 Agent；日志可展示最终 Provider、模型、凭据、状态、延迟、Token、成本、工具调用和 Agent Trace；
+- 还扩展了 Fusion 视觉、Web Search、MCP/ToolHub、浏览器自动化、客户端 Key/额度限制和消息平台 Agent relay。
+
+**分析判断**
+
+- 它与 Flowlet 的重叠不是单点，而是“桌面端 + 本地代理 + Provider/账号 + 模型 + Agent 配置 + 路由 + 日志 + 成本”的整条主链路，直接程度高于此前报告中的 TiyGate、cc-router 和多数 CLIProxyAPI 前端；
+- 36.3k stars 不能证明桌面活跃用户数，但结合 728 次提交、跨平台发行和持续更新，已经足以列为高优先级真实竞争者；
+- 它的优势是 Agent/Provider/协议广度、插件化扩展和成熟传播；Flowlet 的潜在差异仍是显式开放模型语义、原生协议透明边界、最终上游 attempt 证据与跨 Agent 原生会话合并；
+- CCR 的协议转换、请求改写、Fusion、浏览器状态导入和消息平台 relay 同时扩大了兼容、安全和维护边界，Flowlet 不应因其规模而全线跟随。
+
+**对 Flowlet**
+
+- 威胁级别：**高（同层直接替代）**，纳入每两周跟踪；
+- 立即对标：账号编辑、模型发现、Agent Profile 写入、服务启停、fallback 可解释性、日志下钻和错误恢复；
+- 差异化重点：真实上游请求/响应证据、原生会话关联、成本来源与置信度、明确模型身份，以及不做跨协议转换带来的可预测性；
+- 重点监控：桌面 release 下载、真实 issue 结构、凭据池与账号额度、Codex Responses 稳定性、Trace 深度、配置恢复和安全边界。
+
+### 6.2 AIUsage：当前功能重叠最深
 
 **已验证事实**
 
@@ -198,7 +247,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 - 应对重点：渠道账号流程、代理稳定性、真实上游日志、原生会话关联和统一成本语义；
 - 不应跟随：Claude Science 虚拟登录、广泛协议转换等高兼容/合规负担能力。
 
-### 6.2 OpenCodex：增长最快的同层替代
+### 6.3 OpenCodex：增长最快的同层替代
 
 **已验证事实**
 
@@ -221,7 +270,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 - 重点跟踪：额度选择算法、线程粘性、Codex App 接入、配置恢复安全性、实际下载与留存；
 - 可借鉴：会话级账号 affinity，但必须先有可靠且合规的额度来源。
 
-### 6.3 CLIProxyAPI：平台型竞争，不应只当后端项目
+### 6.4 CLIProxyAPI：平台型竞争，不应只当后端项目
 
 **已验证事实**
 
@@ -242,7 +291,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 - 威胁级别：**高（平台级）**；
 - 差异化应放在它不容易通过通用内核补齐的部分：Flowlet 数据语义、最终上游 attempt 证据、Agent 原生会话关联、显式开放模型流程和本地可解释成本。
 
-### 6.4 CC Switch：最大的接入入口竞争者
+### 6.5 CC Switch：最大的接入入口竞争者
 
 **已验证事实**
 
@@ -262,7 +311,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 - 威胁级别：**高（入口和心智）**；
 - 应对方式：把 Flowlet 的 Agent 接入做成可检测、可备份、可写入、可恢复、可观测的闭环，而不是追求管理所有 Agent 配置资产。
 
-### 6.5 Free Claude Code：Provider-first 的大众叙事
+### 6.6 Free Claude Code：Provider-first 的大众叙事
 
 **已验证事实**
 
@@ -281,7 +330,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 - 威胁级别：**中高**；
 - Flowlet 不宜跟随“免费模型”叙事，应强调稳定、透明、可解释和本地数据所有权。
 
-### 6.6 cc-router：产品形态最接近
+### 6.7 cc-router：产品形态最接近
 
 **已验证事实**
 
@@ -304,7 +353,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 - 可验证：HTTPS-only 客户端接入、用量导出；
 - 不建议复制：跨厂商模糊模型身份、以订阅聚合为核心的高风险叙事。
 
-### 6.7 TiyGate：定位镜像，不是当前第一直接威胁
+### 6.8 TiyGate：定位镜像，不是当前第一直接威胁
 
 **已验证事实**
 
@@ -324,7 +373,35 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 - 威胁级别：**低到中**；
 - 主要价值：持续校验 Flowlet 是否仍应保持个人桌面、原生协议和 Agent 观测定位。
 
-### 6.8 CCPark：Agent 远程控制层的相邻竞品
+### 6.9 Token Monitor：增长较快的用量与额度入口
+
+**已验证事实**
+
+- 官方仓库创建于 2026-05-19；截至 2026-07-29 为 1,026 stars、86 forks、18 位贡献者，已发布 48 个 release，最新版 `v0.37.0`；默认分支快照为 `574fe9f37eb`。约 70 天达到 1,026 stars 是增长信号，但不能等同于活跃用户或留存；
+- Electron 桌面端覆盖 macOS、Windows 和 Linux，提供菜单栏/托盘、悬浮 Bubble、历史趋势、年度热力图、模型/设备/会话/项目拆分和 CSV/JSON 导出；
+- [官方 README](https://github.com/Javis603/token-monitor#supported-tools) 列出 28+ AI 工具：其中 Claude Code、Codex、OpenCode 等读取本地会话文件或数据库；DeepSeek、OpenRouter、Minimax、Volcengine 等主要读取额度、余额或套餐状态；
+- 核心用量采集依赖 `tokscale 4.7.0`。应用以 today/month/all-time 三个周期调用扫描器，并通过文件监听触发秒级刷新；Windows 还能合并正在运行的 WSL 发行版数据；
+- Claude Code、Codex、OpenCode 的会话详情会在本机按需读取，展示 prompt 预览、逐回复 Token、缓存拆分和工具名。Claude/Codex 成本明细按会话总成本和 Token 占比分摊，OpenCode 使用原生消息 cost；这属于本地会话解析，不是代理捕获的真实请求/响应；
+- 多设备同步可使用内嵌 Hub、Node Hub 或 Cloudflare Worker，通过 SSE 推送。根据[隐私说明](https://github.com/Javis603/token-monitor/blob/main/docs/privacy.md)和[同步 API](https://github.com/Javis603/token-monitor/blob/main/docs/API.md)，同步不上传原始日志、prompt、回复、源码或凭据，但会上传设备标识、Token/成本聚合、模型、会话、项目标签以及账号邮箱/套餐等额度归属信息；无共享密钥时 Node Hub 强制只监听 loopback；
+- GUI 管理的 Provider 凭据保存在本地 `credentials.json`，POSIX 权限为 `0600`，Windows 依赖用户数据目录 ACL；官方明确说明这是受文件权限保护的明文存储，不是系统 Keychain/Credential Manager 加密；
+- 公开 issue 已出现后台采集能耗、Windows Token 统计失效、长会话遗漏和部分 Provider 额度读取异常。项目已有 175 个测试文件和跨 Node 22/24 CI，说明维护投入较高，但快速扩展工具矩阵仍带来解析兼容与资源占用成本。
+
+**分析判断**
+
+- 它的产品主张比 CodexBar 更宽：CodexBar 偏菜单栏额度/状态，Token Monitor 已形成“跨工具本地用量 + 多 Provider 额度 + 会话/项目拆分 + 多设备同步 + 跨平台组件”的完整观察面；
+- 它和 Flowlet 的重叠主要在 Agent 原生会话、Token/缓存/成本展示、账号额度和桌面状态入口；不覆盖 Channel / Account / Exposed Model、OpenAI/Anthropic 代理、真实上游 attempt、fallback 或客户端配置接管；
+- 最大优势是覆盖面和即时反馈：用户无需把流量切到统一代理，就能先获得跨工具统计；最大结构性限制是证据来自各工具本地格式和 Provider 私有接口，数据语义、价格估算与兼容性受上游变化影响；
+- 自托管同步的隐私边界比默认 SaaS 上传清楚，但“local-first”不等于“所有数据永不离机”。启用同步后仍会传输会话/项目归属、设备元数据及部分账号身份，因此 Flowlet 若未来做跨设备能力，必须同样把同步字段和凭据边界写清楚。
+
+**对 Flowlet**
+
+- 威胁级别：**中（用量、额度与桌面入口能力）**；不是代理主链路的直接替代；
+- 应立即借鉴：轻量托盘状态、明确的缓存拆分、工具无关 CSV/JSON 导出、历史留存开关和数据新鲜度/不完整诊断；
+- 应坚持差异：把 Flowlet 代理捕获的最终上游请求证据与 Agent 原生会话合并，并明确区分真实支付、API 公开价估算、套餐 credits 和余额，不把不同来源简单相加；
+- 不建议复制：以支持工具数量为核心 KPI、频繁全盘扫描、在 Flowlet 内重建一套通用多设备 Hub，或为追赶额度覆盖而大量依赖不稳定的网页 Cookie/私有接口；
+- 重点跟踪：月活/下载而非 Stars、`tokscale` 格式兼容、Windows/WSL 能耗、价格覆盖和估算误差、多设备同步采用率，以及是否开始提供本地代理、配置写入或请求 Trace。若后三项出现，它会从能力竞品升级为更直接的 Flowlet 替代。
+
+### 6.10 CCPark：Agent 远程控制层的相邻竞品
 
 **已验证事实**
 
@@ -428,21 +505,23 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 
 | 等级 | 对象 | 主要原因 | 重点指标 |
 |---|---|---|---|
+| **高** | Claude Code Router | 36.3k、跨平台桌面、主链路高度重叠 | 下载、Agent/Provider 覆盖、凭据池、Trace、配置恢复、安全边界 |
 | **高** | AIUsage | 功能重叠最深 | macOS 下载、代理稳定性、配置恢复、CPA 整合 |
 | **高** | OpenCodex | 增长快、额度感知账号池、Codex/Claude 深度 | 下载、账号池反馈、线程 affinity、跨平台稳定性 |
 | **高** | CLIProxyAPI 生态 | 内核+大量前端的平台效应 | 生态项目数、SDK 采用、OAuth Provider、桌面前端增长 |
 | **高（入口）** | CC Switch | 121k 社区、配置和代理入口 | 代理采用、Agent 覆盖、配置接管故障、协议兼容成本 |
 | **中高** | Free Claude Code | 传播力和 Provider 广度 | 安装量、活跃 Provider、用户是否需要更深账号/成本能力 |
 | **中** | cc-router | 同桌面形态、订阅聚合、HTTPS | Releases、真实用户反馈、ToS 风险、HTTPS 使用场景 |
-| **中（能力）** | CodeBurn、claude-tap、Vibe Usage | 分别抢成本优化、Trace、用量心智 | 新数据源、导出、定价覆盖、Viewer 深度 |
+| **中（能力）** | ccusage、Claude Code Usage Monitor、Token Monitor、CodeBurn、claude-tap、Vibe Usage | 分别抢用量/额度入口、成本优化、Trace 和用量心智 | 新数据源、证据标签、导出、定价覆盖、桌面入口、Viewer 深度 |
+| **观察（历史）** | opcode | 22.3k 的 Claude Code GUI/会话/用量样本，但默认分支长期未更新 | 是否恢复发行、扩展到 Codex/OpenCode、会话入口是否重新活跃 |
 | **低到中** | TiyGate | 技术相近但定位偏通用网关 | 是否转向个人桌面、是否增加 Agent 接入 |
 | **观察（会话/控制）** | CCPark | 已覆盖本机 daemon、统一会话事件和远程交互，但公开实现与服务端边界不透明 | 是否增加代理、账号池、成本、Trace 或统一 API；许可证与数据边界 |
 | **观察** | Orca、Multica、herdr、gastown、OpenWork | 舰队/工作台可能向账号和流量层扩展 | 是否增加代理、账号池、成本或统一 API |
 
 建议跟踪频率：
 
-- **每两周**：AIUsage、OpenCodex、CLIProxyAPI、CC Switch；
-- **每月**：cc-router、Free Claude Code、CodeBurn、claude-tap、Vibe Usage、CCPark；
+- **每两周**：Claude Code Router、AIUsage、OpenCodex、CLIProxyAPI、CC Switch；
+- **每月**：ccusage、Claude Code Usage Monitor、Token Monitor、cc-router、Free Claude Code、CodeBurn、claude-tap、Vibe Usage、CCPark、ZCF、CC-Switch CLI；
 - **每季度**：TiyGate 和 Agent 舰队/工作台产品。
 
 每次记录：
@@ -463,11 +542,17 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 | [CC Switch](https://github.com/farion1231/cc-switch) | 121,792 | 2025-08-04 | `ccda04bfa6d8` | MIT |
 | [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | 45,238 | 2025-07-01 | `cade44b9cdee` | MIT |
 | [Free Claude Code](https://github.com/Alishahryar1/free-claude-code) | 42,606 | 2026-01-28 | `58147b1e18e6` | MIT |
+| [Claude Code Router](https://github.com/musistudio/claude-code-router) | 36,269 | 2025-02-25 | `3b99fa239b58` | MIT |
 | [CodexBar](https://github.com/steipete/CodexBar) | 19,187 | 2025-11-16 | `dd029db4cb17` | MIT |
+| [ccusage](https://github.com/ccusage/ccusage) | 17,565 | 2025-05-29 | `c4be7c150fd1` | README: MIT；GitHub API: NOASSERTION |
 | [CodeBurn](https://github.com/getagentseal/codeburn) | 8,973 | 2026-04-13 | `85781999a5ea` | MIT |
+| [Claude Code Usage Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) | 8,542 | 2025-06-19 | `c59a83bf943f` | MIT |
+| [ZCF](https://github.com/UfoMiao/zcf) | 6,078 | 2025-07-30 | `e043e5ff39ad` | MIT |
 | [OpenCodex](https://github.com/lidge-jun/opencodex) | 5,371 | 2026-06-18 | `7cb15bff4efd` | MIT |
+| [CC-Switch CLI](https://github.com/SaladDay/cc-switch-cli) | 4,447 | 2025-11-23 | `03094473a808` | MIT |
 | [claude-tap](https://github.com/liaohch3/claude-tap) | 2,884 | 2026-02-15 | `8af0c4ea54ff` | MIT |
 | [CCS](https://github.com/kaitranntt/ccs) | 2,754 | 2025-11-01 | `51e8716630cd` | MIT |
+| [Token Monitor](https://github.com/Javis603/token-monitor) | 1,026 | 2026-05-19 | `574fe9f37eb0` | MIT |
 | [AIUsage](https://github.com/sylearn/AIUsage) | 456 | 2026-04-11 | `17c05dbefc63` | Apache-2.0 |
 | [agent-vibes](https://github.com/funny-vibes/agent-vibes) | 346 | 2026-03-08 | `a589b104c078` | MIT |
 | [cc-router](https://github.com/finch-xu/cc-router) | 210 | 2026-04-24 | `4b52d7a70eaa` | MIT |
@@ -484,6 +569,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 |---|---:|---|---|---|
 | [Multica](https://github.com/multica-ai/multica) | 42,273 | 2026-01-13 | `77b309a5ac1d` | GitHub API: NOASSERTION |
 | [Orca](https://github.com/stablyai/orca) | 31,016 | 2026-03-17 | `badf91101bab` | MIT |
+| [opcode](https://github.com/winfunc/opcode) | 22,314 | 2025-06-19 | `70c16d8a4910` | AGPL-3.0 |
 | [herdr](https://github.com/ogulcancelik/herdr) | 21,582 | 2026-03-27 | `1491b7dd9c99` | Apache-2.0 |
 | [OpenWork](https://github.com/different-ai/openwork) | 17,323 | 2026-01-14 | `1aba9e346cb6` | GitHub API: NOASSERTION |
 | [gastown](https://github.com/gastownhall/gastown) | 17,281 | 2025-12-16 | `649b832b7672` | MIT |
@@ -513,9 +599,9 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 
 Flowlet 面对的不是一个单一竞品，而是五股力量同时挤压：
 
-1. CLIProxyAPI、OpenCodex、Free Claude Code 用协议广度和订阅账号池抢“统一入口”；
+1. Claude Code Router、CLIProxyAPI、OpenCodex、Free Claude Code 用协议广度、Provider/账号和路由能力抢“统一入口”；
 2. AIUsage、CC Switch 用配置接管和桌面体验抢“Agent 接入入口”；
-3. CodeBurn、Vibe Usage、CodexBar 抢“用量与成本心智”；
+3. ccusage、Claude Code Usage Monitor、Token Monitor、CodeBurn、Vibe Usage、CodexBar 抢“用量、额度与成本心智”；
 4. claude-tap 抢“真实 Trace 和可调试性”；
 5. CCPark、Orca、Vibe X 抢“远程看 Agent、接管交互”的工作台入口。
 

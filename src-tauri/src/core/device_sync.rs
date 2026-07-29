@@ -47,7 +47,7 @@ pub struct S3SyncConfig {
     pub path_style: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct S3SyncConfigInput {
     pub endpoint: String,
@@ -486,6 +486,20 @@ pub fn load_settings(storage: &Storage) -> Result<S3SyncSettings, String> {
             secret_configured: has_secret(config),
         }),
         status: load_status(storage),
+    })
+}
+
+pub fn export_connection_config(storage: &Storage) -> Result<S3SyncConfigInput, String> {
+    let config = load_config(storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
+    let secret_access_key = read_secret(&config)?;
+    Ok(S3SyncConfigInput {
+        endpoint: config.endpoint,
+        region: config.region,
+        bucket: config.bucket,
+        prefix: config.prefix,
+        access_key_id: config.access_key_id,
+        secret_access_key: Some(secret_access_key),
+        path_style: config.path_style,
     })
 }
 

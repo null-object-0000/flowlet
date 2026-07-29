@@ -2,7 +2,9 @@ use super::config::{
     AgentSessionCostEstimate, AgentSessionNativeUsage, AgentSessionTimeline,
     AgentSessionTimelineEvent, ModelPrice,
 };
-use chrono::{DateTime, Utc};
+use super::agent_session_sources::{
+    collect_jsonl_files, format_unix_millis, opencode_database_candidates, string_field,
+};
 use rusqlite::{params, Connection, OpenFlags};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -1574,15 +1576,6 @@ fn render_json_value(value: &Value) -> Option<String> {
     }
 }
 
-fn string_field(value: &Value, field: &str) -> Option<String> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
 fn truncate_chars(value: &str, max_chars: usize) -> String {
     let mut chars = value.chars();
     let prefix = chars.by_ref().take(max_chars).collect::<String>();
@@ -1590,34 +1583,6 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
         format!("{prefix}\n…")
     } else {
         prefix
-    }
-}
-
-fn format_unix_millis(value: i64) -> Option<String> {
-    DateTime::<Utc>::from_timestamp_millis(value).map(|value| value.to_rfc3339())
-}
-
-fn collect_jsonl_files(directory: &Path, matches: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(directory) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_symlink() {
-            continue;
-        }
-        let path = entry.path();
-        if file_type.is_dir() {
-            collect_jsonl_files(&path, matches);
-        } else if path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("jsonl"))
-        {
-            matches.push(path);
-        }
     }
 }
 
@@ -1655,28 +1620,6 @@ fn find_codex_session_file(root: &Path, agent_type: &str, session_id: &str) -> O
         };
         matches_agent && string_field(payload, "id").as_deref() == Some(session_id)
     })
-}
-
-fn opencode_database_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(
-            home.join(".local")
-                .join("share")
-                .join("opencode")
-                .join("opencode.db"),
-        );
-    }
-    if let Some(data) = dirs::data_dir() {
-        candidates.push(data.join("opencode").join("opencode.db"));
-        candidates.push(data.join("ai.opencode.desktop").join("opencode.db"));
-    }
-    if let Some(config) = dirs::config_dir() {
-        candidates.push(config.join("ai.opencode.desktop").join("opencode.db"));
-    }
-    let mut seen = HashSet::new();
-    candidates.retain(|path| seen.insert(path.clone()));
-    candidates
 }
 
 #[cfg(test)]

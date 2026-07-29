@@ -30,6 +30,8 @@ pub enum StorageError {
 
 #[path = "storage_config.rs"]
 mod storage_config;
+#[path = "storage_device_usage.rs"]
+mod storage_device_usage;
 #[path = "storage_stats.rs"]
 mod storage_stats;
 #[path = "storage_tasks.rs"]

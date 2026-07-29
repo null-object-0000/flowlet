@@ -1,4 +1,7 @@
 use super::config::AgentSessionRow;
+use super::agent_session_sources::{
+    collect_jsonl_files, format_unix_millis, opencode_database_candidates, string_field,
+};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
@@ -294,30 +297,6 @@ fn jsonl_stem(file_name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn collect_jsonl_files(directory: &Path, matches: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(directory) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_symlink() {
-            continue;
-        }
-        let path = entry.path();
-        if file_type.is_dir() {
-            collect_jsonl_files(&path, matches);
-        } else if path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("jsonl"))
-        {
-            matches.push(path);
-        }
-    }
-}
-
 fn read_claude_transcript(path: &Path) -> Option<NativeSessionMetadata> {
     let file = File::open(path).ok()?;
     let mut metadata = NativeSessionMetadata::default();
@@ -435,15 +414,6 @@ fn apply_claude_runtime_freshness(
     } else {
         status.to_string()
     }
-}
-
-fn string_field(value: &Value, field: &str) -> Option<String> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -620,28 +590,6 @@ fn list_opencode_native_sessions() -> Vec<AgentSessionRow> {
         }
     }
     rows.into_values().collect()
-}
-
-fn opencode_database_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(
-            home.join(".local")
-                .join("share")
-                .join("opencode")
-                .join("opencode.db"),
-        );
-    }
-    if let Some(data) = dirs::data_dir() {
-        candidates.push(data.join("opencode").join("opencode.db"));
-        candidates.push(data.join("ai.opencode.desktop").join("opencode.db"));
-    }
-    if let Some(config) = dirs::config_dir() {
-        candidates.push(config.join("ai.opencode.desktop").join("opencode.db"));
-    }
-    let mut seen = HashSet::new();
-    candidates.retain(|path| seen.insert(path.clone()));
-    candidates
 }
 
 fn list_opencode_native_sessions_from(database_path: &Path) -> Vec<AgentSessionRow> {
@@ -1015,10 +963,6 @@ fn parse_session_time(value: &str) -> i64 {
                 .map(|value| value.and_utc().timestamp_millis())
         })
         .unwrap_or_default()
-}
-
-fn format_unix_millis(value: i64) -> Option<String> {
-    DateTime::<Utc>::from_timestamp_millis(value).map(|value| value.to_rfc3339())
 }
 
 #[cfg(test)]

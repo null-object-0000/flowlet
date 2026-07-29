@@ -2,6 +2,7 @@ use super::config::{
     classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType,
     ProxyBindConfig, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
+use super::agent_session_identity::{from_http_headers, AgentSessionIdentity};
 use super::power::{ActivityPermit, ActivityTracker};
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
@@ -92,70 +93,8 @@ fn mark_account_credential_recovered(
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
 const MAX_USAGE_CAPTURE_BYTES: usize = 1024 * 1024;
 const MAX_TTFT_PROBE_BYTES: usize = 64 * 1024;
-const MAX_AGENT_SESSION_ID_BYTES: usize = 512;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct AgentSessionIdentity {
-    agent_type: String,
-    session_id: String,
-    parent_session_id: Option<String>,
-}
-
 fn extract_agent_session(headers: &HeaderMap) -> Option<AgentSessionIdentity> {
-    if let Some(session_id) = valid_session_header(headers, "x-claude-code-session-id") {
-        return Some(AgentSessionIdentity {
-            agent_type: "claude-code".to_string(),
-            session_id,
-            parent_session_id: None,
-        });
-    }
-
-    // Pi — Pi 走 OpenAI 兼容 SDK，原生请求不带会话标识。Flowlet 在写入 Pi 配置时
-    // 会同时写入一个扩展（~/.pi/agent/extensions/flowlet.ts），在每次 LLM 请求的
-    // headers 组装完成后注入 x-flowlet-session（值为当前会话 UUID，与 Pi 原生会话
-    // 文件头行的 id 一致）。识别时以 x-flowlet-client: pi 标记头为门控，避免误读
-    // 其他客户端的同名头。
-    let is_flowlet_pi = headers
-        .get(proxy_http::AGENT_CLIENT_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .is_some_and(|value| value.eq_ignore_ascii_case("pi"));
-    if is_flowlet_pi {
-        if let Some(session_id) = valid_session_header(headers, proxy_http::AGENT_SESSION_HEADER) {
-            return Some(AgentSessionIdentity {
-                agent_type: "pi".to_string(),
-                session_id,
-                parent_session_id: None,
-            });
-        }
-    }
-
-    let user_agent_is_opencode = headers
-        .get("user-agent")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.to_ascii_lowercase().contains("opencode/"));
-    let opencode_session = valid_session_header(headers, "x-opencode-session");
-    if !user_agent_is_opencode && opencode_session.is_none() {
-        return None;
-    }
-
-    let session_id = opencode_session
-        .or_else(|| valid_session_header(headers, "x-session-id"))
-        .or_else(|| valid_session_header(headers, "x-session-affinity"))?;
-    Some(AgentSessionIdentity {
-        agent_type: "opencode".to_string(),
-        session_id,
-        parent_session_id: valid_session_header(headers, "x-parent-session-id"),
-    })
-}
-
-fn valid_session_header(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && value.len() <= MAX_AGENT_SESSION_ID_BYTES)
-        .map(str::to_string)
+    from_http_headers(headers)
 }
 
 #[path = "proxy_http.rs"]

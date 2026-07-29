@@ -499,7 +499,9 @@ pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::Lo
 /// 读取本头，再回退到 UA 规则，确保开箱即可归属，不依赖用户 config.json 是否含
 /// 对应规则。该头仅用于本地归属，不参与鉴权或路由；Flowlet 在识别后、转发上游前
 /// 会将其剥离，不向上游泄露。
-pub(super) const AGENT_CLIENT_HEADER: &str = "x-flowlet-client";
+pub(super) use crate::core::agent_session_identity::{
+    AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER,
+};
 
 /// Pi 与 Flowlet 约定的会话标识头。
 ///
@@ -510,7 +512,6 @@ pub(super) const AGENT_CLIENT_HEADER: &str = "x-flowlet-client";
 /// 该头仅用于本地会话归属，不参与鉴权或路由；Flowlet 在识别后、转发上游前会将其
 /// 剥离，不向上游泄露。识别时以 `x-flowlet-client: pi` 标记头为门控，避免误读其他
 /// 客户端的同名头。
-pub(super) const AGENT_SESSION_HEADER: &str = "x-flowlet-session";
 
 /// 标记头值 → 展示名。仅收录 UA 无法区分、需要靠标记头识别的 Agent。
 fn agent_client_marker_name(value: &str) -> Option<&'static str> {

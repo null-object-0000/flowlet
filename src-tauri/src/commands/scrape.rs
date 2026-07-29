@@ -1,45 +1,14 @@
-use super::{update_tray_tooltip, AppState};
 use crate::core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelModel, ChannelPreset,
-    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, ProxyBindConfig,
-    RequestLogModelOptions, RequestLogRow, RouteCandidate, RouteRule, UsageSummaryRow,
-    UsageTodaySummary, VirtualModel,
-};
-use crate::core::device_identity::{
-    DailyUsageTotal, DeviceUsageBundle, DeviceUsageImportPreview, DeviceUsageImportResult,
-    DeviceUsageSnapshot, KnownDevice,
+    AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelPreset, RouteRule,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
-use crate::core::proxy::ProxyStatus;
 use crate::core::sync::{
     query_deepseek_balance, query_kimi_balance, sync_deepseek_models, sync_kimi_models,
-    sync_longcat_models, sync_openai_compatible_models, sync_qwen_models, test_channel_connection,
+    sync_longcat_models, sync_openai_compatible_models, sync_qwen_models,
 };
+use crate::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, Manager};
-
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StorageUsageProgress {
-    scan_id: String,
-    summary: crate::core::storage::StorageUsageSummary,
-}
-
-static AGENT_DATA_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
-struct AgentDataSyncGuard;
-impl Drop for AgentDataSyncGuard {
-    fn drop(&mut self) {
-        AGENT_DATA_SYNC_RUNNING.store(false, Ordering::Release);
-    }
-}
-
-static CODEX_ACCOUNT_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
-struct CodexAccountSyncGuard;
-impl Drop for CodexAccountSyncGuard {
-    fn drop(&mut self) {
-        CODEX_ACCOUNT_SYNC_RUNNING.store(false, Ordering::Release);
-    }
-}
+use tauri::{AppHandle, Manager};
 
 static SCRAPE_BALANCE_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
 struct ScrapeBalanceSyncGuard;
@@ -48,1011 +17,10 @@ impl Drop for ScrapeBalanceSyncGuard {
         SCRAPE_BALANCE_SYNC_RUNNING.store(false, Ordering::Release);
     }
 }
-use tauri_plugin_autostart::ManagerExt;
-
-// ─── Agent Environment Commands ────────────────────────────────────────────
-
-// Claude Code 走 Anthropic-compatible 端点，其余已支持一键接入的 Agent
-// （OpenCode、Pi）走 OpenAI-compatible 端点。
-fn agent_endpoint_suffix(agent_id: &str) -> &'static str {
-    match agent_id {
-        "claude-code" => "/anthropic",
-        _ => "/v1",
-    }
-}
-
-#[tauri::command]
-pub(super) async fn detect_agent_environment(
-    agent_id: String,
-) -> Result<crate::core::agent_environment::AgentEnvironmentReport, String> {
-    crate::core::agent_environment::detect_agent_environment(&agent_id).await
-}
-
-#[tauri::command]
-pub(super) async fn query_codex_accounts(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::codex_account::CodexAccountsReport, String> {
-    crate::core::codex_account::query_codex_accounts(&state.codex_accounts_dir).await
-}
-
-#[tauri::command]
-pub(super) fn list_cached_codex_accounts(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::codex_account::CodexAccountsReport, String> {
-    crate::core::codex_account::list_cached_codex_accounts(&state.codex_accounts_dir)
-}
-
-#[tauri::command]
-pub(super) async fn sync_codex_accounts(
-    state: tauri::State<'_, AppState>,
-    trigger_source: String,
-) -> Result<crate::core::codex_account::CodexAccountSyncResult, String> {
-    if CODEX_ACCOUNT_SYNC_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Ok(crate::core::codex_account::CodexAccountSyncResult {
-            started: false,
-            job_id: None,
-            accounts: 0,
-            stale: 0,
-            failed: 0,
-            message: "已有 Codex 账号同步正在运行".to_string(),
-        });
-    }
-    let _guard = CodexAccountSyncGuard;
-    let codex_home = crate::core::codex_account::codex_home();
-    crate::core::codex_account::sync_codex_accounts(
-        &state.storage,
-        &state.codex_accounts_dir,
-        &codex_home,
-        &trigger_source,
-    )
-    .await
-}
-
-#[tauri::command]
-pub(super) async fn authorize_codex_account(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::codex_account::CodexAccountReport, String> {
-    crate::core::codex_account::authorize_codex_account(&state.codex_accounts_dir, |auth_url| {
-        tauri_plugin_opener::open_url(auth_url, None::<&str>)
-            .map_err(|error| format!("无法打开 Codex 账号授权页面：{error}"))
-    })
-    .await
-}
-
-#[tauri::command]
-pub(super) fn inspect_agent_global_config(
-    state: tauri::State<'_, AppState>,
-    agent_id: String,
-) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
-    let bind = state
-        .bind_config
-        .lock()
-        .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
-        .clone()
-        .normalized();
-    let suffix = agent_endpoint_suffix(&agent_id);
-    crate::core::agent_global_config::inspect_agent_global_config(
-        &agent_id,
-        &format!("http://127.0.0.1:{}{suffix}", bind.port),
-    )
-}
-
-#[tauri::command]
-pub(super) fn apply_agent_global_config(
-    state: tauri::State<'_, AppState>,
-    agent_id: String,
-    options: Option<crate::core::agent_global_config::AgentGlobalConfigOptions>,
-) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
-    let bind = state
-        .bind_config
-        .lock()
-        .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
-        .clone()
-        .normalized();
-    let suffix = agent_endpoint_suffix(&agent_id);
-    crate::core::agent_global_config::apply_agent_global_config(
-        &agent_id,
-        &format!("http://127.0.0.1:{}{suffix}", bind.port),
-        &bind.default_client_token,
-        options.as_ref(),
-    )
-}
-
-#[tauri::command]
-pub(super) fn restore_agent_global_config(
-    state: tauri::State<'_, AppState>,
-    agent_id: String,
-) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
-    let port = state
-        .bind_config
-        .lock()
-        .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
-        .clone()
-        .normalized()
-        .port;
-    let suffix = agent_endpoint_suffix(&agent_id);
-    crate::core::agent_global_config::restore_agent_global_config(
-        &agent_id,
-        &format!("http://127.0.0.1:{port}{suffix}"),
-    )
-}
-
-// ─── Proxy Commands ──────────────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) async fn start_proxy(
-    app: AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    if state.proxy.status().running {
-        update_tray_tooltip(&app, true);
-        return Ok(());
-    }
-    tracing::info!("start_proxy: 开始启动本地代理");
-    state.start_configured_proxy().await.map_err(|err| {
-        tracing::error!(error = %err, "start_proxy: 启动失败");
-        err
-    })?;
-    tracing::info!("start_proxy: 本地代理启动成功");
-    update_tray_tooltip(&app, true);
-    Ok(())
-}
-
-#[tauri::command]
-pub(super) async fn stop_proxy(
-    app: AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    state.proxy.stop().await.map_err(|err| err.to_string())?;
-    // 更新托盘 tooltip
-    update_tray_tooltip(&app, false);
-    Ok(())
-}
-
-#[tauri::command]
-pub(super) fn proxy_status(state: tauri::State<'_, AppState>) -> ProxyStatus {
-    let mut status = state.proxy.status();
-    if !status.running {
-        if let Ok(config) = state.bind_config.lock() {
-            status.bind_addr = config.clone().normalized().bind_addr();
-        }
-    }
-    status
-}
-
-// ─── Connection Test ───────────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) async fn test_connection(
-    state: tauri::State<'_, AppState>,
-    channel_id: String,
-    api_key: String,
-    base_url_override: Option<String>,
-) -> Result<(), String> {
-    // 直接传入连接参数，这样新建账号（尚未保存）也能测试。
-    // 仅做上游鉴权校验，不读写已保存的账号列表。
-    let account = ChannelAccount {
-        id: String::new(),
-        channel_id,
-        name: String::new(),
-        api_key,
-        enabled: true,
-        priority: 0,
-        base_url_override,
-        ..Default::default()
-    };
-    let channels_config = state
-        .channels_config
-        .lock()
-        .map_err(|_| "锁定渠道运行时配置失败".to_string())?
-        .clone();
-    test_channel_connection(&account, &channels_config).await
-}
-
-#[tauri::command]
-pub(super) fn get_proxy_bind_config(
-    state: tauri::State<'_, AppState>,
-) -> Result<ProxyBindConfig, String> {
-    state
-        .bind_config
-        .lock()
-        .map(|guard| guard.clone().normalized())
-        .map_err(|_| "读取代理监听配置失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn set_proxy_bind_config(
-    state: tauri::State<'_, AppState>,
-    config: ProxyBindConfig,
-) -> Result<(), String> {
-    let config = config.normalized();
-    config
-        .bind_addr()
-        .parse::<std::net::SocketAddr>()
-        .map_err(|_| "代理监听地址无效".to_string())?;
-    let json = serde_json::to_string(&config).map_err(|err| err.to_string())?;
-    state
-        .storage
-        .set_app_meta("proxy_bind_config", &json)
-        .map_err(|err| err.to_string())?;
-    if let Ok(mut guard) = state.bind_config.lock() {
-        *guard = config.clone();
-    }
-    if let Ok(mut guard) = state.proxy.bind_config.lock() {
-        *guard = config;
-    }
-    Ok(())
-}
-// ─── Channel Presets Commands ────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn list_channel_presets(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<ChannelPreset>, String> {
-    state
-        .channels
-        .lock()
-        .map(|channels| channels.clone())
-        .map_err(|_| "读取渠道模板失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn save_channel_presets(
-    state: tauri::State<'_, AppState>,
-    presets: Vec<ChannelPreset>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_channel_presets(&presets)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .channels
-        .lock()
-        .map_err(|_| "保存渠道模板失败".to_string())?;
-    *current = presets;
-    Ok(())
-}
-
-// ─── Channel Accounts Commands ──────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn list_channel_accounts(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<ChannelAccount>, String> {
-    state
-        .accounts
-        .lock()
-        .map(|accounts| accounts.clone())
-        .map_err(|_| "读取账号配置失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn save_channel_accounts(
-    state: tauri::State<'_, AppState>,
-    accounts: Vec<ChannelAccount>,
-) -> Result<Vec<ChannelAccount>, String> {
-    state
-        .storage
-        .save_channel_accounts(&accounts)
-        .map_err(|err| err.to_string())?;
-
-    // 从数据库重新读取规范化后的账号列表（API Key 变化时 credential_status 已被重置）。
-    let normalized = state
-        .storage
-        .list_channel_accounts()
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .accounts
-        .lock()
-        .map_err(|_| "保存账号配置失败".to_string())?;
-    *current = normalized.clone();
-    Ok(normalized)
-}
-
-// ─── Route Candidates Commands ──────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn list_route_candidates(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<RouteCandidate>, String> {
-    state
-        .routes
-        .lock()
-        .map(|routes| routes.clone())
-        .map_err(|_| "读取路由配置失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn save_route_candidates(
-    state: tauri::State<'_, AppState>,
-    routes: Vec<RouteCandidate>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_route_candidates(&routes)
-        .map_err(|err| {
-            let msg = err.to_string();
-            tracing::error!(error = %msg, "保存路由候选失败");
-            msg
-        })?;
-
-    let mut current = state.routes.lock().map_err(|_| {
-        let msg = "保存路由配置失败".to_string();
-        tracing::error!("{}", msg);
-        msg
-    })?;
-    *current = routes;
-    Ok(())
-}
-
-#[tauri::command]
-pub(super) fn list_channel_models(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<ChannelModel>, String> {
-    state
-        .storage
-        .list_channel_models()
-        .map_err(|err| err.to_string())
-}
-
-// ─── Virtual Models Commands ────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn list_virtual_models(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<VirtualModel>, String> {
-    state
-        .virtual_models
-        .lock()
-        .map(|models| models.clone())
-        .map_err(|_| "读取虚拟模型失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn save_virtual_models(
-    state: tauri::State<'_, AppState>,
-    models: Vec<VirtualModel>,
-) -> Result<(), String> {
-    state
-        .storage
-        .save_virtual_models(&models)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .virtual_models
-        .lock()
-        .map_err(|_| "保存虚拟模型失败".to_string())?;
-    *current = models;
-    Ok(())
-}
-
-// ─── Usage & Logs Commands ──────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
-    let parsed = state
-        .storage
-        .reanalyze_captured_usage("all")
-        .map_err(|err| err.to_string())?;
-    let inserted = state
-        .storage
-        .analyze_unknown_usage("all")
-        .map_err(|err| err.to_string())?;
-    state
-        .storage
-        .recalculate_usage_costs("all")
-        .map_err(|err| err.to_string())?;
-    Ok(parsed + inserted)
-}
-
-#[tauri::command]
-pub(super) fn repair_agent_sessions(
-    state: tauri::State<'_, AppState>,
-    time_range: String,
-) -> Result<crate::core::config::AgentSessionRepairResult, String> {
-    state
-        .storage
-        .repair_agent_sessions(&time_range)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn repair_captured_usage(
-    state: tauri::State<'_, AppState>,
-    time_range: String,
-) -> Result<usize, String> {
-    state
-        .storage
-        .reanalyze_captured_usage(&time_range)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn repair_unknown_usage(
-    state: tauri::State<'_, AppState>,
-    time_range: String,
-) -> Result<usize, String> {
-    state
-        .storage
-        .analyze_unknown_usage(&time_range)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn repair_usage_costs(
-    state: tauri::State<'_, AppState>,
-    time_range: String,
-) -> Result<usize, String> {
-    state
-        .storage
-        .recalculate_usage_costs(&time_range)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) async fn usage_summary(
-    state: tauri::State<'_, AppState>,
-    period: String,
-) -> Result<Vec<UsageSummaryRow>, String> {
-    if !matches!(
-        period.as_str(),
-        "all" | "year" | "quarter" | "month" | "week" | "today"
-    ) {
-        return Err(format!("不支持的用量统计周期：{period}"));
-    }
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || storage.usage_summary(&period))
-        .await
-        .map_err(|err| format!("读取用量统计任务失败：{err}"))?
-        .map_err(|err| err.to_string())
-}
-
-/// 概览页「今日消耗」专用：返回今日 Token 聚合（总量 + 输入/缓存/输出拆解），
-/// 供 service-strip 悬浮明细展示总消耗、缓存命中率与输入/输出拆解。
-/// 使用 `async fn` 避免同步命令占用 Tauri 主线程；底层查询走索引范围
-/// 扫描、不带分组、不带 JOIN，持锁时间极短，不会卡住窗口拖动。
-#[tauri::command]
-pub(super) async fn usage_today_tokens(
-    state: tauri::State<'_, AppState>,
-) -> Result<UsageTodaySummary, String> {
-    state
-        .storage
-        .usage_today_summary()
-        .map_err(|err| err.to_string())
-}
-
-/// 返回可供本地导出或未来同步上传的最小设备用量快照。
-#[tauri::command]
-pub(super) async fn device_usage_snapshot(
-    state: tauri::State<'_, AppState>,
-) -> Result<DeviceUsageSnapshot, String> {
-    let storage = state.storage.clone();
-    let identity = state
-        .device_identity
-        .lock()
-        .map_err(|_| "读取当前设备身份失败".to_string())?
-        .clone();
-    let days = tauri::async_runtime::spawn_blocking(move || storage.daily_usage_totals())
-        .await
-        .map_err(|error| format!("生成设备每日用量任务失败：{error}"))?
-        .map_err(|error| error.to_string())?;
-    Ok(DeviceUsageSnapshot::new(&identity, days))
-}
-
-#[tauri::command]
-pub(super) async fn list_known_devices(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<KnownDevice>, String> {
-    let storage = state.storage.clone();
-    let identity = state
-        .device_identity
-        .lock()
-        .map_err(|_| "读取当前设备身份失败".to_string())?
-        .clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let current_days = storage.daily_usage_totals().map_err(|error| error.to_string())?;
-        let mut devices = storage.imported_known_devices().map_err(|error| error.to_string())?;
-        devices.retain(|device| device.device_id != identity.device_id);
-        devices.insert(0, KnownDevice {
-            device_id: identity.device_id,
-            device_created_at: identity.created_at,
-            display_name: identity.display_name,
-            platform: identity.platform,
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-            is_current: true,
-            timezone_offset_minutes: chrono::Local::now().offset().local_minus_utc() / 60,
-            first_usage_date: current_days.first().map(|day| day.date.clone()),
-            last_usage_date: current_days.last().map(|day| day.date.clone()),
-            day_count: current_days.len() as i64,
-            request_count: current_days.iter().map(|day| day.request_count).sum(),
-            known_tokens: current_days.iter().map(|day| day.known_tokens).sum(),
-            last_seen_at: chrono::Utc::now().to_rfc3339(),
-        });
-        Ok(devices)
-    })
-    .await
-    .map_err(|error| format!("读取设备目录任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn list_shared_devices(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<KnownDevice>, String> {
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        storage
-            .imported_known_devices()
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("读取共享设备目录任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn device_daily_usage(
-    state: tauri::State<'_, AppState>,
-    device_id: Option<String>,
-) -> Result<Vec<DailyUsageTotal>, String> {
-    let storage = state.storage.clone();
-    let current_device_id = state
-        .device_identity
-        .lock()
-        .map_err(|_| "读取当前设备身份失败".to_string())?
-        .device_id
-        .clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if device_id.as_deref() == Some(current_device_id.as_str()) {
-            return storage.daily_usage_totals().map_err(|error| error.to_string());
-        }
-        if let Some(device_id) = device_id.as_deref() {
-            return storage
-                .imported_daily_usage(Some(device_id))
-                .map_err(|error| error.to_string());
-        }
-        let current = storage.daily_usage_totals().map_err(|error| error.to_string())?;
-        let imported = storage.imported_daily_usage(None).map_err(|error| error.to_string())?;
-        let mut by_date = std::collections::BTreeMap::<String, DailyUsageTotal>::new();
-        for day in current.into_iter().chain(imported) {
-            let total = by_date.entry(day.date.clone()).or_insert(DailyUsageTotal {
-                date: day.date.clone(),
-                request_count: 0,
-                known_tokens: 0,
-                input_tokens: 0,
-                input_cached_tokens: 0,
-                input_uncached_tokens: 0,
-                cache_measured_input_tokens: 0,
-                output_tokens: 0,
-                unknown_count: 0,
-            });
-            total.request_count += day.request_count;
-            total.known_tokens += day.known_tokens;
-            total.input_tokens += day.input_tokens;
-            total.input_cached_tokens += day.input_cached_tokens;
-            total.input_uncached_tokens += day.input_uncached_tokens;
-            total.cache_measured_input_tokens += day.cache_measured_input_tokens;
-            total.output_tokens += day.output_tokens;
-            total.unknown_count += day.unknown_count;
-        }
-        Ok(by_date.into_values().collect())
-    })
-    .await
-    .map_err(|error| format!("读取设备每日用量任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn shared_device_daily_usage(
-    state: tauri::State<'_, AppState>,
-    device_id: Option<String>,
-) -> Result<Vec<DailyUsageTotal>, String> {
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        storage
-            .imported_daily_usage(device_id.as_deref())
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("读取共享设备每日用量任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn rename_current_device(
-    state: tauri::State<'_, AppState>,
-    display_name: String,
-) -> Result<(), String> {
-    let identity = state.device_identity.clone();
-    let data_dir = state.device_identity_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        identity
-            .lock()
-            .map_err(|_| "更新当前设备身份失败".to_string())?
-            .update_display_name(&data_dir, &display_name)
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("重命名当前设备任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn get_s3_sync_settings(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::device_sync::S3SyncSettings, String> {
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::core::device_sync::load_settings(&storage)
-    })
-    .await
-    .map_err(|_| "读取 S3 同步设置任务失败".to_string())?
-}
-
-#[tauri::command]
-pub(super) async fn save_s3_sync_config(
-    state: tauri::State<'_, AppState>,
-    config: crate::core::device_sync::S3SyncConfigInput,
-) -> Result<crate::core::device_sync::S3SyncSettings, String> {
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::core::device_sync::save_config(&storage, &config)?;
-        crate::core::device_sync::load_settings(&storage)
-    })
-    .await
-    .map_err(|_| "保存 S3 同步设置任务失败".to_string())?
-}
-
-#[tauri::command]
-pub(super) async fn test_s3_sync_connection(
-    _state: tauri::State<'_, AppState>,
-    config: crate::core::device_sync::S3SyncConfigInput,
-) -> Result<crate::core::device_sync::S3ConnectionTestResult, String> {
-    crate::core::device_sync::test_connection(&config).await
-}
-
-#[tauri::command]
-pub(super) async fn test_s3_read_connection(
-    _state: tauri::State<'_, AppState>,
-    config: crate::core::device_sync::S3SyncConfigInput,
-) -> Result<crate::core::device_sync::S3ConnectionTestResult, String> {
-    crate::core::device_sync::test_read_connection(&config).await
-}
-
-#[tauri::command]
-pub(super) async fn sync_device_usage_s3(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::device_sync::S3DeviceSyncResult, String> {
-    let storage = state.storage.clone();
-    let identity = state
-        .device_identity
-        .lock()
-        .map_err(|_| "读取当前设备身份失败".to_string())?
-        .clone();
-    crate::core::device_sync::run_configured_sync(storage, identity, "manual").await
-}
-
-#[tauri::command]
-pub(super) async fn refresh_shared_device_usage_s3(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::device_sync::S3DevicePullResult, String> {
-    crate::core::device_sync::run_configured_pull(state.storage.clone()).await
-}
-
-fn read_device_usage_bundle(path: &str) -> Result<DeviceUsageBundle, String> {
-    const MAX_BUNDLE_BYTES: u64 = 4 * 1024 * 1024;
-    let metadata = std::fs::metadata(path).map_err(|error| format!("读取导入文件失败：{error}"))?;
-    if metadata.len() > MAX_BUNDLE_BYTES {
-        return Err("设备用量文件超过 4 MB 限制".to_string());
-    }
-    let bytes = std::fs::read(path).map_err(|error| format!("读取导入文件失败：{error}"))?;
-    DeviceUsageBundle::from_bytes(&bytes)
-}
-
-#[tauri::command]
-pub(super) async fn export_device_usage_bundle(
-    state: tauri::State<'_, AppState>,
-    path: String,
-) -> Result<(), String> {
-    let storage = state.storage.clone();
-    let identity = state
-        .device_identity
-        .lock()
-        .map_err(|_| "读取当前设备身份失败".to_string())?
-        .clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let days = storage.daily_usage_totals().map_err(|error| error.to_string())?;
-        let bundle = DeviceUsageBundle::new(DeviceUsageSnapshot::new(&identity, days));
-        let bytes = serde_json::to_vec_pretty(&bundle)
-            .map_err(|error| format!("生成设备用量文件失败：{error}"))?;
-        let target = std::path::PathBuf::from(&path);
-        let parent = target.parent().unwrap_or_else(|| std::path::Path::new("."));
-        let temporary = parent.join(format!(
-            ".flowlet-usage-{}.tmp",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::write(&temporary, bytes)
-            .map_err(|error| format!("写入设备用量临时文件失败：{error}"))?;
-        let backup = parent.join(format!(
-            ".flowlet-usage-{}.backup",
-            uuid::Uuid::new_v4().simple()
-        ));
-        if target.exists() {
-            std::fs::rename(&target, &backup)
-                .map_err(|error| format!("准备覆盖设备用量文件失败：{error}"))?;
-        }
-        match std::fs::rename(&temporary, &target) {
-            Ok(()) => {
-                let _ = std::fs::remove_file(&backup);
-                Ok(())
-            }
-            Err(error) => {
-                let _ = std::fs::remove_file(&temporary);
-                if backup.exists() {
-                    let _ = std::fs::rename(&backup, &target);
-                }
-                Err(format!("保存设备用量文件失败：{error}"))
-            }
-        }
-    })
-    .await
-    .map_err(|error| format!("导出设备用量任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn preview_device_usage_import(
-    state: tauri::State<'_, AppState>,
-    path: String,
-) -> Result<DeviceUsageImportPreview, String> {
-    let storage = state.storage.clone();
-    let current_device_id = state
-        .device_identity
-        .lock()
-        .map_err(|_| "读取当前设备身份失败".to_string())?
-        .device_id
-        .clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let bundle = read_device_usage_bundle(&path)?;
-        let snapshot = bundle.snapshot;
-        let display_name = snapshot.resolved_display_name();
-        let platform = snapshot.resolved_platform();
-        let app_version = snapshot.resolved_app_version();
-        storage
-            .preview_device_usage_import(
-                &current_device_id,
-                &snapshot.device_id,
-                &snapshot.device_created_at,
-                &display_name,
-                &platform,
-                &app_version,
-                &snapshot.generated_at,
-                snapshot.timezone_offset_minutes,
-                &snapshot.days,
-            )
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("预览设备用量导入任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn import_device_usage_bundle(
-    state: tauri::State<'_, AppState>,
-    path: String,
-) -> Result<DeviceUsageImportResult, String> {
-    let storage = state.storage.clone();
-    let current_device_id = state
-        .device_identity
-        .lock()
-        .map_err(|_| "读取当前设备身份失败".to_string())?
-        .device_id
-        .clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let bundle = read_device_usage_bundle(&path)?;
-        let snapshot = bundle.snapshot;
-        if snapshot.device_id == current_device_id {
-            return Err("不能把当前设备的用量重新导入为远程设备".to_string());
-        }
-        let display_name = snapshot.resolved_display_name();
-        let platform = snapshot.resolved_platform();
-        let app_version = snapshot.resolved_app_version();
-        storage
-            .import_device_usage(
-                &snapshot.device_id,
-                &snapshot.device_created_at,
-                &display_name,
-                &platform,
-                &app_version,
-                &snapshot.generated_at,
-                snapshot.timezone_offset_minutes,
-                &snapshot.days,
-            )
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("导入设备用量任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) fn list_request_logs(
-    state: tauri::State<'_, AppState>,
-    filter: LogsFilter,
-) -> Result<LogsPageResult, String> {
-    state
-        .storage
-        .list_request_logs_page(filter)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn list_agent_sessions(
-    state: tauri::State<'_, AppState>,
-    filter: crate::core::config::AgentSessionsFilter,
-) -> Result<crate::core::config::AgentSessionsPageResult, String> {
-    state
-        .storage
-        .list_agent_sessions(filter)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn list_agent_session_children(
-    state: tauri::State<'_, AppState>,
-    agent_type: String,
-    parent_session_id: String,
-) -> Result<Vec<crate::core::config::AgentSessionRow>, String> {
-    state
-        .storage
-        .list_agent_session_children(&agent_type, &parent_session_id)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) async fn get_agent_session_timeline(
-    state: tauri::State<'_, AppState>,
-    agent_type: String,
-    session_id: String,
-) -> Result<crate::core::config::AgentSessionTimeline, String> {
-    let prices = state.storage.prices();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut timeline = crate::core::agent_session_timeline::get_native_agent_session_timeline(
-            &agent_type,
-            &session_id,
-        )?;
-        crate::core::agent_session_timeline::apply_native_cost_estimate_to_timeline(
-            &agent_type,
-            &mut timeline,
-            &prices,
-        );
-        Ok(timeline)
-    })
-    .await
-    .map_err(|error| format!("读取原生会话任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn get_agent_session_native_summary(
-    state: tauri::State<'_, AppState>,
-    agent_type: String,
-    session_id: String,
-) -> Result<crate::core::config::AgentSessionNativeSummary, String> {
-    let prices = state.storage.prices();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut summary = crate::core::agent_session_timeline::get_native_agent_session_summary(
-            &agent_type,
-            &session_id,
-        )?;
-        crate::core::agent_session_timeline::apply_native_cost_estimate_to_summary(
-            &agent_type,
-            &mut summary,
-            &prices,
-        );
-        Ok(summary)
-    })
-    .await
-    .map_err(|error| format!("读取原生会话摘要任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn sync_agent_data(
-    state: tauri::State<'_, AppState>,
-    force: bool,
-    trigger_source: String,
-) -> Result<crate::core::storage::AgentDataSyncResult, String> {
-    if AGENT_DATA_SYNC_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Ok(crate::core::storage::AgentDataSyncResult {
-            started: false,
-            job_id: None,
-            scanned: 0,
-            changed: 0,
-            failed: 0,
-            message: "已有 Agent 数据同步正在运行".to_string(),
-        });
-    }
-    let _guard = AgentDataSyncGuard;
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || storage.sync_agent_data(force, &trigger_source))
-        .await
-        .map_err(|error| format!("Agent 数据同步任务失败：{error}"))?
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub(super) fn list_background_jobs(
-    state: tauri::State<'_, AppState>,
-    filter: crate::core::storage::BackgroundJobsFilter,
-) -> Result<crate::core::storage::BackgroundJobsPage, String> {
-    state
-        .storage
-        .list_background_jobs(filter)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub(super) fn get_background_job_detail(
-    state: tauri::State<'_, AppState>,
-    job_id: String,
-) -> Result<crate::core::storage::BackgroundJobDetail, String> {
-    state
-        .storage
-        .get_background_job_detail(&job_id)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "任务日志不存在".to_string())
-}
-
-#[tauri::command]
-pub(super) fn get_agent_sync_status(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::storage::AgentSyncStatusReport, String> {
-    Ok(crate::core::storage::AgentSyncStatusReport {
-        running: AGENT_DATA_SYNC_RUNNING.load(Ordering::Acquire),
-        sources: state
-            .storage
-            .list_agent_source_sync_states()
-            .map_err(|error| error.to_string())?,
-    })
-}
-
-#[tauri::command]
-pub(super) fn cancel_background_job(
-    state: tauri::State<'_, AppState>,
-    job_id: String,
-) -> Result<bool, String> {
-    state
-        .storage
-        .request_background_job_cancel(&job_id)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub(super) fn cleanup_background_jobs(
-    state: tauri::State<'_, AppState>,
-    keep_days: u32,
-) -> Result<crate::core::storage::CleanupBackgroundJobsResult, String> {
-    state
-        .storage
-        .cleanup_background_jobs(keep_days)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub(super) async fn probe_cost_ledger_sources(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::cost_ledger_source_probe::CostLedgerSourceProbeResult, String> {
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::core::cost_ledger_source_probe::probe_cost_ledger_sources(&storage)
-    })
-    .await
-    .map_err(|error| format!("探测成本账本数据源失败：{error}"))
-}
 
 /// 手动触发 models-cn 目录同步。拉取远程数据保存到本地，写入任务日志。
 #[tauri::command]
-pub(super) async fn sync_models_cn_catalog(
+pub(crate) async fn sync_models_cn_catalog(
     state: tauri::State<'_, AppState>,
     source_url: String,
     trigger_source: String,
@@ -1070,7 +38,7 @@ pub(super) async fn sync_models_cn_catalog(
 
 /// 手动触发 models.dev 目录同步。拉取远程数据保存到本地，写入任务日志。
 #[tauri::command]
-pub(super) async fn sync_models_dev_catalog(
+pub(crate) async fn sync_models_dev_catalog(
     state: tauri::State<'_, AppState>,
     source_url: String,
     trigger_source: String,
@@ -1088,7 +56,7 @@ pub(super) async fn sync_models_dev_catalog(
 
 /// 读取本地 models-cn 目录文件。返回 None 表示文件不存在。
 #[tauri::command]
-pub(super) fn get_models_cn_catalog(
+pub(crate) fn get_models_cn_catalog(
     _state: tauri::State<'_, AppState>,
 ) -> Result<Option<String>, String> {
     Ok(crate::core::storage::storage_tasks::read_models_cn_file())
@@ -1096,7 +64,7 @@ pub(super) fn get_models_cn_catalog(
 
 /// 从本地 models-cn 目录提取 channel_id:upstream_model → currency 映射。
 #[tauri::command]
-pub(super) fn get_models_cn_currencies(
+pub(crate) fn get_models_cn_currencies(
     _state: tauri::State<'_, AppState>,
 ) -> Result<Vec<(String, String)>, String> {
     crate::core::storage::storage_tasks::get_models_cn_currencies()
@@ -1137,7 +105,7 @@ pub struct NewExposedModel {
 
 /// 预览 config.json 与数据库渠道预设的差异（不写入）。
 #[tauri::command]
-pub(super) fn preview_sync_channel_presets(
+pub(crate) fn preview_sync_channel_presets(
     state: tauri::State<'_, AppState>,
 ) -> Result<PresetSyncPreview, String> {
     let storage = state.storage.clone();
@@ -1278,7 +246,7 @@ pub(super) fn preview_sync_channel_presets(
 /// 把 config.json 渠道预设同步到数据库，并补齐新增暴露模型的默认路由。
 /// 新增渠道默认禁用，已有渠道保留启用状态。
 #[tauri::command]
-pub(super) fn apply_sync_channel_presets(state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub(crate) fn apply_sync_channel_presets(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let storage = state.storage.clone();
     let config_path = state.config_path.clone();
     crate::migrate_channel_presets_from_config(&storage, &config_path, true)?;
@@ -1310,80 +278,10 @@ pub(super) fn apply_sync_channel_presets(state: tauri::State<'_, AppState>) -> R
     Ok(())
 }
 
-#[tauri::command]
-pub(super) fn list_agent_session_clients(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<LogFilterClient>, String> {
-    state
-        .storage
-        .list_agent_session_clients()
-        .map_err(|err| err.to_string())
-}
-
-/// 返回请求日志中实际出现的客户端身份列表，供前端"客户端"筛选项使用。
-/// id 为空串表示"未知"（client_id IS NULL）。
-#[tauri::command]
-pub(super) fn list_request_log_clients(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<LogFilterClient>, String> {
-    state
-        .storage
-        .list_request_log_clients()
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn list_request_log_models(
-    state: tauri::State<'_, AppState>,
-) -> Result<RequestLogModelOptions, String> {
-    state
-        .storage
-        .list_request_log_models()
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn get_request_log_detail(
-    state: tauri::State<'_, AppState>,
-    request_id: String,
-) -> Result<Vec<RequestLogRow>, String> {
-    state
-        .storage
-        .list_request_logs_by_request_id(&request_id)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn get_log_capture_config(
-    state: tauri::State<'_, AppState>,
-) -> Result<LogCaptureConfig, String> {
-    state
-        .capture
-        .lock()
-        .map(|guard| guard.clone())
-        .map_err(|_| "锁失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn set_log_capture_config(
-    state: tauri::State<'_, AppState>,
-    config: LogCaptureConfig,
-) -> Result<(), String> {
-    let json = serde_json::to_string(&config).map_err(|err| err.to_string())?;
-    state
-        .storage
-        .set_app_meta("log_capture_config", &json)
-        .map_err(|err| err.to_string())?;
-    if let Ok(mut guard) = state.capture.lock() {
-        *guard = config;
-    }
-    Ok(())
-}
-
 // ─── Sync Commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub(super) async fn query_balance(
+pub(crate) async fn query_balance(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<BalanceQueryResult, String> {
@@ -1503,7 +401,7 @@ pub(super) async fn query_balance(
 /// 也能拉取。成功后把结果写入 `channel_models` 目录（供模型服务页展示），但**不**写
 /// 账号的 `synced_models` / `exposed_models`——那些由账号编辑器保存时按用户勾选持久化。
 #[tauri::command]
-pub(super) async fn fetch_channel_models(
+pub(crate) async fn fetch_channel_models(
     state: tauri::State<'_, AppState>,
     channel_id: String,
     api_key: String,
@@ -1611,7 +509,7 @@ pub(super) async fn fetch_channel_models(
 // ─── Balance Snapshot Commands ──────────────────────────────────────────────
 
 #[tauri::command]
-pub(super) fn save_balance_snapshot(
+pub(crate) fn save_balance_snapshot(
     state: tauri::State<'_, AppState>,
     snapshot: AccountBalanceSnapshot,
 ) -> Result<(), String> {
@@ -1622,7 +520,7 @@ pub(super) fn save_balance_snapshot(
 }
 
 #[tauri::command]
-pub(super) fn list_balance_snapshots(
+pub(crate) fn list_balance_snapshots(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<Vec<AccountBalanceSnapshot>, String> {
@@ -1633,7 +531,7 @@ pub(super) fn list_balance_snapshots(
 }
 
 #[tauri::command]
-pub(super) fn latest_balance_snapshots(
+pub(crate) fn latest_balance_snapshots(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<AccountBalanceSnapshot>, String> {
     state
@@ -1645,7 +543,7 @@ pub(super) fn latest_balance_snapshots(
 // ─── Account Stats Commands ────────────────────────────────────────────────
 
 #[tauri::command]
-pub(super) fn account_stats(
+pub(crate) fn account_stats(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<AccountStatsRow>, String> {
     state.storage.account_stats().map_err(|err| err.to_string())
@@ -1654,7 +552,7 @@ pub(super) fn account_stats(
 // ─── Route Rules Commands ──────────────────────────────────────────────────
 
 #[tauri::command]
-pub(super) fn list_route_rules(
+pub(crate) fn list_route_rules(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<RouteRule>, String> {
     state
@@ -1665,7 +563,7 @@ pub(super) fn list_route_rules(
 }
 
 #[tauri::command]
-pub(super) fn save_route_rules(
+pub(crate) fn save_route_rules(
     state: tauri::State<'_, AppState>,
     rules: Vec<RouteRule>,
 ) -> Result<(), String> {
@@ -1680,259 +578,6 @@ pub(super) fn save_route_rules(
         .map_err(|_| "保存路由规则失败".to_string())?;
     *current = rules;
     Ok(())
-}
-
-// ─── Maintenance Commands ─────────────────────────────────────────────────
-
-// ─── App Meta (全局配置 KV) ────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn read_app_meta(
-    state: tauri::State<'_, AppState>,
-    key: String,
-) -> Result<Option<String>, String> {
-    state
-        .storage
-        .get_app_meta(&key)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn write_app_meta(
-    state: tauri::State<'_, AppState>,
-    key: String,
-    value: String,
-) -> Result<(), String> {
-    state
-        .storage
-        .set_app_meta(&key, &value)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn db_stats(state: tauri::State<'_, AppState>) -> Result<(i64, i64, i64), String> {
-    state.storage.db_stats().map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) async fn storage_usage_summary(
-    app: AppHandle,
-    state: tauri::State<'_, AppState>,
-    scan_id: String,
-) -> Result<crate::core::storage::StorageUsageSummary, String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let config_bytes = std::fs::metadata(&state.config_path)
-            .map(|metadata| metadata.len().min(i64::MAX as u64) as i64)
-            .unwrap_or(0);
-        state
-            .storage
-            .storage_usage_summary_with_progress(config_bytes, |summary| {
-                let _ = app.emit(
-                    "storage-usage-progress",
-                    StorageUsageProgress {
-                        scan_id: scan_id.clone(),
-                        summary,
-                    },
-                );
-            })
-            .map_err(|err| err.to_string())
-    })
-    .await
-    .map_err(|error| format!("读取存储占用任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn compact_database(
-    state: tauri::State<'_, AppState>,
-) -> Result<crate::core::storage::DatabaseCompactionResult, String> {
-    if state.proxy.status().running {
-        return Err("优化数据库前必须先暂停代理服务".to_string());
-    }
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        tracing::info!("开始完整压缩数据库并启用增量空间回收");
-        let result = storage
-            .compact_database()
-            .map_err(|error| error.to_string())?;
-        tracing::info!(
-            before_mb = format!("{:.1}", result.before.database_bytes as f64 / 1048576.0),
-            after_mb = format!("{:.1}", result.after.database_bytes as f64 / 1048576.0),
-            reclaimed_mb = format!("{:.1}", result.reclaimed_bytes as f64 / 1048576.0),
-            "数据库完整压缩完成"
-        );
-        Ok(result)
-    })
-    .await
-    .map_err(|error| format!("数据库优化任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) fn read_config(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let path = &state.config_path;
-    crate::core::proxy::read_config_raw(path)
-        .ok_or_else(|| "config.json 不存在或读取失败".to_string())
-}
-
-#[tauri::command]
-pub(super) fn write_config(
-    state: tauri::State<'_, AppState>,
-    content: String,
-) -> Result<(), String> {
-    let path = &state.config_path;
-    crate::core::proxy::write_config_raw(path, &content)
-}
-
-/// 烟雾测试用：验证前端 IPC 能连上后端。返回当前进程环境摘要。
-#[tauri::command]
-pub(super) fn ipc_ping() -> serde_json::Value {
-    tracing::info!(pid = std::process::id(), "ipc_ping received");
-    serde_json::json!({
-        "ok": true,
-        "pid": std::process::id(),
-        "exe": std::env::current_exe().ok().map(|p| p.display().to_string()),
-    })
-}
-
-/// 前端日志落盘。JS 通过这个 Tauri 命令把 console 内容写到同一份文件日志里，
-/// 这样 Rust + JS 在 portable 模式下都能集中排查。
-#[tauri::command]
-pub(super) fn log_from_frontend(level: String, message: String) {
-    let target = "flowlet_frontend";
-    match level.as_str() {
-        "error" => tracing::error!(target, message),
-        "warn" => tracing::warn!(target, message),
-        "debug" => tracing::debug!(target, message),
-        _ => tracing::info!(target, message),
-    }
-}
-
-#[tauri::command]
-pub(super) fn cleanup_old_logs(
-    state: tauri::State<'_, AppState>,
-    keep_days: i64,
-) -> Result<(usize, usize), String> {
-    state
-        .storage
-        .cleanup_old_logs(keep_days)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn cleanup_expired_body_data(
-    state: tauri::State<'_, AppState>,
-    retention_days: i64,
-) -> Result<usize, String> {
-    state
-        .storage
-        .cleanup_expired_body_data(retention_days)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn prune_oldest_body_data(
-    state: tauri::State<'_, AppState>,
-    target_bytes: i64,
-    prune_ratio: f64,
-) -> Result<usize, String> {
-    state
-        .storage
-        .prune_oldest_body_data(target_bytes, prune_ratio)
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn get_total_body_size_bytes(state: tauri::State<'_, AppState>) -> Result<i64, String> {
-    state
-        .storage
-        .get_total_body_size_bytes()
-        .map_err(|err| err.to_string())
-}
-
-// ─── Config Import/Export Commands ────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn export_config(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.storage.export_config().map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub(super) fn import_config(state: tauri::State<'_, AppState>, json: String) -> Result<(), String> {
-    state
-        .storage
-        .import_config(&json)
-        .map_err(|err| err.to_string())?;
-
-    // 重新加载内存状态
-    let channels = state
-        .storage
-        .list_channel_presets()
-        .map_err(|e| e.to_string())?;
-    let accounts = state
-        .storage
-        .list_channel_accounts()
-        .map_err(|e| e.to_string())?;
-    let routes = state
-        .storage
-        .list_route_candidates()
-        .map_err(|e| e.to_string())?;
-    let rules = state
-        .storage
-        .list_route_rules()
-        .map_err(|e| e.to_string())?;
-    let virtual_models = state
-        .storage
-        .list_virtual_models()
-        .map_err(|e| e.to_string())?;
-
-    *state.channels.lock().map_err(|_| "锁失败".to_string())? = channels;
-    *state.accounts.lock().map_err(|_| "锁失败".to_string())? = accounts;
-    *state.routes.lock().map_err(|_| "锁失败".to_string())? = routes;
-    *state.rules.lock().map_err(|_| "锁失败".to_string())? = rules;
-    *state
-        .virtual_models
-        .lock()
-        .map_err(|_| "锁失败".to_string())? = virtual_models;
-
-    Ok(())
-}
-
-// ─── Smart Routing Commands ───────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn account_routing_scores(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<(String, String, f64, f64, f64)>, String> {
-    state
-        .storage
-        .account_routing_scores()
-        .map_err(|err| err.to_string())
-}
-
-// ─── Auto-start Commands ───────────────────────────────────────────────────
-
-#[tauri::command]
-pub(super) fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
-    let autostart = app.autolaunch();
-    autostart
-        .is_enabled()
-        .map_err(|e| format!("检查自启动状态失败: {e}"))
-}
-
-#[tauri::command]
-pub(super) fn enable_autostart(app: AppHandle) -> Result<(), String> {
-    let autostart = app.autolaunch();
-    autostart
-        .enable()
-        .map_err(|e| format!("启用自启动失败: {e}"))
-}
-
-#[tauri::command]
-pub(super) fn disable_autostart(app: AppHandle) -> Result<(), String> {
-    let autostart = app.autolaunch();
-    autostart
-        .disable()
-        .map_err(|e| format!("禁用自启动失败: {e}"))
 }
 
 // ─── Scrape Console Commands ────────────────────────────────────────────────
@@ -1982,7 +627,7 @@ pub enum ScrapeProbeState {
 
 /// 创建 per-account 后台抓取 webview(隐藏)。
 #[tauri::command]
-pub(super) async fn open_scrape_console(
+pub(crate) async fn open_scrape_console(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     account_id: String,
@@ -2093,7 +738,7 @@ pub(super) async fn open_scrape_console(
 
 /// 关闭并 drop per-account 抓取 webview。
 #[tauri::command]
-pub(super) async fn close_scrape_console(
+pub(crate) async fn close_scrape_console(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<(), String> {
@@ -2121,7 +766,7 @@ pub(super) async fn close_scrape_console(
 
 /// document-start 拦截器安装完成后的 ACK。账号从 webview label 推导，不能由页面伪造。
 #[tauri::command]
-pub(super) async fn handle_scrape_interceptor_ready(
+pub(crate) async fn handle_scrape_interceptor_ready(
     webview: tauri::WebviewWindow,
     state: tauri::State<'_, AppState>,
     channel_id: String,
@@ -2173,7 +818,7 @@ pub(super) async fn handle_scrape_interceptor_ready(
 
 /// 页面 JS 通过 IPC 回传拦截到的响应体。
 #[tauri::command]
-pub(super) async fn handle_intercepted_response(
+pub(crate) async fn handle_intercepted_response(
     webview: tauri::WebviewWindow,
     state: tauri::State<'_, AppState>,
     channel_id: String,
@@ -2432,12 +1077,7 @@ fn merge_longcat_token_packs(
                 candidates.push(current.clone());
             }
             if let Some(others) = data.get("otherLots").and_then(|value| value.as_array()) {
-                candidates.extend(
-                    others
-                        .iter()
-                        .filter(|value| value.is_object())
-                        .cloned(),
-                );
+                candidates.extend(others.iter().filter(|value| value.is_object()).cloned());
             }
         }
     }
@@ -2694,7 +1334,7 @@ fn is_explicit_login_url(channel_id: &str, page_url: &str) -> bool {
 /// 拦截器是 WebView initialization_script，会在每次导航的页面脚本之前安装；
 /// 因此必须先清缓冲，再导航刷新，随后等待目标业务响应。
 #[tauri::command]
-pub(super) async fn probe_scrape_login(
+pub(crate) async fn probe_scrape_login(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     account_id: String,
@@ -3054,7 +1694,7 @@ fn surface_scrape_webview(
 /// 注意:前端在调 scrape_balance 之前应先调 probe_scrape_login 显式处理登录态;
 /// 这里的探测是防御性二次检查(防直连调用),未登录时只返回错误,不再发事件(避免与前端事件监听竞态)。
 #[tauri::command]
-pub(super) async fn scrape_balance(
+pub(crate) async fn scrape_balance(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     account_id: String,
@@ -3205,8 +1845,7 @@ pub(super) async fn scrape_balance(
         .get("token_packs")
         .filter(|value| value.is_array())
         .and_then(|value| serde_json::to_string(value).ok());
-    let token_packs =
-        merge_longcat_token_packs(&slots, extracted_token_packs.as_deref());
+    let token_packs = merge_longcat_token_packs(&slots, extracted_token_packs.as_deref());
 
     let now = chrono::Utc::now().to_rfc3339();
     let raw_scraped_json = if mode.aggregate {
@@ -3296,7 +1935,7 @@ fn channel_resource_sync_completion_status(failed: usize, skipped: usize) -> &'s
 /// 周期同步所有启用了 WebView 自动同步的渠道账号。后台运行时保持窗口隐藏，
 /// 登录失效或页面需要交互只记入任务日志，等待用户从账号编辑页手动刷新处理。
 #[tauri::command]
-pub(super) async fn sync_scrape_balances(
+pub(crate) async fn sync_scrape_balances(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     trigger_source: String,
@@ -3469,32 +2108,5 @@ pub(super) async fn sync_scrape_balances(
             "渠道资源同步完成：成功 {synced} 个，失败 {failed} 个，跳过 {} 个",
             skipped
         ),
-    })
-}
-
-#[tauri::command]
-pub(super) fn get_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
-#[tauri::command]
-pub(super) fn get_app_data_dir() -> String {
-    // 数据目录与 exe 同级，便携/安装模式统一。
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    exe_dir.to_string_lossy().to_string()
-}
-
-#[tauri::command]
-pub(super) fn get_app_diagnostics(state: tauri::State<'_, AppState>) -> serde_json::Value {
-    let os = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
-    let proxy = proxy_status(state);
-    let proxy_status = if proxy.running { "running" } else { "stopped" };
-    serde_json::json!({
-        "os": os,
-        "database": "healthy",
-        "proxy": proxy_status,
     })
 }

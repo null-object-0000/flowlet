@@ -37,7 +37,16 @@ Flowlet Desktop
   │  └─ src/
   │     ├─ lib.rs                      Tauri 应用入口和 command 注册
   │     ├─ main.rs                     桌面进程入口
-  │     ├─ commands.rs                 Tauri command 定义
+  │     ├─ commands/                   Tauri command 薄适配层（按领域分组）
+  │     │  ├─ mod.rs                   稳定的 command 门面与统一导出
+  │     │  ├─ agent.rs                 Agent 环境、账号与全局配置
+  │     │  ├─ channels.rs              渠道、账号、模型与路由配置
+  │     │  ├─ device_sync.rs           设备用量导入、导出与同步
+  │     │  ├─ maintenance.rs           应用诊断、配置与存储维护
+  │     │  ├─ observability.rs         请求日志、会话与后台任务观测
+  │     │  ├─ proxy.rs                 代理生命周期与连接测试
+  │     │  ├─ scrape.rs                渠道目录、资源同步与控制台抓取
+  │     │  └─ usage.rs                 用量分析、修复与汇总
   │     └─ core/
   │        ├─ mod.rs                   Core 模块出口
   │        ├─ config.rs                运行时配置结构
@@ -52,6 +61,7 @@ Flowlet Desktop
   │        ├─ storage_maintenance.rs   SQLite 完整压缩与增量空间回收
   │        ├─ storage_config.rs        渠道 / 账号 / 模型配置读写
   │        ├─ storage_usage.rs         用量与会话聚合查询
+  │        ├─ storage_device_usage.rs  跨设备用量导入与聚合
   │        ├─ storage_stats.rs         统计查询
   │        ├─ storage_tasks.rs         后台任务持久化
   │        ├─ storage_tests.rs         存储测试
@@ -61,6 +71,8 @@ Flowlet Desktop
   │        ├─ metrics.rs               运行时指标
   │        ├─ agent_environment.rs     Agent 本机安装探测
   │        ├─ agent_global_config.rs   Claude Code / OpenCode 全局配置写入与恢复
+  │        ├─ agent_session_identity.rs 请求头中的 Agent / Session 统一识别
+  │        ├─ agent_session_sources.rs  原生会话数据源共享工具
   │        ├─ agent_session_metadata.rs 原生会话目录与会话列表
   │        ├─ agent_session_timeline.rs 原生会话时间线解析
   │        ├─ agent_source_watcher.rs  Agent 数据源文件监听

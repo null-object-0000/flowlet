@@ -156,3 +156,4 @@ vite.config.ts.timestamp-*
 .skills/
 
 .cargo-target-check/
+dist-mobile/

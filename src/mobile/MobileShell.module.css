@@ -1,6 +1,8 @@
 .shell {
   width: 100%;
   min-height: 100dvh;
+  overflow-x: hidden;
+  touch-action: pan-x pan-y;
   color: var(--flowlet-color-text);
   background:
     radial-gradient(circle at 100% 0, var(--flowlet-color-shell-glow), transparent 34%),
@@ -42,7 +44,7 @@
   min-height: calc(64px + env(safe-area-inset-bottom));
   padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   border-top: 1px solid var(--flowlet-color-border);
   background: color-mix(in srgb, var(--flowlet-color-surface) 94%, transparent);
   box-shadow: 0 -8px 24px rgba(15, 23, 42, .06);

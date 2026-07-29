@@ -1,4 +1,4 @@
-import { IconHistogram, IconHome, IconServer, IconSetting } from "@douyinfe/semi-icons";
+import { IconComment, IconHome, IconSetting } from "@douyinfe/semi-icons";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
 import { FlowletLogo } from "../shared/ui/FlowletLogo";
@@ -6,8 +6,7 @@ import styles from "./MobileShell.module.css";
 
 const items = [
   { to: "/", label: "概览", icon: <IconHome /> },
-  { to: "/usage", label: "用量", icon: <IconHistogram /> },
-  { to: "/devices", label: "设备", icon: <IconServer /> },
+  { to: "/sessions", label: "会话", icon: <IconComment /> },
   { to: "/settings", label: "设置", icon: <IconSetting /> },
 ];
 

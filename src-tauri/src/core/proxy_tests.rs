@@ -399,6 +399,30 @@ fn agent_marker_falls_back_to_ua_when_absent() {
 }
 
 #[test]
+fn embedded_config_identifies_open_code_review_client() {
+    // open-codereview.ai 的请求 UA 形如 `open-code-review/v1.8.0 | claude`，
+    // 内置默认配置必须通过 ua_rules 将其识别为独立客户端（会话 id 暂不解析）。
+    let json: serde_json::Value =
+        serde_json::from_str(crate::core::channels_config::DEFAULT_CONFIG_JSON).unwrap();
+    let rules: Vec<UaClientRule> =
+        serde_json::from_value(json.pointer("/ua_rules").cloned().unwrap_or_default()).unwrap();
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("open-code-review/v1.8.0 | claude"),
+    );
+
+    assert_eq!(
+        identify_client_agent(&headers, &rules),
+        Some((
+            "open-code-review".to_string(),
+            "Open Code Review".to_string()
+        ))
+    );
+}
+
+#[test]
 fn extracts_openai_usage() {
     let usage = extract_response_usage(
         br#"{"id":"chatcmpl","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"#,

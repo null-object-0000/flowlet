@@ -13,6 +13,12 @@
       "enabled": true
     },
     {
+      "id": "open-code-review",
+      "pattern": "open-code-review/",
+      "name": "Open Code Review",
+      "enabled": true
+    },
+    {
       "id": "flowlet",
       "pattern": "Flowlet/",
       "name": "Flowlet",

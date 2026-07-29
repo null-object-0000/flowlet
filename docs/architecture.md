@@ -206,7 +206,7 @@ Codex CLI 当前支持安装探测、账号用量复用和原生会话读取。F
 
 Claude Code 用户级全局配置由独立的 `agent_global_config` 模块管理。前端只读取脱敏状态并触发应用或恢复；Rust 解析 `CLAUDE_CONFIG_DIR` / `~/.claude/settings.json`，安全合并 Flowlet Base URL、Client Token 和模型别名映射。修改前只备份受管字段，恢复时不覆盖用户后续新增的其他 Claude 设置。完整字段和优先级见 [`claude-code-global-config.md`](./claude-code-global-config.md)。
 
-OpenCode CLI 与 Desktop 共用用户级配置。Flowlet 在 `~/.config/opencode/opencode.jsonc`（或已有的 `opencode.json`）中结构化合并 `provider.flowlet`、`model` 和 `small_model`，并把 Client Token 单独写入 `~/.local/share/opencode/auth.json` 的 `flowlet` 凭据项。JSONC 修改保留未受管字段和注释；配置与凭据均先备份受管值，再支持恢复。完整行为见 [`opencode-global-config.md`](./opencode-global-config.md)。
+OpenCode CLI 与 Desktop 共用用户级配置。Flowlet 在 `~/.config/opencode/opencode.jsonc`（或已有的 `opencode.json`）中结构化合并 `provider.flowlet`、`model`、`small_model`，并把本地 Server 固定到 `127.0.0.1:4096`；Client Token 单独写入 `~/.local/share/opencode/auth.json` 的 `flowlet` 凭据项。JSONC 修改保留未受管字段和注释；配置与凭据均先备份受管值，再支持恢复。完整行为见 [`opencode-global-config.md`](./opencode-global-config.md)。
 
 Agent 接入抽屉中的 Client Token 默认使用固定长度掩码；查看按钮只在当前抽屉会话中临时展示，关闭后恢复掩码，复制始终使用真实值。Claude Code 手动片段与一键写入字段保持一致；OpenCode 将 Provider 配置和 `auth.json` 凭据拆成两个片段。OpenCode 配置与凭据采用双文件事务写入，第二个文件失败时恢复两个文件的原始字节内容。
 
@@ -470,6 +470,10 @@ Claude Code 文件按路径、大小和修改时间缓存，未变化文件不�
 指令。单次最多扫描 16 MiB、返回 300 个展示事件、每个事件内容最多 8000 字符；达到展示事件上限后
 仍继续扫描剩余记录中的轮次、模型与累计用量，详情页同时明确提示事件已截断，避免展示上限造成统计和
 费用低估。原生源不存在时返回“不可用”空结果，结构不兼容或读取失败时返回可重试错误。
+OpenCode 的可操作状态不从 SQLite 推测：`opencode_control` 通过本机 `GET /permission` 读取进程内
+待确认权限并按 `sessionID` 过滤，前端在 OpenCode 会话的最近交互中每 2 秒轮询；“同意本次”和“否决”
+分别调用 `POST /permission/{requestID}/reply` 的 `once` 与 `reject`。控制服务离线时返回结构化不可用状态，
+不影响时间线读取；回复失败保留待确认卡片并向用户显示错误。
 解析结果同时返回 Agent 原生累计用量、模型集合和单事件用量。OpenCode 使用 `session` 的累计
 Token / cost 与消息级 tokens；Claude Code 对去重后的助手回复 usage 聚合输入、输出、缓存创建和
 缓存读取；Codex 使用最新 `total_token_usage` 作为会话总量，并在

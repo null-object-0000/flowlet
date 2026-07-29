@@ -34,6 +34,7 @@ import {
   getAccountNameDisplayUnits,
   truncateAccountName,
 } from "./accountName";
+import { ScrapeSyncFeedback } from "./ScrapeSyncFeedback";
 
 const { Text } = Typography;
 
@@ -774,24 +775,15 @@ function LongCatTokenPackPanel({
           >
             {t("立即刷新")}
           </Button>
-          {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
-          {needLogin ? (
-            <div className={styles.scrapeError}>
-              {t("检测到控制台登录页，请在弹出的窗口中完成登录。")}
-              <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
-                {t("登录完成,重新抓取")}
-              </Button>
-            </div>
-          ) : null}
-          {consoleActionMessage ? (
-            <div className={styles.scrapeError}>
-              {consoleActionMessage}
-              <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
-                {t("重新抓取")}
-              </Button>
-            </div>
-          ) : null}
-          {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
+          <ScrapeSyncFeedback
+            isScraping={isScraping}
+            statusText={statusText}
+            needLogin={needLogin}
+            consoleActionMessage={consoleActionMessage}
+            error={error}
+            onRetry={() => void handleRetry()}
+            t={t}
+          />
         </div>
       </div>
 
@@ -910,23 +902,15 @@ function ScrapeConsolePanel({
         </Button>
         {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
       </div>
-      {needLogin ? (
-        <div className={styles.scrapeError}>
-          {t("检测到控制台登录页，请在弹出的窗口中完成登录。")}
-          <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
-            {t("登录完成,重新抓取")}
-          </Button>
-        </div>
-      ) : null}
-      {consoleActionMessage ? (
-        <div className={styles.scrapeError}>
-          {consoleActionMessage}
-          <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
-            {t("重新抓取")}
-          </Button>
-        </div>
-      ) : null}
-      {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
+      <ScrapeSyncFeedback
+        isScraping={isScraping}
+        statusText={null}
+        needLogin={needLogin}
+        consoleActionMessage={consoleActionMessage}
+        error={error}
+        onRetry={() => void handleRetry()}
+        t={t}
+      />
       {scrapeDisplay ? (
         <div className={styles.scrapeResult}>
           {scrapeDisplay.plan_name ? <strong>{scrapeDisplay.plan_name}</strong> : null}
@@ -1054,29 +1038,16 @@ function QwenTokenPlanPanel({
           >
             {t("立即刷新")}
           </Button>
-          {statusText ? <span className={styles.scrapeStatus}>{statusText}</span> : null}
-          {needLogin ? (
-            <div className={styles.scrapeError}>
-              {t("检测到控制台登录页，请在弹出的窗口中完成登录。")}
-              <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
-                {t("登录完成,重新抓取")}
-              </Button>
-            </div>
-          ) : null}
-          {consoleActionMessage ? (
-            <div className={styles.scrapeError}>
-              {consoleActionMessage}
-              <Button size="small" theme="solid" type="primary" loading={isScraping} onClick={() => void handleRetry()}>
-                {t("重新抓取")}
-              </Button>
-            </div>
-          ) : null}
-          {error ? <div className={styles.scrapeError}>{t("抓取失败：{message}", { message: error })}</div> : null}
-          {!details && !error ? (
-            <span className={styles.scrapeHint}>
-              {t("系统每 5 分钟自动同步一次；如登录失效，请点击“立即刷新”完成登录。")}
-            </span>
-          ) : null}
+          <ScrapeSyncFeedback
+            isScraping={isScraping}
+            statusText={statusText}
+            needLogin={needLogin}
+            consoleActionMessage={consoleActionMessage}
+            error={error}
+            onRetry={() => void handleRetry()}
+            showIdleHint={!details}
+            t={t}
+          />
         </div>
       </div>
     </div>

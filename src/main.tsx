@@ -16,7 +16,8 @@ const appRoot = root;
 const mobileTarget = import.meta.env.MODE === "mobile"
   || import.meta.env.VITE_FLOWLET_TARGET === "mobile"
   || import.meta.env.TAURI_ENV_PLATFORM === "android"
-  || import.meta.env.TAURI_ENV_PLATFORM === "ios";
+  || import.meta.env.TAURI_ENV_PLATFORM === "ios"
+  || /\b(?:Android|iPhone|iPad|iPod)\b/i.test(navigator.userAgent);
 
 if (mobileTarget) {
   document

@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:mobile": "vite --mode mobile",
     "build": "tsc && vite build",
-    "build:mobile": "tsc && vite build --mode mobile",
+    "build:mobile": "tsc && vite build --mode mobile --outDir dist-mobile",
     "preview": "vite preview",
     "fetch:models-cn": "node scripts/fetch-models-cn.mjs",
     "fetch:models-dev": "node scripts/fetch-models-dev.mjs",

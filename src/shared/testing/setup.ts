@@ -11,6 +11,13 @@ class TestWorker {
   dispatchEvent() { return true; }
 }
 
+class TestResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 if (!("Worker" in globalThis)) Object.defineProperty(globalThis, "Worker", { value: TestWorker, configurable: true });
+if (!("ResizeObserver" in globalThis)) Object.defineProperty(globalThis, "ResizeObserver", { value: TestResizeObserver, configurable: true });
 if (!("createObjectURL" in URL)) Object.defineProperty(URL, "createObjectURL", { value: () => "blob:flowlet-test-worker", configurable: true });
 if (!("revokeObjectURL" in URL)) Object.defineProperty(URL, "revokeObjectURL", { value: () => undefined, configurable: true });

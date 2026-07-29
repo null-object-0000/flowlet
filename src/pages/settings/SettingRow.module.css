@@ -7,7 +7,7 @@
 }
 
 .row + .row {
-  border-top: 1px solid #eef1f5;
+  border-top: 1px solid var(--flowlet-color-border);
 }
 
 .copy {
@@ -18,7 +18,7 @@
 .name {
   font-size: 13px;
   font-weight: 620;
-  color: #202632;
+  color: var(--flowlet-color-text);
 }
 
 .help {
@@ -40,8 +40,8 @@
   font-size: 11px;
   padding: 3px 7px;
   border-radius: 999px;
-  background: #edf7f1;
-  color: #26844b;
+  background: var(--semi-color-success-light-default);
+  color: var(--semi-color-success);
   font-weight: 650;
   white-space: nowrap;
 }

@@ -1004,6 +1004,7 @@ fn run_desktop() {
             commands::shared_device_daily_usage,
             commands::rename_current_device,
             commands::get_s3_sync_settings,
+            commands::export_s3_connection_config,
             commands::save_s3_sync_config,
             commands::test_s3_sync_connection,
             commands::test_s3_read_connection,

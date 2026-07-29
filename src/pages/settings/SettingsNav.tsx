@@ -1,4 +1,4 @@
-import { IconCamera, IconSetting, IconWrench } from "@douyinfe/semi-icons";
+import { IconCamera, IconCloud, IconSetting, IconWrench } from "@douyinfe/semi-icons";
 
 function IconDatabase() {
   return (
@@ -22,7 +22,7 @@ function IconInfo() {
 import styles from "./SettingsNav.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
-export type SettingsTab = "general" | "capture" | "storage" | "maintenance" | "about";
+export type SettingsTab = "general" | "capture" | "sync" | "storage" | "maintenance" | "about";
 
 type NavItem = {
   key: SettingsTab;
@@ -33,11 +33,13 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { key: "general", label: "通用", icon: <IconSetting /> },
   { key: "capture", label: "数据捕获", icon: <IconCamera /> },
+  { key: "sync", label: "同步与共享", icon: <IconCloud /> },
   { key: "storage", label: "存储管理", icon: <IconDatabase /> },
   { key: "maintenance", label: "数据维护", icon: <IconWrench /> },
 ];
 
 export function SettingsNav({ active, onChange }: { active: SettingsTab; onChange: (tab: SettingsTab) => void }) {
+  const { t } = useAppPreferences();
   return (
     <nav className={styles.nav}>
       {NAV_ITEMS.map((item) => (
@@ -46,12 +48,12 @@ export function SettingsNav({ active, onChange }: { active: SettingsTab; onChang
           type="button"
           className={`${styles.button} ${active === item.key ? styles.active : ""}`}
           data-tab={item.key}
-          aria-label={item.label}
+          aria-label={t(item.label)}
           aria-current={active === item.key ? "true" : undefined}
           onClick={() => onChange(item.key)}
         >
           <span className={styles.icon} aria-hidden="true">{item.icon}</span>
-          {item.label}
+          {t(item.label)}
         </button>
       ))}
       <div className={styles.sep} />
@@ -59,12 +61,12 @@ export function SettingsNav({ active, onChange }: { active: SettingsTab; onChang
         type="button"
         className={`${styles.button} ${active === "about" ? styles.active : ""}`}
         data-tab="about"
-        aria-label="关于"
+        aria-label={t("关于")}
         aria-current={active === "about" ? "true" : undefined}
         onClick={() => onChange("about")}
       >
         <span className={styles.icon} aria-hidden="true"><IconInfo /></span>
-        关于
+        {t("关于")}
       </button>
     </nav>
   );
@@ -75,6 +77,7 @@ export function useSettingsTabMeta(): Record<SettingsTab, { title: string; desc:
   return {
     general: { title: t("通用设置"), desc: t("调整 Flowlet 的显示、主题与启动行为") },
     capture: { title: t("数据捕获"), desc: t("控制请求 / 响应内容的捕获、保留和脱敏策略") },
+    sync: { title: t("同步与共享"), desc: t("连接 S3 数据源并在多台设备之间共享每日用量") },
     storage: { title: t("存储管理"), desc: t("查看本地数据占用并清理不再需要的内容") },
     maintenance: { title: t("数据维护"), desc: t("检查并修复历史统计数据") },
     about: { title: t("关于 Flowlet"), desc: t("版本信息、数据目录与诊断工具") },

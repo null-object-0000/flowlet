@@ -30,6 +30,9 @@ export const deviceSyncCommands = {
   s3Settings: (): Promise<S3SyncSettings> =>
     invokeCommand<S3SyncSettings>("get_s3_sync_settings")
       .catch(toDeviceSyncError("s3_sync_settings_failed")),
+  exportS3ConnectionConfig: (): Promise<S3SyncConfigInput> =>
+    invokeCommand<S3SyncConfigInput>("export_s3_connection_config")
+      .catch(toDeviceSyncError("s3_connection_export_failed")),
   saveS3Config: (config: S3SyncConfigInput): Promise<S3SyncSettings> =>
     invokeCommand<S3SyncSettings>("save_s3_sync_config", { config })
       .catch(toDeviceSyncError("s3_sync_config_save_failed")),

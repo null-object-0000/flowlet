@@ -1,10 +1,10 @@
 .nav {
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--flowlet-color-surface);
   border: 1px solid var(--flowlet-color-border);
   border-radius: 12px;
   padding: 10px;
   align-self: start;
-  box-shadow: 0 2px 8px rgba(24, 39, 75, 0.03);
+  box-shadow: var(--flowlet-shadow-card);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -20,7 +20,7 @@
   align-items: center;
   gap: 10px;
   padding: 0 11px;
-  color: #535d6e;
+  color: var(--flowlet-color-text-secondary);
   font-size: 13px;
   text-align: left;
   margin: 2px 0;
@@ -29,8 +29,8 @@
 }
 
 .button:hover {
-  background: #f1f4f8;
-  color: #242a34;
+  background: var(--semi-color-fill-0);
+  color: var(--flowlet-color-text);
 }
 
 .active {

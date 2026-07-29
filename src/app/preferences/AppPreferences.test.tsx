@@ -6,6 +6,7 @@ vi.mock("lottie-web", () => ({
 }));
 
 import { AppPreferencesProvider, applyInitialPreferences, resolveSystemLanguage, useAppPreferences } from "./AppPreferences";
+import { translate } from "./translations";
 
 afterEach(() => {
   localStorage.clear();
@@ -53,6 +54,15 @@ describe("AppPreferencesProvider", () => {
     expect(document.body).toHaveAttribute("theme-mode", "dark");
     expect(localStorage.getItem("flowlet.language")).toBe("en-US");
     expect(localStorage.getItem("flowlet.theme")).toBe("dark");
+  });
+
+  it("uses compact English labels in the overview", () => {
+    expect(translate("en-US", "渠道账号")).toBe("Accounts");
+    expect(translate("en-US", "已启用 {enabled} / 共 {total} 个账号", { enabled: 5, total: 7 })).toBe("5/7 enabled");
+    expect(translate("en-US", "开放模型")).toBe("Models");
+    expect(translate("en-US", "AI Agent 接入")).toBe("Agents");
+    expect(translate("en-US", "ChatGPT (Codex) Desktop 接入")).toBe("ChatGPT Desktop");
+    expect(translate("en-US", "添加 / 重新授权账号")).toBe("Add / reauthorize");
   });
 });
 

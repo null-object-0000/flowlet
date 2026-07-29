@@ -58,6 +58,10 @@ describe("deviceSyncCommands contract", () => {
     await deviceSyncCommands.testS3Connection(config);
     expect(invokeMock).toHaveBeenLastCalledWith("test_s3_sync_connection", { config });
 
+    invokeMock.mockResolvedValueOnce(config);
+    await deviceSyncCommands.exportS3ConnectionConfig();
+    expect(invokeMock).toHaveBeenLastCalledWith("export_s3_connection_config", undefined);
+
     invokeMock.mockResolvedValueOnce(undefined);
     await deviceSyncCommands.syncS3();
     expect(invokeMock).toHaveBeenLastCalledWith("sync_device_usage_s3", undefined);

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppPreferencesProvider } from "../../app/preferences/AppPreferences";
 
 vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
@@ -134,6 +135,7 @@ vi.mock("../../features/device-sync/useDeviceSync", () => ({
   useDeviceUsageTransfer: () => ({
     renameCurrentDevice: { isPending: false, mutateAsync: vi.fn() },
     exportBundle: { isPending: false, mutateAsync: vi.fn() },
+    exportS3ConnectionConfig: { isPending: false, mutateAsync: vi.fn() },
     previewImport: { isPending: false, mutateAsync: vi.fn() },
     importBundle: { isPending: false, mutateAsync: vi.fn() },
     saveS3Config: { isPending: false, mutateAsync: vi.fn() },
@@ -152,6 +154,8 @@ function renderWithQueryClient(ui: React.ReactElement) {
 }
 
 describe("SettingsPage", () => {
+  afterEach(() => localStorage.clear());
+
   it("renders the settings layout with search", () => {
     renderWithQueryClient(<SettingsPage />);
     expect(screen.getByRole("heading", { name: "应用设置" })).toBeInTheDocument();
@@ -181,9 +185,9 @@ describe("SettingsPage", () => {
     expect(screen.getByText("登录后自动启动 Flowlet")).not.toBeVisible();
   });
 
-  it("shows the current device in storage management", async () => {
+  it("shows the current device in sync and sharing", async () => {
     renderWithQueryClient(<SettingsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "存储管理" }));
+    fireEvent.click(screen.getByRole("button", { name: "同步与共享" }));
     expect(await screen.findByText("设备与用量共享")).toBeInTheDocument();
     expect(screen.getByText("当前设备")).toBeInTheDocument();
     expect(screen.getByText("公司笔记本")).toBeInTheDocument();
@@ -192,7 +196,7 @@ describe("SettingsPage", () => {
 
   it("opens the current device rename dialog", async () => {
     renderWithQueryClient(<SettingsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "存储管理" }));
+    fireEvent.click(screen.getByRole("button", { name: "同步与共享" }));
     fireEvent.click(await screen.findByRole("button", { name: "重命名" }));
 
     expect(screen.getByText("重命名当前设备")).toBeInTheDocument();
@@ -202,7 +206,7 @@ describe("SettingsPage", () => {
 
   it("opens the S3-compatible configuration dialog", async () => {
     renderWithQueryClient(<SettingsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "存储管理" }));
+    fireEvent.click(screen.getByRole("button", { name: "同步与共享" }));
     fireEvent.click(await screen.findByRole("button", { name: "配置 S3" }));
 
     expect(screen.getByText("配置 S3-compatible 同步")).toBeInTheDocument();
@@ -213,5 +217,24 @@ describe("SettingsPage", () => {
     expect(pathStyle).toBeChecked();
     fireEvent.click(pathStyle);
     expect(pathStyle).not.toBeChecked();
+  });
+
+  it("renders the settings navigation and general settings in English", () => {
+    localStorage.setItem("flowlet.language", "en-US");
+    renderWithQueryClient(
+      <AppPreferencesProvider>
+        <SettingsPage />
+      </AppPreferencesProvider>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search settings")).toBeInTheDocument();
+    for (const label of ["General", "Capture", "Sync & Sharing", "Storage", "Maintenance", "About"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.getByText("Display language")).toBeInTheDocument();
+    expect(screen.getByText("Theme")).toBeInTheDocument();
+    expect(screen.getByText("Launch Flowlet at sign-in")).toBeInTheDocument();
+    expect(screen.getByText("System notifications")).toBeInTheDocument();
   });
 });

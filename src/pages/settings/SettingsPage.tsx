@@ -1,22 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconSearch } from "@douyinfe/semi-icons";
+import { Typography } from "@douyinfe/semi-ui-19";
 import { AboutTab } from "./tabs/AboutTab";
 import { CaptureTab } from "./tabs/CaptureTab";
 import { GeneralTab } from "./tabs/GeneralTab";
 import { MaintenanceTab } from "./tabs/MaintenanceTab";
 import { StorageTab } from "./tabs/StorageTab";
+import { SyncTab } from "./tabs/SyncTab";
 import styles from "./SettingsPage.module.css";
 import { SettingsNav, useSettingsTabMeta, type SettingsTab } from "./SettingsNav";
+import { useAppPreferences } from "../../app/preferences/AppPreferences";
+
+const { Paragraph, Title } = Typography;
 
 const TAB_COMPONENTS: Record<SettingsTab, React.ComponentType> = {
   general: GeneralTab,
   capture: CaptureTab,
+  sync: SyncTab,
   storage: StorageTab,
   maintenance: MaintenanceTab,
   about: AboutTab,
 };
 
 export function SettingsPage() {
+  const { t } = useAppPreferences();
   const [tab, setTab] = useState<SettingsTab>("general");
   const [query, setQuery] = useState("");
   const panelBodyRef = useRef<HTMLDivElement>(null);
@@ -74,15 +81,15 @@ export function SettingsPage() {
     <main className={styles.page}>
       <header className={styles.pageHead}>
         <div>
-          <h1 className={styles.pageTitle}>应用设置</h1>
-          <p className={styles.pageSub}>管理应用偏好、本地数据与安全策略</p>
+          <Title heading={3}>{t("应用设置")}</Title>
+          <Paragraph>{t("管理应用偏好、本地数据与安全策略")}</Paragraph>
         </div>
         <div className={styles.headActions}>
           <label className={styles.searchBox}>
             <IconSearch style={{ width: 15, height: 15 }} />
             <input
               ref={searchInputRef}
-              placeholder="搜索设置"
+              placeholder={t("搜索设置")}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -103,8 +110,8 @@ export function SettingsPage() {
             <ActiveTab />
             <div className={`${styles.searchEmpty} ${searchEmpty ? styles.show : ""}`}>
               <IconSearch style={{ width: 34, height: 34 }} />
-              <strong>没有找到相关设置</strong>
-              <p>换一个关键词试试，例如“Body”“备份”或“主题”</p>
+              <strong>{t("没有找到相关设置")}</strong>
+              <p>{t("换一个关键词试试，例如“Body”“备份”或“主题”")}</p>
             </div>
           </div>
         </article>

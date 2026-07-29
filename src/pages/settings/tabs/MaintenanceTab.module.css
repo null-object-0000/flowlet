@@ -3,7 +3,7 @@
   border: 1px solid var(--flowlet-color-border);
   border-radius: 11px;
   padding: 16px;
-  background: #fbfcfe;
+  background: var(--flowlet-color-surface-muted);
 }
 
 .repairTop {
@@ -16,7 +16,7 @@
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: #eef4ff;
+  background: var(--semi-color-primary-light-default);
   color: var(--flowlet-color-primary);
   display: grid;
   place-items: center;
@@ -71,14 +71,14 @@
 
 .progressTrack {
   height: 7px;
-  background: #e5eaf2;
+  background: var(--semi-color-fill-1);
   border-radius: 999px;
   overflow: hidden;
 }
 
 .progressFill {
   height: 100%;
-  background: linear-gradient(90deg, #1769ff, #69a0ff);
+  background: var(--flowlet-color-primary);
   border-radius: 999px;
   transition: width 0.18s ease;
 }
@@ -94,7 +94,7 @@
   border: 1px solid var(--flowlet-color-border);
   border-radius: 8px;
   padding: 9px;
-  background: #fff;
+  background: var(--flowlet-color-surface-strong);
 }
 
 .step strong {
@@ -108,11 +108,11 @@
 }
 
 .done {
-  border-color: #cfe9d8;
-  background: #f5fbf7;
+  border-color: var(--semi-color-success);
+  background: var(--semi-color-success-light-default);
 }
 
 .active {
-  border-color: #bcd1ff;
-  background: #f5f8ff;
+  border-color: var(--flowlet-color-primary);
+  background: var(--semi-color-primary-light-default);
 }

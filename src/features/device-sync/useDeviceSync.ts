@@ -42,6 +42,9 @@ export function useDeviceUsageTransfer() {
     },
   });
   const exportBundle = useMutation({ mutationFn: deviceSyncCommands.exportBundle });
+  const exportS3ConnectionConfig = useMutation({
+    mutationFn: deviceSyncCommands.exportS3ConnectionConfig,
+  });
   const previewImport = useMutation({ mutationFn: deviceSyncCommands.previewImport });
   const importBundle = useMutation({
     mutationFn: deviceSyncCommands.importBundle,
@@ -68,6 +71,7 @@ export function useDeviceUsageTransfer() {
   return {
     renameCurrentDevice,
     exportBundle,
+    exportS3ConnectionConfig,
     previewImport,
     importBundle,
     saveS3Config,

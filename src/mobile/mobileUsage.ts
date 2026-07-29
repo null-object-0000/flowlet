@@ -27,12 +27,15 @@ export type MobileHourlyHeatmapCell = {
   hour: string;
   date: string;
   hourOfDay: number;
+  hourEnd: number;
   tokens: number;
   requests: number;
   level: 0 | 1 | 2 | 3 | 4;
   outside: boolean;
   hasData: boolean;
 };
+
+export const MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS = 3;
 
 export function getMobileUsageRange(
   period: MobileUsagePeriod,
@@ -117,39 +120,69 @@ export function buildMobileWeeklyHourlyHeatmap(
   );
   const range = getMobileUsageRange("week", offset, currentHour);
   const values = new Map(hours.map((item) => [item.hour, item]));
-  const inRange = hours.filter((item) => {
-    const date = item.hour.slice(0, 10);
-    return date >= range.startDate && date <= range.endDate;
-  });
-  const max = Math.max(0, ...inRange.map((item) => item.knownTokens));
-  const cells: MobileHourlyHeatmapCell[] = [];
+  const cells: Omit<MobileHourlyHeatmapCell, "level">[] = [];
 
-  for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
-    const date = localDate(addLocalDays(range.start, dayIndex));
-    for (let hourOfDay = 0; hourOfDay < 24; hourOfDay += 1) {
+  for (
+    let hourOfDay = 0;
+    hourOfDay < 24;
+    hourOfDay += MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS
+  ) {
+    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+      const date = localDate(addLocalDays(range.start, dayIndex));
       const hour = `${date}T${String(hourOfDay).padStart(2, "0")}:00:00`;
-      const item = values.get(hour);
-      const future = offset === 0 && new Date(
+      const bucketStart = new Date(
         range.start.getFullYear(),
         range.start.getMonth(),
         range.start.getDate() + dayIndex,
         hourOfDay,
-      ) > currentHour;
-      const tokens = future ? 0 : item?.knownTokens ?? 0;
+      );
+      const future = offset === 0 && bucketStart > currentHour;
+      let tokens = 0;
+      let requests = 0;
+      let hasData = false;
+
+      if (!future) {
+        for (
+          let bucketHour = hourOfDay;
+          bucketHour < hourOfDay + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS;
+          bucketHour += 1
+        ) {
+          const itemHour = `${date}T${String(bucketHour).padStart(2, "0")}:00:00`;
+          const itemDate = new Date(
+            range.start.getFullYear(),
+            range.start.getMonth(),
+            range.start.getDate() + dayIndex,
+            bucketHour,
+          );
+          if (offset === 0 && itemDate > currentHour) continue;
+          const item = values.get(itemHour);
+          if (!item) continue;
+          tokens += item.knownTokens;
+          requests += item.requestCount;
+          hasData = true;
+        }
+      }
+
       cells.push({
         hour,
         date,
         hourOfDay,
+        hourEnd: hourOfDay + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
         tokens,
-        requests: future ? 0 : item?.requestCount ?? 0,
-        level: heatLevel(tokens, max),
+        requests,
         outside: future,
-        hasData: !future && item !== undefined,
+        hasData,
       });
     }
   }
 
-  return { cells };
+  const max = Math.max(0, ...cells.map((cell) => cell.tokens));
+  return {
+    cells: cells.map((cell): MobileHourlyHeatmapCell => ({
+      ...cell,
+      level: heatLevel(cell.tokens, max),
+    })),
+  };
 }
 
 export function formatMobileUsageRange(

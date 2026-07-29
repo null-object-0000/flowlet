@@ -157,15 +157,14 @@ button.heatmapCell {
 button.heatmapCell span { font-size: 9px; line-height: 1; }
 button.heatmapCell[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--flowlet-color-primary), 0 0 0 2px var(--flowlet-color-primary-soft); }
 .heatmapCell.outside { opacity: .3; cursor: default; }
-.hourlyHeatmapScroller { margin: 0 -3px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
 .hourlyHeatmap {
-  width: max-content;
-  min-width: 100%;
-  padding: 2px 3px 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0;
   display: grid;
-  grid-template-columns: 24px repeat(24, minmax(15px, 1fr));
-  grid-template-rows: 15px repeat(7, 17px);
-  gap: 3px;
+  grid-template-columns: 39px repeat(7, minmax(0, 1fr));
+  grid-template-rows: 18px repeat(8, 28px);
+  gap: 5px;
 }
 .hourLabel, .hourDayLabel {
   display: grid;
@@ -174,13 +173,12 @@ button.heatmapCell[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--flow
   font-size: 9px;
   line-height: 1;
 }
-.hourDayLabel { position: sticky; left: 0; z-index: 1; background: var(--flowlet-color-surface); }
 .hourCell {
-  min-width: 15px;
-  min-height: 17px;
+  min-width: 0;
+  min-height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--flowlet-color-surface-muted);
   box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
   cursor: pointer;

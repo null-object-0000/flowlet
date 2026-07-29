@@ -1305,6 +1305,8 @@ const english: Record<string, string> = {
   "按设备查看每周或每月 Token 热力图": "View weekly or monthly token heatmaps by device",
   "统计维度": "Time granularity",
   "每小时 Token 热力图": "Hourly token heatmap",
+  "每 3 小时 Token 热力图": "Token heatmap by 3-hour interval",
+  "横轴为星期，纵轴为时段": "Weekdays across, 3-hour intervals down",
   "横轴为小时，纵轴为日期": "Hours across columns and dates down rows",
   "从云端刷新设备、用量和会话摘要": "Refresh devices, usage, and session summaries from cloud storage",
   "周": "Week",

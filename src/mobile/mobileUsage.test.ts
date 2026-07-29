@@ -75,9 +75,10 @@ describe("mobile usage aggregation", () => {
     expect(heatmap.cells[3]).toMatchObject({ date: "2026-07-30", outside: true, hasData: false });
   });
 
-  it("builds a real 7 by 24 hourly heatmap for a week", () => {
+  it("aggregates a week into 7 days by 3-hour buckets", () => {
     const hours: HourlyUsageTotal[] = [
       { hour: "2026-07-27T09:00:00", requestCount: 2, knownTokens: 20 },
+      { hour: "2026-07-27T10:00:00", requestCount: 1, knownTokens: 30 },
       { hour: "2026-07-29T11:00:00", requestCount: 3, knownTokens: 80 },
     ];
     const heatmap = buildMobileWeeklyHourlyHeatmap(
@@ -86,12 +87,12 @@ describe("mobile usage aggregation", () => {
       new Date("2026-07-29T12:30:00"),
     );
 
-    expect(heatmap.cells).toHaveLength(7 * 24);
+    expect(heatmap.cells).toHaveLength(7 * 8);
     expect(heatmap.cells.find((cell) => cell.hour === "2026-07-27T09:00:00"))
-      .toMatchObject({ tokens: 20, requests: 2, hasData: true });
-    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T11:00:00"))
-      .toMatchObject({ tokens: 80, level: 4, hasData: true });
-    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T13:00:00"))
+      .toMatchObject({ hourEnd: 12, tokens: 50, requests: 3, hasData: true });
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T09:00:00"))
+      .toMatchObject({ hourEnd: 12, tokens: 80, level: 4, hasData: true });
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T15:00:00"))
       .toMatchObject({ outside: true, hasData: false });
   });
 

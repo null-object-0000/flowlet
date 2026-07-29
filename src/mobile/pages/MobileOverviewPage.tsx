@@ -10,6 +10,7 @@ import {
   filterMobileUsage,
   formatMobileUsageRange,
   getMobileUsageRange,
+  MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
   summarizeMobileUsage,
   type MobileUsagePeriod,
 } from "../mobileUsage";
@@ -58,7 +59,9 @@ export function MobileOverviewPage() {
   );
   const selectedHourlyCell = useMemo(
     () => hourlyHeatmap.cells.find((cell) => cell.hour === selectedHour)
-      ?? [...hourlyHeatmap.cells].reverse().find((cell) => cell.hasData)
+      ?? hourlyHeatmap.cells
+        .filter((cell) => cell.hasData)
+        .sort((left, right) => right.hour.localeCompare(left.hour))[0]
       ?? null,
     [hourlyHeatmap.cells, selectedHour],
   );
@@ -159,21 +162,27 @@ export function MobileOverviewPage() {
       </div>
 
       <article className={styles.card}>
-        <div className={styles.cardHeader}><div><strong>{t(period === "week" ? "每小时 Token 热力图" : "每日 Token 热力图")}</strong><span>{t(period === "week" ? "横轴为小时，纵轴为日期" : "点击日期查看当天汇总")}</span></div></div>
+        <div className={styles.cardHeader}><div><strong>{t(period === "week" ? "每 3 小时 Token 热力图" : "每日 Token 热力图")}</strong><span>{t(period === "week" ? "横轴为星期，纵轴为时段" : "点击日期查看当天汇总")}</span></div></div>
         {period === "week" && hourlyUsage.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{hourlyUsage.error.message}</span></div> : null}
         {period === "month" && usage.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{usage.error.message}</span></div> : null}
         {period === "week" && !hourlyUsage.isError ? (
           <>
-            <div className={styles.hourlyHeatmapScroller}>
-              <div className={styles.hourlyHeatmap}>
-                <span />
-                {Array.from({ length: 24 }, (_, hour) => (
-                  <span className={styles.hourLabel} key={hour}>{hour % 3 === 0 ? hour : ""}</span>
-                ))}
-                {weekdayLabels.flatMap((label, dayIndex) => [
-                  <span className={styles.hourDayLabel} key={`label-${dayIndex}`}>{label}</span>,
-                  ...hourlyHeatmap.cells.slice(dayIndex * 24, dayIndex * 24 + 24).map((cell) => {
-                    const title = `${cell.date} ${String(cell.hourOfDay).padStart(2, "0")}:00 · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}`;
+            <div className={styles.hourlyHeatmap}>
+              <span />
+              {weekdayLabels.map((label, dayIndex) => (
+                <span className={styles.hourDayLabel} key={`${label}-${dayIndex}`}>{label}</span>
+              ))}
+              {Array.from(
+                { length: 24 / MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS },
+                (_, bucketIndex) => {
+                const bucketCells = hourlyHeatmap.cells.slice(bucketIndex * 7, bucketIndex * 7 + 7);
+                const hourStart = bucketIndex * MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS;
+                return [
+                  <span className={styles.hourLabel} key={`label-${hourStart}`}>
+                    {String(hourStart).padStart(2, "0")}–{String(hourStart + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS).padStart(2, "0")}
+                  </span>,
+                  ...bucketCells.map((cell) => {
+                    const title = `${cell.date} ${String(cell.hourOfDay).padStart(2, "0")}:00–${String(cell.hourEnd - 1).padStart(2, "0")}:59 · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}`;
                     return (
                       <button
                         key={cell.hour}
@@ -187,8 +196,8 @@ export function MobileOverviewPage() {
                       />
                     );
                   }),
-                ])}
-              </div>
+                ];
+              })}
             </div>
             <div className={styles.heatmapLegend}><span>{t("少")}</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`${styles.heatmapCell} ${styles[`heatLevel${level}`]}`} />)}<span>{t("多")}</span></div>
             {!hourlyHeatmap.cells.some((cell) => cell.hasData) ? <div className={styles.emptyHint}>{t("当前周期暂无数据")}</div> : null}
@@ -226,7 +235,7 @@ export function MobileOverviewPage() {
 
       {period === "week" && selectedHourlyCell ? (
         <article className={styles.selectedDay}>
-          <div><strong>{selectedHourlyCell.date} {String(selectedHourlyCell.hourOfDay).padStart(2, "0")}:00</strong><span>{formatCompactNumber(selectedHourlyCell.tokens, language)} Tokens</span></div>
+          <div><strong>{selectedHourlyCell.date} {String(selectedHourlyCell.hourOfDay).padStart(2, "0")}:00–{String(selectedHourlyCell.hourEnd - 1).padStart(2, "0")}:59</strong><span>{formatCompactNumber(selectedHourlyCell.tokens, language)} Tokens</span></div>
           <small>{t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })}</small>
         </article>
       ) : null}

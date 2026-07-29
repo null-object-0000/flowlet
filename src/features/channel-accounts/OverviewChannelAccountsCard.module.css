@@ -6,9 +6,9 @@
   border-radius: var(--flowlet-radius-control);
 }
 
-.cardTitle { display: inline-flex; align-items: center; gap: 10px; line-height: 28px; }
-.cardTitle em { padding: 3px 9px; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 12px; font-style: normal; font-weight: 500; }
-.headerActions { min-height: 28px; display: flex; align-items: center; gap: 12px; }
+.cardTitle { min-width: 0; display: inline-flex; align-items: center; gap: 10px; line-height: 28px; white-space: nowrap; }
+.cardTitle em { flex: none; padding: 3px 9px; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 12px; font-style: normal; font-weight: 500; white-space: nowrap; }
+.headerActions { min-height: 28px; display: flex; flex: none; align-items: center; gap: 12px; white-space: nowrap; }
 
 .row {
   min-height: 61px;

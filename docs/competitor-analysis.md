@@ -1,6 +1,6 @@
 # Flowlet 竞品分析报告
 
-> 快照时间：2026-07-28（Asia/Shanghai）。
+> 快照时间：主要 GitHub 项目为 2026-07-28；CCPark npm 补充快照为 2026-07-29（Asia/Shanghai）。
 >
 > 本报告优先使用竞品官方仓库、官方 README、官方文档和 GitHub API；动态数据均为快照，不等同于活跃用户或商业采用。
 >
@@ -22,6 +22,7 @@
 5. **Flowlet 当前没有额度感知路由。** 已有能力是账号优先级、有限状态码 fallback 和运行时热更新。额度感知、成本/延迟/成功率综合调度属于后续能力。
 6. **不建议因竞品普遍做协议转换就改变 Flowlet 的协议边界。** 协议转换扩大 Provider 覆盖，也引入流式事件、工具调用、thinking/reasoning、缓存语义和错误映射的长期兼容负担。Flowlet 当前资源更适合把原生双协议链路做深。
 7. **当前优先级不应被 MCP/Skills 管理、本地 HTTPS 或分享小票打乱。** 通用 MCP/Prompt/Skills 管理仍是明确非目标；HTTPS 和用量导出有真实竞品案例，但应先用目标客户端和用户反馈验证需求。
+8. **CCPark 算相邻竞品，但不是当前核心模型代理竞品。** 它争夺的是“远程查看和接管终端 Agent”的会话/控制入口；当前公开资料未显示其管理模型渠道、账号池、开放模型、代理路由、请求成本或完整 Trace。短期直接威胁低，但对 Flowlet 的 Agent Session、远程观测和交互接管方向构成中等压力。
 
 ## 二、调研方法与判断标准
 
@@ -122,17 +123,18 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 
 ### 4.4 Agent 工作台与舰队层
 
-| 产品 | Stars | 核心定位 | 与 Flowlet 的关系 |
+| 产品 | Stars / 下载 | 核心定位 | 与 Flowlet 的关系 |
 |---|---:|---|---|
 | [Multica](https://github.com/multica-ai/multica) | 42,273 | Managed Agents、任务、Squads、技能沉淀 | 上游相邻；不直接管理模型流量 |
 | [Orca](https://github.com/stablyai/orca) | 31,016 | 并行 Agent IDE、worktree、手机/VPS、账号切换和用量查看 | 有向账号/额度层扩展的迹象 |
+| [CCPark](https://www.npmjs.com/package/ccpark) | npm 周下载 1,404 | 终端 Agent 远程控制台、本机 daemon、统一会话事件和远程审批 | 会话/控制层相邻；当前不管理模型流量 |
 | [herdr](https://github.com/ogulcancelik/herdr) | 21,582 | 终端 Agent multiplexer | 上游相邻 |
 | [gastown](https://github.com/gastownhall/gastown) | 17,281 | 多 Agent 工作区和容量 Scheduler | 并发容量问题的场景证据 |
 | [OpenWork](https://github.com/different-ai/openwork) | 17,323 | Claude Cowork 开源替代、OpenCode 驱动 | 工作台和技能生态相邻 |
 | [Eigent](https://github.com/eigent-ai/eigent) | 14,676 | CAMEL 多 Agent Cowork Desktop | 工作台相邻 |
 | [XIAOCHUANGx](https://github.com/zhaozhaozhiyi/XIAOCHUANGx) | 248 | 多 Agent 企业业务流工作台 | 当前威胁低 |
 
-**分析判断：** 舰队层的增长说明多 Agent 并行正在形成用户场景，但不能由 Stars 直接推导出 Flowlet 必然受益。需要验证这些用户是否会主动配置统一代理、是否需要按 Agent/会话拆账，以及订阅账号本身是否允许相应使用方式。
+**分析判断：** 舰队层的增长说明多 Agent 并行正在形成用户场景，但不能由 Stars 或 npm 下载直接推导出 Flowlet 必然受益。CCPark 进一步证明“离开电脑后查看会话、回答问题和处理权限”正在形成独立产品层；它与 Flowlet 的模型流量控制边界不同，但会争夺 Agent 会话入口。需要验证这些用户是否会主动配置统一代理、是否需要按 Agent/会话拆账，以及订阅账号本身是否允许相应使用方式。
 
 ## 五、核心能力对比
 
@@ -322,6 +324,31 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 - 威胁级别：**低到中**；
 - 主要价值：持续校验 Flowlet 是否仍应保持个人桌面、原生协议和 Agent 观测定位。
 
+### 6.8 CCPark：Agent 远程控制层的相邻竞品
+
+**已验证事实**
+
+- npm 包 `ccpark` 创建于 2026-06-03，本次快照最新版为 `0.0.71`；2026-07-18 至 2026-07-24 下载 1,404 次，2026-06-25 至 2026-07-24 下载 4,576 次；
+- `ccpark` 本身是很薄的 CLI 包，依赖同版本 `@agentdock/daemon`；daemon 负责本机 Agent 子进程、ACP/JSONL 事件映射、Socket.IO 上传、本地控制 API，以及 approve/deny/answer/abort/stop 等远程 RPC；
+- `@agentdock/wire` 的公开 README 列出 Claude、Copilot、OpenCode、Codex、Gemini、Hermes、OpenClaw 七类 CLI，并定义文本、thinking、工具调用、文件、问题、权限和 Token 用量等统一事件；
+- `@agentdock/crypto` 宣称使用 AES-256-GCM、Ed25519 和 NaCl，并在数据离开设备前加密；
+- 相关 npm 包为 `UNLICENSED`，npm 元数据未提供公开仓库、主页或源码链接。因此端到端加密、服务端行为和实现边界目前只能记录为官方声明，不能视为独立审计结论。
+
+**分析判断**
+
+- CCPark 解决的是“Agent 进程与会话如何被远程看见和接管”，Flowlet 解决的是“模型流量如何接入、路由、记录和计费”，两者目前不在同一核心控制面；
+- 对 Flowlet 当前渠道账号、开放模型和本地代理主链路的直接替代威胁为**低**；
+- 对 Flowlet 长期的 Agent Session、远程观测、问题回答和权限接管入口的竞争压力为**中**；
+- 两者也存在互补可能：CCPark 管进程和交互，Flowlet 管模型渠道、请求证据与成本。
+
+**升级为直接竞品的观察信号**
+
+- 增加 Provider/API Key、订阅账号池或渠道账号管理；
+- 提供本地 OpenAI/Anthropic-compatible 代理或统一 Base URL；
+- 增加模型路由、fallback、额度感知或成本核算；
+- 将统一会话事件下钻为可审计的逐请求 Trace；
+- 自动把所管理 Agent 的模型流量统一注入 CCPark 自有端点。
+
 ## 七、Flowlet 的竞争位置
 
 ### 7.1 已成立的差异
@@ -386,7 +413,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 | 本地 HTTPS | AIUsage、cc-router 已用于 Claude Desktop/HTTPS-only 场景 | 先确认 Flowlet 目标客户端、证书安装/卸载和安全支持成本 |
 | 用量 PNG/PDF 分享 | cc-router 有小票，Vibe 有排行榜 | 等成本语义和数据准确后再做，避免传播错误数据 |
 | 显式模型别名 | 多个网关用别名降低接入成本 | 只考虑明确、可审计别名；不做跨厂商模糊身份映射 |
-| 远程/手机查看 | Orca、Vibe X 有真实产品 | 作为长期场景观察，不进入当前核心路线 |
+| 远程/手机查看与交互接管 | Orca、Vibe X、CCPark 有真实产品或公开发行包；CCPark 已覆盖远程问答和权限 RPC | 作为 Agent 观测的长期场景观察；先验证只读查看、远程审批和安全边界，不进入当前核心路线 |
 
 ### 8.4 继续不做
 
@@ -409,12 +436,13 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 | **中** | cc-router | 同桌面形态、订阅聚合、HTTPS | Releases、真实用户反馈、ToS 风险、HTTPS 使用场景 |
 | **中（能力）** | CodeBurn、claude-tap、Vibe Usage | 分别抢成本优化、Trace、用量心智 | 新数据源、导出、定价覆盖、Viewer 深度 |
 | **低到中** | TiyGate | 技术相近但定位偏通用网关 | 是否转向个人桌面、是否增加 Agent 接入 |
+| **观察（会话/控制）** | CCPark | 已覆盖本机 daemon、统一会话事件和远程交互，但公开实现与服务端边界不透明 | 是否增加代理、账号池、成本、Trace 或统一 API；许可证与数据边界 |
 | **观察** | Orca、Multica、herdr、gastown、OpenWork | 舰队/工作台可能向账号和流量层扩展 | 是否增加代理、账号池、成本或统一 API |
 
 建议跟踪频率：
 
 - **每两周**：AIUsage、OpenCodex、CLIProxyAPI、CC Switch；
-- **每月**：cc-router、Free Claude Code、CodeBurn、claude-tap、Vibe Usage；
+- **每月**：cc-router、Free Claude Code、CodeBurn、claude-tap、Vibe Usage、CCPark；
 - **每季度**：TiyGate 和 Agent 舰队/工作台产品。
 
 每次记录：
@@ -462,7 +490,18 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 | [Eigent](https://github.com/eigent-ai/eigent) | 14,676 | 2025-07-29 | `822250079873` | Apache-2.0 |
 | [XIAOCHUANGx](https://github.com/zhaozhaozhiyi/XIAOCHUANGx) | 248 | 2026-06-26 | `51719a2e03fe` | MIT |
 
-### 10.3 其他官方页面
+### 10.3 CCPark npm 包快照
+
+| 包 | 快照版本 | 创建时间 | 下载快照 | License / 源码元数据 |
+|---|---:|---|---|---|
+| [ccpark](https://www.npmjs.com/package/ccpark) | `0.0.71` | 2026-06-03 | 周 1,404；月 4,576 | `UNLICENSED`；未提供 repository/homepage |
+| [@agentdock/daemon](https://www.npmjs.com/package/@agentdock/daemon) | `0.0.90` | 2026-03-14 | 周 2,538 | `UNLICENSED`；未提供 repository/homepage |
+| [@agentdock/wire](https://www.npmjs.com/package/@agentdock/wire) | `0.0.90` | 2026-03-14 | — | `UNLICENSED`；README 提供事件、RPC、同步和控制级别说明 |
+| [@agentdock/crypto](https://www.npmjs.com/package/@agentdock/crypto) | `0.0.90` | 2026-03-14 | — | `UNLICENSED`；README 提供端到端加密声明 |
+
+下载数据来源：[npm Downloads API（ccpark 周下载）](https://api.npmjs.org/downloads/point/2026-07-18:2026-07-24/ccpark)、[npm Downloads API（ccpark 月下载）](https://api.npmjs.org/downloads/point/2026-06-25:2026-07-24/ccpark)、[npm Downloads API（daemon 周下载）](https://api.npmjs.org/downloads/point/2026-07-18:2026-07-24/%40agentdock%2Fdaemon)。
+
+### 10.4 其他官方页面
 
 - [Vibe Usage 官方页面](https://vibecafe.ai/usage)
 - [Vibe X 官方页面](https://vibecafe.ai/x)
@@ -472,14 +511,15 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 
 ## 十一、最终判断
 
-Flowlet 面对的不是一个单一竞品，而是四股力量同时挤压：
+Flowlet 面对的不是一个单一竞品，而是五股力量同时挤压：
 
 1. CLIProxyAPI、OpenCodex、Free Claude Code 用协议广度和订阅账号池抢“统一入口”；
 2. AIUsage、CC Switch 用配置接管和桌面体验抢“Agent 接入入口”；
 3. CodeBurn、Vibe Usage、CodexBar 抢“用量与成本心智”；
-4. claude-tap 抢“真实 Trace 和可调试性”。
+4. claude-tap 抢“真实 Trace 和可调试性”；
+5. CCPark、Orca、Vibe X 抢“远程看 Agent、接管交互”的工作台入口。
 
-Flowlet 不应在四条线上同时追求功能数量。更可行的路线是：
+Flowlet 不应在五条线上同时追求功能数量。更可行的路线是：
 
 > **把渠道账号、显式开放模型和原生双协议代理做稳；把最终上游请求证据与 Agent 原生会话合并；再完成可解释的统一成本账本。**
 

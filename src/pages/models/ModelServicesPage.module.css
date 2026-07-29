@@ -107,10 +107,10 @@
 .infoFootnote a:hover { text-decoration: underline; }
 
 /* 渠道路由:概览头(标题 + 说明 + 已启用计数 pill) */
-.routeOverview { display: flex; align-items: flex-start; gap: 8px; }
-.routeOverviewCopy { min-width: 0; flex: 1; display: grid; gap: 4px; }
-.routeOverviewCopy strong { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong); }
-.routeOverviewCopy span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: 1.45; }
+.routeOverview { display: grid; gap: 4px; }
+.routeOverviewHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.routeOverviewHeader strong { min-width: 0; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong); }
+.routeOverviewDesc { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: 1.45; }
 .routeCountPill { flex: 0 0 auto; padding: 4px 8px; border-radius: 6px; background: var(--semi-color-primary-light-default); color: var(--semi-color-primary); font-size: var(--flowlet-font-size-caption); font-weight: 650; white-space: nowrap; }
 
 .routeRow { min-height: 58px; padding: 7px 9px; display: grid; grid-template-columns: 22px 24px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--flowlet-color-border); transition: background-color 120ms ease, opacity 120ms ease; }

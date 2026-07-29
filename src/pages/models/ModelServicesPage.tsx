@@ -598,11 +598,11 @@ function ModelDetail({ model, relations, accounts, channels, channelModels, pric
           {model.kind === "aggregate" ? (
             <div className={styles.tabContent}>
               <div className={styles.routeOverview}>
-                <div className={styles.routeOverviewCopy}>
+                <div className={styles.routeOverviewHeader}>
                   <strong>{t("渠道路由")}</strong>
-                  <span>{t("拖动调整请求优先级；接口健康与是否参与路由分别展示。")}</span>
+                  <span className={styles.routeCountPill}>{t("{enabled} / {total} 条已启用", { enabled: enabledRouteCount, total: model.routeGroups.length })}</span>
                 </div>
-                <span className={styles.routeCountPill}>{t("{enabled} / {total} 条已启用", { enabled: enabledRouteCount, total: model.routeGroups.length })}</span>
+                <span className={styles.routeOverviewDesc}>{t("拖动调整请求优先级；接口健康与是否参与路由分别展示。")}</span>
               </div>
               <div className={styles.configBox}>
                 <RouteList model={model} accounts={accounts} channels={channels} busy={busy} onToggleRoute={onToggleRoute} onReorderRoute={onReorderRoute} t={t} />
@@ -611,11 +611,11 @@ function ModelDetail({ model, relations, accounts, channels, channelModels, pric
           ) : (
             <div className={styles.tabContent}>
               <div className={styles.routeOverview}>
-                <div className={styles.routeOverviewCopy}>
+                <div className={styles.routeOverviewHeader}>
                   <strong>{t("路由关系")}</strong>
-                  <span>{t("展示当前渠道模型被哪些聚合模型引用。")}</span>
+                  <span className={styles.routeCountPill}>{t("{count} 个聚合模型", { count: relatedAggregateCount })}</span>
                 </div>
-                <span className={styles.routeCountPill}>{t("{count} 个聚合模型", { count: relatedAggregateCount })}</span>
+                <span className={styles.routeOverviewDesc}>{t("展示当前渠道模型被哪些聚合模型引用。")}</span>
               </div>
               {modelRelations.length > 0 ? (
                 <div className={styles.configBox}>

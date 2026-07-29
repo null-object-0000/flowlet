@@ -29,11 +29,12 @@ export function filterModelServiceItems(
 }
 
 /** 渠道下拉筛选器选项：只展示已有路由（即有账号且配置了 API Key）的渠道。
- *  避免 config.json 里新增但用户还没配账号的渠道提前出现在下拉列表里。 */
+ *  避免 config.json 里新增但用户还没配账号的渠道提前出现在下拉列表里。
+ *  返回 Semi Select optionList 需要的 { value, label } 结构。 */
 export function buildChannelFilterOptions(
   models: ModelServiceItem[],
   channels: ChannelPreset[] = [],
-): Array<{ id: string; name: string }> {
+): Array<{ value: string; label: string }> {
   const channelNames = new Map(channels.map((channel) => [channel.id, channel.name]));
   const channelIdToName = new Map<string, string>();
   for (const model of models) {
@@ -44,8 +45,8 @@ export function buildChannelFilterOptions(
     }
   }
   return [...channelIdToName.entries()]
-    .map(([id, name]) => ({ id, name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export function reorderModelRouteGroups(

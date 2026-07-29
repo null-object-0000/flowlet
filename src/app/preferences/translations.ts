@@ -857,7 +857,7 @@ const english: Record<string, string> = {
   "价格来源": "Pricing source",
   "1M 长上下文": "1M long context",
   "为主模型写入 [1m] 后缀，Claude Code 长会话按百万级上下文窗口管理。": "Append the [1m] suffix to primary models so Claude Code manages long sessions with a 1M-token context window.",
-  "Flowlet 实际可用上下文受路由后端限制，部分后端（如 Kimi K3 约 256K）撑不满 1M。": "Flowlet's actual context is limited by the routed backend; some backends (e.g. Kimi K3 at ~256K) cannot fill 1M.",
+  "Flowlet 实际可用上下文取决于当前路由模型；仅当路由模型支持 1M 时，此配置才能完整生效。": "Flowlet's actual context depends on the routed model; this option is fully effective only when that model supports a 1M-token context.",
   "支持协议": "Supported protocols",
   "渠道路由": "Channel routes",
   "数字越小优先级越高": "Lower numbers have higher priority",

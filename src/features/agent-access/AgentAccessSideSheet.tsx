@@ -263,7 +263,7 @@ export function AgentAccessSideSheet({
                     <div>
                       <strong>{t("1M 长上下文")}</strong>
                       <small>{t("为主模型写入 [1m] 后缀，Claude Code 长会话按百万级上下文窗口管理。")}</small>
-                      <small>{t("Flowlet 实际可用上下文受路由后端限制，部分后端（如 Kimi K3 约 256K）撑不满 1M。")}</small>
+                      <small>{t("Flowlet 实际可用上下文取决于当前路由模型；仅当路由模型支持 1M 时，此配置才能完整生效。")}</small>
                     </div>
                     <Switch
                       checked={globalConfig.long_context ?? false}

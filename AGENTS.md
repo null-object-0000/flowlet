@@ -368,7 +368,7 @@ Agent 接入能力应逐步提供：
 
 ### 客户端归属标记头
 
-请求日志 / 用量中的“客户端”归属优先由请求头 `x-flowlet-client` 决定，再回退到
+请求日志 / 用量中的”客户端”归属优先由请求头 `x-flowlet-client` 决定，再回退到
 `config.json` 的 `ua_rules`（User-Agent 子串匹配）。复用通用 SDK、User-Agent 无法
 区分的 Agent（如 Pi，其 UA 为通用 `OpenAI/JS`），必须在 Flowlet 写入的全局配置中
 注入 `x-flowlet-client: <agent_id>`（Pi 写在 `models.json` 的 `providers.flowlet.headers`），
@@ -376,6 +376,12 @@ Agent 接入能力应逐步提供：
 转发上游前会将其剥离（见 `proxy_http.rs` 的 `apply_request_headers`），不向上游泄露。
 新增此类 Agent 时，需同步在 Rust `proxy_http.rs` 的 `agent_client_marker_name` 登记
 展示名，并在一键写入与手动配置片段中同时注入该头。
+
+**历史修复路径**：客户端归属在捕获时一次性落库（`client_id` / `client_name`），`ua_rules`
+修改只影响新请求。对于历史日志中 `client_id IS NULL` 的记录，`storage_usage.rs` 的
+`repair_agent_sessions` 会按最新 `ua_rules` 重识别（通过 `proxy.rs` 的
+`identify_client_from_json` 复用实时识别逻辑），已有归属的记录不会被覆盖。用户在
+“设置 → 维护 → 数据完整性检查”点击”开始检查”即可触发修复。
 
 ### Pi 会话标识头
 

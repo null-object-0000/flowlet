@@ -1,5 +1,5 @@
 import { Button, Progress, Select, Switch, Toast } from "@douyinfe/semi-ui-19";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { DataRepairTimeRange } from "../../../domains/data-repair/types";
 import { useDataRepair } from "../../../features/settings/useDataRepair";
 import { SettingRow, SettingSection } from "../SettingRow";
@@ -23,37 +23,26 @@ export function MaintenanceTab() {
   const { t } = useAppPreferences();
   const repair = useDataRepair();
   const [repairTimeRange, setRepairTimeRange] = useState<DataRepairTimeRange>("all");
-  const [percent, setPercent] = useState(0);
-  const [activeStep, setActiveStep] = useState(0);
-  const [doneSteps, setDoneSteps] = useState<Set<number>>(new Set());
-  const runningRef = useRef(false);
+
+  const isRunning = repair.state.status === "running";
+  const percent = repair.state.percent;
+  const activeStep = repair.state.currentStage
+    ? STAGES.findIndex((s) => s.key === repair.state.currentStage)
+    : repair.state.status === "success"
+    ? STAGES.length
+    : 0;
+
+  const doneSteps = new Set<number>();
+  for (const stage of repair.state.completedStages) {
+    const idx = STAGES.findIndex((s) => s.key === stage);
+    if (idx >= 0) doneSteps.add(idx);
+  }
 
   const startRepair = () => {
-    if (runningRef.current) return;
-    runningRef.current = true;
-    setPercent(0);
-    setActiveStep(0);
-    setDoneSteps(new Set());
-
-    let p = 0;
-    const stagesDone = new Set<number>();
-    const timer = setInterval(() => {
-      p += 4;
-      setPercent(p);
-      const idx = Math.min(3, Math.floor(p / 25));
-      setActiveStep(idx);
-      if (idx > 0) {
-        const newDone = new Set<number>();
-        for (let i = 0; i < idx; i++) newDone.add(i);
-        setDoneSteps(newDone);
-      }
-      if (p >= 100) {
-        clearInterval(timer);
-        runningRef.current = false;
-        setDoneSteps(new Set([0, 1, 2, 3]));
-        Toast.success(t("检查完成，未发现需要修复的数据"));
-      }
-    }, 180);
+    repair.run(repairTimeRange).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      Toast.error(t("本地数据修复失败：{message}", { message }));
+    });
   };
 
   const eta = Math.ceil((100 - percent) / 6);
@@ -76,8 +65,8 @@ export function MaintenanceTab() {
             />
             <Button
               type="primary"
-              loading={runningRef.current}
-              disabled={runningRef.current}
+              loading={isRunning}
+              disabled={isRunning}
               onClick={startRepair}
             >
               {t("开始检查")}
@@ -85,21 +74,27 @@ export function MaintenanceTab() {
           </div>
         </div>
 
-        <div className={`${styles.repairProgress} ${percent > 0 ? styles.show : ""}`}>
+        <div className={`${styles.repairProgress} ${percent > 0 || repair.state.status === "success" ? styles.show : ""}`}>
           <div className={styles.progressHeader}>
-            <strong>{t("正在检查历史数据 · {percent}%", { percent })}</strong>
-            <span>{t("预计还需 {sec} 秒", { sec: eta })}</span>
+            <strong>
+              {repair.state.status === "success"
+                ? t("本地数据修复完成")
+                : repair.state.status === "error"
+                ? t("本地数据修复失败：{message}", { message: repair.state.error ?? "" })
+                : t("正在检查历史数据 · {percent}%", { percent })}
+            </strong>
+            {isRunning && <span>{t("预计还需 {sec} 秒", { sec: eta })}</span>}
           </div>
           <div className={styles.progressTrack}>
             <div className={styles.progressFill} style={{ width: `${percent}%` }} />
           </div>
           <div className={styles.repairSteps}>
             {STAGES.map((stage, index) => {
-              const state = doneSteps.has(index) ? "done" : activeStep === index && percent < 100 ? "active" : "";
+              const state = doneSteps.has(index) ? "done" : activeStep === index && isRunning ? "active" : "";
               return (
                 <div key={stage.key} className={`${styles.step} ${styles[state]}`}>
                   <strong>{t(stage.label)}</strong>
-                  <p>{doneSteps.has(index) ? t("已完成") : activeStep === index && percent < 100 ? t("正在检查") : t("等待处理")}</p>
+                  <p>{doneSteps.has(index) ? t("已完成") : activeStep === index && isRunning ? t("正在检查") : t("等待处理")}</p>
                 </div>
               );
             })}

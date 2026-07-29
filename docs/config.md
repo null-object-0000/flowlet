@@ -178,7 +178,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 ### 6.1 `channels` — 渠道模板
 
-每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、千问 Qwen）。
+每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、Qwen）。
 
 ```jsonc
 {
@@ -258,10 +258,10 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 **行为**：
 
 - 启动时从 `config.json` 解析；缺失的渠道模板会追加到 SQLite `channel_presets` 表。
-- 已有渠道模板的 `supported_protocols`、`openai_base_url`、`anthropic_base_url`、`openai_auth`、`anthropic_auth` 会在启动时从有效配置同步，确保新增协议和端点修正能迁移到已有安装。
+- 已有渠道模板的 `name`、`supported_protocols`、`openai_base_url`、`anthropic_base_url`、`openai_auth`、`anthropic_auth` 会在启动时从有效配置同步，确保渠道更名、新增协议和端点修正能迁移到已有安装。
 - 后续通过 `list_channel_presets` command 供前端使用。
 - 同步渠道模板**不会**修改已创建账号的覆盖地址，也不会新增、删除或改变现有路由的启用状态。
-- 千问 Qwen（`id = "qwen"`）的渠道级端点是**按量付费**端点；Token Plan 订阅账号
+- Qwen（`id = "qwen"`）的渠道级端点是**按量付费**端点；Token Plan 订阅账号
   （`resource_mode = "token_plan"`）通过账号级 `base_url_override` /
   `anthropic_base_url_override` 指向 `https://token-plan.cn-beijing.maas.aliyuncs.com`
   下的专属端点，由账号编辑器在选择 Token Plan 模式时自动写入。

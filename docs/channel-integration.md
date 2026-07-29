@@ -36,7 +36,7 @@
 
 ## 2. 已接入渠道对照
 
-| 能力 | LongCat | DeepSeek | Kimi | 千问 Qwen | 自定义渠道 |
+| 能力 | LongCat | DeepSeek | Kimi | Qwen | 自定义渠道 |
 |------|---------|----------|------|-----------|------------|
 | 渠道 ID | `longcat` | `deepseek` | `kimi` | `qwen` | `custom` |
 | OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 账号级填写 |
@@ -55,7 +55,7 @@ OpenAI-compatible `/models` 的实际返回结果，并统一受 Flowlet 全局�
 白名单外模型照常展示，但标记为“不支持”且不可勾选。最终候选必须同时存在于
 最近一次 `/models` 结果、用户勾选列表和全局白名单中。
 
-千问 Qwen 的一个账号级特性是 **Token Plan**（订阅制，`sk-sp-` 前缀 Key）：
+Qwen 的一个账号级特性是 **Token Plan**（订阅制，`sk-sp-` 前缀 Key）：
 渠道级端点保持按量付费地址，Token Plan 账号通过账号级 Base URL 覆盖指向
 `https://token-plan.cn-beijing.maas.aliyuncs.com` 下的专属端点
 （OpenAI `/compatible-mode/v1`，Anthropic `/apps/anthropic`），

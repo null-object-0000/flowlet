@@ -1,122 +1,245 @@
-# Flowlet
+<div align="center">
+  <img src="public/flowlet-logo.png" width="112" alt="Flowlet Logo" />
+  <h1>Flowlet</h1>
+  <p><strong>给 AI Agent 一个本地、可观测、可切换的模型入口。</strong></p>
+  <p>统一管理模型渠道与账号，把 Claude Code、OpenCode、Pi 等 Agent 接入本地代理，并在一个桌面应用里查看请求、会话、Token、费用和资源余量。</p>
+</div>
 
-Flowlet 是一个面向 AI Agent 的本地桌面模型服务控制台。
+<p align="center">
+  <a href="https://github.com/null-object-0000/flowlet/stargazers"><img src="https://img.shields.io/github/stars/null-object-0000/flowlet?style=flat-square" alt="GitHub Stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563eb?style=flat-square" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/status-early%20preview-f59e0b?style=flat-square" alt="Early Preview" />
+  <img src="https://img.shields.io/badge/desktop-Tauri%202-24c8db?style=flat-square" alt="Tauri 2" />
+</p>
 
-它负责管理上游渠道账号、对外开放模型、为 AI 客户端和 Agent 提供本地代理端点，并提供请求日志、Agent 会话、用量成本和运行状态。长期方向是建立与代理流量解耦的统一 AI 成本账本，让官方账号和本地 Agent 使用也能按任务、会话和请求归集。
+> [!IMPORTANT]
+> Flowlet 仍处于早期预览阶段，功能迭代较快，暂未发布正式 GitHub Release。
+> 当前推荐从源码运行或自行构建。欢迎 Star、试用并通过
+> [Issues](https://github.com/null-object-0000/flowlet/issues) 提交反馈。
 
-Flowlet 当前采用 LongCat + DeepSeek first 策略，先把 LongCat 和 DeepSeek 的 OpenAI-compatible 与 Anthropic-compatible 两种透明转发入口和多账号管理做完整，再扩展更多渠道。
+## 为什么是 Flowlet
 
-## 产品原则
+AI Agent 越来越多，但模型渠道、账号、套餐、请求日志和会话数据往往散落在不同地方。
+Flowlet 把这些日常操作收敛到本地桌面：
 
-- 支持多协议透明转发，但不做跨协议转换
-- 响应零改写
-- 请求侧只做轻量路由和必要 Header 替换
-- 日志旁路记录，不影响主请求链路
-- 模型列表、价格、余额、额度、用量查询走异步同步
-- Token 和成本通过离线分析完成
-- 成本账本金额优先，区分实际支付、公开价估算、摊销、分配和等价价值，不伪造精度
-- 前端优先：业务流程和状态编排由 React 负责，Rust 提供底层原子能力
+- **一个本地入口**：OpenAI-compatible 与 Anthropic-compatible 客户端使用固定的
+  Base URL 和 Client Token，不必在每个 Agent 中反复更换上游密钥。
+- **多个渠道与账号**：管理 LongCat、DeepSeek、Kimi、千问 Qwen 和自定义中转服务，
+  为同一模型配置多个候选账号和优先级。
+- **明确开放哪些模型**：从上游 `/models` 拉取真实列表，只开放 Flowlet 支持且由用户
+  明确选择的模型。
+- **Agent 不再是黑盒**：统一查看经过 Flowlet 的请求，以及 Claude Code、OpenCode、
+  Pi、Codex Desktop / CLI 的本地原生会话和时间线。
+- **用量与费用更容易核对**：查看 Token、缓存命中、模型价格、渠道费用、套餐余量和
+  Codex credits；不同币种和不同成本语义不会被强行相加。
+- **本地优先**：代理、配置、SQLite 数据库和请求捕获默认保存在本机；多设备共享是
+  可选能力。
 
-## 核心能力
+## 现在可以做什么
 
-- 本地代理入口（默认端口 18640）
-- LongCat + DeepSeek 首发渠道模板
-- 多协议入口：OpenAI-compatible 与 Anthropic-compatible
-- 多账号管理：测试连接、余额同步、资源包管理
-- 开放模型管理：按渠道/账号选择对外开放的模型
-- 渠道账号管理：启用/停用、优先级排序、API Key 轮换
-- Client Token 管理：固定掩码展示、按需查看明文
-- Agent 接入向导：Claude Code、Codex CLI、OpenCode 等
-- 请求日志：筛选、详情、清理、实时刷新
-- 用量与成本分析（统一成本账本已纳入规划）
-- 设置：语言、主题、开机自启动
-- 系统托盘 / 开机自启动
+### 管理渠道账号与开放模型
 
-## 当前架构
+- 同一渠道添加多个账号，测试连接、启用/停用和调整路由优先级；
+- 拉取上游真实模型列表，白名单外模型可见但不可误开放；
+- 使用 `flowlet-pro` / `flowlet-flash` 聚合模型，或直接使用规范化模型 ID；
+- 查看 DeepSeek、Kimi 官方余额，以及 LongCat、Qwen Token Plan 的资源余量；
+- 使用自定义渠道连接标准 OpenAI-compatible / Anthropic-compatible 中转服务。
 
-正式前端位于 `src/`，使用 Semi Design、React 19 和 TanStack Query，并采用分层架构：
+### 一键接入 AI Agent
 
-```text
-src/
-├── app/          # Provider、Router、Shell
-├── pages/        # 路由页面和页面状态组合
-├── features/     # 用户动作与业务编排
-├── domains/      # 领域类型、command、query、mutation
-├── platform/     # Tauri 等运行平台边界
-├── shared/       # 无业务含义的共享 UI 与工具
-└── styles/       # reset 与 Design Tokens
-```
+- **Claude Code**：检测安装与版本，一键写入/恢复全局配置，支持主模型、快速模型、
+  子 Agent 模型和可选 `[1m]` 长上下文；
+- **OpenCode**：同时识别 CLI 与 Desktop，共用 Flowlet Provider 和凭据配置；
+- **Pi**：写入 OpenAI-compatible Provider，并可安装会话扩展以注入稳定 Session ID；
+- **ChatGPT（Codex）/ Codex CLI**：检测 Desktop 与 CLI，读取 Codex 账号、套餐用量、
+  credits 和原生会话。
 
-Rust 后端（`src-tauri/`）负责代理核心、HTTP 转发、SQLite 持久化、系统托盘和渠道同步。
+### 看清请求、会话与成本
 
-统一 AI 成本账本尚未实现；完整产品语义、目标模型、阶段范围和验收标准见 [`docs/ai-cost-ledger.md`](docs/ai-cost-ledger.md)。当前页面中的预估费用仍是基于公开模型价格计算的估算值，不代表实际支付或订阅分摊成本。
+- 请求日志支持客户端、模型、渠道、状态、时间和会话筛选；
+- 查看最终上游 URL、Header、Body、错误、路由尝试、首 Token 延迟与总耗时；
+- 原生读取 Claude Code JSONL、OpenCode SQLite、Pi JSONL 和 Codex rollout；
+- 会话详情统一展示消息、思考摘要、工具调用、工具结果、错误和 Token 用量；
+- 请求捕获采用 SQLite 索引与本地 `.flcap` 明细文件，支持按时间和体积自动清理；
+- 数据维护工具可以修复历史会话归因、重新解析 Token 并重算费用。
 
-## 当前状态
+### 在多设备查看用量
 
-Flowlet 已完成从 Mantine 到 Semi Design 的正式前端切换，概览页、渠道账号、开放模型、请求日志、用量成本和设置页面均由 `src/` 提供。
+Flowlet 支持把最小化的每日用量快照同步到兼容 S3 的对象存储，并在其它桌面设备读取。
+当前代码还包含实验性的 Android 只读查看器，用于查看设备用量和会话摘要；它不会启动
+手机本地代理，也不会同步请求正文、Header、API Key 或渠道账号。
 
-### 已完成能力
+## 当前支持范围
 
-**正式前端（src/）**
-- 概览页（状态总览 + 三步引导）
-- 渠道账号管理（增删改、测试连接、余额同步、LongCat 资源包）
-- 模型服务页（路由候选检查）
-- 请求日志（列表、详情、筛选、清理、自动刷新）
-- 用量成本页
-- 设置页（语言、主题、自启动）
+### 渠道
 
-**核心后端**
-- Channel / Account / Model 三层数据模型
-- SQLite WAL 模式持久化
-- OpenAI-compatible + Anthropic-compatible 双协议透明转发
-- 账号优先级 fallback、429/5xx 降级
-- 请求日志旁路捕获（channel/account/protocol 维度）
-- Token / 成本分析
-- 余额快照与 DeepSeek 余额查询
-- 便携版构建、配置导入导出
-- Headless 二进制入口（`bin/headless.rs`）
-- 运行时代理配置热更新
+| 渠道 | OpenAI Chat | Anthropic Messages | 模型同步 | 余额 / 资源 |
+|------|-------------|--------------------|----------|-------------|
+| LongCat | ✅ | ✅ | ✅ | 资源包与按量余额 |
+| DeepSeek | ✅ | ✅ | ✅ | 官方余额 |
+| Kimi / Moonshot | ✅ | ✅ | ✅ | 官方余额 |
+| 千问 Qwen | ✅ | ✅ | ✅ | Token Plan 套餐余量 |
+| 自定义渠道 | 取决于上游 | 取决于上游 | 标准 OpenAI `/models` | — |
 
-## 快速开始
+### Agent
 
-### 前端开发
+| Agent | 安装探测 | 一键接入 Flowlet | 原生会话 |
+|-------|----------|------------------|----------|
+| Claude Code | ✅ | ✅ | ✅ |
+| OpenCode CLI / Desktop | ✅ | ✅ | ✅ |
+| Pi | ✅ | ✅ | ✅ |
+| ChatGPT（Codex）/ Codex CLI | ✅ | 暂未开放 | ✅ |
+
+Flowlet 当前正式支持 Chat Completions 与 Anthropic Messages 透明转发。完整的渠道、
+11 个模型、协议和 Agent 能力边界见 [当前支持矩阵](docs/support-matrix.md)。
+
+## 3 分钟启动
+
+### 环境要求
+
+- [Node.js](https://nodejs.org/) 22+
+- [Rust stable](https://www.rust-lang.org/tools/install)
+- [Tauri 2 系统依赖](https://v2.tauri.app/start/prerequisites/)
+
+### 从源码运行桌面端
 
 ```bash
-npm install
-npm run dev
-```
-
-### 桌面端（开发模式）
-
-```bash
+git clone https://github.com/null-object-0000/flowlet.git
+cd flowlet
+npm ci
 npm run tauri:dev
 ```
 
-### 检查与构建
+首次启动后：
+
+1. Flowlet 会自动尝试启动本地代理；
+2. 在概览页添加渠道账号并填写上游 API Key；
+3. 点击“拉取模型列表”，选择需要开放的模型并保存；
+4. 在“AI Agent 接入”中选择 Claude Code、OpenCode 或 Pi，一键写入全局配置；
+5. 回到你的 Agent 发起请求，在 Flowlet 中查看日志、会话和用量。
+
+没有账号或开放模型时，代理仍会正常监听，只是 `/models` 返回空列表。
+
+### 本地访问地址
+
+默认代理地址为 `http://127.0.0.1:18640`。
+
+| 用途 | 地址 |
+|------|------|
+| 健康检查 | `http://127.0.0.1:18640/health` |
+| OpenAI Base URL | `http://127.0.0.1:18640/v1` |
+| OpenAI 模型列表 | `http://127.0.0.1:18640/v1/models` |
+| OpenAI Chat Completions | `http://127.0.0.1:18640/v1/chat/completions` |
+| Anthropic Base URL | `http://127.0.0.1:18640/anthropic` |
+| Anthropic Messages | `http://127.0.0.1:18640/anthropic/v1/messages` |
+
+客户端鉴权使用 Flowlet 概览页展示的 **Client Token**，不是渠道 API Key：
 
 ```bash
-npm run check          # 前端 typecheck
-npm run build          # 构建前端
-npm test               # 运行前端测试
+curl http://127.0.0.1:18640/v1/models \
+  -H "Authorization: Bearer <FLOWLET_CLIENT_TOKEN>"
 ```
 
-### Rust Core 检查
+## 构建
+
+### 桌面安装包
 
 ```bash
+npm ci
+npm run fetch:catalogs
+npx tauri build
+```
+
+仓库的构建工作流覆盖：
+
+- Windows x64：NSIS、MSI、便携版 ZIP；
+- Linux x64：AppImage、Debian package；
+- macOS Apple Silicon / Intel：DMG。
+
+Windows 还可以使用 `npm run tauri:build` 在完成安装包构建后额外生成便携版 ZIP；
+该步骤需要 Python 3。
+
+当前产物尚未签名。Windows 和 macOS 可能显示“未知发布者”或阻止直接打开。
+详细说明见 [安装包构建](docs/release-builds.md)。
+
+### Android 只读查看器（实验性）
+
+```bash
+npm run tauri:android:init
+npm run tauri:android:build
+```
+
+需要 Android Studio、Android SDK/NDK 和 Java 17–21。该构建只提供多设备用量与会话摘要
+查看，不包含桌面端的渠道管理和本地代理。
+
+## 数据与安全
+
+- 渠道 API Key、Client Token、配置和使用数据默认只保存在本机；
+- 请求日志是否脱敏由 `log_capture.redact_sensitive_headers` 控制，**当前默认关闭**；
+- 默认状态下，请求捕获可能原样保存 `Authorization`、`x-api-key`、Cookie、Header 和 Body；
+- 如果不需要排查完整请求，请在“设置 → 数据捕获”中开启敏感 Header 脱敏，或关闭对应
+  Header / Body 捕获；
+- 可选 S3 设备同步只发送最小用量与会话摘要，不发送请求正文、凭据或渠道账号；
+- Flowlet 的费用主要是基于官方价格目录的估算，不等同于账单实付或订阅成本分摊。
+
+完整字段和保留策略见 [`docs/config.md`](docs/config.md)。
+
+## 产品边界
+
+Flowlet 是面向 AI Agent 的本地模型服务控制台，不是通用企业 LLM Gateway：
+
+- 不做不同模型服务协议之间的转换；
+- 不随意改写上游响应结构；
+- 不提供企业多租户、复杂权重调度或大规模网关控制面；
+- fallback 只处理适合重试的网络错误、429 和部分 5xx，不会用换模型掩盖参数错误；
+- Agent 原生用量与经过 Flowlet 的请求分开统计，不重复相加。
+
+更完整的产品定义见 [产品文档](docs/product.md)。
+
+## 路线方向
+
+接下来重点推进：
+
+- 扩展更多 Agent 的安装探测、配置写入、请求归属和原生会话；
+- 完善统一 AI 成本账本，区分实付、公开价估算、套餐 credits 和分摊；
+- 完善多设备同步与移动端只读体验；
+- 继续提升代理稳定性、日志可诊断性和渠道接入体验。
+
+进度和阶段边界见 [Roadmap](docs/roadmap.md)。
+
+## 开发与贡献
+
+Flowlet 使用 React 19、TypeScript、Semi Design、TanStack Query、Tauri 2、Rust 和 SQLite。
+README 只保留用户需要的最小技术信息，代码分层、代理链路、存储和 Agent 数据源说明统一
+维护在 [架构文档](docs/architecture.md)。
+
+常用检查：
+
+```bash
+npm run check
+npm test
+npm run build
+
 cd src-tauri
-cargo fmt
 cargo check
 cargo test
 ```
 
-详细文档见 [docs/](docs/) 目录。
+欢迎提交 Issue 或 Pull Request。如果 Flowlet 对你的 Agent 工作流有帮助，也欢迎点一个
+[Star](https://github.com/null-object-0000/flowlet/stargazers)，这会帮助更多人发现它。
 
-## 透明转发边界
+## 文档
 
-- Flowlet 支持多协议入口，但不做跨协议转换。客户端请求使用什么协议，上游 Provider 就必须原生支持同一种协议。
-- OpenAI-compatible 入口支持 `/v1/*`、`/openai/v1/*`。
-- Anthropic-compatible 入口支持 `/anthropic/v1/*`，用于 Claude Code、Anthropic SDK 等。
-- 请求侧仅做 Provider base_url 替换、Authorization / X-Api-Key 替换和 `auto` 的 model 映射。
-- 上游返回的最终响应按原 status、headers、body 流式返回。
-- 日志写入走旁路，失败不影响主请求链路。
-- `auto` 当前只做顺序候选：429、5xx、network error 会尝试下一个候选；400、参数错误、协议不匹配、上下文超长不自动降级。
+- [当前支持矩阵](docs/support-matrix.md)
+- [产品定义](docs/product.md)
+- [架构说明](docs/architecture.md)
+- [新增渠道接入指南](docs/channel-integration.md)
+- [`config.json` 字段说明](docs/config.md)
+- [Claude Code 全局配置](docs/claude-code-global-config.md)
+- [OpenCode 全局配置](docs/opencode-global-config.md)
+- [安装包构建](docs/release-builds.md)
+- [Roadmap](docs/roadmap.md)
+
+## License
+
+[MIT](LICENSE)

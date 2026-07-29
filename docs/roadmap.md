@@ -265,6 +265,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] Codex 原生会话按任务轮次聚合 Token、缓存命中率、总耗时和首 Token 延迟
 - [x] 未经过 Flowlet 的 Codex 会话分别估算原币种 API 等价价值与 Codex 套餐 credits 消耗，并展示价格版本与计价覆盖率
 - [x] 增量整理 Agent 原生会话快照，支持自动轮询、文件变化触发和失败重试
+- [x] 用量成本页独立展示未经过 Flowlet 的根会话累计 Token 与成本语义，并保守去重
 - [x] 对持续增长的 Codex / Claude JSONL 保存字节游标，只解析上次快照后的新增记录
 - [x] 任务日志持久化同步进度、阶段、结果与错误
 - [x] Agent 同步批次上限、单会话超时、慢任务指标、取消与任务日志分页清理

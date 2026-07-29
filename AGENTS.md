@@ -264,7 +264,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 `channels_config.merge_default_routes` 与前端 `mergeDefaultRoutes`（只追加缺失路由，
 不覆盖用户已有状态；删除动作由前端 `reconcileAccountRoutes` 在保存时执行）。
 
-千问 Qwen 是单渠道双资源模式：渠道级端点为按量付费地址；
+Qwen 是单渠道双资源模式：渠道级端点为按量付费地址；
 Token Plan 账号（sk-sp 前缀 Key）通过账号级 Base URL 覆盖接入套餐专属端点。
 Token Plan 账号拉取 `/models` 时使用账号级覆盖端点；由于其套餐端点也会返回
 DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即可选，不在则禁用）。
@@ -297,18 +297,14 @@ DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即�
 
 ### 没有账号时
 
-展示：
+概览页仍保持完整、稳定的信息架构，不切换为另一套 onboarding 页面：
 
-* 代理服务状态；
-* 渠道账号引导；
-* LongCat、DeepSeek、Kimi 和千问 Qwen 添加入口；
-* 三步接入流程。
-
-隐藏：
-
-* 开放模型列表；
-* 客户端访问信息；
-* AI Agent 接入。
+* 顶部 service-strip 完整展示代理状态、今日 Token、客户端接入和 Client Token；
+* 主体仍展示渠道账号、开放模型和 AI Agent 接入三个模块；
+* 渠道账号模块在空状态中展示简短引导，以及 LongCat、DeepSeek、Kimi 和 Qwen 添加入口；
+* 开放模型模块展示与当前配置相符的空状态，引导用户添加账号并明确选择开放模型；
+* AI Agent 接入保持可用，允许用户提前查看或写入客户端配置；
+* 不展示独立的“开始接入”页面或大段三步说明。
 
 ### 已有账号时
 

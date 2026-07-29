@@ -202,7 +202,7 @@ Agent 接入组件
 
 Claude Code 探测同时检查 PATH 和官方常见安装位置，返回当前主安装、全部候选安装、可执行文件路径、安装目录、版本及安装方式。OpenCode 探测同时覆盖 CLI 与 Desktop：CLI 检查 PATH、原生脚本、npm、Bun 等常见位置并执行版本命令；Desktop 检查各平台常见应用位置且不会启动桌面进程。ChatGPT（Codex）同样同时探测 Desktop 与 Codex CLI；CLI 覆盖 PATH、npm 和官方独立安装目录，并通过 `codex --version` 读取版本。保留全部候选用于识别多版本或 CLI/Desktop 并存；探测结果只存在于 TanStack Query 内存缓存，不写入 SQLite 或 `config.json`。
 
-Codex CLI 当前支持安装探测、账号用量复用和原生会话读取。Flowlet 暂不自动写入 Codex `model_providers`：Codex 当前自定义 Provider 使用 Responses wire API，而 Flowlet 坚持不做跨协议转换；待确认目标上游支持 `/v1/responses` 后再开放一键网关配置。
+Codex CLI 当前支持安装探测、账号用量复用和原生会话读取。Flowlet 暂不自动写入 Codex `model_providers`：Codex 当前自定义 Provider 使用 Responses wire API；千问按量付费与 Token Plan 上游已确认原生支持 `/v1/responses`，但 Flowlet 尚未完成渠道/模型能力约束、Responses 流式观测和正式回归验证，因此暂不开放一键网关配置。当前准确支持范围见 [`support-matrix.md`](./support-matrix.md)。
 
 Claude Code 用户级全局配置由独立的 `agent_global_config` 模块管理。前端只读取脱敏状态并触发应用或恢复；Rust 解析 `CLAUDE_CONFIG_DIR` / `~/.claude/settings.json`，安全合并 Flowlet Base URL、Client Token 和模型别名映射。修改前只备份受管字段，恢复时不覆盖用户后续新增的其他 Claude 设置。完整字段和优先级见 [`claude-code-global-config.md`](./claude-code-global-config.md)。
 
@@ -342,6 +342,7 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 - `usage_records`
 - `known_devices`
 - `device_daily_usage`
+- `device_agent_sessions`
 - `account_balance_snapshots`
 - `app_meta`
 
@@ -352,15 +353,19 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 短前缀组成，不采集主机名、用户名、MAC、序列号或硬件 ID。重命名只更新展示名称，
 不会改变 `deviceId`，保存后立即热生效。
 
-多设备共享的第一阶段只定义最小快照：`device_usage_snapshot` 返回设备 ID、身份
+多设备共享使用最小设备快照：`device_usage_snapshot` 返回设备 ID、身份
 创建时间、展示名称、平台、Flowlet 版本、快照生成时间、当前本地时区偏移，以及按设备
-本地自然日聚合的请求数和 Token 分项。它不包含费用、渠道账号、Header、Body 或 Agent
-原生内容，也暂不负责网络上传。
+本地自然日聚合的请求数和 Token 分项。快照还携带经过限量的根会话摘要：`running` 与
+`waiting_user` 运行态会话全部保留；运行态不足 10 条时，按最近活跃时间用其它会话补足
+到 10 条；运行态超过 10 条时不截断。摘要只包含设备/会话寻址、标题、客户端、状态、
+最近活跃时间及请求与 Token 汇总，不包含项目路径、消息正文、提示词、工具调用、费用、
+渠道账号、Header 或 Body。
 每日行由现有 `request_logs` / `usage_records` 实时聚合，不新增事实表；历史用量修复后
 重新生成快照即可按 `(device_id, date)` 幂等覆盖远端日汇总，无需重启代理。
 
 设置页可把当前设备快照导出为版本化 `flowlet-device-usage` JSON 文件，并在另一设备先
-预览再导入。导入数据写入独立的 `known_devices` / `device_daily_usage` 只读共享区，
+预览再导入。导入数据写入独立的 `known_devices` / `device_daily_usage` /
+`device_agent_sessions` 只读共享区，
 不会进入当前设备的 `request_logs` / `usage_records`，也不会改变当前设备 ID。同一设备
 同一日期按快照生成时间幂等更新，旧快照不得覆盖新快照。用量页支持全部设备、当前设备和
 指定导入设备筛选；共享视图只展示请求数和 Token，每日摘要没有的费用、模型与渠道明细
@@ -391,9 +396,11 @@ ID。阿里云 OSS 的 PutObject 不支持 `If-Match`，因此在 ETag 比较通
 
 移动查看器与桌面端保持在同一仓库和同一个 Rust crate 中，但使用独立的 React Router、
 Shell 与精简的 Tauri 启动入口。`#[cfg(desktop)]` 注册代理、托盘、Agent 与完整数据命令，
-`#[cfg(mobile)]` 只注册 S3 配置、只读连接测试、共享设备目录、每日汇总和远端刷新命令。
+`#[cfg(mobile)]` 只注册 S3 配置、只读连接测试、共享设备目录、每日汇总、会话摘要和远端刷新命令。
 移动端复用 `DeviceUsageBundle`、S3 适配器、SQLite 导入与聚合逻辑，不启动本地代理，也不
-扫描 Agent 数据。桌面同步继续执行“拉取其它设备 + 上传当前设备”，移动刷新只拉取
+扫描本机 Agent 数据。移动会话页只读取桌面设备已筛选并同步的摘要，支持按设备和运行状态
+筛选，不读取会话正文，也不把远端摘要合并进手机本机的 Agent 会话事实表。桌面同步继续
+执行“拉取其它设备 + 上传当前设备”，移动刷新只拉取
 `<prefix>/flowlet/v1/devices/*/snapshot.json` 并导入只读共享区，不为手机生成或上传空设备
 快照。移动前端通过 `VITE_FLOWLET_TARGET=mobile` 或 Tauri 的 Android/iOS 构建平台变量选择
 移动路由；Android 和 iOS 分别使用平台覆盖配置，但共享同一套移动页面与领域边界。
@@ -469,6 +476,13 @@ USD 等原始计价币种；同时展示 `codex-native` 官方 credits 费率计
 会话列表中经过 Flowlet 的 Token 汇总复用请求日志的明细提示，按会话聚合输入、缓存输入、未缓存输入、
 输出和总 Token；缓存命中率仅以明确返回缓存字段的输入 Token 为分母，缺少 Token 明细的请求单独计数，
 不把未知用量当作零值参与命中率。
+
+用量成本页提供“经过 Flowlet”和“Agent 原生”两个相互独立的数据源视图。Agent 原生视图复用
+`agent_session_snapshots` 中的累计摘要，只统计未被 Flowlet 观测的根会话，避免父子会话和代理请求
+重复相加；自动或手动 Agent 数据同步完成后会立即刷新该查询。由于快照尚不是逐事件账本，时间筛选按
+会话最近活动日归类，不声称能够还原跨日会话每天的精确增量。Token、原生来源直接报告的费用、
+公开 API 等价价值和套餐 credits 分栏展示，不换汇、不相加；缺少可靠价格映射时保留未计价状态。
+这是一层只读汇总，不创建 `usage_events`，也不改变统一成本账本的目标数据模型。
 
 Codex 账号与用量另有独立的周期性后台同步：应用启动约 20 秒后首次执行，此后固定每 5 分钟一轮，前台与
 后台同周期（Codex 官方用量窗口本身是 5 小时 / 周级粒度，5 分钟足够新鲜，也避免高频调用官方用量接口与

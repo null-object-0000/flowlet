@@ -180,7 +180,7 @@ describe("AccountManagementSideSheet", () => {
         presets={[{
           ...preset,
           id: "qwen",
-          name: "千问 Qwen",
+          name: "Qwen",
           supports_scrape_balance: true,
           supports_balance_query: false,
         }]}
@@ -252,7 +252,7 @@ describe("AccountManagementSideSheet", () => {
     const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
     const qwenPreset = {
       id: "qwen",
-      name: "千问 Qwen",
+      name: "Qwen",
       openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic",
     } as ChannelPreset;
@@ -305,7 +305,7 @@ describe("AccountManagementSideSheet", () => {
     };
     const qwenPreset = {
       id: "qwen",
-      name: "千问 Qwen",
+      name: "Qwen",
       openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic",
     } as ChannelPreset;

@@ -119,7 +119,7 @@
       },
       {
         "id": "qwen",
-        "name": "千问 Qwen",
+        "name": "Qwen",
         "vendor": "qwen",
         "platform_url": "https://platform.qianwenai.com/home/api-keys",
         "supported_protocols": ["openai", "anthropic"],

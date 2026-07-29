@@ -99,7 +99,7 @@ export function isCustomChannel(channel: Pick<ChannelPreset, "id" | "vendor"> | 
   return channel?.id === CUSTOM_CHANNEL_ID || channel?.vendor === "custom";
 }
 
-// ─── 千问 Qwen Token Plan ────────────────────────────────────────────────────
+// ─── Qwen Token Plan ─────────────────────────────────────────────────────────
 // 千问 AI 平台的一种账号资源模式：订阅制（Credits 计量），API Key 为 sk-sp- 前缀，
 // 与按量付费（sk- 前缀）端点完全隔离。账号选择 token_plan 模式时，编辑器会把
 // 以下专属 Base URL 写入账号级覆盖；团队版若控制台展示套餐专属地址，

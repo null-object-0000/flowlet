@@ -351,13 +351,13 @@ impl ChannelPreset {
         }
     }
 
-    /// 千问 Qwen（千问 AI 平台）按量付费渠道。
+    /// Qwen（千问 AI 平台）按量付费渠道。
     /// Token Plan 订阅账号通过账号级 resource_mode + Base URL 覆盖接入，
     /// 渠道级默认值保持按量付费端点。
     pub fn qwen() -> Self {
         Self {
             id: "qwen".to_string(),
-            name: "千问 Qwen".to_string(),
+            name: "Qwen".to_string(),
             vendor: "qwen".to_string(),
             platform_url: Some("https://platform.qianwenai.com/home/api-keys".to_string()),
             enabled: true,
@@ -966,6 +966,24 @@ pub struct UsageSummaryRow {
     pub estimated_cost: f64,
 }
 
+/// 未经过 Flowlet 的 Agent 原生会话用量。
+///
+/// 这是只读的会话累计摘要，不写入网关 `usage_records`，也不把 Agent 原生费用、
+/// API 等价价值和套餐消耗合并为同一个金额。`date` 仅表示会话最近活动日，供当前
+/// V1 页面做保守的周期筛选；逐日精确归集留给后续 `usage_events` 账本。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentNativeUsageSummaryRow {
+    pub date: String,
+    pub activity_at: String,
+    pub agent_type: String,
+    pub session_id: String,
+    pub turn_count: i64,
+    pub models: Vec<String>,
+    pub truncated: bool,
+    pub usage: Option<AgentSessionNativeUsage>,
+}
+
 // ─── Account Stats Row (per-account statistics) ──────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1264,6 +1282,8 @@ pub struct AgentSessionRepairResult {
     pub repaired_requests: usize,
     pub repaired_logs: usize,
     pub skipped_requests: usize,
+    /// 本次修复中重新识别客户端归属的记录数（client_id 从 NULL 变为具体值）。
+    pub repaired_clients: usize,
 }
 
 // ─── Proxy Bind Configuration ───────────────────────────────────────────────

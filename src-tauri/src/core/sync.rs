@@ -880,7 +880,7 @@ pub async fn sync_kimi_models(
     }
 }
 
-/// 同步千问 Qwen 模型列表（DashScope 兼容模式，标准 OpenAI /models 格式）。
+/// 同步 Qwen 模型列表（DashScope 兼容模式，标准 OpenAI /models 格式）。
 /// 官方列表不返回上下文窗口等详情，相关字段保持 None，不硬编码。
 pub async fn sync_qwen_models(
     account: &ChannelAccount,
@@ -1627,7 +1627,7 @@ mod tests {
             "channels_config": {
                 "channels": [{
                     "id": "qwen",
-                    "name": "千问 Qwen",
+                    "name": "Qwen",
                     "vendor": "qwen",
                     "supported_protocols": ["openai", "anthropic"],
                     "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",

@@ -494,6 +494,7 @@ Adapter 失败不影响代理；未经授权不读取第三方数据；默认不
 - `usage_records.estimated_cost` 是基于运行时模型价格的公开价估算，不是统一账本实际成本；
 - 网关请求已具备请求、Token、账号、模型和 Agent Session 归因基础；
 - Codex、Claude Code、OpenCode 原生会话已支持只读、尽力而为的查询时聚合；
+- 用量成本页已提供独立的 Agent 原生汇总视图，复用同步快照并仅纳入未被 Flowlet 观测的根会话；它按最近活动日归类累计摘要，并将原生费用、API 等价价值和套餐 credits 分开表达，不把快照伪装成逐日成本账本；
 - 尚无 `cost_sources`、`usage_events`、`agent_tasks`、持久化 `agent_sessions` 或 `cost_allocations`；
 - 尚无独立成本分配引擎和账期版本。
 

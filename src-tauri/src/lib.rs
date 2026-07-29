@@ -1041,6 +1041,8 @@ fn run_desktop() {
             commands::list_agent_sessions,
             commands::list_agent_session_children,
             commands::get_agent_session_timeline,
+            commands::list_opencode_session_permissions,
+            commands::reply_opencode_permission,
             commands::get_agent_session_native_summary,
             commands::sync_agent_data,
             commands::list_background_jobs,

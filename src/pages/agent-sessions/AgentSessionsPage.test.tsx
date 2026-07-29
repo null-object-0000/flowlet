@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionRow } from "../../domains/agent-session/types";
@@ -58,6 +58,7 @@ const childSession: AgentSessionRow = {
 };
 
 let listedSessions = [session];
+const { permissionReplyMock } = vi.hoisted(() => ({ permissionReplyMock: vi.fn(() => Promise.resolve()) }));
 
 vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
   useAgentSessions: () => ({
@@ -200,6 +201,30 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useOpenCodeSessionPermissions: () => ({
+    data: {
+      available: true,
+      serverUrl: "http://127.0.0.1:4096",
+      error: null,
+      permissions: [{
+        id: "per_test",
+        sessionId: "ses_native_test",
+        permission: "bash",
+        patterns: ["cargo test"],
+        metadata: {},
+        always: [],
+        tool: null,
+      }],
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+  useReplyOpenCodePermission: () => ({
+    mutateAsync: permissionReplyMock,
+    isPending: false,
+    variables: undefined,
+  }),
   useAgentSessionNativeSummary: () => ({
     data: {
       sourceAvailable: true,
@@ -229,6 +254,7 @@ import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSession
 describe("AgentSessionsPage", () => {
   beforeEach(() => {
     listedSessions = [session];
+    permissionReplyMock.mockClear();
   });
 
   it("shows request-style token details and aggregate cache hit rate", () => {
@@ -368,6 +394,21 @@ describe("AgentSessionsPage", () => {
     expect(screen.getAllByText("助手回复 · Agent 原生")).toHaveLength(2);
     expect(screen.getByText("工具调用 · Agent 原生")).toBeInTheDocument();
     expect(screen.getByText("缓存命中率 16.7%")).toBeInTheDocument();
+  });
+
+  it("allows a pending OpenCode permission once from the recent interaction", async () => {
+    render(
+      <MemoryRouter>
+        <AgentSessionDetailSideSheet session={session} onClose={vi.fn()} onViewRequestLogs={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByText("最近交互"));
+    expect(screen.getByText("OpenCode 等待确认")).toBeInTheDocument();
+    expect(screen.getAllByText("cargo test")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "同意本次" }));
+
+    await waitFor(() => expect(permissionReplyMock).toHaveBeenCalledWith({ permissionId: "per_test", decision: "allow_once" }));
   });
 });
 

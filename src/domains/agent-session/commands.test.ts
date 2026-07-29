@@ -51,4 +51,14 @@ describe("agentSessionCommands contract", () => {
       sessionId: "session-2",
     });
   });
+
+  it("uses typed OpenCode permission commands", async () => {
+    invokeMock.mockResolvedValueOnce({ available: true, permissions: [] });
+    await agentSessionCommands.openCodePermissions("ses_open");
+    expect(invokeMock).toHaveBeenCalledWith("list_opencode_session_permissions", { sessionId: "ses_open" });
+
+    invokeMock.mockResolvedValueOnce(undefined);
+    await agentSessionCommands.replyOpenCodePermission("per_1", "reject");
+    expect(invokeMock).toHaveBeenCalledWith("reply_opencode_permission", { permissionId: "per_1", decision: "reject" });
+  });
 });

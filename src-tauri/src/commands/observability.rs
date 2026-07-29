@@ -73,6 +73,21 @@ pub(crate) async fn get_agent_session_timeline(
 }
 
 #[tauri::command]
+pub(crate) async fn list_opencode_session_permissions(
+    session_id: String,
+) -> Result<crate::core::opencode_control::OpenCodePermissionReport, String> {
+    Ok(crate::core::opencode_control::list_session_permissions(&session_id).await)
+}
+
+#[tauri::command]
+pub(crate) async fn reply_opencode_permission(
+    permission_id: String,
+    decision: crate::core::opencode_control::OpenCodePermissionDecision,
+) -> Result<(), String> {
+    crate::core::opencode_control::reply_permission(&permission_id, decision).await
+}
+
+#[tauri::command]
 pub(crate) async fn get_agent_session_native_summary(
     state: tauri::State<'_, AppState>,
     agent_type: String,

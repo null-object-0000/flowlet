@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { AgentSessionClient, AgentSessionFilter, AgentSessionNativeSummary, AgentSessionRow, AgentSessionTimeline, AgentSessionsPage } from "./types";
+import type { AgentSessionClient, AgentSessionFilter, AgentSessionNativeSummary, AgentSessionRow, AgentSessionTimeline, AgentSessionsPage, OpenCodePermissionDecision, OpenCodePermissionReport } from "./types";
 
 export const agentSessionCommands = {
   list: (filter: AgentSessionFilter): Promise<AgentSessionsPage> =>
@@ -25,6 +25,14 @@ export const agentSessionCommands = {
   nativeSummary: (agentType: AgentSessionRow["agentType"], sessionId: string): Promise<AgentSessionNativeSummary> =>
     invokeCommand<AgentSessionNativeSummary>("get_agent_session_native_summary", { agentType, sessionId }).catch((error: unknown) => {
       throw toAppError(error, "agent_session_native_summary_failed");
+    }),
+  openCodePermissions: (sessionId: string): Promise<OpenCodePermissionReport> =>
+    invokeCommand<OpenCodePermissionReport>("list_opencode_session_permissions", { sessionId }).catch((error: unknown) => {
+      throw toAppError(error, "opencode_permission_list_failed");
+    }),
+  replyOpenCodePermission: (permissionId: string, decision: OpenCodePermissionDecision): Promise<void> =>
+    invokeCommand<void>("reply_opencode_permission", { permissionId, decision }).catch((error: unknown) => {
+      throw toAppError(error, "opencode_permission_reply_failed");
     }),
   clients: (): Promise<AgentSessionClient[]> =>
     invokeCommand<AgentSessionClient[]>("list_agent_session_clients").catch((error: unknown) => {

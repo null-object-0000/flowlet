@@ -1321,6 +1321,17 @@ const english: Record<string, string> = {
   "上一月": "Previous month",
   "下一月": "Next month",
   "当前周期暂无数据": "No data for this period",
+  "正在检查 OpenCode 待确认操作": "Checking pending OpenCode actions",
+  "OpenCode 待确认操作读取失败：{message}": "Failed to load pending OpenCode actions: {message}",
+  "OpenCode 控制服务未连接": "OpenCode control server is not connected",
+  "请重新应用 OpenCode 全局接入配置并重启 OpenCode；之后可在这里同意或否决待确认操作。": "Reapply the OpenCode global integration and restart OpenCode. You can then allow or reject pending actions here.",
+  "已同意 OpenCode 本次操作": "Allowed this OpenCode action",
+  "已否决 OpenCode 操作": "Rejected the OpenCode action",
+  "OpenCode 操作提交失败：{message}": "Failed to submit the OpenCode action: {message}",
+  "OpenCode 等待确认": "OpenCode is waiting for confirmation",
+  "待用户操作": "User action required",
+  "否决": "Reject",
+  "同意本次": "Allow once",
 };
 
 export type TranslationVariables = Record<string, string | number>;

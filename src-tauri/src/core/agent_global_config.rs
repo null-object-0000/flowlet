@@ -149,6 +149,8 @@ struct OpenCodeConfigBackup {
     disabled_providers: BackedUpValue,
     #[serde(default)]
     enabled_providers: BackedUpValue,
+    #[serde(default)]
+    server: Option<BackedUpValue>,
     flowlet_provider: BackedUpValue,
     flowlet_auth: BackedUpValue,
 }
@@ -879,6 +881,12 @@ fn apply_opencode(
     {
         return Err("OpenCode 配置中的 provider 必须是 JSON 对象".to_string());
     }
+    if settings
+        .get("server")
+        .is_some_and(|value| !value.is_object())
+    {
+        return Err("OpenCode 配置中的 server 必须是 JSON 对象".to_string());
+    }
 
     let backup = opencode_backup_path(settings_path);
     let backup_created = !backup.is_file();
@@ -897,6 +905,7 @@ fn apply_opencode(
             small_model: backed_up_value(settings.get("small_model")),
             disabled_providers: backed_up_value(settings.get("disabled_providers")),
             enabled_providers: backed_up_value(settings.get("enabled_providers")),
+            server: Some(backed_up_value(settings.get("server"))),
             flowlet_provider: backed_up_value(settings.pointer("/provider/flowlet")),
             flowlet_auth: backed_up_value(auth.get("flowlet")),
         };
@@ -904,6 +913,8 @@ fn apply_opencode(
             &backup,
             &serde_json::to_value(snapshot).map_err(|error| error.to_string())?,
         )?;
+    } else {
+        upgrade_opencode_backup_with_server(&backup, settings.get("server"))?;
     }
 
     if !settings_existed {
@@ -923,6 +934,20 @@ fn apply_opencode(
         &root_object,
         "small_model",
         CstInputValue::from(OPENCODE_FAST_MODEL),
+    );
+    let server_object = match root_object.get("server") {
+        Some(property) => property.object_value_or_set(),
+        None => root_object
+            .append("server", CstInputValue::Object(Vec::new()))
+            .object_value_or_set(),
+    };
+    set_cst_property(&server_object, "hostname", CstInputValue::from("127.0.0.1"));
+    set_cst_property(
+        &server_object,
+        "port",
+        serde_to_cst(&serde_json::json!(
+            crate::core::opencode_control::OPENCODE_CONTROL_PORT
+        )),
     );
     let provider_object = match root_object.get("provider") {
         Some(property) => property.object_value_or_set(),
@@ -1005,6 +1030,9 @@ fn restore_opencode(
         &backup.disabled_providers,
     );
     restore_cst_property(&root_object, "enabled_providers", &backup.enabled_providers);
+    if let Some(server) = &backup.server {
+        restore_cst_property(&root_object, "server", server);
+    }
     if let Some(provider_property) = root_object.get("provider") {
         let provider_object = provider_property.object_value_or_set();
         restore_cst_property(
@@ -1471,6 +1499,25 @@ fn backed_up_value(value: Option<&Value>) -> BackedUpValue {
         present: value.is_some(),
         value: value.cloned().unwrap_or(Value::Null),
     }
+}
+
+fn upgrade_opencode_backup_with_server(
+    backup_path: &Path,
+    current_server: Option<&Value>,
+) -> Result<(), String> {
+    let mut backup = read_settings(backup_path)?;
+    let object = backup
+        .as_object_mut()
+        .ok_or_else(|| "OpenCode 全局配置备份格式无效".to_string())?;
+    if object.contains_key("server") {
+        return Ok(());
+    }
+    object.insert(
+        "server".to_string(),
+        serde_json::to_value(backed_up_value(current_server))
+            .map_err(|error| format!("升级 OpenCode 配置备份失败：{error}"))?,
+    );
+    write_json_file(backup_path, &backup)
 }
 
 fn string_array_contains(value: Option<&Value>, expected: &str) -> bool {
@@ -2053,6 +2100,7 @@ mod tests {
             r#"{
   // keep this user setting
   "theme": "system",
+  "server": { "port": 1234, "mdns": true },
   "disabled_providers": ["flowlet", "legacy"],
   "enabled_providers": ["other"],
   "provider": {
@@ -2085,6 +2133,12 @@ mod tests {
         assert_eq!(settings["model"], OPENCODE_PRIMARY_MODEL);
         assert_eq!(settings["small_model"], OPENCODE_FAST_MODEL);
         assert_eq!(
+            settings["server"]["port"],
+            crate::core::opencode_control::OPENCODE_CONTROL_PORT
+        );
+        assert_eq!(settings["server"]["hostname"], "127.0.0.1");
+        assert_eq!(settings["server"]["mdns"], true);
+        assert_eq!(
             settings["provider"]["flowlet"]["options"]["baseURL"],
             "http://127.0.0.1:18640/v1"
         );
@@ -2112,6 +2166,9 @@ mod tests {
         assert_eq!(restored.state, AgentGlobalConfigState::OtherGateway);
         let restored_settings = read_jsonc_settings(&settings_path).unwrap();
         assert_eq!(restored_settings["theme"], "system");
+        assert_eq!(restored_settings["server"]["port"], 1234);
+        assert_eq!(restored_settings["server"]["mdns"], true);
+        assert!(restored_settings["server"].get("hostname").is_none());
         assert!(restored_settings.get("model").is_none());
         assert_eq!(
             restored_settings["disabled_providers"],
@@ -2130,6 +2187,30 @@ mod tests {
         assert_eq!(restored_auth["other"]["key"], "keep");
 
         let _ = std::fs::remove_dir_all(settings_path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn upgrades_legacy_opencode_backup_without_overwriting_the_original_server() {
+        let directory = std::env::temp_dir().join(format!(
+            "flowlet-opencode-backup-upgrade-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let backup_path = directory.join("backup.json");
+        write_json_file(&backup_path, &serde_json::json!({ "version": 1 })).unwrap();
+
+        let original = serde_json::json!({ "hostname": "localhost", "port": 8123 });
+        upgrade_opencode_backup_with_server(&backup_path, Some(&original)).unwrap();
+        let first = read_settings(&backup_path).unwrap();
+        assert_eq!(first["server"]["present"], true);
+        assert_eq!(first["server"]["value"], original);
+
+        let later = serde_json::json!({ "port": 4096 });
+        upgrade_opencode_backup_with_server(&backup_path, Some(&later)).unwrap();
+        let second = read_settings(&backup_path).unwrap();
+        assert_eq!(second["server"]["value"]["port"], 8123);
+
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

@@ -503,6 +503,7 @@ function buildManualSnippets(
     $schema: "https://opencode.ai/config.json",
     model: "flowlet/flowlet-pro",
     small_model: "flowlet/flowlet-flash",
+    server: { hostname: "127.0.0.1", port: 4096 },
     provider: {
       flowlet: {
         name: "Flowlet",

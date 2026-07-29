@@ -2,8 +2,8 @@ import { Button, SideSheet, Tabs, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-
 import { IconCopy, IconExternalOpen } from "@douyinfe/semi-icons";
 import { useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { AgentSessionNativeUsage, AgentSessionRow, AgentSessionTimeline, AgentSessionTimelineEvent } from "../../domains/agent-session/types";
-import { useAgentSessionChildren, useAgentSessionTimeline } from "../../features/agent-sessions/useAgentSessions";
+import type { AgentSessionNativeUsage, AgentSessionRow, AgentSessionTimeline, AgentSessionTimelineEvent, OpenCodePermissionRequest } from "../../domains/agent-session/types";
+import { useAgentSessionChildren, useAgentSessionTimeline, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
@@ -101,6 +101,7 @@ export function AgentSessionDetailSideSheet({
         <Tabs.TabPane tab={t("最近交互")} itemKey="recent">
           <div className={styles.body}>
             <RecentInteractionSection
+              session={session}
               data={timeline.data}
               loading={timeline.isLoading}
               fetching={timeline.isFetching}
@@ -116,6 +117,7 @@ export function AgentSessionDetailSideSheet({
 }
 
 function RecentInteractionSection({
+  session,
   data,
   loading,
   fetching,
@@ -123,6 +125,7 @@ function RecentInteractionSection({
   language,
   onRetry,
 }: {
+  session: AgentSessionRow;
   data: AgentSessionTimeline | undefined;
   loading: boolean;
   fetching: boolean;
@@ -141,6 +144,7 @@ function RecentInteractionSection({
         </div>
         <Button size="small" theme="borderless" loading={fetching && !loading} onClick={onRetry}>{t("刷新")}</Button>
       </div>
+      <OpenCodeApprovalSection session={session} />
       {loading ? <div className={styles.timelineLoading}><span /><span /><span /></div> : null}
       {error ? (
         <div className={styles.childError}>
@@ -163,6 +167,61 @@ function RecentInteractionSection({
         </>
       ) : null}
     </section>
+  );
+}
+
+function OpenCodeApprovalSection({ session }: { session: AgentSessionRow }) {
+  const { t } = useAppPreferences();
+  const permissions = useOpenCodeSessionPermissions(session, session.agentType === "opencode");
+  const reply = useReplyOpenCodePermission(session);
+  if (session.agentType !== "opencode") return null;
+  if (permissions.isLoading) {
+    return <div className={styles.approvalLoading}>{t("正在检查 OpenCode 待确认操作")}</div>;
+  }
+  if (permissions.isError) {
+    return <div className={styles.approvalUnavailable}>{t("OpenCode 待确认操作读取失败：{message}", { message: permissions.error.message })}</div>;
+  }
+  if (!permissions.data?.available) {
+    return (
+      <div className={styles.approvalUnavailable}>
+        <strong>{t("OpenCode 控制服务未连接")}</strong>
+        <span>{t("请重新应用 OpenCode 全局接入配置并重启 OpenCode；之后可在这里同意或否决待确认操作。")}</span>
+      </div>
+    );
+  }
+  if (permissions.data.permissions.length === 0) return null;
+
+  const decide = async (request: OpenCodePermissionRequest, decision: "allow_once" | "reject") => {
+    try {
+      await reply.mutateAsync({ permissionId: request.id, decision });
+      Toast.success(decision === "allow_once" ? t("已同意 OpenCode 本次操作") : t("已否决 OpenCode 操作"));
+    } catch (error) {
+      Toast.error(t("OpenCode 操作提交失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
+
+  return (
+    <div className={styles.approvalList}>
+      {permissions.data.permissions.map((request) => {
+        const submitting = reply.isPending && reply.variables?.permissionId === request.id;
+        return (
+          <article className={styles.approvalCard} key={request.id}>
+            <div className={styles.approvalHeading}>
+              <div>
+                <span>{t("OpenCode 等待确认")}</span>
+                <strong>{request.permission}</strong>
+              </div>
+              <Tag color="amber" size="small">{t("待用户操作")}</Tag>
+            </div>
+            {request.patterns.length > 0 ? <pre>{request.patterns.join("\n")}</pre> : null}
+            <div className={styles.approvalActions}>
+              <Button size="small" type="danger" theme="borderless" loading={submitting && reply.variables?.decision === "reject"} disabled={reply.isPending && !submitting} onClick={() => void decide(request, "reject")}>{t("否决")}</Button>
+              <Button size="small" type="primary" theme="solid" loading={submitting && reply.variables?.decision === "allow_once"} disabled={reply.isPending && !submitting} onClick={() => void decide(request, "allow_once")}>{t("同意本次")}</Button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 

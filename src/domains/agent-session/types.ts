@@ -122,3 +122,22 @@ export type AgentSessionNativeSummary = {
   usage: AgentSessionNativeUsage | null;
   models: string[];
 };
+
+export type OpenCodePermissionRequest = {
+  id: string;
+  sessionId: string;
+  permission: string;
+  patterns: string[];
+  metadata: unknown;
+  always: string[];
+  tool: { messageId: string; callId: string } | null;
+};
+
+export type OpenCodePermissionReport = {
+  available: boolean;
+  serverUrl: string;
+  permissions: OpenCodePermissionRequest[];
+  error: string | null;
+};
+
+export type OpenCodePermissionDecision = "allow_once" | "reject";

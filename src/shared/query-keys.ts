@@ -57,6 +57,7 @@ export const queryKeys = {
     list: (filter: unknown) => [...queryKeys.agentSession.all, "list", filter] as const,
     children: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "children", agentType, sessionId] as const,
     timeline: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "timeline", agentType, sessionId] as const,
+    openCodePermissions: (sessionId: string) => [...queryKeys.agentSession.all, "opencode-permissions", sessionId] as const,
     nativeSummary: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "native-summary", agentType, sessionId] as const,
     clients: () => [...queryKeys.agentSession.all, "clients"] as const,
   },

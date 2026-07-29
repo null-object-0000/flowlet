@@ -1,6 +1,7 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentSessionCommands } from "../../domains/agent-session/commands";
 import type { AgentSessionFilter, AgentSessionRow } from "../../domains/agent-session/types";
+import type { OpenCodePermissionDecision } from "../../domains/agent-session/types";
 import { queryKeys } from "../../shared/query-keys";
 
 export function useAgentSessions(filter: AgentSessionFilter, autoRefresh: boolean) {
@@ -34,6 +35,30 @@ export function useAgentSessionTimeline(session: AgentSessionRow, enabled = true
     queryFn: () => agentSessionCommands.timeline(session.agentType, session.sessionId),
     enabled,
     staleTime: 30_000,
+  });
+}
+
+export function useOpenCodeSessionPermissions(session: AgentSessionRow, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.agentSession.openCodePermissions(session.sessionId),
+    queryFn: () => agentSessionCommands.openCodePermissions(session.sessionId),
+    enabled: enabled && session.agentType === "opencode",
+    refetchInterval: 2_000,
+  });
+}
+
+export function useReplyOpenCodePermission(session: AgentSessionRow) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ permissionId, decision }: { permissionId: string; decision: OpenCodePermissionDecision }) =>
+      agentSessionCommands.replyOpenCodePermission(permissionId, decision),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.openCodePermissions(session.sessionId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.timeline(session.agentType, session.sessionId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.all }),
+      ]);
+    },
   });
 }
 

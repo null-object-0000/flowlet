@@ -13,6 +13,7 @@ pub mod device_identity;
 pub mod device_sync;
 pub mod logging;
 pub mod metrics;
+pub mod opencode_control;
 pub mod power;
 pub mod presets;
 pub mod proxy;

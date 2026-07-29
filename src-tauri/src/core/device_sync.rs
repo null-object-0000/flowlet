@@ -1,4 +1,6 @@
-use crate::core::device_identity::{DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot};
+use crate::core::device_identity::{
+    DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, SyncedAgentSession,
+};
 use crate::core::storage::Storage;
 use reqwest::{Client, Response, StatusCode};
 use rusty_s3::actions::{ListObjectsV2, S3Action as _};
@@ -19,6 +21,7 @@ pub const AUTO_SYNC_INITIAL_DELAY: Duration = Duration::from_secs(60);
 pub const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 pub const SYNC_ALREADY_RUNNING_ERROR: &str = "设备用量同步正在运行";
 static SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+const MIN_SYNCED_RECENT_SESSIONS: usize = 10;
 
 #[derive(Debug)]
 pub struct DeviceSyncGuard;
@@ -108,6 +111,75 @@ pub struct S3DeviceSyncResult {
     pub uploaded_key: String,
 }
 
+pub fn build_device_snapshot(
+    storage: &Storage,
+    identity: &DeviceIdentity,
+) -> Result<DeviceUsageSnapshot, String> {
+    let days = storage
+        .daily_usage_totals()
+        .map_err(|error| error.to_string())?;
+    let sessions = storage
+        .list_agent_sessions_for_device_sync()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|row| SyncedAgentSession {
+            agent_type: row.agent_type,
+            session_id: row.session_id,
+            runtime_status: row.runtime_status,
+            title: sanitize_session_text(row.title, 512),
+            client_name: sanitize_session_text(row.client_name, 128),
+            activity_at: row.activity_at,
+            flowlet_observed: row.flowlet_observed,
+            request_count: row.request_count,
+            error_count: row.error_count,
+            known_tokens: row.known_tokens,
+        })
+        .collect();
+    Ok(DeviceUsageSnapshot::new(
+        identity,
+        days,
+        select_sessions_for_sync(sessions),
+    ))
+}
+
+fn sanitize_session_text(value: Option<String>, max_chars: usize) -> Option<String> {
+    let value = value?;
+    let sanitized = value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(max_chars)
+        .collect::<String>();
+    let sanitized = sanitized.trim();
+    (!sanitized.is_empty()).then(|| sanitized.to_string())
+}
+
+fn select_sessions_for_sync(mut sessions: Vec<SyncedAgentSession>) -> Vec<SyncedAgentSession> {
+    sessions.sort_by(|left, right| {
+        crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
+            .cmp(&crate::core::agent_session_metadata::session_time_millis(
+                &left.activity_at,
+            ))
+            .then_with(|| right.session_id.cmp(&left.session_id))
+    });
+    let (mut active, inactive): (Vec<_>, Vec<_>) = sessions
+        .into_iter()
+        .partition(|session| matches!(session.runtime_status.as_str(), "running" | "waiting_user"));
+    if active.len() < MIN_SYNCED_RECENT_SESSIONS {
+        active.extend(
+            inactive
+                .into_iter()
+                .take(MIN_SYNCED_RECENT_SESSIONS - active.len()),
+        );
+    }
+    active
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct S3DevicePullResult {
@@ -150,7 +222,10 @@ impl S3SyncConfig {
             return Err("S3 Endpoint 必须是有效的 HTTP 或 HTTPS 地址".to_string());
         }
         if endpoint_url.scheme() == "http"
-            && !matches!(endpoint_url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+            && !matches!(
+                endpoint_url.host_str(),
+                Some("localhost" | "127.0.0.1" | "::1")
+            )
         {
             return Err("远程 S3 Endpoint 必须使用 HTTPS；HTTP 仅允许本机 MinIO".to_string());
         }
@@ -178,9 +253,7 @@ impl S3SyncConfig {
                     .to_string(),
             );
         }
-        if endpoint_host.ends_with(".aliyuncs.com")
-            && !endpoint_host.starts_with("s3.oss-")
-        {
+        if endpoint_host.ends_with(".aliyuncs.com") && !endpoint_host.starts_with("s3.oss-") {
             return Err(
                 "阿里云 OSS 必须使用 S3-compatible Endpoint；上海地域请填写 https://s3.oss-cn-shanghai.aliyuncs.com"
                     .to_string(),
@@ -249,14 +322,20 @@ struct S3Store {
 
 impl S3Store {
     fn new(config: &S3SyncConfig, secret: &str) -> Result<Self, String> {
-        let endpoint = Url::parse(&config.endpoint).map_err(|_| "S3 Endpoint 格式无效".to_string())?;
+        let endpoint =
+            Url::parse(&config.endpoint).map_err(|_| "S3 Endpoint 格式无效".to_string())?;
         let style = if config.path_style {
             UrlStyle::Path
         } else {
             UrlStyle::VirtualHost
         };
-        let bucket = Bucket::new(endpoint, style, config.bucket.clone(), config.region.clone())
-            .map_err(|_| "无法构造 S3 Bucket 地址".to_string())?;
+        let bucket = Bucket::new(
+            endpoint,
+            style,
+            config.bucket.clone(),
+            config.region.clone(),
+        )
+        .map_err(|_| "无法构造 S3 Bucket 地址".to_string())?;
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
@@ -333,7 +412,8 @@ impl S3Store {
             .bucket
             .head_object(Some(&self.credentials), key)
             .sign(SIGNED_URL_TTL);
-        let response = checked_response(self.client.head(url).send().await, "读取对象元信息").await?;
+        let response =
+            checked_response(self.client.head(url).send().await, "读取对象元信息").await?;
         Ok(response
             .headers()
             .get("etag")
@@ -532,9 +612,7 @@ pub fn save_config(storage: &Storage, input: &S3SyncConfigInput) -> Result<(), S
     Ok(())
 }
 
-pub async fn test_connection(
-    input: &S3SyncConfigInput,
-) -> Result<S3ConnectionTestResult, String> {
+pub async fn test_connection(input: &S3SyncConfigInput) -> Result<S3ConnectionTestResult, String> {
     let config = S3SyncConfig::from_input(input)?;
     let provided_secret = input
         .secret_access_key
@@ -557,11 +635,7 @@ pub async fn test_connection(
         format!("{}/flowlet/v1/tests/", config.prefix)
     };
     store.list(&test_prefix).await?;
-    let test_key = format!(
-        "{}{}.json",
-        test_prefix,
-        uuid::Uuid::new_v4()
-    );
+    let test_key = format!("{}{}.json", test_prefix, uuid::Uuid::new_v4());
     store.put(&test_key, b"{}".to_vec(), None).await?;
     let downloaded = store.get(&test_key).await;
     let deleted = store.delete(&test_key).await;
@@ -653,6 +727,7 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
                 &snapshot.generated_at,
                 snapshot.timezone_offset_minutes,
                 &snapshot.days,
+                &snapshot.sessions,
             ) {
                 Ok(result) => result,
                 Err(_) => {
@@ -771,17 +846,12 @@ pub async fn sync_device_usage(
         });
     if let (Some(saved), Some(remote)) = (saved_etag.as_ref(), current_etag.as_ref()) {
         if saved.etag != *remote {
-            return Err(
-                "远端当前设备快照已被另一个写入者修改，可能存在重复设备 ID".to_string(),
-            );
+            return Err("远端当前设备快照已被另一个写入者修改，可能存在重复设备 ID".to_string());
         }
     }
     let remote_objects = objects
         .into_iter()
-        .filter(|object| {
-            object.key != current_key
-                && object.key.ends_with("/snapshot.json")
-        })
+        .filter(|object| object.key != current_key && object.key.ends_with("/snapshot.json"))
         .collect::<Vec<_>>();
 
     let mut bundles = Vec::new();
@@ -816,21 +886,22 @@ pub async fn sync_device_usage(
         for bundle in bundles {
             let snapshot = bundle.snapshot;
             let result = match import_storage.import_device_usage(
-                    &snapshot.device_id,
-                    &snapshot.device_created_at,
-                    &snapshot.resolved_display_name(),
-                    &snapshot.resolved_platform(),
-                    &snapshot.resolved_app_version(),
-                    &snapshot.generated_at,
-                    snapshot.timezone_offset_minutes,
-                    &snapshot.days,
-                ) {
-                    Ok(result) => result,
-                    Err(_) => {
-                        import_failures += 1;
-                        continue;
-                    }
-                };
+                &snapshot.device_id,
+                &snapshot.device_created_at,
+                &snapshot.resolved_display_name(),
+                &snapshot.resolved_platform(),
+                &snapshot.resolved_app_version(),
+                &snapshot.generated_at,
+                snapshot.timezone_offset_minutes,
+                &snapshot.days,
+                &snapshot.sessions,
+            ) {
+                Ok(result) => result,
+                Err(_) => {
+                    import_failures += 1;
+                    continue;
+                }
+            };
             imported_devices += 1;
             imported_days += result.imported_days;
             unchanged_days += result.unchanged_days;
@@ -845,12 +916,15 @@ pub async fn sync_device_usage(
     .await
     .map_err(|_| "导入远端设备快照任务失败".to_string())??;
 
-    let days_storage = storage.clone();
-    let days = tauri::async_runtime::spawn_blocking(move || days_storage.daily_usage_totals())
-        .await
-        .map_err(|_| "生成当前设备快照任务失败".to_string())?
-        .map_err(|error| error.to_string())?;
-    let bundle = DeviceUsageBundle::new(DeviceUsageSnapshot::new(&identity, days));
+    let snapshot_storage = storage.clone();
+    let snapshot_identity = identity.clone();
+    let snapshot = tauri::async_runtime::spawn_blocking(move || {
+        build_device_snapshot(&snapshot_storage, &snapshot_identity)
+    })
+    .await
+    .map_err(|_| "生成当前设备快照任务失败".to_string())?
+    .map_err(|error| error.to_string())?;
+    let bundle = DeviceUsageBundle::new(snapshot);
     let bytes =
         serde_json::to_vec_pretty(&bundle).map_err(|_| "序列化当前设备快照失败".to_string())?;
     let expected_etag = saved_etag
@@ -1020,6 +1094,21 @@ mod tests {
         }
     }
 
+    fn synced_session(id: usize, status: &str) -> SyncedAgentSession {
+        SyncedAgentSession {
+            agent_type: "codex-cli".to_string(),
+            session_id: format!("session-{id:02}"),
+            runtime_status: status.to_string(),
+            title: Some(format!("Session {id}")),
+            client_name: Some("Codex CLI".to_string()),
+            activity_at: format!("2026-07-29T12:{id:02}:00Z"),
+            flowlet_observed: true,
+            request_count: id as i64,
+            error_count: 0,
+            known_tokens: id as i64 * 100,
+        }
+    }
+
     #[test]
     fn normalizes_prefix_and_builds_per_device_key() {
         let config = S3SyncConfig::from_input(&input("https://example.com")).unwrap();
@@ -1050,8 +1139,7 @@ mod tests {
         assert!(auto_region.contains("不能使用 auto"));
 
         let non_s3_endpoint =
-            S3SyncConfig::from_input(&input("https://oss-cn-shanghai.aliyuncs.com"))
-                .unwrap_err();
+            S3SyncConfig::from_input(&input("https://oss-cn-shanghai.aliyuncs.com")).unwrap_err();
         assert!(non_s3_endpoint.contains("S3-compatible Endpoint"));
 
         let mut valid = input("https://s3.oss-cn-shanghai.aliyuncs.com");
@@ -1090,10 +1178,7 @@ mod tests {
             Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
         let job_id = create_sync_job(&storage, "background").unwrap();
-        let detail = storage
-            .get_background_job_detail(&job_id)
-            .unwrap()
-            .unwrap();
+        let detail = storage.get_background_job_detail(&job_id).unwrap().unwrap();
         assert_eq!(detail.job.job_type, "device-s3-sync");
         assert_eq!(detail.job.title, "S3 设备同步");
         assert_eq!(detail.job.trigger_source, "background");
@@ -1108,5 +1193,61 @@ mod tests {
         let serialized = serde_json::to_string(&config).unwrap();
         assert!(!serialized.contains("secret"));
         assert!(!serialized.contains("secretAccessKey"));
+    }
+
+    #[test]
+    fn session_snapshot_keeps_all_active_when_more_than_ten() {
+        let sessions = (0..12)
+            .map(|index| {
+                synced_session(
+                    index,
+                    if index % 2 == 0 {
+                        "running"
+                    } else {
+                        "waiting_user"
+                    },
+                )
+            })
+            .chain((12..18).map(|index| synced_session(index, "idle")))
+            .collect();
+        let selected = select_sessions_for_sync(sessions);
+        assert_eq!(selected.len(), 12);
+        assert!(selected
+            .iter()
+            .all(|row| matches!(row.runtime_status.as_str(), "running" | "waiting_user")));
+    }
+
+    #[test]
+    fn session_snapshot_fills_active_sessions_to_ten_by_recency() {
+        let sessions = (0..3)
+            .map(|index| synced_session(index, "running"))
+            .chain((3..15).map(|index| synced_session(index, "idle")))
+            .collect();
+        let selected = select_sessions_for_sync(sessions);
+        assert_eq!(selected.len(), 10);
+        assert_eq!(
+            selected
+                .iter()
+                .filter(|row| row.runtime_status == "running")
+                .count(),
+            3
+        );
+        let idle_ids = selected
+            .iter()
+            .filter(|row| row.runtime_status == "idle")
+            .map(|row| row.session_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            idle_ids,
+            vec![
+                "session-14",
+                "session-13",
+                "session-12",
+                "session-11",
+                "session-10",
+                "session-09",
+                "session-08",
+            ]
+        );
     }
 }

@@ -243,7 +243,11 @@ pub async fn sync_codex_accounts(
     match query_codex_accounts(managed_root).await {
         Ok(report) => {
             let total = report.accounts.len();
-            let stale = report.accounts.iter().filter(|account| account.stale).count();
+            let stale = report
+                .accounts
+                .iter()
+                .filter(|account| account.stale)
+                .count();
             let failed = report
                 .accounts
                 .iter()
@@ -315,7 +319,9 @@ pub async fn sync_codex_accounts(
 
 fn sort_accounts(accounts: &mut [CodexAccountReport]) {
     accounts.sort_by(|left, right| {
-        left.stale.cmp(&right.stale).then_with(|| left.email.cmp(&right.email))
+        left.stale
+            .cmp(&right.stale)
+            .then_with(|| left.email.cmp(&right.email))
     });
 }
 
@@ -1424,7 +1430,10 @@ mod tests {
         let forward = merged(vec![older.clone(), newer.clone()]);
         assert_eq!(forward.len(), 1);
         assert_eq!(
-            forward[0].primary.as_ref().map(|window| window.used_percent),
+            forward[0]
+                .primary
+                .as_ref()
+                .map(|window| window.used_percent),
             Some(70.0)
         );
         assert_eq!(forward[0].updated_at, "2026-07-22T16:02:00Z");
@@ -1433,7 +1442,10 @@ mod tests {
         let reverse = merged(vec![newer, older]);
         assert_eq!(reverse.len(), 1);
         assert_eq!(
-            reverse[0].primary.as_ref().map(|window| window.used_percent),
+            reverse[0]
+                .primary
+                .as_ref()
+                .map(|window| window.used_percent),
             Some(70.0)
         );
         assert_eq!(reverse[0].updated_at, "2026-07-22T16:02:00Z");
@@ -1559,7 +1571,8 @@ mod tests {
             rusqlite::Connection::open_in_memory().unwrap(),
         );
         storage.migrate().unwrap();
-        let root = std::env::temp_dir().join(format!("flowlet-codex-sync-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-sync-{}", uuid::Uuid::new_v4()));
         let home = root.join("home");
         let managed = root.join("accounts");
         std::fs::create_dir_all(&home).expect("create codex home");

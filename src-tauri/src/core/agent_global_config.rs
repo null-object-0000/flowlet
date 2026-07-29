@@ -235,7 +235,9 @@ pub fn apply_agent_global_config(
             expected_base_url,
             client_token,
             // 会话扩展默认安装；仅当用户明确关闭开关时才不安装。
-            options.as_ref().map_or(true, |options| options.session_extension),
+            options
+                .as_ref()
+                .map_or(true, |options| options.session_extension),
         ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
     }
@@ -486,10 +488,11 @@ fn report_from_settings(
     .iter()
     .all(|name| {
         string_value(name).as_deref().map(strip_long_context_suffix) == Some(PRIMARY_MODEL)
-    })
-        && fast_model.as_deref() == Some(FAST_MODEL);
+    }) && fast_model.as_deref() == Some(FAST_MODEL);
     // 写入时四个主模型变量同时带后缀；检测只看 ANTHROPIC_MODEL 即可反映开关状态。
-    let long_context = primary_model.as_deref().is_some_and(has_long_context_suffix);
+    let long_context = primary_model
+        .as_deref()
+        .is_some_and(has_long_context_suffix);
     // 遗留的 ANTHROPIC_SMALL_FAST_MODEL 在会话标题生成等后台任务中仍优先于
     // ANTHROPIC_DEFAULT_HAIKU_MODEL 生效，必须一并收敛到 FAST_MODEL。
     let small_fast_matches =
@@ -1144,7 +1147,9 @@ fn inspect_pi(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .map(ToOwned::to_owned);
-    let api_matches = provider.and_then(|value| value.get("api")).and_then(Value::as_str)
+    let api_matches = provider
+        .and_then(|value| value.get("api"))
+        .and_then(Value::as_str)
         == Some("openai-completions");
     let model_ids = provider
         .and_then(|value| value.get("models"))
@@ -1156,8 +1161,8 @@ fn inspect_pi(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let models_shape_matches = model_ids.contains(&PI_PRIMARY_MODEL)
-        && model_ids.contains(&PI_FAST_MODEL);
+    let models_shape_matches =
+        model_ids.contains(&PI_PRIMARY_MODEL) && model_ids.contains(&PI_FAST_MODEL);
     let api_key_configured = auth
         .pointer("/flowlet/key")
         .and_then(Value::as_str)
@@ -1242,9 +1247,10 @@ fn apply_pi(
         // 仅当扩展已存在时才记录其原始内容；present == false 表示写入前不存在，
         // 恢复时应删除 Flowlet 创建的扩展文件。
         let extension_previous = if extension_existed {
-            Some(Value::String(std::fs::read_to_string(extension_path).map_err(
-                |error| format!("读取 Pi 会话扩展失败：{error}"),
-            )?))
+            Some(Value::String(
+                std::fs::read_to_string(extension_path)
+                    .map_err(|error| format!("读取 Pi 会话扩展失败：{error}"))?,
+            ))
         } else {
             None
         };
@@ -1305,7 +1311,10 @@ fn apply_pi(
     );
 
     let mut writes = vec![
-        (settings_path.to_path_buf(), Some(json_file_bytes(&settings)?)),
+        (
+            settings_path.to_path_buf(),
+            Some(json_file_bytes(&settings)?),
+        ),
         (models_path.to_path_buf(), Some(json_file_bytes(&models)?)),
         (auth_path.to_path_buf(), Some(json_file_bytes(&auth)?)),
     ];
@@ -1317,16 +1326,20 @@ fn apply_pi(
         // 删除前的原始内容已由上方备份（extension_previous）捕获，恢复时可写回。
         writes.push((extension_path.to_path_buf(), None));
     }
-    if let Err(failure) = write_files_transactionally(
-        "Pi 配置、模型、凭据与会话扩展文件",
-        &writes,
-    ) {
+    if let Err(failure) = write_files_transactionally("Pi 配置、模型、凭据与会话扩展文件", &writes)
+    {
         if backup_created && failure.rolled_back {
             let _ = std::fs::remove_file(&backup);
         }
         return Err(failure.message);
     }
-    inspect_pi(settings_path, models_path, auth_path, extension_path, expected_base_url)
+    inspect_pi(
+        settings_path,
+        models_path,
+        auth_path,
+        extension_path,
+        expected_base_url,
+    )
 }
 
 fn restore_pi(
@@ -1377,7 +1390,8 @@ fn restore_pi(
             PI_PROVIDER_ID.to_string(),
             backup.flowlet_provider.value.clone(),
         );
-        models.as_object_mut()
+        models
+            .as_object_mut()
             .unwrap()
             .insert("providers".to_string(), Value::Object(providers));
     } else {
@@ -1389,17 +1403,19 @@ fn restore_pi(
 
     let auth_object = auth.as_object_mut().unwrap();
     if backup.flowlet_auth.present {
-        auth_object.insert(PI_PROVIDER_ID.to_string(), backup.flowlet_auth.value.clone());
+        auth_object.insert(
+            PI_PROVIDER_ID.to_string(),
+            backup.flowlet_auth.value.clone(),
+        );
     } else {
         auth_object.remove(PI_PROVIDER_ID);
     }
 
-    let settings_content =
-        if !backup.settings_existed && settings.as_object().unwrap().is_empty() {
-            None
-        } else {
-            Some(json_file_bytes(&settings)?)
-        };
+    let settings_content = if !backup.settings_existed && settings.as_object().unwrap().is_empty() {
+        None
+    } else {
+        Some(json_file_bytes(&settings)?)
+    };
     let models_content = if !backup.models_existed && models.as_object().unwrap().is_empty() {
         None
     } else {
@@ -1755,15 +1771,23 @@ mod tests {
         )
         .unwrap();
 
-        let applied =
-            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
+        let applied = apply_claude_code(
+            &path,
+            "http://127.0.0.1:18640/anthropic",
+            "flowlet-token",
+            false,
+        )
+        .unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
         assert!(applied.backup_available);
         let current = read_settings(&path).unwrap();
         assert_eq!(current["theme"], "dark");
         assert_eq!(current["env"]["CUSTOM"], "keep");
         assert!(current["env"].get("ANTHROPIC_API_KEY").is_none());
-        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_FABLE_MODEL"], PRIMARY_MODEL);
+        assert_eq!(
+            current["env"]["ANTHROPIC_DEFAULT_FABLE_MODEL"],
+            PRIMARY_MODEL
+        );
         assert_eq!(current["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], FAST_MODEL);
         assert_eq!(current["env"]["ANTHROPIC_SMALL_FAST_MODEL"], FAST_MODEL);
         assert_eq!(current["env"]["CLAUDE_CODE_SUBAGENT_MODEL"], FAST_MODEL);
@@ -1825,7 +1849,10 @@ mod tests {
         assert!(!reapplied.long_context);
         let current = read_settings(&path).unwrap();
         assert_eq!(current["env"]["ANTHROPIC_MODEL"], PRIMARY_MODEL);
-        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], PRIMARY_MODEL);
+        assert_eq!(
+            current["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"],
+            PRIMARY_MODEL
+        );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -1887,8 +1914,13 @@ mod tests {
         let inspected = inspect_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
         assert_eq!(inspected.state, AgentGlobalConfigState::Partial);
 
-        let applied =
-            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
+        let applied = apply_claude_code(
+            &path,
+            "http://127.0.0.1:18640/anthropic",
+            "flowlet-token",
+            false,
+        )
+        .unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
         let current = read_settings(&path).unwrap();
         assert_eq!(current["env"]["ANTHROPIC_SMALL_FAST_MODEL"], FAST_MODEL);
@@ -1931,11 +1963,19 @@ mod tests {
         let inspected = inspect_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
         assert_eq!(inspected.state, AgentGlobalConfigState::Partial);
 
-        let applied =
-            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
+        let applied = apply_claude_code(
+            &path,
+            "http://127.0.0.1:18640/anthropic",
+            "flowlet-token",
+            false,
+        )
+        .unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
         let current = read_settings(&path).unwrap();
-        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_FABLE_MODEL"], PRIMARY_MODEL);
+        assert_eq!(
+            current["env"]["ANTHROPIC_DEFAULT_FABLE_MODEL"],
+            PRIMARY_MODEL
+        );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -1945,7 +1985,13 @@ mod tests {
         let path = test_settings_path();
         let directory = path.parent().unwrap().to_path_buf();
 
-        apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
+        apply_claude_code(
+            &path,
+            "http://127.0.0.1:18640/anthropic",
+            "flowlet-token",
+            false,
+        )
+        .unwrap();
         assert!(path.is_file());
 
         let restored = restore_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
@@ -1960,7 +2006,13 @@ mod tests {
         let path = test_settings_path();
         let directory = path.parent().unwrap().to_path_buf();
 
-        apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "flowlet-token", false).unwrap();
+        apply_claude_code(
+            &path,
+            "http://127.0.0.1:18640/anthropic",
+            "flowlet-token",
+            false,
+        )
+        .unwrap();
         let backup = backup_path(&path);
         let mut backup_value = read_settings(&backup).unwrap();
         backup_value["fields"]
@@ -1983,7 +2035,9 @@ mod tests {
         let report = inspect_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Invalid);
         assert!(report.error.is_some());
-        assert!(apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "token", false).is_err());
+        assert!(
+            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "token", false).is_err()
+        );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{invalid");
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -2103,10 +2157,8 @@ mod tests {
     }
 
     fn test_pi_paths() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
-        let directory = std::env::temp_dir().join(format!(
-            "flowlet-pi-global-config-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("flowlet-pi-global-config-{}", uuid::Uuid::new_v4()));
         let extensions = directory.join("extensions");
         std::fs::create_dir_all(&extensions).unwrap();
         (
@@ -2167,7 +2219,10 @@ mod tests {
             .map(|model| model["id"].as_str().unwrap())
             .collect::<Vec<_>>();
         assert_eq!(model_ids, vec![PI_PRIMARY_MODEL, PI_FAST_MODEL]);
-        assert_eq!(models["providers"]["other"]["baseUrl"], "https://other.example");
+        assert_eq!(
+            models["providers"]["other"]["baseUrl"],
+            "https://other.example"
+        );
         let auth = read_settings(&auth_path).unwrap();
         assert_eq!(auth["flowlet"]["type"], "api_key");
         assert_eq!(auth["flowlet"]["key"], "flowlet-token");
@@ -2194,7 +2249,10 @@ mod tests {
             models["providers"]["flowlet"]["baseUrl"],
             "https://old.example/v1"
         );
-        assert_eq!(models["providers"]["flowlet"]["models"][0]["id"], "old-model");
+        assert_eq!(
+            models["providers"]["flowlet"]["models"][0]["id"],
+            "old-model"
+        );
         let auth = read_settings(&auth_path).unwrap();
         assert_eq!(auth["flowlet"]["key"], "old");
         let settings = read_settings(&settings_path).unwrap();

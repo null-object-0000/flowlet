@@ -14,11 +14,12 @@ pub(crate) async fn device_usage_snapshot(
         .lock()
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
-    let days = tauri::async_runtime::spawn_blocking(move || storage.daily_usage_totals())
-        .await
-        .map_err(|error| format!("生成设备每日用量任务失败：{error}"))?
-        .map_err(|error| error.to_string())?;
-    Ok(DeviceUsageSnapshot::new(&identity, days))
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::core::device_sync::build_device_snapshot(&storage, &identity)
+    })
+    .await
+    .map_err(|error| format!("生成设备每日用量任务失败：{error}"))?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -261,10 +262,8 @@ pub(crate) async fn export_device_usage_bundle(
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let days = storage
-            .daily_usage_totals()
-            .map_err(|error| error.to_string())?;
-        let bundle = DeviceUsageBundle::new(DeviceUsageSnapshot::new(&identity, days));
+        let snapshot = crate::core::device_sync::build_device_snapshot(&storage, &identity)?;
+        let bundle = DeviceUsageBundle::new(snapshot);
         let bytes = serde_json::to_vec_pretty(&bundle)
             .map_err(|error| format!("生成设备用量文件失败：{error}"))?;
         let target = std::path::PathBuf::from(&path);
@@ -368,6 +367,7 @@ pub(crate) async fn import_device_usage_bundle(
                 &snapshot.generated_at,
                 snapshot.timezone_offset_minutes,
                 &snapshot.days,
+                &snapshot.sessions,
             )
             .map_err(|error| error.to_string())
     })

@@ -10,9 +10,9 @@
 
 use crate::core::channels_config::ChannelsConfig;
 use std::collections::HashMap;
-use tauri::Manager;
 #[cfg(any(windows, target_os = "linux"))]
 use std::sync::{Arc, Mutex};
+use tauri::Manager;
 
 /// 单个抓取模式的运行时配置(从 ChannelsConfig 解析后传入)。
 #[derive(Debug, Clone)]
@@ -208,11 +208,7 @@ fn attach_webview2_response_capture(
                             let body_bytes = body.len();
                             if let Ok(mut guard) = response_pending.lock() {
                                 let entry = guard.entry(response_account_id.clone()).or_default();
-                                record_captured_response(
-                                    entry,
-                                    response_url.clone(),
-                                    body,
-                                );
+                                record_captured_response(entry, response_url.clone(), body);
                             }
                             tracing::info!(
                                 account_id = %response_account_id,
@@ -313,11 +309,7 @@ pub fn install_linux_response_capture(
                                 if let Ok(mut guard) = response_pending.lock() {
                                     let entry =
                                         guard.entry(response_account_id.clone()).or_default();
-                                    record_captured_response(
-                                        entry,
-                                        response_url.clone(),
-                                        body,
-                                    );
+                                    record_captured_response(entry, response_url.clone(), body);
                                 }
                                 tracing::info!(
                                     account_id = %response_account_id,
@@ -366,9 +358,7 @@ pub fn classify_response_url(url: &str) -> &'static str {
         "subscription"
     } else if normalized.contains("/tokenplan/personal/api/v2/quota-config") {
         "quota_config"
-    } else if normalized
-        .contains("/api/pay/commercial/entitlements/token-packs/list")
-    {
+    } else if normalized.contains("/api/pay/commercial/entitlements/token-packs/list") {
         // 必须在 token-packs/summary 之前判断,但二者路径不同无冲突。
         // 放在前面是为了让"token-packs"前缀的匹配更明确可读。
         "token_packs_list"
@@ -389,11 +379,7 @@ pub fn classify_response_url(url: &str) -> &'static str {
 /// `token-packs/list` 并行发出不同筛选条件的 POST 请求（例如完整历史列表，以及
 /// `statusCodes=[1], pageSize=1` 的活跃包探测），因此该槽位必须按 resourceId 合并，
 /// 不能让较小的筛选响应覆盖完整历史列表。
-pub fn record_captured_response(
-    entry: &mut Vec<(String, String)>,
-    url: String,
-    body: String,
-) {
+pub fn record_captured_response(entry: &mut Vec<(String, String)>, url: String, body: String) {
     let kind = classify_response_url(&url);
     if kind == "token_packs_list" {
         if let Some(index) = entry
@@ -447,9 +433,9 @@ pub fn captured_response_satisfies_slot(kind: &str, body: &str) -> bool {
         return page_size > 1;
     }
     let expected_history_items = history_count.min(page_size.max(1));
-    let has_status_codes = items.iter().any(|item| {
-        item.get("statusCode").is_some() || item.get("displayStatusCode").is_some()
-    });
+    let has_status_codes = items
+        .iter()
+        .any(|item| item.get("statusCode").is_some() || item.get("displayStatusCode").is_some());
     let captured_history_items = if has_status_codes {
         items
             .iter()
@@ -518,10 +504,7 @@ fn merge_longcat_token_pack_list(existing: &str, incoming: &str) -> Option<Strin
         &mut existing_root
     };
     let data = data.as_object_mut()?;
-    data.insert(
-        "items".to_string(),
-        serde_json::Value::Array(merged_items),
-    );
+    data.insert("items".to_string(), serde_json::Value::Array(merged_items));
     for (field, mut value) in merged_counts {
         if field == "total" {
             value = value.max(merged_len);
@@ -669,8 +652,7 @@ mod tests {
 
     #[test]
     fn longcat_list_waits_for_history_response_and_merges_parallel_filters() {
-        let url =
-            "https://longcat.chat/api/pay/commercial/entitlements/token-packs/list";
+        let url = "https://longcat.chat/api/pay/commercial/entitlements/token-packs/list";
         let active_probe = r#"{
           "code":0,
           "data":{
@@ -717,10 +699,7 @@ mod tests {
             r#"{"code":0,"data":{"activeCount":0,"historyCount":0,"total":0,"pageSize":9,"items":[]}}"#
         ));
 
-        for responses in [
-            [active_probe, history_list],
-            [history_list, active_probe],
-        ] {
+        for responses in [[active_probe, history_list], [history_list, active_probe]] {
             let mut entry = Vec::new();
             for body in responses {
                 record_captured_response(&mut entry, url.to_string(), body.to_string());
@@ -732,9 +711,7 @@ mod tests {
             ));
             let merged: serde_json::Value =
                 serde_json::from_str(&entry[0].1).expect("merged list response");
-            let items = merged["data"]["items"]
-                .as_array()
-                .expect("merged items");
+            let items = merged["data"]["items"].as_array().expect("merged items");
             assert_eq!(items.len(), 4);
             assert_eq!(
                 items
@@ -827,9 +804,7 @@ mod tests {
                 console_url_secondary: Some(
                     "https://longcat.chat/platform/usage?tab=api".to_string(),
                 ),
-                console_url_tertiary: Some(
-                    "https://longcat.chat/platform/fuel_pack".to_string(),
-                ),
+                console_url_tertiary: Some("https://longcat.chat/platform/fuel_pack".to_string()),
                 interceptor_js: String::new(),
                 extractor_js: String::new(),
                 aggregate: true,
@@ -862,7 +837,11 @@ mod tests {
         );
         assert_eq!(
             mode.required_slots,
-            vec!["token_packs_summary", "api_usage_summary", "token_packs_list"]
+            vec![
+                "token_packs_summary",
+                "api_usage_summary",
+                "token_packs_list"
+            ]
         );
     }
 

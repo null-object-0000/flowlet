@@ -234,7 +234,11 @@ fn build_summary(
         summarize_category(
             table_stats,
             "agentSessions",
-            &["agent_session_snapshots", "agent_source_sync_state"],
+            &[
+                "agent_session_snapshots",
+                "agent_source_sync_state",
+                "device_agent_sessions",
+            ],
         ),
         summarize_category(
             table_stats,

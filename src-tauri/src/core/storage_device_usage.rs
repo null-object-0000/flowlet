@@ -1,7 +1,7 @@
 use super::{Storage, StorageError};
 use crate::core::device_identity::{
     resolve_device_display_name, DailyUsageTotal, DeviceUsageImportPreview,
-    DeviceUsageImportResult, KnownDevice,
+    DeviceUsageImportResult, KnownDevice, SharedAgentSession, SyncedAgentSession,
 };
 use rusqlite::{params, OptionalExtension};
 
@@ -152,6 +152,7 @@ impl Storage {
         generated_at: &str,
         timezone_offset_minutes: i32,
         days: &[DailyUsageTotal],
+        sessions: &[SyncedAgentSession],
     ) -> Result<DeviceUsageImportResult, StorageError> {
         let preview = self.preview_device_usage_import(
             "",
@@ -193,6 +194,14 @@ impl Storage {
                 generated_at
             ],
         )?;
+        let import_sessions = transaction
+            .query_row(
+                "SELECT profile_generated_at FROM known_devices WHERE device_id = ?1",
+                [device_id],
+                |row| row.get::<_, String>(0),
+            )?
+            .as_str()
+            <= generated_at;
         for day in days {
             transaction.execute(
                 "INSERT INTO device_daily_usage (
@@ -226,6 +235,31 @@ impl Storage {
                     generated_at,
                 ],
             )?;
+        }
+        if import_sessions {
+            transaction.execute(
+                "DELETE FROM device_agent_sessions WHERE device_id = ?1",
+                [device_id],
+            )?;
+            for session in sessions {
+                let session_json = serde_json::to_string(session)
+                    .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+                transaction.execute(
+                    "INSERT INTO device_agent_sessions (
+                        device_id, agent_type, session_id, runtime_status, activity_at,
+                        session_json, snapshot_generated_at, imported_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))",
+                    params![
+                        device_id,
+                        session.agent_type,
+                        session.session_id,
+                        session.runtime_status,
+                        session.activity_at,
+                        session_json,
+                        generated_at,
+                    ],
+                )?;
+            }
         }
         transaction.commit()?;
         Ok(DeviceUsageImportResult {
@@ -319,5 +353,73 @@ impl Storage {
             }
         }
         Ok(totals)
+    }
+
+    pub fn imported_device_sessions(
+        &self,
+        device_id: Option<&str>,
+    ) -> Result<Vec<SharedAgentSession>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let sql = if device_id.is_some() {
+            "SELECT s.device_id, d.display_name, d.platform, s.session_json
+             FROM device_agent_sessions s
+             JOIN known_devices d ON d.device_id = s.device_id
+             WHERE s.device_id = ?1
+             ORDER BY CASE s.runtime_status
+                        WHEN 'running' THEN 0
+                        WHEN 'waiting_user' THEN 1
+                        ELSE 2
+                      END,
+                      s.activity_at DESC"
+        } else {
+            "SELECT s.device_id, d.display_name, d.platform, s.session_json
+             FROM device_agent_sessions s
+             JOIN known_devices d ON d.device_id = s.device_id
+             ORDER BY CASE s.runtime_status
+                        WHEN 'running' THEN 0
+                        WHEN 'waiting_user' THEN 1
+                        ELSE 2
+                      END,
+                      s.activity_at DESC"
+        };
+        let mut statement = connection.prepare(sql)?;
+        let map_row = |row: &rusqlite::Row<'_>| {
+            let device_id: String = row.get(0)?;
+            let display_name: String = row.get(1)?;
+            let platform: String = row.get(2)?;
+            let session_json: String = row.get(3)?;
+            let session =
+                serde_json::from_str::<SyncedAgentSession>(&session_json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+            Ok(SharedAgentSession {
+                device_display_name: resolve_device_display_name(
+                    &display_name,
+                    &platform,
+                    &device_id,
+                ),
+                device_id,
+                device_platform: platform,
+                session,
+            })
+        };
+        let mut sessions = Vec::new();
+        if let Some(device_id) = device_id {
+            for row in statement.query_map([device_id], map_row)? {
+                sessions.push(row?);
+            }
+        } else {
+            for row in statement.query_map([], map_row)? {
+                sessions.push(row?);
+            }
+        }
+        Ok(sessions)
     }
 }

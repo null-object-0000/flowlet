@@ -3,10 +3,10 @@ use super::{Storage, StorageError};
 use crate::core::agent_session_identity::from_header_json;
 use crate::core::channels_config::official_channel_id_for_model;
 use crate::core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, AgentSessionRepairResult, AgentSessionRow,
-    AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter, LogsPageResult,
-    LogsSummary, ModelPrice, RequestLogInput, RequestLogModelOptions, RequestLogRow,
-    UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
+    AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionRepairResult,
+    AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter,
+    LogsPageResult, LogsSummary, ModelPrice, RequestLogInput, RequestLogModelOptions,
+    RequestLogRow, UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
 };
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_response_usage, extract_stream_usage};
@@ -99,6 +99,64 @@ fn matches_agent_session_flowlet_status(row: &AgentSessionRow, flowlet_status: &
     }
 }
 
+fn build_agent_native_usage_summary(
+    catalog: Vec<AgentSessionRow>,
+) -> Vec<AgentNativeUsageSummaryRow> {
+    let mut rows = catalog
+        .into_iter()
+        // 根会话避免父子会话累计摘要重复；已观测会话优先使用 Flowlet 请求证据，
+        // 原生累计摘要不再叠加，保持保守去重。
+        .filter(|row| row.parent_session_id.is_none() && !row.flowlet_observed)
+        .filter_map(|row| {
+            let summary = row.native_summary?;
+            if !summary.source_available {
+                return None;
+            }
+            let activity_at = row
+                .native_updated_at
+                .as_deref()
+                .unwrap_or(&row.activity_at)
+                .to_string();
+            let date = native_usage_local_date(&activity_at)?;
+            Some(AgentNativeUsageSummaryRow {
+                date,
+                activity_at,
+                agent_type: row.agent_type,
+                session_id: row.session_id,
+                turn_count: summary.turn_count,
+                models: summary.models,
+                truncated: summary.truncated,
+                usage: summary.usage,
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
+            .cmp(&crate::core::agent_session_metadata::session_time_millis(
+                &left.activity_at,
+            ))
+            .then_with(|| right.session_id.cmp(&left.session_id))
+    });
+    rows
+}
+
+fn native_usage_local_date(value: &str) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|timestamp| {
+            timestamp
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+        .or_else(|| {
+            value
+                .get(..10)
+                .filter(|date| date.chars().nth(4) == Some('-'))
+                .map(str::to_string)
+        })
+}
+
 fn repair_time_clause(column: &str, time_range: &str) -> String {
     let condition = match time_range {
         "1h" => "datetime({column}) >= datetime('now', '-1 hour')",
@@ -167,7 +225,8 @@ fn estimate_cost(
 
     let input_uncached_cost = input_uncached * uncached_price / 1_000_000.0;
     let input_cached_cost = input_cached * cached_price / 1_000_000.0;
-    let input_cache_write_cost = cache_write * cache_write_price.unwrap_or(uncached_price) / 1_000_000.0;
+    let input_cache_write_cost =
+        cache_write * cache_write_price.unwrap_or(uncached_price) / 1_000_000.0;
     let output_cost = output * output_price / 1_000_000.0;
 
     Some(CostBreakdown {
@@ -727,6 +786,39 @@ impl Storage {
         })
     }
 
+    /// 返回用于设备快照的全部根会话。同步层会在此结果上应用
+    /// “运行态全保留，其余按最近活跃补足 10 条”的传输规则。
+    pub fn list_agent_sessions_for_device_sync(
+        &self,
+    ) -> Result<Vec<AgentSessionRow>, StorageError> {
+        let mut catalog = crate::core::agent_session_metadata::merge_agent_session_catalog(
+            self.list_observed_agent_sessions()?,
+            self.list_native_agent_sessions(),
+        );
+        catalog.retain(|row| row.parent_session_id.is_none());
+        catalog.sort_by(|left, right| {
+            crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
+                .cmp(&crate::core::agent_session_metadata::session_time_millis(
+                    &left.activity_at,
+                ))
+                .then_with(|| right.session_id.cmp(&left.session_id))
+        });
+        Ok(catalog)
+    }
+
+    /// 返回未经过 Flowlet 的根会话累计用量。
+    ///
+    /// 复用后台 Agent 数据同步写入的 `agent_session_snapshots`，不在用量页面查询时
+    /// 重新解析完整会话正文。已被 Flowlet 观测的会话不返回，避免与
+    /// `usage_records` 重复统计。
+    pub fn agent_native_usage_summary(
+        &self,
+    ) -> Result<Vec<AgentNativeUsageSummaryRow>, StorageError> {
+        Ok(build_agent_native_usage_summary(
+            self.list_agent_sessions_for_device_sync()?,
+        ))
+    }
+
     pub fn list_agent_session_children(
         &self,
         agent_type: &str,
@@ -1246,20 +1338,25 @@ impl Storage {
 
     /// Repair historical Claude Code and OpenCode session attribution from
     /// captured request headers. Requests without captured headers cannot be recovered.
+    ///
+    /// 同时修复客户端归属：对 `client_id IS NULL` 的记录，按最新 `ua_rules`
+    /// 重新识别并写入 `client_id` / `client_name`。已有归属的记录不会被覆盖，
+    /// 避免用户手动修改后被修复回退。
     pub fn repair_agent_sessions(
         &self,
         time_range: &str,
+        ua_rules: &[crate::core::config::UaClientRule],
     ) -> Result<AgentSessionRepairResult, StorageError> {
         // 先于连接锁之外完成查询，仅把批量更新包装在单个事务中持锁，
         // 避免长时间持锁阻塞请求写入端。
-        let rows: Vec<(String, String)> = {
+        let rows: Vec<(String, String, Option<String>, Option<String>)> = {
             let connection = self
                 .connection
                 .lock()
                 .map_err(|_| StorageError::LockFailed)?;
             let mut stmt = connection.prepare(&format!(
                 r#"
-                SELECT request_id, MAX(req_headers_json)
+                SELECT request_id, MAX(req_headers_json), MAX(client_id), MAX(client_name)
                 FROM request_logs
                 WHERE req_headers_json IS NOT NULL
                   AND {}
@@ -1268,7 +1365,9 @@ impl Storage {
                 repair_time_clause("created_at", time_range)
             ))?;
             let rows = stmt
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })?
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };
@@ -1276,32 +1375,64 @@ impl Storage {
         let scanned_requests = rows.len();
         let mut repaired_requests = 0usize;
         let mut repaired_logs = 0usize;
+        let mut repaired_clients = 0usize;
         // 批量更新包装在单个事务中：避免逐行自动提交引发万次 fsync，
-        // 历史数据量较大时这是导致前端“点修复后整个应用卡顿”的主因。
+        // 历史数据量较大时这是导致前端"点修复后整个应用卡顿"的主因。
         let mut connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let transaction = connection.transaction()?;
-        for (request_id, headers_json) in rows {
-            let Some(identity) = from_header_json(&headers_json) else {
-                continue;
+        for (request_id, headers_json, existing_client_id, existing_client_name) in rows {
+            // 会话归因修复：从 headers JSON 识别 Agent 会话
+            let identity = from_header_json(&headers_json);
+
+            // 客户端归属修复：仅对 client_id 或 client_name 为空的记录重识别
+            let new_client = if existing_client_id.is_none() || existing_client_name.is_none() {
+                crate::core::proxy::identify_client_from_json(&headers_json, ua_rules)
+            } else {
+                None
             };
-            repaired_logs += transaction.execute(
-                r#"
-                UPDATE request_logs
-                SET agent_type = ?2,
-                    agent_session_id = ?3,
-                    parent_agent_session_id = ?4
-                WHERE request_id = ?1
-                "#,
-                params![
-                    request_id,
-                    identity.agent_type,
-                    identity.session_id,
-                    identity.parent_session_id
-                ],
-            )?;
+
+            let has_session = identity.is_some();
+            let has_client = new_client.is_some();
+
+            if !has_session && !has_client {
+                continue;
+            }
+
+            if has_session {
+                let identity = identity.unwrap();
+                repaired_logs += transaction.execute(
+                    r#"
+                    UPDATE request_logs
+                    SET agent_type = ?2,
+                        agent_session_id = ?3,
+                        parent_agent_session_id = ?4
+                    WHERE request_id = ?1
+                    "#,
+                    params![
+                        request_id,
+                        identity.agent_type,
+                        identity.session_id,
+                        identity.parent_session_id
+                    ],
+                )?;
+            }
+
+            if has_client {
+                let (client_id, client_name) = new_client.unwrap();
+                transaction.execute(
+                    r#"
+                    UPDATE request_logs
+                    SET client_id = ?2, client_name = ?3
+                    WHERE request_id = ?1 AND client_id IS NULL
+                    "#,
+                    params![request_id, client_id, client_name],
+                )?;
+                repaired_clients += 1;
+            }
+
             repaired_requests += 1;
         }
         transaction.commit()?;
@@ -1311,6 +1442,7 @@ impl Storage {
             repaired_requests,
             repaired_logs,
             skipped_requests: scanned_requests.saturating_sub(repaired_requests),
+            repaired_clients,
         })
     }
 
@@ -1337,19 +1469,20 @@ impl Storage {
                   AND estimated_input_uncached_cost IS NULL
                 "#,
             )?;
-            let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
-                    row.get::<_, Option<i64>>(5)?,
-                    row.get::<_, Option<i64>>(6)?,
-                    row.get::<_, Option<i64>>(7)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        row.get::<_, Option<i64>>(6)?,
+                        row.get::<_, Option<i64>>(7)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             rows
         };
 
@@ -1359,7 +1492,17 @@ impl Storage {
 
         let mut updates: Vec<(String, Option<f64>, Option<f64>, Option<f64>, Option<f64>)> =
             Vec::new();
-        for (id, channel_id, upstream_model, input_tokens, input_cached_tokens, input_uncached_tokens, input_cache_write_tokens, output_tokens) in &rows {
+        for (
+            id,
+            channel_id,
+            upstream_model,
+            input_tokens,
+            input_cached_tokens,
+            input_uncached_tokens,
+            input_cache_write_tokens,
+            output_tokens,
+        ) in &rows
+        {
             let breakdown = estimate_cost(
                 &prices,
                 channel_id.as_deref(),
@@ -1515,8 +1658,7 @@ impl Storage {
             let Some(res_body_b64) = row.res_body_b64.as_deref() else {
                 continue;
             };
-            let Ok(body) = base64::engine::general_purpose::STANDARD.decode(res_body_b64)
-            else {
+            let Ok(body) = base64::engine::general_purpose::STANDARD.decode(res_body_b64) else {
                 continue;
             };
             let usage = if row.is_stream {
@@ -1704,39 +1846,39 @@ impl Storage {
             let rows = stmt
                 .query_map([batch_size], |row| {
                     Ok(RequestCaptureRecord {
-                    format_version: 1,
-                    request_log_id: row.get(0)?,
-                    request_id: row.get(1)?,
-                    attempt_seq: row.get(2)?,
-                    captured_at: row.get(3)?,
-                    agent_type: row.get(4)?,
-                    agent_session_id: row.get(5)?,
-                    parent_agent_session_id: row.get(6)?,
-                    client_id: row.get(7)?,
-                    client_name: row.get(8)?,
-                    channel_id: row.get(9)?,
-                    channel_name: row.get(10)?,
-                    account_id: row.get(11)?,
-                    account_name: row.get(12)?,
-                    client_protocol: row.get(13)?,
-                    upstream_protocol: row.get(14)?,
-                    virtual_model: row.get(15)?,
-                    public_model: row.get(16)?,
-                    upstream_model: row.get(17)?,
-                    request_type: row.get(18)?,
-                    method: row.get(19)?,
-                    path: row.get(20)?,
-                    upstream_url: row.get(21)?,
-                    status: row.get(22)?,
-                    is_stream: row.get::<_, i64>(23)? != 0,
-                    error_message: row.get(24)?,
-                    route_reason: row.get(25)?,
-                    req_headers_json: row.get(26)?,
-                    req_body_b64: row.get(27)?,
-                    res_headers_json: row.get(28)?,
-                    res_body_b64: row.get(29)?,
-                    incomplete: row.get::<_, Option<i64>>(30)?.is_none()
-                        && row.get::<_, i64>(23)? != 0,
+                        format_version: 1,
+                        request_log_id: row.get(0)?,
+                        request_id: row.get(1)?,
+                        attempt_seq: row.get(2)?,
+                        captured_at: row.get(3)?,
+                        agent_type: row.get(4)?,
+                        agent_session_id: row.get(5)?,
+                        parent_agent_session_id: row.get(6)?,
+                        client_id: row.get(7)?,
+                        client_name: row.get(8)?,
+                        channel_id: row.get(9)?,
+                        channel_name: row.get(10)?,
+                        account_id: row.get(11)?,
+                        account_name: row.get(12)?,
+                        client_protocol: row.get(13)?,
+                        upstream_protocol: row.get(14)?,
+                        virtual_model: row.get(15)?,
+                        public_model: row.get(16)?,
+                        upstream_model: row.get(17)?,
+                        request_type: row.get(18)?,
+                        method: row.get(19)?,
+                        path: row.get(20)?,
+                        upstream_url: row.get(21)?,
+                        status: row.get(22)?,
+                        is_stream: row.get::<_, i64>(23)? != 0,
+                        error_message: row.get(24)?,
+                        route_reason: row.get(25)?,
+                        req_headers_json: row.get(26)?,
+                        req_body_b64: row.get(27)?,
+                        res_headers_json: row.get(28)?,
+                        res_body_b64: row.get(29)?,
+                        incomplete: row.get::<_, Option<i64>>(30)?.is_none()
+                            && row.get::<_, i64>(23)? != 0,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1846,8 +1988,15 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
 
-        let (total, input_uncached, input_cached, input_cache_write, output) = match estimated_cost {
-            Some(c) => (Some(c.total), Some(c.input_uncached), Some(c.input_cached), Some(c.input_cache_write), Some(c.output)),
+        let (total, input_uncached, input_cached, input_cache_write, output) = match estimated_cost
+        {
+            Some(c) => (
+                Some(c.total),
+                Some(c.input_uncached),
+                Some(c.input_cached),
+                Some(c.input_cache_write),
+                Some(c.output),
+            ),
             None => (None, None, None, None, None),
         };
 
@@ -2026,7 +2175,14 @@ impl Storage {
                  estimated_input_cached_cost = ?4, estimated_input_cache_write_cost = ?5,
                  estimated_output_cost = ?6, analyzed_at = datetime('now')
                  WHERE request_id = ?1",
-                params![row.request_id, cost.total, cost.input_uncached, cost.input_cached, cost.input_cache_write, cost.output],
+                params![
+                    row.request_id,
+                    cost.total,
+                    cost.input_uncached,
+                    cost.input_cached,
+                    cost.input_cache_write,
+                    cost.output
+                ],
             )?;
             updated += n;
         }
@@ -2091,7 +2247,10 @@ impl Storage {
                 AND request_logs.created_at < datetime('now', 'localtime', 'start of year', '+1 year', 'utc')
             "#,
             ),
-            _ => ("strftime('%Y-%m-%d', request_logs.created_at, 'localtime')", ""),
+            _ => (
+                "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
+                "",
+            ),
         };
         let connection = self
             .connection
@@ -2670,6 +2829,48 @@ mod agent_session_filter_tests {
         assert!(matches_agent_session_flowlet_status(&native, ""));
         assert!(matches_agent_session_flowlet_status(&observed, "observed"));
         assert!(matches_agent_session_flowlet_status(&native, "native"));
+    }
+
+    #[test]
+    fn native_usage_summary_keeps_only_unobserved_root_sessions() {
+        let mut native = session("codex-cli", false);
+        native.session_id = "native-root".to_string();
+        native.native_updated_at = Some("2026-07-20T08:30:00Z".to_string());
+        native.native_summary = Some(crate::core::config::AgentSessionNativeSummary {
+            source_available: true,
+            truncated: false,
+            turn_count: 3,
+            usage: Some(crate::core::config::AgentSessionNativeUsage {
+                input_tokens: 100,
+                cached_input_tokens: 40,
+                cache_write_input_tokens: 0,
+                output_tokens: 20,
+                reasoning_tokens: 5,
+                total_tokens: 125,
+                cost: None,
+                cost_currency: None,
+                api_equivalent: None,
+                plan_consumption: None,
+            }),
+            models: vec!["gpt-5.6-sol".to_string()],
+        });
+        let mut observed = native.clone();
+        observed.session_id = "observed".to_string();
+        observed.flowlet_observed = true;
+        let mut child = native.clone();
+        child.session_id = "child".to_string();
+        child.parent_session_id = Some("native-root".to_string());
+
+        let rows = build_agent_native_usage_summary(vec![observed, child, native]);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id, "native-root");
+        assert_eq!(rows[0].date, "2026-07-20");
+        assert_eq!(rows[0].turn_count, 3);
+        assert_eq!(
+            rows[0].usage.as_ref().map(|usage| usage.total_tokens),
+            Some(125)
+        );
     }
 }
 

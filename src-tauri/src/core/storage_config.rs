@@ -176,12 +176,12 @@ impl Storage {
         Ok(())
     }
 
-    /// 将 config.json 中影响协议路由的渠道字段同步到 SQLite（升级迁移）。
+    /// 将 config.json 中由 Flowlet 维护的渠道名称和协议字段同步到 SQLite（升级迁移）。
     ///
     /// 渠道模板是 Flowlet 内置维护的数据；账号覆盖地址和用户控制的路由开关分别
-    /// 存储在账号与路由表中，不会被这里修改。该同步确保新增协议或修正上游端点后，
-    /// 已有安装不会继续使用旧的渠道能力声明。
-    pub fn sync_preset_protocol_config(
+    /// 存储在账号与路由表中，不会被这里修改。该同步确保渠道更名、新增协议或修正
+    /// 上游端点后，已有安装不会继续使用旧的渠道模板信息。
+    pub fn sync_preset_maintained_config(
         &self,
         presets: &[ChannelPreset],
     ) -> Result<(), StorageError> {
@@ -194,15 +194,17 @@ impl Storage {
             connection.execute(
                 r#"
                 UPDATE channel_presets
-                SET supported_protocols = ?1,
-                    openai_base_url = ?2,
-                    anthropic_base_url = ?3,
-                    openai_auth = ?4,
-                    anthropic_auth = ?5,
-                    updated_at = ?6
-                WHERE id = ?7
+                SET name = ?1,
+                    supported_protocols = ?2,
+                    openai_base_url = ?3,
+                    anthropic_base_url = ?4,
+                    openai_auth = ?5,
+                    anthropic_auth = ?6,
+                    updated_at = ?7
+                WHERE id = ?8
                 "#,
                 params![
+                    preset.name,
                     protocols,
                     preset.openai_base_url,
                     preset.anthropic_base_url,

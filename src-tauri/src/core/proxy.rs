@@ -1,8 +1,8 @@
+use super::agent_session_identity::{from_http_headers, AgentSessionIdentity};
 use super::config::{
     classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType,
     ProxyBindConfig, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
-use super::agent_session_identity::{from_http_headers, AgentSessionIdentity};
 use super::power::{ActivityPermit, ActivityTracker};
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
@@ -116,6 +116,23 @@ pub fn write_config_raw(path: &std::path::Path, content: &str) -> Result<(), Str
     std::fs::write(path, content).map_err(|e| format!("写入失败: {e}"))?;
     Ok(())
 }
+
+// ─── 历史日志客户端归属重识别 ───────────────────────────────────────────────
+// 从已捕获的请求头 JSON 识别客户端身份，用于修复历史日志中缺失的 client_id/client_name。
+
+/// 从历史请求日志的 Header JSON 识别客户端身份。
+///
+/// 与实时代理使用同一套 `identify_client_agent` 规则，保证历史修复结果与新请求
+/// 的归属一致。返回 `(client_id, client_name)`；无法识别时返回 `None`。
+pub(crate) fn identify_client_from_json(
+    headers_json: &str,
+    ua_rules: &[super::config::UaClientRule],
+) -> Option<(String, String)> {
+    let headers = super::agent_session_identity::header_map_from_json(headers_json)?;
+    proxy_http::identify_client_agent(&headers, ua_rules)
+}
+
+pub(crate) use proxy_http::load_config_ua_rules;
 
 #[path = "proxy_routing.rs"]
 mod proxy_routing;

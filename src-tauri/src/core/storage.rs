@@ -32,16 +32,16 @@ pub enum StorageError {
 mod storage_config;
 #[path = "storage_device_usage.rs"]
 mod storage_device_usage;
+#[path = "storage_maintenance.rs"]
+mod storage_maintenance;
 #[path = "storage_stats.rs"]
 mod storage_stats;
 #[path = "storage_tasks.rs"]
 pub(crate) mod storage_tasks;
-#[path = "storage_maintenance.rs"]
-mod storage_maintenance;
 #[path = "storage_usage.rs"]
 mod storage_usage;
-pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
 pub use storage_maintenance::{DatabaseCompactionResult, DatabaseMaintenanceStats};
+pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
 pub use storage_tasks::{
     AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
     BackgroundJobsFilter, BackgroundJobsPage, CatalogSyncResult, CleanupBackgroundJobsResult,
@@ -519,9 +519,7 @@ impl Storage {
                 let mut record = self.capture_store.read(pointer)?;
                 let had_req_body = record.req_body_b64.is_some();
                 let had_res_body = record.res_body_b64.is_some();
-                if targets.contains(request_log_id)
-                    && (had_req_body || had_res_body)
-                {
+                if targets.contains(request_log_id) && (had_req_body || had_res_body) {
                     record.req_body_b64 = None;
                     record.res_body_b64 = None;
                     cleared.insert(request_log_id.clone());
@@ -533,21 +531,17 @@ impl Storage {
             if records.is_empty() {
                 continue;
             }
-            let pointers = self.capture_store.rewrite_segment_locked(
-                storage_key,
-                &records,
-                &writer_guard,
-            )?;
+            let pointers =
+                self.capture_store
+                    .rewrite_segment_locked(storage_key, &records, &writer_guard)?;
             let update_result = (|| -> Result<(), StorageError> {
                 let mut connection = self
                     .connection
                     .lock()
                     .map_err(|_| StorageError::LockFailed)?;
                 let transaction = connection.transaction()?;
-                for ((request_log_id, (had_req_body, had_res_body)), pointer) in ids
-                    .iter()
-                    .zip(body_presence.iter())
-                    .zip(pointers.iter())
+                for ((request_log_id, (had_req_body, had_res_body)), pointer) in
+                    ids.iter().zip(body_presence.iter()).zip(pointers.iter())
                 {
                     transaction.execute(
                         r#"UPDATE request_capture_refs
@@ -938,6 +932,22 @@ impl Storage {
                 PRIMARY KEY (device_id, usage_date),
                 FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS device_agent_sessions (
+                device_id             TEXT NOT NULL,
+                agent_type            TEXT NOT NULL,
+                session_id            TEXT NOT NULL,
+                runtime_status        TEXT NOT NULL,
+                activity_at           TEXT NOT NULL,
+                session_json          TEXT NOT NULL,
+                snapshot_generated_at TEXT NOT NULL,
+                imported_at           TEXT NOT NULL,
+                PRIMARY KEY (device_id, agent_type, session_id),
+                FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_device_agent_sessions_activity
+                ON device_agent_sessions(device_id, activity_at DESC);
 
             CREATE TABLE IF NOT EXISTS agent_session_snapshots (
                 agent_type TEXT NOT NULL,
@@ -1376,12 +1386,37 @@ impl Storage {
         add_column_if_missing(&connection, "usage_records", "output_tokens", "INTEGER")?;
         add_column_if_missing(&connection, "usage_records", "total_tokens", "INTEGER")?;
         add_column_if_missing(&connection, "usage_records", "estimated_cost", "REAL")?;
-        add_column_if_missing(&connection, "usage_records", "estimated_input_uncached_cost", "REAL")?;
-        add_column_if_missing(&connection, "usage_records", "estimated_input_cached_cost", "REAL")?;
-        add_column_if_missing(&connection, "usage_records", "estimated_input_cache_write_cost", "REAL")?;
-        add_column_if_missing(&connection, "usage_records", "estimated_output_cost", "REAL")?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "estimated_input_uncached_cost",
+            "REAL",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "estimated_input_cached_cost",
+            "REAL",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "estimated_input_cache_write_cost",
+            "REAL",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "estimated_output_cost",
+            "REAL",
+        )?;
         add_column_if_missing(&connection, "usage_records", "analyzed_at", "TEXT")?;
-        add_column_if_missing(&connection, "channel_presets", "enabled", "INTEGER NOT NULL DEFAULT 1")?;
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "enabled",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
         add_column_if_missing(
             &connection,
             "usage_records",

@@ -1,4 +1,4 @@
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
 
 pub(crate) const AGENT_CLIENT_HEADER: &str = "x-flowlet-client";
 pub(crate) const AGENT_SESSION_HEADER: &str = "x-flowlet-session";
@@ -36,6 +36,34 @@ pub(crate) fn from_header_json(headers_json: &str) -> Option<AgentSessionIdentit
             .and_then(|(_, value)| value.as_str())
             .and_then(valid_header_value)
     })
+}
+
+/// 从历史请求日志保存的 Header JSON 还原 `HeaderMap`（键名统一小写）。
+///
+/// 供历史修复路径把落库的 `req_headers_json` 还原成与实时请求一致的
+/// `HeaderMap`，再交给实时识别逻辑（如 `identify_client_agent`）复用
+/// 同一套规则，保证修复结果与新请求的归属一致。
+///
+/// 落库 JSON 的键名大小写不固定（历史捕获层可能原样保存 SDK 原值），这里
+/// 全部降为小写后写入，符合 `HeaderMap` 的规范化语义；非字符串值与无法
+/// 解析为合法 Header 名/值的条目被跳过，避免历史脏数据让整段修复中断。
+pub(crate) fn header_map_from_json(headers_json: &str) -> Option<HeaderMap> {
+    let parsed = serde_json::from_str::<serde_json::Value>(headers_json).ok()?;
+    let obj = parsed.as_object()?;
+    let mut headers = HeaderMap::new();
+    for (raw_name, raw_value) in obj {
+        let Some(value) = raw_value.as_str() else {
+            continue;
+        };
+        let Ok(name) = HeaderName::from_bytes(raw_name.to_ascii_lowercase().as_bytes()) else {
+            continue;
+        };
+        let Ok(value) = HeaderValue::from_str(value) else {
+            continue;
+        };
+        headers.append(name, value);
+    }
+    Some(headers)
 }
 
 fn parse_with(header: impl Fn(&str) -> Option<String>) -> Option<AgentSessionIdentity> {

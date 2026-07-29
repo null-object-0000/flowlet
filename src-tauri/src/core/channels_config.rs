@@ -181,7 +181,8 @@ pub struct ChannelsConfig {
     /// 每个渠道的端点覆盖，key 为 channel_id → (endpoint_key → url)
     pub endpoints: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
     /// 每个渠道的抓取配置，key 为 channel_id → (mode_key → ScrapeModeConfig)。
-    pub scrape: std::collections::HashMap<String, std::collections::HashMap<String, ScrapeModeConfig>>,
+    pub scrape:
+        std::collections::HashMap<String, std::collections::HashMap<String, ScrapeModeConfig>>,
 }
 
 impl ChannelsConfig {
@@ -311,11 +312,7 @@ impl ChannelsConfig {
     }
 
     /// 获取指定渠道、指定模式的抓取配置。
-    pub fn scrape_config(
-        &self,
-        channel_id: &str,
-        mode_key: &str,
-    ) -> Option<&ScrapeModeConfig> {
+    pub fn scrape_config(&self, channel_id: &str, mode_key: &str) -> Option<&ScrapeModeConfig> {
         self.scrape.get(channel_id)?.get(mode_key)
     }
 
@@ -388,7 +385,7 @@ impl ChannelsConfig {
         })
     }
 
-    /// 获取千问 Qwen 模型列表端点
+    /// 获取 Qwen 模型列表端点
     pub fn qwen_models_endpoint(&self) -> String {
         self.endpoint_or("qwen", "models", |c| {
             format!("{}/models", c.openai_base_url.trim_end_matches('/'))
@@ -817,8 +814,7 @@ mod tests {
         };
 
         // 故意把后创建账号放在前面，避免测试意外依赖数组或渠道排序。
-        let routes =
-            config.merge_default_routes(&[], &[later, first], &config.presets);
+        let routes = config.merge_default_routes(&[], &[later, first], &config.presets);
 
         assert_eq!(
             routes
@@ -850,7 +846,7 @@ mod tests {
             "channels_config": {
                 "channels": [{
                     "id": "qwen",
-                    "name": "千问 Qwen",
+                    "name": "Qwen",
                     "vendor": "qwen",
                     "supported_protocols": ["openai", "anthropic"],
                     "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -879,7 +875,7 @@ mod tests {
                 "channels": [
                     {
                         "id": "qwen",
-                        "name": "千问 Qwen",
+                        "name": "Qwen",
                         "vendor": "qwen",
                         "supported_protocols": ["openai", "anthropic"],
                         "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -969,7 +965,7 @@ mod tests {
             "channels_config": {
                 "channels": [{
                     "id": "qwen",
-                    "name": "千问 Qwen",
+                    "name": "Qwen",
                     "vendor": "qwen",
                     "supported_protocols": ["openai", "anthropic"],
                     "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -981,14 +977,19 @@ mod tests {
             }
         });
         let config = ChannelsConfig::from_config_json(&json).unwrap();
-        let supported: std::collections::HashSet<String> = config.supported_models().into_iter().collect();
+        let supported: std::collections::HashSet<String> =
+            config.supported_models().into_iter().collect();
         // 渠道列表 + Token Plan 专属模型(qwen3.8-max-preview) 的并集。
         for expected in ["qwen3.7-max", "qwen3.6-flash", "qwen3.8-max-preview"] {
             assert!(supported.contains(expected), "缺少支持的模型: {expected}");
         }
         // 去重：qwen3.6-flash 同时出现在渠道列表与 Token Plan 列表，只出现一次。
         assert_eq!(
-            config.supported_models().iter().filter(|m| *m == "qwen3.6-flash").count(),
+            config
+                .supported_models()
+                .iter()
+                .filter(|m| *m == "qwen3.6-flash")
+                .count(),
             1
         );
     }
@@ -1092,11 +1093,9 @@ mod tests {
             synced_models: Some(vec!["deepseek-v4-flash".to_string()]),
             ..Default::default()
         };
-        assert!(
-            config
-                .merge_default_routes(&[], &[missing_from_models], &config.presets)
-                .is_empty()
-        );
+        assert!(config
+            .merge_default_routes(&[], &[missing_from_models], &config.presets)
+            .is_empty());
     }
 
     #[test]
@@ -1139,11 +1138,9 @@ mod tests {
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].upstream_model, "deepseek-v4-pro");
         assert_eq!(routes[0].client_protocol, ProtocolType::OpenAi);
-        assert!(
-            routes
-                .iter()
-                .all(|route| route.upstream_model != "relay-proprietary-model")
-        );
+        assert!(routes
+            .iter()
+            .all(|route| route.upstream_model != "relay-proprietary-model"));
     }
 
     #[test]
@@ -1189,13 +1186,21 @@ mod tests {
         );
         assert_eq!(
             hybrid.required_slots,
-            vec!["token_packs_summary", "api_usage_summary", "token_packs_list"],
+            vec![
+                "token_packs_summary",
+                "api_usage_summary",
+                "token_packs_list"
+            ],
             "三阶段聚合需要三个槽位全部到位"
         );
         assert!(hybrid.aggregate);
         // 拦截器必须同时拦截三个目标端点
-        assert!(hybrid.interceptor_js.contains("/api/pay/quota/metering/token-packs/summary"));
-        assert!(hybrid.interceptor_js.contains("/api/pay/quota/metering/api-usage/summary"));
+        assert!(hybrid
+            .interceptor_js
+            .contains("/api/pay/quota/metering/token-packs/summary"));
+        assert!(hybrid
+            .interceptor_js
+            .contains("/api/pay/quota/metering/api-usage/summary"));
         assert!(hybrid
             .interceptor_js
             .contains("/api/pay/commercial/entitlements/token-packs/list"));

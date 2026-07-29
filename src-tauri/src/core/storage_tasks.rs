@@ -289,15 +289,20 @@ impl Storage {
                 );
             }
         } else {
-            let _ = self.add_job_event(&job_id, "info", "超限清理", "体积上限设为 0（不限制），跳过");
+            let _ = self.add_job_event(
+                &job_id,
+                "info",
+                "超限清理",
+                "体积上限设为 0（不限制），跳过",
+            );
         }
         self.update_job_progress(&job_id, 3, 4)?;
 
         // 第四步：新库或已执行过一次完整优化的旧库，按固定上限增量归还磁盘页。
         // 旧库 auto_vacuum=NONE 时安全跳过，由设置页提示用户先执行一次完整优化。
-        let incremental_reclaimed = match self.incremental_vacuum(
-            super::storage_maintenance::SCHEDULED_INCREMENTAL_VACUUM_BYTES,
-        ) {
+        let incremental_reclaimed = match self
+            .incremental_vacuum(super::storage_maintenance::SCHEDULED_INCREMENTAL_VACUUM_BYTES)
+        {
             Ok(bytes) => {
                 let message = match self.database_maintenance_stats() {
                     Ok(stats) if stats.auto_vacuum_mode == 2 => format!(
@@ -305,10 +310,7 @@ impl Storage {
                         bytes as f64 / 1048576.0,
                         stats.reclaimable_bytes as f64 / 1048576.0
                     ),
-                    Ok(_) => {
-                        "当前数据库尚未启用增量回收，请在设置页执行一次“优化存储”"
-                            .to_string()
-                    }
+                    Ok(_) => "当前数据库尚未启用增量回收，请在设置页执行一次“优化存储”".to_string(),
                     Err(error) => format!(
                         "本轮归还 {:.1} MB；读取剩余空间失败：{error}",
                         bytes as f64 / 1048576.0
@@ -376,7 +378,10 @@ impl Storage {
         let total = connection.query_row("SELECT COUNT(*) FROM background_jobs WHERE (?1 = '' OR status = ?1) AND (?2 = '' OR job_type = ?2) AND (?3 = '' OR trigger_source = ?3)", params![status, job_type, trigger_source], |row| row.get(0))?;
         let mut stmt = connection.prepare("SELECT id, job_type, title, trigger_source, status, stage, progress_current, progress_total, summary_json, error_message, created_at, started_at, finished_at, updated_at, cancel_requested FROM background_jobs WHERE (?1 = '' OR status = ?1) AND (?2 = '' OR job_type = ?2) AND (?3 = '' OR trigger_source = ?3) ORDER BY created_at DESC LIMIT ?4 OFFSET ?5")?;
         let rows = stmt
-            .query_map(params![status, job_type, trigger_source, page_size, offset], map_job)?
+            .query_map(
+                params![status, job_type, trigger_source, page_size, offset],
+                map_job,
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(BackgroundJobsPage {
             rows,
@@ -1195,10 +1200,15 @@ async fn sync_catalog_file(
 
     // 2. 计算内容 hash，与本地文件比较
     let file_path = catalog_dir().join(spec.file_name);
-    let content_hash = format!("sha256:{}", hex::encode(sha2::Sha256::digest(body.as_bytes())));
+    let content_hash = format!(
+        "sha256:{}",
+        hex::encode(sha2::Sha256::digest(body.as_bytes()))
+    );
     if let Ok(existing) = std::fs::read_to_string(&file_path) {
-        let existing_hash =
-            format!("sha256:{}", hex::encode(sha2::Sha256::digest(existing.as_bytes())));
+        let existing_hash = format!(
+            "sha256:{}",
+            hex::encode(sha2::Sha256::digest(existing.as_bytes()))
+        );
         if existing_hash == content_hash {
             return Ok(CatalogSyncResult {
                 source: spec.source.to_string(),
@@ -1213,8 +1223,8 @@ async fn sync_catalog_file(
     }
 
     // 3. 解析 JSON 统计 provider/model 数量
-    let json: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| format!("解析 {} JSON 失败：{e}", spec.source))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("解析 {} JSON 失败：{e}", spec.source))?;
     let (provider_count, model_count) = (spec.count)(&json);
 
     // 4. 创建后台任务并记录事件
@@ -1244,7 +1254,9 @@ async fn sync_catalog_file(
         return Err(error_string);
     }
 
-    storage.update_job_progress(&job_id, 1, 1).map_err(|e| e.to_string())?;
+    storage
+        .update_job_progress(&job_id, 1, 1)
+        .map_err(|e| e.to_string())?;
     let summary = serde_json::json!({
         "providerCount": provider_count,
         "modelCount": model_count,
@@ -1256,7 +1268,10 @@ async fn sync_catalog_file(
             &job_id,
             "succeeded",
             &summary.to_string(),
-            &format!("{} 同步完成：{provider_count} 个厂商、{model_count} 个模型", spec.source),
+            &format!(
+                "{} 同步完成：{provider_count} 个厂商、{model_count} 个模型",
+                spec.source
+            ),
         )
         .map_err(|e| e.to_string())?;
 
@@ -1363,8 +1378,8 @@ fn provider_id_to_channel_id(provider_id: &str) -> Option<&'static str> {
 pub fn build_prices_from_models_cn_catalog(
     catalog_json: &str,
 ) -> Result<Vec<crate::core::config::ModelPrice>, String> {
-    let catalog: serde_json::Value = serde_json::from_str(catalog_json)
-        .map_err(|e| format!("解析 models-cn JSON 失败：{e}"))?;
+    let catalog: serde_json::Value =
+        serde_json::from_str(catalog_json).map_err(|e| format!("解析 models-cn JSON 失败：{e}"))?;
     let providers = catalog
         .get("providers")
         .and_then(|p| p.as_array())
@@ -1442,17 +1457,24 @@ pub fn get_models_cn_currencies() -> Result<Vec<(String, String)>, String> {
                 .get("prices")
                 .and_then(|p| p.as_array())
                 .and_then(|prices| {
-                    prices.iter().find_map(|price| {
-                        let market = price.get("market").and_then(|v| v.as_str()).unwrap_or("");
-                        let currency = price.get("currency").and_then(|v| v.as_str()).unwrap_or("");
-                        if market == "china" && currency == "CNY" {
-                            Some(currency.to_string())
-                        } else {
-                            None
-                        }
-                    }).or_else(|| {
-                        prices.first().and_then(|p| p.get("currency").and_then(|v| v.as_str())).map(String::from)
-                    })
+                    prices
+                        .iter()
+                        .find_map(|price| {
+                            let market = price.get("market").and_then(|v| v.as_str()).unwrap_or("");
+                            let currency =
+                                price.get("currency").and_then(|v| v.as_str()).unwrap_or("");
+                            if market == "china" && currency == "CNY" {
+                                Some(currency.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| {
+                            prices
+                                .first()
+                                .and_then(|p| p.get("currency").and_then(|v| v.as_str()))
+                                .map(String::from)
+                        })
                 })
                 .unwrap_or_else(|| "CNY".to_string());
             result.push((format!("{}:{}", channel_id, upstream_model), currency));
@@ -1507,13 +1529,31 @@ fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPric
     let input_standard = input.get("standard").and_then(|v| v.as_f64())?;
     let output = price.get("output").and_then(|v| v.as_f64())?;
     // 缓存命中价仅在字段存在时使用
-    let input_cache_hit = input.get("cacheHit").and_then(|v| v.as_f64()).unwrap_or(input_standard);
+    let input_cache_hit = input
+        .get("cacheHit")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(input_standard);
     let input_cache_write = input.get("explicitCacheCreation").and_then(|v| v.as_f64());
-    let source_url = price.get("sourceUrl").and_then(|v| v.as_str()).map(String::from);
+    let source_url = price
+        .get("sourceUrl")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     Some(BestModelPrice {
-        market: price.get("market").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        currency: price.get("currency").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        rate_type: price.get("rateType").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        market: price
+            .get("market")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        currency: price
+            .get("currency")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        rate_type: price
+            .get("rateType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
         input_standard,
         input_cache_hit,
         input_cache_write,
@@ -1547,7 +1587,10 @@ fn build_price_tiers(
         let Some(max_inclusive) = range.get("maxInclusive").and_then(|v| v.as_i64()) else {
             continue;
         };
-        let min_exclusive = range.get("minExclusive").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let min_exclusive = range
+            .get("minExclusive")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(-1);
         let Some(input) = price.get("input") else {
             continue;
         };
@@ -1557,9 +1600,19 @@ fn build_price_tiers(
         let Some(output) = price.get("output").and_then(|v| v.as_f64()) else {
             continue;
         };
-        let cache_hit = input.get("cacheHit").and_then(|v| v.as_f64()).unwrap_or(standard);
+        let cache_hit = input
+            .get("cacheHit")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(standard);
         let cache_write = input.get("explicitCacheCreation").and_then(|v| v.as_f64());
-        ranged.push((min_exclusive, max_inclusive, standard, cache_hit, cache_write, output));
+        ranged.push((
+            min_exclusive,
+            max_inclusive,
+            standard,
+            cache_hit,
+            cache_write,
+            output,
+        ));
     }
     if ranged.len() < 2 {
         return Vec::new();
@@ -1569,15 +1622,21 @@ fn build_price_tiers(
     ranged
         .into_iter()
         .enumerate()
-        .map(|(index, (_, max_inclusive, standard, cache_hit, cache_write, output))| {
-            crate::core::config::ModelPriceTier {
-                up_to_input_tokens: if index == last { None } else { Some(max_inclusive) },
-                input_uncached_price: standard,
-                input_cached_price: cache_hit,
-                input_cache_write_price: cache_write,
-                output_price: output,
-            }
-        })
+        .map(
+            |(index, (_, max_inclusive, standard, cache_hit, cache_write, output))| {
+                crate::core::config::ModelPriceTier {
+                    up_to_input_tokens: if index == last {
+                        None
+                    } else {
+                        Some(max_inclusive)
+                    },
+                    input_uncached_price: standard,
+                    input_cached_price: cache_hit,
+                    input_cache_write_price: cache_write,
+                    output_price: output,
+                }
+            },
+        )
         .collect()
 }
 
@@ -1709,8 +1768,14 @@ fn build_models_dev_tiers(
         output_price: base_output,
     });
     for (index, (_, entry)) in context_tiers.iter().enumerate() {
-        let input = entry.get("input").and_then(|v| v.as_f64()).unwrap_or(base_input);
-        let output = entry.get("output").and_then(|v| v.as_f64()).unwrap_or(base_output);
+        let input = entry
+            .get("input")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(base_input);
+        let output = entry
+            .get("output")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(base_output);
         let cache_read = entry.get("cache_read").and_then(|v| v.as_f64());
         let cache_write = entry.get("cache_write").and_then(|v| v.as_f64());
         tiers.push(crate::core::config::ModelPriceTier {
@@ -2134,7 +2199,12 @@ mod tests {
 
     // ─── 模型目录 → ModelPrice 构建 ───────────────────────────────────────
 
-    fn price(channel_id: &str, upstream_model: &str, input: f64, currency: &str) -> crate::core::config::ModelPrice {
+    fn price(
+        channel_id: &str,
+        upstream_model: &str,
+        input: f64,
+        currency: &str,
+    ) -> crate::core::config::ModelPrice {
         crate::core::config::ModelPrice {
             channel_id: channel_id.to_string(),
             upstream_model: upstream_model.to_string(),
@@ -2223,7 +2293,9 @@ mod tests {
         assert_eq!(mid.input_cache_write_price, None);
 
         // 无 cost 的模型跳过；未映射的 provider 整体跳过。
-        assert!(!prices.iter().any(|p| p.upstream_model == "gpt-free-no-cost"));
+        assert!(!prices
+            .iter()
+            .any(|p| p.upstream_model == "gpt-free-no-cost"));
         assert!(!prices.iter().any(|p| p.upstream_model == "claude-x"));
     }
 
@@ -2249,7 +2321,10 @@ mod tests {
 
             let plan_price = find_price(&prices, "codex-native", model);
             assert_eq!(plan_price.currency, "CREDITS");
-            assert!((plan_price.input_uncached_price - api_price.input_uncached_price * 25.0).abs() < 1e-9);
+            assert!(
+                (plan_price.input_uncached_price - api_price.input_uncached_price * 25.0).abs()
+                    < 1e-9
+            );
             assert!((plan_price.output_price - api_price.output_price * 25.0).abs() < 1e-9);
         }
     }
@@ -2339,8 +2414,13 @@ mod tests {
         ];
         let merged = merge_price_tables(catalog, config);
         assert_eq!(merged.len(), 3);
-        assert!((find_price(&merged, "qwen", "qwen3.7-max").input_uncached_price - 6.0).abs() < 1e-9);
+        assert!(
+            (find_price(&merged, "qwen", "qwen3.7-max").input_uncached_price - 6.0).abs() < 1e-9
+        );
         assert_eq!(find_price(&merged, "openai-api", "gpt-5.5").currency, "USD");
-        assert!((find_price(&merged, "custom", "my-relay-model").input_uncached_price - 1.0).abs() < 1e-9);
+        assert!(
+            (find_price(&merged, "custom", "my-relay-model").input_uncached_price - 1.0).abs()
+                < 1e-9
+        );
     }
 }

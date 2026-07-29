@@ -177,8 +177,8 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         .expect("追加新增渠道模板失败");
 
     storage
-        .sync_preset_protocol_config(&migration_presets)
-        .expect("同步渠道协议配置失败");
+        .sync_preset_maintained_config(&migration_presets)
+        .expect("同步渠道模板配置失败");
 
     storage
         .ensure_preset_balance_query(&migration_presets)
@@ -996,6 +996,7 @@ fn run_desktop() {
             commands::repair_unknown_usage,
             commands::repair_usage_costs,
             commands::usage_summary,
+            commands::agent_native_usage_summary,
             commands::usage_today_tokens,
             commands::device_usage_snapshot,
             commands::list_known_devices,
@@ -1103,6 +1104,7 @@ fn run_mobile() {
         .invoke_handler(tauri::generate_handler![
             mobile_commands::list_shared_devices,
             mobile_commands::shared_device_daily_usage,
+            mobile_commands::list_shared_device_sessions,
             mobile_commands::get_s3_sync_settings,
             mobile_commands::save_s3_sync_config,
             mobile_commands::test_s3_read_connection,
@@ -1157,12 +1159,12 @@ fn migrate_channel_presets_from_config(
     config_path: &std::path::Path,
     disable_newly_added: bool,
 ) -> Result<(), String> {
-    let config_raw = std::fs::read_to_string(config_path)
-        .map_err(|e| format!("读取 config.json 失败：{e}"))?;
+    let config_raw =
+        std::fs::read_to_string(config_path).map_err(|e| format!("读取 config.json 失败：{e}"))?;
 
     // 重新解析 config.json 并同步渠道预设
-    let config_value: serde_json::Value = serde_json::from_str(&config_raw)
-        .map_err(|e| format!("解析 config.json 失败：{e}"))?;
+    let config_value: serde_json::Value =
+        serde_json::from_str(&config_raw).map_err(|e| format!("解析 config.json 失败：{e}"))?;
     let channels_config = core::channels_config::ChannelsConfig::from_config_json(&config_value)
         .map_err(|e| format!("构建 ChannelsConfig 失败：{e}"))?;
 
@@ -1176,10 +1178,13 @@ fn migrate_channel_presets_from_config(
     }
 
     // 读取现有渠道，建立 ID → enabled 映射
-    let existing = storage.list_channel_presets()
+    let existing = storage
+        .list_channel_presets()
         .map_err(|e| format!("读取现有渠道预设失败：{e}"))?;
-    let existing_map: std::collections::HashMap<&str, bool> =
-        existing.iter().map(|p| (p.id.as_str(), p.enabled)).collect();
+    let existing_map: std::collections::HashMap<&str, bool> = existing
+        .iter()
+        .map(|p| (p.id.as_str(), p.enabled))
+        .collect();
 
     // 新增渠道默认禁用（用户需手动启用并配置 API Key）
     if disable_newly_added {
@@ -1202,10 +1207,15 @@ fn migrate_channel_presets_from_config(
     }
 
     // 全量替换渠道预设（save_channel_presets 内部先 DELETE 再 INSERT）
-    storage.save_channel_presets(&presets)
+    storage
+        .save_channel_presets(&presets)
         .map_err(|e| format!("保存渠道预设失败：{e}"))?;
 
-    tracing::info!(count = presets.len(), disable_newly_added, "渠道预设同步完成");
+    tracing::info!(
+        count = presets.len(),
+        disable_newly_added,
+        "渠道预设同步完成"
+    );
     Ok(())
 }
 

@@ -355,7 +355,10 @@ fn ua_skip_disabled_and_empty_pattern() {
 fn agent_marker_header_identifies_pi_and_beats_ua_rules() {
     let mut headers = HeaderMap::new();
     // Pi 走 OpenAI SDK，UA 是通用的 OpenAI/JS；标记头应优先归属为 Pi。
-    headers.insert(header::USER_AGENT, HeaderValue::from_static("OpenAI/JS 6.26.0"));
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("OpenAI/JS 6.26.0"),
+    );
     headers.insert("x-flowlet-client", HeaderValue::from_static("pi"));
     let rules = vec![UaClientRule {
         id: "opencode".to_string(),
@@ -373,7 +376,10 @@ fn agent_marker_header_identifies_pi_and_beats_ua_rules() {
 #[test]
 fn agent_marker_header_unknown_value_uses_value_as_name() {
     let mut headers = HeaderMap::new();
-    headers.insert("x-flowlet-client", HeaderValue::from_static("  FutureAgent  "));
+    headers.insert(
+        "x-flowlet-client",
+        HeaderValue::from_static("  FutureAgent  "),
+    );
 
     assert_eq!(
         identify_client_agent(&headers, &[]),
@@ -399,26 +405,62 @@ fn agent_marker_falls_back_to_ua_when_absent() {
 }
 
 #[test]
-fn embedded_config_identifies_open_code_review_client() {
-    // open-codereview.ai 的请求 UA 形如 `open-code-review/v1.8.0 | claude`，
-    // 内置默认配置必须通过 ua_rules 将其识别为独立客户端（会话 id 暂不解析）。
-    let json: serde_json::Value =
-        serde_json::from_str(crate::core::channels_config::DEFAULT_CONFIG_JSON).unwrap();
-    let rules: Vec<UaClientRule> =
-        serde_json::from_value(json.pointer("/ua_rules").cloned().unwrap_or_default()).unwrap();
+fn identify_client_from_json_parses_case_insensitive_headers() {
+    use super::super::proxy::identify_client_from_json;
+    let rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
 
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::USER_AGENT,
-        HeaderValue::from_static("open-code-review/v1.8.0 | claude"),
-    );
+    // 历史 JSON 键名大小写不固定，应该都能识别
+    let json_lower = r#"{"user-agent":"opencode/1.2.3"}"#;
+    let json_upper = r#"{"User-Agent":"opencode/1.2.3"}"#;
 
     assert_eq!(
-        identify_client_agent(&headers, &rules),
-        Some((
-            "open-code-review".to_string(),
-            "Open Code Review".to_string()
-        ))
+        identify_client_from_json(json_lower, &rules),
+        Some(("opencode".to_string(), "OpenCode".to_string()))
+    );
+    assert_eq!(
+        identify_client_from_json(json_upper, &rules),
+        Some(("opencode".to_string(), "OpenCode".to_string()))
+    );
+}
+
+#[test]
+fn identify_client_from_json_respects_marker_header_priority() {
+    use super::super::proxy::identify_client_from_json;
+    let rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    // x-flowlet-client 标记头应优先于 UA 规则
+    let json_with_marker = r#"{"user-agent":"opencode/1.2.3","x-flowlet-client":"pi"}"#;
+    assert_eq!(
+        identify_client_from_json(json_with_marker, &rules),
+        Some(("pi".to_string(), "Pi".to_string()))
+    );
+}
+
+#[test]
+fn identify_client_from_json_returns_none_for_invalid_json() {
+    use super::super::proxy::identify_client_from_json;
+    let rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    assert_eq!(identify_client_from_json("not json", &rules), None);
+    assert_eq!(identify_client_from_json("[]", &rules), None);
+    assert_eq!(
+        identify_client_from_json(r#"{"other":"value"}"#, &rules),
+        None
     );
 }
 

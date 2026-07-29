@@ -1,5 +1,6 @@
 use crate::core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelPreset, RouteRule,
+    AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelPreset, RouteCandidate,
+    RouteRule,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::sync::{
@@ -103,6 +104,44 @@ pub struct NewExposedModel {
     pub model_id: String,
 }
 
+/// 按实际路由合并规则计算本次同步会补齐的模型。
+///
+/// 预览必须与 `merge_default_routes` 使用同一套 exposed_models / synced_models /
+/// 全局白名单约束，不能直接拿 config.json 的 default_exposed_models 与现有路由比较，
+/// 否则用户未勾选的默认模型会永久显示为“待同步”，但确认后又不会真正生成路由。
+fn preview_new_exposed_models(
+    channels_config: &crate::core::channels_config::ChannelsConfig,
+    existing_routes: &[RouteCandidate],
+    accounts: &[ChannelAccount],
+    presets: &[ChannelPreset],
+) -> Vec<NewExposedModel> {
+    let merged = channels_config.merge_default_routes(existing_routes, accounts, presets);
+    let channel_names: std::collections::HashMap<&str, &str> = presets
+        .iter()
+        .map(|preset| (preset.id.as_str(), preset.name.as_str()))
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut additions = Vec::new();
+
+    // merge_default_routes 保留原数组顺序，只在末尾追加缺失路由。
+    for route in merged.iter().skip(existing_routes.len()) {
+        let key = (route.channel_id.clone(), route.upstream_model.clone());
+        if !seen.insert(key) {
+            continue;
+        }
+        additions.push(NewExposedModel {
+            channel_id: route.channel_id.clone(),
+            channel_name: channel_names
+                .get(route.channel_id.as_str())
+                .copied()
+                .unwrap_or(route.channel_id.as_str())
+                .to_string(),
+            model_id: route.upstream_model.clone(),
+        });
+    }
+    additions
+}
+
 /// 预览 config.json 与数据库渠道预设的差异（不写入）。
 #[tauri::command]
 pub(crate) fn preview_sync_channel_presets(
@@ -198,35 +237,14 @@ pub(crate) fn preview_sync_channel_presets(
         }
     }
 
-    // 检测已有账号的渠道新增的暴露模型（config 里有但数据库里尚无路由）。
-    // 没有账号的渠道不参与检测——用户还没配账号，不提前生成路由。
     let existing_routes = storage.list_route_candidates().map_err(|e| e.to_string())?;
     let existing_accounts = storage.list_channel_accounts().map_err(|e| e.to_string())?;
-    let channels_with_accounts: std::collections::HashSet<&str> = existing_accounts
-        .iter()
-        .map(|a| a.channel_id.as_str())
-        .collect();
-    let mut new_exposed_models: Vec<NewExposedModel> = Vec::new();
-    for preset in &new_presets {
-        if !channels_with_accounts.contains(preset.id.as_str()) {
-            continue;
-        }
-        let exposed = channels_config.default_exposed_models(&preset.id);
-        let existing_upstreams: std::collections::HashSet<&str> = existing_routes
-            .iter()
-            .filter(|r| r.channel_id == preset.id)
-            .map(|r| r.upstream_model.as_str())
-            .collect();
-        for model_id in &exposed {
-            if !existing_upstreams.contains(model_id.as_str()) {
-                new_exposed_models.push(NewExposedModel {
-                    channel_id: preset.id.clone(),
-                    channel_name: preset.name.clone(),
-                    model_id: model_id.clone(),
-                });
-            }
-        }
-    }
+    let new_exposed_models = preview_new_exposed_models(
+        &channels_config,
+        &existing_routes,
+        &existing_accounts,
+        &new_presets,
+    );
 
     let added_count = items.iter().filter(|i| i.status == "added").count();
     let removed_count = items.iter().filter(|i| i.status == "removed").count();
@@ -276,6 +294,74 @@ pub(crate) fn apply_sync_channel_presets(state: tauri::State<'_, AppState>) -> R
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod preset_sync_tests {
+    use super::preview_new_exposed_models;
+    use crate::core::channels_config::ChannelsConfig;
+    use crate::core::config::ChannelAccount;
+
+    fn qwen_config() -> ChannelsConfig {
+        ChannelsConfig::from_config_json(&serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "qwen",
+                    "name": "Qwen",
+                    "vendor": "qwen",
+                    "supported_protocols": ["openai"]
+                }],
+                "default_exposed_models": {
+                    "qwen": ["qwen3.7-flash", "qwen3.6-plus"]
+                }
+            }
+        }))
+        .expect("valid qwen config")
+    }
+
+    #[test]
+    fn preview_does_not_report_defaults_the_account_did_not_expose() {
+        let config = qwen_config();
+        let account = ChannelAccount {
+            id: "qwen-account".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec![]),
+            synced_models: Some(vec![
+                "qwen3.7-flash".to_string(),
+                "qwen3.6-plus".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let additions = preview_new_exposed_models(&config, &[], &[account], &config.presets);
+
+        assert!(additions.is_empty());
+    }
+
+    #[test]
+    fn preview_reports_only_routes_the_apply_step_can_create() {
+        let config = qwen_config();
+        let account = ChannelAccount {
+            id: "qwen-account".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec!["qwen3.7-flash".to_string()]),
+            synced_models: Some(vec![
+                "qwen3.7-flash".to_string(),
+                "qwen3.6-plus".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let additions = preview_new_exposed_models(&config, &[], &[account], &config.presets);
+
+        assert_eq!(additions.len(), 1);
+        assert_eq!(additions[0].channel_id, "qwen");
+        assert_eq!(additions[0].model_id, "qwen3.7-flash");
+    }
 }
 
 // ─── Sync Commands ──────────────────────────────────────────────────────────

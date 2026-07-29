@@ -3,7 +3,7 @@ use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
     ChannelAccount, LogsFilter, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
 };
-use crate::core::device_identity::DailyUsageTotal;
+use crate::core::device_identity::{DailyUsageTotal, SyncedAgentSession};
 
 #[test]
 fn channel_account_resource_sync_mode_round_trips() {
@@ -479,7 +479,7 @@ fn repairs_historical_claude_code_session_header() {
     log.req_headers_json = Some(r#"{"user-agent":"claude-cli/2.1.207 (external, cli)","x-claude-code-session-id":"claude-history-session"}"#.to_string());
     storage.insert_request_log(&log).unwrap();
 
-    let result = storage.repair_agent_sessions("all").unwrap();
+    let result = storage.repair_agent_sessions("all", &[]).unwrap();
     assert_eq!(result.repaired_requests, 1);
     let connection = storage.connection.lock().unwrap();
     let attribution: (String, String) = connection
@@ -508,10 +508,10 @@ fn repairs_historical_opencode_sessions_for_all_attempts() {
     storage.connection.lock().unwrap()
         .execute("UPDATE request_logs SET created_at = datetime('now', '-10 days') WHERE request_id = 'req-history'", [])
         .unwrap();
-    let recent_result = storage.repair_agent_sessions("7d").unwrap();
+    let recent_result = storage.repair_agent_sessions("7d", &[]).unwrap();
     assert_eq!(recent_result.scanned_requests, 0);
 
-    let result = storage.repair_agent_sessions("all").unwrap();
+    let result = storage.repair_agent_sessions("all", &[]).unwrap();
     assert_eq!(result.scanned_requests, 1);
     assert_eq!(result.repaired_requests, 1);
     assert_eq!(result.repaired_logs, 2);
@@ -526,6 +526,121 @@ fn repairs_historical_opencode_sessions_for_all_attempts() {
         )
         .unwrap();
     assert_eq!(repaired, 2);
+}
+
+#[test]
+fn repairs_client_identification_when_client_id_is_null() {
+    use crate::core::config::UaClientRule;
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+
+    // 插入一条 client_id 为 NULL 的历史日志，但 headers 包含 opencode UA
+    let mut log = request_log_for_repair("req-client-repair", 0, true);
+    log.client_id = None;
+    log.client_name = None;
+    log.req_headers_json =
+        Some(r#"{"user-agent":"opencode/1.2.3","x-session-id":"ses-123"}"#.to_string());
+    storage.insert_request_log(&log).unwrap();
+
+    let ua_rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    let result = storage.repair_agent_sessions("all", &ua_rules).unwrap();
+    assert_eq!(result.scanned_requests, 1);
+    assert_eq!(result.repaired_requests, 1);
+    assert_eq!(result.repaired_clients, 1);
+
+    let connection = storage.connection.lock().unwrap();
+    let client: (String, String) = connection
+        .query_row(
+            "SELECT client_id, client_name FROM request_logs WHERE request_id = 'req-client-repair'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(client.0, "opencode");
+    assert_eq!(client.1, "OpenCode");
+}
+
+#[test]
+fn does_not_overwrite_existing_client_identification() {
+    use crate::core::config::UaClientRule;
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+
+    // 插入一条已有 client_id 的日志
+    let mut log = request_log_for_repair("req-client-existing", 0, true);
+    log.client_id = Some("claude-code".to_string());
+    log.client_name = Some("Claude Code".to_string());
+    log.req_headers_json =
+        Some(r#"{"user-agent":"opencode/1.2.3","x-session-id":"ses-123"}"#.to_string());
+    storage.insert_request_log(&log).unwrap();
+
+    let ua_rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    let result = storage.repair_agent_sessions("all", &ua_rules).unwrap();
+    // 会话归因修复了，但客户端归属未修复（已有值）
+    assert_eq!(result.repaired_requests, 1);
+    assert_eq!(result.repaired_clients, 0);
+
+    let connection = storage.connection.lock().unwrap();
+    let client: (String, String) = connection
+        .query_row(
+            "SELECT client_id, client_name FROM request_logs WHERE request_id = 'req-client-existing'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    // 保持原有值，未被覆盖
+    assert_eq!(client.0, "claude-code");
+    assert_eq!(client.1, "Claude Code");
+}
+
+#[test]
+fn identifies_client_with_case_insensitive_headers() {
+    use crate::core::config::UaClientRule;
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+
+    // headers 键名大小写不固定，应该都能识别
+    let mut log = request_log_for_repair("req-client-case", 0, true);
+    log.client_id = None;
+    log.client_name = None;
+    log.req_headers_json = Some(r#"{"User-Agent":"opencode/1.2.3"}"#.to_string());
+    storage.insert_request_log(&log).unwrap();
+
+    let ua_rules = vec![UaClientRule {
+        id: "opencode".to_string(),
+        pattern: "opencode/".to_string(),
+        name: "OpenCode".to_string(),
+        enabled: true,
+    }];
+
+    let result = storage.repair_agent_sessions("all", &ua_rules).unwrap();
+    assert_eq!(result.repaired_clients, 1);
+
+    let connection = storage.connection.lock().unwrap();
+    let client: (String, String) = connection
+        .query_row(
+            "SELECT client_id, client_name FROM request_logs WHERE request_id = 'req-client-case'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(client.0, "opencode");
+    assert_eq!(client.1, "OpenCode");
 }
 
 #[test]
@@ -831,7 +946,7 @@ fn fills_preset_platform_urls_after_migration_without_relocking() {
 }
 
 #[test]
-fn syncs_protocol_config_for_existing_channel_presets() {
+fn syncs_maintained_config_for_existing_channel_presets() {
     let path = std::env::temp_dir().join(format!(
         "flowlet-protocol-config-migration-{}.sqlite",
         uuid::Uuid::new_v4()
@@ -846,6 +961,7 @@ fn syncs_protocol_config_for_existing_channel_presets() {
         .find(|preset| preset.id == "kimi")
         .expect("embedded Kimi preset");
     let mut stored_kimi = kimi.clone();
+    stored_kimi.name = "旧 Kimi 名称".to_string();
     stored_kimi.supported_protocols = vec![ProtocolType::OpenAi];
     stored_kimi.anthropic_base_url.clear();
 
@@ -853,8 +969,8 @@ fn syncs_protocol_config_for_existing_channel_presets() {
         .save_channel_presets(&[stored_kimi])
         .expect("save legacy Kimi preset");
     storage
-        .sync_preset_protocol_config(&config.presets)
-        .expect("sync protocol config");
+        .sync_preset_maintained_config(&config.presets)
+        .expect("sync maintained preset config");
 
     let migrated = storage
         .list_channel_presets()
@@ -866,6 +982,7 @@ fn syncs_protocol_config_for_existing_channel_presets() {
         migrated.supported_protocols,
         vec![ProtocolType::OpenAi, ProtocolType::Anthropic]
     );
+    assert_eq!(migrated.name, "Kimi");
     assert_eq!(
         migrated.anthropic_base_url,
         "https://api.moonshot.cn/anthropic"
@@ -1016,14 +1133,17 @@ fn body_request_log(request_id: &str) -> RequestLogInput {
         route_reason: Some("direct".to_string()),
         ttfb_ms: Some(10),
         duration_ms: Some(20),
-        req_headers_json: Some(r#"{"User-Agent":"opencode/local ai-sdk"}"# .to_string()),
+        req_headers_json: Some(r#"{"User-Agent":"opencode/local ai-sdk"}"#.to_string()),
         res_headers_json: None,
     }
 }
 
 #[test]
 fn cleanup_expired_body_data_keeps_incomplete_usage_records() {
-    let path = std::env::temp_dir().join(format!("flowlet_test_body_cleanup_{}.sqlite", uuid::Uuid::new_v4()));
+    let path = std::env::temp_dir().join(format!(
+        "flowlet_test_body_cleanup_{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
     let storage = Storage::open(&path).expect("open storage");
 
     // 插入过期记录（先全部插入再统一修饰时间戳）
@@ -1035,7 +1155,9 @@ fn cleanup_expired_body_data_keeps_incomplete_usage_records() {
         .expect("insert old with usage");
 
     // 把已插入的记录时间戳改为 10 天前
-    storage.test_set_logs_created_at_days_ago(10).expect("set old timestamp");
+    storage
+        .test_set_logs_created_at_days_ago(10)
+        .expect("set old timestamp");
 
     // 为 old-with-usage 插入完整 usage 统计
     storage
@@ -1066,17 +1188,38 @@ fn cleanup_expired_body_data_keeps_incomplete_usage_records() {
 
     // 验证 old-no-usage 的 Body 仍保留
     let logs = storage.list_request_logs().expect("list logs");
-    let old_no_usage_log = logs.iter().find(|l| l.request_id == "old-no-usage").unwrap();
-    assert!(old_no_usage_log.req_body_b64.is_some(), "无统计的过期记录不应清除 Body");
+    let old_no_usage_log = logs
+        .iter()
+        .find(|l| l.request_id == "old-no-usage")
+        .unwrap();
+    assert!(
+        old_no_usage_log.req_body_b64.is_some(),
+        "无统计的过期记录不应清除 Body"
+    );
 
     // 验证 old-with-usage 的 Body 已清除
-    let old_with_usage_log = logs.iter().find(|l| l.request_id == "old-with-usage").unwrap();
-    assert!(old_with_usage_log.req_body_b64.is_none(), "有完整统计的过期记录应清除 Body");
-    assert!(old_with_usage_log.res_body_b64.is_none(), "有完整统计的过期记录应清除 Body");
+    let old_with_usage_log = logs
+        .iter()
+        .find(|l| l.request_id == "old-with-usage")
+        .unwrap();
+    assert!(
+        old_with_usage_log.req_body_b64.is_none(),
+        "有完整统计的过期记录应清除 Body"
+    );
+    assert!(
+        old_with_usage_log.res_body_b64.is_none(),
+        "有完整统计的过期记录应清除 Body"
+    );
     assert!(old_with_usage_log.req_body_cleared_at.is_some());
-    assert_eq!(old_with_usage_log.req_body_cleanup_reason.as_deref(), Some("retention"));
+    assert_eq!(
+        old_with_usage_log.req_body_cleanup_reason.as_deref(),
+        Some("retention")
+    );
     assert!(old_with_usage_log.res_body_cleared_at.is_some());
-    assert_eq!(old_with_usage_log.res_body_cleanup_reason.as_deref(), Some("retention"));
+    assert_eq!(
+        old_with_usage_log.res_body_cleanup_reason.as_deref(),
+        Some("retention")
+    );
 
     drop(storage);
     for suffix in ["", "-wal", "-shm"] {
@@ -1086,7 +1229,10 @@ fn cleanup_expired_body_data_keeps_incomplete_usage_records() {
 
 #[test]
 fn cleanup_expired_body_data_never_retention() {
-    let path = std::env::temp_dir().join(format!("flowlet_test_body_cleanup_never_{}.sqlite", uuid::Uuid::new_v4()));
+    let path = std::env::temp_dir().join(format!(
+        "flowlet_test_body_cleanup_never_{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
     let storage = Storage::open(&path).expect("open storage");
 
     // 插入过期请求（有 Body + 完整统计）
@@ -1099,7 +1245,9 @@ fn cleanup_expired_body_data_never_retention() {
         ..request_log_for_repair("old-forever", 1, true)
     };
     storage.insert_request_log(&old).expect("insert");
-    storage.test_set_logs_created_at_days_ago(365).expect("set old timestamp");
+    storage
+        .test_set_logs_created_at_days_ago(365)
+        .expect("set old timestamp");
     storage
         .upsert_usage_record(&UsageRecordInput {
             request_id: "old-forever".to_string(),
@@ -1143,7 +1291,10 @@ fn empty_usage_input(request_id: &str) -> UsageRecordInput {
 
 #[test]
 fn get_total_body_size_bytes_counts_only_non_null() {
-    let path = std::env::temp_dir().join(format!("flowlet_test_body_size_{}.sqlite", uuid::Uuid::new_v4()));
+    let path = std::env::temp_dir().join(format!(
+        "flowlet_test_body_size_{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
     let storage = Storage::open(&path).expect("open storage");
 
     // 无记录时返回 0
@@ -1161,7 +1312,9 @@ fn get_total_body_size_bytes_counts_only_non_null() {
     let mut no_body = body_request_log("no-body");
     no_body.req_body_b64 = None;
     no_body.res_body_b64 = None;
-    storage.insert_request_log(&no_body).expect("insert no body");
+    storage
+        .insert_request_log(&no_body)
+        .expect("insert no body");
 
     let size2 = storage.get_total_body_size_bytes().expect("get size");
     assert_eq!(size, size2, "null body should not affect total size");
@@ -1291,7 +1444,10 @@ fn migrates_legacy_sqlite_bodies_only_after_creating_a_ready_file_reference() {
 
 #[test]
 fn prune_oldest_body_data_removes_oldest_first() {
-    let path = std::env::temp_dir().join(format!("flowlet_test_body_prune_{}.sqlite", uuid::Uuid::new_v4()));
+    let path = std::env::temp_dir().join(format!(
+        "flowlet_test_body_prune_{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
     let storage = Storage::open(&path).expect("open storage");
 
     // 构造一条大约 100 KB 的请求体（base64 编码后约 136 KB）
@@ -1318,8 +1474,12 @@ fn prune_oldest_body_data_removes_oldest_first() {
     }
 
     // 将 req-0 和 req-1 的时间戳改为最老（12 天前和 11 天前，确保排序确定）
-    storage.test_set_log_created_at_days_ago("req-0", 12).expect("set req-0");
-    storage.test_set_log_created_at_days_ago("req-1", 11).expect("set req-1");
+    storage
+        .test_set_log_created_at_days_ago("req-0", 12)
+        .expect("set req-0");
+    storage
+        .test_set_log_created_at_days_ago("req-1", 11)
+        .expect("set req-1");
 
     // 当前 10 条约 200 KB/条（req + res），总计 ~2000 KB。
     // 只有两条超过一小时，空间清理必须保留其余近期记录，即使因此暂时超过软上限。
@@ -1340,8 +1500,14 @@ fn prune_oldest_body_data_removes_oldest_first() {
 
     // 验证近期记录仍保留；软上限不能以牺牲最新请求的可排查性为代价。
     let recent = logs.iter().find(|l| l.request_id == "req-9").unwrap();
-    assert!(recent.req_body_b64.is_some(), "最近一小时的请求 Body 必须保留");
-    assert!(recent.res_body_b64.is_some(), "最近一小时的响应 Body 必须保留");
+    assert!(
+        recent.req_body_b64.is_some(),
+        "最近一小时的请求 Body 必须保留"
+    );
+    assert!(
+        recent.res_body_b64.is_some(),
+        "最近一小时的响应 Body 必须保留"
+    );
     let remaining_bytes = storage.get_total_body_size_bytes().expect("size");
     assert!(
         remaining_bytes > target_bytes,
@@ -1383,7 +1549,9 @@ fn request_log_queries_resolve_current_account_name_and_fall_back_to_snapshot() 
     let mut log = request_log_for_repair("req-rename", 0, true);
     log.account_id = Some("account-1".to_string());
     log.account_name = Some("主账号-旧名".to_string());
-    storage.insert_request_log(&log).expect("insert request log");
+    storage
+        .insert_request_log(&log)
+        .expect("insert request log");
     storage
         .upsert_usage_record(&UsageRecordInput {
             request_id: "req-rename".to_string(),
@@ -1427,7 +1595,11 @@ fn request_log_queries_resolve_current_account_name_and_fall_back_to_snapshot() 
     let page = search_by(&storage, "主账号-新名");
     assert_eq!(page.total, 1, "按新账号名搜索应命中历史记录");
     assert_eq!(page.rows[0].account_name.as_deref(), Some("主账号-新名"));
-    assert_eq!(search_by(&storage, "主账号-旧名").total, 0, "账号仍在时旧名不应命中");
+    assert_eq!(
+        search_by(&storage, "主账号-旧名").total,
+        0,
+        "账号仍在时旧名不应命中"
+    );
 
     let usage = storage.usage_summary("all").expect("usage summary");
     let usage_row = usage
@@ -1488,10 +1660,7 @@ fn usage_summary_filters_at_the_database_boundary() {
         1
     );
     let all_time = storage.usage_summary("all").expect("all-time summary");
-    assert_eq!(
-        all_time.iter().map(|row| row.request_count).sum::<i64>(),
-        2
-    );
+    assert_eq!(all_time.iter().map(|row| row.request_count).sum::<i64>(), 2);
 }
 
 #[test]
@@ -1539,7 +1708,10 @@ fn usage_summary_today_filters_to_today_and_groups_by_hour() {
                 && row.date.ends_with(":00:00")
         }),
         "today 周期应按小时分组返回 2026-07-28T09:00:00 形式的日期，实际：{:?}",
-        today.iter().map(|row| row.date.as_str()).collect::<Vec<_>>()
+        today
+            .iter()
+            .map(|row| row.date.as_str())
+            .collect::<Vec<_>>()
     );
 
     // week 周期同样按小时分组，供前端 7×24 分时热力图使用。周一跑该测试时
@@ -1707,6 +1879,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             "2026-07-28T10:00:00Z",
             480,
             std::slice::from_ref(&first),
+            &[],
         )
         .expect("import first snapshot");
     assert_eq!(inserted.imported_days, 1);
@@ -1721,6 +1894,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             "2026-07-28T10:00:00Z",
             480,
             std::slice::from_ref(&first),
+            &[],
         )
         .expect("repeat same snapshot");
     assert_eq!(repeated.imported_days, 0);
@@ -1738,6 +1912,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             "2026-07-28T09:00:00Z",
             480,
             &[older],
+            &[],
         )
         .expect("ignore older snapshot");
 
@@ -1751,4 +1926,60 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
     assert_eq!(devices[0].display_name, "Office PC");
     assert_eq!(devices[0].platform, "windows");
     assert_eq!(devices[0].app_version, "0.1.0");
+}
+
+#[test]
+fn imported_device_sessions_replace_the_previous_device_snapshot() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    let session = |id: &str, status: &str, activity_at: &str| SyncedAgentSession {
+        agent_type: "codex-cli".to_string(),
+        session_id: id.to_string(),
+        runtime_status: status.to_string(),
+        title: Some(id.to_string()),
+        client_name: Some("Codex CLI".to_string()),
+        activity_at: activity_at.to_string(),
+        flowlet_observed: true,
+        request_count: 3,
+        error_count: 0,
+        known_tokens: 120,
+    };
+    let device_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    storage
+        .import_device_usage(
+            device_id,
+            "2026-07-01T00:00:00Z",
+            "Work PC",
+            "windows",
+            "0.1.0",
+            "2026-07-29T10:00:00Z",
+            480,
+            &[],
+            &[
+                session("running", "running", "2026-07-29T09:00:00Z"),
+                session("old", "idle", "2026-07-29T08:00:00Z"),
+            ],
+        )
+        .expect("import sessions");
+    storage
+        .import_device_usage(
+            device_id,
+            "2026-07-01T00:00:00Z",
+            "Work PC",
+            "windows",
+            "0.1.0",
+            "2026-07-29T11:00:00Z",
+            480,
+            &[],
+            &[session("new", "waiting_user", "2026-07-29T10:30:00Z")],
+        )
+        .expect("replace sessions");
+
+    let rows = storage
+        .imported_device_sessions(Some(device_id))
+        .expect("read sessions");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].session.session_id, "new");
+    assert_eq!(rows[0].device_display_name, "Work PC");
 }

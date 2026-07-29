@@ -1,4 +1,4 @@
-use crate::core::config::{UsageSummaryRow, UsageTodaySummary};
+use crate::core::config::{AgentNativeUsageSummaryRow, UsageSummaryRow, UsageTodaySummary};
 use crate::AppState;
 
 #[tauri::command]
@@ -23,9 +23,10 @@ pub(crate) fn repair_agent_sessions(
     state: tauri::State<'_, AppState>,
     time_range: String,
 ) -> Result<crate::core::config::AgentSessionRepairResult, String> {
+    let ua_rules = crate::core::proxy::load_config_ua_rules(&state.config_path);
     state
         .storage
-        .repair_agent_sessions(&time_range)
+        .repair_agent_sessions(&time_range, &ua_rules)
         .map_err(|err| err.to_string())
 }
 
@@ -77,6 +78,17 @@ pub(crate) async fn usage_summary(
     tauri::async_runtime::spawn_blocking(move || storage.usage_summary(&period))
         .await
         .map_err(|err| format!("读取用量统计任务失败：{err}"))?
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn agent_native_usage_summary(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<AgentNativeUsageSummaryRow>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || storage.agent_native_usage_summary())
+        .await
+        .map_err(|err| format!("读取 Agent 原生用量任务失败：{err}"))?
         .map_err(|err| err.to_string())
 }
 

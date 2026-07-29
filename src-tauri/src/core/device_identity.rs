@@ -183,6 +183,33 @@ pub struct DailyUsageTotal {
     pub unknown_count: i64,
 }
 
+/// 设备同步中携带的最小会话摘要。只包含列表展示与后续远程寻址所需字段，
+/// 不同步消息正文、提示词、工具调用或本地项目路径。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedAgentSession {
+    pub agent_type: String,
+    pub session_id: String,
+    pub runtime_status: String,
+    pub title: Option<String>,
+    pub client_name: Option<String>,
+    pub activity_at: String,
+    pub flowlet_observed: bool,
+    pub request_count: i64,
+    pub error_count: i64,
+    pub known_tokens: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedAgentSession {
+    pub device_id: String,
+    pub device_display_name: String,
+    pub device_platform: String,
+    #[serde(flatten)]
+    pub session: SyncedAgentSession,
+}
+
 /// 供本地导出和未来同步传输共同使用的最小快照契约。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -199,6 +226,8 @@ pub struct DeviceUsageSnapshot {
     pub generated_at: String,
     pub timezone_offset_minutes: i32,
     pub days: Vec<DailyUsageTotal>,
+    #[serde(default)]
+    pub sessions: Vec<SyncedAgentSession>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,7 +284,11 @@ pub struct KnownDevice {
 }
 
 impl DeviceUsageSnapshot {
-    pub fn new(identity: &DeviceIdentity, days: Vec<DailyUsageTotal>) -> Self {
+    pub fn new(
+        identity: &DeviceIdentity,
+        days: Vec<DailyUsageTotal>,
+        sessions: Vec<SyncedAgentSession>,
+    ) -> Self {
         Self {
             schema_version: DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION,
             device_id: identity.device_id.clone(),
@@ -266,6 +299,7 @@ impl DeviceUsageSnapshot {
             generated_at: Utc::now().to_rfc3339(),
             timezone_offset_minutes: Local::now().offset().local_minus_utc() / 60,
             days,
+            sessions,
         }
     }
 }
@@ -288,7 +322,8 @@ impl DeviceUsageBundle {
         chrono::DateTime::parse_from_rfc3339(&self.snapshot.device_created_at)
             .map_err(|_| "设备用量文件的 deviceCreatedAt 无效".to_string())?;
         if !self.snapshot.display_name.is_empty() {
-            validate_display_name(&self.snapshot.display_name).map_err(|error| error.to_string())?;
+            validate_display_name(&self.snapshot.display_name)
+                .map_err(|error| error.to_string())?;
         }
         if self.snapshot.platform.chars().count() > 32
             || self.snapshot.platform.chars().any(char::is_control)
@@ -335,6 +370,42 @@ impl DeviceUsageBundle {
                 return Err(format!("设备用量包含负数：{}", day.date));
             }
         }
+        let mut session_keys = std::collections::HashSet::new();
+        for session in &self.snapshot.sessions {
+            if session.agent_type.trim().is_empty()
+                || session.agent_type.chars().count() > 64
+                || session.session_id.trim().is_empty()
+                || session.session_id.chars().count() > 256
+            {
+                return Err("设备会话摘要包含无效的会话标识".to_string());
+            }
+            if !session_keys.insert((&session.agent_type, &session.session_id)) {
+                return Err("设备会话摘要包含重复会话".to_string());
+            }
+            if !matches!(
+                session.runtime_status.as_str(),
+                "idle" | "running" | "waiting_user" | "unknown"
+            ) {
+                return Err("设备会话摘要包含无效运行状态".to_string());
+            }
+            let valid_activity_at = chrono::DateTime::parse_from_rfc3339(&session.activity_at)
+                .is_ok()
+                || chrono::NaiveDateTime::parse_from_str(&session.activity_at, "%Y-%m-%d %H:%M:%S")
+                    .is_ok();
+            if !valid_activity_at {
+                return Err("设备会话摘要的 activityAt 无效".to_string());
+            }
+            if session.request_count < 0 || session.error_count < 0 || session.known_tokens < 0 {
+                return Err("设备会话摘要包含负数统计".to_string());
+            }
+            if session.title.as_ref().is_some_and(|value| {
+                value.chars().count() > 512 || value.chars().any(char::is_control)
+            }) || session.client_name.as_ref().is_some_and(|value| {
+                value.chars().count() > 128 || value.chars().any(char::is_control)
+            }) {
+                return Err("设备会话摘要包含无效文本".to_string());
+            }
+        }
         Ok(())
     }
 
@@ -348,7 +419,11 @@ impl DeviceUsageBundle {
 
 impl DeviceUsageSnapshot {
     pub fn resolved_display_name(&self) -> String {
-        resolve_device_display_name(&self.display_name, &self.resolved_platform(), &self.device_id)
+        resolve_device_display_name(
+            &self.display_name,
+            &self.resolved_platform(),
+            &self.device_id,
+        )
     }
 
     pub fn resolved_platform(&self) -> String {
@@ -368,11 +443,7 @@ impl DeviceUsageSnapshot {
     }
 }
 
-pub fn resolve_device_display_name(
-    display_name: &str,
-    platform: &str,
-    device_id: &str,
-) -> String {
+pub fn resolve_device_display_name(display_name: &str, platform: &str, device_id: &str) -> String {
     if display_name.trim().is_empty() {
         default_display_name(platform, device_id)
     } else {
@@ -498,5 +569,28 @@ mod tests {
         assert!(matches!(error, DeviceIdentityError::InvalidDeviceId(_)));
 
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn legacy_device_bundle_without_sessions_remains_supported() {
+        let bundle = DeviceUsageBundle::from_bytes(
+            br#"{
+                "format":"flowlet-device-usage",
+                "version":1,
+                "snapshot":{
+                    "schemaVersion":1,
+                    "deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "deviceCreatedAt":"2026-07-28T00:00:00Z",
+                    "displayName":"Legacy PC",
+                    "platform":"windows",
+                    "appVersion":"0.1.0",
+                    "generatedAt":"2026-07-29T00:00:00Z",
+                    "timezoneOffsetMinutes":480,
+                    "days":[]
+                }
+            }"#,
+        )
+        .expect("parse legacy bundle");
+        assert!(bundle.snapshot.sessions.is_empty());
     }
 }

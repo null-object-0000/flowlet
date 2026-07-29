@@ -1,9 +1,9 @@
+use super::agent_session_sources::{
+    collect_jsonl_files, format_unix_millis, opencode_database_candidates, string_field,
+};
 use super::config::{
     AgentSessionCostEstimate, AgentSessionNativeUsage, AgentSessionTimeline,
     AgentSessionTimelineEvent, ModelPrice,
-};
-use super::agent_session_sources::{
-    collect_jsonl_files, format_unix_millis, opencode_database_candidates, string_field,
 };
 use rusqlite::{params, Connection, OpenFlags};
 use serde_json::Value;
@@ -993,25 +993,23 @@ fn read_pi_timeline_from(path: &Path) -> Result<AgentSessionTimeline, String> {
     // 从叶子回溯到根，收集活动分支上的 entry 下标。
     let mut branch_indices: Vec<usize> = Vec::new();
     let mut visited: HashSet<String> = HashSet::new();
-    let mut current_id: Option<String> = leaf.as_ref().and_then(|(_, value)| {
-        value.get("id").and_then(Value::as_str).map(str::to_string)
-    });
+    let mut current_id: Option<String> = leaf
+        .as_ref()
+        .and_then(|(_, value)| value.get("id").and_then(Value::as_str).map(str::to_string));
     while let Some(id) = current_id {
         if !visited.insert(id.clone()) {
             break;
         }
-        let entry_index = entries.iter().position(|(_, value)| {
-            value.get("id").and_then(Value::as_str) == Some(id.as_str())
-        });
+        let entry_index = entries
+            .iter()
+            .position(|(_, value)| value.get("id").and_then(Value::as_str) == Some(id.as_str()));
         if let Some(entry_index) = entry_index {
             branch_indices.push(entry_index);
         }
         // 沿 parentId 上溯；找不到父 entry 或父 id 为空时结束。
         current_id = entries
             .iter()
-            .find(|(_, value)| {
-                value.get("id").and_then(Value::as_str) == Some(id.as_str())
-            })
+            .find(|(_, value)| value.get("id").and_then(Value::as_str) == Some(id.as_str()))
             .and_then(|(_, value)| value.get("parentId").and_then(Value::as_str))
             .filter(|parent_id| !parent_id.is_empty())
             .and_then(|parent_id| by_id.contains_key(parent_id).then(|| parent_id.to_string()));
@@ -1046,7 +1044,10 @@ fn parse_pi_entry(
             let Some(message) = value.get("message") else {
                 return;
             };
-            let role = message.get("role").and_then(Value::as_str).unwrap_or_default();
+            let role = message
+                .get("role")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let model = string_field(message, "model");
             if let Some(model) = model.as_deref() {
                 remember_model(timeline, model);
@@ -1220,9 +1221,7 @@ fn usage_from_pi_message(message: &Value) -> Option<AgentSessionNativeUsage> {
         reasoning_tokens: integer_field(usage, "reasoning"),
         total_tokens: integer_field(usage, "totalTokens"),
         // Pi 的 cost.total 由上游报告，可能是整数或浮点。
-        cost: cost.and_then(|cost| {
-            cost.get("total").and_then(optional_number_field)
-        }),
+        cost: cost.and_then(|cost| cost.get("total").and_then(optional_number_field)),
         cost_currency: None,
         api_equivalent: None,
         plan_consumption: None,

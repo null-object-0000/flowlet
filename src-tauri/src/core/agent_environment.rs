@@ -366,7 +366,11 @@ async fn detect_pi() -> AgentEnvironmentReport {
         let package_version = read_package_version(&install_dir);
         let version_result = read_version(&candidate.path).await;
         let (version, version_output, error) = match version_result {
-            Ok(output) => (parse_version(&output).or(package_version), Some(output), None),
+            Ok(output) => (
+                parse_version(&output).or(package_version),
+                Some(output),
+                None,
+            ),
             Err(_) if package_version.is_some() => (package_version, None, None),
             Err(error) => (None, None, Some(error)),
         };
@@ -1131,8 +1135,9 @@ fn decode_windows_acp(bytes: &[u8]) -> String {
         return String::new();
     }
     let byte_len = bytes.len().min(i32::MAX as usize) as i32;
-    let required =
-        unsafe { MultiByteToWideChar(CP_ACP, 0, bytes.as_ptr(), byte_len, std::ptr::null_mut(), 0) };
+    let required = unsafe {
+        MultiByteToWideChar(CP_ACP, 0, bytes.as_ptr(), byte_len, std::ptr::null_mut(), 0)
+    };
     if required <= 0 {
         return String::from_utf8_lossy(bytes).into_owned();
     }

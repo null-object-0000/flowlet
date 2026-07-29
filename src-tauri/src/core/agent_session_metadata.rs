@@ -1,7 +1,7 @@
-use super::config::AgentSessionRow;
 use super::agent_session_sources::{
     collect_jsonl_files, format_unix_millis, opencode_database_candidates, string_field,
 };
+use super::config::AgentSessionRow;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;

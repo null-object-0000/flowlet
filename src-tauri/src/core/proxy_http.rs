@@ -499,9 +499,7 @@ pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::Lo
 /// 读取本头，再回退到 UA 规则，确保开箱即可归属，不依赖用户 config.json 是否含
 /// 对应规则。该头仅用于本地归属，不参与鉴权或路由；Flowlet 在识别后、转发上游前
 /// 会将其剥离，不向上游泄露。
-pub(super) use crate::core::agent_session_identity::{
-    AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER,
-};
+pub(super) use crate::core::agent_session_identity::{AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER};
 
 /// Pi 与 Flowlet 约定的会话标识头。
 ///
@@ -525,7 +523,10 @@ fn agent_client_marker_name(value: &str) -> Option<&'static str> {
 ///
 /// 与鉴权 token 无关，仅决定日志/用量中的客户端归属。返回 (id, name)；
 /// 标记头与 UA 规则均无命中时返回 None。
-pub(super) fn identify_client_agent(headers: &HeaderMap, rules: &[UaClientRule]) -> Option<(String, String)> {
+pub(super) fn identify_client_agent(
+    headers: &HeaderMap,
+    rules: &[UaClientRule],
+) -> Option<(String, String)> {
     if let Some(value) = headers
         .get(AGENT_CLIENT_HEADER)
         .and_then(|v| v.to_str().ok())
@@ -570,7 +571,7 @@ pub(super) fn ensure_config_file(path: &std::path::Path) {
 }
 
 /// 从本地 config.json 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。
-pub(super) fn load_config_ua_rules(path: &std::path::Path) -> Vec<UaClientRule> {
+pub(crate) fn load_config_ua_rules(path: &std::path::Path) -> Vec<UaClientRule> {
     let Ok(json) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
@@ -907,7 +908,10 @@ mod tests {
     #[test]
     fn apply_request_headers_strips_agent_client_marker_before_forwarding() {
         let mut headers = HeaderMap::new();
-        headers.insert(header::USER_AGENT, HeaderValue::from_static("OpenAI/JS 6.26.0"));
+        headers.insert(
+            header::USER_AGENT,
+            HeaderValue::from_static("OpenAI/JS 6.26.0"),
+        );
         headers.insert(AGENT_CLIENT_HEADER, HeaderValue::from_static("pi"));
 
         let request = apply_request_headers(

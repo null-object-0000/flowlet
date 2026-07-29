@@ -1,5 +1,5 @@
 use super::MobileAppState;
-use crate::core::device_identity::{DailyUsageTotal, KnownDevice};
+use crate::core::device_identity::{DailyUsageTotal, KnownDevice, SharedAgentSession};
 
 #[tauri::command]
 pub(super) async fn list_shared_devices(
@@ -28,6 +28,21 @@ pub(super) async fn shared_device_daily_usage(
     })
     .await
     .map_err(|error| format!("读取共享设备每日用量任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn list_shared_device_sessions(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: Option<String>,
+) -> Result<Vec<SharedAgentSession>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_device_sessions(device_id.as_deref())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享设备会话任务失败：{error}"))?
 }
 
 #[tauri::command]

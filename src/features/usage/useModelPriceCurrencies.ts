@@ -19,7 +19,7 @@ function priceKey(channelId: string, model: string) {
  */
 export function useModelPriceCurrencyLookup() {
   const query = useQuery({
-    queryKey: queryKeys.modelCatalog.catalog(),
+    queryKey: queryKeys.modelCatalog.currencies(),
     queryFn: backgroundTaskCommands.getModelsCnCurrencies,
     staleTime: 10 * 60 * 1000,
     networkMode: "always",

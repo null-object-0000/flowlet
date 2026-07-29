@@ -154,6 +154,7 @@ const english: Record<string, string> = {
   "更多操作": "More actions",
   "设备信息": "Device",
   "使用情况": "Usage",
+  "最后数据更新": "Last data update",
   "设备操作：{name}": "Device actions: {name}",
   "导出用量": "Export usage",
   "选择一种方式，将手机或另一台桌面设备连接到当前同步空间": "Choose how to connect a phone or another desktop to this sync space",

@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toast } from "@douyinfe/semi-ui-19";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppPreferencesProvider } from "../../app/preferences/AppPreferences";
+import { formatFullTimestamp } from "../../shared/formatters/datetime";
 
 vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
@@ -117,6 +118,20 @@ vi.mock("../../features/device-sync/useDeviceSync", () => ({
       requestCount: 3,
       knownTokens: 1200,
       lastSeenAt: "2026-07-28T01:00:00Z",
+    }, {
+      deviceId: "7f482379-ed34-46e7-9da7-7a0c05d447be",
+      deviceCreatedAt: "2026-07-27T00:00:00Z",
+      displayName: "家庭电脑",
+      platform: "windows",
+      appVersion: "0.1.0",
+      isCurrent: false,
+      timezoneOffsetMinutes: 480,
+      firstUsageDate: "2026-07-27",
+      lastUsageDate: "2026-07-28",
+      dayCount: 2,
+      requestCount: 5,
+      knownTokens: 2400,
+      lastSeenAt: "2026-07-28T02:30:00Z",
     }],
     isLoading: false,
     isError: false,
@@ -203,6 +218,15 @@ describe("SettingsPage", () => {
     expect(screen.getByText("当前设备")).toBeInTheDocument();
     expect(screen.getByText("公司笔记本")).toBeInTheDocument();
     expect(screen.getByTitle("8d58734f-0b71-49ea-b5a4-115b389a9ae7")).toBeInTheDocument();
+  });
+
+  it("shows the last data update for every device, including the current device", async () => {
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
+
+    expect(await screen.findByText("最后数据更新")).toBeInTheDocument();
+    expect(screen.getByText(formatFullTimestamp("2026-07-28T01:00:00Z", "zh-CN"))).toBeInTheDocument();
+    expect(screen.getByText(formatFullTimestamp("2026-07-28T02:30:00Z", "zh-CN"))).toBeInTheDocument();
   });
 
   it("opens the current device rename dialog", async () => {

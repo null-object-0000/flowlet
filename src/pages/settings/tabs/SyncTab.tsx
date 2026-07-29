@@ -18,6 +18,7 @@ import {
   useS3SyncSettings,
 } from "../../../features/device-sync/useDeviceSync";
 import { errorMessage } from "../../../shared/errors/AppError";
+import { formatFullTimestamp } from "../../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../../shared/formatters/number";
 import { APP_OVERLAY_Z_INDEX } from "../../../shared/ui/overlayLayers";
 import styles from "./SyncTab.module.css";
@@ -330,6 +331,7 @@ export function SyncTab() {
           <div className={styles.deviceHead} aria-hidden="true">
             <span>{t("设备信息")}</span>
             <span>{t("使用情况")}</span>
+            <span>{t("最后数据更新")}</span>
             <span>{t("状态")}</span>
             <span />
           </div>
@@ -351,6 +353,9 @@ export function SyncTab() {
                 <strong>{formatCompactNumber(device.knownTokens, language)}</strong>
                 <span>{t("{count} 次请求", { count: device.requestCount })}</span>
               </div>
+              <time className={styles.deviceUpdated} dateTime={device.lastSeenAt}>
+                {formatFullTimestamp(device.lastSeenAt, language)}
+              </time>
               <div className={styles.deviceState}>
                 {device.isCurrent ? <Tag color="blue" size="small">{t("当前设备")}</Tag> : <Tag size="small">{t("已导入")}</Tag>}
               </div>

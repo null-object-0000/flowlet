@@ -176,16 +176,17 @@ button.heatmapCell[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--flow
   padding: 2px 0;
   display: grid;
   grid-template-columns: 39px repeat(7, minmax(0, 1fr));
-  grid-template-rows: 18px repeat(8, 28px);
+  grid-template-rows: 18px repeat(8, 28px) 16px;
   gap: 5px;
 }
-.hourLabel, .hourDayLabel {
+.hourLabel, .hourDayLabel, .hourDateLabel {
   display: grid;
   place-items: center;
   color: var(--flowlet-color-text-tertiary);
   font-size: 9px;
   line-height: 1;
 }
+.hourDateLabel { align-self: start; white-space: nowrap; }
 .hourCell {
   min-width: 0;
   min-height: 28px;

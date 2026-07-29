@@ -96,6 +96,24 @@ describe("mobile usage aggregation", () => {
       .toMatchObject({ outside: true, hasData: false });
   });
 
+  it("assigns weekly bucket colors from the current visible distribution", () => {
+    const tokens = [10, 20, 30, 40, 1_000_000];
+    const hours: HourlyUsageTotal[] = tokens.map((knownTokens, index) => ({
+      hour: `2026-07-${String(27 + index).padStart(2, "0")}T09:00:00`,
+      requestCount: 1,
+      knownTokens,
+    }));
+    const heatmap = buildMobileWeeklyHourlyHeatmap(
+      hours,
+      0,
+      new Date("2026-08-02T23:00:00"),
+    );
+    const levels = tokens.map((_, index) => heatmap.cells.find(
+      (cell) => cell.hour === `2026-07-${String(27 + index).padStart(2, "0")}T09:00:00`,
+    )?.level);
+    expect(levels).toEqual([1, 1, 2, 3, 4]);
+  });
+
   it("builds a complete calendar grid for the selected month", () => {
     const heatmap = buildMobileUsageHeatmap(
       [day("2026-07-01", 1, 10), day("2026-07-29", 1, 20)],

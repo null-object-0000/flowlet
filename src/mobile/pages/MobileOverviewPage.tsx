@@ -69,6 +69,17 @@ export function MobileOverviewPage() {
     () => Array.from({ length: 7 }, (_, index) => new Date(2026, 6, 13 + index).toLocaleDateString(language, { weekday: "narrow" })),
     [language],
   );
+  const weekDateLabels = useMemo(
+    () => Array.from(
+      { length: 7 },
+      (_, index) => new Date(
+        range.start.getFullYear(),
+        range.start.getMonth(),
+        range.start.getDate() + index,
+      ).toLocaleDateString(language, { month: "numeric", day: "numeric" }),
+    ),
+    [language, range.start],
+  );
 
   useEffect(() => {
     if (!settings.data?.config || autoRefreshStarted.current) return;
@@ -198,6 +209,10 @@ export function MobileOverviewPage() {
                   }),
                 ];
               })}
+              <span aria-hidden="true" />
+              {weekDateLabels.map((label, dayIndex) => (
+                <span className={styles.hourDateLabel} key={`${label}-${dayIndex}`}>{label}</span>
+              ))}
             </div>
             <div className={styles.heatmapLegend}><span>{t("少")}</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`${styles.heatmapCell} ${styles[`heatLevel${level}`]}`} />)}<span>{t("多")}</span></div>
             {!hourlyHeatmap.cells.some((cell) => cell.hasData) ? <div className={styles.emptyHint}>{t("当前周期暂无数据")}</div> : null}

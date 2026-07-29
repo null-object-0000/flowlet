@@ -1,4 +1,4 @@
-use chrono::{Local, Utc};
+use chrono::{Local, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -388,8 +388,15 @@ impl DeviceUsageBundle {
         }
         let mut previous_hour: Option<&str> = None;
         for hour in &self.snapshot.hours {
-            chrono::NaiveDateTime::parse_from_str(&hour.hour, "%Y-%m-%dT%H:00:00")
-                .map_err(|_| format!("设备小时用量时间无效：{}", hour.hour))?;
+            let parsed_hour =
+                chrono::NaiveDateTime::parse_from_str(&hour.hour, "%Y-%m-%dT%H:%M:%S")
+                    .map_err(|_| format!("设备小时用量时间无效：{}", hour.hour))?;
+            if parsed_hour.minute() != 0
+                || parsed_hour.second() != 0
+                || parsed_hour.nanosecond() != 0
+            {
+                return Err(format!("设备小时用量时间无效：{}", hour.hour));
+            }
             if previous_hour.is_some_and(|previous| previous >= hour.hour.as_str()) {
                 return Err("设备小时用量必须严格递增且不能重复".to_string());
             }
@@ -620,5 +627,61 @@ mod tests {
         )
         .expect("parse legacy bundle");
         assert!(bundle.snapshot.sessions.is_empty());
+    }
+
+    #[test]
+    fn device_bundle_accepts_generated_local_hour_values() {
+        let bundle = DeviceUsageBundle::from_bytes(
+            br#"{
+                "format":"flowlet-device-usage",
+                "version":1,
+                "snapshot":{
+                    "schemaVersion":2,
+                    "deviceId":"1411a7d7-55d8-4024-8363-95858788aa91",
+                    "deviceCreatedAt":"2026-07-21T00:00:00Z",
+                    "displayName":"Home PC",
+                    "platform":"windows",
+                    "appVersion":"0.1.0",
+                    "generatedAt":"2026-07-29T13:04:42Z",
+                    "timezoneOffsetMinutes":480,
+                    "days":[],
+                    "hours":[
+                        {"hour":"2026-07-21T21:00:00","requestCount":1,"knownTokens":42}
+                    ],
+                    "sessions":[]
+                }
+            }"#,
+        )
+        .expect("parse the local hour format emitted by hourly_usage_totals");
+
+        assert_eq!(bundle.snapshot.hours[0].hour, "2026-07-21T21:00:00");
+    }
+
+    #[test]
+    fn device_bundle_rejects_non_hour_aligned_usage_values() {
+        let error = DeviceUsageBundle::from_bytes(
+            br#"{
+                "format":"flowlet-device-usage",
+                "version":1,
+                "snapshot":{
+                    "schemaVersion":2,
+                    "deviceId":"1411a7d7-55d8-4024-8363-95858788aa91",
+                    "deviceCreatedAt":"2026-07-21T00:00:00Z",
+                    "displayName":"Home PC",
+                    "platform":"windows",
+                    "appVersion":"0.1.0",
+                    "generatedAt":"2026-07-29T13:04:42Z",
+                    "timezoneOffsetMinutes":480,
+                    "days":[],
+                    "hours":[
+                        {"hour":"2026-07-21T21:30:00","requestCount":1,"knownTokens":42}
+                    ],
+                    "sessions":[]
+                }
+            }"#,
+        )
+        .expect_err("reject a value that is not aligned to the start of an hour");
+
+        assert_eq!(error, "设备小时用量时间无效：2026-07-21T21:30:00");
     }
 }

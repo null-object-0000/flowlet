@@ -1,4 +1,5 @@
 import type { DailyUsageTotal, HourlyUsageTotal } from "../domains/device-sync/types";
+import { createHeatLevelScale, type HeatLevel } from "../shared/visualization/heatmapLevels";
 
 export type MobileUsagePeriod = "week" | "month";
 
@@ -13,7 +14,7 @@ export type MobileUsageHeatmapCell = {
   date: string;
   tokens: number;
   requests: number;
-  level: 0 | 1 | 2 | 3 | 4;
+  level: HeatLevel;
   outside: boolean;
   hasData: boolean;
 };
@@ -30,7 +31,7 @@ export type MobileHourlyHeatmapCell = {
   hourEnd: number;
   tokens: number;
   requests: number;
-  level: 0 | 1 | 2 | 3 | 4;
+  level: HeatLevel;
   outside: boolean;
   hasData: boolean;
 };
@@ -84,7 +85,6 @@ export function buildMobileUsageHeatmap(
   const gridStart = addLocalDays(range.start, -mondayIndex(range.start));
   const gridEnd = addLocalDays(range.end, 6 - mondayIndex(range.end));
   const values = new Map(filtered.map((day) => [day.date, day]));
-  const max = Math.max(0, ...filtered.map((day) => day.knownTokens));
   const cells: MobileUsageHeatmapCell[] = [];
 
   for (let cursor = gridStart; cursor <= gridEnd; cursor = addLocalDays(cursor, 1)) {
@@ -98,13 +98,19 @@ export function buildMobileUsageHeatmap(
       date,
       tokens,
       requests: outside ? 0 : day?.requestCount ?? 0,
-      level: heatLevel(tokens, max),
+      level: 0,
       outside,
       hasData: !outside && day !== undefined,
     });
   }
 
-  return { cells, columns: 7 };
+  const scale = createHeatLevelScale(
+    cells.filter((cell) => !cell.outside).map((cell) => cell.tokens),
+  );
+  return {
+    cells: cells.map((cell) => ({ ...cell, level: scale.levelFor(cell.tokens) })),
+    columns: 7,
+  };
 }
 
 export function buildMobileWeeklyHourlyHeatmap(
@@ -176,11 +182,13 @@ export function buildMobileWeeklyHourlyHeatmap(
     }
   }
 
-  const max = Math.max(0, ...cells.map((cell) => cell.tokens));
+  const scale = createHeatLevelScale(
+    cells.filter((cell) => !cell.outside).map((cell) => cell.tokens),
+  );
   return {
     cells: cells.map((cell): MobileHourlyHeatmapCell => ({
       ...cell,
-      level: heatLevel(cell.tokens, max),
+      level: scale.levelFor(cell.tokens),
     })),
   };
 }
@@ -200,11 +208,6 @@ export function formatMobileUsageRange(
     day: "numeric",
   });
   return `${start} – ${end}`;
-}
-
-function heatLevel(value: number, max: number): 0 | 1 | 2 | 3 | 4 {
-  if (value <= 0 || max <= 0) return 0;
-  return Math.max(1, Math.min(4, Math.ceil(Math.log1p(value) / Math.log1p(max) * 4))) as 1 | 2 | 3 | 4;
 }
 
 function startOfLocalDay(value: Date) {

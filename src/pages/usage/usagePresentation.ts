@@ -1,5 +1,6 @@
 import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
 import { canonicalModelId, officialChannelIdForModel } from "../../domains/channel/types";
+import { createHeatLevelScale, type HeatLevel } from "../../shared/visualization/heatmapLevels";
 
 export type UsageAggregate = {
   cost: number;
@@ -17,7 +18,7 @@ export type UsageBreakdown = UsageAggregate & { key: string; label: string; shar
 export type UsageSummaryTotals = UsageAggregate & { costByCurrency: Record<string, number> };
 export type CostCurrencyLookup = (row: UsageSummaryRow) => string | null;
 export type UsageDay = UsageAggregate & { date: string };
-export type UsageHeatmapCell = { bucket: string; tokens: number; level: 0 | 1 | 2 | 3 | 4; outside: boolean };
+export type UsageHeatmapCell = { bucket: string; tokens: number; level: HeatLevel; outside: boolean };
 export type UsageHeatmap = {
   cells: UsageHeatmapCell[];
   columns: number;
@@ -276,9 +277,11 @@ function dailyCalendarHeatmap(rows: UsageSummaryRow[], start: Date, end: Date, n
 }
 
 function finalizeHeatmap(values: Array<{ bucket: string; tokens: number; outside: boolean }>, columns: number, labels: Array<{ column: number; label: string }>, granularity: UsageHeatmap["granularity"], bucketUnit: UsageHeatmap["bucketUnit"] = "day"): UsageHeatmap {
-  const max = Math.max(0, ...values.map((cell) => cell.tokens));
+  const scale = createHeatLevelScale(
+    values.filter((cell) => !cell.outside).map((cell) => cell.tokens),
+  );
   return {
-    cells: values.map((cell) => ({ ...cell, level: heatLevel(cell.tokens, max) })),
+    cells: values.map((cell) => ({ ...cell, level: scale.levelFor(cell.tokens) })),
     columns,
     labels,
     bucketUnit,
@@ -321,11 +324,6 @@ function groupUsage(
 }
 
 function finite(value: number) { return Number.isFinite(value) ? value : 0; }
-
-function heatLevel(value: number, max: number): 0 | 1 | 2 | 3 | 4 {
-  if (value <= 0 || max <= 0) return 0;
-  return Math.max(1, Math.min(4, Math.ceil(Math.log1p(value) / Math.log1p(max) * 4))) as 1 | 2 | 3 | 4;
-}
 
 function emptyAggregate(): UsageAggregate {
   return { cost: 0, tokens: 0, inputTokens: 0, cachedInputTokens: 0, uncachedInputTokens: 0, cacheMeasuredInputTokens: 0, outputTokens: 0, requests: 0, unknown: 0 };

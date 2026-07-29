@@ -65,6 +65,18 @@ describe("usage presentation", () => {
     expect(heatmap.cells[6 * 24 + 23].outside).toBe(true);
   });
 
+  it("uses the same current-period distribution levels on the PC heatmap", () => {
+    const now = new Date(2026, 6, 18, 23);
+    const tokens = [10, 20, 30, 40, 1_000_000];
+    const heatmap = buildUsageHeatmap(tokens.map((knownTokens, index) => ({
+      ...rows[0],
+      date: `2026-07-${String(13 + index).padStart(2, "0")}T09:00:00`,
+      known_tokens: knownTokens,
+    })) as UsageSummaryRow[], "week", now);
+    expect(tokens.map((_, index) => heatmap.cells[index * 24 + 9].level))
+      .toEqual([1, 1, 2, 3, 4]);
+  });
+
   it("renders today's day-granular shared rows as a single active calendar cell", () => {
     const now = new Date(2026, 6, 15, 12);
     const heatmap = buildUsageHeatmap(rows, "today", now, "zh-CN", false);

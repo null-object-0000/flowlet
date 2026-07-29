@@ -6,7 +6,7 @@
 .sectionHeader > div:first-child > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; flex: none; }
 .deviceTable { display: grid; }
-.deviceHead, .deviceRow { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(110px, .72fr) minmax(88px, .48fr) 36px; align-items: center; gap: 12px; padding: 0 14px; }
+.deviceHead, .deviceRow { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(100px, .62fr) minmax(142px, .72fr) minmax(78px, .42fr) 36px; align-items: center; gap: 12px; padding: 0 14px; }
 .deviceHead { height: 34px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 11px; }
 .deviceRow { min-height: 72px; border-top: 1px solid var(--flowlet-color-border); }
 .deviceMain { min-width: 0; display: flex; align-items: center; gap: 11px; }
@@ -18,6 +18,7 @@
 .deviceCopy > span, .deviceStats span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
 .deviceStats { display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
 .deviceStats strong { font-size: 15px; }
+.deviceUpdated { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .deviceState { display: flex; align-items: center; }
 .deviceMenu { display: grid; place-items: center; }
 .state { min-height: 64px; grid-column: 1 / -1; display: grid; place-items: center; color: var(--flowlet-color-text-tertiary); font-size: 12px; }
@@ -91,6 +92,6 @@
   .s3Summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .deviceHead { display: none; }
   .deviceRow { grid-template-columns: minmax(0, 1fr) auto; }
-  .deviceState, .deviceMenu { display: none; }
+  .deviceUpdated, .deviceState, .deviceMenu { display: none; }
   .qrLayout { grid-template-columns: 1fr; }
 }

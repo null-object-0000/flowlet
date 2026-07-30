@@ -5,6 +5,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useMobileDailyUsage, useMobileDevices, useMobileDeviceSyncActions, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { MobileDevicePicker } from "../MobileDevicePicker";
+import { MobileRefreshButton } from "../MobileRefreshButton";
 import { useMobileDeviceSelection } from "../MobileDeviceSelection";
 import {
   buildMobileWeeklyHourlyHeatmap,
@@ -101,7 +102,10 @@ export function MobileOverviewPage() {
       <header className={`${styles.heading} ${styles.headingWithPicker}`}>
         <div className={styles.headingTitleRow}>
           <h2>{t("概览")}</h2>
-          <MobileDevicePicker />
+          <div className={styles.headingActions}>
+            <MobileDevicePicker />
+            <MobileRefreshButton />
+          </div>
         </div>
         <p>{t("按设备查看每周或每月 Token 热力图")}</p>
       </header>

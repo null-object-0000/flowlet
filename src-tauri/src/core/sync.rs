@@ -337,7 +337,7 @@ pub async fn query_deepseek_balance(
                 currency: None,
                 is_available: false,
                 error: Some(format!("创建 HTTP 客户端失败: {err}")),
-            }
+            };
         }
     };
 
@@ -359,7 +359,7 @@ pub async fn query_deepseek_balance(
                 currency: None,
                 is_available: false,
                 error: Some(format!("请求失败: {err}")),
-            }
+            };
         }
     };
 
@@ -372,7 +372,7 @@ pub async fn query_deepseek_balance(
                 currency: None,
                 is_available: false,
                 error: Some(format!("读取响应失败: {err}")),
-            }
+            };
         }
     };
 
@@ -456,7 +456,7 @@ pub async fn query_kimi_balance(
                 currency: None,
                 is_available: false,
                 error: Some(format!("创建 HTTP 客户端失败: {err}")),
-            }
+            };
         }
     };
 
@@ -478,7 +478,7 @@ pub async fn query_kimi_balance(
                 currency: None,
                 is_available: false,
                 error: Some(format!("请求失败: {err}")),
-            }
+            };
         }
     };
 
@@ -491,7 +491,7 @@ pub async fn query_kimi_balance(
                 currency: None,
                 is_available: false,
                 error: Some(format!("读取响应失败: {err}")),
-            }
+            };
         }
     };
 
@@ -554,7 +554,7 @@ pub async fn sync_deepseek_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("创建 HTTP 客户端失败: {err}")],
-            }
+            };
         }
     };
 
@@ -565,7 +565,7 @@ pub async fn sync_deepseek_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("不支持同步模型的渠道: {}", account.channel_id)],
-            }
+            };
         }
     };
 
@@ -586,7 +586,7 @@ pub async fn sync_deepseek_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("请求失败: {err}")],
-            }
+            };
         }
     };
 
@@ -598,7 +598,7 @@ pub async fn sync_deepseek_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("读取响应失败: {err}")],
-            }
+            };
         }
     };
 
@@ -679,7 +679,7 @@ pub async fn sync_openai_compatible_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("创建 HTTP 客户端失败: {error}")],
-            }
+            };
         }
     };
 
@@ -699,7 +699,7 @@ pub async fn sync_openai_compatible_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("GET {url} 请求失败: {error}")],
-            }
+            };
         }
     };
     let status = response.status();
@@ -710,7 +710,7 @@ pub async fn sync_openai_compatible_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("读取响应失败: {error}")],
-            }
+            };
         }
     };
     if !status.is_success() {
@@ -786,7 +786,7 @@ pub async fn sync_kimi_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("创建 HTTP 客户端失败: {err}")],
-            }
+            };
         }
     };
 
@@ -797,7 +797,7 @@ pub async fn sync_kimi_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("不支持同步模型的渠道: {}", account.channel_id)],
-            }
+            };
         }
     };
 
@@ -818,7 +818,7 @@ pub async fn sync_kimi_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("请求失败: {err}")],
-            }
+            };
         }
     };
 
@@ -830,7 +830,7 @@ pub async fn sync_kimi_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("读取响应失败: {err}")],
-            }
+            };
         }
     };
 
@@ -904,7 +904,7 @@ pub async fn sync_qwen_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("创建 HTTP 客户端失败: {err}")],
-            }
+            };
         }
     };
 
@@ -915,7 +915,7 @@ pub async fn sync_qwen_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("不支持同步模型的渠道: {}", account.channel_id)],
-            }
+            };
         }
     };
 
@@ -936,7 +936,7 @@ pub async fn sync_qwen_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("请求失败: {err}")],
-            }
+            };
         }
     };
 
@@ -948,7 +948,7 @@ pub async fn sync_qwen_models(
                 models_synced: 0,
                 models: Vec::new(),
                 errors: vec![format!("读取响应失败: {err}")],
-            }
+            };
         }
     };
 

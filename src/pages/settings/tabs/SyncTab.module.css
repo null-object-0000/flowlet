@@ -30,6 +30,29 @@
 .s3Summary .empty { grid-column: 1 / -1; min-height: 34px; display: flex; align-items: center; color: var(--flowlet-color-text-tertiary); font-size: 12px; }
 .syncFoot { min-height: 34px; padding: 8px 14px; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
 .syncDot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--semi-color-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--semi-color-success) 14%, transparent); }
+.lanBody { display: grid; }
+.lanService { padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 2fr) minmax(140px, 1fr); gap: 12px; border-bottom: 1px solid var(--flowlet-color-border); }
+.lanService > div { min-width: 0; display: grid; gap: 4px; align-content: start; }
+.lanService span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
+.lanService strong, .lanService code { overflow: hidden; font-size: var(--flowlet-font-size-body); white-space: nowrap; text-overflow: ellipsis; }
+.lanService code { color: var(--flowlet-color-text-secondary); }
+.lanPeers { display: grid; border-bottom: 1px solid var(--flowlet-color-border); }
+.lanPeer { min-height: 40px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.lanPeer + .lanPeer { border-top: 1px solid var(--flowlet-color-border); }
+.lanPeer strong { min-width: 0; overflow: hidden; font-size: var(--flowlet-font-size-body); white-space: nowrap; text-overflow: ellipsis; }
+.lanState { flex: none; font-size: var(--flowlet-font-size-caption); }
+.lanState[data-state="ok"] { color: var(--semi-color-success); }
+.lanState[data-state="fail"] { color: var(--semi-color-danger); }
+.lanState[data-state="muted"] { color: var(--flowlet-color-text-tertiary); }
+.lanHint { padding: 10px 14px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
+.lanInbound { padding: 10px 14px 12px; display: grid; gap: 8px; }
+.lanInbound > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
+.lanInbound > small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
+.lanInbound ul { margin: 0; padding: 0; display: grid; gap: 5px; list-style: none; }
+.lanInbound li { display: flex; align-items: baseline; gap: 8px; font-size: var(--flowlet-font-size-caption); }
+.lanInbound li code { color: var(--flowlet-color-text-secondary); }
+.lanInbound li em { color: var(--flowlet-color-text-tertiary); font-style: normal; }
+.lanInbound li time { margin-left: auto; color: var(--flowlet-color-text-tertiary); white-space: nowrap; }
 .form { display: grid; gap: 13px; }
 .form label { display: grid; gap: 6px; }
 .form label > span { color: var(--flowlet-color-text-secondary); font-size: 12px; font-weight: 620; }

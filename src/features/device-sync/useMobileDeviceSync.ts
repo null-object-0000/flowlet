@@ -11,6 +11,16 @@ export function useMobileDevices() {
   });
 }
 
+export function useMobileLanProbes(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.mobileDeviceSync.lanProbes(),
+    queryFn: () => mobileDeviceSyncCommands.probeLanPeers(null),
+    staleTime: 10_000,
+    retry: false,
+    enabled,
+  });
+}
+
 export function useMobileDeviceAgents(deviceId: string | null) {
   return useQuery({
     queryKey: queryKeys.mobileDeviceSync.agents(deviceId ?? "none"),

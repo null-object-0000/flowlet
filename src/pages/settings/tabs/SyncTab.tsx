@@ -15,6 +15,8 @@ import type {
 import {
   useDeviceUsageTransfer,
   useKnownDevices,
+  useLanProbes,
+  useLanServerStatus,
   useS3SyncSettings,
 } from "../../../features/device-sync/useDeviceSync";
 import { errorMessage } from "../../../shared/errors/AppError";
@@ -41,6 +43,8 @@ export function SyncTab() {
   const devices = useKnownDevices();
   const settings = useS3SyncSettings();
   const transfer = useDeviceUsageTransfer();
+  const lanStatus = useLanServerStatus();
+  const lanProbes = useLanProbes();
   const [importPath, setImportPath] = useState<string | null>(null);
   const [preview, setPreview] = useState<DeviceUsageImportPreview | null>(null);
   const [renameValue, setRenameValue] = useState<string | null>(null);
@@ -280,6 +284,64 @@ export function SyncTab() {
             <span>{settings.data.status.message}</span>
           </div>
         ) : null}
+      </section>
+
+      <section className={styles.card} data-keywords="局域网 LAN 直连 内网 同步">
+        <header className={styles.sectionHeader}>
+          <div>
+            <div className={styles.deviceTitle}>
+              <strong>{t("局域网直连")}</strong>
+              {lanStatus.data?.status.running
+                ? <Tag color="green" size="small">{t("运行中")}</Tag>
+                : <Tag size="small">{t("未开启")}</Tag>}
+            </div>
+            <span>{t("同一局域网内的设备直接同步与操作，不经过云端")}</span>
+          </div>
+          <div className={styles.actions}>
+            <Button
+              theme="outline"
+              loading={lanProbes.isFetching}
+              onClick={() => void lanProbes.refetch()}
+            >
+              {t(lanProbes.isFetching ? "正在探测…" : "重新探测")}
+            </Button>
+          </div>
+        </header>
+        <div className={styles.lanBody}>
+          <div className={styles.lanService}>
+            <div>
+              <span>{t("直连服务")}</span>
+              {lanStatus.data?.status.running ? (
+                <code>{lanStatus.data.status.endpoints.join(", ")}</code>
+              ) : (
+                <strong>{lanStatus.data?.status.error ?? t("未开启")}</strong>
+              )}
+            </div>
+            {lanStatus.data?.status.running && lanStatus.data.status.startedAt ? (
+              <div>
+                <span>{t("启动时间")}</span>
+                <strong>{formatFullTimestamp(lanStatus.data.status.startedAt, language)}</strong>
+              </div>
+            ) : null}
+          </div>
+          <LanPeerList devices={devices.data ?? []} probes={lanProbes.data} loading={lanProbes.isLoading} t={t} />
+          <div className={styles.lanInbound}>
+            <span>{t("最近入站连接")}</span>
+            {(lanStatus.data?.inbound.length ?? 0) === 0 ? (
+              <small>{t("暂无入站连接")}</small>
+            ) : (
+              <ul>
+                {lanStatus.data!.inbound.slice(0, 8).map((event, index) => (
+                  <li key={`${event.at}-${index}`}>
+                    <code>{event.remoteAddr}</code>
+                    <em>{lanPathLabel(event.path, t)}</em>
+                    <time>{formatFullTimestamp(event.at, language)}</time>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       </section>
 
       <section className={styles.card} data-keywords="设备 ID 导入 导出 多设备 用量">
@@ -674,4 +736,72 @@ function SyncStatusTag({ status }: { status: string }) {
   if (status === "failed") return <Tag color="red" size="small">{t("失败")}</Tag>;
   if (status === "running") return <Tag color="blue" size="small">{t("同步中")}</Tag>;
   return <Tag size="small">{t("未同步")}</Tag>;
+}
+
+function LanPeerList({
+  devices,
+  probes,
+  loading,
+  t,
+}: {
+  devices: Array<{ deviceId: string; displayName: string; isCurrent: boolean }>;
+  probes: Array<{
+    deviceId: string;
+    lanPublished: boolean;
+    reachable: boolean;
+    latencyMs: number | null;
+    errorKind: string | null;
+    error: string | null;
+  }> | undefined;
+  loading: boolean;
+  t: Translate;
+}) {
+  if (loading) {
+    return <div className={styles.lanPeers}><span className={styles.lanHint}>{t("正在探测…")}</span></div>;
+  }
+  const rows = (probes ?? []).map((probe) => {
+    const device = devices.find((item) => item.deviceId === probe.deviceId);
+    return { probe, name: device?.displayName ?? probe.deviceId.slice(0, 8) };
+  });
+  if (rows.length === 0) {
+    return (
+      <div className={styles.lanPeers}>
+        <span className={styles.lanHint}>{t("尚未发现局域网设备。设备会通过云端同步自动发布直连信息。")}</span>
+      </div>
+    );
+  }
+  return (
+    <div className={styles.lanPeers}>
+      {rows.map(({ probe, name }) => (
+        <div className={styles.lanPeer} key={probe.deviceId}>
+          <strong>{name}</strong>
+          {!probe.lanPublished ? (
+            <span className={styles.lanState} data-state="muted">{t("未发布直连信息")}</span>
+          ) : probe.reachable ? (
+            <span className={styles.lanState} data-state="ok">
+              {probe.latencyMs != null
+                ? t("可直连 · {ms}ms", { ms: probe.latencyMs })
+                : t("可直连")}
+            </span>
+          ) : (
+            <span className={styles.lanState} data-state="fail" title={probe.error ?? undefined}>
+              {probe.errorKind === "unauthorized"
+                ? t("局域网认证失败，等待下一次同步刷新连接信息")
+                : probe.errorKind === "outdated"
+                  ? t("对端版本过旧，无法探测")
+                  : t("不可直连")}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function lanPathLabel(path: string, t: Translate) {
+  if (path === "/flowlet/v1/ping") return t("探测");
+  if (path === "/flowlet/v1/snapshot") return t("读取快照");
+  if (path.includes("/reply")) return t("回复权限");
+  if (path.includes("/permissions/")) return t("查询权限");
+  return path;
 }

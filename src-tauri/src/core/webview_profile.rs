@@ -93,7 +93,7 @@ fn flowlet_webview_profiles(app_local_data_dir: &Path) -> Result<Vec<PathBuf>, S
             return Err(format!(
                 "读取 WebView 数据目录 {} 失败: {error}",
                 app_local_data_dir.display()
-            ))
+            ));
         }
     };
 

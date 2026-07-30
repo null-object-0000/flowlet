@@ -3,7 +3,7 @@ use super::{Storage, StorageError};
 use crate::core::agent_session_timeline::{
     AgentSessionSummaryCheckpoint, AgentSessionSummaryParseResult,
 };
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 #[cfg(desktop)]
 use sha2::Digest;
@@ -2004,10 +2004,12 @@ mod tests {
         let cleaned = storage.cleanup_background_jobs(90).unwrap();
         assert_eq!(cleaned.deleted_jobs, 1);
         assert_eq!(cleaned.deleted_events, 2);
-        assert!(storage
-            .get_background_job_detail("finished")
-            .unwrap()
-            .is_none());
+        assert!(
+            storage
+                .get_background_job_detail("finished")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -2070,10 +2072,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(detail.job.status, "succeeded_with_warnings");
-        assert!(detail
-            .events
-            .iter()
-            .any(|event| event.stage.as_deref() == Some("账号刷新失败")));
+        assert!(
+            detail
+                .events
+                .iter()
+                .any(|event| event.stage.as_deref() == Some("账号刷新失败"))
+        );
     }
 
     #[test]
@@ -2293,9 +2297,11 @@ mod tests {
         assert_eq!(mid.input_cache_write_price, None);
 
         // 无 cost 的模型跳过；未映射的 provider 整体跳过。
-        assert!(!prices
-            .iter()
-            .any(|p| p.upstream_model == "gpt-free-no-cost"));
+        assert!(
+            !prices
+                .iter()
+                .any(|p| p.upstream_model == "gpt-free-no-cost")
+        );
         assert!(!prices.iter().any(|p| p.upstream_model == "claude-x"));
     }
 
@@ -2395,9 +2401,11 @@ mod tests {
         assert!((plus.output_price - 6.4).abs() < 1e-9);
 
         // qwen3.8-max-preview：暂无公开单价，不生成价格条目。
-        assert!(!prices
-            .iter()
-            .any(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.8-max-preview"));
+        assert!(
+            !prices
+                .iter()
+                .any(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.8-max-preview")
+        );
     }
 
     #[test]

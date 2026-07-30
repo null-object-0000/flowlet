@@ -164,6 +164,20 @@ vi.mock("../../features/device-sync/useDeviceSync", () => ({
     testS3Connection: { isPending: false, mutateAsync: vi.fn() },
     syncS3: { isPending: false, mutateAsync: vi.fn() },
   }),
+  useLanServerStatus: () => ({
+    data: { status: { running: false, endpoints: [], startedAt: null, error: null }, inbound: [] },
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    refetch: vi.fn(),
+  }),
+  useLanProbes: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    refetch: vi.fn(),
+  }),
 }));
 
 import { SettingsPage } from "./SettingsPage";

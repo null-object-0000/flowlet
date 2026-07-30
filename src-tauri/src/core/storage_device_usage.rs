@@ -1,10 +1,10 @@
 use super::{Storage, StorageError};
 use crate::core::device_identity::{
-    resolve_device_display_name, DailyUsageTotal, DeviceUsageImportPreview,
-    DeviceUsageImportResult, HourlyUsageTotal, KnownDevice, SharedAgentSession, SyncedAgentProfile,
-    SyncedAgentSession,
+    DailyUsageTotal, DeviceUsageImportPreview, DeviceUsageImportResult, HourlyUsageTotal,
+    KnownDevice, SharedAgentSession, SyncedAgentProfile, SyncedAgentSession,
+    resolve_device_display_name,
 };
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 impl Storage {
     /// 为本地导出和未来设备同步生成按设备本地自然日聚合的最小用量数据。

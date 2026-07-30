@@ -1,5 +1,5 @@
 import { Button, SideSheet, Tabs, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
+import { IconAlertTriangle, IconCopy, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { AgentSessionInteractionEvent, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionNativeUsage, AgentSessionRow, OpenCodePermissionRequest } from "../../domains/agent-session/types";
@@ -28,6 +28,10 @@ export function AgentSessionDetailSideSheet({
   const children = useAgentSessionChildren(session);
   const nativeSummary = useAgentSessionNativeSummary(session);
   const lastInteraction = useAgentSessionLastInteraction(session, activeTab === "last-interaction");
+  const openCodePermissions = useOpenCodeSessionPermissions(session, activeTab === "last-interaction");
+  const pendingApprovalCount = session.agentType === "opencode" && openCodePermissions.data?.available
+    ? openCodePermissions.data.permissions.length
+    : 0;
   const nativeUsage = session.nativeSummary ?? nativeSummary.data;
   const refreshActiveTab = async () => {
     setRefreshing(true);
@@ -134,13 +138,16 @@ export function AgentSessionDetailSideSheet({
         </Tabs.TabPane>
         <Tabs.TabPane tab={t("最近一轮")} itemKey="last-interaction">
           <div className={styles.body}>
-            <OpenCodeApprovalSection session={session} enabled={activeTab === "last-interaction"} />
             <LastInteractionSection
               data={lastInteraction.data}
               loading={lastInteraction.isLoading}
               error={lastInteraction.isError ? lastInteraction.error.message : null}
               language={language}
               onRetry={() => void lastInteraction.refetch()}
+              turnBlocked={pendingApprovalCount > 0}
+              approvalSection={session.agentType === "opencode" ? (
+                <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
+              ) : null}
             />
           </div>
         </Tabs.TabPane>
@@ -155,12 +162,16 @@ function LastInteractionSection({
   error,
   language,
   onRetry,
+  turnBlocked = false,
+  approvalSection = null,
 }: {
   data: AgentSessionLastInteraction | null | undefined;
   loading: boolean;
   error: string | null;
   language: "zh-CN" | "en-US";
   onRetry: () => void;
+  turnBlocked?: boolean;
+  approvalSection?: ReactNode;
 }) {
   const { t } = useAppPreferences();
   const turnEvent = data?.events.find((event) => event.kind === "turn") ?? null;
@@ -180,7 +191,10 @@ function LastInteractionSection({
         </div>
       ) : null}
       {!loading && !error && events.length === 0 ? (
-        <div className={styles.emptyState}>{t("未找到可读取的最近一轮")}</div>
+        <>
+          <div className={styles.emptyState}>{t("未找到可读取的最近一轮")}</div>
+          {approvalSection}
+        </>
       ) : null}
       {!loading && !error && events.length > 0 ? (
         <div className={styles.interactionFlow} aria-label={t("最近一轮")}>
@@ -198,7 +212,8 @@ function LastInteractionSection({
               ))}
             </div>
           ) : null}
-          {turnEvent?.status === "running" ? (
+          {approvalSection}
+          {turnEvent?.status === "running" && !turnBlocked ? (
             <div className={styles.interactionProgress} role="status"><i />{t("正在处理")}</div>
           ) : null}
           {turnEvent?.status === "cancelled" && !hasAssistantMessage ? (
@@ -248,20 +263,19 @@ function matchesInteractionKind(
   return candidates.includes(kind);
 }
 
-function OpenCodeApprovalSection({ session, enabled }: { session: AgentSessionRow; enabled: boolean }) {
+function OpenCodeApprovalSection({ session, permissions }: { session: AgentSessionRow; permissions: ReturnType<typeof useOpenCodeSessionPermissions> }) {
   const { t } = useAppPreferences();
-  const permissions = useOpenCodeSessionPermissions(session, enabled);
   const reply = useReplyOpenCodePermission(session);
   if (session.agentType !== "opencode") return null;
   if (permissions.isLoading) {
-    return <div className={styles.approvalLoading}>{t("正在检查 OpenCode 待确认操作")}</div>;
+    return <div className={styles.approvalNotice}>{t("正在检查 OpenCode 待确认操作")}</div>;
   }
   if (permissions.isError) {
-    return <div className={styles.approvalUnavailable}>{t("OpenCode 待确认操作读取失败：{message}", { message: permissions.error.message })}</div>;
+    return <div className={styles.approvalNotice}>{t("OpenCode 待确认操作读取失败：{message}", { message: permissions.error.message })}</div>;
   }
   if (!permissions.data?.available) {
     return (
-      <div className={styles.approvalUnavailable}>
+      <div className={styles.approvalNotice}>
         <strong>{t("OpenCode 控制服务未连接")}</strong>
         <span>{t("请重新应用 OpenCode 全局接入配置并重启 OpenCode；之后可在这里同意或否决待确认操作。")}</span>
       </div>
@@ -284,18 +298,16 @@ function OpenCodeApprovalSection({ session, enabled }: { session: AgentSessionRo
         const submitting = reply.isPending && reply.variables?.permissionId === request.id;
         return (
           <article className={styles.approvalCard} key={request.id}>
-            <div className={styles.approvalHeading}>
-              <div>
-                <span>{t("OpenCode 等待确认")}</span>
-                <strong>{request.permission}</strong>
+            <div className={styles.approvalHeader}>
+              <IconAlertTriangle className={styles.approvalIcon} />
+              <strong>{t("OpenCode 等待确认")}</strong>
+              <code>{request.permission}</code>
+              <div className={styles.approvalActions}>
+                <Button size="small" type="danger" theme="borderless" loading={submitting && reply.variables?.decision === "reject"} disabled={reply.isPending && !submitting} onClick={() => void decide(request, "reject")}>{t("否决")}</Button>
+                <Button size="small" type="primary" theme="solid" loading={submitting && reply.variables?.decision === "allow_once"} disabled={reply.isPending && !submitting} onClick={() => void decide(request, "allow_once")}>{t("同意本次")}</Button>
               </div>
-              <Tag color="amber" size="small">{t("待用户操作")}</Tag>
             </div>
             {request.patterns.length > 0 ? <pre>{request.patterns.join("\n")}</pre> : null}
-            <div className={styles.approvalActions}>
-              <Button size="small" type="danger" theme="borderless" loading={submitting && reply.variables?.decision === "reject"} disabled={reply.isPending && !submitting} onClick={() => void decide(request, "reject")}>{t("否决")}</Button>
-              <Button size="small" type="primary" theme="solid" loading={submitting && reply.variables?.decision === "allow_once"} disabled={reply.isPending && !submitting} onClick={() => void decide(request, "allow_once")}>{t("同意本次")}</Button>
-            </div>
           </article>
         );
       })}

@@ -1,3 +1,4 @@
+use crate::AppState;
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelPreset, RouteCandidate,
     RouteRule,
@@ -7,7 +8,6 @@ use crate::core::sync::{
     query_deepseek_balance, query_kimi_balance, sync_deepseek_models, sync_kimi_models,
     sync_longcat_models, sync_openai_compatible_models, sync_qwen_models,
 };
-use crate::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
 
@@ -1727,9 +1727,13 @@ pub(crate) async fn probe_scrape_login(
                 "控制台登录状态已失效，本轮自动同步已跳过。请手动刷新并重新登录。".to_string()
             }),
             ScrapeProbeState::ConsoleActionRequired => Some(if interactive {
-                format!("未捕获到完整套餐接口响应{missing_hint}，已打开控制台窗口。请在窗口中完成登录或等待页面加载后，再重新抓取。")
+                format!(
+                    "未捕获到完整套餐接口响应{missing_hint}，已打开控制台窗口。请在窗口中完成登录或等待页面加载后，再重新抓取。"
+                )
             } else {
-                format!("未捕获到完整套餐接口响应{missing_hint}，本轮自动同步已跳过。请手动刷新检查控制台。")
+                format!(
+                    "未捕获到完整套餐接口响应{missing_hint}，本轮自动同步已跳过。请手动刷新检查控制台。"
+                )
             }),
             ScrapeProbeState::CaptureTimeout => {
                 Some("控制台页面监听初始化失败，请重新抓取。".to_string())
@@ -1887,7 +1891,7 @@ pub(crate) async fn scrape_balance(
                 }
             });
         } // guard 在这里 drop
-          // 等待回调,超时 10s
+        // 等待回调,超时 10s
         match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
             Ok(Ok(s)) => s,
             Ok(Err(_)) => return Err("extractor 回调通道关闭".to_string()),

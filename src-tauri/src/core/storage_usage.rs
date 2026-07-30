@@ -11,7 +11,7 @@ use crate::core::config::{
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_response_usage, extract_stream_usage};
 use base64::Engine;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
 
 type AgentSessionKey = (String, String);
@@ -90,13 +90,8 @@ fn matches_agent_session_type(row: &AgentSessionRow, agent_type: &str) -> bool {
     agent_type.is_empty() || row.agent_type == agent_type
 }
 
-fn matches_agent_session_flowlet_status(row: &AgentSessionRow, flowlet_status: &str) -> bool {
-    match flowlet_status {
-        "" => true,
-        "observed" => row.flowlet_observed,
-        "native" => !row.flowlet_observed,
-        _ => false,
-    }
+fn matches_agent_session_runtime_status(row: &AgentSessionRow, runtime_status: &str) -> bool {
+    runtime_status.is_empty() || row.runtime_status == runtime_status
 }
 
 fn build_agent_native_usage_summary(
@@ -747,23 +742,35 @@ impl Storage {
     pub fn list_agent_sessions(
         &self,
         filter: AgentSessionsFilter,
+        opencode_pending_sessions: &std::collections::HashSet<String>,
     ) -> Result<AgentSessionsPageResult, StorageError> {
         let page = filter.page.max(1);
         let page_size = filter.page_size.clamp(1, 8);
         let offset = ((page - 1) * page_size) as usize;
         let search = filter.search.trim().to_lowercase();
         let agent_type = filter.agent_type.trim();
-        let flowlet_status = filter.flowlet_status.trim();
+        let runtime_status = filter.runtime_status.trim();
         let mut catalog = crate::core::agent_session_metadata::merge_agent_session_catalog(
             self.list_observed_agent_sessions()?,
             self.list_native_agent_sessions(),
         );
+        for row in &mut catalog {
+            // OpenCode 的 pending permission 是进程内实时状态，优先级高于
+            // SQLite 中“末条 assistant 尚未完成”的运行态推断；必须在过滤和分页前
+            // 合并，否则运行状态筛选、总数和分页都会与实时状态不一致。
+            row.runtime_status = crate::core::opencode_control::merge_runtime_status(
+                &row.agent_type,
+                &row.session_id,
+                &row.runtime_status,
+                opencode_pending_sessions,
+            );
+        }
         let matching_roots = matching_root_session_keys(&catalog, &search);
         catalog.retain(|row| {
             row.parent_session_id.is_none()
                 && matching_roots.contains(&agent_session_key(row))
                 && matches_agent_session_type(row, agent_type)
-                && matches_agent_session_flowlet_status(row, flowlet_status)
+                && matches_agent_session_runtime_status(row, runtime_status)
         });
         catalog.sort_by(|left, right| {
             crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
@@ -2546,7 +2553,9 @@ impl Storage {
                 _ => {
                     refs.push(&filter.model);
                     refs.push(&filter.model);
-                    Some("(COALESCE(rl.public_model, rl.virtual_model) = ? OR rl.upstream_model = ?)")
+                    Some(
+                        "(COALESCE(rl.public_model, rl.virtual_model) = ? OR rl.upstream_model = ?)",
+                    )
                 }
             }
         };
@@ -2575,7 +2584,9 @@ impl Storage {
             for value in &raw_params[base..base + 6] {
                 refs.push(value);
             }
-            Some("(rl.path LIKE ? OR rl.request_id = ? OR rl.error_message LIKE ? OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ? OR COALESCE(ca.name, rl.account_name, rl.account_id, '') LIKE ? OR COALESCE(rl.agent_session_id, '') LIKE ?)")
+            Some(
+                "(rl.path LIKE ? OR rl.request_id = ? OR rl.error_message LIKE ? OR COALESCE(rl.public_model, rl.virtual_model, '') LIKE ? OR COALESCE(ca.name, rl.account_name, rl.account_id, '') LIKE ? OR COALESCE(rl.agent_session_id, '') LIKE ?)",
+            )
         };
 
         let mut clauses: Vec<&str> = vec!["rl.is_last_attempt = 1"];
@@ -2813,22 +2824,37 @@ mod agent_session_filter_tests {
     }
 
     #[test]
-    fn filters_native_sessions_by_agent_type_independently_from_flowlet_status() {
+    fn filters_sessions_by_agent_type() {
         let codex = session("codex-desktop", false);
         assert!(matches_agent_session_type(&codex, "codex-desktop"));
-        assert!(matches_agent_session_flowlet_status(&codex, "native"));
-        assert!(!matches_agent_session_flowlet_status(&codex, "observed"));
         assert!(!matches_agent_session_type(&codex, "opencode"));
     }
 
     #[test]
-    fn supports_all_observed_and_native_flowlet_filters() {
-        let observed = session("opencode", true);
-        let native = session("opencode", false);
-        assert!(matches_agent_session_flowlet_status(&observed, ""));
-        assert!(matches_agent_session_flowlet_status(&native, ""));
-        assert!(matches_agent_session_flowlet_status(&observed, "observed"));
-        assert!(matches_agent_session_flowlet_status(&native, "native"));
+    fn filters_sessions_by_runtime_status() {
+        let mut idle = session("codex-desktop", false);
+        idle.runtime_status = "idle".to_string();
+        let mut running = session("opencode", true);
+        running.runtime_status = "running".to_string();
+        let mut waiting = session("opencode", false);
+        waiting.runtime_status = "waiting_user".to_string();
+
+        assert!(matches_agent_session_runtime_status(&idle, "idle"));
+        assert!(matches_agent_session_runtime_status(&running, "running"));
+        assert!(matches_agent_session_runtime_status(
+            &waiting,
+            "waiting_user"
+        ));
+        assert!(!matches_agent_session_runtime_status(&idle, "running"));
+        assert!(!matches_agent_session_runtime_status(&running, "idle"));
+    }
+
+    #[test]
+    fn empty_runtime_status_matches_any_session() {
+        let idle = session("codex-desktop", false);
+        let running = session("opencode", true);
+        assert!(matches_agent_session_runtime_status(&idle, ""));
+        assert!(matches_agent_session_runtime_status(&running, ""));
     }
 
     #[test]
@@ -3026,28 +3052,32 @@ mod estimate_cost_tests {
     #[test]
     fn returns_none_without_matching_price() {
         let prices = vec![flat_price()];
-        assert!(estimate_cost(
-            &prices,
-            Some("qwen"),
-            Some("qwen3.8-max-preview"),
-            Some(10),
-            None,
-            Some(10),
-            None,
-            Some(0)
-        )
-        .is_none());
-        assert!(estimate_cost(
-            &prices,
-            None,
-            Some("qwen3.6-flash"),
-            Some(10),
-            None,
-            Some(10),
-            None,
-            Some(0)
-        )
-        .is_none());
+        assert!(
+            estimate_cost(
+                &prices,
+                Some("qwen"),
+                Some("qwen3.8-max-preview"),
+                Some(10),
+                None,
+                Some(10),
+                None,
+                Some(0)
+            )
+            .is_none()
+        );
+        assert!(
+            estimate_cost(
+                &prices,
+                None,
+                Some("qwen3.6-flash"),
+                Some(10),
+                None,
+                Some(10),
+                None,
+                Some(0)
+            )
+            .is_none()
+        );
     }
 
     #[test]

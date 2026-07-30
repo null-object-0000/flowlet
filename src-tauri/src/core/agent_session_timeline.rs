@@ -5,7 +5,7 @@ use super::config::{
     AgentSessionCostEstimate, AgentSessionNativeUsage, AgentSessionTimeline,
     AgentSessionTimelineEvent, ModelPrice,
 };
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, params};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -1820,8 +1820,7 @@ mod tests {
 
     #[test]
     fn codex_last_interaction_keeps_its_turn_status() {
-        let root =
-            std::env::temp_dir().join(format!("flowlet-codex-last-turn-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("flowlet-codex-last-turn-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         let path = root.join("session.jsonl");
         fs::write(

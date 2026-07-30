@@ -318,9 +318,9 @@ fn control_client() -> Result<Client, String> {
 mod tests {
     use super::*;
     use axum::{
+        Json, Router,
         extract::Path,
         routing::{get, post},
-        Json, Router,
     };
     use serde_json::json;
     use std::sync::{Arc, Mutex};

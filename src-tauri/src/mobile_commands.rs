@@ -148,3 +148,11 @@ pub(super) async fn refresh_shared_device_usage_lan(
 ) -> Result<crate::core::lan_sync::LanRefreshResult, String> {
     crate::core::lan_sync::refresh_known_peers(state.storage.clone(), device_id.as_deref()).await
 }
+
+#[tauri::command]
+pub(super) async fn probe_lan_peers(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: Option<String>,
+) -> Result<Vec<crate::core::lan_sync::LanPeerProbe>, String> {
+    Ok(crate::core::lan_sync::probe_lan_peers(&state.storage, device_id.as_deref()).await)
+}

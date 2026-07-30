@@ -1,25 +1,31 @@
 import { IconChevronDown, IconChevronUp, IconDesktop } from "@douyinfe/semi-icons";
 import { useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { SyncedAgentProfile } from "../../domains/device-sync/types";
-import { useMobileDeviceAgents, useMobileDevices } from "../../features/device-sync/useMobileDeviceSync";
+import type { LanPeerProbe, SyncedAgentProfile } from "../../domains/device-sync/types";
+import { useMobileDeviceAgents, useMobileDevices, useMobileLanProbes } from "../../features/device-sync/useMobileDeviceSync";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
+import { MobileRefreshButton } from "../MobileRefreshButton";
 import styles from "./MobilePage.module.css";
 
 export function MobileDevicesPage() {
   const { language, t } = useAppPreferences();
   const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null);
   const devices = useMobileDevices();
+  const lanProbes = useMobileLanProbes();
+  const probeByDevice = new Map((lanProbes.data ?? []).map((probe) => [probe.deviceId, probe]));
 
   return (
     <section className={styles.page}>
-      <header className={styles.heading}>
-        <div>
+      <header className={`${styles.heading} ${styles.headingWithPicker}`}>
+        <div className={styles.headingTitleRow}>
           <h2>{t("设备")}</h2>
-          <p>{t("查看同步设备、已安装 Agent 及其 Flowlet 接入状态")}</p>
+          <div className={styles.headingActions}>
+            <MobileRefreshButton />
+          </div>
         </div>
+        <p>{t("查看同步设备、已安装 Agent 及其 Flowlet 接入状态")}</p>
       </header>
 
       {devices.isLoading ? (
@@ -41,6 +47,7 @@ export function MobileDevicesPage() {
       <div className={styles.deviceList}>
         {(devices.data ?? []).map((device) => {
           const expanded = expandedDeviceId === device.deviceId;
+          const probe = probeByDevice.get(device.deviceId);
           return (
             <article className={styles.deviceCard} key={device.deviceId}>
               <button
@@ -55,6 +62,7 @@ export function MobileDevicesPage() {
                   <strong>{device.displayName}</strong>
                   <small>{platformLabel(device.platform)} · Flowlet {device.appVersion}</small>
                 </span>
+                <LanStateBadge probe={probe} loading={lanProbes.isLoading} t={t} />
                 <span className={styles.deviceChevron} aria-hidden="true">
                   {expanded ? <IconChevronUp /> : <IconChevronDown />}
                 </span>
@@ -70,6 +78,27 @@ export function MobileDevicesPage() {
         })}
       </div>
     </section>
+  );
+}
+
+function LanStateBadge({ probe, loading, t }: { probe: LanPeerProbe | undefined; loading: boolean; t: Translate }) {
+  if (loading && !probe) {
+    return <span className={styles.lanState} data-state="muted"><i />{t("探测中…")}</span>;
+  }
+  if (!probe || !probe.lanPublished) {
+    return <span className={styles.lanState} data-state="muted"><i />{t("仅云端")}</span>;
+  }
+  if (probe.reachable) {
+    return (
+      <span className={styles.lanState} data-state="ok">
+        <i />{probe.latencyMs != null ? t("直连 {ms}ms", { ms: probe.latencyMs }) : t("可直连")}
+      </span>
+    );
+  }
+  return (
+    <span className={styles.lanState} data-state="fail" title={probe.error ?? undefined}>
+      <i />{t("不可直连")}
+    </span>
   );
 }
 

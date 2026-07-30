@@ -87,6 +87,8 @@ export const queryKeys = {
     dailyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "daily-usage", deviceId ?? "all"] as const,
     hourlyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "hourly-usage", deviceId ?? "all"] as const,
     s3Settings: () => [...queryKeys.deviceSync.all, "s3-settings"] as const,
+    lanServerStatus: () => [...queryKeys.deviceSync.all, "lan-server-status"] as const,
+    lanProbes: () => [...queryKeys.deviceSync.all, "lan-probes"] as const,
   },
   mobileDeviceSync: {
     all: ["mobile-device-sync"] as const,
@@ -97,6 +99,7 @@ export const queryKeys = {
     sessions: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "sessions", deviceId ?? "all"] as const,
     permissions: (deviceId: string, sessionId: string) => [...queryKeys.mobileDeviceSync.all, "permissions", deviceId, sessionId] as const,
     s3Settings: () => [...queryKeys.mobileDeviceSync.all, "s3-settings"] as const,
+    lanProbes: () => [...queryKeys.mobileDeviceSync.all, "lan-probes"] as const,
   },
   settings: {
     all: ["settings"] as const,

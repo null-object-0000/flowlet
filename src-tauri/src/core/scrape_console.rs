@@ -183,8 +183,8 @@ fn attach_webview2_response_capture(
 ) -> Result<(), String> {
     use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2_2};
     use webview2_com::{
-        take_pwstr, WebResourceResponseReceivedEventHandler,
-        WebResourceResponseViewGetContentCompletedHandler,
+        WebResourceResponseReceivedEventHandler, WebResourceResponseViewGetContentCompletedHandler,
+        take_pwstr,
     };
     use windows::core::{Interface, PWSTR};
 
@@ -622,15 +622,21 @@ mod tests {
     #[test]
     fn test_classify_response_url() {
         assert_eq!(
-            classify_response_url("https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fsubscription"),
+            classify_response_url(
+                "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fsubscription"
+            ),
             "subscription"
         );
         assert_eq!(
-            classify_response_url("https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fquota-config"),
+            classify_response_url(
+                "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fquota-config"
+            ),
             "quota_config"
         );
         assert_eq!(
-            classify_response_url("https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fusage"),
+            classify_response_url(
+                "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fusage"
+            ),
             "usage"
         );
         assert_eq!(

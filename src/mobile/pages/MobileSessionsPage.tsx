@@ -10,6 +10,7 @@ import {
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { MobileDevicePicker } from "../MobileDevicePicker";
+import { MobileRefreshButton } from "../MobileRefreshButton";
 import { useMobileDeviceSelection } from "../MobileDeviceSelection";
 import styles from "./MobilePage.module.css";
 
@@ -37,7 +38,10 @@ export function MobileSessionsPage() {
       <header className={`${styles.heading} ${styles.headingWithPicker}`}>
         <div className={styles.headingTitleRow}>
           <h2>{t("会话")}</h2>
-          <MobileDevicePicker />
+          <div className={styles.headingActions}>
+            <MobileDevicePicker />
+            <MobileRefreshButton />
+          </div>
         </div>
         <p>{t("查看各设备同步的最近会话与实时运行状态")}</p>
       </header>

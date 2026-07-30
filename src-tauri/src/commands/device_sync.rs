@@ -1,8 +1,8 @@
+use crate::AppState;
 use crate::core::device_identity::{
     DailyUsageTotal, DeviceUsageBundle, DeviceUsageImportPreview, DeviceUsageImportResult,
     DeviceUsageSnapshot, HourlyUsageTotal, KnownDevice,
 };
-use crate::AppState;
 
 #[tauri::command]
 pub(crate) async fn device_usage_snapshot(
@@ -328,6 +328,24 @@ pub(crate) async fn refresh_shared_device_usage_lan(
     device_id: Option<String>,
 ) -> Result<crate::core::lan_sync::LanRefreshResult, String> {
     crate::core::lan_sync::refresh_known_peers(state.storage.clone(), device_id.as_deref()).await
+}
+
+#[tauri::command]
+pub(crate) async fn lan_server_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::lan_sync::LanServerReport, String> {
+    Ok(crate::core::lan_sync::read_server_report(
+        &state.lan_status,
+        &state.lan_inbound,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn probe_lan_peers(
+    state: tauri::State<'_, AppState>,
+    device_id: Option<String>,
+) -> Result<Vec<crate::core::lan_sync::LanPeerProbe>, String> {
+    Ok(crate::core::lan_sync::probe_lan_peers(&state.storage, device_id.as_deref()).await)
 }
 
 fn read_device_usage_bundle(path: &str) -> Result<DeviceUsageBundle, String> {

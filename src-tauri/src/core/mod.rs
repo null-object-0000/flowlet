@@ -31,5 +31,5 @@ pub use metrics::Metrics;
 pub use proxy::ProxyController;
 pub use rate_limiter::RateLimiter;
 pub use storage::Storage;
-pub use web::create_web_router;
 pub use web::WebState;
+pub use web::create_web_router;

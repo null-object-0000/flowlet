@@ -1,6 +1,6 @@
 use crate::core::config::{
-    ChannelAccount, ChannelPreset, ProtocolType, RequestLogInput, RouteCandidate, RouteRule,
-    ACCOUNT_CREDENTIAL_HEALTHY,
+    ACCOUNT_CREDENTIAL_HEALTHY, ChannelAccount, ChannelPreset, ProtocolType, RequestLogInput,
+    RouteCandidate, RouteRule,
 };
 pub(super) fn match_candidates(
     routes: &[RouteCandidate],

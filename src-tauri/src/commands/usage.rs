@@ -1,5 +1,5 @@
-use crate::core::config::{AgentNativeUsageSummaryRow, UsageSummaryRow, UsageTodaySummary};
 use crate::AppState;
+use crate::core::config::{AgentNativeUsageSummaryRow, UsageSummaryRow, UsageTodaySummary};
 
 #[tauri::command]
 pub(crate) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {

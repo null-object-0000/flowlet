@@ -1,7 +1,7 @@
 //! Prometheus-compatible metrics collection
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone)]
 pub struct Metrics {

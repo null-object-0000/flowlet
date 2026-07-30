@@ -6,6 +6,8 @@ import type {
   DeviceUsageSnapshot,
   HourlyUsageTotal,
   KnownDevice,
+  LanPeerProbe,
+  LanServerReport,
   S3ConnectionTestResult,
   S3DevicePullResult,
   S3DeviceSyncResult,
@@ -58,6 +60,12 @@ export const deviceSyncCommands = {
   importBundle: (path: string): Promise<DeviceUsageImportResult> =>
     invokeCommand<DeviceUsageImportResult>("import_device_usage_bundle", { path })
       .catch(toDeviceSyncError("device_usage_import_failed")),
+  lanServerStatus: (): Promise<LanServerReport> =>
+    invokeCommand<LanServerReport>("lan_server_status")
+      .catch(toDeviceSyncError("lan_server_status_failed")),
+  probeLanPeers: (deviceId: string | null): Promise<LanPeerProbe[]> =>
+    invokeCommand<LanPeerProbe[]>("probe_lan_peers", { deviceId })
+      .catch(toDeviceSyncError("lan_peer_probe_failed")),
 };
 
 export const mobileDeviceSyncCommands = {
@@ -79,6 +87,9 @@ export const mobileDeviceSyncCommands = {
   refreshLan: (deviceId: string | null): Promise<{ attemptedDevices: number; refreshedDevices: number; failedDevices: number }> =>
     invokeCommand<{ attemptedDevices: number; refreshedDevices: number; failedDevices: number }>("refresh_shared_device_usage_lan", { deviceId })
       .catch(toDeviceSyncError("lan_device_refresh_failed")),
+  probeLanPeers: (deviceId: string | null): Promise<LanPeerProbe[]> =>
+    invokeCommand<LanPeerProbe[]>("probe_lan_peers", { deviceId })
+      .catch(toDeviceSyncError("lan_peer_probe_failed")),
   s3Settings: deviceSyncCommands.s3Settings,
   saveS3Config: deviceSyncCommands.saveS3Config,
   testS3Connection: (config: S3SyncConfigInput): Promise<S3ConnectionTestResult> =>

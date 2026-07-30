@@ -44,6 +44,27 @@ export function useS3SyncSettings() {
   });
 }
 
+export function useLanServerStatus() {
+  return useQuery({
+    queryKey: queryKeys.deviceSync.lanServerStatus(),
+    queryFn: deviceSyncCommands.lanServerStatus,
+    networkMode: "always",
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+
+export function useLanProbes(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.deviceSync.lanProbes(),
+    queryFn: () => deviceSyncCommands.probeLanPeers(null),
+    networkMode: "always",
+    staleTime: 10_000,
+    retry: false,
+    enabled,
+  });
+}
+
 export function useDeviceUsageTransfer() {
   const queryClient = useQueryClient();
   const renameCurrentDevice = useMutation({

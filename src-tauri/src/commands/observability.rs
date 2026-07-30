@@ -1,8 +1,8 @@
+use crate::AppState;
 use crate::core::config::{
     LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, RequestLogModelOptions,
     RequestLogRow,
 };
-use crate::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static AGENT_DATA_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -31,31 +31,23 @@ pub(crate) async fn list_agent_sessions(
     state: tauri::State<'_, AppState>,
     filter: crate::core::config::AgentSessionsFilter,
 ) -> Result<crate::core::config::AgentSessionsPageResult, String> {
-    let mut page = state
+    // OpenCode 的 pending permission 是进程内实时状态，优先级高于
+    // SQLite 中“末条 assistant 尚未完成”的运行态推断；必须在过滤和分页前合并，
+    // 否则按运行状态筛选时，实时等待中的 OpenCode 会话会被 SQLite 中旧的状态误筛掉。
+    let permission_report = crate::core::opencode_control::list_permissions().await;
+    let waiting_sessions = if permission_report.available {
+        permission_report
+            .permissions
+            .into_iter()
+            .map(|permission| permission.session_id)
+            .collect::<std::collections::HashSet<_>>()
+    } else {
+        std::collections::HashSet::new()
+    };
+    state
         .storage
-        .list_agent_sessions(filter)
-        .map_err(|err| err.to_string())?;
-    if page.rows.iter().any(|row| row.agent_type == "opencode") {
-        let permission_report = crate::core::opencode_control::list_permissions().await;
-        if permission_report.available {
-            let waiting_sessions = permission_report
-                .permissions
-                .into_iter()
-                .map(|permission| permission.session_id)
-                .collect::<std::collections::HashSet<_>>();
-            for row in &mut page.rows {
-                // OpenCode 的 pending permission 是进程内实时状态，优先级高于
-                // SQLite 中“末条 assistant 尚未完成”的运行态推断。
-                row.runtime_status = crate::core::opencode_control::merge_runtime_status(
-                    &row.agent_type,
-                    &row.session_id,
-                    &row.runtime_status,
-                    &waiting_sessions,
-                );
-            }
-        }
-    }
-    Ok(page)
+        .list_agent_sessions(filter, &waiting_sessions)
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]

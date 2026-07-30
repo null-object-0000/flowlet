@@ -887,7 +887,7 @@ fn desktop_version(path: &Path) -> Option<String> {
 fn windows_file_version(path: &Path) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
     };
 
     let wide = path
@@ -1130,7 +1130,7 @@ fn decode_process_output(bytes: &[u8]) -> String {
 
 #[cfg(windows)]
 fn decode_windows_acp(bytes: &[u8]) -> String {
-    use windows_sys::Win32::Globalization::{MultiByteToWideChar, CP_ACP};
+    use windows_sys::Win32::Globalization::{CP_ACP, MultiByteToWideChar};
     if bytes.is_empty() {
         return String::new();
     }

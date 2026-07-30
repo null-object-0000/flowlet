@@ -1161,7 +1161,7 @@ pub struct AgentSessionsFilter {
     #[serde(default)]
     pub agent_type: String,
     #[serde(default)]
-    pub flowlet_status: String,
+    pub runtime_status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

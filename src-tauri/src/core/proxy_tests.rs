@@ -2,7 +2,7 @@ use super::proxy_routing::rank_candidates_by_score;
 use super::*;
 use crate::core::config::{AuthStrategy, UaClientRule};
 use axum::{
-    http::{header, HeaderValue, Uri},
+    http::{HeaderValue, Uri, header},
     routing::post,
 };
 use std::path::PathBuf;
@@ -1193,13 +1193,15 @@ fn cors_preflight_allows_browser_requests() {
         response.headers().get(header::ACCESS_CONTROL_ALLOW_HEADERS),
         Some(&HeaderValue::from_static("authorization,content-type"))
     );
-    assert!(response
-        .headers()
-        .get(header::ACCESS_CONTROL_ALLOW_METHODS)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("OPTIONS"));
+    assert!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("OPTIONS")
+    );
 }
 
 #[test]
@@ -1211,12 +1213,14 @@ fn cors_headers_are_added_to_regular_responses() {
         headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
         Some(&HeaderValue::from_static("*"))
     );
-    assert!(headers
-        .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("authorization"));
+    assert!(
+        headers
+            .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("authorization")
+    );
 }
 fn temp_db_path() -> PathBuf {
     std::env::temp_dir().join(format!("flowlet-test-{}.sqlite", uuid::Uuid::new_v4()))
@@ -1455,9 +1459,11 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
             .collect::<Vec<_>>(),
         vec!["b", "a", "c"]
     );
-    assert!(second
-        .iter()
-        .all(|route| route.virtual_model_id == "flowlet-pro"));
+    assert!(
+        second
+            .iter()
+            .all(|route| route.virtual_model_id == "flowlet-pro")
+    );
 }
 
 #[test]
@@ -1484,18 +1490,20 @@ fn flowlet_pool_rejects_single_protocol_channels() {
         ..Default::default()
     }];
     let mut round_robin = std::collections::HashMap::new();
-    assert!(match_candidates(
-        &routes,
-        &[],
-        &[],
-        Some("flowlet-pro"),
-        &ProtocolType::OpenAi,
-        None,
-        &accounts,
-        &channels,
-        &mut round_robin
-    )
-    .is_empty());
+    assert!(
+        match_candidates(
+            &routes,
+            &[],
+            &[],
+            Some("flowlet-pro"),
+            &ProtocolType::OpenAi,
+            None,
+            &accounts,
+            &channels,
+            &mut round_robin
+        )
+        .is_empty()
+    );
 }
 
 // ─── End-to-end routing test helpers ─────────────────────────────────────────

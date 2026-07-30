@@ -830,14 +830,18 @@ mod tests {
                 .count(),
             1
         );
-        assert!(routes
-            .iter()
-            .filter(|route| route.account_id == "account-first")
-            .all(|route| route.enabled));
-        assert!(routes
-            .iter()
-            .filter(|route| route.account_id == "account-later")
-            .all(|route| !route.enabled));
+        assert!(
+            routes
+                .iter()
+                .filter(|route| route.account_id == "account-first")
+                .all(|route| route.enabled)
+        );
+        assert!(
+            routes
+                .iter()
+                .filter(|route| route.account_id == "account-later")
+                .all(|route| !route.enabled)
+        );
     }
 
     #[test]
@@ -1021,9 +1025,11 @@ mod tests {
             enabled: true,
             ..Default::default()
         };
-        assert!(config
-            .merge_default_routes(&[], &[unconfigured], &config.presets)
-            .is_empty());
+        assert!(
+            config
+                .merge_default_routes(&[], &[unconfigured], &config.presets)
+                .is_empty()
+        );
 
         // 2) 仅为用户勾选的模型生成路由；与白名单取交集做防御（白名单外即使被勾选也过滤）。
         let selected = ChannelAccount {
@@ -1063,9 +1069,11 @@ mod tests {
             synced_models: Some(vec![]),
             ..Default::default()
         };
-        assert!(config
-            .merge_default_routes(&[], &[none_selected], &config.presets)
-            .is_empty());
+        assert!(
+            config
+                .merge_default_routes(&[], &[none_selected], &config.presets)
+                .is_empty()
+        );
 
         // 4) 只追加不删除：已有路由保留（删除取消勾选由前端对账负责）。
         let existing = routes.first().cloned().unwrap();
@@ -1093,9 +1101,11 @@ mod tests {
             synced_models: Some(vec!["deepseek-v4-flash".to_string()]),
             ..Default::default()
         };
-        assert!(config
-            .merge_default_routes(&[], &[missing_from_models], &config.presets)
-            .is_empty());
+        assert!(
+            config
+                .merge_default_routes(&[], &[missing_from_models], &config.presets)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1138,9 +1148,11 @@ mod tests {
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].upstream_model, "deepseek-v4-pro");
         assert_eq!(routes[0].client_protocol, ProtocolType::OpenAi);
-        assert!(routes
-            .iter()
-            .all(|route| route.upstream_model != "relay-proprietary-model"));
+        assert!(
+            routes
+                .iter()
+                .all(|route| route.upstream_model != "relay-proprietary-model")
+        );
     }
 
     #[test]
@@ -1195,15 +1207,21 @@ mod tests {
         );
         assert!(hybrid.aggregate);
         // 拦截器必须同时拦截三个目标端点
-        assert!(hybrid
-            .interceptor_js
-            .contains("/api/pay/quota/metering/token-packs/summary"));
-        assert!(hybrid
-            .interceptor_js
-            .contains("/api/pay/quota/metering/api-usage/summary"));
-        assert!(hybrid
-            .interceptor_js
-            .contains("/api/pay/commercial/entitlements/token-packs/list"));
+        assert!(
+            hybrid
+                .interceptor_js
+                .contains("/api/pay/quota/metering/token-packs/summary")
+        );
+        assert!(
+            hybrid
+                .interceptor_js
+                .contains("/api/pay/quota/metering/api-usage/summary")
+        );
+        assert!(
+            hybrid
+                .interceptor_js
+                .contains("/api/pay/commercial/entitlements/token-packs/list")
+        );
         // extractor 必须引用 token_packs_list 槽位(去重合并逻辑)
         assert!(hybrid.extractor_js.contains("token_packs_list"));
     }

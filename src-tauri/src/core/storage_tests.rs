@@ -371,13 +371,16 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
     storage.insert_request_log(&log).unwrap();
 
     let page = storage
-        .list_agent_sessions(crate::core::config::AgentSessionsFilter {
-            page: 1,
-            page_size: 10,
-            search: "ses_test".to_string(),
-            agent_type: "opencode".to_string(),
-            flowlet_status: "observed".to_string(),
-        })
+        .list_agent_sessions(
+            crate::core::config::AgentSessionsFilter {
+                page: 1,
+                page_size: 10,
+                search: "ses_test".to_string(),
+                agent_type: "opencode".to_string(),
+                runtime_status: String::new(),
+            },
+            &std::collections::HashSet::new(),
+        )
         .unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.page_size, 8);
@@ -415,25 +418,61 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
     let clients = storage.list_agent_session_clients().unwrap();
     assert_eq!(clients.len(), 1);
     assert_eq!(clients[0].id, "opencode");
+    let pending = std::collections::HashSet::from(["ses_parent".to_string()]);
+    let waiting = storage
+        .list_agent_sessions(
+            crate::core::config::AgentSessionsFilter {
+                page: 1,
+                page_size: 10,
+                search: String::new(),
+                agent_type: String::new(),
+                runtime_status: "waiting_user".to_string(),
+            },
+            &pending,
+        )
+        .unwrap();
+    assert_eq!(waiting.total, 1);
+    assert_eq!(waiting.rows[0].runtime_status, "waiting_user");
+
+    let idle = storage
+        .list_agent_sessions(
+            crate::core::config::AgentSessionsFilter {
+                page: 1,
+                page_size: 10,
+                search: String::new(),
+                agent_type: String::new(),
+                runtime_status: "idle".to_string(),
+            },
+            &pending,
+        )
+        .unwrap();
+    assert_eq!(idle.total, 0);
+
     let filtered_out = storage
-        .list_agent_sessions(crate::core::config::AgentSessionsFilter {
-            page: 1,
-            page_size: 10,
-            search: String::new(),
-            agent_type: "claude-code".to_string(),
-            flowlet_status: String::new(),
-        })
+        .list_agent_sessions(
+            crate::core::config::AgentSessionsFilter {
+                page: 1,
+                page_size: 10,
+                search: String::new(),
+                agent_type: "claude-code".to_string(),
+                runtime_status: String::new(),
+            },
+            &std::collections::HashSet::new(),
+        )
         .unwrap();
     assert_eq!(filtered_out.total, 0);
 
     let out_of_range = storage
-        .list_agent_sessions(crate::core::config::AgentSessionsFilter {
-            page: 2,
-            page_size: 8,
-            search: String::new(),
-            agent_type: String::new(),
-            flowlet_status: String::new(),
-        })
+        .list_agent_sessions(
+            crate::core::config::AgentSessionsFilter {
+                page: 2,
+                page_size: 8,
+                search: String::new(),
+                agent_type: String::new(),
+                runtime_status: String::new(),
+            },
+            &std::collections::HashSet::new(),
+        )
         .unwrap();
     assert!(out_of_range.rows.is_empty());
     assert_eq!(out_of_range.total, 1);
@@ -454,13 +493,16 @@ fn groups_claude_code_requests_by_official_session_header_attribution() {
     storage.insert_request_log(&log).unwrap();
 
     let page = storage
-        .list_agent_sessions(crate::core::config::AgentSessionsFilter {
-            page: 1,
-            page_size: 10,
-            search: "09af5e1a".to_string(),
-            agent_type: "claude-code".to_string(),
-            flowlet_status: "observed".to_string(),
-        })
+        .list_agent_sessions(
+            crate::core::config::AgentSessionsFilter {
+                page: 1,
+                page_size: 10,
+                search: "09af5e1a".to_string(),
+                agent_type: "claude-code".to_string(),
+                runtime_status: String::new(),
+            },
+            &std::collections::HashSet::new(),
+        )
         .unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.rows[0].agent_type, "claude-code");
@@ -1029,18 +1071,22 @@ fn adds_new_channel_preset_columns_to_legacy_schema() {
 
     storage.migrate().expect("migrate channel preset schema");
 
-    assert!(super::table_has_column(
-        &storage.connection.lock().unwrap(),
-        "channel_presets",
-        "small_model",
-    )
-    .unwrap());
-    assert!(super::table_has_column(
-        &storage.connection.lock().unwrap(),
-        "channel_presets",
-        "timeout_seconds",
-    )
-    .unwrap());
+    assert!(
+        super::table_has_column(
+            &storage.connection.lock().unwrap(),
+            "channel_presets",
+            "small_model",
+        )
+        .unwrap()
+    );
+    assert!(
+        super::table_has_column(
+            &storage.connection.lock().unwrap(),
+            "channel_presets",
+            "timeout_seconds",
+        )
+        .unwrap()
+    );
 }
 
 #[test]
@@ -1786,7 +1832,9 @@ fn usage_today_summary_aggregates_only_today_with_cache_denominator() {
             .lock()
             .unwrap()
             .execute(
-                &format!("UPDATE usage_records SET created_at = {expr} WHERE request_id = '{request_id}'"),
+                &format!(
+                    "UPDATE usage_records SET created_at = {expr} WHERE request_id = '{request_id}'"
+                ),
                 [],
             )
             .expect("set created_at");

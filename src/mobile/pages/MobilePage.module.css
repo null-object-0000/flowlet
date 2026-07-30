@@ -7,6 +7,7 @@
 .headingWithPicker { display: grid; gap: 0; }
 .headingWithPicker > .headingTitleRow { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .headingTitleRow h2 { min-width: 0; }
+.headingActions { flex: none; display: flex; align-items: center; gap: 2px; }
 .headingWithPicker > p { width: 100%; }
 .card {
   min-width: 0;
@@ -80,7 +81,7 @@
   width: 100%;
   padding: 14px;
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 7px 11px;
   border: 0;
@@ -105,6 +106,13 @@
 .deviceIdentity { min-width: 0; display: grid; gap: 3px; }
 .deviceIdentity strong, .deviceIdentity small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .deviceIdentity small, .deviceMetrics, .deviceToggle time { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.lanState { display: flex; align-items: center; gap: 5px; font-size: 11px; white-space: nowrap; }
+.lanState i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--flowlet-color-text-tertiary); }
+.lanState[data-state="ok"] { color: var(--semi-color-success); }
+.lanState[data-state="ok"] i { background: var(--semi-color-success); }
+.lanState[data-state="fail"] { color: var(--semi-color-danger); }
+.lanState[data-state="fail"] i { background: var(--semi-color-danger); }
+.lanState[data-state="muted"] { color: var(--flowlet-color-text-tertiary); }
 .deviceChevron { color: var(--flowlet-color-text-tertiary); }
 .deviceMetrics { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 5px 13px; }
 .deviceMetrics span + span::before { content: "·"; margin-right: 13px; }

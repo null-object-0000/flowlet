@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -168,8 +168,9 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
                         if let Some(mut snapshot) = stored_snapshot {
                             snapshot.stale = true;
                             snapshot.error = Some(match app_server_result {
-                                Ok(_) => "登录凭据已失效，请在 Codex 中重新登录该账号后刷新"
-                                    .to_string(),
+                                Ok(_) => {
+                                    "登录凭据已失效，请在 Codex 中重新登录该账号后刷新".to_string()
+                                }
                                 Err(app_server_error) => format!(
                                     "Codex 账号刷新失败。OAuth 会话：{oauth_error}；app-server：{app_server_error}"
                                 ),
@@ -1157,14 +1158,16 @@ mod tests {
             ),
             Some(Ok(()))
         );
-        assert!(parse_login_completed(
-            &json!({
-                "method": "account/login/completed",
-                "params": { "loginId": "another-login", "success": true }
-            }),
-            "login-1"
-        )
-        .is_none());
+        assert!(
+            parse_login_completed(
+                &json!({
+                    "method": "account/login/completed",
+                    "params": { "loginId": "another-login", "success": true }
+                }),
+                "login-1"
+            )
+            .is_none()
+        );
     }
 
     #[test]

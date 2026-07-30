@@ -28,19 +28,19 @@
 .usageModels { margin: 0; overflow-wrap: anywhere; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
 .nativeUsageLoading { height: 138px; border-radius: 8px; background: var(--flowlet-color-surface-strong); animation: pulse 1.2s ease-in-out infinite alternate; }
 .lastInteractionContent { min-width: 0; display: grid; gap: 10px; }
-.approvalList { display: grid; gap: 8px; }
-.approvalCard { padding: 12px; display: grid; gap: 10px; border: 1px solid var(--semi-color-warning-light-active); border-radius: 8px; background: var(--semi-color-warning-light-default); }
-.approvalHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.approvalHeading > div { min-width: 0; display: grid; gap: 2px; }
-.approvalHeading span { color: var(--flowlet-color-text-secondary); font-size: 10px; }
-.approvalHeading strong { overflow-wrap: anywhere; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
-.approvalCard pre { max-height: 160px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.approvalActions { display: flex; justify-content: flex-end; gap: 6px; }
-.approvalLoading, .approvalUnavailable { padding: 10px 12px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
-.approvalUnavailable { display: grid; gap: 3px; border-style: solid; border-color: var(--semi-color-warning-light-active); background: var(--semi-color-warning-light-default); }
-.approvalUnavailable strong { color: var(--flowlet-color-text); }
+.approvalList { position: sticky; bottom: 12px; z-index: 1; display: grid; gap: 8px; }
+.approvalCard { padding: 11px 12px; display: grid; gap: 9px; border: 1px solid var(--semi-color-warning-light-active); border-left: 3px solid var(--semi-color-warning); border-radius: 8px; color: var(--flowlet-color-text); background: var(--flowlet-color-surface-strong); box-shadow: var(--flowlet-shadow-card); }
+.approvalHeader { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.approvalIcon { flex: none; color: var(--semi-color-warning); font-size: 15px; animation: interactionPulse 1.6s ease-in-out infinite alternate; }
+.approvalHeader > strong { flex: none; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
+.approvalHeader > code { min-width: 0; padding: 1px 6px; overflow: hidden; border-radius: 4px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.approvalActions { margin-left: auto; display: flex; flex: none; gap: 6px; }
+.approvalCard pre { max-height: 120px; margin: 0; padding: 7px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.approvalNotice { padding: 10px 12px; display: grid; gap: 3px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
+.approvalNotice strong { color: var(--flowlet-color-text); }
 .emptyState { padding: 12px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
-.interactionFlow { padding: 4px 2px 8px; display: grid; gap: 24px; }
+.interactionFlow { padding: 4px 2px 16px; }
+.interactionFlow > * + * { margin-top: 24px; }
 .interactionFlow pre { margin: 0; font-family: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .userMessageRow { min-width: 0; display: flex; justify-content: flex-end; }
 .userMessageBubble { width: fit-content; max-width: 82%; padding: 10px 13px; border-radius: 12px 12px 3px 12px; color: var(--flowlet-color-text); background: var(--semi-color-fill-0); font-size: var(--flowlet-font-size-body); line-height: 1.65; }

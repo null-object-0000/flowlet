@@ -49,6 +49,9 @@ struct AppState {
     codex_accounts_dir: std::path::PathBuf,
     channels_config: Arc<Mutex<ChannelsConfig>>,
     agent_source_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    /// LAN 直连服务的运行状态与最近入站请求，供「局域网直连」卡片展示。
+    lan_status: Arc<Mutex<core::lan_sync::LanServerStatus>>,
+    lan_inbound: Arc<Mutex<std::collections::VecDeque<core::lan_sync::LanInboundEvent>>>,
     /// per-account 后台抓取 webview,key=account_id。webview 自身即会话容器。
     scrape_webviews: Arc<Mutex<std::collections::HashMap<String, tauri::WebviewWindow>>>,
     /// per-account 待处理拦截响应缓冲(抓取过程中临时存放)。
@@ -425,6 +428,8 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         codex_accounts_dir,
         channels_config: Arc::new(Mutex::new((*channels_config).clone())),
         agent_source_watcher: Arc::new(Mutex::new(None)),
+        lan_status: Arc::new(Mutex::new(core::lan_sync::LanServerStatus::default())),
+        lan_inbound: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         scrape_webviews: Arc::new(Mutex::new(std::collections::HashMap::new())),
         scrape_pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
         scrape_ready: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -563,10 +568,12 @@ mod app_config_tests {
         let _ = std::fs::remove_file(path);
 
         assert!(config.presets.iter().any(|channel| channel.id == "longcat"));
-        assert!(config
-            .presets
-            .iter()
-            .any(|channel| channel.id == "deepseek"));
+        assert!(
+            config
+                .presets
+                .iter()
+                .any(|channel| channel.id == "deepseek")
+        );
         assert!(config.presets.iter().any(|channel| channel.id == "kimi"));
         assert!(config.presets.iter().any(|channel| channel.id == "qwen"));
     }
@@ -741,20 +748,36 @@ fn run_desktop() {
             // 监听失败不会影响代理或 S3 快照同步；后者仍是完整的回退路径。
             let lan_storage = state.storage.clone();
             let lan_identity = state.device_identity.clone();
+            let lan_status = state.lan_status.clone();
+            let lan_inbound = state.lan_inbound.clone();
             tauri::async_runtime::spawn(async move {
                 let identity = match lan_identity.lock() {
                     Ok(identity) => identity.clone(),
                     Err(_) => {
                         tracing::warn!("局域网同步服务无法读取设备身份");
+                        crate::core::lan_sync::record_start_failure(
+                            &lan_status,
+                            "无法读取设备身份",
+                        );
                         return;
                     }
                 };
-                match crate::core::lan_sync::start_server(lan_storage, identity).await {
+                match crate::core::lan_sync::start_server(
+                    lan_storage,
+                    identity,
+                    lan_status.clone(),
+                    lan_inbound,
+                )
+                .await
+                {
                     Ok(descriptor) => tracing::info!(
                         endpoints = ?descriptor.endpoints,
                         "局域网同步服务已启动"
                     ),
-                    Err(error) => tracing::warn!(%error, "局域网同步服务未启用"),
+                    Err(error) => {
+                        tracing::warn!(%error, "局域网同步服务未启用");
+                        crate::core::lan_sync::record_start_failure(&lan_status, &error);
+                    }
                 }
             });
 
@@ -1060,6 +1083,8 @@ fn run_desktop() {
             commands::list_remote_opencode_permissions,
             commands::reply_remote_opencode_permission,
             commands::refresh_shared_device_usage_lan,
+            commands::lan_server_status,
+            commands::probe_lan_peers,
             commands::export_device_usage_bundle,
             commands::preview_device_usage_import,
             commands::import_device_usage_bundle,
@@ -1165,6 +1190,7 @@ fn run_mobile() {
             mobile_commands::list_remote_opencode_permissions,
             mobile_commands::reply_remote_opencode_permission,
             mobile_commands::refresh_shared_device_usage_lan,
+            mobile_commands::probe_lan_peers,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet Mobile 失败");

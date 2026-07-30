@@ -180,3 +180,33 @@ export type S3DevicePullResult = {
   failedObjects: number;
   failureDetails?: string[];
 };
+
+export type LanInboundEvent = {
+  remoteAddr: string;
+  path: string;
+  at: string;
+};
+
+export type LanServerStatus = {
+  running: boolean;
+  endpoints: string[];
+  startedAt: string | null;
+  error: string | null;
+};
+
+export type LanServerReport = {
+  status: LanServerStatus;
+  inbound: LanInboundEvent[];
+};
+
+export type LanProbeErrorKind = "unreachable" | "unauthorized" | "outdated" | "invalid";
+
+export type LanPeerProbe = {
+  deviceId: string;
+  lanPublished: boolean;
+  reachable: boolean;
+  latencyMs: number | null;
+  protocolVersion: number | null;
+  errorKind: LanProbeErrorKind | null;
+  error: string | null;
+};

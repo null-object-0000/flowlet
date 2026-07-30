@@ -1,6 +1,6 @@
+use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use jsonc_parser::json;
-use jsonc_parser::ParseOptions;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -2402,9 +2402,11 @@ mod tests {
             settings["provider"]["flowlet"]["options"]["baseURL"],
             "http://127.0.0.1:18640/v1"
         );
-        assert!(settings["provider"]["flowlet"]["options"]
-            .get("apiKey")
-            .is_none());
+        assert!(
+            settings["provider"]["flowlet"]["options"]
+                .get("apiKey")
+                .is_none()
+        );
         assert_eq!(
             settings["disabled_providers"],
             serde_json::json!(["legacy"])
@@ -2413,9 +2415,11 @@ mod tests {
             settings["enabled_providers"],
             serde_json::json!(["other", "flowlet"])
         );
-        assert!(std::fs::read_to_string(&settings_path)
-            .unwrap()
-            .contains("// keep this user setting"));
+        assert!(
+            std::fs::read_to_string(&settings_path)
+                .unwrap()
+                .contains("// keep this user setting")
+        );
         let auth = read_settings(&auth_path).unwrap();
         assert_eq!(auth["flowlet"]["type"], "api");
         assert_eq!(auth["flowlet"]["key"], "flowlet-token");

@@ -1,5 +1,4 @@
 export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi";
-export type AgentSessionFlowletStatus = "" | "observed" | "native";
 export type AgentSessionRuntimeStatus = "idle" | "running" | "waiting_user" | "unknown";
 
 export type AgentSessionFilter = {
@@ -7,7 +6,7 @@ export type AgentSessionFilter = {
   pageSize: number;
   search: string;
   agentType: "" | AgentSessionType;
-  flowletStatus: AgentSessionFlowletStatus;
+  runtimeStatus: "" | AgentSessionRuntimeStatus;
 };
 
 export type AgentSessionRow = {
@@ -58,7 +57,7 @@ export const DEFAULT_AGENT_SESSION_FILTER: AgentSessionFilter = {
   pageSize: 8,
   search: "",
   agentType: "",
-  flowletStatus: "",
+  runtimeStatus: "",
 };
 
 export type AgentSessionNativeUsage = {

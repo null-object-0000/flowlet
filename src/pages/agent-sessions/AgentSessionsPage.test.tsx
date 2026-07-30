@@ -58,6 +58,21 @@ const childSession: AgentSessionRow = {
 };
 
 let listedSessions = [session];
+const defaultPermissionsReport = {
+  available: true,
+  serverUrl: "http://127.0.0.1:4096",
+  error: null,
+  permissions: [{
+    id: "per_test",
+    sessionId: "ses_native_test",
+    permission: "bash",
+    patterns: ["cargo test"],
+    metadata: {},
+    always: [],
+    tool: null,
+  }],
+};
+let permissionsReport: typeof defaultPermissionsReport | null = defaultPermissionsReport;
 const {
   permissionReplyMock,
   sessionListRefetchMock,
@@ -88,20 +103,7 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
     refetch: childrenRefetchMock,
   }),
   useOpenCodeSessionPermissions: () => ({
-    data: {
-      available: true,
-      serverUrl: "http://127.0.0.1:4096",
-      error: null,
-      permissions: [{
-        id: "per_test",
-        sessionId: "ses_native_test",
-        permission: "bash",
-        patterns: ["cargo test"],
-        metadata: {},
-        always: [],
-        tool: null,
-      }],
-    },
+    data: permissionsReport,
     isLoading: false,
     isError: false,
     error: null,
@@ -165,6 +167,7 @@ import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSession
 describe("AgentSessionsPage", () => {
   beforeEach(() => {
     listedSessions = [session];
+    permissionsReport = defaultPermissionsReport;
     [
       permissionReplyMock,
       sessionListRefetchMock,
@@ -205,7 +208,7 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByLabelText("Token 明细：总计 13.50万，缓存命中率 16.0%")).toHaveAttribute("title", "135,000");
   });
 
-  it("offers Codex and an independent Flowlet observation filter", () => {
+  it("offers client and runtime status filters", () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     fireEvent.click(screen.getByText("全部客户端"));
@@ -216,12 +219,14 @@ describe("AgentSessionsPage", () => {
     expect(screen.getAllByText("OpenCode").length).toBeGreaterThan(1);
     fireEvent.click(codexOption);
 
-    fireEvent.click(screen.getByText("全部状态"));
-    expect(screen.getByText("经过 Flowlet")).toBeInTheDocument();
-    expect(screen.getByText("未经过 Flowlet")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("运行状态"));
+    const optionLabels = Array.from(document.querySelectorAll(".semi-select-option-text")).map((el) => el.textContent);
+    expect(optionLabels).toEqual(expect.arrayContaining(["自动运行中", "等待用户确认", "空闲", "无法判断"]));
+    expect(screen.queryByText("经过 Flowlet")).not.toBeInTheDocument();
   });
 
   it("opens session details and refreshes the active tab", async () => {
+    permissionsReport = { ...defaultPermissionsReport, permissions: [] };
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     const rowTitle = screen.getByText("Native session title");
@@ -339,6 +344,7 @@ describe("AgentSessionsPage", () => {
     const conversation = screen.getByRole("tabpanel", { name: "最近一轮" });
     const approval = within(conversation).getByText("OpenCode 等待确认").closest("article")!;
     expect(within(approval).getByText("cargo test")).toBeInTheDocument();
+    expect(within(conversation).queryByRole("status")).not.toBeInTheDocument();
     fireEvent.click(within(approval).getByRole("button", { name: "同意本次" }));
 
     await waitFor(() => expect(permissionReplyMock).toHaveBeenCalledWith({ permissionId: "per_test", decision: "allow_once" }));

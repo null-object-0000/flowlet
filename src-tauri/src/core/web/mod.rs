@@ -7,11 +7,11 @@ use super::config::{
 use super::metrics::Metrics;
 use super::storage::Storage;
 use axum::{
+    Router,
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Json, Response},
     routing::get,
-    Router,
 };
 use serde::Serialize;
 use std::sync::Arc;

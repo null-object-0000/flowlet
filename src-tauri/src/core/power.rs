@@ -81,7 +81,7 @@ impl Drop for ActivityPermit {
 #[cfg(windows)]
 mod platform {
     use windows_sys::Win32::System::Power::{
-        SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED,
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
     };
 
     /// ES_CONTINUOUS | ES_SYSTEM_REQUIRED：抑制系统自动待机直到显式清除；

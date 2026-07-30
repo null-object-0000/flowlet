@@ -1,10 +1,10 @@
 use crate::core::config::{
-    AuthStrategy, ChannelAccount, ChannelPreset, ProtocolType, RouteCandidate, UaClientRule,
-    ACCOUNT_CREDENTIAL_HEALTHY,
+    ACCOUNT_CREDENTIAL_HEALTHY, AuthStrategy, ChannelAccount, ChannelPreset, ProtocolType,
+    RouteCandidate, UaClientRule,
 };
 use axum::{
     body::Body,
-    http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
     response::Response,
 };
 use base64::Engine;
@@ -750,8 +750,8 @@ mod tests {
     }
 
     fn gzip_compress(bytes: &[u8]) -> Vec<u8> {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(bytes).unwrap();

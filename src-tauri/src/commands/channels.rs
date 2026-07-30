@@ -1,7 +1,7 @@
+use crate::AppState;
 use crate::core::config::{
     ChannelAccount, ChannelModel, ChannelPreset, RouteCandidate, VirtualModel,
 };
-use crate::AppState;
 
 #[tauri::command]
 pub(crate) fn list_channel_presets(

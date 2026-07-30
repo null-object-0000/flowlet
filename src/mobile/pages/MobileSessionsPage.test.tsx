@@ -7,6 +7,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileDevices: () => ({ data: [{ deviceId: "device-1", displayName: "Office PC" }] }),
+  useMobileS3Settings: () => ({ data: { config: null, status: { status: "never", message: "尚未同步" } }, isLoading: false }),
+  useMobileDeviceSyncActions: () => ({
+    saveS3Config: { isPending: false, mutateAsync: vi.fn() },
+    testS3Connection: { isPending: false, mutateAsync: vi.fn() },
+    refreshS3: { isPending: false, mutateAsync: vi.fn() },
+  }),
   useMobileSessions: () => ({
     data: [{
       deviceId: "device-1",

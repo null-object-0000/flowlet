@@ -1,7 +1,7 @@
 use crate::core::config::{ChannelAccount, ProxyBindConfig};
 use crate::core::proxy::ProxyStatus;
 use crate::core::sync::test_channel_connection;
-use crate::{update_tray_tooltip, AppState};
+use crate::{AppState, update_tray_tooltip};
 use tauri::AppHandle;
 
 #[tauri::command]

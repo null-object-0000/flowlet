@@ -4,24 +4,25 @@ use crate::core::device_identity::{
 use crate::core::opencode_control::{OpenCodePermissionDecision, OpenCodePermissionReport};
 use crate::core::storage::Storage;
 use axum::{
+    Json, Router,
     body::Bytes,
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
     http::{HeaderMap, Method, StatusCode},
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Nonce,
+    aead::{Aead, KeyInit},
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use hmac::{Hmac, Mac};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::Sha256;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
+    net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -31,6 +32,9 @@ const LAN_PEERS_KEY: &str = "device_lan_peers_v1";
 const AUTH_WINDOW_SECONDS: i64 = 30;
 const MAX_AUTH_NONCES: usize = 2048;
 const PROTOCOL_VERSION: u32 = 1;
+/// 入站请求只保留最近若干条，用于桌面端「局域网直连」卡片展示
+/// 连接来源与时间，不持久化、不影响转发路径。
+const MAX_INBOUND_EVENTS: usize = 50;
 
 #[derive(Clone)]
 struct LanServerState {
@@ -38,6 +42,17 @@ struct LanServerState {
     identity: DeviceIdentity,
     auth_key: [u8; 32],
     nonces: Arc<Mutex<HashMap<String, i64>>>,
+    inbound: Arc<Mutex<VecDeque<LanInboundEvent>>>,
+}
+
+/// 一条入站直连请求记录。来源地址取 TCP 对端 IP，
+/// 不要求客户端上报身份，因此旧版本客户端的连接同样可见。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanInboundEvent {
+    pub remote_addr: String,
+    pub path: String,
+    pub at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,11 +62,43 @@ struct EncryptedPayload {
     ciphertext: String,
 }
 
+/// 桌面端 LAN 服务的运行状态，供「局域网直连」卡片展示。
+/// 监听失败不影响代理与 S3 同步，因此失败原因也保存在这里，
+/// 前端无需读取日志即可展示。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanServerStatus {
+    pub running: bool,
+    pub endpoints: Vec<String>,
+    pub started_at: Option<String>,
+    pub error: Option<String>,
+}
+
+impl Default for LanServerStatus {
+    fn default() -> Self {
+        Self {
+            running: false,
+            endpoints: Vec::new(),
+            started_at: None,
+            error: None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PermissionReplyInput {
     decision: OpenCodePermissionDecision,
     operation_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PingResponse {
+    device_id: String,
+    protocol_version: u32,
+    capabilities: Vec<String>,
+    server_time: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -128,6 +175,8 @@ fn descriptor_is_fresh(descriptor: &LanPeerDescriptor) -> bool {
 pub async fn start_server(
     storage: Storage,
     identity: DeviceIdentity,
+    status: Arc<Mutex<LanServerStatus>>,
+    inbound: Arc<Mutex<VecDeque<LanInboundEvent>>>,
 ) -> Result<LanPeerDescriptor, String> {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
         .await
@@ -146,11 +195,7 @@ pub async fn start_server(
         protocol_version: PROTOCOL_VERSION,
         endpoints: vec![endpoint],
         auth_key: BASE64.encode(auth_key),
-        capabilities: vec![
-            "snapshot.read".to_string(),
-            "opencode.permission.read".to_string(),
-            "opencode.permission.reply".to_string(),
-        ],
+        capabilities: current_capabilities(),
         started_at: now.to_rfc3339(),
         expires_at: (now + ChronoDuration::minutes(20)).to_rfc3339(),
     };
@@ -161,13 +206,22 @@ pub async fn start_server(
         )
         .map_err(|error| error.to_string())?;
 
+    if let Ok(mut guard) = status.lock() {
+        guard.running = true;
+        guard.endpoints = descriptor.endpoints.clone();
+        guard.started_at = Some(descriptor.started_at.clone());
+        guard.error = None;
+    }
+
     let state = LanServerState {
         storage,
         identity,
         auth_key,
         nonces: Arc::new(Mutex::new(HashMap::new())),
+        inbound,
     };
     let app = Router::new()
+        .route("/flowlet/v1/ping", get(ping_handler))
         .route("/flowlet/v1/snapshot", get(snapshot_handler))
         .route(
             "/flowlet/v1/opencode/permissions/{session_id}",
@@ -179,11 +233,45 @@ pub async fn start_server(
         )
         .with_state(state);
     tokio::spawn(async move {
-        if let Err(error) = axum::serve(listener, app).await {
+        if let Err(error) = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        {
             tracing::warn!(%error, "局域网同步服务已停止");
         }
     });
     Ok(descriptor)
+}
+
+/// 启动失败时记录原因，前端可以展示「未开启」而不是空白。
+#[cfg(desktop)]
+pub fn record_start_failure(status: &Arc<Mutex<LanServerStatus>>, error: &str) {
+    if let Ok(mut guard) = status.lock() {
+        guard.running = false;
+        guard.error = Some(error.to_string());
+    }
+}
+
+/// 桌面端 LAN 服务的完整报告：运行状态 + 最近入站请求。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanServerReport {
+    pub status: LanServerStatus,
+    pub inbound: Vec<LanInboundEvent>,
+}
+
+pub fn read_server_report(
+    status: &Arc<Mutex<LanServerStatus>>,
+    inbound: &Arc<Mutex<VecDeque<LanInboundEvent>>>,
+) -> LanServerReport {
+    let status = status.lock().map(|guard| guard.clone()).unwrap_or_default();
+    let inbound = inbound
+        .lock()
+        .map(|guard| guard.iter().rev().cloned().collect())
+        .unwrap_or_default();
+    LanServerReport { status, inbound }
 }
 
 #[cfg(desktop)]
@@ -194,13 +282,61 @@ fn primary_lan_address() -> Option<std::net::IpAddr> {
     (!address.is_loopback() && !address.is_unspecified()).then_some(address)
 }
 
+fn record_inbound(state: &LanServerState, remote: Option<&SocketAddr>, path: &str) {
+    let Some(remote) = remote else {
+        return;
+    };
+    if let Ok(mut guard) = state.inbound.lock() {
+        if guard.len() >= MAX_INBOUND_EVENTS {
+            guard.pop_front();
+        }
+        guard.push_back(LanInboundEvent {
+            remote_addr: remote.ip().to_string(),
+            path: path.to_string(),
+            at: Utc::now().to_rfc3339(),
+        });
+    }
+}
+
+async fn ping_handler(
+    State(state): State<LanServerState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) = authorize(&state, &Method::GET, "/flowlet/v1/ping", &headers, &[]) {
+        return (StatusCode::UNAUTHORIZED, error).into_response();
+    }
+    record_inbound(&state, Some(&remote), "/flowlet/v1/ping");
+    let capabilities = current_capabilities();
+    encrypted_response(
+        &state.auth_key,
+        &headers,
+        &PingResponse {
+            device_id: state.identity.device_id.clone(),
+            protocol_version: PROTOCOL_VERSION,
+            capabilities,
+            server_time: Utc::now().to_rfc3339(),
+        },
+    )
+}
+
+fn current_capabilities() -> Vec<String> {
+    vec![
+        "snapshot.read".to_string(),
+        "opencode.permission.read".to_string(),
+        "opencode.permission.reply".to_string(),
+    ]
+}
+
 async fn snapshot_handler(
     State(state): State<LanServerState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
     if let Err(error) = authorize(&state, &Method::GET, "/flowlet/v1/snapshot", &headers, &[]) {
         return (StatusCode::UNAUTHORIZED, error).into_response();
     }
+    record_inbound(&state, Some(&remote), "/flowlet/v1/snapshot");
     match crate::core::device_sync::build_device_snapshot(
         state.storage.clone(),
         state.identity.clone(),
@@ -217,12 +353,14 @@ async fn snapshot_handler(
 async fn permission_list_handler(
     State(state): State<LanServerState>,
     Path(session_id): Path<String>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let path = format!("/flowlet/v1/opencode/permissions/{session_id}");
     if let Err(error) = authorize(&state, &Method::GET, &path, &headers, &[]) {
         return (StatusCode::UNAUTHORIZED, error).into_response();
     }
+    record_inbound(&state, Some(&remote), &path);
     let report = crate::core::opencode_control::list_session_permissions(&session_id).await;
     encrypted_response(&state.auth_key, &headers, &report)
 }
@@ -230,6 +368,7 @@ async fn permission_list_handler(
 async fn permission_reply_handler(
     State(state): State<LanServerState>,
     Path(permission_id): Path<String>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
@@ -237,6 +376,7 @@ async fn permission_reply_handler(
     if let Err(error) = authorize(&state, &Method::POST, &path, &headers, &body) {
         return (StatusCode::UNAUTHORIZED, error).into_response();
     }
+    record_inbound(&state, Some(&remote), &path);
     let input = match serde_json::from_slice::<PermissionReplyInput>(&body) {
         Ok(input) if !input.operation_id.trim().is_empty() => input,
         _ => return (StatusCode::BAD_REQUEST, "无效的确认操作").into_response(),
@@ -400,24 +540,64 @@ fn decrypt<T: DeserializeOwned>(
     serde_json::from_slice(&plain).map_err(|error| format!("解析局域网响应失败：{error}"))
 }
 
-async fn request<T: DeserializeOwned>(
+/// 签名直连请求的错误分类。探测与状态展示依赖这个区分
+/// 「设备不在线」和「连接信息失效」，而不是只给用户一行字符串。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LanProbeErrorKind {
+    Unreachable,
+    Unauthorized,
+    Outdated,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignedRequestErrorKind {
+    Unreachable,
+    Invalid,
+}
+
+#[derive(Debug)]
+struct SignedRequestError {
+    kind: SignedRequestErrorKind,
+    message: String,
+}
+
+impl SignedRequestError {
+    fn unreachable(message: String) -> Self {
+        Self {
+            kind: SignedRequestErrorKind::Unreachable,
+            message,
+        }
+    }
+
+    fn invalid(message: String) -> Self {
+        Self {
+            kind: SignedRequestErrorKind::Invalid,
+            message,
+        }
+    }
+}
+
+async fn send_signed(
     descriptor: &LanPeerDescriptor,
     endpoint: &str,
     method: Method,
     path: &str,
     body: Vec<u8>,
-) -> Result<T, String> {
-    validate_endpoint(endpoint)?;
-    let key = descriptor_key(descriptor)?;
+) -> Result<(reqwest::Response, [u8; 32], String), SignedRequestError> {
+    validate_endpoint(endpoint).map_err(SignedRequestError::invalid)?;
+    let key = descriptor_key(descriptor).map_err(SignedRequestError::invalid)?;
     let timestamp = Utc::now().timestamp().to_string();
     let nonce = uuid::Uuid::new_v4().to_string();
-    let signature = sign(&key, method.as_str(), path, &timestamp, &nonce, &body)?;
+    let signature = sign(&key, method.as_str(), path, &timestamp, &nonce, &body)
+        .map_err(SignedRequestError::invalid)?;
     let url = format!("{}{}", endpoint.trim_end_matches('/'), path);
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_millis(500))
         .timeout(Duration::from_secs(3))
         .build()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| SignedRequestError::invalid(error.to_string()))?;
     let response = client
         .request(method, url)
         .header("x-flowlet-timestamp", &timestamp)
@@ -427,7 +607,20 @@ async fn request<T: DeserializeOwned>(
         .body(body)
         .send()
         .await
-        .map_err(|error| format!("局域网设备不可达：{error}"))?;
+        .map_err(|error| SignedRequestError::unreachable(format!("局域网设备不可达：{error}")))?;
+    Ok((response, key, nonce))
+}
+
+async fn request<T: DeserializeOwned>(
+    descriptor: &LanPeerDescriptor,
+    endpoint: &str,
+    method: Method,
+    path: &str,
+    body: Vec<u8>,
+) -> Result<T, String> {
+    let (response, key, nonce) = send_signed(descriptor, endpoint, method, path, body)
+        .await
+        .map_err(|error| error.message)?;
     if !response.status().is_success() {
         return Err(format!("局域网设备返回 HTTP {}", response.status()));
     }
@@ -455,6 +648,146 @@ pub async fn fetch_snapshot(descriptor: &LanPeerDescriptor) -> Result<DeviceUsag
         }
     }
     Err(last_error)
+}
+
+/// 单台设备的直连探测结果。移动端与桌面端共用同一份结构展示
+/// 「能不能连上这台设备」。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanPeerProbe {
+    pub device_id: String,
+    /// 设备是否在 S3 快照中发布过有效的局域网描述符。
+    pub lan_published: bool,
+    /// ping 是否成功。发布过但 ping 不通通常意味着不在同一局域网
+    /// 或防火墙拦截。
+    pub reachable: bool,
+    pub latency_ms: Option<u64>,
+    pub protocol_version: Option<u32>,
+    pub error_kind: Option<LanProbeErrorKind>,
+    pub error: Option<String>,
+}
+
+pub async fn probe_peer(descriptor: &LanPeerDescriptor, expected_device_id: &str) -> LanPeerProbe {
+    let mut probe = LanPeerProbe {
+        device_id: expected_device_id.to_string(),
+        lan_published: true,
+        reachable: false,
+        latency_ms: None,
+        protocol_version: None,
+        error_kind: None,
+        error: None,
+    };
+    let mut last_error: Option<(LanProbeErrorKind, String)> = None;
+    for endpoint in &descriptor.endpoints {
+        let started = std::time::Instant::now();
+        let result = send_signed(
+            descriptor,
+            endpoint,
+            Method::GET,
+            "/flowlet/v1/ping",
+            Vec::new(),
+        )
+        .await;
+        let (response, key, nonce) = match result {
+            Ok(parts) => parts,
+            Err(error) => {
+                let kind = match error.kind {
+                    SignedRequestErrorKind::Unreachable => LanProbeErrorKind::Unreachable,
+                    SignedRequestErrorKind::Invalid => LanProbeErrorKind::Invalid,
+                };
+                last_error = Some((kind, error.message));
+                continue;
+            }
+        };
+        let status = response.status();
+        if status == StatusCode::UNAUTHORIZED {
+            last_error = Some((
+                LanProbeErrorKind::Unauthorized,
+                "局域网认证失败，连接信息可能已过期".to_string(),
+            ));
+            continue;
+        }
+        if status == StatusCode::NOT_FOUND {
+            // 旧版本对端没有 ping 端点，只能提示升级。
+            last_error = Some((
+                LanProbeErrorKind::Outdated,
+                "对端版本过旧，缺少 ping 端点".to_string(),
+            ));
+            continue;
+        }
+        if !status.is_success() {
+            last_error = Some((
+                LanProbeErrorKind::Invalid,
+                format!("局域网设备返回 HTTP {status}"),
+            ));
+            continue;
+        }
+        let payload = match response.json::<EncryptedPayload>().await {
+            Ok(payload) => payload,
+            Err(error) => {
+                last_error = Some((
+                    LanProbeErrorKind::Invalid,
+                    format!("读取局域网响应失败：{error}"),
+                ));
+                continue;
+            }
+        };
+        match decrypt::<PingResponse>(&key, nonce.as_bytes(), payload) {
+            Ok(pong) => {
+                probe.reachable = true;
+                probe.latency_ms = Some(started.elapsed().as_millis() as u64);
+                probe.protocol_version = Some(pong.protocol_version);
+                probe.device_id = pong.device_id;
+                return probe;
+            }
+            Err(error) => {
+                last_error = Some((LanProbeErrorKind::Invalid, error));
+            }
+        }
+    }
+    if let Some((kind, message)) = last_error {
+        probe.error_kind = Some(kind);
+        probe.error = Some(message);
+    }
+    probe
+}
+
+/// 对 registry 中全部（或指定）已知 peer 做并发 ping 探测。
+/// 未发布有效描述符的设备也返回结果，`lan_published = false`，
+/// 这样前端可以区分「对方没开直连」和「开了但连不上」。
+pub async fn probe_lan_peers(storage: &Storage, device_id: Option<&str>) -> Vec<LanPeerProbe> {
+    let registry = load_peer_registry(storage).0;
+    let mut tasks = Vec::new();
+    let mut probes = Vec::new();
+    for (id, descriptor) in registry {
+        if let Some(wanted) = device_id {
+            if wanted != id {
+                continue;
+            }
+        }
+        if !descriptor_is_fresh(&descriptor) {
+            probes.push(LanPeerProbe {
+                device_id: id,
+                lan_published: false,
+                reachable: false,
+                latency_ms: None,
+                protocol_version: None,
+                error_kind: None,
+                error: None,
+            });
+            continue;
+        }
+        tasks.push(tauri::async_runtime::spawn(async move {
+            probe_peer(&descriptor, &id).await
+        }));
+    }
+    for task in tasks {
+        if let Ok(probe) = task.await {
+            probes.push(probe);
+        }
+    }
+    probes.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+    probes
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -621,5 +954,128 @@ mod tests {
         assert!(validate_endpoint("http://169.254.169.254:80").is_err());
         assert!(validate_endpoint("https://192.168.1.8:17878").is_err());
         assert!(validate_endpoint("http://example.com:17878").is_err());
+    }
+
+    fn test_state() -> (
+        LanServerState,
+        DeviceIdentity,
+        [u8; 32],
+        Arc<Mutex<VecDeque<LanInboundEvent>>>,
+    ) {
+        let storage =
+            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
+        let identity = DeviceIdentity {
+            schema_version: 1,
+            device_id: "11111111-2222-3333-4444-555555555555".to_string(),
+            created_at: Utc::now().to_rfc3339(),
+            display_name: "Test PC".to_string(),
+            platform: "windows".to_string(),
+        };
+        let auth_key = [42u8; 32];
+        let inbound = Arc::new(Mutex::new(VecDeque::new()));
+        let state = LanServerState {
+            storage,
+            identity: identity.clone(),
+            auth_key,
+            nonces: Arc::new(Mutex::new(HashMap::new())),
+            inbound: inbound.clone(),
+        };
+        (state, identity, auth_key, inbound)
+    }
+
+    fn signed_headers(key: &[u8; 32], method: &str, path: &str) -> (HeaderMap, String) {
+        let timestamp = Utc::now().timestamp().to_string();
+        let nonce = uuid::Uuid::new_v4().to_string();
+        let signature = sign(key, method, path, &timestamp, &nonce, &[]).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-flowlet-timestamp", timestamp.parse().unwrap());
+        headers.insert("x-flowlet-nonce", nonce.parse().unwrap());
+        headers.insert(
+            "x-flowlet-signature",
+            hex::encode(signature).parse().unwrap(),
+        );
+        (headers, nonce)
+    }
+
+    #[tokio::test]
+    async fn ping_returns_device_info_and_records_inbound() {
+        let (state, identity, auth_key, inbound) = test_state();
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+        let (headers, nonce) = signed_headers(&auth_key, "GET", "/flowlet/v1/ping");
+
+        let response = ping_handler(State(state), ConnectInfo(remote), headers)
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: EncryptedPayload = serde_json::from_slice(&body).unwrap();
+        let pong: PingResponse = decrypt(&auth_key, nonce.as_bytes(), payload).unwrap();
+        assert_eq!(pong.device_id, identity.device_id);
+        assert_eq!(pong.protocol_version, PROTOCOL_VERSION);
+        assert!(pong.capabilities.contains(&"snapshot.read".to_string()));
+
+        let events = inbound.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].remote_addr, "192.168.1.23");
+        assert_eq!(events[0].path, "/flowlet/v1/ping");
+    }
+
+    #[tokio::test]
+    async fn ping_rejects_unsigned_request_and_does_not_record() {
+        let (state, _, _, inbound) = test_state();
+        let remote = SocketAddr::from(([192, 168, 1, 24], 9101));
+
+        let response = ping_handler(State(state), ConnectInfo(remote), HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(inbound.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn inbound_ring_buffer_keeps_only_recent_events() {
+        let (state, _, _, inbound) = test_state();
+        let remote = SocketAddr::from(([10, 0, 0, 8], 9000));
+        for index in 0..(MAX_INBOUND_EVENTS + 7) {
+            record_inbound(&state, Some(&remote), &format!("/test/{index}"));
+        }
+        let events = inbound.lock().unwrap();
+        assert_eq!(events.len(), MAX_INBOUND_EVENTS);
+        // 最旧的事件被淘汰，最新保留。
+        assert_eq!(events.front().unwrap().path, "/test/7");
+        assert_eq!(
+            events.back().unwrap().path,
+            format!("/test/{}", MAX_INBOUND_EVENTS + 6)
+        );
+    }
+
+    #[test]
+    fn server_report_reads_status_and_newest_first_inbound() {
+        let status = Arc::new(Mutex::new(LanServerStatus {
+            running: true,
+            endpoints: vec!["http://192.168.1.8:17878".to_string()],
+            started_at: Some("2026-07-30T08:00:00Z".to_string()),
+            error: None,
+        }));
+        let inbound = Arc::new(Mutex::new(VecDeque::from([
+            LanInboundEvent {
+                remote_addr: "192.168.1.23".to_string(),
+                path: "/flowlet/v1/ping".to_string(),
+                at: "2026-07-30T08:01:00Z".to_string(),
+            },
+            LanInboundEvent {
+                remote_addr: "192.168.1.24".to_string(),
+                path: "/flowlet/v1/snapshot".to_string(),
+                at: "2026-07-30T08:02:00Z".to_string(),
+            },
+        ])));
+        let report = read_server_report(&status, &inbound);
+        assert!(report.status.running);
+        assert_eq!(report.inbound.len(), 2);
+        assert_eq!(report.inbound[0].remote_addr, "192.168.1.24");
+        assert_eq!(report.inbound[1].remote_addr, "192.168.1.23");
     }
 }

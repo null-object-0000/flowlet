@@ -354,10 +354,12 @@ mod tests {
         assert!(summary.total_bytes > summary.config_bytes);
         assert_eq!(summary.config_bytes, 256);
         assert_eq!(summary.categories.len(), 6);
-        assert!(summary
-            .categories
-            .iter()
-            .any(|category| category.key == "requestCaptures"));
+        assert!(
+            summary
+                .categories
+                .iter()
+                .any(|category| category.key == "requestCaptures")
+        );
         let request_logs = summary
             .categories
             .iter()

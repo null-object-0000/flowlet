@@ -87,14 +87,16 @@ export function AgentSessionsPage() {
           onChange={(value) => setFilter((current) => ({ ...current, agentType: value === "__all__" ? "" : String(value) as AgentSessionFilter["agentType"], page: 1 }))}
         />
         <Select
-          insetLabel={t("Flowlet 状态")}
-          value={filter.flowletStatus || "__all__"}
+          insetLabel={t("运行状态")}
+          value={filter.runtimeStatus || "__all__"}
           optionList={[
             { value: "__all__", label: t("全部状态") },
-            { value: "observed", label: t("经过 Flowlet") },
-            { value: "native", label: t("未经过 Flowlet") },
+            { value: "running", label: t("自动运行中") },
+            { value: "waiting_user", label: t("等待用户确认") },
+            { value: "idle", label: t("空闲") },
+            { value: "unknown", label: t("无法判断") },
           ]}
-          onChange={(value) => setFilter((current) => ({ ...current, flowletStatus: value === "__all__" ? "" : String(value) as AgentSessionFilter["flowletStatus"], page: 1 }))}
+          onChange={(value) => setFilter((current) => ({ ...current, runtimeStatus: value === "__all__" ? "" : String(value) as AgentSessionFilter["runtimeStatus"], page: 1 }))}
         />
         <span className={styles.toolbarSpacer} />
         <div className={styles.syncActions}>{lastJobId ? <Button type="tertiary" onClick={() => navigate(`/tasks?jobId=${encodeURIComponent(lastJobId)}`)}>{t("查看任务")}</Button> : null}<Button

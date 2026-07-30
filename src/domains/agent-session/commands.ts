@@ -9,7 +9,7 @@ export const agentSessionCommands = {
         page_size: filter.pageSize,
         search: filter.search,
         agent_type: filter.agentType,
-        flowlet_status: filter.flowletStatus,
+        runtime_status: filter.runtimeStatus,
       },
     }).catch((error: unknown) => {
       throw toAppError(error, "agent_session_list_failed");

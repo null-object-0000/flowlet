@@ -1375,9 +1375,11 @@ mod tests {
         valid.path_style = false;
         let config = S3SyncConfig::from_input(&valid).unwrap();
         assert!(!config.supports_conditional_put());
-        assert!(S3SyncConfig::from_input(&input("https://example.com"))
-            .unwrap()
-            .supports_conditional_put());
+        assert!(
+            S3SyncConfig::from_input(&input("https://example.com"))
+                .unwrap()
+                .supports_conditional_put()
+        );
     }
 
     #[test]
@@ -1460,9 +1462,11 @@ mod tests {
             .collect();
         let selected = select_sessions_for_sync(sessions);
         assert_eq!(selected.len(), 12);
-        assert!(selected
-            .iter()
-            .all(|row| matches!(row.runtime_status.as_str(), "running" | "waiting_user")));
+        assert!(
+            selected
+                .iter()
+                .all(|row| matches!(row.runtime_status.as_str(), "running" | "waiting_user"))
+        );
     }
 
     #[test]

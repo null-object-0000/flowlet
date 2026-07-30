@@ -168,6 +168,16 @@ export function MobileSettingsPage() {
       Toast.success(t("S3 连接配置已导入"));
     } catch (error) {
       Toast.error(t("导入连接配置失败：{message}", { message: errorMessage(error) }));
+      return;
+    }
+
+    setRefreshError(null);
+    try {
+      await actions.refreshS3.mutateAsync();
+    } catch (error) {
+      const message = errorMessage(error);
+      setRefreshError(message);
+      Toast.warning(t("自动刷新失败：{message}", { message }));
     }
   };
   const syncStatus = settings.data?.status;
@@ -289,7 +299,7 @@ export function MobileSettingsPage() {
         <div className={styles.form}>
           <div className={styles.permissions}><strong>{t("安全提示")}</strong><span>{t("连接包包含 S3 访问凭据，只导入来自可信桌面设备的内容。")}</span></div>
           <TextArea
-            autoFocus
+            autoFocus={connectionText === ""}
             value={connectionText ?? ""}
             placeholder={t("粘贴 Flowlet S3 连接包 JSON")}
             autosize={{ minRows: 9, maxRows: 9 }}

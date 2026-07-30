@@ -7,7 +7,7 @@ import {
   formatMobileUsageRange,
   getMobileUsageRange,
   summarizeMobileUsage,
-} from "./mobileUsage";
+} from "../features/usage/deviceUsagePresentation";
 
 const day = (date: string, requests: number, tokens: number): DailyUsageTotal => ({
   date,
@@ -58,7 +58,23 @@ describe("mobile usage aggregation", () => {
 
   it("summarizes request and token breakdowns", () => {
     expect(summarizeMobileUsage([day("2026-07-28", 2, 30), day("2026-07-29", 3, 40)]))
-      .toEqual({ requests: 5, tokens: 70, inputTokens: 50, cachedInputTokens: 10, outputTokens: 20 });
+      .toEqual({
+        requests: 5,
+        tokens: 70,
+        inputTokens: 50,
+        cachedInputTokens: 10,
+        cacheMeasuredInputTokens: 50,
+        cacheHitRate: 0.2,
+        outputTokens: 20,
+      });
+  });
+
+  it("does not report a cache hit rate without cache-measured input", () => {
+    expect(summarizeMobileUsage([{
+      ...day("2026-07-29", 3, 40),
+      inputCachedTokens: 0,
+      cacheMeasuredInputTokens: 0,
+    }]).cacheHitRate).toBeNull();
   });
 
   it("builds one row for a week and disables future dates", () => {

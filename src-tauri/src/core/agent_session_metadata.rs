@@ -16,6 +16,8 @@ const MAX_CLAUDE_TRANSCRIPT_BYTES: usize = 1024 * 1024;
 const MAX_RUNTIME_STATUS_BYTES: u64 = 256 * 1024;
 const CLAUDE_RUNNING_FRESHNESS_SECS: u64 = 30 * 60;
 const CLAUDE_WAITING_USER_FRESHNESS_SECS: u64 = 24 * 60 * 60;
+const CODEX_RUNNING_FRESHNESS_SECS: u64 = 30 * 60;
+const CODEX_WAITING_USER_FRESHNESS_SECS: u64 = 24 * 60 * 60;
 const OPENCODE_EMPTY_ASSISTANT_GRACE_MILLIS: i64 = 30_000;
 const EMPTY_SESSION_TIME: &str = "1970-01-01T00:00:00Z";
 
@@ -579,7 +581,33 @@ fn infer_codex_runtime_status(path: &Path) -> String {
             _ => {}
         }
     }
-    status.to_string()
+    apply_codex_runtime_freshness(
+        status,
+        fs::metadata(path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok()),
+        SystemTime::now(),
+    )
+}
+
+fn apply_codex_runtime_freshness(
+    status: &str,
+    modified_at: Option<SystemTime>,
+    now: SystemTime,
+) -> String {
+    let max_age_secs = match status {
+        "running" => CODEX_RUNNING_FRESHNESS_SECS,
+        "waiting_user" => CODEX_WAITING_USER_FRESHNESS_SECS,
+        _ => return status.to_string(),
+    };
+    let is_stale = modified_at
+        .and_then(|modified_at| now.duration_since(modified_at).ok())
+        .is_some_and(|age| age.as_secs() > max_age_secs);
+    if is_stale {
+        "idle".to_string()
+    } else {
+        status.to_string()
+    }
 }
 
 fn list_opencode_native_sessions() -> Vec<AgentSessionRow> {
@@ -1006,6 +1034,43 @@ mod tests {
         .unwrap();
         assert_eq!(infer_codex_runtime_status(&path), "idle");
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn expires_stale_codex_running_and_waiting_states() {
+        let now = SystemTime::now();
+        assert_eq!(
+            apply_codex_runtime_freshness(
+                "running",
+                Some(now - std::time::Duration::from_secs(CODEX_RUNNING_FRESHNESS_SECS + 1)),
+                now,
+            ),
+            "idle"
+        );
+        assert_eq!(
+            apply_codex_runtime_freshness(
+                "waiting_user",
+                Some(now - std::time::Duration::from_secs(CODEX_WAITING_USER_FRESHNESS_SECS + 1),),
+                now,
+            ),
+            "idle"
+        );
+        assert_eq!(
+            apply_codex_runtime_freshness(
+                "running",
+                Some(now - std::time::Duration::from_secs(CODEX_RUNNING_FRESHNESS_SECS - 1)),
+                now,
+            ),
+            "running"
+        );
+        assert_eq!(
+            apply_codex_runtime_freshness(
+                "waiting_user",
+                Some(now - std::time::Duration::from_secs(CODEX_WAITING_USER_FRESHNESS_SECS - 1),),
+                now,
+            ),
+            "waiting_user"
+        );
     }
 
     #[test]

@@ -1,9 +1,11 @@
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
-import { Button, Select } from "@douyinfe/semi-ui-19";
+import { Button } from "@douyinfe/semi-ui-19";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useMobileDailyUsage, useMobileDevices, useMobileDeviceSyncActions, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
+import { MobileDevicePicker } from "../MobileDevicePicker";
+import { useMobileDeviceSelection } from "../MobileDeviceSelection";
 import {
   buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
@@ -13,12 +15,12 @@ import {
   MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
   summarizeMobileUsage,
   type MobileUsagePeriod,
-} from "../mobileUsage";
+} from "../../features/usage/deviceUsagePresentation";
 import styles from "./MobilePage.module.css";
 
 export function MobileOverviewPage() {
   const { language, t } = useAppPreferences();
-  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const { deviceId } = useMobileDeviceSelection();
   const [period, setPeriod] = useState<MobileUsagePeriod>("month");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -89,10 +91,19 @@ export function MobileOverviewPage() {
     });
   }, [settings.data?.config]);
 
+  useEffect(() => {
+    setSelectedDate(null);
+    setSelectedHour(null);
+  }, [deviceId]);
+
   return (
     <section className={styles.page}>
-      <header className={styles.heading}>
-        <div><h2>{t("概览")}</h2><p>{t("按设备查看每周或每月 Token 热力图")}</p></div>
+      <header className={`${styles.heading} ${styles.headingWithPicker}`}>
+        <div className={styles.headingTitleRow}>
+          <h2>{t("概览")}</h2>
+          <MobileDevicePicker />
+        </div>
+        <p>{t("按设备查看每周或每月 Token 热力图")}</p>
       </header>
 
       {!settings.isLoading && !settings.data?.config ? (
@@ -103,37 +114,22 @@ export function MobileOverviewPage() {
       ) : null}
 
       <div className={styles.overviewFilters}>
-        <div className={styles.filterRow}>
-          <Select
-            value={deviceId ?? "__all__"}
-            aria-label={t("设备")}
-            optionList={[
-              { value: "__all__", label: t("全部设备") },
-              ...(devices.data ?? []).map((device) => ({ value: device.deviceId, label: device.displayName })),
-            ]}
-            onChange={(value) => {
-              setDeviceId(value === "__all__" ? null : String(value));
-              setSelectedDate(null);
-              setSelectedHour(null);
-            }}
-          />
-          <div className={styles.periodTabs} aria-label={t("统计维度")}>
-            {(["week", "month"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={period === value}
-                onClick={() => {
-                  setPeriod(value);
-                  setPeriodOffset(0);
-                  setSelectedDate(null);
-                  setSelectedHour(null);
-                }}
-              >
-                {value === "week" ? t("周") : t("月")}
-              </button>
-            ))}
-          </div>
+        <div className={styles.periodTabs} aria-label={t("统计维度")}>
+          {(["week", "month"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={period === value}
+              onClick={() => {
+                setPeriod(value);
+                setPeriodOffset(0);
+                setSelectedDate(null);
+                setSelectedHour(null);
+              }}
+            >
+              {value === "week" ? t("周") : t("月")}
+            </button>
+          ))}
         </div>
         <div className={styles.periodToolbar}>
           <div className={styles.rangeNavigator}>
@@ -168,7 +164,7 @@ export function MobileOverviewPage() {
       <div className={styles.stats}>
         <article className={styles.stat}><span>Tokens</span><strong>{formatCompactNumber(summary.tokens, language)}</strong><small>{t("输入 {input} · 输出 {output}", { input: formatCompactNumber(summary.inputTokens, language), output: formatCompactNumber(summary.outputTokens, language) })}</small></article>
         <article className={styles.stat}><span>{t("请求量")}</span><strong>{formatInteger(summary.requests, language)}</strong><small>{t("{count} 天数据", { count: days.length })}</small></article>
-        <article className={styles.stat}><span>{t("缓存输入")}</span><strong>{formatCompactNumber(summary.cachedInputTokens, language)}</strong><small>Tokens</small></article>
+        <article className={styles.stat}><span>{t("缓存输入")}</span><strong>{formatCompactNumber(summary.cachedInputTokens, language)}</strong><small>{t("缓存命中率")} {formatCacheHitRate(summary.cacheHitRate)}</small></article>
         <article className={styles.stat}><span>{t("设备")}</span><strong>{deviceId ? "1" : formatInteger(devices.data?.length ?? 0, language)}</strong><small>{deviceId ? t("指定设备") : t("全部设备")}</small></article>
       </div>
 
@@ -263,4 +259,8 @@ export function MobileOverviewPage() {
       ) : null}
     </section>
   );
+}
+
+function formatCacheHitRate(value: number | null) {
+  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 }

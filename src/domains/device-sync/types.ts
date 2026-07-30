@@ -19,6 +19,7 @@ export type HourlyUsageTotal = {
 export type SyncedAgentSession = {
   agentType: "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi" | string;
   sessionId: string;
+  parentSessionId: string | null;
   runtimeStatus: "idle" | "running" | "waiting_user" | "unknown";
   title: string | null;
   clientName: string | null;
@@ -27,12 +28,42 @@ export type SyncedAgentSession = {
   requestCount: number;
   errorCount: number;
   knownTokens: number;
+  lastInteraction: SyncedAgentInteraction | null;
+};
+
+export type SyncedAgentInteractionEvent = {
+  id: string;
+  kind: string;
+  timestamp: string | null;
+  title: string | null;
+  content: string | null;
+  model: string | null;
+  status: string | null;
+};
+
+export type SyncedAgentInteraction = {
+  events: SyncedAgentInteractionEvent[];
 };
 
 export type SharedAgentSession = SyncedAgentSession & {
   deviceId: string;
   deviceDisplayName: string;
   devicePlatform: string;
+};
+
+export type SyncedAgentInstallation = {
+  surface: "cli" | "desktop";
+  installMethod: string;
+  version: string | null;
+};
+
+export type SyncedAgentProfile = {
+  agentId: "claude-code" | "opencode" | "pi" | "chatgpt-desktop" | string;
+  agentName: string;
+  installed: boolean;
+  installations: SyncedAgentInstallation[];
+  flowletConfigState: "not_configured" | "flowlet" | "other_gateway" | "partial" | "invalid" | null;
+  flowletObserved: boolean;
 };
 
 export type DeviceUsageSnapshot = {
@@ -47,6 +78,15 @@ export type DeviceUsageSnapshot = {
   days: DailyUsageTotal[];
   hours: HourlyUsageTotal[];
   sessions: SyncedAgentSession[];
+  agents: SyncedAgentProfile[];
+  lanPeer: {
+    protocolVersion: number;
+    endpoints: string[];
+    authKey: string;
+    capabilities: string[];
+    startedAt: string;
+    expiresAt: string;
+  } | null;
 };
 
 export type KnownDevice = {

@@ -1,6 +1,6 @@
 use super::MobileAppState;
 use crate::core::device_identity::{
-    DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession,
+    DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession, SyncedAgentProfile,
 };
 
 #[tauri::command]
@@ -15,6 +15,21 @@ pub(super) async fn list_shared_devices(
     })
     .await
     .map_err(|error| format!("读取共享设备目录任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn list_shared_device_agents(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: String,
+) -> Result<Vec<SyncedAgentProfile>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_device_agents(&device_id)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享设备 Agent 资料任务失败：{error}"))?
 }
 
 #[tauri::command]
@@ -99,4 +114,37 @@ pub(super) async fn refresh_shared_device_usage_s3(
     state: tauri::State<'_, MobileAppState>,
 ) -> Result<crate::core::device_sync::S3DevicePullResult, String> {
     crate::core::device_sync::run_configured_pull(state.storage.clone()).await
+}
+
+#[tauri::command]
+pub(super) async fn list_remote_opencode_permissions(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: String,
+    session_id: String,
+) -> Result<crate::core::opencode_control::OpenCodePermissionReport, String> {
+    crate::core::lan_sync::list_remote_permissions(&state.storage, &device_id, &session_id).await
+}
+
+#[tauri::command]
+pub(super) async fn reply_remote_opencode_permission(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: String,
+    permission_id: String,
+    decision: crate::core::opencode_control::OpenCodePermissionDecision,
+) -> Result<(), String> {
+    crate::core::lan_sync::reply_remote_permission(
+        &state.storage,
+        &device_id,
+        &permission_id,
+        decision,
+    )
+    .await
+}
+
+#[tauri::command]
+pub(super) async fn refresh_shared_device_usage_lan(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: Option<String>,
+) -> Result<crate::core::lan_sync::LanRefreshResult, String> {
+    crate::core::lan_sync::refresh_known_peers(state.storage.clone(), device_id.as_deref()).await
 }

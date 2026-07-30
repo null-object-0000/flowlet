@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionRow } from "../../domains/agent-session/types";
@@ -58,7 +58,19 @@ const childSession: AgentSessionRow = {
 };
 
 let listedSessions = [session];
-const { permissionReplyMock } = vi.hoisted(() => ({ permissionReplyMock: vi.fn(() => Promise.resolve()) }));
+const {
+  permissionReplyMock,
+  sessionListRefetchMock,
+  childrenRefetchMock,
+  nativeSummaryRefetchMock,
+  lastInteractionRefetchMock,
+} = vi.hoisted(() => ({
+  permissionReplyMock: vi.fn(() => Promise.resolve()),
+  sessionListRefetchMock: vi.fn(() => Promise.resolve({ data: undefined })),
+  childrenRefetchMock: vi.fn(() => Promise.resolve()),
+  nativeSummaryRefetchMock: vi.fn(() => Promise.resolve()),
+  lastInteractionRefetchMock: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
   useAgentSessions: () => ({
@@ -66,152 +78,14 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
     isLoading: false,
     isError: false,
     isFetching: false,
-    refetch: vi.fn(),
+    refetch: sessionListRefetchMock,
   }),
   useAgentSessionChildren: () => ({
     data: [childSession],
     isLoading: false,
     isError: false,
     error: null,
-    refetch: vi.fn(),
-  }),
-  useAgentSessionTimeline: () => ({
-    data: {
-      sourceAvailable: true,
-      truncated: false,
-      turnCount: 1,
-      usage: {
-        inputTokens: 1000,
-        cachedInputTokens: 300,
-        cacheWriteInputTokens: 50,
-        outputTokens: 456,
-        reasoningTokens: 120,
-        totalTokens: 1576,
-        cost: 0.123456,
-        costCurrency: "USD",
-      },
-      models: ["native-model"],
-      events: [{
-        id: "old-user",
-        kind: "user-message",
-        source: "agent-native",
-        timestamp: "2026-07-18T07:00:00Z",
-        title: null,
-        content: "This earlier input should not be shown",
-        model: null,
-        status: null,
-        durationMs: null,
-        timeToFirstTokenMs: null,
-        usage: null,
-      }, {
-        id: "old-output",
-        kind: "assistant-message",
-        source: "agent-native",
-        timestamp: "2026-07-18T07:01:00Z",
-        title: null,
-        content: "This earlier output should not be shown",
-        model: null,
-        status: null,
-        durationMs: null,
-        timeToFirstTokenMs: null,
-        usage: null,
-      }, {
-        id: "turn-1",
-        kind: "turn",
-        source: "agent-native",
-        timestamp: "2026-07-18T08:00:00Z",
-        title: "Agent 轮次",
-        content: null,
-        model: "native-model",
-        status: "completed",
-        durationMs: 62000,
-        timeToFirstTokenMs: 1250,
-        usage: {
-          inputTokens: 1000,
-          cachedInputTokens: 300,
-          cacheWriteInputTokens: 50,
-          outputTokens: 456,
-          reasoningTokens: 120,
-          totalTokens: 1576,
-          cost: null,
-          costCurrency: null,
-        },
-      }, {
-        id: "latest-user",
-        kind: "user-message",
-        source: "agent-native",
-        timestamp: "2026-07-18T08:00:30Z",
-        title: null,
-        content: "Please inspect the routing bug",
-        model: null,
-        status: null,
-        durationMs: null,
-        timeToFirstTokenMs: null,
-        usage: null,
-      }, {
-        id: "reasoning-1",
-        kind: "reasoning",
-        source: "agent-native",
-        timestamp: "2026-07-18T08:00:45Z",
-        title: "思考摘要",
-        content: "Check the routing candidates before changing code.",
-        model: null,
-        status: null,
-        durationMs: null,
-        timeToFirstTokenMs: null,
-        usage: null,
-      }, {
-        id: "event-1",
-        kind: "assistant-message",
-        source: "agent-native",
-        timestamp: "2026-07-18T08:01:00Z",
-        title: null,
-        content: "I found the route selection issue.",
-        model: null,
-        status: null,
-        durationMs: null,
-        timeToFirstTokenMs: null,
-        usage: {
-          inputTokens: 500,
-          cachedInputTokens: 100,
-          cacheWriteInputTokens: 0,
-          outputTokens: 200,
-          reasoningTokens: 20,
-          totalTokens: 720,
-          cost: null,
-          costCurrency: null,
-        },
-      }, {
-        id: "event-2",
-        kind: "tool-call",
-        source: "agent-native",
-        timestamp: "2026-07-18T08:02:00Z",
-        title: "cargo test",
-        content: "cargo test routing",
-        model: null,
-        status: "completed",
-        durationMs: null,
-        timeToFirstTokenMs: null,
-        usage: null,
-      }, {
-        id: "event-3",
-        kind: "assistant-message",
-        source: "agent-native",
-        timestamp: "2026-07-18T08:03:00Z",
-        title: null,
-        content: "The fix is complete and tests pass.",
-        model: null,
-        status: null,
-        durationMs: null,
-        timeToFirstTokenMs: null,
-        usage: null,
-      }],
-    },
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
+    refetch: childrenRefetchMock,
   }),
   useOpenCodeSessionPermissions: () => ({
     data: {
@@ -242,6 +116,7 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
       sourceAvailable: true,
       truncated: false,
       turnCount: 2,
+      models: ["native-model"],
       usage: {
         inputTokens: 100000,
         cachedInputTokens: 20000,
@@ -249,13 +124,37 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
         outputTokens: 10000,
         reasoningTokens: 0,
         totalTokens: 135000,
-        cost: null,
-        costCurrency: null,
+        cost: 0.123456,
+        costCurrency: "USD",
       },
     },
     isLoading: false,
     isError: false,
     error: null,
+    refetch: nativeSummaryRefetchMock,
+  }),
+  useAgentSessionLastInteraction: () => ({
+    data: {
+      sourceAvailable: true,
+      truncated: false,
+      turnCount: 1,
+      usage: null,
+      models: ["native-model"],
+      events: [
+        { id: "turn-latest", kind: "turn", source: "agent-native", timestamp: "2026-07-18T09:00:00Z", title: null, content: null, model: "native-model", status: "running", durationMs: null, timeToFirstTokenMs: null, usage: null },
+        { id: "user-latest", kind: "user-message", source: "agent-native", timestamp: "2026-07-18T09:00:00Z", title: null, content: "latest complete input", model: null, status: null, durationMs: null, timeToFirstTokenMs: null, usage: null },
+        { id: "assistant-first", kind: "assistant-message", source: "agent-native", timestamp: "2026-07-18T09:00:01Z", title: null, content: "first output", model: "native-model", status: "completed", durationMs: null, timeToFirstTokenMs: null, usage: null },
+        { id: "reasoning-latest", kind: "reasoning", source: "agent-native", timestamp: "2026-07-18T09:00:02Z", title: "思考摘要", content: "check the implementation", model: null, status: null, durationMs: null, timeToFirstTokenMs: null, usage: null },
+        { id: "tool-call-latest", kind: "tool-call", source: "agent-native", timestamp: "2026-07-18T09:00:03Z", title: "exec_command", content: JSON.stringify({ cmd: "cargo test", workdir: "E:\\flowlet" }), model: null, status: "completed", durationMs: null, timeToFirstTokenMs: null, usage: null },
+        { id: "tool-result-latest", kind: "tool-result", source: "agent-native", timestamp: "2026-07-18T09:00:04Z", title: "exec_command", content: JSON.stringify({ output: "2 tests passed", exit_code: 0 }), model: null, status: "completed", durationMs: null, timeToFirstTokenMs: null, usage: null },
+        { id: "assistant-second", kind: "assistant-message", source: "agent-native", timestamp: "2026-07-18T09:00:02Z", title: null, content: "second output", model: "native-model", status: "completed", durationMs: null, timeToFirstTokenMs: null, usage: null },
+      ],
+    },
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+    refetch: lastInteractionRefetchMock,
   }),
   useAgentSessionClients: () => ({ data: [], isLoading: false }),
 }));
@@ -266,7 +165,13 @@ import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSession
 describe("AgentSessionsPage", () => {
   beforeEach(() => {
     listedSessions = [session];
-    permissionReplyMock.mockClear();
+    [
+      permissionReplyMock,
+      sessionListRefetchMock,
+      childrenRefetchMock,
+      nativeSummaryRefetchMock,
+      lastInteractionRefetchMock,
+    ].forEach((mock) => mock.mockClear());
   });
 
   it("shows request-style token details and aggregate cache hit rate", () => {
@@ -316,7 +221,7 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByText("未经过 Flowlet")).toBeInTheDocument();
   });
 
-  it("opens session details in a side sheet when a row is clicked", () => {
+  it("opens session details and refreshes the active tab", async () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     const rowTitle = screen.getByText("Native session title");
@@ -331,16 +236,41 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByText("子会话（1）")).toBeInTheDocument();
     expect(screen.getByText("Child session title")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
-
-    fireEvent.click(screen.getByRole("tab", { name: "最近交互" }));
-    expect(screen.getByRole("tab", { name: "最近交互" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("会话时间线")).toBeInTheDocument();
-    expect(screen.getByText("Please inspect the routing bug")).toBeInTheDocument();
-    expect(screen.getByText("I found the route selection issue.")).toBeInTheDocument();
-    expect(screen.getByText("The fix is complete and tests pass.")).toBeInTheDocument();
-    expect(screen.getByText("This earlier input should not be shown")).toBeInTheDocument();
-    expect(screen.getByText("This earlier output should not be shown")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("单次原生用量").some((element) => element.textContent?.includes("总计 720"))).toBe(true);
+    const tabList = screen.getByRole("tablist");
+    fireEvent.click(within(tabList).getByRole("button", { name: "刷新" }));
+    await waitFor(() => {
+      expect(sessionListRefetchMock).toHaveBeenCalledOnce();
+      expect(childrenRefetchMock).toHaveBeenCalledOnce();
+      expect(nativeSummaryRefetchMock).toHaveBeenCalledOnce();
+    });
+    [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
+    expect(screen.queryByText("完整展示最后一个用户输入及其后的全部 Agent 输出与过程事件")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "最近一轮" }));
+    fireEvent.click(within(tabList).getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(lastInteractionRefetchMock).toHaveBeenCalledOnce());
+    expect(sessionListRefetchMock).not.toHaveBeenCalled();
+    expect(childrenRefetchMock).not.toHaveBeenCalled();
+    expect(nativeSummaryRefetchMock).not.toHaveBeenCalled();
+    const conversation = screen.getByRole("tabpanel", { name: "最近一轮" });
+    const input = within(conversation).getByLabelText("用户消息");
+    expect(within(input).getByText("latest complete input")).toBeInTheDocument();
+    expect(within(conversation).getByText("first output")).toBeInTheDocument();
+    expect(within(conversation).getByText("second output")).toBeInTheDocument();
+    expect(within(conversation).getByRole("status")).toHaveTextContent("正在处理");
+    expect(within(conversation).queryByText("用户输入")).not.toBeInTheDocument();
+    expect(within(conversation).queryByText("Agent 输出")).not.toBeInTheDocument();
+    expect(within(conversation).queryByText("OpenCode · native-model")).not.toBeInTheDocument();
+    const process = within(conversation).getByText("已处理 3 项").closest("details")!;
+    expect(process).not.toHaveAttribute("open");
+    fireEvent.click(within(conversation).getByText("已处理 3 项"));
+    expect(process).toHaveAttribute("open");
+    expect(within(process).getByText("cargo test")).toBeInTheDocument();
+    expect(within(process).getByText("E:\\flowlet")).toBeInTheDocument();
+    expect(within(process).getByText("2 tests passed")).toBeInTheDocument();
+    expect(within(process).getByText("命令")).toBeInTheDocument();
+    expect(within(process).getByText("工作目录")).toBeInTheDocument();
+    expect(within(process).getByText("退出码")).toBeInTheDocument();
+    expect(screen.queryByText("会话时间线")).not.toBeInTheDocument();
   });
 
   it("falls back to the project name when native title is unavailable", () => {
@@ -394,42 +324,15 @@ describe("AgentSessionsPage", () => {
     expect(screen.getAllByText("—")).toHaveLength(7);
   });
 
-  it("renders the complete native conversation with user, assistant, and activity events interleaved", () => {
+  it("allows a pending OpenCode permission once from the session overview", async () => {
     render(
       <MemoryRouter>
         <AgentSessionDetailSideSheet session={session} onClose={vi.fn()} onViewRequestLogs={vi.fn()} />
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByText("最近交互"));
-    const userMessages = screen.getAllByLabelText("用户消息");
-    const assistantMessages = screen.getAllByLabelText("助手回复");
-    const reasoning = screen.getByLabelText("思考摘要");
-    const toolCall = screen.getByLabelText("工具调用");
-    expect(userMessages[1]).toHaveTextContent("Please inspect the routing bug");
-    expect(reasoning).not.toHaveAttribute("open");
-    expect(assistantMessages[1]).toHaveTextContent("I found the route selection issue.");
-    expect(toolCall).not.toHaveAttribute("open");
-    expect(toolCall).toHaveTextContent("cargo test routing");
-    expect(assistantMessages[2]).toHaveTextContent("The fix is complete and tests pass.");
-    expect(userMessages[1].compareDocumentPosition(reasoning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(reasoning.compareDocumentPosition(assistantMessages[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(assistantMessages[1].compareDocumentPosition(toolCall) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(toolCall.compareDocumentPosition(assistantMessages[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByText("过程记录")).not.toBeInTheDocument();
-    expect(screen.getByText("缓存命中率 16.7%")).toBeInTheDocument();
-  });
-
-  it("allows a pending OpenCode permission once from the recent interaction", async () => {
-    render(
-      <MemoryRouter>
-        <AgentSessionDetailSideSheet session={session} onClose={vi.fn()} onViewRequestLogs={vi.fn()} />
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByText("最近交互"));
-    expect(screen.getByText("OpenCode 等待确认")).toBeInTheDocument();
-    expect(screen.getAllByText("cargo test")).toHaveLength(2);
+    const approval = screen.getByText("OpenCode 等待确认").closest("article")!;
+    expect(within(approval).getByText("cargo test")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "同意本次" }));
 
     await waitFor(() => expect(permissionReplyMock).toHaveBeenCalledWith({ permissionId: "per_test", decision: "allow_once" }));

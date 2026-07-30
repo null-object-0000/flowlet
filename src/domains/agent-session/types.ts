@@ -61,29 +61,6 @@ export const DEFAULT_AGENT_SESSION_FILTER: AgentSessionFilter = {
   flowletStatus: "",
 };
 
-export type AgentSessionTimelineEventKind =
-  | "turn"
-  | "user-message"
-  | "assistant-message"
-  | "reasoning"
-  | "tool-call"
-  | "tool-result"
-  | "error";
-
-export type AgentSessionTimelineEvent = {
-  id: string;
-  kind: AgentSessionTimelineEventKind;
-  source: "agent-native";
-  timestamp: string | null;
-  title: string | null;
-  content: string | null;
-  model: string | null;
-  status: string | null;
-  durationMs: number | null;
-  timeToFirstTokenMs: number | null;
-  usage: AgentSessionNativeUsage | null;
-};
-
 export type AgentSessionNativeUsage = {
   inputTokens: number;
   cachedInputTokens: number;
@@ -97,6 +74,38 @@ export type AgentSessionNativeUsage = {
   planConsumption?: AgentSessionCostEstimate | null;
 };
 
+export type AgentSessionInteractionEventKind =
+  | "turn"
+  | "user-message"
+  | "assistant-message"
+  | "reasoning"
+  | "tool-call"
+  | "tool-result"
+  | "error";
+
+export type AgentSessionInteractionEvent = {
+  id: string;
+  kind: AgentSessionInteractionEventKind;
+  source: "agent-native";
+  timestamp: string | null;
+  title: string | null;
+  content: string | null;
+  model: string | null;
+  status: string | null;
+  durationMs: number | null;
+  timeToFirstTokenMs: number | null;
+  usage: AgentSessionNativeUsage | null;
+};
+
+export type AgentSessionLastInteraction = {
+  sourceAvailable: boolean;
+  truncated: false;
+  turnCount: number;
+  usage: AgentSessionNativeUsage | null;
+  models: string[];
+  events: AgentSessionInteractionEvent[];
+};
+
 export type AgentSessionCostEstimate = {
   amount: number | null;
   currency: string | null;
@@ -104,15 +113,6 @@ export type AgentSessionCostEstimate = {
   priceVersion: string | null;
   pricedTurnCount: number;
   unpricedTurnCount: number;
-};
-
-export type AgentSessionTimeline = {
-  sourceAvailable: boolean;
-  truncated: boolean;
-  turnCount: number;
-  usage: AgentSessionNativeUsage | null;
-  models: string[];
-  events: AgentSessionTimelineEvent[];
 };
 
 export type AgentSessionNativeSummary = {

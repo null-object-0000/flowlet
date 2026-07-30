@@ -23,6 +23,17 @@ export function useDeviceDailyUsage(deviceId: string | null, enabled = true) {
   });
 }
 
+export function useDeviceHourlyUsage(deviceId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.deviceSync.hourlyUsage(deviceId),
+    queryFn: () => deviceSyncCommands.hourlyUsage(deviceId),
+    networkMode: "always",
+    staleTime: 15_000,
+    retry: false,
+    enabled,
+  });
+}
+
 export function useS3SyncSettings() {
   return useQuery({
     queryKey: queryKeys.deviceSync.s3Settings(),

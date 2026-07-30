@@ -11,6 +11,7 @@ pub mod config;
 pub mod cost_ledger_source_probe;
 pub mod device_identity;
 pub mod device_sync;
+pub mod lan_sync;
 pub mod logging;
 pub mod metrics;
 pub mod opencode_control;

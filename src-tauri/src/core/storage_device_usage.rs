@@ -1,7 +1,8 @@
 use super::{Storage, StorageError};
 use crate::core::device_identity::{
     resolve_device_display_name, DailyUsageTotal, DeviceUsageImportPreview,
-    DeviceUsageImportResult, HourlyUsageTotal, KnownDevice, SharedAgentSession, SyncedAgentSession,
+    DeviceUsageImportResult, HourlyUsageTotal, KnownDevice, SharedAgentSession, SyncedAgentProfile,
+    SyncedAgentSession,
 };
 use rusqlite::{params, OptionalExtension};
 
@@ -194,6 +195,7 @@ impl Storage {
         days: &[DailyUsageTotal],
         hours: &[HourlyUsageTotal],
         sessions: &[SyncedAgentSession],
+        agents: &[SyncedAgentProfile],
     ) -> Result<DeviceUsageImportResult, StorageError> {
         let preview = self.preview_device_usage_import(
             "",
@@ -320,6 +322,20 @@ impl Storage {
                         session_json,
                         generated_at,
                     ],
+                )?;
+            }
+            transaction.execute(
+                "DELETE FROM device_agent_profiles WHERE device_id = ?1",
+                [device_id],
+            )?;
+            for agent in agents {
+                let profile_json = serde_json::to_string(agent)
+                    .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+                transaction.execute(
+                    "INSERT INTO device_agent_profiles (
+                        device_id, agent_id, profile_json, snapshot_generated_at, imported_at
+                     ) VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+                    params![device_id, agent.agent_id, profile_json, generated_at],
                 )?;
             }
         }
@@ -524,5 +540,31 @@ impl Storage {
             }
         }
         Ok(sessions)
+    }
+
+    pub fn imported_device_agents(
+        &self,
+        device_id: &str,
+    ) -> Result<Vec<SyncedAgentProfile>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT profile_json FROM device_agent_profiles
+             WHERE device_id = ?1 ORDER BY agent_id",
+        )?;
+        let rows = statement.query_map([device_id], |row| {
+            let profile_json: String = row.get(0)?;
+            serde_json::from_str::<SyncedAgentProfile>(&profile_json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 }

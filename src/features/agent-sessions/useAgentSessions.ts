@@ -29,15 +29,6 @@ export function useAgentSessionChildren(session: AgentSessionRow) {
   });
 }
 
-export function useAgentSessionTimeline(session: AgentSessionRow, enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.agentSession.timeline(session.agentType, session.sessionId),
-    queryFn: () => agentSessionCommands.timeline(session.agentType, session.sessionId),
-    enabled,
-    staleTime: 30_000,
-  });
-}
-
 export function useOpenCodeSessionPermissions(session: AgentSessionRow, enabled = true) {
   return useQuery({
     queryKey: queryKeys.agentSession.openCodePermissions(session.sessionId),
@@ -55,7 +46,6 @@ export function useReplyOpenCodePermission(session: AgentSessionRow) {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.openCodePermissions(session.sessionId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.timeline(session.agentType, session.sessionId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.all }),
       ]);
     },
@@ -66,9 +56,19 @@ export function useAgentSessionNativeSummary(session: AgentSessionRow) {
   return useQuery({
     queryKey: queryKeys.agentSession.nativeSummary(session.agentType, session.sessionId),
     queryFn: () => agentSessionCommands.nativeSummary(session.agentType, session.sessionId),
-    enabled: !session.flowletObserved && !session.nativeSummary,
+    enabled: !session.nativeSummary,
     staleTime: 5 * 60_000,
     gcTime: 10 * 60_000,
+    retry: 1,
+  });
+}
+
+export function useAgentSessionLastInteraction(session: AgentSessionRow, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.agentSession.lastInteraction(session.agentType, session.sessionId),
+    queryFn: () => agentSessionCommands.lastInteraction(session.agentType, session.sessionId),
+    enabled,
+    staleTime: 30_000,
     retry: 1,
   });
 }

@@ -1,0 +1,15 @@
+.mark {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: block;
+  background: currentColor;
+  mask: var(--agent-icon) center / contain no-repeat;
+  -webkit-mask: var(--agent-icon) center / contain no-repeat;
+}
+
+.claude-code { --agent-icon: url("/icons/lobe/claudecode.svg"); color: #d97757; }
+.opencode { --agent-icon: url("/icons/lobe/opencode.svg"); color: var(--flowlet-color-text); }
+.pi { --agent-icon: url("/icons/lobe/pi.svg"); color: var(--flowlet-color-text); }
+.openai { --agent-icon: url("/icons/lobe/openai.svg"); color: var(--flowlet-color-text); }
+.generic { --agent-icon: url("/icons/lobe/openai.svg"); color: var(--flowlet-color-text-tertiary); }

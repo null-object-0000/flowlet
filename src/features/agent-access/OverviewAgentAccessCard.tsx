@@ -104,9 +104,12 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
 
   const applyGlobalConfig = async (options?: AgentGlobalConfigOptions) => {
     try {
-      // 仅 Claude Code 支持可选参数（1M 长上下文开关）；其他 Agent 忽略。
       if (selectedAgent === "claude-code") {
         await claudeGlobalConfig.apply.mutateAsync(options);
+      } else if (selectedAgent === "opencode") {
+        await openCodeGlobalConfig.apply.mutateAsync();
+      } else if (selectedAgent === "pi") {
+        await piGlobalConfig.apply.mutateAsync(options);
       } else {
         await activeGlobalConfig.apply.mutateAsync(undefined);
       }

@@ -36,6 +36,10 @@ describe("deviceSyncCommands contract", () => {
     await deviceSyncCommands.dailyUsage("device-1");
     expect(invokeMock).toHaveBeenLastCalledWith("device_daily_usage", { deviceId: "device-1" });
 
+    invokeMock.mockResolvedValueOnce([]);
+    await deviceSyncCommands.hourlyUsage(null);
+    expect(invokeMock).toHaveBeenLastCalledWith("device_hourly_usage", { deviceId: null });
+
     invokeMock.mockResolvedValueOnce(undefined);
     await deviceSyncCommands.renameCurrentDevice("公司笔记本");
     expect(invokeMock).toHaveBeenLastCalledWith("rename_current_device", { displayName: "公司笔记本" });
@@ -68,7 +72,7 @@ describe("deviceSyncCommands contract", () => {
     expect(invokeMock).toHaveBeenLastCalledWith("sync_device_usage_s3", undefined);
   });
 
-  it("keeps mobile viewer commands read-only", async () => {
+  it("keeps cloud sync read-only while allowing authenticated LAN permission replies", async () => {
     const config = {
       endpoint: "https://example.com",
       region: "auto",
@@ -83,6 +87,10 @@ describe("deviceSyncCommands contract", () => {
     expect(invokeMock).toHaveBeenLastCalledWith("list_shared_devices", undefined);
 
     invokeMock.mockResolvedValueOnce([]);
+    await mobileDeviceSyncCommands.agents("device-1");
+    expect(invokeMock).toHaveBeenLastCalledWith("list_shared_device_agents", { deviceId: "device-1" });
+
+    invokeMock.mockResolvedValueOnce([]);
     await mobileDeviceSyncCommands.dailyUsage(null);
     expect(invokeMock).toHaveBeenLastCalledWith("shared_device_daily_usage", { deviceId: null });
 
@@ -94,6 +102,10 @@ describe("deviceSyncCommands contract", () => {
     await mobileDeviceSyncCommands.sessions("device-1");
     expect(invokeMock).toHaveBeenLastCalledWith("list_shared_device_sessions", { deviceId: "device-1" });
 
+    invokeMock.mockResolvedValueOnce({ attemptedDevices: 1, refreshedDevices: 1, failedDevices: 0 });
+    await mobileDeviceSyncCommands.refreshLan("device-1");
+    expect(invokeMock).toHaveBeenLastCalledWith("refresh_shared_device_usage_lan", { deviceId: "device-1" });
+
     invokeMock.mockResolvedValueOnce({ message: "ok" });
     await mobileDeviceSyncCommands.testS3Connection(config);
     expect(invokeMock).toHaveBeenLastCalledWith("test_s3_read_connection", { config });
@@ -101,5 +113,20 @@ describe("deviceSyncCommands contract", () => {
     invokeMock.mockResolvedValueOnce({ remoteDevices: 1 });
     await mobileDeviceSyncCommands.refreshS3();
     expect(invokeMock).toHaveBeenLastCalledWith("refresh_shared_device_usage_s3", undefined);
+
+    invokeMock.mockResolvedValueOnce({ available: true, permissions: [] });
+    await mobileDeviceSyncCommands.remoteOpenCodePermissions("device-1", "session-1");
+    expect(invokeMock).toHaveBeenLastCalledWith("list_remote_opencode_permissions", {
+      deviceId: "device-1",
+      sessionId: "session-1",
+    });
+
+    invokeMock.mockResolvedValueOnce(undefined);
+    await mobileDeviceSyncCommands.replyRemoteOpenCodePermission("device-1", "permission-1", "allow_once");
+    expect(invokeMock).toHaveBeenLastCalledWith("reply_remote_opencode_permission", {
+      deviceId: "device-1",
+      permissionId: "permission-1",
+      decision: "allow_once",
+    });
   });
 });

@@ -1,19 +1,24 @@
-import { Select } from "@douyinfe/semi-ui-19";
+import { Button, Select, Toast } from "@douyinfe/semi-ui-19";
 import { useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { SharedAgentSession } from "../../domains/device-sync/types";
-import { useMobileDevices, useMobileSessions } from "../../features/device-sync/useMobileDeviceSync";
+import {
+  useMobileRemotePermissions,
+  useMobileSessions,
+  useReplyMobileRemotePermission,
+} from "../../features/device-sync/useMobileDeviceSync";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
+import { MobileDevicePicker } from "../MobileDevicePicker";
+import { useMobileDeviceSelection } from "../MobileDeviceSelection";
 import styles from "./MobilePage.module.css";
 
 type SessionStatusFilter = "all" | "active" | "waiting_user" | "idle";
 
 export function MobileSessionsPage() {
   const { language, t } = useAppPreferences();
-  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const { deviceId } = useMobileDeviceSelection();
   const [statusFilter, setStatusFilter] = useState<SessionStatusFilter>("all");
-  const devices = useMobileDevices();
   const sessions = useMobileSessions(deviceId);
   const rows = useMemo(
     () => (sessions.data ?? []).filter((session) => matchesStatus(session, statusFilter)),
@@ -23,26 +28,15 @@ export function MobileSessionsPage() {
 
   return (
     <section className={styles.page}>
-      <header className={styles.heading}>
-        <div>
+      <header className={`${styles.heading} ${styles.headingWithPicker}`}>
+        <div className={styles.headingTitleRow}>
           <h2>{t("会话")}</h2>
-          <p>{t("查看各设备同步的最近会话与实时运行状态")}</p>
+          <MobileDevicePicker />
         </div>
+        <p>{t("查看各设备同步的最近会话与实时运行状态")}</p>
       </header>
 
       <div className={styles.controls}>
-        <Select
-          value={deviceId ?? "__all__"}
-          aria-label={t("设备")}
-          optionList={[
-            { value: "__all__", label: t("全部设备") },
-            ...(devices.data ?? []).map((device) => ({
-              value: device.deviceId,
-              label: device.displayName,
-            })),
-          ]}
-          onChange={(value) => setDeviceId(value === "__all__" ? null : String(value))}
-        />
         <Select
           value={statusFilter}
           aria-label={t("会话状态")}
@@ -109,11 +103,87 @@ export function MobileSessionsPage() {
                 ) : null}
               </div>
               <time>{t("最近活跃：{time}", { time: formatFullTimestamp(session.activityAt, language) })}</time>
+              {session.agentType === "opencode" ? (
+                <RemoteApprovalActions session={session} />
+              ) : null}
             </article>
           ))}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function RemoteApprovalActions({ session }: { session: SharedAgentSession }) {
+  const { t } = useAppPreferences();
+  const permissions = useMobileRemotePermissions(session.deviceId, session.sessionId, true);
+  const reply = useReplyMobileRemotePermission(session.deviceId, session.sessionId);
+
+  if (permissions.isLoading) {
+    return session.runtimeStatus === "waiting_user"
+      ? <div className={styles.remoteApprovalState}>{t("正在连接 Agent 所在设备…")}</div>
+      : null;
+  }
+  if (permissions.isError || !permissions.data?.available) {
+    return session.runtimeStatus === "waiting_user" ? (
+      <div className={styles.remoteApprovalState} data-error="true">
+        {t("目标设备当前无法直连，请确认两台设备位于同一局域网。")}
+      </div>
+    ) : null;
+  }
+  if (permissions.data.permissions.length === 0) {
+    return session.runtimeStatus === "waiting_user"
+      ? <div className={styles.remoteApprovalState}>{t("该确认请求已处理或已过期。")}</div>
+      : null;
+  }
+
+  const decide = async (permissionId: string, decision: "allow_once" | "reject") => {
+    try {
+      await reply.mutateAsync({ permissionId, decision });
+      Toast.success(decision === "allow_once" ? t("已同意 OpenCode 本次操作") : t("已否决 OpenCode 操作"));
+    } catch (error) {
+      Toast.error(t("OpenCode 操作提交失败：{message}", {
+        message: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  };
+
+  return (
+    <div className={styles.remoteApprovalList}>
+      {permissions.data.permissions.map((permission) => {
+        const submitting = reply.isPending && reply.variables?.permissionId === permission.id;
+        return (
+          <div className={styles.remoteApproval} key={permission.id}>
+            <div>
+              <strong>{permission.permission}</strong>
+              {permission.patterns.length > 0 ? <span>{permission.patterns.join(" · ")}</span> : null}
+            </div>
+            <div className={styles.remoteApprovalActions}>
+              <Button
+                size="small"
+                type="danger"
+                theme="borderless"
+                loading={submitting && reply.variables?.decision === "reject"}
+                disabled={reply.isPending && !submitting}
+                onClick={() => void decide(permission.id, "reject")}
+              >
+                {t("否决")}
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                theme="solid"
+                loading={submitting && reply.variables?.decision === "allow_once"}
+                disabled={reply.isPending && !submitting}
+                onClick={() => void decide(permission.id, "allow_once")}
+              >
+                {t("同意本次")}
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { MobileShell } from "./MobileShell";
 import { MobileOverviewPage } from "./pages/MobileOverviewPage";
+import { MobileDevicesPage } from "./pages/MobileDevicesPage";
 import { MobileSessionsPage } from "./pages/MobileSessionsPage";
 import { MobileSettingsPage } from "./pages/MobileSettingsPage";
 
@@ -11,7 +12,7 @@ export function MobileRouter() {
         <Route element={<MobileShell />}>
           <Route index element={<MobileOverviewPage />} />
           <Route path="usage" element={<Navigate to="/" replace />} />
-          <Route path="devices" element={<Navigate to="/" replace />} />
+          <Route path="devices" element={<MobileDevicesPage />} />
           <Route path="sessions" element={<MobileSessionsPage />} />
           <Route path="settings" element={<MobileSettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

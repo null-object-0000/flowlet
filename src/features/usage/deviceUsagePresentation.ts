@@ -1,5 +1,5 @@
-import type { DailyUsageTotal, HourlyUsageTotal } from "../domains/device-sync/types";
-import { createHeatLevelScale, type HeatLevel } from "../shared/visualization/heatmapLevels";
+import type { DailyUsageTotal, HourlyUsageTotal } from "../../domains/device-sync/types";
+import { createHeatLevelScale, type HeatLevel } from "../../shared/visualization/heatmapLevels";
 
 export type MobileUsagePeriod = "week" | "month";
 
@@ -64,13 +64,27 @@ export function filterMobileUsage(
 }
 
 export function summarizeMobileUsage(days: DailyUsageTotal[]) {
-  return days.reduce((summary, day) => ({
-    requests: summary.requests + day.requestCount,
-    tokens: summary.tokens + day.knownTokens,
-    inputTokens: summary.inputTokens + day.inputTokens,
-    cachedInputTokens: summary.cachedInputTokens + day.inputCachedTokens,
-    outputTokens: summary.outputTokens + day.outputTokens,
-  }), { requests: 0, tokens: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
+  const summary = days.reduce((total, day) => ({
+    requests: total.requests + day.requestCount,
+    tokens: total.tokens + day.knownTokens,
+    inputTokens: total.inputTokens + day.inputTokens,
+    cachedInputTokens: total.cachedInputTokens + day.inputCachedTokens,
+    cacheMeasuredInputTokens: total.cacheMeasuredInputTokens + day.cacheMeasuredInputTokens,
+    outputTokens: total.outputTokens + day.outputTokens,
+  }), {
+    requests: 0,
+    tokens: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheMeasuredInputTokens: 0,
+    outputTokens: 0,
+  });
+  return {
+    ...summary,
+    cacheHitRate: summary.cacheMeasuredInputTokens > 0
+      ? Math.max(0, Math.min(1, summary.cachedInputTokens / summary.cacheMeasuredInputTokens))
+      : null,
+  };
 }
 
 export function buildMobileUsageHeatmap(

@@ -72,6 +72,6 @@ Flowlet 不要求 OpenCode 使用固定控制端口。OpenCode Desktop 自带的
 
 接入状态同时检查 Provider、凭据、主/快速模型和权限插件。只有这些项目都已写入时才显示“已接入 Flowlet”；权限插件缺失或内容落后于当前 Flowlet 托管版本时显示“配置不完整”，接入详情中会标记“权限插件：需安装或更新”，重新写入 Flowlet 配置即可补齐。
 
-会话列表和“最近交互”优先使用插件或控制接口返回的 pending permission：只要某会话仍有待确认权限，状态直接为 `waiting_user`；permission 消失后立即回退到 OpenCode SQLite message 推断。详情中的“同意本次”与“否决”会优先经对应进程的插件交回 OpenCode，因此 Desktop sidecar 即使启用了内部鉴权也不需要 Flowlet 读取其密码。插件或控制服务暂不可用时保持 SQLite 回退，不会把只读会话观测整体判为失败。
+会话列表和详情优先使用插件或控制接口返回的 pending permission：只要某会话仍有待确认权限，状态直接为 `waiting_user`；permission 消失后立即回退到 OpenCode SQLite message 推断。详情中的“同意本次”与“否决”会优先经对应进程的插件交回 OpenCode，因此 Desktop sidecar 即使启用了内部鉴权也不需要 Flowlet 读取其密码。插件或控制服务暂不可用时保持 SQLite 回退，不会把只读会话观测整体判为失败。
 
 应用配置后必须重启已经运行的 OpenCode 进程，才能加载权限事件插件；不需要重启 Flowlet 代理。

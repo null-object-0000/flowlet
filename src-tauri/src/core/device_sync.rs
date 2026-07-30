@@ -1,5 +1,9 @@
+use crate::core::agent_environment::{AgentInstallMethod, AgentSurface};
+use crate::core::agent_global_config::AgentGlobalConfigState;
+use crate::core::config::ProxyBindConfig;
 use crate::core::device_identity::{
-    DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, SyncedAgentSession,
+    DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, SyncedAgentInstallation,
+    SyncedAgentInteraction, SyncedAgentInteractionEvent, SyncedAgentProfile, SyncedAgentSession,
 };
 use crate::core::storage::Storage;
 use reqwest::{Client, Response, StatusCode};
@@ -15,9 +19,9 @@ const CONFIG_KEY: &str = "device_sync_s3_config_v1";
 const STATUS_KEY: &str = "device_sync_s3_status_v1";
 const CURRENT_ETAG_KEY: &str = "device_sync_s3_current_etag_v1";
 const KEYRING_SERVICE: &str = "Flowlet Device Sync";
-const MAX_REMOTE_BUNDLE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_REMOTE_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
 const SIGNED_URL_TTL: Duration = Duration::from_secs(60);
-pub const AUTO_SYNC_INITIAL_DELAY: Duration = Duration::from_secs(60);
+pub const AUTO_SYNC_INITIAL_DELAY: Duration = Duration::from_secs(5);
 pub const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 pub const SYNC_ALREADY_RUNNING_ERROR: &str = "设备用量同步正在运行";
 static SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -113,39 +117,180 @@ pub struct S3DeviceSyncResult {
     pub uploaded_key: String,
 }
 
-pub fn build_device_snapshot(
-    storage: &Storage,
-    identity: &DeviceIdentity,
+pub async fn build_device_snapshot(
+    storage: Storage,
+    identity: DeviceIdentity,
 ) -> Result<DeviceUsageSnapshot, String> {
-    let days = storage
-        .daily_usage_totals()
-        .map_err(|error| error.to_string())?;
-    let hours = storage
-        .hourly_usage_totals()
-        .map_err(|error| error.to_string())?;
-    let sessions = storage
-        .list_agent_sessions_for_device_sync()
-        .map_err(|error| error.to_string())?
+    let snapshot_storage = storage.clone();
+    let (days, hours, sessions) = tauri::async_runtime::spawn_blocking(move || {
+        let days = snapshot_storage
+            .daily_usage_totals()
+            .map_err(|error| error.to_string())?;
+        let hours = snapshot_storage
+            .hourly_usage_totals()
+            .map_err(|error| error.to_string())?;
+        let sessions = snapshot_storage
+            .list_agent_sessions_for_device_sync()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|row| SyncedAgentSession {
+                agent_type: row.agent_type,
+                session_id: row.session_id,
+                parent_session_id: row.parent_session_id,
+                runtime_status: row.runtime_status,
+                title: sanitize_session_text(row.title, 512),
+                client_name: sanitize_session_text(row.client_name, 128),
+                activity_at: row.activity_at,
+                flowlet_observed: row.flowlet_observed,
+                request_count: row.request_count,
+                error_count: row.error_count,
+                known_tokens: row.known_tokens,
+                last_interaction: None,
+            })
+            .collect::<Vec<_>>();
+        let mut sessions = select_sessions_for_sync(sessions);
+        for session in &mut sessions {
+            match crate::core::agent_session_timeline::get_native_agent_session_last_interaction(
+                &session.agent_type,
+                &session.session_id,
+            ) {
+                Ok(Some(timeline)) => {
+                    session.last_interaction = Some(SyncedAgentInteraction {
+                        events: timeline
+                            .events
+                            .into_iter()
+                            .map(|event| SyncedAgentInteractionEvent {
+                                id: event.id,
+                                kind: event.kind,
+                                timestamp: event.timestamp,
+                                title: event.title,
+                                content: event.content,
+                                model: event.model,
+                                status: event.status,
+                            })
+                            .collect(),
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => tracing::warn!(
+                    agent_type = session.agent_type,
+                    session_id = session.session_id,
+                    error,
+                    "读取设备同步会话最后交互失败"
+                ),
+            }
+        }
+        Ok::<_, String>((days, hours, sessions))
+    })
+    .await
+    .map_err(|_| "生成设备用量快照任务失败".to_string())??;
+    let agents = build_synced_agent_profiles(&storage, &sessions).await?;
+    let mut snapshot = DeviceUsageSnapshot::new(&identity, days, hours, sessions, agents);
+    snapshot.lan_peer = crate::core::lan_sync::current_descriptor(&storage);
+    Ok(snapshot)
+}
+
+async fn build_synced_agent_profiles(
+    storage: &Storage,
+    sessions: &[SyncedAgentSession],
+) -> Result<Vec<SyncedAgentProfile>, String> {
+    let (claude, opencode, pi, chatgpt) = tokio::join!(
+        crate::core::agent_environment::detect_agent_environment("claude-code"),
+        crate::core::agent_environment::detect_agent_environment("opencode"),
+        crate::core::agent_environment::detect_agent_environment("pi"),
+        crate::core::agent_environment::detect_agent_environment("chatgpt-desktop"),
+    );
+    let environments = [claude?, opencode?, pi?, chatgpt?];
+    let config_storage = storage.clone();
+    let config_states = tauri::async_runtime::spawn_blocking(move || {
+        let bind = config_storage
+            .get_app_meta("proxy_bind_config")
+            .unwrap_or_default()
+            .and_then(|json| serde_json::from_str::<ProxyBindConfig>(&json).ok())
+            .unwrap_or_default()
+            .normalized();
+        [
+            (
+                "claude-code",
+                format!("http://127.0.0.1:{}/anthropic", bind.port),
+            ),
+            ("opencode", format!("http://127.0.0.1:{}/v1", bind.port)),
+            ("pi", format!("http://127.0.0.1:{}/v1", bind.port)),
+        ]
         .into_iter()
-        .map(|row| SyncedAgentSession {
-            agent_type: row.agent_type,
-            session_id: row.session_id,
-            runtime_status: row.runtime_status,
-            title: sanitize_session_text(row.title, 512),
-            client_name: sanitize_session_text(row.client_name, 128),
-            activity_at: row.activity_at,
-            flowlet_observed: row.flowlet_observed,
-            request_count: row.request_count,
-            error_count: row.error_count,
-            known_tokens: row.known_tokens,
+        .map(|(agent_id, base_url)| {
+            let state =
+                crate::core::agent_global_config::inspect_agent_global_config(agent_id, &base_url)
+                    .ok()
+                    .map(|report| global_config_state_name(&report.state).to_string());
+            (agent_id.to_string(), state)
         })
-        .collect();
-    Ok(DeviceUsageSnapshot::new(
-        identity,
-        days,
-        hours,
-        select_sessions_for_sync(sessions),
-    ))
+        .collect::<std::collections::HashMap<_, _>>()
+    })
+    .await
+    .map_err(|_| "检测 Agent 接入状态任务失败".to_string())?;
+
+    Ok(environments
+        .into_iter()
+        .map(|environment| SyncedAgentProfile {
+            flowlet_observed: sessions.iter().any(|session| {
+                session.flowlet_observed
+                    && session_matches_agent(&session.agent_type, &environment.agent_id)
+            }),
+            flowlet_config_state: config_states.get(&environment.agent_id).cloned().flatten(),
+            agent_id: environment.agent_id,
+            agent_name: environment.agent_name,
+            installed: environment.installed,
+            installations: environment
+                .installations
+                .into_iter()
+                .map(|installation| SyncedAgentInstallation {
+                    surface: agent_surface_name(&installation.surface).to_string(),
+                    install_method: agent_install_method_name(&installation.install_method)
+                        .to_string(),
+                    version: installation.version,
+                })
+                .collect(),
+        })
+        .collect())
+}
+
+fn global_config_state_name(state: &AgentGlobalConfigState) -> &'static str {
+    match state {
+        AgentGlobalConfigState::NotConfigured => "not_configured",
+        AgentGlobalConfigState::Flowlet => "flowlet",
+        AgentGlobalConfigState::OtherGateway => "other_gateway",
+        AgentGlobalConfigState::Partial => "partial",
+        AgentGlobalConfigState::Invalid => "invalid",
+    }
+}
+
+fn agent_surface_name(surface: &AgentSurface) -> &'static str {
+    match surface {
+        AgentSurface::Cli => "cli",
+        AgentSurface::Desktop => "desktop",
+    }
+}
+
+fn agent_install_method_name(method: &AgentInstallMethod) -> &'static str {
+    match method {
+        AgentInstallMethod::Native => "native",
+        AgentInstallMethod::Winget => "winget",
+        AgentInstallMethod::Npm => "npm",
+        AgentInstallMethod::Bun => "bun",
+        AgentInstallMethod::LegacyNpm => "legacy_npm",
+        AgentInstallMethod::Homebrew => "homebrew",
+        AgentInstallMethod::SystemPackage => "system_package",
+        AgentInstallMethod::Desktop => "desktop",
+        AgentInstallMethod::Unknown => "unknown",
+    }
+}
+
+fn session_matches_agent(agent_type: &str, agent_id: &str) -> bool {
+    match agent_id {
+        "chatgpt-desktop" => matches!(agent_type, "codex-cli" | "codex-desktop"),
+        _ => agent_type == agent_id,
+    }
 }
 
 fn sanitize_session_text(value: Option<String>, max_chars: usize) -> Option<String> {
@@ -403,14 +548,14 @@ impl S3Store {
             .sign(SIGNED_URL_TTL);
         let response = checked_response(self.client.get(url).send().await, "下载对象").await?;
         if response.content_length().unwrap_or(0) > MAX_REMOTE_BUNDLE_BYTES {
-            return Err("远端设备快照超过 4 MB 限制".to_string());
+            return Err("远端设备快照超过 64 MB 限制".to_string());
         }
         let bytes = response
             .bytes()
             .await
             .map_err(|_| "读取远端设备快照失败".to_string())?;
         if bytes.len() as u64 > MAX_REMOTE_BUNDLE_BYTES {
-            return Err("远端设备快照超过 4 MB 限制".to_string());
+            return Err("远端设备快照超过 64 MB 限制".to_string());
         }
         Ok(bytes.to_vec())
     }
@@ -704,7 +849,7 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
     for object in &remote_objects {
         let object_label = snapshot_object_label(&object.key);
         if object.size > MAX_REMOTE_BUNDLE_BYTES {
-            failure_details.push(format!("{object_label}：快照超过 4 MB 限制"));
+            failure_details.push(format!("{object_label}：快照超过 64 MB 限制"));
             continue;
         }
         let bundle = match store.get(&object.key).await {
@@ -723,7 +868,8 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
             }
         };
         if config.snapshot_key(&bundle.snapshot.device_id) == object.key {
-            bundles.push(bundle);
+            crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
+            bundles.push(prefer_lan_bundle(&storage, bundle).await);
         } else {
             failure_details.push(format!("{object_label}：快照 deviceId 与对象路径不一致"));
         }
@@ -750,6 +896,7 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
                 &snapshot.days,
                 &snapshot.hours,
                 &snapshot.sessions,
+                &snapshot.agents,
             ) {
                 Ok(result) => result,
                 Err(error) => {
@@ -914,7 +1061,8 @@ pub async fn sync_device_usage(
                 if bundle.snapshot.device_id != identity.device_id
                     && config.snapshot_key(&bundle.snapshot.device_id) == object.key =>
             {
-                bundles.push(bundle)
+                crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
+                bundles.push(prefer_lan_bundle(&storage, bundle).await)
             }
             Ok(_) => failed_objects += 1,
             Err(_) => failed_objects += 1,
@@ -941,6 +1089,7 @@ pub async fn sync_device_usage(
                 &snapshot.days,
                 &snapshot.hours,
                 &snapshot.sessions,
+                &snapshot.agents,
             ) {
                 Ok(result) => result,
                 Err(_) => {
@@ -962,14 +1111,7 @@ pub async fn sync_device_usage(
     .await
     .map_err(|_| "导入远端设备快照任务失败".to_string())??;
 
-    let snapshot_storage = storage.clone();
-    let snapshot_identity = identity.clone();
-    let snapshot = tauri::async_runtime::spawn_blocking(move || {
-        build_device_snapshot(&snapshot_storage, &snapshot_identity)
-    })
-    .await
-    .map_err(|_| "生成当前设备快照任务失败".to_string())?
-    .map_err(|error| error.to_string())?;
+    let snapshot = build_device_snapshot(storage.clone(), identity.clone()).await?;
     let bundle = DeviceUsageBundle::new(snapshot);
     let bytes =
         serde_json::to_vec_pretty(&bundle).map_err(|_| "序列化当前设备快照失败".to_string())?;
@@ -1001,6 +1143,41 @@ pub async fn sync_device_usage(
         failed_objects: failed_objects + import_result.3,
         uploaded_key: current_key,
     })
+}
+
+async fn prefer_lan_bundle(storage: &Storage, fallback: DeviceUsageBundle) -> DeviceUsageBundle {
+    let Some(descriptor) = fallback.snapshot.lan_peer.as_ref() else {
+        return fallback;
+    };
+    match crate::core::lan_sync::fetch_snapshot(descriptor).await {
+        Ok(bundle)
+            if bundle.validate().is_ok()
+                && bundle.snapshot.device_id == fallback.snapshot.device_id
+                && snapshot_is_newer(
+                    &bundle.snapshot.generated_at,
+                    &fallback.snapshot.generated_at,
+                ) =>
+        {
+            crate::core::lan_sync::remember_peer(storage, &bundle.snapshot);
+            tracing::debug!(device_id = %bundle.snapshot.device_id, "使用局域网直连设备快照");
+            bundle
+        }
+        Ok(_) => fallback,
+        Err(error) => {
+            tracing::debug!(device_id = %fallback.snapshot.device_id, %error, "局域网快照不可用，回退 S3");
+            fallback
+        }
+    }
+}
+
+fn snapshot_is_newer(candidate: &str, fallback: &str) -> bool {
+    match (
+        chrono::DateTime::parse_from_rfc3339(candidate),
+        chrono::DateTime::parse_from_rfc3339(fallback),
+    ) {
+        (Ok(candidate), Ok(fallback)) => candidate > fallback,
+        _ => false,
+    }
 }
 
 pub async fn run_configured_sync(
@@ -1147,6 +1324,7 @@ mod tests {
         SyncedAgentSession {
             agent_type: "codex-cli".to_string(),
             session_id: format!("session-{id:02}"),
+            parent_session_id: None,
             runtime_status: status.to_string(),
             title: Some(format!("Session {id}")),
             client_name: Some("Codex CLI".to_string()),
@@ -1155,6 +1333,7 @@ mod tests {
             request_count: id as i64,
             error_count: 0,
             known_tokens: id as i64 * 100,
+            last_interaction: None,
         }
     }
 

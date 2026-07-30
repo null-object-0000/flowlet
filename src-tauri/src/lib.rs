@@ -737,6 +737,27 @@ fn run_desktop() {
                 }
             }
 
+            // LAN 服务只承担同一 S3 信任域内设备的直连加速与可操作事件转发。
+            // 监听失败不会影响代理或 S3 快照同步；后者仍是完整的回退路径。
+            let lan_storage = state.storage.clone();
+            let lan_identity = state.device_identity.clone();
+            tauri::async_runtime::spawn(async move {
+                let identity = match lan_identity.lock() {
+                    Ok(identity) => identity.clone(),
+                    Err(_) => {
+                        tracing::warn!("局域网同步服务无法读取设备身份");
+                        return;
+                    }
+                };
+                match crate::core::lan_sync::start_server(lan_storage, identity).await {
+                    Ok(descriptor) => tracing::info!(
+                        endpoints = ?descriptor.endpoints,
+                        "局域网同步服务已启动"
+                    ),
+                    Err(error) => tracing::warn!(%error, "局域网同步服务未启用"),
+                }
+            });
+
             // 关闭窗口时隐藏到托盘，而非退出。自启动传入 --hidden 时保持后台托盘模式。
             if let Some(window) = app.get_webview_window("main") {
                 if !start_hidden {
@@ -823,7 +844,8 @@ fn run_desktop() {
                 *tray_guard = Some(tray);
             }
 
-            // S3 设备用量后台同步：启动后 1 分钟首次检查，之后每 15 分钟执行一次。
+            // S3 设备用量后台同步：启动后 5 秒首次检查，以尽快发布 LAN 端点；
+            // 之后每 15 分钟执行一次。
             // 未配置时静默跳过；与手动同步重叠时由共享 guard 去重。窗口隐藏到托盘后
             // Tauri runtime 仍然存活，因此定时同步会继续运行，退出 Flowlet 时停止。
             let s3_timer_storage = state.storage.clone();
@@ -1024,6 +1046,7 @@ fn run_desktop() {
             commands::list_known_devices,
             commands::list_shared_devices,
             commands::device_daily_usage,
+            commands::device_hourly_usage,
             commands::shared_device_daily_usage,
             commands::shared_device_hourly_usage,
             commands::rename_current_device,
@@ -1034,16 +1057,19 @@ fn run_desktop() {
             commands::test_s3_read_connection,
             commands::sync_device_usage_s3,
             commands::refresh_shared_device_usage_s3,
+            commands::list_remote_opencode_permissions,
+            commands::reply_remote_opencode_permission,
+            commands::refresh_shared_device_usage_lan,
             commands::export_device_usage_bundle,
             commands::preview_device_usage_import,
             commands::import_device_usage_bundle,
             commands::list_request_logs,
             commands::list_agent_sessions,
             commands::list_agent_session_children,
-            commands::get_agent_session_timeline,
             commands::list_opencode_session_permissions,
             commands::reply_opencode_permission,
             commands::get_agent_session_native_summary,
+            commands::get_agent_session_last_interaction,
             commands::sync_agent_data,
             commands::list_background_jobs,
             commands::get_background_job_detail,
@@ -1128,6 +1154,7 @@ fn run_mobile() {
         })
         .invoke_handler(tauri::generate_handler![
             mobile_commands::list_shared_devices,
+            mobile_commands::list_shared_device_agents,
             mobile_commands::shared_device_daily_usage,
             mobile_commands::shared_device_hourly_usage,
             mobile_commands::list_shared_device_sessions,
@@ -1135,6 +1162,9 @@ fn run_mobile() {
             mobile_commands::save_s3_sync_config,
             mobile_commands::test_s3_read_connection,
             mobile_commands::refresh_shared_device_usage_s3,
+            mobile_commands::list_remote_opencode_permissions,
+            mobile_commands::reply_remote_opencode_permission,
+            mobile_commands::refresh_shared_device_usage_lan,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet Mobile 失败");

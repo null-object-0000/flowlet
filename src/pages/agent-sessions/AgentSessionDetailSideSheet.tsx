@@ -1,9 +1,9 @@
 import { Button, SideSheet, Tabs, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconExternalOpen } from "@douyinfe/semi-icons";
+import { IconCopy, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { AgentSessionNativeUsage, AgentSessionRow, AgentSessionTimeline, AgentSessionTimelineEvent, OpenCodePermissionRequest } from "../../domains/agent-session/types";
-import { useAgentSessionChildren, useAgentSessionTimeline, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
+import type { AgentSessionInteractionEvent, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionNativeUsage, AgentSessionRow, OpenCodePermissionRequest } from "../../domains/agent-session/types";
+import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
@@ -14,16 +14,37 @@ export function AgentSessionDetailSideSheet({
   session,
   onClose,
   onViewRequestLogs,
+  onRefreshOverview,
 }: {
   session: AgentSessionRow;
   onClose: () => void;
   onViewRequestLogs: (sessionId: string) => void;
+  onRefreshOverview?: () => Promise<unknown> | void;
 }) {
   const { language, t } = useAppPreferences();
-  const [activeTab, setActiveTab] = useState<"overview" | "recent">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "last-interaction">("overview");
+  const [refreshing, setRefreshing] = useState(false);
   const title = sessionDisplayTitle(session);
   const children = useAgentSessionChildren(session);
-  const timeline = useAgentSessionTimeline(session);
+  const nativeSummary = useAgentSessionNativeSummary(session);
+  const lastInteraction = useAgentSessionLastInteraction(session, activeTab === "last-interaction");
+  const nativeUsage = session.nativeSummary ?? nativeSummary.data;
+  const refreshActiveTab = async () => {
+    setRefreshing(true);
+    try {
+      if (activeTab === "last-interaction") {
+        await lastInteraction.refetch();
+        return;
+      }
+      await Promise.all([
+        children.refetch(),
+        nativeSummary.refetch(),
+        onRefreshOverview?.(),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <SideSheet
@@ -41,10 +62,24 @@ export function AgentSessionDetailSideSheet({
         type="line"
         activeKey={activeTab}
         tabPaneMotion={false}
-        onChange={(key) => setActiveTab(key as "overview" | "recent")}
+        onChange={(key) => setActiveTab(key as "overview" | "last-interaction")}
+        tabBarExtraContent={(
+          <Button
+            className={styles.tabRefresh}
+            icon={<IconRefresh />}
+            aria-label={t("刷新")}
+            size="small"
+            theme="borderless"
+            loading={refreshing}
+            onClick={() => void refreshActiveTab()}
+          >
+            {t("刷新")}
+          </Button>
+        )}
       >
         <Tabs.TabPane tab={t("概览")} itemKey="overview">
           <div className={styles.body}>
+            <OpenCodeApprovalSection session={session} />
             <DetailSection title={t("会话信息")}>
               <div className={styles.detailGrid}>
                 <DetailItem label={t("会话标题")} value={title} wide />
@@ -81,11 +116,11 @@ export function AgentSessionDetailSideSheet({
 
             <NativeUsageSection
               agentType={session.agentType}
-              data={timeline.data}
-              loading={timeline.isLoading}
-              error={timeline.isError ? timeline.error.message : null}
+              data={nativeUsage}
+              loading={nativeSummary.isLoading}
+              error={nativeSummary.isError ? nativeSummary.error.message : null}
               language={language}
-              onRetry={() => void timeline.refetch()}
+              onRetry={() => void nativeSummary.refetch()}
             />
 
             <ChildSessionsSection
@@ -98,16 +133,14 @@ export function AgentSessionDetailSideSheet({
             />
           </div>
         </Tabs.TabPane>
-        <Tabs.TabPane tab={t("最近交互")} itemKey="recent">
+        <Tabs.TabPane tab={t("最近一轮")} itemKey="last-interaction">
           <div className={styles.body}>
-            <RecentInteractionSection
-              session={session}
-              data={timeline.data}
-              loading={timeline.isLoading}
-              fetching={timeline.isFetching}
-              error={timeline.isError ? timeline.error.message : null}
+            <LastInteractionSection
+              data={lastInteraction.data}
+              loading={lastInteraction.isLoading}
+              error={lastInteraction.isError ? lastInteraction.error.message : null}
               language={language}
-              onRetry={() => void timeline.refetch()}
+              onRetry={() => void lastInteraction.refetch()}
             />
           </div>
         </Tabs.TabPane>
@@ -116,56 +149,103 @@ export function AgentSessionDetailSideSheet({
   );
 }
 
-function RecentInteractionSection({
-  session,
+function LastInteractionSection({
   data,
   loading,
-  fetching,
   error,
   language,
   onRetry,
 }: {
-  session: AgentSessionRow;
-  data: AgentSessionTimeline | undefined;
+  data: AgentSessionLastInteraction | null | undefined;
   loading: boolean;
-  fetching: boolean;
   error: string | null;
   language: "zh-CN" | "en-US";
   onRetry: () => void;
 }) {
   const { t } = useAppPreferences();
-  const events = data ? visibleTimelineEvents(data.events) : [];
+  const turnEvent = data?.events.find((event) => event.kind === "turn") ?? null;
+  const events = data?.events.filter((event) => event.kind !== "turn") ?? [];
+  const userEventIndex = events.findIndex((event) => event.kind === "user-message");
+  const userEvent = userEventIndex >= 0 ? events[userEventIndex] : null;
+  const outputEvents = userEventIndex >= 0 ? events.slice(userEventIndex + 1) : events;
+  const outputItems = groupInteractionEvents(outputEvents);
+  const hasAssistantMessage = outputEvents.some((event) => event.kind === "assistant-message");
   return (
-    <section className={styles.section}>
-      <div className={styles.timelineHeader}>
-        <div>
-          <strong className={styles.sectionTitle}>{t("会话时间线")}</strong>
-          <span>{t("按原生顺序混合展示用户输入、Agent 输出、思考与工具活动")}</span>
-        </div>
-        <Button size="small" theme="borderless" loading={fetching && !loading} onClick={onRetry}>{t("刷新")}</Button>
-      </div>
-      {loading ? <div className={styles.timelineLoading}><span /><span /><span /></div> : null}
+    <div className={styles.lastInteractionContent}>
+      {loading ? <div className={styles.interactionLoading}><span /><span /><span /></div> : null}
       {error ? (
         <div className={styles.childError}>
-          <span>{t("最近交互加载失败：{message}", { message: error })}</span>
+          <span>{t("最近一轮加载失败：{message}", { message: error })}</span>
           <Button size="small" onClick={onRetry}>{t("重试")}</Button>
         </div>
       ) : null}
-      {!loading && !error && data && !data.sourceAvailable ? (
-        <div className={styles.timelineEmpty}>{t("未找到可读取的原生会话数据")}</div>
+      {!loading && !error && events.length === 0 ? (
+        <div className={styles.emptyState}>{t("未找到可读取的最近一轮")}</div>
       ) : null}
-      {!loading && !error && data?.sourceAvailable && events.length === 0 ? (
-        <div className={styles.timelineEmpty}>{t("未找到可展示的会话事件")}</div>
+      {!loading && !error && events.length > 0 ? (
+        <div className={styles.interactionFlow} aria-label={t("最近一轮")}>
+          {userEvent ? (
+            <article className={styles.userMessageRow} aria-label={t("用户消息")}>
+              {userEvent.content ? <pre className={styles.userMessageBubble}>{userEvent.content}</pre> : null}
+            </article>
+          ) : null}
+          {outputItems.length > 0 ? (
+            <div className={styles.outputStream}>
+              {outputItems.map((item) => item.kind === "event" ? (
+                <InteractionOutputEvent key={item.event.id} event={item.event} language={language} />
+              ) : (
+                <InteractionProcessGroup key={item.id} events={item.events} language={language} />
+              ))}
+            </div>
+          ) : null}
+          {turnEvent?.status === "running" ? (
+            <div className={styles.interactionProgress} role="status"><i />{t("正在处理")}</div>
+          ) : null}
+          {turnEvent?.status === "cancelled" && !hasAssistantMessage ? (
+            <div className={styles.interactionNotice}>{t("本轮已中断，未生成回复")}</div>
+          ) : null}
+          {turnEvent?.status === "completed" && !hasAssistantMessage ? (
+            <div className={styles.interactionNotice}>{t("本轮未生成可展示的回复")}</div>
+          ) : null}
+        </div>
       ) : null}
-      {!loading && !error && data && events.length > 0 ? (
-        <>
-          {data.truncated ? <div className={styles.timelineNotice}>{t("原生内容受读取上限影响，最近交互可能不完整")}</div> : null}
-          <RecentConversation session={session} events={events} language={language} />
-        </>
-      ) : null}
-      {!loading && !error ? <OpenCodeApprovalSection session={session} /> : null}
-    </section>
+    </div>
   );
+}
+
+type InteractionDisplayItem =
+  | { kind: "event"; event: AgentSessionInteractionEvent }
+  | { kind: "process"; id: string; events: AgentSessionInteractionEvent[] };
+
+export function groupInteractionEvents(events: AgentSessionInteractionEvent[]): InteractionDisplayItem[] {
+  const items: InteractionDisplayItem[] = [];
+  let processEvents: AgentSessionInteractionEvent[] = [];
+  const flushProcess = () => {
+    if (processEvents.length === 0) return;
+    items.push({ kind: "process", id: `process:${processEvents[0].id}`, events: processEvents });
+    processEvents = [];
+  };
+  for (const event of events) {
+    if (isProcessEvent(event)) {
+      processEvents.push(event);
+    } else {
+      flushProcess();
+      items.push({ kind: "event", event });
+    }
+  }
+  flushProcess();
+  return items;
+}
+
+function isProcessEvent(event: AgentSessionInteractionEvent) {
+  return matchesInteractionKind(event.kind, ["reasoning", "tool-call", "tool-result"]);
+}
+
+function matchesInteractionKind(
+  kind: AgentSessionInteractionEvent["kind"],
+  candidates: AgentSessionInteractionEvent["kind"][],
+) {
+  return candidates.includes(kind);
 }
 
 function OpenCodeApprovalSection({ session }: { session: AgentSessionRow }) {
@@ -223,10 +303,6 @@ function OpenCodeApprovalSection({ session }: { session: AgentSessionRow }) {
   );
 }
 
-export function visibleTimelineEvents(events: AgentSessionTimelineEvent[]) {
-  return events.filter((event) => event.kind !== "turn");
-}
-
 function NativeUsageSection({
   agentType,
   data,
@@ -236,7 +312,7 @@ function NativeUsageSection({
   onRetry,
 }: {
   agentType: AgentSessionRow["agentType"];
-  data: AgentSessionTimeline | undefined;
+  data: AgentSessionNativeSummary | undefined;
   loading: boolean;
   error: string | null;
   language: "zh-CN" | "en-US";
@@ -254,7 +330,7 @@ function NativeUsageSection({
         </div>
       ) : null}
       {!loading && !error && (!data?.sourceAvailable || !data.usage) ? (
-        <div className={styles.timelineEmpty}>{t("Agent 原生数据未提供 Token 用量")}</div>
+        <div className={styles.emptyState}>{t("Agent 原生数据未提供 Token 用量")}</div>
       ) : null}
       {!loading && !error && data?.usage ? (
         <>
@@ -270,7 +346,7 @@ function NativeUsageSection({
             <Metric label={t("套餐消耗")} value={data.usage.planConsumption ? formatCostAmount(data.usage.planConsumption, 4) : "—"} />
             {data.usage.cost != null ? <Metric label={t("原生实际费用")} value={formatNativeCost(data.usage)} /> : null}
           </div>
-          {data.models.length > 0 ? <p className={styles.usageModels}>{t("模型：{models}", { models: data.models.join("、") })}</p> : null}
+          {(data.models ?? []).length > 0 ? <p className={styles.usageModels}>{t("模型：{models}", { models: data.models.join("、") })}</p> : null}
           {data.usage.apiEquivalent ? <EstimateMeta label={t("API 价格")} estimate={data.usage.apiEquivalent} /> : null}
           {data.usage.planConsumption ? <EstimateMeta label={t("套餐价格")} estimate={data.usage.planConsumption} /> : null}
         </>
@@ -279,94 +355,141 @@ function NativeUsageSection({
   );
 }
 
-function RecentConversation({
-  session,
+function InteractionProcessGroup({
   events,
   language,
 }: {
-  session: AgentSessionRow;
-  events: AgentSessionTimelineEvent[];
+  events: AgentSessionInteractionEvent[];
   language: "zh-CN" | "en-US";
 }) {
   const { t } = useAppPreferences();
+  const toolCalls = events.filter((event) => event.kind === "tool-call").length;
+  const reasoning = events.filter((event) => event.kind === "reasoning").length;
   return (
-    <div className={styles.conversation} aria-label={t("会话时间线")}>
-      {events.map((event) => (
-        <ConversationTimelineEvent
-          key={event.id}
-          session={session}
-          event={event}
-          language={language}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ConversationTimelineEvent({
-  session,
-  event,
-  language,
-}: {
-  session: AgentSessionRow;
-  event: AgentSessionTimelineEvent;
-  language: "zh-CN" | "en-US";
-}) {
-  const { t } = useAppPreferences();
-  if (event.kind === "user-message") {
-    return (
-      <article className={styles.userMessageRow} aria-label={t("用户消息")}>
-        <div className={styles.userMessageBubble}>
-          {event.content ? <pre>{event.content}</pre> : null}
-          {event.timestamp ? <time>{formatTimestamp(event.timestamp, language)}</time> : null}
-        </div>
-      </article>
-    );
-  }
-
-  if (event.kind === "assistant-message" || event.kind === "error") {
-    return (
-      <article
-        className={`${styles.assistantMessageRow} ${event.kind === "error" ? styles.assistantError : ""}`}
-        aria-label={event.kind === "error" ? t("错误") : t("助手回复")}
-      >
-        <div className={styles.conversationEventMeta}>
-          <div>
-            <strong>{agentLabel(session.agentType)}</strong>
-            {event.model ? <span>{event.model}</span> : null}
-          </div>
-          {event.timestamp ? <time>{formatTimestamp(event.timestamp, language)}</time> : null}
-        </div>
-        {event.content ? <pre>{event.content}</pre> : null}
-        <EventStatus event={event} language={language} />
-        {event.usage ? <EventUsage usage={event.usage} language={language} /> : null}
-      </article>
-    );
-  }
-
-  return (
-    <details className={`${styles.activityEvent} ${event.kind === "reasoning" ? styles.reasoningEvent : ""}`} aria-label={timelineEventLabel(event.kind, t)}>
-      <summary className={styles.activityEventHeader}>
-        <span>{timelineEventLabel(event.kind, t)}</span>
-        <strong>{event.title ?? event.model ?? timelineEventLabel(event.kind, t)}</strong>
-        {event.timestamp ? <time>{formatTimestamp(event.timestamp, language)}</time> : null}
+    <details className={styles.processGroup}>
+      <summary className={styles.processGroupHeader}>
+        <span>{t("已处理 {count} 项", { count: events.length })}</span>
+        <small>
+          {[
+            reasoning > 0 ? t("{count} 项思考", { count: reasoning }) : null,
+            toolCalls > 0 ? t("{count} 次工具调用", { count: toolCalls }) : null,
+          ].filter(Boolean).join(" · ")}
+        </small>
       </summary>
-      <div className={styles.activityEventBody}>
-        {event.content ? <pre>{event.content}</pre> : null}
-        <EventStatus event={event} language={language} />
-        {event.usage ? <EventUsage usage={event.usage} language={language} /> : null}
+      <div className={styles.processGroupBody}>
+        {events.map((event) => (
+          <ProcessEvent key={event.id} event={event} language={language} />
+        ))}
       </div>
     </details>
   );
 }
 
-function EventStatus({ event, language }: { event: AgentSessionTimelineEvent; language: "zh-CN" | "en-US" }) {
+function ProcessEvent({ event, language }: { event: AgentSessionInteractionEvent; language: "zh-CN" | "en-US" }) {
+  const { t } = useAppPreferences();
+  const label = interactionEventLabel(event.kind, t);
+  return (
+    <article className={styles.processEvent}>
+      <header>
+        <span>{label}</span>
+        <strong>{event.title ?? event.model ?? label}</strong>
+        {event.timestamp ? <time>{formatTimestamp(event.timestamp, language)}</time> : null}
+      </header>
+      {event.content ? <ToolEventContent event={event} /> : null}
+      <InteractionEventStatus event={event} language={language} />
+      {event.usage ? <InteractionEventUsage usage={event.usage} language={language} /> : null}
+    </article>
+  );
+}
+
+function ToolEventContent({ event }: { event: AgentSessionInteractionEvent }) {
+  const { t } = useAppPreferences();
+  const parsed = parseToolPayload(event.content ?? "");
+  const fallbackLabel = event.kind === "tool-result"
+    ? t("执行结果")
+    : toolInputLabel(event.title, t);
+  if (!parsed) {
+    return (
+      <div className={styles.toolPayload}>
+        <span>{fallbackLabel}</span>
+        <pre>{event.content}</pre>
+      </div>
+    );
+  }
+  return (
+    <div className={styles.toolPayloadList}>
+      {parsed.map(({ key, value }) => (
+        <div className={styles.toolPayload} key={key}>
+          <span>{toolFieldLabel(key, fallbackLabel, t)}</span>
+          <pre>{value}</pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function parseToolPayload(content: string): Array<{ key: string; value: string }> | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return null;
+    return Object.entries(parsed).map(([key, value]) => ({
+      key,
+      value: typeof value === "string" ? value : JSON.stringify(value, null, 2),
+    }));
+  } catch {
+    return null;
+  }
+}
+
+function toolInputLabel(title: string | null, t: (key: string) => string) {
+  if (title === "exec") return t("执行脚本");
+  if (title === "exec_command" || title === "shell" || title === "bash") return t("命令");
+  if (title === "apply_patch") return t("补丁内容");
+  return t("调用参数");
+}
+
+function toolFieldLabel(key: string, fallback: string, t: (key: string) => string) {
+  if (key === "cmd" || key === "command") return t("命令");
+  if (key === "output") return t("输出");
+  if (key === "workdir" || key === "cwd") return t("工作目录");
+  if (key === "exit_code" || key === "exitCode") return t("退出码");
+  if (key === "status") return t("状态");
+  if (key === "input" || key === "arguments") return fallback;
+  return key;
+}
+
+function InteractionOutputEvent({
+  event,
+  language,
+}: {
+  event: AgentSessionInteractionEvent;
+  language: "zh-CN" | "en-US";
+}) {
+  const { t } = useAppPreferences();
+  if (event.kind === "assistant-message" || event.kind === "error") {
+    return (
+      <article
+        className={`${styles.outputMessage} ${event.kind === "error" ? styles.assistantError : ""}`}
+        aria-label={event.kind === "error" ? t("错误") : t("助手回复")}
+      >
+        {event.content ? <pre>{event.content}</pre> : null}
+        {event.usage ? <InteractionEventUsage usage={event.usage} language={language} /> : null}
+      </article>
+    );
+  }
+
+  return null;
+}
+
+function InteractionEventStatus({ event, language }: { event: AgentSessionInteractionEvent; language: "zh-CN" | "en-US" }) {
   const { t } = useAppPreferences();
   if (!event.status && event.durationMs == null && event.timeToFirstTokenMs == null) return null;
   return (
-    <small className={styles.timelineStatus}>
+    <small className={styles.interactionStatus}>
       {[
-        event.status ? t("状态：{status}", { status: timelineStatusLabel(event.status, t) }) : null,
+        event.status ? t("状态：{status}", { status: interactionStatusLabel(event.status, t) }) : null,
         event.durationMs != null ? t("耗时 {duration}", { duration: formatDuration(event.durationMs, language) }) : null,
         event.timeToFirstTokenMs != null ? t("首 Token {duration}", { duration: formatDuration(event.timeToFirstTokenMs, language) }) : null,
       ].filter(Boolean).join(" · ")}
@@ -374,7 +497,7 @@ function EventStatus({ event, language }: { event: AgentSessionTimelineEvent; la
   );
 }
 
-function EventUsage({ usage, language }: { usage: AgentSessionNativeUsage; language: "zh-CN" | "en-US" }) {
+function InteractionEventUsage({ usage, language }: { usage: AgentSessionNativeUsage; language: "zh-CN" | "en-US" }) {
   const { t } = useAppPreferences();
   const items = [
     [t("总计"), usage.totalTokens],
@@ -397,13 +520,7 @@ function EventUsage({ usage, language }: { usage: AgentSessionNativeUsage; langu
   );
 }
 
-function EstimateMeta({ label, estimate }: { label: string; estimate: NonNullable<AgentSessionNativeUsage["apiEquivalent"]> }) {
-  const { t } = useAppPreferences();
-  const total = estimate.pricedTurnCount + estimate.unpricedTurnCount;
-  return <p className={styles.usageModels} title={estimate.sourceUrl ?? undefined}>{t("{label}：原币计价 · 价格核验 {version} · 已计价 {priced}/{total} 轮", { label, version: estimate.priceVersion ?? "—", priced: estimate.pricedTurnCount, total })}</p>;
-}
-
-function timelineEventLabel(kind: AgentSessionTimelineEvent["kind"], t: (key: string, params?: Record<string, string | number>) => string) {
+function interactionEventLabel(kind: AgentSessionInteractionEvent["kind"], t: (key: string, params?: Record<string, string | number>) => string) {
   if (kind === "turn") return t("Agent 轮次");
   if (kind === "user-message") return t("用户消息");
   if (kind === "assistant-message") return t("助手回复");
@@ -413,11 +530,17 @@ function timelineEventLabel(kind: AgentSessionTimelineEvent["kind"], t: (key: st
   return t("错误");
 }
 
-function timelineStatusLabel(status: string, t: (key: string) => string) {
+function interactionStatusLabel(status: string, t: (key: string) => string) {
   if (status === "running") return t("运行中");
   if (status === "completed") return t("已完成");
   if (status === "cancelled") return t("已取消");
   return status;
+}
+
+function EstimateMeta({ label, estimate }: { label: string; estimate: NonNullable<AgentSessionNativeUsage["apiEquivalent"]> }) {
+  const { t } = useAppPreferences();
+  const total = estimate.pricedTurnCount + estimate.unpricedTurnCount;
+  return <p className={styles.usageModels} title={estimate.sourceUrl ?? undefined}>{t("{label}：原币计价 · 价格核验 {version} · 已计价 {priced}/{total} 轮", { label, version: estimate.priceVersion ?? "—", priced: estimate.pricedTurnCount, total })}</p>;
 }
 
 function formatCacheHitRate(usage: AgentSessionNativeUsage, language: "zh-CN" | "en-US") {

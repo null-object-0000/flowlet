@@ -34,7 +34,7 @@ pub struct OpenCodePermissionRequest {
     pub tool: Option<OpenCodePermissionTool>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenCodePermissionReport {
     pub available: bool,
@@ -52,7 +52,7 @@ struct OpenCodeBridgeState {
     permissions: Vec<OpenCodePermissionRequest>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenCodePermissionDecision {
     AllowOnce,

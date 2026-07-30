@@ -71,29 +71,6 @@ pub(crate) fn list_agent_session_children(
 }
 
 #[tauri::command]
-pub(crate) async fn get_agent_session_timeline(
-    state: tauri::State<'_, AppState>,
-    agent_type: String,
-    session_id: String,
-) -> Result<crate::core::config::AgentSessionTimeline, String> {
-    let prices = state.storage.prices();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut timeline = crate::core::agent_session_timeline::get_native_agent_session_timeline(
-            &agent_type,
-            &session_id,
-        )?;
-        crate::core::agent_session_timeline::apply_native_cost_estimate_to_timeline(
-            &agent_type,
-            &mut timeline,
-            &prices,
-        );
-        Ok(timeline)
-    })
-    .await
-    .map_err(|error| format!("读取原生会话任务失败：{error}"))?
-}
-
-#[tauri::command]
 pub(crate) async fn list_opencode_session_permissions(
     session_id: String,
 ) -> Result<crate::core::opencode_control::OpenCodePermissionReport, String> {
@@ -129,6 +106,32 @@ pub(crate) async fn get_agent_session_native_summary(
     })
     .await
     .map_err(|error| format!("读取原生会话摘要任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn get_agent_session_last_interaction(
+    state: tauri::State<'_, AppState>,
+    agent_type: String,
+    session_id: String,
+) -> Result<Option<crate::core::config::AgentSessionTimeline>, String> {
+    let prices = state.storage.prices();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut interaction =
+            crate::core::agent_session_timeline::get_native_agent_session_last_interaction(
+                &agent_type,
+                &session_id,
+            )?;
+        if let Some(interaction) = interaction.as_mut() {
+            crate::core::agent_session_timeline::apply_native_cost_estimate_to_timeline(
+                &agent_type,
+                interaction,
+                &prices,
+            );
+        }
+        Ok(interaction)
+    })
+    .await
+    .map_err(|error| format!("读取会话最后一次交互任务失败：{error}"))?
 }
 
 #[tauri::command]

@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 axum = "0.8"
 base64 = "0.22"
+chacha20poly1305 = "0.10"
 # 仅用于请求日志捕获层：上游可能返回 gzip/deflate/br 压缩体，需在落库前解压，
 # 否则响应 Body 在 UI 中显示为乱码。reqwest 未启用自动解压 feature，故在此自行处理。
 brotli = "8"
@@ -25,6 +26,7 @@ dirs = "5"
 flate2 = "1"
 futures-util = "0.3"
 hex = "0.4"
+hmac = "0.12"
 jsonc-parser = { version = "0.33", features = ["cst", "serde", "serde_json"] }
 notify = "8.2"
 keyring = "4.1.5"

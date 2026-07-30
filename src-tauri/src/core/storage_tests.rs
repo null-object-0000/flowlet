@@ -3,7 +3,10 @@ use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
     ChannelAccount, LogsFilter, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
 };
-use crate::core::device_identity::{DailyUsageTotal, HourlyUsageTotal, SyncedAgentSession};
+use crate::core::device_identity::{
+    DailyUsageTotal, HourlyUsageTotal, SyncedAgentInstallation, SyncedAgentInteraction,
+    SyncedAgentInteractionEvent, SyncedAgentProfile, SyncedAgentSession,
+};
 
 #[test]
 fn channel_account_resource_sync_mode_round_trips() {
@@ -1893,6 +1896,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             std::slice::from_ref(&first),
             std::slice::from_ref(&first_hour),
             &[],
+            &[],
         )
         .expect("import first snapshot");
     assert_eq!(inserted.imported_days, 1);
@@ -1909,6 +1913,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             480,
             std::slice::from_ref(&first),
             std::slice::from_ref(&first_hour),
+            &[],
             &[],
         )
         .expect("repeat same snapshot");
@@ -1928,6 +1933,7 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
             "2026-07-28T09:00:00Z",
             480,
             &[older],
+            &[],
             &[],
             &[],
         )
@@ -1957,6 +1963,7 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
     let session = |id: &str, status: &str, activity_at: &str| SyncedAgentSession {
         agent_type: "codex-cli".to_string(),
         session_id: id.to_string(),
+        parent_session_id: None,
         runtime_status: status.to_string(),
         title: Some(id.to_string()),
         client_name: Some("Codex CLI".to_string()),
@@ -1965,8 +1972,22 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
         request_count: 3,
         error_count: 0,
         known_tokens: 120,
+        last_interaction: None,
     };
     let device_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let interaction = |content: &str| SyncedAgentInteraction {
+        events: vec![SyncedAgentInteractionEvent {
+            id: format!("user-{content}"),
+            kind: "user-message".to_string(),
+            timestamp: Some("2026-07-29T10:00:00Z".to_string()),
+            title: None,
+            content: Some(content.to_string()),
+            model: None,
+            status: None,
+        }],
+    };
+    let mut running = session("running", "running", "2026-07-29T09:00:00Z");
+    running.last_interaction = Some(interaction("old interaction"));
     storage
         .import_device_usage(
             2,
@@ -1979,12 +2000,12 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
             480,
             &[],
             &[],
-            &[
-                session("running", "running", "2026-07-29T09:00:00Z"),
-                session("old", "idle", "2026-07-29T08:00:00Z"),
-            ],
+            &[running, session("old", "idle", "2026-07-29T08:00:00Z")],
+            &[],
         )
         .expect("import sessions");
+    let mut latest = session("new", "waiting_user", "2026-07-29T10:30:00Z");
+    latest.last_interaction = Some(interaction("new interaction"));
     storage
         .import_device_usage(
             2,
@@ -1997,7 +2018,8 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
             480,
             &[],
             &[],
-            &[session("new", "waiting_user", "2026-07-29T10:30:00Z")],
+            &[latest],
+            &[],
         )
         .expect("replace sessions");
 
@@ -2007,4 +2029,73 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].session.session_id, "new");
     assert_eq!(rows[0].device_display_name, "Work PC");
+    assert_eq!(
+        rows[0].session.last_interaction.as_ref().unwrap().events[0]
+            .content
+            .as_deref(),
+        Some("new interaction")
+    );
+}
+
+#[test]
+fn imported_device_agents_replace_the_previous_device_snapshot() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    let profile = |agent_id: &str, state: Option<&str>| SyncedAgentProfile {
+        agent_id: agent_id.to_string(),
+        agent_name: agent_id.to_string(),
+        installed: true,
+        installations: vec![SyncedAgentInstallation {
+            surface: "cli".to_string(),
+            install_method: "npm".to_string(),
+            version: Some("1.0.0".to_string()),
+        }],
+        flowlet_config_state: state.map(str::to_string),
+        flowlet_observed: state == Some("flowlet"),
+    };
+    let device_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+    storage
+        .import_device_usage(
+            3,
+            device_id,
+            "2026-07-01T00:00:00Z",
+            "Agent PC",
+            "windows",
+            "0.1.0",
+            "2026-07-29T10:00:00Z",
+            480,
+            &[],
+            &[],
+            &[],
+            &[profile("claude-code", Some("flowlet")), profile("pi", None)],
+        )
+        .expect("import agent profiles");
+    storage
+        .import_device_usage(
+            3,
+            device_id,
+            "2026-07-01T00:00:00Z",
+            "Agent PC",
+            "windows",
+            "0.1.0",
+            "2026-07-29T11:00:00Z",
+            480,
+            &[],
+            &[],
+            &[],
+            &[profile("opencode", Some("other_gateway"))],
+        )
+        .expect("replace agent profiles");
+
+    let profiles = storage
+        .imported_device_agents(device_id)
+        .expect("read agent profiles");
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0].agent_id, "opencode");
+    assert_eq!(
+        profiles[0].flowlet_config_state.as_deref(),
+        Some("other_gateway")
+    );
 }

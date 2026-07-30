@@ -960,6 +960,16 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_device_agent_sessions_activity
                 ON device_agent_sessions(device_id, activity_at DESC);
 
+            CREATE TABLE IF NOT EXISTS device_agent_profiles (
+                device_id             TEXT NOT NULL,
+                agent_id              TEXT NOT NULL,
+                profile_json          TEXT NOT NULL,
+                snapshot_generated_at TEXT NOT NULL,
+                imported_at           TEXT NOT NULL,
+                PRIMARY KEY (device_id, agent_id),
+                FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS agent_session_snapshots (
                 agent_type TEXT NOT NULL,
                 session_id TEXT NOT NULL,
@@ -1461,7 +1471,7 @@ impl Storage {
 
         // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
         connection.execute(
-            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.23', datetime('now'))
+            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.30', datetime('now'))
              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
             [],
         )?;

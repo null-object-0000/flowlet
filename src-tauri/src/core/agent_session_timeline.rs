@@ -57,6 +57,55 @@ pub fn get_native_agent_session_timeline(
     }
 }
 
+/// 流式读取会话原生数据，只保留最后一个真实用户输入、所属轮次状态及其后的全部事件。
+/// 该路径不应用历史浏览的事件数和正文长度上限，供详情页和设备同步完整读取最后一轮。
+pub fn get_native_agent_session_last_interaction(
+    agent_type: &str,
+    session_id: &str,
+) -> Result<Option<AgentSessionTimeline>, String> {
+    let agent_type = agent_type.trim();
+    let session_id = session_id.trim();
+    if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_BYTES {
+        return Err("无效的 Agent 会话 ID".to_string());
+    }
+    let timeline = match agent_type {
+        "opencode" => read_opencode_last_interaction(session_id)?,
+        "claude-code" => {
+            let Some(home) = dirs::home_dir() else {
+                return Ok(None);
+            };
+            let Some(path) = find_jsonl_by_stem(&home.join(".claude").join("projects"), session_id)
+            else {
+                return Ok(None);
+            };
+            read_jsonl_last_interaction(&path, parse_claude_line)?
+        }
+        "codex-desktop" | "codex-cli" => {
+            let root = crate::core::codex_account::codex_home().join("sessions");
+            let Some(path) = find_codex_session_file(&root, agent_type, session_id) else {
+                return Ok(None);
+            };
+            read_jsonl_last_interaction(&path, parse_codex_line)?
+        }
+        "pi" => {
+            let Some(home) = dirs::home_dir() else {
+                return Ok(None);
+            };
+            let root = home.join(".pi").join("agent").join("sessions");
+            let Some(path) = find_pi_session_file(&root, session_id) else {
+                return Ok(None);
+            };
+            read_pi_timeline_from_mode(&path, None, true)?
+        }
+        _ => return Err(format!("暂不支持读取 Agent 会话最后交互：{agent_type}")),
+    };
+    Ok(timeline
+        .events
+        .iter()
+        .any(|event| event.kind == "user-message")
+        .then_some(timeline))
+}
+
 pub fn get_native_agent_session_summary(
     agent_type: &str,
     session_id: &str,
@@ -361,6 +410,17 @@ fn summarize_timeline(timeline: AgentSessionTimeline) -> super::config::AgentSes
 }
 
 fn empty_timeline() -> AgentSessionTimeline {
+    timeline_with_limits(Some(MAX_TIMELINE_EVENTS), Some(MAX_EVENT_CONTENT_CHARS))
+}
+
+fn complete_timeline() -> AgentSessionTimeline {
+    timeline_with_limits(None, None)
+}
+
+fn timeline_with_limits(
+    event_limit: Option<usize>,
+    content_limit: Option<usize>,
+) -> AgentSessionTimeline {
     AgentSessionTimeline {
         source_available: false,
         truncated: false,
@@ -368,6 +428,8 @@ fn empty_timeline() -> AgentSessionTimeline {
         usage: None,
         models: Vec::new(),
         events: Vec::new(),
+        event_limit,
+        content_limit,
     }
 }
 
@@ -403,6 +465,41 @@ fn read_opencode_timeline_from(
     connection: &Connection,
     session_id: &str,
 ) -> Result<AgentSessionTimeline, String> {
+    read_opencode_timeline_from_mode(connection, session_id, false)
+}
+
+fn read_opencode_last_interaction(session_id: &str) -> Result<AgentSessionTimeline, String> {
+    for database_path in opencode_database_candidates() {
+        if !database_path.is_file() {
+            continue;
+        }
+        let connection = match Connection::open_with_flags(
+            &database_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            Ok(connection) => connection,
+            Err(_) => continue,
+        };
+        let _ = connection.busy_timeout(std::time::Duration::from_millis(750));
+        let exists = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM session WHERE id = ?1)",
+                params![session_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false);
+        if exists {
+            return read_opencode_timeline_from_mode(&connection, session_id, true);
+        }
+    }
+    Ok(complete_timeline())
+}
+
+fn read_opencode_timeline_from_mode(
+    connection: &Connection,
+    session_id: &str,
+    latest_interaction_only: bool,
+) -> Result<AgentSessionTimeline, String> {
     let mut statement = connection
         .prepare(
             r#"
@@ -427,15 +524,16 @@ fn read_opencode_timeline_from(
         })
         .map_err(|error| format!("读取 OpenCode 会话失败：{error}"))?;
 
-    let mut timeline = AgentSessionTimeline {
-        source_available: true,
-        truncated: false,
-        turn_count: 0,
-        usage: read_opencode_session_usage(connection, session_id),
-        models: read_opencode_session_models(connection, session_id),
-        events: Vec::new(),
+    let mut timeline = if latest_interaction_only {
+        complete_timeline()
+    } else {
+        empty_timeline()
     };
+    timeline.source_available = true;
+    timeline.usage = read_opencode_session_usage(connection, session_id);
+    timeline.models = read_opencode_session_models(connection, session_id);
     let mut usage_messages = HashSet::new();
+    let mut current_user_message_id: Option<String> = None;
     for row in rows {
         let (message_id, message_time, message_json, part_id, part_time, part_json) =
             row.map_err(|error| format!("读取 OpenCode 会话失败：{error}"))?;
@@ -456,6 +554,13 @@ fn read_opencode_timeline_from(
         let Ok(part) = serde_json::from_str::<Value>(&part_json) else {
             continue;
         };
+        if latest_interaction_only
+            && role == "user"
+            && current_user_message_id.as_deref() != Some(message_id.as_str())
+        {
+            timeline.events.clear();
+            current_user_message_id = Some(message_id.clone());
+        }
         let event_id = part_id.unwrap_or_else(|| message_id.clone());
         let timestamp = part_time.or(message_time).and_then(format_unix_millis);
         let event_start = timeline.events.len();
@@ -933,13 +1038,21 @@ fn find_pi_session_file(root: &Path, session_id: &str) -> Option<PathBuf> {
 // 分支：从叶子（不被任何 entry 引为 parentId 的 entry）沿 parentId 回溯到根，再反转
 // 为时间顺序，映射为时间线事件。
 fn read_pi_timeline_from(path: &Path) -> Result<AgentSessionTimeline, String> {
+    read_pi_timeline_from_mode(path, Some(MAX_TIMELINE_FILE_BYTES), false)
+}
+
+fn read_pi_timeline_from_mode(
+    path: &Path,
+    max_bytes: Option<usize>,
+    latest_interaction_only: bool,
+) -> Result<AgentSessionTimeline, String> {
     let file = File::open(path).map_err(|error| format!("无法读取 Pi 会话文件：{error}"))?;
     let mut entries: Vec<(usize, Value)> = Vec::new();
     let mut bytes_read = 0usize;
     for (index, line) in BufReader::new(file).lines().enumerate() {
         let line = line.map_err(|error| format!("读取 Pi 会话文件失败：{error}"))?;
         bytes_read = bytes_read.saturating_add(line.len());
-        if bytes_read > MAX_TIMELINE_FILE_BYTES {
+        if max_bytes.is_some_and(|limit| bytes_read > limit) {
             break;
         }
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -1016,18 +1129,25 @@ fn read_pi_timeline_from(path: &Path) -> Result<AgentSessionTimeline, String> {
     }
     branch_indices.reverse();
 
-    let mut timeline = AgentSessionTimeline {
-        source_available: true,
-        truncated: false,
-        turn_count: 0,
-        usage: None,
-        models: Vec::new(),
-        events: Vec::new(),
+    let mut timeline = if latest_interaction_only {
+        complete_timeline()
+    } else {
+        empty_timeline()
     };
+    timeline.source_available = true;
     let mut seen_usage_ids: HashSet<String> = HashSet::new();
     for entry_index in branch_indices {
         let (_, value) = &entries[entry_index];
+        let event_start = timeline.events.len();
         parse_pi_entry(value, &mut timeline, &mut seen_usage_ids);
+        if latest_interaction_only
+            && timeline.events[event_start..]
+                .iter()
+                .any(|event| event.kind == "user-message")
+        {
+            let latest = timeline.events.split_off(event_start);
+            timeline.events = latest;
+        }
     }
     Ok(timeline)
 }
@@ -1233,14 +1353,8 @@ fn read_jsonl_timeline(
     parser: fn(&Value, usize, &mut AgentSessionTimeline, &mut HashSet<String>),
 ) -> Result<AgentSessionTimeline, String> {
     let file = File::open(path).map_err(|error| format!("无法读取原生会话文件：{error}"))?;
-    let mut timeline = AgentSessionTimeline {
-        source_available: true,
-        truncated: false,
-        turn_count: 0,
-        usage: None,
-        models: Vec::new(),
-        events: Vec::new(),
-    };
+    let mut timeline = empty_timeline();
+    timeline.source_available = true;
     let mut bytes_read = 0usize;
     let mut seen_usage_ids = HashSet::new();
     for (index, line) in BufReader::new(file).lines().enumerate() {
@@ -1254,6 +1368,40 @@ fn read_jsonl_timeline(
             continue;
         };
         parser(&value, index, &mut timeline, &mut seen_usage_ids);
+    }
+    Ok(timeline)
+}
+
+fn read_jsonl_last_interaction(
+    path: &Path,
+    parser: fn(&Value, usize, &mut AgentSessionTimeline, &mut HashSet<String>),
+) -> Result<AgentSessionTimeline, String> {
+    let file = File::open(path).map_err(|error| format!("无法读取原生会话文件：{error}"))?;
+    let mut timeline = complete_timeline();
+    timeline.source_available = true;
+    let mut seen_usage_ids = HashSet::new();
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        let line = line.map_err(|error| format!("读取原生会话文件失败：{error}"))?;
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let event_start = timeline.events.len();
+        parser(&value, index, &mut timeline, &mut seen_usage_ids);
+        if timeline.events[event_start..]
+            .iter()
+            .any(|event| event.kind == "user-message")
+        {
+            let active_turn = timeline.events[..event_start]
+                .iter()
+                .rev()
+                .find(|event| event.kind == "turn")
+                .cloned();
+            let mut latest = timeline.events.split_off(event_start);
+            if let Some(turn) = active_turn {
+                latest.insert(0, turn);
+            }
+            timeline.events = latest;
+        }
     }
     Ok(timeline)
 }
@@ -1406,14 +1554,22 @@ fn push_event(
     model: Option<String>,
     status: Option<String>,
 ) {
-    if timeline.events.len() >= MAX_TIMELINE_EVENTS {
+    if timeline
+        .event_limit
+        .is_some_and(|limit| timeline.events.len() >= limit)
+    {
         timeline.truncated = true;
         return;
     }
+    let content_limit = timeline.content_limit;
     let content = content
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .map(|value| truncate_chars(&value, MAX_EVENT_CONTENT_CHARS));
+        .map(|value| {
+            content_limit
+                .map(|limit| truncate_chars(&value, limit))
+                .unwrap_or(value)
+        });
     if content.is_none() && title.is_none() {
         return;
     }
@@ -1625,6 +1781,67 @@ fn find_codex_session_file(root: &Path, agent_type: &str, session_id: &str) -> O
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn last_interaction_keeps_complete_input_and_all_following_outputs() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-last-interaction-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("session.jsonl");
+        let complete_input = "x".repeat(MAX_EVENT_CONTENT_CHARS + 321);
+        let records = [
+            serde_json::json!({"type":"user","uuid":"u1","timestamp":"2026-07-30T08:00:00Z","message":{"role":"user","content":"old input"}}),
+            serde_json::json!({"type":"assistant","uuid":"a1","timestamp":"2026-07-30T08:00:01Z","message":{"id":"m1","role":"assistant","content":"old output"}}),
+            serde_json::json!({"type":"user","uuid":"u2","timestamp":"2026-07-30T08:01:00Z","message":{"role":"user","content":complete_input}}),
+            serde_json::json!({"type":"assistant","uuid":"a2","timestamp":"2026-07-30T08:01:01Z","message":{"id":"m2","role":"assistant","content":"first output"}}),
+            serde_json::json!({"type":"assistant","uuid":"a3","timestamp":"2026-07-30T08:01:02Z","message":{"id":"m3","role":"assistant","content":"second output"}}),
+        ];
+        fs::write(
+            &path,
+            records
+                .iter()
+                .map(serde_json::Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+
+        let timeline = read_jsonl_last_interaction(&path, parse_claude_line).unwrap();
+        assert_eq!(timeline.events.len(), 3);
+        assert_eq!(timeline.events[0].id, "u2");
+        assert_eq!(
+            timeline.events[0].content.as_deref(),
+            Some(complete_input.as_str())
+        );
+        assert_eq!(timeline.events[1].content.as_deref(), Some("first output"));
+        assert_eq!(timeline.events[2].content.as_deref(), Some("second output"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn codex_last_interaction_keeps_its_turn_status() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-last-turn-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("session.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"timestamp\":\"2026-07-30T08:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"turn-1\"}}\n",
+                "{\"timestamp\":\"2026-07-30T08:00:01Z\",\"type\":\"response_item\",\"payload\":{\"id\":\"m1\",\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Build it\"}]}}\n",
+                "{\"timestamp\":\"2026-07-30T08:00:02Z\",\"type\":\"response_item\",\"payload\":{\"id\":\"r1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Checking\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        let timeline = read_jsonl_last_interaction(&path, parse_codex_line).unwrap();
+        assert_eq!(timeline.events.len(), 3);
+        assert_eq!(timeline.events[0].kind, "turn");
+        assert_eq!(timeline.events[0].status.as_deref(), Some("running"));
+        assert_eq!(timeline.events[1].kind, "user-message");
+        assert_eq!(timeline.events[2].kind, "reasoning");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn reads_pi_branch_from_leaf_with_usage_and_tool_result() {

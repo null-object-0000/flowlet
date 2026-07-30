@@ -35,6 +35,14 @@ export function AgentSessionsPage() {
   const checkedTimes = syncStatus.data?.sources.map((source) => source.lastCheckedAt).filter((value): value is string => Boolean(value)).sort() ?? [];
   const latestCheckedAt = checkedTimes.length ? checkedTimes[checkedTimes.length - 1] : null;
   const syncStatusTitle = syncStatus.data?.sources.map((source) => `${agentLabel(source.agentType as AgentSessionRow["agentType"])}：${source.failedCount > 0 ? source.lastError ?? t("同步异常") : t("已扫描 {count} 个会话", { count: source.scannedCount })}`).join("\n");
+  const refreshSelectedSessionOverview = async () => {
+    const result = await sessions.refetch();
+    if (!selectedSession) return;
+    const refreshed = result.data?.rows.find((row) =>
+      row.agentType === selectedSession.agentType && row.sessionId === selectedSession.sessionId,
+    );
+    if (refreshed) setSelectedSession(refreshed);
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -121,6 +129,7 @@ export function AgentSessionsPage() {
           session={selectedSession}
           onClose={() => setSelectedSession(null)}
           onViewRequestLogs={(sessionId) => navigate(`/logs?search=${encodeURIComponent(sessionId)}`)}
+          onRefreshOverview={refreshSelectedSessionOverview}
         />
       ) : null}
     </main>

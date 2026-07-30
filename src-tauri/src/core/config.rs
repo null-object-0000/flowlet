@@ -1218,6 +1218,10 @@ pub struct AgentSessionTimeline {
     pub usage: Option<AgentSessionNativeUsage>,
     pub models: Vec<String>,
     pub events: Vec<AgentSessionTimelineEvent>,
+    #[serde(skip)]
+    pub(crate) event_limit: Option<usize>,
+    #[serde(skip)]
+    pub(crate) content_limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

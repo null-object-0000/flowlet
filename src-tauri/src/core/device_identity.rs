@@ -7,7 +7,7 @@ use thiserror::Error;
 
 const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
 const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
-pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Error)]
 pub enum DeviceIdentityError {
@@ -193,13 +193,33 @@ pub struct HourlyUsageTotal {
     pub known_tokens: i64,
 }
 
-/// 设备同步中携带的最小会话摘要。只包含列表展示与后续远程寻址所需字段，
-/// 不同步消息正文、提示词、工具调用或本地项目路径。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedAgentInteractionEvent {
+    pub id: String,
+    pub kind: String,
+    pub timestamp: Option<String>,
+    pub title: Option<String>,
+    pub content: Option<String>,
+    pub model: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedAgentInteraction {
+    pub events: Vec<SyncedAgentInteractionEvent>,
+}
+
+/// 设备同步中携带的会话摘要。除列表寻址字段外，版本 4 起还可携带最后一个
+/// 用户回合的完整输入及其后的全部输出事件；不携带本地项目路径。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncedAgentSession {
     pub agent_type: String,
     pub session_id: String,
+    #[serde(default)]
+    pub parent_session_id: Option<String>,
     pub runtime_status: String,
     pub title: Option<String>,
     pub client_name: Option<String>,
@@ -208,6 +228,8 @@ pub struct SyncedAgentSession {
     pub request_count: i64,
     pub error_count: i64,
     pub known_tokens: i64,
+    #[serde(default)]
+    pub last_interaction: Option<SyncedAgentInteraction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -218,6 +240,43 @@ pub struct SharedAgentSession {
     pub device_platform: String,
     #[serde(flatten)]
     pub session: SyncedAgentSession,
+}
+
+/// 设备快照中携带的 Agent 安装摘要。刻意不包含可执行文件路径和安装目录。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedAgentInstallation {
+    pub surface: String,
+    pub install_method: String,
+    pub version: Option<String>,
+}
+
+/// 设备快照中携带的 Agent 接入摘要。配置状态来自同步发生时的本机检查；
+/// `flowlet_observed` 只表示同步的会话摘要中存在经过 Flowlet 的记录。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedAgentProfile {
+    pub agent_id: String,
+    pub agent_name: String,
+    pub installed: bool,
+    pub installations: Vec<SyncedAgentInstallation>,
+    pub flowlet_config_state: Option<String>,
+    pub flowlet_observed: bool,
+}
+
+/// 由桌面端写入 S3 设备快照的局域网发现信息。认证材料是设备本次启动
+/// 随机生成的能力密钥，不包含或派生自 S3 凭据。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LanPeerDescriptor {
+    pub protocol_version: u32,
+    pub endpoints: Vec<String>,
+    /// 32-byte random capability key encoded as base64. It is only distributed
+    /// through the already-sensitive S3 device snapshot and is never sent over LAN.
+    pub auth_key: String,
+    pub capabilities: Vec<String>,
+    pub started_at: String,
+    pub expires_at: String,
 }
 
 /// 供本地导出和未来同步传输共同使用的最小快照契约。
@@ -240,6 +299,10 @@ pub struct DeviceUsageSnapshot {
     pub hours: Vec<HourlyUsageTotal>,
     #[serde(default)]
     pub sessions: Vec<SyncedAgentSession>,
+    #[serde(default)]
+    pub agents: Vec<SyncedAgentProfile>,
+    #[serde(default)]
+    pub lan_peer: Option<LanPeerDescriptor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -301,6 +364,7 @@ impl DeviceUsageSnapshot {
         days: Vec<DailyUsageTotal>,
         hours: Vec<HourlyUsageTotal>,
         sessions: Vec<SyncedAgentSession>,
+        agents: Vec<SyncedAgentProfile>,
     ) -> Self {
         Self {
             schema_version: DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION,
@@ -314,6 +378,8 @@ impl DeviceUsageSnapshot {
             days,
             hours,
             sessions,
+            agents,
+            lan_peer: None,
         }
     }
 }
@@ -439,6 +505,78 @@ impl DeviceUsageBundle {
                 value.chars().count() > 128 || value.chars().any(char::is_control)
             }) {
                 return Err("设备会话摘要包含无效文本".to_string());
+            }
+            if let Some(interaction) = &session.last_interaction {
+                if interaction.events.is_empty()
+                    || !interaction
+                        .events
+                        .iter()
+                        .any(|event| event.kind == "user-message")
+                {
+                    return Err("设备会话最后交互缺少用户输入".to_string());
+                }
+                for event in &interaction.events {
+                    if event.id.trim().is_empty()
+                        || event.id.chars().count() > 512
+                        || event.kind.trim().is_empty()
+                        || event.kind.chars().count() > 64
+                    {
+                        return Err("设备会话最后交互包含无效事件".to_string());
+                    }
+                    if event.timestamp.as_ref().is_some_and(|timestamp| {
+                        chrono::DateTime::parse_from_rfc3339(timestamp).is_err()
+                    }) {
+                        return Err("设备会话最后交互包含无效时间".to_string());
+                    }
+                    if event
+                        .title
+                        .as_ref()
+                        .is_some_and(|value| value.chars().count() > 512)
+                        || event
+                            .model
+                            .as_ref()
+                            .is_some_and(|value| value.chars().count() > 256)
+                        || event
+                            .status
+                            .as_ref()
+                            .is_some_and(|value| value.chars().count() > 64)
+                    {
+                        return Err("设备会话最后交互包含无效元数据".to_string());
+                    }
+                }
+            }
+        }
+        let mut agent_ids = std::collections::HashSet::new();
+        for agent in &self.snapshot.agents {
+            if agent.agent_id.trim().is_empty()
+                || agent.agent_id.chars().count() > 64
+                || agent.agent_name.trim().is_empty()
+                || agent.agent_name.chars().count() > 128
+                || agent.agent_name.chars().any(char::is_control)
+            {
+                return Err("设备 Agent 摘要包含无效标识".to_string());
+            }
+            if !agent_ids.insert(&agent.agent_id) {
+                return Err("设备 Agent 摘要包含重复 Agent".to_string());
+            }
+            if agent.flowlet_config_state.as_deref().is_some_and(|state| {
+                !matches!(
+                    state,
+                    "not_configured" | "flowlet" | "other_gateway" | "partial" | "invalid"
+                )
+            }) {
+                return Err("设备 Agent 摘要包含无效接入状态".to_string());
+            }
+            for installation in &agent.installations {
+                if !matches!(installation.surface.as_str(), "cli" | "desktop")
+                    || installation.install_method.trim().is_empty()
+                    || installation.install_method.chars().count() > 32
+                    || installation.version.as_ref().is_some_and(|version| {
+                        version.chars().count() > 64 || version.chars().any(char::is_control)
+                    })
+                {
+                    return Err("设备 Agent 摘要包含无效安装信息".to_string());
+                }
             }
         }
         Ok(())
@@ -627,6 +765,96 @@ mod tests {
         )
         .expect("parse legacy bundle");
         assert!(bundle.snapshot.sessions.is_empty());
+        assert!(bundle.snapshot.agents.is_empty());
+    }
+
+    #[test]
+    fn version_three_bundle_accepts_agent_installation_summary() {
+        let bundle = DeviceUsageBundle::from_bytes(
+            br#"{
+                "format":"flowlet-device-usage",
+                "version":1,
+                "snapshot":{
+                    "schemaVersion":3,
+                    "deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "deviceCreatedAt":"2026-07-28T00:00:00Z",
+                    "displayName":"Agent PC",
+                    "platform":"windows",
+                    "appVersion":"0.1.0",
+                    "generatedAt":"2026-07-30T00:00:00Z",
+                    "timezoneOffsetMinutes":480,
+                    "days":[],
+                    "hours":[],
+                    "sessions":[],
+                    "agents":[{
+                        "agentId":"claude-code",
+                        "agentName":"Claude Code",
+                        "installed":true,
+                        "installations":[{"surface":"cli","installMethod":"npm","version":"1.2.3"}],
+                        "flowletConfigState":"flowlet",
+                        "flowletObserved":true
+                    }]
+                }
+            }"#,
+        )
+        .expect("parse version three bundle");
+
+        assert_eq!(bundle.snapshot.agents.len(), 1);
+        assert_eq!(bundle.snapshot.agents[0].agent_id, "claude-code");
+    }
+
+    #[test]
+    fn version_four_bundle_accepts_a_complete_last_interaction() {
+        let bundle = DeviceUsageBundle::from_bytes(
+            br#"{
+                "format":"flowlet-device-usage",
+                "version":1,
+                "snapshot":{
+                    "schemaVersion":4,
+                    "deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "deviceCreatedAt":"2026-07-28T00:00:00Z",
+                    "displayName":"Session PC",
+                    "platform":"windows",
+                    "appVersion":"0.1.0",
+                    "generatedAt":"2026-07-30T00:00:00Z",
+                    "timezoneOffsetMinutes":480,
+                    "days":[],
+                    "hours":[],
+                    "sessions":[{
+                        "agentType":"codex-cli",
+                        "sessionId":"session-child",
+                        "parentSessionId":"session-root",
+                        "runtimeStatus":"idle",
+                        "title":"Latest turn",
+                        "clientName":"Codex CLI",
+                        "activityAt":"2026-07-30T00:00:00Z",
+                        "flowletObserved":true,
+                        "requestCount":2,
+                        "errorCount":0,
+                        "knownTokens":42,
+                        "lastInteraction":{"events":[
+                            {"id":"user-1","kind":"user-message","timestamp":"2026-07-30T00:00:00Z","title":null,"content":"complete input","model":null,"status":null},
+                            {"id":"assistant-1","kind":"assistant-message","timestamp":"2026-07-30T00:00:01Z","title":null,"content":"first output","model":"gpt-5","status":null},
+                            {"id":"assistant-2","kind":"assistant-message","timestamp":"2026-07-30T00:00:02Z","title":null,"content":"second output","model":"gpt-5","status":null}
+                        ]}
+                    }],
+                    "agents":[]
+                }
+            }"#,
+        )
+        .expect("parse version four bundle");
+
+        let session = &bundle.snapshot.sessions[0];
+        assert_eq!(session.parent_session_id.as_deref(), Some("session-root"));
+        assert_eq!(
+            session
+                .last_interaction
+                .as_ref()
+                .expect("last interaction")
+                .events
+                .len(),
+            3
+        );
     }
 
     #[test]

@@ -96,4 +96,5 @@ describe("agent commands", () => {
     await call();
     expect(invoke).toHaveBeenCalledWith(command, { agentId: "opencode" });
   });
+
 });

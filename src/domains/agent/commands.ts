@@ -87,8 +87,8 @@ export function inspectPiGlobalConfig(): Promise<AgentGlobalConfigReport> {
   return inspectAgentGlobalConfig("pi");
 }
 
-export function applyPiGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return applyAgentGlobalConfig("pi");
+export function applyPiGlobalConfig(options?: AgentGlobalConfigOptions): Promise<AgentGlobalConfigReport> {
+  return applyAgentGlobalConfig("pi", options);
 }
 
 export function restorePiGlobalConfig(): Promise<AgentGlobalConfigReport> {

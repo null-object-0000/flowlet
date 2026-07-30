@@ -56,9 +56,9 @@ export const queryKeys = {
     all: ["agent-session"] as const,
     list: (filter: unknown) => [...queryKeys.agentSession.all, "list", filter] as const,
     children: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "children", agentType, sessionId] as const,
-    timeline: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "timeline", agentType, sessionId] as const,
     openCodePermissions: (sessionId: string) => [...queryKeys.agentSession.all, "opencode-permissions", sessionId] as const,
     nativeSummary: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "native-summary", agentType, sessionId] as const,
+    lastInteraction: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "last-interaction", agentType, sessionId] as const,
     clients: () => [...queryKeys.agentSession.all, "clients"] as const,
   },
   backgroundTask: {
@@ -85,14 +85,17 @@ export const queryKeys = {
     all: ["device-sync"] as const,
     devices: () => [...queryKeys.deviceSync.all, "devices"] as const,
     dailyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "daily-usage", deviceId ?? "all"] as const,
+    hourlyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "hourly-usage", deviceId ?? "all"] as const,
     s3Settings: () => [...queryKeys.deviceSync.all, "s3-settings"] as const,
   },
   mobileDeviceSync: {
     all: ["mobile-device-sync"] as const,
     devices: () => [...queryKeys.mobileDeviceSync.all, "devices"] as const,
+    agents: (deviceId: string) => [...queryKeys.mobileDeviceSync.all, "agents", deviceId] as const,
     dailyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "daily-usage", deviceId ?? "all"] as const,
     hourlyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "hourly-usage", deviceId ?? "all"] as const,
     sessions: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "sessions", deviceId ?? "all"] as const,
+    permissions: (deviceId: string, sessionId: string) => [...queryKeys.mobileDeviceSync.all, "permissions", deviceId, sessionId] as const,
     s3Settings: () => [...queryKeys.mobileDeviceSync.all, "s3-settings"] as const,
   },
   settings: {

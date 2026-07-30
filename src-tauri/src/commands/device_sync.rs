@@ -14,12 +14,7 @@ pub(crate) async fn device_usage_snapshot(
         .lock()
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::core::device_sync::build_device_snapshot(&storage, &identity)
-    })
-    .await
-    .map_err(|error| format!("生成设备每日用量任务失败：{error}"))?
-    .map_err(|error| error.to_string())
+    crate::core::device_sync::build_device_snapshot(storage, identity).await
 }
 
 #[tauri::command]
@@ -133,6 +128,53 @@ pub(crate) async fn device_daily_usage(
     })
     .await
     .map_err(|error| format!("读取设备每日用量任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn device_hourly_usage(
+    state: tauri::State<'_, AppState>,
+    device_id: Option<String>,
+) -> Result<Vec<HourlyUsageTotal>, String> {
+    let storage = state.storage.clone();
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if device_id.as_deref() == Some(current_device_id.as_str()) {
+            return storage
+                .hourly_usage_totals()
+                .map_err(|error| error.to_string());
+        }
+        if let Some(device_id) = device_id.as_deref() {
+            return storage
+                .imported_hourly_usage(Some(device_id))
+                .map_err(|error| error.to_string());
+        }
+        let current = storage
+            .hourly_usage_totals()
+            .map_err(|error| error.to_string())?;
+        let imported = storage
+            .imported_hourly_usage(None)
+            .map_err(|error| error.to_string())?;
+        let mut by_hour = std::collections::BTreeMap::<String, HourlyUsageTotal>::new();
+        for hour in current.into_iter().chain(imported) {
+            let total = by_hour
+                .entry(hour.hour.clone())
+                .or_insert(HourlyUsageTotal {
+                    hour: hour.hour.clone(),
+                    request_count: 0,
+                    known_tokens: 0,
+                });
+            total.request_count += hour.request_count;
+            total.known_tokens += hour.known_tokens;
+        }
+        Ok(by_hour.into_values().collect())
+    })
+    .await
+    .map_err(|error| format!("读取设备小时用量任务失败：{error}"))?
 }
 
 #[tauri::command]
@@ -255,6 +297,39 @@ pub(crate) async fn refresh_shared_device_usage_s3(
     crate::core::device_sync::run_configured_pull(state.storage.clone()).await
 }
 
+#[tauri::command]
+pub(crate) async fn list_remote_opencode_permissions(
+    state: tauri::State<'_, AppState>,
+    device_id: String,
+    session_id: String,
+) -> Result<crate::core::opencode_control::OpenCodePermissionReport, String> {
+    crate::core::lan_sync::list_remote_permissions(&state.storage, &device_id, &session_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn reply_remote_opencode_permission(
+    state: tauri::State<'_, AppState>,
+    device_id: String,
+    permission_id: String,
+    decision: crate::core::opencode_control::OpenCodePermissionDecision,
+) -> Result<(), String> {
+    crate::core::lan_sync::reply_remote_permission(
+        &state.storage,
+        &device_id,
+        &permission_id,
+        decision,
+    )
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn refresh_shared_device_usage_lan(
+    state: tauri::State<'_, AppState>,
+    device_id: Option<String>,
+) -> Result<crate::core::lan_sync::LanRefreshResult, String> {
+    crate::core::lan_sync::refresh_known_peers(state.storage.clone(), device_id.as_deref()).await
+}
+
 fn read_device_usage_bundle(path: &str) -> Result<DeviceUsageBundle, String> {
     const MAX_BUNDLE_BYTES: u64 = 4 * 1024 * 1024;
     let metadata = std::fs::metadata(path).map_err(|error| format!("读取导入文件失败：{error}"))?;
@@ -276,8 +351,8 @@ pub(crate) async fn export_device_usage_bundle(
         .lock()
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
+    let snapshot = crate::core::device_sync::build_device_snapshot(storage, identity).await?;
     tauri::async_runtime::spawn_blocking(move || {
-        let snapshot = crate::core::device_sync::build_device_snapshot(&storage, &identity)?;
         let bundle = DeviceUsageBundle::new(snapshot);
         let bytes = serde_json::to_vec_pretty(&bundle)
             .map_err(|error| format!("生成设备用量文件失败：{error}"))?;
@@ -385,6 +460,7 @@ pub(crate) async fn import_device_usage_bundle(
                 &snapshot.days,
                 &snapshot.hours,
                 &snapshot.sessions,
+                &snapshot.agents,
             )
             .map_err(|error| error.to_string())
     })

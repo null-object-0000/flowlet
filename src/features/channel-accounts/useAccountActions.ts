@@ -7,6 +7,7 @@ import { queryKeys } from "../../shared/query-keys";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { errorMessage } from "../../shared/errors/AppError";
 
 /**
  * Account mutations. After writes, refresh only the affected queries and use
@@ -23,8 +24,10 @@ export function useAccountActions(presets: ChannelPreset[]) {
 
   const saveAll = useMutation({
     mutationFn: async (accounts: ChannelAccount[]) => {
+      const previous = qc.getQueryData<ChannelAccount[]>(queryKeys.account.list()) ?? [];
+      const refreshAccountIds = changedAccountIds(previous, accounts);
       const saved = await accountCommands.saveAll(accounts);
-      const refresh = await refreshSavedAccounts(saved, presets);
+      const refresh = await refreshSavedAccounts(saved, presets, refreshAccountIds);
       return { saved, ...refresh };
     },
     onSuccess: ({ saved, balanceRequested, routesUpdated, failures }) => {
@@ -102,11 +105,13 @@ export type AccountAutoRefreshResult = {
 export async function refreshSavedAccounts(
   accounts: ChannelAccount[],
   presets: ChannelPreset[],
+  refreshAccountIds?: ReadonlySet<string>,
 ): Promise<AccountAutoRefreshResult> {
   const presetById = new Map(presets.map((preset) => [preset.id, preset]));
   const operations: AutoRefreshOperation[] = [];
 
   for (const account of accounts) {
+    if (refreshAccountIds && !refreshAccountIds.has(account.id)) continue;
     if (!account.enabled || !account.api_key.trim()) continue;
     const preset = presetById.get(account.channel_id);
     if (!preset) continue;
@@ -134,7 +139,7 @@ export async function refreshSavedAccounts(
     accountId: operations[index].accountId,
     accountName: operations[index].accountName,
     kind: operations[index].kind,
-    message: result.reason instanceof Error ? result.reason.message : String(result.reason),
+    message: errorMessage(result.reason),
   }] : []);
 
   // 路由对账：exposed_models 为 null 的账号（尚未用新流程配置）路由保持原样；
@@ -156,7 +161,7 @@ export async function refreshSavedAccounts(
         accountId: anchor.id,
         accountName: anchor.name,
         kind: "routes",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       });
     }
   }
@@ -166,4 +171,15 @@ export async function refreshSavedAccounts(
     routesUpdated,
     failures,
   };
+}
+
+function changedAccountIds(
+  previous: ChannelAccount[],
+  next: ChannelAccount[],
+): ReadonlySet<string> {
+  const previousById = new Map(previous.map((account) => [account.id, account]));
+  return new Set(next.filter((account) => {
+    const existing = previousById.get(account.id);
+    return !existing || JSON.stringify(existing) !== JSON.stringify(account);
+  }).map((account) => account.id));
 }

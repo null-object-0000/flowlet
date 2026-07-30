@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
+import { formatTime } from "../../shared/formatters/datetime";
 import { OverviewChannelAccountsCard } from "./OverviewChannelAccountsCard";
 
 vi.mock("lottie-web", () => ({
@@ -51,6 +52,7 @@ describe("OverviewChannelAccountsCard", () => {
   });
 
   it("renders legacy account summaries and routes all three actions", async () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
     const user = userEvent.setup();
     const onCreate = vi.fn();
     const onViewAll = vi.fn();
@@ -70,6 +72,7 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByText(/资源包 4398\.70万 Tokens/)).toBeInTheDocument();
     expect(screen.getByText(/有效期至 2026-07-30/)).toBeInTheDocument();
     expect(screen.getByText("启用")).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("renders LongCat resource pack row with 0 tokens when the pack is fully consumed", () => {
@@ -135,9 +138,9 @@ describe("OverviewChannelAccountsCard", () => {
     vi.useRealTimers();
   });
 
-  it("renders LongCat expiry as end-of-day clock time when expiring today", () => {
+  it("renders LongCat expiry using the source clock time when expiring today", () => {
     vi.setSystemTime(new Date("2026-07-30T10:00:00Z"));
-    const todayIso = new Date().toISOString();
+    const todayIso = "2026-07-30T11:42:47Z";
     const todaySnapshot = {
       account_id: account.id,
       token_pack_remaining: 43_987_000,
@@ -154,7 +157,8 @@ describe("OverviewChannelAccountsCard", () => {
       />,
     );
 
-    expect(screen.getByText(/有效期至 23:59:59/)).toBeInTheDocument();
+    expect(screen.getByText(`有效期至 ${formatTime(todayIso, "zh-CN")}`)).toBeInTheDocument();
+    expect(screen.queryByText(/有效期至 23:59:59/)).not.toBeInTheDocument();
     vi.useRealTimers();
   });
 

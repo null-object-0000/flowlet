@@ -150,4 +150,41 @@ describe("refreshSavedAccounts", () => {
     ]);
     expect(result.routesUpdated).toBe(true);
   });
+
+  it("extracts messages from AppError objects instead of rendering object Object", async () => {
+    vi.spyOn(accountCommands, "queryBalance").mockRejectedValue({
+      code: "account_balance_failed",
+      message: "invoke timeout: query_balance",
+      retryable: false,
+    });
+    vi.spyOn(modelCommands, "listRouteCandidates").mockResolvedValue([]);
+    vi.spyOn(modelCommands, "saveRouteCandidates").mockResolvedValue();
+
+    const result = await refreshSavedAccounts([account], [preset]);
+
+    expect(result.failures).toEqual([
+      expect.objectContaining({ message: "invoke timeout: query_balance" }),
+    ]);
+  });
+
+  it("refreshes balances only for accounts changed by the current save", async () => {
+    const unchanged = { ...account, id: "account-unchanged", name: "未修改账号" };
+    const queryBalance = vi.spyOn(accountCommands, "queryBalance").mockResolvedValue({
+      balance: 100,
+      currency: "CNY",
+      is_available: true,
+      error: null,
+    });
+    vi.spyOn(modelCommands, "listRouteCandidates").mockResolvedValue([]);
+    vi.spyOn(modelCommands, "saveRouteCandidates").mockResolvedValue();
+
+    await refreshSavedAccounts(
+      [account, unchanged],
+      [preset],
+      new Set([account.id]),
+    );
+
+    expect(queryBalance).toHaveBeenCalledOnce();
+    expect(queryBalance).toHaveBeenCalledWith(account.id);
+  });
 });

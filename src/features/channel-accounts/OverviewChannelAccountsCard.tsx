@@ -215,9 +215,8 @@ function nameLineSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
   // LongCat hybrid 将资源包有效期放到账号名称行。
   if (account.channel_id === "longcat") {
     if (!snapshot?.token_pack_expire_at) return "";
-    // 官方过期时间为当天 23:59:59，若到期日已是当天则展示为 23:59:59。
     if (isToday(snapshot.token_pack_expire_at)) {
-      return t("有效期至 {time}", { time: END_OF_DAY });
+      return t("有效期至 {time}", { time: formatTime(snapshot.token_pack_expire_at, language) });
     }
     return t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) });
   }

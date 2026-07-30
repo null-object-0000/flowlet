@@ -1,4 +1,4 @@
-import { Button, Select, Toast } from "@douyinfe/semi-ui-19";
+import { Button, Toast } from "@douyinfe/semi-ui-19";
 import { useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { SharedAgentSession } from "../../domains/device-sync/types";
@@ -15,6 +15,13 @@ import styles from "./MobilePage.module.css";
 
 type SessionStatusFilter = "all" | "active" | "waiting_user" | "idle";
 
+const STATUS_FILTERS: Array<{ value: SessionStatusFilter; labelKey: string }> = [
+  { value: "all", labelKey: "全部状态" },
+  { value: "active", labelKey: "运行态" },
+  { value: "waiting_user", labelKey: "等待确认" },
+  { value: "idle", labelKey: "已空闲" },
+];
+
 export function MobileSessionsPage() {
   const { language, t } = useAppPreferences();
   const { deviceId } = useMobileDeviceSelection();
@@ -24,7 +31,6 @@ export function MobileSessionsPage() {
     () => (sessions.data ?? []).filter((session) => matchesStatus(session, statusFilter)),
     [sessions.data, statusFilter],
   );
-  const activeCount = (sessions.data ?? []).filter(isActive).length;
 
   return (
     <section className={styles.page}>
@@ -36,24 +42,17 @@ export function MobileSessionsPage() {
         <p>{t("查看各设备同步的最近会话与实时运行状态")}</p>
       </header>
 
-      <div className={styles.controls}>
-        <Select
-          value={statusFilter}
-          aria-label={t("会话状态")}
-          optionList={[
-            { value: "all", label: t("全部状态") },
-            { value: "active", label: t("运行态") },
-            { value: "waiting_user", label: t("等待确认") },
-            { value: "idle", label: t("已空闲") },
-          ]}
-          onChange={(value) => setStatusFilter(value as SessionStatusFilter)}
-        />
-      </div>
-
-      <div className={styles.sessionSummary}>
-        <div><span>{t("已同步会话")}</span><strong>{formatInteger(sessions.data?.length ?? 0, language)}</strong></div>
-        <div><span>{t("运行态")}</span><strong>{formatInteger(activeCount, language)}</strong></div>
-        <p>{t("每台设备保留全部运行态会话，并用最近活跃会话补足 10 条。")}</p>
+      <div className={styles.statusTabs} role="group" aria-label={t("会话状态")}>
+        {STATUS_FILTERS.map((filter) => (
+          <button
+            key={filter.value}
+            type="button"
+            aria-pressed={statusFilter === filter.value}
+            onClick={() => setStatusFilter(filter.value)}
+          >
+            {t(filter.labelKey)}
+          </button>
+        ))}
       </div>
 
       {sessions.isLoading ? (

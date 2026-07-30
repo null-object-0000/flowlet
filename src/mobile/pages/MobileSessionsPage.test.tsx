@@ -72,4 +72,20 @@ describe("MobileSessionsPage LAN approval", () => {
       decision: "allow_once",
     }));
   });
+
+  it("filters sessions through the status button group", () => {
+    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    const group = screen.getByRole("group", { name: "会话状态" });
+    const waitingButton = within(group).getByRole("button", { name: "等待确认" });
+    expect(waitingButton).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Fix CI")).toBeInTheDocument();
+
+    fireEvent.click(within(group).getByRole("button", { name: "已空闲" }));
+    expect(screen.queryByText("Fix CI")).not.toBeInTheDocument();
+    expect(screen.getByText("暂无同步会话")).toBeInTheDocument();
+
+    fireEvent.click(waitingButton);
+    expect(waitingButton).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Fix CI")).toBeInTheDocument();
+  });
 });

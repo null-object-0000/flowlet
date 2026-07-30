@@ -1342,8 +1342,6 @@ const english: Record<string, string> = {
   "运行态": "Active",
   "等待确认": "Needs confirmation",
   "已空闲": "Idle",
-  "已同步会话": "Synced sessions",
-  "每台设备保留全部运行态会话，并用最近活跃会话补足 10 条。": "Each device keeps every active session, then fills the list to 10 with the most recently active sessions.",
   "正在读取会话…": "Loading sessions…",
   "暂无同步会话": "No synced sessions",
   "请先在桌面端执行同步，再在手机端刷新远端数据。": "Sync from the desktop first, then refresh remote data on mobile.",

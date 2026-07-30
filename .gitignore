@@ -155,5 +155,9 @@ vite.config.ts.timestamp-*
 .agents/
 .skills/
 
+# IDE metadata (including generated Android projects)
+**/.idea/
+*.iml
+
 .cargo-target-check/
 dist-mobile/

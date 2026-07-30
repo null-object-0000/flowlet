@@ -147,9 +147,10 @@ use proxy_http::{
 #[cfg(test)]
 use proxy_http::identify_client_by_ua;
 use proxy_routing::{
-    body_contains_account_deactivated, body_contains_quota_exceeded, enrich_upstream_error_log,
-    match_candidates, network_error_route_reason, resolve_small_model,
-    should_check_quota_body_status, should_try_next_status,
+    body_contains_account_deactivated, body_contains_product_not_activated,
+    body_contains_quota_exceeded, enrich_upstream_error_log, match_candidates,
+    network_error_route_reason, resolve_small_model, should_inspect_fallback_body,
+    should_try_next_status,
 };
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -802,7 +803,7 @@ async fn forward_request(
                 let is_last = index + 1 >= candidates.len()
                     || !should_try_next_status(status, &channel_vendor);
 
-                if should_check_quota_body_status(status) {
+                if should_inspect_fallback_body(status) {
                     let headers = upstream_response.headers().clone();
                     let body = read_buffered_body(upstream_response, timeout_seconds).await?;
                     let duration_ms = log_context.send_at.elapsed().as_millis() as i64;
@@ -859,6 +860,36 @@ async fn forward_request(
                                 "quota_exceeded".to_string(),
                             ),
                         );
+                        continue;
+                    }
+                    if body_contains_product_not_activated(&body) && has_next_candidate {
+                        fallback_count += 1;
+                        let mut log = log_context.log_fallback(
+                            request_id_for_routing.clone(),
+                            Some(status.as_u16() as i64),
+                            Some("upstream product is not activated".to_string()),
+                            fallback_count,
+                            "product_not_activated".to_string(),
+                        );
+                        log.ttfb_ms = Some(ttfb_ms);
+                        log.duration_ms = Some(duration_ms);
+                        if state.capture.capture_res_headers {
+                            let keys = if state.capture.redact_sensitive_headers {
+                                LogCaptureConfig::redacted_header_keys()
+                            } else {
+                                &[]
+                            };
+                            log.res_headers_json =
+                                Some(sanitize_headers(&headers, keys).to_string());
+                        }
+                        if state.capture.capture_res_body {
+                            log.res_body_b64 = proxy_http::prepare_captured_res_body(
+                                &body,
+                                proxy_http::content_encoding_value(&headers).as_deref(),
+                                state.capture.max_body_bytes,
+                            );
+                        }
+                        record_request_log(storage.clone(), log);
                         continue;
                     }
 

@@ -223,8 +223,10 @@ pub(super) fn should_try_next_status(status: reqwest::StatusCode, channel_vendor
     false
 }
 
-pub(super) fn should_check_quota_body_status(status: reqwest::StatusCode) -> bool {
-    status == reqwest::StatusCode::PAYMENT_REQUIRED || status == reqwest::StatusCode::FORBIDDEN
+pub(super) fn should_inspect_fallback_body(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::BAD_REQUEST
+        || status == reqwest::StatusCode::PAYMENT_REQUIRED
+        || status == reqwest::StatusCode::FORBIDDEN
 }
 
 pub(super) fn body_contains_quota_exceeded(body: &[u8]) -> bool {
@@ -234,6 +236,26 @@ pub(super) fn body_contains_quota_exceeded(body: &[u8]) -> bool {
         || text.contains("exceeded your current quota")
         || text.contains("billing quota")
         || text.contains("balance insufficient")
+}
+
+pub(super) fn body_contains_product_not_activated(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    let error = value.get("error").unwrap_or(&value);
+    let is_invalid_parameter = error
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|code| code.eq_ignore_ascii_case("invalid_parameter_error"));
+    let product_not_activated = error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|message| {
+            message
+                .to_ascii_lowercase()
+                .contains("product is not activated")
+        });
+    is_invalid_parameter && product_not_activated
 }
 
 pub(super) fn body_contains_account_deactivated(body: &[u8]) -> bool {

@@ -213,15 +213,16 @@ fn should_not_try_next_for_client_errors() {
 }
 
 #[test]
-fn checks_quota_body_only_for_quota_candidate_statuses() {
-    assert!(should_check_quota_body_status(
+fn inspects_fallback_body_for_supported_client_error_statuses() {
+    assert!(should_inspect_fallback_body(
+        reqwest::StatusCode::BAD_REQUEST
+    ));
+    assert!(should_inspect_fallback_body(
         reqwest::StatusCode::PAYMENT_REQUIRED
     ));
-    assert!(should_check_quota_body_status(
-        reqwest::StatusCode::FORBIDDEN
-    ));
-    assert!(!should_check_quota_body_status(
-        reqwest::StatusCode::BAD_REQUEST
+    assert!(should_inspect_fallback_body(reqwest::StatusCode::FORBIDDEN));
+    assert!(!should_inspect_fallback_body(
+        reqwest::StatusCode::UNPROCESSABLE_ENTITY
     ));
 }
 
@@ -238,6 +239,19 @@ fn detects_quota_exceeded_messages() {
     ));
     assert!(!body_contains_quota_exceeded(
         br#"{"error":"context length exceeded"}"#
+    ));
+}
+
+#[test]
+fn detects_product_not_activated_without_retrying_other_bad_requests() {
+    assert!(body_contains_product_not_activated(
+        br#"{"error":{"message":"The product is not activated, please confirm that you have activated products and try again after activation.","type":"invalid_request_error","param":"","code":"invalid_parameter_error"}}"#
+    ));
+    assert!(!body_contains_product_not_activated(
+        br#"{"error":{"message":"Invalid max_tokens","type":"invalid_request_error","code":"invalid_parameter_error"}}"#
+    ));
+    assert!(!body_contains_product_not_activated(
+        br#"{"error":{"message":"The product is not activated","code":"another_error"}}"#
     ));
 }
 
@@ -1869,6 +1883,85 @@ async fn e2e_cross_model_fallback() {
             "key-b".to_string(),
             "key-c".to_string()
         ]
+    );
+}
+
+#[tokio::test]
+async fn e2e_product_not_activated_falls_back_to_next_model() {
+    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen_by_upstream = seen.clone();
+    let upstream = Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: HeaderMap| {
+            let seen = seen_by_upstream.clone();
+            async move {
+                let key = headers
+                    .get(header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.strip_prefix("Bearer "))
+                    .unwrap_or("")
+                    .to_string();
+                seen.lock().unwrap().push(key.clone());
+                if key == "kimi-key" {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        [("content-type", "application/json")],
+                        r#"{"error":{"message":"The product is not activated, please confirm that you have activated products and try again after activation.","type":"invalid_request_error","param":"","code":"invalid_parameter_error"}}"#,
+                    )
+                } else {
+                    (
+                        StatusCode::OK,
+                        [("content-type", "application/json")],
+                        r#"{"choices":[]}"#,
+                    )
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+    let base_url = format!("http://{addr}");
+
+    let channels = vec![
+        dual_protocol_channel("kimi", "Kimi", &base_url),
+        dual_protocol_channel("deepseek", "DeepSeek", &base_url),
+    ];
+    let accounts = vec![
+        test_account("kimi", "kimi", "kimi-key", 0),
+        test_account("deepseek", "deepseek", "deepseek-key", 0),
+    ];
+    let routes = vec![
+        test_route(
+            "1",
+            "flowlet-pro",
+            "kimi",
+            "kimi",
+            "kimi-k3",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "2",
+            "flowlet-pro",
+            "deepseek",
+            "deepseek",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            1,
+        ),
+    ];
+    let state = build_test_state(channels, accounts, routes);
+    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["kimi-key".to_string(), "deepseek-key".to_string()]
     );
 }
 

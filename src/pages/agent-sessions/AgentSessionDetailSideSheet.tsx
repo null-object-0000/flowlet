@@ -79,7 +79,6 @@ export function AgentSessionDetailSideSheet({
       >
         <Tabs.TabPane tab={t("概览")} itemKey="overview">
           <div className={styles.body}>
-            <OpenCodeApprovalSection session={session} />
             <DetailSection title={t("会话信息")}>
               <div className={styles.detailGrid}>
                 <DetailItem label={t("会话标题")} value={title} wide />
@@ -135,6 +134,7 @@ export function AgentSessionDetailSideSheet({
         </Tabs.TabPane>
         <Tabs.TabPane tab={t("最近一轮")} itemKey="last-interaction">
           <div className={styles.body}>
+            <OpenCodeApprovalSection session={session} enabled={activeTab === "last-interaction"} />
             <LastInteractionSection
               data={lastInteraction.data}
               loading={lastInteraction.isLoading}
@@ -248,9 +248,9 @@ function matchesInteractionKind(
   return candidates.includes(kind);
 }
 
-function OpenCodeApprovalSection({ session }: { session: AgentSessionRow }) {
+function OpenCodeApprovalSection({ session, enabled }: { session: AgentSessionRow; enabled: boolean }) {
   const { t } = useAppPreferences();
-  const permissions = useOpenCodeSessionPermissions(session, session.agentType === "opencode");
+  const permissions = useOpenCodeSessionPermissions(session, enabled);
   const reply = useReplyOpenCodePermission(session);
   if (session.agentType !== "opencode") return null;
   if (permissions.isLoading) {

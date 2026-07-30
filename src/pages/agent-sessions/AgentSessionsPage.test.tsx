@@ -324,16 +324,22 @@ describe("AgentSessionsPage", () => {
     expect(screen.getAllByText("—")).toHaveLength(7);
   });
 
-  it("allows a pending OpenCode permission once from the session overview", async () => {
+  it("allows a pending OpenCode permission once from the last interaction tab", async () => {
     render(
       <MemoryRouter>
         <AgentSessionDetailSideSheet session={session} onClose={vi.fn()} onViewRequestLogs={vi.fn()} />
       </MemoryRouter>,
     );
 
-    const approval = screen.getByText("OpenCode 等待确认").closest("article")!;
+    expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
+    const overview = screen.getByRole("tabpanel", { name: "概览" });
+    expect(within(overview).queryByText("OpenCode 等待确认")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "最近一轮" }));
+    const conversation = screen.getByRole("tabpanel", { name: "最近一轮" });
+    const approval = within(conversation).getByText("OpenCode 等待确认").closest("article")!;
     expect(within(approval).getByText("cargo test")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "同意本次" }));
+    fireEvent.click(within(approval).getByRole("button", { name: "同意本次" }));
 
     await waitFor(() => expect(permissionReplyMock).toHaveBeenCalledWith({ permissionId: "per_test", decision: "allow_once" }));
   });

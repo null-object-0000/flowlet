@@ -493,8 +493,8 @@ Claude Code 文件按路径、大小和修改时间缓存，未变化文件不�
 两个独立筛选项展示。
 
 会话详情不提供完整历史时间线，使用“概览”和“最近一轮”两个 Tab；概览保留原生元数据、
-Flowlet 请求指标、Agent 原生累计用量、子会话和 OpenCode 待确认权限，“最近一轮” Tab 在首次
-切换时按需读取。桌面通过 `get_agent_session_last_interaction`
+Flowlet 请求指标、Agent 原生累计用量和子会话；OpenCode 待确认权限归入“最近一轮” Tab，
+该 Tab 在首次切换时按需读取。桌面通过 `get_agent_session_last_interaction`
 只返回最后一个真实用户输入及其后的全部回复、思考与工具事件；
 `get_agent_session_native_summary` 只返回累计摘要。Rust 内部以只读方式解析 OpenCode
 `message` / `part`、Claude Code JSONL、Codex rollout JSONL 和 Pi 活动分支：一部分用于计算
@@ -505,7 +505,7 @@ Agent 会话事实表，也不读取 Codex developer 指令。
 结构化展示，未知格式回退为原始文本。最后一轮提取同时保留所属 Agent 轮次状态：尚未写入最终回复时
 显示“正在处理”，已结束但没有可展示回复时给出明确状态，不把未完成误呈现为内容读取丢失。
 OpenCode 的可操作状态不从 SQLite 推测：`opencode_control` 通过本机 `GET /permission` 读取进程内
-待确认权限并按 `sessionID` 过滤，前端在 OpenCode 会话详情中每 2 秒轮询；“同意本次”和“否决”
+待确认权限并按 `sessionID` 过滤，前端在 OpenCode 会话详情的“最近一轮” Tab 激活期间每 2 秒轮询；“同意本次”和“否决”
 分别调用 `POST /permission/{requestID}/reply` 的 `once` 与 `reject`。控制服务离线时返回结构化不可用状态，
 不影响会话概览；回复失败保留待确认卡片并向用户显示错误。
 原生摘要返回 Agent 累计用量和模型集合。OpenCode 使用 `session` 的累计

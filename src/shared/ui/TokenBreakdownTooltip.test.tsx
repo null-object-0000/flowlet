@@ -14,6 +14,7 @@ describe("TokenBreakdownTooltip", () => {
       <TokenBreakdownTooltip
         language="zh-CN"
         t={(source) => source}
+        label="2026年7月15日"
         tokens={{
           total: 1200,
           input: 1000,
@@ -29,6 +30,7 @@ describe("TokenBreakdownTooltip", () => {
     );
 
     expect(screen.getByText(/总消耗 Token/)).toHaveTextContent("1,200");
+    expect(screen.getByText("2026年7月15日")).toBeInTheDocument();
     expect(screen.getByText("缓存命中率").parentElement).toHaveTextContent("50.0%");
     expect(screen.getByText("缓存输入 Token").parentElement).toHaveTextContent("400");
     expect(screen.getByText("未缓存输入 Token").parentElement).toHaveTextContent("600");

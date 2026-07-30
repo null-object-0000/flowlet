@@ -41,6 +41,14 @@ describe("usage presentation", () => {
     const heatmap = buildUsageHeatmap(hourly, "today", now);
     expect(heatmap.cells).toHaveLength(24);
     expect(heatmap.cells[9].tokens).toBe(100);
+    expect(heatmap.cells[9]).toEqual(expect.objectContaining({
+      inputTokens: 900,
+      cachedInputTokens: 600,
+      uncachedInputTokens: 300,
+      outputTokens: 300,
+      requests: 3,
+      unknown: 1,
+    }));
     expect(heatmap.cells[14].tokens).toBe(50);
     expect(heatmap.totalTokens).toBe(150);
     expect(heatmap.labels).toEqual([0, 6, 12, 18, 23].map((hour) => expect.objectContaining({ column: hour + 1 })));
@@ -88,8 +96,17 @@ describe("usage presentation", () => {
   it("aggregates totals and breakdown shares without fixture data", () => {
     const july = rows.slice(0, 2);
     expect(summarizeUsage(july)).toEqual({ cost: 0.2, tokens: 2000, inputTokens: 1500, cachedInputTokens: 900, uncachedInputTokens: 600, cacheMeasuredInputTokens: 1500, outputTokens: 500, requests: 5, unknown: 1, costByCurrency: {} });
-    expect(groupUsageByModel(july)[0]).toEqual(expect.objectContaining({ label: "deepseek-v4-pro", share: 1, requests: 5 }));
-    expect(groupUsageByChannel(july)[0]).toEqual(expect.objectContaining({ label: "DeepSeek", share: 1, tokens: 2000 }));
+    expect(groupUsageByModel(july)[0]).toEqual(expect.objectContaining({ label: "deepseek-v4-pro", share: 1, tokenShare: 1, requests: 5 }));
+    expect(groupUsageByChannel(july)[0]).toEqual(expect.objectContaining({ label: "DeepSeek", share: 1, tokenShare: 1, tokens: 2000 }));
+  });
+
+  it("orders usage breakdowns by token consumption", () => {
+    const result = groupUsageByChannel([
+      { ...rows[0], channel_id: "high-cost", channel_name: "High cost", known_tokens: 100, estimated_cost: 10 },
+      { ...rows[1], channel_id: "high-tokens", channel_name: "High tokens", known_tokens: 2000, estimated_cost: 0.01 },
+    ]);
+    expect(result.map((item) => item.key)).toEqual(["high-tokens", "high-cost"]);
+    expect(result[0].tokenShare).toBeCloseTo(2000 / 2100);
   });
 
   it("attributes the pricing currency to model and channel groups", () => {

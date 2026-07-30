@@ -22,6 +22,8 @@ type ContentProps = {
   tokens: TokenBreakdown;
   language: "zh-CN" | "en-US";
   t: (source: string, variables?: Record<string, string | number>) => string;
+  /** 可选的上下文标题，例如热力图对应的日期或时段。 */
+  label?: ReactNode;
 };
 
 type Props = ContentProps & {
@@ -29,9 +31,10 @@ type Props = ContentProps & {
 };
 
 /** 悬浮层主体：总消耗 Token、缓存命中率，横线分割后展示输入/输出明细。 */
-export function TokenBreakdownContent({ tokens, language, t }: ContentProps) {
+export function TokenBreakdownContent({ tokens, language, t, label }: ContentProps) {
   return (
     <div className={styles.breakdown}>
+      {label ? <span className={styles.contextLabel}>{label}</span> : null}
       <strong>{t("总消耗 Token")} <CompactNumber value={tokens.total} language={language} /></strong>
       <span><small>{t("缓存命中率")}</small><b>{formatPercentage(tokens.cacheHitRate)}</b></span>
       <hr className={styles.divider} />
@@ -49,11 +52,11 @@ export function TokenBreakdownContent({ tokens, language, t }: ContentProps) {
   );
 }
 
-export function TokenBreakdownTooltip({ children, tokens, language, t }: Props) {
+export function TokenBreakdownTooltip({ children, tokens, language, t, label }: Props) {
   return (
     <Tooltip
       showArrow
-      content={<TokenBreakdownContent tokens={tokens} language={language} t={t} />}
+      content={<TokenBreakdownContent tokens={tokens} language={language} t={t} label={label} />}
     >
       {children}
     </Tooltip>

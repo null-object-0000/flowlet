@@ -22,6 +22,7 @@ const OPENCODE_BACKUP_FILE: &str = "opencode-global-config-backup.json";
 const OPENCODE_PROVIDER_ID: &str = "flowlet";
 const OPENCODE_PRIMARY_MODEL: &str = "flowlet/flowlet-pro";
 const OPENCODE_FAST_MODEL: &str = "flowlet/flowlet-flash";
+const OPENCODE_PERMISSION_PLUGIN_FILE: &str = "plugins/flowlet.ts";
 const PI_BACKUP_FILE: &str = "pi-global-config-backup.json";
 const PI_PROVIDER_ID: &str = "flowlet";
 const PI_PRIMARY_MODEL: &str = "flowlet-pro";
@@ -94,6 +95,9 @@ pub struct AgentGlobalConfigReport {
     /// 该扩展为 Pi 请求注入 x-flowlet-session 头，使 Flowlet 能按会话归并请求。
     #[serde(default)]
     pub session_extension: bool,
+    /// 仅 OpenCode：Flowlet 权限事件插件是否在位。插件用于发现 Desktop 动态端口实例。
+    #[serde(default)]
+    pub opencode_permission_bridge: bool,
 }
 
 /// Agent 全局配置一键写入的可选参数；某 Agent 不支持的选项会被忽略。
@@ -153,6 +157,10 @@ struct OpenCodeConfigBackup {
     server: Option<BackedUpValue>,
     flowlet_provider: BackedUpValue,
     flowlet_auth: BackedUpValue,
+    #[serde(default)]
+    permission_plugin_path: String,
+    #[serde(default)]
+    permission_plugin_previous: BackedUpValue,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -194,6 +202,7 @@ pub fn inspect_agent_global_config(
         "opencode" => inspect_opencode(
             &opencode_settings_path()?,
             &opencode_auth_path()?,
+            &opencode_permission_plugin_path()?,
             expected_base_url,
         ),
         "pi" => inspect_pi(
@@ -226,6 +235,7 @@ pub fn apply_agent_global_config(
         "opencode" => apply_opencode(
             &opencode_settings_path()?,
             &opencode_auth_path()?,
+            &opencode_permission_plugin_path()?,
             expected_base_url,
             client_token,
         ),
@@ -257,6 +267,7 @@ pub fn restore_agent_global_config(
         "opencode" => restore_opencode(
             &opencode_settings_path()?,
             &opencode_auth_path()?,
+            &opencode_permission_plugin_path()?,
             expected_base_url,
         ),
         "pi" => restore_pi(
@@ -322,6 +333,114 @@ fn opencode_auth_path() -> Result<PathBuf, String> {
         })
         .ok_or_else(|| "无法确定 OpenCode 凭据文件路径".to_string())
 }
+
+fn opencode_permission_plugin_path() -> Result<PathBuf, String> {
+    dirs::home_dir()
+        .map(|home| {
+            home.join(".config")
+                .join("opencode")
+                .join(OPENCODE_PERMISSION_PLUGIN_FILE)
+        })
+        .ok_or_else(|| "无法确定 OpenCode 权限事件插件路径".to_string())
+}
+
+/// OpenCode CLI、Web 与 Desktop 都会加载全局插件。每个进程按 PID 写一份短期心跳，
+/// Flowlet 因而无需猜测 Desktop sidecar 的动态端口，也不会让多个并行实例互相覆盖。
+const OPENCODE_PERMISSION_PLUGIN_SOURCE: &str = r#"// Flowlet 自动写入：桥接 OpenCode 进程内待确认权限状态。
+import path from "node:path"
+import { createHash } from "node:crypto"
+import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
+
+export const FlowletPermissionBridge = async ({ client, serverUrl, directory, worktree }) => {
+  const home = process.env.USERPROFILE || process.env.HOME
+  if (!home) return {}
+  const root = path.join(home, ".flowlet", "opencode-control")
+  const instanceKey = createHash("sha256")
+    .update(String(directory || worktree || serverUrl))
+    .digest("hex")
+    .slice(0, 12)
+  const statePath = path.join(root, `state-${process.pid}-${instanceKey}.json`)
+  const stateTempPath = `${statePath}.tmp`
+  const permissions = new Map()
+  const normalizePermission = (value) => ({
+    id: value.id,
+    sessionID: value.sessionID,
+    permission: value.permission || value.type || "unknown",
+    patterns: value.patterns || (Array.isArray(value.pattern) ? value.pattern : value.pattern ? [value.pattern] : []),
+    metadata: value.metadata || {},
+    always: value.always || [],
+    tool: value.tool || (value.messageID ? { messageID: value.messageID, callID: value.callID || "" } : undefined),
+  })
+
+  await mkdir(root, { recursive: true })
+  try {
+    const response = await client.permission?.list?.()
+    const pending = Array.isArray(response) ? response : response?.data
+    if (Array.isArray(pending)) {
+      for (const value of pending) permissions.set(value.id, normalizePermission(value))
+    }
+  } catch {}
+  let persistQueue = Promise.resolve()
+  const persist = () => {
+    const snapshot = JSON.stringify({
+      pid: process.pid,
+      serverUrl: String(serverUrl),
+      updatedAt: Date.now(),
+      permissions: [...permissions.values()],
+    })
+    persistQueue = persistQueue.catch(() => {}).then(async () => {
+      await writeFile(stateTempPath, snapshot, "utf8")
+      await rename(stateTempPath, statePath)
+    })
+    return persistQueue
+  }
+  await persist()
+  const consumeReplies = async () => {
+    for (const name of await readdir(root)) {
+      if (!name.startsWith("reply-") || !name.endsWith(".json")) continue
+      const replyPath = path.join(root, name)
+      try {
+        const command = JSON.parse(await readFile(replyPath, "utf8"))
+        const permission = permissions.get(command.permissionId)
+        if (!permission) continue
+        if (client.permission?.reply) {
+          await client.permission.reply({ requestID: command.permissionId, reply: command.reply })
+        } else if (client.postSessionIdPermissionsPermissionId) {
+          await client.postSessionIdPermissionsPermissionId({
+            path: { id: permission.sessionID, permissionID: command.permissionId },
+            body: { response: command.reply },
+          })
+        } else {
+          throw new Error("当前 OpenCode SDK 不支持 permission.reply")
+        }
+        await unlink(replyPath)
+      } catch {}
+    }
+  }
+  const heartbeat = setInterval(() => {
+    void persist()
+    void consumeReplies()
+  }, 500)
+
+  return {
+    event: async ({ event }) => {
+      if (event.type === "permission.asked" || event.type === "permission.updated") {
+        permissions.set(event.properties.id, normalizePermission(event.properties))
+        await persist()
+      } else if (event.type === "permission.replied") {
+        permissions.delete(event.properties.requestID || event.properties.permissionID)
+        await persist()
+      }
+    },
+    dispose: async () => {
+      clearInterval(heartbeat)
+      await persistQueue.catch(() => {})
+      try { await unlink(statePath) } catch {}
+      try { await unlink(stateTempPath) } catch {}
+    },
+  }
+}
+"#;
 
 // Pi 的用户级配置统一位于 `~/.pi/agent/`：`models.json` 声明自定义 Provider，
 // `auth.json`（0600）保存 Provider 凭据，`settings.json` 决定默认 Provider 和模型。
@@ -409,6 +528,7 @@ fn inspect_claude_code(
             external_environment_overrides,
             error: None,
             session_extension: false,
+            opencode_permission_bridge: false,
         });
     }
 
@@ -432,6 +552,7 @@ fn inspect_claude_code(
                 external_environment_overrides,
                 error: Some(error),
                 session_extension: false,
+                opencode_permission_bridge: false,
             });
         }
     };
@@ -550,6 +671,7 @@ fn report_from_settings(
         external_environment_overrides,
         error: None,
         session_extension: false,
+        opencode_permission_bridge: false,
     })
 }
 
@@ -693,10 +815,15 @@ fn restore_claude_code(
 fn inspect_opencode(
     settings_path: &Path,
     auth_path: &Path,
+    permission_plugin_path: &Path,
     expected_base_url: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     let settings_exists = settings_path.is_file();
     let backup_available = opencode_backup_path(settings_path).is_file();
+    // 仅有同名文件不代表桥接可用：旧版插件曾依赖 Desktop 中不存在的 Bun 全局对象。
+    // 必须与当前托管源码一致，过期或被改写的插件应提示用户重新应用配置。
+    let permission_bridge =
+        managed_text_file_matches(permission_plugin_path, OPENCODE_PERMISSION_PLUGIN_SOURCE);
     let external_environment_overrides = ["OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT"]
         .iter()
         .filter(|name| std::env::var_os(name).is_some())
@@ -720,6 +847,7 @@ fn inspect_opencode(
             external_environment_overrides,
             error: None,
             session_extension: false,
+            opencode_permission_bridge: permission_bridge,
         });
     }
 
@@ -743,6 +871,7 @@ fn inspect_opencode(
                 external_environment_overrides,
                 error: Some(error),
                 session_extension: false,
+                opencode_permission_bridge: permission_bridge,
             });
         }
     };
@@ -766,6 +895,7 @@ fn inspect_opencode(
                 external_environment_overrides,
                 error: Some(error),
                 session_extension: false,
+                opencode_permission_bridge: permission_bridge,
             });
         }
     };
@@ -807,6 +937,7 @@ fn inspect_opencode(
         && provider_enabled
         && primary_model.as_deref() == Some(OPENCODE_PRIMARY_MODEL)
         && fast_model.as_deref() == Some(OPENCODE_FAST_MODEL)
+        && permission_bridge
     {
         AgentGlobalConfigState::Flowlet
     } else if base_url
@@ -822,6 +953,7 @@ fn inspect_opencode(
         || fast_model
             .as_deref()
             .is_some_and(|model| model.starts_with("flowlet/"))
+        || permission_bridge
     {
         AgentGlobalConfigState::Partial
     } else {
@@ -845,12 +977,14 @@ fn inspect_opencode(
         external_environment_overrides,
         error: None,
         session_extension: false,
+        opencode_permission_bridge: permission_bridge,
     })
 }
 
 fn apply_opencode(
     settings_path: &Path,
     auth_path: &Path,
+    permission_plugin_path: &Path,
     expected_base_url: &str,
     client_token: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
@@ -859,6 +993,15 @@ fn apply_opencode(
     }
     let settings_existed = settings_path.is_file();
     let auth_existed = auth_path.is_file();
+    let permission_plugin_previous = if permission_plugin_path.is_file() {
+        Some(
+            std::fs::read_to_string(permission_plugin_path).map_err(|error| {
+                format!("读取 {} 失败：{error}", permission_plugin_path.display())
+            })?,
+        )
+    } else {
+        None
+    };
     let mut auth = read_optional_json_object(auth_path)?;
     let source = if settings_existed {
         std::fs::read_to_string(settings_path)
@@ -908,6 +1051,14 @@ fn apply_opencode(
             server: Some(backed_up_value(settings.get("server"))),
             flowlet_provider: backed_up_value(settings.pointer("/provider/flowlet")),
             flowlet_auth: backed_up_value(auth.get("flowlet")),
+            permission_plugin_path: display_path(permission_plugin_path),
+            permission_plugin_previous: BackedUpValue {
+                present: permission_plugin_previous.is_some(),
+                value: permission_plugin_previous
+                    .as_ref()
+                    .map(|content| Value::String(content.clone()))
+                    .unwrap_or(Value::Null),
+            },
         };
         write_json_file(
             &backup,
@@ -915,6 +1066,12 @@ fn apply_opencode(
         )?;
     } else {
         upgrade_opencode_backup_with_server(&backup, settings.get("server"))?;
+        upgrade_opencode_backup_with_permission_plugin(
+            &backup,
+            permission_plugin_path,
+            permission_plugin_previous.as_deref(),
+        )?;
+        restore_opencode_managed_server_fields(&root_object, &backup)?;
     }
 
     if !settings_existed {
@@ -934,20 +1091,6 @@ fn apply_opencode(
         &root_object,
         "small_model",
         CstInputValue::from(OPENCODE_FAST_MODEL),
-    );
-    let server_object = match root_object.get("server") {
-        Some(property) => property.object_value_or_set(),
-        None => root_object
-            .append("server", CstInputValue::Object(Vec::new()))
-            .object_value_or_set(),
-    };
-    set_cst_property(&server_object, "hostname", CstInputValue::from("127.0.0.1"));
-    set_cst_property(
-        &server_object,
-        "port",
-        serde_to_cst(&serde_json::json!(
-            crate::core::opencode_control::OPENCODE_CONTROL_PORT
-        )),
     );
     let provider_object = match root_object.get("provider") {
         Some(property) => property.object_value_or_set(),
@@ -976,11 +1119,16 @@ fn apply_opencode(
     );
     let settings_content = text_file_bytes(&root.to_string());
     let auth_content = json_file_bytes(&auth)?;
+    let permission_plugin_content = text_file_bytes(OPENCODE_PERMISSION_PLUGIN_SOURCE);
     if let Err(failure) = write_files_transactionally(
         "OpenCode 配置与凭据文件",
         &[
             (settings_path.to_path_buf(), Some(settings_content)),
             (auth_path.to_path_buf(), Some(auth_content)),
+            (
+                permission_plugin_path.to_path_buf(),
+                Some(permission_plugin_content),
+            ),
         ],
     ) {
         if backup_created && failure.rolled_back {
@@ -988,12 +1136,18 @@ fn apply_opencode(
         }
         return Err(failure.message);
     }
-    inspect_opencode(settings_path, auth_path, expected_base_url)
+    inspect_opencode(
+        settings_path,
+        auth_path,
+        permission_plugin_path,
+        expected_base_url,
+    )
 }
 
 fn restore_opencode(
     settings_path: &Path,
     expected_auth_path: &Path,
+    permission_plugin_path: &Path,
     expected_base_url: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     let backup_path = opencode_backup_path(settings_path);
@@ -1008,6 +1162,14 @@ fn restore_opencode(
     let auth_path = PathBuf::from(&backup.auth_path);
     if !paths_equal(&auth_path, expected_auth_path) {
         return Err("OpenCode 凭据备份路径与当前用户配置不一致".to_string());
+    }
+    if !backup.permission_plugin_path.is_empty()
+        && !paths_equal(
+            &PathBuf::from(&backup.permission_plugin_path),
+            permission_plugin_path,
+        )
+    {
+        return Err("OpenCode 权限插件备份路径与当前用户配置不一致".to_string());
     }
     let mut auth = read_optional_json_object(&auth_path)?;
     let source = if settings_path.is_file() {
@@ -1073,17 +1235,35 @@ fn restore_opencode(
     } else {
         Some(json_file_bytes(&auth)?)
     };
+    let permission_plugin_content = if backup.permission_plugin_previous.present {
+        backup
+            .permission_plugin_previous
+            .value
+            .as_str()
+            .map(text_file_bytes)
+    } else {
+        None
+    };
     write_files_transactionally(
-        "OpenCode 配置与凭据文件",
+        "OpenCode 配置、凭据与权限插件文件",
         &[
             (settings_path.to_path_buf(), settings_content),
             (auth_path.to_path_buf(), auth_content),
+            (
+                permission_plugin_path.to_path_buf(),
+                permission_plugin_content,
+            ),
         ],
     )
     .map_err(|failure| failure.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("配置已恢复，但清理 Flowlet 备份标记失败：{error}"))?;
-    inspect_opencode(settings_path, expected_auth_path, expected_base_url)
+    inspect_opencode(
+        settings_path,
+        expected_auth_path,
+        permission_plugin_path,
+        expected_base_url,
+    )
 }
 
 fn inspect_pi(
@@ -1119,6 +1299,7 @@ fn inspect_pi(
             external_environment_overrides: Vec::new(),
             error,
             session_extension,
+            opencode_permission_bridge: false,
         }
     };
 
@@ -1520,6 +1701,79 @@ fn upgrade_opencode_backup_with_server(
     write_json_file(backup_path, &backup)
 }
 
+fn upgrade_opencode_backup_with_permission_plugin(
+    backup_path: &Path,
+    plugin_path: &Path,
+    previous_content: Option<&str>,
+) -> Result<(), String> {
+    let mut backup = read_settings(backup_path)?;
+    let object = backup
+        .as_object_mut()
+        .ok_or_else(|| "OpenCode 全局配置备份格式无效".to_string())?;
+    if object.contains_key("permission_plugin_previous") {
+        return Ok(());
+    }
+    object.insert(
+        "permission_plugin_path".to_string(),
+        Value::String(display_path(plugin_path)),
+    );
+    object.insert(
+        "permission_plugin_previous".to_string(),
+        serde_json::to_value(BackedUpValue {
+            present: previous_content.is_some(),
+            value: previous_content
+                .map(|content| Value::String(content.to_string()))
+                .unwrap_or(Value::Null),
+        })
+        .map_err(|error| format!("升级 OpenCode 权限插件备份失败：{error}"))?,
+    );
+    write_json_file(backup_path, &backup)
+}
+
+/// 早期 Flowlet 版本曾为了直接访问 OpenCode 控制接口写入 server.hostname/port。
+/// 权限桥接插件已经不依赖固定端口；重新应用配置时只恢复这两个曾被 Flowlet 管理的
+/// 字段，保留用户后来添加的 mdns、cors 等其他 server 设置。
+fn restore_opencode_managed_server_fields(
+    root: &CstObject,
+    backup_path: &Path,
+) -> Result<(), String> {
+    let backup: OpenCodeConfigBackup = serde_json::from_value(read_settings(backup_path)?)
+        .map_err(|error| format!("OpenCode 配置备份格式无效：{error}"))?;
+    let Some(server_backup) = backup.server.as_ref() else {
+        return Ok(());
+    };
+    let current = root
+        .to_serde_value()
+        .ok_or_else(|| "OpenCode 配置文件顶层必须是 JSON 对象".to_string())?;
+    let current_server = current.get("server").and_then(Value::as_object);
+    if !current_server.is_some_and(|server| {
+        server.get("hostname").and_then(Value::as_str) == Some("127.0.0.1")
+            && server.get("port").and_then(Value::as_u64).is_some()
+    }) {
+        return Ok(());
+    }
+    let Some(server_property) = root.get("server") else {
+        return Ok(());
+    };
+    let server_object = server_property.object_value_or_set();
+    let original_server = server_backup.value.as_object();
+    for field in ["hostname", "port"] {
+        if server_backup.present {
+            if let Some(value) = original_server.and_then(|server| server.get(field)) {
+                set_cst_property(&server_object, field, serde_to_cst(value));
+                continue;
+            }
+        }
+        if let Some(property) = server_object.get(field) {
+            property.remove();
+        }
+    }
+    if server_object.properties().is_empty() {
+        server_property.remove();
+    }
+    Ok(())
+}
+
 fn string_array_contains(value: Option<&Value>, expected: &str) -> bool {
     value
         .and_then(Value::as_array)
@@ -1668,6 +1922,13 @@ fn text_file_bytes(content: &str) -> Vec<u8> {
     } else {
         format!("{content}\n").into_bytes()
     }
+}
+
+fn managed_text_file_matches(path: &Path, expected: &str) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|actual| {
+        actual.replace("\r\n", "\n").trim_end_matches('\n')
+            == expected.replace("\r\n", "\n").trim_end_matches('\n')
+    })
 }
 
 fn write_bytes_file(path: &Path, content: &[u8]) -> Result<(), String> {
@@ -2093,6 +2354,7 @@ mod tests {
     #[test]
     fn applies_and_restores_opencode_config_and_credentials() {
         let (settings_path, auth_path) = test_opencode_paths();
+        let permission_plugin_path = settings_path.parent().unwrap().join("plugins/flowlet.ts");
         std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
         std::fs::create_dir_all(auth_path.parent().unwrap()).unwrap();
         std::fs::write(
@@ -2123,6 +2385,7 @@ mod tests {
         let applied = apply_opencode(
             &settings_path,
             &auth_path,
+            &permission_plugin_path,
             "http://127.0.0.1:18640/v1",
             "flowlet-token",
         )
@@ -2132,11 +2395,8 @@ mod tests {
         let settings = read_jsonc_settings(&settings_path).unwrap();
         assert_eq!(settings["model"], OPENCODE_PRIMARY_MODEL);
         assert_eq!(settings["small_model"], OPENCODE_FAST_MODEL);
-        assert_eq!(
-            settings["server"]["port"],
-            crate::core::opencode_control::OPENCODE_CONTROL_PORT
-        );
-        assert_eq!(settings["server"]["hostname"], "127.0.0.1");
+        assert_eq!(settings["server"]["port"], 1234);
+        assert!(settings["server"].get("hostname").is_none());
         assert_eq!(settings["server"]["mdns"], true);
         assert_eq!(
             settings["provider"]["flowlet"]["options"]["baseURL"],
@@ -2160,9 +2420,89 @@ mod tests {
         assert_eq!(auth["flowlet"]["type"], "api");
         assert_eq!(auth["flowlet"]["key"], "flowlet-token");
         assert_eq!(auth["other"]["key"], "keep");
+        let plugin_source = std::fs::read_to_string(&permission_plugin_path).unwrap();
+        assert!(plugin_source.contains("permission.asked"));
+        assert!(plugin_source.contains("client.permission?.list?.()"));
+        assert!(plugin_source.contains("writeFile(stateTempPath"));
+        assert!(plugin_source.contains("rename(stateTempPath, statePath)"));
+        assert!(plugin_source.contains("state-${process.pid}-${instanceKey}.json"));
+        assert!(!plugin_source.contains("Bun.write"));
 
-        let restored =
-            restore_opencode(&settings_path, &auth_path, "http://127.0.0.1:18640/v1").unwrap();
+        std::fs::write(
+            &permission_plugin_path,
+            "// Flowlet 旧版权限插件\nconst persist = () => Bun.write('state.json', '{}')\n",
+        )
+        .unwrap();
+        let stale_plugin = inspect_opencode(
+            &settings_path,
+            &auth_path,
+            &permission_plugin_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
+        assert_eq!(stale_plugin.state, AgentGlobalConfigState::Partial);
+        assert!(!stale_plugin.opencode_permission_bridge);
+        apply_opencode(
+            &settings_path,
+            &auth_path,
+            &permission_plugin_path,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-token",
+        )
+        .unwrap();
+
+        std::fs::remove_file(&permission_plugin_path).unwrap();
+        let missing_plugin = inspect_opencode(
+            &settings_path,
+            &auth_path,
+            &permission_plugin_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
+        assert_eq!(missing_plugin.state, AgentGlobalConfigState::Partial);
+        assert!(!missing_plugin.opencode_permission_bridge);
+        apply_opencode(
+            &settings_path,
+            &auth_path,
+            &permission_plugin_path,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-token",
+        )
+        .unwrap();
+
+        // 兼容短暂发布过的固定控制端口版本：再次应用时恢复接入前的 hostname/port，
+        // 同时保留用户原有的 mdns 等其他 server 字段。
+        let mut managed_settings = read_jsonc_settings(&settings_path).unwrap();
+        let managed_server = managed_settings
+            .get_mut("server")
+            .and_then(Value::as_object_mut)
+            .unwrap();
+        managed_server.insert("port".to_string(), serde_json::json!(4096));
+        managed_server.insert(
+            "hostname".to_string(),
+            Value::String("127.0.0.1".to_string()),
+        );
+        write_json_file(&settings_path, &managed_settings).unwrap();
+        apply_opencode(
+            &settings_path,
+            &auth_path,
+            &permission_plugin_path,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-token",
+        )
+        .unwrap();
+        let migrated = read_jsonc_settings(&settings_path).unwrap();
+        assert_eq!(migrated["server"]["port"], 1234);
+        assert!(migrated["server"].get("hostname").is_none());
+        assert_eq!(migrated["server"]["mdns"], true);
+
+        let restored = restore_opencode(
+            &settings_path,
+            &auth_path,
+            &permission_plugin_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
         assert_eq!(restored.state, AgentGlobalConfigState::OtherGateway);
         let restored_settings = read_jsonc_settings(&settings_path).unwrap();
         assert_eq!(restored_settings["theme"], "system");
@@ -2185,6 +2525,7 @@ mod tests {
         let restored_auth = read_settings(&auth_path).unwrap();
         assert_eq!(restored_auth["flowlet"]["key"], "old");
         assert_eq!(restored_auth["other"]["key"], "keep");
+        assert!(!permission_plugin_path.exists());
 
         let _ = std::fs::remove_dir_all(settings_path.parent().unwrap().parent().unwrap());
     }
@@ -2226,11 +2567,18 @@ mod tests {
         apply_opencode(
             &settings_path,
             &auth_path,
+            &settings_path.parent().unwrap().join("plugins/flowlet.ts"),
             "http://127.0.0.1:18640/v1",
             "flowlet-token",
         )
         .unwrap();
-        restore_opencode(&settings_path, &auth_path, "http://127.0.0.1:18640/v1").unwrap();
+        restore_opencode(
+            &settings_path,
+            &auth_path,
+            &settings_path.parent().unwrap().join("plugins/flowlet.ts"),
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
         assert!(!settings_path.exists());
         assert!(!auth_path.exists());
 
@@ -2506,6 +2854,7 @@ mod tests {
         let error = apply_opencode(
             &settings_path,
             &auth_path,
+            &settings_path.parent().unwrap().join("plugins/flowlet.ts"),
             "http://127.0.0.1:18640/v1",
             "flowlet-token",
         )

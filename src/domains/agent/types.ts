@@ -104,6 +104,8 @@ export type AgentGlobalConfigReport = {
   error?: string | null;
   /** 仅 Pi：Flowlet 会话扩展（`~/.pi/agent/extensions/flowlet.ts`）是否在位。 */
   session_extension?: boolean;
+  /** 仅 OpenCode：用于发现 CLI/Desktop 进程内权限事件的全局插件是否在位。 */
+  opencode_permission_bridge?: boolean;
 };
 
 /** 一键写入 Agent 全局配置的可选参数；某 Agent 不支持的选项会被忽略。 */

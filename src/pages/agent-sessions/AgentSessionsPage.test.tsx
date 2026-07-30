@@ -149,6 +149,18 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
         timeToFirstTokenMs: null,
         usage: null,
       }, {
+        id: "reasoning-1",
+        kind: "reasoning",
+        source: "agent-native",
+        timestamp: "2026-07-18T08:00:45Z",
+        title: "思考摘要",
+        content: "Check the routing candidates before changing code.",
+        model: null,
+        status: null,
+        durationMs: null,
+        timeToFirstTokenMs: null,
+        usage: null,
+      }, {
         id: "event-1",
         kind: "assistant-message",
         source: "agent-native",
@@ -322,12 +334,12 @@ describe("AgentSessionsPage", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "最近交互" }));
     expect(screen.getByRole("tab", { name: "最近交互" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("最近一次输入与输出")).toBeInTheDocument();
+    expect(screen.getByText("会话时间线")).toBeInTheDocument();
     expect(screen.getByText("Please inspect the routing bug")).toBeInTheDocument();
     expect(screen.getByText("I found the route selection issue.")).toBeInTheDocument();
     expect(screen.getByText("The fix is complete and tests pass.")).toBeInTheDocument();
-    expect(screen.queryByText("This earlier input should not be shown")).not.toBeInTheDocument();
-    expect(screen.queryByText("This earlier output should not be shown")).not.toBeInTheDocument();
+    expect(screen.getByText("This earlier input should not be shown")).toBeInTheDocument();
+    expect(screen.getByText("This earlier output should not be shown")).toBeInTheDocument();
     expect(screen.getAllByLabelText("单次原生用量").some((element) => element.textContent?.includes("总计 720"))).toBe(true);
   });
 
@@ -376,13 +388,13 @@ describe("AgentSessionsPage", () => {
 
     expect(screen.queryByText("未经过 Flowlet")).not.toBeInTheDocument();
     expect(screen.getByText("Agent 来源")).toBeInTheDocument();
-    expect(screen.getByText("ChatGPT (Codex)")).toBeInTheDocument();
+    expect(screen.getAllByText("ChatGPT (Codex)").length).toBeGreaterThan(0);
     expect(screen.queryByText("未知客户端")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).not.toBeInTheDocument();
     expect(screen.getAllByText("—")).toHaveLength(7);
   });
 
-  it("shows every Agent output produced after the latest user input", () => {
+  it("renders the complete native conversation with user, assistant, and activity events interleaved", () => {
     render(
       <MemoryRouter>
         <AgentSessionDetailSideSheet session={session} onClose={vi.fn()} onViewRequestLogs={vi.fn()} />
@@ -390,9 +402,21 @@ describe("AgentSessionsPage", () => {
     );
 
     fireEvent.click(screen.getByText("最近交互"));
-    expect(screen.getByText("用户消息 · Agent 原生")).toBeInTheDocument();
-    expect(screen.getAllByText("助手回复 · Agent 原生")).toHaveLength(2);
-    expect(screen.getByText("工具调用 · Agent 原生")).toBeInTheDocument();
+    const userMessages = screen.getAllByLabelText("用户消息");
+    const assistantMessages = screen.getAllByLabelText("助手回复");
+    const reasoning = screen.getByLabelText("思考摘要");
+    const toolCall = screen.getByLabelText("工具调用");
+    expect(userMessages[1]).toHaveTextContent("Please inspect the routing bug");
+    expect(reasoning).not.toHaveAttribute("open");
+    expect(assistantMessages[1]).toHaveTextContent("I found the route selection issue.");
+    expect(toolCall).not.toHaveAttribute("open");
+    expect(toolCall).toHaveTextContent("cargo test routing");
+    expect(assistantMessages[2]).toHaveTextContent("The fix is complete and tests pass.");
+    expect(userMessages[1].compareDocumentPosition(reasoning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reasoning.compareDocumentPosition(assistantMessages[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(assistantMessages[1].compareDocumentPosition(toolCall) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toolCall.compareDocumentPosition(assistantMessages[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("过程记录")).not.toBeInTheDocument();
     expect(screen.getByText("缓存命中率 16.7%")).toBeInTheDocument();
   });
 

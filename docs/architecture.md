@@ -462,8 +462,9 @@ Claude Code 文件按路径、大小和修改时间缓存，未变化文件不�
 两个独立筛选项展示。
 
 会话详情拆分为“概览”和“最近交互”两个 Tab；详情打开时，前端通过独立 Query 按需调用
-`get_agent_session_timeline`，概览使用返回的原生累计用量，最近交互复用同一份缓存数据，定位最后一条
-用户消息并仅展示该消息及其后的全部 Agent 输出。Rust 在阻塞任务中
+`get_agent_session_timeline`，概览使用返回的原生累计用量，最近交互复用同一份缓存数据，将可读取范围内的
+用户消息、Agent 输出、思考和工具活动按原生顺序混合成完整时间线。用户消息靠右，Agent 与过程事件靠左；
+思考摘要和工具活动保留在原时间点并默认折叠，由用户按需展开。Rust 在阻塞任务中
 只读对应原生数据源：OpenCode 联查 `message` / `part`，Claude Code 解析目标 JSONL，Codex
 解析目标 rollout JSONL 的 `response_item`。不同来源统一返回用户消息、助手回复、思考摘要、
 工具调用、工具结果和错误六类事件，不写入 Flowlet SQLite，也不读取或展示 Codex developer

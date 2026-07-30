@@ -256,6 +256,7 @@ vi.mock("./useAgentEnvironment", () => ({
         api_key_configured: true,
         primary_model: "flowlet/flowlet-pro",
         fast_model: "flowlet/flowlet-flash",
+        opencode_permission_bridge: true,
         backup_available: true,
         external_environment_overrides: [],
       },
@@ -364,6 +365,9 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("C:\\Users\\test\\.local\\share\\opencode\\auth.json")).toBeInTheDocument();
     expect(screen.getByText("flowlet/flowlet-pro")).toBeInTheDocument();
     expect(screen.getByText("flowlet/flowlet-flash")).toBeInTheDocument();
+    const permissionPluginRow = screen.getByText("权限插件").closest("div");
+    expect(permissionPluginRow).not.toBeNull();
+    expect(within(permissionPluginRow!).getByText("已安装")).toBeInTheDocument();
     expect(screen.queryByText("接入参数")).not.toBeInTheDocument();
   });
 

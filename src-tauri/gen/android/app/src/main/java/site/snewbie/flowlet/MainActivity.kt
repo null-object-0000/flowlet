@@ -1,4 +1,4 @@
-package local.flowlet.mobile
+package site.snewbie.flowlet
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

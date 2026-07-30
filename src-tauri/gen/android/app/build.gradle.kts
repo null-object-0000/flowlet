@@ -13,16 +13,39 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val releaseKeystorePropertiesFile = rootProject.file("keystore.properties")
+val releaseKeystoreProperties = Properties().apply {
+    if (releaseKeystorePropertiesFile.isFile) {
+        releaseKeystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun Properties.requireSigningProperty(name: String): String =
+    getProperty(name)?.takeIf(String::isNotBlank)
+        ?: error("Android release signing property '$name' is missing")
+
 android {
     compileSdk = 36
-    namespace = "local.flowlet.mobile"
+    namespace = "site.snewbie.flowlet"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "local.flowlet.mobile"
+        applicationId = "site.snewbie.flowlet"
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        if (releaseKeystorePropertiesFile.isFile) {
+            create("release") {
+                keyAlias = releaseKeystoreProperties.requireSigningProperty("keyAlias")
+                keyPassword = releaseKeystoreProperties.requireSigningProperty("keyPassword")
+                storeFile = file(
+                    releaseKeystoreProperties.requireSigningProperty("storeFile")
+                )
+                storePassword = releaseKeystoreProperties.requireSigningProperty("storePassword")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -37,6 +60,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

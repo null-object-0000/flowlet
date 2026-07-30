@@ -27,6 +27,7 @@ flate2 = "1"
 futures-util = "0.3"
 hex = "0.4"
 hmac = "0.12"
+if-addrs = "0.14"
 jsonc-parser = { version = "0.33", features = ["cst", "serde", "serde_json"] }
 notify = "8.2"
 keyring = "4.1.5"

@@ -276,10 +276,46 @@ pub fn read_server_report(
 
 #[cfg(desktop)]
 fn primary_lan_address() -> Option<std::net::IpAddr> {
+    fn is_private_or_unique_local(addr: &std::net::IpAddr) -> bool {
+        match addr {
+            std::net::IpAddr::V4(v4) => v4.is_private(),
+            std::net::IpAddr::V6(v6) => v6.is_unique_local(),
+        }
+    }
+
+    // 优先枚举本机接口，选择处于 UP 状态且地址为内网地址的端点。
+    // UDP routing 启发式在有多网卡 / VPN / 虚拟网卡时可能选中非私有地址，
+    // 导致后续 validate_endpoint 拒绝。
+    if let Ok(interfaces) = if_addrs::get_if_addrs() {
+        let mut fallback_ipv6 = None;
+        for interface in interfaces {
+            if !interface.is_oper_up() || interface.is_loopback() {
+                continue;
+            }
+            let addr = interface.ip();
+            if addr.is_unspecified() || !is_private_or_unique_local(&addr) {
+                continue;
+            }
+            if addr.is_ipv4() {
+                return Some(addr);
+            }
+            if fallback_ipv6.is_none() {
+                fallback_ipv6 = Some(addr);
+            }
+        }
+        if let Some(addr) = fallback_ipv6 {
+            return Some(addr);
+        }
+    }
+
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("192.0.2.1:9").ok()?;
     let address = socket.local_addr().ok()?.ip();
-    (!address.is_loopback() && !address.is_unspecified()).then_some(address)
+    if is_private_or_unique_local(&address) && !address.is_loopback() && !address.is_unspecified() {
+        Some(address)
+    } else {
+        None
+    }
 }
 
 fn record_inbound(state: &LanServerState, remote: Option<&SocketAddr>, path: &str) {

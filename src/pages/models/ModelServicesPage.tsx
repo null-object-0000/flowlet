@@ -19,7 +19,7 @@ import type { ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import type { ChannelModel } from "../../domains/model/types";
 import type { ModelPriceInfo } from "../../domains/settings/types";
-import { formatCompactNumber, type NumberLanguage } from "../../shared/formatters/number";
+import { formatTokenCapacity, type NumberLanguage } from "../../shared/formatters/number";
 import { formatCostAmount } from "../../shared/formatters/cost";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
@@ -747,8 +747,8 @@ function ModelBasicInfoTab({ basicInfo, resolved, isAggregate, channelName, lang
       </div>
       <DetailSection title={t("模型参数")}>
         <div className={styles.parameterGrid}>
-          <div className={styles.parameterItem}><span>{t("上下文窗口")}</span><strong>{formatCompactNumber(contextTokens, language)}</strong></div>
-          <div className={styles.parameterItem}><span>{t("最大输出")}</span><strong>{formatCompactNumber(maxOutputTokens, language)}</strong></div>
+          <div className={styles.parameterItem}><span>{t("上下文窗口")}</span><strong>{formatTokenCapacity(contextTokens, language)}</strong></div>
+          <div className={styles.parameterItem}><span>{t("最大输出")}</span><strong>{formatTokenCapacity(maxOutputTokens, language)}</strong></div>
           <div className={styles.parameterItem}><span>{t("模型类型")}</span><strong>{isAggregate ? t("Flowlet 聚合") : t("渠道原始模型")}</strong></div>
           <div className={styles.parameterItem}><span>{t("官方归属")}</span><strong>{isAggregate ? t("多渠道聚合") : channelName ?? "—"}</strong></div>
         </div>

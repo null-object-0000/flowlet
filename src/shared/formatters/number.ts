@@ -38,6 +38,37 @@ export function formatCompactNumber(
   return formatInteger(value, language, fallback);
 }
 
+/**
+ * Formats model token capacities using the conventional K/M notation.
+ * Catalog sources may encode advertised capacities using either decimal
+ * (128_000) or binary-aligned (131_072) values, so prefer an exact unit in
+ * either system before falling back to decimal scaling.
+ */
+export function formatTokenCapacity(
+  value: number | null | undefined,
+  language: NumberLanguage,
+  fallback = "—",
+) {
+  if (value == null || !Number.isFinite(value)) return fallback;
+  const absolute = Math.abs(value);
+
+  if (absolute >= 1_000_000) {
+    const divisor = absolute % 1_000_000 === 0 || absolute % 1_048_576 !== 0
+      ? 1_000_000
+      : 1_048_576;
+    return formatCapacityScaled(value, divisor, "M", language);
+  }
+
+  if (absolute >= 1_000) {
+    const divisor = absolute % 1_000 === 0 || absolute % 1_024 !== 0
+      ? 1_000
+      : 1_024;
+    return formatCapacityScaled(value, divisor, "K", language);
+  }
+
+  return formatInteger(value, language, fallback);
+}
+
 function formatScaled(
   value: number,
   divisor: number,
@@ -48,6 +79,19 @@ function formatScaled(
   const scaled = new Intl.NumberFormat(language, {
     maximumFractionDigits,
     minimumFractionDigits: maximumFractionDigits,
+    useGrouping: false,
+  }).format(value / divisor);
+  return `${scaled}${suffix}`;
+}
+
+function formatCapacityScaled(
+  value: number,
+  divisor: number,
+  suffix: string,
+  language: NumberLanguage,
+) {
+  const scaled = new Intl.NumberFormat(language, {
+    maximumFractionDigits: 2,
     useGrouping: false,
   }).format(value / divisor);
   return `${scaled}${suffix}`;

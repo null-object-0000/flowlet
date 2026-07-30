@@ -112,17 +112,19 @@ pub fn current_descriptor(storage: &Storage) -> Option<LanPeerDescriptor> {
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .filter(descriptor_is_fresh)?;
     #[cfg(desktop)]
-    if let (Some(address), Some(port)) = (
-        primary_lan_address(),
-        descriptor
-            .endpoints
-            .first()
-            .and_then(|endpoint| url::Url::parse(endpoint).ok())
-            .and_then(|endpoint| endpoint.port()),
-    ) {
-        let endpoint = format!("http://{address}:{port}");
-        if validate_endpoint(&endpoint).is_ok() {
-            descriptor.endpoints = vec![endpoint];
+    if let Some(port) = descriptor
+        .endpoints
+        .first()
+        .and_then(|endpoint| url::Url::parse(endpoint).ok())
+        .and_then(|endpoint| endpoint.port())
+    {
+        let endpoints: Vec<String> = candidate_lan_addresses()
+            .into_iter()
+            .map(|address| format!("http://{address}:{port}"))
+            .filter(|endpoint| validate_endpoint(endpoint).is_ok())
+            .collect();
+        if !endpoints.is_empty() {
+            descriptor.endpoints = endpoints;
         }
     }
     descriptor.expires_at = (Utc::now() + ChronoDuration::minutes(20)).to_rfc3339();
@@ -185,15 +187,21 @@ pub async fn start_server(
         .local_addr()
         .map_err(|error| format!("读取局域网同步端口失败：{error}"))?
         .port();
-    let address = primary_lan_address().ok_or_else(|| "未找到可发布的局域网地址".to_string())?;
-    let endpoint = format!("http://{address}:{port}");
-    validate_endpoint(&endpoint)?;
+    let addresses = candidate_lan_addresses();
+    let endpoints: Vec<String> = addresses
+        .into_iter()
+        .map(|address| format!("http://{address}:{port}"))
+        .filter(|endpoint| validate_endpoint(endpoint).is_ok())
+        .collect();
+    if endpoints.is_empty() {
+        return Err("未找到可发布的局域网地址".to_string());
+    }
     // 发布信息的有效期长于常规定时同步周期；每次生成并上传快照时都会刷新。
     let now = Utc::now();
     let auth_key = random_key();
     let descriptor = LanPeerDescriptor {
         protocol_version: PROTOCOL_VERSION,
-        endpoints: vec![endpoint],
+        endpoints,
         auth_key: BASE64.encode(auth_key),
         capabilities: current_capabilities(),
         started_at: now.to_rfc3339(),
@@ -275,19 +283,24 @@ pub fn read_server_report(
 }
 
 #[cfg(desktop)]
-fn primary_lan_address() -> Option<std::net::IpAddr> {
-    fn is_private_or_unique_local(addr: &std::net::IpAddr) -> bool {
-        match addr {
-            std::net::IpAddr::V4(v4) => v4.is_private(),
-            std::net::IpAddr::V6(v6) => v6.is_unique_local(),
-        }
+fn is_private_or_unique_local(addr: &std::net::IpAddr) -> bool {
+    match addr {
+        std::net::IpAddr::V4(v4) => v4.is_private(),
+        std::net::IpAddr::V6(v6) => v6.is_unique_local(),
     }
+}
 
-    // 优先枚举本机接口，选择处于 UP 状态且地址为内网地址的端点。
-    // UDP routing 启发式在有多网卡 / VPN / 虚拟网卡时可能选中非私有地址，
-    // 导致后续 validate_endpoint 拒绝。
+/// 返回所有可用于局域网直连的本机地址候选。
+///
+/// 1. 先枚举所有处于 UP 状态、非 loopback 的接口，收集其中的 IPv4 私有地址
+///    和 IPv6 Unique Local 地址。
+/// 2. 再用 UDP routing 启发式询问 OS：访问公网地址时会用哪个源地址。
+///    这个地址通常是能和手机互通的物理 LAN/Wi-Fi 地址，因此排在最前面。
+/// 3. 如果路由启发式返回非内网地址（VPN 等场景），则只保留枚举到的内网地址。
+#[cfg(desktop)]
+fn candidate_lan_addresses() -> Vec<std::net::IpAddr> {
+    let mut candidates = Vec::new();
     if let Ok(interfaces) = if_addrs::get_if_addrs() {
-        let mut fallback_ipv6 = None;
         for interface in interfaces {
             if !interface.is_oper_up() || interface.is_loopback() {
                 continue;
@@ -296,26 +309,28 @@ fn primary_lan_address() -> Option<std::net::IpAddr> {
             if addr.is_unspecified() || !is_private_or_unique_local(&addr) {
                 continue;
             }
-            if addr.is_ipv4() {
-                return Some(addr);
-            }
-            if fallback_ipv6.is_none() {
-                fallback_ipv6 = Some(addr);
-            }
-        }
-        if let Some(addr) = fallback_ipv6 {
-            return Some(addr);
+            candidates.push(addr);
         }
     }
 
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("192.0.2.1:9").ok()?;
-    let address = socket.local_addr().ok()?.ip();
-    if is_private_or_unique_local(&address) && !address.is_loopback() && !address.is_unspecified() {
-        Some(address)
-    } else {
-        None
+    let routed = (|| {
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+        // 1.1.1.1:53 只是为了让 OS 选择默认路由接口，不会真正发送数据。
+        socket.connect("1.1.1.1:53").ok()?;
+        let addr = socket.local_addr().ok()?.ip();
+        if is_private_or_unique_local(&addr) && !addr.is_loopback() && !addr.is_unspecified() {
+            Some(addr)
+        } else {
+            None
+        }
+    })();
+
+    if let Some(first) = routed {
+        candidates.retain(|addr| *addr != first);
+        candidates.insert(0, first);
     }
+
+    candidates
 }
 
 fn record_inbound(state: &LanServerState, remote: Option<&SocketAddr>, path: &str) {

@@ -1,6 +1,7 @@
 import { IconComment, IconDesktop, IconHome, IconSetting } from "@douyinfe/semi-icons";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
+import { MobileDeviceSyncAutoRefresh } from "../features/device-sync/MobileDeviceSyncAutoRefresh";
 import { MobileDeviceSelectionProvider } from "./MobileDeviceSelection";
 import styles from "./MobileShell.module.css";
 
@@ -15,6 +16,7 @@ export function MobileShell() {
   const { t } = useAppPreferences();
   return (
     <MobileDeviceSelectionProvider>
+      <MobileDeviceSyncAutoRefresh />
       <div className={styles.shell}>
         <main className={styles.content}><Outlet /></main>
         <nav className={styles.navigation} aria-label={t("主导航")}>

@@ -1,8 +1,8 @@
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { Button } from "@douyinfe/semi-ui-19";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { useMobileDailyUsage, useMobileDevices, useMobileDeviceSyncActions, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
+import { useMobileDailyUsage, useMobileDevices, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { MobileDevicePicker } from "../MobileDevicePicker";
 import { MobileRefreshButton } from "../MobileRefreshButton";
@@ -30,8 +30,6 @@ export function MobileOverviewPage() {
   const devices = useMobileDevices();
   const usage = useMobileDailyUsage(deviceId);
   const hourlyUsage = useMobileHourlyUsage(deviceId);
-  const actions = useMobileDeviceSyncActions();
-  const autoRefreshStarted = useRef(false);
   const now = useMemo(() => new Date(), []);
   const range = useMemo(
     () => getMobileUsageRange(period, periodOffset, now),
@@ -83,14 +81,6 @@ export function MobileOverviewPage() {
     ),
     [language, range.start],
   );
-
-  useEffect(() => {
-    if (!settings.data?.config || autoRefreshStarted.current) return;
-    autoRefreshStarted.current = true;
-    void actions.refreshS3.mutateAsync().catch((error) => {
-      console.warn("Failed to refresh shared device usage", error);
-    });
-  }, [settings.data?.config]);
 
   useEffect(() => {
     setSelectedDate(null);

@@ -113,7 +113,15 @@ pub(super) async fn test_s3_read_connection(
 pub(super) async fn refresh_shared_device_usage_s3(
     state: tauri::State<'_, MobileAppState>,
 ) -> Result<crate::core::device_sync::S3DevicePullResult, String> {
-    crate::core::device_sync::run_configured_pull(state.storage.clone()).await
+    // 移动端手动刷新按钮走 LAN 优先，与桌面端行为一致。
+    crate::core::device_sync::run_configured_pull(state.storage.clone(), true).await
+}
+
+#[tauri::command]
+pub(super) async fn list_cached_lan_probes(
+    state: tauri::State<'_, MobileAppState>,
+) -> Result<Vec<crate::core::lan_sync::LanPeerProbe>, String> {
+    Ok(crate::core::lan_sync::cached_lan_probes(&state.storage))
 }
 
 #[tauri::command]

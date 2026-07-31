@@ -9,6 +9,7 @@ vi.mock("../features/device-sync/useMobileDeviceSync", () => ({
   useMobileDevices: () => ({
     data: [{ deviceId: "device-1", displayName: "Office PC" }],
   }),
+  useMobileDeviceSyncBackground: () => {},
 }));
 
 function SelectionPage({ name }: { name: string }) {

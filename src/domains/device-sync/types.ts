@@ -210,3 +210,11 @@ export type LanPeerProbe = {
   errorKind: LanProbeErrorKind | null;
   error: string | null;
 };
+
+export type MobileSyncUpdate = {
+  completedAt: string;
+  s3ImportedDevices: number;
+  s3FailedObjects: number;
+  s3Error: string | null;
+  lanProbeCount: number;
+};

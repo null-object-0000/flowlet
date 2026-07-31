@@ -593,7 +593,7 @@ fn decrypt<T: DeserializeOwned>(
 
 /// 签名直连请求的错误分类。探测与状态展示依赖这个区分
 /// 「设备不在线」和「连接信息失效」，而不是只给用户一行字符串。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LanProbeErrorKind {
     Unreachable,
@@ -703,7 +703,7 @@ pub async fn fetch_snapshot(descriptor: &LanPeerDescriptor) -> Result<DeviceUsag
 
 /// 单台设备的直连探测结果。移动端与桌面端共用同一份结构展示
 /// 「能不能连上这台设备」。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanPeerProbe {
     pub device_id: String,
@@ -915,11 +915,17 @@ pub async fn list_remote_permissions(
     let peer = peer_descriptor(storage, device_id)
         .ok_or_else(|| "目标设备没有可用的局域网连接信息".to_string())?;
     let path = format!("/flowlet/v1/opencode/permissions/{session_id}");
-    let endpoint = peer
-        .endpoints
-        .first()
-        .ok_or_else(|| "目标设备没有局域网端点".to_string())?;
-    request(&peer, endpoint, Method::GET, &path, Vec::new()).await
+    // 遍历所有端点，任一成功即可；与 fetch_snapshot / probe_peer 保持一致。
+    // 桌面端发布多端点时（多网卡/VPN 场景），首个地址可能手机到不了，
+    // 仅取 endpoints.first() 会误报「无法直连」。
+    let mut last_error = "没有可用的局域网端点".to_string();
+    for endpoint in &peer.endpoints {
+        match request(&peer, endpoint, Method::GET, &path, Vec::new()).await {
+            Ok(report) => return Ok(report),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 
 pub async fn reply_remote_permission(
@@ -931,13 +937,54 @@ pub async fn reply_remote_permission(
     let peer = peer_descriptor(storage, device_id)
         .ok_or_else(|| "目标设备没有可用的局域网连接信息".to_string())?;
     let path = format!("/flowlet/v1/opencode/permissions/{permission_id}/reply");
-    let endpoint = peer
-        .endpoints
-        .first()
-        .ok_or_else(|| "目标设备没有局域网端点".to_string())?;
-    let body = serde_json::to_vec(&serde_json::json!({ "decision": decision, "operationId": uuid::Uuid::new_v4().to_string() })).map_err(|error| error.to_string())?;
-    let result: Result<(), String> = request(&peer, endpoint, Method::POST, &path, body).await?;
-    result
+    // operationId 在循环外生成一次，多端点重试保持幂等。
+    let body = serde_json::to_vec(&serde_json::json!({
+        "decision": decision,
+        "operationId": uuid::Uuid::new_v4().to_string()
+    }))
+    .map_err(|error| error.to_string())?;
+    let mut last_error = "没有可用的局域网端点".to_string();
+    for endpoint in &peer.endpoints {
+        match request::<()>(&peer, endpoint, Method::POST, &path, body.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+const LAN_PROBE_CACHE_KEY: &str = "mobile_lan_probe_cache_v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LanProbeCache {
+    probed_at: String,
+    probes: Vec<LanPeerProbe>,
+}
+
+/// 执行全量 LAN 探测并把结果写入 app_meta 缓存，供移动端设备页读取。
+/// 探测失败不会阻断缓存写入（空结果也缓存），避免反复发起网络请求。
+pub async fn probe_and_cache_lan_peers(storage: &Storage) -> Vec<LanPeerProbe> {
+    let probes = probe_lan_peers(storage, None).await;
+    let cache = LanProbeCache {
+        probed_at: Utc::now().to_rfc3339(),
+        probes: probes.clone(),
+    };
+    if let Ok(raw) = serde_json::to_string(&cache) {
+        let _ = storage.set_app_meta(LAN_PROBE_CACHE_KEY, &raw);
+    }
+    probes
+}
+
+/// 读取缓存中的 LAN 探测结果。无缓存时返回空 Vec，不发起网络请求。
+pub fn cached_lan_probes(storage: &Storage) -> Vec<LanPeerProbe> {
+    storage
+        .get_app_meta(LAN_PROBE_CACHE_KEY)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<LanProbeCache>(&raw).ok())
+        .map(|cache| cache.probes)
+        .unwrap_or_default()
 }
 
 fn random_key() -> [u8; 32] {

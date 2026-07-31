@@ -90,6 +90,9 @@ export const mobileDeviceSyncCommands = {
   probeLanPeers: (deviceId: string | null): Promise<LanPeerProbe[]> =>
     invokeCommand<LanPeerProbe[]>("probe_lan_peers", { deviceId })
       .catch(toDeviceSyncError("lan_peer_probe_failed")),
+  cachedLanProbes: (): Promise<LanPeerProbe[]> =>
+    invokeCommand<LanPeerProbe[]>("list_cached_lan_probes")
+      .catch(toDeviceSyncError("lan_peer_probe_failed")),
   s3Settings: deviceSyncCommands.s3Settings,
   saveS3Config: deviceSyncCommands.saveS3Config,
   testS3Connection: (config: S3SyncConfigInput): Promise<S3ConnectionTestResult> =>

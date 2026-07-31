@@ -476,6 +476,28 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
         .unwrap();
     assert!(out_of_range.rows.is_empty());
     assert_eq!(out_of_range.total, 1);
+
+    // 设备同步快照与列表页共用同一实时待确认合并入口，两端状态必须一致。
+    let sync_pending = storage
+        .list_agent_sessions_for_device_sync(&pending)
+        .unwrap();
+    assert_eq!(
+        sync_pending
+            .iter()
+            .find(|row| row.session_id == "ses_parent")
+            .map(|row| row.runtime_status.as_str()),
+        Some("waiting_user")
+    );
+    let sync_default = storage
+        .list_agent_sessions_for_device_sync(&std::collections::HashSet::new())
+        .unwrap();
+    assert_ne!(
+        sync_default
+            .iter()
+            .find(|row| row.session_id == "ses_parent")
+            .map(|row| row.runtime_status.as_str()),
+        Some("waiting_user")
+    );
 }
 
 #[test]

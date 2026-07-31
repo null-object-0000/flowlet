@@ -89,6 +89,21 @@ pub async fn list_permissions() -> OpenCodePermissionReport {
     list_permissions_from(&base_url, None).await
 }
 
+/// 返回当前存在待确认权限的 OpenCode 会话 ID 集合。
+/// PC 列表页与设备同步快照必须走同一入口，否则快照会把"等待确认"的会话
+/// 固化为"自动运行中"。控制服务不可用时返回空集合，退化为 SQLite 推断状态。
+pub async fn pending_session_ids() -> HashSet<String> {
+    let report = list_permissions().await;
+    if !report.available {
+        return HashSet::new();
+    }
+    report
+        .permissions
+        .into_iter()
+        .map(|permission| permission.session_id)
+        .collect()
+}
+
 pub async fn reply_permission(
     permission_id: &str,
     decision: OpenCodePermissionDecision,

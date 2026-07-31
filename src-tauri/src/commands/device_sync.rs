@@ -294,7 +294,7 @@ pub(crate) async fn sync_device_usage_s3(
 pub(crate) async fn refresh_shared_device_usage_s3(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::device_sync::S3DevicePullResult, String> {
-    crate::core::device_sync::run_configured_pull(state.storage.clone()).await
+    crate::core::device_sync::run_configured_pull(state.storage.clone(), true).await
 }
 
 #[tauri::command]

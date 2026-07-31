@@ -23,6 +23,9 @@ const MAX_REMOTE_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
 const SIGNED_URL_TTL: Duration = Duration::from_secs(60);
 pub const AUTO_SYNC_INITIAL_DELAY: Duration = Duration::from_secs(5);
 pub const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
+/// 移动端后台 S3-only 拉取周期。与桌面端 15 分钟上传周期独立；
+/// 移动端不做 LAN 直连，只做云端拉取。
+pub const MOBILE_AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(5 * 60);
 pub const SYNC_ALREADY_RUNNING_ERROR: &str = "设备用量同步正在运行";
 static SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
 const MIN_SYNCED_RECENT_SESSIONS: usize = 10;
@@ -122,6 +125,9 @@ pub async fn build_device_snapshot(
     identity: DeviceIdentity,
 ) -> Result<DeviceUsageSnapshot, String> {
     let snapshot_storage = storage.clone();
+    // 与 PC 列表页同一入口合并 OpenCode 实时待确认权限，否则移动端快照会把
+    // “等待确认”的会话固化为 SQLite 推断出的“自动运行中”。
+    let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
     let (days, hours, sessions) = tauri::async_runtime::spawn_blocking(move || {
         let days = snapshot_storage
             .daily_usage_totals()
@@ -130,7 +136,7 @@ pub async fn build_device_snapshot(
             .hourly_usage_totals()
             .map_err(|error| error.to_string())?;
         let sessions = snapshot_storage
-            .list_agent_sessions_for_device_sync()
+            .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
             .map_err(|error| error.to_string())?
             .into_iter()
             .map(|row| SyncedAgentSession {
@@ -834,7 +840,10 @@ pub async fn test_read_connection(
     })
 }
 
-pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, String> {
+pub async fn pull_device_usage(
+    storage: Storage,
+    prefer_lan: bool,
+) -> Result<S3DevicePullResult, String> {
     let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
     let secret = read_secret(&config)?;
     let store = S3Store::new(&config, &secret)?;
@@ -869,7 +878,13 @@ pub async fn pull_device_usage(storage: Storage) -> Result<S3DevicePullResult, S
         };
         if config.snapshot_key(&bundle.snapshot.device_id) == object.key {
             crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
-            bundles.push(prefer_lan_bundle(&storage, bundle).await);
+            // prefer_lan = false 时跳过局域网直连，仅使用 S3 快照；
+            // 手动刷新等用户主动场景才允许 LAN 优先。
+            if prefer_lan {
+                bundles.push(prefer_lan_bundle(&storage, bundle).await);
+            } else {
+                bundles.push(bundle);
+            }
         } else {
             failure_details.push(format!("{object_label}：快照 deviceId 与对象路径不一致"));
         }
@@ -938,7 +953,10 @@ fn snapshot_object_label(key: &str) -> String {
         .unwrap_or_else(|| "未知设备快照".to_string())
 }
 
-pub async fn run_configured_pull(storage: Storage) -> Result<S3DevicePullResult, String> {
+pub async fn run_configured_pull(
+    storage: Storage,
+    prefer_lan: bool,
+) -> Result<S3DevicePullResult, String> {
     let _guard = acquire_sync_guard()?;
     let now = chrono::Utc::now().to_rfc3339();
     let previous = load_status(&storage);
@@ -957,7 +975,7 @@ pub async fn run_configured_pull(storage: Storage) -> Result<S3DevicePullResult,
         },
     );
 
-    match pull_device_usage(storage.clone()).await {
+    match pull_device_usage(storage.clone(), prefer_lan).await {
         Ok(result) => {
             let status = if result.failed_objects == 0 {
                 "success"

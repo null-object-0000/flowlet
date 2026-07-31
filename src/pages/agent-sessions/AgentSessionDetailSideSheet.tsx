@@ -5,6 +5,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { AgentSessionInteractionEvent, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionNativeUsage, AgentSessionRow, OpenCodePermissionRequest } from "../../domains/agent-session/types";
 import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { Markdown } from "../../shared/ui/Markdown";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
 import { formatTimestamp } from "../../shared/formatters/datetime";
@@ -200,7 +201,7 @@ function LastInteractionSection({
         <div className={styles.interactionFlow} aria-label={t("最近一轮")}>
           {userEvent ? (
             <article className={styles.userMessageRow} aria-label={t("用户消息")}>
-              {userEvent.content ? <pre className={styles.userMessageBubble}>{userEvent.content}</pre> : null}
+              {userEvent.content ? <div className={styles.userMessageBubble}><Markdown content={userEvent.content} /></div> : null}
             </article>
           ) : null}
           {outputItems.length > 0 ? (
@@ -480,13 +481,25 @@ function InteractionOutputEvent({
   language: "zh-CN" | "en-US";
 }) {
   const { t } = useAppPreferences();
-  if (event.kind === "assistant-message" || event.kind === "error") {
+  if (event.kind === "assistant-message") {
     return (
       <article
-        className={`${styles.outputMessage} ${event.kind === "error" ? styles.assistantError : ""}`}
-        aria-label={event.kind === "error" ? t("错误") : t("助手回复")}
+        className={styles.outputMessage}
+        aria-label={t("助手回复")}
       >
-        {event.content ? <pre>{event.content}</pre> : null}
+        {event.content ? <Markdown content={event.content} /> : null}
+        {event.usage ? <InteractionEventUsage usage={event.usage} language={language} /> : null}
+      </article>
+    );
+  }
+
+  if (event.kind === "error") {
+    return (
+      <article
+        className={`${styles.outputMessage} ${styles.assistantError}`}
+        aria-label={t("错误")}
+      >
+        {event.content ? <pre className={styles.errorContent}>{event.content}</pre> : null}
         {event.usage ? <InteractionEventUsage usage={event.usage} language={language} /> : null}
       </article>
     );

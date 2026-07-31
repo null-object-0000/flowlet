@@ -41,13 +41,12 @@
 .emptyState { padding: 12px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
 .interactionFlow { padding: 4px 2px 16px; }
 .interactionFlow > * + * { margin-top: 24px; }
-.interactionFlow pre { margin: 0; font-family: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .userMessageRow { min-width: 0; display: flex; justify-content: flex-end; }
 .userMessageBubble { width: fit-content; max-width: 82%; padding: 10px 13px; border-radius: 12px 12px 3px 12px; color: var(--flowlet-color-text); background: var(--semi-color-fill-0); font-size: var(--flowlet-font-size-body); line-height: 1.65; }
 .processEvent time { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .outputStream { min-width: 0; display: grid; gap: 17px; }
 .outputMessage { min-width: 0; max-width: 96%; }
-.outputMessage > pre { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); line-height: 1.75; }
+.errorContent { margin: 0; color: var(--flowlet-color-text); font-family: inherit; font-size: var(--flowlet-font-size-body); line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
 .assistantError { padding: 10px 12px; border: 1px solid var(--semi-color-danger-light-active); border-radius: 8px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); }
 .assistantError > pre { color: var(--semi-color-danger); }
 .processGroup { min-width: 0; max-width: 96%; }
@@ -67,7 +66,7 @@
 .toolPayloadList { display: grid; gap: 8px; }
 .toolPayload { margin-top: 7px; display: grid; gap: 4px; }
 .toolPayload > span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
-.toolPayload > pre { max-height: 280px; padding: 8px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.55; }
+.toolPayload > pre { max-height: 280px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .interactionStatus { display: block; margin-top: 7px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
 .eventUsage { margin-top: 12px; padding-top: 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; border-top: 1px solid var(--flowlet-color-border); }
 .eventUsage span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }

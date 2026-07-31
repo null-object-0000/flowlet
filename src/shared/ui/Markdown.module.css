@@ -1,0 +1,6 @@
+.markdown { min-width: 0; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); line-height: 1.7; overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown :global(.semi-typography) { color: inherit; }
+.markdown a { color: var(--flowlet-color-primary); }
+.markdown :global(.semi-codeHighlight) { max-width: 100%; }

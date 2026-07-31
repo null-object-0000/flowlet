@@ -116,6 +116,20 @@ const requestedArguments = process.argv.slice(2);
 let exitCode;
 
 if (requestedArguments[0] === "install") {
+  const keystoreProperties = join(
+    process.cwd(),
+    "src-tauri",
+    "gen",
+    "android",
+    "keystore.properties",
+  );
+  if (!existsSync(keystoreProperties)) {
+    console.error(
+      "未找到 src-tauri/gen/android/keystore.properties，无法构建正式签名 APK。",
+    );
+    process.exit(1);
+  }
+
   exitCode = await run(process.execPath, [
     tauriCli,
     "android",
@@ -123,7 +137,6 @@ if (requestedArguments[0] === "install") {
     "--apk",
     "--target",
     "aarch64",
-    "--debug",
     ...requestedArguments.slice(1),
   ]);
 
@@ -144,10 +157,17 @@ if (requestedArguments[0] === "install") {
       "outputs",
       "apk",
       "universal",
-      "debug",
-      "app-universal-debug.apk",
+      "release",
+      "app-universal-release.apk",
     );
-    exitCode = await run(adbExecutable, ["install", "-r", apk]);
+    if (!existsSync(apk)) {
+      console.error(
+        `未找到正式签名 APK：${apk}\n请检查 Android release signing 配置。`,
+      );
+      exitCode = 1;
+    } else {
+      exitCode = await run(adbExecutable, ["install", "-r", apk]);
+    }
   }
 } else {
   exitCode = await run(process.execPath, [

@@ -455,7 +455,10 @@ Shell 与精简的 Tauri 启动入口。`#[cfg(desktop)]` 注册代理、托盘�
 
 Android 工程需在已安装 Android SDK/NDK 的开发机上先执行
 `npm run tauri:android:init`。之后使用 `npm run tauri:android:build` 生成 arm64 APK，
-或使用 `npm run tauri:android:build:aab` 生成 arm64 AAB。普通的
+或使用 `npm run tauri:android:build:aab` 生成 arm64 AAB。配置本机
+`src-tauri/gen/android/keystore.properties` 后，`npm run tauri:android:install`
+会构建并通过 ADB 覆盖安装正式签名的 arm64 release APK；该命令不会卸载签名不一致的旧包。
+普通的
 `npm run tauri:build` 始终构建当前桌面宿主平台，不会同时生成 Android 包。
 
 请求日志采用 SQLite 索引 + `request-captures/` 明细文件的混合存储。`request_logs`

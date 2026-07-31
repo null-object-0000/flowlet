@@ -1,0 +1,9 @@
+.page {
+  min-height: 100vh;
+  background: var(--flowlet-color-app-bg);
+  color: var(--flowlet-color-text);
+}
+
+.page main {
+  display: block;
+}

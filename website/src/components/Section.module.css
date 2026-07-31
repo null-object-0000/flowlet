@@ -1,0 +1,35 @@
+.section {
+  padding: 72px 24px;
+  scroll-margin-top: 72px;
+}
+
+.inner {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.header {
+  margin-bottom: 40px;
+  text-align: center;
+}
+
+.title {
+  margin-bottom: 12px !important;
+}
+
+.subtitle {
+  max-width: 720px;
+  margin: 0 auto !important;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+@media (max-width: 640px) {
+  .section {
+    padding: 48px 16px;
+  }
+
+  .header {
+    margin-bottom: 28px;
+  }
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/flowlet-logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flowlet — 给 AI Agent 一个本地、可观测、可切换的模型入口</title>
+    <meta
+      name="description"
+      content="Flowlet 是面向 AI Agent 的本地桌面模型服务控制台:统一管理模型渠道与账号,把 Claude Code、OpenCode、Pi 等 Agent 接入本地代理,并在一个桌面应用里查看请求、会话、Token、费用和资源余量。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Flowlet" />
+    <meta property="og:title" content="Flowlet — 给 AI Agent 一个本地、可观测、可切换的模型入口" />
+    <meta
+      property="og:description"
+      content="统一管理模型渠道与账号,把 Claude Code、OpenCode、Pi 等 Agent 接入本地代理,并在一个桌面应用里查看请求、会话、Token、费用和资源余量。"
+    />
+    <meta property="og:url" content="https://flowlet.snewbie.site/" />
+    <meta property="og:image" content="https://flowlet.snewbie.site/flowlet-logo.png" />
+  </head>
+  <body>
+    <script>
+      // 在首帧渲染前同步系统暗色偏好,避免闪烁(与主应用 theme-mode 机制一致)
+      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        document.body.setAttribute("theme-mode", "dark");
+      }
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

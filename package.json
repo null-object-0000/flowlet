@@ -20,7 +20,9 @@
     "tauri:android:install": "node scripts/tauri-android.mjs install",
     "check": "tsc --noEmit",
     "test": "vitest run --config src/vitest.config.ts",
-    "test:watch": "vitest --config src/vitest.config.ts"
+    "test:watch": "vitest --config src/vitest.config.ts",
+    "website:dev": "npm --prefix website run dev",
+    "website:build": "npm --prefix website run build"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",

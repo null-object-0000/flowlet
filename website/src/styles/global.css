@@ -1,0 +1,36 @@
+/* Flowlet website global styles — 复用主应用 reset,仅增加官网排版基线。 */
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--semi-color-link, var(--semi-color-primary));
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+:root {
+  color-scheme: light dark;
+}

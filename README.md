@@ -12,6 +12,10 @@
   <img src="https://img.shields.io/badge/desktop-Tauri%202-24c8db?style=flat-square" alt="Tauri 2" />
 </p>
 
+<p align="center">
+  <strong>官网：<a href="https://flowlet.snewbie.site">flowlet.snewbie.site</a></strong>
+</p>
+
 > [!IMPORTANT]
 > Flowlet 仍处于早期预览阶段，功能迭代较快，暂未发布正式 GitHub Release。
 > 当前推荐从源码运行或自行构建。欢迎 Star、试用并通过

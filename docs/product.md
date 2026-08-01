@@ -32,13 +32,14 @@ Flowlet 是一个本地 AI 请求路由客户端，普通用户选择渠道、�
 
 ### 3.1 多协议透明转发，但不做跨协议转换
 
-Flowlet 不负责 OpenAI、Anthropic、Gemini、Codex Responses 等协议之间的互相转换，但应该支持多个客户端协议入口。
+Flowlet 不负责 OpenAI、Anthropic、Gemini、Responses 等协议之间的互相转换，但应该支持多个客户端协议入口。
 
 正确链路是：
 
 ```text
 OpenAI-compatible 请求 -> OpenAI-compatible Provider
 Anthropic-compatible 请求 -> Anthropic-compatible Provider
+Responses 请求 -> 原生支持 Responses API 的 Provider（无状态透传）
 Gemini-compatible 请求 -> Gemini-compatible Provider
 ```
 

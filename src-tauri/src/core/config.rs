@@ -177,8 +177,10 @@ fn has_tool_use_content(json: &serde_json::Value, _protocol: &ProtocolType) -> b
 }
 
 // ─── Protocol Type ──────────────────────────────────────────────────────────
-// 序列化必须与 TypeScript 的 ProtocolType ("openai" | "anthropic") 完全一致
-//（全小写），前端直接比较字符串。反序列化用 alias 兼容旧数据库的 "open-ai"。
+// 序列化必须与 TypeScript 的 ProtocolType ("openai" | "anthropic" | "responses")
+// 完全一致（全小写），前端直接比较字符串。反序列化用 alias 兼容旧数据库的 "open-ai"。
+// Responses（OpenAI Responses API）复用渠道的 OpenAI Base URL 与鉴权策略，
+// 仅入站探测与路由协议归属独立。
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ProtocolType {
@@ -187,6 +189,8 @@ pub enum ProtocolType {
     OpenAi,
     #[serde(rename = "anthropic", alias = "Anthropic")]
     Anthropic,
+    #[serde(rename = "responses")]
+    Responses,
 }
 
 impl ProtocolType {
@@ -201,10 +205,30 @@ impl ProtocolType {
         }
     }
 
+    /// 精确探测 OpenAI Responses API 入站路径（`POST /v1/responses` 等）。
+    /// `from_path` 是粗分类器（`/v1/...` 一律归 OpenAi），本函数在其之上识别
+    /// responses 子路径，供 OpenAI 兼容入口把协议重标为 `Responses`。
+    /// 覆盖三种入口前缀：`/v1/`、`/openai/v1/` 以及裸根路径 `/responses`
+    ///（DeepSeek SDK 风格，base_url 不带 /v1 的客户端）。
+    pub fn is_responses_path(path: &str) -> bool {
+        let p = path
+            .split('?')
+            .next()
+            .unwrap_or(path)
+            .trim_start_matches('/');
+        matches!(
+            p,
+            "v1/responses" | "openai/v1/responses" | "responses"
+        ) || p.starts_with("v1/responses/")
+            || p.starts_with("openai/v1/responses/")
+            || p.starts_with("responses/")
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
+            Self::Responses => "responses",
         }
     }
 }
@@ -406,14 +430,16 @@ impl ChannelPreset {
 
     pub fn base_url_for(&self, protocol: &ProtocolType) -> &str {
         match protocol {
-            ProtocolType::OpenAi => &self.openai_base_url,
+            // Responses API 端点统一从 OpenAI Base URL 派生（`{base}/responses`，
+            // 路径拼接时沿用 build_upstream_url 的 /v1 去重规则）。
+            ProtocolType::OpenAi | ProtocolType::Responses => &self.openai_base_url,
             ProtocolType::Anthropic => &self.anthropic_base_url,
         }
     }
 
     pub fn auth_strategy_for(&self, protocol: &ProtocolType) -> &AuthStrategy {
         match protocol {
-            ProtocolType::OpenAi => &self.openai_auth,
+            ProtocolType::OpenAi | ProtocolType::Responses => &self.openai_auth,
             ProtocolType::Anthropic => &self.anthropic_auth,
         }
     }

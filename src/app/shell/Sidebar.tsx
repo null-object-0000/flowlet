@@ -5,6 +5,7 @@ import {
   IconHome,
   IconComment,
   IconList,
+  IconPieChart2Stroked,
   IconServer,
   IconSetting,
   IconHistory,
@@ -19,7 +20,7 @@ const { Text, Title } = Typography;
 
 const navGroups: Array<{
   label: string;
-  items: Array<{ to: string; label: string; icon: ReactNode }>;
+  items: Array<{ to: string; label: string; icon: ReactNode; tag?: string }>;
 }> = [
   {
     label: "工作台",
@@ -38,7 +39,10 @@ const navGroups: Array<{
   },
   {
     label: "分析",
-    items: [{ to: "/usage", label: "用量成本", icon: <IconHistogram /> }],
+    items: [
+      { to: "/usage", label: "用量成本", icon: <IconHistogram /> },
+      { to: "/usage-analysis", label: "消耗分析", icon: <IconPieChart2Stroked />, tag: "NEW" },
+    ],
   },
 ];
 
@@ -67,6 +71,7 @@ export function Sidebar() {
               >
                 <span className={navStyles.icon}>{item.icon}</span>
                 {t(item.label)}
+                {item.tag ? <span className={navStyles.tag}>{item.tag}</span> : null}
               </NavLink>
             ))}
           </div>

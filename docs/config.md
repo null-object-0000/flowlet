@@ -226,7 +226,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `name` | `string` | 是 | — | 前端展示名称 |
 | `vendor` | `string` | 是 | — | 厂商标识，用于内部匹配 |
 | `platform_url` | `string?` | 否 | `null` | 渠道控制台跳转地址，前端"获取 API Key"按钮链接 |
-| `supported_protocols` | `string[]` | 否 | `[]` | 支持的协议，可选 `"openai"` / `"anthropic"` |
+| `supported_protocols` | `string[]` | 否 | `[]` | 支持的协议，可选 `"openai"` / `"anthropic"` / `"responses"`（OpenAI Responses API，仅无状态透传） |
 | `openai_base_url` | `string` | 否 | `""` | OpenAI 协议的上游 Base URL |
 | `anthropic_base_url` | `string` | 否 | `""` | Anthropic 协议的上游 Base URL |
 | `openai_auth` | `string` | 否 | `"bearer"` | OpenAI 协议鉴权方式：`"bearer"` 或 `"x_api_key"` |
@@ -248,6 +248,22 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 一个协议地址，Flowlet 只为实际填写地址的协议生成路由。OpenAI-compatible 使用
 Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI `/models`
 拉取，并统一受全局白名单约束；不提供手工添加、余额、额度、价格或控制台抓取能力。
+
+**Responses 协议端点解析**：
+
+`responses` 不引入独立的 Base URL / 鉴权字段，统一从 OpenAI 配置派生：
+
+- 上游 URL = `{openai_base_url}` + 入站路径（沿用 `/v1` 去重规则）：
+  LongCat → `https://api.longcat.chat/openai/v1/responses`；
+  Qwen → `https://dashscope.aliyuncs.com/compatible-mode/v1/responses`；
+  DeepSeek → `https://api.deepseek.com/v1/responses`（裸根入口
+  `/responses` 则拼出官方规范端点 `https://api.deepseek.com/responses`）。
+- 鉴权复用 `openai_auth`；账号级覆盖复用 `base_url_override`。
+- 自定义渠道只有在填写了 OpenAI Base URL 时才生成 responses 路由。
+- 仅无状态透传 `POST /v1/responses`：存储响应管理接口
+  （`GET`/`DELETE /v1/responses/{id}`、`input_items`）返回 405；
+  `previous_response_id` / `store` 的多账号粘性不保证。
+- `/v1/models` 仍按 OpenAI 协议口径返回，不存在 responses 专属模型列表。
 
 **端点解析优先级**：
 

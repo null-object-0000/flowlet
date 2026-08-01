@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   refreshS3: vi.fn<() => Promise<void>>(),
   refreshSession: vi.fn<() => Promise<void>>(),
   permissionsQuery: vi.fn(),
+  assistantContent: vi.fn<() => string>(),
 }));
 
 vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
@@ -62,7 +63,7 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
       lastInteraction: {
         events: [
           { id: "u2", kind: "user-message", timestamp: "2026-07-30T04:00:01Z", title: null, content: "整理解析器", model: null, status: null },
-          { id: "a2", kind: "assistant-message", timestamp: "2026-07-30T04:00:02Z", title: null, content: "已完成整理", model: null, status: null },
+          { id: "a2", kind: "assistant-message", timestamp: "2026-07-30T04:00:02Z", title: null, content: mocks.assistantContent(), model: null, status: null },
           { id: "turn-2", kind: "turn", timestamp: "2026-07-30T04:00:03Z", title: null, content: null, model: null, status: "completed" },
         ],
       },
@@ -93,6 +94,7 @@ describe("MobileSessionsPage", () => {
     mocks.refreshDevice.mockReset().mockResolvedValue({ source: "lan", refreshedDevices: 1 });
     mocks.refreshS3.mockReset().mockResolvedValue(undefined);
     mocks.refreshSession.mockReset().mockResolvedValue(undefined);
+    mocks.assistantContent.mockReset().mockReturnValue("已完成整理");
     mocks.permissionsQuery.mockReset().mockReturnValue({
       isLoading: false,
       isFetching: false,
@@ -275,6 +277,37 @@ describe("MobileSessionsPage", () => {
     fireEvent.touchEnd(body);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     intervalSpy.mockRestore();
+  });
+
+  it("shows a bottom shortcut and marks unseen refreshed content while reading history", async () => {
+    const view = render(
+      <MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>,
+    );
+    const dialog = openSession("Refactor parser");
+    const body = within(dialog).getByText("最近一轮").parentElement!.parentElement!;
+    Object.defineProperties(body, {
+      clientHeight: { configurable: true, value: 300 },
+      scrollHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 120 },
+    });
+    fireEvent.scroll(body);
+    fireEvent.click(within(dialog).getByRole("button", { name: "展开会话详情" }));
+
+    const shortcut = within(dialog).getByRole("button", { name: "滚动到底部" });
+    expect(shortcut.closest("[data-unseen-content]")).toBeNull();
+
+    mocks.assistantContent.mockReturnValue("已完成整理，并追加了新的刷新结果");
+    view.rerender(
+      <MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>,
+    );
+    const unseenShortcut = await within(dialog).findByRole("button", {
+      name: "有新内容，滚动到底部",
+    });
+    expect(unseenShortcut.closest("[data-unseen-content]")).not.toBeNull();
+
+    fireEvent.click(unseenShortcut);
+    expect(body.scrollTop).toBe(600);
+    expect(within(dialog).queryByRole("button", { name: /滚动到底部/ })).toBeNull();
   });
 
   it("switches devices from the page title without offering an all-devices option", async () => {

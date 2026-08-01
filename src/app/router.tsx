@@ -6,6 +6,7 @@ import { RequestLogsRouteFallback } from "../pages/request-logs/RequestLogsRoute
 import { SettingsPage } from "../pages/settings/SettingsPage";
 import { ModelServicesPage } from "../pages/models/ModelServicesPage";
 import { UsageCostPage } from "../pages/usage/UsageCostPage";
+import { UsageAnalysisPage } from "../pages/usage-analysis/UsageAnalysisPage";
 import { AgentSessionsPage } from "../pages/agent-sessions/AgentSessionsPage";
 import { TaskLogsPage } from "../pages/task-logs/TaskLogsPage";
 
@@ -23,6 +24,7 @@ export function AppRouter() {
           <Route path="sessions" element={<AgentSessionsPage />} />
           <Route path="tasks" element={<TaskLogsPage />} />
           <Route path="usage" element={<UsageCostPage />} />
+          <Route path="usage-analysis" element={<UsageAnalysisPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

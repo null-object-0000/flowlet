@@ -511,7 +511,8 @@ impl ChannelsConfig {
                 {
                     let protocol_has_endpoint = if preset.vendor == "custom" {
                         match protocol {
-                            ProtocolType::OpenAi => account
+                            // Responses 从 OpenAI Base URL 派生，共用同一覆盖地址。
+                            ProtocolType::OpenAi | ProtocolType::Responses => account
                                 .base_url_override
                                 .as_deref()
                                 .is_some_and(|url| !url.trim().is_empty()),
@@ -671,6 +672,7 @@ fn parse_protocols(raw: &[String]) -> Vec<ProtocolType> {
     raw.iter()
         .map(|p| match p.as_str() {
             "anthropic" => ProtocolType::Anthropic,
+            "responses" => ProtocolType::Responses,
             _ => ProtocolType::OpenAi,
         })
         .collect()
@@ -816,6 +818,117 @@ mod tests {
                 vec!["LongCat-2.0", "flowlet-pro", "flowlet-flash"]
             );
         }
+    }
+
+    #[test]
+    fn parse_protocols_maps_responses() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "deepseek",
+                    "name": "DeepSeek",
+                    "vendor": "deepseek",
+                    "supported_protocols": ["openai", "anthropic", "responses"]
+                }]
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        assert_eq!(
+            config.presets[0].supported_protocols,
+            vec![
+                ProtocolType::OpenAi,
+                ProtocolType::Anthropic,
+                ProtocolType::Responses
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_default_routes_generates_responses_routes() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "deepseek",
+                    "name": "DeepSeek",
+                    "vendor": "deepseek",
+                    "supported_protocols": ["openai", "responses"]
+                }],
+                "default_exposed_models": {
+                    "deepseek": ["deepseek-v4-flash"]
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let account = ChannelAccount {
+            id: "deepseek-account".to_string(),
+            channel_id: "deepseek".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            synced_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            ..Default::default()
+        };
+
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        // 每个声明的协议各生成一条直连模型路由
+        assert_eq!(routes.len(), 2);
+        for protocol in [ProtocolType::OpenAi, ProtocolType::Responses] {
+            let models: Vec<&str> = routes
+                .iter()
+                .filter(|route| route.client_protocol == protocol)
+                .map(|route| route.virtual_model_id.as_str())
+                .collect();
+            assert_eq!(models, vec!["deepseek-v4-flash"]);
+        }
+    }
+
+    #[test]
+    fn custom_channel_responses_requires_base_url_override() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "custom",
+                    "name": "自定义渠道",
+                    "vendor": "custom",
+                    "supported_protocols": ["openai", "responses"]
+                }],
+                "default_exposed_models": {
+                    "deepseek": ["deepseek-v4-flash"]
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        // 只填 Anthropic 覆盖地址：openai 与 responses 都没有可用端点 → 零路由
+        let anthropic_only = ChannelAccount {
+            id: "relay".to_string(),
+            channel_id: "custom".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            anthropic_base_url_override: Some("https://relay.example/anthropic".to_string()),
+            exposed_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            synced_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            ..Default::default()
+        };
+        assert!(
+            config
+                .merge_default_routes(&[], &[anthropic_only.clone()], &config.presets)
+                .is_empty()
+        );
+
+        // 填了 OpenAI Base URL：openai 与 responses 路由同时生成（共享同一地址）
+        let with_openai = ChannelAccount {
+            base_url_override: Some("https://relay.example/v1".to_string()),
+            ..anthropic_only
+        };
+        let routes = config.merge_default_routes(&[], &[with_openai], &config.presets);
+        let protocols: std::collections::BTreeSet<&str> = routes
+            .iter()
+            .map(|route| route.client_protocol.as_str())
+            .collect();
+        assert_eq!(
+            protocols,
+            std::collections::BTreeSet::from(["openai", "responses"])
+        );
     }
 
     #[test]

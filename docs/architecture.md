@@ -323,6 +323,9 @@ API Key 字段保留独立类型，方便后续接入系统密钥链或本地加
 - `/health` 返回本地服务健康状态。
 - `/v1/*`、`/openai/v1/*` 透明转发到 OpenAI-compatible 渠道端点。
 - `/anthropic/v1/messages`、`/anthropic/v1/models` 透明转发到 Anthropic-compatible 渠道端点。
+- `/v1/responses`（及裸根 `/responses`）作为独立的 Responses 协议转发到声明
+  `"responses"` 的渠道端点（上游 URL 从 OpenAI Base URL 派生，仅无状态透传，
+  非 POST 管理接口返回 405）。
 - 普通响应直接透传。
 - 流式响应使用上游字节流直接返回，不能缓存完整响应后再返回。
 - 旁路生成 metadata 日志事件，日志失败不影响响应。

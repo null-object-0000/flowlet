@@ -503,6 +503,90 @@ describe("reconcileAccountRoutes", () => {
   });
 });
 
+describe("responses protocol routing", () => {
+  const account = {
+    id: "account-deepseek",
+    channel_id: "deepseek",
+    api_key: "sk-test",
+    enabled: true,
+    exposed_models: ["deepseek-v4-flash"],
+    synced_models: ["deepseek-v4-flash"],
+  } as ChannelAccount;
+
+  it("generates responses routes for channels declaring the protocol", () => {
+    const preset = {
+      id: "deepseek",
+      supported_protocols: ["openai", "anthropic", "responses"],
+    } as ChannelPreset;
+    const routes = mergeDefaultRoutes([], [account], [preset]);
+    // deepseek-v4-flash 直连 + flowlet-flash 聚合，三个协议各两条
+    expect(routes).toHaveLength(6);
+    const responsesRoutes = routes.filter((route) => route.client_protocol === "responses");
+    expect(responsesRoutes.map((route) => route.virtual_model_id).sort()).toEqual([
+      "deepseek-v4-flash",
+      "flowlet-flash",
+    ]);
+  });
+
+  it("generates no responses routes for channels without the protocol (Kimi)", () => {
+    const preset = {
+      id: "kimi",
+      supported_protocols: ["openai", "anthropic"],
+    } as ChannelPreset;
+    const kimiAccount = { ...account, channel_id: "kimi" } as ChannelAccount;
+    const routes = mergeDefaultRoutes([], [kimiAccount], [preset]);
+    expect(routes.some((route) => route.client_protocol === "responses")).toBe(false);
+  });
+
+  it("requires the OpenAI Base URL override for custom-channel responses routes", () => {
+    const customPreset = {
+      id: "custom",
+      vendor: "custom",
+      supported_protocols: ["openai", "responses"],
+    } as ChannelPreset;
+    const withUrl = {
+      ...account,
+      id: "account-custom",
+      channel_id: "custom",
+      base_url_override: "https://relay.example/v1",
+    } as ChannelAccount;
+    const protocols = new Set(
+      mergeDefaultRoutes([], [withUrl], [customPreset]).map((route) => route.client_protocol),
+    );
+    expect(protocols).toEqual(new Set(["openai", "responses"]));
+
+    const withoutUrl = { ...withUrl, base_url_override: null } as ChannelAccount;
+    expect(mergeDefaultRoutes([], [withoutUrl], [customPreset])).toHaveLength(0);
+  });
+
+  it("prunes custom-channel responses routes when the Base URL override is cleared", () => {
+    const customPreset = {
+      id: "custom",
+      vendor: "custom",
+      supported_protocols: ["openai", "responses"],
+    } as ChannelPreset;
+    const customAccount = {
+      ...account,
+      id: "account-custom",
+      channel_id: "custom",
+      base_url_override: null,
+    } as ChannelAccount;
+    const existing: RouteCandidate = {
+      id: "route-responses",
+      virtual_model_id: "deepseek-v4-flash",
+      channel_id: "custom",
+      account_id: "account-custom",
+      upstream_model: "deepseek-v4-flash",
+      client_protocol: "responses",
+      priority: 0,
+      enabled: true,
+      created_at: "old",
+      updated_at: "old",
+    };
+    expect(reconcileAccountRoutes([existing], [customAccount], [customPreset])).toHaveLength(0);
+  });
+});
+
 describe("routesDiffer", () => {
   const base: RouteCandidate = {
     id: "route-1",

@@ -59,7 +59,8 @@ export function buildDefaultRoutes(
     ?.id;
   const usable = accounts.filter((a) => {
     if (a.channel_id !== channelId || !a.enabled || !a.api_key.trim()) return false;
-    return protocol === "openai"
+    // Responses 端点从 OpenAI Base URL 派生，自定义渠道门禁与 openai 相同。
+    return protocol === "openai" || protocol === "responses"
       ? Boolean(a.base_url_override?.trim()) || channelId !== "custom"
       : Boolean(a.anthropic_base_url_override?.trim()) || channelId !== "custom";
   });
@@ -182,9 +183,10 @@ export function reconcileAccountRoutes(
     );
     if (!syncedKeys.has(canonicalKey)) return false;
     if (account && isCustomChannel(presetById.get(account.channel_id))) {
-      const hasEndpoint = route.client_protocol === "openai"
-        ? Boolean(account.base_url_override?.trim())
-        : Boolean(account.anthropic_base_url_override?.trim());
+      const hasEndpoint =
+        route.client_protocol === "openai" || route.client_protocol === "responses"
+          ? Boolean(account.base_url_override?.trim())
+          : Boolean(account.anthropic_base_url_override?.trim());
       if (!hasEndpoint) return false;
     }
     const exposedSet = new Set(exposed.map((m) => m.trim().toLowerCase()));

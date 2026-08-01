@@ -140,6 +140,35 @@ fn protocol_type_from_path_returns_none_for_health() {
 }
 
 #[test]
+fn protocol_type_from_path_keeps_openai_for_responses_subpath() {
+    // from_path 是粗分类器，responses 的精确识别交给 is_responses_path
+    assert_eq!(
+        ProtocolType::from_path("/v1/responses"),
+        Some(ProtocolType::OpenAi)
+    );
+}
+
+#[test]
+fn is_responses_path_detects_responses_entry_paths() {
+    assert!(ProtocolType::is_responses_path("/v1/responses"));
+    assert!(ProtocolType::is_responses_path("/openai/v1/responses"));
+    assert!(ProtocolType::is_responses_path("/responses"));
+    assert!(ProtocolType::is_responses_path("/v1/responses/resp_1"));
+    assert!(ProtocolType::is_responses_path("/openai/v1/responses/resp_1"));
+    assert!(ProtocolType::is_responses_path("/v1/responses/resp_1/input_items"));
+    assert!(ProtocolType::is_responses_path("/v1/responses?stream=true"));
+}
+
+#[test]
+fn is_responses_path_rejects_other_paths() {
+    assert!(!ProtocolType::is_responses_path("/v1/chat/completions"));
+    assert!(!ProtocolType::is_responses_path("/v1/models"));
+    assert!(!ProtocolType::is_responses_path("/health"));
+    assert!(!ProtocolType::is_responses_path("/anthropic/v1/messages"));
+    assert!(!ProtocolType::is_responses_path("/v1/responsesfoo"));
+}
+
+#[test]
 fn rewrite_model_maps_openai_public_name() {
     let body = br#"{"model":"auto","messages":[]}"#;
     let rewritten = rewrite_model(body, "qwen-plus", &ProtocolType::OpenAi);
@@ -596,6 +625,58 @@ fn build_upstream_url_keeps_v1_in_base_when_path_has_no_v1() {
     let uri: Uri = "/chat/completions".parse().unwrap();
     let url = build_upstream_url("https://api.moonshot.cn/v1", &uri, &ProtocolType::OpenAi);
     assert_eq!(url, "https://api.moonshot.cn/v1/chat/completions");
+}
+
+#[test]
+fn build_upstream_url_responses_for_longcat_base() {
+    let uri: Uri = "/v1/responses".parse().unwrap();
+    let url = build_upstream_url(
+        "https://api.longcat.chat/openai",
+        &uri,
+        &ProtocolType::Responses,
+    );
+    assert_eq!(url, "https://api.longcat.chat/openai/v1/responses");
+}
+
+#[test]
+fn build_upstream_url_responses_dedupes_v1_for_qwen_base() {
+    let uri: Uri = "/v1/responses".parse().unwrap();
+    let url = build_upstream_url(
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        &uri,
+        &ProtocolType::Responses,
+    );
+    assert_eq!(
+        url,
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/responses"
+    );
+}
+
+#[test]
+fn build_upstream_url_responses_for_deepseek_base() {
+    let uri: Uri = "/v1/responses".parse().unwrap();
+    let url = build_upstream_url("https://api.deepseek.com", &uri, &ProtocolType::Responses);
+    assert_eq!(url, "https://api.deepseek.com/v1/responses");
+}
+
+#[test]
+fn build_upstream_url_responses_strips_openai_entry_prefix() {
+    let uri: Uri = "/openai/v1/responses".parse().unwrap();
+    let url = build_upstream_url(
+        "https://api.longcat.chat/openai",
+        &uri,
+        &ProtocolType::Responses,
+    );
+    assert_eq!(url, "https://api.longcat.chat/openai/v1/responses");
+}
+
+#[test]
+fn build_upstream_url_responses_root_path_matches_deepseek_docs() {
+    // 裸根路径入口（base_url 不带 /v1 的客户端）恰好拼出 DeepSeek
+    // 官方文档的规范端点 https://api.deepseek.com/responses
+    let uri: Uri = "/responses".parse().unwrap();
+    let url = build_upstream_url("https://api.deepseek.com", &uri, &ProtocolType::Responses);
+    assert_eq!(url, "https://api.deepseek.com/responses");
 }
 
 #[test]
@@ -1497,6 +1578,79 @@ fn flowlet_pool_rejects_single_protocol_channels() {
             &[],
             Some("flowlet-pro"),
             &ProtocolType::OpenAi,
+            None,
+            &accounts,
+            &channels,
+            &mut round_robin
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn match_candidates_filters_routes_by_responses_protocol() {
+    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", "http://upstream")];
+    let accounts = vec![test_account("a", "deepseek", "key", 0)];
+    let routes = vec![
+        test_route(
+            "openai-route",
+            "deepseek-v4-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "responses-route",
+            "deepseek-v4-flash",
+            "deepseek",
+            "a",
+            "deepseek-v4-flash",
+            ProtocolType::Responses,
+            0,
+        ),
+    ];
+    let mut round_robin = std::collections::HashMap::new();
+    let matched = match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("deepseek-v4-flash"),
+        &ProtocolType::Responses,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin,
+    );
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0].id, "responses-route");
+    assert_eq!(matched[0].client_protocol, ProtocolType::Responses);
+}
+
+#[test]
+fn match_candidates_excludes_channels_without_responses_routes() {
+    // Kimi 不声明 responses 协议 → 不会生成 responses 路由 →
+    // 该协议下任何模型都没有候选（不会被误路由到不支持的上游）。
+    let channels = vec![dual_protocol_channel("kimi", "Kimi", "http://upstream")];
+    let accounts = vec![test_account("a", "kimi", "key", 0)];
+    let routes = vec![test_route(
+        "openai-route",
+        "kimi-k3",
+        "kimi",
+        "a",
+        "kimi-k3",
+        ProtocolType::OpenAi,
+        0,
+    )];
+    let mut round_robin = std::collections::HashMap::new();
+    assert!(
+        match_candidates(
+            &routes,
+            &[],
+            &[],
+            Some("kimi-k3"),
+            &ProtocolType::Responses,
             None,
             &accounts,
             &channels,

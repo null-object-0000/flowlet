@@ -1,4 +1,4 @@
-import { IconClose, IconRefresh } from "@douyinfe/semi-icons";
+import { IconChevronDown, IconClose, IconRefresh } from "@douyinfe/semi-icons";
 import { Button, Toast } from "@douyinfe/semi-ui-19";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
@@ -39,6 +39,8 @@ export function MobileSessionSheet({
   const [closing, setClosing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [lastSessionRefreshAt, setLastSessionRefreshAt] = useState<string | null>(null);
+  const [sessionAtBottom, setSessionAtBottom] = useState(true);
+  const [hasUnseenSessionContent, setHasUnseenSessionContent] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -86,11 +88,22 @@ export function MobileSessionSheet({
     });
   }, [onClose]);
 
+  const scrollSessionToBottom = useCallback(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    followSessionScrollBottom(body, true);
+    followSessionBottom.current = true;
+    setSessionAtBottom(true);
+    setHasUnseenSessionContent(false);
+  }, []);
+
   // 会话切换或重新打开时复位退出动画并聚焦关闭按钮。
   useEffect(() => {
     setClosing(false);
     setExpanded(false);
     setLastSessionRefreshAt(null);
+    setSessionAtBottom(true);
+    setHasUnseenSessionContent(false);
     if (!sessionKey) autoStartedSessionKey.current = null;
     if (closeTimer.current != null) {
       window.clearTimeout(closeTimer.current);
@@ -145,10 +158,17 @@ export function MobileSessionSheet({
     if (!body) return;
     const previous = previousInteraction.current;
     if (!previous || previous.sessionKey !== sessionKey) {
-      followSessionBottom.current = isSessionScrollNearBottom(body);
+      const atBottom = isSessionScrollNearBottom(body);
+      followSessionBottom.current = atBottom;
+      setSessionAtBottom(atBottom);
+      setHasUnseenSessionContent(false);
     } else if (previous.version !== interactionVersion) {
-      followSessionScrollBottom(body, followSessionBottom.current);
-      followSessionBottom.current = isSessionScrollNearBottom(body);
+      const wasFollowing = followSessionBottom.current;
+      followSessionScrollBottom(body, wasFollowing);
+      const atBottom = isSessionScrollNearBottom(body);
+      followSessionBottom.current = atBottom;
+      setSessionAtBottom(atBottom);
+      setHasUnseenSessionContent(!wasFollowing && !atBottom);
     }
     previousInteraction.current = { sessionKey, version: interactionVersion };
   }, [interactionVersion, sessionKey]);
@@ -241,17 +261,21 @@ export function MobileSessionSheet({
             <span>{t("最近活跃：{time}", { time: formatFullTimestamp(session.activityAt, language) })}</span>
           </div>
         </header>
-        <div
-          ref={bodyRef}
-          className={styles.body}
-          style={{
-            overflowY: expanded ? "auto" : "hidden",
-            touchAction: expanded ? "pan-y" : "none",
-          }}
-          onScroll={(event) => {
-            followSessionBottom.current = isSessionScrollNearBottom(event.currentTarget);
-          }}
-        >
+        <div className={styles.bodyFrame}>
+          <div
+            ref={bodyRef}
+            className={styles.body}
+            style={{
+              overflowY: expanded ? "auto" : "hidden",
+              touchAction: expanded ? "pan-y" : "none",
+            }}
+            onScroll={(event) => {
+              const atBottom = isSessionScrollNearBottom(event.currentTarget);
+              followSessionBottom.current = atBottom;
+              setSessionAtBottom(atBottom);
+              if (atBottom) setHasUnseenSessionContent(false);
+            }}
+          >
           <div className={styles.stats}>
             <div className={styles.stat}>
               <span>Tokens</span>
@@ -281,11 +305,27 @@ export function MobileSessionSheet({
               />
             </div>
           </div>
-          {events.length > 0 ? (
-            <MobileSessionInteraction events={events} />
-          ) : (
-            <div className={styles.empty}>{t("未找到可读取的最近一轮")}</div>
-          )}
+            {events.length > 0 ? (
+              <MobileSessionInteraction events={events} />
+            ) : (
+              <div className={styles.empty}>{t("未找到可读取的最近一轮")}</div>
+            )}
+          </div>
+          {expanded && !sessionAtBottom ? (
+            <div
+              className={styles.scrollBottomControl}
+              data-unseen-content={hasUnseenSessionContent || undefined}
+            >
+              <Button
+                type="primary"
+                theme="solid"
+                icon={<IconChevronDown />}
+                aria-label={hasUnseenSessionContent ? t("有新内容，滚动到底部") : t("滚动到底部")}
+                title={hasUnseenSessionContent ? t("有新内容，滚动到底部") : t("滚动到底部")}
+                onClick={scrollSessionToBottom}
+              />
+            </div>
+          ) : null}
         </div>
         {session.agentType === "opencode" ? (
           <footer className={styles.footer}>

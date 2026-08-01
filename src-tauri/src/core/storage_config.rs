@@ -577,6 +577,7 @@ impl Storage {
             let protocol_raw: String = row.get(2)?;
             let protocol = match protocol_raw.as_str() {
                 "anthropic" => ProtocolType::Anthropic,
+                "responses" => ProtocolType::Responses,
                 _ => ProtocolType::OpenAi,
             };
             Ok(VirtualModel {
@@ -721,6 +722,7 @@ impl Storage {
             let protocol_raw: String = row.get(5)?;
             let protocol = match protocol_raw.as_str() {
                 "anthropic" => ProtocolType::Anthropic,
+                "responses" => ProtocolType::Responses,
                 _ => ProtocolType::OpenAi,
             };
             Ok(RouteCandidate {

@@ -118,9 +118,13 @@ fn value_contains_output_token(value: &serde_json::Value) -> bool {
 }
 
 fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> {
+    // OpenAI Responses API 的流式 `response.completed` 事件把完整响应对象嵌在
+    // `response` 字段下（usage 位于 `/response/usage`）；非流式响应与
+    // Chat Completions / Anthropic 一样在顶层或 `/message/usage`。
     let usage = value
         .get("usage")
-        .or_else(|| value.pointer("/message/usage"))?;
+        .or_else(|| value.pointer("/message/usage"))
+        .or_else(|| value.pointer("/response/usage"))?;
     let raw_input_tokens = usage
         .get("prompt_tokens")
         .or_else(|| usage.get("input_tokens"))
@@ -171,6 +175,13 @@ fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> 
                 .or_else(|| {
                     usage
                         .get("prompt_tokens_details")
+                        .and_then(|details| details.get("cached_tokens"))
+                })
+                // OpenAI Responses API 用 input_tokens_details.cached_tokens
+                // 报告缓存命中（DeepSeek/Qwen/LongCat 的 responses 端点同此形状）。
+                .or_else(|| {
+                    usage
+                        .get("input_tokens_details")
                         .and_then(|details| details.get("cached_tokens"))
                 })
                 .or_else(|| usage.get("cache_read_tokens"))
@@ -378,6 +389,54 @@ data: {"type":"message_stop"}
                 input_cache_write_tokens: None,
                 output_tokens: Some(50),
                 total_tokens: Some(230),
+            })
+        );
+    }
+
+    #[test]
+    fn extracts_responses_streaming_usage_from_response_completed() {
+        // OpenAI Responses API 的 SSE 流：usage 嵌在 `response.completed`
+        // 事件的 `response` 对象下，且流不以 [DONE] 终止。
+        let body = br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"hello"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"deepseek-v4-flash","usage":{"input_tokens":1000,"input_tokens_details":{"cached_tokens":400},"output_tokens":200,"output_tokens_details":{"reasoning_tokens":50},"total_tokens":1200}}}
+
+"#;
+
+        let expected = Some(ResponseUsage {
+            input_tokens: Some(1000),
+            input_cached_tokens: Some(400),
+            input_uncached_tokens: Some(600),
+            input_cache_write_tokens: None,
+            output_tokens: Some(200),
+            total_tokens: Some(1200),
+        });
+        // 实时流路径不要求终止标记
+        assert_eq!(extract_sse_response_usage(body, false), expected);
+        assert_eq!(extract_stream_usage(body), expected);
+        // 捕获体可能被截断时的严格模式：无 [DONE]/message_stop 标记则不采信
+        assert_eq!(extract_sse_response_usage(body, true), None);
+    }
+
+    #[test]
+    fn extracts_responses_non_streaming_top_level_usage() {
+        // 非流式 Responses 响应：usage 位于顶层，缓存命中在
+        // input_tokens_details.cached_tokens。
+        let body = br#"{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":500,"input_tokens_details":{"cached_tokens":100},"output_tokens":80,"total_tokens":580}}"#;
+        assert_eq!(
+            extract_response_usage(body),
+            Some(ResponseUsage {
+                input_tokens: Some(500),
+                input_cached_tokens: Some(100),
+                input_uncached_tokens: Some(400),
+                input_cache_write_tokens: None,
+                output_tokens: Some(80),
+                total_tokens: Some(580),
             })
         );
     }

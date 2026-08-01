@@ -336,6 +336,11 @@ impl ProxyController {
             .route("/health", any(health))
             .route("/v1/{*path}", any(forward_openai_compatible))
             .route("/openai/v1/{*path}", any(forward_openai_compatible))
+            // Responses API 常规入口（`/v1/responses`）已被 `/v1/{*path}` 覆盖；
+            // 裸根路径入口兼容 base_url 不带 /v1 的客户端（DeepSeek SDK 风格）。
+            // forward_request 内通过 is_responses_path 将协议重标为 Responses。
+            .route("/responses", any(forward_openai_compatible))
+            .route("/responses/{*path}", any(forward_openai_compatible))
             .route("/anthropic/v1/{*path}", any(forward_anthropic_compatible))
             .with_state(ProxyAppState {
                 shared,
@@ -484,6 +489,35 @@ async fn forward_request(
         .unwrap_or_else(|| "/".to_string());
 
     let method = parts.method.to_string();
+
+    // OpenAI 兼容入口命中的 `/v1/responses[...]`、`/openai/v1/responses[...]`
+    // 以及裸根路径 `/responses[...]` 属于 Responses 协议（路由候选、日志归属
+    // 与 Chat Completions 独立）。Anthropic 入口路径永不命中，无需额外防护。
+    let detected_protocol = if ProtocolType::is_responses_path(&path) {
+        ProtocolType::Responses
+    } else {
+        detected_protocol
+    };
+
+    // Responses v1 只做无状态透传：仅支持 POST。Qwen 上游的有状态管理接口
+    //（GET/DELETE /v1/responses/{id}、input_items）不经 Flowlet 路由，这里
+    // 返回明确错误，避免落入“模型未开放”之类误导性错误。
+    if detected_protocol == ProtocolType::Responses && parts.method != Method::POST {
+        let payload = serde_json::json!({
+            "error": {
+                "message": "Flowlet only supports stateless POST /v1/responses passthrough; stored-response management endpoints (retrieve/delete/input_items) are not supported",
+                "type": "responses_unsupported_method",
+                "code": "responses_unsupported_method"
+            }
+        });
+        let mut response = Response::new(Body::from(payload.to_string()));
+        *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
+        response
+            .headers_mut()
+            .insert("Content-Type", "application/json".parse().unwrap());
+        return Ok(response);
+    }
+
     let agent_session = extract_agent_session(&parts.headers);
 
     // 热更新：从共享锁读取最新配置
@@ -593,7 +627,7 @@ async fn forward_request(
             )
         };
         let payload = match detected_protocol {
-            ProtocolType::OpenAi => serde_json::json!({
+            ProtocolType::OpenAi | ProtocolType::Responses => serde_json::json!({
                 "error": { "message": error_message, "type": error_code, "code": error_code }
             }),
             ProtocolType::Anthropic => serde_json::json!({
@@ -682,8 +716,11 @@ async fn forward_request(
         let routed_body = rewrite_model(&body_bytes, &effective_model, &detected_protocol);
 
         // 账号级 Base URL 按协议分别覆盖，未配置时回退到渠道默认地址。
+        // Responses 复用 OpenAI 的覆盖地址（两者共享上游 Base URL）。
         let account_base_url = match &detected_protocol {
-            ProtocolType::OpenAi => account.base_url_override.as_deref(),
+            ProtocolType::OpenAi | ProtocolType::Responses => {
+                account.base_url_override.as_deref()
+            }
             ProtocolType::Anthropic => account.anthropic_base_url_override.as_deref(),
         };
         let base_url = account_base_url

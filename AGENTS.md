@@ -173,6 +173,7 @@ Flowlet 当前支持：
 
 * OpenAI-compatible
 * Anthropic-compatible
+* OpenAI Responses API（仅无状态透传）
 
 默认原则：
 
@@ -181,6 +182,13 @@ Flowlet 当前支持：
 * 不随意改写响应结构；
 * 不把 Anthropic 请求转换成 OpenAI 请求；
 * 不把 OpenAI 请求转换成 Anthropic 请求；
+* Responses 是独立的第三协议（`supported_protocols` 中的 `"responses"`），
+  入站 `POST /v1/responses`（兼容裸根路径 `/responses`）按协议独立匹配路由，
+  上游端点从渠道 OpenAI Base URL 派生、复用 OpenAI 鉴权；
+* Responses 仅保证无状态透传：不支持存储响应管理接口
+  （retrieve / delete / input_items，非 POST 请求返回 405），
+  不保证 `previous_response_id` / `store` 的多账号粘性；
+  当前由 LongCat、DeepSeek、Qwen 渠道承载，Kimi 不支持该协议；
 * 对外模型名使用 `virtual_model_id`；
 * `upstream_model` 只用于向上游发起请求前替换模型名；
 * 直接模型请求必须匹配 `virtual_model_id`；

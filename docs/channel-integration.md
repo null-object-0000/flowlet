@@ -15,7 +15,7 @@
   -> 账号创建、测试、保存
   -> 模型与余额同步
   -> 默认开放模型和 Flowlet 档位路由
-  -> OpenAI / Anthropic 代理请求
+  -> OpenAI / Anthropic / Responses 代理请求
   -> UI、图标、日志和回归测试
 ```
 
@@ -25,8 +25,9 @@
 
 - 渠道 ID、展示名称、vendor；
 - API Key 控制台地址；
-- 原生支持 OpenAI-compatible、Anthropic-compatible 中的哪些协议；
-- 每种协议的 Base URL、请求路径和鉴权方式；
+- 原生支持 OpenAI-compatible、Anthropic-compatible、OpenAI Responses API 中的哪些协议；
+- 每种协议的 Base URL、请求路径和鉴权方式（Responses 端点须单独确认，
+  不能凭“OpenAI-compatible”推断；支持时确认有状态/无状态能力边界）；
 - 模型列表、模型详情、余额、配额、用量等端点；
 - 默认模型、上下文窗口、最大输出和流式能力；
 - 官方价格和计价单位；
@@ -41,6 +42,7 @@
 | 渠道 ID | `longcat` | `deepseek` | `kimi` | `qwen` | `custom` |
 | OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 账号级填写 |
 | Anthropic Base URL | `https://api.longcat.chat/anthropic` | `https://api.deepseek.com/anthropic` | `https://api.moonshot.cn/anthropic` | `https://dashscope.aliyuncs.com/apps/anthropic` | 账号级填写 |
+| Responses | ✅ 从 OpenAI Base URL 派生（无状态） | ✅ 从 OpenAI Base URL 派生（无状态，暂仅 v4-flash） | — 不支持 | ✅ 从 OpenAI Base URL 派生（仅透传无状态子集） | 填写 OpenAI Base URL 即启用 |
 | 鉴权 | Bearer | Bearer | Bearer | Bearer | OpenAI Bearer / Anthropic x-api-key |
 | 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 | 标准模型列表（无上下文详情） | 标准 OpenAI `/models` |
 | 自动余额 | 否 | 是 | 是 | 否 | 否 |

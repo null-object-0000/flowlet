@@ -1,6 +1,8 @@
 /** Channel-domain types (ChannelPreset template). No UI / React imports. */
 
-export type ProtocolType = "openai" | "anthropic";
+/** 客户端协议。`responses`（OpenAI Responses API）复用渠道的 OpenAI Base URL
+ *  与鉴权，仅路由归属独立；当前仅无状态透传（POST /v1/responses）。 */
+export type ProtocolType = "openai" | "anthropic" | "responses";
 
 export type AuthStrategy = "bearer" | "x_api_key";
 

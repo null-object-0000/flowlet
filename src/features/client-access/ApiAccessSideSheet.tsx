@@ -38,6 +38,11 @@ export function ApiAccessSideSheet({ visible, onClose, baseUrl, bindConfig, runn
     { label: t("模型列表"), copyLabel: `Anthropic ${t("模型列表")}`, value: `${baseUrl}/anthropic/v1/models`, copyValue: `${baseUrl}/anthropic/v1/models` },
     { label: t("消息接口"), copyLabel: `Anthropic ${t("消息接口")}`, value: `${baseUrl}/anthropic/v1/messages`, copyValue: `${baseUrl}/anthropic/v1/messages` },
   ];
+  const responsesRows: DetailRow[] = [
+    { label: "Base URL", copyLabel: "Responses Base URL", value: `${baseUrl}/v1`, copyValue: `${baseUrl}/v1`, copyMessage: t("{label} 已复制", { label: "Responses Base URL" }) },
+    { label: t("响应接口"), copyLabel: `Responses ${t("响应接口")}`, value: `${baseUrl}/v1/responses`, copyValue: `${baseUrl}/v1/responses` },
+    { label: t("鉴权 Header"), value: "Authorization: Bearer <Client Token>", copyValue: "Authorization: Bearer <Client Token>" },
+  ];
 
   return (
     <SideSheet
@@ -58,6 +63,15 @@ export function ApiAccessSideSheet({ visible, onClose, baseUrl, bindConfig, runn
             <div className={styles.headerStack}>
               <CopyValue value="Authorization: Bearer <Client Token>" message={t("{label} 已复制", { label: "Authorization Header" })} onCopy={onCopy} />
               <CopyValue value="X-Api-Key: <Client Token>" message={t("{label} 已复制", { label: "X-Api-Key Header" })} onCopy={onCopy} />
+            </div>
+          </div>
+        </DetailSection>
+        <DetailSection icon="▤" title="OpenAI Responses" rows={responsesRows} onCopy={onCopy}>
+          <div className={styles.multiRow}>
+            <span>{t("说明")}</span>
+            <div className={styles.headerStack}>
+              <span className={styles.noteLine}>{t("仅支持无状态透传（POST /v1/responses）；存储响应管理接口（retrieve/delete/input_items）不支持。")}</span>
+              <span className={styles.noteLine}>{t("当前由 LongCat、DeepSeek、Qwen 渠道承载；Kimi 暂不支持该协议。")}</span>
             </div>
           </div>
         </DetailSection>

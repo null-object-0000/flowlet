@@ -1,0 +1,377 @@
+/* 消耗分析页：1200×720 窗口下内容区约 980×654。
+   页面只有「页头 + 单卡片」两行，卡片内部排行面板与矩阵面板各自滚动，
+   保证默认数据量下不出现页面级滚动条。 */
+.page {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.headingText { min-width: 0; flex: 1; }
+.heading h2 { margin: 0; color: var(--flowlet-color-text); font-size: 23px; letter-spacing: -.03em; }
+.heading p { margin: 4px 0 0; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.45; }
+.headingControls { flex: none; display: flex; align-items: center; gap: 10px; }
+
+.periodTabs {
+  padding: 2px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(44px, 1fr));
+  border-radius: 8px;
+  background: var(--flowlet-color-surface-strong);
+  border: 1px solid var(--flowlet-color-border);
+}
+.periodTabs button {
+  min-height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--flowlet-color-text-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+.periodTabs button[aria-pressed="true"] {
+  color: var(--flowlet-color-primary);
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+  font-weight: 700;
+}
+
+.card {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 14px;
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+}
+.cardHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--flowlet-color-border);
+}
+.cardTitle { min-width: 0; display: grid; gap: 2px; }
+.cardTitle strong { color: var(--flowlet-color-text); font-size: 15px; }
+.cardTitle span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+
+.dimensionTabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--flowlet-color-surface-muted);
+  border: 1px solid var(--flowlet-color-border);
+}
+.dimensionTabs button {
+  height: 30px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--flowlet-color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+.dimensionTabs button:hover[aria-selected="false"] { color: var(--flowlet-color-text); }
+.dimensionTabs button[aria-selected="true"] {
+  background: var(--flowlet-color-text);
+  color: var(--flowlet-color-surface-strong);
+  font-weight: 650;
+  box-shadow: 0 4px 10px rgba(20, 24, 33, 0.18);
+}
+
+.state { min-height: 260px; padding: 24px 18px; display: grid; place-items: center; align-content: center; gap: 8px; text-align: center; }
+.state span { max-width: 580px; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.5; }
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(300px, 0.86fr);
+}
+
+/* ─── 左侧排行面板 ─────────────────────────────────────────────── */
+.rankPane {
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
+  border-right: 1px solid var(--flowlet-color-border);
+}
+.rankHead, .rankRow {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.45fr) minmax(86px, 0.8fr) minmax(94px, 0.85fr) minmax(82px, 0.72fr) 20px;
+  gap: 12px;
+  align-items: center;
+  padding: 0 16px;
+  text-align: left;
+}
+.rankHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 32px;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 10px;
+  background: var(--flowlet-color-surface-strong);
+  box-shadow: 0 1px 0 var(--flowlet-color-border);
+}
+.rankRow {
+  width: 100%;
+  min-height: 58px;
+  border: 0;
+  border-top: 1px solid var(--flowlet-color-border);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.rankRow:hover { background: var(--flowlet-color-surface-muted); }
+.rankRowSelected, .rankRowSelected:hover {
+  background: color-mix(in srgb, var(--flowlet-color-primary) 7%, var(--flowlet-color-surface-strong));
+  box-shadow: inset 3px 0 0 var(--flowlet-color-primary);
+}
+
+.rankName { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.badge { flex: none; }
+.badgeLetter {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
+  font-size: 12px;
+  font-weight: 750;
+}
+.rankNameText { min-width: 0; }
+.rankNameText strong {
+  display: block;
+  overflow: hidden;
+  color: var(--flowlet-color-text);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rankNameText small {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.metricCell { min-width: 0; display: block; }
+.metricCell strong {
+  display: block;
+  overflow: hidden;
+  color: var(--flowlet-color-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.metricCell small { display: block; margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+
+.cacheCell { display: flex; align-items: center; gap: 7px; color: var(--flowlet-color-text-secondary); font-size: 10px; font-variant-numeric: tabular-nums; }
+.cacheBar {
+  width: 50px;
+  height: 5px;
+  flex: none;
+  border-radius: 99px;
+  background: var(--flowlet-color-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
+  overflow: hidden;
+}
+.cacheBar i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--flowlet-color-primary), color-mix(in srgb, var(--flowlet-color-primary) 55%, #8ab2ff));
+  transition: width 200ms ease;
+}
+.rankArrow { display: grid; place-items: center; color: var(--flowlet-color-text-tertiary); }
+
+/* ─── 右侧矩阵面板 ─────────────────────────────────────────────── */
+.matrixPane {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--flowlet-color-surface-muted) 55%, var(--flowlet-color-surface));
+}
+.matrixHead { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 13px 16px 10px; }
+.matrixTitle { min-width: 0; }
+.matrixTitle strong { display: block; color: var(--flowlet-color-text); font-size: 13px; }
+.matrixTitle span { display: block; margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 10px; line-height: 1.4; }
+
+.metricSeg {
+  flex: none;
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--flowlet-color-surface-strong);
+  border: 1px solid var(--flowlet-color-border);
+}
+.metricSeg button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--flowlet-color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+.metricSeg button[aria-pressed="true"] {
+  color: var(--flowlet-color-primary);
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+  font-weight: 700;
+}
+
+.matrixScroll { flex: 1; min-height: 0; overflow: auto; padding: 0 16px 6px; }
+.matrixGrid { display: grid; gap: 5px; min-width: 300px; grid-auto-rows: 38px; }
+.matrixColHead {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 9.5px;
+  line-height: 1.25;
+  text-align: center;
+  word-break: break-all;
+}
+.matrixRowHead {
+  min-width: 0;
+  padding: 0 4px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--flowlet-color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+.matrixRowHead:hover { color: var(--flowlet-color-text); }
+.matrixRowHead[aria-pressed="true"] { color: var(--flowlet-color-primary); font-weight: 650; }
+
+.matrixCell {
+  min-width: 0;
+  border: 0;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: transform 120ms ease, filter 120ms ease;
+}
+button.matrixCell {
+  cursor: pointer;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-strong);
+  box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
+}
+button.matrixCell:hover { transform: translateY(-1px); filter: saturate(1.18); }
+.matrixCellEmpty { color: var(--flowlet-color-text-tertiary); background: transparent; }
+
+.heatLevel0 { background: var(--flowlet-color-surface-muted); }
+.heatLevel1 { background: color-mix(in srgb, var(--flowlet-color-primary) 16%, var(--flowlet-color-surface-strong)); }
+.heatLevel2 { background: color-mix(in srgb, var(--flowlet-color-primary) 36%, var(--flowlet-color-surface-strong)); }
+.heatLevel3 { color: #fff; background: color-mix(in srgb, var(--flowlet-color-primary) 62%, var(--flowlet-color-surface-strong)); }
+.heatLevel4 { color: #fff; background: var(--flowlet-color-primary); }
+
+.matrixFoot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 16px 2px; }
+.heatLegend { display: flex; align-items: center; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.heatSwatch { width: 11px; height: 11px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--flowlet-color-border); }
+.coverage { color: var(--flowlet-color-text-tertiary); font-size: 10px; text-align: right; }
+
+/* ─── 选中对象详情 ─────────────────────────────────────────────── */
+.detail {
+  flex: none;
+  margin: 9px 16px 14px;
+  padding: 12px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 12px;
+  background: var(--flowlet-color-surface-strong);
+  box-shadow: var(--flowlet-shadow-card);
+  animation: detailRise 180ms ease;
+}
+@keyframes detailRise { from { opacity: 0; transform: translateY(4px); } }
+.detailHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.detailHead strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--flowlet-color-text);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.detailPill {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 99px;
+  color: var(--flowlet-color-primary);
+  background: var(--semi-color-primary-light-default);
+  font-size: 10px;
+}
+.detailGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.detailGrid > div {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: var(--flowlet-color-surface-muted);
+}
+.detailGrid span { display: block; color: var(--flowlet-color-text-tertiary); font-size: 9px; white-space: nowrap; }
+.detailGrid strong {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--flowlet-color-text);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.detailMeta { margin-top: 9px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+
+.cellTip { display: grid; gap: 2px; font-size: 11px; line-height: 1.5; }
+.cellTip strong { font-size: 12px; }
+
+@media (max-width: 900px) {
+  .page { height: auto; min-height: 100%; }
+  .heading { flex-wrap: wrap; }
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .rankPane { border-right: 0; border-bottom: 1px solid var(--flowlet-color-border); }
+  .rankHead, .rankRow { grid-template-columns: minmax(140px, 1.4fr) minmax(80px, 0.8fr) minmax(88px, 0.85fr) minmax(76px, 0.7fr) 18px; gap: 10px; }
+}

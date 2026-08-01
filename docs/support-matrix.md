@@ -1,6 +1,6 @@
 # Flowlet 当前支持矩阵
 
-> 状态日期：2026-07-29  
+> 状态日期：2026-08-01  
 > 本文描述当前工作区已经实现或已经确认的能力，不把路线图能力写成已支持。
 
 本文统一说明 Flowlet 当前对渠道、模型和 AI Agent 的支持情况。判断某项能力时，
@@ -30,14 +30,17 @@
 | `POST /v1/chat/completions` | ✅ | OpenAI Chat Completions 透明转发 |
 | `GET /anthropic/v1/models` | ✅ | 返回当前 Anthropic 协议下可用的开放模型 |
 | `POST /anthropic/v1/messages` | ✅ | Anthropic Messages 透明转发 |
-| `POST /v1/responses` | ◐ | 通配路由可以机械透传，但尚未完成渠道能力约束、Responses 流式观测和正式回归验证 |
+| `POST /v1/responses` | ✅ | OpenAI Responses API 无状态透传，作为第三协议独立路由（仅声明 `"responses"` 的渠道参与候选）；兼容裸根入口 `POST /responses`；SSE 与 JSON 用量均解析落库 |
+| `GET`/`DELETE /v1/responses/{id}`、`input_items` | — | 存储响应管理接口不支持，返回 405 明确错误 |
 | OpenAI ↔ Anthropic 转换 | — | Flowlet 明确不做跨协议转换 |
 | Responses ↔ Chat Completions 转换 | — | Flowlet 明确不做跨协议转换 |
 | Gemini-compatible | — | 尚未提供正式入口 |
 
-OpenAI 入口实际由 `/v1/{*path}` 与 `/openai/v1/{*path}` 通配路由承载，因此
-`/v1/responses` 可以被转发到同路径上游。但在补齐能力声明、模型限制、日志用量解析和
-测试前，不能将其描述为 Flowlet 已正式支持的协议。
+Responses 是独立协议（`ProtocolType::Responses`），不是 OpenAI 通配路由的副产品：
+路由候选按 `client_protocol = "responses"` 匹配，未声明该协议的渠道（如 Kimi）
+不会产生候选；上游端点从渠道 OpenAI Base URL 派生（`{base}/v1/responses`，
+裸根入口 `/responses` 则拼出 `{base}/responses`），鉴权复用 `openai_auth`。
+仅保证无状态透传：`previous_response_id` / `store` 的多账号粘性不支持。
 
 ## 3. 渠道支持
 
@@ -47,31 +50,36 @@ Flowlet 当前有五种渠道模板：LongCat、DeepSeek、Kimi、Qwen 和自定
 
 ### 3.1 渠道能力矩阵
 
-| 渠道 | OpenAI Chat | Anthropic Messages | 模型列表 | 模型详情 | 余额/资源 | 上游 Responses API |
-|------|-------------|--------------------|----------|----------|-----------|----------------------|
-| LongCat | ✅ | ✅ | ✅ | ✅ | 控制台抓取资源包与按量余额 | — 官方端点未列出 |
-| DeepSeek | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | — 官方当前仅文档化 Chat Completions |
-| Kimi / Moonshot | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | — 官方当前声明兼容 Chat Completions |
-| Qwen 按量付费 | ✅ | ✅ | ✅ | — | — | ✅ 官方明确支持 |
-| Qwen Token Plan | ✅ | ✅ | ✅ | — | ✅ 控制台抓取套餐额度 | ✅ 官方明确支持 |
-| 自定义渠道 | 取决于已填写的 OpenAI Base URL | 取决于已填写的 Anthropic Base URL | ✅ 使用标准 OpenAI `/models` | — | — | 取决于上游，当前无自动检测 |
+| 渠道 | OpenAI Chat | Anthropic Messages | 模型列表 | 模型详情 | 余额/资源 | 上游 Responses API | Flowlet Responses 转发 |
+|------|-------------|--------------------|----------|----------|-----------|----------------------|------------------------|
+| LongCat | ✅ | ✅ | ✅ | ✅ | 控制台抓取资源包与按量余额 | ✅ 官方 Codex 文档确认（无状态） | ✅ |
+| DeepSeek | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | ✅ 官方文档确认（无状态；当前仅 `deepseek-v4-flash`，`v4-pro` 上游将于 2026-08 初开放） | ✅ |
+| Kimi / Moonshot | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | — 官方确认暂不支持 | —（不生成 responses 路由） |
+| Qwen 按量付费 | ✅ | ✅ | ✅ | — | — | ✅ 官方明确支持（含有状态 store/retrieve） | ✅（仅无状态透传） |
+| Qwen Token Plan | ✅ | ✅ | ✅ | — | ✅ 控制台抓取套餐额度 | ✅ 官方明确支持 | ✅（仅无状态透传） |
+| 自定义渠道 | 取决于已填写的 OpenAI Base URL | 取决于已填写的 Anthropic Base URL | ✅ 使用标准 OpenAI `/models` | — | — | 取决于上游，当前无自动检测 | ✅（填写 OpenAI Base URL 即生成路由，上游是否支持由用户保证） |
 
 上游 Responses API 的当前结论：
 
-- 千问按量付费提供 OpenAI-compatible `/compatible-mode/v1/responses`；
-- 千问 Token Plan 也提供 Responses API，并给出了 Codex `wire_api = "responses"` 配置；
-- LongCat、DeepSeek、Kimi 的当前官方端点目录没有确认 `/responses`，应按不支持处理，
-  不能仅凭“OpenAI-compatible”推断；
+- LongCat 官方 Codex 接入文档使用 `wire_api = "responses"`（端点
+  `https://api.longcat.chat/openai/v1/responses`，`disable_response_storage = true`，
+  支持 reasoning summaries），确认无状态支持；
+- DeepSeek 官方 Responses API 文档确认端点 `https://api.deepseek.com/responses`，
+  完全无状态（`store` / `previous_response_id` / `conversation` 不支持），
+  当前仅 `deepseek-v4-flash`，`deepseek-v4-pro` 预计 2026 年 8 月初开放；
+- 千问按量付费与 Token Plan 提供 OpenAI-compatible `/compatible-mode/v1/responses`，
+  并额外支持 `store` / `previous_response_id` 与 retrieve/delete/input_items
+  管理接口（Flowlet 当前不透传这些有状态能力）；
+- Kimi 已确认暂不支持 Responses API，`supported_protocols` 不声明 `"responses"`；
 - 自定义渠道代表中转站或自建服务，必须由具体账号的上游能力决定。
 
-千问官方参考：
+官方参考：
 
-- [OpenAI-compatible Responses API](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-responses)
-- [Codex 接入](https://help.aliyun.com/en/model-studio/codex)
-- [Token Plan 快速开始](https://help.aliyun.com/en/model-studio/token-plan-quickstart)
-
-其他渠道官方参考：
-
+- [DeepSeek Responses API](https://api-docs.deepseek.com/zh-cn/guides/responses_api)
+- [DeepSeek Anthropic 兼容 API](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)
+- [LongCat Codex 接入](https://longcat.chat/platform/docs/zh/codex)
+- [千问 OpenAI Responses](https://platform.qianwenai.com/docs/api-reference/chat/openai-responses)
+- [千问 Codex 接入](https://help.aliyun.com/en/model-studio/codex)
 - [LongCat API 概述](https://longcat.chat/platform/docs/APIDocs.html)
 - [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion)
 - [Kimi API 概述](https://platform.kimi.com/docs/api/overview)
@@ -96,11 +104,11 @@ Flowlet 当前总共支持 11 个规范化模型。这个列表是全局白名�
 
 | 官方归属 | 规范化模型 ID | 聚合档位 | Responses 说明 |
 |----------|---------------|----------|----------------|
-| LongCat | `LongCat-2.0` | `flowlet-pro`、`flowlet-flash` | 当前官方渠道未确认 |
-| DeepSeek | `deepseek-v4-pro` | `flowlet-pro` | 当前官方渠道未确认 |
-| DeepSeek | `deepseek-v4-flash` | `flowlet-flash` | 当前官方渠道未确认 |
-| Kimi | `kimi-k3` | `flowlet-pro` | 当前官方渠道未确认 |
-| Kimi | `kimi-k2.7-code` | `flowlet-pro` | 当前官方渠道未确认 |
+| LongCat | `LongCat-2.0` | `flowlet-pro`、`flowlet-flash` | ✅ 上游确认 |
+| DeepSeek | `deepseek-v4-pro` | `flowlet-pro` | ◐ 上游 Responses 将于 2026-08 初开放该模型 |
+| DeepSeek | `deepseek-v4-flash` | `flowlet-flash` | ✅ 上游确认 |
+| Kimi | `kimi-k3` | `flowlet-pro` | — 上游暂不支持 |
+| Kimi | `kimi-k2.7-code` | `flowlet-pro` | — 上游暂不支持 |
 | Qwen | `qwen3.8-max-preview` | `flowlet-pro` | ✅，仅 Token Plan |
 | Qwen | `qwen3.7-max` | `flowlet-pro` | ✅ 上游确认 |
 | Qwen | `qwen3.7-plus` | `flowlet-pro` | ✅ 上游确认 |
@@ -125,8 +133,9 @@ Channel + Account + Protocol
 千问账号承载请求。
 
 Responses 能力同样必须按“渠道端点 + 模型”共同判断，不能因为账号属于 Qwen 渠道，就把
-它返回的所有第三方模型都视为支持 Responses。当前可以明确标记的范围是上表中的 Qwen
-模型。
+它返回的所有第三方模型都视为支持 Responses。Flowlet 的 responses 路由按渠道声明
+（`supported_protocols` 含 `"responses"`）生成，模型级上游可用性差异（如 DeepSeek
+Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 不做模型级拦截。
 
 ### 4.2 对外模型名
 
@@ -147,7 +156,7 @@ Responses 能力同样必须按“渠道端点 + 模型”共同判断，不能�
 | Claude Code | ✅ CLI、多安装候选、版本 | ✅ | Anthropic Messages | ✅ User-Agent；官方 Session Header | ✅ | 主模型/快速模型/子 Agent 映射，可选 `[1m]` 长上下文 |
 | OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置 |
 | Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可部署原生扩展注入 `x-flowlet-session` |
-| ChatGPT（Codex）/ Codex CLI | ✅ Desktop + CLI | — | 当前需要 Responses，尚未正式接入 Flowlet 网关 | — | ✅，Desktop 与 CLI 分开识别 | Codex 账号发现、授权、套餐用量和 credits 查询 |
+| ChatGPT（Codex）/ Codex CLI | ✅ Desktop + CLI | — | Responses 链路已正式可用，一键写入待实现 | — | ✅，Desktop 与 CLI 分开识别 | Codex 账号发现、授权、套餐用量和 credits 查询 |
 
 “一键写入/恢复”包括：
 
@@ -156,9 +165,10 @@ Responses 能力同样必须按“渠道端点 + 模型”共同判断，不能�
 - 写入本地 Base URL、Client Token 和模型映射；
 - 恢复时保留用户后来新增的非 Flowlet 字段。
 
-Codex 当前不自动写入 `model_providers`。千问上游已经确认支持 Responses API，但 Flowlet
-本地 `/v1/responses` 仍处于透明透传、未正式产品化的状态；在完成渠道/模型能力约束和
-回归验证后，才适合开放 Codex 一键网关配置。
+Codex 当前不自动写入 `model_providers`。Flowlet 本地 `/v1/responses` 已成为正式协议
+入口（LongCat / DeepSeek / Qwen 渠道承载，无状态透传），Codex 可手动配置
+`wire_api = "responses"`、`base_url = http://127.0.0.1:18640/v1`、
+`disable_response_storage = true` 接入；一键写入与恢复待后续实现。
 
 ### 5.2 原生会话数据源
 
@@ -180,6 +190,8 @@ Flowlet 会只读以下 Agent 原生数据，不修改会话正文：
 
 - OpenAI Chat Completions：Base URL 指向 `http://127.0.0.1:18640/v1`；
 - Anthropic Messages：Base URL 指向 `http://127.0.0.1:18640/anthropic`；
+- OpenAI Responses：Base URL 指向 `http://127.0.0.1:18640/v1`（端点
+  `POST /v1/responses`，无状态透传，不要开启 `store`）；
 - 鉴权使用 Flowlet Client Token。
 
 Cline、Continue、Open WebUI、Gemini CLI、Hermes Agent 等目前没有完整的一等安装探测、
@@ -188,12 +200,12 @@ Cline、Continue、Open WebUI、Gemini CLI、Hermes Agent 等目前没有完整�
 
 ## 6. 当前主要缺口
 
-1. 将 Qwen Responses 能力建模为明确的渠道/账号/模型能力，而不是依赖通配路径；
-2. 补充 `/v1/responses` 普通响应、SSE、错误、日志、Token 用量与 fallback 测试；
-3. 明确自定义渠道的 Responses 能力检测或用户声明机制；
-4. 在 Responses 链路正式可用后开放 Codex `model_providers` 一键写入与恢复；
-5. 扩展更多 Agent 的安装探测、配置管理、归属标记和原生会话解析；
-6. Gemini-compatible 入口仍未实现。
+1. Codex `model_providers` 一键写入与恢复（Responses 链路已正式可用）；
+2. Qwen 有状态 Responses 能力（`store` / `previous_response_id` 的账号粘性路由、
+   retrieve/delete/input_items 透传）；
+3. DeepSeek `deepseek-v4-pro` 的上游 Responses 开放（预计 2026-08 初，无需 Flowlet 改动）；
+4. 扩展更多 Agent 的安装探测、配置管理、归属标记和原生会话解析；
+5. Gemini-compatible 入口仍未实现。
 
 ## 7. 维护要求
 

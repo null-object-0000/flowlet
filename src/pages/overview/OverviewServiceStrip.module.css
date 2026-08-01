@@ -183,6 +183,14 @@
   text-overflow: ellipsis;
 }
 
+/* Responses 协议选中时在 Base URL 右侧提示实际端点路径。 */
+.endpointHint {
+  flex: 0 0 auto;
+  font: 11px "SFMono-Regular", Consolas, "Cascadia Code", monospace;
+  color: var(--flowlet-color-text-tertiary);
+  white-space: nowrap;
+}
+
 .iconBtn {
   width: 29px;
   height: 29px;

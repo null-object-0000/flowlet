@@ -56,6 +56,12 @@
   gap: 6px;
 }
 
+.noteLine {
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .security {
   border-color: var(--flowlet-color-warning-border);
   background: var(--flowlet-color-warning-surface);

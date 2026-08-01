@@ -70,7 +70,9 @@ pub(super) fn build_model_list_response(
     let entries = collect_model_entries(routes, accounts, channels, protocol);
 
     match protocol {
-        ProtocolType::OpenAi => build_openai_model_list(&entries),
+        // Responses 没有独立模型列表端点（/v1/models 归属 OpenAI 协议），
+        // 此分支仅为穷尽匹配兜底，形状沿用 OpenAI。
+        ProtocolType::OpenAi | ProtocolType::Responses => build_openai_model_list(&entries),
         ProtocolType::Anthropic => build_anthropic_model_list(&entries),
     }
 }
@@ -274,8 +276,10 @@ pub(super) fn build_upstream_url(
         .unwrap_or("/");
 
     match protocol {
-        ProtocolType::OpenAi => {
-            // 保留 /v1 和 /openai/v1 前缀，因为 base_url 已经包含了 /openai 或 /v1 的入口前缀
+        ProtocolType::OpenAi | ProtocolType::Responses => {
+            // 保留 /v1 和 /openai/v1 前缀，因为 base_url 已经包含了 /openai 或 /v1 的入口前缀。
+            // Responses 与 OpenAI 共享 Base URL：`/v1/responses` 拼出 `{base}/v1/responses`
+            //（dashscope 等自带 /v1 后缀的 base 经 strip_duplicate_v1 去重后同样正确）。
             let path = path.trim_start_matches("/openai");
             let base = strip_duplicate_v1(base, path);
             format!("{base}{path}")
@@ -600,7 +604,10 @@ fn strip_long_context_suffix(model: &str) -> &str {
 pub(super) fn extract_model(body: &[u8], protocol: &ProtocolType) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
     let model = match protocol {
-        ProtocolType::OpenAi => value.get("model").and_then(|v| v.as_str()),
+        // Responses 请求体同样在顶层携带 model 字段。
+        ProtocolType::OpenAi | ProtocolType::Responses => {
+            value.get("model").and_then(|v| v.as_str())
+        }
         ProtocolType::Anthropic => value.get("model").and_then(|v| v.as_str()),
     }?;
     Some(strip_long_context_suffix(model).to_string())

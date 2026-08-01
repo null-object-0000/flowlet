@@ -201,7 +201,7 @@ function LastInteractionSection({
         <div className={styles.interactionFlow} aria-label={t("最近一轮")}>
           {userEvent ? (
             <article className={styles.userMessageRow} aria-label={t("用户消息")}>
-              {userEvent.content ? <div className={styles.userMessageBubble}><Markdown content={userEvent.content} /></div> : null}
+              {userEvent.content ? <pre className={styles.userMessageBubble}>{userEvent.content}</pre> : null}
             </article>
           ) : null}
           {outputItems.length > 0 ? (

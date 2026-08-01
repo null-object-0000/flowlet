@@ -24,7 +24,12 @@ export function AgentDataAutoSync() {
       publishSchedule(null);
       try {
         const result = await backgroundTaskCommands.syncAgentData(false, triggerSource);
-        if (result.started) await Promise.all([client.invalidateQueries({ queryKey: queryKeys.agentSession.all }), client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all })]);
+        // deviceSync：原生用量账本（agent_usage_events）更新后，用量页热力图/统计卡需要重取。
+        if (result.started) await Promise.all([
+          client.invalidateQueries({ queryKey: queryKeys.agentSession.all }),
+          client.invalidateQueries({ queryKey: queryKeys.backgroundTask.all }),
+          client.invalidateQueries({ queryKey: queryKeys.deviceSync.all }),
+        ]);
       }
       catch { /* 自动检查失败不打断应用，下一轮继续。 */ }
       if (!stopped) schedule(document.hidden ? BACKGROUND_INTERVAL : FOREGROUND_INTERVAL);

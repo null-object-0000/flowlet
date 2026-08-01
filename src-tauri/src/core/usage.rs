@@ -125,6 +125,16 @@ fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> 
         .get("prompt_tokens")
         .or_else(|| usage.get("input_tokens"))
         .and_then(serde_json::Value::as_i64);
+    // Anthropic 形状的未缓存基值：必须 `input_tokens` 优先。某些 Anthropic 兼容上游
+    // 会在同一 usage 里额外漏出 OpenAI 的 `prompt_tokens`（按 OpenAI 语义是「含缓存读」
+    // 的全量）。若像 OpenAI 分支那样让 `prompt_tokens` 优先，再走下面的「+ cache_read」
+    // 归一化，缓存读就会被重复计一次，使落库 input/total 虚高，并且和原样透传给客户端的
+    // usage 对不上。故 Anthropic 分支以 `input_tokens` 为未缓存基值，仅在它缺失时才回退
+    // `prompt_tokens`；`prompt_tokens` 的绝对优先权只留给下面的 OpenAI 分支。
+    let anthropic_raw_input = usage
+        .get("input_tokens")
+        .or_else(|| usage.get("prompt_tokens"))
+        .and_then(serde_json::Value::as_i64);
     let output_tokens = usage
         .get("completion_tokens")
         .or_else(|| usage.get("output_tokens"))
@@ -142,7 +152,7 @@ fn extract_usage_from_value(value: &serde_json::Value) -> Option<ResponseUsage> 
             // 未缓存输入沿用旧口径（含缓存写入），保证既有展示与汇总不变；
             // 缓存写入另行单列，计价时再单独扣减并按缓存写入单价计费。
             let cache_write = anthropic_cache_creation;
-            let uncached = match (raw_input_tokens, anthropic_cache_creation) {
+            let uncached = match (anthropic_raw_input, anthropic_cache_creation) {
                 (Some(input), Some(created)) => Some(input.saturating_add(created)),
                 (Some(input), None) => Some(input),
                 (None, Some(created)) => Some(created),
@@ -303,6 +313,71 @@ data: {"type":"message_stop"}
                 input_cache_write_tokens: Some(2000),
                 output_tokens: Some(50),
                 total_tokens: Some(3550),
+            })
+        );
+    }
+
+    #[test]
+    fn anthropic_shape_ignores_leaked_prompt_tokens_to_avoid_double_counting_cache() {
+        // 某些 Anthropic 兼容上游在同一 usage 里漏出 OpenAI 的 prompt_tokens（= 净输入 + 缓存读，
+        // 含缓存的全量）。落库的 input/total 绝不能因此把缓存读重复加一次，必须与透传给
+        // 客户端的原始 usage 解释一致：净输入 1000 + 写入 2000 + 读取 500 = 3500。
+        // （修复前 prompt_tokens 抢占基值，会得到 (1500+2000)+500 = 4000 的虚高值。）
+        let body = br#"{"id":"msg_1","type":"message","usage":{"input_tokens":1000,"cache_read_input_tokens":500,"cache_creation_input_tokens":2000,"output_tokens":50,"prompt_tokens":1500}}"#;
+        assert_eq!(
+            extract_response_usage(body),
+            Some(ResponseUsage {
+                input_tokens: Some(3500),
+                input_cached_tokens: Some(500),
+                input_uncached_tokens: Some(3000),
+                input_cache_write_tokens: Some(2000),
+                output_tokens: Some(50),
+                total_tokens: Some(3550),
+            })
+        );
+    }
+
+    #[test]
+    fn anthropic_stream_with_leaked_prompt_tokens_does_not_double_count_cache() {
+        // 同上，流式路径：每个带用量的 SSE 事件都走同一归一化，同样不能因漏出的
+        // prompt_tokens 重复计缓存。
+        let body = br#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":1000,"cache_read_input_tokens":500,"cache_creation_input_tokens":2000,"output_tokens":0,"prompt_tokens":1500}}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":50}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#;
+        assert_eq!(
+            extract_sse_response_usage(body, true),
+            Some(ResponseUsage {
+                input_tokens: Some(3500),
+                input_cached_tokens: Some(500),
+                input_uncached_tokens: Some(3000),
+                input_cache_write_tokens: Some(2000),
+                output_tokens: Some(50),
+                total_tokens: Some(3550),
+            })
+        );
+    }
+
+    #[test]
+    fn openai_shape_still_prefers_prompt_tokens() {
+        // 回归保护：OpenAI 形状（无 Anthropic 缓存字段）仍须以 prompt_tokens 为全量基值，
+        // 并减去 cached 得到未缓存，行为不变。
+        let body = br#"{"usage":{"prompt_tokens":180,"completion_tokens":50,"total_tokens":230,"prompt_tokens_details":{"cached_tokens":80}}}"#;
+        assert_eq!(
+            extract_response_usage(body),
+            Some(ResponseUsage {
+                input_tokens: Some(180),
+                input_cached_tokens: Some(80),
+                input_uncached_tokens: Some(100),
+                input_cache_write_tokens: None,
+                output_tokens: Some(50),
+                total_tokens: Some(230),
             })
         );
     }

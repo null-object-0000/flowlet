@@ -51,7 +51,13 @@ export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { 
       {detail.isSuccess && !finalRow ? <DetailState title={t("未找到请求记录")} description={t("该日志可能已被清理。")} /> : null}
 
       {finalRow && selectedRow ? (
-        <Tabs className={styles.tabs} type="line" defaultActiveKey="overview" tabPaneMotion={false}>
+        <Tabs
+          className={styles.tabs}
+          type="line"
+          defaultActiveKey="overview"
+          tabPaneMotion={false}
+          keepDOM={false}
+        >
           <Tabs.TabPane tab={t("概览")} itemKey="overview">
             <div className={styles.tabContent}>
               <AttemptSelector rows={rows} selectedRow={selectedRow} onSelect={setSelectedAttemptId} />

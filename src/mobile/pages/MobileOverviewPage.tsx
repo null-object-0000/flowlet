@@ -3,10 +3,9 @@ import { Button } from "@douyinfe/semi-ui-19";
 import { useEffect, useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useMobileDailyUsage, useMobileDevices, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
-import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
-import { MobileDevicePicker } from "../MobileDevicePicker";
+import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
+import { MobileDeviceTitlePicker, useMobileDevicePickerState } from "../MobileDevicePicker";
 import { MobileRefreshButton } from "../MobileRefreshButton";
-import { useMobileDeviceSelection } from "../MobileDeviceSelection";
 import {
   buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
@@ -21,7 +20,8 @@ import styles from "./MobilePage.module.css";
 
 export function MobileOverviewPage() {
   const { language, t } = useAppPreferences();
-  const { deviceId } = useMobileDeviceSelection();
+  const devicePicker = useMobileDevicePickerState();
+  const deviceId = devicePicker.deviceId;
   const [period, setPeriod] = useState<MobileUsagePeriod>("month");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -91,9 +91,14 @@ export function MobileOverviewPage() {
     <section className={styles.page}>
       <header className={`${styles.heading} ${styles.headingWithPicker}`}>
         <div className={styles.headingTitleRow}>
-          <h2>{t("概览")}</h2>
+          <h2>
+            <MobileDeviceTitlePicker
+              state={devicePicker}
+              allowAll
+              formatTitle={(name) => (name == null ? t("全部概览") : `${name} ${t("概览")}`)}
+            />
+          </h2>
           <div className={styles.headingActions}>
-            <MobileDevicePicker />
             <MobileRefreshButton />
           </div>
         </div>
@@ -156,8 +161,8 @@ export function MobileOverviewPage() {
       </div>
 
       <div className={styles.stats}>
-        <article className={styles.stat}><span>Tokens</span><strong>{formatCompactNumber(summary.tokens, language)}</strong><small>{t("输入 {input} · 输出 {output}", { input: formatCompactNumber(summary.inputTokens, language), output: formatCompactNumber(summary.outputTokens, language) })}</small></article>
-        <article className={styles.stat}><span>{t("请求量")}</span><strong>{formatInteger(summary.requests, language)}</strong><small>{t("{count} 天数据", { count: days.length })}</small></article>
+        <article className={styles.stat}><span>Tokens</span><strong>{formatCompactNumber(summary.tokens + summary.nativeTokens, language)}</strong><small>{t("输入 {input} · 输出 {output}", { input: formatCompactNumber(summary.inputTokens + summary.nativeInputTokens, language), output: formatCompactNumber(summary.outputTokens + summary.nativeOutputTokens, language) })}</small></article>
+        <article className={styles.stat}><span>{t("请求量")}</span><strong>{formatInteger(summary.requests + summary.nativeEvents, language)}</strong><small>{summary.nativeEvents > 0 ? t("代理 {proxy} · 原生 {native}", { proxy: formatInteger(summary.requests, language), native: formatInteger(summary.nativeEvents, language) }) : t("{count} 天数据", { count: days.length })}</small></article>
         <article className={styles.stat}><span>{t("缓存输入")}</span><strong>{formatCompactNumber(summary.cachedInputTokens, language)}</strong><small>{t("缓存命中率")} {formatCacheHitRate(summary.cacheHitRate)}</small></article>
         <article className={styles.stat}><span>{t("设备")}</span><strong>{deviceId ? "1" : formatInteger(devices.data?.length ?? 0, language)}</strong><small>{deviceId ? t("指定设备") : t("全部设备")}</small></article>
       </div>
@@ -183,7 +188,7 @@ export function MobileOverviewPage() {
                     {String(hourStart).padStart(2, "0")}–{String(hourStart + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS).padStart(2, "0")}
                   </span>,
                   ...bucketCells.map((cell) => {
-                    const title = `${cell.date} ${String(cell.hourOfDay).padStart(2, "0")}:00–${String(cell.hourEnd - 1).padStart(2, "0")}:59 · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}`;
+                    const title = `${cell.date} ${String(cell.hourOfDay).padStart(2, "0")}:00–${String(cell.hourEnd - 1).padStart(2, "0")}:59 · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
                     return (
                       <button
                         key={cell.hour}
@@ -215,7 +220,7 @@ export function MobileOverviewPage() {
             </div>
             <div className={styles.mobileHeatmap}>
               {heatmap.cells.map((cell) => {
-                const title = `${cell.date} · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}`;
+                const title = `${cell.date} · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
                 return (
                   <button
                     key={cell.date}
@@ -242,13 +247,25 @@ export function MobileOverviewPage() {
         <article className={styles.selectedDay}>
           <div><strong>{selectedHourlyCell.date} {String(selectedHourlyCell.hourOfDay).padStart(2, "0")}:00–{String(selectedHourlyCell.hourEnd - 1).padStart(2, "0")}:59</strong><span>{formatCompactNumber(selectedHourlyCell.tokens, language)} Tokens</span></div>
           <small>{t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })}</small>
+          {selectedHourlyCell.nativeTokens > 0 ? (
+            <small>{t("Flowlet {proxy} · 原生 {native}", {
+              proxy: formatCompactNumber(selectedHourlyCell.tokens - selectedHourlyCell.nativeTokens, language),
+              native: formatCompactNumber(selectedHourlyCell.nativeTokens, language),
+            })}</small>
+          ) : null}
         </article>
       ) : null}
 
       {period === "month" && selectedDay ? (
         <article className={styles.selectedDay}>
-          <div><strong>{selectedDay.date}</strong><span>{formatCompactNumber(selectedDay.knownTokens, language)} Tokens</span></div>
-          <small>{t("{count} 次请求", { count: formatInteger(selectedDay.requestCount, language) })} · {t("输入 {input} · 输出 {output}", { input: formatCompactNumber(selectedDay.inputTokens, language), output: formatCompactNumber(selectedDay.outputTokens, language) })}</small>
+          <div><strong>{selectedDay.date}</strong><span>{formatCompactNumber(selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0), language)} Tokens</span></div>
+          <small>{t("{count} 次请求", { count: formatInteger(selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0), language) })} · {t("输入 {input} · 输出 {output}", { input: formatCompactNumber(selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0), language), output: formatCompactNumber(selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0), language) })}</small>
+          {(selectedDay.nativeTotalTokens ?? 0) > 0 ? (
+            <small>{t("Flowlet {proxy} · 原生 {native}", {
+              proxy: formatCompactNumber(selectedDay.knownTokens, language),
+              native: formatCompactNumber(selectedDay.nativeTotalTokens ?? 0, language),
+            })}</small>
+          ) : null}
         </article>
       ) : null}
     </section>
@@ -257,4 +274,18 @@ export function MobileOverviewPage() {
 
 function formatCacheHitRate(value: number | null) {
   return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+/** 热力图 tooltip 的来源拆分后缀：存在原生用量时追加「Flowlet X · 原生 Y」。 */
+function formatNativeSplit(
+  tokens: number,
+  nativeTokens: number,
+  language: NumberLanguage,
+  t: ReturnType<typeof useAppPreferences>["t"],
+) {
+  if (nativeTokens <= 0) return "";
+  return ` · ${t("Flowlet {proxy} · 原生 {native}", {
+    proxy: formatInteger(tokens - nativeTokens, language),
+    native: formatInteger(nativeTokens, language),
+  })}`;
 }

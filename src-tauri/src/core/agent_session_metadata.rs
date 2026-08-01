@@ -377,7 +377,7 @@ fn infer_claude_runtime_status(path: &Path) -> String {
             Some("system")
                 if matches!(
                     value.get("subtype").and_then(Value::as_str),
-                    Some("turn_duration" | "away_summary")
+                    Some("turn_duration" | "away_summary" | "local_command")
                 ) =>
             {
                 status = "idle";
@@ -1118,6 +1118,25 @@ mod tests {
                 "{\"type\":\"system\",\"subtype\":\"turn_duration\"}\n",
                 "{\"type\":\"system\",\"subtype\":\"local_command\",\"content\":\"local command\"}\n",
                 "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":\"local result\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(infer_claude_runtime_status(&path), "idle");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn marks_claude_idle_after_failed_local_command() {
+        let path = std::env::temp_dir().join(format!(
+            "flowlet-claude-local-failure-{}.jsonl",
+            Uuid::new_v4()
+        ));
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"/compact\"}}\n",
+                "{\"type\":\"system\",\"subtype\":\"local_command\",\"content\":\"Error during compaction\"}\n"
             ),
         )
         .unwrap();

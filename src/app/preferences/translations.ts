@@ -2,6 +2,8 @@ export type AppLanguage = "zh-CN" | "en-US";
 
 const english: Record<string, string> = {
   "概览": "Overview",
+  "全部概览": "All devices overview",
+  "全部设备": "All devices",
   "运行概览": "Overview",
   "今日消耗": "Tokens today",
   "Tokens": "Tokens",
@@ -1359,6 +1361,7 @@ const english: Record<string, string> = {
   "添加渠道账号并选择开放模型后，这里会显示模型。": "Models will appear here after you add an account and choose which models to expose.",
   "暂无开放模型，请前往模型服务选择要开放的模型。": "No exposed models yet. Open Models to choose which models to expose.",
   "查看各设备同步的最近会话与实时运行状态": "View recently synced sessions and runtime status across devices",
+  "查看该设备同步的最近会话与实时运行状态": "View recently synced sessions and runtime status for this device",
   "会话状态": "Session status",
   "运行态": "Active",
   "等待确认": "Needs confirmation",
@@ -1397,6 +1400,8 @@ const english: Record<string, string> = {
   "正在连接 Agent 所在设备…": "Connecting to the device running the Agent…",
   "目标设备当前无法直连，请确认两台设备位于同一局域网。": "The target device is not directly reachable. Check that both devices are on the same local network.",
   "该确认请求已处理或已过期。": "This confirmation request was handled or has expired.",
+  "代理 {proxy} · 原生 {native}": "Proxy {proxy} · Native {native}",
+  "Flowlet {proxy} · 原生 {native}": "Flowlet {proxy} · Native {native}",
 };
 
 export type TranslationVariables = Record<string, string | number>;

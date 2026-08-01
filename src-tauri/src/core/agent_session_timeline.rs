@@ -16,7 +16,9 @@ const MAX_SESSION_ID_BYTES: usize = 512;
 const MAX_TIMELINE_FILE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TIMELINE_EVENTS: usize = 300;
 const MAX_EVENT_CONTENT_CHARS: usize = 8_000;
-pub const AGENT_SUMMARY_PARSER_VERSION: i64 = 3;
+// 版本 4：解析结果新增逐事件用量（usage_events），用于 agent_usage_events 账本。
+// 升级后所有 checkpoint 失效，触发一次全量重解析以回填完整历史账本。
+pub const AGENT_SUMMARY_PARSER_VERSION: i64 = 4;
 
 #[derive(Debug, Clone)]
 pub struct AgentSessionSummaryCheckpoint {
@@ -37,6 +39,9 @@ pub struct AgentSessionSummaryParseResult {
     pub complete: bool,
     pub incremental: bool,
     pub bytes_processed: u64,
+    /// 本次解析新产生的消息级用量事件（agent_usage_events 账本写入来源）。
+    /// 增量解析只含新事件；全量重解析含会话全部事件（调用方负责先清旧行）。
+    pub usage_events: Vec<super::config::AgentUsageEvent>,
 }
 
 pub fn get_native_agent_session_timeline(
@@ -95,7 +100,7 @@ pub fn get_native_agent_session_last_interaction(
             let Some(path) = find_pi_session_file(&root, session_id) else {
                 return Ok(None);
             };
-            read_pi_timeline_from_mode(&path, None, true)?
+            read_pi_timeline_from_mode(&path, None, true, None)?
         }
         _ => return Err(format!("暂不支持读取 Agent 会话最后交互：{agent_type}")),
     };
@@ -291,7 +296,8 @@ pub fn get_native_agent_session_summary_incremental(
         _ => None,
     };
     let Some(path) = path else {
-        let summary = get_native_agent_session_summary(agent_type, session_id)?;
+        let (summary, usage_events) =
+            get_native_agent_session_summary_with_events(agent_type, session_id)?;
         return Ok(AgentSessionSummaryParseResult {
             summary,
             source_offset: 0,
@@ -301,6 +307,7 @@ pub fn get_native_agent_session_summary_incremental(
             complete: true,
             incremental: false,
             bytes_processed: 0,
+            usage_events,
         });
     };
     let source_size = fs::metadata(&path)
@@ -317,8 +324,19 @@ pub fn get_native_agent_session_summary_incremental(
         .filter(|_| can_resume)
         .map(|checkpoint| checkpoint.usage_ids.iter().cloned().collect())
         .unwrap_or_default();
-    let (delta, source_offset, usage_ids) =
-        read_jsonl_summary_range(&path, agent_type, start_offset, seen_usage_ids)?;
+    // Codex 的 token_count 是累计值：增量续跑时以上次解析的最终累计为基线，
+    // 逐行求差分写入账本。全量解析时基线为 None，首行差分即其累计值。
+    let codex_cumulative_baseline = checkpoint
+        .as_ref()
+        .filter(|_| can_resume)
+        .and_then(|checkpoint| checkpoint.summary.usage.clone());
+    let (delta, source_offset, usage_ids, usage_events) = read_jsonl_summary_range(
+        &path,
+        agent_type,
+        start_offset,
+        seen_usage_ids,
+        codex_cumulative_baseline,
+    )?;
     let complete = source_offset >= source_size;
     let mut summary = if can_resume {
         merge_incremental_summary(
@@ -342,6 +360,58 @@ pub fn get_native_agent_session_summary_incremental(
         complete,
         incremental: can_resume,
         bytes_processed: source_offset.saturating_sub(start_offset),
+        usage_events,
+    })
+}
+
+/// 全量解析时间线并在解析过程中同步采集消息级用量事件（Pi / OpenCode 路径）。
+/// 事件采集发生在渲染事件截断（MAX_TIMELINE_EVENTS）之前，长会话不会低估。
+fn get_native_agent_session_summary_with_events(
+    agent_type: &str,
+    session_id: &str,
+) -> Result<
+    (
+        super::config::AgentSessionNativeSummary,
+        Vec<super::config::AgentUsageEvent>,
+    ),
+    String,
+> {
+    let mut usage_events = Vec::new();
+    let timeline = match agent_type {
+        "opencode" => read_opencode_timeline_with_events(session_id, &mut usage_events)?,
+        "pi" => read_pi_timeline_with_events(session_id, &mut usage_events)?,
+        _ => get_native_agent_session_timeline(agent_type, session_id)?,
+    };
+    Ok((summarize_timeline(timeline), usage_events))
+}
+
+/// 将原生时间戳规范化为 UTC RFC3339；无法解析时返回 None（该事件不入账本）。
+fn normalize_event_time(value: &str) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|timestamp| timestamp.with_timezone(&chrono::Utc).to_rfc3339())
+}
+
+fn agent_usage_event(
+    event_id: String,
+    event_time: Option<String>,
+    model: Option<String>,
+    usage: &AgentSessionNativeUsage,
+) -> Option<super::config::AgentUsageEvent> {
+    let event_time = event_time.and_then(|value| normalize_event_time(&value))?;
+    if event_id.is_empty() {
+        return None;
+    }
+    Some(super::config::AgentUsageEvent {
+        event_id,
+        event_time,
+        model,
+        input_tokens: usage.input_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
+        cache_write_input_tokens: usage.cache_write_input_tokens,
+        output_tokens: usage.output_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        total_tokens: usage.total_tokens,
     })
 }
 
@@ -434,6 +504,20 @@ fn timeline_with_limits(
 }
 
 fn read_opencode_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
+    read_opencode_timeline_impl(session_id, None)
+}
+
+fn read_opencode_timeline_with_events(
+    session_id: &str,
+    usage_events: &mut Vec<super::config::AgentUsageEvent>,
+) -> Result<AgentSessionTimeline, String> {
+    read_opencode_timeline_impl(session_id, Some(usage_events))
+}
+
+fn read_opencode_timeline_impl(
+    session_id: &str,
+    usage_sink: Option<&mut Vec<super::config::AgentUsageEvent>>,
+) -> Result<AgentSessionTimeline, String> {
     for database_path in opencode_database_candidates() {
         if !database_path.is_file() {
             continue;
@@ -456,7 +540,7 @@ fn read_opencode_timeline(session_id: &str) -> Result<AgentSessionTimeline, Stri
         if !exists {
             continue;
         }
-        return read_opencode_timeline_from(&connection, session_id);
+        return read_opencode_timeline_from(&connection, session_id, usage_sink);
     }
     Ok(empty_timeline())
 }
@@ -464,8 +548,9 @@ fn read_opencode_timeline(session_id: &str) -> Result<AgentSessionTimeline, Stri
 fn read_opencode_timeline_from(
     connection: &Connection,
     session_id: &str,
+    usage_sink: Option<&mut Vec<super::config::AgentUsageEvent>>,
 ) -> Result<AgentSessionTimeline, String> {
-    read_opencode_timeline_from_mode(connection, session_id, false)
+    read_opencode_timeline_from_mode(connection, session_id, false, usage_sink)
 }
 
 fn read_opencode_last_interaction(session_id: &str) -> Result<AgentSessionTimeline, String> {
@@ -489,7 +574,7 @@ fn read_opencode_last_interaction(session_id: &str) -> Result<AgentSessionTimeli
             )
             .unwrap_or(false);
         if exists {
-            return read_opencode_timeline_from_mode(&connection, session_id, true);
+            return read_opencode_timeline_from_mode(&connection, session_id, true, None);
         }
     }
     Ok(complete_timeline())
@@ -499,6 +584,7 @@ fn read_opencode_timeline_from_mode(
     connection: &Connection,
     session_id: &str,
     latest_interaction_only: bool,
+    mut usage_sink: Option<&mut Vec<super::config::AgentUsageEvent>>,
 ) -> Result<AgentSessionTimeline, String> {
     let mut statement = connection
         .prepare(
@@ -545,6 +631,8 @@ fn read_opencode_timeline_from_mode(
             .and_then(Value::as_str)
             .unwrap_or_default();
         let model = message_model(&message);
+        // model 会在下方 push_event 中被按值消耗，账本事件另存一份。
+        let usage_event_model = model.clone();
         if let Some(model) = model.as_deref() {
             remember_model(&mut timeline, model);
         }
@@ -588,13 +676,20 @@ fn read_opencode_timeline_from_mode(
             Some("tool") => push_opencode_tool_events(&mut timeline, event_id, timestamp, &part),
             _ => {}
         }
-        if role == "assistant" && usage_messages.insert(message_id) {
+        if role == "assistant" && usage_messages.insert(message_id.clone()) {
             timeline.turn_count += 1;
-            attach_usage_to_first_event(
-                &mut timeline,
-                event_start,
-                usage_from_opencode_message(&message),
-            );
+            let usage = usage_from_opencode_message(&message);
+            if let (Some(sink), Some(usage)) = (usage_sink.as_deref_mut(), usage.as_ref()) {
+                if let Some(event) = agent_usage_event(
+                    message_id.clone(),
+                    message_time.and_then(format_unix_millis),
+                    usage_event_model,
+                    usage,
+                ) {
+                    sink.push(event);
+                }
+            }
+            attach_usage_to_first_event(&mut timeline, event_start, usage);
         }
     }
     Ok(timeline)
@@ -1012,6 +1107,20 @@ fn parse_codex_line(
 }
 
 fn read_pi_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
+    read_pi_timeline_impl(session_id, None)
+}
+
+fn read_pi_timeline_with_events(
+    session_id: &str,
+    usage_events: &mut Vec<super::config::AgentUsageEvent>,
+) -> Result<AgentSessionTimeline, String> {
+    read_pi_timeline_impl(session_id, Some(usage_events))
+}
+
+fn read_pi_timeline_impl(
+    session_id: &str,
+    usage_sink: Option<&mut Vec<super::config::AgentUsageEvent>>,
+) -> Result<AgentSessionTimeline, String> {
     let Some(home) = dirs::home_dir() else {
         return Ok(empty_timeline());
     };
@@ -1019,7 +1128,7 @@ fn read_pi_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
     let Some(path) = find_pi_session_file(&root, session_id) else {
         return Ok(empty_timeline());
     };
-    read_pi_timeline_from(&path)
+    read_pi_timeline_from(&path, usage_sink)
 }
 
 // Pi 会话文件按 `<timestamp>_<uuid>.jsonl` 命名，uuid 即会话 id。在 sessions 目录下
@@ -1037,14 +1146,18 @@ fn find_pi_session_file(root: &Path, session_id: &str) -> Option<PathBuf> {
 // Pi 会话是树状结构（entry 通过 id/parentId 连接，支持原地分支）。这里重建当前活动
 // 分支：从叶子（不被任何 entry 引为 parentId 的 entry）沿 parentId 回溯到根，再反转
 // 为时间顺序，映射为时间线事件。
-fn read_pi_timeline_from(path: &Path) -> Result<AgentSessionTimeline, String> {
-    read_pi_timeline_from_mode(path, Some(MAX_TIMELINE_FILE_BYTES), false)
+fn read_pi_timeline_from(
+    path: &Path,
+    usage_sink: Option<&mut Vec<super::config::AgentUsageEvent>>,
+) -> Result<AgentSessionTimeline, String> {
+    read_pi_timeline_from_mode(path, Some(MAX_TIMELINE_FILE_BYTES), false, usage_sink)
 }
 
 fn read_pi_timeline_from_mode(
     path: &Path,
     max_bytes: Option<usize>,
     latest_interaction_only: bool,
+    mut usage_sink: Option<&mut Vec<super::config::AgentUsageEvent>>,
 ) -> Result<AgentSessionTimeline, String> {
     let file = File::open(path).map_err(|error| format!("无法读取 Pi 会话文件：{error}"))?;
     let mut entries: Vec<(usize, Value)> = Vec::new();
@@ -1139,7 +1252,12 @@ fn read_pi_timeline_from_mode(
     for entry_index in branch_indices {
         let (_, value) = &entries[entry_index];
         let event_start = timeline.events.len();
-        parse_pi_entry(value, &mut timeline, &mut seen_usage_ids);
+        parse_pi_entry(
+            value,
+            &mut timeline,
+            &mut seen_usage_ids,
+            usage_sink.as_deref_mut(),
+        );
         if latest_interaction_only
             && timeline.events[event_start..]
                 .iter()
@@ -1156,6 +1274,7 @@ fn parse_pi_entry(
     value: &Value,
     timeline: &mut AgentSessionTimeline,
     seen_usage_ids: &mut HashSet<String>,
+    usage_sink: Option<&mut Vec<super::config::AgentUsageEvent>>,
 ) {
     let timestamp = string_field(value, "timestamp");
     let id = string_field(value, "id").unwrap_or_default();
@@ -1242,6 +1361,16 @@ fn parse_pi_entry(
                     if seen_usage_ids.insert(id.clone()) {
                         timeline.turn_count += 1;
                         if let Some(usage) = usage_from_pi_message(message) {
+                            if let Some(sink) = usage_sink {
+                                if let Some(event) = agent_usage_event(
+                                    id.clone(),
+                                    timestamp.clone(),
+                                    model.clone(),
+                                    &usage,
+                                ) {
+                                    sink.push(event);
+                                }
+                            }
                             attach_usage_to_first_event(timeline, event_start, Some(usage.clone()));
                             add_usage_to_summary(timeline, &usage);
                         }
@@ -1411,11 +1540,13 @@ fn read_jsonl_summary_range(
     agent_type: &str,
     start_offset: u64,
     mut seen_usage_ids: HashSet<String>,
+    codex_cumulative_baseline: Option<AgentSessionNativeUsage>,
 ) -> Result<
     (
         super::config::AgentSessionNativeSummary,
         u64,
         HashSet<String>,
+        Vec<super::config::AgentUsageEvent>,
     ),
     String,
 > {
@@ -1430,10 +1561,16 @@ fn read_jsonl_summary_range(
         usage: None,
         models: Vec::new(),
     };
+    let mut usage_events = Vec::new();
+    // Codex 差分链：本次扫描内上一条 token_count 的累计值，初始为续跑基线。
+    let mut codex_last_cumulative = codex_cumulative_baseline;
     let mut bytes_read = 0usize;
     let mut line = String::new();
     loop {
         line.clear();
+        let line_start = reader
+            .stream_position()
+            .map_err(|error| format!("无法记录原生会话行游标：{error}"))?;
         let length = reader
             .read_line(&mut line)
             .map_err(|error| format!("读取原生会话文件失败：{error}"))?;
@@ -1442,7 +1579,15 @@ fn read_jsonl_summary_range(
         }
         bytes_read = bytes_read.saturating_add(length);
         if let Ok(value) = serde_json::from_str::<Value>(&line) {
-            parse_jsonl_summary_line(agent_type, &value, &mut summary, &mut seen_usage_ids);
+            parse_jsonl_summary_line(
+                agent_type,
+                &value,
+                line_start,
+                &mut summary,
+                &mut seen_usage_ids,
+                &mut usage_events,
+                &mut codex_last_cumulative,
+            );
         }
         if bytes_read >= MAX_TIMELINE_FILE_BYTES {
             break;
@@ -1451,14 +1596,18 @@ fn read_jsonl_summary_range(
     let source_offset = reader
         .stream_position()
         .map_err(|error| format!("无法记录原生会话增量游标：{error}"))?;
-    Ok((summary, source_offset, seen_usage_ids))
+    Ok((summary, source_offset, seen_usage_ids, usage_events))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_jsonl_summary_line(
     agent_type: &str,
     value: &Value,
+    line_offset: u64,
     summary: &mut super::config::AgentSessionNativeSummary,
     seen_usage_ids: &mut HashSet<String>,
+    usage_events: &mut Vec<super::config::AgentUsageEvent>,
+    codex_last_cumulative: &mut Option<AgentSessionNativeUsage>,
 ) {
     if agent_type == "claude-code" {
         if value.get("type").and_then(Value::as_str) != Some("assistant")
@@ -1469,17 +1618,26 @@ fn parse_jsonl_summary_line(
         let Some(message) = value.get("message") else {
             return;
         };
-        if let Some(model) = string_field(message, "model") {
-            remember_summary_model(summary, model);
+        let model = string_field(message, "model");
+        if let Some(model) = model.as_deref() {
+            remember_summary_model(summary, model.to_string());
         }
         let usage_id = string_field(message, "id")
             .or_else(|| string_field(value, "uuid"))
             .unwrap_or_default();
-        if usage_id.is_empty() || !seen_usage_ids.insert(usage_id) {
+        if usage_id.is_empty() || !seen_usage_ids.insert(usage_id.clone()) {
             return;
         }
         summary.turn_count += 1;
         if let Some(usage) = usage_from_claude_message(message) {
+            if let Some(event) = agent_usage_event(
+                usage_id,
+                string_field(value, "timestamp"),
+                model,
+                &usage,
+            ) {
+                usage_events.push(event);
+            }
             add_native_usage(&mut summary.usage, &usage);
         }
         return;
@@ -1495,16 +1653,50 @@ fn parse_jsonl_summary_line(
         match payload.get("type").and_then(Value::as_str) {
             Some("task_started") => summary.turn_count += 1,
             Some("token_count") => {
-                if let Some(usage) = payload
+                if let Some(cumulative) = payload
                     .get("info")
                     .and_then(|info| info.get("total_token_usage"))
                     .and_then(usage_from_codex_token_value)
                 {
-                    summary.usage = Some(usage);
+                    // token_count 报告的是会话累计用量：与上一条求差分得到本段增量，
+                    // 使账本可按时间精确归集；累计回退（上下文压缩）时保留负差分。
+                    let delta = codex_last_cumulative
+                        .as_ref()
+                        .map(|last| subtract_native_usage(&cumulative, last))
+                        .unwrap_or_else(|| cumulative.clone());
+                    *codex_last_cumulative = Some(cumulative.clone());
+                    if let Some(event) = agent_usage_event(
+                        format!("codex-tc:{line_offset}"),
+                        string_field(value, "timestamp"),
+                        None,
+                        &delta,
+                    ) {
+                        usage_events.push(event);
+                    }
+                    summary.usage = Some(cumulative);
                 }
             }
             _ => {}
         }
+    }
+}
+
+fn subtract_native_usage(
+    current: &AgentSessionNativeUsage,
+    previous: &AgentSessionNativeUsage,
+) -> AgentSessionNativeUsage {
+    AgentSessionNativeUsage {
+        input_tokens: current.input_tokens - previous.input_tokens,
+        cached_input_tokens: current.cached_input_tokens - previous.cached_input_tokens,
+        cache_write_input_tokens: current.cache_write_input_tokens
+            - previous.cache_write_input_tokens,
+        output_tokens: current.output_tokens - previous.output_tokens,
+        reasoning_tokens: current.reasoning_tokens - previous.reasoning_tokens,
+        total_tokens: current.total_tokens - previous.total_tokens,
+        cost: None,
+        cost_currency: None,
+        api_equivalent: None,
+        plan_consumption: None,
     }
 }
 
@@ -1861,7 +2053,8 @@ mod tests {
             ),
         )
         .unwrap();
-        let timeline = read_pi_timeline_from(&path).unwrap();
+        let mut usage_events = Vec::new();
+        let timeline = read_pi_timeline_from(&path, Some(&mut usage_events)).unwrap();
         assert!(timeline.source_available);
         // 活动分支应为 a1 -> a2 -> a4 -> a5（叶子 a5 时间戳晚于 a3）。
         let kinds: Vec<&str> = timeline.events.iter().map(|e| e.kind.as_str()).collect();
@@ -1880,6 +2073,14 @@ mod tests {
         assert_eq!(timeline.turn_count, 2);
         assert_eq!(timeline.usage.as_ref().unwrap().total_tokens, 265);
         assert_eq!(timeline.usage.as_ref().unwrap().cost, Some(5.0));
+        // 账本事件：活动分支上两条带用量的 assistant 消息（a2、a4），被弃分支 a3 不计入。
+        assert_eq!(usage_events.len(), 2);
+        assert_eq!(usage_events[0].event_id, "a2");
+        assert_eq!(usage_events[0].total_tokens, 175);
+        assert_eq!(usage_events[0].cached_input_tokens, 40);
+        assert_eq!(usage_events[0].event_time, "2024-12-03T14:00:02+00:00");
+        assert_eq!(usage_events[1].event_id, "a4");
+        assert_eq!(usage_events[1].total_tokens, 90);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2085,37 +2286,76 @@ mod tests {
         fs::write(
             &path,
             concat!(
-                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"turn-1\"}}\n",
+                "{\"type\":\"event_msg\",\"timestamp\":\"2026-07-30T08:00:00Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"turn-1\"}}\n",
                 "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-a\"}}\n",
-                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":80,\"cached_input_tokens\":40,\"output_tokens\":20,\"total_tokens\":100}}}}\n"
+                "{\"type\":\"event_msg\",\"timestamp\":\"2026-07-30T08:05:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":80,\"cached_input_tokens\":40,\"output_tokens\":20,\"total_tokens\":100}}}}\n"
             ),
         )
         .unwrap();
-        let (first, offset, usage_ids) =
-            read_jsonl_summary_range(&path, "codex-desktop", 0, HashSet::new()).unwrap();
+        let (first, offset, usage_ids, first_events) =
+            read_jsonl_summary_range(&path, "codex-desktop", 0, HashSet::new(), None).unwrap();
         assert_eq!(first.turn_count, 1);
         assert_eq!(first.usage.as_ref().unwrap().total_tokens, 100);
+        // 全量解析：首条 token_count 的差分即其累计值。
+        assert_eq!(first_events.len(), 1);
+        assert_eq!(first_events[0].total_tokens, 100);
+        assert_eq!(first_events[0].cached_input_tokens, 40);
+        assert_eq!(first_events[0].event_time, "2026-07-30T08:05:00+00:00");
 
         let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
         file.write_all(
             concat!(
-                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"turn-1\"}}\n",
-                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"turn-2\"}}\n",
+                "{\"type\":\"event_msg\",\"timestamp\":\"2026-07-30T09:00:00Z\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"turn-1\"}}\n",
+                "{\"type\":\"event_msg\",\"timestamp\":\"2026-07-30T09:10:00Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"turn-2\"}}\n",
                 "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-b\"}}\n",
-                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":200,\"cached_input_tokens\":120,\"output_tokens\":50,\"total_tokens\":250}}}}\n"
+                "{\"type\":\"event_msg\",\"timestamp\":\"2026-07-30T09:15:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":200,\"cached_input_tokens\":120,\"output_tokens\":50,\"total_tokens\":250}}}}\n"
             )
             .as_bytes(),
         )
         .unwrap();
         drop(file);
 
-        let (delta, final_offset, _) =
-            read_jsonl_summary_range(&path, "codex-desktop", offset, usage_ids).unwrap();
+        // 增量续跑：以 first.usage 为基线求差分。
+        let (delta, final_offset, _, delta_events) = read_jsonl_summary_range(
+            &path,
+            "codex-desktop",
+            offset,
+            usage_ids,
+            first.usage.clone(),
+        )
+        .unwrap();
+        assert_eq!(delta_events.len(), 1);
+        assert_eq!(delta_events[0].total_tokens, 150);
+        assert_eq!(delta_events[0].cached_input_tokens, 80);
+        assert_eq!(delta_events[0].event_time, "2026-07-30T09:15:00+00:00");
         let merged = merge_incremental_summary("codex-desktop", first, delta);
         assert_eq!(merged.turn_count, 2);
         assert_eq!(merged.models, vec!["gpt-a", "gpt-b"]);
         assert_eq!(merged.usage.as_ref().unwrap().total_tokens, 250);
         assert_eq!(final_offset, fs::metadata(&path).unwrap().len());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn codex_usage_events_allow_negative_delta_on_compaction() {
+        let root = std::env::temp_dir().join(format!("flowlet-codex-delta-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("session.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"event_msg\",\"timestamp\":\"2026-07-30T08:05:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":80,\"output_tokens\":20,\"total_tokens\":100}}}}\n",
+                "{\"type\":\"event_msg\",\"timestamp\":\"2026-07-30T09:05:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":30,\"output_tokens\":10,\"total_tokens\":40}}}}\n"
+            ),
+        )
+        .unwrap();
+        let (_, _, _, events) =
+            read_jsonl_summary_range(&path, "codex-desktop", 0, HashSet::new(), None).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].total_tokens, 100);
+        // 累计回退（上下文压缩）时保留负差分，保证账本合计 ≡ 会话最终总量。
+        assert_eq!(events[1].total_tokens, -60);
+        assert_eq!(events[1].input_tokens, -50);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2126,18 +2366,29 @@ mod tests {
         let root = std::env::temp_dir().join(format!("flowlet-claude-cursor-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         let path = root.join("session.jsonl");
-        let first_line = "{\"type\":\"assistant\",\"uuid\":\"u1\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-a\",\"usage\":{\"input_tokens\":100,\"output_tokens\":20}}}\n";
+        let first_line = "{\"type\":\"assistant\",\"uuid\":\"u1\",\"timestamp\":\"2026-07-30T08:00:01Z\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-a\",\"usage\":{\"input_tokens\":100,\"output_tokens\":20}}}\n";
         fs::write(&path, first_line).unwrap();
-        let (first, offset, usage_ids) =
-            read_jsonl_summary_range(&path, "claude-code", 0, HashSet::new()).unwrap();
+        let (first, offset, usage_ids, first_events) =
+            read_jsonl_summary_range(&path, "claude-code", 0, HashSet::new(), None).unwrap();
+        assert_eq!(first_events.len(), 1);
+        assert_eq!(first_events[0].event_id, "msg-1");
+        assert_eq!(first_events[0].total_tokens, 120);
+        assert_eq!(
+            first_events[0].model.as_deref(),
+            Some("claude-a")
+        );
 
         let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
         file.write_all(first_line.as_bytes()).unwrap();
-        file.write_all(b"{\"type\":\"assistant\",\"uuid\":\"u2\",\"message\":{\"id\":\"msg-2\",\"model\":\"claude-b\",\"usage\":{\"input_tokens\":200,\"cache_read_input_tokens\":50,\"output_tokens\":30}}}\n").unwrap();
+        file.write_all(b"{\"type\":\"assistant\",\"uuid\":\"u2\",\"timestamp\":\"2026-07-30T08:10:01Z\",\"message\":{\"id\":\"msg-2\",\"model\":\"claude-b\",\"usage\":{\"input_tokens\":200,\"cache_read_input_tokens\":50,\"output_tokens\":30}}}\n").unwrap();
         drop(file);
 
-        let (delta, _, _) =
-            read_jsonl_summary_range(&path, "claude-code", offset, usage_ids).unwrap();
+        let (delta, _, _, delta_events) =
+            read_jsonl_summary_range(&path, "claude-code", offset, usage_ids, None).unwrap();
+        // 重复行不再产生账本事件；只追加新消息的增量事件。
+        assert_eq!(delta_events.len(), 1);
+        assert_eq!(delta_events[0].event_id, "msg-2");
+        assert_eq!(delta_events[0].cached_input_tokens, 50);
         let merged = merge_incremental_summary("claude-code", first, delta);
         assert_eq!(merged.turn_count, 2);
         assert_eq!(merged.models, vec!["claude-a", "claude-b"]);
@@ -2192,7 +2443,8 @@ mod tests {
             "#,
         )
         .unwrap();
-        let timeline = read_opencode_timeline_from(&connection, "ses").unwrap();
+        let mut usage_events = Vec::new();
+        let timeline = read_opencode_timeline_from(&connection, "ses", Some(&mut usage_events)).unwrap();
         assert_eq!(timeline.events.len(), 4);
         assert_eq!(timeline.events[0].kind, "user-message");
         assert_eq!(timeline.events[2].kind, "tool-call");
@@ -2201,5 +2453,12 @@ mod tests {
         assert_eq!(timeline.usage.as_ref().unwrap().total_tokens, 1300);
         assert_eq!(timeline.usage.as_ref().unwrap().cost, Some(0.125));
         assert_eq!(timeline.events[1].usage.as_ref().unwrap().total_tokens, 250);
+        // 账本事件：assistant 消息 m2 的逐消息用量（event_time 取消息 time_created）。
+        assert_eq!(usage_events.len(), 1);
+        assert_eq!(usage_events[0].event_id, "m2");
+        assert_eq!(usage_events[0].total_tokens, 250);
+        assert_eq!(usage_events[0].cached_input_tokens, 80);
+        assert_eq!(usage_events[0].model.as_deref(), Some("model-a"));
+        assert_eq!(usage_events[0].event_time, "1970-01-01T00:00:02+00:00");
     }
 }

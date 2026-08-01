@@ -87,8 +87,9 @@ pub(crate) async fn device_daily_usage(
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
         if device_id.as_deref() == Some(current_device_id.as_str()) {
+            // 本设备：代理 + Agent 原生合并口径。
             return storage
-                .daily_usage_totals()
+                .local_daily_usage_totals_with_native()
                 .map_err(|error| error.to_string());
         }
         if let Some(device_id) = device_id.as_deref() {
@@ -97,34 +98,14 @@ pub(crate) async fn device_daily_usage(
                 .map_err(|error| error.to_string());
         }
         let current = storage
-            .daily_usage_totals()
+            .local_daily_usage_totals_with_native()
             .map_err(|error| error.to_string())?;
         let imported = storage
             .imported_daily_usage(None)
             .map_err(|error| error.to_string())?;
-        let mut by_date = std::collections::BTreeMap::<String, DailyUsageTotal>::new();
-        for day in current.into_iter().chain(imported) {
-            let total = by_date.entry(day.date.clone()).or_insert(DailyUsageTotal {
-                date: day.date.clone(),
-                request_count: 0,
-                known_tokens: 0,
-                input_tokens: 0,
-                input_cached_tokens: 0,
-                input_uncached_tokens: 0,
-                cache_measured_input_tokens: 0,
-                output_tokens: 0,
-                unknown_count: 0,
-            });
-            total.request_count += day.request_count;
-            total.known_tokens += day.known_tokens;
-            total.input_tokens += day.input_tokens;
-            total.input_cached_tokens += day.input_cached_tokens;
-            total.input_uncached_tokens += day.input_uncached_tokens;
-            total.cache_measured_input_tokens += day.cache_measured_input_tokens;
-            total.output_tokens += day.output_tokens;
-            total.unknown_count += day.unknown_count;
-        }
-        Ok(by_date.into_values().collect())
+        Ok(crate::core::device_identity::merge_daily_usage_totals(
+            current.into_iter().chain(imported),
+        ))
     })
     .await
     .map_err(|error| format!("读取设备每日用量任务失败：{error}"))?
@@ -144,8 +125,9 @@ pub(crate) async fn device_hourly_usage(
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
         if device_id.as_deref() == Some(current_device_id.as_str()) {
+            // 本设备：代理 + Agent 原生合并口径。
             return storage
-                .hourly_usage_totals()
+                .local_hourly_usage_totals_with_native()
                 .map_err(|error| error.to_string());
         }
         if let Some(device_id) = device_id.as_deref() {
@@ -154,24 +136,14 @@ pub(crate) async fn device_hourly_usage(
                 .map_err(|error| error.to_string());
         }
         let current = storage
-            .hourly_usage_totals()
+            .local_hourly_usage_totals_with_native()
             .map_err(|error| error.to_string())?;
         let imported = storage
             .imported_hourly_usage(None)
             .map_err(|error| error.to_string())?;
-        let mut by_hour = std::collections::BTreeMap::<String, HourlyUsageTotal>::new();
-        for hour in current.into_iter().chain(imported) {
-            let total = by_hour
-                .entry(hour.hour.clone())
-                .or_insert(HourlyUsageTotal {
-                    hour: hour.hour.clone(),
-                    request_count: 0,
-                    known_tokens: 0,
-                });
-            total.request_count += hour.request_count;
-            total.known_tokens += hour.known_tokens;
-        }
-        Ok(by_hour.into_values().collect())
+        Ok(crate::core::device_identity::merge_hourly_usage_totals(
+            current.into_iter().chain(imported),
+        ))
     })
     .await
     .map_err(|error| format!("读取设备小时用量任务失败：{error}"))?

@@ -7,7 +7,7 @@ use thiserror::Error;
 
 const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
 const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
-pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 5;
+pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Error)]
 pub enum DeviceIdentityError {
@@ -169,7 +169,9 @@ impl DeviceIdentity {
 }
 
 /// 单台设备按其本地自然日计算的最小用量汇总。不包含费用、账号、Header 或 Body。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// `native_*` 字段（schema v6 起）承载未经过 Flowlet 代理的 Agent 原生会话用量，
+/// 与代理口径字段相互独立，合计由展示层计算。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyUsageTotal {
     pub date: String,
@@ -181,16 +183,94 @@ pub struct DailyUsageTotal {
     pub cache_measured_input_tokens: i64,
     pub output_tokens: i64,
     pub unknown_count: i64,
+    /// 原生带用量消息事件数（不是 HTTP 请求数）。
+    #[serde(default)]
+    pub native_event_count: i64,
+    #[serde(default)]
+    pub native_input_tokens: i64,
+    #[serde(default)]
+    pub native_cached_input_tokens: i64,
+    #[serde(default)]
+    pub native_cache_write_input_tokens: i64,
+    #[serde(default)]
+    pub native_output_tokens: i64,
+    #[serde(default)]
+    pub native_reasoning_tokens: i64,
+    #[serde(default)]
+    pub native_total_tokens: i64,
 }
 
 /// 单台设备按其本地自然小时计算的最小 Token 汇总。只同步最近 180 天，
 /// 供移动端周视图展示真实的 7×24 小时热力图。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HourlyUsageTotal {
     pub hour: String,
     pub request_count: i64,
     pub known_tokens: i64,
+    #[serde(default)]
+    pub native_event_count: i64,
+    #[serde(default)]
+    pub native_total_tokens: i64,
+}
+
+/// 把 other 的全部字段（含 native_*）累加进 into。用于合并代理聚合、
+/// Agent 原生聚合与导入快照等多个来源的日/小时汇总。
+pub fn merge_daily_usage_total(into: &mut DailyUsageTotal, other: &DailyUsageTotal) {
+    into.request_count += other.request_count;
+    into.known_tokens += other.known_tokens;
+    into.input_tokens += other.input_tokens;
+    into.input_cached_tokens += other.input_cached_tokens;
+    into.input_uncached_tokens += other.input_uncached_tokens;
+    into.cache_measured_input_tokens += other.cache_measured_input_tokens;
+    into.output_tokens += other.output_tokens;
+    into.unknown_count += other.unknown_count;
+    into.native_event_count += other.native_event_count;
+    into.native_input_tokens += other.native_input_tokens;
+    into.native_cached_input_tokens += other.native_cached_input_tokens;
+    into.native_cache_write_input_tokens += other.native_cache_write_input_tokens;
+    into.native_output_tokens += other.native_output_tokens;
+    into.native_reasoning_tokens += other.native_reasoning_tokens;
+    into.native_total_tokens += other.native_total_tokens;
+}
+
+/// 按日期合并多个来源的日汇总，输出严格按日期升序（快照 validate 要求）。
+pub fn merge_daily_usage_totals(
+    days: impl IntoIterator<Item = DailyUsageTotal>,
+) -> Vec<DailyUsageTotal> {
+    let mut by_date = std::collections::BTreeMap::<String, DailyUsageTotal>::new();
+    for day in days {
+        match by_date.get_mut(&day.date) {
+            Some(total) => merge_daily_usage_total(total, &day),
+            None => {
+                by_date.insert(day.date.clone(), day);
+            }
+        }
+    }
+    by_date.into_values().collect()
+}
+
+pub fn merge_hourly_usage_total(into: &mut HourlyUsageTotal, other: &HourlyUsageTotal) {
+    into.request_count += other.request_count;
+    into.known_tokens += other.known_tokens;
+    into.native_event_count += other.native_event_count;
+    into.native_total_tokens += other.native_total_tokens;
+}
+
+/// 按小时合并多个来源的小时汇总，输出严格按小时升序。
+pub fn merge_hourly_usage_totals(
+    hours: impl IntoIterator<Item = HourlyUsageTotal>,
+) -> Vec<HourlyUsageTotal> {
+    let mut by_hour = std::collections::BTreeMap::<String, HourlyUsageTotal>::new();
+    for hour in hours {
+        match by_hour.get_mut(&hour.hour) {
+            Some(total) => merge_hourly_usage_total(total, &hour),
+            None => {
+                by_hour.insert(hour.hour.clone(), hour);
+            }
+        }
+    }
+    by_hour.into_values().collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -445,12 +525,15 @@ impl DeviceUsageBundle {
                 day.cache_measured_input_tokens,
                 day.output_tokens,
                 day.unknown_count,
+                day.native_event_count,
             ]
             .iter()
             .any(|value| *value < 0)
             {
                 return Err(format!("设备用量包含负数：{}", day.date));
             }
+            // native_*_tokens 不做非负校验：Codex 上下文压缩会让累计用量回退，
+            // 账本会记录负的修正事件，按天求和后仍可能为负，但这属于真实账目。
         }
         let mut previous_hour: Option<&str> = None;
         for hour in &self.snapshot.hours {
@@ -467,7 +550,7 @@ impl DeviceUsageBundle {
                 return Err("设备小时用量必须严格递增且不能重复".to_string());
             }
             previous_hour = Some(hour.hour.as_str());
-            if hour.request_count < 0 || hour.known_tokens < 0 {
+            if hour.request_count < 0 || hour.known_tokens < 0 || hour.native_event_count < 0 {
                 return Err(format!("设备小时用量不能为负数：{}", hour.hour));
             }
         }
@@ -855,6 +938,143 @@ mod tests {
                 .len(),
             3
         );
+    }
+
+    #[test]
+    fn version_six_bundle_carries_native_usage_fields() {
+        let bundle = DeviceUsageBundle::from_bytes(
+            br#"{
+                "format":"flowlet-device-usage",
+                "version":1,
+                "snapshot":{
+                    "schemaVersion":6,
+                    "deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "deviceCreatedAt":"2026-07-28T00:00:00Z",
+                    "displayName":"Native PC",
+                    "platform":"windows",
+                    "appVersion":"0.1.0",
+                    "generatedAt":"2026-07-31T00:00:00Z",
+                    "timezoneOffsetMinutes":480,
+                    "days":[{
+                        "date":"2026-07-30",
+                        "requestCount":4,
+                        "knownTokens":30,
+                        "inputTokens":20,
+                        "inputCachedTokens":5,
+                        "inputUncachedTokens":15,
+                        "cacheMeasuredInputTokens":20,
+                        "outputTokens":10,
+                        "unknownCount":0,
+                        "nativeEventCount":3,
+                        "nativeInputTokens":50,
+                        "nativeCachedInputTokens":20,
+                        "nativeCacheWriteInputTokens":5,
+                        "nativeOutputTokens":27,
+                        "nativeReasoningTokens":2,
+                        "nativeTotalTokens":77
+                    }],
+                    "hours":[{
+                        "hour":"2026-07-30T12:00:00",
+                        "requestCount":4,
+                        "knownTokens":30,
+                        "nativeEventCount":2,
+                        "nativeTotalTokens":70
+                    }],
+                    "sessions":[],
+                    "agents":[]
+                }
+            }"#,
+        )
+        .expect("parse version six bundle");
+        bundle.validate().expect("version six bundle is valid");
+
+        let day = &bundle.snapshot.days[0];
+        assert_eq!(day.known_tokens, 30);
+        assert_eq!(day.native_event_count, 3);
+        assert_eq!(day.native_total_tokens, 77);
+        let hour = &bundle.snapshot.hours[0];
+        assert_eq!(hour.native_event_count, 2);
+        assert_eq!(hour.native_total_tokens, 70);
+    }
+
+    #[test]
+    fn older_bundles_default_native_usage_fields_to_zero() {
+        let bundle = DeviceUsageBundle::from_bytes(
+            br#"{
+                "format":"flowlet-device-usage",
+                "version":1,
+                "snapshot":{
+                    "schemaVersion":5,
+                    "deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "deviceCreatedAt":"2026-07-28T00:00:00Z",
+                    "displayName":"Legacy PC",
+                    "platform":"windows",
+                    "appVersion":"0.1.0",
+                    "generatedAt":"2026-07-31T00:00:00Z",
+                    "timezoneOffsetMinutes":480,
+                    "days":[{
+                        "date":"2026-07-30",
+                        "requestCount":4,
+                        "knownTokens":30,
+                        "inputTokens":20,
+                        "inputCachedTokens":5,
+                        "inputUncachedTokens":15,
+                        "cacheMeasuredInputTokens":20,
+                        "outputTokens":10,
+                        "unknownCount":0
+                    }],
+                    "hours":[{
+                        "hour":"2026-07-30T12:00:00",
+                        "requestCount":4,
+                        "knownTokens":30
+                    }],
+                    "sessions":[],
+                    "agents":[]
+                }
+            }"#,
+        )
+        .expect("parse version five bundle");
+        bundle.validate().expect("version five bundle is valid");
+
+        assert_eq!(bundle.snapshot.days[0].native_total_tokens, 0);
+        assert_eq!(bundle.snapshot.days[0].native_event_count, 0);
+        assert_eq!(bundle.snapshot.hours[0].native_total_tokens, 0);
+    }
+
+    #[test]
+    fn merge_daily_usage_totals_sums_proxy_and_native_fields() {
+        let merged = merge_daily_usage_totals(vec![
+            DailyUsageTotal {
+                date: "2026-07-30".to_string(),
+                request_count: 2,
+                known_tokens: 15,
+                input_tokens: 10,
+                output_tokens: 5,
+                ..Default::default()
+            },
+            DailyUsageTotal {
+                date: "2026-07-30".to_string(),
+                native_event_count: 1,
+                native_input_tokens: 60,
+                native_output_tokens: 40,
+                native_total_tokens: 100,
+                ..Default::default()
+            },
+            DailyUsageTotal {
+                date: "2026-07-31".to_string(),
+                native_event_count: 1,
+                native_total_tokens: 40,
+                ..Default::default()
+            },
+        ]);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].date, "2026-07-30");
+        assert_eq!(merged[0].request_count, 2);
+        assert_eq!(merged[0].known_tokens, 15);
+        assert_eq!(merged[0].native_total_tokens, 100);
+        assert_eq!(merged[1].date, "2026-07-31");
+        assert_eq!(merged[1].known_tokens, 0);
+        assert_eq!(merged[1].native_total_tokens, 40);
     }
 
     #[test]

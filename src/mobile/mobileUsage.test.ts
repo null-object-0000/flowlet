@@ -66,7 +66,69 @@ describe("mobile usage aggregation", () => {
         cacheMeasuredInputTokens: 50,
         cacheHitRate: 0.2,
         outputTokens: 20,
+        nativeEvents: 0,
+        nativeTokens: 0,
+        nativeInputTokens: 0,
+        nativeOutputTokens: 0,
       });
+  });
+
+  it("merges agent native usage into summaries and heatmap cells", () => {
+    const withNative: DailyUsageTotal = {
+      ...day("2026-07-29", 3, 40),
+      nativeEventCount: 2,
+      nativeTotalTokens: 100,
+      nativeInputTokens: 60,
+      nativeOutputTokens: 40,
+    };
+    const summary = summarizeMobileUsage([withNative]);
+    // 代理口径字段保持独立，原生部分单列，合计由页面渲染时相加。
+    expect(summary.requests).toBe(3);
+    expect(summary.nativeEvents).toBe(2);
+    expect(summary.tokens).toBe(40);
+    expect(summary.nativeTokens).toBe(100);
+    expect(summary.nativeInputTokens).toBe(60);
+    expect(summary.nativeOutputTokens).toBe(40);
+
+    const heatmap = buildMobileUsageHeatmap(
+      [withNative],
+      "month",
+      0,
+      new Date("2026-07-29T12:00:00"),
+    );
+    expect(heatmap.cells.find((cell) => cell.date === "2026-07-29"))
+      .toMatchObject({ tokens: 140, requests: 5, nativeTokens: 100, nativeEvents: 2, hasData: true });
+
+    const hours: HourlyUsageTotal[] = [
+      { hour: "2026-07-29T09:00:00", requestCount: 1, knownTokens: 30, nativeEventCount: 2, nativeTotalTokens: 70 },
+    ];
+    const hourly = buildMobileWeeklyHourlyHeatmap(hours, 0, new Date("2026-07-29T12:30:00"));
+    expect(hourly.cells.find((cell) => cell.hour === "2026-07-29T09:00:00"))
+      .toMatchObject({ tokens: 100, requests: 3, nativeTokens: 70, nativeEvents: 2, hasData: true });
+  });
+
+  it("marks native-only days as heatmap data", () => {
+    const nativeOnly: DailyUsageTotal = {
+      date: "2026-07-29",
+      requestCount: 0,
+      knownTokens: 0,
+      inputTokens: 0,
+      inputCachedTokens: 0,
+      inputUncachedTokens: 0,
+      cacheMeasuredInputTokens: 0,
+      outputTokens: 0,
+      unknownCount: 0,
+      nativeEventCount: 1,
+      nativeTotalTokens: 50,
+    };
+    const heatmap = buildMobileUsageHeatmap(
+      [nativeOnly],
+      "month",
+      0,
+      new Date("2026-07-29T12:00:00"),
+    );
+    expect(heatmap.cells.find((cell) => cell.date === "2026-07-29"))
+      .toMatchObject({ tokens: 50, requests: 1, nativeTokens: 50, hasData: true });
   });
 
   it("does not report a cache hit rate without cache-measured input", () => {

@@ -1,0 +1,73 @@
+.flow { min-width: 0; display: grid; gap: 12px; }
+.userBubble {
+  justify-self: end;
+  max-width: 92%;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 12px 12px 3px 12px;
+  color: var(--flowlet-color-text);
+  background: var(--semi-color-fill-0);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.assistant { min-width: 0; font-size: 13px; line-height: 1.65; }
+.error {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--semi-color-danger-light-active);
+  border-radius: 9px;
+  color: var(--semi-color-danger);
+  background: var(--semi-color-danger-light-default);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.notice { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.processGroup { min-width: 0; }
+.processGroup > summary {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.processGroup > summary::before {
+  content: "›";
+  flex: none;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+.processGroup[open] > summary::before { transform: rotate(90deg); }
+.processGroup > summary::marker { content: ""; }
+.processGroup > summary::-webkit-details-marker { display: none; }
+.processGroup > summary > span { flex: none; color: var(--flowlet-color-text-secondary); font-size: 11px; font-weight: 500; }
+.processGroup > summary > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.processBody { margin: 6px 0 2px 5px; padding-left: 13px; display: grid; gap: 10px; border-left: 1px solid var(--flowlet-color-border); }
+.processEvent { min-width: 0; display: grid; gap: 5px; }
+.processEvent > header { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 7px; }
+.processEvent > header span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.processEvent > header strong { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.processEvent > header time { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.processEvent > pre {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 8px;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-muted);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

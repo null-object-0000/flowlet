@@ -42,7 +42,7 @@
 .interactionFlow { padding: 4px 2px 16px; }
 .interactionFlow > * + * { margin-top: 24px; }
 .userMessageRow { min-width: 0; display: flex; justify-content: flex-end; }
-.userMessageBubble { width: fit-content; max-width: 82%; padding: 10px 13px; border-radius: 12px 12px 3px 12px; color: var(--flowlet-color-text); background: var(--semi-color-fill-0); font-size: var(--flowlet-font-size-body); line-height: 1.65; }
+.userMessageBubble { width: fit-content; max-width: 82%; margin: 0; padding: 10px 13px; border-radius: 12px 12px 3px 12px; color: var(--flowlet-color-text); background: var(--semi-color-fill-0); font-family: inherit; font-size: var(--flowlet-font-size-body); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .processEvent time { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .outputStream { min-width: 0; display: grid; gap: 17px; }
 .outputMessage { min-width: 0; max-width: 96%; }

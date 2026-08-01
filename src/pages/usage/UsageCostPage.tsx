@@ -3,7 +3,7 @@ import { Button, Select } from "@douyinfe/semi-ui-19";
 import { useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useDeviceDailyUsage, useDeviceHourlyUsage, useKnownDevices } from "../../features/device-sync/useDeviceSync";
-import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
+import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
 import {
   buildMobileUsageHeatmap,
   buildMobileWeeklyHourlyHeatmap,
@@ -153,16 +153,21 @@ export function UsageCostPage() {
       <section className={styles.stats}>
         <article className={styles.stat}>
           <span>Tokens</span>
-          <strong>{formatCompactNumber(summary.tokens, language)}</strong>
+          <strong>{formatCompactNumber(summary.tokens + summary.nativeTokens, language)}</strong>
           <small>{t("输入 {input} · 输出 {output}", {
-            input: formatCompactNumber(summary.inputTokens, language),
-            output: formatCompactNumber(summary.outputTokens, language),
+            input: formatCompactNumber(summary.inputTokens + summary.nativeInputTokens, language),
+            output: formatCompactNumber(summary.outputTokens + summary.nativeOutputTokens, language),
           })}</small>
         </article>
         <article className={styles.stat}>
           <span>{t("请求量")}</span>
-          <strong>{formatInteger(summary.requests, language)}</strong>
-          <small>{t("{count} 天数据", { count: days.length })}</small>
+          <strong>{formatInteger(summary.requests + summary.nativeEvents, language)}</strong>
+          <small>{summary.nativeEvents > 0
+            ? t("代理 {proxy} · 原生 {native}", {
+              proxy: formatInteger(summary.requests, language),
+              native: formatInteger(summary.nativeEvents, language),
+            })
+            : t("{count} 天数据", { count: days.length })}</small>
         </article>
         <article className={styles.stat}>
           <span>{t("缓存输入")}</span>
@@ -216,7 +221,8 @@ export function UsageCostPage() {
                         const title = cell.date + " " + String(cell.hourOfDay).padStart(2, "0") + ":00–"
                           + String(cell.hourEnd - 1).padStart(2, "0") + ":59 · "
                           + formatInteger(cell.tokens, language) + " Tokens · "
-                          + t("{count} 次请求", { count: formatInteger(cell.requests, language) });
+                          + t("{count} 次请求", { count: formatInteger(cell.requests, language) })
+                          + formatNativeSplit(cell.tokens, cell.nativeTokens, language, t);
                         return (
                           <button
                             key={cell.hour}
@@ -257,7 +263,8 @@ export function UsageCostPage() {
               <div className={styles.monthHeatmap}>
                 {heatmap.cells.map((cell) => {
                   const title = cell.date + " · " + formatInteger(cell.tokens, language) + " Tokens · "
-                    + t("{count} 次请求", { count: formatInteger(cell.requests, language) });
+                    + t("{count} 次请求", { count: formatInteger(cell.requests, language) })
+                    + formatNativeSplit(cell.tokens, cell.nativeTokens, language, t);
                   return (
                     <button
                       key={cell.date}
@@ -290,18 +297,32 @@ export function UsageCostPage() {
               + ":00–" + String(selectedHourlyCell.hourEnd - 1).padStart(2, "0") + ":59"}
             tokens={formatCompactNumber(selectedHourlyCell.tokens, language)}
             detail={t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })}
+            split={selectedHourlyCell.nativeTokens > 0
+              ? t("Flowlet {proxy} · 原生 {native}", {
+                proxy: formatCompactNumber(selectedHourlyCell.tokens - selectedHourlyCell.nativeTokens, language),
+                native: formatCompactNumber(selectedHourlyCell.nativeTokens, language),
+              })
+              : null}
           />
         ) : null}
 
         {period === "month" && selectedDay ? (
           <SelectedPeriodCard
             title={selectedDay.date}
-            tokens={formatCompactNumber(selectedDay.knownTokens, language)}
-            detail={t("{count} 次请求", { count: formatInteger(selectedDay.requestCount, language) }) + " · "
+            tokens={formatCompactNumber(selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0), language)}
+            detail={t("{count} 次请求", {
+              count: formatInteger(selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0), language),
+            }) + " · "
               + t("输入 {input} · 输出 {output}", {
-                input: formatCompactNumber(selectedDay.inputTokens, language),
-                output: formatCompactNumber(selectedDay.outputTokens, language),
+                input: formatCompactNumber(selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0), language),
+                output: formatCompactNumber(selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0), language),
               })}
+            split={(selectedDay.nativeTotalTokens ?? 0) > 0
+              ? t("Flowlet {proxy} · 原生 {native}", {
+                proxy: formatCompactNumber(selectedDay.knownTokens, language),
+                native: formatCompactNumber(selectedDay.nativeTotalTokens ?? 0, language),
+              })
+              : null}
           />
         ) : null}
       </section>
@@ -321,7 +342,12 @@ function HeatmapLegend({ t }: { t: ReturnType<typeof useAppPreferences>["t"] }) 
   );
 }
 
-function SelectedPeriodCard({ title, tokens, detail }: { title: string; tokens: string; detail: string }) {
+function SelectedPeriodCard({ title, tokens, detail, split }: {
+  title: string;
+  tokens: string;
+  detail: string;
+  split?: string | null;
+}) {
   return (
     <article className={styles.selectedPeriod}>
       <span className={styles.selectedLabel}>Token</span>
@@ -330,9 +356,24 @@ function SelectedPeriodCard({ title, tokens, detail }: { title: string; tokens: 
       <div className={styles.selectedMeta}>
         <strong>{title}</strong>
         <span>{detail}</span>
+        {split ? <span>{split}</span> : null}
       </div>
     </article>
   );
+}
+
+/** 热力图 tooltip 的来源拆分后缀：存在原生用量时追加「Flowlet X · 原生 Y」。 */
+function formatNativeSplit(
+  tokens: number,
+  nativeTokens: number,
+  language: NumberLanguage,
+  t: ReturnType<typeof useAppPreferences>["t"],
+) {
+  if (nativeTokens <= 0) return "";
+  return " · " + t("Flowlet {proxy} · 原生 {native}", {
+    proxy: formatInteger(tokens - nativeTokens, language),
+    native: formatInteger(nativeTokens, language),
+  });
 }
 
 function formatCacheHitRate(value: number | null) {

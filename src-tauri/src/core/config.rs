@@ -1263,6 +1263,28 @@ pub struct AgentSessionNativeUsage {
     pub plan_consumption: Option<AgentSessionCostEstimate>,
 }
 
+/// Agent 原生会话中一条带用量的消息级事件。写入 `agent_usage_events` 账本表，
+/// 供按天/小时精确归集「未经过 Flowlet 代理」的 Token。与 `usage_records`
+/// （HTTP 请求级、含费用与渠道）刻意分离；不含费用。
+///
+/// 各 Agent 的取值语义：Claude Code / Pi / OpenCode 为逐消息增量；
+/// Codex 的 token_count 是累计值，解析时转换为相邻差分（上下文压缩导致
+/// 累计回退时允许为负，保证 Σ(账本) ≡ 会话最终总量）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentUsageEvent {
+    pub event_id: String,
+    /// UTC RFC3339。解析自原生文件时间戳后规范化，聚合时按 localtime 转换。
+    pub event_time: String,
+    pub model: Option<String>,
+    pub input_tokens: i64,
+    pub cached_input_tokens: i64,
+    pub cache_write_input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub total_tokens: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionTimelineEvent {

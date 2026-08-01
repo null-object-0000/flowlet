@@ -75,10 +75,13 @@ describe("RequestLogsPage", () => {
 
   it("loads details on demand and preserves captured credentials", async () => {
     const user = userEvent.setup();
-    render(<RequestLogsPage />);
+    const { container } = render(<RequestLogsPage />);
     await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
 
     expect(await screen.findByText("请求详情")).toBeInTheDocument();
+    // 大体积日志不能在宽度为 0 的隐藏面板中初始化 autoWrap JsonViewer，
+    // 否则 WebView 会在打开详情时崩溃；概览阶段只能挂载概览内容。
+    expect(container.querySelector(".semi-json-viewer")).not.toBeInTheDocument();
     expect(screen.queryByText("路由信息")).not.toBeInTheDocument();
     expect(screen.getByText("flowlet-pro → LongCat-2.0 · 直接路由")).toBeInTheDocument();
     expect(screen.getByText("https://api.longcat.chat/anthropic/v1/messages")).toBeInTheDocument();
@@ -87,7 +90,7 @@ describe("RequestLogsPage", () => {
     expect(screen.getByText("响应性能")).toBeInTheDocument();
     expect(screen.getByText("Token 明细")).toBeInTheDocument();
     expect(screen.getByText("660 ms")).toBeInTheDocument();
-    await user.click(screen.getByText("请求"));
+    await user.click(screen.getByRole("tab", { name: "请求" }));
     expect(screen.queryByText("敏感凭据已隐藏")).not.toBeInTheDocument();
     expect(screen.getByText(/secret-key/)).toBeInTheDocument();
   });

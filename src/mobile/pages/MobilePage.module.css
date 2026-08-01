@@ -303,6 +303,14 @@ button.heatmapCell[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--flow
   border-radius: 14px;
   background: var(--flowlet-color-surface);
   box-shadow: var(--flowlet-shadow-card);
+  cursor: pointer;
+  transition: transform 130ms ease, box-shadow 130ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.sessionCard:active { transform: scale(.985); }
+@media (hover: hover) {
+  .sessionCard:hover { box-shadow: 0 10px 26px rgba(15, 23, 42, .10); }
+  .sessionCard:hover .sessionChevron { transform: translateX(2px); color: var(--flowlet-color-text-secondary); }
 }
 .sessionTopline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .agentBadge {
@@ -322,34 +330,28 @@ button.heatmapCell[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--flow
 .sessionState[data-state="running"] i { background: var(--semi-color-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--semi-color-success) 16%, transparent); }
 .sessionState[data-state="waiting_user"] { color: var(--semi-color-warning); }
 .sessionState[data-state="waiting_user"] i { background: var(--semi-color-warning); }
-.sessionTitle { overflow: hidden; font-size: 15px; line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
+.sessionTitleRow { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.sessionTitle { min-width: 0; flex: 1; overflow: hidden; font-size: 15px; line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
+.sessionChevron { flex: none; color: var(--flowlet-color-text-tertiary); font-size: 14px; transition: transform 130ms ease, color 130ms ease; }
+.sessionCard:active .sessionChevron { transform: translateX(2px); }
+.sessionTeaser {
+  margin: 0;
+  padding-left: 9px;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  border-left: 2px solid var(--flowlet-color-border-strong);
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .sessionMeta, .sessionMetrics { display: flex; flex-wrap: wrap; gap: 5px 12px; }
 .sessionMeta span, .sessionMetrics span, .sessionCard time { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
 .sessionMeta span + span::before, .sessionMetrics span + span::before { content: "·"; margin-right: 12px; }
 .sessionMetrics span[data-error="true"] { color: var(--semi-color-danger); }
 .sessionCard time { padding-top: 8px; border-top: 1px solid var(--flowlet-color-border); }
-.remoteApprovalList { display: grid; gap: 8px; }
-.remoteApproval {
-  padding: 11px;
-  display: grid;
-  gap: 9px;
-  border: 1px solid color-mix(in srgb, var(--semi-color-warning) 34%, var(--flowlet-color-border));
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--semi-color-warning) 7%, var(--flowlet-color-surface));
-}
-.remoteApproval > div:first-child { min-width: 0; display: grid; gap: 3px; }
-.remoteApproval strong { font-size: 12px; }
-.remoteApproval span { overflow-wrap: anywhere; color: var(--flowlet-color-text-secondary); font-size: 11px; }
-.remoteApprovalActions { display: flex; justify-content: flex-end; gap: 7px; }
-.remoteApprovalState {
-  padding: 9px 11px;
-  border-radius: 9px;
-  color: var(--flowlet-color-text-tertiary);
-  background: var(--flowlet-color-surface-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-.remoteApprovalState[data-error="true"] { color: var(--semi-color-warning); }
 .form { display: grid; gap: 13px; }
 .form label { display: grid; gap: 6px; color: var(--flowlet-color-text-secondary); font-size: 12px; font-weight: 600; }
 .formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

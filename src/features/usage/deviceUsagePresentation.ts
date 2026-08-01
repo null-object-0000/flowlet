@@ -12,8 +12,13 @@ export type MobileUsageRange = {
 
 export type MobileUsageHeatmapCell = {
   date: string;
+  /** 合计 Token（Flowlet 代理 + Agent 原生），用于色阶与展示。 */
   tokens: number;
+  /** 合计次数（代理请求 + 原生交互）。 */
   requests: number;
+  /** 其中 Agent 原生部分（未经过 Flowlet）。 */
+  nativeTokens: number;
+  nativeEvents: number;
   level: HeatLevel;
   outside: boolean;
   hasData: boolean;
@@ -31,6 +36,8 @@ export type MobileHourlyHeatmapCell = {
   hourEnd: number;
   tokens: number;
   requests: number;
+  nativeTokens: number;
+  nativeEvents: number;
   level: HeatLevel;
   outside: boolean;
   hasData: boolean;
@@ -71,6 +78,10 @@ export function summarizeMobileUsage(days: DailyUsageTotal[]) {
     cachedInputTokens: total.cachedInputTokens + day.inputCachedTokens,
     cacheMeasuredInputTokens: total.cacheMeasuredInputTokens + day.cacheMeasuredInputTokens,
     outputTokens: total.outputTokens + day.outputTokens,
+    nativeEvents: total.nativeEvents + (day.nativeEventCount ?? 0),
+    nativeTokens: total.nativeTokens + (day.nativeTotalTokens ?? 0),
+    nativeInputTokens: total.nativeInputTokens + (day.nativeInputTokens ?? 0),
+    nativeOutputTokens: total.nativeOutputTokens + (day.nativeOutputTokens ?? 0),
   }), {
     requests: 0,
     tokens: 0,
@@ -78,6 +89,10 @@ export function summarizeMobileUsage(days: DailyUsageTotal[]) {
     cachedInputTokens: 0,
     cacheMeasuredInputTokens: 0,
     outputTokens: 0,
+    nativeEvents: 0,
+    nativeTokens: 0,
+    nativeInputTokens: 0,
+    nativeOutputTokens: 0,
   });
   return {
     ...summary,
@@ -107,11 +122,13 @@ export function buildMobileUsageHeatmap(
     const outsideRange = cursor < range.start || cursor > range.end;
     const future = offset === 0 && cursor > today;
     const outside = outsideRange || future;
-    const tokens = outside ? 0 : day?.knownTokens ?? 0;
+    const tokens = outside ? 0 : (day?.knownTokens ?? 0) + (day?.nativeTotalTokens ?? 0);
     cells.push({
       date,
       tokens,
-      requests: outside ? 0 : day?.requestCount ?? 0,
+      requests: outside ? 0 : (day?.requestCount ?? 0) + (day?.nativeEventCount ?? 0),
+      nativeTokens: outside ? 0 : day?.nativeTotalTokens ?? 0,
+      nativeEvents: outside ? 0 : day?.nativeEventCount ?? 0,
       level: 0,
       outside,
       hasData: !outside && day !== undefined,
@@ -159,6 +176,8 @@ export function buildMobileWeeklyHourlyHeatmap(
       const future = offset === 0 && bucketStart > currentHour;
       let tokens = 0;
       let requests = 0;
+      let nativeTokens = 0;
+      let nativeEvents = 0;
       let hasData = false;
 
       if (!future) {
@@ -177,8 +196,10 @@ export function buildMobileWeeklyHourlyHeatmap(
           if (offset === 0 && itemDate > currentHour) continue;
           const item = values.get(itemHour);
           if (!item) continue;
-          tokens += item.knownTokens;
-          requests += item.requestCount;
+          tokens += item.knownTokens + (item.nativeTotalTokens ?? 0);
+          requests += item.requestCount + (item.nativeEventCount ?? 0);
+          nativeTokens += item.nativeTotalTokens ?? 0;
+          nativeEvents += item.nativeEventCount ?? 0;
           hasData = true;
         }
       }
@@ -190,6 +211,8 @@ export function buildMobileWeeklyHourlyHeatmap(
         hourEnd: hourOfDay + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
         tokens,
         requests,
+        nativeTokens,
+        nativeEvents,
         outside: future,
         hasData,
       });

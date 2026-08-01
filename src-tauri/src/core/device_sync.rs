@@ -129,11 +129,13 @@ pub async fn build_device_snapshot(
     // “等待确认”的会话固化为 SQLite 推断出的“自动运行中”。
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
     let (days, hours, sessions) = tauri::async_runtime::spawn_blocking(move || {
+        // 快照携带「代理 + Agent 原生」合并口径，其他设备/移动端才能看到
+        // 本机未经过 Flowlet 的 Token（schema v6 的 native_* 字段）。
         let days = snapshot_storage
-            .daily_usage_totals()
+            .local_daily_usage_totals_with_native()
             .map_err(|error| error.to_string())?;
         let hours = snapshot_storage
-            .hourly_usage_totals()
+            .local_hourly_usage_totals_with_native()
             .map_err(|error| error.to_string())?;
         let sessions = snapshot_storage
             .list_agent_sessions_for_device_sync(&opencode_pending_sessions)

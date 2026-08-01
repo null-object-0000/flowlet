@@ -983,6 +983,27 @@ impl Storage {
                 PRIMARY KEY (agent_type, session_id)
             );
 
+            -- Agent 原生会话逐事件用量账本：未经过 Flowlet 代理的 Token，
+            -- 按消息级时间戳落库，供按天/小时精确归集（见 AgentUsageEvent）。
+            CREATE TABLE IF NOT EXISTS agent_usage_events (
+                agent_type               TEXT NOT NULL,
+                session_id               TEXT NOT NULL,
+                event_id                 TEXT NOT NULL,
+                event_time               TEXT NOT NULL,
+                model                    TEXT,
+                input_tokens             INTEGER NOT NULL DEFAULT 0,
+                cached_input_tokens      INTEGER NOT NULL DEFAULT 0,
+                cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens            INTEGER NOT NULL DEFAULT 0,
+                reasoning_tokens         INTEGER NOT NULL DEFAULT 0,
+                total_tokens             INTEGER NOT NULL DEFAULT 0,
+                synced_at                TEXT NOT NULL,
+                PRIMARY KEY (agent_type, session_id, event_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_usage_events_time
+                ON agent_usage_events(event_time);
+
             CREATE TABLE IF NOT EXISTS agent_source_sync_state (
                 agent_type TEXT PRIMARY KEY,
                 last_checked_at TEXT,
@@ -1059,6 +1080,34 @@ impl Storage {
             "agent_session_snapshots",
             "cursor_guard",
             "TEXT NOT NULL DEFAULT ''",
+        )?;
+        for column in [
+            "native_event_count",
+            "native_input_tokens",
+            "native_cached_input_tokens",
+            "native_cache_write_input_tokens",
+            "native_output_tokens",
+            "native_reasoning_tokens",
+            "native_total_tokens",
+        ] {
+            add_column_if_missing(
+                &connection,
+                "device_daily_usage",
+                column,
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+        }
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "native_event_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "native_total_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
         )?;
         connection.execute(
             "DELETE FROM background_job_events WHERE job_id IN (SELECT id FROM background_jobs WHERE status NOT IN ('queued', 'running') AND created_at < datetime('now', '-90 days'))",

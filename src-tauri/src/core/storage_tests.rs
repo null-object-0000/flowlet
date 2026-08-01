@@ -1932,6 +1932,213 @@ fn daily_usage_totals_keep_days_separate_and_sum_token_breakdowns() {
 }
 
 #[test]
+fn local_daily_usage_totals_with_native_merges_proxy_and_agent_events() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    storage
+        .insert_request_log(&request_log_for_repair("proxy-a", 0, true))
+        .expect("insert request log");
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET created_at = '2026-07-30T01:00:00Z' WHERE request_id = 'proxy-a'",
+            [],
+        )
+        .expect("set deterministic request date");
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "proxy-a".to_string(),
+            input_tokens: Some(10),
+            input_cached_tokens: Some(4),
+            input_uncached_tokens: Some(6),
+            output_tokens: Some(5),
+            total_tokens: Some(15),
+            ..empty_usage_input("proxy-a")
+        })
+        .expect("insert usage");
+
+    {
+        let connection = storage.connection.lock().unwrap();
+        for (event_id, event_time, total) in [
+            ("native-e1", "2026-07-30T12:00:00+00:00", 100),
+            ("native-e2", "2026-07-31T12:00:00+00:00", 40),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO agent_usage_events (
+                        agent_type, session_id, event_id, event_time, model,
+                        input_tokens, cached_input_tokens, cache_write_input_tokens,
+                        output_tokens, reasoning_tokens, total_tokens, synced_at
+                     ) VALUES ('claude-code', 'session-1', ?1, ?2, 'model-a', ?3, 0, 0, ?4, 0, ?5, datetime('now'))",
+                    rusqlite::params![event_id, event_time, total / 2, total / 2, total],
+                )
+                .expect("insert native usage event");
+        }
+    }
+
+    let merged = storage
+        .local_daily_usage_totals_with_native()
+        .expect("merged daily usage");
+    assert_eq!(merged.len(), 2);
+    // 同一天：代理 15 + 原生 100，字段各自独立。
+    assert_eq!(merged[0].known_tokens, 15);
+    assert_eq!(merged[0].request_count, 1);
+    assert_eq!(merged[0].native_total_tokens, 100);
+    assert_eq!(merged[0].native_event_count, 1);
+    // 次日：只有原生。
+    assert_eq!(merged[1].known_tokens, 0);
+    assert_eq!(merged[1].request_count, 0);
+    assert_eq!(merged[1].native_total_tokens, 40);
+
+    let merged_hours = storage
+        .local_hourly_usage_totals_with_native()
+        .expect("merged hourly usage");
+    assert_eq!(merged_hours.len(), 3);
+    assert_eq!(
+        merged_hours
+            .iter()
+            .map(|hour| hour.native_total_tokens)
+            .sum::<i64>(),
+        140
+    );
+    assert_eq!(
+        merged_hours.iter().map(|hour| hour.known_tokens).sum::<i64>(),
+        15
+    );
+}
+
+#[test]
+fn native_usage_totals_exclude_flowlet_observed_sessions() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    // 原生事件：session-obs（稍后被 Flowlet 观测）与 session-pure（纯原生）各一条。
+    {
+        let connection = storage.connection.lock().unwrap();
+        for (session_id, event_id, total) in [
+            ("session-obs", "obs-e1", 100),
+            ("session-pure", "pure-e1", 40),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO agent_usage_events (
+                        agent_type, session_id, event_id, event_time, model,
+                        input_tokens, cached_input_tokens, cache_write_input_tokens,
+                        output_tokens, reasoning_tokens, total_tokens, synced_at
+                     ) VALUES ('claude-code', ?1, ?2, '2026-07-30T12:00:00+00:00', 'model-a', ?3, 0, 0, ?3, 0, ?4, datetime('now'))",
+                    rusqlite::params![session_id, event_id, total / 2, total],
+                )
+                .expect("insert native usage event");
+        }
+    }
+
+    // session-obs 的调用经过了 Flowlet：request_logs 出现同名会话记录。
+    let mut observed_log = request_log_for_repair("req-obs", 0, true);
+    observed_log.agent_type = Some("claude-code".to_string());
+    observed_log.agent_session_id = Some("session-obs".to_string());
+    storage
+        .insert_request_log(&observed_log)
+        .expect("insert observed request log");
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET created_at = '2026-07-30T01:00:00Z' WHERE request_id = 'req-obs'",
+            [],
+        )
+        .expect("set deterministic request date");
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "req-obs".to_string(),
+            input_tokens: Some(10),
+            input_cached_tokens: Some(4),
+            input_uncached_tokens: Some(6),
+            output_tokens: Some(5),
+            total_tokens: Some(15),
+            ..empty_usage_input("req-obs")
+        })
+        .expect("insert proxy usage");
+
+    // 原生聚合排除被观测会话：session-obs 的 100 不出现，只剩 session-pure 的 40。
+    let native_days = storage
+        .agent_native_daily_usage_totals()
+        .expect("native daily totals");
+    assert_eq!(native_days.len(), 1);
+    assert_eq!(native_days[0].native_event_count, 1);
+    assert_eq!(native_days[0].native_total_tokens, 40);
+
+    // 合并视图：代理 15 + 纯原生 40，同一批调用不会在两个账本里重复计数。
+    let merged = storage
+        .local_daily_usage_totals_with_native()
+        .expect("merged daily usage");
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].known_tokens, 15);
+    assert_eq!(merged[0].native_total_tokens, 40);
+
+    let native_hours = storage
+        .agent_native_hourly_usage_totals()
+        .expect("native hourly totals");
+    assert_eq!(native_hours.len(), 1);
+    assert_eq!(native_hours[0].native_total_tokens, 40);
+}
+
+#[test]
+fn imported_device_usage_roundtrips_native_fields() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    let day = DailyUsageTotal {
+        date: "2026-07-30".to_string(),
+        request_count: 4,
+        known_tokens: 30,
+        native_event_count: 3,
+        native_input_tokens: 50,
+        native_cached_input_tokens: 20,
+        native_cache_write_input_tokens: 5,
+        native_output_tokens: 27,
+        native_reasoning_tokens: 2,
+        native_total_tokens: 77,
+        ..Default::default()
+    };
+    let hour = HourlyUsageTotal {
+        hour: "2026-07-30T12:00:00".to_string(),
+        request_count: 4,
+        known_tokens: 30,
+        native_event_count: 2,
+        native_total_tokens: 70,
+    };
+    storage
+        .import_device_usage(
+            6,
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "2026-07-01T00:00:00Z",
+            "Office PC",
+            "windows",
+            "0.1.0",
+            "2026-07-31T10:00:00Z",
+            480,
+            std::slice::from_ref(&day),
+            std::slice::from_ref(&hour),
+            &[],
+            &[],
+        )
+        .expect("import snapshot with native fields");
+
+    let days = storage.imported_daily_usage(None).expect("imported days");
+    assert_eq!(days.len(), 1);
+    assert_eq!(days[0], day);
+    let hours = storage.imported_hourly_usage(None).expect("imported hours");
+    assert_eq!(hours.len(), 1);
+    assert_eq!(hours[0], hour);
+}
+
+#[test]
 fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
@@ -1946,11 +2153,13 @@ fn imported_device_usage_is_idempotent_and_keeps_newer_snapshot() {
         cache_measured_input_tokens: 20,
         output_tokens: 10,
         unknown_count: 0,
+        ..Default::default()
     };
     let first_hour = HourlyUsageTotal {
         hour: "2026-07-28T18:00:00".to_string(),
         request_count: 2,
         known_tokens: 30,
+        ..Default::default()
     };
 
     let inserted = storage

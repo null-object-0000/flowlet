@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mobileDeviceSyncCommands } from "../../domains/device-sync/commands";
 import { queryKeys } from "../../shared/query-keys";
@@ -56,6 +56,28 @@ export function useMobileSessions(deviceId: string | null) {
     staleTime: 15_000,
     refetchInterval: 15_000,
   });
+}
+
+/**
+ * 等待确认的会话需要最近一次交互作为审批依据，但移动端后台同步默认 5 分钟一次，
+ * 缓存里的 lastInteraction 可能滞后。页面出现 waiting_user 会话时，对其所在设备
+ * 做一次 best-effort LAN 快照刷新并失效对应 sessions query；每个设备每次页面挂载
+ * 只刷一次，LAN 不可达时静默沿用缓存数据。
+ */
+export function useMobileWaitingSessionLanRefresh(deviceIds: string[]) {
+  const queryClient = useQueryClient();
+  const refreshedRef = useRef(new Set<string>());
+  const idsKey = deviceIds.join("\n");
+  useEffect(() => {
+    for (const deviceId of idsKey.split("\n").filter(Boolean)) {
+      if (refreshedRef.current.has(deviceId)) continue;
+      refreshedRef.current.add(deviceId);
+      mobileDeviceSyncCommands
+        .refreshLan(deviceId)
+        .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.sessions(deviceId) }))
+        .catch(() => undefined);
+    }
+  }, [idsKey, queryClient]);
 }
 
 export function useMobileRemotePermissions(deviceId: string, sessionId: string, enabled: boolean) {

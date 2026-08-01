@@ -587,6 +587,33 @@ impl Storage {
         let mut incremental_sessions = 0usize;
         let mut full_sessions = 0usize;
         let mut source_bytes_processed = 0u64;
+        // 判定哪些会话的「原生账本」应被排除（其用量已由代理侧覆盖）：
+        // 1) 自身 id 出现在 request_logs（整会话经过 Flowlet）；
+        // 2) 是子会话且其父 id 出现在 request_logs——子代理的调用经过 Flowlet 时
+        //    会以父会话的 x-*-session-id 落库，子 id 在 request_logs 里没有记录，
+        //    仅靠自身 id 匹配会漏排除而重复计数。
+        // 父未观测的子会话（纯原生）不在此集合，照常计入原生账本。
+        let observed = self.observed_agent_session_keys()?;
+        let is_observed = |agent_type: &str, session_id: &str| -> bool {
+            observed
+                .get(agent_type)
+                .is_some_and(|ids| ids.contains(session_id))
+        };
+        let subsumed: std::collections::HashSet<(String, String)> = sessions
+            .iter()
+            .filter(|session| {
+                is_observed(&session.agent_type, &session.session_id)
+                    || session
+                        .parent_session_id
+                        .as_deref()
+                        .is_some_and(|parent| is_observed(&session.agent_type, parent))
+            })
+            .map(|session| (session.agent_type.clone(), session.session_id.clone()))
+            .collect();
+        let changed_keys: std::collections::HashSet<(String, String)> = changed
+            .iter()
+            .map(|(session, _)| (session.agent_type.clone(), session.session_id.clone()))
+            .collect();
         for (index, (session, fingerprint)) in changed.iter().enumerate() {
             if self.is_job_cancel_requested(job_id)? {
                 let summary = serde_json::json!({ "scanned": sessions.len(), "processed": index, "deferred": deferred + changed.len() - index, "durationMs": total_started.elapsed().as_millis() }).to_string();
@@ -656,6 +683,21 @@ impl Storage {
                         fingerprint,
                         &parsed,
                     )?;
+                    // 被代理覆盖的会话（自身观测，或子会话且父被观测）不记原生账本，
+                    // 并清掉可能残留的旧事件；其余会话（含父未观测的原生子会话）照常记账。
+                    if subsumed.contains(&(session.agent_type.clone(), session.session_id.clone()))
+                    {
+                        self.delete_agent_usage_events(
+                            &session.agent_type,
+                            &session.session_id,
+                        )?;
+                    } else {
+                        self.save_agent_usage_events(
+                            &session.agent_type,
+                            &session.session_id,
+                            &parsed,
+                        )?;
+                    }
                     write_ms += write_started.elapsed().as_millis() as u64;
                 }
                 Err(error) => {
@@ -695,6 +737,17 @@ impl Storage {
                 (changed.len() + offset + 1) as i64,
                 (changed.len() + deleted.len()) as i64,
             )?;
+        }
+        // 清理「本轮未变化、但其父已被观测」的子会话残留事件：它们不会进入 changed，
+        // 上面的循环轮不到，必须在这里主动清除，否则旧事件会一直重复计数。
+        for session in sessions {
+            let key = (session.agent_type.clone(), session.session_id.clone());
+            if session.parent_session_id.is_some()
+                && subsumed.contains(&key)
+                && !changed_keys.contains(&key)
+            {
+                self.delete_agent_usage_events(&session.agent_type, &session.session_id)?;
+            }
         }
         self.update_source_states_checked(&sessions, &changed, &failures)?;
         let status = if failed == 0 {
@@ -770,6 +823,50 @@ impl Storage {
         Ok(())
     }
 
+    /// 将解析产出的消息级用量事件写入 agent_usage_events 账本。
+    /// 增量解析只 INSERT 新事件（主键幂等）；全量重解析先清旧行再写入，
+    /// 保证账本与本次全量结果严格一致（含文件被改写/压缩的场景）。
+    fn save_agent_usage_events(
+        &self,
+        agent_type: &str,
+        session_id: &str,
+        parsed: &AgentSessionSummaryParseResult,
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        if !parsed.incremental {
+            connection.execute(
+                "DELETE FROM agent_usage_events WHERE agent_type=?1 AND session_id=?2",
+                params![agent_type, session_id],
+            )?;
+        }
+        let mut statement = connection.prepare(
+            "INSERT OR IGNORE INTO agent_usage_events (
+                agent_type, session_id, event_id, event_time, model,
+                input_tokens, cached_input_tokens, cache_write_input_tokens,
+                output_tokens, reasoning_tokens, total_tokens, synced_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'))",
+        )?;
+        for event in &parsed.usage_events {
+            statement.execute(params![
+                agent_type,
+                session_id,
+                event.event_id,
+                event.event_time,
+                event.model,
+                event.input_tokens,
+                event.cached_input_tokens,
+                event.cache_write_input_tokens,
+                event.output_tokens,
+                event.reasoning_tokens,
+                event.total_tokens,
+            ])?;
+        }
+        Ok(())
+    }
+
     fn load_agent_summary_checkpoint(
         &self,
         agent_type: &str,
@@ -826,7 +923,55 @@ impl Storage {
             "DELETE FROM agent_session_snapshots WHERE agent_type=?1 AND session_id=?2",
             params![agent_type, session_id],
         )?;
+        connection.execute(
+            "DELETE FROM agent_usage_events WHERE agent_type=?1 AND session_id=?2",
+            params![agent_type, session_id],
+        )?;
         Ok(())
+    }
+
+    fn delete_agent_usage_events(
+        &self,
+        agent_type: &str,
+        session_id: &str,
+    ) -> Result<(), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection.execute(
+            "DELETE FROM agent_usage_events WHERE agent_type=?1 AND session_id=?2",
+            params![agent_type, session_id],
+        )?;
+        Ok(())
+    }
+
+    /// 返回被 Flowlet 代理观测到的 (agent_type -> session_id 集合)：即 request_logs 里
+    /// 出现过会话归属标记的记录。用于判断一个原生会话（或其子会话）的用量是否已在
+    /// 代理侧统计，从而避免原生账本重复计数。
+    fn observed_agent_session_keys(
+        &self,
+    ) -> Result<std::collections::HashMap<String, std::collections::HashSet<String>>, StorageError>
+    {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT DISTINCT agent_type, agent_session_id FROM request_logs
+             WHERE agent_type IS NOT NULL AND agent_session_id IS NOT NULL",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (agent_type, session_id) = row?;
+            map.entry(agent_type)
+                .or_insert_with(std::collections::HashSet::new)
+                .insert(session_id);
+        }
+        Ok(map)
     }
     fn update_source_states_checked(
         &self,
@@ -1898,6 +2043,7 @@ mod tests {
             complete: true,
             incremental: true,
             bytes_processed: 256,
+            usage_events: Vec::new(),
         };
         storage
             .save_agent_snapshot("codex-desktop", "session-1", "fingerprint", &parsed)
@@ -1922,6 +2068,250 @@ mod tests {
             .unwrap();
         assert!(!stored.0.contains("message"));
         assert!(!stored.1.contains("message"));
+    }
+
+    #[test]
+    fn saves_agent_usage_events_incrementally_and_replaces_on_full_reparse() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+
+        let make_event = |event_id: &str, event_time: &str, total: i64| {
+            crate::core::config::AgentUsageEvent {
+                event_id: event_id.to_string(),
+                event_time: event_time.to_string(),
+                model: Some("model-a".to_string()),
+                input_tokens: total / 2,
+                cached_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                output_tokens: total / 2,
+                reasoning_tokens: 0,
+                total_tokens: total,
+            }
+        };
+        let make_parsed = |incremental: bool, usage_events| AgentSessionSummaryParseResult {
+            summary: AgentSessionNativeSummary {
+                source_available: true,
+                truncated: false,
+                turn_count: 0,
+                usage: None,
+                models: Vec::new(),
+            },
+            source_offset: 0,
+            parser_version: crate::core::agent_session_timeline::AGENT_SUMMARY_PARSER_VERSION,
+            usage_ids: Vec::new(),
+            cursor_guard: String::new(),
+            complete: true,
+            incremental,
+            bytes_processed: 0,
+            usage_events,
+        };
+
+        // 全量写入 2 条；事件时间选在正午附近，任何时区下分组都稳定。
+        storage
+            .save_agent_usage_events(
+                "claude-code",
+                "session-1",
+                &make_parsed(
+                    false,
+                    vec![
+                        make_event("e1", "2026-07-30T12:00:00+00:00", 100),
+                        make_event("e2", "2026-07-30T13:00:00+00:00", 60),
+                    ],
+                ),
+            )
+            .unwrap();
+        let days = storage.agent_native_daily_usage_totals().unwrap();
+        assert_eq!(days.len(), 1);
+        assert_eq!(days[0].native_event_count, 2);
+        assert_eq!(days[0].native_total_tokens, 160);
+        assert_eq!(days[0].native_input_tokens, 80);
+        // 代理口径字段不受原生聚合影响。
+        assert_eq!(days[0].known_tokens, 0);
+        assert_eq!(days[0].request_count, 0);
+
+        // 增量：重复 e2 + 新增 e3 → 主键幂等，只插入 e3。
+        storage
+            .save_agent_usage_events(
+                "claude-code",
+                "session-1",
+                &make_parsed(
+                    true,
+                    vec![
+                        make_event("e2", "2026-07-30T13:00:00+00:00", 60),
+                        make_event("e3", "2026-07-31T12:00:00+00:00", 40),
+                    ],
+                ),
+            )
+            .unwrap();
+        let days = storage.agent_native_daily_usage_totals().unwrap();
+        assert_eq!(days.len(), 2);
+        assert_eq!(days[0].native_total_tokens, 160);
+        assert_eq!(days[1].native_event_count, 1);
+        assert_eq!(days[1].native_total_tokens, 40);
+        let hours = storage.agent_native_hourly_usage_totals().unwrap();
+        assert_eq!(hours.len(), 3);
+        assert_eq!(
+            hours.iter().map(|hour| hour.native_total_tokens).sum::<i64>(),
+            200
+        );
+
+        // 全量重解析：先清旧行再写入，账本与本次全量结果严格一致。
+        storage
+            .save_agent_usage_events(
+                "claude-code",
+                "session-1",
+                &make_parsed(false, vec![make_event("e9", "2026-07-31T12:00:00+00:00", 5)]),
+            )
+            .unwrap();
+        let days = storage.agent_native_daily_usage_totals().unwrap();
+        assert_eq!(days.len(), 1);
+        assert_eq!(days[0].native_event_count, 1);
+        assert_eq!(days[0].native_total_tokens, 5);
+
+        // 会话删除时事件随快照一并清理。
+        storage
+            .delete_agent_snapshot("claude-code", "session-1")
+            .unwrap();
+        assert!(storage.agent_native_daily_usage_totals().unwrap().is_empty());
+        assert!(storage.agent_native_hourly_usage_totals().unwrap().is_empty());
+    }
+
+    #[test]
+    fn excludes_subsumed_sessions_but_keeps_native_only_children() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        storage
+            .create_job(
+                "job-child",
+                "agent-data-sync",
+                "Agent 数据同步",
+                "扫描并整理会话",
+                "manual",
+                3,
+                "发现 3 个需要整理的会话",
+            )
+            .unwrap();
+
+        // root_obs 经过 Flowlet（request_logs 有记录）→ 自身被覆盖；
+        // child_of_obs 是其子会话 → 子会话的调用以父 id 落库，也应被覆盖；
+        // root_native / child_of_native 完全未经过 Flowlet → 原生账本应保留。
+        storage
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO request_logs (id, request_id, agent_type, agent_session_id,
+                    client_protocol, upstream_protocol, method, path, created_at)
+                 VALUES ('rl-1','req-1','opencode','root-obs','openai','openai','POST','/v1/x',
+                    '2026-07-30T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+
+        let mut root_obs = native_session();
+        root_obs.session_id = "root-obs".into();
+        let mut root_native = native_session();
+        root_native.session_id = "root-native".into();
+        let mut child_of_obs = native_session();
+        child_of_obs.session_id = "child-of-obs".into();
+        child_of_obs.parent_session_id = Some("root-obs".into());
+        let mut child_of_native = native_session();
+        child_of_native.session_id = "child-of-native".into();
+        child_of_native.parent_session_id = Some("root-native".into());
+
+        // child_of_obs 本轮「未变化」，但预置一条陈旧事件，验证 after-loop 清理路径。
+        storage
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO agent_usage_events (
+                    agent_type, session_id, event_id, event_time, model,
+                    input_tokens, cached_input_tokens, cache_write_input_tokens,
+                    output_tokens, reasoning_tokens, total_tokens, synced_at
+                 ) VALUES ('opencode', 'child-of-obs', 'stale-1', '2026-07-30T12:00:00+00:00', NULL, 1, 0, 0, 1, 0, 2, datetime('now'))",
+                [],
+            )
+            .unwrap();
+
+        let sessions = vec![
+            root_obs.clone(),
+            root_native.clone(),
+            child_of_obs.clone(),
+            child_of_native.clone(),
+        ];
+        // child_of_obs 故意不放进 changed，以覆盖「未变化但需清理」的分支。
+        let changed = vec![
+            (root_obs, "fp-root-obs".to_string()),
+            (root_native, "fp-root-native".to_string()),
+            (child_of_native, "fp-child-native".to_string()),
+        ];
+
+        let parsed_template = AgentSessionSummaryParseResult {
+            summary: AgentSessionNativeSummary {
+                source_available: true,
+                truncated: false,
+                turn_count: 1,
+                usage: None,
+                models: Vec::new(),
+            },
+            source_offset: 0,
+            parser_version: crate::core::agent_session_timeline::AGENT_SUMMARY_PARSER_VERSION,
+            usage_ids: Vec::new(),
+            cursor_guard: String::new(),
+            complete: true,
+            incremental: false,
+            bytes_processed: 0,
+            usage_events: vec![crate::core::config::AgentUsageEvent {
+                event_id: "e1".into(),
+                event_time: "2026-07-30T12:00:00+00:00".into(),
+                model: Some("model-a".into()),
+                input_tokens: 10,
+                cached_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                output_tokens: 10,
+                reasoning_tokens: 0,
+                total_tokens: 20,
+            }],
+        };
+        storage
+            .run_agent_sync_job_with_parser(
+                "job-child",
+                &sessions,
+                &changed,
+                &[],
+                0,
+                1,
+                1,
+                Instant::now(),
+                move |_, _, _| Ok(parsed_template.clone()),
+            )
+            .unwrap();
+
+        let count = |session_id: &str| -> i64 {
+            storage
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT count(*) FROM agent_usage_events WHERE agent_type='opencode' AND session_id=?1",
+                    [session_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        // 自身被观测：不记原生账本。
+        assert_eq!(count("root-obs"), 0);
+        // 子会话且父被观测：陈旧事件被清理，也不记新事件。
+        assert_eq!(count("child-of-obs"), 0);
+        // 纯原生根会话与「父未观测的子会话」：照常记账，不反向漏计。
+        assert_eq!(count("root-native"), 1);
+        assert_eq!(count("child-of-native"), 1);
+        // 被覆盖会话即便在 changed 里，快照仍正常保存（详情视图不受影响）。
+        assert!(storage
+            .load_agent_summary_checkpoint("opencode", "root-obs")
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -2170,6 +2560,7 @@ mod tests {
                         complete: true,
                         incremental: false,
                         bytes_processed: 10,
+                        usage_events: Vec::new(),
                     })
                 },
             )

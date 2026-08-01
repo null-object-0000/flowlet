@@ -8,12 +8,22 @@ export type DailyUsageTotal = {
   cacheMeasuredInputTokens: number;
   outputTokens: number;
   unknownCount: number;
+  /** 未经过 Flowlet 代理的 Agent 原生会话用量（快照 schema v6 起；旧快照缺省为 0）。 */
+  nativeEventCount?: number;
+  nativeInputTokens?: number;
+  nativeCachedInputTokens?: number;
+  nativeCacheWriteInputTokens?: number;
+  nativeOutputTokens?: number;
+  nativeReasoningTokens?: number;
+  nativeTotalTokens?: number;
 };
 
 export type HourlyUsageTotal = {
   hour: string;
   requestCount: number;
   knownTokens: number;
+  nativeEventCount?: number;
+  nativeTotalTokens?: number;
 };
 
 export type SyncedAgentSession = {

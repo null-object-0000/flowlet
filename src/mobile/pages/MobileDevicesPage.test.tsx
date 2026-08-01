@@ -5,6 +5,7 @@ import { MobileDevicesPage } from "./MobileDevicesPage";
 const useMobileDevicesMock = vi.fn();
 const useMobileDeviceAgentsMock = vi.fn();
 const useMobileLanProbesMock = vi.fn();
+const refreshMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
 
 vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
@@ -16,8 +17,13 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileLanProbes: () => useMobileLanProbesMock(),
 }));
 
-vi.mock("../MobileRefreshButton", () => ({
-  MobileRefreshButton: () => null,
+vi.mock("../useMobileRefreshController", () => ({
+  useMobileRefreshController: () => ({
+    refresh: refreshMock,
+    loading: false,
+    disabled: false,
+    lastSuccessAt: "2026-07-30T02:03:04Z",
+  }),
 }));
 
 const DEVICE = {
@@ -38,6 +44,7 @@ const DEVICE = {
 
 describe("MobileDevicesPage", () => {
   beforeEach(() => {
+    refreshMock.mockReset().mockResolvedValue(undefined);
     useMobileDevicesMock.mockReturnValue({
       data: [DEVICE],
       isLoading: false,
@@ -60,6 +67,20 @@ describe("MobileDevicesPage", () => {
       isLoading: false,
       isError: false,
     });
+  });
+
+  it("uses page pull-to-refresh without a header refresh button", async () => {
+    render(<MobileDevicesPage />);
+    expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
+    expect(screen.getByText(/最后刷新：/)).toBeInTheDocument();
+
+    const page = screen.getByText("设备").closest("section")!;
+    const pullSurface = page.parentElement!;
+    fireEvent.touchStart(pullSurface, { touches: [{ clientY: 10 }] });
+    fireEvent.touchMove(pullSurface, { touches: [{ clientY: 140 }] });
+    fireEvent.touchEnd(pullSurface);
+
+    expect(refreshMock).toHaveBeenCalledOnce();
   });
 
   it("expands a device and shows installed agents with Flowlet status", () => {

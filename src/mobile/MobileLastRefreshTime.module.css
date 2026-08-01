@@ -1,0 +1,11 @@
+.time {
+  min-width: 0;
+  flex: none;
+  overflow: hidden;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

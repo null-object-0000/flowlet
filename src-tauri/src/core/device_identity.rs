@@ -7,7 +7,7 @@ use thiserror::Error;
 
 const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
 const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
-pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 6;
+pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Error)]
 pub enum DeviceIdentityError {
@@ -308,6 +308,16 @@ pub struct SyncedAgentSession {
     pub request_count: i64,
     pub error_count: i64,
     pub known_tokens: i64,
+    /// Agent 原生会话摘要中的累计轮次。`None` 表示尚未生成或数据源不可读，
+    /// 不能按 0 展示。
+    #[serde(default)]
+    pub native_turn_count: Option<i64>,
+    /// Agent 原生会话摘要中的累计 Token。与 Flowlet 观测口径保持独立，
+    /// 移动端只在 `flowlet_observed = false` 时用它展示原生指标。
+    #[serde(default)]
+    pub native_total_tokens: Option<i64>,
+    #[serde(default)]
+    pub native_truncated: bool,
     #[serde(default)]
     pub last_interaction: Option<SyncedAgentInteraction>,
 }
@@ -579,7 +589,12 @@ impl DeviceUsageBundle {
             if !valid_activity_at {
                 return Err("设备会话摘要的 activityAt 无效".to_string());
             }
-            if session.request_count < 0 || session.error_count < 0 || session.known_tokens < 0 {
+            if session.request_count < 0
+                || session.error_count < 0
+                || session.known_tokens < 0
+                || session.native_turn_count.is_some_and(|value| value < 0)
+                || session.native_total_tokens.is_some_and(|value| value < 0)
+            {
                 return Err("设备会话摘要包含负数统计".to_string());
             }
             if session.title.as_ref().is_some_and(|value| {

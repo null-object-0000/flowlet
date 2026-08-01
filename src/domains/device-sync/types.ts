@@ -38,6 +38,9 @@ export type SyncedAgentSession = {
   requestCount: number;
   errorCount: number;
   knownTokens: number;
+  nativeTurnCount?: number | null;
+  nativeTotalTokens?: number | null;
+  nativeTruncated?: boolean;
   lastInteraction: SyncedAgentInteraction | null;
 };
 
@@ -189,6 +192,11 @@ export type S3DevicePullResult = {
   unchangedDays: number;
   failedObjects: number;
   failureDetails?: string[];
+};
+
+export type DeviceRefreshResult = {
+  source: "lan" | "s3";
+  refreshedDevices: number;
 };
 
 export type LanInboundEvent = {

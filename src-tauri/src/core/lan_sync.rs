@@ -1,24 +1,24 @@
 use crate::core::device_identity::{
-    DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, LanPeerDescriptor,
+    DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, LanPeerDescriptor, SyncedAgentSession,
 };
 use crate::core::opencode_control::{OpenCodePermissionDecision, OpenCodePermissionReport};
 use crate::core::storage::Storage;
 use axum::{
-    Json, Router,
     body::Bytes,
     extract::{ConnectInfo, Path, State},
     http::{HeaderMap, Method, StatusCode},
     response::IntoResponse,
     routing::{get, post},
+    Json, Router,
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chacha20poly1305::{
-    ChaCha20Poly1305, Nonce,
     aead::{Aead, KeyInit},
+    ChaCha20Poly1305, Nonce,
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::Sha256;
 use std::{
     collections::{HashMap, VecDeque},
@@ -90,6 +90,20 @@ impl Default for LanServerStatus {
 struct PermissionReplyInput {
     decision: OpenCodePermissionDecision,
     operation_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionReadInput {
+    agent_type: String,
+    session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanSessionSnapshot {
+    pub generated_at: String,
+    pub session: SyncedAgentSession,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +245,7 @@ pub async fn start_server(
     let app = Router::new()
         .route("/flowlet/v1/ping", get(ping_handler))
         .route("/flowlet/v1/snapshot", get(snapshot_handler))
+        .route("/flowlet/v1/session/read", post(session_read_handler))
         .route(
             "/flowlet/v1/opencode/permissions/{session_id}",
             get(permission_list_handler),
@@ -374,6 +389,7 @@ async fn ping_handler(
 fn current_capabilities() -> Vec<String> {
     vec![
         "snapshot.read".to_string(),
+        "session.read".to_string(),
         "opencode.permission.read".to_string(),
         "opencode.permission.reply".to_string(),
     ]
@@ -397,6 +413,43 @@ async fn snapshot_handler(
         Ok(snapshot) => {
             encrypted_response(&state.auth_key, &headers, &DeviceUsageBundle::new(snapshot))
         }
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+async fn session_read_handler(
+    State(state): State<LanServerState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    const PATH: &str = "/flowlet/v1/session/read";
+    if let Err(error) = authorize(&state, &Method::POST, PATH, &headers, &body) {
+        return (StatusCode::UNAUTHORIZED, error).into_response();
+    }
+    let input = match serde_json::from_slice::<SessionReadInput>(&body) {
+        Ok(input) if !input.agent_type.trim().is_empty() && !input.session_id.trim().is_empty() => {
+            input
+        }
+        _ => return (StatusCode::BAD_REQUEST, "无效的会话读取参数").into_response(),
+    };
+    record_inbound(&state, Some(&remote), PATH);
+    match crate::core::device_sync::build_synced_agent_session(
+        state.storage.clone(),
+        &input.agent_type,
+        &input.session_id,
+    )
+    .await
+    {
+        Ok(Some(session)) => encrypted_response(
+            &state.auth_key,
+            &headers,
+            &LanSessionSnapshot {
+                generated_at: Utc::now().to_rfc3339(),
+                session,
+            },
+        ),
+        Ok(None) => (StatusCode::NOT_FOUND, "未找到会话").into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     }
 }
@@ -701,6 +754,30 @@ pub async fn fetch_snapshot(descriptor: &LanPeerDescriptor) -> Result<DeviceUsag
     Err(last_error)
 }
 
+pub async fn fetch_session(
+    storage: &Storage,
+    device_id: &str,
+    agent_type: &str,
+    session_id: &str,
+) -> Result<LanSessionSnapshot, String> {
+    let peer = peer_descriptor(storage, device_id)
+        .ok_or_else(|| "目标设备没有可用的局域网连接信息".to_string())?;
+    let path = "/flowlet/v1/session/read";
+    let body = serde_json::to_vec(&SessionReadInput {
+        agent_type: agent_type.to_string(),
+        session_id: session_id.to_string(),
+    })
+    .map_err(|error| error.to_string())?;
+    let mut last_error = "没有可用的局域网端点".to_string();
+    for endpoint in &peer.endpoints {
+        match request(&peer, endpoint, Method::POST, path, body.clone()).await {
+            Ok(snapshot) => return Ok(snapshot),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
 /// 单台设备的直连探测结果。移动端与桌面端共用同一份结构展示
 /// 「能不能连上这台设备」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -945,9 +1022,17 @@ pub async fn reply_remote_permission(
     .map_err(|error| error.to_string())?;
     let mut last_error = "没有可用的局域网端点".to_string();
     for endpoint in &peer.endpoints {
-        match request::<()>(&peer, endpoint, Method::POST, &path, body.clone()).await {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = error,
+        match request::<Result<(), String>>(
+            &peer,
+            endpoint,
+            Method::POST,
+            &path,
+            body.clone(),
+        )
+        .await
+        {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(error)) | Err(error) => last_error = error,
         }
     }
     Err(last_error)
@@ -1045,6 +1130,15 @@ mod tests {
     }
 
     #[test]
+    fn permission_reply_result_must_be_decoded_as_result() {
+        let key = [9u8; 32];
+        let payload = encrypt(&key, b"permission-reply", &Ok::<(), String>(())).unwrap();
+        assert!(decrypt::<()>(&key, b"permission-reply", payload.clone()).is_err());
+        let decoded = decrypt::<Result<(), String>>(&key, b"permission-reply", payload).unwrap();
+        assert_eq!(decoded, Ok(()));
+    }
+
+    #[test]
     fn only_private_ip_endpoints_are_accepted() {
         assert!(validate_endpoint("http://192.168.1.8:17878").is_ok());
         assert!(validate_endpoint("http://10.0.0.2:17878").is_ok());
@@ -1114,6 +1208,7 @@ mod tests {
         assert_eq!(pong.device_id, identity.device_id);
         assert_eq!(pong.protocol_version, PROTOCOL_VERSION);
         assert!(pong.capabilities.contains(&"snapshot.read".to_string()));
+        assert!(pong.capabilities.contains(&"session.read".to_string()));
 
         let events = inbound.lock().unwrap();
         assert_eq!(events.len(), 1);

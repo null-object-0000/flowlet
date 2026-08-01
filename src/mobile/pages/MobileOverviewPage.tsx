@@ -5,7 +5,9 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useMobileDailyUsage, useMobileDevices, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
 import { MobileDeviceTitlePicker, useMobileDevicePickerState } from "../MobileDevicePicker";
-import { MobileRefreshButton } from "../MobileRefreshButton";
+import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
+import { useMobileRefreshController } from "../useMobileRefreshController";
+import { MobilePullToRefresh } from "../MobilePullToRefresh";
 import {
   buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
@@ -30,6 +32,7 @@ export function MobileOverviewPage() {
   const devices = useMobileDevices();
   const usage = useMobileDailyUsage(deviceId);
   const hourlyUsage = useMobileHourlyUsage(deviceId);
+  const refreshController = useMobileRefreshController(deviceId ?? undefined);
   const now = useMemo(() => new Date(), []);
   const range = useMemo(
     () => getMobileUsageRange(period, periodOffset, now),
@@ -88,6 +91,11 @@ export function MobileOverviewPage() {
   }, [deviceId]);
 
   return (
+    <MobilePullToRefresh
+      disabled={refreshController.disabled}
+      refreshing={refreshController.loading}
+      onRefresh={refreshController.refresh}
+    >
     <section className={styles.page}>
       <header className={`${styles.heading} ${styles.headingWithPicker}`}>
         <div className={styles.headingTitleRow}>
@@ -98,9 +106,7 @@ export function MobileOverviewPage() {
               formatTitle={(name) => (name == null ? t("全部概览") : `${name} ${t("概览")}`)}
             />
           </h2>
-          <div className={styles.headingActions}>
-            <MobileRefreshButton />
-          </div>
+          <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
         </div>
         <p>{t("按设备查看每周或每月 Token 热力图")}</p>
       </header>
@@ -269,6 +275,7 @@ export function MobileOverviewPage() {
         </article>
       ) : null}
     </section>
+    </MobilePullToRefresh>
   );
 }
 

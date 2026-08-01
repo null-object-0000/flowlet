@@ -4,6 +4,7 @@ import type {
   DeviceUsageImportPreview,
   DeviceUsageImportResult,
   DeviceUsageSnapshot,
+  DeviceRefreshResult,
   HourlyUsageTotal,
   KnownDevice,
   LanPeerProbe,
@@ -14,6 +15,7 @@ import type {
   S3SyncConfigInput,
   S3SyncSettings,
   SharedAgentSession,
+  SyncedAgentSession,
   SyncedAgentProfile,
 } from "./types";
 import type { OpenCodePermissionDecision, OpenCodePermissionReport } from "../agent-session/types";
@@ -87,6 +89,12 @@ export const mobileDeviceSyncCommands = {
   refreshLan: (deviceId: string | null): Promise<{ attemptedDevices: number; refreshedDevices: number; failedDevices: number }> =>
     invokeCommand<{ attemptedDevices: number; refreshedDevices: number; failedDevices: number }>("refresh_shared_device_usage_lan", { deviceId })
       .catch(toDeviceSyncError("lan_device_refresh_failed")),
+  refreshDevice: (deviceId: string): Promise<DeviceRefreshResult> =>
+    invokeCommand<DeviceRefreshResult>("refresh_shared_device", { deviceId }, Number.POSITIVE_INFINITY)
+      .catch(toDeviceSyncError("shared_device_refresh_failed")),
+  refreshSessionLan: (deviceId: string, agentType: string, sessionId: string): Promise<SyncedAgentSession> =>
+    invokeCommand<SyncedAgentSession>("refresh_shared_device_session_lan", { deviceId, agentType, sessionId })
+      .catch(toDeviceSyncError("shared_device_session_lan_refresh_failed")),
   probeLanPeers: (deviceId: string | null): Promise<LanPeerProbe[]> =>
     invokeCommand<LanPeerProbe[]>("probe_lan_peers", { deviceId })
       .catch(toDeviceSyncError("lan_peer_probe_failed")),

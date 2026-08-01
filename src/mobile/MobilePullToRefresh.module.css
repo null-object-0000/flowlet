@@ -1,0 +1,38 @@
+.root {
+  position: relative;
+  min-height: 100%;
+}
+
+.indicator {
+  position: absolute;
+  top: -34px;
+  right: 0;
+  left: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 11px;
+  opacity: min(1, calc(var(--mobile-pull-distance) / 36px));
+  transform: translateY(var(--mobile-pull-distance));
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.content {
+  transition: transform 180ms ease;
+}
+
+.root[data-pulling] .content { transform: translateY(var(--mobile-pull-distance)); }
+
+.root[data-dragging] .indicator,
+.root[data-dragging] .content {
+  transition: none;
+}
+
+.root[data-refreshing] .indicator { color: var(--flowlet-color-primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .indicator, .content { transition: none; }
+}

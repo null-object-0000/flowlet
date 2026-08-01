@@ -6,7 +6,9 @@ import { useMobileDeviceAgents, useMobileDevices, useMobileLanProbes } from "../
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
-import { MobileRefreshButton } from "../MobileRefreshButton";
+import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
+import { useMobileRefreshController } from "../useMobileRefreshController";
+import { MobilePullToRefresh } from "../MobilePullToRefresh";
 import styles from "./MobilePage.module.css";
 
 export function MobileDevicesPage() {
@@ -14,16 +16,20 @@ export function MobileDevicesPage() {
   const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null);
   const devices = useMobileDevices();
   const lanProbes = useMobileLanProbes();
+  const refreshController = useMobileRefreshController();
   const probeByDevice = new Map((lanProbes.data ?? []).map((probe) => [probe.deviceId, probe]));
 
   return (
+    <MobilePullToRefresh
+      disabled={refreshController.disabled}
+      refreshing={refreshController.loading}
+      onRefresh={refreshController.refresh}
+    >
     <section className={styles.page}>
       <header className={`${styles.heading} ${styles.headingWithPicker}`}>
         <div className={styles.headingTitleRow}>
           <h2>{t("设备")}</h2>
-          <div className={styles.headingActions}>
-            <MobileRefreshButton />
-          </div>
+          <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
         </div>
         <p>{t("查看同步设备、已安装 Agent 及其 Flowlet 接入状态")}</p>
       </header>
@@ -78,6 +84,7 @@ export function MobileDevicesPage() {
         })}
       </div>
     </section>
+    </MobilePullToRefresh>
   );
 }
 

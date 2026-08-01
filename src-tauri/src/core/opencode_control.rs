@@ -12,9 +12,9 @@ const LEGACY_CONTROL_URL: &str = "http://127.0.0.1:4096";
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenCodePermissionTool {
-    #[serde(rename(deserialize = "messageID", serialize = "messageId"))]
+    #[serde(rename = "messageId", alias = "messageID")]
     pub message_id: String,
-    #[serde(rename(deserialize = "callID", serialize = "callId"))]
+    #[serde(rename = "callId", alias = "callID")]
     pub call_id: String,
 }
 
@@ -22,7 +22,7 @@ pub struct OpenCodePermissionTool {
 #[serde(rename_all = "camelCase")]
 pub struct OpenCodePermissionRequest {
     pub id: String,
-    #[serde(rename(deserialize = "sessionID", serialize = "sessionId"))]
+    #[serde(rename = "sessionId", alias = "sessionID")]
     pub session_id: String,
     pub permission: String,
     #[serde(default)]
@@ -360,6 +360,27 @@ mod tests {
             merge_runtime_status("codex", "ses_waiting", "running", &pending),
             "running"
         );
+    }
+
+    #[test]
+    fn permission_wire_format_round_trips_and_accepts_opencode_id_casing() {
+        let request = serde_json::from_value::<OpenCodePermissionRequest>(json!({
+            "id": "per_target",
+            "sessionID": "ses_target",
+            "permission": "external_directory",
+            "patterns": ["C:\\Windows\\System32\\drivers\\etc\\*"],
+            "tool": {"messageID": "msg_1", "callID": "call_1"}
+        }))
+        .unwrap();
+
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(wire["sessionId"], "ses_target");
+        assert_eq!(wire["tool"]["messageId"], "msg_1");
+        assert_eq!(wire["tool"]["callId"], "call_1");
+        assert!(wire.get("sessionID").is_none());
+        let decoded = serde_json::from_value::<OpenCodePermissionRequest>(wire).unwrap();
+        assert_eq!(decoded.session_id, "ses_target");
+        assert_eq!(decoded.tool.unwrap().message_id, "msg_1");
     }
 
     async fn test_server() -> (String, Arc<Mutex<Vec<(String, Value)>>>) {

@@ -1,6 +1,7 @@
 use super::MobileAppState;
 use crate::core::device_identity::{
     DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession, SyncedAgentProfile,
+    SyncedAgentSession,
 };
 
 #[tauri::command]
@@ -155,6 +156,37 @@ pub(super) async fn refresh_shared_device_usage_lan(
     device_id: Option<String>,
 ) -> Result<crate::core::lan_sync::LanRefreshResult, String> {
     crate::core::lan_sync::refresh_known_peers(state.storage.clone(), device_id.as_deref()).await
+}
+
+#[tauri::command]
+pub(super) async fn refresh_shared_device(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: String,
+) -> Result<crate::core::device_sync::DeviceRefreshResult, String> {
+    crate::core::device_sync::refresh_device(state.storage.clone(), &device_id).await
+}
+
+#[tauri::command]
+pub(super) async fn refresh_shared_device_session_lan(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: String,
+    agent_type: String,
+    session_id: String,
+) -> Result<SyncedAgentSession, String> {
+    let storage = state.storage.clone();
+    let snapshot =
+        crate::core::lan_sync::fetch_session(&storage, &device_id, &agent_type, &session_id)
+            .await?;
+    let session = snapshot.session;
+    let imported_session = session.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .upsert_imported_device_session(&device_id, &imported_session, &snapshot.generated_at)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("保存直连会话快照任务失败：{error}"))??;
+    Ok(session)
 }
 
 #[tauri::command]

@@ -131,6 +131,56 @@ export function useMobileDeviceSyncActions() {
   return { saveS3Config, testS3Connection, refreshS3 };
 }
 
+export function useMobileDeviceRefresh(deviceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!deviceId) throw new Error("请先选择设备");
+      return mobileDeviceSyncCommands.refreshDevice(deviceId);
+    },
+    onSettled: async () => {
+      if (!deviceId) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.agents(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.dailyUsage(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.hourlyUsage(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.sessions(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.lanProbes() }),
+      ]);
+    },
+  });
+}
+
+export function useMobileSessionLanRefresh(session: {
+  deviceId: string;
+  agentType: string;
+  sessionId: string;
+} | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!session) throw new Error("未选择会话");
+      return mobileDeviceSyncCommands.refreshSessionLan(
+        session.deviceId,
+        session.agentType,
+        session.sessionId,
+      );
+    },
+    onSuccess: async () => {
+      if (!session) return;
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.mobileDeviceSync.sessions(session.deviceId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.mobileDeviceSync.permissions(session.deviceId, session.sessionId),
+        }),
+      ]);
+    },
+  });
+}
+
 /**
  * 监听 Rust 后台定时同步完成事件，触发本地 query 失效。
  * 同时在应用从后台恢复时立即失效一次，避免事件丢失导致数据陈旧。

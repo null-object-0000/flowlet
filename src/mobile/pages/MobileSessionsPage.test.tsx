@@ -1,8 +1,12 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   reply: vi.fn<() => Promise<void>>(),
+  refreshDevice: vi.fn<() => Promise<{ source: "lan" | "s3"; refreshedDevices: number }>>(),
+  refreshS3: vi.fn<() => Promise<void>>(),
+  refreshSession: vi.fn<() => Promise<void>>(),
+  permissionsQuery: vi.fn(),
 }));
 
 vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
@@ -11,8 +15,10 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileDeviceSyncActions: () => ({
     saveS3Config: { isPending: false, mutateAsync: vi.fn() },
     testS3Connection: { isPending: false, mutateAsync: vi.fn() },
-    refreshS3: { isPending: false, mutateAsync: vi.fn() },
+    refreshS3: { isPending: false, mutateAsync: mocks.refreshS3 },
   }),
+  useMobileDeviceRefresh: () => ({ isPending: false, mutateAsync: mocks.refreshDevice }),
+  useMobileSessionLanRefresh: () => ({ isPending: false, mutateAsync: mocks.refreshSession }),
   useMobileSessions: () => ({
     data: [{
       deviceId: "device-1",
@@ -65,24 +71,7 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
     isError: false,
   }),
   useMobileWaitingSessionLanRefresh: () => {},
-  useMobileRemotePermissions: () => ({
-    isLoading: false,
-    isError: false,
-    data: {
-      available: true,
-      serverUrl: "http://127.0.0.1:4096",
-      error: null,
-      permissions: [{
-        id: "permission-1",
-        sessionId: "session-1",
-        permission: "bash",
-        patterns: ["cargo test"],
-        metadata: {},
-        always: [],
-        tool: null,
-      }],
-    },
-  }),
+  useMobileRemotePermissions: () => mocks.permissionsQuery(),
   useReplyMobileRemotePermission: () => ({
     isPending: false,
     variables: undefined,
@@ -99,7 +88,69 @@ function openSession(title: string) {
 }
 
 describe("MobileSessionsPage", () => {
-  beforeEach(() => mocks.reply.mockReset().mockResolvedValue(undefined));
+  beforeEach(() => {
+    mocks.reply.mockReset().mockResolvedValue(undefined);
+    mocks.refreshDevice.mockReset().mockResolvedValue({ source: "lan", refreshedDevices: 1 });
+    mocks.refreshS3.mockReset().mockResolvedValue(undefined);
+    mocks.refreshSession.mockReset().mockResolvedValue(undefined);
+    mocks.permissionsQuery.mockReset().mockReturnValue({
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      data: {
+        available: true,
+        serverUrl: "http://127.0.0.1:4096",
+        error: null,
+        permissions: [{
+          id: "permission-1",
+          sessionId: "session-1",
+          permission: "bash",
+          patterns: ["cargo test"],
+          metadata: {},
+          always: [],
+          tool: null,
+        }],
+      },
+    });
+  });
+
+  it("distinguishes an unavailable OpenCode control service from a LAN failure", () => {
+    mocks.permissionsQuery.mockReturnValue({
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      data: {
+        available: false,
+        serverUrl: "http://127.0.0.1:4096",
+        error: "无法连接 OpenCode 控制服务",
+        permissions: [],
+      },
+    });
+    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    const dialog = openSession("Fix CI");
+
+    expect(within(dialog).getByText("OpenCode 控制服务未连接")).toBeInTheDocument();
+    expect(within(dialog).queryByText("目标设备当前无法直连，请确认两台设备位于同一局域网。")).toBeNull();
+  });
+
+  it("does not render a stale unavailable result while permissions are refetching", () => {
+    mocks.permissionsQuery.mockReturnValue({
+      isLoading: false,
+      isFetching: true,
+      isError: false,
+      data: {
+        available: false,
+        serverUrl: "http://127.0.0.1:4096",
+        error: "旧的不可用结果",
+        permissions: [],
+      },
+    });
+    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    const dialog = openSession("Fix CI");
+
+    expect(within(dialog).getByText("正在连接 Agent 所在设备…")).toBeInTheDocument();
+    expect(within(dialog).queryByText("OpenCode 控制服务未连接")).toBeNull();
+  });
 
   it("approves a remote OpenCode permission from the session sheet", async () => {
     render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
@@ -111,9 +162,11 @@ describe("MobileSessionsPage", () => {
     // 卡片上只有最近一次用户输入摘要，审批在弹窗里进行。
     const card = screen.getByText("Fix CI").closest("article")!;
     expect(within(card).getByText("**不要渲染我**")).toBeInTheDocument();
+    expect(within(card).getAllByText("OpenCode")).toHaveLength(1);
     expect(within(card).queryByRole("button", { name: "同意本次" })).toBeNull();
 
     const dialog = openSession("Fix CI");
+    expect(within(dialog).getAllByText("OpenCode")).toHaveLength(1);
     expect(within(dialog).getByText("cargo test")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "同意本次" }));
     await waitFor(() => expect(mocks.reply).toHaveBeenCalledWith({
@@ -139,9 +192,89 @@ describe("MobileSessionsPage", () => {
   it("opens the sheet for non-OpenCode sessions without approval actions", async () => {
     render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
     const dialog = openSession("Refactor parser");
+    expect(within(dialog).getAllByText("Claude Code")).toHaveLength(1);
     expect(within(dialog).getByText("整理解析器")).toBeInTheDocument();
     expect(await within(dialog).findByText("已完成整理")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "同意本次" })).toBeNull();
+  });
+
+  it("refreshes only the selected device and supports pull to refresh", async () => {
+    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
+    expect(screen.getByText("尚未成功刷新")).toBeInTheDocument();
+
+    const page = screen.getByText("Office PC 会话").closest("section")!;
+    const pullSurface = page.parentElement!;
+    fireEvent.touchStart(pullSurface, { touches: [{ clientY: 10 }] });
+    fireEvent.touchMove(pullSurface, { touches: [{ clientY: 140 }] });
+    fireEvent.touchEnd(pullSurface);
+    await waitFor(() => expect(mocks.refreshDevice).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByText(/最后刷新：/)).toBeInTheDocument());
+    expect(mocks.refreshS3).not.toHaveBeenCalled();
+  });
+
+  it("blocks page refresh, supports expand-collapse-close gestures, and refreshes one session over LAN", async () => {
+    const intervalSpy = vi.spyOn(window, "setInterval");
+    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    const dialog = openSession("Refactor parser");
+    await waitFor(() => expect(mocks.refreshSession).toHaveBeenCalledOnce());
+    expect(within(dialog).getByText(/最后刷新：/)).toBeInTheDocument();
+    const periodicRefresh = intervalSpy.mock.calls.find(([, delay]) => delay === 5_000)?.[0];
+    expect(periodicRefresh).toBeTypeOf("function");
+    await act(async () => {
+      (periodicRefresh as () => void)();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mocks.refreshSession).toHaveBeenCalledTimes(2));
+    const pullSurface = screen.getByText("Office PC 会话").closest("section")!.parentElement!;
+    const body = within(dialog).getByText("最近一轮").parentElement!.parentElement!;
+    expect(pullSurface).not.toHaveAttribute("data-pulling");
+    expect(dialog).not.toHaveAttribute("data-expanded");
+    expect(getComputedStyle(body).overflowY).toBe("hidden");
+    expect(getComputedStyle(body).touchAction).toBe("none");
+    expect(within(dialog).queryByRole("button", { name: "展开" })).toBeNull();
+    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 300 }] });
+    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 260 }] });
+    expect(dialog).toHaveAttribute("data-expanded");
+    expect(getComputedStyle(body).overflowY).toBe("auto");
+    expect(getComputedStyle(body).touchAction).toBe("pan-y");
+
+    Object.defineProperty(body, "scrollTop", { configurable: true, writable: true, value: 40 });
+    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
+    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 330 }] });
+    fireEvent.touchEnd(body);
+    expect(dialog).toHaveAttribute("data-expanded");
+
+    body.scrollTop = 0;
+    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
+    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 290 }] });
+    fireEvent.touchEnd(body);
+    expect(dialog).toHaveAttribute("data-expanded");
+
+    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
+    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 320 }] });
+    expect(dialog).not.toHaveAttribute("data-expanded");
+    expect(getComputedStyle(body).overflowY).toBe("hidden");
+    expect(getComputedStyle(body).touchAction).toBe("none");
+
+    fireEvent.touchStart(pullSurface, { touches: [{ clientY: 10 }] });
+    fireEvent.touchMove(pullSurface, { touches: [{ clientY: 150 }] });
+    fireEvent.touchEnd(pullSurface);
+    expect(mocks.refreshDevice).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "刷新会话" }));
+    await waitFor(() => expect(mocks.refreshSession).toHaveBeenCalledTimes(3));
+
+    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
+    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 310 }] });
+    fireEvent.touchEnd(body);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
+    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 330 }] });
+    fireEvent.touchEnd(body);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    intervalSpy.mockRestore();
   });
 
   it("switches devices from the page title without offering an all-devices option", async () => {

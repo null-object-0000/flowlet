@@ -707,6 +707,44 @@ impl Storage {
         Ok(sessions)
     }
 
+    /// 直连刷新单个会话时只覆盖该会话，不删除同设备的其他会话快照。
+    pub fn upsert_imported_device_session(
+        &self,
+        device_id: &str,
+        session: &SyncedAgentSession,
+        generated_at: &str,
+    ) -> Result<(), StorageError> {
+        let session_json = serde_json::to_string(session)
+            .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection.execute(
+            "INSERT INTO device_agent_sessions (
+                device_id, agent_type, session_id, runtime_status, activity_at,
+                session_json, snapshot_generated_at, imported_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
+             ON CONFLICT(device_id, agent_type, session_id) DO UPDATE SET
+                runtime_status = excluded.runtime_status,
+                activity_at = excluded.activity_at,
+                session_json = excluded.session_json,
+                snapshot_generated_at = excluded.snapshot_generated_at,
+                imported_at = datetime('now')
+             WHERE excluded.snapshot_generated_at >= device_agent_sessions.snapshot_generated_at",
+            params![
+                device_id,
+                session.agent_type,
+                session.session_id,
+                session.runtime_status,
+                session.activity_at,
+                session_json,
+                generated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn imported_device_agents(
         &self,
         device_id: &str,

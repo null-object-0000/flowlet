@@ -120,6 +120,63 @@ pub struct S3DeviceSyncResult {
     pub uploaded_key: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceRefreshResult {
+    pub source: String,
+    pub refreshed_devices: usize,
+}
+
+pub async fn build_synced_agent_session(
+    storage: Storage,
+    agent_type: &str,
+    session_id: &str,
+) -> Result<Option<SyncedAgentSession>, String> {
+    let agent_type = agent_type.trim().to_string();
+    let session_id = session_id.trim().to_string();
+    if agent_type.is_empty() || session_id.is_empty() {
+        return Err("Agent 类型和会话 ID 不能为空".to_string());
+    }
+    let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(row) = storage
+            .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|row| row.agent_type == agent_type && row.session_id == session_id)
+        else {
+            return Ok(None);
+        };
+        let mut session = synced_agent_session_from_row(row);
+        if let Some(timeline) =
+            crate::core::agent_session_timeline::get_native_agent_session_last_interaction(
+                &session.agent_type,
+                &session.session_id,
+            )
+            .map_err(|error| error.to_string())?
+        {
+            session.last_interaction = Some(SyncedAgentInteraction {
+                events: timeline
+                    .events
+                    .into_iter()
+                    .map(|event| SyncedAgentInteractionEvent {
+                        id: event.id,
+                        kind: event.kind,
+                        timestamp: event.timestamp,
+                        title: event.title,
+                        content: event.content,
+                        model: event.model,
+                        status: event.status,
+                    })
+                    .collect(),
+            });
+        }
+        Ok(Some(session))
+    })
+    .await
+    .map_err(|_| "读取单个 Agent 会话任务失败".to_string())?
+}
+
 pub async fn build_device_snapshot(
     storage: Storage,
     identity: DeviceIdentity,
@@ -130,7 +187,7 @@ pub async fn build_device_snapshot(
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
     let (days, hours, sessions) = tauri::async_runtime::spawn_blocking(move || {
         // 快照携带「代理 + Agent 原生」合并口径，其他设备/移动端才能看到
-        // 本机未经过 Flowlet 的 Token（schema v6 的 native_* 字段）。
+        // 本机未经过 Flowlet 的 Token（schema v6 的日/小时 native_* 字段）。
         let days = snapshot_storage
             .local_daily_usage_totals_with_native()
             .map_err(|error| error.to_string())?;
@@ -141,20 +198,7 @@ pub async fn build_device_snapshot(
             .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
             .map_err(|error| error.to_string())?
             .into_iter()
-            .map(|row| SyncedAgentSession {
-                agent_type: row.agent_type,
-                session_id: row.session_id,
-                parent_session_id: row.parent_session_id,
-                runtime_status: row.runtime_status,
-                title: sanitize_session_text(row.title, 512),
-                client_name: sanitize_session_text(row.client_name, 128),
-                activity_at: row.activity_at,
-                flowlet_observed: row.flowlet_observed,
-                request_count: row.request_count,
-                error_count: row.error_count,
-                known_tokens: row.known_tokens,
-                last_interaction: None,
-            })
+            .map(synced_agent_session_from_row)
             .collect::<Vec<_>>();
         let mut sessions = select_sessions_for_sync(sessions);
         for session in &mut sessions {
@@ -947,6 +991,110 @@ pub async fn pull_device_usage(
     })
 }
 
+fn synced_agent_session_from_row(row: crate::core::config::AgentSessionRow) -> SyncedAgentSession {
+    let native_summary = row
+        .native_summary
+        .as_ref()
+        .filter(|summary| summary.source_available);
+    SyncedAgentSession {
+        agent_type: row.agent_type,
+        session_id: row.session_id,
+        parent_session_id: row.parent_session_id,
+        runtime_status: row.runtime_status,
+        title: sanitize_session_text(row.title, 512),
+        client_name: sanitize_session_text(row.client_name, 128),
+        activity_at: row.activity_at,
+        flowlet_observed: row.flowlet_observed,
+        request_count: row.request_count,
+        error_count: row.error_count,
+        known_tokens: row.known_tokens,
+        native_turn_count: native_summary.map(|summary| summary.turn_count),
+        native_total_tokens: native_summary
+            .and_then(|summary| summary.usage.as_ref())
+            .map(|usage| usage.total_tokens),
+        native_truncated: native_summary.is_some_and(|summary| summary.truncated),
+        last_interaction: None,
+    }
+}
+
+async fn pull_device_usage_for_device(
+    storage: Storage,
+    device_id: &str,
+) -> Result<S3DevicePullResult, String> {
+    let device_id = device_id.trim();
+    if device_id.is_empty() {
+        return Err("设备 ID 不能为空".to_string());
+    }
+    let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
+    let secret = read_secret(&config)?;
+    let store = S3Store::new(&config, &secret)?;
+    let object_key = config.snapshot_key(device_id);
+    let bytes = store.get(&object_key).await?;
+    let bundle = DeviceUsageBundle::from_bytes(&bytes)?;
+    if bundle.snapshot.device_id != device_id
+        || config.snapshot_key(&bundle.snapshot.device_id) != object_key
+    {
+        return Err("S3 快照 deviceId 与当前设备不一致".to_string());
+    }
+    crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
+    let snapshot = bundle.snapshot;
+    let import_storage = storage.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        import_storage
+            .import_device_usage(
+                snapshot.schema_version,
+                &snapshot.device_id,
+                &snapshot.device_created_at,
+                &snapshot.resolved_display_name(),
+                &snapshot.resolved_platform(),
+                &snapshot.resolved_app_version(),
+                &snapshot.generated_at,
+                snapshot.timezone_offset_minutes,
+                &snapshot.days,
+                &snapshot.hours,
+                &snapshot.sessions,
+                &snapshot.agents,
+            )
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "导入指定设备 S3 快照任务失败".to_string())??;
+    Ok(S3DevicePullResult {
+        remote_devices: 1,
+        imported_devices: 1,
+        imported_days: result.imported_days,
+        unchanged_days: result.unchanged_days,
+        failed_objects: 0,
+        failure_details: Vec::new(),
+    })
+}
+
+/// 移动端页面的指定设备刷新：先直接请求该设备的 LAN 快照；只有直连没有
+/// 成功更新时才读取该设备唯一的 S3 对象，不列举或下载其他设备。
+pub async fn refresh_device(
+    storage: Storage,
+    device_id: &str,
+) -> Result<DeviceRefreshResult, String> {
+    let device_id = device_id.trim();
+    if device_id.is_empty() {
+        return Err("设备 ID 不能为空".to_string());
+    }
+    let lan = crate::core::lan_sync::refresh_known_peers(storage.clone(), Some(device_id)).await?;
+    if lan.refreshed_devices > 0 {
+        return Ok(DeviceRefreshResult {
+            source: "lan".to_string(),
+            refreshed_devices: lan.refreshed_devices,
+        });
+    }
+
+    let _guard = acquire_sync_guard()?;
+    let result = pull_device_usage_for_device(storage, device_id).await?;
+    Ok(DeviceRefreshResult {
+        source: "s3".to_string(),
+        refreshed_devices: result.imported_devices,
+    })
+}
+
 fn snapshot_object_label(key: &str) -> String {
     key.strip_suffix("/snapshot.json")
         .and_then(|prefix| prefix.rsplit('/').next())
@@ -1353,8 +1501,72 @@ mod tests {
             request_count: id as i64,
             error_count: 0,
             known_tokens: id as i64 * 100,
+            native_turn_count: None,
+            native_total_tokens: None,
+            native_truncated: false,
             last_interaction: None,
         }
+    }
+
+    #[test]
+    fn synced_session_keeps_native_summary_separate_from_flowlet_metrics() {
+        let row = crate::core::config::AgentSessionRow {
+            agent_type: "codex-cli".to_string(),
+            session_id: "native-session".to_string(),
+            runtime_status: "idle".to_string(),
+            title: Some("Native Codex".to_string()),
+            project_path: None,
+            parent_session_id: None,
+            client_id: None,
+            client_name: Some("Codex CLI".to_string()),
+            native_started_at: Some("2026-08-01T09:00:00Z".to_string()),
+            native_updated_at: Some("2026-08-01T10:00:00Z".to_string()),
+            activity_at: "2026-08-01T10:00:00Z".to_string(),
+            flowlet_observed: false,
+            started_at: "2026-08-01T09:00:00Z".to_string(),
+            updated_at: "2026-08-01T10:00:00Z".to_string(),
+            request_count: 0,
+            success_count: 0,
+            error_count: 0,
+            known_tokens: 0,
+            input_tokens: 0,
+            input_cached_tokens: 0,
+            input_uncached_tokens: 0,
+            cache_measured_input_tokens: 0,
+            output_tokens: 0,
+            unknown_usage_count: 0,
+            estimated_cost: 0.0,
+            estimated_input_uncached_cost: 0.0,
+            estimated_input_cached_cost: 0.0,
+            estimated_input_cache_write_cost: 0.0,
+            estimated_output_cost: 0.0,
+            native_summary: Some(crate::core::config::AgentSessionNativeSummary {
+                source_available: true,
+                truncated: true,
+                turn_count: 8,
+                usage: Some(crate::core::config::AgentSessionNativeUsage {
+                    input_tokens: 10_000,
+                    cached_input_tokens: 2_000,
+                    cache_write_input_tokens: 0,
+                    output_tokens: 345,
+                    reasoning_tokens: 0,
+                    total_tokens: 12_345,
+                    cost: None,
+                    cost_currency: None,
+                    api_equivalent: None,
+                    plan_consumption: None,
+                }),
+                models: vec!["gpt-5".to_string()],
+            }),
+            native_synced_at: Some("2026-08-01T10:01:00Z".to_string()),
+        };
+
+        let synced = synced_agent_session_from_row(row);
+        assert_eq!(synced.request_count, 0);
+        assert_eq!(synced.known_tokens, 0);
+        assert_eq!(synced.native_turn_count, Some(8));
+        assert_eq!(synced.native_total_tokens, Some(12_345));
+        assert!(synced.native_truncated);
     }
 
     #[test]

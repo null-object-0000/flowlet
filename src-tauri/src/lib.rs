@@ -1266,6 +1266,8 @@ fn run_mobile() {
             mobile_commands::list_remote_opencode_permissions,
             mobile_commands::reply_remote_opencode_permission,
             mobile_commands::refresh_shared_device_usage_lan,
+            mobile_commands::refresh_shared_device,
+            mobile_commands::refresh_shared_device_session_lan,
             mobile_commands::probe_lan_peers,
             mobile_commands::list_cached_lan_probes,
         ])

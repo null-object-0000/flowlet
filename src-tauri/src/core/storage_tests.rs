@@ -2251,6 +2251,9 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
         request_count: 3,
         error_count: 0,
         known_tokens: 120,
+        native_turn_count: None,
+        native_total_tokens: None,
+        native_truncated: false,
         last_interaction: None,
     };
     let device_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -2314,6 +2317,68 @@ fn imported_device_sessions_replace_the_previous_device_snapshot() {
             .as_deref(),
         Some("new interaction")
     );
+}
+
+#[test]
+fn direct_session_refresh_updates_only_the_target_session() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    let device_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    let session = |id: &str, status: &str, activity_at: &str| SyncedAgentSession {
+        agent_type: "claude-code".to_string(),
+        session_id: id.to_string(),
+        parent_session_id: None,
+        runtime_status: status.to_string(),
+        title: Some(id.to_string()),
+        client_name: Some("Claude Code".to_string()),
+        activity_at: activity_at.to_string(),
+        flowlet_observed: true,
+        request_count: 1,
+        error_count: 0,
+        known_tokens: 10,
+        native_turn_count: None,
+        native_total_tokens: None,
+        native_truncated: false,
+        last_interaction: None,
+    };
+    storage
+        .import_device_usage(
+            2,
+            device_id,
+            "2026-07-01T00:00:00Z",
+            "Work PC",
+            "windows",
+            "0.1.0",
+            "2026-07-29T10:00:00Z",
+            480,
+            &[],
+            &[],
+            &[
+                session("target", "idle", "2026-07-29T09:00:00Z"),
+                session("untouched", "idle", "2026-07-29T08:00:00Z"),
+            ],
+            &[],
+        )
+        .expect("import sessions");
+
+    let mut refreshed = session("target", "running", "2026-07-29T10:30:00Z");
+    refreshed.request_count = 4;
+    storage
+        .upsert_imported_device_session(device_id, &refreshed, "2026-07-29T10:30:01Z")
+        .expect("upsert direct session");
+
+    let rows = storage
+        .imported_device_sessions(Some(device_id))
+        .expect("read sessions");
+    assert_eq!(rows.len(), 2);
+    let target = rows
+        .iter()
+        .find(|row| row.session.session_id == "target")
+        .unwrap();
+    assert_eq!(target.session.runtime_status, "running");
+    assert_eq!(target.session.request_count, 4);
+    assert!(rows.iter().any(|row| row.session.session_id == "untouched"));
 }
 
 #[test]

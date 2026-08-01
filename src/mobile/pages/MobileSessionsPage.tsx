@@ -12,8 +12,11 @@ import {
   MobileDeviceTitlePicker,
   useMobileDevicePickerState,
 } from "../MobileDevicePicker";
-import { MobileRefreshButton } from "../MobileRefreshButton";
+import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
+import { useMobileRefreshController } from "../useMobileRefreshController";
+import { MobilePullToRefresh } from "../MobilePullToRefresh";
 import { MobileSessionSheet, agentLabel, runtimeLabel } from "../MobileSessionSheet";
+import { mobileSessionMetrics } from "../sessionMetrics";
 import styles from "./MobilePage.module.css";
 
 type SessionStatusFilter = "all" | "active" | "waiting_user" | "idle";
@@ -31,6 +34,7 @@ export function MobileSessionsPage() {
   const [statusFilter, setStatusFilter] = useState<SessionStatusFilter>("all");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const sessions = useMobileSessions(devicePicker.effectiveDeviceId);
+  const refreshController = useMobileRefreshController(devicePicker.effectiveDeviceId);
   const waitingDeviceIds = useMemo(
     () => [...new Set(
       (sessions.data ?? [])
@@ -50,13 +54,16 @@ export function MobileSessionsPage() {
   );
 
   return (
+    <MobilePullToRefresh
+      disabled={refreshController.disabled || selectedKey !== null}
+      refreshing={refreshController.loading}
+      onRefresh={refreshController.refresh}
+    >
     <section className={styles.page}>
       <header className={`${styles.heading} ${styles.headingWithPicker}`}>
         <div className={styles.headingTitleRow}>
           <h2><MobileDeviceTitlePicker state={devicePicker} formatTitle={(name) => `${name ?? "…"} ${t("会话")}`} /></h2>
-          <div className={styles.headingActions}>
-            <MobileRefreshButton />
-          </div>
+          <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
         </div>
         <p>{t("查看该设备同步的最近会话与实时运行状态")}</p>
       </header>
@@ -105,6 +112,7 @@ export function MobileSessionsPage() {
 
       <MobileSessionSheet session={selectedSession} onClose={() => setSelectedKey(null)} />
     </section>
+    </MobilePullToRefresh>
   );
 }
 
@@ -120,6 +128,7 @@ function SessionCard({
   const { t } = useAppPreferences();
   const title = session.title?.trim() || t("未命名会话");
   const teaser = lastUserInputPreview(session);
+  const metrics = mobileSessionMetrics(session);
   return (
     <article
       className={styles.sessionCard}
@@ -147,15 +156,17 @@ function SessionCard({
       </div>
       <div className={styles.sessionMeta}>
         <span>{session.deviceDisplayName}</span>
-        {session.clientName ? <span>{session.clientName}</span> : null}
       </div>
       {teaser ? <p className={styles.sessionTeaser}>{teaser}</p> : null}
       <div className={styles.sessionMetrics}>
-        <span>{formatCompactNumber(session.knownTokens, language)} Tokens</span>
-        <span>{t("{count} 次请求", { count: formatInteger(session.requestCount, language) })}</span>
-        {session.errorCount > 0 ? (
+        <span>{metrics.truncated ? "≥" : ""}{metrics.tokens == null ? "—" : formatCompactNumber(metrics.tokens, language)} Tokens</span>
+        <span>{metrics.source === "flowlet"
+          ? t("{count} 次请求", { count: formatInteger(metrics.count, language) })
+          : t("{turns} 个 Agent 轮次", { turns: metrics.count == null ? "—" : formatInteger(metrics.count, language) })}</span>
+        {metrics.source === "agent-native" ? <span>{t("Agent 原生")}</span> : null}
+        {metrics.failures != null && metrics.failures > 0 ? (
           <span data-error="true">
-            {t("{count} 次失败", { count: formatInteger(session.errorCount, language) })}
+            {t("{count} 次失败", { count: formatInteger(metrics.failures, language) })}
           </span>
         ) : null}
       </div>

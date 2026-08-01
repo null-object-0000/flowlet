@@ -190,7 +190,62 @@ pub fn merge_agent_session_catalog(
             merged.insert(key, observed);
         }
     }
-    merged.into_values().collect()
+    let mut rows = merged.into_values().collect::<Vec<_>>();
+    aggregate_descendant_runtime_status(&mut rows);
+    rows
+}
+
+/// 根会话是列表与移动端快照的展示单位，因此它的运行状态必须覆盖整棵子会话树。
+/// 等待确认比运行中更需要用户注意；空闲或未知子会话不覆盖父会话自身状态。
+pub fn aggregate_descendant_runtime_status(catalog: &mut [AgentSessionRow]) {
+    let index_by_key = catalog
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (session_key(row), index))
+        .collect::<HashMap<_, _>>();
+    let parent_by_key = catalog
+        .iter()
+        .filter_map(|row| {
+            row.parent_session_id.as_ref().map(|parent_session_id| {
+                (
+                    session_key(row),
+                    (row.agent_type.clone(), parent_session_id.clone()),
+                )
+            })
+        })
+        .collect::<HashMap<_, _>>();
+    let active_descendants = catalog
+        .iter()
+        .filter(|row| runtime_status_priority(&row.runtime_status) > 0)
+        .map(|row| (session_key(row), row.runtime_status.clone()))
+        .collect::<Vec<_>>();
+
+    for (descendant_key, descendant_status) in active_descendants {
+        let mut current = descendant_key;
+        let mut visited = HashSet::new();
+        while visited.insert(current.clone()) {
+            let Some(parent_key) = parent_by_key.get(&current).cloned() else {
+                break;
+            };
+            let Some(parent_index) = index_by_key.get(&parent_key).copied() else {
+                break;
+            };
+            if runtime_status_priority(&descendant_status)
+                > runtime_status_priority(&catalog[parent_index].runtime_status)
+            {
+                catalog[parent_index].runtime_status = descendant_status.clone();
+            }
+            current = parent_key;
+        }
+    }
+}
+
+fn runtime_status_priority(status: &str) -> u8 {
+    match status {
+        "waiting_user" => 2,
+        "running" => 1,
+        _ => 0,
+    }
 }
 
 fn list_claude_native_sessions() -> Vec<AgentSessionRow> {
@@ -997,6 +1052,53 @@ fn parse_session_time(value: &str) -> i64 {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    fn catalog_test_row(
+        session_id: &str,
+        parent_session_id: Option<&str>,
+        runtime_status: &str,
+    ) -> AgentSessionRow {
+        native_row(
+            "claude-code",
+            session_id.to_string(),
+            parent_session_id.map(str::to_string),
+            runtime_status.to_string(),
+            None,
+            None,
+            Some("2026-08-01T00:00:00Z".to_string()),
+            Some("2026-08-01T00:01:00Z".to_string()),
+        )
+    }
+
+    #[test]
+    fn aggregates_descendant_runtime_status_into_root_session() {
+        let rows = merge_agent_session_catalog(
+            Vec::new(),
+            vec![
+                catalog_test_row("root", None, "idle"),
+                catalog_test_row("running-child", Some("root"), "running"),
+                catalog_test_row("waiting-grandchild", Some("running-child"), "waiting_user"),
+            ],
+        );
+        let status = |session_id: &str| {
+            rows.iter()
+                .find(|row| row.session_id == session_id)
+                .map(|row| row.runtime_status.as_str())
+        };
+        assert_eq!(status("waiting-grandchild"), Some("waiting_user"));
+        assert_eq!(status("running-child"), Some("waiting_user"));
+        assert_eq!(status("root"), Some("waiting_user"));
+    }
+
+    #[test]
+    fn descendant_runtime_aggregation_tolerates_parent_cycles() {
+        let mut rows = vec![
+            catalog_test_row("cycle-a", Some("cycle-b"), "running"),
+            catalog_test_row("cycle-b", Some("cycle-a"), "idle"),
+        ];
+        aggregate_descendant_runtime_status(&mut rows);
+        assert!(rows.iter().all(|row| row.runtime_status == "running"));
+    }
 
     #[test]
     fn infers_codex_running_waiting_and_idle_runtime_states() {

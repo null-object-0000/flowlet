@@ -11,10 +11,30 @@ use serde::Deserialize;
 pub const DEFAULT_CONFIG_JSON: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config.json"));
 
+/// 上游模型变体 → 白名单规范模型 ID 的映射（键值均按小写匹配）。
+/// 部分渠道端点的 /models 会返回与规范名不同、但实际是同一模型的日期快照或别名
+/// （如千问 Token Plan 套餐端点的 deepseek-v4-flash-0731 即 deepseek-v4-flash）。
+/// 变体按规范 ID 参与白名单求交、用量合并与品牌/档位/价格解析；生成路由时
+/// virtual_model_id 用规范 ID，upstream_model 保留 /models 返回的上游原名。
+/// 必须与 src/domains/channel/types.ts 的 MODEL_ALIASES 保持一致。
+const MODEL_ALIASES: [(&str, &str); 1] = [("deepseek-v4-flash-0731", "deepseek-v4-flash")];
+
+/// 把任意模型名解析为规范键（小写）：命中别名表返回映射目标，否则原样小写。
+/// 规范键可直接与 supported_models() 的小写形式比较。
+pub(crate) fn canonical_model_key(model_id: &str) -> String {
+    let key = model_id.trim().to_lowercase();
+    MODEL_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == key)
+        .map(|(_, canonical)| canonical.to_string())
+        .unwrap_or(key)
+}
+
 /// Flowlet 支持模型的官方归属。实际请求可以经任意渠道账号转发，但模型品牌、
 /// 官方规格和基准价格始终由模型 ID 决定，不由路由渠道决定。
+/// 别名变体（如 deepseek-v4-flash-0731）按规范模型解析归属。
 pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static str> {
-    match model_id.trim().to_lowercase().as_str() {
+    match canonical_model_key(model_id).as_str() {
         "longcat-2.0" => Some("longcat"),
         "deepseek-v4-flash" | "deepseek-v4-pro" => Some("deepseek"),
         "kimi-k3" | "kimi-k2.7-code" => Some("kimi"),
@@ -406,7 +426,8 @@ impl ChannelsConfig {
     /// 同一上游模型在任何渠道账号下都应得到相同的聚合档位，与「我们总共支持哪些模型」
     /// 的全局白名单语义一致。用于路由生成。
     pub fn flowlet_tiers_for_model(&self, model: &str) -> Vec<String> {
-        let normalized = model.trim().to_lowercase();
+        // 别名变体（如 deepseek-v4-flash-0731）按规范模型查档位。
+        let normalized = canonical_model_key(model);
         self.flowlet_tiers
             .values()
             .find_map(|channel_tiers| channel_tiers.get(&normalized).cloned())
@@ -510,34 +531,55 @@ impl ChannelsConfig {
                     let exposed = account.exposed_models.as_deref().unwrap_or(&[]);
                     let exposed_set: std::collections::HashSet<String> =
                         exposed.iter().map(|m| m.trim().to_lowercase()).collect();
-                    let synced_set: std::collections::HashSet<String> = account
+                    // synced_models 保留 /models 返回的原名（仅 trim 去空）：求交时
+                    // 按规范键匹配白名单（别名变体如 deepseek-v4-flash-0731 命中
+                    // deepseek-v4-flash），转发时仍以原名作为 upstream_model 发起请求。
+                    let synced_raw: Vec<String> = account
                         .synced_models
                         .as_deref()
                         .unwrap_or(&[])
                         .iter()
-                        .map(|m| m.trim().to_lowercase())
+                        .map(|m| m.trim().to_owned())
+                        .filter(|m| !m.is_empty())
                         .collect();
-                    let upstream_models: Vec<String> = if exposed.is_empty() {
+                    let synced_keys: std::collections::HashSet<String> =
+                        synced_raw.iter().map(|m| canonical_model_key(m)).collect();
+                    let exposed_models: Vec<(String, String)> = if exposed.is_empty() {
                         Vec::new()
                     } else {
                         whitelist
                             .iter()
-                            .filter(|m| {
+                            .filter_map(|m| {
                                 let key = m.trim().to_lowercase();
-                                exposed_set.contains(&key) && synced_set.contains(&key)
+                                if !exposed_set.contains(&key) || !synced_keys.contains(&key) {
+                                    return None;
+                                }
+                                // /models 精确返回同名时用白名单规范名（保持历史路由
+                                // 签名稳定）；否则取第一个映射到该规范的变体原名。
+                                let upstream = if synced_raw.iter().any(|s| s.to_lowercase() == key)
+                                {
+                                    m.clone()
+                                } else {
+                                    synced_raw
+                                        .iter()
+                                        .find(|s| canonical_model_key(s) == key)
+                                        .cloned()?
+                                };
+                                Some((m.clone(), upstream))
                             })
-                            .cloned()
                             .collect()
                     };
-                    for (model_index, upstream_model) in upstream_models.iter().enumerate() {
-                        // 档位映射按模型全局查找（不按渠道），与全局白名单语义一致。
-                        let tiers = self.flowlet_tiers_for_model(upstream_model);
-                        let public_models: Vec<String> = std::iter::once(upstream_model.clone())
+                    for (model_index, (canonical_model, upstream_model)) in
+                        exposed_models.iter().enumerate()
+                    {
+                        // 档位映射按规范模型全局查找（不按渠道），与全局白名单语义一致。
+                        let tiers = self.flowlet_tiers_for_model(canonical_model);
+                        let public_models: Vec<String> = std::iter::once(canonical_model.clone())
                             .chain(tiers.into_iter().map(|tier| format!("flowlet-{tier}")))
                             .collect();
                         for public_model in &public_models {
                             let route = RouteCandidate {
-                                id: if public_model == upstream_model {
+                                id: if public_model == canonical_model {
                                     format!(
                                         "route-{}-{}-{}-{}-{}",
                                         account.id,
@@ -842,6 +884,166 @@ mod tests {
                 .filter(|route| route.account_id == "account-later")
                 .all(|route| !route.enabled)
         );
+    }
+
+    #[test]
+    fn canonical_model_key_maps_alias_variants() {
+        // 别名变体 → 规范 ID；大小写不敏感；规范名与未知模型原样小写透传。
+        assert_eq!(
+            canonical_model_key("deepseek-v4-flash-0731"),
+            "deepseek-v4-flash"
+        );
+        assert_eq!(
+            canonical_model_key("DeepSeek-V4-Flash-0731"),
+            "deepseek-v4-flash"
+        );
+        assert_eq!(canonical_model_key("DeepSeek-V4-Flash"), "deepseek-v4-flash");
+        assert_eq!(canonical_model_key("qwen3.7-max"), "qwen3.7-max");
+    }
+
+    #[test]
+    fn official_channel_id_resolves_alias_variants() {
+        assert_eq!(
+            official_channel_id_for_model("deepseek-v4-flash-0731"),
+            Some("deepseek")
+        );
+        assert_eq!(
+            official_channel_id_for_model("deepseek-v4-flash"),
+            Some("deepseek")
+        );
+    }
+
+    #[test]
+    fn flowlet_tiers_resolve_through_alias() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "deepseek",
+                    "name": "DeepSeek",
+                    "vendor": "deepseek",
+                    "supported_protocols": ["openai"]
+                }],
+                "default_exposed_models": {
+                    "deepseek": ["deepseek-v4-flash"]
+                },
+                "flowlet_tiers": {
+                    "deepseek": {
+                        "deepseek-v4-flash": "flash"
+                    }
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        // 别名变体按规范模型查档位，保证变体路由也能生成 flowlet-flash 聚合路由。
+        assert_eq!(
+            config.flowlet_tiers_for_model("deepseek-v4-flash-0731"),
+            vec!["flash".to_string()]
+        );
+    }
+
+    fn qwen_alias_test_config() -> ChannelsConfig {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "qwen",
+                    "name": "Qwen",
+                    "vendor": "qwen",
+                    "supported_protocols": ["openai"],
+                    "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                }],
+                "default_exposed_models": {
+                    "deepseek": ["deepseek-v4-flash"]
+                },
+                "flowlet_tiers": {
+                    "deepseek": {
+                        "deepseek-v4-flash": "flash"
+                    }
+                }
+            }
+        });
+        ChannelsConfig::from_config_json(&json).unwrap()
+    }
+
+    #[test]
+    fn merge_default_routes_maps_alias_variant_to_canonical_virtual_model() {
+        // 千问 Token Plan 端点 /models 返回 deepseek-v4-flash-0731：
+        // 用户勾选规范名 deepseek-v4-flash 即可命中，virtual_model_id 用规范名，
+        // upstream_model 保留上游原名用于转发，且按规范模型补齐 flowlet-flash。
+        let config = qwen_alias_test_config();
+        let account = ChannelAccount {
+            id: "qwen-token-plan".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: String::new(),
+            enabled: true,
+            resource_mode: Some("token_plan".to_string()),
+            exposed_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            synced_models: Some(vec![
+                "qwen3.8-max-preview".to_string(),
+                "deepseek-v4-flash-0731".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        let pairs: Vec<(&str, &str)> = routes
+            .iter()
+            .map(|route| (route.virtual_model_id.as_str(), route.upstream_model.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("deepseek-v4-flash", "deepseek-v4-flash-0731"),
+                ("flowlet-flash", "deepseek-v4-flash-0731"),
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_default_routes_prefers_exact_model_over_alias_variant() {
+        // /models 同时返回规范名与别名变体时，upstream_model 用规范名，
+        // 保持历史路由签名稳定，不产生重复路由。
+        let config = qwen_alias_test_config();
+        let account = ChannelAccount {
+            id: "qwen-token-plan".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: String::new(),
+            enabled: true,
+            resource_mode: Some("token_plan".to_string()),
+            exposed_models: Some(vec!["deepseek-v4-flash".to_string()]),
+            synced_models: Some(vec![
+                "deepseek-v4-flash-0731".to_string(),
+                "deepseek-v4-flash".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        assert!(
+            routes
+                .iter()
+                .all(|route| route.upstream_model == "deepseek-v4-flash"),
+            "精确同名优先于别名变体: {routes:?}"
+        );
+        assert_eq!(routes.len(), 2);
+    }
+
+    #[test]
+    fn merge_default_routes_ignores_unselected_alias_variant() {
+        // 未勾选规范名时，即使 synced 含别名变体也不生成路由。
+        let config = qwen_alias_test_config();
+        let account = ChannelAccount {
+            id: "qwen-token-plan".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: String::new(),
+            enabled: true,
+            resource_mode: Some("token_plan".to_string()),
+            exposed_models: Some(vec![]),
+            synced_models: Some(vec!["deepseek-v4-flash-0731".to_string()]),
+            ..Default::default()
+        };
+
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        assert!(routes.is_empty());
     }
 
     #[test]

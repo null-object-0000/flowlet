@@ -3,7 +3,7 @@
 
 import type { ModelsCnCatalog } from "./types";
 import { findModelInCatalog, resolveModel } from "./pricing";
-import { officialChannelIdForModel } from "../channel/types";
+import { canonicalModelId, officialChannelIdForModel } from "../channel/types";
 
 /** 解析本地存储的 JSON 字符串为 ModelsCnCatalog。解析失败返回 null。 */
 export function parseCatalogJson(json: string): ModelsCnCatalog | null {
@@ -39,10 +39,13 @@ export function resolveChannelModel(
   channelId: string,
   upstreamModel: string,
 ): ReturnType<typeof resolveModel> | null {
+  // 路由的 upstream_model 可能是别名变体原名（如 deepseek-v4-flash-0731），
+  // 官方归属与目录查找统一按规范模型 ID 解析。
+  const canonicalModel = canonicalModelId(upstreamModel) ?? upstreamModel;
   const ownerChannelId = officialChannelIdForModel(upstreamModel) ?? channelId;
   const providerId = PROVIDER_BY_CHANNEL[ownerChannelId];
   if (!providerId) return null;
-  const found = findModelInCatalog(catalog, providerId, upstreamModel);
+  const found = findModelInCatalog(catalog, providerId, canonicalModel);
   if (!found) return null;
 
   // 判断是否官方字段缺失（limits 全 null 或 capabilities 全 false）。
@@ -53,7 +56,7 @@ export function resolveChannelModel(
     (officialLimits.contextTokens == null && officialLimits.maxOutputTokens == null);
   const capsMissing = officialCaps == null || (!officialCaps.thinking && !officialCaps.toolCalls && !officialCaps.jsonOutput);
   const supplemented = Boolean(limitsMissing || capsMissing);
-  const referenceUrl = supplemented ? findModelsDevReference(catalog, providerId, upstreamModel) : null;
+  const referenceUrl = supplemented ? findModelsDevReference(catalog, providerId, canonicalModel) : null;
 
   return resolveModel(found.provider, found.model, {
     supplemented,

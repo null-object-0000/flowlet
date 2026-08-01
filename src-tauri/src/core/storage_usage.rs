@@ -1,7 +1,7 @@
 use super::request_capture::{RequestCapturePointer, RequestCaptureRecord};
 use super::{Storage, StorageError};
 use crate::core::agent_session_identity::from_header_json;
-use crate::core::channels_config::official_channel_id_for_model;
+use crate::core::channels_config::{canonical_model_key, official_channel_id_for_model};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionRepairResult,
     AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter,
@@ -104,7 +104,7 @@ fn apply_opencode_pending_sessions(
     if opencode_pending_sessions.is_empty() {
         return;
     }
-    for row in catalog {
+    for row in catalog.iter_mut() {
         row.runtime_status = crate::core::opencode_control::merge_runtime_status(
             &row.agent_type,
             &row.session_id,
@@ -112,6 +112,7 @@ fn apply_opencode_pending_sessions(
             opencode_pending_sessions,
         );
     }
+    crate::core::agent_session_metadata::aggregate_descendant_runtime_status(catalog);
 }
 
 fn build_agent_native_usage_summary(
@@ -210,19 +211,21 @@ fn estimate_cost(
 ) -> Option<CostBreakdown> {
     let channel_id = channel_id?;
     let upstream_model = upstream_model?;
+    // 别名变体（如 deepseek-v4-flash-0731）按规范模型 ID 匹配价格条目。
+    let canonical_model = canonical_model_key(upstream_model);
     // 实际渠道的显式价格优先；自定义渠道没有独立价格时，按模型 ID 回退到
     // 官方归属渠道的基准价格。路由渠道仍原样保留用于渠道/账号维度统计。
     let price = prices
         .iter()
         .find(|p| {
             p.channel_id.eq_ignore_ascii_case(channel_id)
-                && p.upstream_model.eq_ignore_ascii_case(upstream_model)
+                && p.upstream_model.eq_ignore_ascii_case(&canonical_model)
         })
         .or_else(|| {
-            let owner_channel_id = official_channel_id_for_model(upstream_model)?;
+            let owner_channel_id = official_channel_id_for_model(&canonical_model)?;
             prices.iter().find(|p| {
                 p.channel_id.eq_ignore_ascii_case(owner_channel_id)
-                    && p.upstream_model.eq_ignore_ascii_case(upstream_model)
+                    && p.upstream_model.eq_ignore_ascii_case(&canonical_model)
             })
         })?;
 

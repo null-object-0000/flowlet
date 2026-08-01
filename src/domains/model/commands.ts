@@ -1,5 +1,11 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import { FLOWLET_SUPPORTED_MODELS, FLOWLET_TIERS_BY_MODEL, isCustomChannel } from "../channel/types";
+import {
+  FLOWLET_SUPPORTED_MODELS,
+  FLOWLET_TIERS_BY_MODEL,
+  canonicalModelKey,
+  isCustomChannel,
+  pickUpstreamModelForCanonical,
+} from "../channel/types";
 import type { ChannelAccount } from "../account/types";
 import type { ChannelPreset, ProtocolType } from "../channel/types";
 import type { ChannelModel, ModelExposureMode, RouteCandidate } from "./types";
@@ -60,20 +66,22 @@ export function buildDefaultRoutes(
   const now = new Date().toISOString();
   const out: RouteCandidate[] = [];
   usable.forEach((acc, j) => {
-    const upstreamModels = defaultModelsForAccount(channelId, acc);
-    upstreamModels.forEach((up, i) => {
-      // 档位映射按模型全局查找（不按渠道），与全局白名单语义一致。
+    const exposedModels = defaultModelsForAccount(channelId, acc);
+    exposedModels.forEach(({ canonical: up, upstream }, i) => {
+      // 档位映射按规范模型全局查找（不按渠道），与全局白名单语义一致。
       const tiers = FLOWLET_TIERS_BY_MODEL[up.toLowerCase()] ?? [];
       const publicModels = [up, ...tiers.map((tier) => `flowlet-${tier}`)];
       publicModels.forEach((publicModel) => {
         out.push({
           id: publicModel === up
-            ? `route-${acc.id}-${up}-${protocol}-${i}-${j}`
-            : `route-${acc.id}-${publicModel}-${up}-${protocol}-${i}-${j}`,
+            ? `route-${acc.id}-${upstream}-${protocol}-${i}-${j}`
+            : `route-${acc.id}-${publicModel}-${upstream}-${protocol}-${i}-${j}`,
           virtual_model_id: publicModel,
           channel_id: channelId,
           account_id: acc.id,
-          upstream_model: up,
+          // 对外模型名用白名单规范 ID；转发上游时保留 /models 返回的原名
+          // （变体别名如 deepseek-v4-flash-0731 按上游实际支持的名字发起请求）。
+          upstream_model: upstream,
           client_protocol: protocol,
           priority: j,
           // 仅全局第一个渠道账号的新路由默认开启；后续账号仍自动补齐路由，
@@ -88,23 +96,35 @@ export function buildDefaultRoutes(
   return out;
 }
 
-/** Upstream models one account exposes: the user-selected `exposed_models`
- *  intersected with the latest `/models` result and the global supported-models
- *  set. The whitelist is NOT per-channel — any account may expose any model
- *  Flowlet supports, as long as that account's `/models` returned it.
+/** Models one account exposes: the user-selected `exposed_models` intersected
+ *  with the latest `/models` result and the global supported-models set. The
+ *  whitelist is NOT per-channel — any account may expose any model Flowlet
+ *  supports, as long as that account's `/models` returned it (directly, or as
+ *  an aliased variant such as `deepseek-v4-flash-0731` for `deepseek-v4-flash`).
+ *  Returns `{ canonical, upstream }` pairs: `canonical` is the whitelist name
+ *  used as `virtual_model_id`; `upstream` is the name to send upstream (the raw
+ *  `/models` entry — the canonical name for exact matches, the variant's
+ *  original name for alias matches).
  *  `exposed_models = null` (not yet configured) or empty → no models exposed.
  *  Mirrors the Rust-side selection in channels_config.merge_default_routes. */
-function defaultModelsForAccount(_channelId: string, account: ChannelAccount): string[] {
+function defaultModelsForAccount(
+  _channelId: string,
+  account: ChannelAccount,
+): Array<{ canonical: string; upstream: string }> {
   const exposed = account.exposed_models ?? null;
   if (!exposed || exposed.length === 0) return [];
   const exposedSet = new Set(exposed.map((m) => m.trim().toLowerCase()).filter(Boolean));
-  const syncedSet = new Set(
-    (account.synced_models ?? []).map((m) => m.trim().toLowerCase()).filter(Boolean),
-  );
-  return FLOWLET_SUPPORTED_MODELS.filter((m) => {
-    const key = m.trim().toLowerCase();
-    return exposedSet.has(key) && syncedSet.has(key);
-  });
+  const syncedRaw = (account.synced_models ?? []).map((m) => m.trim()).filter(Boolean);
+  const syncedKeys = new Set(syncedRaw.map((m) => canonicalModelKey(m)));
+  return FLOWLET_SUPPORTED_MODELS
+    .filter((m) => {
+      const key = m.trim().toLowerCase();
+      return exposedSet.has(key) && syncedKeys.has(key);
+    })
+    .flatMap((m) => {
+      const upstream = pickUpstreamModelForCanonical(m, syncedRaw);
+      return upstream ? [{ canonical: m, upstream }] : [];
+    });
 }
 
 /** Add only missing direct-model and Flowlet aggregate routes for each account's
@@ -153,12 +173,14 @@ export function reconcileAccountRoutes(
     const account = accountById.get(route.account_id);
     const exposed = account?.exposed_models ?? null;
     if (exposed == null) return true; // 未配置的账号保持现状
-    const upstreamKey = route.upstream_model.trim().toLowerCase();
-    if (!supportedModels.has(upstreamKey)) return false;
-    const syncedSet = new Set(
-      (account?.synced_models ?? []).map((m) => m.trim().toLowerCase()).filter(Boolean),
+    // 路由的 upstream_model 可能是白名单规范名，也可能是别名映射保留的上游变体
+    // 原名（如 deepseek-v4-flash-0731）；统一按规范键参与白名单 / synced / 勾选校验。
+    const canonicalKey = canonicalModelKey(route.upstream_model);
+    if (!supportedModels.has(canonicalKey)) return false;
+    const syncedKeys = new Set(
+      (account?.synced_models ?? []).map((m) => canonicalModelKey(m)).filter(Boolean),
     );
-    if (!syncedSet.has(upstreamKey)) return false;
+    if (!syncedKeys.has(canonicalKey)) return false;
     if (account && isCustomChannel(presetById.get(account.channel_id))) {
       const hasEndpoint = route.client_protocol === "openai"
         ? Boolean(account.base_url_override?.trim())
@@ -166,7 +188,7 @@ export function reconcileAccountRoutes(
       if (!hasEndpoint) return false;
     }
     const exposedSet = new Set(exposed.map((m) => m.trim().toLowerCase()));
-    return exposedSet.has(upstreamKey);
+    return exposedSet.has(canonicalKey);
   });
   return mergeDefaultRoutes(pruned, accounts, presets);
 }

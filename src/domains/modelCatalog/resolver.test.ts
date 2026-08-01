@@ -72,6 +72,15 @@ describe("resolveChannelModel", () => {
     expect(resolved?.modelId).toBe("deepseek-v4-flash");
   });
 
+  it("resolves an alias variant upstream model through its canonical model", () => {
+    // 千问 Token Plan 账号的路由 upstream_model 保留上游原名 deepseek-v4-flash-0731，
+    // 规格与基准价格仍按规范模型 deepseek-v4-flash 的官方归属解析。
+    const resolved = resolveChannelModel(makeCatalog(), "qwen", "deepseek-v4-flash-0731");
+    expect(resolved?.providerId).toBe("deepseek");
+    expect(resolved?.modelId).toBe("deepseek-v4-flash");
+    expect(resolved?.officialPrice?.currency).toBe("CNY");
+  });
+
   it("returns null for unknown channel", () => {
     expect(resolveChannelModel(makeCatalog(), "unknown", "x")).toBeNull();
   });

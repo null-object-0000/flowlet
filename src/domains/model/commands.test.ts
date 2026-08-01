@@ -264,6 +264,93 @@ describe("mergeDefaultRoutes", () => {
   });
 });
 
+describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)", () => {
+  const qwenPreset = {
+    id: "qwen",
+    supported_protocols: ["openai"],
+  } as ChannelPreset;
+  const tokenPlanAccount = {
+    id: "account-qwen-token-plan",
+    channel_id: "qwen",
+    api_key: "sk-sp-test",
+    enabled: true,
+    exposed_models: ["deepseek-v4-flash"],
+    synced_models: ["qwen3.8-max-preview", "deepseek-v4-flash-0731"],
+  } as ChannelAccount;
+
+  it("maps an aliased /models variant to the canonical virtual model and keeps the raw upstream name", () => {
+    const routes = mergeDefaultRoutes([], [tokenPlanAccount], [qwenPreset]);
+    expect(routes.map((route) => [route.virtual_model_id, route.upstream_model])).toEqual([
+      ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+      ["flowlet-flash", "deepseek-v4-flash-0731"],
+    ]);
+    expect(new Set(routes.map((route) => route.id))).toHaveLength(2);
+  });
+
+  it("prefers the exact model name over the alias variant when /models returns both", () => {
+    const account = {
+      ...tokenPlanAccount,
+      synced_models: ["deepseek-v4-flash-0731", "deepseek-v4-flash"],
+    } as ChannelAccount;
+    const routes = mergeDefaultRoutes([], [account], [qwenPreset]);
+    expect(routes.every((route) => route.upstream_model === "deepseek-v4-flash")).toBe(true);
+    expect(routes).toHaveLength(2);
+  });
+
+  it("does not build a route when the canonical model is not selected", () => {
+    const account = {
+      ...tokenPlanAccount,
+      exposed_models: ["qwen3.8-max-preview"],
+    } as ChannelAccount;
+    const routes = mergeDefaultRoutes([], [account], [qwenPreset]);
+    expect(routes.some((route) => route.upstream_model === "deepseek-v4-flash-0731")).toBe(false);
+  });
+
+  it("keeps an alias-variant route through reconciliation while selected and synced", () => {
+    const existing: RouteCandidate = {
+      id: "route-account-qwen-token-plan-deepseek-v4-flash-0731-openai-0-0",
+      virtual_model_id: "deepseek-v4-flash",
+      channel_id: "qwen",
+      account_id: "account-qwen-token-plan",
+      upstream_model: "deepseek-v4-flash-0731",
+      client_protocol: "openai",
+      priority: 0,
+      enabled: false,
+      created_at: "old",
+      updated_at: "old",
+    };
+    const next = reconcileAccountRoutes([existing], [tokenPlanAccount], [qwenPreset]);
+    // 保留原路由（含启停状态），不产生重复路由。
+    expect(next).toHaveLength(2);
+    const kept = next.find((route) => route.id === existing.id);
+    expect(kept?.enabled).toBe(false);
+    expect(
+      next.filter((route) => route.upstream_model === "deepseek-v4-flash-0731"),
+    ).toHaveLength(2);
+  });
+
+  it("removes an alias-variant route when the canonical model is deselected", () => {
+    const account = {
+      ...tokenPlanAccount,
+      exposed_models: [] as string[],
+    } as ChannelAccount;
+    const existing: RouteCandidate = {
+      id: "route-alias",
+      virtual_model_id: "deepseek-v4-flash",
+      channel_id: "qwen",
+      account_id: "account-qwen-token-plan",
+      upstream_model: "deepseek-v4-flash-0731",
+      client_protocol: "openai",
+      priority: 0,
+      enabled: true,
+      created_at: "old",
+      updated_at: "old",
+    };
+    const next = reconcileAccountRoutes([existing], [account], [qwenPreset]);
+    expect(next.some((route) => route.upstream_model === "deepseek-v4-flash-0731")).toBe(false);
+  });
+});
+
 describe("reconcileAccountRoutes", () => {
   const preset = {
     id: "deepseek",

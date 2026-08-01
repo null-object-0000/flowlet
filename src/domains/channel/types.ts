@@ -59,6 +59,17 @@ export const FLOWLET_SUPPORTED_MODELS: string[] = Array.from(new Set([
   ...QWEN_TOKEN_PLAN_DEFAULT_MODELS,
 ]));
 
+/** 上游模型变体 → 白名单规范模型 ID 的映射（键值均按小写匹配）。
+ *  部分渠道端点的 /models 会返回与规范名不同、但实际是同一模型的日期快照或别名
+ *  （如千问 Token Plan 套餐端点的 deepseek-v4-flash-0731 即 deepseek-v4-flash）。
+ *  变体按规范 ID 参与白名单求交、编辑器勾选、用量合并与品牌/档位/价格解析；
+ *  生成路由时 virtual_model_id 用规范 ID，upstream_model 保留 /models 返回的
+ *  上游原名，转发时按上游实际支持的名字发起请求。
+ *  必须与 src-tauri/src/core/channels_config.rs 的 MODEL_ALIASES 保持一致。 */
+export const MODEL_ALIASES: Record<string, string> = {
+  "deepseek-v4-flash-0731": "deepseek-v4-flash",
+};
+
 /** Per-channel Flowlet aggregate tier mapping. Must stay in sync with
  *  config.json channels_config.flowlet_tiers。
  *  仅作为数据源；路由生成请使用 FLOWLET_TIERS_BY_MODEL（按模型全局查找，不按渠道区分）。 */
@@ -122,14 +133,42 @@ const CANONICAL_MODEL_BY_ID = new Map<string, string>(
   FLOWLET_SUPPORTED_MODELS.map((model) => [model.trim().toLowerCase(), model]),
 );
 
+const ALIAS_TARGET_BY_ID = new Map<string, string>(
+  Object.entries(MODEL_ALIASES).map(([alias, canonical]) => [
+    alias.trim().toLowerCase(),
+    canonical.trim().toLowerCase(),
+  ]),
+);
+
+/** 把任意模型名解析为规范键（小写）：命中别名表返回映射目标，否则原样小写。
+ *  规范键可直接与 FLOWLET_SUPPORTED_MODELS 的小写形式比较。 */
+export function canonicalModelKey(modelId: string | null | undefined): string {
+  const key = (modelId ?? "").trim().toLowerCase();
+  return ALIAS_TARGET_BY_ID.get(key) ?? key;
+}
+
 export function officialChannelIdForModel(modelId: string | null | undefined): string | null {
   if (!modelId?.trim()) return null;
-  return OFFICIAL_CHANNEL_BY_MODEL.get(modelId.trim().toLowerCase()) ?? null;
+  return OFFICIAL_CHANNEL_BY_MODEL.get(canonicalModelKey(modelId)) ?? null;
 }
 
 export function canonicalModelId(modelId: string | null | undefined): string | null {
   if (!modelId?.trim()) return null;
-  return CANONICAL_MODEL_BY_ID.get(modelId.trim().toLowerCase()) ?? null;
+  return CANONICAL_MODEL_BY_ID.get(canonicalModelKey(modelId)) ?? null;
+}
+
+/** 在账号最近一次 /models 结果（synced_models）中，为规范模型挑选实际转发用的
+ *  上游模型名：/models 精确返回了同名模型（大小写不敏感）时返回白名单规范名
+ *  （保持历史路由签名稳定），否则取第一个映射到该规范的变体条目并保留上游原名
+ *  （保持 /models 返回顺序）。找不到返回 null。 */
+export function pickUpstreamModelForCanonical(
+  canonicalId: string,
+  syncedModels: readonly string[] | null | undefined,
+): string | null {
+  const key = canonicalId.trim().toLowerCase();
+  const synced = (syncedModels ?? []).map((model) => model.trim()).filter(Boolean);
+  if (synced.some((model) => model.toLowerCase() === key)) return canonicalId.trim();
+  return synced.find((model) => canonicalModelKey(model) === key) ?? null;
 }
 
 /** 判断账号是否为千问 Token Plan 模式。 */

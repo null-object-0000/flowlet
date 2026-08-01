@@ -11,6 +11,8 @@ import {
   QWEN_CHANNEL_ID,
   QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL,
   QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
+  canonicalModelId,
+  canonicalModelKey,
   isCustomChannel,
 } from "../../domains/channel/types";
 import {
@@ -207,7 +209,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         base_url_override: currentDraft.base_url_override,
       });
       const models = result.models.filter((item) => item.model.trim());
-      const returnedSet = new Set(models.map((item) => item.model.trim().toLowerCase()));
+      // /models 返回的模型按规范键归一（别名变体如 deepseek-v4-flash-0731 →
+      // deepseek-v4-flash），用于清理已不再返回或全局不支持的旧勾选。
+      const returnedKeys = new Set(models.map((item) => canonicalModelKey(item.model)));
       setCandidates(models);
       setModelPage(1);
       update({
@@ -216,8 +220,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         exposed_models: currentDraft.exposed_models == null
           ? null
           : currentDraft.exposed_models.filter((model) => {
-            const key = model.trim().toLowerCase();
-            return returnedSet.has(key) && whitelistSet.has(key);
+            const key = canonicalModelKey(model);
+            return returnedKeys.has(key) && whitelistSet.has(key);
           }),
       });
       if (result.errors.length > 0) {
@@ -238,10 +242,14 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     [currentDraft.exposed_models],
   );
 
+  /** 勾选写入白名单规范 ID（别名变体如 deepseek-v4-flash-0731 归一为
+   *  deepseek-v4-flash），保证 exposed_models 始终以规范名为键。 */
   function toggleExposedModel(model: string, checked: boolean) {
-    const key = model.trim().toLowerCase();
+    const canonical = canonicalModelId(model);
+    if (!canonical) return;
+    const key = canonical.trim().toLowerCase();
     const next = checked
-      ? [...selectedModels, model]
+      ? [...selectedModels.filter((item) => item.trim().toLowerCase() !== key), canonical]
       : selectedModels.filter((item) => item.trim().toLowerCase() !== key);
     update({ exposed_models: next });
   }
@@ -483,8 +491,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
               <>
                 {(() => {
                   const sorted = [...candidates].sort((a, b) => {
-                    const aSupported = whitelistSet.has(a.model.trim().toLowerCase());
-                    const bSupported = whitelistSet.has(b.model.trim().toLowerCase());
+                    const aSupported = whitelistSet.has(canonicalModelKey(a.model));
+                    const bSupported = whitelistSet.has(canonicalModelKey(b.model));
                     return Number(bSupported) - Number(aSupported);
                   });
                   const startIndex = (modelPage - 1) * MODELS_PER_PAGE;
@@ -494,9 +502,15 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                     <>
                       <div className={styles.modelList}>
                         {paged.map((candidate) => {
-                          const key = candidate.model.trim().toLowerCase();
+                          // 支持与否、勾选状态都按规范键判定：别名变体
+                          // （如 deepseek-v4-flash-0731）与规范模型共享同一勾选项。
+                          const key = canonicalModelKey(candidate.model);
                           const supported = whitelistSet.has(key);
                           const checked = selectedSet.has(key);
+                          const canonical = canonicalModelId(candidate.model);
+                          const isAliasVariant = supported
+                            && canonical != null
+                            && canonical.toLowerCase() !== candidate.model.trim().toLowerCase();
                           return (
                             <label
                               key={candidate.model}
@@ -508,6 +522,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                                 onChange={(event) => toggleExposedModel(candidate.model, event.target.checked === true)}
                               />
                               <span className={styles.modelName}>{candidate.model}</span>
+                              {isAliasVariant && canonical ? (
+                                <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }}>{t("开放为 {model}", { model: canonical })}</Text>
+                              ) : null}
                               {candidate.display_name && candidate.display_name.trim() && candidate.display_name !== candidate.model ? (
                                 <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }}>{candidate.display_name}</Text>
                               ) : null}

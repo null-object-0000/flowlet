@@ -269,6 +269,18 @@ Token Plan 账号（sk-sp 前缀 Key）通过账号级 Base URL 覆盖接入套�
 Token Plan 账号拉取 `/models` 时使用账号级覆盖端点；由于其套餐端点也会返回
 DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即可选，不在则禁用）。
 
+上游模型变体（别名）映射：
+
+部分渠道端点的 `/models` 会返回与白名单规范名不同、但实际是同一模型的日期快照
+或别名（如千问 Token Plan 套餐端点返回 `deepseek-v4-flash-0731`，实际就是
+`deepseek-v4-flash`）。Flowlet 维护「上游变体 → 规范模型 ID」映射表（前端
+`src/domains/channel/types.ts` 的 `MODEL_ALIASES` 与 Rust `channels_config.rs`
+的 `MODEL_ALIASES`，两侧必须保持一致）。变体按规范 ID 命中白名单、参与编辑器
+勾选、路由生成、用量合并与品牌/档位/基准价格解析；`synced_models` 与路由的
+`upstream_model` 仍保留 `/models` 返回的上游原名，转发时按上游实际支持的名字
+发起请求；路由 `virtual_model_id` 使用规范 ID。`/models` 同时返回规范名与变体时
+优先使用规范名，保持历史路由签名稳定。别名只影响匹配与展示，不新增模型身份。
+
 ---
 
 ## 7. 概览页规则

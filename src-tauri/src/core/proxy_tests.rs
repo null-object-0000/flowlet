@@ -1845,6 +1845,57 @@ async fn streaming_idle_timeout_resets_after_each_chunk() {
 }
 
 #[tokio::test]
+async fn streaming_usage_survives_response_larger_than_capture_limit() {
+    let mut chunks = vec![Ok::<Bytes, reqwest::Error>(Bytes::from_static(
+        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":113,\"cache_read_input_tokens\":116352,\"cache_creation_input_tokens\":0,\"output_tokens\":0}}}\n\n",
+    ))];
+    let large_delta = format!(
+        "event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"delta\":{{\"type\":\"text_delta\",\"text\":\"{}\"}}}}\n\n",
+        "x".repeat(64 * 1024),
+    );
+    for _ in 0..17 {
+        chunks.push(Ok(Bytes::from(large_delta.clone())));
+    }
+    chunks.push(Ok(Bytes::from_static(
+        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":9764}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    )));
+    let streamed_bytes: usize = chunks
+        .iter()
+        .map(|chunk| chunk.as_ref().unwrap().len())
+        .sum();
+    assert!(streamed_bytes > MAX_USAGE_CAPTURE_BYTES);
+
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let stream = capture_timed_stream(
+        futures_util::stream::iter(chunks),
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_secs(1),
+        ActivityTracker::new().track(),
+    );
+    futures_util::pin_mut!(stream);
+    while let Some(chunk) = stream.next().await {
+        chunk.unwrap();
+    }
+
+    let done = rx_done.await.unwrap();
+    assert_eq!(
+        done.usage,
+        Some(ResponseUsage {
+            input_tokens: Some(116465),
+            input_cached_tokens: Some(116352),
+            input_uncached_tokens: Some(113),
+            input_cache_write_tokens: Some(0),
+            output_tokens: Some(9764),
+            total_tokens: Some(126229),
+        })
+    );
+}
+
+#[tokio::test]
 async fn streaming_idle_timeout_reports_stream_failure() {
     let upstream = futures_util::stream::pending::<Result<Bytes, reqwest::Error>>();
     let capture = LogCaptureConfig::default();

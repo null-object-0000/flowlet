@@ -31,14 +31,19 @@ pub(crate) fn repair_agent_sessions(
 }
 
 #[tauri::command]
-pub(crate) fn repair_captured_usage(
+pub(crate) async fn repair_captured_usage(
     state: tauri::State<'_, AppState>,
     time_range: String,
 ) -> Result<usize, String> {
-    state
-        .storage
-        .reanalyze_captured_usage(&time_range)
-        .map_err(|err| err.to_string())
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let captured = storage.reanalyze_captured_usage(&time_range)?;
+        let native = storage.repair_usage_from_native_sessions(&time_range)?;
+        Ok::<_, crate::core::storage::StorageError>(captured + native)
+    })
+    .await
+    .map_err(|error| format!("Token 用量修复任务失败：{error}"))?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

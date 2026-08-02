@@ -7,7 +7,8 @@ use super::power::{ActivityPermit, ActivityTracker};
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
 use super::usage::{
-    ResponseUsage, contains_sse_output_token, extract_response_usage, extract_stream_usage,
+    ResponseUsage, StreamUsageAccumulator, contains_sse_output_token, extract_response_usage,
+    extract_stream_usage,
 };
 use axum::{
     Router,
@@ -1558,6 +1559,7 @@ fn capture_timed_stream(
         res_content_encoding,
         usage_body_buf: Vec::new(),
         usage_body_enabled: true,
+        usage_accumulator: StreamUsageAccumulator::default(),
         first_line: None,
         last_line: None,
         line_count: 0,
@@ -1593,6 +1595,7 @@ fn capture_timed_stream(
                     state.usage_body_enabled = false;
                     state.usage_body_buf.clear();
                 }
+                state.usage_accumulator.push(&bytes);
                 let piece = String::from_utf8_lossy(&bytes);
                 for line in piece.split('\n') {
                     let trimmed = line.trim_end_matches('\r');
@@ -1667,9 +1670,17 @@ fn send_stream_done(
             state.res_body_max,
         )
     };
-    let usage = if success && state.usage_body_enabled {
-        // 流已正常结束：兼容无终止标记的 SSE 流，以及以 event-stream 返回的单条 JSON 消息。
-        extract_stream_usage(&state.usage_body_buf)
+    let usage = if success {
+        // SSE 用量随流增量解析，不受完整响应体大小限制。保留小响应的整段解析作为
+        // 兼容兜底，覆盖以 event-stream 返回但正文实际是单条 JSON 的上游。
+        std::mem::take(&mut state.usage_accumulator)
+            .finish()
+            .or_else(|| {
+                state
+                    .usage_body_enabled
+                    .then(|| extract_stream_usage(&state.usage_body_buf))
+                    .flatten()
+            })
     } else {
         None
     };
@@ -1699,6 +1710,7 @@ struct TimedStreamState {
     res_content_encoding: Option<String>,
     usage_body_buf: Vec<u8>,
     usage_body_enabled: bool,
+    usage_accumulator: StreamUsageAccumulator,
     first_line: Option<String>,
     last_line: Option<String>,
     line_count: usize,

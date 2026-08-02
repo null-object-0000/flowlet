@@ -8,6 +8,79 @@ pub struct ResponseUsage {
     pub total_tokens: Option<i64>,
 }
 
+const MAX_STREAM_USAGE_LINE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Incrementally extracts usage from an SSE byte stream without retaining the
+/// whole response. Usage-bearing events are normally small even when the
+/// generated content is very large, so memory is bounded by one SSE line
+/// rather than by the total response size.
+#[derive(Debug, Default)]
+pub(crate) struct StreamUsageAccumulator {
+    pending_line: Vec<u8>,
+    discarding_oversized_line: bool,
+    usage: Option<ResponseUsage>,
+}
+
+impl StreamUsageAccumulator {
+    pub(crate) fn push(&mut self, chunk: &[u8]) {
+        let mut remaining = chunk;
+        while let Some(newline) = remaining.iter().position(|byte| *byte == b'\n') {
+            self.push_line_fragment(&remaining[..newline]);
+            self.finish_line();
+            remaining = &remaining[newline + 1..];
+        }
+        self.push_line_fragment(remaining);
+    }
+
+    pub(crate) fn finish(mut self) -> Option<ResponseUsage> {
+        if !self.pending_line.is_empty() || self.discarding_oversized_line {
+            self.finish_line();
+        }
+        self.usage
+    }
+
+    fn push_line_fragment(&mut self, fragment: &[u8]) {
+        if self.discarding_oversized_line {
+            return;
+        }
+        if self.pending_line.len().saturating_add(fragment.len()) > MAX_STREAM_USAGE_LINE_BYTES {
+            self.pending_line.clear();
+            self.discarding_oversized_line = true;
+            return;
+        }
+        self.pending_line.extend_from_slice(fragment);
+    }
+
+    fn finish_line(&mut self) {
+        if self.discarding_oversized_line {
+            self.discarding_oversized_line = false;
+            self.pending_line.clear();
+            return;
+        }
+
+        let Ok(line) = std::str::from_utf8(&self.pending_line) else {
+            self.pending_line.clear();
+            return;
+        };
+        let Some(data) = line.trim().strip_prefix("data:") else {
+            self.pending_line.clear();
+            return;
+        };
+        let data = data.trim();
+        if !data.is_empty() && data != "[DONE]" && data.contains("\"usage\"") {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+                if let Some(usage) = extract_usage_from_value(&value) {
+                    self.usage = Some(match self.usage.take() {
+                        Some(current) => merge_usage(current, usage),
+                        None => usage,
+                    });
+                }
+            }
+        }
+        self.pending_line.clear();
+    }
+}
+
 pub fn extract_response_usage(body: &[u8]) -> Option<ResponseUsage> {
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
     extract_usage_from_value(&value)
@@ -63,6 +136,20 @@ pub fn extract_sse_response_usage(body: &[u8], require_done_marker: bool) -> Opt
 ///    的非流式响应——此时回退按普通 JSON 消息解析。
 pub fn extract_stream_usage(body: &[u8]) -> Option<ResponseUsage> {
     extract_sse_response_usage(body, false).or_else(|| extract_response_usage(body))
+}
+
+/// Parse a stored stream capture without mistaking a truncated prefix for a
+/// complete response. A terminal marker is the strongest signal. Some
+/// compatible providers omit it, so a final positive output usage is also
+/// accepted; a `message_start`-only prefix (input usage with zero output) is
+/// deliberately rejected and may be recovered from the Agent transcript.
+pub fn extract_captured_stream_usage(body: &[u8]) -> Option<ResponseUsage> {
+    extract_sse_response_usage(body, true)
+        .or_else(|| {
+            extract_sse_response_usage(body, false)
+                .filter(|usage| usage.output_tokens.unwrap_or_default() > 0)
+        })
+        .or_else(|| extract_response_usage(body))
 }
 
 /// Returns true once a completed SSE data line contains actual model output.
@@ -260,6 +347,38 @@ data: [DONE]
                 input_cache_write_tokens: None,
                 output_tokens: Some(77),
                 total_tokens: Some(110730),
+            })
+        );
+    }
+
+    #[test]
+    fn incrementally_extracts_usage_across_arbitrary_chunk_boundaries() {
+        let body = br#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":113,"cache_read_input_tokens":116352,"cache_creation_input_tokens":0,"output_tokens":0}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}
+
+event: message_delta
+data: {"type":"message_delta","usage":{"output_tokens":9764}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#;
+        let mut accumulator = StreamUsageAccumulator::default();
+        for chunk in body.chunks(7) {
+            accumulator.push(chunk);
+        }
+        assert_eq!(
+            accumulator.finish(),
+            Some(ResponseUsage {
+                input_tokens: Some(116465),
+                input_cached_tokens: Some(116352),
+                input_uncached_tokens: Some(113),
+                input_cache_write_tokens: Some(0),
+                output_tokens: Some(9764),
+                total_tokens: Some(126229),
             })
         );
     }
@@ -468,6 +587,21 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
                 total_tokens: Some(35352),
             })
         );
+        assert!(extract_captured_stream_usage(body).is_some());
+    }
+
+    #[test]
+    fn rejects_truncated_capture_with_only_message_start_usage() {
+        let body = br#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":113,"cache_read_input_tokens":116352,"cache_creation_input_tokens":0,"output_tokens":0}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}
+
+"#;
+
+        assert!(extract_stream_usage(body).is_some());
+        assert_eq!(extract_captured_stream_usage(body), None);
     }
 
     #[test]

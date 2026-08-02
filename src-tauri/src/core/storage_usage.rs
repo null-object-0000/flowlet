@@ -4,18 +4,139 @@ use crate::core::agent_session_identity::from_header_json;
 use crate::core::channels_config::{canonical_model_key, official_channel_id_for_model};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionRepairResult,
-    AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult, DeviceUsageBreakdownRow,
+    AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult, AgentUsageEvent,
     LogFilterClient, LogsFilter, LogsPageResult, LogsSummary, ModelPrice, RequestLogInput,
     RequestLogModelOptions, RequestLogRow, UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
 };
-use chrono::Datelike;
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
-use crate::core::usage::{extract_response_usage, extract_stream_usage};
+use crate::core::usage::{extract_captured_stream_usage, extract_response_usage};
 use base64::Engine;
+use chrono::{DateTime, Datelike};
 use rusqlite::{OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
 
 type AgentSessionKey = (String, String);
+
+#[derive(Debug, Clone)]
+struct NativeUsageRepairRequest {
+    request_id: String,
+    agent_type: String,
+    session_id: String,
+    started_at_ms: i64,
+    duration_ms: i64,
+    model: Option<String>,
+    channel_id: Option<String>,
+    needs_repair: bool,
+}
+
+#[cfg(test)]
+mod native_usage_repair_tests {
+    use super::*;
+
+    fn request(id: &str, started_at_ms: i64, duration_ms: i64) -> NativeUsageRepairRequest {
+        NativeUsageRepairRequest {
+            request_id: id.to_string(),
+            agent_type: "claude-code".to_string(),
+            session_id: "session-1".to_string(),
+            started_at_ms,
+            duration_ms,
+            model: Some("deepseek-v4-flash".to_string()),
+            channel_id: Some("deepseek".to_string()),
+            needs_repair: true,
+        }
+    }
+
+    fn event(id: &str, timestamp: &str, output_tokens: i64) -> AgentUsageEvent {
+        AgentUsageEvent {
+            event_id: id.to_string(),
+            event_time: timestamp.to_string(),
+            model: Some("deepseek-v4-flash".to_string()),
+            input_tokens: 113,
+            cached_input_tokens: 116_352,
+            cache_write_input_tokens: 0,
+            output_tokens,
+            reasoning_tokens: 0,
+            total_tokens: 116_465 + output_tokens,
+        }
+    }
+
+    #[test]
+    fn assigns_native_event_to_latest_started_adjacent_request() {
+        let base = DateTime::parse_from_rfc3339("2026-08-02T06:32:01Z")
+            .unwrap()
+            .timestamp_millis();
+        let requests = vec![
+            request("missing", base, 67_016),
+            request("next", base + 67_000, 11_043),
+        ];
+        let events = vec![
+            event("message-1", "2026-08-02T06:33:06.834Z", 9_764),
+            event("message-2", "2026-08-02T06:33:08.865Z", 2_316),
+        ];
+
+        let matched = match_native_usage_events(&requests, &events)
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+        assert_eq!(matched["missing"].output_tokens, 9_764);
+        assert_eq!(matched["next"].output_tokens, 2_316);
+    }
+
+    #[test]
+    fn skips_ambiguous_native_events() {
+        let start = DateTime::parse_from_rfc3339("2026-08-02T06:32:01Z")
+            .unwrap()
+            .timestamp_millis();
+        let requests = vec![request("request-1", start, 10_000)];
+        let events = vec![
+            event("message-1", "2026-08-02T06:32:05Z", 10),
+            event("message-2", "2026-08-02T06:32:06Z", 20),
+        ];
+
+        assert!(match_native_usage_events(&requests, &events).is_empty());
+    }
+}
+
+fn match_native_usage_events(
+    requests: &[NativeUsageRepairRequest],
+    events: &[AgentUsageEvent],
+) -> Vec<(String, AgentUsageEvent)> {
+    let mut matches: HashMap<String, Vec<&AgentUsageEvent>> = HashMap::new();
+    for event in events {
+        let Ok(event_time) = DateTime::parse_from_rfc3339(&event.event_time) else {
+            continue;
+        };
+        let event_ms = event_time.timestamp_millis();
+        // Assign an event to the latest request that had already started. This
+        // disambiguates adjacent calls whose timing windows touch or overlap.
+        let candidate = requests
+            .iter()
+            .filter(|request| {
+                request.started_at_ms <= event_ms
+                    && event_ms <= request.started_at_ms + request.duration_ms.max(0) + 1_000
+                    && match (&request.model, &event.model) {
+                        (Some(request_model), Some(event_model)) => {
+                            canonical_model_key(request_model) == canonical_model_key(event_model)
+                        }
+                        _ => true,
+                    }
+            })
+            .max_by_key(|request| request.started_at_ms);
+        if let Some(candidate) = candidate {
+            matches
+                .entry(candidate.request_id.clone())
+                .or_default()
+                .push(event);
+        }
+    }
+
+    matches
+        .into_iter()
+        // Ambiguous mappings are deliberately left unknown.
+        .filter_map(|(request_id, events)| {
+            (events.len() == 1).then(|| (request_id, events[0].clone()))
+        })
+        .collect()
+}
 
 #[derive(Debug)]
 struct StoredCaptureRef {
@@ -1692,8 +1813,10 @@ impl Storage {
                 continue;
             };
             let usage = if row.is_stream {
-                // 重解析已落库的完整捕获体；兼容无终止标记的 SSE 流与单条 JSON 消息。
-                extract_stream_usage(&body)
+                // 捕获体可能受历史大小上限截断。仅采信带终止标记、带正输出
+                // usage 的完整事件，或单条 JSON 响应；message_start 前缀留给
+                // Agent 原生会话回退，避免把 output=0 的半条数据覆盖进账本。
+                extract_captured_stream_usage(&body)
             } else {
                 extract_response_usage(&body)
             };
@@ -1844,6 +1967,205 @@ impl Storage {
         transaction.commit()?;
 
         Ok(parsed)
+    }
+
+    /// Recover incomplete proxy usage from the Agent's native message ledger.
+    /// Matching is intentionally conservative: same Agent session, compatible
+    /// model, and exactly one message event assigned by request start/end time.
+    /// Ambiguous rows remain unknown for manual audit.
+    pub fn repair_usage_from_native_sessions(
+        &self,
+        time_range: &str,
+    ) -> Result<usize, StorageError> {
+        let requests = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| StorageError::LockFailed)?;
+            let mut statement = connection.prepare(&format!(
+                r#"
+                SELECT
+                    rl.request_id, rl.agent_type, rl.agent_session_id,
+                    unixepoch(rl.created_at) * 1000, COALESCE(rl.duration_ms, 0),
+                    rl.upstream_model, rl.channel_id,
+                    CASE WHEN NOT EXISTS (
+                        SELECT 1 FROM usage_records ur WHERE ur.request_id = rl.request_id
+                    ) OR EXISTS (
+                        SELECT 1 FROM usage_records ur
+                        WHERE ur.request_id = rl.request_id
+                          AND (ur.total_tokens IS NULL OR COALESCE(ur.output_tokens, 0) = 0)
+                    ) THEN 1 ELSE 0 END
+                FROM request_logs rl
+                WHERE rl.is_last_attempt = 1
+                  AND rl.status BETWEEN 200 AND 299
+                  AND rl.agent_type IN ('claude-code', 'opencode', 'pi')
+                  AND rl.agent_session_id IS NOT NULL
+                  AND {}
+                ORDER BY rl.agent_type, rl.agent_session_id, rl.created_at
+                "#,
+                repair_time_clause("rl.created_at", time_range)
+            ))?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok(NativeUsageRepairRequest {
+                        request_id: row.get(0)?,
+                        agent_type: row.get(1)?,
+                        session_id: row.get(2)?,
+                        started_at_ms: row.get(3)?,
+                        duration_ms: row.get(4)?,
+                        model: row.get(5)?,
+                        channel_id: row.get(6)?,
+                        needs_repair: row.get::<_, i64>(7)? != 0,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+
+        let mut sessions: HashMap<AgentSessionKey, Vec<NativeUsageRepairRequest>> = HashMap::new();
+        for request in requests {
+            sessions
+                .entry((request.agent_type.clone(), request.session_id.clone()))
+                .or_default()
+                .push(request);
+        }
+
+        let prices = self.prices();
+        let mut repairs = Vec::new();
+        for ((agent_type, session_id), session_requests) in sessions {
+            if !session_requests.iter().any(|request| request.needs_repair) {
+                continue;
+            }
+            let Ok(parsed) =
+                crate::core::agent_session_timeline::get_native_agent_session_summary_incremental(
+                    &agent_type,
+                    &session_id,
+                    None,
+                )
+            else {
+                continue;
+            };
+            let repairable = session_requests
+                .iter()
+                .filter(|request| request.needs_repair)
+                .map(|request| request.request_id.as_str())
+                .collect::<HashSet<_>>();
+            let request_by_id = session_requests
+                .iter()
+                .map(|request| (request.request_id.as_str(), request))
+                .collect::<HashMap<_, _>>();
+            for (request_id, event) in
+                match_native_usage_events(&session_requests, &parsed.usage_events)
+            {
+                if !repairable.contains(request_id.as_str()) {
+                    continue;
+                }
+                let Some(request) = request_by_id.get(request_id.as_str()) else {
+                    continue;
+                };
+                let input_uncached = event
+                    .input_tokens
+                    .saturating_add(event.cache_write_input_tokens);
+                let input_tokens = input_uncached.saturating_add(event.cached_input_tokens);
+                let cost = estimate_cost(
+                    &prices,
+                    request.channel_id.as_deref(),
+                    request.model.as_deref(),
+                    Some(input_tokens),
+                    Some(event.cached_input_tokens),
+                    Some(input_uncached),
+                    Some(event.cache_write_input_tokens),
+                    Some(event.output_tokens),
+                );
+                repairs.push((
+                    request_id,
+                    input_tokens,
+                    event.cached_input_tokens,
+                    input_uncached,
+                    event.cache_write_input_tokens,
+                    event.output_tokens,
+                    event.total_tokens,
+                    cost,
+                ));
+            }
+        }
+
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let transaction = connection.transaction()?;
+        let mut repaired = 0usize;
+        for (request_id, input, cached, uncached, cache_write, output, total, cost) in repairs {
+            let cost_total = cost.map(|value| value.total);
+            let cost_uncached = cost.map(|value| value.input_uncached);
+            let cost_cached = cost.map(|value| value.input_cached);
+            let cost_cache_write = cost.map(|value| value.input_cache_write);
+            let cost_output = cost.map(|value| value.output);
+            let updated = transaction.execute(
+                r#"
+                UPDATE usage_records SET
+                    input_tokens=?2, input_cached_tokens=?3, input_uncached_tokens=?4,
+                    input_cache_write_tokens=?5, output_tokens=?6, total_tokens=?7,
+                    estimated_cost=?8, estimated_input_uncached_cost=?9,
+                    estimated_input_cached_cost=?10, estimated_input_cache_write_cost=?11,
+                    estimated_output_cost=?12, analyzed_at=datetime('now')
+                WHERE request_id=?1
+                "#,
+                params![
+                    request_id,
+                    input,
+                    cached,
+                    uncached,
+                    cache_write,
+                    output,
+                    total,
+                    cost_total,
+                    cost_uncached,
+                    cost_cached,
+                    cost_cache_write,
+                    cost_output
+                ],
+            )?;
+            if updated == 0 {
+                transaction.execute(
+                    r#"
+                    INSERT INTO usage_records (
+                        id, request_id, client_id, client_name, channel_id, channel_name,
+                        account_id, account_name, client_protocol, upstream_protocol,
+                        virtual_model, upstream_model, input_tokens, input_cached_tokens,
+                        input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
+                        estimated_cost, estimated_input_uncached_cost, estimated_input_cached_cost,
+                        estimated_input_cache_write_cost, estimated_output_cost, analyzed_at, created_at
+                    )
+                    SELECT lower(hex(randomblob(16))), rl.request_id, rl.client_id, rl.client_name,
+                        rl.channel_id, rl.channel_name, rl.account_id, rl.account_name,
+                        rl.client_protocol, rl.upstream_protocol, rl.virtual_model, rl.upstream_model,
+                        ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now'), rl.created_at
+                    FROM request_logs rl
+                    WHERE rl.request_id=?1 AND rl.is_last_attempt=1
+                    ORDER BY rl.attempt_seq DESC LIMIT 1
+                    "#,
+                    params![
+                        request_id,
+                        input,
+                        cached,
+                        uncached,
+                        cache_write,
+                        output,
+                        total,
+                        cost_total,
+                        cost_uncached,
+                        cost_cached,
+                        cost_cache_write,
+                        cost_output
+                    ],
+                )?;
+            }
+            repaired += 1;
+        }
+        transaction.commit()?;
+        Ok(repaired)
     }
 
     /// Incrementally moves legacy SQLite Body columns into capture files. The file frame

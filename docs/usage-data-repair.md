@@ -32,7 +32,8 @@ Token 汇总可用于日常用量分析；页面中的费用是按当前渠道�
 
 - 有完整响应捕获时，可以用当前解析器重新计算 Token；
 - Body 已清理时，不能从请求内容反推出可靠的响应 usage；
-- 本地 Agent transcript 只能用于审计，不能默认替代代理真实调用账本；
+- 本地 Agent transcript 仅在会话、模型和请求时间窗能够唯一对应时用于回填；
+  存在多个候选或无法定位原始会话时仍只用于审计；
 - 无法确认的记录必须继续标记为未知，不得填 0 或估算 Token。
 
 ## 3. 版本前置条件
@@ -78,7 +79,8 @@ SQLite 文件；无法停机时应使用 SQLite 在线备份 API，而不是普�
 
 1. **会话归因**：按已保存 Header 和最新识别规则修复历史会话；
 2. **Token 用量**：读取最终 attempt 的完整响应捕获，用当前解析器覆盖或补齐
-   `usage_records`；
+   `usage_records`；历史流式捕获被截断时，按同一 Agent 会话、模型和请求执行时间窗
+   匹配唯一的原生消息级用量，歧义记录自动跳过；
 3. **未知记录**：为仍无可解析 usage 的请求建立明确的未知记录；
 4. **预估费用**：按当前渠道、模型和价格配置重新计算费用。
 
@@ -137,12 +139,10 @@ SQLite 文件；无法停机时应使用 SQLite 在线备份 API，而不是普�
 
 ### transcript 回填
 
-transcript 回填不是常规维护步骤。只有同时满足以下条件才可考虑：
+transcript 唯一匹配回填已纳入“Token 用量”维护阶段，但只有同时满足以下条件才会执行：
 
-- 会话 ID、模型、时间顺序和输出 Token 能唯一对应；
+- 会话 ID、模型和请求时间窗能唯一对应；
 - 能区分正式响应、内部摘要、重试和未采纳响应；
-- dry-run 明确展示每条旧值、新值和总差；
-- 已建立独立备份；
 - 歧义记录全部跳过。
 
 不得按整段时间窗口比例缩放，也不得只按行序盲目对齐。
@@ -165,6 +165,7 @@ transcript 回填不是常规维护步骤。只有同时满足以下条件才可
 - 前端编排：`src/features/settings/useDataRepair.ts`
 - Tauri command：`src-tauri/src/commands/usage.rs`
 - 捕获响应重解析：`Storage::reanalyze_captured_usage`
+- Agent 原生会话唯一匹配回填：`Storage::repair_usage_from_native_sessions`
 - 未知用量补齐：`Storage::analyze_unknown_usage`
 - 费用重算：`Storage::recalculate_usage_costs`
 - 原生用量账本：`agent_usage_events`

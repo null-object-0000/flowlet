@@ -54,7 +54,7 @@ export function MaintenanceTab() {
           <div className={styles.repairIcon}>🔧</div>
           <div className={styles.repairCopy}>
             <div className={styles.repairTitle}>{t("数据完整性检查")}</div>
-            <div className={styles.repairDesc}>{t("检查并修复旧版本产生的会话归因、Token 用量和预估费用数据。操作不会删除原始请求记录。")}</div>
+            <div className={styles.repairDesc}>{t("检查并修复旧版本产生的会话归因、Token 用量和预估费用；响应捕获不完整时会尝试与 Agent 原生会话安全匹配。操作不会删除原始请求记录。")}</div>
           </div>
           <div className={styles.repairActions}>
             <Select

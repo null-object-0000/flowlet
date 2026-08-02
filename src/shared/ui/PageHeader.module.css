@@ -1,0 +1,35 @@
+.header {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.titleBlock {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  color: var(--flowlet-color-text);
+  font-size: 20px;
+  font-weight: 740;
+  line-height: 1.2;
+  letter-spacing: -.025em;
+}
+
+.subtitle {
+  margin: 3px 0 0;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.controls {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

@@ -1,4 +1,4 @@
-/* 消耗分析页：1200×720 窗口下内容区约 980×654。
+/* 用量分析页：1200×720 窗口下内容区约 980×654。
    页面只有「页头 + 单卡片」两行，卡片内部排行面板与矩阵面板各自滚动，
    保证默认数据量下不出现页面级滚动条。 */
 .page {
@@ -8,12 +8,6 @@
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
 }
-
-.heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.headingText { min-width: 0; flex: 1; }
-.heading h2 { margin: 0; color: var(--flowlet-color-text); font-size: 23px; letter-spacing: -.03em; }
-.heading p { margin: 4px 0 0; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.45; }
-.headingControls { flex: none; display: flex; align-items: center; gap: 10px; }
 
 .periodTabs {
   padding: 2px;

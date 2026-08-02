@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconSearch } from "@douyinfe/semi-icons";
-import { Typography } from "@douyinfe/semi-ui-19";
 import { AboutTab } from "./tabs/AboutTab";
 import { CaptureTab } from "./tabs/CaptureTab";
 import { GeneralTab } from "./tabs/GeneralTab";
@@ -10,8 +9,7 @@ import { SyncTab } from "./tabs/SyncTab";
 import styles from "./SettingsPage.module.css";
 import { SettingsNav, useSettingsTabMeta, type SettingsTab } from "./SettingsNav";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-
-const { Paragraph, Title } = Typography;
+import { PageHeader } from "../../shared/ui/PageHeader";
 
 const TAB_COMPONENTS: Record<SettingsTab, React.ComponentType> = {
   general: GeneralTab,
@@ -79,11 +77,7 @@ export function SettingsPage() {
 
   return (
     <main className={styles.page}>
-      <header className={styles.pageHead}>
-        <div>
-          <Title heading={3}>{t("应用设置")}</Title>
-          <Paragraph>{t("管理应用偏好、本地数据与安全策略")}</Paragraph>
-        </div>
+      <PageHeader title={t("应用设置")} subtitle={t("管理应用偏好、本地数据与安全策略")}>
         <div className={styles.headActions}>
           <label className={styles.searchBox}>
             <IconSearch style={{ width: 15, height: 15 }} />
@@ -95,7 +89,7 @@ export function SettingsPage() {
             />
           </label>
         </div>
-      </header>
+      </PageHeader>
 
       <section className={styles.shell}>
         <SettingsNav active={tab} onChange={setTab} />

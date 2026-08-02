@@ -9,6 +9,7 @@ import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceC
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
+import { PageHeader } from "../../shared/ui/PageHeader";
 import { dominantCostCurrency, formatCostAmount, formatMultiCurrencyCost } from "../../shared/formatters/cost";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
@@ -48,7 +49,7 @@ const BRANDED_AGENT_IDS = new Set(["claude-code", "opencode", "pi", "chatgpt-des
 
 export function UsageAnalysisPage() {
   const { language, t } = useAppPreferences();
-  const refresh = useRefreshControl({ intervalMs: 30_000, initialAutoRefresh: false });
+  const refresh = useRefreshControl({ intervalMs: 30_000 });
   const [period, setPeriod] = useState<UsagePeriod>("week");
   const [dimension, setDimension] = useState<ConsumptionDimension>("model");
   const [matrixMetric, setMatrixMetric] = useState<ConsumptionMetric>("tokens");
@@ -81,41 +82,35 @@ export function UsageAnalysisPage() {
 
   return (
     <main className={styles.page}>
-      <header className={styles.heading}>
-        <div className={styles.headingText}>
-          <h2>{t("消耗分析")}</h2>
-          <p>{t("看清 Token 在模型、渠道账号与客户端之间的去向与费用归因")}</p>
+      <PageHeader title={t("用量分析")} subtitle={t("按模型、渠道账号和客户端拆解 Token、费用与性能")}>
+        <div className={styles.periodTabs} aria-label={t("统计周期")}>
+          {PERIOD_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={period === option.value}
+              onClick={() => setPeriod(option.value)}
+            >
+              {t(option.label)}
+            </button>
+          ))}
         </div>
-        <div className={styles.headingControls}>
-          <div className={styles.periodTabs} aria-label={t("统计周期")}>
-            {PERIOD_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={period === option.value}
-                onClick={() => setPeriod(option.value)}
-              >
-                {t(option.label)}
-              </button>
-            ))}
-          </div>
-          <RefreshControl
-            autoRefresh={refresh.autoRefresh}
-            onToggleAutoRefresh={refresh.toggleAutoRefresh}
-            isFetching={query.isFetching}
-            lastUpdatedAt={query.dataUpdatedAt || undefined}
-            intervalMs={refresh.intervalMs}
-            onRefresh={() => void query.refetch()}
-            language={language}
-            t={t}
-          />
-        </div>
-      </header>
+        <RefreshControl
+          autoRefresh={refresh.autoRefresh}
+          onToggleAutoRefresh={refresh.toggleAutoRefresh}
+          isFetching={query.isFetching}
+          lastUpdatedAt={query.dataUpdatedAt || undefined}
+          intervalMs={refresh.intervalMs}
+          onRefresh={() => void query.refetch()}
+          language={language}
+          t={t}
+        />
+      </PageHeader>
 
       <section className={styles.card}>
         <div className={styles.cardHeader}>
           <div className={styles.cardTitle}>
-            <strong>{t("多维消耗分析")}</strong>
+            <strong>{t("多维归因")}</strong>
             <span>{t("切换主维度，再交叉查看 Token 与费用归因")}</span>
           </div>
           <div className={styles.dimensionTabs} role="tablist" aria-label={t("分析维度")}>

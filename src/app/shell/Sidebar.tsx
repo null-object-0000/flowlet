@@ -40,8 +40,8 @@ const navGroups: Array<{
   {
     label: "分析",
     items: [
-      { to: "/usage", label: "用量成本", icon: <IconHistogram /> },
-      { to: "/usage-analysis", label: "消耗分析", icon: <IconPieChart2Stroked />, tag: "NEW" },
+      { to: "/usage", label: "用量概览", icon: <IconHistogram /> },
+      { to: "/usage-analysis", label: "用量分析", icon: <IconPieChart2Stroked />, tag: "NEW" },
     ],
   },
 ];

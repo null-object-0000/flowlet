@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CodexAccountsReport } from "../../domains/agent/types";
-import { ChatGptDesktopSideSheet } from "./ChatGptDesktopSideSheet";
+import { CodexAccountSideSheet } from "./CodexAccountSideSheet";
 import { CODEX_ACCOUNT_SYNC_INTERVAL_MS } from "../background-tasks/CodexAccountAutoSync";
 
 const cachedAccounts: CodexAccountsReport = {
@@ -30,14 +30,13 @@ vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
 }));
 
-describe("ChatGptDesktopSideSheet cached account state", () => {
+describe("CodexAccountSideSheet cached account state", () => {
   it("keeps cached usage visible while a live refresh is running", () => {
     render(
-      <ChatGptDesktopSideSheet
+      <CodexAccountSideSheet
         visible
         accounts={cachedAccounts}
         accountLoading
-        onRefresh={noop}
         onRefreshAccount={noop}
         onAuthorizeAccount={noop}
         onClose={noop}
@@ -52,11 +51,10 @@ describe("ChatGptDesktopSideSheet cached account state", () => {
 
   it("keeps cached usage visible when the live refresh fails", () => {
     render(
-      <ChatGptDesktopSideSheet
+      <CodexAccountSideSheet
         visible
         accounts={cachedAccounts}
         accountError="network timeout"
-        onRefresh={noop}
         onRefreshAccount={noop}
         onAuthorizeAccount={noop}
         onClose={noop}
@@ -70,7 +68,7 @@ describe("ChatGptDesktopSideSheet cached account state", () => {
   });
 });
 
-describe("ChatGptDesktopSideSheet last-updated tooltip", () => {
+describe("CodexAccountSideSheet last-updated tooltip", () => {
   const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
     month: "short",
     day: "numeric",
@@ -81,10 +79,9 @@ describe("ChatGptDesktopSideSheet last-updated tooltip", () => {
   it("shows the estimated next refresh time when hovering the last-updated time", async () => {
     const updatedAt = new Date(Date.now() - 60_000);
     render(
-      <ChatGptDesktopSideSheet
+      <CodexAccountSideSheet
         visible
         accounts={{ accounts: [{ ...cachedAccounts.accounts[0], updated_at: updatedAt.toISOString() }] }}
-        onRefresh={noop}
         onRefreshAccount={noop}
         onAuthorizeAccount={noop}
         onClose={noop}
@@ -101,10 +98,9 @@ describe("ChatGptDesktopSideSheet last-updated tooltip", () => {
 
   it("shows a refresh-soon hint when the estimated next refresh has already passed", async () => {
     render(
-      <ChatGptDesktopSideSheet
+      <CodexAccountSideSheet
         visible
         accounts={cachedAccounts}
-        onRefresh={noop}
         onRefreshAccount={noop}
         onAuthorizeAccount={noop}
         onClose={noop}

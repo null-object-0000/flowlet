@@ -4,15 +4,11 @@ import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import styles from "./OverviewAgentAccessCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
-import { ChatGptDesktopSideSheet } from "./ChatGptDesktopSideSheet";
 import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentSurface } from "../../domains/agent/types";
 import {
   useChatGptDesktopEnvironment,
   useClaudeCodeEnvironment,
   useClaudeCodeGlobalConfig,
-  useCodexAccountAuthorization,
-  useCodexAccountRefresh,
-  useCodexAccounts,
   useCodexGlobalConfig,
   useOpenCodeEnvironment,
   useOpenCodeGlobalConfig,
@@ -20,13 +16,11 @@ import {
   usePiGlobalConfig,
 } from "./useAgentEnvironment";
 
-type SupportedAgentKind = AgentKind | "chatgpt-desktop";
-
 const AGENTS: Array<{
   name: string;
   icon: React.ReactNode;
   iconClassName: string;
-  kind: SupportedAgentKind;
+  kind: AgentKind;
   hasDesktop: boolean;
 }> = [
   {
@@ -51,10 +45,10 @@ const AGENTS: Array<{
     hasDesktop: false,
   },
   {
-    name: "ChatGPT (Codex)",
+    name: "Codex",
     icon: <span className={`${styles.brandIcon} ${styles.chatgptMark}`} aria-hidden="true" />,
     iconClassName: styles.chatgptIcon,
-    kind: "chatgpt-desktop",
+    kind: "codex",
     hasDesktop: true,
   },
 ];
@@ -66,18 +60,15 @@ type Props = {
 
 export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const { t } = useAppPreferences();
-  const [selectedAgent, setSelectedAgent] = useState<SupportedAgentKind | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<AgentKind | null>(null);
   const claudeEnvironment = useClaudeCodeEnvironment();
   const openCodeEnvironment = useOpenCodeEnvironment();
   const piEnvironment = usePiEnvironment();
   const chatGptEnvironment = useChatGptDesktopEnvironment();
-  const codexAccounts = useCodexAccounts(selectedAgent === "chatgpt-desktop");
-  const codexAccountRefresh = useCodexAccountRefresh();
-  const codexAccountAuthorization = useCodexAccountAuthorization();
   const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
   const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
   const piGlobalConfig = usePiGlobalConfig(selectedAgent === "pi");
-  const codexGlobalConfig = useCodexGlobalConfig(selectedAgent === "chatgpt-desktop");
+  const codexGlobalConfig = useCodexGlobalConfig(selectedAgent === "codex");
 
   const copy = async (value: string, message: string) => {
     try {
@@ -92,17 +83,23 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
     ? openCodeGlobalConfig
     : selectedAgent === "pi"
       ? piGlobalConfig
-      : claudeGlobalConfig;
+      : selectedAgent === "codex"
+        ? codexGlobalConfig
+        : claudeGlobalConfig;
   const activeEnvironment = selectedAgent === "opencode"
     ? openCodeEnvironment
     : selectedAgent === "pi"
       ? piEnvironment
-      : claudeEnvironment;
+      : selectedAgent === "codex"
+        ? chatGptEnvironment
+        : claudeEnvironment;
   const activeAgentName = selectedAgent === "opencode"
     ? "OpenCode"
     : selectedAgent === "pi"
       ? "Pi"
-      : "Claude Code";
+      : selectedAgent === "codex"
+        ? "Codex"
+        : "Claude Code";
 
   const applyGlobalConfig = async (options?: AgentGlobalConfigOptions) => {
     try {
@@ -112,6 +109,8 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         await openCodeGlobalConfig.apply.mutateAsync();
       } else if (selectedAgent === "pi") {
         await piGlobalConfig.apply.mutateAsync(options);
+      } else if (selectedAgent === "codex") {
+        await codexGlobalConfig.apply.mutateAsync();
       } else {
         await activeGlobalConfig.apply.mutateAsync(undefined);
       }
@@ -127,34 +126,6 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       Toast.success(t("{name} 全局配置已恢复", { name: activeAgentName }));
     } catch (error) {
       Toast.error(t("恢复 {name} 全局配置失败：{message}", { name: activeAgentName, message: error instanceof Error ? error.message : String(error) }));
-    }
-  };
-
-  const authorizeCodexAccount = async () => {
-    try {
-      await codexAccountAuthorization.mutateAsync();
-      await codexAccounts.refetch();
-      Toast.success(t("Codex 账号授权成功"));
-    } catch (error) {
-      Toast.error(t("Codex 账号授权失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
-    }
-  };
-
-  const applyCodexGlobalConfig = async () => {
-    try {
-      await codexGlobalConfig.apply.mutateAsync();
-      Toast.success(t("Codex 已全局接入 Flowlet"));
-    } catch (error) {
-      Toast.error(t("写入 Codex 全局配置失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
-    }
-  };
-
-  const restoreCodexGlobalConfig = async () => {
-    try {
-      await codexGlobalConfig.restore.mutateAsync();
-      Toast.success(t("Codex 全局配置已恢复"));
-    } catch (error) {
-      Toast.error(t("恢复 Codex 全局配置失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
     }
   };
 
@@ -208,8 +179,8 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       </OverviewModuleCard>
 
       <AgentAccessSideSheet
-        visible={selectedAgent === "claude-code" || selectedAgent === "opencode" || selectedAgent === "pi"}
-        agent={selectedAgent === "opencode" ? "opencode" : selectedAgent === "pi" ? "pi" : "claude-code"}
+        visible={selectedAgent === "claude-code" || selectedAgent === "opencode" || selectedAgent === "pi" || selectedAgent === "codex"}
+        agent={selectedAgent === "opencode" ? "opencode" : selectedAgent === "pi" ? "pi" : selectedAgent === "codex" ? "codex" : "claude-code"}
         baseUrl={baseUrl}
         clientToken={clientToken}
         environment={activeEnvironment.data}
@@ -217,35 +188,12 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         environmentError={activeEnvironment.error?.message}
         onRefreshEnvironment={() => void activeEnvironment.refetch()}
         globalConfig={activeGlobalConfig.query.data}
-        globalConfigLoading={Boolean(selectedAgent && selectedAgent !== "chatgpt-desktop" && activeGlobalConfig.query.isLoading)}
+        globalConfigLoading={Boolean(selectedAgent && activeGlobalConfig.query.isLoading)}
         globalConfigBusy={activeGlobalConfig.apply.isPending || activeGlobalConfig.restore.isPending}
         globalConfigError={activeGlobalConfig.query.error?.message}
         onRefreshGlobalConfig={() => void activeGlobalConfig.query.refetch()}
         onApplyGlobalConfig={applyGlobalConfig}
         onRestoreGlobalConfig={restoreGlobalConfig}
-        onClose={() => setSelectedAgent(null)}
-        onCopy={copy}
-      />
-      <ChatGptDesktopSideSheet
-        visible={selectedAgent === "chatgpt-desktop"}
-        environment={chatGptEnvironment.data}
-        loading={chatGptEnvironment.isFetching}
-        error={chatGptEnvironment.error?.message}
-        onRefresh={() => void chatGptEnvironment.refetch()}
-        clientToken={clientToken}
-        globalConfig={codexGlobalConfig.query.data}
-        globalConfigLoading={codexGlobalConfig.query.isLoading}
-        globalConfigBusy={codexGlobalConfig.apply.isPending || codexGlobalConfig.restore.isPending}
-        globalConfigError={codexGlobalConfig.query.error?.message}
-        onRefreshGlobalConfig={() => void codexGlobalConfig.query.refetch()}
-        onApplyGlobalConfig={applyCodexGlobalConfig}
-        onRestoreGlobalConfig={restoreCodexGlobalConfig}
-        accounts={codexAccounts.data}
-        accountLoading={codexAccountRefresh.isPending}
-        accountError={codexAccountRefresh.error?.message}
-        onRefreshAccount={() => void codexAccountRefresh.mutate()}
-        accountAuthorizationBusy={codexAccountAuthorization.isPending}
-        onAuthorizeAccount={() => void authorizeCodexAccount()}
         onClose={() => setSelectedAgent(null)}
         onCopy={copy}
       />

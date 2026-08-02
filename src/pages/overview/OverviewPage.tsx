@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Card } from "@douyinfe/semi-ui-19";
+import { Card, Toast } from "@douyinfe/semi-ui-19";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
 import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
-import { useCodexAccounts } from "../../features/agent-access/useAgentEnvironment";
+import { useCodexAccounts, useCodexAccountRefresh, useCodexAccountAuthorization } from "../../features/agent-access/useAgentEnvironment";
 import { AccountManagementSideSheet, type AccountManagerRequest } from "../../features/channel-accounts/AccountManagementSideSheet";
+import { CodexAccountSideSheet } from "../../features/channel-accounts/CodexAccountSideSheet";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
 import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
@@ -28,7 +29,20 @@ export function OverviewPage() {
   const hasAccounts = (accounts.data?.length ?? 0) > 0;
   const balanceSnapshots = useLatestBalanceSnapshots(hasAccounts);
   const codexAccounts = useCodexAccounts(hasAccounts);
+  const codexAccountRefresh = useCodexAccountRefresh();
+  const codexAccountAuthorization = useCodexAccountAuthorization();
+  const [codexSheetVisible, setCodexSheetVisible] = useState(false);
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
+
+  const authorizeCodexAccount = async () => {
+    try {
+      await codexAccountAuthorization.mutateAsync();
+      await codexAccounts.refetch();
+      Toast.success(t("Codex 账号授权成功"));
+    } catch (error) {
+      Toast.error(t("Codex 账号授权失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
 
   // 概览页顶部「今日消耗」：用专用轻量接口，拉今日 Token 聚合（总量 + 输入/
   // 输出/缓存拆解，单条聚合行），供总数展示与悬浮明细。不要复用
@@ -66,6 +80,7 @@ export function OverviewPage() {
           baseUrl={baseUrl}
           bindConfig={bindConfig.data}
           onAccountRequest={setAccountRequest}
+          onOpenCodexAgent={() => setCodexSheetVisible(true)}
           busyModelId={modelActions.toggleExposedModel.isPending ? modelActions.toggleExposedModel.variables?.modelId : undefined}
           onToggleModel={(routeIds, modelId, enabled) => modelActions.toggleExposedModel.mutate({ routes: routes.data ?? [], routeIds, modelId, enabled })}
         />
@@ -100,6 +115,25 @@ export function OverviewPage() {
         onSaveBalanceSnapshot={(snapshot) => accountActions.saveBalanceSnapshot.mutateAsync(snapshot)}
         onSyncBalance={(accountId) => accountActions.queryBalance.mutateAsync(accountId).then(() => undefined)}
         onScrape={(accountId) => accountActions.scrapeBalance.mutateAsync(accountId)}
+      />
+
+      <CodexAccountSideSheet
+        visible={codexSheetVisible}
+        accounts={codexAccounts.data}
+        accountLoading={codexAccountRefresh.isPending}
+        accountError={codexAccountRefresh.error?.message}
+        onRefreshAccount={() => void codexAccountRefresh.mutate()}
+        accountAuthorizationBusy={codexAccountAuthorization.isPending}
+        onAuthorizeAccount={() => void authorizeCodexAccount()}
+        onClose={() => setCodexSheetVisible(false)}
+        onCopy={async (value, message) => {
+          try {
+            await navigator.clipboard.writeText(value);
+            Toast.success(message);
+          } catch {
+            Toast.success(t("已复制到剪贴板"));
+          }
+        }}
       />
     </main>
   );

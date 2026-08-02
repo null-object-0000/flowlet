@@ -18,9 +18,6 @@ vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
   useOpenCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
   usePiEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
   useChatGptDesktopEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
-  useCodexAccounts: () => ({ data: undefined, error: null, isFetching: false, refetch: vi.fn() }),
-  useCodexAccountRefresh: () => ({ isPending: false, error: null, mutate: vi.fn() }),
-  useCodexAccountAuthorization: () => ({ isPending: false, mutateAsync: vi.fn() }),
   useCodexGlobalConfig: () => ({
     query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
     apply: { isPending: false, mutateAsync: vi.fn() },

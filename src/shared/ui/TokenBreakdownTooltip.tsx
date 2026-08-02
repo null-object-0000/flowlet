@@ -13,7 +13,7 @@ type TokenBreakdown = {
   output: number | null;
   reasoning?: number | null;
   cacheHitRate: number | null;
-  /** 可选：请求量（用量成本页渠道维度等聚合场景展示）。 */
+  /** 可选：请求量（用量分析页维度聚合等场景展示）。 */
   requests?: number | null;
   unknownUsageCount?: number;
 };

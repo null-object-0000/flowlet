@@ -8,13 +8,14 @@ import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLo
 import { RequestLogTable } from "../../features/request-logs/RequestLogTable";
 import { formatDuration, formatPercentage, formatTokenRate, safeLogText } from "../../features/request-logs/logPresentation";
 import { useRequestLogActions, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
+import { PageHeader } from "../../shared/ui/PageHeader";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import styles from "./RequestLogsPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 
-const { Paragraph, Text, Title } = Typography;
+const { Text } = Typography;
 
 const TIME_OPTIONS: Array<{ value: RequestLogTimeRange; label: string }> = [
   { value: "1h", label: "最近 1 小时" },
@@ -77,8 +78,7 @@ export function RequestLogsPage() {
 
   return (
     <main className={styles.page}>
-      <header className={styles.header}>
-        <div><Title heading={3} style={{ margin: 0 }}>{t("请求日志")}</Title><Paragraph type="tertiary" style={{ margin: 0 }}>{t("查看代理服务的实时请求、模型路由和 Token 消耗")}</Paragraph></div>
+      <PageHeader title={t("请求日志")} subtitle={t("查看代理服务的实时请求、模型路由和 Token 消耗")}>
         <RefreshControl
           autoRefresh={refresh.autoRefresh}
           onToggleAutoRefresh={refresh.toggleAutoRefresh}
@@ -89,7 +89,7 @@ export function RequestLogsPage() {
           language={language}
           t={t}
         />
-      </header>
+      </PageHeader>
 
       <section className={styles.stats} aria-label={t("日志统计")}>
         <StatCard label={t("请求数")} value={formatInteger(summary?.requestCount, language)} hint={t("失败 {count} 条", { count: formatInteger(summary?.errorCount, language) })} />

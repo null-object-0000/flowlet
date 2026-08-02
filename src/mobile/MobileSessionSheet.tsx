@@ -1,6 +1,8 @@
 import { IconChevronDown, IconClose, IconRefresh } from "@douyinfe/semi-icons";
 import { Button, Toast } from "@douyinfe/semi-ui-19";
+import { onBackButtonPress } from "@tauri-apps/api/app";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
 import type { SharedAgentSession, SyncedAgentInteractionEvent } from "../domains/device-sync/types";
 import {
@@ -87,6 +89,8 @@ export function MobileSessionSheet({
       return true;
     });
   }, [onClose]);
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
 
   const scrollSessionToBottom = useCallback(() => {
     const body = bodyRef.current;
@@ -140,6 +144,25 @@ export function MobileSessionSheet({
   }, [sessionKey, requestClose]);
 
   useEffect(() => {
+    if (!sessionKey || import.meta.env.TAURI_ENV_PLATFORM !== "android") return;
+    let disposed = false;
+    let listener: Awaited<ReturnType<typeof onBackButtonPress>> | null = null;
+    void onBackButtonPress(() => requestCloseRef.current())
+      .then((registeredListener) => {
+        if (disposed) {
+          void registeredListener.unregister().catch(() => undefined);
+          return;
+        }
+        listener = registeredListener;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      void listener?.unregister().catch(() => undefined);
+    };
+  }, [sessionKey]);
+
+  useEffect(() => {
     if (!sessionKey) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -178,7 +201,7 @@ export function MobileSessionSheet({
   const events = session.lastInteraction?.events ?? [];
   const metrics = mobileSessionMetrics(session);
 
-  return (
+  return createPortal(
     <div
       className={styles.backdrop}
       data-closing={closing || undefined}
@@ -333,7 +356,8 @@ export function MobileSessionSheet({
           </footer>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -2,12 +2,21 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  backHandler: null as (() => void) | null,
+  unregisterBackHandler: vi.fn<() => Promise<void>>(),
   reply: vi.fn<() => Promise<void>>(),
   refreshDevice: vi.fn<() => Promise<{ source: "lan" | "s3"; refreshedDevices: number }>>(),
   refreshS3: vi.fn<() => Promise<void>>(),
   refreshSession: vi.fn<() => Promise<void>>(),
   permissionsQuery: vi.fn(),
   assistantContent: vi.fn<() => string>(),
+}));
+
+vi.mock("@tauri-apps/api/app", () => ({
+  onBackButtonPress: vi.fn(async (handler: () => void) => {
+    mocks.backHandler = handler;
+    return { unregister: mocks.unregisterBackHandler };
+  }),
 }));
 
 vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
@@ -90,6 +99,9 @@ function openSession(title: string) {
 
 describe("MobileSessionsPage", () => {
   beforeEach(() => {
+    vi.stubEnv("TAURI_ENV_PLATFORM", "android");
+    mocks.backHandler = null;
+    mocks.unregisterBackHandler.mockReset().mockResolvedValue(undefined);
     mocks.reply.mockReset().mockResolvedValue(undefined);
     mocks.refreshDevice.mockReset().mockResolvedValue({ source: "lan", refreshedDevices: 1 });
     mocks.refreshS3.mockReset().mockResolvedValue(undefined);
@@ -191,6 +203,26 @@ describe("MobileSessionsPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
+  it("closes both collapsed and expanded session sheets with the Android back gesture", async () => {
+    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+
+    openSession("Refactor parser");
+    await waitFor(() => expect(mocks.backHandler).not.toBeNull());
+    act(() => mocks.backHandler?.());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(mocks.unregisterBackHandler).toHaveBeenCalledTimes(1));
+
+    mocks.backHandler = null;
+    const expandedDialog = openSession("Refactor parser");
+    await waitFor(() => expect(mocks.backHandler).not.toBeNull());
+    fireEvent.click(within(expandedDialog).getByRole("button", { name: "展开会话详情" }));
+    expect(expandedDialog).toHaveAttribute("data-expanded");
+
+    act(() => mocks.backHandler?.());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(mocks.unregisterBackHandler).toHaveBeenCalledTimes(2));
+  });
+
   it("opens the sheet for non-OpenCode sessions without approval actions", async () => {
     render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
     const dialog = openSession("Refactor parser");
@@ -213,6 +245,21 @@ describe("MobileSessionsPage", () => {
     await waitFor(() => expect(mocks.refreshDevice).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByText(/最后刷新：/)).toBeInTheDocument());
     expect(mocks.refreshS3).not.toHaveBeenCalled();
+  });
+
+  it("keeps the session sheet viewport-bound while pull-to-refresh transforms the page", () => {
+    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+
+    const page = screen.getByText("Office PC 会话").closest("section")!;
+    const pullSurface = page.parentElement!;
+    pullSurface.setAttribute("data-pulling", "true");
+
+    const dialog = openSession("Refactor parser");
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
+    expect(pullSurface).toHaveAttribute("data-pulling");
+    expect(pullSurface).not.toContainElement(dialog);
+
+    pullSurface.removeAttribute("data-pulling");
   });
 
   it("blocks page refresh, supports expand-collapse-close gestures, and refreshes one session over LAN", async () => {

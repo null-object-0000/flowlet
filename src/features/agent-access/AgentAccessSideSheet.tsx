@@ -108,7 +108,7 @@ export const FlowletPermissionBridge = async ({ client, serverUrl, directory, wo
 }
 `;
 
-export type AgentKind = "claude-code" | "opencode" | "pi";
+export type AgentKind = "claude-code" | "opencode" | "pi" | "codex";
 type Copy = (value: string, message: string) => Promise<void>;
 
 type AgentMeta = {
@@ -164,6 +164,19 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     globalConfigDescription: "Pi 的 Provider 定义在 models.json，凭据在 auth.json，默认模型在 settings.json",
     manualDescription: "Pi 的 models.json、auth.json 与 settings.json 需要分别设置",
     restartTip: "修改全局配置后请重新启动 Pi。",
+  },
+  codex: {
+    name: "Codex",
+    endpointSuffix: "/v1",
+    hasDesktop: true,
+    showsCredentialsFile: true,
+    showsFastModel: false,
+    showsSubagentModel: false,
+    environmentDescription: "识别 Codex CLI 与 ChatGPT Desktop 的安装位置和版本",
+    notInstalledText: "未检测到 Codex CLI 或 ChatGPT Desktop。Flowlet 会检查 PATH 与常见安装位置。",
+    globalConfigDescription: "Codex CLI、ChatGPT 桌面端与 VS Code 插件共用此全局配置",
+    manualDescription: "以下内容与一键写入的 Codex 全局配置一致",
+    restartTip: "修改全局配置后请重新启动 Codex CLI 与 ChatGPT Desktop。",
   },
 };
 
@@ -486,11 +499,14 @@ function installationTitle(
   t: (source: string) => string,
 ) {
   const base = AGENT_META[agent].name;
+  // Codex 桌面端探测到的是 ChatGPT 桌面应用，保留真实应用名便于识别。
   const name = agent === "claude-code"
     ? "Claude Code"
-    : surface === "desktop"
-      ? `${base} Desktop`
-      : `${base} CLI`;
+    : agent === "codex" && surface === "desktop"
+      ? "ChatGPT Desktop"
+      : surface === "desktop"
+        ? `${base} Desktop`
+        : `${base} CLI`;
   return version ? `${name} ${version}` : t(`${name} 安装`);
 }
 
@@ -603,6 +619,37 @@ function buildManualSnippets(
       },
     },
   }, null, 2);
+  if (agent === "codex") {
+    // 与 Rust apply_codex 受管字段完全一致：Responses 协议、本地 Base URL、
+    // 强制关闭响应存储（避免 store/previous_response_id 破坏无状态多账号路由）。
+    const configToml = [
+      'model = "flowlet-pro"',
+      'model_provider = "flowlet"',
+      "disable_response_storage = true",
+      'preferred_auth_method = "apikey"',
+      "",
+      "[model_providers.flowlet]",
+      'name = "flowlet"',
+      `base_url = "${endpoint}"`,
+      'wire_api = "responses"',
+      "requires_openai_auth = true",
+    ].join("\n");
+    const credentials = (apiKey: string) => JSON.stringify({
+      OPENAI_API_KEY: apiKey,
+    }, null, 2);
+    return [
+      {
+        label: t("config.toml 配置片段"),
+        displayValue: configToml,
+        copyValue: configToml,
+      },
+      {
+        label: t("auth.json 凭据片段"),
+        displayValue: credentials(displayedToken),
+        copyValue: credentials(token),
+      },
+    ];
+  }
   const credentials = (apiKey: string) => JSON.stringify({
     flowlet: { type: "api", key: apiKey },
   }, null, 2);

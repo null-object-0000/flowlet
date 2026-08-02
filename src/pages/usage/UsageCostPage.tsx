@@ -3,6 +3,9 @@ import { Button, Select } from "@douyinfe/semi-ui-19";
 import { useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useDeviceDailyUsage, useDeviceHourlyUsage, useKnownDevices } from "../../features/device-sync/useDeviceSync";
+import { PageHeader } from "../../shared/ui/PageHeader";
+import { RefreshControl } from "../../shared/ui/RefreshControl";
+import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
 import {
   buildMobileUsageHeatmap,
@@ -18,14 +21,15 @@ import styles from "./UsageCostPage.module.css";
 
 export function UsageCostPage() {
   const { language, t } = useAppPreferences();
+  const refresh = useRefreshControl({ intervalMs: 30_000 });
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [period, setPeriod] = useState<MobileUsagePeriod>("month");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const devices = useKnownDevices();
-  const usage = useDeviceDailyUsage(deviceId);
-  const hourlyUsage = useDeviceHourlyUsage(deviceId);
+  const usage = useDeviceDailyUsage(deviceId, true, refresh.autoRefresh);
+  const hourlyUsage = useDeviceHourlyUsage(deviceId, true, refresh.autoRefresh);
   const now = useMemo(() => new Date(), []);
   const range = useMemo(
     () => getMobileUsageRange(period, periodOffset, now),
@@ -90,9 +94,18 @@ export function UsageCostPage() {
 
   return (
     <main className={styles.page}>
-      <header className={styles.heading}>
-        <div><h2>{t("概览")}</h2><p>{t("按设备查看每周或每月 Token 热力图")}</p></div>
-      </header>
+      <PageHeader title={t("用量概览")} subtitle={t("按设备和时间查看 Token 使用规模与活跃节奏")}>
+        <RefreshControl
+          autoRefresh={refresh.autoRefresh}
+          onToggleAutoRefresh={refresh.toggleAutoRefresh}
+          isFetching={activeQuery.isFetching}
+          lastUpdatedAt={activeQuery.dataUpdatedAt || undefined}
+          intervalMs={refresh.intervalMs}
+          onRefresh={() => void activeQuery.refetch()}
+          language={language}
+          t={t}
+        />
+      </PageHeader>
 
       <section className={styles.toolbar}>
         <Select

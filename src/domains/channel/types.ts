@@ -9,8 +9,8 @@ export type AuthStrategy = "bearer" | "x_api_key";
 export const CUSTOM_CHANNEL_ID = "custom";
 
 /** ChatGPT (Codex) 伪装渠道 ID。Codex 账号由 Rust 端自动发现和同步，
- *  不需要用户手动创建。前端仅在概览页底部作为非交互式展示项呈现，
- *  不在账号管理弹窗中出现。 */
+ *  不需要用户手动创建。前端在概览页渠道账号卡片中作为只读伪账号行呈现
+ *  （行点击打开只读详情抽屉），不参与路由，不在账号管理弹窗中出现。 */
 export const CHATGPT_CHANNEL_ID = "chatgpt";
 
 export type ChannelPreset = {

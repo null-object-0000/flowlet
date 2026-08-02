@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { DEFAULT_BACKGROUND_JOBS_FILTER, type BackgroundJobRow, type BackgroundJobsFilter } from "../../domains/background-task/types";
 import { useBackgroundTaskDetail, useBackgroundTasks, useCancelBackgroundTask, useCleanupBackgroundTasks } from "../../features/background-tasks/useBackgroundTasks";
+import { PageHeader } from "../../shared/ui/PageHeader";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
@@ -13,7 +14,7 @@ import { formatTimestamp } from "../../shared/formatters/datetime";
 import styles from "./TaskLogsPage.module.css";
 import { formatJobDuration } from "./taskDuration";
 
-const { Paragraph, Text, Title } = Typography;
+const { Text } = Typography;
 type Translate = (key: string, variables?: Record<string, string | number>) => string;
 
 export function TaskLogsPage() {
@@ -42,8 +43,7 @@ export function TaskLogsPage() {
   });
 
   return <main className={styles.page}>
-    <header className={styles.header}>
-      <div><Title heading={3}>{t("任务日志")}</Title><Paragraph type="tertiary">{t("查看后台处理任务的进度、性能、结果与错误")}</Paragraph></div>
+    <PageHeader title={t("任务日志")} subtitle={t("查看后台处理任务的进度、性能、结果与错误")}>
       <RefreshControl
         autoRefresh={refresh.autoRefresh}
         onToggleAutoRefresh={refresh.toggleAutoRefresh}
@@ -54,7 +54,7 @@ export function TaskLogsPage() {
         language={language}
         t={t}
       />
-    </header>
+    </PageHeader>
     <section className={styles.toolbar} aria-label={t("任务筛选")}>
       <Select insetLabel={t("状态")} value={filter.status || "__all__"} optionList={statusOptions(t)} onChange={(value) => setFilter((current) => ({ ...current, status: value === "__all__" ? "" : String(value) as BackgroundJobsFilter["status"], page: 1 }))} />
       <Select insetLabel={t("任务类型")} value={filter.jobType || "__all__"} optionList={[{ value: "__all__", label: t("全部类型") }, { value: "body-cleanup", label: t("Body 清理") }, { value: "agent-data-sync", label: t("Agent 数据同步") }, { value: "codex-account-sync", label: t("Codex 账号同步") }, { value: "channel-resource-sync", label: t("渠道资源自动同步") }, { value: "device-s3-sync", label: t("S3 设备同步") }]} onChange={(value) => setFilter((current) => ({ ...current, jobType: value === "__all__" ? "" : String(value), page: 1 }))} />

@@ -1,8 +1,4 @@
 .page { height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; }
-.pageHeading { min-height: 44px; display: flex; align-items: center; gap: 16px; }
-.pageHeading > div { min-width: 0; flex: 1; }
-.pageHeading h3 { margin: 0; color: var(--flowlet-color-text); font-size: 20px; line-height: 1.2; }
-.pageHeading p { margin: 3px 0 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 
 /* 统计条:单条通栏卡片,统计项竖线分隔,右侧为模型构成 pill */
 .statsBar { min-height: 64px; padding: 6px 8px; display: flex; align-items: center; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }

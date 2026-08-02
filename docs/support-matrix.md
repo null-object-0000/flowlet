@@ -156,7 +156,7 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 | Claude Code | ✅ CLI、多安装候选、版本 | ✅ | Anthropic Messages | ✅ User-Agent；官方 Session Header | ✅ | 主模型/快速模型/子 Agent 映射，可选 `[1m]` 长上下文 |
 | OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置 |
 | Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可部署原生扩展注入 `x-flowlet-session` |
-| ChatGPT（Codex）/ Codex CLI | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | Codex 账号发现、授权、套餐用量和 credits 查询 |
+| Codex | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | 账号发现/授权/套餐用量/credits 查询（承载于渠道账号卡片伪账号行的只读详情抽屉） |
 
 “一键写入/恢复”包括：
 

@@ -6,6 +6,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionNativeUsage, type AgentSessionRow } from "../../domains/agent-session/types";
 import { useAgentSessionNativeSummary, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
 import { useAgentDataSync, useAgentSyncStatus } from "../../features/background-tasks/useBackgroundTasks";
+import { PageHeader } from "../../shared/ui/PageHeader";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
@@ -18,7 +19,7 @@ import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSessionDetailSideSheet";
 import styles from "./AgentSessionsPage.module.css";
 
-const { Paragraph, Text, Title } = Typography;
+const { Text } = Typography;
 
 export function AgentSessionsPage() {
   const { language, t } = useAppPreferences();
@@ -54,11 +55,7 @@ export function AgentSessionsPage() {
 
   return (
     <main className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <Title heading={3} style={{ margin: 0 }}>{t("会话管理")}</Title>
-          <Paragraph type="tertiary" style={{ margin: 0 }}>{t("统一查看 Agent 本地会话与 Flowlet 请求观测")}</Paragraph>
-        </div>
+      <PageHeader title={t("会话管理")} subtitle={t("统一查看 Agent 本地会话与 Flowlet 请求观测")}>
         <RefreshControl
           autoRefresh={refresh.autoRefresh}
           onToggleAutoRefresh={refresh.toggleAutoRefresh}
@@ -69,7 +66,7 @@ export function AgentSessionsPage() {
           language={language}
           t={t}
         />
-      </header>
+      </PageHeader>
 
       <section className={styles.toolbar} aria-label={t("会话筛选")}>
         <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索会话标题、ID 或项目目录")} showClear onChange={setSearchDraft} />

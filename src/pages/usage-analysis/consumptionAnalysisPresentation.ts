@@ -1,5 +1,5 @@
 /**
- * 消耗分析页「多维消耗分析」模块的纯展示层聚合。
+ * 用量分析页「多维归因」模块的纯展示层聚合。
  *
  * 数据来源是 `usage_summary` command 的分组明细行（粒度为
  * 日期 × client × channel × account × upstream_model），本模块在
@@ -147,6 +147,8 @@ export function buildCrossMatrix(
   const cellsByKey = new Map<string, CellAccumulator>();
   const rowTotals = new Map<string, number>();
   const columnTotals = new Map<string, CrossMatrixAxisEntry>();
+  // 列序固定按 Token 体量排，与当前指标切换无关——避免切「预估费用」时列序跳动。
+  const columnTokenTotals = new Map<string, number>();
   let grandTotal = 0;
 
   const metricOf = (row: UsageSummaryRow) => (metric === "tokens" ? finite(row.known_tokens) : finite(row.estimated_cost));
@@ -179,10 +181,11 @@ export function buildCrossMatrix(
     };
     column.total += value;
     columnTotals.set(colKey, column);
+    columnTokenTotals.set(colKey, (columnTokenTotals.get(colKey) ?? 0) + finite(row.known_tokens));
   }
 
   const columns = [...columnTotals.values()]
-    .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label))
+    .sort((a, b) => (columnTokenTotals.get(b.key) ?? 0) - (columnTokenTotals.get(a.key) ?? 0) || a.label.localeCompare(b.label))
     .slice(0, maxColumns);
   const covered = columns.reduce((sum, column) => sum + column.total, 0);
 

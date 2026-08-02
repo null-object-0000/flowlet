@@ -147,14 +147,17 @@ describe("buildCrossMatrix", () => {
     expect(cell?.cost).toBe(0.2);
   });
 
-  it("caps columns at the top N by the selected metric and reports coverage", () => {
+  it("keeps column order stable across metric switches (ordered by token volume)", () => {
+    // 列序固定按 Token 体量排，切「预估费用」时列序不应跳动。
     const tokenMatrix = buildCrossMatrix(rows, "account", "tokens", cnyOnly, 2);
     expect(tokenMatrix.columns).toHaveLength(2);
     expect(tokenMatrix.columns.map((column) => column.key)).toEqual(["deepseek-v4-pro", "longcat-2.0"]);
     expect(tokenMatrix.columnCoverage).toBeCloseTo((2000 + 1100) / 4300);
 
     const costMatrix = buildCrossMatrix(rows, "account", "cost", mixedCurrency, 2);
-    expect(costMatrix.columns.map((column) => column.key)).toEqual(["gpt-5-mini", "deepseek-v4-pro"]);
+    expect(costMatrix.columns.map((column) => column.key)).toEqual(["deepseek-v4-pro", "longcat-2.0"]);
+    // 覆盖率随当前指标变化（费用口径下 Top 2 覆盖的费用占比不同）。
+    expect(costMatrix.columnCoverage).toBeCloseTo((0.2 + 0) / 0.68);
   });
 
   it("assigns heat levels from the current period cell distribution", () => {

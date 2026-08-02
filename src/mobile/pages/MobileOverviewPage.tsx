@@ -108,7 +108,7 @@ export function MobileOverviewPage() {
           </h2>
           <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
         </div>
-        <p>{t("按设备查看每周或每月 Token 热力图")}</p>
+        <p>{t("按设备和时间查看 Token 使用规模与活跃节奏")}</p>
       </header>
 
       {!settings.isLoading && !settings.data?.config ? (

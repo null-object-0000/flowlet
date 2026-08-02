@@ -137,81 +137,21 @@ vi.mock("./useAgentEnvironment", () => ({
     isLoading: false,
     refetch,
   }),
-  useCodexAccounts: () => ({
-    data: {
-      accounts: [{
-        account_id: "account-1",
-        signed_in: true,
-        auth_mode: "chatgpt",
-        email: "user@example.com",
-        plan_type: "plus",
-        primary: { used_percent: 25, window_duration_mins: 300, resets_at: 1779459394 },
-        secondary: { used_percent: 18, window_duration_mins: 10080, resets_at: 1779826837 },
-        credits: { has_credits: true, unlimited: false, balance: "12.50" },
-        rate_limit_reset_credits: {
-          available_count: 2,
-          credits: [{
-            id: "RateLimitResetCredit_1",
-            reset_type: "codexRateLimits",
-            status: "available",
-            granted_at: 1781654400,
-            expires_at: 1784246400,
-            title: "Full reset",
-          }, {
-            id: "RateLimitResetCredit_2",
-            reset_type: "codexRateLimits",
-            status: "available",
-            granted_at: 1781654400,
-            expires_at: 1786924800,
-            title: "Weekly reset",
-          }],
-        },
-        source: "app_server",
-        updated_at: "2026-07-18T10:00:00Z",
-        stale: false,
-      }, {
-        account_id: "account-2",
-        signed_in: true,
-        auth_mode: "chatgpt",
-        email: "count-only@example.com",
-        plan_type: "free",
-        rate_limit_reset_credits: {
-          available_count: 1,
-          credits: null,
-        },
-        source: "oauth",
-        updated_at: "2026-07-18T09:00:00Z",
-        stale: false,
-      }],
-    },
-    error: null,
-    isFetching: false,
-    refetch,
-  }),
-  useCodexAccountRefresh: () => ({
-    isPending: false,
-    error: null,
-    mutate: vi.fn(),
-  }),
-  useCodexAccountAuthorization: () => ({
-    isPending: false,
-    mutateAsync,
-  }),
   useCodexGlobalConfig: () => ({
     query: {
       data: {
         agent_id: "codex",
         settings_path: "C:\\Users\\test\\.codex\\config.toml",
         credentials_path: "C:\\Users\\test\\.codex\\auth.json",
-        settings_exists: false,
-        state: "not_configured",
-        base_url: null,
-        auth_token_configured: false,
-        api_key_configured: false,
-        primary_model: null,
+        settings_exists: true,
+        state: "flowlet",
+        base_url: "http://127.0.0.1:18640/v1",
+        auth_token_configured: true,
+        api_key_configured: true,
+        primary_model: "flowlet-pro",
         fast_model: null,
         subagent_model: null,
-        backup_available: false,
+        backup_available: true,
         external_environment_overrides: [],
       },
       error: null,
@@ -310,7 +250,7 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByRole("button", { name: "配置 OpenCode" })).toBeEnabled();
     expect(screen.getByText("1.18.2")).toBeInTheDocument();
     expect(screen.getAllByText("已安装")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "配置 ChatGPT (Codex)" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "配置 Codex" })).toBeEnabled();
     expect(screen.getByText("0.142.5")).toBeInTheDocument();
     expect(screen.getByText("26.707.12708.0")).toBeInTheDocument();
 
@@ -335,45 +275,34 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.queryByRole("button", { name: "查看 Client Token" })).not.toBeInTheDocument();
   });
 
-  it("switches between the supported ChatGPT Codex Desktop and CLI tabs", () => {
+  it("opens the standard Codex agent sheet with CLI and Desktop surfaces", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "配置 ChatGPT (Codex)" }));
-    expect(screen.getByRole("tab", { name: "ChatGPT (Codex) Desktop 接入" })).toHaveAttribute("aria-selected", "true");
-    // 一键接入区（全系共享一份配置）
-    expect(screen.getByText("接入 Flowlet")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "全局接入 Flowlet" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "恢复接入前配置" })).not.toBeInTheDocument();
-    expect(screen.queryByText("检测新版 ChatGPT Desktop 的安装版本和位置。")).not.toBeInTheDocument();
-    expect(screen.getByText("ChatGPT Desktop 26.707.12708.0")).toBeInTheDocument();
-    expect(screen.getByText("仅识别统一后的新版 ChatGPT Desktop")).toBeInTheDocument();
-    expect(screen.getByText("C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe")).toBeInTheDocument();
-    expect(screen.queryByText("全局配置")).not.toBeInTheDocument();
-    expect(screen.getByText("user@example.com")).toBeInTheDocument();
-    expect(screen.getByText("Plus")).toBeInTheDocument();
-    expect(screen.getByText("5 小时用量")).toBeInTheDocument();
-    expect(screen.getByText("每周用量")).toBeInTheDocument();
-    expect(screen.getByText("剩余 75%")).toBeInTheDocument();
-    expect(screen.getByText("重置机会")).toBeInTheDocument();
-    expect(screen.getByText("可用 2 次")).toBeInTheDocument();
-    expect(screen.getByText("Full reset")).toBeInTheDocument();
-    expect(screen.getByText("Weekly reset")).toBeInTheDocument();
-    expect(screen.getAllByText(/将于 .* 到期/)).toHaveLength(2);
-    const countOnlyCard = screen.getByText("count-only@example.com").parentElement?.parentElement;
-    expect(countOnlyCard).not.toBeNull();
-    expect(within(countOnlyCard as HTMLElement).getByText("重置 1 次")).toBeInTheDocument();
-    expect(within(countOnlyCard as HTMLElement).queryByText("重置机会")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "添加 / 重新授权账号" })).toBeEnabled();
-    const sideSheetBody = document.querySelector<HTMLElement>(".semi-sidesheet-body");
-    expect(sideSheetBody).not.toBeNull();
-    if (sideSheetBody) sideSheetBody.scrollTop = 240;
-    fireEvent.click(screen.getByRole("tab", { name: "ChatGPT (Codex) CLI 接入" }));
-    expect(sideSheetBody?.scrollTop).toBe(0);
-    expect(screen.getByRole("tab", { name: "ChatGPT (Codex) CLI 接入" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.queryByText("检测 Codex CLI 的安装版本和位置。")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "配置 Codex" }));
+    // 标准 Agent 抽屉：CLI/Desktop 双标签页，默认选中 CLI。
+    expect(screen.getByRole("tab", { name: "Codex CLI 接入" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Codex CLI 0.142.5")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\AppData\\Roaming\\npm\\codex.cmd")).toBeInTheDocument();
-    expect(screen.queryByText("ChatGPT Desktop 26.707.12708.0")).not.toBeInTheDocument();
+    // 一键接入 Flowlet 全局配置区。
+    expect(screen.getByText("全局配置")).toBeInTheDocument();
+    expect(screen.getByText("Codex CLI、ChatGPT 桌面端与 VS Code 插件共用此全局配置")).toBeInTheDocument();
+    expect(screen.getByText("已接入 Flowlet")).toBeInTheDocument();
+    expect(screen.getByText("C:\\Users\\test\\.codex\\config.toml")).toBeInTheDocument();
+    expect(screen.getByText("C:\\Users\\test\\.codex\\auth.json")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
+    // 手动配置片段：config.toml + auth.json。
+    expect(screen.getByText("config.toml 配置片段")).toBeInTheDocument();
+    expect(screen.getByText("auth.json 凭据片段")).toBeInTheDocument();
+    // config.toml 片段应包含 Responses 协议配置（文本在 code 块内被拆分，用正则模糊匹配）。
+    expect(screen.getByText(/wire_api\s*=\s*"responses"/, { selector: "code" })).toBeInTheDocument();
+
+    // 切到 Desktop 标签页：探测到的是 ChatGPT 桌面应用。
+    fireEvent.click(screen.getByRole("tab", { name: "Codex Desktop 接入" }));
+    expect(screen.getByRole("tab", { name: "Codex Desktop 接入" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("ChatGPT Desktop 26.707.12708.0")).toBeInTheDocument();
+    expect(screen.getByText("C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe")).toBeInTheDocument();
+    expect(screen.queryByText("Codex CLI 0.142.5")).not.toBeInTheDocument();
   });
   it("opens the shared OpenCode CLI and Desktop global configuration", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);

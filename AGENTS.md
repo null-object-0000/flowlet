@@ -422,9 +422,10 @@ Pi 官方的 `before_provider_headers` 事件），在每次 LLM 请求的 heade
 
 ### Codex 系一键接入
 
-Codex CLI、ChatGPT 桌面端 Codex 与 VS Code Codex 插件共享同一份
-`~/.codex/config.toml` 与 `auth.json`，一键写入一次即覆盖三端，不需要分别配置，
-也不新增第五张 Agent 卡片（统一收纳在「ChatGPT (Codex)」抽屉的「接入 Flowlet」区）。
+Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent（`AgentKind = "codex"`），
+复用 `AgentAccessSideSheet`：CLI/Desktop 双标签页安装探测、一键接入 Flowlet 全局配置、
+手动配置片段。Codex CLI、ChatGPT 桌面端 Codex 与 VS Code Codex 插件共享同一份
+`~/.codex/config.toml` 与 `auth.json`，一键写入一次即覆盖三端，不需要分别配置。
 受管内容包括：`[model_providers.flowlet]`（`wire_api = "responses"`、本地 Base URL、
 `requires_openai_auth = true`）、顶层 `model = "flowlet-pro"` 与
 `disable_response_storage = true`——后者是无状态 Responses 路由的**强制项**，
@@ -432,6 +433,11 @@ Codex CLI、ChatGPT 桌面端 Codex 与 VS Code Codex 插件共享同一份
 `auth.json` 的 `OPENAI_API_KEY`（不动系统环境变量，备份/恢复保留原有登录态字段）。
 Codex 的 User-Agent（`codex_cli_rs/`）可区分，归属走 UA 规则（config.json 默认集 +
 内置兜底规则），不需要 `x-flowlet-client` 标记头。
+
+Codex 账号观测（订阅用量、套餐、Credits、重置机会、授权/刷新）承载于概览页
+渠道账号卡片：Codex 账号由 Rust 端自动发现与同步，作为伪 `ChannelAccount` 插入
+渠道账号列表（只读、不参与路由、不开放编辑、`priority: -1000` 排底），
+伪账号行点击打开只读详情抽屉（`CodexAccountSideSheet`）。
 
 ---
 

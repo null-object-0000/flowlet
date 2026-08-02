@@ -12,7 +12,7 @@ export function useKnownDevices() {
   });
 }
 
-export function useDeviceDailyUsage(deviceId: string | null, enabled = true) {
+export function useDeviceDailyUsage(deviceId: string | null, enabled = true, autoRefresh = false) {
   return useQuery({
     queryKey: queryKeys.deviceSync.dailyUsage(deviceId),
     queryFn: () => deviceSyncCommands.dailyUsage(deviceId),
@@ -20,10 +20,12 @@ export function useDeviceDailyUsage(deviceId: string | null, enabled = true) {
     staleTime: 15_000,
     retry: false,
     enabled,
+    refetchOnWindowFocus: false,
+    refetchInterval: autoRefresh ? 30_000 : false,
   });
 }
 
-export function useDeviceHourlyUsage(deviceId: string | null, enabled = true) {
+export function useDeviceHourlyUsage(deviceId: string | null, enabled = true, autoRefresh = false) {
   return useQuery({
     queryKey: queryKeys.deviceSync.hourlyUsage(deviceId),
     queryFn: () => deviceSyncCommands.hourlyUsage(deviceId),
@@ -31,6 +33,8 @@ export function useDeviceHourlyUsage(deviceId: string | null, enabled = true) {
     staleTime: 15_000,
     retry: false,
     enabled,
+    refetchOnWindowFocus: false,
+    refetchInterval: autoRefresh ? 30_000 : false,
   });
 }
 

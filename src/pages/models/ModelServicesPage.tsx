@@ -6,6 +6,7 @@ import { useAccounts, useChannelPresets } from "../../features/channel-accounts"
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useChannelModels, useModelPrices, useRouteCandidates } from "../../features/exposed-models/useModels";
+import { PageHeader } from "../../shared/ui/PageHeader";
 import {
   buildAggregateRelations,
   buildModelServiceItems,
@@ -40,7 +41,7 @@ import { useModelCatalogsSync } from "../../features/background-tasks/useBackgro
 import { channelCommands, type PresetSyncPreview } from "../../domains/channel/commands";
 import styles from "./ModelServicesPage.module.css";
 
-const { Paragraph, Text, Title } = Typography;
+const { Text } = Typography;
 
 /** 把聚合模型 helper 产出的 ResolvedPrice（扁平 input* 字段）转回 ModelsCnPrice 形态，
  *  方便 UI 统一按 input.standard / input.cacheHit 访问。sourceUrl 仅作兜底。 */
@@ -272,10 +273,9 @@ export function ModelServicesPage() {
 
   return (
     <main className={styles.page}>
-      <header className={styles.pageHeading}>
-        <div><Title heading={3}>{t("模型服务")}</Title><Paragraph>{t("管理对外模型、渠道能力与请求路由")}</Paragraph></div>
+      <PageHeader title={t("模型服务")} subtitle={t("管理对外模型、渠道能力与请求路由")}>
         <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconRefresh />} onClick={openSyncPresets} loading={syncPending}>{t("刷新模型")}</Button>
-      </header>
+      </PageHeader>
 
       <section className={styles.statsBar} aria-label={t("模型服务统计")}>
         <Stat label={t("对外模型")} value={models.length} />

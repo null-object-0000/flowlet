@@ -99,10 +99,7 @@ Qwen 的一个账号级特性是 **Token Plan**（订阅制，`sk-sp-` 前缀 Ke
 同时按实际能力维护：
 
 - `channels_config.default_exposed_models`；
-- `channels_config.flowlet_tiers`；
 - `channels_config.model_prices`：仅当渠道厂商**未被** `models-cn.json` / `models-dev.json` 目录覆盖时才需要手工维护（例如自定义中转站）。国内厂商与 OpenAI 官方价格已由两份本地目录提供，请勿重复填写。
-
-`flowlet_tiers` 只声明明确进入 `flowlet-pro` 或 `flowlet-flash` 的模型，值为档位数组；同一个上游模型可以同时进入多个档位。不要根据模型名称猜档位，也不要把所有模型默认映射到同一档。
 
 ### 3.2 同步代码默认值
 
@@ -110,7 +107,6 @@ Qwen 的一个账号级特性是 **Token Plan**（订阅制，`sk-sp-` 前缀 Ke
 
 - `src/domains/channel/types.ts`
   - `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`
-  - `FLOWLET_TIERS_BY_CHANNEL_MODEL`
 - `src-tauri/src/core/config.rs`
   - `ChannelPreset::<channel>()`
 - `src-tauri/src/core/presets.rs`
@@ -198,7 +194,7 @@ AccountEditorDrawer
   -> refreshSavedAccounts
      -> query_balance（能力允许时）
      -> sync_models（能力允许时）
-     -> mergeDefaultRoutes
+     -> reconcileAccountRoutes
      -> save_route_candidates（仅新增缺失路由时）
 ```
 
@@ -209,13 +205,14 @@ AccountEditorDrawer
 - 全局第一个渠道账号生成的新路由默认开启；此后新增的任何官方或自定义渠道账号，
   路由仍自动创建但默认关闭，必须由用户手动开启；
 - 直接模型使用 `virtual_model_id == upstream_model`；
-- 聚合模型根据 `flowlet_tiers` 映射到 `flowlet-pro` 或 `flowlet-flash`；
+- 账号保存只补齐直连路由，不自动加入 `flowlet-pro` 或 `flowlet-flash`；
+- 用户可在模型服务页把任意已有渠道模型显式加入任一聚合模型；
 - 已存在路由不被重复创建；
 - 用户关闭的路由不会因账号编辑或模型同步被重新开启；
 - 保存单账号不应无条件重写全部路由；
 - 自定义 Base URL 时，官方余额和模型同步是否应跳过必须明确。
 
-若渠道需要进入 Flowlet 聚合模型，还必须验证 `proxy_routing.rs` 和 `proxy_http.rs` 中的协议、账号健康状态和 `/models` 过滤条件。
+渠道模型加入 Flowlet 聚合模型后，还必须验证 `proxy_routing.rs` 和 `proxy_http.rs` 中的协议、账号健康状态和 `/models` 过滤条件。
 
 ## 7. 前端接入
 

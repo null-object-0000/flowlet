@@ -180,8 +180,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 "channels_config": {
   "channels": [ ... ],                  // 渠道模板列表
   "model_prices": [ ... ],              // 模型价格预设
-  "default_exposed_models": { ... },    // 各渠道默认开放的模型
-  "flowlet_tiers": { ... }              // Flowlet 档位映射
+  "default_exposed_models": { ... }     // 各渠道默认提供的模型
 }
 ```
 
@@ -364,7 +363,7 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 - 一个账号开放哪些模型由**用户显式选择**：在账号编辑器里手动「拉取模型列表」
   （底层 `/models`，Rust command `fetch_channel_models`），编辑器展示全量上游模型、
   白名单之外的模型展示但禁用勾选，用户勾选后保存到 `channel_accounts.exposed_models`。
-- 实际为账号生成的路由 = 全局白名单 **∩ 最近一次 `/models` 返回的
+- 实际为账号自动生成的直连路由 = 全局白名单 **∩ 最近一次 `/models` 返回的
   `synced_models` ∩ 用户勾选的 `exposed_models`**。
   - 白名单之外的模型**绝不生成路由**（即使上游 `/models` 返回了、用户也看得到，仍不可勾选）。
   - `exposed_models` 为 `NULL`（尚未用新流程配置）的账号**保持路由现状不动**（老账号升级不受影响）；
@@ -372,7 +371,7 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 - `channel_accounts.synced_models` / `models_synced_at` 保存最近一次 `/models` 结果，
   既作为编辑器候选池缓存，也作为已配置账号生成路由时的来源校验；未在
   `synced_models` 中的模型不会生成或保留路由。
-- 保存账号时前端按 `exposed_models` 对账路由：删除取消勾选的路由、补齐新勾选的路由，
+- 保存账号时前端按 `exposed_models` 对账路由：删除取消勾选模型关联的直连与聚合路由、补齐新勾选模型的直连路由，
   保留用户已有的启停状态、优先级和时间戳。
 - 自动补齐路由时，只有全局最早创建的渠道账号的新路由默认开启；后续新增的任何官方
   或自定义渠道账号，其新路由默认关闭并等待用户手动开启。已有路由的启停状态不追溯修改。
@@ -382,47 +381,8 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 - `custom` 渠道不例外：模型必须来自该账号 `/models` 返回结果，并与全局白名单取交集；
   白名单外模型展示为“不支持”且禁用勾选，不能进入 `exposed_models` 或生成路由。
 
-### 6.4 `flowlet_tiers` — Flowlet 档位映射
-
-```jsonc
-"flowlet_tiers": {
-  "longcat": {
-    "longcat-2.0": ["pro", "flash"]
-  },
-  "deepseek": {
-    "deepseek-v4-pro": ["pro"],
-    "deepseek-v4-flash": ["flash"]
-  },
-  "kimi": {
-    "kimi-k3": ["pro"],
-    "kimi-k2.7-code": ["pro"]
-  },
-  "qwen": {
-    "qwen3.7-max": ["pro"],
-    "qwen3.7-plus": ["pro"],
-    "qwen3.7-flash": ["flash"],
-    "qwen3.6-plus": ["pro"],
-    "qwen3.6-flash": ["flash"],
-    "qwen3.8-max-preview": ["pro"]
-  }
-}
-```
-
-**结构**：`Record<channel_id, Record<model_name_lower, tier[]>>`。旧配置中的单个
-`"pro"` / `"flash"` 字符串仍可兼容读取。
-
-**行为**：账号保存后的默认路由合并会根据该映射，将上游模型同时加入
-一个或多个聚合模型；已有路由的启用状态和优先级保持不变，
-只补充缺失的账号、协议和聚合路由。补充出来的路由仅在属于全局最早创建账号时
-默认开启；后续账号的直接路由和聚合路由均默认关闭。
-
-**tier 取值**：`"pro"` | `"flash"`。
-
-**行为**：
-
-- 用于 Flowlet 对外模型分层（Flowlet Pro / Flowlet Flash）。
-- 查询时模型名会先 `trim().to_lowercase()` 再匹配。
-- 未匹配到的模型返回 `"none"`。
+`flowlet-pro` 与 `flowlet-flash` 的候选关系不属于 `config.json`。用户在模型服务页从已有
+渠道模型中显式添加；添加时复用该渠道模型已经存在的协议路由，保存后立即热更新。
 
 ---
 
@@ -467,13 +427,11 @@ LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、�
 
 3. **在 `default_exposed_models` 中声明默认开放的模型列表**。
 
-4. **在 `flowlet_tiers` 中声明档位映射**（可选）。
+4. **按 `docs/channel-integration.md` 完成 Rust 适配、SQLite 迁移、前端、图标与测试**。
 
-5. **按 `docs/channel-integration.md` 完成 Rust 适配、SQLite 迁移、前端、图标与测试**。
+5. **同步更新本文档**（第 6.1 节及示例）。
 
-6. **同步更新本文档**（第 6.1 节及示例）。
-
-7. **运行检查**：
+6. **运行检查**：
    - `cargo check`（Rust 编译）
    - `bun run build`（前端构建）
    - 启动应用验证渠道模板已加载

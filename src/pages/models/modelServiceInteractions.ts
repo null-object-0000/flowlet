@@ -1,6 +1,10 @@
 import type { RouteCandidate } from "../../domains/model/types";
 import type { ChannelPreset } from "../../domains/channel/types";
-import { buildModelRouteGroups, type ModelServiceItem } from "./modelServiceView";
+import {
+  buildModelRouteGroups,
+  type ModelRouteGroup,
+  type ModelServiceItem,
+} from "./modelServiceView";
 
 export function filterModelServiceItems(
   models: ModelServiceItem[],
@@ -65,5 +69,94 @@ export function reorderModelRouteGroups(
   return routes.map((route) => {
     const priority = priorityByRouteId.get(route.id);
     return priority == null ? route : { ...route, priority, updated_at: updatedAt };
+  });
+}
+
+export type AggregateRouteOption = {
+  key: string;
+  channelId: string;
+  accountId: string;
+  upstreamModel: string;
+  routeIds: string[];
+};
+
+function aggregateRouteOptionKey(group: ModelRouteGroup): string {
+  return JSON.stringify([group.channelId, group.accountId, group.upstreamModel]);
+}
+
+/** Existing direct channel-model groups that can be explicitly attached to an aggregate. */
+export function buildAggregateRouteOptions(
+  routes: RouteCandidate[],
+  aggregateModelId: string,
+): AggregateRouteOption[] {
+  const attached = new Set(
+    buildModelRouteGroups(routes.filter((route) => route.virtual_model_id === aggregateModelId))
+      .map(aggregateRouteOptionKey),
+  );
+  return buildModelRouteGroups(routes.filter((route) => (
+    route.virtual_model_id !== "flowlet-pro"
+    && route.virtual_model_id !== "flowlet-flash"
+  )))
+    .filter((group) => !attached.has(aggregateRouteOptionKey(group)))
+    .map((group) => ({
+      key: aggregateRouteOptionKey(group),
+      channelId: group.channelId,
+      accountId: group.accountId,
+      upstreamModel: group.upstreamModel,
+      routeIds: group.routeIds,
+    }));
+}
+
+export function addAggregateRouteGroup(
+  routes: RouteCandidate[],
+  aggregateModelId: string,
+  sourceKey: string,
+  updatedAt: string,
+  createId: () => string,
+): RouteCandidate[] {
+  const source = buildModelRouteGroups(routes.filter((route) => (
+    route.virtual_model_id !== "flowlet-pro"
+    && route.virtual_model_id !== "flowlet-flash"
+  ))).find((group) => aggregateRouteOptionKey(group) === sourceKey);
+  if (!source) return routes;
+
+  const alreadyAttached = buildModelRouteGroups(
+    routes.filter((route) => route.virtual_model_id === aggregateModelId),
+  ).some((group) => aggregateRouteOptionKey(group) === sourceKey);
+  if (alreadyAttached) return routes;
+
+  const aggregateGroups = buildModelRouteGroups(
+    routes.filter((route) => route.virtual_model_id === aggregateModelId),
+  );
+  const priority = aggregateGroups.length;
+  const additions = source.routes.map((route) => ({
+    ...route,
+    id: createId(),
+    virtual_model_id: aggregateModelId,
+    priority,
+    enabled: true,
+    created_at: updatedAt,
+    updated_at: updatedAt,
+  }));
+  return [...routes, ...additions];
+}
+
+export function removeAggregateRouteGroup(
+  routes: RouteCandidate[],
+  aggregateModelId: string,
+  routeIds: string[],
+): RouteCandidate[] {
+  const ids = new Set(routeIds);
+  const remaining = routes.filter((route) => !(
+    route.virtual_model_id === aggregateModelId && ids.has(route.id)
+  ));
+  const groups = buildModelRouteGroups(
+    remaining.filter((route) => route.virtual_model_id === aggregateModelId),
+  );
+  const priorityById = new Map<string, number>();
+  groups.forEach((group, priority) => group.routeIds.forEach((id) => priorityById.set(id, priority)));
+  return remaining.map((route) => {
+    const priority = priorityById.get(route.id);
+    return priority == null ? route : { ...route, priority };
   });
 }

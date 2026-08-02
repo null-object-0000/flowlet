@@ -237,8 +237,18 @@ pub async fn build_device_snapshot(
     .await
     .map_err(|_| "生成设备用量快照任务失败".to_string())??;
     let agents = build_synced_agent_profiles(&storage, &sessions).await?;
+    // 维度用量聚合：最近 90 天按 (日期, 客户端, 渠道, 账号, 模型) 聚合，
+    // 附带在快照中发给对方，供用量分析页按设备维度汇总。
+    let usage_breakdowns = tauri::async_runtime::spawn_blocking({
+        let snapshot_storage = storage.clone();
+        move || snapshot_storage.usage_breakdown_for_sync(90)
+    })
+    .await
+    .map_err(|_| "生成维度用量聚合任务失败".to_string())?
+    .map_err(|error| error.to_string())?;
     let mut snapshot = DeviceUsageSnapshot::new(&identity, days, hours, sessions, agents);
     snapshot.lan_peer = crate::core::lan_sync::current_descriptor(&storage);
+    snapshot.usage_breakdowns = usage_breakdowns;
     Ok(snapshot)
 }
 
@@ -966,6 +976,13 @@ pub async fn pull_device_usage(
                     continue;
                 }
             };
+            if let Err(error) = import_storage.import_device_usage_breakdowns(
+                &snapshot.device_id,
+                &snapshot.generated_at,
+                &snapshot.usage_breakdowns,
+            ) {
+                tracing::warn!(device_id = %snapshot.device_id, %error, "failed to import S3 device breakdowns");
+            }
             imported_devices += 1;
             imported_days += result.imported_days;
             unchanged_days += result.unchanged_days;
@@ -1039,8 +1056,8 @@ async fn pull_device_usage_for_device(
     crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
     let snapshot = bundle.snapshot;
     let import_storage = storage.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        import_storage
+    let pull_result = tauri::async_runtime::spawn_blocking(move || {
+        let result = import_storage
             .import_device_usage(
                 snapshot.schema_version,
                 &snapshot.device_id,
@@ -1055,15 +1072,23 @@ async fn pull_device_usage_for_device(
                 &snapshot.sessions,
                 &snapshot.agents,
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        import_storage
+            .import_device_usage_breakdowns(
+                &snapshot.device_id,
+                &snapshot.generated_at,
+                &snapshot.usage_breakdowns,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>(result)
     })
     .await
     .map_err(|_| "导入指定设备 S3 快照任务失败".to_string())??;
     Ok(S3DevicePullResult {
         remote_devices: 1,
         imported_devices: 1,
-        imported_days: result.imported_days,
-        unchanged_days: result.unchanged_days,
+        imported_days: pull_result.imported_days,
+        unchanged_days: pull_result.unchanged_days,
         failed_objects: 0,
         failure_details: Vec::new(),
     })
@@ -1265,6 +1290,16 @@ pub async fn sync_device_usage(
                     continue;
                 }
             };
+            if import_storage
+                .import_device_usage_breakdowns(
+                    &snapshot.device_id,
+                    &snapshot.generated_at,
+                    &snapshot.usage_breakdowns,
+                )
+                .is_err()
+            {
+                import_failures += 1;
+            }
             imported_devices += 1;
             imported_days += result.imported_days;
             unchanged_days += result.unchanged_days;

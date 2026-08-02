@@ -4,10 +4,11 @@ use crate::core::agent_session_identity::from_header_json;
 use crate::core::channels_config::{canonical_model_key, official_channel_id_for_model};
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionRepairResult,
-    AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult, LogFilterClient, LogsFilter,
-    LogsPageResult, LogsSummary, ModelPrice, RequestLogInput, RequestLogModelOptions,
-    RequestLogRow, UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
+    AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult, DeviceUsageBreakdownRow,
+    LogFilterClient, LogsFilter, LogsPageResult, LogsSummary, ModelPrice, RequestLogInput,
+    RequestLogModelOptions, RequestLogRow, UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
 };
+use chrono::Datelike;
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_response_usage, extract_stream_usage};
 use base64::Engine;
@@ -2219,11 +2220,20 @@ impl Storage {
         Ok(updated)
     }
 
-    pub fn usage_summary(&self, period: &str) -> Result<Vec<UsageSummaryRow>, StorageError> {
+    pub fn usage_summary(
+        &self,
+        period: &str,
+        current_device_id: &str,
+    ) -> Result<Vec<UsageSummaryRow>, StorageError> {
         // 保留 request_logs.created_at 作为统计日期来源：历史修复可能在请求发生后才
         // 补写 usage_records，直接使用 usage_records.created_at 会把历史用量归到修复日。
         // period 只接受 command 边界校验后的固定枚举值，下面的 match 片段不包含用户输入。
         // "today"/"week" 按小时分组，给前端分时热力图提供粒度；其它周期按自然日分组。
+        //
+        // 结果由两部分 UNION ALL 后再按 device_id 二次分组：
+        //   1. 本机 usage_records，标记为 current_device_id；
+        //   2. 跨设备同步来的 device_usage_breakdowns（已按设备/日期/维度预聚合）。
+        // 这样前端即可把「设备」作为与模型、渠道账号、客户端并列的第四维度。
         let (date_expression, period_clause) = match period {
             "today" => (
                 "strftime('%Y-%m-%dT%H:00:00', request_logs.created_at, 'localtime')",
@@ -2281,84 +2291,199 @@ impl Storage {
                 "",
             ),
         };
+        // 同步来的 device_usage_breakdowns 按自然日存储，需要对应的日期范围过滤。
+        // "all" 不限制日期，其余周期按自然日起止过滤。起止修饰符与本地查询的
+        // period 语义一致（含当天），以 ISO 日期字符串传入。
+        let breakdown_period_clause = match period {
+            "all" => "",
+            _ => "AND breakdown_date >= ?3 AND breakdown_date <= ?4",
+        };
+        // 为同步数据的日期过滤计算起止日期（自然日），与 period 语义一致。
+        let (breakdown_start, breakdown_end): (Option<String>, Option<String>) = match period {
+            "all" => (None, None),
+            _ => {
+                let today = chrono::Local::now().date_naive();
+                let (start, end) = match period {
+                    "today" => (today, today),
+                    "week" => {
+                        let monday_offset = (today.weekday().num_days_from_monday() as i64);
+                        (today - chrono::Duration::days(monday_offset), today)
+                    }
+                    "month" => {
+                        let first = chrono::NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
+                        let last = chrono::NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1)
+                            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap())
+                            - chrono::Duration::days(1);
+                        (first, last)
+                    }
+                    "quarter" => {
+                        let quarter_start_month = ((today.month() - 1) / 3) * 3 + 1;
+                        let start = chrono::NaiveDate::from_ymd_opt(today.year(), quarter_start_month, 1).unwrap();
+                        let end = chrono::NaiveDate::from_ymd_opt(today.year(), quarter_start_month + 3, 1)
+                            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap())
+                            - chrono::Duration::days(1);
+                        (start, end)
+                    }
+                    "year" => {
+                        let start = chrono::NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap();
+                        let end = chrono::NaiveDate::from_ymd_opt(today.year(), 12, 31).unwrap();
+                        (start, end)
+                    }
+                    _ => (today, today),
+                };
+                (Some(start.to_string()), Some(end.to_string()))
+            }
+        };
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
+        // 本机记录（标记 current_device_id）与同步来的维度聚合 UNION ALL，
+        // 再按 device_id + 维度二次分组，使设备成为可与模型/渠道账号/客户端并列的维度。
         let sql = format!(
             r#"
             SELECT
-                {date_expression} AS usage_date,
-                usage_records.client_id,
-                usage_records.client_name,
-                usage_records.channel_id,
-                usage_records.channel_name,
-                usage_records.account_id,
-                COALESCE(ca.name, usage_records.account_name) AS account_name,
-                usage_records.upstream_model,
-                count(*) AS request_count,
-                coalesce(sum(usage_records.total_tokens), 0) AS known_tokens,
-                coalesce(sum(usage_records.input_tokens), 0) AS input_tokens,
-                coalesce(sum(usage_records.input_cached_tokens), 0) AS input_cached_tokens,
-                coalesce(sum(usage_records.input_uncached_tokens), 0) AS input_uncached_tokens,
-                coalesce(sum(CASE WHEN usage_records.input_cached_tokens IS NOT NULL THEN usage_records.input_tokens ELSE 0 END), 0) AS cache_measured_input_tokens,
-                coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
-                sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
-                coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost,
-                coalesce(sum(COALESCE(request_logs.duration_ms, request_logs.latency_ms)), 0) AS elapsed_total_ms,
-                sum(CASE WHEN COALESCE(request_logs.duration_ms, request_logs.latency_ms) IS NOT NULL THEN 1 ELSE 0 END) AS elapsed_measured_count,
-                coalesce(sum(CASE WHEN request_logs.duration_ms IS NOT NULL
-                                   AND request_logs.ttft_ms IS NOT NULL
-                                   AND request_logs.duration_ms > request_logs.ttft_ms
-                             THEN request_logs.duration_ms - request_logs.ttft_ms ELSE 0 END), 0) AS generation_total_ms,
-                sum(CASE WHEN request_logs.duration_ms IS NOT NULL
-                          AND request_logs.ttft_ms IS NOT NULL
-                          AND request_logs.duration_ms > request_logs.ttft_ms
-                    THEN coalesce(usage_records.output_tokens, 0) ELSE 0 END) AS generation_output_tokens
-            FROM usage_records
-            LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
-                                  AND request_logs.is_last_attempt = 1
-            LEFT JOIN channel_accounts ca ON ca.id = usage_records.account_id
-            WHERE 1 = 1
-            {period_clause}
-            GROUP BY usage_date, usage_records.client_id, usage_records.channel_id,
-                     usage_records.account_id, usage_records.upstream_model
+                device_id,
+                usage_date,
+                client_id,
+                client_name,
+                channel_id,
+                channel_name,
+                account_id,
+                account_name,
+                upstream_model,
+                sum(request_count) AS request_count,
+                sum(known_tokens) AS known_tokens,
+                sum(input_tokens) AS input_tokens,
+                sum(input_cached_tokens) AS input_cached_tokens,
+                sum(input_uncached_tokens) AS input_uncached_tokens,
+                sum(cache_measured_input_tokens) AS cache_measured_input_tokens,
+                sum(output_tokens) AS output_tokens,
+                sum(unknown_count) AS unknown_count,
+                sum(estimated_cost) AS estimated_cost,
+                sum(elapsed_total_ms) AS elapsed_total_ms,
+                sum(elapsed_measured_count) AS elapsed_measured_count,
+                sum(generation_total_ms) AS generation_total_ms,
+                sum(generation_output_tokens) AS generation_output_tokens
+            FROM (
+                SELECT
+                    ?1 AS device_id,
+                    {date_expression} AS usage_date,
+                    usage_records.client_id,
+                    usage_records.client_name,
+                    usage_records.channel_id,
+                    usage_records.channel_name,
+                    usage_records.account_id,
+                    COALESCE(ca.name, usage_records.account_name) AS account_name,
+                    usage_records.upstream_model,
+                    count(*) AS request_count,
+                    coalesce(sum(usage_records.total_tokens), 0) AS known_tokens,
+                    coalesce(sum(usage_records.input_tokens), 0) AS input_tokens,
+                    coalesce(sum(usage_records.input_cached_tokens), 0) AS input_cached_tokens,
+                    coalesce(sum(usage_records.input_uncached_tokens), 0) AS input_uncached_tokens,
+                    coalesce(sum(CASE WHEN usage_records.input_cached_tokens IS NOT NULL THEN usage_records.input_tokens ELSE 0 END), 0) AS cache_measured_input_tokens,
+                    coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
+                    sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
+                    coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost,
+                    coalesce(sum(COALESCE(request_logs.duration_ms, request_logs.latency_ms)), 0) AS elapsed_total_ms,
+                    sum(CASE WHEN COALESCE(request_logs.duration_ms, request_logs.latency_ms) IS NOT NULL THEN 1 ELSE 0 END) AS elapsed_measured_count,
+                    coalesce(sum(CASE WHEN request_logs.duration_ms IS NOT NULL
+                                       AND request_logs.ttft_ms IS NOT NULL
+                                       AND request_logs.duration_ms > request_logs.ttft_ms
+                                 THEN request_logs.duration_ms - request_logs.ttft_ms ELSE 0 END), 0) AS generation_total_ms,
+                    sum(CASE WHEN request_logs.duration_ms IS NOT NULL
+                              AND request_logs.ttft_ms IS NOT NULL
+                              AND request_logs.duration_ms > request_logs.ttft_ms
+                        THEN coalesce(usage_records.output_tokens, 0) ELSE 0 END) AS generation_output_tokens
+                FROM usage_records
+                LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
+                                      AND request_logs.is_last_attempt = 1
+                LEFT JOIN channel_accounts ca ON ca.id = usage_records.account_id
+                WHERE 1 = 1
+                {period_clause}
+                GROUP BY usage_date, usage_records.client_id, usage_records.channel_id,
+                         usage_records.account_id, usage_records.upstream_model
+
+                UNION ALL
+
+                SELECT
+                    device_id,
+                    breakdown_date AS usage_date,
+                    client_id,
+                    client_name,
+                    channel_id,
+                    channel_name,
+                    account_id,
+                    account_name,
+                    upstream_model,
+                    request_count,
+                    known_tokens,
+                    input_tokens,
+                    input_cached_tokens,
+                    input_uncached_tokens,
+                    cache_measured_input_tokens,
+                    output_tokens,
+                    unknown_count,
+                    estimated_cost,
+                    elapsed_total_ms,
+                    elapsed_measured_count,
+                    generation_total_ms,
+                    generation_output_tokens
+                FROM device_usage_breakdowns
+                WHERE device_id != ?2
+                {breakdown_period_clause}
+            ) combined
+            GROUP BY device_id, usage_date, client_id, channel_id, account_id, upstream_model
             ORDER BY usage_date DESC, request_count DESC
             "#,
         );
         let mut stmt = connection.prepare(&sql)?;
-        let rows = stmt.query_map([], |row| {
-            Ok(UsageSummaryRow {
-                date: row
-                    .get::<_, Option<String>>(0)?
-                    .unwrap_or_else(|| "未知日期".to_string()),
-                client_id: row.get(1)?,
-                client_name: row.get(2)?,
-                channel_id: row.get(3)?,
-                channel_name: row.get(4)?,
-                account_id: row.get(5)?,
-                account_name: row.get(6)?,
-                upstream_model: row.get(7)?,
-                request_count: row.get(8)?,
-                known_tokens: row.get(9)?,
-                input_tokens: row.get(10)?,
-                input_cached_tokens: row.get(11)?,
-                input_uncached_tokens: row.get(12)?,
-                cache_measured_input_tokens: row.get(13)?,
-                output_tokens: row.get(14)?,
-                unknown_count: row.get(15)?,
-                estimated_cost: row.get(16)?,
-                elapsed_total_ms: row.get(17)?,
-                elapsed_measured_count: row.get(18)?,
-                generation_total_ms: row.get(19)?,
-                generation_output_tokens: row.get(20)?,
-            })
-        })?;
-        let mut summary = Vec::new();
-        for row in rows {
-            summary.push(row?);
+        // 同步数据的日期过滤仅非 "all" 周期出现（SQL 中 ?3/?4），按周期动态拼参。
+        let map_row = Self::map_usage_summary_row;
+        let summary: Vec<UsageSummaryRow> = if period == "all" {
+            stmt.query_map(params![current_device_id, current_device_id], map_row)?
+        } else {
+            stmt.query_map(
+                params![
+                    current_device_id,
+                    current_device_id,
+                    breakdown_start.unwrap_or_default(),
+                    breakdown_end.unwrap_or_default(),
+                ],
+                map_row,
+            )?
         }
+        .collect::<Result<Vec<_>, _>>()?;
         Ok(summary)
+    }
+
+    /// 把 usage_summary 结果集的一行映射为 UsageSummaryRow。device_id 在第 0 列，
+    /// 其余字段自第 1 列起与 SELECT 顺序一致。
+    fn map_usage_summary_row(row: &rusqlite::Row<'_>) -> Result<UsageSummaryRow, rusqlite::Error> {
+        Ok(UsageSummaryRow {
+            device_id: row.get(0)?,
+            date: row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "未知日期".to_string()),
+            client_id: row.get(2)?,
+            client_name: row.get(3)?,
+            channel_id: row.get(4)?,
+            channel_name: row.get(5)?,
+            account_id: row.get(6)?,
+            account_name: row.get(7)?,
+            upstream_model: row.get(8)?,
+            request_count: row.get(9)?,
+            known_tokens: row.get(10)?,
+            input_tokens: row.get(11)?,
+            input_cached_tokens: row.get(12)?,
+            input_uncached_tokens: row.get(13)?,
+            cache_measured_input_tokens: row.get(14)?,
+            output_tokens: row.get(15)?,
+            unknown_count: row.get(16)?,
+            estimated_cost: row.get(17)?,
+            elapsed_total_ms: row.get(18)?,
+            elapsed_measured_count: row.get(19)?,
+            generation_total_ms: row.get(20)?,
+            generation_output_tokens: row.get(21)?,
+        })
     }
 
     /// 今日 Token 消耗聚合（总量 + 输入/缓存/未缓存/输出拆解）。

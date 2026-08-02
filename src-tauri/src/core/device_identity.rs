@@ -1,5 +1,7 @@
 use chrono::{Local, Timelike, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::core::config::DeviceUsageBreakdownRow;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -370,7 +372,7 @@ pub struct LanPeerDescriptor {
 }
 
 /// 供本地导出和未来同步传输共同使用的最小快照契约。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceUsageSnapshot {
     pub schema_version: u32,
@@ -393,6 +395,10 @@ pub struct DeviceUsageSnapshot {
     pub agents: Vec<SyncedAgentProfile>,
     #[serde(default)]
     pub lan_peer: Option<LanPeerDescriptor>,
+    /// 本机按 (日期, 客户端, 渠道, 账号, 模型) 聚合的最近用量，附带在快照中
+    /// 发给其他设备。接收端导入 `device_usage_breakdowns`，供用量分析页按设备汇总。
+    #[serde(default)]
+    pub usage_breakdowns: Vec<DeviceUsageBreakdownRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -470,6 +476,7 @@ impl DeviceUsageSnapshot {
             sessions,
             agents,
             lan_peer: None,
+            usage_breakdowns: Vec::new(),
         }
     }
 }

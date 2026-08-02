@@ -550,13 +550,6 @@ pub(crate) fn merge_builtin_config(mut external: ChannelsConfig) -> ChannelsConf
             .or_insert_with(|| models.clone());
     }
 
-    for (channel_id, tiers) in &builtin.flowlet_tiers {
-        external
-            .flowlet_tiers
-            .entry(channel_id.clone())
-            .or_insert_with(|| tiers.clone());
-    }
-
     external
 }
 

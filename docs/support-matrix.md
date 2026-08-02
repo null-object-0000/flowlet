@@ -102,19 +102,21 @@ Flowlet 当前有五种渠道模板：LongCat、DeepSeek、Kimi、Qwen 和自定
 Flowlet 当前总共支持 11 个规范化模型。这个列表是全局白名单，不是按渠道切分的
 固定路由表。
 
-| 官方归属 | 规范化模型 ID | 聚合档位 | Responses 说明 |
-|----------|---------------|----------|----------------|
-| LongCat | `LongCat-2.0` | `flowlet-pro`、`flowlet-flash` | ✅ 上游确认 |
-| DeepSeek | `deepseek-v4-pro` | `flowlet-pro` | ◐ 上游 Responses 将于 2026-08 初开放该模型 |
-| DeepSeek | `deepseek-v4-flash` | `flowlet-flash` | ✅ 上游确认 |
-| Kimi | `kimi-k3` | `flowlet-pro` | — 上游暂不支持 |
-| Kimi | `kimi-k2.7-code` | `flowlet-pro` | — 上游暂不支持 |
-| Qwen | `qwen3.8-max-preview` | `flowlet-pro` | ✅，仅 Token Plan |
-| Qwen | `qwen3.7-max` | `flowlet-pro` | ✅ 上游确认 |
-| Qwen | `qwen3.7-plus` | `flowlet-pro` | ✅ 上游确认 |
-| Qwen | `qwen3.7-flash` | `flowlet-flash` | ✅ 上游确认 |
-| Qwen | `qwen3.6-plus` | `flowlet-pro` | ✅ 上游确认 |
-| Qwen | `qwen3.6-flash` | `flowlet-flash` | ✅ 上游确认 |
+| 官方归属 | 规范化模型 ID | Responses 说明 |
+|----------|---------------|----------------|
+| LongCat | `LongCat-2.0` | ✅ 上游确认 |
+| DeepSeek | `deepseek-v4-pro` | ◐ 上游 Responses 将于 2026-08 初开放该模型 |
+| DeepSeek | `deepseek-v4-flash` | ✅ 上游确认 |
+| Kimi | `kimi-k3` | — 上游暂不支持 |
+| Kimi | `kimi-k2.7-code` | — 上游暂不支持 |
+| Qwen | `qwen3.8-max-preview` | ✅，仅 Token Plan |
+| Qwen | `qwen3.7-max` | ✅ 上游确认 |
+| Qwen | `qwen3.7-plus` | ✅ 上游确认 |
+| Qwen | `qwen3.7-flash` | ✅ 上游确认 |
+| Qwen | `qwen3.6-plus` | ✅ 上游确认 |
+| Qwen | `qwen3.6-flash` | ✅ 上游确认 |
+
+`flowlet-pro` 与 `flowlet-flash` 没有固定档位对应关系；用户可把上述任意已有渠道模型加入任一聚合模型。
 
 ### 4.1 模型身份与承载渠道
 
@@ -216,7 +218,7 @@ Cline、Continue、Open WebUI、Gemini CLI、Hermes Agent 等目前没有完整�
 
 - 新增或删除渠道模板；
 - 渠道新增协议、余额、资源或 Responses 能力；
-- 修改 `FLOWLET_SUPPORTED_MODELS` 或聚合档位映射；
+- 修改 `FLOWLET_SUPPORTED_MODELS` 或聚合模型管理逻辑；
 - 新增 Agent 接入卡片、全局配置写入或原生会话解析；
 - Flowlet 正式支持新的客户端协议；
 - “上游已支持”升级为“Flowlet 已正式支持”。

@@ -9,7 +9,7 @@
 .successValue { color: var(--flowlet-color-success) !important; }
 .statsKindPill { margin-right: 8px; padding: 5px 10px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface-muted); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); white-space: nowrap; }
 
-.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.36fr) minmax(330px, .84fr); gap: 10px; }
+.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(400px, .95fr); gap: 10px; }
 .listCard, .detailCard { min-height: 0; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .listCard { display: grid; grid-template-rows: 48px minmax(0, 1fr) 38px; }
 .toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 124px; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--flowlet-color-border); }
@@ -107,6 +107,12 @@
 /* 渠道路由:概览头(标题 + 说明 + 已启用计数 pill) */
 .routeOverview { display: grid; gap: 4px; }
 .routeOverviewHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.routeOverviewActions { display: flex; align-items: center; gap: 4px; }
+.emptyRouteState { padding: 22px 14px; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); text-align: center; }
+.addRouteForm { display: grid; gap: 8px; }
+.addRouteForm > span { color: var(--flowlet-color-text); font-weight: 600; }
+.addRouteForm > small { color: var(--flowlet-color-text-secondary); line-height: 1.5; }
+.addRouteForm :global(.semi-select) { width: 100%; }
 .routeOverviewHeader strong { min-width: 0; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong); }
 .routeOverviewDesc { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: 1.45; }
 .routeCountPill { flex: 0 0 auto; padding: 4px 8px; border-radius: 6px; background: var(--semi-color-primary-light-default); color: var(--semi-color-primary); font-size: var(--flowlet-font-size-caption); font-weight: 650; white-space: nowrap; }

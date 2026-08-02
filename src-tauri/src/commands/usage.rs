@@ -75,7 +75,13 @@ pub(crate) async fn usage_summary(
         return Err(format!("不支持的用量统计周期：{period}"));
     }
     let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || storage.usage_summary(&period))
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || storage.usage_summary(&period, &current_device_id))
         .await
         .map_err(|err| format!("读取用量统计任务失败：{err}"))?
         .map_err(|err| err.to_string())

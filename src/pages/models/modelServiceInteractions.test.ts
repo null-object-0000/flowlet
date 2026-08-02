@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { RouteCandidate } from "../../domains/model/types";
 import type { ModelServiceItem } from "./modelServiceView";
-import { filterModelServiceItems, reorderModelRouteGroups } from "./modelServiceInteractions";
+import {
+  addAggregateRouteGroup,
+  buildAggregateRouteOptions,
+  filterModelServiceItems,
+  removeAggregateRouteGroup,
+  reorderModelRouteGroups,
+} from "./modelServiceInteractions";
 
 function route(
   id: string,
@@ -92,5 +98,43 @@ describe("model service interactions", () => {
     const routes = [route("r1", "flowlet-pro", "kimi", "a1", "openai", 0)];
     expect(reorderModelRouteGroups(routes, "flowlet-pro", "missing", "also-missing", "updated"))
       .toBe(routes);
+  });
+
+  it("offers every unattached direct channel-model group", () => {
+    const routes = [
+      route("direct-openai", "kimi-k3", "kimi", "a1", "openai", 0),
+      route("direct-anthropic", "kimi-k3", "kimi", "a1", "anthropic", 0),
+      route("attached", "flowlet-pro", "kimi", "a1", "openai", 0),
+      route("other", "qwen3.6-flash", "qwen", "a2", "openai", 0),
+    ];
+    expect(buildAggregateRouteOptions(routes, "flowlet-pro").map((option) => option.upstreamModel))
+      .toEqual(["qwen-model"]);
+    expect(buildAggregateRouteOptions(routes, "flowlet-flash").map((option) => option.upstreamModel))
+      .toEqual(["kimi-model", "qwen-model"]);
+  });
+
+  it("adds all protocols from a direct model without inferring a tier", () => {
+    const routes = [
+      route("direct-openai", "kimi-k3", "kimi", "a1", "openai", 0),
+      route("direct-anthropic", "kimi-k3", "kimi", "a1", "anthropic", 0),
+    ];
+    const sourceKey = JSON.stringify(["kimi", "a1", "kimi-model"]);
+    let id = 0;
+    const next = addAggregateRouteGroup(routes, "flowlet-flash", sourceKey, "now", () => `new-${++id}`);
+    const added = next.filter((item) => item.virtual_model_id === "flowlet-flash");
+    expect(added.map((item) => item.client_protocol)).toEqual(["openai", "anthropic"]);
+    expect(added.every((item) => item.enabled && item.created_at === "now")).toBe(true);
+  });
+
+  it("removes only the selected aggregate relation and compacts priorities", () => {
+    const routes = [
+      route("direct", "kimi-k3", "kimi", "a1", "openai", 8),
+      route("aggregate-kimi", "flowlet-pro", "kimi", "a1", "openai", 0),
+      route("aggregate-qwen", "flowlet-pro", "qwen", "a2", "openai", 1),
+    ];
+    const next = removeAggregateRouteGroup(routes, "flowlet-pro", ["aggregate-kimi"]);
+    expect(next.map((item) => item.id)).toEqual(["direct", "aggregate-qwen"]);
+    expect(next.find((item) => item.id === "aggregate-qwen")?.priority).toBe(0);
+    expect(next.find((item) => item.id === "direct")?.priority).toBe(8);
   });
 });

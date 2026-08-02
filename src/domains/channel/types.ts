@@ -72,38 +72,6 @@ export const MODEL_ALIASES: Record<string, string> = {
   "deepseek-v4-flash-0731": "deepseek-v4-flash",
 };
 
-/** Per-channel Flowlet aggregate tier mapping. Must stay in sync with
- *  config.json channels_config.flowlet_tiers。
- *  仅作为数据源；路由生成请使用 FLOWLET_TIERS_BY_MODEL（按模型全局查找，不按渠道区分）。 */
-export const FLOWLET_TIERS_BY_CHANNEL_MODEL: Record<string, Record<string, Array<"pro" | "flash">>> = {
-  longcat: {
-    "longcat-2.0": ["pro", "flash"],
-  },
-  deepseek: {
-    "deepseek-v4-pro": ["pro"],
-    "deepseek-v4-flash": ["flash"],
-  },
-  kimi: {
-    "kimi-k3": ["pro"],
-    "kimi-k2.7-code": ["pro"],
-  },
-  qwen: {
-    "qwen3.8-max-preview": ["pro"],
-    "qwen3.7-plus": ["pro"],
-    "qwen3.7-max": ["pro"],
-    "qwen3.7-flash": ["flash"],
-    "qwen3.6-plus": ["pro"],
-    "qwen3.6-flash": ["flash"],
-  },
-};
-
-/** Flowlet 聚合档位的全局模型映射（所有渠道的并集）。
- *  同一上游模型在任何渠道账号下都应得到相同的聚合档位，与「我们总共支持哪些模型」
- *  的全局白名单语义一致。路由生成应使用此映射，而非按渠道查找。 */
-export const FLOWLET_TIERS_BY_MODEL: Record<string, Array<"pro" | "flash">> = Object.fromEntries(
-  Object.values(FLOWLET_TIERS_BY_CHANNEL_MODEL).flatMap((channel) => Object.entries(channel)),
-);
-
 export function defaultExposedModels(channel: ChannelPreset): string[] {
   return DEFAULT_EXPOSED_MODELS_BY_CHANNEL[channel.id] ?? [channel.default_model].filter(Boolean);
 }

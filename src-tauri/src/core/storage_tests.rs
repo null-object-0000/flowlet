@@ -1,7 +1,8 @@
 use super::Storage;
 use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
-    ChannelAccount, LogsFilter, ProtocolType, RequestLogInput, RouteCandidate, UsageRecordInput,
+    ChannelAccount, DeviceUsageBreakdownRow, LogsFilter, ProtocolType, RequestLogInput, RouteCandidate,
+    UsageRecordInput, UsageSummaryRow,
 };
 use crate::core::device_identity::{
     DailyUsageTotal, HourlyUsageTotal, SyncedAgentInstallation, SyncedAgentInteraction,
@@ -1338,6 +1339,11 @@ fn cleanup_expired_body_data_never_retention() {
     }
 }
 
+// 测试辅助：本机用量汇总统一视为「本地设备」，与生产命令传入当前 device_id 同义。
+fn test_usage_summary(storage: &Storage, period: &str) -> Vec<UsageSummaryRow> {
+    storage.usage_summary(period, "local-device").expect("usage summary")
+}
+
 fn empty_usage_input(request_id: &str) -> UsageRecordInput {
     UsageRecordInput {
         request_id: request_id.to_string(),
@@ -1672,7 +1678,7 @@ fn request_log_queries_resolve_current_account_name_and_fall_back_to_snapshot() 
         "账号仍在时旧名不应命中"
     );
 
-    let usage = storage.usage_summary("all").expect("usage summary");
+    let usage = test_usage_summary(&storage, "all");
     let usage_row = usage
         .iter()
         .find(|row| row.account_id.as_deref() == Some("account-1"))
@@ -1722,7 +1728,7 @@ fn usage_summary_filters_at_the_database_boundary() {
         )
         .expect("age one request");
 
-    let current_month = storage.usage_summary("month").expect("month summary");
+    let current_month = test_usage_summary(&storage, "month");
     assert_eq!(
         current_month
             .iter()
@@ -1730,7 +1736,7 @@ fn usage_summary_filters_at_the_database_boundary() {
             .sum::<i64>(),
         1
     );
-    let all_time = storage.usage_summary("all").expect("all-time summary");
+    let all_time = test_usage_summary(&storage, "all");
     assert_eq!(all_time.iter().map(|row| row.request_count).sum::<i64>(), 2);
 }
 
@@ -1765,7 +1771,7 @@ fn usage_summary_today_filters_to_today_and_groups_by_hour() {
         )
         .expect("age one request to yesterday");
 
-    let today = storage.usage_summary("today").expect("today summary");
+    let today = test_usage_summary(&storage, "today");
     assert_eq!(
         today.iter().map(|row| row.request_count).sum::<i64>(),
         2,
@@ -1787,7 +1793,7 @@ fn usage_summary_today_filters_to_today_and_groups_by_hour() {
 
     // week 周期同样按小时分组，供前端 7×24 分时热力图使用。周一跑该测试时
     // "昨天"落在上周，所以只断言今日数据完整包含且全部为小时粒度。
-    let week = storage.usage_summary("week").expect("week summary");
+    let week = test_usage_summary(&storage, "week");
     assert_eq!(
         week.iter()
             .filter(|row| row.date.starts_with(&local_today))
@@ -1846,7 +1852,7 @@ fn usage_summary_aggregates_timings_with_request_log_semantics() {
     // 四条请求维度完全相同，汇总为单行。总耗时取 COALESCE(duration, latency)：
     // 5200 + 3100 + 400 = 8700，三条计入分母；生成耗时只统计 duration > ttft 的
     // 流式请求：(5200−200) + (3100−100) = 8000，对应输出 200 + 100 = 300。
-    let summary = storage.usage_summary("all").expect("usage summary");
+    let summary = test_usage_summary(&storage, "all");
     let elapsed_total: i64 = summary.iter().map(|row| row.elapsed_total_ms).sum();
     let elapsed_measured: i64 = summary.iter().map(|row| row.elapsed_measured_count).sum();
     let generation_total: i64 = summary.iter().map(|row| row.generation_total_ms).sum();
@@ -2495,4 +2501,91 @@ fn imported_device_agents_replace_the_previous_device_snapshot() {
         profiles[0].flowlet_config_state.as_deref(),
         Some("other_gateway")
     );
+}
+
+#[test]
+fn usage_summary_unions_imported_device_breakdowns() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    // 本机两条请求：deepseek-v4-pro 与 LongCat-2.0，标记为当前设备。
+    for (request_id, model, created) in [
+        ("local-pro", "deepseek-v4-pro", "2026-07-30T10:00:00Z"),
+        ("local-longcat", "LongCat-2.0", "2026-07-30T11:00:00Z"),
+    ] {
+        storage
+            .insert_request_log(&request_log_for_repair(request_id, 0, true))
+            .expect("insert request log");
+        storage
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE request_logs SET created_at = ?1 WHERE request_id = ?2",
+                [created, request_id],
+            )
+            .expect("set created_at");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: request_id.to_string(),
+                channel_id: Some(if model == "deepseek-v4-pro" { "deepseek".to_string() } else { "longcat".to_string() }),
+                channel_name: Some(if model == "deepseek-v4-pro" { "DeepSeek".to_string() } else { "LongCat".to_string() }),
+                upstream_model: Some(model.to_string()),
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                ..empty_usage_input(request_id)
+            })
+            .expect("upsert usage record");
+    }
+
+    // 导入另一台设备的维度聚合：该设备只有 deepseek-v4-pro。
+    let remote_device = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let breakdowns = vec![DeviceUsageBreakdownRow {
+        date: "2026-07-30".to_string(),
+        client_id: None,
+        client_name: None,
+        channel_id: Some("deepseek".to_string()),
+        channel_name: Some("DeepSeek".to_string()),
+        account_id: None,
+        account_name: None,
+        upstream_model: Some("deepseek-v4-pro".to_string()),
+        request_count: 3,
+        known_tokens: 300,
+        input_tokens: 200,
+        input_cached_tokens: 0,
+        input_uncached_tokens: 200,
+        cache_measured_input_tokens: 200,
+        output_tokens: 100,
+        unknown_count: 0,
+        estimated_cost: 0.3,
+        elapsed_total_ms: 0,
+        elapsed_measured_count: 0,
+        generation_total_ms: 0,
+        generation_output_tokens: 0,
+    }];
+    storage
+        .import_device_usage_breakdowns(remote_device, "2026-07-31T10:00:00Z", &breakdowns)
+        .expect("import breakdowns");
+
+    let current = "local-device-id";
+    let summary = storage
+        .usage_summary("all", current)
+        .expect("usage summary");
+
+    // 按 (device, model) 聚合：本机 deepseek 1条 + 远端 deepseek 1条，本机 longcat 1条。
+    let find = |device: &str, model: &str| {
+        summary
+            .iter()
+            .find(|r| r.device_id.as_deref() == Some(device) && r.upstream_model.as_deref() == Some(model))
+    };
+    let local_pro = find(current, "deepseek-v4-pro").expect("local deepseek row");
+    assert_eq!(local_pro.request_count, 1);
+    assert_eq!(local_pro.known_tokens, 15);
+    let remote_pro = find(remote_device, "deepseek-v4-pro").expect("remote deepseek row");
+    assert_eq!(remote_pro.request_count, 3);
+    assert_eq!(remote_pro.known_tokens, 300);
+    assert!(find(current, "LongCat-2.0").is_some());
+    assert!(find(remote_device, "LongCat-2.0").is_none());
 }

@@ -6,9 +6,9 @@ import type { AgentSessionInteractionEvent, AgentSessionLastInteraction, AgentSe
 import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { Markdown } from "../../shared/ui/Markdown";
-import { formatCompactNumber } from "../../shared/formatters/number";
+import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
-import { formatTimestamp } from "../../shared/formatters/datetime";
+import { formatFullTimestamp, formatTimestamp } from "../../shared/formatters/datetime";
 import styles from "./AgentSessionDetailSideSheet.module.css";
 
 export function AgentSessionDetailSideSheet({
@@ -23,29 +23,39 @@ export function AgentSessionDetailSideSheet({
   onRefreshOverview?: () => Promise<unknown> | void;
 }) {
   const { language, t } = useAppPreferences();
-  const [activeTab, setActiveTab] = useState<"overview" | "last-interaction">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "usage" | "session" | "child-sessions">("overview");
   const [refreshing, setRefreshing] = useState(false);
   const title = sessionDisplayTitle(session);
   const children = useAgentSessionChildren(session);
   const nativeSummary = useAgentSessionNativeSummary(session);
-  const lastInteraction = useAgentSessionLastInteraction(session, activeTab === "last-interaction");
-  const openCodePermissions = useOpenCodeSessionPermissions(session, activeTab === "last-interaction");
+  const lastInteraction = useAgentSessionLastInteraction(session, activeTab === "overview");
+  const openCodePermissions = useOpenCodeSessionPermissions(session, activeTab === "overview");
   const pendingApprovalCount = session.agentType === "opencode" && openCodePermissions.data?.available
     ? openCodePermissions.data.permissions.length
     : 0;
   const nativeUsage = session.nativeSummary ?? nativeSummary.data;
+  const overviewMetrics = overviewSessionMetrics(session, nativeUsage);
   const refreshActiveTab = async () => {
     setRefreshing(true);
     try {
-      if (activeTab === "last-interaction") {
-        await lastInteraction.refetch();
+      if (activeTab === "overview") {
+        await Promise.all([
+          lastInteraction.refetch(),
+          children.refetch(),
+          nativeSummary.refetch(),
+          onRefreshOverview?.(),
+        ]);
         return;
       }
-      await Promise.all([
-        children.refetch(),
-        nativeSummary.refetch(),
-        onRefreshOverview?.(),
-      ]);
+      if (activeTab === "usage") {
+        await Promise.all([nativeSummary.refetch(), children.refetch()]);
+        return;
+      }
+      if (activeTab === "child-sessions") {
+        await children.refetch();
+        return;
+      }
+      await onRefreshOverview?.();
     } finally {
       setRefreshing(false);
     }
@@ -67,7 +77,7 @@ export function AgentSessionDetailSideSheet({
         type="line"
         activeKey={activeTab}
         tabPaneMotion={false}
-        onChange={(key) => setActiveTab(key as "overview" | "last-interaction")}
+        onChange={(key) => setActiveTab(key as "overview" | "usage" | "session" | "child-sessions")}
         tabBarExtraContent={(
           <Button
             className={styles.tabRefresh}
@@ -83,6 +93,48 @@ export function AgentSessionDetailSideSheet({
         )}
       >
         <Tabs.TabPane tab={t("概览")} itemKey="overview">
+          <div className={styles.overview}>
+            <OverviewHeader session={session} language={language} />
+            <OverviewStats metrics={overviewMetrics} language={language} />
+            <div className={styles.sectionHeading}>
+              <h3 className={styles.sectionLabel}>{t("最近一轮")}</h3>
+            </div>
+            <LastInteractionSection
+              data={lastInteraction.data}
+              loading={lastInteraction.isLoading}
+              error={lastInteraction.isError ? lastInteraction.error.message : null}
+              language={language}
+              onRetry={() => void lastInteraction.refetch()}
+              turnBlocked={pendingApprovalCount > 0}
+              approvalSection={session.agentType === "opencode" ? (
+                <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
+              ) : null}
+            />
+          </div>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={t("用量")} itemKey="usage">
+          <div className={styles.body}>
+            <DetailSection title={t("Flowlet 请求统计")}>
+              <div className={styles.metrics}>
+                <Metric label={t("请求数")} value={session.flowletObserved ? formatCompactNumber(session.requestCount, language) : "—"} />
+                <Metric label={t("成功")} value={session.flowletObserved ? formatCompactNumber(session.successCount, language) : "—"} />
+                <Metric label={t("失败")} value={session.flowletObserved ? formatCompactNumber(session.errorCount, language) : "—"} warning={session.flowletObserved && session.errorCount > 0} />
+                <Metric label="Token" value={session.flowletObserved ? formatCompactNumber(session.knownTokens, language) : "—"} />
+                <Metric label={t("费用")} value={session.flowletObserved ? `¥${session.estimatedCost.toFixed(4)}` : "—"} />
+              </div>
+            </DetailSection>
+
+            <NativeUsageSection
+              agentType={session.agentType}
+              data={nativeUsage}
+              loading={nativeSummary.isLoading}
+              error={nativeSummary.isError ? nativeSummary.error.message : null}
+              language={language}
+              onRetry={() => void nativeSummary.refetch()}
+            />
+          </div>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={t("会话")} itemKey="session">
           <div className={styles.body}>
             <DetailSection title={t("会话信息")}>
               <div className={styles.detailGrid}>
@@ -107,51 +159,22 @@ export function AgentSessionDetailSideSheet({
                 {session.nativeUpdatedAt ? <DetailItem label={t("Agent 更新时间")} value={formatDate(session.nativeUpdatedAt, language)} /> : null}
               </div>
             </DetailSection>
-
-            <DetailSection title={t("Flowlet 请求统计")}>
-              <div className={styles.metrics}>
-                <Metric label={t("请求数")} value={session.flowletObserved ? formatCompactNumber(session.requestCount, language) : "—"} />
-                <Metric label={t("成功")} value={session.flowletObserved ? formatCompactNumber(session.successCount, language) : "—"} />
-                <Metric label={t("失败")} value={session.flowletObserved ? formatCompactNumber(session.errorCount, language) : "—"} warning={session.flowletObserved && session.errorCount > 0} />
-                <Metric label="Token" value={session.flowletObserved ? formatCompactNumber(session.knownTokens, language) : "—"} />
-                <Metric label={t("费用")} value={session.flowletObserved ? `¥${session.estimatedCost.toFixed(4)}` : "—"} />
-              </div>
-            </DetailSection>
-
-            <NativeUsageSection
-              agentType={session.agentType}
-              data={nativeUsage}
-              loading={nativeSummary.isLoading}
-              error={nativeSummary.isError ? nativeSummary.error.message : null}
-              language={language}
-              onRetry={() => void nativeSummary.refetch()}
-            />
-
-            <ChildSessionsSection
-              rows={children.data ?? []}
-              loading={children.isLoading}
-              error={children.isError ? children.error.message : null}
-              language={language}
-              onRetry={() => void children.refetch()}
-              onViewRequestLogs={onViewRequestLogs}
-            />
           </div>
         </Tabs.TabPane>
-        <Tabs.TabPane tab={t("最近一轮")} itemKey="last-interaction">
-          <div className={styles.body}>
-            <LastInteractionSection
-              data={lastInteraction.data}
-              loading={lastInteraction.isLoading}
-              error={lastInteraction.isError ? lastInteraction.error.message : null}
-              language={language}
-              onRetry={() => void lastInteraction.refetch()}
-              turnBlocked={pendingApprovalCount > 0}
-              approvalSection={session.agentType === "opencode" ? (
-                <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
-              ) : null}
-            />
-          </div>
-        </Tabs.TabPane>
+        {children.data && children.data.length > 0 ? (
+          <Tabs.TabPane tab={t("子会话（{count}）", { count: children.data.length })} itemKey="child-sessions">
+            <div className={styles.body}>
+              <ChildSessionsSection
+                rows={children.data ?? []}
+                loading={children.isLoading}
+                error={children.isError ? children.error.message : null}
+                language={language}
+                onRetry={() => void children.refetch()}
+                onViewRequestLogs={onViewRequestLogs}
+              />
+            </div>
+          </Tabs.TabPane>
+        ) : null}
       </Tabs>
     </SideSheet>
   );
@@ -733,4 +756,75 @@ function formatDate(value: string, language: "zh-CN" | "en-US") {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(language, {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
   });
+}
+
+type OverviewSessionMetrics =
+  | { source: "flowlet"; tokens: number; count: number; failures: number; truncated: false }
+  | { source: "agent-native"; tokens: number | null; count: number | null; failures: null; truncated: boolean };
+
+/** 概览统计行双源归一：Flowlet 观测走请求数/失败数，Agent 原生走轮次与截断标记。 */
+function overviewSessionMetrics(
+  session: AgentSessionRow,
+  nativeSummary: AgentSessionNativeSummary | undefined,
+): OverviewSessionMetrics {
+  if (session.flowletObserved) {
+    return {
+      source: "flowlet",
+      tokens: session.knownTokens,
+      count: session.requestCount,
+      failures: session.errorCount,
+      truncated: false,
+    };
+  }
+  return {
+    source: "agent-native",
+    tokens: nativeSummary?.usage?.totalTokens ?? null,
+    count: nativeSummary?.turnCount ?? null,
+    failures: null,
+    truncated: nativeSummary?.truncated ?? false,
+  };
+}
+
+function runtimeLabel(status: AgentSessionRow["runtimeStatus"], t: (key: string, params?: Record<string, string | number>) => string) {
+  if (status === "running") return t("自动运行中");
+  if (status === "waiting_user") return t("等待用户确认");
+  if (status === "idle") return t("空闲");
+  return t("状态未知");
+}
+
+function OverviewHeader({ session, language }: { session: AgentSessionRow; language: "zh-CN" | "en-US" }) {
+  const { t } = useAppPreferences();
+  const title = sessionDisplayTitle(session);
+  return (
+    <div className={styles.overviewHeader}>
+      <div className={styles.overviewTopline}>
+        <span className={styles.agentBadge}>{agentLabel(session.agentType)}</span>
+        <strong className={styles.overviewTitle} title={title}>{title}</strong>
+      </div>
+      <div className={styles.meta}>
+        <span className={styles.state} data-state={session.runtimeStatus}><i />{runtimeLabel(session.runtimeStatus, t)}</span>
+        <span>{t("最近活跃：{time}", { time: formatFullTimestamp(session.activityAt, language) })}</span>
+      </div>
+    </div>
+  );
+}
+
+function OverviewStats({ metrics, language }: { metrics: OverviewSessionMetrics; language: "zh-CN" | "en-US" }) {
+  const { t } = useAppPreferences();
+  return (
+    <div className={styles.stats}>
+      <div className={styles.stat}>
+        <span>Tokens</span>
+        <strong>{metrics.truncated ? "≥" : ""}{metrics.tokens == null ? "—" : formatCompactNumber(metrics.tokens, language)}</strong>
+      </div>
+      <div className={styles.stat}>
+        <span>{metrics.source === "agent-native" ? t("原生轮次") : t("请求数")}</span>
+        <strong>{metrics.count == null ? "—" : formatInteger(metrics.count, language)}</strong>
+      </div>
+      <div className={styles.stat} data-error={metrics.failures != null && metrics.failures > 0 || undefined}>
+        <span>{metrics.source === "agent-native" ? t("来源") : t("失败")}</span>
+        <strong>{metrics.source === "agent-native" ? t("Agent 原生") : formatInteger(metrics.failures ?? 0, language)}</strong>
+      </div>
+    </div>
+  );
 }

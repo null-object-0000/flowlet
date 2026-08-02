@@ -43,20 +43,17 @@ describe("mergeDefaultRoutes", () => {
     supported_protocols: ["openai", "anthropic"],
   } as ChannelPreset;
 
-  it("creates direct and Flowlet aggregate routes for both protocols", () => {
+  it("creates only direct routes for both protocols", () => {
     const routes = mergeDefaultRoutes([], [account], [preset]);
-    expect(routes).toHaveLength(8);
+    expect(routes).toHaveLength(4);
     expect(routes.map((route) => [route.virtual_model_id, route.client_protocol])).toEqual([
       ["deepseek-v4-flash", "openai"],
-      ["flowlet-flash", "openai"],
       ["deepseek-v4-pro", "openai"],
-      ["flowlet-pro", "openai"],
       ["deepseek-v4-flash", "anthropic"],
-      ["flowlet-flash", "anthropic"],
       ["deepseek-v4-pro", "anthropic"],
-      ["flowlet-pro", "anthropic"],
     ]);
-    expect(new Set(routes.map((route) => route.id))).toHaveLength(8);
+    expect(new Set(routes.map((route) => route.id))).toHaveLength(4);
+    expect(routes.some((route) => route.virtual_model_id.startsWith("flowlet-"))).toBe(false);
     expect(routes.every((route) => route.enabled)).toBe(true);
   });
 
@@ -120,11 +117,11 @@ describe("mergeDefaultRoutes", () => {
       updated_at: "old",
     }] as RouteCandidate[];
     const routes = mergeDefaultRoutes(existing, [account], [preset]);
-    expect(routes).toHaveLength(8);
+    expect(routes).toHaveLength(4);
     expect(routes[0]).toBe(existing[0]);
   });
 
-  it("maps LongCat-2.0 into both Flowlet aggregate tiers", () => {
+  it("does not infer aggregate membership for LongCat-2.0", () => {
     const longcatAccount = {
       ...account,
       id: "account-longcat",
@@ -138,14 +135,10 @@ describe("mergeDefaultRoutes", () => {
     } as ChannelPreset;
 
     const routes = mergeDefaultRoutes([], [longcatAccount], [longcatPreset]);
-    expect(routes).toHaveLength(6);
+    expect(routes).toHaveLength(2);
     expect(routes.map((route) => [route.virtual_model_id, route.client_protocol])).toEqual([
       ["LongCat-2.0", "openai"],
-      ["flowlet-pro", "openai"],
-      ["flowlet-flash", "openai"],
       ["LongCat-2.0", "anthropic"],
-      ["flowlet-pro", "anthropic"],
-      ["flowlet-flash", "anthropic"],
     ]);
   });
 
@@ -180,11 +173,9 @@ describe("mergeDefaultRoutes", () => {
 
     const planRoutes = mergeDefaultRoutes([], [planAccount], [qwenPreset]);
     expect(new Set(planRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.8-max-preview", "qwen3.6-flash"]));
-    // qwen3.8-max-preview → flowlet-pro，qwen3.6-flash → flowlet-flash
-    expect(planRoutes.filter((route) => route.virtual_model_id === "flowlet-pro" && route.upstream_model === "qwen3.8-max-preview")).toHaveLength(2);
-    expect(planRoutes.filter((route) => route.virtual_model_id === "flowlet-flash" && route.upstream_model === "qwen3.6-flash")).toHaveLength(2);
+    expect(planRoutes.some((route) => route.virtual_model_id.startsWith("flowlet-"))).toBe(false);
 
-    // 跨渠道：千问账号勾选原属 DeepSeek 的 deepseek-v4-pro，全局白名单下应可开放并进入 flowlet-pro 聚合路由。
+    // 跨渠道：千问账号勾选原属 DeepSeek 的 deepseek-v4-pro，全局白名单下仍可开放为直连模型。
     const crossChannelAccount = {
       ...account,
       id: "account-qwen-cross",
@@ -195,7 +186,7 @@ describe("mergeDefaultRoutes", () => {
     const crossRoutes = mergeDefaultRoutes([], [crossChannelAccount], [qwenPreset, deepseekPreset]);
     const crossUpstream = new Set(crossRoutes.map((route) => route.upstream_model));
     expect(crossUpstream).toEqual(new Set(["deepseek-v4-pro", "qwen3.6-flash"]));
-    expect(crossRoutes.some((route) => route.virtual_model_id === "flowlet-pro" && route.upstream_model === "deepseek-v4-pro")).toBe(true);
+    expect(crossRoutes.some((route) => route.virtual_model_id === "deepseek-v4-pro" && route.upstream_model === "deepseek-v4-pro")).toBe(true);
   });
 
   it("applies the global model whitelist to custom channels and only builds configured protocols", () => {
@@ -282,9 +273,8 @@ describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)",
     const routes = mergeDefaultRoutes([], [tokenPlanAccount], [qwenPreset]);
     expect(routes.map((route) => [route.virtual_model_id, route.upstream_model])).toEqual([
       ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
-      ["flowlet-flash", "deepseek-v4-flash-0731"],
     ]);
-    expect(new Set(routes.map((route) => route.id))).toHaveLength(2);
+    expect(new Set(routes.map((route) => route.id))).toHaveLength(1);
   });
 
   it("prefers the exact model name over the alias variant when /models returns both", () => {
@@ -294,7 +284,7 @@ describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)",
     } as ChannelAccount;
     const routes = mergeDefaultRoutes([], [account], [qwenPreset]);
     expect(routes.every((route) => route.upstream_model === "deepseek-v4-flash")).toBe(true);
-    expect(routes).toHaveLength(2);
+    expect(routes).toHaveLength(1);
   });
 
   it("does not build a route when the canonical model is not selected", () => {
@@ -321,12 +311,12 @@ describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)",
     };
     const next = reconcileAccountRoutes([existing], [tokenPlanAccount], [qwenPreset]);
     // 保留原路由（含启停状态），不产生重复路由。
-    expect(next).toHaveLength(2);
+    expect(next).toHaveLength(1);
     const kept = next.find((route) => route.id === existing.id);
     expect(kept?.enabled).toBe(false);
     expect(
       next.filter((route) => route.upstream_model === "deepseek-v4-flash-0731"),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
   });
 
   it("removes an alias-variant route when the canonical model is deselected", () => {
@@ -519,13 +509,9 @@ describe("responses protocol routing", () => {
       supported_protocols: ["openai", "anthropic", "responses"],
     } as ChannelPreset;
     const routes = mergeDefaultRoutes([], [account], [preset]);
-    // deepseek-v4-flash 直连 + flowlet-flash 聚合，三个协议各两条
-    expect(routes).toHaveLength(6);
+    expect(routes).toHaveLength(3);
     const responsesRoutes = routes.filter((route) => route.client_protocol === "responses");
-    expect(responsesRoutes.map((route) => route.virtual_model_id).sort()).toEqual([
-      "deepseek-v4-flash",
-      "flowlet-flash",
-    ]);
+    expect(responsesRoutes.map((route) => route.virtual_model_id)).toEqual(["deepseek-v4-flash"]);
   });
 
   it("generates no responses routes for channels without the protocol (Kimi)", () => {

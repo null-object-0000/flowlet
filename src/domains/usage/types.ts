@@ -25,6 +25,9 @@ export type UsageSummaryRow = {
   generation_total_ms: number;
   /** 计入生成速度的输出 Token（与 generation_total_ms 同一批请求）。 */
   generation_output_tokens: number;
+  /** 产生这条聚合的设备的 device_id。本机请求为当前设备（string），
+   *  跨设备同步来的聚合也标记来源设备；历史未标记行兼容为 null，前端按「未知设备」归组。 */
+  device_id: string | null;
 };
 
 export type UsagePeriod = "all" | "year" | "quarter" | "month" | "week" | "today";

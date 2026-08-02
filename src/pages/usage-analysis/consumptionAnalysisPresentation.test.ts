@@ -34,6 +34,7 @@ function row(partial: Partial<UsageSummaryRow>): UsageSummaryRow {
     elapsed_measured_count: 0,
     generation_total_ms: 0,
     generation_output_tokens: 0,
+    device_id: null,
     ...partial,
   };
 }

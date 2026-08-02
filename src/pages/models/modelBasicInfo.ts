@@ -12,7 +12,7 @@ export type ModelBasicInfo = {
   price: ModelPriceInfo | null;
 };
 
-/** 与 Rust `flowlet_tiers` 的 `trim().to_lowercase()` 归一化保持一致，
+/** 与路由模型 ID 的 `trim().to_lowercase()` 归一化保持一致，
  *  避免 `LongCat-2.0` 这类大小写差异导致失配。 */
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase();

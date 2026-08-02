@@ -803,7 +803,6 @@ mod tests {
             presets: vec![ChannelPreset::longcat()],
             prices: vec![],
             default_exposed_models: HashMap::new(),
-            flowlet_tiers: HashMap::new(),
             endpoints: HashMap::new(),
             scrape: HashMap::new(),
         };
@@ -844,7 +843,6 @@ mod tests {
             presets: vec![ChannelPreset::longcat()],
             prices: vec![],
             default_exposed_models: HashMap::new(),
-            flowlet_tiers: HashMap::new(),
             endpoints: HashMap::new(),
             scrape,
         };
@@ -897,7 +895,6 @@ mod tests {
             presets: vec![ChannelPreset::longcat()],
             prices: vec![],
             default_exposed_models: HashMap::new(),
-            flowlet_tiers: HashMap::new(),
             endpoints: HashMap::new(),
             scrape,
         };

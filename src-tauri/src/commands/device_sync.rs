@@ -452,7 +452,19 @@ pub(crate) async fn import_device_usage_bundle(
                 &snapshot.sessions,
                 &snapshot.agents,
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        storage
+            .import_device_usage_breakdowns(
+                &snapshot.device_id,
+                &snapshot.generated_at,
+                &snapshot.usage_breakdowns,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(DeviceUsageImportResult {
+            device_id: snapshot.device_id,
+            imported_days: 0,
+            unchanged_days: 0,
+        })
     })
     .await
     .map_err(|error| format!("导入设备用量任务失败：{error}"))?

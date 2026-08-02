@@ -233,41 +233,40 @@ describe("AgentSessionsPage", () => {
     fireEvent.click(rowTitle.closest("button")!);
 
     expect(screen.getByText(/会话详情/)).toBeInTheDocument();
-    expect(screen.getByText("ses_native_test")).toBeInTheDocument();
-    expect(screen.getByText("Flowlet 请求统计")).toBeInTheDocument();
-    expect(screen.getByText("Agent 原生用量")).toBeInTheDocument();
-    expect(screen.getByText("$0.123456")).toBeInTheDocument();
-    expect(screen.getByText("模型：native-model")).toBeInTheDocument();
-    expect(screen.getByText("子会话（1）")).toBeInTheDocument();
-    expect(screen.getByText("Child session title")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
+    const overview = screen.getByRole("tabpanel", { name: "概览" });
+
+    // 概览：移动端风格头部 + 3 列统计行
+    expect(within(overview).getByText("Native session title")).toBeInTheDocument();
+    expect(within(overview).getByText("空闲")).toBeInTheDocument();
+    expect(within(overview).getByText("1.20万")).toBeInTheDocument();
+    expect(within(overview).getByText("4")).toBeInTheDocument();
+    expect(within(overview).getByText("1")).toBeInTheDocument();
+
+    // 刷新概览：最近一轮 + 子会话 + 原生用量 + 列表
     const tabList = screen.getByRole("tablist");
     fireEvent.click(within(tabList).getByRole("button", { name: "刷新" }));
     await waitFor(() => {
-      expect(sessionListRefetchMock).toHaveBeenCalledOnce();
+      expect(lastInteractionRefetchMock).toHaveBeenCalledOnce();
       expect(childrenRefetchMock).toHaveBeenCalledOnce();
       expect(nativeSummaryRefetchMock).toHaveBeenCalledOnce();
+      expect(sessionListRefetchMock).toHaveBeenCalledOnce();
     });
-    [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
-    expect(screen.queryByText("完整展示最后一个用户输入及其后的全部 Agent 输出与过程事件")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "最近一轮" }));
-    fireEvent.click(within(tabList).getByRole("button", { name: "刷新" }));
-    await waitFor(() => expect(lastInteractionRefetchMock).toHaveBeenCalledOnce());
-    expect(sessionListRefetchMock).not.toHaveBeenCalled();
-    expect(childrenRefetchMock).not.toHaveBeenCalled();
-    expect(nativeSummaryRefetchMock).not.toHaveBeenCalled();
-    const conversation = screen.getByRole("tabpanel", { name: "最近一轮" });
-    const input = within(conversation).getByLabelText("用户消息");
+    [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock, lastInteractionRefetchMock].forEach((mock) => mock.mockClear());
+
+    // 最近一轮嵌入概览
+    expect(within(overview).queryByText("完整展示最后一个用户输入及其后的全部 Agent 输出与过程事件")).not.toBeInTheDocument();
+    const input = within(overview).getByLabelText("用户消息");
     expect(within(input).getByText("latest complete input")).toBeInTheDocument();
-    expect(within(conversation).getByText("first output")).toBeInTheDocument();
-    expect(within(conversation).getByText("second output")).toBeInTheDocument();
-    expect(within(conversation).getByRole("status")).toHaveTextContent("正在处理");
-    expect(within(conversation).queryByText("用户输入")).not.toBeInTheDocument();
-    expect(within(conversation).queryByText("Agent 输出")).not.toBeInTheDocument();
-    expect(within(conversation).queryByText("OpenCode · native-model")).not.toBeInTheDocument();
-    const process = within(conversation).getByText("已处理 3 项").closest("details")!;
+    expect(within(overview).getByText("first output")).toBeInTheDocument();
+    expect(within(overview).getByText("second output")).toBeInTheDocument();
+    expect(within(overview).getByRole("status")).toHaveTextContent("正在处理");
+    expect(within(overview).queryByText("用户输入")).not.toBeInTheDocument();
+    expect(within(overview).queryByText("Agent 输出")).not.toBeInTheDocument();
+    expect(within(overview).queryByText("OpenCode · native-model")).not.toBeInTheDocument();
+    const process = within(overview).getByText("已处理 3 项").closest("details")!;
     expect(process).not.toHaveAttribute("open");
-    fireEvent.click(within(conversation).getByText("已处理 3 项"));
+    fireEvent.click(within(overview).getByText("已处理 3 项"));
     expect(process).toHaveAttribute("open");
     expect(within(process).getByText("cargo test")).toBeInTheDocument();
     expect(within(process).getByText("E:\\flowlet")).toBeInTheDocument();
@@ -276,6 +275,35 @@ describe("AgentSessionsPage", () => {
     expect(within(process).getByText("工作目录")).toBeInTheDocument();
     expect(within(process).getByText("退出码")).toBeInTheDocument();
     expect(screen.queryByText("会话时间线")).not.toBeInTheDocument();
+
+    // 用量 Tab：Flowlet 请求统计 + Agent 原生用量
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
+    const usage = screen.getByRole("tabpanel", { name: "用量" });
+    expect(within(usage).getByText("Flowlet 请求统计")).toBeInTheDocument();
+    expect(within(usage).getByText("Agent 原生用量")).toBeInTheDocument();
+    expect(within(usage).getByText("$0.123456")).toBeInTheDocument();
+    expect(within(usage).getByText("模型：native-model")).toBeInTheDocument();
+
+    // 用量 Tab 刷新：只刷新原生用量与子会话
+    fireEvent.click(within(tabList).getByRole("button", { name: "刷新" }));
+    await waitFor(() => {
+      expect(nativeSummaryRefetchMock).toHaveBeenCalledOnce();
+      expect(childrenRefetchMock).toHaveBeenCalledOnce();
+    });
+    expect(lastInteractionRefetchMock).not.toHaveBeenCalled();
+    expect(sessionListRefetchMock).not.toHaveBeenCalled();
+    [childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
+
+    // 会话 Tab：会话信息与活动时间
+    fireEvent.click(screen.getByRole("tab", { name: "会话" }));
+    const sessionPane = screen.getByRole("tabpanel", { name: "会话" });
+    expect(within(sessionPane).getByText("ses_native_test")).toBeInTheDocument();
+    expect(within(sessionPane).getByText("D:\\GitHub\\flowlet")).toBeInTheDocument();
+
+    // 子会话 Tab
+    fireEvent.click(screen.getByRole("tab", { name: "子会话（1）" }));
+    const childrenPane = screen.getByRole("tabpanel", { name: "子会话（1）" });
+    expect(within(childrenPane).getByText("Child session title")).toBeInTheDocument();
   });
 
   it("falls back to the project name when native title is unavailable", () => {
@@ -291,6 +319,7 @@ describe("AgentSessionsPage", () => {
     );
 
     fireEvent.click(screen.getByText("Native session title").closest("button")!);
+    fireEvent.click(screen.getByRole("tab", { name: "会话" }));
     fireEvent.click(screen.getByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" }));
 
     expect(screen.getByTestId("location")).toHaveTextContent("/logs?search=ses_native_test");
@@ -305,6 +334,7 @@ describe("AgentSessionsPage", () => {
     );
 
     fireEvent.click(screen.getByText("Native session title").closest("button")!);
+    fireEvent.click(screen.getByRole("tab", { name: "子会话（1）" }));
     fireEvent.click(screen.getByRole("button", { name: "查看会话 ses_child 的请求日志明细" }));
 
     expect(screen.getByTestId("location")).toHaveTextContent("/logs?search=ses_child");
@@ -321,15 +351,21 @@ describe("AgentSessionsPage", () => {
       </MemoryRouter>,
     );
 
+    // 概览：native 来源的统计行显示为 Agent 原生，而非请求指标
+    const overview = screen.getByRole("tabpanel", { name: "概览" });
+    expect(within(overview).getByText("ChatGPT (Codex)")).toBeInTheDocument();
+    expect(within(overview).getByText("Agent 原生")).toBeInTheDocument();
+
+    // 会话 Tab：显示 Agent 来源，无请求日志入口
+    fireEvent.click(screen.getByRole("tab", { name: "会话" }));
+    const sessionPane = screen.getByRole("tabpanel", { name: "会话" });
+    expect(within(sessionPane).getByText("Agent 来源")).toBeInTheDocument();
+    expect(within(sessionPane).queryByText("未知客户端")).not.toBeInTheDocument();
+    expect(within(sessionPane).queryByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).not.toBeInTheDocument();
     expect(screen.queryByText("未经过 Flowlet")).not.toBeInTheDocument();
-    expect(screen.getByText("Agent 来源")).toBeInTheDocument();
-    expect(screen.getAllByText("ChatGPT (Codex)").length).toBeGreaterThan(0);
-    expect(screen.queryByText("未知客户端")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).not.toBeInTheDocument();
-    expect(screen.getAllByText("—")).toHaveLength(7);
   });
 
-  it("allows a pending OpenCode permission once from the last interaction tab", async () => {
+  it("allows a pending OpenCode permission once from the overview", async () => {
     render(
       <MemoryRouter>
         <AgentSessionDetailSideSheet session={session} onClose={vi.fn()} onViewRequestLogs={vi.fn()} />
@@ -338,13 +374,9 @@ describe("AgentSessionsPage", () => {
 
     expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
     const overview = screen.getByRole("tabpanel", { name: "概览" });
-    expect(within(overview).queryByText("OpenCode 等待确认")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("tab", { name: "最近一轮" }));
-    const conversation = screen.getByRole("tabpanel", { name: "最近一轮" });
-    const approval = within(conversation).getByText("OpenCode 等待确认").closest("article")!;
+    const approval = within(overview).getByText("OpenCode 等待确认").closest("article")!;
     expect(within(approval).getByText("cargo test")).toBeInTheDocument();
-    expect(within(conversation).queryByRole("status")).not.toBeInTheDocument();
+    expect(within(overview).queryByRole("status")).not.toBeInTheDocument();
     fireEvent.click(within(approval).getByRole("button", { name: "同意本次" }));
 
     await waitFor(() => expect(permissionReplyMock).toHaveBeenCalledWith({ permissionId: "per_test", decision: "allow_once" }));

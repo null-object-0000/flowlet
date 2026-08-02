@@ -1,7 +1,6 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import {
   FLOWLET_SUPPORTED_MODELS,
-  FLOWLET_TIERS_BY_MODEL,
   canonicalModelKey,
   isCustomChannel,
   pickUpstreamModelForCanonical,
@@ -69,28 +68,21 @@ export function buildDefaultRoutes(
   usable.forEach((acc, j) => {
     const exposedModels = defaultModelsForAccount(channelId, acc);
     exposedModels.forEach(({ canonical: up, upstream }, i) => {
-      // 档位映射按规范模型全局查找（不按渠道），与全局白名单语义一致。
-      const tiers = FLOWLET_TIERS_BY_MODEL[up.toLowerCase()] ?? [];
-      const publicModels = [up, ...tiers.map((tier) => `flowlet-${tier}`)];
-      publicModels.forEach((publicModel) => {
-        out.push({
-          id: publicModel === up
-            ? `route-${acc.id}-${upstream}-${protocol}-${i}-${j}`
-            : `route-${acc.id}-${publicModel}-${upstream}-${protocol}-${i}-${j}`,
-          virtual_model_id: publicModel,
-          channel_id: channelId,
-          account_id: acc.id,
-          // 对外模型名用白名单规范 ID；转发上游时保留 /models 返回的原名
-          // （变体别名如 deepseek-v4-flash-0731 按上游实际支持的名字发起请求）。
-          upstream_model: upstream,
-          client_protocol: protocol,
-          priority: j,
-          // 仅全局第一个渠道账号的新路由默认开启；后续账号仍自动补齐路由，
-          // 但需要用户在模型服务页手动开启。
-          enabled: acc.id === firstAccountId,
-          created_at: now,
-          updated_at: now,
-        });
+      out.push({
+        id: `route-${acc.id}-${upstream}-${protocol}-${i}-${j}`,
+        virtual_model_id: up,
+        channel_id: channelId,
+        account_id: acc.id,
+        // 对外模型名用白名单规范 ID；转发上游时保留 /models 返回的原名
+        // （变体别名如 deepseek-v4-flash-0731 按上游实际支持的名字发起请求）。
+        upstream_model: upstream,
+        client_protocol: protocol,
+        priority: j,
+        // 仅全局第一个渠道账号的新路由默认开启；后续账号仍自动补齐路由，
+        // 但需要用户在模型服务页手动开启。
+        enabled: acc.id === firstAccountId,
+        created_at: now,
+        updated_at: now,
       });
     });
   });
@@ -128,11 +120,13 @@ function defaultModelsForAccount(
     });
 }
 
-/** Add only missing direct-model and Flowlet aggregate routes for each account's
+/** Add only missing direct-model routes for each account's
  *  selected `exposed_models`. Existing routes are returned unchanged so
  *  user-controlled enabled state, priority and timestamps survive. Removing
  *  deselected models is the caller's job (see the save-time reconciliation).
- *  New routes are enabled only for the globally earliest account; routes added
+ *  Aggregate membership is managed explicitly on the model-services page and
+ *  is never inferred from an upstream model name. New routes are enabled only
+ *  for the globally earliest account; routes added
  *  for every later official or custom account start disabled. */
 export function mergeDefaultRoutes(
   existing: RouteCandidate[],

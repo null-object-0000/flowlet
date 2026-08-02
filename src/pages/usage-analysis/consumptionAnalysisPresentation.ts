@@ -16,7 +16,7 @@ import { canonicalModelId, officialChannelIdForModel } from "../../domains/chann
 import type { UsageSummaryRow } from "../../domains/usage/types";
 import { createHeatLevelScale, type HeatLevel, type HeatLevelScale } from "../../shared/visualization/heatmapLevels";
 
-export type ConsumptionDimension = "model" | "account" | "client";
+export type ConsumptionDimension = "model" | "account" | "client" | "device";
 export type ConsumptionMetric = "tokens" | "cost";
 export type CostCurrencyLookup = (row: UsageSummaryRow) => string | null;
 
@@ -80,8 +80,9 @@ export function groupConsumption(
   rows: UsageSummaryRow[],
   dimension: ConsumptionDimension,
   currencyOf?: CostCurrencyLookup,
+  deviceNameOf?: (deviceId: string) => string,
 ): ConsumptionEntry[] {
-  const dimensionOf = dimensionSelectors(dimension);
+  const dimensionOf = dimensionSelectors(dimension, deviceNameOf);
   const groups = new Map<string, Omit<ConsumptionEntry, "tokenShare" | "costShare">>();
   for (const row of rows) {
     const key = dimensionOf.keyOf(row);
@@ -225,7 +226,10 @@ type DimensionSelectors = {
   brandIdOf: (row: UsageSummaryRow) => string | null;
 };
 
-function dimensionSelectors(dimension: ConsumptionDimension): DimensionSelectors {
+function dimensionSelectors(
+  dimension: ConsumptionDimension,
+  deviceNameOf?: (deviceId: string) => string,
+): DimensionSelectors {
   if (dimension === "model") {
     return {
       keyOf: (row) => (canonicalModelId(row.upstream_model) ?? row.upstream_model?.trim() ?? "unknown-model").toLowerCase(),
@@ -252,14 +256,38 @@ function dimensionSelectors(dimension: ConsumptionDimension): DimensionSelectors
       brandIdOf: (row) => row.channel_id ?? null,
     };
   }
+  if (dimension === "client") {
+    return {
+      keyOf: (row) => row.client_id?.trim() || "unknown-client",
+      labelOf: (row) => row.client_name?.trim() || row.client_id?.trim() || "未识别客户端",
+      shortLabelOf: (row) => row.client_name?.trim() || row.client_id?.trim() || "未识别",
+      sublabelOf: (row) => (row.client_name?.trim() && row.client_id?.trim() && row.client_name.trim() !== row.client_id.trim()
+        ? row.client_id.trim()
+        : null),
+      brandIdOf: (row) => row.client_id?.trim() || null,
+    };
+  }
+  // device：label 由调用方通过 deviceNameOf 解析设备展示名（来自同步的 known_devices），
+  // 未匹配到时回退到 device_id 本身。
   return {
-    keyOf: (row) => row.client_id?.trim() || "unknown-client",
-    labelOf: (row) => row.client_name?.trim() || row.client_id?.trim() || "未识别客户端",
-    shortLabelOf: (row) => row.client_name?.trim() || row.client_id?.trim() || "未识别",
-    sublabelOf: (row) => (row.client_name?.trim() && row.client_id?.trim() && row.client_name.trim() !== row.client_id.trim()
-      ? row.client_id.trim()
-      : null),
-    brandIdOf: (row) => row.client_id?.trim() || null,
+    keyOf: (row) => row.device_id?.trim() || "unknown-device",
+    labelOf: (row) => {
+      const id = row.device_id?.trim();
+      if (!id) return "未知设备";
+      return deviceNameOf?.(id) || id;
+    },
+    shortLabelOf: (row) => {
+      const id = row.device_id?.trim();
+      if (!id) return "未知";
+      return deviceNameOf?.(id) || id;
+    },
+    sublabelOf: (row) => {
+      const id = row.device_id?.trim();
+      if (!id) return null;
+      const name = deviceNameOf?.(id);
+      return name && name !== id ? id : null;
+    },
+    brandIdOf: (row) => row.device_id?.trim() || null,
   };
 }
 

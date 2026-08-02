@@ -970,6 +970,36 @@ impl Storage {
                 FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
             );
 
+            -- 跨设备同步来的维度用量聚合：每台设备在快照中附带自身按
+            -- (日期, 客户端, 渠道, 账号, 模型) 聚合的用量，导入后落库，供用量分析页
+            -- 按设备维度汇总。主键含 device_id，与本机 usage_summary 行互不冲突。
+            CREATE TABLE IF NOT EXISTS device_usage_breakdowns (
+                device_id                    TEXT NOT NULL,
+                breakdown_date               TEXT NOT NULL,
+                client_id                    TEXT,
+                client_name                  TEXT,
+                channel_id                   TEXT,
+                channel_name                 TEXT,
+                account_id                   TEXT,
+                account_name                 TEXT,
+                upstream_model               TEXT,
+                request_count                INTEGER NOT NULL DEFAULT 0,
+                known_tokens                 INTEGER NOT NULL DEFAULT 0,
+                input_tokens                 INTEGER NOT NULL DEFAULT 0,
+                input_cached_tokens          INTEGER NOT NULL DEFAULT 0,
+                input_uncached_tokens        INTEGER NOT NULL DEFAULT 0,
+                cache_measured_input_tokens  INTEGER NOT NULL DEFAULT 0,
+                output_tokens                INTEGER NOT NULL DEFAULT 0,
+                unknown_count                INTEGER NOT NULL DEFAULT 0,
+                estimated_cost               REAL    NOT NULL DEFAULT 0,
+                elapsed_total_ms             INTEGER NOT NULL DEFAULT 0,
+                elapsed_measured_count       INTEGER NOT NULL DEFAULT 0,
+                generation_total_ms          INTEGER NOT NULL DEFAULT 0,
+                generation_output_tokens     INTEGER NOT NULL DEFAULT 0,
+                imported_at                  TEXT NOT NULL,
+                PRIMARY KEY (device_id, breakdown_date, client_id, channel_id, account_id, upstream_model)
+            );
+
             CREATE TABLE IF NOT EXISTS agent_session_snapshots (
                 agent_type TEXT NOT NULL,
                 session_id TEXT NOT NULL,

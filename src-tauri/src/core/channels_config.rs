@@ -57,25 +57,6 @@ pub struct ChannelConfigJson {
     pub model_prices: Vec<ModelPriceJson>,
     #[serde(default)]
     pub default_exposed_models: std::collections::HashMap<String, Vec<String>>,
-    #[serde(default)]
-    pub flowlet_tiers:
-        std::collections::HashMap<String, std::collections::HashMap<String, FlowletTiersJson>>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum FlowletTiersJson {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl FlowletTiersJson {
-    fn into_vec(self) -> Vec<String> {
-        match self {
-            Self::One(tier) => vec![tier],
-            Self::Many(tiers) => tiers,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -196,8 +177,6 @@ pub struct ChannelsConfig {
     pub presets: Vec<ChannelPreset>,
     pub prices: Vec<ModelPrice>,
     pub default_exposed_models: std::collections::HashMap<String, Vec<String>>,
-    pub flowlet_tiers:
-        std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
     /// 每个渠道的端点覆盖，key 为 channel_id → (endpoint_key → url)
     pub endpoints: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
     /// 每个渠道的抓取配置，key 为 channel_id → (mode_key → ScrapeModeConfig)。
@@ -309,23 +288,10 @@ impl ChannelsConfig {
             })
             .collect();
 
-        let flowlet_tiers = json
-            .flowlet_tiers
-            .into_iter()
-            .map(|(channel_id, models)| {
-                let models = models
-                    .into_iter()
-                    .map(|(model, tiers)| (model, tiers.into_vec()))
-                    .collect();
-                (channel_id, models)
-            })
-            .collect();
-
         Ok(Self {
             presets,
             prices,
             default_exposed_models: json.default_exposed_models,
-            flowlet_tiers,
             endpoints,
             scrape,
         })
@@ -412,28 +378,6 @@ impl ChannelsConfig {
         })
     }
 
-    /// 获取模型所属的全部 Flowlet 档位（按渠道查找，保留以兼容旧调用点）。
-    pub fn flowlet_tiers(&self, channel_id: &str, model: &str) -> Vec<String> {
-        let normalized = model.trim().to_lowercase();
-        self.flowlet_tiers
-            .get(channel_id)
-            .and_then(|m| m.get(&normalized))
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// 获取模型所属的全部 Flowlet 档位（全局查找，不按渠道区分）。
-    /// 同一上游模型在任何渠道账号下都应得到相同的聚合档位，与「我们总共支持哪些模型」
-    /// 的全局白名单语义一致。用于路由生成。
-    pub fn flowlet_tiers_for_model(&self, model: &str) -> Vec<String> {
-        // 别名变体（如 deepseek-v4-flash-0731）按规范模型查档位。
-        let normalized = canonical_model_key(model);
-        self.flowlet_tiers
-            .values()
-            .find_map(|channel_tiers| channel_tiers.get(&normalized).cloned())
-            .unwrap_or_default()
-    }
-
     /// 获取默认开放模型列表（按渠道）。
     /// 仅用于渠道预设的配置漂移检测（preset-sync），不再作为开放模型的白名单。
     /// 白名单请使用 supported_models()（所有渠道的并集）。
@@ -461,7 +405,7 @@ impl ChannelsConfig {
         models
     }
 
-    /// 为现有账号补齐「用户已勾选开放」的直连模型与 Flowlet 聚合模型路由。
+    /// 为现有账号补齐「用户已勾选开放」的直连模型路由。
     ///
     /// 只追加缺失签名，不覆盖用户已有的启停状态、优先级和时间戳（删除取消勾选的
     /// 路由由前端保存时的对账逻辑负责）。全局最早创建账号的新路由默认开启，后续
@@ -573,46 +517,27 @@ impl ChannelsConfig {
                     for (model_index, (canonical_model, upstream_model)) in
                         exposed_models.iter().enumerate()
                     {
-                        // 档位映射按规范模型全局查找（不按渠道），与全局白名单语义一致。
-                        let tiers = self.flowlet_tiers_for_model(canonical_model);
-                        let public_models: Vec<String> = std::iter::once(canonical_model.clone())
-                            .chain(tiers.into_iter().map(|tier| format!("flowlet-{tier}")))
-                            .collect();
-                        for public_model in &public_models {
-                            let route = RouteCandidate {
-                                id: if public_model == canonical_model {
-                                    format!(
-                                        "route-{}-{}-{}-{}-{}",
-                                        account.id,
-                                        upstream_model,
-                                        protocol.as_str(),
-                                        model_index,
-                                        account_index
-                                    )
-                                } else {
-                                    format!(
-                                        "route-{}-{}-{}-{}-{}-{}",
-                                        account.id,
-                                        public_model,
-                                        upstream_model,
-                                        protocol.as_str(),
-                                        model_index,
-                                        account_index
-                                    )
-                                },
-                                virtual_model_id: public_model.clone(),
-                                channel_id: preset.id.clone(),
-                                account_id: account.id.clone(),
-                                upstream_model: upstream_model.clone(),
-                                client_protocol: protocol.clone(),
-                                priority: account_index as i64,
-                                enabled: first_account_id == Some(account.id.as_str()),
-                                created_at: now.clone(),
-                                updated_at: now.clone(),
-                            };
-                            if signatures.insert(route_signature(&route)) {
-                                merged.push(route);
-                            }
+                        let route = RouteCandidate {
+                            id: format!(
+                                "route-{}-{}-{}-{}-{}",
+                                account.id,
+                                upstream_model,
+                                protocol.as_str(),
+                                model_index,
+                                account_index
+                            ),
+                            virtual_model_id: canonical_model.clone(),
+                            channel_id: preset.id.clone(),
+                            account_id: account.id.clone(),
+                            upstream_model: upstream_model.clone(),
+                            client_protocol: protocol.clone(),
+                            priority: account_index as i64,
+                            enabled: first_account_id == Some(account.id.as_str()),
+                            created_at: now.clone(),
+                            updated_at: now.clone(),
+                        };
+                        if signatures.insert(route_signature(&route)) {
+                            merged.push(route);
                         }
                     }
                 }
@@ -699,8 +624,7 @@ mod tests {
                     "vendor": "test"
                 }],
                 "model_prices": [],
-                "default_exposed_models": {},
-                "flowlet_tiers": {}
+                "default_exposed_models": {}
             }
         });
         let config = ChannelsConfig::from_config_json(&json).unwrap();
@@ -740,11 +664,6 @@ mod tests {
                 }],
                 "default_exposed_models": {
                     "deepseek": ["deepseek-v4-flash"]
-                },
-                "flowlet_tiers": {
-                    "deepseek": {
-                        "deepseek-v4-flash": "flash"
-                    }
                 }
             }
         });
@@ -754,10 +673,6 @@ mod tests {
         assert_eq!(
             config.default_exposed_models("deepseek"),
             vec!["deepseek-v4-flash".to_string()]
-        );
-        assert_eq!(
-            config.flowlet_tiers("deepseek", "deepseek-v4-flash"),
-            vec!["flash".to_string()]
         );
         // 覆盖端点生效
         assert_eq!(
@@ -775,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_one_upstream_model_to_multiple_flowlet_tiers() {
+    fn account_model_routes_do_not_infer_aggregate_membership() {
         let json = serde_json::json!({
             "channels_config": {
                 "channels": [{
@@ -786,11 +701,6 @@ mod tests {
                 }],
                 "default_exposed_models": {
                     "longcat": ["LongCat-2.0"]
-                },
-                "flowlet_tiers": {
-                    "longcat": {
-                        "longcat-2.0": ["pro", "flash"]
-                    }
                 }
             }
         });
@@ -806,17 +716,14 @@ mod tests {
         };
 
         let routes = config.merge_default_routes(&[], &[account], &config.presets);
-        assert_eq!(routes.len(), 6);
+        assert_eq!(routes.len(), 2);
         for protocol in [ProtocolType::OpenAi, ProtocolType::Anthropic] {
             let public_models: Vec<&str> = routes
                 .iter()
                 .filter(|route| route.client_protocol == protocol)
                 .map(|route| route.virtual_model_id.as_str())
                 .collect();
-            assert_eq!(
-                public_models,
-                vec!["LongCat-2.0", "flowlet-pro", "flowlet-flash"]
-            );
+            assert_eq!(public_models, vec!["LongCat-2.0"]);
         }
     }
 
@@ -1026,34 +933,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn flowlet_tiers_resolve_through_alias() {
-        let json = serde_json::json!({
-            "channels_config": {
-                "channels": [{
-                    "id": "deepseek",
-                    "name": "DeepSeek",
-                    "vendor": "deepseek",
-                    "supported_protocols": ["openai"]
-                }],
-                "default_exposed_models": {
-                    "deepseek": ["deepseek-v4-flash"]
-                },
-                "flowlet_tiers": {
-                    "deepseek": {
-                        "deepseek-v4-flash": "flash"
-                    }
-                }
-            }
-        });
-        let config = ChannelsConfig::from_config_json(&json).unwrap();
-        // 别名变体按规范模型查档位，保证变体路由也能生成 flowlet-flash 聚合路由。
-        assert_eq!(
-            config.flowlet_tiers_for_model("deepseek-v4-flash-0731"),
-            vec!["flash".to_string()]
-        );
-    }
-
     fn qwen_alias_test_config() -> ChannelsConfig {
         let json = serde_json::json!({
             "channels_config": {
@@ -1066,11 +945,6 @@ mod tests {
                 }],
                 "default_exposed_models": {
                     "deepseek": ["deepseek-v4-flash"]
-                },
-                "flowlet_tiers": {
-                    "deepseek": {
-                        "deepseek-v4-flash": "flash"
-                    }
                 }
             }
         });
@@ -1081,7 +955,7 @@ mod tests {
     fn merge_default_routes_maps_alias_variant_to_canonical_virtual_model() {
         // 千问 Token Plan 端点 /models 返回 deepseek-v4-flash-0731：
         // 用户勾选规范名 deepseek-v4-flash 即可命中，virtual_model_id 用规范名，
-        // upstream_model 保留上游原名用于转发，且按规范模型补齐 flowlet-flash。
+        // upstream_model 保留上游原名用于转发，且不推断任何聚合模型归属。
         let config = qwen_alias_test_config();
         let account = ChannelAccount {
             id: "qwen-token-plan".to_string(),
@@ -1104,10 +978,7 @@ mod tests {
             .collect();
         assert_eq!(
             pairs,
-            vec![
-                ("deepseek-v4-flash", "deepseek-v4-flash-0731"),
-                ("flowlet-flash", "deepseek-v4-flash-0731"),
-            ]
+            vec![("deepseek-v4-flash", "deepseek-v4-flash-0731")]
         );
     }
 
@@ -1137,7 +1008,7 @@ mod tests {
                 .all(|route| route.upstream_model == "deepseek-v4-flash"),
             "精确同名优先于别名变体: {routes:?}"
         );
-        assert_eq!(routes.len(), 2);
+        assert_eq!(routes.len(), 1);
     }
 
     #[test]
@@ -1212,17 +1083,6 @@ mod tests {
                 "default_exposed_models": {
                     "qwen": ["qwen3.7-max", "qwen3.6-flash"],
                     "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"]
-                },
-                "flowlet_tiers": {
-                    "qwen": {
-                        "qwen3.7-max": "pro",
-                        "qwen3.6-flash": "flash",
-                        "qwen3.8-max-preview": "pro"
-                    },
-                    "deepseek": {
-                        "deepseek-v4-pro": "pro",
-                        "deepseek-v4-flash": "flash"
-                    }
                 }
             }
         });
@@ -1251,10 +1111,14 @@ mod tests {
             upstream_models,
             std::collections::HashSet::from(["deepseek-v4-pro", "qwen3.6-flash"])
         );
-        // deepseek-v4-pro 应进入 flowlet-pro 聚合路由（沿用 deepseek 渠道的档位映射）。
+        // 聚合归属不再由模型名推断；这里只生成已有渠道模型的直连路由。
         assert!(routes.iter().any(|route| {
-            route.virtual_model_id == "flowlet-pro" && route.upstream_model == "deepseek-v4-pro"
+            route.virtual_model_id == "deepseek-v4-pro"
+                && route.upstream_model == "deepseek-v4-pro"
         }));
+        assert!(!routes
+            .iter()
+            .any(|route| route.virtual_model_id.starts_with("flowlet-")));
         // 全局白名单外的模型仍被防御过滤。
         let with_stranger = ChannelAccount {
             id: "qwen-stranger".to_string(),

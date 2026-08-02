@@ -7,7 +7,23 @@
 .tabs :global(.semi-tabs-pane) { overflow: auto; }
 .tabs :global(.semi-tabs-tab) { height: 44px; padding: 0 3px; margin-right: 25px; font-size: var(--flowlet-font-size-body); }
 .tabRefresh { height: 32px; margin: 6px 0; }
-.body { padding: 18px 20px 28px; display: grid; gap: 20px; }
+.body, .overview { padding: 18px 20px 28px; display: grid; gap: 20px; }
+.overviewHeader { display: grid; gap: 8px; }
+.overviewTopline { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.agentBadge { flex: none; padding: 2px 8px; border-radius: 6px; color: var(--flowlet-color-primary); background: var(--semi-color-primary-light-default); font-size: var(--flowlet-font-size-caption); font-weight: 600; }
+.overviewTitle { min-width: 0; overflow: hidden; color: var(--flowlet-color-text); font-size: 16px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.meta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
+.state { display: inline-flex; align-items: center; gap: 6px; }
+.state i { width: 8px; height: 8px; border-radius: 50%; background: var(--flowlet-color-text-tertiary); }
+.state[data-state="running"] i { background: var(--semi-color-success); }
+.state[data-state="waiting_user"] i { background: var(--semi-color-warning); }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.stat { min-width: 0; min-height: 72px; padding: 11px; display: grid; align-content: center; gap: 6px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface); }
+.stat span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
+.stat strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.stat[data-error] strong { color: var(--semi-color-danger); }
+.sectionHeading { display: flex; align-items: center; justify-content: space-between; }
+.sectionLabel { margin: 0; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong); font-weight: 680; }
 .section { display: grid; gap: 10px; }
 .sectionTitle { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong); font-weight: 680; }
 .detailGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-border); }
@@ -92,6 +108,7 @@
   .detailItem.wide { grid-column: auto; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nativeMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats { grid-template-columns: 1fr; }
   .childRow { grid-template-columns: minmax(0, 1fr) auto; }
   .childMeta { grid-column: 1 / -1; grid-row: 2; }
   .childActions { grid-column: 2; grid-row: 1; }

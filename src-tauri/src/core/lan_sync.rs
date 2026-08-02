@@ -972,6 +972,13 @@ pub async fn refresh_known_peers(
                     &snapshot.agents,
                 )
                 .map_err(|error| error.to_string())?;
+            import_storage
+                .import_device_usage_breakdowns(
+                    &snapshot.device_id,
+                    &snapshot.generated_at,
+                    &snapshot.usage_breakdowns,
+                )
+                .map_err(|error| error.to_string())?;
         }
         Ok::<_, String>(())
     })

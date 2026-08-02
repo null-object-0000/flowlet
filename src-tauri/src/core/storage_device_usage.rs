@@ -1,4 +1,5 @@
 use super::{Storage, StorageError};
+use crate::core::config::DeviceUsageBreakdownRow;
 use crate::core::device_identity::{
     DailyUsageTotal, DeviceUsageImportPreview, DeviceUsageImportResult, HourlyUsageTotal,
     KnownDevice, SharedAgentSession, SyncedAgentProfile, SyncedAgentSession,
@@ -493,6 +494,85 @@ impl Storage {
         })
     }
 
+    /// 导入单个设备同步来的维度用量聚合到 `device_usage_breakdowns`。
+    /// 与 `import_device_usage` 中的 device_daily_usage 同理：按快照版本覆盖，
+    /// 高版本 generated_at 覆盖低版本，同版本保留先入库者。
+    pub fn import_device_usage_breakdowns(
+        &self,
+        device_id: &str,
+        generated_at: &str,
+        usage_breakdowns: &[DeviceUsageBreakdownRow],
+    ) -> Result<usize, StorageError> {
+        if usage_breakdowns.is_empty() {
+            return Ok(0);
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let transaction = connection.transaction()?;
+        let mut imported = 0;
+        for breakdown in usage_breakdowns {
+            let changes = transaction.execute(
+                "INSERT INTO device_usage_breakdowns (
+                    device_id, breakdown_date, client_id, client_name, channel_id, channel_name,
+                    account_id, account_name, upstream_model, request_count, known_tokens,
+                    input_tokens, input_cached_tokens, input_uncached_tokens,
+                    cache_measured_input_tokens, output_tokens, unknown_count, estimated_cost,
+                    elapsed_total_ms, elapsed_measured_count, generation_total_ms,
+                    generation_output_tokens, imported_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                           ?16, ?17, ?18, ?19, ?20, ?21, ?22, datetime('now'))
+                 ON CONFLICT(device_id, breakdown_date, client_id, channel_id, account_id, upstream_model)
+                 DO UPDATE SET
+                    client_name = excluded.client_name,
+                    channel_name = excluded.channel_name,
+                    account_name = excluded.account_name,
+                    request_count = excluded.request_count,
+                    known_tokens = excluded.known_tokens,
+                    input_tokens = excluded.input_tokens,
+                    input_cached_tokens = excluded.input_cached_tokens,
+                    input_uncached_tokens = excluded.input_uncached_tokens,
+                    cache_measured_input_tokens = excluded.cache_measured_input_tokens,
+                    output_tokens = excluded.output_tokens,
+                    unknown_count = excluded.unknown_count,
+                    estimated_cost = excluded.estimated_cost,
+                    elapsed_total_ms = excluded.elapsed_total_ms,
+                    elapsed_measured_count = excluded.elapsed_measured_count,
+                    generation_total_ms = excluded.generation_total_ms,
+                    generation_output_tokens = excluded.generation_output_tokens,
+                    imported_at = datetime('now')",
+                params![
+                    device_id,
+                    breakdown.date,
+                    breakdown.client_id,
+                    breakdown.client_name,
+                    breakdown.channel_id,
+                    breakdown.channel_name,
+                    breakdown.account_id,
+                    breakdown.account_name,
+                    breakdown.upstream_model,
+                    breakdown.request_count,
+                    breakdown.known_tokens,
+                    breakdown.input_tokens,
+                    breakdown.input_cached_tokens,
+                    breakdown.input_uncached_tokens,
+                    breakdown.cache_measured_input_tokens,
+                    breakdown.output_tokens,
+                    breakdown.unknown_count,
+                    breakdown.estimated_cost,
+                    breakdown.elapsed_total_ms,
+                    breakdown.elapsed_measured_count,
+                    breakdown.generation_total_ms,
+                    breakdown.generation_output_tokens,
+                ],
+            )?;
+            imported += changes;
+        }
+        transaction.commit()?;
+        Ok(imported)
+    }
+
     pub fn imported_known_devices(&self) -> Result<Vec<KnownDevice>, StorageError> {
         let connection = self
             .connection
@@ -743,6 +823,87 @@ impl Storage {
             ],
         )?;
         Ok(())
+    }
+
+    /// 生成本机供设备同步的维度用量聚合：按 (日期, 客户端, 渠道, 账号, 模型)
+    /// 聚合最近 `history_days` 天的用量，字段口径与 `usage_summary` 本地查询一致。
+    /// 附带在快照中发给对方，接收端落 `device_usage_breakdowns` 表后可供按设备汇总。
+    /// 限制历史天是为了控制快照体积；分析页按设备维度并不需要逐年的历史。
+    pub fn usage_breakdown_for_sync(
+        &self,
+        history_days: i64,
+    ) -> Result<Vec<DeviceUsageBreakdownRow>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            r#"
+            SELECT
+                strftime('%Y-%m-%d', request_logs.created_at, 'localtime') AS breakdown_date,
+                usage_records.client_id,
+                usage_records.client_name,
+                usage_records.channel_id,
+                usage_records.channel_name,
+                usage_records.account_id,
+                COALESCE(ca.name, usage_records.account_name) AS account_name,
+                usage_records.upstream_model,
+                count(*) AS request_count,
+                coalesce(sum(usage_records.total_tokens), 0) AS known_tokens,
+                coalesce(sum(usage_records.input_tokens), 0) AS input_tokens,
+                coalesce(sum(usage_records.input_cached_tokens), 0) AS input_cached_tokens,
+                coalesce(sum(usage_records.input_uncached_tokens), 0) AS input_uncached_tokens,
+                coalesce(sum(CASE WHEN usage_records.input_cached_tokens IS NOT NULL THEN usage_records.input_tokens ELSE 0 END), 0) AS cache_measured_input_tokens,
+                coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
+                sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
+                coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost,
+                coalesce(sum(COALESCE(request_logs.duration_ms, request_logs.latency_ms)), 0) AS elapsed_total_ms,
+                sum(CASE WHEN COALESCE(request_logs.duration_ms, request_logs.latency_ms) IS NOT NULL THEN 1 ELSE 0 END) AS elapsed_measured_count,
+                coalesce(sum(CASE WHEN request_logs.duration_ms IS NOT NULL
+                                   AND request_logs.ttft_ms IS NOT NULL
+                                   AND request_logs.duration_ms > request_logs.ttft_ms
+                             THEN request_logs.duration_ms - request_logs.ttft_ms ELSE 0 END), 0) AS generation_total_ms,
+                sum(CASE WHEN request_logs.duration_ms IS NOT NULL
+                          AND request_logs.ttft_ms IS NOT NULL
+                          AND request_logs.duration_ms > request_logs.ttft_ms
+                    THEN coalesce(usage_records.output_tokens, 0) ELSE 0 END) AS generation_output_tokens
+            FROM usage_records
+            LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
+                                  AND request_logs.is_last_attempt = 1
+            LEFT JOIN channel_accounts ca ON ca.id = usage_records.account_id
+            WHERE request_logs.created_at >= datetime('now', 'localtime', 'start of day', printf('-%d days', ?1), 'utc')
+            GROUP BY breakdown_date, usage_records.client_id, usage_records.channel_id,
+                     usage_records.account_id, usage_records.upstream_model
+            ORDER BY breakdown_date ASC
+            "#,
+        )?;
+        let rows = statement.query_map([history_days], |row| {
+            Ok(DeviceUsageBreakdownRow {
+                date: row.get(0)?,
+                client_id: row.get(1)?,
+                client_name: row.get(2)?,
+                channel_id: row.get(3)?,
+                channel_name: row.get(4)?,
+                account_id: row.get(5)?,
+                account_name: row.get(6)?,
+                upstream_model: row.get(7)?,
+                request_count: row.get(8)?,
+                known_tokens: row.get(9)?,
+                input_tokens: row.get(10)?,
+                input_cached_tokens: row.get(11)?,
+                input_uncached_tokens: row.get(12)?,
+                cache_measured_input_tokens: row.get(13)?,
+                output_tokens: row.get(14)?,
+                unknown_count: row.get(15)?,
+                estimated_cost: row.get(16)?,
+                elapsed_total_ms: row.get(17)?,
+                elapsed_measured_count: row.get(18)?,
+                generation_total_ms: row.get(19)?,
+                generation_output_tokens: row.get(20)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub fn imported_device_agents(

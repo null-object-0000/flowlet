@@ -159,7 +159,8 @@ async fn logs_handler(State(state): State<Arc<WebState>>) -> Json<Vec<RequestLog
 }
 
 async fn usage_handler(State(state): State<Arc<WebState>>) -> Json<Vec<UsageSummaryRow>> {
-    Json(state.storage.usage_summary("all").unwrap_or_default())
+    // Web 嵌入式视图仅展示本机用量，设备维度固定为 "local"。
+    Json(state.storage.usage_summary("all", "local").unwrap_or_default())
 }
 
 async fn stats_handler(State(state): State<Arc<WebState>>) -> Json<Vec<AccountStatsRow>> {

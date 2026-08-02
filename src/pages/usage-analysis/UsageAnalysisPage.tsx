@@ -5,6 +5,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { formatDuration, formatTokenRate } from "../../features/request-logs/logPresentation";
+import { useKnownDevices } from "../../features/device-sync/useDeviceSync";
 import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
@@ -42,6 +43,7 @@ const DIMENSION_OPTIONS: Array<{ value: ConsumptionDimension; label: string }> =
   { value: "model", label: "按模型" },
   { value: "account", label: "按渠道账号" },
   { value: "client", label: "按客户端" },
+  { value: "device", label: "按设备" },
 ];
 
 /** AgentBrandMark 已内置品牌图标的客户端 ID（其余客户端展示首字母徽标）。 */
@@ -56,11 +58,29 @@ export function UsageAnalysisPage() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const { query } = useUsageSummary(period, refresh.autoRefresh);
   const { modelCurrencyOf } = useModelPriceCurrencyLookup();
+  const knownDevices = useKnownDevices();
+
+  // device_id → 设备展示名：优先用同步来的 known_devices.display_name，
+  // 本机则标「本机」，未匹配时回退到 device_id。
+  const deviceNameLookup = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const device of knownDevices.data ?? []) {
+      map.set(device.deviceId, device.displayName);
+    }
+    return map;
+  }, [knownDevices.data]);
+  const resolveDeviceName = useMemo(() => {
+    const currentId = (knownDevices.data ?? []).find((device) => device.isCurrent)?.deviceId;
+    return (deviceId: string): string => {
+      if (currentId && deviceId === currentId) return t("本机");
+      return deviceNameLookup.get(deviceId) || deviceId;
+    };
+  }, [deviceNameLookup, knownDevices.data, t]);
 
   const rows = query.data ?? EMPTY_ROWS;
   const entries = useMemo(
-    () => groupConsumption(rows, dimension, modelCurrencyOf),
-    [rows, dimension, modelCurrencyOf],
+    () => groupConsumption(rows, dimension, modelCurrencyOf, resolveDeviceName),
+    [rows, dimension, modelCurrencyOf, resolveDeviceName],
   );
   const matrix = useMemo(
     () => buildCrossMatrix(rows, dimension, matrixMetric, modelCurrencyOf),

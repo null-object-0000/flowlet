@@ -420,6 +420,19 @@ Pi 官方的 `before_provider_headers` 事件），在每次 LLM 请求的 heade
 对应分支（以该 Agent 的标记头为门控）；在 `apply_request_headers` 剥离该头；在一键写入
 与手动配置片段中同时部署注入该头的原生扩展/配置。
 
+### Codex 系一键接入
+
+Codex CLI、ChatGPT 桌面端 Codex 与 VS Code Codex 插件共享同一份
+`~/.codex/config.toml` 与 `auth.json`，一键写入一次即覆盖三端，不需要分别配置，
+也不新增第五张 Agent 卡片（统一收纳在「ChatGPT (Codex)」抽屉的「接入 Flowlet」区）。
+受管内容包括：`[model_providers.flowlet]`（`wire_api = "responses"`、本地 Base URL、
+`requires_openai_auth = true`）、顶层 `model = "flowlet-pro"` 与
+`disable_response_storage = true`——后者是无状态 Responses 路由的**强制项**，
+防止 Codex 携带 `store`/`previous_response_id` 破坏多账号路由；Client Token 写入
+`auth.json` 的 `OPENAI_API_KEY`（不动系统环境变量，备份/恢复保留原有登录态字段）。
+Codex 的 User-Agent（`codex_cli_rs/`）可区分，归属走 UA 规则（config.json 默认集 +
+内置兜底规则），不需要 `x-flowlet-client` 标记头。
+
 ---
 
 ## 9. 日志与捕获

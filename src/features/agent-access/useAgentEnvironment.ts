@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   applyClaudeCodeGlobalConfig,
+  applyCodexGlobalConfig,
   applyOpenCodeGlobalConfig,
   applyPiGlobalConfig,
   authorizeCodexAccount,
@@ -9,11 +10,13 @@ import {
   detectOpenCodeEnvironment,
   detectPiEnvironment,
   inspectClaudeCodeGlobalConfig,
+  inspectCodexGlobalConfig,
   inspectOpenCodeGlobalConfig,
   inspectPiGlobalConfig,
   listCachedCodexAccounts,
   queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
+  restoreCodexGlobalConfig,
   restoreOpenCodeGlobalConfig,
   restorePiGlobalConfig,
 } from "../../domains/agent/commands";
@@ -149,6 +152,30 @@ export function useClaudeCodeGlobalConfig(enabled = true) {
   });
   const restore = useMutation({
     mutationFn: restoreClaudeCodeGlobalConfig,
+    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
+  });
+
+  return { query, apply, restore };
+}
+
+// Codex 全系（CLI / ChatGPT Desktop / VS Code 插件）共享 ~/.codex/config.toml，
+// 一键写入只管理 config.toml + auth.json，无额外可选项。
+export function useCodexGlobalConfig(enabled = true) {
+  const queryClient = useQueryClient();
+  const queryKey = queryKeys.agent.globalConfig("codex");
+  const query = useQuery({
+    queryKey,
+    queryFn: inspectCodexGlobalConfig,
+    enabled,
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const apply = useMutation({
+    mutationFn: applyCodexGlobalConfig,
+    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
+  });
+  const restore = useMutation({
+    mutationFn: restoreCodexGlobalConfig,
     onSuccess: (report) => queryClient.setQueryData(queryKey, report),
   });
 

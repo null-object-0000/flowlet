@@ -94,3 +94,15 @@ export function applyPiGlobalConfig(options?: AgentGlobalConfigOptions): Promise
 export function restorePiGlobalConfig(): Promise<AgentGlobalConfigReport> {
   return restoreAgentGlobalConfig("pi");
 }
+
+export function inspectCodexGlobalConfig(): Promise<AgentGlobalConfigReport> {
+  return inspectAgentGlobalConfig("codex");
+}
+
+export function applyCodexGlobalConfig(): Promise<AgentGlobalConfigReport> {
+  return applyAgentGlobalConfig("codex");
+}
+
+export function restoreCodexGlobalConfig(): Promise<AgentGlobalConfigReport> {
+  return restoreAgentGlobalConfig("codex");
+}

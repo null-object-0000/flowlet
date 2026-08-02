@@ -34,6 +34,10 @@ export type ConsumptionAggregate = {
   unknown: number;
   cost: number;
   costByCurrency: Record<string, number>;
+  /** 有延迟记录的请求总耗时（ms）。 */
+  latencyTotalMs: number;
+  /** 有延迟记录的请求数。 */
+  latencyMeasured: number;
 };
 
 export type ConsumptionEntry = ConsumptionAggregate & {
@@ -49,6 +53,21 @@ export type ConsumptionEntry = ConsumptionAggregate & {
 export function cacheHitRateOf(aggregate: Pick<ConsumptionAggregate, "cachedInputTokens" | "cacheMeasuredInputTokens">): number | null {
   if (!(aggregate.cacheMeasuredInputTokens > 0)) return null;
   return Math.max(0, Math.min(1, aggregate.cachedInputTokens / aggregate.cacheMeasuredInputTokens));
+}
+
+/** 平均延迟（ms）；没有延迟记录时为 null。 */
+export function averageLatencyMsOf(aggregate: Pick<ConsumptionAggregate, "latencyTotalMs" | "latencyMeasured">): number | null {
+  if (!(aggregate.latencyMeasured > 0)) return null;
+  return aggregate.latencyTotalMs / aggregate.latencyMeasured;
+}
+
+/** 输出吞吐（token/s）= 输出 Token ÷ 请求总耗时。
+ *  耗时含首 Token 等待，是近似值而非纯解码速度；缺少延迟或输出数据时为 null。 */
+export function outputTokensPerSecondOf(
+  aggregate: Pick<ConsumptionAggregate, "latencyTotalMs" | "outputTokens">,
+): number | null {
+  if (!(aggregate.latencyTotalMs > 0) || !(aggregate.outputTokens > 0)) return null;
+  return aggregate.outputTokens / (aggregate.latencyTotalMs / 1000);
 }
 
 export function groupConsumption(
@@ -250,6 +269,8 @@ function accumulate(entry: ConsumptionAggregate, row: UsageSummaryRow, currencyO
     const currency = currencyOf(row) ?? "";
     entry.costByCurrency[currency] = (entry.costByCurrency[currency] ?? 0) + cost;
   }
+  entry.latencyTotalMs += finite(row.latency_total_ms);
+  entry.latencyMeasured += finite(row.latency_measured_count);
 }
 
 function totalOf(groups: Map<string, ConsumptionAggregate>, valueOf: (entry: ConsumptionAggregate) => number) {
@@ -270,6 +291,8 @@ function emptyAggregate(): ConsumptionAggregate {
     unknown: 0,
     cost: 0,
     costByCurrency: {},
+    latencyTotalMs: 0,
+    latencyMeasured: 0,
   };
 }
 

@@ -197,6 +197,30 @@ vi.mock("./useAgentEnvironment", () => ({
     isPending: false,
     mutateAsync,
   }),
+  useCodexGlobalConfig: () => ({
+    query: {
+      data: {
+        agent_id: "codex",
+        settings_path: "C:\\Users\\test\\.codex\\config.toml",
+        credentials_path: "C:\\Users\\test\\.codex\\auth.json",
+        settings_exists: false,
+        state: "not_configured",
+        base_url: null,
+        auth_token_configured: false,
+        api_key_configured: false,
+        primary_model: null,
+        fast_model: null,
+        subagent_model: null,
+        backup_available: false,
+        external_environment_overrides: [],
+      },
+      error: null,
+      isLoading: false,
+      refetch,
+    },
+    apply: { isPending: false, mutateAsync },
+    restore: { isPending: false, mutateAsync },
+  }),
   useClaudeCodeGlobalConfig: () => ({
     query: {
       data: {
@@ -316,6 +340,10 @@ describe("OverviewAgentAccessCard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "配置 ChatGPT (Codex)" }));
     expect(screen.getByRole("tab", { name: "ChatGPT (Codex) Desktop 接入" })).toHaveAttribute("aria-selected", "true");
+    // 一键接入区（全系共享一份配置）
+    expect(screen.getByText("接入 Flowlet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全局接入 Flowlet" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "恢复接入前配置" })).not.toBeInTheDocument();
     expect(screen.queryByText("检测新版 ChatGPT Desktop 的安装版本和位置。")).not.toBeInTheDocument();
     expect(screen.getByText("ChatGPT Desktop 26.707.12708.0")).toBeInTheDocument();
     expect(screen.getByText("仅识别统一后的新版 ChatGPT Desktop")).toBeInTheDocument();

@@ -4,11 +4,11 @@ import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { ConfigRow, StatusRow, globalConfigTag } from "./globalConfigPresentation";
 import type {
   AgentEnvironmentReport,
   AgentGlobalConfigOptions,
   AgentGlobalConfigReport,
-  AgentGlobalConfigState,
   AgentInstallMethod,
 } from "../../domains/agent/types";
 
@@ -464,17 +464,6 @@ export function AgentAccessSideSheet({
   );
 }
 
-function globalConfigTag(state: AgentGlobalConfigState): { label: string; color: "green" | "orange" | "red" | "grey" } {
-  const values: Record<AgentGlobalConfigState, { label: string; color: "green" | "orange" | "red" | "grey" }> = {
-    not_configured: { label: "未配置", color: "grey" },
-    flowlet: { label: "已接入 Flowlet", color: "green" },
-    other_gateway: { label: "已配置其他网关", color: "orange" },
-    partial: { label: "配置不完整", color: "orange" },
-    invalid: { label: "配置文件无效", color: "red" },
-  };
-  return values[state];
-}
-
 function installMethodLabel(method: AgentInstallMethod, t: (source: string) => string) {
   const labels: Record<AgentInstallMethod, string> = {
     native: "原生安装",
@@ -636,17 +625,6 @@ function buildManualSnippets(
   ];
 }
 
-function ConfigRow({ label, value, onCopy }: { label: string; value: string; onCopy: () => Promise<void> }) {
-  const { t } = useAppPreferences();
-  return (
-    <div className={styles.configRow}>
-      <Text type="tertiary" size="small">{label}</Text>
-      <code>{value}</code>
-      <Button icon={<IconCopy />} theme="borderless" aria-label={t("复制{label}", { label })} onClick={() => void onCopy()} />
-    </div>
-  );
-}
-
 function InstallationPathRow({
   executablePath,
   installDir,
@@ -679,6 +657,3 @@ function InstallationPathRow({
   );
 }
 
-function StatusRow({ label, value }: { label: string; value: string }) {
-  return <div className={styles.statusRow}><Text type="tertiary" size="small">{label}</Text><code>{value}</code></div>;
-}

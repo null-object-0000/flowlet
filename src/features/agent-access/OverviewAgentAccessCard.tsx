@@ -13,6 +13,7 @@ import {
   useCodexAccountAuthorization,
   useCodexAccountRefresh,
   useCodexAccounts,
+  useCodexGlobalConfig,
   useOpenCodeEnvironment,
   useOpenCodeGlobalConfig,
   usePiEnvironment,
@@ -76,6 +77,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
   const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
   const piGlobalConfig = usePiGlobalConfig(selectedAgent === "pi");
+  const codexGlobalConfig = useCodexGlobalConfig(selectedAgent === "chatgpt-desktop");
 
   const copy = async (value: string, message: string) => {
     try {
@@ -135,6 +137,24 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       Toast.success(t("Codex 账号授权成功"));
     } catch (error) {
       Toast.error(t("Codex 账号授权失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
+
+  const applyCodexGlobalConfig = async () => {
+    try {
+      await codexGlobalConfig.apply.mutateAsync();
+      Toast.success(t("Codex 已全局接入 Flowlet"));
+    } catch (error) {
+      Toast.error(t("写入 Codex 全局配置失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
+
+  const restoreCodexGlobalConfig = async () => {
+    try {
+      await codexGlobalConfig.restore.mutateAsync();
+      Toast.success(t("Codex 全局配置已恢复"));
+    } catch (error) {
+      Toast.error(t("恢复 Codex 全局配置失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
     }
   };
 
@@ -212,6 +232,14 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         loading={chatGptEnvironment.isFetching}
         error={chatGptEnvironment.error?.message}
         onRefresh={() => void chatGptEnvironment.refetch()}
+        clientToken={clientToken}
+        globalConfig={codexGlobalConfig.query.data}
+        globalConfigLoading={codexGlobalConfig.query.isLoading}
+        globalConfigBusy={codexGlobalConfig.apply.isPending || codexGlobalConfig.restore.isPending}
+        globalConfigError={codexGlobalConfig.query.error?.message}
+        onRefreshGlobalConfig={() => void codexGlobalConfig.query.refetch()}
+        onApplyGlobalConfig={applyCodexGlobalConfig}
+        onRestoreGlobalConfig={restoreCodexGlobalConfig}
         accounts={codexAccounts.data}
         accountLoading={codexAccountRefresh.isPending}
         accountError={codexAccountRefresh.error?.message}

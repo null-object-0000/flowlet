@@ -2304,7 +2304,9 @@ impl Storage {
                 coalesce(sum(CASE WHEN usage_records.input_cached_tokens IS NOT NULL THEN usage_records.input_tokens ELSE 0 END), 0) AS cache_measured_input_tokens,
                 coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
                 sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
-                coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost
+                coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost,
+                coalesce(sum(request_logs.latency_ms), 0) AS latency_total_ms,
+                sum(CASE WHEN request_logs.latency_ms IS NOT NULL THEN 1 ELSE 0 END) AS latency_measured_count
             FROM usage_records
             LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
                                   AND request_logs.is_last_attempt = 1
@@ -2338,6 +2340,8 @@ impl Storage {
                 output_tokens: row.get(14)?,
                 unknown_count: row.get(15)?,
                 estimated_cost: row.get(16)?,
+                latency_total_ms: row.get(17)?,
+                latency_measured_count: row.get(18)?,
             })
         })?;
         let mut summary = Vec::new();

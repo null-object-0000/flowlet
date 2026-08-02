@@ -16,6 +16,11 @@ export type UsageSummaryRow = {
   output_tokens: number;
   unknown_count: number;
   estimated_cost: number;
+  /** 有延迟记录的请求总耗时（ms）；与 latency_measured_count 搭配计算
+   *  平均延迟与输出吞吐（output tokens / 总耗时）。 */
+  latency_total_ms: number;
+  /** 有延迟记录的请求数（平均延迟分母）。 */
+  latency_measured_count: number;
 };
 
 export type UsagePeriod = "all" | "year" | "quarter" | "month" | "week" | "today";

@@ -103,7 +103,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.14fr) minmax(300px, 0.86fr);
+  grid-template-columns: minmax(0, 0.92fr) minmax(340px, 1.08fr);
 }
 
 /* ─── 左侧排行面板 ─────────────────────────────────────────────── */
@@ -115,7 +115,7 @@
 }
 .rankHead, .rankRow {
   display: grid;
-  grid-template-columns: minmax(150px, 1.45fr) minmax(86px, 0.8fr) minmax(94px, 0.85fr) minmax(82px, 0.72fr) 20px;
+  grid-template-columns: minmax(140px, 1.5fr) minmax(84px, 0.8fr) minmax(92px, 0.9fr) 20px;
   gap: 12px;
   align-items: center;
   padding: 0 16px;
@@ -125,15 +125,15 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  height: 32px;
+  height: 34px;
   color: var(--flowlet-color-text-tertiary);
-  font-size: 10px;
+  font-size: 11px;
   background: var(--flowlet-color-surface-strong);
   box-shadow: 0 1px 0 var(--flowlet-color-border);
 }
 .rankRow {
   width: 100%;
-  min-height: 58px;
+  min-height: 60px;
   border: 0;
   border-top: 1px solid var(--flowlet-color-border);
   background: transparent;
@@ -158,7 +158,7 @@
   color: var(--flowlet-color-text-secondary);
   background: var(--flowlet-color-surface-muted);
   box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 750;
 }
 .rankNameText { min-width: 0; }
@@ -166,7 +166,8 @@
   display: block;
   overflow: hidden;
   color: var(--flowlet-color-text);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 650;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -175,7 +176,7 @@
   margin-top: 3px;
   overflow: hidden;
   color: var(--flowlet-color-text-tertiary);
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -185,30 +186,14 @@
   display: block;
   overflow: hidden;
   color: var(--flowlet-color-text);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.metricCell small { display: block; margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.metricCell small { display: block; margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-.cacheCell { display: flex; align-items: center; gap: 7px; color: var(--flowlet-color-text-secondary); font-size: 10px; font-variant-numeric: tabular-nums; }
-.cacheBar {
-  width: 50px;
-  height: 5px;
-  flex: none;
-  border-radius: 99px;
-  background: var(--flowlet-color-surface-muted);
-  box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
-  overflow: hidden;
-}
-.cacheBar i {
-  display: block;
-  height: 100%;
-  border-radius: 99px;
-  background: linear-gradient(90deg, var(--flowlet-color-primary), color-mix(in srgb, var(--flowlet-color-primary) 55%, #8ab2ff));
-  transition: width 200ms ease;
-}
 .rankArrow { display: grid; place-items: center; color: var(--flowlet-color-text-tertiary); }
 
 /* ─── 右侧矩阵面板 ─────────────────────────────────────────────── */
@@ -221,7 +206,7 @@
 .matrixHead { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 13px 16px 10px; }
 .matrixTitle { min-width: 0; }
 .matrixTitle strong { display: block; color: var(--flowlet-color-text); font-size: 13px; }
-.matrixTitle span { display: block; margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 10px; line-height: 1.4; }
+.matrixTitle span { display: block; margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.4; }
 
 .metricSeg {
   flex: none;
@@ -259,7 +244,7 @@
   justify-content: center;
   overflow: hidden;
   color: var(--flowlet-color-text-tertiary);
-  font-size: 9.5px;
+  font-size: 11px;
   line-height: 1.25;
   text-align: center;
   word-break: break-all;
@@ -271,7 +256,7 @@
   background: transparent;
   color: var(--flowlet-color-text-secondary);
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
@@ -282,6 +267,8 @@
 .matrixRowHead:hover { color: var(--flowlet-color-text); }
 .matrixRowHead[aria-pressed="true"] { color: var(--flowlet-color-primary); font-weight: 650; }
 
+/* 单元格底色只写在 .matrixCell 基类上（不要写到 button.matrixCell，
+   否则选择器特异性会压过后面的 heatLevel* 档位色，热力配色失效）。 */
 .matrixCell {
   min-width: 0;
   border: 0;
@@ -290,31 +277,38 @@
   place-items: center;
   overflow: hidden;
   font: inherit;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  transition: transform 120ms ease, filter 120ms ease;
-}
-button.matrixCell {
-  cursor: pointer;
   color: var(--flowlet-color-text-secondary);
   background: var(--flowlet-color-surface-strong);
   box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
 }
-button.matrixCell:hover { transform: translateY(-1px); filter: saturate(1.18); }
-.matrixCellEmpty { color: var(--flowlet-color-text-tertiary); background: transparent; }
+button.matrixCell { cursor: pointer; }
+button.matrixCell:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.18);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--flowlet-color-primary) 30%, var(--flowlet-color-border));
+}
+/* 空格子与热力图日历的空日期一致：铺最低档底色、保留网格描边，
+   让矩阵呈现连续的热力表面而不是破洞。 */
+.matrixCellEmpty {
+  color: var(--flowlet-color-text-tertiary);
+  background: var(--flowlet-color-surface-muted);
+}
 
 .heatLevel0 { background: var(--flowlet-color-surface-muted); }
-.heatLevel1 { background: color-mix(in srgb, var(--flowlet-color-primary) 16%, var(--flowlet-color-surface-strong)); }
-.heatLevel2 { background: color-mix(in srgb, var(--flowlet-color-primary) 36%, var(--flowlet-color-surface-strong)); }
-.heatLevel3 { color: #fff; background: color-mix(in srgb, var(--flowlet-color-primary) 62%, var(--flowlet-color-surface-strong)); }
+.heatLevel1 { background: color-mix(in srgb, var(--flowlet-color-primary) 18%, var(--flowlet-color-surface-strong)); }
+.heatLevel2 { background: color-mix(in srgb, var(--flowlet-color-primary) 38%, var(--flowlet-color-surface-strong)); }
+.heatLevel3 { color: #fff; background: color-mix(in srgb, var(--flowlet-color-primary) 64%, var(--flowlet-color-surface-strong)); }
 .heatLevel4 { color: #fff; background: var(--flowlet-color-primary); }
 
 .matrixFoot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 16px 2px; }
-.heatLegend { display: flex; align-items: center; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.heatLegend { display: flex; align-items: center; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
 .heatSwatch { width: 11px; height: 11px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--flowlet-color-border); }
-.coverage { color: var(--flowlet-color-text-tertiary); font-size: 10px; text-align: right; }
+.coverage { color: var(--flowlet-color-text-tertiary); font-size: 11px; text-align: right; }
 
 /* ─── 选中对象详情 ─────────────────────────────────────────────── */
 .detail {
@@ -343,27 +337,30 @@ button.matrixCell:hover { transform: translateY(-1px); filter: saturate(1.18); }
   border-radius: 99px;
   color: var(--flowlet-color-primary);
   background: var(--semi-color-primary-light-default);
-  font-size: 10px;
+  font-size: 11px;
 }
 .detailGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .detailGrid > div {
   min-width: 0;
-  padding: 8px 9px;
+  padding: 9px 10px;
   border-radius: 9px;
   background: var(--flowlet-color-surface-muted);
 }
-.detailGrid span { display: block; color: var(--flowlet-color-text-tertiary); font-size: 9px; white-space: nowrap; }
+.detailGrid span { display: block; color: var(--flowlet-color-text-tertiary); font-size: 11px; white-space: nowrap; }
 .detailGrid strong {
   display: block;
   margin-top: 4px;
   overflow: hidden;
   color: var(--flowlet-color-text);
-  font-size: 11.5px;
+  font-size: 12px;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.detailMeta { margin-top: 9px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.detailMeta { margin-top: 9px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+/* 输出速度是近似值，虚线下划线提示悬浮可看口径说明。 */
+.detailSpeed { cursor: help; text-decoration: underline dotted var(--flowlet-color-border-strong) 1px; text-underline-offset: 3px; }
 
 .cellTip { display: grid; gap: 2px; font-size: 11px; line-height: 1.5; }
 .cellTip strong { font-size: 12px; }
@@ -373,5 +370,5 @@ button.matrixCell:hover { transform: translateY(-1px); filter: saturate(1.18); }
   .heading { flex-wrap: wrap; }
   .body { grid-template-columns: minmax(0, 1fr); }
   .rankPane { border-right: 0; border-bottom: 1px solid var(--flowlet-color-border); }
-  .rankHead, .rankRow { grid-template-columns: minmax(140px, 1.4fr) minmax(80px, 0.8fr) minmax(88px, 0.85fr) minmax(76px, 0.7fr) 18px; gap: 10px; }
+  .rankHead, .rankRow { grid-template-columns: minmax(130px, 1.5fr) minmax(78px, 0.8fr) minmax(86px, 0.9fr) 16px; gap: 10px; }
 }

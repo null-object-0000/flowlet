@@ -600,6 +600,12 @@ Claude usage ID 去重集合；后续仅解析追加内容，不把消息或工�
 任务列表按 20 条分页并支持状态、类型筛选；用户可清理 90 天前已结束任务，应用启动也会执行相同保留策略，
 运行中任务不会被清理。
 
+Claude Code 会话状态优先读取 `~/.claude/sessions/<pid>.json` 的活动进程记录，并按
+`sessionId` 合并到原生会话：`waitingFor = permission prompt / user input` 映射为等待用户确认，
+`tool execution` 映射为运行中。这样交互式提问或权限确认尚未写入项目 transcript 时也能实时识别；
+进程记录不存在或无法识别时，回退到 `~/.claude/projects/**/*.jsonl` 的尾部事件推断。两个目录都纳入
+原生数据源监听，状态变化会触发增量同步；不新增持久化字段，也不需要重启代理。
+
 Claude Code 2.1.86 及以上版本会在 API 请求中发送官方
 `x-claude-code-session-id` Header。代理将其写入同一组 `agent_type` / `agent_session_id`
 字段，其中 `agent_type = 'claude-code'`；恢复的 Claude Code 会话继续使用原 session ID。

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Select, SideSheet, Tabs, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
-import type { AgentEnvironmentReport, AgentSurface, CodexAccountReport, CodexAccountsReport, CodexRateLimitResetCredits, CodexUsageWindow } from "../../domains/agent/types";
+import type { AgentEnvironmentReport, AgentGlobalConfigReport, AgentSurface, CodexAccountReport, CodexAccountsReport, CodexRateLimitResetCredits, CodexUsageWindow } from "../../domains/agent/types";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { CODEX_ACCOUNT_SYNC_INTERVAL_MS } from "../background-tasks/CodexAccountAutoSync";
+// ConfigRow 使用本文件内的局部版本（与本抽屉其它行的视觉一致）；
+// 状态标签与只读状态行复用 Agent 接入共享组件。
+import { StatusRow, globalConfigTag } from "./globalConfigPresentation";
 import styles from "./AgentAccessSideSheet.module.css";
 
 const { Text, Title } = Typography;
@@ -16,6 +19,15 @@ type Props = {
   loading?: boolean;
   error?: string;
   onRefresh: () => void;
+  /** 一键接入 Flowlet 的全局配置状态（~/.codex/config.toml + auth.json）。 */
+  clientToken?: string | null;
+  globalConfig?: AgentGlobalConfigReport;
+  globalConfigLoading?: boolean;
+  globalConfigBusy?: boolean;
+  globalConfigError?: string;
+  onRefreshGlobalConfig?: () => void;
+  onApplyGlobalConfig?: () => Promise<void>;
+  onRestoreGlobalConfig?: () => Promise<void>;
   accounts?: CodexAccountsReport;
   accountLoading?: boolean;
   accountError?: string;
@@ -32,6 +44,14 @@ export function ChatGptDesktopSideSheet({
   loading = false,
   error,
   onRefresh,
+  clientToken,
+  globalConfig,
+  globalConfigLoading = false,
+  globalConfigBusy = false,
+  globalConfigError,
+  onRefreshGlobalConfig,
+  onApplyGlobalConfig,
+  onRestoreGlobalConfig,
   accounts,
   accountLoading = false,
   accountError,
@@ -80,6 +100,80 @@ export function ChatGptDesktopSideSheet({
       bodyStyle={{ padding: 0 }}
     >
       <div ref={bodyRef} className={styles.body}>
+        <section className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <div>
+              <Title heading={5}>{t("接入 Flowlet")}</Title>
+              <Text type="tertiary" size="small">
+                {t("一次写入即覆盖 Codex CLI、ChatGPT 桌面端与 VS Code Codex 插件（共享 ~/.codex/config.toml），经 Responses 协议访问 Flowlet。")}
+              </Text>
+            </div>
+            <Button
+              icon={<IconRefresh spin={globalConfigLoading} />}
+              loading={globalConfigLoading}
+              theme="borderless"
+              onClick={onRefreshGlobalConfig}
+            >
+              {t("重新读取")}
+            </Button>
+          </div>
+
+          {globalConfigError ? (
+            <Text className={styles.environmentMessage} type="danger">
+              {t("读取全局配置失败：{message}", { message: globalConfigError })}
+            </Text>
+          ) : null}
+          {globalConfig ? (
+            <div className={styles.globalConfig}>
+              <div className={styles.globalConfigStatus}>
+                <span>{t("当前状态")}</span>
+                <Tag color={globalConfigTag(globalConfig.state).color}>{t(globalConfigTag(globalConfig.state).label)}</Tag>
+              </div>
+              <ConfigRow
+                label={t("配置文件")}
+                value={globalConfig.settings_path}
+                onCopy={() => onCopy(globalConfig.settings_path, t("{label} 已复制", { label: t("配置文件") }))}
+              />
+              {globalConfig.credentials_path ? (
+                <ConfigRow
+                  label={t("凭据文件")}
+                  value={globalConfig.credentials_path}
+                  onCopy={() => onCopy(globalConfig.credentials_path || "", t("{label} 已复制", { label: t("凭据文件") }))}
+                />
+              ) : null}
+              {globalConfig.base_url ? <StatusRow label="Base URL" value={globalConfig.base_url} /> : null}
+              <StatusRow label="Client Token" value={t(globalConfig.auth_token_configured ? "已配置（内容已隐藏）" : "未配置")} />
+              <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
+              {globalConfig.error ? <Text type="danger">{globalConfig.error}</Text> : null}
+              {globalConfig.state === "other_gateway" ? (
+                <Text className={styles.configNotice} type="warning">
+                  {t("当前配置指向其他网关。接入 Flowlet 前会备份原值，之后可以恢复。")}
+                </Text>
+              ) : null}
+              <Text className={styles.configNotice} type="tertiary">
+                {t("写入后 Codex 切换为 apikey 鉴权（使用 Flowlet Client Token）并关闭响应存储；恢复后还原此前的登录方式与配置。")}
+              </Text>
+              <div className={styles.configActions}>
+                <Button
+                  type="primary"
+                  theme="solid"
+                  loading={globalConfigBusy}
+                  disabled={globalConfig.state === "invalid" || !clientToken}
+                  onClick={() => void onApplyGlobalConfig?.()}
+                >
+                  {t(globalConfig.state === "flowlet" ? "重新写入 Flowlet 配置" : globalConfig.state === "other_gateway" ? "覆盖并接入 Flowlet" : "全局接入 Flowlet")}
+                </Button>
+                {globalConfig.backup_available ? (
+                  <Button disabled={globalConfigBusy} onClick={() => void onRestoreGlobalConfig?.()}>{t("恢复接入前配置")}</Button>
+                ) : null}
+              </div>
+              {!clientToken ? (
+                <Text type="tertiary" size="small">{t("当前未配置默认 Client Token，请先在客户端设置中完成配置。")}</Text>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <div>

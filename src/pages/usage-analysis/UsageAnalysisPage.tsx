@@ -14,10 +14,12 @@ import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import {
+  averageLatencyMsOf,
   buildCrossMatrix,
   cacheHitRateOf,
   cellId,
   groupConsumption,
+  outputTokensPerSecondOf,
   secondaryDimensionOf,
   type ConsumptionDimension,
   type ConsumptionEntry,
@@ -153,7 +155,6 @@ export function UsageAnalysisPage() {
                 <span>{t("对象")}</span>
                 <span>{t("Token / 占比")}</span>
                 <span>{t("预估费用")}</span>
-                <span>{t("缓存命中")}</span>
                 <span aria-hidden="true" />
               </div>
               {entries.map((entry) => (
@@ -275,8 +276,12 @@ export function UsageAnalysisPage() {
                       </strong>
                     </div>
                     <div>
-                      <span>{t("平均单次 Token")}</span>
-                      <strong>{formatCompactNumber(selected.requests > 0 ? selected.tokens / selected.requests : null, language)}</strong>
+                      <span>{t("输出速度")}</span>
+                      <Tooltip content={t("输出 Token ÷ 请求总耗时（含首 Token 等待）")}>
+                        <strong className={styles.detailSpeed}>
+                          {formatTokensPerSecond(outputTokensPerSecondOf(selected))}
+                        </strong>
+                      </Tooltip>
                     </div>
                     <div>
                       <span>{t("缓存命中率")}</span>
@@ -285,6 +290,8 @@ export function UsageAnalysisPage() {
                   </div>
                   <div className={styles.detailMeta}>
                     {t("{count} 次请求", { count: formatInteger(selected.requests, language) })}
+                    {" · "}
+                    {t("平均延迟 {latency}", { latency: formatLatency(averageLatencyMsOf(selected), language) })}
                     {" · "}
                     {t("预估费用")} {formatAggregateCost(selected.costByCurrency, selected.cost)}
                   </div>
@@ -348,12 +355,6 @@ function RankRow({ entry, dimension, selected, onSelect, language, t }: {
         <strong>{formatAggregateCost(entry.costByCurrency, entry.cost)}</strong>
         <small>{formatPercent(entry.costShare)}</small>
       </span>
-      <span className={styles.cacheCell}>
-        <span className={styles.cacheBar} aria-hidden="true">
-          <i style={{ width: cacheRate == null ? "0%" : `${Math.round(cacheRate * 100)}%` }} />
-        </span>
-        <span>{cacheRate == null ? "—" : formatPercent(cacheRate)}</span>
-      </span>
       <span className={styles.rankArrow} aria-hidden="true"><IconChevronRight size="small" /></span>
     </button>
   );
@@ -395,4 +396,17 @@ function formatCellCost(cost: number, costByCurrency: Record<string, number>) {
 
 function formatPercent(rate: number | null) {
   return rate == null || !Number.isFinite(rate) ? "—" : `${(rate * 100).toFixed(1)}%`;
+}
+
+function formatTokensPerSecond(speed: number | null) {
+  if (speed == null || !Number.isFinite(speed)) return "—";
+  const value = speed >= 100 ? Math.round(speed).toLocaleString() : speed.toFixed(1);
+  return `${value} token/s`;
+}
+
+function formatLatency(latencyMs: number | null, language: Language) {
+  if (latencyMs == null || !Number.isFinite(latencyMs)) return "—";
+  return latencyMs >= 1000
+    ? `${(latencyMs / 1000).toFixed(1)}s`
+    : formatInteger(Math.round(latencyMs), language) + "ms";
 }

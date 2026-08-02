@@ -40,6 +40,9 @@ sha2 = "0.10"
 tauri = { version = "2", features = [] }
 url = "2"
 thiserror = "2"
+# Codex 全局配置是 TOML（~/.codex/config.toml）；toml_edit 做保留用户注释与
+# 格式的“外科手术式”读写，与 OpenCode 用 jsonc_parser CST 保留注释的思路一致。
+toml_edit = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "signal", "process", "time", "io-util"] }
 tokio-util = "0.7"
 tracing = "0.1"

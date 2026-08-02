@@ -51,12 +51,21 @@ pub struct NativeAgentSourceWatch {
 pub fn native_agent_source_watches() -> Vec<NativeAgentSourceWatch> {
     let mut watches = Vec::new();
     if let Some(home) = dirs::home_dir() {
-        let claude = home.join(".claude").join("projects");
-        if claude.is_dir() {
+        let claude_home = home.join(".claude");
+        let claude_projects = claude_home.join("projects");
+        if claude_projects.is_dir() {
             watches.push(NativeAgentSourceWatch {
                 agent_type: "claude-code".into(),
-                path: claude,
+                path: claude_projects,
                 recursive: true,
+            });
+        }
+        let claude_live_sessions = claude_home.join("sessions");
+        if claude_live_sessions.is_dir() {
+            watches.push(NativeAgentSourceWatch {
+                agent_type: "claude-code".into(),
+                path: claude_live_sessions,
+                recursive: false,
             });
         }
         let codex_home = std::env::var_os("CODEX_HOME")
@@ -252,13 +261,27 @@ fn list_claude_native_sessions() -> Vec<AgentSessionRow> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
-    list_claude_native_sessions_from(&home.join(".claude").join("projects"))
+    let claude_home = home.join(".claude");
+    list_claude_native_sessions_from_with_live_status(
+        &claude_home.join("projects"),
+        Some(&claude_home.join("sessions")),
+    )
 }
 
 fn list_claude_native_sessions_from(projects_root: &Path) -> Vec<AgentSessionRow> {
+    list_claude_native_sessions_from_with_live_status(projects_root, None)
+}
+
+fn list_claude_native_sessions_from_with_live_status(
+    projects_root: &Path,
+    live_sessions_root: Option<&Path>,
+) -> Vec<AgentSessionRow> {
     if !projects_root.is_dir() {
         return Vec::new();
     }
+    let live_runtime_statuses = live_sessions_root
+        .map(read_claude_live_runtime_statuses)
+        .unwrap_or_default();
     let mut paths = Vec::new();
     collect_jsonl_files(projects_root, &mut paths);
     let current_paths = paths.iter().cloned().collect::<HashSet<_>>();
@@ -275,11 +298,18 @@ fn list_claude_native_sessions_from(projects_root: &Path) -> Vec<AgentSessionRow
                 classify_claude_session_path(projects_root, &path)?;
             let file_metadata = fs::metadata(&path).ok()?;
             let metadata = cached_claude_metadata(&mut cache, &path, &file_metadata)?;
-            let runtime_status = apply_claude_runtime_freshness(
+            let transcript_runtime_status = apply_claude_runtime_freshness(
                 metadata.runtime_status.as_deref().unwrap_or("unknown"),
                 file_metadata.modified().ok(),
                 SystemTime::now(),
             );
+            // Claude Code 的 AskUserQuestion/权限确认界面可能在用户作答前不会写入
+            // transcript。活动进程会把即时状态写到 ~/.claude/sessions/<pid>.json，
+            // 因此该来源优先于只能事后回放的 JSONL；进程记录不存在时再回退。
+            let runtime_status = live_runtime_statuses
+                .get(&session_id)
+                .cloned()
+                .unwrap_or(transcript_runtime_status);
             Some(native_row(
                 "claude-code",
                 session_id,
@@ -292,6 +322,53 @@ fn list_claude_native_sessions_from(projects_root: &Path) -> Vec<AgentSessionRow
             ))
         })
         .collect()
+}
+
+fn read_claude_live_runtime_statuses(sessions_root: &Path) -> HashMap<String, String> {
+    let Ok(entries) = fs::read_dir(sessions_root) else {
+        return HashMap::new();
+    };
+    let now = SystemTime::now();
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                return None;
+            }
+            let file_metadata = entry.metadata().ok()?;
+            if !file_metadata.is_file() || file_metadata.len() > MAX_RUNTIME_STATUS_BYTES {
+                return None;
+            }
+            let mut content = String::new();
+            File::open(&path)
+                .ok()?
+                .take(MAX_RUNTIME_STATUS_BYTES + 1)
+                .read_to_string(&mut content)
+                .ok()?;
+            let value = serde_json::from_str::<Value>(&content).ok()?;
+            let session_id = string_field(&value, "sessionId")?;
+            let status = infer_claude_live_runtime_status(&value)?;
+            let status = apply_claude_runtime_freshness(status, file_metadata.modified().ok(), now);
+            Some((session_id, status))
+        })
+        .collect()
+}
+
+fn infer_claude_live_runtime_status(value: &Value) -> Option<&'static str> {
+    let status = value.get("status")?.as_str()?;
+    let waiting_for = value
+        .get("waitingFor")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match (status, waiting_for) {
+        ("waiting", "permission prompt" | "user input") => Some("waiting_user"),
+        // `tool execution` 表示 Claude 正在等工具或子代理完成，仍属于运行中。
+        ("waiting", _) => Some("running"),
+        ("working" | "running" | "active" | "busy", _) => Some("running"),
+        ("idle" | "stopped", _) => Some("idle"),
+        _ => None,
+    }
 }
 
 fn cached_claude_metadata(
@@ -1226,6 +1303,61 @@ mod tests {
 
         assert_eq!(infer_claude_runtime_status(&path), "idle");
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn maps_claude_live_wait_reasons_to_user_or_tool_waiting() {
+        assert_eq!(
+            infer_claude_live_runtime_status(&serde_json::json!({
+                "status": "waiting",
+                "waitingFor": "permission prompt"
+            })),
+            Some("waiting_user")
+        );
+        assert_eq!(
+            infer_claude_live_runtime_status(&serde_json::json!({
+                "status": "waiting",
+                "waitingFor": "user input"
+            })),
+            Some("waiting_user")
+        );
+        assert_eq!(
+            infer_claude_live_runtime_status(&serde_json::json!({
+                "status": "waiting",
+                "waitingFor": "tool execution"
+            })),
+            Some("running")
+        );
+        assert_eq!(
+            infer_claude_live_runtime_status(&serde_json::json!({"status": "idle"})),
+            Some("idle")
+        );
+    }
+
+    #[test]
+    fn live_claude_process_status_overrides_unflushed_transcript_state() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-claude-live-session-{}", Uuid::new_v4()));
+        let projects = root.join("projects");
+        let project = projects.join("encoded-project");
+        let sessions = root.join("sessions");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(
+            project.join("session-live.jsonl"),
+            "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"end_turn\",\"content\":[]}}\n",
+        )
+        .unwrap();
+        fs::write(
+            sessions.join("123.json"),
+            "{\"pid\":123,\"sessionId\":\"session-live\",\"status\":\"waiting\",\"waitingFor\":\"permission prompt\"}",
+        )
+        .unwrap();
+
+        let rows = list_claude_native_sessions_from_with_live_status(&projects, Some(&sessions));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].runtime_status, "waiting_user");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -1805,6 +1805,62 @@ fn usage_summary_today_filters_to_today_and_groups_by_hour() {
 }
 
 #[test]
+fn usage_summary_aggregates_latency_for_performance_metrics() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    for request_id in ["perf-a", "perf-b", "perf-unmeasured"] {
+        storage
+            .insert_request_log(&request_log_for_repair(request_id, 0, true))
+            .expect("insert request log");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: request_id.to_string(),
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                ..empty_usage_input(request_id)
+            })
+            .expect("insert usage");
+    }
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET latency_ms = 1200 WHERE request_id = 'perf-a'",
+            [],
+        )
+        .expect("set latency a");
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET latency_ms = 800 WHERE request_id = 'perf-b'",
+            [],
+        )
+        .expect("set latency b");
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET latency_ms = NULL WHERE request_id = 'perf-unmeasured'",
+            [],
+        )
+        .expect("clear latency for unmeasured request");
+
+    // 三条请求维度完全相同，汇总为单行：总耗时 2000ms，只有两条计入延迟分母。
+    let summary = storage.usage_summary("all").expect("usage summary");
+    let total_latency: i64 = summary.iter().map(|row| row.latency_total_ms).sum();
+    let measured: i64 = summary.iter().map(|row| row.latency_measured_count).sum();
+    assert_eq!(total_latency, 2000, "延迟总和应只累加有记录的请求");
+    assert_eq!(measured, 2, "无延迟记录的请求不应计入平均延迟分母");
+}
+
+#[test]
 fn usage_today_summary_aggregates_only_today_with_cache_denominator() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);

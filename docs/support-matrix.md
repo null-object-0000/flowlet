@@ -156,7 +156,7 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 | Claude Code | ✅ CLI、多安装候选、版本 | ✅ | Anthropic Messages | ✅ User-Agent；官方 Session Header | ✅ | 主模型/快速模型/子 Agent 映射，可选 `[1m]` 长上下文 |
 | OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置 |
 | Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可部署原生扩展注入 `x-flowlet-session` |
-| ChatGPT（Codex）/ Codex CLI | ✅ Desktop + CLI | — | Responses 链路已正式可用，一键写入待实现 | — | ✅，Desktop 与 CLI 分开识别 | Codex 账号发现、授权、套餐用量和 credits 查询 |
+| ChatGPT（Codex）/ Codex CLI | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | Codex 账号发现、授权、套餐用量和 credits 查询 |
 
 “一键写入/恢复”包括：
 
@@ -165,10 +165,14 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 - 写入本地 Base URL、Client Token 和模型映射；
 - 恢复时保留用户后来新增的非 Flowlet 字段。
 
-Codex 当前不自动写入 `model_providers`。Flowlet 本地 `/v1/responses` 已成为正式协议
-入口（LongCat / DeepSeek / Qwen 渠道承载，无状态透传），Codex 可手动配置
-`wire_api = "responses"`、`base_url = http://127.0.0.1:18640/v1`、
-`disable_response_storage = true` 接入；一键写入与恢复待后续实现。
+Codex 全系（Codex CLI、ChatGPT 桌面端、VS Code Codex 插件）共享同一份
+`~/.codex/config.toml` 与 `auth.json`，Flowlet 一键写入一次即覆盖三端：受管
+`[model_providers.flowlet]`（`wire_api = "responses"`、Base URL 指向本地代理、
+`requires_openai_auth = true`）、顶层 `model = "flowlet-pro"` 与
+`disable_response_storage = true`（强制无状态，避免 `store`/`previous_response_id`
+破坏多账号路由），Client Token 写入 `auth.json` 的 `OPENAI_API_KEY`。写入前备份
+受管字段，恢复时还原此前的登录方式与配置（保留用户其它 provider 与注释）。
+请求经 User-Agent `codex_cli_rs/` 归属为 Codex（内置兜底规则，无需改 config.json）。
 
 ### 5.2 原生会话数据源
 
@@ -200,12 +204,11 @@ Cline、Continue、Open WebUI、Gemini CLI、Hermes Agent 等目前没有完整�
 
 ## 6. 当前主要缺口
 
-1. Codex `model_providers` 一键写入与恢复（Responses 链路已正式可用）；
-2. Qwen 有状态 Responses 能力（`store` / `previous_response_id` 的账号粘性路由、
+1. Qwen 有状态 Responses 能力（`store` / `previous_response_id` 的账号粘性路由、
    retrieve/delete/input_items 透传）；
-3. DeepSeek `deepseek-v4-pro` 的上游 Responses 开放（预计 2026-08 初，无需 Flowlet 改动）；
-4. 扩展更多 Agent 的安装探测、配置管理、归属标记和原生会话解析；
-5. Gemini-compatible 入口仍未实现。
+2. DeepSeek `deepseek-v4-pro` 的上游 Responses 开放（预计 2026-08 初，无需 Flowlet 改动）；
+3. 扩展更多 Agent 的安装探测、配置管理、归属标记和原生会话解析；
+4. Gemini-compatible 入口仍未实现。
 
 ## 7. 维护要求
 

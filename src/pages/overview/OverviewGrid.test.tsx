@@ -21,6 +21,11 @@ vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
   useCodexAccounts: () => ({ data: undefined, error: null, isFetching: false, refetch: vi.fn() }),
   useCodexAccountRefresh: () => ({ isPending: false, error: null, mutate: vi.fn() }),
   useCodexAccountAuthorization: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useCodexGlobalConfig: () => ({
+    query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
+    apply: { isPending: false, mutateAsync: vi.fn() },
+    restore: { isPending: false, mutateAsync: vi.fn() },
+  }),
   useClaudeCodeGlobalConfig: () => ({
     query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
     apply: { isPending: false, mutateAsync: vi.fn() },

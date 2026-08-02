@@ -574,15 +574,36 @@ pub(super) fn ensure_config_file(path: &std::path::Path) {
     let _ = std::fs::write(path, crate::core::channels_config::DEFAULT_CONFIG_JSON);
 }
 
+/// Flowlet 内置兜底 UA 规则。用户 config.json 中的规则优先：仅补充用户文件里
+/// id 完全不存在的条目（用户显式禁用某 id 时尊重用户选择）。这样已有安装
+///（config.json 早于新规则）无需手动改配置即可获得新 Agent 的客户端归属；
+/// 新安装则从 config.json 默认集中直接获得同样的规则。
+fn builtin_ua_rules() -> Vec<UaClientRule> {
+    vec![UaClientRule {
+        id: "codex".to_string(),
+        pattern: "codex_cli_rs/".to_string(),
+        name: "Codex".to_string(),
+        enabled: true,
+    }]
+}
+
 /// 从本地 config.json 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。
 pub(crate) fn load_config_ua_rules(path: &std::path::Path) -> Vec<UaClientRule> {
     let Ok(json) = std::fs::read_to_string(path) else {
-        return Vec::new();
+        return builtin_ua_rules();
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) else {
-        return Vec::new();
+        return builtin_ua_rules();
     };
-    extract_ua_rules(value)
+    let mut rules = extract_ua_rules(value);
+    let existing_ids: std::collections::HashSet<String> =
+        rules.iter().map(|rule| rule.id.clone()).collect();
+    for rule in builtin_ua_rules() {
+        if !existing_ids.contains(&rule.id) {
+            rules.push(rule);
+        }
+    }
+    rules
 }
 
 // 向后兼容：旧代码里 load_ua_rules(...) 仍然可用

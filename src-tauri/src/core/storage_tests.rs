@@ -1805,12 +1805,17 @@ fn usage_summary_today_filters_to_today_and_groups_by_hour() {
 }
 
 #[test]
-fn usage_summary_aggregates_latency_for_performance_metrics() {
+fn usage_summary_aggregates_timings_with_request_log_semantics() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
     storage.migrate().expect("migrate schema");
 
-    for request_id in ["perf-a", "perf-b", "perf-unmeasured"] {
+    for (request_id, output_tokens) in [
+        ("perf-a", 200),
+        ("perf-b", 100),
+        ("perf-legacy", 30),
+        ("perf-unmeasured", 40),
+    ] {
         storage
             .insert_request_log(&request_log_for_repair(request_id, 0, true))
             .expect("insert request log");
@@ -1818,46 +1823,38 @@ fn usage_summary_aggregates_latency_for_performance_metrics() {
             .upsert_usage_record(&UsageRecordInput {
                 request_id: request_id.to_string(),
                 input_tokens: Some(10),
-                output_tokens: Some(5),
-                total_tokens: Some(15),
+                output_tokens: Some(output_tokens),
+                total_tokens: Some(10 + output_tokens),
                 ..empty_usage_input(request_id)
             })
             .expect("insert usage");
     }
+    // 两条流式请求有 duration/ttft；perf-legacy 只有旧版 latency_ms（总耗时回退列）；
+    // perf-unmeasured 无任何耗时记录。
     storage
         .connection
         .lock()
         .unwrap()
-        .execute(
-            "UPDATE request_logs SET latency_ms = 1200 WHERE request_id = 'perf-a'",
-            [],
+        .execute_batch(
+            "UPDATE request_logs SET duration_ms = 5200, ttft_ms = 200, latency_ms = 200 WHERE request_id = 'perf-a';
+             UPDATE request_logs SET duration_ms = 3100, ttft_ms = 100, latency_ms = 100 WHERE request_id = 'perf-b';
+             UPDATE request_logs SET duration_ms = NULL, ttft_ms = NULL, latency_ms = 400 WHERE request_id = 'perf-legacy';
+             UPDATE request_logs SET duration_ms = NULL, ttft_ms = NULL, latency_ms = NULL WHERE request_id = 'perf-unmeasured';",
         )
-        .expect("set latency a");
-    storage
-        .connection
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE request_logs SET latency_ms = 800 WHERE request_id = 'perf-b'",
-            [],
-        )
-        .expect("set latency b");
-    storage
-        .connection
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE request_logs SET latency_ms = NULL WHERE request_id = 'perf-unmeasured'",
-            [],
-        )
-        .expect("clear latency for unmeasured request");
+        .expect("set request timings");
 
-    // 三条请求维度完全相同，汇总为单行：总耗时 2000ms，只有两条计入延迟分母。
+    // 四条请求维度完全相同，汇总为单行。总耗时取 COALESCE(duration, latency)：
+    // 5200 + 3100 + 400 = 8700，三条计入分母；生成耗时只统计 duration > ttft 的
+    // 流式请求：(5200−200) + (3100−100) = 8000，对应输出 200 + 100 = 300。
     let summary = storage.usage_summary("all").expect("usage summary");
-    let total_latency: i64 = summary.iter().map(|row| row.latency_total_ms).sum();
-    let measured: i64 = summary.iter().map(|row| row.latency_measured_count).sum();
-    assert_eq!(total_latency, 2000, "延迟总和应只累加有记录的请求");
-    assert_eq!(measured, 2, "无延迟记录的请求不应计入平均延迟分母");
+    let elapsed_total: i64 = summary.iter().map(|row| row.elapsed_total_ms).sum();
+    let elapsed_measured: i64 = summary.iter().map(|row| row.elapsed_measured_count).sum();
+    let generation_total: i64 = summary.iter().map(|row| row.generation_total_ms).sum();
+    let generation_output: i64 = summary.iter().map(|row| row.generation_output_tokens).sum();
+    assert_eq!(elapsed_total, 8700, "总耗时应回退到 latency_ms 并跳过无记录请求");
+    assert_eq!(elapsed_measured, 3, "平均耗时分母只计有耗时记录的请求");
+    assert_eq!(generation_total, 8000, "生成耗时应为 duration − ttft 之和");
+    assert_eq!(generation_output, 300, "生成速度分子应与生成耗时来自同一批请求");
 }
 
 #[test]

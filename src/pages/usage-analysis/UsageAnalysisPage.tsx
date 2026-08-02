@@ -4,6 +4,7 @@ import { IconChevronRight } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
+import { formatDuration, formatTokenRate } from "../../features/request-logs/logPresentation";
 import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
@@ -14,7 +15,7 @@ import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import {
-  averageLatencyMsOf,
+  averageElapsedMsOf,
   buildCrossMatrix,
   cacheHitRateOf,
   cellId,
@@ -277,9 +278,9 @@ export function UsageAnalysisPage() {
                     </div>
                     <div>
                       <span>{t("输出速度")}</span>
-                      <Tooltip content={t("输出 Token ÷ 请求总耗时（含首 Token 等待）")}>
+                      <Tooltip content={t("输出 Token ÷ 生成耗时（总耗时 − 首 Token），与请求日志同口径")}>
                         <strong className={styles.detailSpeed}>
-                          {formatTokensPerSecond(outputTokensPerSecondOf(selected))}
+                          {formatTokenRate(outputTokensPerSecondOf(selected))}
                         </strong>
                       </Tooltip>
                     </div>
@@ -291,7 +292,7 @@ export function UsageAnalysisPage() {
                   <div className={styles.detailMeta}>
                     {t("{count} 次请求", { count: formatInteger(selected.requests, language) })}
                     {" · "}
-                    {t("平均延迟 {latency}", { latency: formatLatency(averageLatencyMsOf(selected), language) })}
+                    {t("平均耗时 {elapsed}", { elapsed: formatDuration(averageElapsedMsOf(selected)) })}
                     {" · "}
                     {t("预估费用")} {formatAggregateCost(selected.costByCurrency, selected.cost)}
                   </div>
@@ -398,15 +399,3 @@ function formatPercent(rate: number | null) {
   return rate == null || !Number.isFinite(rate) ? "—" : `${(rate * 100).toFixed(1)}%`;
 }
 
-function formatTokensPerSecond(speed: number | null) {
-  if (speed == null || !Number.isFinite(speed)) return "—";
-  const value = speed >= 100 ? Math.round(speed).toLocaleString() : speed.toFixed(1);
-  return `${value} token/s`;
-}
-
-function formatLatency(latencyMs: number | null, language: Language) {
-  if (latencyMs == null || !Number.isFinite(latencyMs)) return "—";
-  return latencyMs >= 1000
-    ? `${(latencyMs / 1000).toFixed(1)}s`
-    : formatInteger(Math.round(latencyMs), language) + "ms";
-}

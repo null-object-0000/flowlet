@@ -16,11 +16,15 @@ export type UsageSummaryRow = {
   output_tokens: number;
   unknown_count: number;
   estimated_cost: number;
-  /** 有延迟记录的请求总耗时（ms）；与 latency_measured_count 搭配计算
-   *  平均延迟与输出吞吐（output tokens / 总耗时）。 */
-  latency_total_ms: number;
-  /** 有延迟记录的请求数（平均延迟分母）。 */
-  latency_measured_count: number;
+  /** 请求总耗时之和（ms），COALESCE(duration_ms, latency_ms)，
+   *  与请求日志页「总耗时」同口径；÷ elapsed_measured_count 得平均耗时。 */
+  elapsed_total_ms: number;
+  /** 有总耗时记录的请求数（平均耗时分母）。 */
+  elapsed_measured_count: number;
+  /** 纯生成耗时之和（ms）= Σ(duration_ms − ttft_ms)，仅 duration > ttft 的流式请求。 */
+  generation_total_ms: number;
+  /** 计入生成速度的输出 Token（与 generation_total_ms 同一批请求）。 */
+  generation_output_tokens: number;
 };
 
 export type UsagePeriod = "all" | "year" | "quarter" | "month" | "week" | "today";

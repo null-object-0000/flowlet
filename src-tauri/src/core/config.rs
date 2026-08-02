@@ -990,12 +990,16 @@ pub struct UsageSummaryRow {
     pub output_tokens: i64,
     pub unknown_count: i64,
     pub estimated_cost: f64,
-    /// 有延迟记录（`request_logs.latency_ms` 非空）的请求总耗时（毫秒）。
-    /// 与 `latency_measured_count` 搭配，供前端计算平均延迟与输出吞吐
-    /// （output tokens / 总耗时，含首 Token 等待的近似值）。
-    pub latency_total_ms: i64,
-    /// 有延迟记录的请求数（平均延迟的分母；无记录时为 0）。
-    pub latency_measured_count: i64,
+    /// 请求总耗时之和（毫秒），取 `COALESCE(duration_ms, latency_ms)`，
+    /// 与请求日志页「总耗时」列同口径；配合 `elapsed_measured_count` 求平均。
+    pub elapsed_total_ms: i64,
+    /// 有总耗时记录的请求数（平均耗时的分母；无记录时为 0）。
+    pub elapsed_measured_count: i64,
+    /// 纯生成耗时之和（毫秒）= Σ(duration_ms − ttft_ms)，只统计
+    /// `duration_ms > ttft_ms` 的流式请求，与请求日志页单条 tok/s 同口径。
+    pub generation_total_ms: i64,
+    /// 计入生成速度分子的输出 Token（与 `generation_total_ms` 同一批请求）。
+    pub generation_output_tokens: i64,
 }
 
 /// 未经过 Flowlet 的 Agent 原生会话用量。

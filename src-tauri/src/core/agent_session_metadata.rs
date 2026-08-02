@@ -268,6 +268,7 @@ fn list_claude_native_sessions() -> Vec<AgentSessionRow> {
     )
 }
 
+#[cfg(test)]
 fn list_claude_native_sessions_from(projects_root: &Path) -> Vec<AgentSessionRow> {
     list_claude_native_sessions_from_with_live_status(projects_root, None)
 }

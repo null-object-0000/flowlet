@@ -34,10 +34,14 @@ export type ConsumptionAggregate = {
   unknown: number;
   cost: number;
   costByCurrency: Record<string, number>;
-  /** 有延迟记录的请求总耗时（ms）。 */
-  latencyTotalMs: number;
-  /** 有延迟记录的请求数。 */
-  latencyMeasured: number;
+  /** 请求总耗时之和（ms），COALESCE(duration, latency)。 */
+  elapsedTotalMs: number;
+  /** 有总耗时记录的请求数。 */
+  elapsedMeasured: number;
+  /** 纯生成耗时之和（ms）= Σ(duration − ttft)。 */
+  generationTotalMs: number;
+  /** 计入生成速度的输出 Token。 */
+  generationOutputTokens: number;
 };
 
 export type ConsumptionEntry = ConsumptionAggregate & {
@@ -55,19 +59,21 @@ export function cacheHitRateOf(aggregate: Pick<ConsumptionAggregate, "cachedInpu
   return Math.max(0, Math.min(1, aggregate.cachedInputTokens / aggregate.cacheMeasuredInputTokens));
 }
 
-/** 平均延迟（ms）；没有延迟记录时为 null。 */
-export function averageLatencyMsOf(aggregate: Pick<ConsumptionAggregate, "latencyTotalMs" | "latencyMeasured">): number | null {
-  if (!(aggregate.latencyMeasured > 0)) return null;
-  return aggregate.latencyTotalMs / aggregate.latencyMeasured;
+/** 平均总耗时（ms），取 COALESCE(duration, latency) 的请求均值；
+ *  与请求日志页「总耗时」列同口径；没有耗时记录时为 null。 */
+export function averageElapsedMsOf(aggregate: Pick<ConsumptionAggregate, "elapsedTotalMs" | "elapsedMeasured">): number | null {
+  if (!(aggregate.elapsedMeasured > 0)) return null;
+  return aggregate.elapsedTotalMs / aggregate.elapsedMeasured;
 }
 
-/** 输出吞吐（token/s）= 输出 Token ÷ 请求总耗时。
- *  耗时含首 Token 等待，是近似值而非纯解码速度；缺少延迟或输出数据时为 null。 */
+/** 输出生成速度（token/s）= 生成输出 Token ÷ 纯生成耗时（duration − ttft）。
+ *  与请求日志页单条请求的 tok/s（calculateOutputTokenRate）同口径：
+ *  只统计 duration > ttft 的流式请求；缺少数据时为 null。 */
 export function outputTokensPerSecondOf(
-  aggregate: Pick<ConsumptionAggregate, "latencyTotalMs" | "outputTokens">,
+  aggregate: Pick<ConsumptionAggregate, "generationTotalMs" | "generationOutputTokens">,
 ): number | null {
-  if (!(aggregate.latencyTotalMs > 0) || !(aggregate.outputTokens > 0)) return null;
-  return aggregate.outputTokens / (aggregate.latencyTotalMs / 1000);
+  if (!(aggregate.generationTotalMs > 0) || !(aggregate.generationOutputTokens > 0)) return null;
+  return aggregate.generationOutputTokens / (aggregate.generationTotalMs / 1000);
 }
 
 export function groupConsumption(
@@ -269,8 +275,10 @@ function accumulate(entry: ConsumptionAggregate, row: UsageSummaryRow, currencyO
     const currency = currencyOf(row) ?? "";
     entry.costByCurrency[currency] = (entry.costByCurrency[currency] ?? 0) + cost;
   }
-  entry.latencyTotalMs += finite(row.latency_total_ms);
-  entry.latencyMeasured += finite(row.latency_measured_count);
+  entry.elapsedTotalMs += finite(row.elapsed_total_ms);
+  entry.elapsedMeasured += finite(row.elapsed_measured_count);
+  entry.generationTotalMs += finite(row.generation_total_ms);
+  entry.generationOutputTokens += finite(row.generation_output_tokens);
 }
 
 function totalOf(groups: Map<string, ConsumptionAggregate>, valueOf: (entry: ConsumptionAggregate) => number) {
@@ -291,8 +299,10 @@ function emptyAggregate(): ConsumptionAggregate {
     unknown: 0,
     cost: 0,
     costByCurrency: {},
-    latencyTotalMs: 0,
-    latencyMeasured: 0,
+    elapsedTotalMs: 0,
+    elapsedMeasured: 0,
+    generationTotalMs: 0,
+    generationOutputTokens: 0,
   };
 }
 

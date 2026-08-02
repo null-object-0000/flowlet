@@ -2305,8 +2305,16 @@ impl Storage {
                 coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
                 sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
                 coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost,
-                coalesce(sum(request_logs.latency_ms), 0) AS latency_total_ms,
-                sum(CASE WHEN request_logs.latency_ms IS NOT NULL THEN 1 ELSE 0 END) AS latency_measured_count
+                coalesce(sum(COALESCE(request_logs.duration_ms, request_logs.latency_ms)), 0) AS elapsed_total_ms,
+                sum(CASE WHEN COALESCE(request_logs.duration_ms, request_logs.latency_ms) IS NOT NULL THEN 1 ELSE 0 END) AS elapsed_measured_count,
+                coalesce(sum(CASE WHEN request_logs.duration_ms IS NOT NULL
+                                   AND request_logs.ttft_ms IS NOT NULL
+                                   AND request_logs.duration_ms > request_logs.ttft_ms
+                             THEN request_logs.duration_ms - request_logs.ttft_ms ELSE 0 END), 0) AS generation_total_ms,
+                sum(CASE WHEN request_logs.duration_ms IS NOT NULL
+                          AND request_logs.ttft_ms IS NOT NULL
+                          AND request_logs.duration_ms > request_logs.ttft_ms
+                    THEN coalesce(usage_records.output_tokens, 0) ELSE 0 END) AS generation_output_tokens
             FROM usage_records
             LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
                                   AND request_logs.is_last_attempt = 1
@@ -2340,8 +2348,10 @@ impl Storage {
                 output_tokens: row.get(14)?,
                 unknown_count: row.get(15)?,
                 estimated_cost: row.get(16)?,
-                latency_total_ms: row.get(17)?,
-                latency_measured_count: row.get(18)?,
+                elapsed_total_ms: row.get(17)?,
+                elapsed_measured_count: row.get(18)?,
+                generation_total_ms: row.get(19)?,
+                generation_output_tokens: row.get(20)?,
             })
         })?;
         let mut summary = Vec::new();

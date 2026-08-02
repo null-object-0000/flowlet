@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UsageSummaryRow } from "../../domains/usage/types";
 import {
-  averageLatencyMsOf,
+  averageElapsedMsOf,
   buildCrossMatrix,
   cacheHitRateOf,
   cellId,
@@ -30,8 +30,10 @@ function row(partial: Partial<UsageSummaryRow>): UsageSummaryRow {
     output_tokens: 0,
     unknown_count: 0,
     estimated_cost: 0,
-    latency_total_ms: 0,
-    latency_measured_count: 0,
+    elapsed_total_ms: 0,
+    elapsed_measured_count: 0,
+    generation_total_ms: 0,
+    generation_output_tokens: 0,
     ...partial,
   };
 }
@@ -98,21 +100,21 @@ describe("groupConsumption", () => {
     expect(deepseek?.costByCurrency).toEqual({ CNY: 0.23 });
   });
 
-  it("aggregates latency only from measured requests for performance metrics", () => {
+  it("derives performance metrics with request-log semantics", () => {
     const perfRows = [
-      // deepseek-v4-pro：两条请求共 2000ms，输出一共 250 token
-      row({ channel_id: "deepseek", channel_name: "DeepSeek", account_id: "acc-ds-1", upstream_model: "deepseek-v4-pro", output_tokens: 200, latency_total_ms: 1200, latency_measured_count: 1 }),
-      row({ channel_id: "deepseek", channel_name: "DeepSeek", account_id: "acc-ds-1", upstream_model: "deepseek-v4-pro", output_tokens: 50, latency_total_ms: 800, latency_measured_count: 1 }),
-      // longcat：一条无延迟记录，速度/平均延迟不可计算
-      row({ channel_id: "longcat", channel_name: "LongCat", account_id: "acc-lc-1", upstream_model: "LongCat-2.0", output_tokens: 100, latency_total_ms: 0, latency_measured_count: 0 }),
+      // deepseek-v4-pro：生成耗时 (5200−200)+(3100−100)=8000ms，生成输出 300 token
+      row({ channel_id: "deepseek", channel_name: "DeepSeek", account_id: "acc-ds-1", upstream_model: "deepseek-v4-pro", output_tokens: 200, elapsed_total_ms: 5200, elapsed_measured_count: 1, generation_total_ms: 5000, generation_output_tokens: 200 }),
+      row({ channel_id: "deepseek", channel_name: "DeepSeek", account_id: "acc-ds-1", upstream_model: "deepseek-v4-pro", output_tokens: 100, elapsed_total_ms: 3100, elapsed_measured_count: 1, generation_total_ms: 3000, generation_output_tokens: 100 }),
+      // longcat：只有总耗时、无生成耗时（非流式），速度不可计算但平均耗时可用
+      row({ channel_id: "longcat", channel_name: "LongCat", account_id: "acc-lc-1", upstream_model: "LongCat-2.0", output_tokens: 100, elapsed_total_ms: 900, elapsed_measured_count: 1 }),
     ];
     const entries = groupConsumption(perfRows, "model", cnyOnly);
     const pro = entries.find((entry) => entry.key === "deepseek-v4-pro");
-    expect(outputTokensPerSecondOf(pro!)).toBeCloseTo(250 / 2);
-    expect(averageLatencyMsOf(pro!)).toBeCloseTo(1000);
+    expect(outputTokensPerSecondOf(pro!)).toBeCloseTo(300 / 8);
+    expect(averageElapsedMsOf(pro!)).toBeCloseTo((5200 + 3100) / 2);
     const longcat = entries.find((entry) => entry.key === "longcat-2.0");
     expect(outputTokensPerSecondOf(longcat!)).toBeNull();
-    expect(averageLatencyMsOf(longcat!)).toBeNull();
+    expect(averageElapsedMsOf(longcat!)).toBeCloseTo(900);
   });
 
   it("computes cache hit rate from cache-measured input only", () => {

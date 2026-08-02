@@ -29,6 +29,12 @@ export function queryCodexAccounts(): Promise<CodexAccountsReport> {
   });
 }
 
+export function queryCodexAccount(accountId: string): Promise<CodexAccountReport> {
+  return invokeCommand<CodexAccountReport>("query_codex_account", { accountId }, 60_000).catch((error) => {
+    throw toAppError(error, "codex_account_query_failed");
+  });
+}
+
 export function listCachedCodexAccounts(): Promise<CodexAccountsReport> {
   return invokeCommand<CodexAccountsReport>("list_cached_codex_accounts").catch((error) => {
     throw toAppError(error, "codex_account_cache_read_failed");

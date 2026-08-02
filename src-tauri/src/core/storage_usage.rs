@@ -1743,6 +1743,7 @@ impl Storage {
                 LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
                 WHERE rl.is_last_attempt = 1
                   AND (rl.res_body_b64 IS NOT NULL OR (refs.state = 'ready' AND refs.res_body_bytes > 0))
+                  AND lower(rl.path) NOT LIKE '%/messages/count_tokens%'
                   AND {}
                 "#,
                 repair_time_clause("rl.created_at", time_range)
@@ -1887,6 +1888,8 @@ impl Storage {
                     input_cache_write_tokens = ?15,
                     output_tokens = ?16,
                     total_tokens = ?17,
+                    usage_status = 'complete',
+                    usage_source = 'captured_response',
                     estimated_cost = ?18,
                     estimated_input_uncached_cost = ?19,
                     estimated_input_cached_cost = ?20,
@@ -1928,11 +1931,13 @@ impl Storage {
                         account_id, account_name, client_protocol, upstream_protocol,
                         virtual_model, upstream_model, input_tokens, input_cached_tokens,
                         input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
+                        usage_status, usage_source,
                         estimated_cost, estimated_input_uncached_cost, estimated_input_cached_cost,
                         estimated_input_cache_write_cost, estimated_output_cost, analyzed_at, created_at
                     ) VALUES (
                         lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                        'complete', 'captured_response', ?18, ?19, ?20, ?21, ?22,
                         datetime('now'), datetime('now')
                     )
                     "#,
@@ -2000,6 +2005,7 @@ impl Storage {
                   AND rl.status BETWEEN 200 AND 299
                   AND rl.agent_type IN ('claude-code', 'opencode', 'pi')
                   AND rl.agent_session_id IS NOT NULL
+                  AND lower(rl.path) NOT LIKE '%/messages/count_tokens%'
                   AND {}
                 ORDER BY rl.agent_type, rl.agent_session_id, rl.created_at
                 "#,
@@ -2107,6 +2113,7 @@ impl Storage {
                 UPDATE usage_records SET
                     input_tokens=?2, input_cached_tokens=?3, input_uncached_tokens=?4,
                     input_cache_write_tokens=?5, output_tokens=?6, total_tokens=?7,
+                    usage_status='complete', usage_source='agent_native',
                     estimated_cost=?8, estimated_input_uncached_cost=?9,
                     estimated_input_cached_cost=?10, estimated_input_cache_write_cost=?11,
                     estimated_output_cost=?12, analyzed_at=datetime('now')
@@ -2135,13 +2142,15 @@ impl Storage {
                         account_id, account_name, client_protocol, upstream_protocol,
                         virtual_model, upstream_model, input_tokens, input_cached_tokens,
                         input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
+                        usage_status, usage_source,
                         estimated_cost, estimated_input_uncached_cost, estimated_input_cached_cost,
                         estimated_input_cache_write_cost, estimated_output_cost, analyzed_at, created_at
                     )
                     SELECT lower(hex(randomblob(16))), rl.request_id, rl.client_id, rl.client_name,
                         rl.channel_id, rl.channel_name, rl.account_id, rl.account_name,
                         rl.client_protocol, rl.upstream_protocol, rl.virtual_model, rl.upstream_model,
-                        ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now'), rl.created_at
+                        ?2, ?3, ?4, ?5, ?6, ?7, 'complete', 'agent_native',
+                        ?8, ?9, ?10, ?11, ?12, datetime('now'), rl.created_at
                     FROM request_logs rl
                     WHERE rl.request_id=?1 AND rl.is_last_attempt=1
                     ORDER BY rl.attempt_seq DESC LIMIT 1
@@ -2277,17 +2286,38 @@ impl Storage {
     }
 
     pub fn analyze_unknown_usage(&self, time_range: &str) -> Result<usize, StorageError> {
-        let connection = self
+        let mut connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        let inserted = connection.execute(
+        let transaction = connection.transaction()?;
+        // `/messages/count_tokens` 只计算请求上下文长度，不执行模型推理。旧版维护流程
+        // 曾为它建立“未知用量”占位，原生会话回填也可能把相邻模型事件误配给它；
+        // 保留请求日志，清除该路径下的所有误分类用量。
+        let removed_non_billable = transaction.execute(
+            &format!(
+                r#"
+                DELETE FROM usage_records
+                WHERE EXISTS (
+                      SELECT 1 FROM request_logs
+                      WHERE request_logs.request_id = usage_records.request_id
+                        AND request_logs.is_last_attempt = 1
+                        AND lower(request_logs.path) LIKE '%/messages/count_tokens%'
+                        AND {}
+                  )
+                "#,
+                repair_time_clause("request_logs.created_at", time_range)
+            ),
+            [],
+        )?;
+        let inserted = transaction.execute(
             &format!(r#"
             INSERT INTO usage_records (
                 id, request_id, client_id, client_name, channel_id, channel_name,
                 account_id, account_name, client_protocol, upstream_protocol,
                 virtual_model, upstream_model, input_tokens, input_cached_tokens,
-                input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens, estimated_cost, analyzed_at, created_at
+                input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
+                usage_status, usage_source, estimated_cost, analyzed_at, created_at
             )
             SELECT
                 lower(hex(randomblob(16))),
@@ -2302,12 +2332,14 @@ impl Storage {
                 request_logs.upstream_protocol,
                 request_logs.virtual_model,
                 request_logs.upstream_model,
-                NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                NULL, NULL, NULL, NULL, NULL, NULL,
+                'unknown', 'unknown_placeholder', NULL,
                 datetime('now'),
                 datetime('now')
             FROM request_logs
             WHERE request_logs.is_last_attempt = 1
               AND {}
+              AND lower(request_logs.path) NOT LIKE '%/messages/count_tokens%'
               AND NOT EXISTS (
                   SELECT 1 FROM usage_records
                   WHERE usage_records.request_id = request_logs.request_id
@@ -2315,25 +2347,39 @@ impl Storage {
             "#, repair_time_clause("request_logs.created_at", time_range)),
             [],
         )?;
-        Ok(inserted)
+        transaction.commit()?;
+        Ok(removed_non_billable + inserted)
     }
 
     pub fn upsert_usage_record(&self, usage: &UsageRecordInput) -> Result<(), StorageError> {
+        self.upsert_usage_record_with_metadata(usage, "complete", "upstream_response")
+    }
+
+    pub fn upsert_usage_record_with_metadata(
+        &self,
+        usage: &UsageRecordInput,
+        usage_status: &str,
+        usage_source: &str,
+    ) -> Result<(), StorageError> {
         // 成本在 upsert 当场算掉，避免每次请求都全表 recalc（O(n·m) → O(1)）。
         // 仅在内存价格表有匹配价格时写 estimated_cost，否则留 NULL 稍后由
         // recalculate_usage_costs()（analyze_usage 触发）统一填补。
         // 先于连接锁之外读取价格快照，避免死锁（连接锁与价格锁是两把不同的锁）。
         let prices = self.prices();
-        let estimated_cost = estimate_cost(
-            &prices,
-            usage.channel_id.as_deref(),
-            usage.upstream_model.as_deref(),
-            usage.input_tokens,
-            usage.input_cached_tokens,
-            usage.input_uncached_tokens,
-            usage.input_cache_write_tokens,
-            usage.output_tokens,
-        );
+        let estimated_cost = (usage_status == "complete")
+            .then(|| {
+                estimate_cost(
+                    &prices,
+                    usage.channel_id.as_deref(),
+                    usage.upstream_model.as_deref(),
+                    usage.input_tokens,
+                    usage.input_cached_tokens,
+                    usage.input_uncached_tokens,
+                    usage.input_cache_write_tokens,
+                    usage.output_tokens,
+                )
+            })
+            .flatten();
 
         let connection = self
             .connection
@@ -2373,11 +2419,13 @@ impl Storage {
                     input_cache_write_tokens = ?15,
                     output_tokens = ?16,
                     total_tokens = ?17,
-                    estimated_cost = ?18,
-                    estimated_input_uncached_cost = ?19,
-                    estimated_input_cached_cost = ?20,
-                    estimated_input_cache_write_cost = ?21,
-                    estimated_output_cost = ?22,
+                    usage_status = ?18,
+                    usage_source = ?19,
+                    estimated_cost = ?20,
+                    estimated_input_uncached_cost = ?21,
+                    estimated_input_cached_cost = ?22,
+                    estimated_input_cache_write_cost = ?23,
+                    estimated_output_cost = ?24,
                     analyzed_at = datetime('now')
                 WHERE request_id = ?1
                 "#,
@@ -2400,6 +2448,8 @@ impl Storage {
                 usage.input_cache_write_tokens,
                 usage.output_tokens,
                 usage.total_tokens,
+                usage_status,
+                usage_source,
                 total,
                 input_uncached,
                 input_cached,
@@ -2417,11 +2467,12 @@ impl Storage {
                         account_id, account_name, client_protocol, upstream_protocol,
                         virtual_model, upstream_model, input_tokens, input_cached_tokens,
                         input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
+                        usage_status, usage_source,
                         estimated_cost, estimated_input_uncached_cost, estimated_input_cached_cost,
                         estimated_input_cache_write_cost, estimated_output_cost, analyzed_at, created_at
                     ) VALUES (
                         lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
+                        ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
                         datetime('now'), datetime('now')
                     )
                     "#,
@@ -2444,6 +2495,8 @@ impl Storage {
                     usage.input_cache_write_tokens,
                     usage.output_tokens,
                     usage.total_tokens,
+                    usage_status,
+                    usage_source,
                     total,
                     input_uncached,
                     input_cached,
@@ -2628,7 +2681,7 @@ impl Storage {
                 let (start, end) = match period {
                     "today" => (today, today),
                     "week" => {
-                        let monday_offset = (today.weekday().num_days_from_monday() as i64);
+                        let monday_offset = today.weekday().num_days_from_monday() as i64;
                         (today - chrono::Duration::days(monday_offset), today)
                     }
                     "month" => {

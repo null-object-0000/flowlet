@@ -6,6 +6,8 @@ import { accountCommands } from "../../domains/account/commands";
 import type { AccountBalanceSnapshot, AccountResourceMode, AccountResourceSyncMode, ChannelAccount, ModelSyncResult } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import {
+  CHATGPT_CHANNEL_ID,
+  CHATGPT_PSEUDO_PRESET,
   CUSTOM_CHANNEL_ID,
   FLOWLET_SUPPORTED_MODELS,
   QWEN_CHANNEL_ID,
@@ -57,9 +59,12 @@ type Props = {
   onTestConnection: (input: TestInput) => Promise<void>;
   onSyncBalance: (accountId: string) => Promise<void>;
   onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
+  /** ChatGPT 伪渠道的授权登录（浏览器 OAuth，仅新增模式）。 */
+  onAuthorizeChatGpt?: () => Promise<void>;
+  authorizationBusy?: boolean;
 };
 
-export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance, onScrape }: Props) {
+export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance, onScrape, onAuthorizeChatGpt, authorizationBusy = false }: Props) {
   const { language, t } = useAppPreferences();
   const [draft, setDraft] = useState<ChannelAccount>(() => createDraft(mode, accounts, presets, language));
   const [resource, setResource] = useState<ResourceDraft>(() => resourceDraft(snapshot));
@@ -80,9 +85,25 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   );
   const [fetchingModels, setFetchingModels] = useState(false);
 
-  const channel = presets.find((item) => item.id === draft?.channel_id);
+  // 新增模式在渠道选择里附加 ChatGPT 伪预设（授权登录，非表单创建）。
+  const allPresets = useMemo(
+    () => (mode.kind === "create" ? [...presets, CHATGPT_PSEUDO_PRESET] : presets),
+    [mode.kind, presets],
+  );
+  const channel = allPresets.find((item) => item.id === draft?.channel_id);
   const customChannel = isCustomChannel(channel);
   const isEdit = mode.kind === "edit";
+  const isChatGptCreate = !isEdit && draft?.channel_id === CHATGPT_CHANNEL_ID;
+
+  const handleAuthorizeChatGpt = async () => {
+    try {
+      await onAuthorizeChatGpt?.();
+      Toast.success(t("ChatGPT 账号授权成功"));
+      onClose();
+    } catch (error) {
+      Toast.error(t("ChatGPT 账号授权失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
   const autoSyncBalance = channel?.supports_balance_query === true;
   const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
   const resourceOptions = resourceModeOptions(draft?.channel_id ?? "");
@@ -306,8 +327,12 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       footer={(
         <div className={styles.footer}>
           <Button onClick={onClose}>{t("取消")}</Button>
-          <Button disabled={!draft.api_key.trim()} loading={testing} onClick={() => void handleTest()}>{t("测试连接")}</Button>
-          <Button theme="solid" type="primary" loading={saving} onClick={() => void handleSave()}>{t(isEdit ? "保存修改" : "保存账号")}</Button>
+          {!isChatGptCreate ? (
+            <Button disabled={!draft.api_key.trim()} loading={testing} onClick={() => void handleTest()}>{t("测试连接")}</Button>
+          ) : null}
+          {!isChatGptCreate ? (
+            <Button theme="solid" type="primary" loading={saving} onClick={() => void handleSave()}>{t(isEdit ? "保存修改" : "保存账号")}</Button>
+          ) : null}
         </div>
       )}
     >
@@ -323,7 +348,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   style={{ width: "100%" }}
                   onChange={(value) => selectChannel(value as string)}
                 >
-                  {presets.map((item) => (
+                  {allPresets.map((item) => (
                     <Select.Option key={item.id} value={item.id}>
                       <span className={styles.channelOptionLabel}>
                         {item.id === CUSTOM_CHANNEL_ID ? (
@@ -353,24 +378,32 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             </div>
           )}
 
-          <div className={styles.basicFields}>
-            <Field label={t("账号名称")}>
-              <div className={styles.nameInput}>
-                <Input aria-label={t("账号名称")} value={draft.name} onChange={(value) => update({ name: truncateAccountName(value) })} />
-                <span>{getAccountNameDisplayUnits(draft.name)} / {ACCOUNT_NAME_MAX_DISPLAY_UNITS}</span>
-              </div>
-            </Field>
+          {isChatGptCreate ? (
+            <ChatGptAuthorizePanel
+              busy={authorizationBusy}
+              onAuthorize={handleAuthorizeChatGpt}
+            />
+          ) : (
+            <div className={styles.basicFields}>
+              <Field label={t("账号名称")}>
+                <div className={styles.nameInput}>
+                  <Input aria-label={t("账号名称")} value={draft.name} onChange={(value) => update({ name: truncateAccountName(value) })} />
+                  <span>{getAccountNameDisplayUnits(draft.name)} / {ACCOUNT_NAME_MAX_DISPLAY_UNITS}</span>
+                </div>
+              </Field>
 
-            <Field label={(
-              <span className={styles.labelRow}>API Key{channel?.platform_url ? (
-                <Text link={{ href: channel.platform_url, target: "_blank", rel: "noreferrer" }} icon={<IconExternalOpen />} size="small">{t("前往查看")}</Text>
-              ) : null}</span>
-            )}>
-              <Input aria-label="API Key" mode="password" value={draft.api_key} placeholder={t("请输入渠道 API Key")} onChange={(value) => update({ api_key: value })} />
-            </Field>
-          </div>
+              <Field label={(
+                <span className={styles.labelRow}>API Key{channel?.platform_url ? (
+                  <Text link={{ href: channel.platform_url, target: "_blank", rel: "noreferrer" }} icon={<IconExternalOpen />} size="small">{t("前往查看")}</Text>
+                ) : null}</span>
+              )}>
+                <Input aria-label="API Key" mode="password" value={draft.api_key} placeholder={t("请输入渠道 API Key")} onChange={(value) => update({ api_key: value })} />
+              </Field>
+            </div>
+          )}
         </section>
 
+        {!isChatGptCreate ? (
         <section className={styles.section}>
           <div className={`${styles.sectionHeading} ${styles.resourceModeHeading}`}>
             <span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
@@ -466,6 +499,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             </>
           )}
         </section>
+        ) : null}
 
         {channel?.supports_model_list ? (
           <section className={styles.section}>
@@ -582,6 +616,25 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
   return <div className={styles.field}><span>{label}</span>{children}</div>;
 }
 
+/** ChatGPT 伪渠道的新增面板：Codex 账号走浏览器 OAuth 授权，不填 API Key。 */
+function ChatGptAuthorizePanel({ busy, onAuthorize }: { busy: boolean; onAuthorize: () => Promise<void> }) {
+  const { t } = useAppPreferences();
+  return (
+    <div className={styles.resourcePanel}>
+      <div className={styles.resourceHeading}>
+        <strong>{t("ChatGPT 账号授权")}</strong>
+        <span className={styles.autoBadge}>{t("浏览器授权")}</span>
+      </div>
+      <p className={styles.packEmpty}>
+        {t("Codex 账号不是通过 API Key 创建的：点击下方按钮会在浏览器中打开 ChatGPT 授权页，授权完成后账号会自动出现在渠道账号列表。")}
+      </p>
+      <Button theme="solid" type="primary" loading={busy} onClick={() => void onAuthorize()}>
+        {busy ? t("等待浏览器授权…") : t("授权登录")}
+      </Button>
+    </div>
+  );
+}
+
 function ModeOption({ selected, disabled, title, description, onClick }: { selected: boolean; disabled?: boolean; title: string; description: string; onClick: () => void }) {
   return <button type="button" className={`${styles.modeOption} ${selected ? styles.selected : ""}`} aria-pressed={selected} disabled={disabled} onClick={onClick}><i /><span><strong>{title}</strong><small>{description}</small></span></button>;
 }
@@ -589,6 +642,7 @@ function ModeOption({ selected, disabled, title, description, onClick }: { selec
 function defaultResourceMode(channelId: string): AccountResourceMode {
   if (channelId === "longcat") return "hybrid";
   if (channelId === QWEN_CHANNEL_ID) return "token_plan";
+  if (channelId === CHATGPT_CHANNEL_ID) return "codex";
   return "pay_as_you_go";
 }
 

@@ -946,6 +946,8 @@ pub struct UsageRecordRow {
     pub input_uncached_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
+    pub usage_status: String,
+    pub usage_source: String,
     pub estimated_cost: Option<f64>,
     pub analyzed_at: Option<String>,
     pub created_at: String,

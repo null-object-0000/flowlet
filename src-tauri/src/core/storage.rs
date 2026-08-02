@@ -872,6 +872,8 @@ impl Storage {
                 input_cache_write_tokens INTEGER,
                 output_tokens         INTEGER,
                 total_tokens          INTEGER,
+                usage_status          TEXT NOT NULL DEFAULT 'complete',
+                usage_source          TEXT NOT NULL DEFAULT 'upstream_response',
                 estimated_cost        REAL,
                 estimated_input_uncached_cost  REAL,
                 estimated_input_cached_cost    REAL,
@@ -1485,6 +1487,40 @@ impl Storage {
         )?;
         add_column_if_missing(&connection, "usage_records", "output_tokens", "INTEGER")?;
         add_column_if_missing(&connection, "usage_records", "total_tokens", "INTEGER")?;
+        let migrate_usage_status =
+            !table_has_column(&connection, "usage_records", "usage_status")?;
+        let migrate_usage_source =
+            !table_has_column(&connection, "usage_records", "usage_source")?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "usage_status",
+            "TEXT NOT NULL DEFAULT 'complete'",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "usage_records",
+            "usage_source",
+            "TEXT NOT NULL DEFAULT 'upstream_response'",
+        )?;
+        if migrate_usage_status {
+            connection.execute(
+                r#"UPDATE usage_records
+                   SET usage_status = CASE
+                       WHEN total_tokens IS NOT NULL THEN 'complete'
+                       WHEN input_tokens IS NOT NULL OR input_cached_tokens IS NOT NULL
+                         OR input_uncached_tokens IS NOT NULL OR input_cache_write_tokens IS NOT NULL
+                         OR output_tokens IS NOT NULL THEN 'partial'
+                       ELSE 'unknown'
+                   END"#,
+                [],
+            )?;
+        }
+        if migrate_usage_source {
+            // 历史行无法再可靠区分实时响应、捕获重解析或 Agent 原生回填，明确标为 legacy，
+            // 避免伪造比现有证据更具体的来源。
+            connection.execute("UPDATE usage_records SET usage_source = 'legacy'", [])?;
+        }
         add_column_if_missing(&connection, "usage_records", "estimated_cost", "REAL")?;
         add_column_if_missing(
             &connection,
@@ -1550,7 +1586,7 @@ impl Storage {
 
         // 性能索引（2026-07-04）—— 覆盖 list_request_logs / account_stats /
         connection.execute(
-            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.07.30', datetime('now'))
+            "INSERT INTO app_meta (key, value, updated_at) VALUES ('schema_version', '2026.08.02', datetime('now'))
              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
             [],
         )?;

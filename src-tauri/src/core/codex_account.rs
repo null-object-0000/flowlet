@@ -194,6 +194,79 @@ pub async fn query_codex_accounts(managed_root: &Path) -> Result<CodexAccountsRe
     Ok(CodexAccountsReport { accounts })
 }
 
+/// 刷新指定账号的用量（真·单账号）：定位该账号的托管目录，仅刷新这一个
+/// 账号并回写快照，不触碰其他账号。
+/// `account_id → 目录` 为确定性映射（`managed_root.join(profile_directory_name(id))`）；
+/// 目录名在账号规范化后可能不再匹配当前 id，因此直接查找失败时回退扫描托管目录
+/// 匹配 `snapshot.account_id`（与 `canonical_managed_account_id` 同款扫描）。
+pub async fn query_codex_account(
+    managed_root: &Path,
+    account_id: &str,
+) -> Result<CodexAccountReport, String> {
+    std::fs::create_dir_all(managed_root)
+        .map_err(|error| format!("无法创建 Codex 多账号目录：{error}"))?;
+
+    let direct = managed_root.join(profile_directory_name(account_id));
+    let profile_dir = if direct.join("auth.json").is_file() {
+        direct
+    } else {
+        std::fs::read_dir(managed_root)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|path| is_managed_profile_directory(path))
+                    .find(|path| {
+                        read_snapshot(&path.join("snapshot.json"))
+                            .is_some_and(|snapshot| snapshot.account_id == account_id)
+                    })
+            })
+            .ok_or_else(|| format!("未找到 Codex 账号 {account_id} 的托管配置"))?
+    };
+
+    let auth_path = profile_dir.join("auth.json");
+    let snapshot_path = profile_dir.join("snapshot.json");
+    if !auth_path.is_file() {
+        return Err(format!("未找到 Codex 账号 {account_id} 的登录凭据"));
+    }
+
+    // 复用 query_codex_accounts 的每目录刷新逻辑：OAuth 刷新 → 回退 app-server →
+    // 均失败则保留旧快照并标记 stale + error。
+    let report = match query_codex_account_via_oauth_path(&auth_path).await {
+        Ok(report) => {
+            write_private_json(&snapshot_path, &report)?;
+            report
+        }
+        Err(oauth_error) => {
+            match query_codex_account_via_app_server(Some(&profile_dir)).await {
+                Ok(report) if report.signed_in => {
+                    write_private_json(&snapshot_path, &report)?;
+                    report
+                }
+                app_server_result => {
+                    if let Some(mut snapshot) = read_snapshot(&snapshot_path) {
+                        snapshot.stale = true;
+                        snapshot.error = Some(match app_server_result {
+                            Ok(_) => "登录凭据已失效，请在 Codex 中重新登录该账号后刷新".to_string(),
+                            Err(app_server_error) => format!(
+                                "Codex 账号刷新失败。OAuth 会话：{oauth_error}；app-server：{app_server_error}"
+                            ),
+                        });
+                        write_private_json(&snapshot_path, &snapshot)?;
+                        snapshot
+                    } else {
+                        return Err(format!(
+                            "Codex 账号 {account_id} 刷新失败。OAuth 会话：{oauth_error}"
+                        ));
+                    }
+                }
+            }
+        }
+    };
+    Ok(report)
+}
+
 /// Cheap pre-check for scheduled sync: skip network and process work entirely
 /// when the user has never signed in to Codex on this machine.
 pub(crate) fn has_codex_account_sources(managed_root: &Path, codex_home: &Path) -> bool {
@@ -1607,5 +1680,47 @@ mod tests {
             .expect("query local Codex app-server");
         assert!(report.signed_in);
         assert!(report.auth_mode.is_some());
+    }
+
+    #[tokio::test]
+    async fn query_codex_account_reports_unknown_account() {
+        // 无网络路径：空目录查询未知账号应返回明确错误而非 panic。
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-codex-account-query-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let error = query_codex_account(&root, "missing-account")
+            .await
+            .expect_err("unknown account must error");
+        assert!(error.contains("未找到 Codex 账号 missing-account"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn query_codex_account_falls_back_to_snapshot_scan() {
+        // 目录名与 account_id 不一致（规范化后）时按 snapshot.account_id 回退扫描定位；
+        // 该目录缺少 auth.json → 返回“未找到登录凭据”（无网络路径）。
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-codex-account-scan-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let legacy_dir = root.join("legacy-named-dir");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy dir");
+        let report = parse_oauth_usage(
+            &json!({
+                "account_id": "canonical-1",
+                "email": "scan@example.com",
+                "plan_type": "plus"
+            }),
+            None,
+        )
+        .expect("parse report");
+        write_private_json(&legacy_dir.join("snapshot.json"), &report).expect("write snapshot");
+
+        let error = query_codex_account(&root, "canonical-1")
+            .await
+            .expect_err("missing auth must error");
+        assert!(error.contains("登录凭据"), "unexpected error: {error}");
+        let _ = std::fs::remove_dir_all(root);
     }
 }

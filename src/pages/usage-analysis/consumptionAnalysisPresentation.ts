@@ -20,9 +20,6 @@ export type ConsumptionDimension = "model" | "account" | "client" | "device";
 export type ConsumptionMetric = "tokens" | "cost";
 export type CostCurrencyLookup = (row: UsageSummaryRow) => string | null;
 
-/** 交叉归因矩阵每个方向最多展示的条目数（1200×720 布局下右栏的可容纳列数）。 */
-export const CROSS_MATRIX_MAX_COLS = 4;
-
 export type ConsumptionAggregate = {
   tokens: number;
   inputTokens: number;
@@ -122,16 +119,12 @@ export type CrossMatrixAxisEntry = {
 };
 
 export type CrossMatrix = {
-  /** 与主维度排行完全一致的行（含未进入 Top 列覆盖的行）。 */
+  /** 与主维度排行完全一致的行。 */
   rowKeys: string[];
-  /** 次维度 Top N 列（按当前指标降序）。 */
+  /** 次维度的全部列，按 Token 体量降序。 */
   columns: CrossMatrixAxisEntry[];
   cells: Map<string, CrossMatrixCell>;
   scale: HeatLevelScale;
-  /** 次维度去重后的总列数（可能多于实际展示的 Top N 列）。 */
-  columnCount: number;
-  /** 列方向 Top N 覆盖的指标总量占比（0–1）。 */
-  columnCoverage: number;
 };
 
 export function buildCrossMatrix(
@@ -139,7 +132,6 @@ export function buildCrossMatrix(
   primary: ConsumptionDimension,
   metric: ConsumptionMetric,
   currencyOf?: CostCurrencyLookup,
-  maxColumns: number = CROSS_MATRIX_MAX_COLS,
 ): CrossMatrix {
   const primaryOf = dimensionSelectors(primary);
   const secondaryOf = primary === "model" ? dimensionSelectors("account") : dimensionSelectors("model");
@@ -150,8 +142,6 @@ export function buildCrossMatrix(
   const columnTotals = new Map<string, CrossMatrixAxisEntry>();
   // 列序固定按 Token 体量排，与当前指标切换无关——避免切「预估费用」时列序跳动。
   const columnTokenTotals = new Map<string, number>();
-  let grandTotal = 0;
-
   const metricOf = (row: UsageSummaryRow) => (metric === "tokens" ? finite(row.known_tokens) : finite(row.estimated_cost));
 
   for (const row of rows) {
@@ -171,7 +161,6 @@ export function buildCrossMatrix(
     }
     cellsByKey.set(cellKey, cell);
     rowTotals.set(rowKey, (rowTotals.get(rowKey) ?? 0) + value);
-    grandTotal += value;
 
     const column = columnTotals.get(colKey) ?? {
       key: colKey,
@@ -186,9 +175,7 @@ export function buildCrossMatrix(
   }
 
   const columns = [...columnTotals.values()]
-    .sort((a, b) => (columnTokenTotals.get(b.key) ?? 0) - (columnTokenTotals.get(a.key) ?? 0) || a.label.localeCompare(b.label))
-    .slice(0, maxColumns);
-  const covered = columns.reduce((sum, column) => sum + column.total, 0);
+    .sort((a, b) => (columnTokenTotals.get(b.key) ?? 0) - (columnTokenTotals.get(a.key) ?? 0) || a.label.localeCompare(b.label));
 
   const scale = createHeatLevelScale([...cellsByKey.values()].map((cell) => (metric === "tokens" ? cell.tokens : cell.cost)));
   const cells = new Map<string, CrossMatrixCell>(
@@ -203,8 +190,6 @@ export function buildCrossMatrix(
     columns,
     cells,
     scale,
-    columnCount: columnTotals.size,
-    columnCoverage: grandTotal > 0 ? covered / grandTotal : 0,
   };
 }
 

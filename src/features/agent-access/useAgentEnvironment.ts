@@ -14,12 +14,14 @@ import {
   inspectOpenCodeGlobalConfig,
   inspectPiGlobalConfig,
   listCachedCodexAccounts,
+  queryCodexAccount,
   queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
   restoreCodexGlobalConfig,
   restoreOpenCodeGlobalConfig,
   restorePiGlobalConfig,
 } from "../../domains/agent/commands";
+import type { CodexAccountsReport } from "../../domains/agent/types";
 import { queryKeys } from "../../shared/query-keys";
 
 export function useClaudeCodeEnvironment() {
@@ -81,6 +83,21 @@ export function useCodexAccountRefresh() {
   return useMutation({
     mutationFn: queryCodexAccounts,
     onSuccess: (report) => queryClient.setQueryData(queryKey, report),
+  });
+}
+
+// 单账号刷新：只更新缓存中对应 account_id 的报告，保留其他账号的快照。
+export function useCodexAccountRefreshOne() {
+  const queryClient = useQueryClient();
+  const queryKey = queryKeys.agent.codexAccount();
+  return useMutation({
+    mutationFn: queryCodexAccount,
+    onSuccess: (report) => {
+      const current = queryClient.getQueryData<CodexAccountsReport>(queryKey);
+      const accounts = current?.accounts ?? [];
+      const next = [...accounts.filter((item) => item.account_id !== report.account_id), report];
+      queryClient.setQueryData<CodexAccountsReport>(queryKey, { accounts: next });
+    },
   });
 }
 

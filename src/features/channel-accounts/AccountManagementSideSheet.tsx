@@ -3,7 +3,7 @@ import { Button, Modal, SideSheet, Space, Switch, Tag, Toast, Typography } from 
 import { IconDelete, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
-import { isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
+import { CHATGPT_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
 import { AccountEditorDrawer, type AccountEditorMode, type AccountResourceSnapshotDraft } from "./AccountEditorDrawer";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./AccountManagementSideSheet.module.css";
@@ -32,11 +32,14 @@ type Props = {
   onSaveBalanceSnapshot: (snapshot: AccountBalanceSnapshot) => Promise<void>;
   onSyncBalance: (accountId: string) => Promise<void>;
   onScrape: (accountId: string) => Promise<ScrapeBalanceResult>;
+  /** ChatGPT 伪渠道的授权登录（仅新增模式）。 */
+  onAuthorizeChatGpt?: () => Promise<void>;
+  authorizationBusy?: boolean;
 };
 
 export function AccountManagementSideSheet(props: Props) {
   const { language, t } = useAppPreferences();
-  const { request, accounts, snapshots, presets, busy, onClose, onSaveAccounts, onTestConnection, onSaveBalanceSnapshot, onSyncBalance, onScrape } = props;
+  const { request, accounts, snapshots, presets, busy, onClose, onSaveAccounts, onTestConnection, onSaveBalanceSnapshot, onSyncBalance, onScrape, onAuthorizeChatGpt, authorizationBusy = false } = props;
   const [editor, setEditor] = useState<AccountEditorMode | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChannelAccount | null>(null);
   const snapshotByAccount = useMemo(() => new Map(snapshots.map((item) => [item.account_id, item])), [snapshots]);
@@ -142,6 +145,8 @@ export function AccountManagementSideSheet(props: Props) {
         onTestConnection={onTestConnection}
         onSyncBalance={onSyncBalance}
         onScrape={onScrape}
+        onAuthorizeChatGpt={onAuthorizeChatGpt}
+        authorizationBusy={authorizationBusy}
       /> : null}
       <Modal title={t("确认删除账号")} visible={deleteTarget != null} zIndex={APP_OVERLAY_Z_INDEX.modal} footer={null} onCancel={() => setDeleteTarget(null)}>
         <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>
@@ -160,6 +165,10 @@ function resolveRequestedEditor(
 ): AccountEditorMode | null {
   if (!request || request.kind === "list") return null;
   if (request.kind === "create") {
+    // ChatGPT 是前端伪预设（授权登录而非表单创建），特判允许进入新增抽屉。
+    if (request.channelId === CHATGPT_CHANNEL_ID) {
+      return { kind: "create", channelId: CHATGPT_CHANNEL_ID };
+    }
     return presets.some((item) => item.id === request.channelId)
       ? { kind: "create", channelId: request.channelId }
       : null;

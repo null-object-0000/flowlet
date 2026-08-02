@@ -737,6 +737,51 @@ fn fills_unknown_usage_once_for_the_final_attempt() {
 }
 
 #[test]
+fn count_tokens_requests_never_become_unknown_usage_and_legacy_placeholders_are_removed() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+    let mut log = request_log_for_repair("req-count-tokens", 0, true);
+    log.path = "/anthropic/v1/messages/count_tokens?beta=true".to_string();
+    storage.insert_request_log(&log).unwrap();
+
+    assert_eq!(storage.analyze_unknown_usage("all").unwrap(), 0);
+    storage
+        .upsert_usage_record_with_metadata(
+            &empty_usage_input("req-count-tokens"),
+            "unknown",
+            "unknown_placeholder",
+        )
+        .unwrap();
+    assert_eq!(storage.analyze_unknown_usage("all").unwrap(), 1);
+
+    let mut misassigned_usage = empty_usage_input("req-count-tokens");
+    misassigned_usage.input_tokens = Some(100);
+    misassigned_usage.input_cached_tokens = Some(80);
+    misassigned_usage.input_uncached_tokens = Some(20);
+    misassigned_usage.output_tokens = Some(5);
+    misassigned_usage.total_tokens = Some(105);
+    storage
+        .upsert_usage_record_with_metadata(
+            &misassigned_usage,
+            "complete",
+            "agent_native",
+        )
+        .unwrap();
+    assert_eq!(storage.analyze_unknown_usage("all").unwrap(), 1);
+
+    let connection = storage.connection.lock().unwrap();
+    let usage_rows: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM usage_records WHERE request_id = 'req-count-tokens'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(usage_rows, 0);
+}
+
+#[test]
 fn reanalyzes_longcat_stream_usage_from_captured_response() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
@@ -1109,6 +1154,51 @@ fn adds_new_channel_preset_columns_to_legacy_schema() {
             "timeout_seconds",
         )
         .unwrap()
+    );
+}
+
+#[test]
+fn migrates_legacy_usage_rows_with_explicit_status_and_source() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    connection
+        .execute_batch(
+            r#"
+            CREATE TABLE usage_records (
+                id TEXT PRIMARY KEY,
+                input_tokens INTEGER,
+                total_tokens INTEGER
+            );
+            INSERT INTO usage_records (id, input_tokens, total_tokens) VALUES
+                ('complete', 10, 12),
+                ('partial', 10, NULL),
+                ('unknown', NULL, NULL);
+            "#,
+        )
+        .expect("create legacy usage table");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate usage metadata");
+
+    let connection = storage.connection.lock().unwrap();
+    let rows = connection
+        .prepare("SELECT id, usage_status, usage_source FROM usage_records ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("complete".to_string(), "complete".to_string(), "legacy".to_string()),
+            ("partial".to_string(), "partial".to_string(), "legacy".to_string()),
+            ("unknown".to_string(), "unknown".to_string(), "legacy".to_string()),
+        ]
     );
 }
 

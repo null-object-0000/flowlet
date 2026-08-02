@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
-import { Button, Tooltip } from "@douyinfe/semi-ui-19";
-import { IconChevronRight } from "@douyinfe/semi-icons";
+import { Button, SideSheet, Tooltip } from "@douyinfe/semi-ui-19";
+import { IconChevronRight, IconExternalOpen } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
@@ -16,6 +16,7 @@ import { formatCompactNumber, formatInteger } from "../../shared/formatters/numb
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
+import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import {
   averageElapsedMsOf,
   buildCrossMatrix,
@@ -23,14 +24,16 @@ import {
   cellId,
   groupConsumption,
   outputTokensPerSecondOf,
-  secondaryDimensionOf,
   type ConsumptionDimension,
   type ConsumptionEntry,
   type ConsumptionMetric,
+  type CrossMatrix,
+  type CrossMatrixAxisEntry,
 } from "./consumptionAnalysisPresentation";
 import styles from "./UsageAnalysisPage.module.css";
 
 const EMPTY_ROWS: UsageSummaryRow[] = [];
+const COMPACT_MATRIX_COLUMN_COUNT = 4;
 
 const PERIOD_OPTIONS: Array<{ value: UsagePeriod; label: string }> = [
   { value: "today", label: "今日" },
@@ -55,6 +58,7 @@ export function UsageAnalysisPage() {
   const [period, setPeriod] = useState<UsagePeriod>("week");
   const [dimension, setDimension] = useState<ConsumptionDimension>("model");
   const [matrixMetric, setMatrixMetric] = useState<ConsumptionMetric>("tokens");
+  const [matrixExpanded, setMatrixExpanded] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const { query } = useUsageSummary(period, refresh.autoRefresh);
   const { modelCurrencyOf } = useModelPriceCurrencyLookup();
@@ -86,11 +90,18 @@ export function UsageAnalysisPage() {
     () => buildCrossMatrix(rows, dimension, matrixMetric, modelCurrencyOf),
     [rows, dimension, matrixMetric, modelCurrencyOf],
   );
+  const compactMatrixColumns = matrix.columns.slice(0, COMPACT_MATRIX_COLUMN_COUNT);
   const selected = entries.find((entry) => entry.key === selectedKey) ?? entries[0] ?? null;
 
   const changeDimension = (next: ConsumptionDimension) => {
     setDimension(next);
     setSelectedKey(null);
+    setMatrixExpanded(false);
+  };
+
+  const changePeriod = (next: UsagePeriod) => {
+    setPeriod(next);
+    setMatrixExpanded(false);
   };
 
   const loading = query.isPending && query.data == null;
@@ -98,7 +109,9 @@ export function UsageAnalysisPage() {
     ? t("模型 × 渠道账号，颜色越深消耗越高")
     : dimension === "account"
       ? t("渠道账号 × 模型，颜色越深消耗越高")
-      : t("客户端 × 模型，颜色越深消耗越高");
+      : dimension === "client"
+        ? t("客户端 × 模型，颜色越深消耗越高")
+        : t("设备 × 模型，颜色越深消耗越高");
 
   return (
     <main className={styles.page}>
@@ -109,7 +122,7 @@ export function UsageAnalysisPage() {
               key={option.value}
               type="button"
               aria-pressed={period === option.value}
-              onClick={() => setPeriod(option.value)}
+              onClick={() => changePeriod(option.value)}
             >
               {t(option.label)}
             </button>
@@ -207,75 +220,31 @@ export function UsageAnalysisPage() {
               </div>
 
               <div className={styles.matrixScroll}>
-                <div
-                  className={styles.matrixGrid}
-                  style={{ gridTemplateColumns: `minmax(84px, 1.15fr) repeat(${matrix.columns.length}, minmax(56px, 1fr))` }}
-                >
-                  <span aria-hidden="true" />
-                  {matrix.columns.map((column) => (
-                    <span key={column.key} className={styles.matrixColHead} title={column.label}>
-                      {column.shortLabel}
-                    </span>
-                  ))}
-                  {entries.map((entry) => (
-                    <Fragment key={entry.key}>
-                      <button
-                        type="button"
-                        className={styles.matrixRowHead}
-                        aria-pressed={entry.key === (selectedKey ?? entries[0]?.key)}
-                        title={entry.label}
-                        onClick={() => setSelectedKey(entry.key)}
-                      >
-                        {entry.label}
-                      </button>
-                      {matrix.columns.map((column) => {
-                        const cell = matrix.cells.get(cellId(entry.key, column.key));
-                        if (!cell) {
-                          return (
-                            <span key={column.key} className={`${styles.matrixCell} ${styles.matrixCellEmpty}`} title={t("该组合暂无数据")}>
-                              —
-                            </span>
-                          );
-                        }
-                        return (
-                          <Tooltip
-                            key={column.key}
-                            content={(
-                              <span className={styles.cellTip}>
-                                <strong>{entry.label} · {column.label}</strong>
-                                <span>Token {formatCompactNumber(cell.tokens, language)}</span>
-                                <span>{t("预估费用")} {formatAggregateCost(cell.costByCurrency, cell.cost)}</span>
-                              </span>
-                            )}
-                          >
-                            <button
-                              type="button"
-                              className={`${styles.matrixCell} ${styles["heatLevel" + cell.level]}`}
-                              onClick={() => setSelectedKey(entry.key)}
-                            >
-                              {matrixMetric === "tokens"
-                                ? <CompactNumber value={cell.tokens} language={language} maximumFractionDigits={1} showExactTitle={false} />
-                                : formatCellCost(cell.cost, cell.costByCurrency)}
-                            </button>
-                          </Tooltip>
-                        );
-                      })}
-                    </Fragment>
-                  ))}
-                </div>
+                <CrossMatrixGrid
+                  entries={entries}
+                  columns={compactMatrixColumns}
+                  matrix={matrix}
+                  metric={matrixMetric}
+                  selectedKey={selectedKey ?? entries[0]?.key ?? null}
+                  onSelect={setSelectedKey}
+                  language={language}
+                  t={t}
+                />
               </div>
 
               <div className={styles.matrixFoot}>
                 <HeatLegend t={t} />
-                {matrix.columnCount > matrix.columns.length ? (
-                  <span className={styles.coverage}>
-                    {t("展示前 {count} 个{dimension} · 覆盖 {share}", {
-                      count: matrix.columns.length,
-                      dimension: t(secondaryDimensionOf(dimension) === "account" ? "渠道账号" : "模型"),
-                      share: formatPercent(matrix.columnCoverage),
-                    })}
-                  </span>
-                ) : null}
+                <Button
+                  className={styles.expandMatrixButton}
+                  theme="borderless"
+                  size="small"
+                  icon={<IconExternalOpen />}
+                  onClick={() => setMatrixExpanded(true)}
+                >
+                  {matrix.columns.length > COMPACT_MATRIX_COLUMN_COUNT
+                    ? t("展开全部 {count} 项", { count: matrix.columns.length })
+                    : t("展开查看")}
+                </Button>
               </div>
 
               {selected ? (
@@ -317,12 +286,133 @@ export function UsageAnalysisPage() {
           </div>
         ) : null}
       </section>
+
+      <SideSheet
+        visible={matrixExpanded}
+        motion={false}
+        width="min(1080px, calc(100vw - 48px))"
+        title={t("完整交叉归因矩阵")}
+        onCancel={() => setMatrixExpanded(false)}
+        footer={null}
+        bodyStyle={{ padding: 0 }}
+        zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
+      >
+        <div className={styles.expandedMatrixBody}>
+          <div className={styles.expandedMatrixToolbar}>
+            <div>
+              <strong>{matrixSubtitle}</strong>
+              <span>{t("共 {rows} 个对象 × {columns} 个归因项", { rows: entries.length, columns: matrix.columns.length })}</span>
+            </div>
+            <div className={styles.metricSeg} aria-label={t("矩阵指标")}>
+              {(["tokens", "cost"] as const).map((metric) => (
+                <button
+                  key={metric}
+                  type="button"
+                  aria-pressed={matrixMetric === metric}
+                  onClick={() => setMatrixMetric(metric)}
+                >
+                  {metric === "tokens" ? "Token" : t("预估费用")}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className={styles.expandedMatrixScroll}>
+            <CrossMatrixGrid
+              entries={entries}
+              columns={matrix.columns}
+              matrix={matrix}
+              metric={matrixMetric}
+              selectedKey={selectedKey ?? entries[0]?.key ?? null}
+              onSelect={setSelectedKey}
+              language={language}
+              t={t}
+              expanded
+            />
+          </div>
+          <div className={styles.expandedMatrixFoot}><HeatLegend t={t} /></div>
+        </div>
+      </SideSheet>
     </main>
   );
 }
 
 type Translate = ReturnType<typeof useAppPreferences>["t"];
 type Language = ReturnType<typeof useAppPreferences>["language"];
+
+function CrossMatrixGrid({ entries, columns, matrix, metric, selectedKey, onSelect, language, t, expanded = false }: {
+  entries: ConsumptionEntry[];
+  columns: CrossMatrixAxisEntry[];
+  matrix: CrossMatrix;
+  metric: ConsumptionMetric;
+  selectedKey: string | null;
+  onSelect: (key: string) => void;
+  language: Language;
+  t: Translate;
+  expanded?: boolean;
+}) {
+  return (
+    <div
+      className={`${styles.matrixGrid} ${expanded ? styles.matrixGridExpanded : ""}`}
+      style={{
+        gridTemplateColumns: expanded
+          ? `minmax(150px, 180px) repeat(${columns.length}, minmax(92px, 1fr))`
+          : `minmax(96px, 1.15fr) repeat(${columns.length}, minmax(0, 1fr))`,
+      }}
+    >
+      <span className={styles.matrixCorner} aria-hidden="true" />
+      {columns.map((column) => (
+        <span key={column.key} className={styles.matrixColHead} title={column.label}>
+          {column.shortLabel}
+        </span>
+      ))}
+      {entries.map((entry) => (
+        <Fragment key={entry.key}>
+          <button
+            type="button"
+            className={styles.matrixRowHead}
+            aria-pressed={entry.key === selectedKey}
+            title={entry.label}
+            onClick={() => onSelect(entry.key)}
+          >
+            {entry.label}
+          </button>
+          {columns.map((column) => {
+            const cell = matrix.cells.get(cellId(entry.key, column.key));
+            if (!cell) {
+              return (
+                <span key={column.key} className={`${styles.matrixCell} ${styles.matrixCellEmpty}`} title={t("该组合暂无数据")}>
+                  —
+                </span>
+              );
+            }
+            return (
+              <Tooltip
+                key={column.key}
+                content={(
+                  <span className={styles.cellTip}>
+                    <strong>{entry.label} · {column.label}</strong>
+                    <span>Token {formatCompactNumber(cell.tokens, language)}</span>
+                    <span>{t("预估费用")} {formatAggregateCost(cell.costByCurrency, cell.cost)}</span>
+                  </span>
+                )}
+              >
+                <button
+                  type="button"
+                  className={`${styles.matrixCell} ${styles["heatLevel" + cell.level]}`}
+                  onClick={() => onSelect(entry.key)}
+                >
+                  {metric === "tokens"
+                    ? <CompactNumber value={cell.tokens} language={language} maximumFractionDigits={1} showExactTitle={false} />
+                    : formatCellCost(cell.cost, cell.costByCurrency)}
+                </button>
+              </Tooltip>
+            );
+          })}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
 
 function RankRow({ entry, dimension, selected, onSelect, language, t }: {
   entry: ConsumptionEntry;
@@ -413,4 +503,3 @@ function formatCellCost(cost: number, costByCurrency: Record<string, number>) {
 function formatPercent(rate: number | null) {
   return rate == null || !Number.isFinite(rate) ? "—" : `${(rate * 100).toFixed(1)}%`;
 }
-

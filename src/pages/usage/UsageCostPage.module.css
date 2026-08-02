@@ -72,9 +72,8 @@
 .stat strong { display: block; margin-top: 6px; overflow: hidden; font-size: 22px; line-height: 1; white-space: nowrap; text-overflow: ellipsis; }
 .stat small { display: block; margin-top: 6px; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
 
-.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
-.workspace.withDetails { grid-template-columns: minmax(0, 1fr) 250px; }
-.card, .selectedPeriod {
+.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 5fr) minmax(330px, 3fr); gap: 10px; }
+.card, .selectedPeriod, .confidenceCard {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -174,24 +173,71 @@ button.heatmapCell:hover:not(:disabled), .hourCell:hover:not(:disabled) { filter
 .heatmapLegend .heatmapCell { width: 10px; height: 10px; flex: none; border-radius: 3px; }
 .emptyHint { margin-top: 9px; color: var(--flowlet-color-text-tertiary); font-size: 11px; text-align: center; }
 
+.insightColumn {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(128px, .72fr) minmax(210px, 1.28fr);
+  gap: 10px;
+}
+
 .selectedPeriod {
-  padding: 22px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
 }
 .selectedLabel { color: var(--flowlet-color-text-secondary); font-size: 12px; }
-.selectedTokens { width: 100%; margin-top: 10px; overflow: hidden; color: var(--flowlet-color-text); font-size: 32px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.04em; white-space: nowrap; text-overflow: ellipsis; }
+.selectedTokens { width: 100%; margin-top: 7px; overflow: hidden; color: var(--flowlet-color-text); font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.04em; white-space: nowrap; text-overflow: ellipsis; }
 .selectedPeriod > small { margin-top: 5px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
-.selectedMeta { width: 100%; margin-top: auto; padding-top: 18px; display: grid; gap: 7px; border-top: 1px solid var(--flowlet-color-border); }
+.selectedMeta { width: 100%; margin-top: auto; padding-top: 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; border-top: 1px solid var(--flowlet-color-border); }
 .selectedMeta strong { color: var(--flowlet-color-text); font-size: 13px; line-height: 1.45; }
 .selectedMeta span { color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.55; }
+.selectedMeta span:last-child { grid-column: 1 / -1; }
+.selectedPeriodEmpty { justify-content: center; }
+.selectedPeriodEmpty > strong { margin-top: 8px; color: var(--flowlet-color-text); font-size: 14px; }
+
+.confidenceCard { padding: 15px 18px 14px; display: flex; flex-direction: column; }
+.confidenceCard > header { display: grid; gap: 2px; }
+.confidenceCard > header strong { color: var(--flowlet-color-text); font-size: 14px; }
+.confidenceCard > header span { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.confidenceSummary { margin-top: 12px; display: flex; align-items: center; gap: 14px; }
+.confidenceSummary > div:last-child { min-width: 0; display: grid; gap: 4px; }
+.confidenceSummary > div:last-child strong { color: var(--flowlet-color-text); font-size: 13px; }
+.confidenceSummary > div:last-child span { color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.45; }
+.confidenceRing {
+  --confidence-degrees: 0deg;
+  width: 68px;
+  height: 68px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: conic-gradient(var(--flowlet-color-success) var(--confidence-degrees), var(--flowlet-color-surface-muted) 0);
+  position: relative;
+}
+.confidenceRing::after { content: ""; width: 52px; height: 52px; border-radius: 50%; background: var(--flowlet-color-surface); position: absolute; }
+.confidenceRing strong { z-index: 1; color: var(--flowlet-color-text); font-size: 15px; font-variant-numeric: tabular-nums; }
+.confidenceBreakdown { margin-top: 12px; padding-top: 10px; display: grid; gap: 6px; border-top: 1px solid var(--flowlet-color-border); }
+.confidenceBreakdown > div { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.confidenceBreakdown i { width: 7px; height: 7px; border-radius: 50%; }
+.confidenceBreakdown span { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.confidenceBreakdown strong { color: var(--flowlet-color-text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.proxyDot { background: var(--flowlet-color-success); }
+.nativeDot { background: var(--flowlet-color-primary); }
+.unknownDot { background: var(--flowlet-color-border-strong); }
+.confidenceCard > p { margin: auto 0 0; padding: 8px 10px; border-radius: 8px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 10px; line-height: 1.45; }
 
 @media (max-width: 980px) {
   .page { height: auto; min-height: 100%; }
   .toolbar { flex-wrap: wrap; }
   .rangeNavigator { width: 100%; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .workspace.withDetails { grid-template-columns: 1fr; }
+  .workspace { grid-template-columns: 1fr; }
+  .insightColumn { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
   .selectedPeriod { min-height: 150px; }
+}
+
+@media (max-width: 720px) {
+  .insightColumn { grid-template-columns: 1fr; }
 }

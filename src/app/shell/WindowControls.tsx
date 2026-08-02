@@ -11,10 +11,11 @@ export function WindowControls() {
     event.preventDefault();
     void windowCommands.startDragging();
   };
+  const toggleMaximize = () => void windowCommands.toggleMaximize();
 
   return (
     <>
-      <div className={styles.dragRegion} onPointerDown={startWindowDrag} role="presentation" />
+      <div className={styles.dragRegion} onPointerDown={startWindowDrag} onDoubleClick={toggleMaximize} role="presentation" />
       <div className={styles.controls}>
         <Button
           className={styles.control}
@@ -31,8 +32,8 @@ export function WindowControls() {
           type="tertiary"
           theme="borderless"
           aria-label={t("最大化")}
-          disabled
           onPointerDown={(event) => event.stopPropagation()}
+          onClick={toggleMaximize}
         />
         <Button
           className={`${styles.control} ${styles.close}`}

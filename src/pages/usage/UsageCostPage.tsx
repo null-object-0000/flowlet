@@ -86,6 +86,19 @@ export function UsageCostPage() {
   );
   const selectedPeriod = period === "week" ? selectedHourlyCell : selectedDay;
   const activeQuery = period === "week" ? hourlyUsage : usage;
+  const tokenConfidence = useMemo(() => {
+    const unknownRequests = days.reduce((total, day) => total + day.unknownCount, 0);
+    const proxyRecognized = Math.max(0, summary.requests - unknownRequests);
+    const recognized = proxyRecognized + summary.nativeEvents;
+    const total = summary.requests + summary.nativeEvents;
+    return {
+      score: total > 0 ? recognized / total : null,
+      proxyShare: total > 0 ? proxyRecognized / total : 0,
+      nativeShare: total > 0 ? summary.nativeEvents / total : 0,
+      unknownShare: total > 0 ? unknownRequests / total : 0,
+      unknownCount: unknownRequests,
+    };
+  }, [days, summary.nativeEvents, summary.requests]);
 
   const resetSelection = () => {
     setSelectedDate(null);
@@ -194,7 +207,7 @@ export function UsageCostPage() {
         </article>
       </section>
 
-      <section className={[styles.workspace, selectedPeriod ? styles.withDetails : ""].join(" ")}>
+      <section className={styles.workspace}>
         <article className={[styles.card, styles.heatmapCard].join(" ")}>
           <div className={styles.cardHeader}>
             <div>
@@ -304,40 +317,54 @@ export function UsageCostPage() {
           ) : null}
         </article>
 
-        {period === "week" && selectedHourlyCell ? (
-          <SelectedPeriodCard
-            title={selectedHourlyCell.date + " " + String(selectedHourlyCell.hourOfDay).padStart(2, "0")
-              + ":00–" + String(selectedHourlyCell.hourEnd - 1).padStart(2, "0") + ":59"}
-            tokens={formatCompactNumber(selectedHourlyCell.tokens, language)}
-            detail={t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })}
-            split={selectedHourlyCell.nativeTokens > 0
-              ? t("Flowlet {proxy} · 原生 {native}", {
-                proxy: formatCompactNumber(selectedHourlyCell.tokens - selectedHourlyCell.nativeTokens, language),
-                native: formatCompactNumber(selectedHourlyCell.nativeTokens, language),
-              })
-              : null}
-          />
-        ) : null}
+        <aside className={styles.insightColumn}>
+          {period === "week" && selectedHourlyCell ? (
+            <SelectedPeriodCard
+              title={selectedHourlyCell.date + " " + String(selectedHourlyCell.hourOfDay).padStart(2, "0")
+                + ":00–" + String(selectedHourlyCell.hourEnd - 1).padStart(2, "0") + ":59"}
+              tokens={formatCompactNumber(selectedHourlyCell.tokens, language)}
+              detail={t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })}
+              split={selectedHourlyCell.nativeTokens > 0
+                ? t("Flowlet {proxy} · 原生 {native}", {
+                  proxy: formatCompactNumber(selectedHourlyCell.tokens - selectedHourlyCell.nativeTokens, language),
+                  native: formatCompactNumber(selectedHourlyCell.nativeTokens, language),
+                })
+                : null}
+            />
+          ) : null}
 
-        {period === "month" && selectedDay ? (
-          <SelectedPeriodCard
-            title={selectedDay.date}
-            tokens={formatCompactNumber(selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0), language)}
-            detail={t("{count} 次请求", {
-              count: formatInteger(selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0), language),
-            }) + " · "
-              + t("输入 {input} · 输出 {output}", {
-                input: formatCompactNumber(selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0), language),
-                output: formatCompactNumber(selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0), language),
-              })}
-            split={(selectedDay.nativeTotalTokens ?? 0) > 0
-              ? t("Flowlet {proxy} · 原生 {native}", {
-                proxy: formatCompactNumber(selectedDay.knownTokens, language),
-                native: formatCompactNumber(selectedDay.nativeTotalTokens ?? 0, language),
-              })
-              : null}
+          {period === "month" && selectedDay ? (
+            <SelectedPeriodCard
+              title={selectedDay.date}
+              tokens={formatCompactNumber(selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0), language)}
+              detail={t("{count} 次请求", {
+                count: formatInteger(selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0), language),
+              }) + " · "
+                + t("输入 {input} · 输出 {output}", {
+                  input: formatCompactNumber(selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0), language),
+                  output: formatCompactNumber(selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0), language),
+                })}
+              split={(selectedDay.nativeTotalTokens ?? 0) > 0
+                ? t("Flowlet {proxy} · 原生 {native}", {
+                  proxy: formatCompactNumber(selectedDay.knownTokens, language),
+                  native: formatCompactNumber(selectedDay.nativeTotalTokens ?? 0, language),
+                })
+                : null}
+            />
+          ) : null}
+
+          {!selectedPeriod ? <SelectedPeriodEmpty t={t} /> : null}
+
+          <TokenConfidenceCard
+            score={tokenConfidence.score}
+            proxyShare={tokenConfidence.proxyShare}
+            nativeShare={tokenConfidence.nativeShare}
+            unknownShare={tokenConfidence.unknownShare}
+            unknownCount={tokenConfidence.unknownCount}
+            language={language}
+            t={t}
           />
-        ) : null}
+        </aside>
       </section>
     </main>
   );
@@ -375,6 +402,82 @@ function SelectedPeriodCard({ title, tokens, detail, split }: {
   );
 }
 
+function SelectedPeriodEmpty({ t }: { t: ReturnType<typeof useAppPreferences>["t"] }) {
+  return (
+    <article className={[styles.selectedPeriod, styles.selectedPeriodEmpty].join(" ")}>
+      <span className={styles.selectedLabel}>Token</span>
+      <strong>{t("暂无选定时间数据")}</strong>
+      <small>{t("选择有数据的日期或时段后查看详情")}</small>
+    </article>
+  );
+}
+
+function TokenConfidenceCard({
+  score,
+  proxyShare,
+  nativeShare,
+  unknownShare,
+  unknownCount,
+  language,
+  t,
+}: {
+  score: number | null;
+  proxyShare: number;
+  nativeShare: number;
+  unknownShare: number;
+  unknownCount: number;
+  language: NumberLanguage;
+  t: ReturnType<typeof useAppPreferences>["t"];
+}) {
+  const scoreLabel = score == null ? "—" : formatConfidence(score);
+  const scoreDegrees = score == null ? 0 : Math.max(0, Math.min(360, score * 360));
+  return (
+    <article className={styles.confidenceCard}>
+      <header>
+        <strong>{t("数据可信度")}</strong>
+        <span>{t("Token 与费用估算的数据来源构成")}</span>
+      </header>
+      <div className={styles.confidenceSummary}>
+        <div
+          className={styles.confidenceRing}
+          style={{ "--confidence-degrees": `${scoreDegrees}deg` } as React.CSSProperties}
+          aria-label={t("Token 已识别 {score}", { score: scoreLabel })}
+        >
+          <strong>{scoreLabel}</strong>
+        </div>
+        <div>
+          <strong>{t("Token 已识别")}</strong>
+          <span>{score == null
+            ? t("当前筛选范围暂无数据")
+            : t("当前按可统计请求覆盖计算")}</span>
+        </div>
+      </div>
+      <div className={styles.confidenceBreakdown}>
+        <ConfidenceRow className={styles.proxyDot} label={t("Flowlet 可统计用量")} value={formatConfidence(proxyShare)} />
+        <ConfidenceRow className={styles.nativeDot} label={t("Agent 原生用量")} value={formatConfidence(nativeShare)} />
+        <ConfidenceRow className={styles.unknownDot} label={t("未知 / 待识别")} value={formatConfidence(unknownShare)} />
+      </div>
+      {unknownCount > 0 ? (
+        <p>{t("{count} 次请求暂未识别 Token，可在数据完整性检查中尝试修复。", {
+          count: formatInteger(unknownCount, language),
+        })}</p>
+      ) : (
+        <p>{t("当前范围内所有请求均包含可统计 Token；来源级评分将在同步数据支持后进一步细分。")}</p>
+      )}
+    </article>
+  );
+}
+
+function ConfidenceRow({ className, label, value }: { className: string; label: string; value: string }) {
+  return (
+    <div>
+      <i className={className} />
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 /** 热力图 tooltip 的来源拆分后缀：存在原生用量时追加「Flowlet X · 原生 Y」。 */
 function formatNativeSplit(
   tokens: number,
@@ -391,4 +494,8 @@ function formatNativeSplit(
 
 function formatCacheHitRate(value: number | null) {
   return value == null ? "—" : (value * 100).toFixed(1) + "%";
+}
+
+function formatConfidence(value: number) {
+  return (Math.max(0, Math.min(1, value)) * 100).toFixed(1) + "%";
 }

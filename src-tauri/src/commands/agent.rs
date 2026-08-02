@@ -81,6 +81,15 @@ pub(crate) async fn authorize_codex_account(
     .await
 }
 
+/// 刷新单个 Codex 账号的用量（不触碰其他账号）。
+#[tauri::command]
+pub(crate) async fn query_codex_account(
+    state: tauri::State<'_, AppState>,
+    account_id: String,
+) -> Result<crate::core::codex_account::CodexAccountReport, String> {
+    crate::core::codex_account::query_codex_account(&state.codex_accounts_dir, &account_id).await
+}
+
 #[tauri::command]
 pub(crate) fn inspect_agent_global_config(
     state: tauri::State<'_, AppState>,

@@ -19,6 +19,16 @@ pub(crate) struct StreamUsageAccumulator {
     pending_line: Vec<u8>,
     discarding_oversized_line: bool,
     usage: Option<ResponseUsage>,
+    saw_terminal_marker: bool,
+    saw_positive_output_usage: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StreamUsageResult {
+    pub usage: Option<ResponseUsage>,
+    /// 截断或传输报错时仍可认定 usage 完整的上游证据：标准终止标记，或兼容
+    /// 上游最后一个带正数 output_tokens 的 usage 事件。
+    pub has_completion_evidence: bool,
 }
 
 impl StreamUsageAccumulator {
@@ -32,11 +42,15 @@ impl StreamUsageAccumulator {
         self.push_line_fragment(remaining);
     }
 
-    pub(crate) fn finish(mut self) -> Option<ResponseUsage> {
+    pub(crate) fn finish_with_evidence(mut self) -> StreamUsageResult {
         if !self.pending_line.is_empty() || self.discarding_oversized_line {
             self.finish_line();
         }
-        self.usage
+        StreamUsageResult {
+            usage: self.usage,
+            has_completion_evidence: self.saw_terminal_marker
+                || self.saw_positive_output_usage,
+        }
     }
 
     fn push_line_fragment(&mut self, fragment: &[u8]) {
@@ -67,9 +81,24 @@ impl StreamUsageAccumulator {
             return;
         };
         let data = data.trim();
-        if !data.is_empty() && data != "[DONE]" && data.contains("\"usage\"") {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+        if data == "[DONE]" {
+            self.saw_terminal_marker = true;
+            self.pending_line.clear();
+            return;
+        }
+        if data.is_empty() {
+            self.pending_line.clear();
+            return;
+        }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+            if value.get("type").and_then(serde_json::Value::as_str) == Some("message_stop") {
+                self.saw_terminal_marker = true;
+            }
+            if data.contains("\"usage\"") {
                 if let Some(usage) = extract_usage_from_value(&value) {
+                    if usage.output_tokens.unwrap_or_default() > 0 {
+                        self.saw_positive_output_usage = true;
+                    }
                     self.usage = Some(match self.usage.take() {
                         Some(current) => merge_usage(current, usage),
                         None => usage,
@@ -370,8 +399,10 @@ data: {"type":"message_stop"}
         for chunk in body.chunks(7) {
             accumulator.push(chunk);
         }
+        let result = accumulator.finish_with_evidence();
+        assert!(result.has_completion_evidence);
         assert_eq!(
-            accumulator.finish(),
+            result.usage,
             Some(ResponseUsage {
                 input_tokens: Some(116465),
                 input_cached_tokens: Some(116352),
@@ -381,6 +412,35 @@ data: {"type":"message_stop"}
                 total_tokens: Some(126229),
             })
         );
+    }
+
+    #[test]
+    fn incremental_usage_marks_message_start_only_as_incomplete() {
+        let body = br#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":6,"cache_read_input_tokens":23746,"cache_creation_input_tokens":11351,"output_tokens":0}}}
+
+"#;
+        let mut accumulator = StreamUsageAccumulator::default();
+        accumulator.push(body);
+        let result = accumulator.finish_with_evidence();
+        assert!(!result.has_completion_evidence);
+        assert_eq!(result.usage.unwrap().input_tokens, Some(35103));
+    }
+
+    #[test]
+    fn incremental_usage_accepts_positive_output_without_terminal_marker() {
+        let body = br#"event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":6,"cache_read_input_tokens":23746,"cache_creation_input_tokens":11351,"output_tokens":0}}}
+
+event: message_delta
+data: {"type":"message_delta","usage":{"output_tokens":249}}
+
+"#;
+        let mut accumulator = StreamUsageAccumulator::default();
+        accumulator.push(body);
+        let result = accumulator.finish_with_evidence();
+        assert!(result.has_completion_evidence);
+        assert_eq!(result.usage.unwrap().total_tokens, Some(35352));
     }
 
     #[test]

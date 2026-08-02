@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
+import type { CodexAccountReport } from "../../domains/agent/types";
 import { formatTime } from "../../shared/formatters/datetime";
 import { OverviewChannelAccountsCard } from "./OverviewChannelAccountsCard";
 
@@ -49,6 +50,62 @@ describe("OverviewChannelAccountsCard", () => {
 
     await user.click(screen.getByRole("button", { name: "添加 Qwen" }));
     expect(onCreate).toHaveBeenCalledWith("qwen");
+  });
+
+  it("offers ChatGPT authorization in the empty card", async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn();
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[]}
+        snapshots={[]}
+        onCreate={onCreate}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "ChatGPT 授权登录" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "ChatGPT 授权登录" }));
+    expect(onCreate).toHaveBeenCalledWith("chatgpt");
+  });
+
+  it("opens the Codex detail drawer scoped to the clicked pseudo account", async () => {
+    const user = userEvent.setup();
+    const onOpenCodexAgent = vi.fn();
+    const codexAccounts: CodexAccountReport[] = [{
+      account_id: "acc-1",
+      signed_in: true,
+      auth_mode: "chatgpt",
+      email: "one@example.com",
+      plan_type: "plus",
+      primary: { used_percent: 25, window_duration_mins: 300, resets_at: 1_779_459_394 },
+      secondary: null,
+      credits: null,
+      rate_limit_reset_credits: null,
+      rate_limit_reached_type: null,
+      source: "oauth",
+      updated_at: "2026-07-18T10:00:00Z",
+      stale: false,
+      error: null,
+    }];
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[]}
+        snapshots={[]}
+        codexAccounts={codexAccounts}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+        onOpenCodexAgent={onOpenCodexAgent}
+      />,
+    );
+
+    expect(screen.getByText("one@example.com")).toBeInTheDocument();
+    await user.click(screen.getByText("one@example.com").closest("button")!);
+    expect(onOpenCodexAgent).toHaveBeenCalledWith("acc-1");
   });
 
   it("renders legacy account summaries and routes all three actions", async () => {

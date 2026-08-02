@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const windowApi = vi.hoisted(() => ({
   startDragging: vi.fn<() => Promise<void>>(),
   minimize: vi.fn<() => Promise<void>>(),
+  toggleMaximize: vi.fn<() => Promise<void>>(),
   close: vi.fn<() => Promise<void>>(),
 }));
 
@@ -17,6 +18,7 @@ describe("windowCommands", () => {
     vi.clearAllMocks();
     windowApi.startDragging.mockResolvedValue();
     windowApi.minimize.mockResolvedValue();
+    windowApi.toggleMaximize.mockResolvedValue();
     windowApi.close.mockResolvedValue();
   });
 
@@ -28,6 +30,11 @@ describe("windowCommands", () => {
   it("minimizes the native window", async () => {
     await windowCommands.minimize();
     expect(windowApi.minimize).toHaveBeenCalledOnce();
+  });
+
+  it("toggles native window maximization", async () => {
+    await windowCommands.toggleMaximize();
+    expect(windowApi.toggleMaximize).toHaveBeenCalledOnce();
   });
 
   it("closes the native window", async () => {

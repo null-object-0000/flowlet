@@ -5,7 +5,6 @@ import {
   buildCrossMatrix,
   cacheHitRateOf,
   cellId,
-  CROSS_MATRIX_MAX_COLS,
   groupConsumption,
   outputTokensPerSecondOf,
   secondaryDimensionOf,
@@ -150,15 +149,11 @@ describe("buildCrossMatrix", () => {
 
   it("keeps column order stable across metric switches (ordered by token volume)", () => {
     // 列序固定按 Token 体量排，切「预估费用」时列序不应跳动。
-    const tokenMatrix = buildCrossMatrix(rows, "account", "tokens", cnyOnly, 2);
-    expect(tokenMatrix.columns).toHaveLength(2);
-    expect(tokenMatrix.columns.map((column) => column.key)).toEqual(["deepseek-v4-pro", "longcat-2.0"]);
-    expect(tokenMatrix.columnCoverage).toBeCloseTo((2000 + 1100) / 4300);
+    const tokenMatrix = buildCrossMatrix(rows, "account", "tokens", cnyOnly);
+    expect(tokenMatrix.columns.slice(0, 2).map((column) => column.key)).toEqual(["deepseek-v4-pro", "longcat-2.0"]);
 
-    const costMatrix = buildCrossMatrix(rows, "account", "cost", mixedCurrency, 2);
-    expect(costMatrix.columns.map((column) => column.key)).toEqual(["deepseek-v4-pro", "longcat-2.0"]);
-    // 覆盖率随当前指标变化（费用口径下 Top 2 覆盖的费用占比不同）。
-    expect(costMatrix.columnCoverage).toBeCloseTo((0.2 + 0) / 0.68);
+    const costMatrix = buildCrossMatrix(rows, "account", "cost", mixedCurrency);
+    expect(costMatrix.columns.slice(0, 2).map((column) => column.key)).toEqual(["deepseek-v4-pro", "longcat-2.0"]);
   });
 
   it("assigns heat levels from the current period cell distribution", () => {
@@ -168,9 +163,20 @@ describe("buildCrossMatrix", () => {
     expect(matrix.scale.levelFor(0)).toBe(0);
   });
 
-  it("uses the shared default column cap", () => {
-    expect(CROSS_MATRIX_MAX_COLS).toBe(4);
-    const matrix = buildCrossMatrix(rows, "model", "tokens", cnyOnly);
-    expect(matrix.columns.length).toBeLessThanOrEqual(CROSS_MATRIX_MAX_COLS);
+  it("keeps every secondary-dimension column", () => {
+    const extraRows = [
+      ...rows,
+      ...rows.slice(0, 2).map((row, index) => ({
+        ...row,
+        account_id: `extra-account-${index}`,
+        account_name: `Extra ${index}`,
+      })),
+    ];
+    const matrix = buildCrossMatrix(extraRows, "model", "tokens", cnyOnly);
+    expect(matrix.columns).toHaveLength(6);
+    expect(matrix.columns.map((column) => column.key)).toEqual(expect.arrayContaining([
+      "deepseek::extra-account-0",
+      "qwen::extra-account-1",
+    ]));
   });
 });

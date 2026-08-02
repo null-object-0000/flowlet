@@ -1,7 +1,7 @@
 import { Button, Tag, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronRight, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
-import { isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
+import { CHATGPT_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
 import { codexAccountToPseudoChannelAccount, getCodexUsageDisplay, getCodexNameSummary } from "./codexPseudoAccount";
@@ -22,7 +22,7 @@ type Props = {
   onCreate: (channelId: string) => void;
   onViewAll: () => void;
   onEdit: (accountId: string) => void;
-  onOpenCodexAgent?: () => void;
+  onOpenCodexAgent?: (accountId: string) => void;
 };
 
 export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts, onCreate, onViewAll, onEdit, onOpenCodexAgent }: Props) {
@@ -65,7 +65,11 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
           return (
             <div className={styles.row} key={account.id}>
               {isCodex ? (
-                <button className={styles.rowMain} type="button" onClick={onOpenCodexAgent}>
+                <button
+                  className={styles.rowMain}
+                  type="button"
+                  onClick={() => onOpenCodexAgent?.(codexReport?.account_id ?? "")}
+                >
                   <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
                   <span className={styles.accountText}>
                     <span className={styles.nameRow}>
@@ -176,6 +180,7 @@ const EMPTY_CHANNEL_OPTIONS = [
   { id: "deepseek", name: "DeepSeek", actionLabel: "添加 DeepSeek" },
   { id: "kimi", name: "Kimi", actionLabel: "添加 Kimi" },
   { id: "qwen", name: "Qwen", actionLabel: "添加 Qwen" },
+  { id: CHATGPT_CHANNEL_ID, name: "ChatGPT", actionLabel: "ChatGPT 授权登录" },
 ];
 
 function accountStatus(account: ChannelAccount, t: (source: string) => string): { label: string; color: "green" | "red" | "grey" } {

@@ -291,6 +291,37 @@ describe("AccountManagementSideSheet", () => {
     expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
   });
 
+  it("shows the ChatGPT authorization panel instead of the API-key form for a chatgpt create", async () => {
+    const user = userEvent.setup();
+    const onAuthorizeChatGpt = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AccountManagementSideSheet
+        request={{ kind: "create", channelId: "chatgpt" }}
+        accounts={[]}
+        snapshots={[]}
+        presets={[]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+        onAuthorizeChatGpt={onAuthorizeChatGpt}
+      />,
+    );
+
+    expect(await screen.findByText("ChatGPT 账号授权")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "授权登录" })).toBeEnabled();
+    // 非表单创建：没有 API Key 输入，也没有保存按钮。
+    expect(screen.queryByPlaceholderText("请输入渠道 API Key")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存账号" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "授权登录" }));
+    expect(onAuthorizeChatGpt).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the saved resource mode and Token Plan endpoints immutable while editing", async () => {
     const user = userEvent.setup();
     const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();

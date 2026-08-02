@@ -13,6 +13,32 @@ export const CUSTOM_CHANNEL_ID = "custom";
  *  （行点击打开只读详情抽屉），不参与路由，不在账号管理弹窗中出现。 */
 export const CHATGPT_CHANNEL_ID = "chatgpt";
 
+/** ChatGPT 伪渠道预设（仅前端新增账号抽屉用）。Codex 账号不是表单创建的，
+ *  而是通过浏览器 OAuth 授权（authorize_codex_account）新增；该预设只提供
+ *  「新增 ChatGPT」的入口与授权面板渲染，不进入 config.json / channels_config.rs，
+ *  不参与路由。 */
+export const CHATGPT_PSEUDO_PRESET: ChannelPreset = {
+  id: CHATGPT_CHANNEL_ID,
+  name: "ChatGPT",
+  vendor: "openai",
+  supported_protocols: [],
+  openai_base_url: "",
+  anthropic_base_url: "",
+  openai_auth: "bearer",
+  anthropic_auth: "bearer",
+  default_model: "",
+  small_model: null,
+  platform_url: null,
+  supports_model_list: false,
+  supports_model_detail: false,
+  supports_balance_query: false,
+  supports_quota_query: false,
+  supports_usage_query: false,
+  supports_scrape_balance: false,
+  created_at: "",
+  updated_at: "",
+};
+
 export type ChannelPreset = {
   id: string;
   name: string;

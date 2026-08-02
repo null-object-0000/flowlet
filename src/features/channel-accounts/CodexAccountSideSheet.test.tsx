@@ -114,3 +114,54 @@ describe("CodexAccountSideSheet last-updated tooltip", () => {
     expect(await screen.findByText("数据即将自动刷新")).toBeInTheDocument();
   });
 });
+
+describe("CodexAccountSideSheet single-account mode", () => {
+  const multiAccounts: CodexAccountsReport = {
+    accounts: [
+      cachedAccounts.accounts[0],
+      {
+        account_id: "user-2",
+        signed_in: true,
+        auth_mode: "chatgpt",
+        email: "two@example.com",
+        plan_type: "pro",
+        primary: { used_percent: 10, window_duration_mins: 10_080, resets_at: 1_789_200_000 },
+        secondary: null,
+        credits: null,
+        rate_limit_reset_credits: null,
+        rate_limit_reached_type: null,
+        source: "oauth",
+        updated_at: "2026-07-18T09:00:00Z",
+        stale: false,
+        error: null,
+      },
+    ],
+  };
+
+  it("shows only the focused account and offers a back-to-all link", async () => {
+    const user = userEvent.setup();
+    const onShowAll = vi.fn();
+    render(
+      <CodexAccountSideSheet
+        visible
+        accounts={multiAccounts}
+        accountId="user-2"
+        onRefreshAccount={noop}
+        onRefreshAccountOne={noop}
+        onAuthorizeAccount={noop}
+        onShowAll={onShowAll}
+        onClose={noop}
+        onCopy={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    // 邮箱出现在区标题与账号卡片中，用 getAllByText 断言。
+    expect(screen.getAllByText("two@example.com").length).toBeGreaterThan(0);
+    expect(screen.queryByText("cached@example.com")).not.toBeInTheDocument();
+    // 单账号模式不显示“添加 / 重新授权账号”（Rust 仅支持新增）。
+    expect(screen.queryByRole("button", { name: /添加 \/ 重新授权账号/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /全部账号/ }));
+    expect(onShowAll).toHaveBeenCalled();
+  });
+});

@@ -1341,6 +1341,8 @@ async fn build_response(
                 ttft_ms: None,
                 res_body_b64: None,
                 usage: None,
+                usage_status: None,
+                usage_source: None,
                 error_message: Some("下游客户端在流结束前断开连接".to_string()),
                 route_reason: Some("stream_cancelled".to_string()),
             });
@@ -1356,7 +1358,14 @@ async fn build_response(
                 done.route_reason,
             );
             if let Some(usage) = done.usage {
-                record_parsed_usage(usage_capture, usage);
+                record_parsed_usage(
+                    usage_capture,
+                    usage,
+                    done.usage_status.as_deref().unwrap_or("complete"),
+                    done.usage_source
+                        .as_deref()
+                        .unwrap_or("upstream_response"),
+                );
             }
         });
 
@@ -1471,10 +1480,17 @@ fn record_response_usage(capture: UsageCapture) {
         return;
     };
 
-    record_parsed_usage(capture, usage);
+    record_parsed_usage(capture, usage, "complete", "upstream_response");
 }
 
-fn record_parsed_usage(capture: UsageCapture, usage: ResponseUsage) {
+fn record_parsed_usage(
+    capture: UsageCapture,
+    usage: ResponseUsage,
+    usage_status: &str,
+    usage_source: &str,
+) {
+    let usage_status = usage_status.to_string();
+    let usage_source = usage_source.to_string();
     tokio::task::spawn_blocking(move || {
         let input = UsageRecordInput {
             request_id: capture.request_id,
@@ -1495,7 +1511,11 @@ fn record_parsed_usage(capture: UsageCapture, usage: ResponseUsage) {
             output_tokens: usage.output_tokens,
             total_tokens: usage.total_tokens,
         };
-        if let Err(err) = capture.storage.upsert_usage_record(&input) {
+        if let Err(err) = capture.storage.upsert_usage_record_with_metadata(
+            &input,
+            &usage_status,
+            &usage_source,
+        ) {
             tracing::warn!("写入 usage 记录失败: {err}");
         }
     });
@@ -1526,6 +1546,8 @@ struct StreamDone {
     pub ttft_ms: Option<i64>,
     pub res_body_b64: Option<String>,
     pub usage: Option<ResponseUsage>,
+    pub usage_status: Option<String>,
+    pub usage_source: Option<String>,
     pub error_message: Option<String>,
     pub route_reason: Option<String>,
 }
@@ -1560,13 +1582,13 @@ fn capture_timed_stream(
         usage_body_buf: Vec::new(),
         usage_body_enabled: true,
         usage_accumulator: StreamUsageAccumulator::default(),
+        tx_done: std::sync::Arc::new(std::sync::Mutex::new(Some(tx_done))),
         first_line: None,
         last_line: None,
         line_count: 0,
         _activity_permit: activity_permit,
     };
-    let tx_done = std::sync::Arc::new(std::sync::Mutex::new(Some(tx_done)));
-    futures_util::stream::unfold((state, tx_done), move |(mut state, tx_done)| async move {
+    futures_util::stream::unfold(state, move |mut state| async move {
         if state.terminated {
             return None;
         }
@@ -1608,22 +1630,21 @@ fn capture_timed_stream(
                     state.last_line = Some(trimmed.to_string());
                     state.line_count += 1;
                 }
-                Some((Ok(bytes), (state, tx_done)))
+                Some((Ok(bytes), state))
             }
             Ok(Some(Err(err))) => {
                 let error_message = err.to_string();
                 send_stream_done(
                     &mut state,
-                    &tx_done,
                     false,
                     Some(error_message.clone()),
                     Some("stream_error".to_string()),
                 );
                 state.terminated = true;
-                Some((Err(std::io::Error::other(error_message)), (state, tx_done)))
+                Some((Err(std::io::Error::other(error_message)), state))
             }
             Ok(None) => {
-                send_stream_done(&mut state, &tx_done, true, None, None);
+                send_stream_done(&mut state, true, None, None);
                 None
             }
             Err(_) => {
@@ -1631,7 +1652,6 @@ fn capture_timed_stream(
                 let error_message = format!("上游流连续 {timeout_seconds} 秒未返回数据，已中止");
                 send_stream_done(
                     &mut state,
-                    &tx_done,
                     false,
                     Some(error_message.clone()),
                     Some("stream_timeout".to_string()),
@@ -1642,7 +1662,7 @@ fn capture_timed_stream(
                         std::io::ErrorKind::TimedOut,
                         error_message,
                     )),
-                    (state, tx_done),
+                    state,
                 ))
             }
         }
@@ -1651,7 +1671,6 @@ fn capture_timed_stream(
 
 fn send_stream_done(
     state: &mut TimedStreamState,
-    tx_done: &std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<StreamDone>>>>,
     success: bool,
     error_message: Option<String>,
     route_reason: Option<String>,
@@ -1670,26 +1689,48 @@ fn send_stream_done(
             state.res_body_max,
         )
     };
-    let usage = if success {
-        // SSE 用量随流增量解析，不受完整响应体大小限制。保留小响应的整段解析作为
-        // 兼容兜底，覆盖以 event-stream 返回但正文实际是单条 JSON 的上游。
-        std::mem::take(&mut state.usage_accumulator)
-            .finish()
-            .or_else(|| {
-                state
-                    .usage_body_enabled
-                    .then(|| extract_stream_usage(&state.usage_body_buf))
-                    .flatten()
-            })
+    // SSE 用量随流增量解析，不受完整响应体大小限制。传输错误或下游断开时也保留
+    // 已经收到的上游 usage；仅有终止标记/正输出 usage 才算完整，否则清空输出与
+    // total 并标为 partial，避免把 message_start 前缀冒充完整消费。
+    let parsed = std::mem::take(&mut state.usage_accumulator).finish_with_evidence();
+    let mut usage = parsed.usage.or_else(|| {
+        state
+            .usage_body_enabled
+            .then(|| extract_stream_usage(&state.usage_body_buf))
+            .flatten()
+    });
+    let complete = success || parsed.has_completion_evidence;
+    if !complete {
+        if let Some(partial) = usage.as_mut() {
+            partial.output_tokens = None;
+            partial.total_tokens = None;
+        }
+    }
+    let (usage_status, usage_source) = if usage.is_none() {
+        (None, None)
+    } else if complete {
+        (
+            Some("complete".to_string()),
+            Some(if success {
+                "upstream_response".to_string()
+            } else {
+                "upstream_stream_recovered".to_string()
+            }),
+        )
     } else {
-        None
+        (
+            Some("partial".to_string()),
+            Some("upstream_stream_partial".to_string()),
+        )
     };
-    let _ = tx_done.lock().unwrap().take().map(|tx| {
+    let _ = state.tx_done.lock().unwrap().take().map(|tx| {
         tx.send(StreamDone {
             duration_ms,
             ttft_ms: state.ttft_ms,
             res_body_b64,
             usage,
+            usage_status,
+            usage_source,
             error_message,
             route_reason,
         })
@@ -1711,11 +1752,25 @@ struct TimedStreamState {
     usage_body_buf: Vec<u8>,
     usage_body_enabled: bool,
     usage_accumulator: StreamUsageAccumulator,
+    tx_done: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<StreamDone>>>>,
     first_line: Option<String>,
     last_line: Option<String>,
     line_count: usize,
     /// 流式请求的活动凭证：随状态存活，流被 drop 时才归还计数
     _activity_permit: ActivityPermit,
+}
+
+impl Drop for TimedStreamState {
+    fn drop(&mut self) {
+        if !self.done_sent {
+            send_stream_done(
+                self,
+                false,
+                Some("下游客户端在流结束前断开连接".to_string()),
+                Some("stream_cancelled".to_string()),
+            );
+        }
+    }
 }
 
 /// 流式响应结束后由 spawn task 调用，补写 duration / res_body_b64

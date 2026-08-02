@@ -19,7 +19,7 @@ type Props = {
   baseUrl: string;
   bindConfig?: ProxyBindConfig;
   onAccountRequest: (request: AccountManagerRequest) => void;
-  onOpenCodexAgent?: () => void;
+  onOpenCodexAgent?: (accountId: string) => void;
   busyModelId?: string;
   onToggleModel: (routeIds: string[], modelId: string, enabled: boolean) => void;
 };

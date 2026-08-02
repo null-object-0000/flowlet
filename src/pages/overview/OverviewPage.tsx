@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, Toast } from "@douyinfe/semi-ui-19";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
 import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
-import { useCodexAccounts, useCodexAccountRefresh, useCodexAccountAuthorization } from "../../features/agent-access/useAgentEnvironment";
+import { useCodexAccounts, useCodexAccountRefresh, useCodexAccountRefreshOne, useCodexAccountAuthorization } from "../../features/agent-access/useAgentEnvironment";
 import { AccountManagementSideSheet, type AccountManagerRequest } from "../../features/channel-accounts/AccountManagementSideSheet";
 import { CodexAccountSideSheet } from "../../features/channel-accounts/CodexAccountSideSheet";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
@@ -30,8 +30,10 @@ export function OverviewPage() {
   const balanceSnapshots = useLatestBalanceSnapshots(hasAccounts);
   const codexAccounts = useCodexAccounts(hasAccounts);
   const codexAccountRefresh = useCodexAccountRefresh();
+  const codexAccountRefreshOne = useCodexAccountRefreshOne();
   const codexAccountAuthorization = useCodexAccountAuthorization();
   const [codexSheetVisible, setCodexSheetVisible] = useState(false);
+  const [focusedCodexAccount, setFocusedCodexAccount] = useState<string | undefined>(undefined);
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
 
   const authorizeCodexAccount = async () => {
@@ -42,6 +44,12 @@ export function OverviewPage() {
     } catch (error) {
       Toast.error(t("Codex 账号授权失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
     }
+  };
+
+  // 新增抽屉里的 ChatGPT 授权：不自行弹 Toast，由抽屉负责成功关闭/失败提示。
+  const authorizeChatGptFromDrawer = async () => {
+    await codexAccountAuthorization.mutateAsync();
+    await codexAccounts.refetch();
   };
 
   // 概览页顶部「今日消耗」：用专用轻量接口，拉今日 Token 聚合（总量 + 输入/
@@ -80,7 +88,10 @@ export function OverviewPage() {
           baseUrl={baseUrl}
           bindConfig={bindConfig.data}
           onAccountRequest={setAccountRequest}
-          onOpenCodexAgent={() => setCodexSheetVisible(true)}
+          onOpenCodexAgent={(accountId) => {
+            setFocusedCodexAccount(accountId || undefined);
+            setCodexSheetVisible(true);
+          }}
           busyModelId={modelActions.toggleExposedModel.isPending ? modelActions.toggleExposedModel.variables?.modelId : undefined}
           onToggleModel={(routeIds, modelId, enabled) => modelActions.toggleExposedModel.mutate({ routes: routes.data ?? [], routeIds, modelId, enabled })}
         />
@@ -115,14 +126,19 @@ export function OverviewPage() {
         onSaveBalanceSnapshot={(snapshot) => accountActions.saveBalanceSnapshot.mutateAsync(snapshot)}
         onSyncBalance={(accountId) => accountActions.queryBalance.mutateAsync(accountId).then(() => undefined)}
         onScrape={(accountId) => accountActions.scrapeBalance.mutateAsync(accountId)}
+        onAuthorizeChatGpt={authorizeChatGptFromDrawer}
+        authorizationBusy={codexAccountAuthorization.isPending}
       />
 
       <CodexAccountSideSheet
         visible={codexSheetVisible}
         accounts={codexAccounts.data}
-        accountLoading={codexAccountRefresh.isPending}
-        accountError={codexAccountRefresh.error?.message}
+        accountId={focusedCodexAccount}
+        accountLoading={codexAccountRefresh.isPending || codexAccountRefreshOne.isPending}
+        accountError={codexAccountRefresh.error?.message ?? codexAccountRefreshOne.error?.message}
         onRefreshAccount={() => void codexAccountRefresh.mutate()}
+        onRefreshAccountOne={() => void codexAccountRefreshOne.mutate(focusedCodexAccount ?? "")}
+        onShowAll={() => setFocusedCodexAccount(undefined)}
         accountAuthorizationBusy={codexAccountAuthorization.isPending}
         onAuthorizeAccount={() => void authorizeCodexAccount()}
         onClose={() => setCodexSheetVisible(false)}

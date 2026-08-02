@@ -1921,6 +1921,108 @@ async fn streaming_idle_timeout_reports_stream_failure() {
 }
 
 #[tokio::test]
+async fn streaming_timeout_preserves_message_start_usage_as_partial() {
+    let first = Bytes::from_static(
+        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":23746,\"cache_creation_input_tokens\":11351,\"output_tokens\":0}}}\n\n",
+    );
+    let upstream = futures_util::stream::unfold(Some(first), |next| async move {
+        match next {
+            Some(bytes) => Some((Ok::<Bytes, reqwest::Error>(bytes), None)),
+            None => std::future::pending().await,
+        }
+    });
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let mut stream = Box::pin(capture_timed_stream(
+        upstream,
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_millis(30),
+        ActivityTracker::new().track(),
+    ));
+
+    stream.next().await.unwrap().unwrap();
+    assert_eq!(
+        stream.next().await.unwrap().unwrap_err().kind(),
+        std::io::ErrorKind::TimedOut
+    );
+    let done = rx_done.await.unwrap();
+    assert_eq!(done.usage_status.as_deref(), Some("partial"));
+    assert_eq!(done.usage_source.as_deref(), Some("upstream_stream_partial"));
+    let usage = done.usage.unwrap();
+    assert_eq!(usage.input_tokens, Some(35103));
+    assert_eq!(usage.output_tokens, None);
+    assert_eq!(usage.total_tokens, None);
+}
+
+#[tokio::test]
+async fn streaming_timeout_keeps_usage_complete_when_final_output_usage_arrived() {
+    let first = Bytes::from_static(
+        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":6,\"cache_read_input_tokens\":23746,\"cache_creation_input_tokens\":11351,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":249}}\n\n",
+    );
+    let upstream = futures_util::stream::unfold(Some(first), |next| async move {
+        match next {
+            Some(bytes) => Some((Ok::<Bytes, reqwest::Error>(bytes), None)),
+            None => std::future::pending().await,
+        }
+    });
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let mut stream = Box::pin(capture_timed_stream(
+        upstream,
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_millis(30),
+        ActivityTracker::new().track(),
+    ));
+
+    stream.next().await.unwrap().unwrap();
+    stream.next().await.unwrap().unwrap_err();
+    let done = rx_done.await.unwrap();
+    assert_eq!(done.usage_status.as_deref(), Some("complete"));
+    assert_eq!(
+        done.usage_source.as_deref(),
+        Some("upstream_stream_recovered")
+    );
+    assert_eq!(done.usage.unwrap().total_tokens, Some(35352));
+}
+
+#[tokio::test]
+async fn dropping_downstream_stream_preserves_received_partial_usage() {
+    let first = Bytes::from_static(
+        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":113,\"cache_read_input_tokens\":116352,\"cache_creation_input_tokens\":0,\"output_tokens\":0}}}\n\n",
+    );
+    let upstream = futures_util::stream::unfold(Some(first), |next| async move {
+        match next {
+            Some(bytes) => Some((Ok::<Bytes, reqwest::Error>(bytes), None)),
+            None => std::future::pending().await,
+        }
+    });
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let mut stream = Box::pin(capture_timed_stream(
+        upstream,
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_secs(1),
+        ActivityTracker::new().track(),
+    ));
+
+    stream.next().await.unwrap().unwrap();
+    drop(stream);
+    let done = rx_done.await.unwrap();
+    assert_eq!(done.route_reason.as_deref(), Some("stream_cancelled"));
+    assert_eq!(done.usage_status.as_deref(), Some("partial"));
+    assert_eq!(done.usage.unwrap().input_tokens, Some(116465));
+}
+
+#[tokio::test]
 async fn streaming_response_can_outlive_channel_timeout_when_chunks_keep_arriving() {
     let upstream = Router::new().route(
         "/v1/chat/completions",

@@ -5,5 +5,6 @@ const appWindow = getCurrentWindow();
 export const windowCommands = {
   startDragging: (): Promise<void> => appWindow.startDragging(),
   minimize: (): Promise<void> => appWindow.minimize(),
+  toggleMaximize: (): Promise<void> => appWindow.toggleMaximize(),
   close: (): Promise<void> => appWindow.close(),
 };

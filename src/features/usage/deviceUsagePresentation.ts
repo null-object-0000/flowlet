@@ -23,6 +23,8 @@ export type MobileUsageHeatmapCell = {
   /** Flowlet 可统计请求的预估费用；Agent 原生用量暂不计价。 */
   estimatedCost: number;
   level: HeatLevel;
+  /** 是否为月视图首尾补位的相邻月份日期。 */
+  adjacentMonth: boolean;
   outside: boolean;
   future: boolean;
   hasData: boolean;
@@ -59,7 +61,14 @@ export type MobileHourlyHeatmapCell = {
   hasData: boolean;
 };
 
-export const MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS = 3;
+export const MOBILE_WEEKLY_HEATMAP_BUCKETS = [
+  { start: 0, end: 4 },
+  { start: 4, end: 8 },
+  { start: 8, end: 13 },
+  { start: 13, end: 18 },
+  { start: 18, end: 21 },
+  { start: 21, end: 24 },
+] as const;
 
 export function getMobileUsageRange(
   period: MobileUsagePeriod,
@@ -142,7 +151,9 @@ export function buildMobileUsageHeatmap(
   const today = startOfLocalDay(now);
   const range = getMobileUsageRange(period, offset, today);
   const gridStart = addLocalDays(range.start, -mondayIndex(range.start));
-  const gridEnd = addLocalDays(range.end, 6 - mondayIndex(range.end));
+  const gridEnd = period === "month"
+    ? addLocalDays(gridStart, 41)
+    : addLocalDays(range.end, 6 - mondayIndex(range.end));
   // 月视图的首尾补位日期也属于可见日历范围，应展示它们已有的真实数据；
   // 页面顶部汇总仍通过 filterMobileUsage 严格限定在所选自然月。
   const values = new Map(days.map((day) => [day.date, day]));
@@ -163,6 +174,7 @@ export function buildMobileUsageHeatmap(
       nativeEvents: future ? 0 : day?.nativeEventCount ?? 0,
       estimatedCost: future ? 0 : day?.estimatedCost ?? 0,
       level: 0,
+      adjacentMonth: period === "month" && outsideRange,
       outside,
       future,
       hasData: !future && day !== undefined,
@@ -420,11 +432,8 @@ export function buildMobileWeeklyHourlyHeatmap(
   const values = new Map(hours.map((item) => [item.hour, item]));
   const cells: Omit<MobileHourlyHeatmapCell, "level">[] = [];
 
-  for (
-    let hourOfDay = 0;
-    hourOfDay < 24;
-    hourOfDay += MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS
-  ) {
+  for (const bucket of MOBILE_WEEKLY_HEATMAP_BUCKETS) {
+    const hourOfDay = bucket.start;
     for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
       const date = localDate(addLocalDays(range.start, dayIndex));
       const hour = `${date}T${String(hourOfDay).padStart(2, "0")}:00:00`;
@@ -455,7 +464,7 @@ export function buildMobileWeeklyHourlyHeatmap(
       if (!future) {
         for (
           let bucketHour = hourOfDay;
-          bucketHour < hourOfDay + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS;
+          bucketHour < bucket.end;
           bucketHour += 1
         ) {
           const itemHour = `${date}T${String(bucketHour).padStart(2, "0")}:00:00`;
@@ -497,7 +506,7 @@ export function buildMobileWeeklyHourlyHeatmap(
         hour,
         date,
         hourOfDay,
-        hourEnd: hourOfDay + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
+        hourEnd: bucket.end,
         tokens,
         requests,
         inputTokens,
@@ -521,12 +530,19 @@ export function buildMobileWeeklyHourlyHeatmap(
   }
 
   const scale = createHeatLevelScale(
-    cells.filter((cell) => !cell.outside).map((cell) => metric === "tokens" ? cell.tokens : cell.estimatedCost),
+    cells.filter((cell) => !cell.outside).map((cell) => {
+      const durationHours = cell.hourEnd - cell.hourOfDay;
+      const total = metric === "tokens" ? cell.tokens : cell.estimatedCost;
+      return total / durationHours;
+    }),
   );
   return {
     cells: cells.map((cell): MobileHourlyHeatmapCell => ({
       ...cell,
-      level: scale.levelFor(metric === "tokens" ? cell.tokens : cell.estimatedCost),
+      level: scale.levelFor(
+        (metric === "tokens" ? cell.tokens : cell.estimatedCost)
+          / (cell.hourEnd - cell.hourOfDay),
+      ),
     })),
   };
 }

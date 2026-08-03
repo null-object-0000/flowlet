@@ -813,19 +813,23 @@ function RouteList({ model, accounts, channels, busy, removable = false, onToggl
         <strong>{channelById.get(routeGroup.channelId)?.name ?? routeGroup.channelId} · {account?.name ?? routeGroup.accountId}</strong>
         <small>{routeGroup.upstreamModel} · {t(routeGroup.enabled ? "参与当前路由" : "当前未启用")}</small>
       </span>
-      <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
-      <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />
-      {removable ? (
-        <Button
-          theme="borderless"
-          type="danger"
-          size="small"
-          icon={<IconDelete />}
-          disabled={busy}
-          aria-label={t("从 {model} 移除 {name}", { model: model.publicModel, name: routeGroup.upstreamModel })}
-          onClick={() => onRemoveRoute?.(model.publicModel, routeGroup)}
-        />
-      ) : null}
+      <span className={styles.routeActions}>
+        <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
+        <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />
+        {removable ? (
+          <Button
+            className={styles.routeDelete}
+            theme="borderless"
+            type="danger"
+            size="small"
+            icon={<IconDelete />}
+            disabled={busy}
+            aria-label={t("从 {model} 移除 {name}", { model: model.publicModel, name: routeGroup.upstreamModel })}
+            title={t("删除路由")}
+            onClick={() => onRemoveRoute?.(model.publicModel, routeGroup)}
+          />
+        ) : null}
+      </span>
     </div>;
   })}</>;
 }

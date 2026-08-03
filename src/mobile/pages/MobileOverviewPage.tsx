@@ -19,7 +19,7 @@ import {
   filterMobileUsage,
   formatMobileUsageRange,
   getMobileUsageRange,
-  MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
+  MOBILE_WEEKLY_HEATMAP_BUCKETS,
   summarizeMobileUsage,
   type MobileUsageHeatmapMetric,
   type MobileUsagePeriod,
@@ -285,11 +285,11 @@ export function MobileOverviewPage() {
             <strong>{t(period === "day"
               ? heatmapMetric === "tokens" ? "30 小时 Token 热力图" : "30 小时预估费用热力图"
               : period === "week"
-                ? heatmapMetric === "tokens" ? "每 3 小时 Token 热力图" : "每 3 小时预估费用热力图"
+                ? heatmapMetric === "tokens" ? "分时段 Token 热力图" : "分时段预估费用热力图"
                 : heatmapMetric === "tokens" ? "每日 Token 热力图" : "每日预估费用热力图")}</strong>
             <span>{t(period === "day"
               ? "包含昨日最后 6 小时，点击查看时段汇总"
-              : period === "week" ? "横轴为星期，纵轴为时段" : "点击日期查看当天汇总")}</span>
+              : period === "week" ? "横轴为星期，纵轴按工作日节奏划分" : "点击日期查看当天汇总")}</span>
           </div>
           <HeatmapMetricSwitch value={heatmapMetric} onChange={setHeatmapMetric} t={t} />
         </div>
@@ -347,14 +347,12 @@ export function MobileOverviewPage() {
               {weekdayLabels.map((label, dayIndex) => (
                 <span className={styles.hourDayLabel} key={`${label}-${dayIndex}`}>{label}</span>
               ))}
-              {Array.from(
-                { length: 24 / MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS },
-                (_, bucketIndex) => {
+              {MOBILE_WEEKLY_HEATMAP_BUCKETS.map(
+                (bucket, bucketIndex) => {
                 const bucketCells = hourlyHeatmap.cells.slice(bucketIndex * 7, bucketIndex * 7 + 7);
-                const hourStart = bucketIndex * MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS;
                 return [
-                  <span className={styles.hourLabel} key={`label-${hourStart}`}>
-                    {String(hourStart).padStart(2, "0")}–{String(hourStart + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS).padStart(2, "0")}
+                  <span className={styles.hourLabel} key={`label-${bucket.start}`}>
+                    {String(bucket.start).padStart(2, "0")}–{String(bucket.end).padStart(2, "0")}
                   </span>,
                   ...bucketCells.map((cell) => {
                     const title = `${cell.date} ${String(cell.hourOfDay).padStart(2, "0")}:00–${String(cell.hourEnd - 1).padStart(2, "0")}:59 · ${formatHeatmapValues(heatmapMetric, cell.tokens, cell.estimatedCost, language, t)} · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
@@ -397,7 +395,7 @@ export function MobileOverviewPage() {
                   <button
                     key={cell.date}
                     type="button"
-                    className={`${styles.heatmapCell} ${styles[`heatLevel${cell.level}`]} ${cellIndex % 7 >= 5 ? styles.weekend : ""} ${cell.outside ? styles.outside : ""}`}
+                    className={`${styles.heatmapCell} ${styles[`heatLevel${cell.level}`]} ${cellIndex % 7 >= 5 ? styles.weekend : ""} ${cell.adjacentMonth ? styles.adjacentMonth : ""} ${cell.outside ? styles.outside : ""}`}
                     disabled={cell.future}
                     aria-label={title}
                     aria-pressed={selectedDay?.date === cell.date}

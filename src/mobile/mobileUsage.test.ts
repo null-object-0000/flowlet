@@ -193,7 +193,7 @@ describe("mobile usage aggregation", () => {
       },
     ];
     const hourly = buildMobileWeeklyHourlyHeatmap(hours, 0, new Date("2026-07-29T12:30:00"));
-    expect(hourly.cells.find((cell) => cell.hour === "2026-07-29T09:00:00"))
+    expect(hourly.cells.find((cell) => cell.hour === "2026-07-29T08:00:00"))
       .toMatchObject({
         tokens: 100,
         requests: 3,
@@ -260,7 +260,7 @@ describe("mobile usage aggregation", () => {
     expect(heatmap.cells[3]).toMatchObject({ date: "2026-07-30", outside: true, future: true, hasData: false });
   });
 
-  it("aggregates a week into 7 days by 3-hour buckets", () => {
+  it("aggregates a week into 7 days by workday-based time periods", () => {
     const hours: HourlyUsageTotal[] = [
       { hour: "2026-07-27T09:00:00", requestCount: 2, knownTokens: 20, unknownCount: 1 },
       { hour: "2026-07-27T10:00:00", requestCount: 1, knownTokens: 30 },
@@ -272,13 +272,29 @@ describe("mobile usage aggregation", () => {
       new Date("2026-07-29T12:30:00"),
     );
 
-    expect(heatmap.cells).toHaveLength(7 * 8);
-    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-27T09:00:00"))
-      .toMatchObject({ hourEnd: 12, tokens: 50, requests: 3, unknownRequests: 1, hasData: true });
-    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T09:00:00"))
-      .toMatchObject({ hourEnd: 12, tokens: 80, level: 4, hasData: true });
-    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T15:00:00"))
+    expect(heatmap.cells).toHaveLength(7 * 6);
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-27T08:00:00"))
+      .toMatchObject({ hourEnd: 13, tokens: 50, requests: 3, unknownRequests: 1, hasData: true });
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T08:00:00"))
+      .toMatchObject({ hourEnd: 13, tokens: 80, level: 4, hasData: true });
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T13:00:00"))
       .toMatchObject({ outside: true, future: true, hasData: false });
+  });
+
+  it("colors unequal weekly periods by average tokens per hour", () => {
+    const heatmap = buildMobileWeeklyHourlyHeatmap(
+      [
+        { hour: "2026-07-27T08:00:00", requestCount: 1, knownTokens: 500 },
+        { hour: "2026-07-27T18:00:00", requestCount: 1, knownTokens: 360 },
+      ],
+      0,
+      new Date("2026-08-02T23:00:00"),
+    );
+    const fiveHourPeriod = heatmap.cells.find((cell) => cell.hour === "2026-07-27T08:00:00");
+    const threeHourPeriod = heatmap.cells.find((cell) => cell.hour === "2026-07-27T18:00:00");
+    expect(fiveHourPeriod).toMatchObject({ tokens: 500, hourEnd: 13 });
+    expect(threeHourPeriod).toMatchObject({ tokens: 360, hourEnd: 21 });
+    expect(fiveHourPeriod!.level).toBeLessThan(threeHourPeriod!.level);
   });
 
   it("assigns weekly bucket colors from the current visible distribution", () => {
@@ -294,7 +310,7 @@ describe("mobile usage aggregation", () => {
       new Date("2026-08-02T23:00:00"),
     );
     const levels = tokens.map((_, index) => heatmap.cells.find(
-      (cell) => cell.hour === `2026-07-${String(27 + index).padStart(2, "0")}T09:00:00`,
+      (cell) => cell.hour === `2026-07-${String(27 + index).padStart(2, "0")}T08:00:00`,
     )?.level);
     expect(levels).toEqual([1, 1, 2, 3, 4]);
   });
@@ -414,10 +430,10 @@ describe("mobile usage aggregation", () => {
       "cost",
     );
 
-    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-27T09:00:00")?.level).toBe(4);
-    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-28T09:00:00")?.level).toBe(1);
-    expect(costHours.cells.find((cell) => cell.hour === "2026-07-27T09:00:00")?.level).toBe(1);
-    expect(costHours.cells.find((cell) => cell.hour === "2026-07-28T09:00:00")?.level).toBe(4);
+    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-27T08:00:00")?.level).toBe(4);
+    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-28T08:00:00")?.level).toBe(1);
+    expect(costHours.cells.find((cell) => cell.hour === "2026-07-27T08:00:00")?.level).toBe(1);
+    expect(costHours.cells.find((cell) => cell.hour === "2026-07-28T08:00:00")?.level).toBe(4);
   });
 
   it("builds a complete calendar grid for the selected month", () => {
@@ -428,10 +444,25 @@ describe("mobile usage aggregation", () => {
       new Date("2026-07-29T12:00:00"),
     );
 
-    expect(heatmap.cells).toHaveLength(35);
-    expect(heatmap.cells[0]).toMatchObject({ date: "2026-06-29", outside: true, future: false });
+    expect(heatmap.cells).toHaveLength(42);
+    expect(heatmap.cells[0]).toMatchObject({ date: "2026-06-29", adjacentMonth: true, outside: true, future: false });
+    expect(heatmap.cells[heatmap.cells.length - 1]).toMatchObject({ date: "2026-08-09", adjacentMonth: true });
     expect(heatmap.cells.find((cell) => cell.date === "2026-07-01")).toMatchObject({ hasData: true, tokens: 10 });
     expect(heatmap.cells.find((cell) => cell.date === "2026-07-30")).toMatchObject({ outside: true });
+  });
+
+  it("starts a six-row month grid with the natural week containing day one", () => {
+    const heatmap = buildMobileUsageHeatmap(
+      [],
+      "month",
+      0,
+      new Date("2026-06-15T12:00:00"),
+    );
+
+    expect(heatmap.cells).toHaveLength(42);
+    expect(heatmap.cells[0].date).toBe("2026-06-01");
+    expect(heatmap.cells[heatmap.cells.length - 1]?.date).toBe("2026-07-12");
+    expect(heatmap.cells.some((cell) => cell.date.startsWith("2026-05"))).toBe(false);
   });
 
   it("shows real usage in adjacent-month calendar cells without adding it to the month summary", () => {

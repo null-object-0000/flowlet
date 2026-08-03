@@ -24,7 +24,7 @@ import {
   filterMobileUsage,
   formatMobileUsageRange,
   getMobileUsageRange,
-  MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
+  MOBILE_WEEKLY_HEATMAP_BUCKETS,
   summarizeMobileUsage,
   type MobileUsageHeatmapMetric,
   type MobileUsagePeriod,
@@ -183,8 +183,13 @@ export function UsageCostPage() {
     });
   }, [period, selectedDay, selectedHourlyCell]);
   const selectedLogRange = useMemo(
-    () => getSelectedLogRange(period, selectedDay?.date ?? null, selectedHourlyCell?.hour ?? null),
-    [period, selectedDay?.date, selectedHourlyCell?.hour],
+    () => getSelectedLogRange(
+      period,
+      selectedDay?.date ?? null,
+      selectedHourlyCell?.hour ?? null,
+      selectedHourlyCell?.hourEnd ?? null,
+    ),
+    [period, selectedDay?.date, selectedHourlyCell?.hour, selectedHourlyCell?.hourEnd],
   );
   const currentDevice = devices.data?.find((device) => device.isCurrent) ?? null;
   const canReadRequestDetails = deviceId == null || currentDevice?.deviceId === deviceId;
@@ -334,11 +339,11 @@ export function UsageCostPage() {
               <strong>{t(period === "day"
                 ? heatmapMetric === "tokens" ? "36 小时 Token 热力图" : "36 小时预估费用热力图"
                 : period === "week"
-                  ? heatmapMetric === "tokens" ? "每 3 小时 Token 热力图" : "每 3 小时预估费用热力图"
+                  ? heatmapMetric === "tokens" ? "分时段 Token 热力图" : "分时段预估费用热力图"
                   : heatmapMetric === "tokens" ? "每日 Token 热力图" : "每日预估费用热力图")}</strong>
               <span>{t(period === "day"
                 ? "选中日期前后各延伸 6 小时，点击查看时段汇总"
-                : period === "week" ? "横轴为星期，纵轴为时段" : "点击日期查看当天汇总")}</span>
+                : period === "week" ? "横轴为星期，纵轴按工作日节奏划分" : "点击日期查看当天汇总")}</span>
             </div>
             <HeatmapMetricSwitch value={heatmapMetric} onChange={setHeatmapMetric} t={t} />
           </div>
@@ -420,14 +425,12 @@ export function UsageCostPage() {
                 {weekdayLabels.map((label, dayIndex) => (
                   <span className={styles.hourDayLabel} key={label + "-" + dayIndex}>{label}</span>
                 ))}
-                {Array.from(
-                  { length: 24 / MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS },
-                  (_, bucketIndex) => {
+                {MOBILE_WEEKLY_HEATMAP_BUCKETS.map(
+                  (bucket, bucketIndex) => {
                     const bucketCells = hourlyHeatmap.cells.slice(bucketIndex * 7, bucketIndex * 7 + 7);
-                    const hourStart = bucketIndex * MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS;
                     return [
-                      <span className={styles.hourLabel} key={"label-" + hourStart}>
-                        {String(hourStart).padStart(2, "0")}–{String(hourStart + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS).padStart(2, "0")}
+                      <span className={styles.hourLabel} key={"label-" + bucket.start}>
+                        {String(bucket.start).padStart(2, "0")}–{String(bucket.end).padStart(2, "0")}
                       </span>,
                       ...bucketCells.map((cell) => {
                         const title = cell.date + " " + String(cell.hourOfDay).padStart(2, "0") + ":00–"
@@ -486,6 +489,7 @@ export function UsageCostPage() {
                         styles.heatmapCell,
                         styles["heatLevel" + cell.level],
                         cellIndex % 7 >= 5 ? styles.weekend : "",
+                        cell.adjacentMonth ? styles.adjacentMonth : "",
                         cell.outside ? styles.outside : "",
                         cell.hasData ? styles.hasData : "",
                       ].join(" ")}
@@ -913,14 +917,21 @@ function TokenConfidenceCard({
   );
 }
 
-function getSelectedLogRange(period: MobileUsagePeriod, selectedDate: string | null, selectedHour: string | null) {
+function getSelectedLogRange(
+  period: MobileUsagePeriod,
+  selectedDate: string | null,
+  selectedHour: string | null,
+  selectedHourEnd: number | null,
+) {
   const rawStart = period === "month" ? selectedDate ? `${selectedDate}T00:00:00` : null : selectedHour;
   if (!rawStart) return null;
   const start = new Date(rawStart);
   if (Number.isNaN(start.getTime())) return null;
   const end = new Date(start);
   if (period === "day") end.setHours(end.getHours() + 1);
-  else if (period === "week") end.setHours(end.getHours() + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS);
+  else if (period === "week") {
+    end.setHours(selectedHourEnd ?? start.getHours() + 1);
+  }
   else end.setDate(end.getDate() + 1);
   return { startAt: start.toISOString(), endAt: end.toISOString() };
 }

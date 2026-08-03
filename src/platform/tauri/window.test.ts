@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const windowApi = vi.hoisted(() => ({
   startDragging: vi.fn<() => Promise<void>>(),
   minimize: vi.fn<() => Promise<void>>(),
+  isMaximized: vi.fn<() => Promise<boolean>>(),
+  onResized: vi.fn<(handler: () => void) => Promise<() => void>>(),
   toggleMaximize: vi.fn<() => Promise<void>>(),
   close: vi.fn<() => Promise<void>>(),
 }));
@@ -18,6 +20,8 @@ describe("windowCommands", () => {
     vi.clearAllMocks();
     windowApi.startDragging.mockResolvedValue();
     windowApi.minimize.mockResolvedValue();
+    windowApi.isMaximized.mockResolvedValue(false);
+    windowApi.onResized.mockResolvedValue(vi.fn());
     windowApi.toggleMaximize.mockResolvedValue();
     windowApi.close.mockResolvedValue();
   });
@@ -35,6 +39,16 @@ describe("windowCommands", () => {
   it("toggles native window maximization", async () => {
     await windowCommands.toggleMaximize();
     expect(windowApi.toggleMaximize).toHaveBeenCalledOnce();
+  });
+
+  it("reads and observes the native maximized state", async () => {
+    const onResize = vi.fn();
+
+    await expect(windowCommands.isMaximized()).resolves.toBe(false);
+    await windowCommands.onResized(onResize);
+
+    expect(windowApi.isMaximized).toHaveBeenCalledOnce();
+    expect(windowApi.onResized).toHaveBeenCalledWith(onResize);
   });
 
   it("closes the native window", async () => {

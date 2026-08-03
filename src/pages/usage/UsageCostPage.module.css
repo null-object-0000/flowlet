@@ -183,18 +183,19 @@ button.heatmapCell:hover:not(:disabled), .hourCell:hover:not(:disabled) { filter
 
 .selectedPeriod {
   padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(92px, .72fr) minmax(0, 1.28fr);
+  align-items: center;
+  gap: 18px;
 }
+.selectedMetric { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
 .selectedLabel { color: var(--flowlet-color-text-secondary); font-size: 12px; }
 .selectedTokens { width: 100%; margin-top: 7px; overflow: hidden; color: var(--flowlet-color-text); font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.04em; white-space: nowrap; text-overflow: ellipsis; }
-.selectedPeriod > small { margin-top: 5px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
-.selectedMeta { width: 100%; margin-top: auto; padding-top: 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; border-top: 1px solid var(--flowlet-color-border); }
+.selectedMetric > small, .selectedPeriodEmpty > small { margin-top: 5px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.selectedMeta { min-width: 0; align-self: stretch; padding-left: 18px; display: grid; align-content: center; gap: 3px; border-left: 1px solid var(--flowlet-color-border); }
 .selectedMeta strong { color: var(--flowlet-color-text); font-size: 13px; line-height: 1.45; }
 .selectedMeta span { color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.55; }
-.selectedMeta span:last-child { grid-column: 1 / -1; }
-.selectedPeriodEmpty { justify-content: center; }
+.selectedPeriodEmpty { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
 .selectedPeriodEmpty > strong { margin-top: 8px; color: var(--flowlet-color-text); font-size: 14px; }
 
 .confidenceCard { padding: 15px 18px 14px; display: flex; flex-direction: column; }

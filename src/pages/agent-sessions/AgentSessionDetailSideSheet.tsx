@@ -66,7 +66,7 @@ export function AgentSessionDetailSideSheet({
       visible
       motion={false}
       width="min(760px, 96vw)"
-      title={<div className={styles.title}><strong>{title}</strong><span>{agentLabel(session.agentType)} · {t("会话详情")}</span></div>}
+      title={<SessionHeader session={session} language={language} />}
       onCancel={onClose}
       footer={null}
       bodyStyle={{ padding: 0 }}
@@ -94,7 +94,6 @@ export function AgentSessionDetailSideSheet({
       >
         <Tabs.TabPane tab={t("概览")} itemKey="overview">
           <div className={styles.overview}>
-            <OverviewHeader session={session} language={language} />
             <OverviewStats metrics={overviewMetrics} language={language} />
             <div className={styles.sectionHeading}>
               <h3 className={styles.sectionLabel}>{t("最近一轮")}</h3>
@@ -792,14 +791,14 @@ function runtimeLabel(status: AgentSessionRow["runtimeStatus"], t: (key: string,
   return t("状态未知");
 }
 
-function OverviewHeader({ session, language }: { session: AgentSessionRow; language: "zh-CN" | "en-US" }) {
+function SessionHeader({ session, language }: { session: AgentSessionRow; language: "zh-CN" | "en-US" }) {
   const { t } = useAppPreferences();
   const title = sessionDisplayTitle(session);
   return (
-    <div className={styles.overviewHeader}>
-      <div className={styles.overviewTopline}>
+    <div className={styles.sessionHeader}>
+      <div className={styles.sessionHeaderTopline}>
         <span className={styles.agentBadge}>{agentLabel(session.agentType)}</span>
-        <strong className={styles.overviewTitle} title={title}>{title}</strong>
+        <strong className={styles.sessionTitle} title={title}>{title}</strong>
       </div>
       <div className={styles.meta}>
         <span className={styles.state} data-state={session.runtimeStatus}><i />{runtimeLabel(session.runtimeStatus, t)}</span>

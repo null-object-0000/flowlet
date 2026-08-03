@@ -232,13 +232,13 @@ describe("AgentSessionsPage", () => {
     const rowTitle = screen.getByText("Native session title");
     fireEvent.click(rowTitle.closest("button")!);
 
-    expect(screen.getByText(/会话详情/)).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
     const overview = screen.getByRole("tabpanel", { name: "概览" });
 
-    // 概览：移动端风格头部 + 3 列统计行
-    expect(within(overview).getByText("Native session title")).toBeInTheDocument();
-    expect(within(overview).getByText("空闲")).toBeInTheDocument();
+    // 会话摘要直接作为抽屉标题，概览只保留 3 列统计行，避免重复展示。
+    expect(screen.getAllByText("空闲").some((element) => !overview.contains(element))).toBe(true);
+    expect(within(overview).queryByText("Native session title")).not.toBeInTheDocument();
+    expect(within(overview).queryByText("空闲")).not.toBeInTheDocument();
     expect(within(overview).getByText("1.20万")).toBeInTheDocument();
     expect(within(overview).getByText("4")).toBeInTheDocument();
     expect(within(overview).getByText("1")).toBeInTheDocument();
@@ -353,7 +353,8 @@ describe("AgentSessionsPage", () => {
 
     // 概览：native 来源的统计行显示为 Agent 原生，而非请求指标
     const overview = screen.getByRole("tabpanel", { name: "概览" });
-    expect(within(overview).getByText("ChatGPT (Codex)")).toBeInTheDocument();
+    expect(screen.getAllByText("ChatGPT (Codex)").some((element) => !overview.contains(element))).toBe(true);
+    expect(within(overview).queryByText("ChatGPT (Codex)")).not.toBeInTheDocument();
     expect(within(overview).getByText("Agent 原生")).toBeInTheDocument();
 
     // 会话 Tab：显示 Agent 来源，无请求日志入口

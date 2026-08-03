@@ -390,9 +390,11 @@ function SelectedPeriodCard({ title, tokens, detail, split }: {
 }) {
   return (
     <article className={styles.selectedPeriod}>
-      <span className={styles.selectedLabel}>Token</span>
-      <strong className={styles.selectedTokens}>{tokens}</strong>
-      <small>Tokens</small>
+      <div className={styles.selectedMetric}>
+        <span className={styles.selectedLabel}>Token</span>
+        <strong className={styles.selectedTokens}>{tokens}</strong>
+        <small>Tokens</small>
+      </div>
       <div className={styles.selectedMeta}>
         <strong>{title}</strong>
         <span>{detail}</span>

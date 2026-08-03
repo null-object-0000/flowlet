@@ -14,17 +14,21 @@ import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLo
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { TimePeriodSwitch, TimeRangeNavigator, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
+import { UsageTokenDetailSheet } from "../../features/usage/UsageTokenDetailSheet";
 import type { DailyUsageTotal } from "../../domains/device-sync/types";
 import {
+  buildDesktopDailyContextHeatmap,
+  buildUsageTokenDetails,
   buildMobileUsageHeatmap,
   buildMobileWeeklyHourlyHeatmap,
   filterMobileUsage,
   formatMobileUsageRange,
   getMobileUsageRange,
-  MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
+  MOBILE_WEEKLY_HEATMAP_BUCKETS,
   summarizeMobileUsage,
   type MobileUsageHeatmapMetric,
   type MobileUsagePeriod,
+  type UsageTokenDetails,
 } from "../../features/usage/deviceUsagePresentation";
 import styles from "./UsageCostPage.module.css";
 
@@ -32,7 +36,7 @@ export function UsageCostPage() {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 30_000 });
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const [period, setPeriod] = useState<MobileUsagePeriod>("month");
+  const [period, setPeriod] = useState<MobileUsagePeriod>("day");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [heatmapMetric, setHeatmapMetric] = useState<MobileUsageHeatmapMetric>("tokens");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -40,6 +44,7 @@ export function UsageCostPage() {
   const [unknownRequestsOpen, setUnknownRequestsOpen] = useState(false);
   const [unknownRequestsPage, setUnknownRequestsPage] = useState(1);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [tokenDetailsScope, setTokenDetailsScope] = useState<"period" | "selected" | null>(null);
   const devices = useKnownDevices();
   const usage = useDeviceDailyUsage(deviceId, true, refresh.autoRefresh);
   const hourlyUsage = useDeviceHourlyUsage(deviceId, true, refresh.autoRefresh);
@@ -57,6 +62,23 @@ export function UsageCostPage() {
     [now, period, periodOffset, usage.data],
   );
   const summary = useMemo(() => summarizeMobileUsage(days), [days]);
+  const summaryTokenDetails = buildUsageTokenDetails({
+    proxyTotal: summary.tokens,
+    proxyInput: summary.inputTokens,
+    proxyCachedInput: summary.cachedInputTokens,
+    proxyUncachedInput: summary.uncachedInputTokens,
+    proxyCacheMeasuredInput: summary.cacheMeasuredInputTokens,
+    proxyOutput: summary.outputTokens,
+    proxyRequests: summary.requests,
+    proxyUnknownUsageCount: days.reduce((total, day) => total + day.unknownCount, 0),
+    nativeTotal: summary.nativeTokens,
+    nativeInput: summary.nativeInputTokens,
+    nativeCachedInput: summary.nativeCachedInputTokens,
+    nativeCacheWriteInput: summary.nativeCacheWriteInputTokens,
+    nativeOutput: summary.nativeOutputTokens,
+    nativeReasoning: summary.nativeReasoningTokens,
+    nativeEvents: summary.nativeEvents,
+  });
   const heatmap = useMemo(
     () => buildMobileUsageHeatmap(usage.data ?? [], period, periodOffset, now, heatmapMetric),
     [heatmapMetric, now, period, periodOffset, usage.data],
@@ -65,19 +87,32 @@ export function UsageCostPage() {
     () => buildMobileWeeklyHourlyHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
     [heatmapMetric, hourlyUsage.data, now, periodOffset],
   );
+  const dailyContextHeatmap = useMemo(
+    () => buildDesktopDailyContextHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
+    [heatmapMetric, hourlyUsage.data, now, periodOffset],
+  );
+  const activeHourlyHeatmap = period === "day" ? dailyContextHeatmap : hourlyHeatmap;
+  const dailyContextRows = useMemo(() => [
+    { date: dailyContextHeatmap.cells[0]?.date ?? "", start: 18, cells: dailyContextHeatmap.cells.slice(0, 6), context: true, showDate: true, span: 1 },
+    { date: dailyContextHeatmap.cells[6]?.date ?? "", start: 0, cells: dailyContextHeatmap.cells.slice(6, 12), context: false, showDate: true, span: 4 },
+    { date: dailyContextHeatmap.cells[12]?.date ?? "", start: 6, cells: dailyContextHeatmap.cells.slice(12, 18), context: false, showDate: false, span: 1 },
+    { date: dailyContextHeatmap.cells[18]?.date ?? "", start: 12, cells: dailyContextHeatmap.cells.slice(18, 24), context: false, showDate: false, span: 1 },
+    { date: dailyContextHeatmap.cells[24]?.date ?? "", start: 18, cells: dailyContextHeatmap.cells.slice(24, 30), context: false, showDate: false, span: 1 },
+    { date: dailyContextHeatmap.cells[30]?.date ?? "", start: 0, cells: dailyContextHeatmap.cells.slice(30, 36), context: true, showDate: true, span: 1 },
+  ], [dailyContextHeatmap.cells]);
   const selectedDay = useMemo(() => {
     if (selectedDate) {
-      return days.find((day) => day.date === selectedDate) ?? emptyDailyUsage(selectedDate);
+      return (usage.data ?? []).find((day) => day.date === selectedDate) ?? emptyDailyUsage(selectedDate);
     }
     return [...days].sort((left, right) => right.date.localeCompare(left.date))[0] ?? null;
-  }, [days, selectedDate]);
+  }, [days, selectedDate, usage.data]);
   const selectedHourlyCell = useMemo(
-    () => hourlyHeatmap.cells.find((cell) => cell.hour === selectedHour)
-      ?? hourlyHeatmap.cells
+    () => activeHourlyHeatmap.cells.find((cell) => cell.hour === selectedHour)
+      ?? activeHourlyHeatmap.cells
         .filter((cell) => cell.hasData)
         .sort((left, right) => right.hour.localeCompare(left.hour))[0]
       ?? null,
-    [hourlyHeatmap.cells, selectedHour],
+    [activeHourlyHeatmap.cells, selectedHour],
   );
   const weekdayLabels = useMemo(
     () => Array.from(
@@ -97,14 +132,64 @@ export function UsageCostPage() {
     ),
     [language, range.start],
   );
-  const selectedPeriod = period === "week" ? selectedHourlyCell : selectedDay;
-  const selectedPeriodTitle = period === "week" && selectedHourlyCell
+  const selectedPeriod = period === "month" ? selectedDay : selectedHourlyCell;
+  const selectedPeriodTitle = period !== "month" && selectedHourlyCell
     ? selectedHourlyCell.date + " " + String(selectedHourlyCell.hourOfDay).padStart(2, "0")
       + ":00–" + String(selectedHourlyCell.hourEnd - 1).padStart(2, "0") + ":59"
     : selectedDay?.date ?? null;
+  const selectedTokenDetails = useMemo(() => {
+    if (period === "month") {
+      if (!selectedDay) return null;
+      return buildUsageTokenDetails({
+        proxyTotal: selectedDay.knownTokens,
+        proxyInput: selectedDay.inputTokens,
+        proxyCachedInput: selectedDay.inputCachedTokens,
+        proxyUncachedInput: selectedDay.inputUncachedTokens,
+        proxyCacheMeasuredInput: selectedDay.cacheMeasuredInputTokens,
+        proxyOutput: selectedDay.outputTokens,
+        proxyRequests: selectedDay.requestCount,
+        proxyUnknownUsageCount: selectedDay.unknownCount,
+        nativeTotal: selectedDay.nativeTotalTokens ?? 0,
+        nativeInput: selectedDay.nativeInputTokens ?? 0,
+        nativeCachedInput: selectedDay.nativeCachedInputTokens ?? 0,
+        nativeCacheWriteInput: selectedDay.nativeCacheWriteInputTokens ?? 0,
+        nativeOutput: selectedDay.nativeOutputTokens ?? 0,
+        nativeReasoning: selectedDay.nativeReasoningTokens ?? 0,
+        nativeEvents: selectedDay.nativeEventCount ?? 0,
+      });
+    }
+    if (!selectedHourlyCell) return null;
+    const nativeMeasuredInput = selectedHourlyCell.nativeInputTokens
+      + selectedHourlyCell.nativeCachedInputTokens
+      + selectedHourlyCell.nativeCacheWriteInputTokens;
+    const proxyInput = Math.max(0, selectedHourlyCell.inputTokens - nativeMeasuredInput);
+    const proxyCachedInput = Math.max(0, selectedHourlyCell.cachedInputTokens - selectedHourlyCell.nativeCachedInputTokens);
+    return buildUsageTokenDetails({
+      proxyTotal: Math.max(0, selectedHourlyCell.tokens - selectedHourlyCell.nativeTokens),
+      proxyInput,
+      proxyCachedInput,
+      proxyUncachedInput: Math.max(0, proxyInput - proxyCachedInput),
+      proxyCacheMeasuredInput: Math.max(0, selectedHourlyCell.cacheMeasuredInputTokens - nativeMeasuredInput),
+      proxyOutput: Math.max(0, selectedHourlyCell.outputTokens - selectedHourlyCell.nativeOutputTokens),
+      proxyRequests: Math.max(0, selectedHourlyCell.requests - selectedHourlyCell.nativeEvents),
+      proxyUnknownUsageCount: selectedHourlyCell.unknownRequests,
+      nativeTotal: selectedHourlyCell.nativeTokens,
+      nativeInput: selectedHourlyCell.nativeInputTokens,
+      nativeCachedInput: selectedHourlyCell.nativeCachedInputTokens,
+      nativeCacheWriteInput: selectedHourlyCell.nativeCacheWriteInputTokens,
+      nativeOutput: selectedHourlyCell.nativeOutputTokens,
+      nativeReasoning: selectedHourlyCell.nativeReasoningTokens,
+      nativeEvents: selectedHourlyCell.nativeEvents,
+    });
+  }, [period, selectedDay, selectedHourlyCell]);
   const selectedLogRange = useMemo(
-    () => getSelectedLogRange(period, selectedDay?.date ?? null, selectedHourlyCell?.hour ?? null),
-    [period, selectedDay?.date, selectedHourlyCell?.hour],
+    () => getSelectedLogRange(
+      period,
+      selectedDay?.date ?? null,
+      selectedHourlyCell?.hour ?? null,
+      selectedHourlyCell?.hourEnd ?? null,
+    ),
+    [period, selectedDay?.date, selectedHourlyCell?.hour, selectedHourlyCell?.hourEnd],
   );
   const currentDevice = devices.data?.find((device) => device.isCurrent) ?? null;
   const canReadRequestDetails = deviceId == null || currentDevice?.deviceId === deviceId;
@@ -121,17 +206,17 @@ export function UsageCostPage() {
     false,
     unknownRequestsOpen && canReadRequestDetails && selectedLogRange != null,
   );
-  const activeQuery = period === "week" ? hourlyUsage : usage;
+  const activeQuery = period === "month" ? usage : hourlyUsage;
   const tokenConfidence = useMemo(() => {
-    const proxyRequests = period === "week"
+    const proxyRequests = period !== "month"
       ? Math.max(0, (selectedHourlyCell?.requests ?? 0) - (selectedHourlyCell?.nativeEvents ?? 0))
       : selectedDay?.requestCount ?? 0;
-    const nativeEvents = period === "week"
+    const nativeEvents = period !== "month"
       ? selectedHourlyCell?.nativeEvents ?? 0
       : selectedDay?.nativeEventCount ?? 0;
     const unknownRequests = Math.min(
       proxyRequests,
-      period === "week"
+      period !== "month"
         ? selectedHourlyCell?.unknownRequests ?? 0
         : selectedDay?.unknownCount ?? 0,
     );
@@ -150,7 +235,14 @@ export function UsageCostPage() {
   const resetSelection = () => {
     setSelectedDate(null);
     setSelectedHour(null);
+    setTokenDetailsScope(null);
   };
+  const openTokenDetails = tokenDetailsScope === "selected" && selectedTokenDetails
+    ? selectedTokenDetails
+    : summaryTokenDetails;
+  const openTokenDetailsLabel = tokenDetailsScope === "selected" && selectedPeriodTitle
+    ? selectedPeriodTitle
+    : rangeLabel;
 
   return (
     <main className={styles.page}>
@@ -171,6 +263,7 @@ export function UsageCostPage() {
           <TimePeriodSwitch
             value={period}
             options={([
+              { value: "day", label: t("日") },
               { value: "week", label: t("周") },
               { value: "month", label: t("月") },
             ] as Array<{ value: MobileUsagePeriod; label: string }>)}
@@ -183,8 +276,8 @@ export function UsageCostPage() {
           />
           <TimeRangeNavigator
             label={rangeLabel}
-            previousLabel={period === "week" ? t("上一周") : t("上一月")}
-            nextLabel={period === "week" ? t("下一周") : t("下一月")}
+            previousLabel={period === "day" ? t("前一天") : period === "week" ? t("上一周") : t("上一月")}
+            nextLabel={period === "day" ? t("后一天") : period === "week" ? t("下一周") : t("下一月")}
             onPrevious={() => {
               setPeriodOffset((offset) => offset - 1);
               resetSelection();
@@ -209,14 +302,14 @@ export function UsageCostPage() {
       </PageHeader>
 
       <section className={styles.stats}>
-        <article className={styles.stat}>
+        <button type="button" className={[styles.stat, styles.expandableStat].join(" ")} onClick={() => setTokenDetailsScope("period")} title={t("点击查看完整 Token 明细")}>
           <span>Tokens</span>
-          <strong>{formatCompactNumber(summary.tokens + summary.nativeTokens, language)}</strong>
+          <strong>{formatCompactNumber(summaryTokenDetails.total.total, language)}</strong>
           <small>{t("输入 {input} · 输出 {output}", {
-            input: formatCompactNumber(summary.inputTokens + summary.nativeInputTokens, language),
-            output: formatCompactNumber(summary.outputTokens + summary.nativeOutputTokens, language),
+            input: formatCompactNumber(summaryTokenDetails.total.input, language),
+            output: formatCompactNumber(summaryTokenDetails.total.output, language),
           })}</small>
-        </article>
+        </button>
         <article className={styles.stat}>
           <span>{t("请求量")}</span>
           <strong>{formatInteger(summary.requests + summary.nativeEvents, language)}</strong>
@@ -227,11 +320,11 @@ export function UsageCostPage() {
             })
             : t("{count} 天数据", { count: days.length })}</small>
         </article>
-        <article className={styles.stat}>
+        <button type="button" className={[styles.stat, styles.expandableStat].join(" ")} onClick={() => setTokenDetailsScope("period")} title={t("点击查看完整 Token 明细")}>
           <span>{t("缓存输入")}</span>
-          <strong>{formatCompactNumber(summary.cachedInputTokens, language)}</strong>
-          <small>{t("缓存命中率")} {formatCacheHitRate(summary.cacheHitRate)}</small>
-        </article>
+          <strong>{formatCompactNumber(summaryTokenDetails.total.cachedInput, language)}</strong>
+          <small>{t("缓存命中率")} {formatCacheHitRate(summaryTokenDetails.total.cacheHitRate)}</small>
+        </button>
         <article className={styles.stat}>
           <span>{t("预估费用")}</span>
           <strong>{formatCostCny(summary.estimatedCost)}</strong>
@@ -243,10 +336,14 @@ export function UsageCostPage() {
         <article className={[styles.card, styles.heatmapCard].join(" ")}>
           <div className={styles.cardHeader}>
             <div>
-              <strong>{t(period === "week"
-                ? heatmapMetric === "tokens" ? "每 3 小时 Token 热力图" : "每 3 小时预估费用热力图"
-                : heatmapMetric === "tokens" ? "每日 Token 热力图" : "每日预估费用热力图")}</strong>
-              <span>{t(period === "week" ? "横轴为星期，纵轴为时段" : "点击日期查看当天汇总")}</span>
+              <strong>{t(period === "day"
+                ? heatmapMetric === "tokens" ? "36 小时 Token 热力图" : "36 小时预估费用热力图"
+                : period === "week"
+                  ? heatmapMetric === "tokens" ? "分时段 Token 热力图" : "分时段预估费用热力图"
+                  : heatmapMetric === "tokens" ? "每日 Token 热力图" : "每日预估费用热力图")}</strong>
+              <span>{t(period === "day"
+                ? "选中日期前后各延伸 6 小时，点击查看时段汇总"
+                : period === "week" ? "横轴为星期，纵轴按工作日节奏划分" : "点击日期查看当天汇总")}</span>
             </div>
             <HeatmapMetricSwitch value={heatmapMetric} onChange={setHeatmapMetric} t={t} />
           </div>
@@ -262,6 +359,65 @@ export function UsageCostPage() {
             </div>
           ) : null}
 
+          {period === "day" && !activeQuery.isPending && !activeQuery.isError ? (
+            <div className={styles.dailyHeatmapFrame}>
+              <div className={styles.dailyHeatmap}>
+                {dailyContextRows.map((row, rowIndex) => {
+                  const boundary = rowIndex === 1 || rowIndex === 5;
+                  return [
+                    row.showDate ? (
+                      <span
+                        className={[
+                          styles.dailyDateLabel,
+                          row.context ? styles.contextDateLabel : styles.currentDateLabel,
+                          row.span === 4 ? styles.fourRowDateLabel : "",
+                          boundary ? styles.dayBoundary : "",
+                        ].join(" ")}
+                        key={"date-" + row.date}
+                      >
+                        {formatUsageDateLabel(row.date, language)}
+                      </span>
+                    ) : null,
+                    <span className={[styles.dailyRangeLabel, boundary ? styles.dayBoundary : ""].join(" ")} key={"range-" + row.date + "-" + row.start}>
+                      {String(row.start).padStart(2, "0")}–{String(row.start + 5).padStart(2, "0")}
+                    </span>,
+                    ...row.cells.map((cell) => {
+                      const hourLabel = String(cell.hourOfDay).padStart(2, "0");
+                      const title = cell.date + " " + hourLabel + ":00–" + hourLabel + ":59 · "
+                        + formatHeatmapValues(heatmapMetric, cell.tokens, cell.estimatedCost, language, t) + " · "
+                        + t("{count} 次请求", { count: formatInteger(cell.requests, language) })
+                        + formatNativeSplit(cell.tokens, cell.nativeTokens, language, t);
+                      return (
+                        <button
+                          key={cell.hour}
+                          type="button"
+                          className={[
+                            styles.hourCell,
+                            styles.dailyHourCell,
+                            styles["heatLevel" + cell.level],
+                            cell.outside ? styles.outside : "",
+                            boundary ? styles.dayBoundary : "",
+                          ].join(" ")}
+                          disabled={cell.future}
+                          aria-label={title}
+                          aria-pressed={selectedHourlyCell?.hour === cell.hour}
+                          title={title}
+                          onClick={() => setSelectedHour(cell.hour)}
+                        >
+                          <span>{hourLabel}</span>
+                        </button>
+                      );
+                    }),
+                  ];
+                })}
+              </div>
+              <HeatmapLegend t={t} />
+              {!dailyContextHeatmap.cells.some((cell) => cell.hasData) ? (
+                <div className={styles.emptyHint}>{t("当前周期暂无数据")}</div>
+              ) : null}
+            </div>
+          ) : null}
+
           {period === "week" && !activeQuery.isPending && !activeQuery.isError ? (
             <div className={styles.hourlyHeatmapFrame}>
               <div className={styles.hourlyHeatmap}>
@@ -269,14 +425,12 @@ export function UsageCostPage() {
                 {weekdayLabels.map((label, dayIndex) => (
                   <span className={styles.hourDayLabel} key={label + "-" + dayIndex}>{label}</span>
                 ))}
-                {Array.from(
-                  { length: 24 / MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS },
-                  (_, bucketIndex) => {
+                {MOBILE_WEEKLY_HEATMAP_BUCKETS.map(
+                  (bucket, bucketIndex) => {
                     const bucketCells = hourlyHeatmap.cells.slice(bucketIndex * 7, bucketIndex * 7 + 7);
-                    const hourStart = bucketIndex * MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS;
                     return [
-                      <span className={styles.hourLabel} key={"label-" + hourStart}>
-                        {String(hourStart).padStart(2, "0")}–{String(hourStart + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS).padStart(2, "0")}
+                      <span className={styles.hourLabel} key={"label-" + bucket.start}>
+                        {String(bucket.start).padStart(2, "0")}–{String(bucket.end).padStart(2, "0")}
                       </span>,
                       ...bucketCells.map((cell) => {
                         const title = cell.date + " " + String(cell.hourOfDay).padStart(2, "0") + ":00–"
@@ -293,6 +447,7 @@ export function UsageCostPage() {
                               styles["heatLevel" + cell.level],
                               cell.outside ? styles.outside : "",
                             ].join(" ")}
+                            disabled={cell.future}
                             aria-label={title}
                             aria-pressed={selectedHourlyCell?.hour === cell.hour}
                             title={title}
@@ -334,8 +489,11 @@ export function UsageCostPage() {
                         styles.heatmapCell,
                         styles["heatLevel" + cell.level],
                         cellIndex % 7 >= 5 ? styles.weekend : "",
+                        cell.adjacentMonth ? styles.adjacentMonth : "",
                         cell.outside ? styles.outside : "",
+                        cell.hasData ? styles.hasData : "",
                       ].join(" ")}
+                      disabled={cell.future}
                       aria-label={title}
                       aria-pressed={selectedDay?.date === cell.date}
                       title={title}
@@ -368,10 +526,9 @@ export function UsageCostPage() {
             }}
           />
 
-          {period === "week" && selectedHourlyCell ? (
+          {period !== "month" && selectedHourlyCell ? (
             <SelectedPeriodCard
               title={selectedPeriodTitle ?? selectedHourlyCell.date}
-              tokens={selectedHourlyCell.tokens}
               inputTokens={selectedHourlyCell.inputTokens}
               outputTokens={selectedHourlyCell.outputTokens}
               requests={selectedHourlyCell.requests}
@@ -380,6 +537,8 @@ export function UsageCostPage() {
               cachedInputTokens={selectedHourlyCell.cachedInputTokens}
               cacheMeasuredInputTokens={selectedHourlyCell.cacheMeasuredInputTokens}
               estimatedCost={selectedHourlyCell.estimatedCost}
+              tokenDetails={selectedTokenDetails!}
+              onExpandTokenDetails={() => setTokenDetailsScope("selected")}
               language={language}
               t={t}
             />
@@ -388,15 +547,22 @@ export function UsageCostPage() {
           {period === "month" && selectedDay ? (
             <SelectedPeriodCard
               title={selectedPeriodTitle ?? selectedDay.date}
-              tokens={selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0)}
-              inputTokens={selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0)}
+              inputTokens={selectedDay.inputTokens
+                + (selectedDay.nativeInputTokens ?? 0)
+                + (selectedDay.nativeCachedInputTokens ?? 0)
+                + (selectedDay.nativeCacheWriteInputTokens ?? 0)}
               outputTokens={selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0)}
               requests={selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0)}
               proxyRequests={selectedDay.requestCount}
               nativeEvents={selectedDay.nativeEventCount ?? 0}
-              cachedInputTokens={selectedDay.inputCachedTokens}
-              cacheMeasuredInputTokens={selectedDay.cacheMeasuredInputTokens}
+              cachedInputTokens={selectedDay.inputCachedTokens + (selectedDay.nativeCachedInputTokens ?? 0)}
+              cacheMeasuredInputTokens={selectedDay.cacheMeasuredInputTokens
+                + (selectedDay.nativeInputTokens ?? 0)
+                + (selectedDay.nativeCachedInputTokens ?? 0)
+                + (selectedDay.nativeCacheWriteInputTokens ?? 0)}
               estimatedCost={selectedDay.estimatedCost ?? 0}
+              tokenDetails={selectedTokenDetails!}
+              onExpandTokenDetails={() => setTokenDetailsScope("selected")}
               language={language}
               t={t}
             />
@@ -405,6 +571,15 @@ export function UsageCostPage() {
           {!selectedPeriod ? <SelectedPeriodEmpty t={t} /> : null}
         </aside>
       </section>
+
+      <UsageTokenDetailSheet
+        visible={tokenDetailsScope != null}
+        onClose={() => setTokenDetailsScope(null)}
+        contextLabel={openTokenDetailsLabel}
+        details={openTokenDetails}
+        language={language}
+        t={t}
+      />
 
       <SideSheet
         title={t("未识别 Token 的请求")}
@@ -504,7 +679,6 @@ function HeatmapLegend({ t }: { t: ReturnType<typeof useAppPreferences>["t"] }) 
 
 function SelectedPeriodCard({
   title,
-  tokens,
   inputTokens,
   outputTokens,
   requests,
@@ -513,11 +687,12 @@ function SelectedPeriodCard({
   cachedInputTokens,
   cacheMeasuredInputTokens,
   estimatedCost,
+  tokenDetails,
+  onExpandTokenDetails,
   language,
   t,
 }: {
   title: string;
-  tokens: number;
   inputTokens: number;
   outputTokens: number;
   requests: number;
@@ -526,6 +701,8 @@ function SelectedPeriodCard({
   cachedInputTokens: number;
   cacheMeasuredInputTokens: number;
   estimatedCost: number;
+  tokenDetails: UsageTokenDetails;
+  onExpandTokenDetails: () => void;
   language: NumberLanguage;
   t: ReturnType<typeof useAppPreferences>["t"];
 }) {
@@ -538,11 +715,13 @@ function SelectedPeriodCard({
       <div className={styles.selectedPeriodStats}>
         <SelectedPeriodMetric
           label="Tokens"
-          value={formatCompactNumber(tokens, language)}
+          value={formatCompactNumber(tokenDetails.total.total, language)}
           detail={t("输入 {input} · 输出 {output}", {
             input: formatCompactNumber(inputTokens, language),
             output: formatCompactNumber(outputTokens, language),
           })}
+          onClick={onExpandTokenDetails}
+          title={t("点击查看完整 Token 明细")}
         />
         <SelectedPeriodMetric
           label={t("请求量")}
@@ -554,10 +733,12 @@ function SelectedPeriodCard({
         />
         <SelectedPeriodMetric
           label={t("缓存输入")}
-          value={formatCompactNumber(cachedInputTokens, language)}
+          value={formatCompactNumber(tokenDetails.total.cachedInput, language)}
           detail={`${t("缓存命中率")} ${formatCacheHitRate(
             cacheMeasuredInputTokens > 0 ? cachedInputTokens / cacheMeasuredInputTokens : null,
           )}`}
+          onClick={onExpandTokenDetails}
+          title={t("点击查看完整 Token 明细")}
         />
         <SelectedPeriodMetric
           label={t("预估费用")}
@@ -633,16 +814,30 @@ export function DeviceTitlePicker({ devices, deviceId, onChange }: {
   );
 }
 
-function SelectedPeriodMetric({ label, value, detail }: {
+function SelectedPeriodMetric({ label, value, detail, onClick, title }: {
   label: string;
   value: string;
   detail: string;
+  onClick?: () => void;
+  title?: string;
 }) {
-  return (
-    <div className={styles.selectedPeriodMetric}>
+  const content = (
+    <>
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{detail}</small>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" className={[styles.selectedPeriodMetric, styles.expandableMetric].join(" ")} onClick={onClick} title={title}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <div className={styles.selectedPeriodMetric}>
+      {content}
     </div>
   );
 }
@@ -722,13 +917,21 @@ function TokenConfidenceCard({
   );
 }
 
-function getSelectedLogRange(period: MobileUsagePeriod, selectedDate: string | null, selectedHour: string | null) {
-  const rawStart = period === "week" ? selectedHour : selectedDate ? `${selectedDate}T00:00:00` : null;
+function getSelectedLogRange(
+  period: MobileUsagePeriod,
+  selectedDate: string | null,
+  selectedHour: string | null,
+  selectedHourEnd: number | null,
+) {
+  const rawStart = period === "month" ? selectedDate ? `${selectedDate}T00:00:00` : null : selectedHour;
   if (!rawStart) return null;
   const start = new Date(rawStart);
   if (Number.isNaN(start.getTime())) return null;
   const end = new Date(start);
-  if (period === "week") end.setHours(end.getHours() + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS);
+  if (period === "day") end.setHours(end.getHours() + 1);
+  else if (period === "week") {
+    end.setHours(selectedHourEnd ?? start.getHours() + 1);
+  }
   else end.setDate(end.getDate() + 1);
   return { startAt: start.toISOString(), endAt: end.toISOString() };
 }
@@ -746,6 +949,14 @@ function emptyDailyUsage(date: string): DailyUsageTotal {
     unknownCount: 0,
     estimatedCost: 0,
   };
+}
+
+function formatUsageDateLabel(date: string, language: NumberLanguage) {
+  if (!date) return "—";
+  return new Date(`${date}T00:00:00`).toLocaleDateString(language, {
+    month: "numeric",
+    day: "numeric",
+  });
 }
 
 function ConfidenceRow({ className, label, value }: { className: string; label: string; value: string }) {

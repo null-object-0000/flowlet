@@ -87,7 +87,11 @@ impl Storage {
             SELECT
                 strftime('%Y-%m-%d', event_time, 'localtime') AS usage_date,
                 count(*) AS native_event_count,
-                coalesce(sum(input_tokens), 0) AS native_input_tokens,
+                coalesce(sum(CASE
+                    WHEN agent_type IN ('codex-desktop', 'codex-cli') THEN
+                        max(input_tokens - cached_input_tokens - cache_write_input_tokens, 0)
+                    ELSE input_tokens
+                END), 0) AS native_input_tokens,
                 coalesce(sum(cached_input_tokens), 0) AS native_cached_input_tokens,
                 coalesce(sum(cache_write_input_tokens), 0) AS native_cache_write_input_tokens,
                 coalesce(sum(output_tokens), 0) AS native_output_tokens,
@@ -148,8 +152,15 @@ impl Storage {
             SELECT
                 strftime('%Y-%m-%dT%H:00:00', event_time, 'localtime') AS usage_hour,
                 count(*) AS native_event_count,
-                coalesce(sum(input_tokens), 0) AS native_input_tokens,
+                coalesce(sum(CASE
+                    WHEN agent_type IN ('codex-desktop', 'codex-cli') THEN
+                        max(input_tokens - cached_input_tokens - cache_write_input_tokens, 0)
+                    ELSE input_tokens
+                END), 0) AS native_input_tokens,
+                coalesce(sum(cached_input_tokens), 0) AS native_cached_input_tokens,
+                coalesce(sum(cache_write_input_tokens), 0) AS native_cache_write_input_tokens,
                 coalesce(sum(output_tokens), 0) AS native_output_tokens,
+                coalesce(sum(reasoning_tokens), 0) AS native_reasoning_tokens,
                 coalesce(sum(total_tokens), 0) AS native_total_tokens
             FROM agent_usage_events
             WHERE event_time >= datetime('now', 'localtime', 'start of day', '-180 days', 'utc')
@@ -169,8 +180,11 @@ impl Storage {
                     .unwrap_or_else(|| "unknown".to_string()),
                 native_event_count: row.get(1)?,
                 native_input_tokens: row.get(2)?,
-                native_output_tokens: row.get(3)?,
-                native_total_tokens: row.get(4)?,
+                native_cached_input_tokens: row.get(3)?,
+                native_cache_write_input_tokens: row.get(4)?,
+                native_output_tokens: row.get(5)?,
+                native_reasoning_tokens: row.get(6)?,
+                native_total_tokens: row.get(7)?,
                 ..Default::default()
             })
         })?;
@@ -467,10 +481,11 @@ impl Storage {
                         device_id, usage_hour, request_count, known_tokens,
                         input_tokens, input_cached_tokens, cache_measured_input_tokens,
                         output_tokens, unknown_count, estimated_cost,
-                        native_event_count, native_input_tokens, native_output_tokens,
-                        native_total_tokens,
+                        native_event_count, native_input_tokens, native_cached_input_tokens,
+                        native_cache_write_input_tokens, native_output_tokens,
+                        native_reasoning_tokens, native_total_tokens,
                         snapshot_generated_at, imported_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, datetime('now'))",
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, datetime('now'))",
                     params![
                         device_id,
                         hour.hour,
@@ -484,7 +499,10 @@ impl Storage {
                         hour.estimated_cost,
                         hour.native_event_count,
                         hour.native_input_tokens,
+                        hour.native_cached_input_tokens,
+                        hour.native_cache_write_input_tokens,
                         hour.native_output_tokens,
+                        hour.native_reasoning_tokens,
                         hour.native_total_tokens,
                         generated_at,
                     ],
@@ -731,8 +749,9 @@ impl Storage {
             "SELECT usage_hour, sum(request_count), sum(known_tokens),
                     sum(input_tokens), sum(input_cached_tokens), sum(cache_measured_input_tokens),
                     sum(output_tokens), sum(unknown_count), sum(estimated_cost),
-                    sum(native_event_count), sum(native_input_tokens), sum(native_output_tokens),
-                    sum(native_total_tokens)
+                    sum(native_event_count), sum(native_input_tokens), sum(native_cached_input_tokens),
+                    sum(native_cache_write_input_tokens), sum(native_output_tokens),
+                    sum(native_reasoning_tokens), sum(native_total_tokens)
              FROM device_hourly_usage
              WHERE device_id = ?1
              GROUP BY usage_hour
@@ -741,8 +760,9 @@ impl Storage {
             "SELECT usage_hour, sum(request_count), sum(known_tokens),
                     sum(input_tokens), sum(input_cached_tokens), sum(cache_measured_input_tokens),
                     sum(output_tokens), sum(unknown_count), sum(estimated_cost),
-                    sum(native_event_count), sum(native_input_tokens), sum(native_output_tokens),
-                    sum(native_total_tokens)
+                    sum(native_event_count), sum(native_input_tokens), sum(native_cached_input_tokens),
+                    sum(native_cache_write_input_tokens), sum(native_output_tokens),
+                    sum(native_reasoning_tokens), sum(native_total_tokens)
              FROM device_hourly_usage
              GROUP BY usage_hour
              ORDER BY usage_hour"
@@ -761,8 +781,11 @@ impl Storage {
                 estimated_cost: row.get(8)?,
                 native_event_count: row.get(9)?,
                 native_input_tokens: row.get(10)?,
-                native_output_tokens: row.get(11)?,
-                native_total_tokens: row.get(12)?,
+                native_cached_input_tokens: row.get(11)?,
+                native_cache_write_input_tokens: row.get(12)?,
+                native_output_tokens: row.get(13)?,
+                native_reasoning_tokens: row.get(14)?,
+                native_total_tokens: row.get(15)?,
             })
         };
         let mut totals = Vec::new();

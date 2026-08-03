@@ -28,6 +28,8 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 #[cfg(desktop)]
 use tauri::{AppHandle, Manager};
+#[cfg(desktop)]
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 #[derive(Clone)]
 #[cfg(desktop)]
@@ -652,6 +654,13 @@ fn run_desktop() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // 记住主窗口上次的尺寸/位置/最大化状态。不恢复 VISIBLE，
+        // 避免覆盖 --hidden 后台启动与「关闭=隐藏到托盘」的可见性控制。
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+                .build(),
+        )
         .setup(move |app| {
             let setup_t0 = std::time::Instant::now();
             tracing::info!("tauri setup 开始");
@@ -731,6 +740,8 @@ fn run_desktop() {
             let main_webview_builder = main_webview_builder.additional_browser_args(
                 core::webview_profile::WINDOWS_CACHE_LIMIT_BROWSER_ARGS,
             );
+            // 插件 on_window_ready 会自动恢复上次的尺寸/位置/最大化
+            // （无历史状态时保持 tauri.conf.json 的 1200x720）。
             main_webview_builder.build()?;
             tracing::info!(
                 data_dir = %main_webview_data_dir.display(),
@@ -799,6 +810,11 @@ fn run_desktop() {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         if let Some(w) = app_handle_for_window.get_webview_window(&window_label) {
+                            // 关闭窗口只是隐藏到托盘，不会销毁窗口（也就不会触发
+                            // 窗口状态插件的 Exit 写盘），先手动落盘当前尺寸/位置。
+                            let _ = app_handle_for_window.save_window_state(
+                                StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED,
+                            );
                             let _ = w.hide();
                         }
                         api.prevent_close();
@@ -1310,6 +1326,10 @@ fn run_mobile() {
 fn toggle_window_to_front(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
+            // 托盘「显示/隐藏」隐藏主窗口时同样先落盘当前尺寸/位置。
+            let _ = app.save_window_state(
+                StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED,
+            );
             let _ = window.hide();
             return;
         }

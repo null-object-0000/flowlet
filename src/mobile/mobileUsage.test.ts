@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { DailyUsageTotal, HourlyUsageTotal } from "../domains/device-sync/types";
 import {
+  buildDesktopDailyContextHeatmap,
+  buildMobileDailyContextHeatmap,
+  buildMobileDailyHourlyHeatmap,
   buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
+  buildUsageTokenDetails,
   filterMobileUsage,
   formatMobileUsageRange,
   getMobileUsageRange,
@@ -22,6 +26,18 @@ const day = (date: string, requests: number, tokens: number): DailyUsageTotal =>
 });
 
 describe("mobile usage aggregation", () => {
+  it("uses natural days and supports previous days", () => {
+    const now = new Date("2026-08-03T12:00:00");
+    expect(getMobileUsageRange("day", 0, now)).toMatchObject({
+      startDate: "2026-08-03",
+      endDate: "2026-08-03",
+    });
+    expect(getMobileUsageRange("day", -1, now)).toMatchObject({
+      startDate: "2026-08-02",
+      endDate: "2026-08-02",
+    });
+  });
+
   it("uses Monday-to-Sunday natural weeks and supports previous weeks", () => {
     const now = new Date("2026-07-29T12:00:00");
     expect(getMobileUsageRange("week", 0, now)).toMatchObject({
@@ -63,13 +79,17 @@ describe("mobile usage aggregation", () => {
         tokens: 70,
         inputTokens: 50,
         cachedInputTokens: 10,
+        uncachedInputTokens: 40,
         cacheMeasuredInputTokens: 50,
         cacheHitRate: 0.2,
         outputTokens: 20,
         nativeEvents: 0,
         nativeTokens: 0,
         nativeInputTokens: 0,
+        nativeCachedInputTokens: 0,
+        nativeCacheWriteInputTokens: 0,
         nativeOutputTokens: 0,
+        nativeReasoningTokens: 0,
         estimatedCost: 0,
       });
   });
@@ -85,13 +105,51 @@ describe("mobile usage aggregation", () => {
     expect(summarizeMobileUsage([proxyDay, nativeDay]).estimatedCost).toBe(1.25);
   });
 
+  it("builds total, Flowlet, and Agent native token detail sections without fabricating unavailable fields", () => {
+    const details = buildUsageTokenDetails({
+      proxyTotal: 100,
+      proxyInput: 80,
+      proxyCachedInput: 30,
+      proxyUncachedInput: 50,
+      proxyCacheMeasuredInput: 80,
+      proxyOutput: 20,
+      proxyRequests: 4,
+      proxyUnknownUsageCount: 1,
+      nativeTotal: 60,
+      nativeInput: 20,
+      nativeCachedInput: 10,
+      nativeCacheWriteInput: 5,
+      nativeOutput: 25,
+      nativeReasoning: 3,
+      nativeEvents: 2,
+    });
+
+    expect(details.total).toMatchObject({
+      total: 160,
+      input: 115,
+      cachedInput: 40,
+      cacheWriteInput: null,
+      uncachedInput: 70,
+      output: 45,
+      reasoning: null,
+      requests: 6,
+      unknownUsageCount: 1,
+    });
+    expect(details.flowlet.cacheWriteInput).toBeNull();
+    expect(details.flowlet.reasoning).toBeNull();
+    expect(details.native).toMatchObject({ total: 60, input: 35, cachedInput: 10, requests: 2 });
+  });
+
   it("merges agent native usage into summaries and heatmap cells", () => {
     const withNative: DailyUsageTotal = {
       ...day("2026-07-29", 3, 40),
       nativeEventCount: 2,
       nativeTotalTokens: 100,
       nativeInputTokens: 60,
+      nativeCachedInputTokens: 20,
+      nativeCacheWriteInputTokens: 10,
       nativeOutputTokens: 40,
+      nativeReasoningTokens: 5,
     };
     const summary = summarizeMobileUsage([withNative]);
     // 代理口径字段保持独立，原生部分单列，合计由页面渲染时相加。
@@ -100,7 +158,10 @@ describe("mobile usage aggregation", () => {
     expect(summary.tokens).toBe(40);
     expect(summary.nativeTokens).toBe(100);
     expect(summary.nativeInputTokens).toBe(60);
+    expect(summary.nativeCachedInputTokens).toBe(20);
+    expect(summary.nativeCacheWriteInputTokens).toBe(10);
     expect(summary.nativeOutputTokens).toBe(40);
+    expect(summary.nativeReasoningTokens).toBe(5);
 
     const heatmap = buildMobileUsageHeatmap(
       [withNative],
@@ -124,21 +185,29 @@ describe("mobile usage aggregation", () => {
         estimatedCost: 0.25,
         nativeEventCount: 2,
         nativeInputTokens: 50,
+        nativeCachedInputTokens: 15,
+        nativeCacheWriteInputTokens: 5,
         nativeOutputTokens: 20,
+        nativeReasoningTokens: 7,
         nativeTotalTokens: 70,
       },
     ];
     const hourly = buildMobileWeeklyHourlyHeatmap(hours, 0, new Date("2026-07-29T12:30:00"));
-    expect(hourly.cells.find((cell) => cell.hour === "2026-07-29T09:00:00"))
+    expect(hourly.cells.find((cell) => cell.hour === "2026-07-29T08:00:00"))
       .toMatchObject({
         tokens: 100,
         requests: 3,
-        inputTokens: 70,
+        inputTokens: 90,
         outputTokens: 30,
-        cachedInputTokens: 5,
-        cacheMeasuredInputTokens: 20,
+        cachedInputTokens: 20,
+        cacheMeasuredInputTokens: 90,
         estimatedCost: 0.25,
         nativeTokens: 70,
+        nativeInputTokens: 50,
+        nativeCachedInputTokens: 15,
+        nativeCacheWriteInputTokens: 5,
+        nativeOutputTokens: 20,
+        nativeReasoningTokens: 7,
         nativeEvents: 2,
         unknownRequests: 1,
         hasData: true,
@@ -188,10 +257,10 @@ describe("mobile usage aggregation", () => {
     expect(heatmap.cells).toHaveLength(7);
     expect(heatmap.cells[0]).toMatchObject({ date: "2026-07-27", tokens: 20, hasData: true });
     expect(heatmap.cells[2]).toMatchObject({ date: "2026-07-29", tokens: 80, level: 4 });
-    expect(heatmap.cells[3]).toMatchObject({ date: "2026-07-30", outside: true, hasData: false });
+    expect(heatmap.cells[3]).toMatchObject({ date: "2026-07-30", outside: true, future: true, hasData: false });
   });
 
-  it("aggregates a week into 7 days by 3-hour buckets", () => {
+  it("aggregates a week into 7 days by workday-based time periods", () => {
     const hours: HourlyUsageTotal[] = [
       { hour: "2026-07-27T09:00:00", requestCount: 2, knownTokens: 20, unknownCount: 1 },
       { hour: "2026-07-27T10:00:00", requestCount: 1, knownTokens: 30 },
@@ -203,13 +272,29 @@ describe("mobile usage aggregation", () => {
       new Date("2026-07-29T12:30:00"),
     );
 
-    expect(heatmap.cells).toHaveLength(7 * 8);
-    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-27T09:00:00"))
-      .toMatchObject({ hourEnd: 12, tokens: 50, requests: 3, unknownRequests: 1, hasData: true });
-    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T09:00:00"))
-      .toMatchObject({ hourEnd: 12, tokens: 80, level: 4, hasData: true });
-    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T15:00:00"))
-      .toMatchObject({ outside: true, hasData: false });
+    expect(heatmap.cells).toHaveLength(7 * 6);
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-27T08:00:00"))
+      .toMatchObject({ hourEnd: 13, tokens: 50, requests: 3, unknownRequests: 1, hasData: true });
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T08:00:00"))
+      .toMatchObject({ hourEnd: 13, tokens: 80, level: 4, hasData: true });
+    expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T13:00:00"))
+      .toMatchObject({ outside: true, future: true, hasData: false });
+  });
+
+  it("colors unequal weekly periods by average tokens per hour", () => {
+    const heatmap = buildMobileWeeklyHourlyHeatmap(
+      [
+        { hour: "2026-07-27T08:00:00", requestCount: 1, knownTokens: 500 },
+        { hour: "2026-07-27T18:00:00", requestCount: 1, knownTokens: 360 },
+      ],
+      0,
+      new Date("2026-08-02T23:00:00"),
+    );
+    const fiveHourPeriod = heatmap.cells.find((cell) => cell.hour === "2026-07-27T08:00:00");
+    const threeHourPeriod = heatmap.cells.find((cell) => cell.hour === "2026-07-27T18:00:00");
+    expect(fiveHourPeriod).toMatchObject({ tokens: 500, hourEnd: 13 });
+    expect(threeHourPeriod).toMatchObject({ tokens: 360, hourEnd: 21 });
+    expect(fiveHourPeriod!.level).toBeLessThan(threeHourPeriod!.level);
   });
 
   it("assigns weekly bucket colors from the current visible distribution", () => {
@@ -225,9 +310,81 @@ describe("mobile usage aggregation", () => {
       new Date("2026-08-02T23:00:00"),
     );
     const levels = tokens.map((_, index) => heatmap.cells.find(
-      (cell) => cell.hour === `2026-07-${String(27 + index).padStart(2, "0")}T09:00:00`,
+      (cell) => cell.hour === `2026-07-${String(27 + index).padStart(2, "0")}T08:00:00`,
     )?.level);
     expect(levels).toEqual([1, 1, 2, 3, 4]);
+  });
+
+  it("builds a selected day into 24 one-hour cells and disables future hours", () => {
+    const hours: HourlyUsageTotal[] = [{
+      hour: "2026-08-03T09:00:00",
+      requestCount: 2,
+      knownTokens: 30,
+      inputTokens: 20,
+      inputCachedTokens: 5,
+      cacheMeasuredInputTokens: 20,
+      outputTokens: 10,
+      nativeEventCount: 1,
+      nativeInputTokens: 8,
+      nativeCachedInputTokens: 2,
+      nativeCacheWriteInputTokens: 1,
+      nativeOutputTokens: 4,
+      nativeReasoningTokens: 3,
+      nativeTotalTokens: 15,
+    }];
+    const heatmap = buildMobileDailyHourlyHeatmap(
+      hours,
+      0,
+      new Date("2026-08-03T12:30:00"),
+    );
+
+    expect(heatmap.cells).toHaveLength(24);
+    expect(heatmap.cells[9]).toMatchObject({
+      hour: "2026-08-03T09:00:00",
+      hourEnd: 10,
+      tokens: 45,
+      requests: 3,
+      inputTokens: 31,
+      cachedInputTokens: 7,
+      nativeTokens: 15,
+      nativeCachedInputTokens: 2,
+      hasData: true,
+    });
+    expect(heatmap.cells[8]).toMatchObject({ outside: false, future: false, hasData: false, tokens: 0 });
+    expect(heatmap.cells[13]).toMatchObject({ outside: true, future: true, hasData: false });
+  });
+
+  it("builds the desktop day view with 6 hours before and after the selected date", () => {
+    const hours: HourlyUsageTotal[] = [
+      { hour: "2026-08-02T20:00:00", requestCount: 1, knownTokens: 10 },
+      { hour: "2026-08-03T00:00:00", requestCount: 2, knownTokens: 20 },
+      { hour: "2026-08-04T00:00:00", requestCount: 3, knownTokens: 30 },
+    ];
+    const heatmap = buildDesktopDailyContextHeatmap(
+      hours,
+      0,
+      new Date("2026-08-03T12:30:00"),
+    );
+
+    expect(heatmap.cells).toHaveLength(36);
+    expect(heatmap.cells[0]).toMatchObject({ hour: "2026-08-02T18:00:00", future: false });
+    expect(heatmap.cells[2]).toMatchObject({ hour: "2026-08-02T20:00:00", tokens: 10, hasData: true });
+    expect(heatmap.cells[6]).toMatchObject({ hour: "2026-08-03T00:00:00", tokens: 20, hasData: true });
+    expect(heatmap.cells[30]).toMatchObject({ hour: "2026-08-04T00:00:00", future: true, hasData: false });
+  });
+
+  it("builds the mobile day view with only the previous day's final 6 hours", () => {
+    const heatmap = buildMobileDailyContextHeatmap(
+      [{ hour: "2026-08-02T23:00:00", requestCount: 1, knownTokens: 10 }],
+      0,
+      new Date("2026-08-03T12:30:00"),
+    );
+
+    expect(heatmap.cells).toHaveLength(30);
+    expect(heatmap.cells[0].hour).toBe("2026-08-02T18:00:00");
+    expect(heatmap.cells[5]).toMatchObject({ hour: "2026-08-02T23:00:00", tokens: 10 });
+    expect(heatmap.cells[6].hour).toBe("2026-08-03T00:00:00");
+    expect(heatmap.cells[heatmap.cells.length - 1]?.hour).toBe("2026-08-03T23:00:00");
   });
 
   it("switches daily and hourly heat levels between token and estimated cost", () => {
@@ -273,10 +430,10 @@ describe("mobile usage aggregation", () => {
       "cost",
     );
 
-    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-27T09:00:00")?.level).toBe(4);
-    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-28T09:00:00")?.level).toBe(1);
-    expect(costHours.cells.find((cell) => cell.hour === "2026-07-27T09:00:00")?.level).toBe(1);
-    expect(costHours.cells.find((cell) => cell.hour === "2026-07-28T09:00:00")?.level).toBe(4);
+    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-27T08:00:00")?.level).toBe(4);
+    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-28T08:00:00")?.level).toBe(1);
+    expect(costHours.cells.find((cell) => cell.hour === "2026-07-27T08:00:00")?.level).toBe(1);
+    expect(costHours.cells.find((cell) => cell.hour === "2026-07-28T08:00:00")?.level).toBe(4);
   });
 
   it("builds a complete calendar grid for the selected month", () => {
@@ -287,15 +444,48 @@ describe("mobile usage aggregation", () => {
       new Date("2026-07-29T12:00:00"),
     );
 
-    expect(heatmap.cells).toHaveLength(35);
-    expect(heatmap.cells[0]).toMatchObject({ date: "2026-06-29", outside: true });
+    expect(heatmap.cells).toHaveLength(42);
+    expect(heatmap.cells[0]).toMatchObject({ date: "2026-06-29", adjacentMonth: true, outside: true, future: false });
+    expect(heatmap.cells[heatmap.cells.length - 1]).toMatchObject({ date: "2026-08-09", adjacentMonth: true });
     expect(heatmap.cells.find((cell) => cell.date === "2026-07-01")).toMatchObject({ hasData: true, tokens: 10 });
     expect(heatmap.cells.find((cell) => cell.date === "2026-07-30")).toMatchObject({ outside: true });
+  });
+
+  it("starts a six-row month grid with the natural week containing day one", () => {
+    const heatmap = buildMobileUsageHeatmap(
+      [],
+      "month",
+      0,
+      new Date("2026-06-15T12:00:00"),
+    );
+
+    expect(heatmap.cells).toHaveLength(42);
+    expect(heatmap.cells[0].date).toBe("2026-06-01");
+    expect(heatmap.cells[heatmap.cells.length - 1]?.date).toBe("2026-07-12");
+    expect(heatmap.cells.some((cell) => cell.date.startsWith("2026-05"))).toBe(false);
+  });
+
+  it("shows real usage in adjacent-month calendar cells without adding it to the month summary", () => {
+    const adjacent = day("2026-07-31", 2, 40);
+    const current = day("2026-08-01", 3, 60);
+    const days = [adjacent, current];
+    const heatmap = buildMobileUsageHeatmap(
+      days,
+      "month",
+      0,
+      new Date("2026-08-03T12:00:00"),
+    );
+
+    expect(heatmap.cells.find((cell) => cell.date === "2026-07-31"))
+      .toMatchObject({ outside: true, hasData: true, tokens: 40, requests: 2 });
+    expect(summarizeMobileUsage(filterMobileUsage(days, "month", 0, new Date("2026-08-03T12:00:00"))).tokens)
+      .toBe(60);
   });
 
   it("formats week and month labels", () => {
     const now = new Date("2026-07-29T12:00:00");
     expect(formatMobileUsageRange(getMobileUsageRange("month", 0, now), "month", "zh-CN")).toBe("2026年7月");
+    expect(formatMobileUsageRange(getMobileUsageRange("day", 0, now), "day", "zh-CN")).toBe("2026年7月29日");
     expect(formatMobileUsageRange(getMobileUsageRange("week", 0, now), "week", "zh-CN")).toContain("7月27日");
   });
 });

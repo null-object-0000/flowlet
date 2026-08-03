@@ -42,6 +42,7 @@ import {
   aggregateMaxPrice,
   aggregateMaxStandardPrice,
   buildPricingStrategyRows,
+  hasInputLengthTiers,
   isPromotionalDiscount,
 } from "../../domains/modelCatalog";
 import type { ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
@@ -63,6 +64,7 @@ function priceFromResolvedStandard(p: ResolvedPrice): ModelsCnPrice {
       standard: p.inputUncached,
       cacheHit: p.inputCached ?? undefined,
       explicitCacheCreation: p.inputCacheWrite ?? undefined,
+      explicitCacheHit: p.inputCacheHit ?? undefined,
     },
     output: p.output,
     sourceUrl: p.sourceUrl,
@@ -811,19 +813,23 @@ function RouteList({ model, accounts, channels, busy, removable = false, onToggl
         <strong>{channelById.get(routeGroup.channelId)?.name ?? routeGroup.channelId} · {account?.name ?? routeGroup.accountId}</strong>
         <small>{routeGroup.upstreamModel} · {t(routeGroup.enabled ? "参与当前路由" : "当前未启用")}</small>
       </span>
-      <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
-      <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />
-      {removable ? (
-        <Button
-          theme="borderless"
-          type="danger"
-          size="small"
-          icon={<IconDelete />}
-          disabled={busy}
-          aria-label={t("从 {model} 移除 {name}", { model: model.publicModel, name: routeGroup.upstreamModel })}
-          onClick={() => onRemoveRoute?.(model.publicModel, routeGroup)}
-        />
-      ) : null}
+      <span className={styles.routeActions}>
+        <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
+        <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />
+        {removable ? (
+          <Button
+            className={styles.routeDelete}
+            theme="borderless"
+            type="danger"
+            size="small"
+            icon={<IconDelete />}
+            disabled={busy}
+            aria-label={t("从 {model} 移除 {name}", { model: model.publicModel, name: routeGroup.upstreamModel })}
+            title={t("删除路由")}
+            onClick={() => onRemoveRoute?.(model.publicModel, routeGroup)}
+          />
+        ) : null}
+      </span>
     </div>;
   })}</>;
 }
@@ -931,13 +937,9 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
   const strategyRows = !isAggregate
     ? buildPricingStrategyRows(resolved?.allPrices ?? [], price.market, price.currency)
     : [];
-  const showDetailedStrategy = strategyRows.length > 1 || strategyRows.some((row) => (
-    row.inputTokenRange != null
-    || row.current.input.explicitCacheCreation != null
-    || row.current.input.explicitCacheHit != null
-    || row.standard?.input.explicitCacheCreation != null
-    || row.standard?.input.explicitCacheHit != null
-  ));
+  // 仅「按输入长度分段计价」时使用策略卡片布局（每档一行）。单档模型即使带显式
+  // 缓存价格也走下方扁平 configRow 布局，与 LongCat / DeepSeek / Kimi 保持一致。
+  const showDetailedStrategy = hasInputLengthTiers(strategyRows);
   const showInputOriginal = standardPrice != null
     && isPromotionalDiscount(price.rateType, standardPrice.input.standard, price.inputUncached);
   const showCachedOriginal = standardPrice?.input.cacheHit != null
@@ -947,6 +949,12 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
       price.rateType,
       standardPrice.input.explicitCacheCreation,
       price.inputCacheWrite ?? 0,
+    );
+  const showExplicitHitOriginal = standardPrice?.input.explicitCacheHit != null
+    && isPromotionalDiscount(
+      price.rateType,
+      standardPrice.input.explicitCacheHit,
+      price.inputCacheHit ?? 0,
     );
   const showOutputOriginal = standardPrice != null
     && isPromotionalDiscount(price.rateType, standardPrice.output, price.output);
@@ -996,6 +1004,17 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
                 ? <span className={styles.priceOriginal}>{formatPrice(standardPrice.input.explicitCacheCreation, price.currency)}</span>
                 : null}
               <span>{formatPrice(price.inputCacheWrite, price.currency)} / {unitLabel}</span>
+            </strong>
+          </div>
+        ) : null}
+        {price.inputCacheHit != null ? (
+          <div className={styles.configRow}>
+            <span>{t("显式命中")}</span>
+            <strong className={styles.priceCell}>
+              {showExplicitHitOriginal && standardPrice?.input.explicitCacheHit != null
+                ? <span className={styles.priceOriginal}>{formatPrice(standardPrice.input.explicitCacheHit, price.currency)}</span>
+                : null}
+              <span>{formatPrice(price.inputCacheHit, price.currency)} / {unitLabel}</span>
             </strong>
           </div>
         ) : null}

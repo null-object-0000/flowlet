@@ -34,6 +34,11 @@
   background: var(--flowlet-color-surface);
   box-shadow: var(--flowlet-shadow-card);
 }
+button.stat { color: var(--flowlet-color-text); font: inherit; text-align: left; }
+.expandableStat { padding-right: 30px; position: relative; cursor: pointer; transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; }
+.expandableStat::after, .expandableMetric::after { content: "›"; position: absolute; right: 12px; top: 50%; color: var(--flowlet-color-text-tertiary); font-size: 18px; transform: translateY(-50%); }
+.expandableStat:hover { border-color: color-mix(in srgb, var(--flowlet-color-primary) 30%, var(--flowlet-color-border)); transform: translateY(-1px); }
+.expandableStat:focus-visible, .expandableMetric:focus-visible { outline: 2px solid var(--flowlet-color-primary); outline-offset: 2px; }
 .stat span { display: block; color: var(--flowlet-color-text-secondary); font-size: 13px; }
 .stat strong { display: block; margin-top: 6px; overflow: hidden; font-size: 22px; line-height: 1; white-space: nowrap; text-overflow: ellipsis; }
 .stat small { display: block; margin-top: 6px; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
@@ -133,8 +138,6 @@ button.heatmapCell span { font-size: 15px; line-height: 1; font-weight: 650; fon
   padding: 0;
   place-items: center;
   border-radius: 12px;
-  background: transparent;
-  box-shadow: none;
   transition: transform 120ms ease, filter 120ms ease;
 }
 @media (hover: hover) {
@@ -148,6 +151,18 @@ button.heatmapCell span { font-size: 15px; line-height: 1; font-weight: 650; fon
 .monthHeatmap button.heatmapCell.heatLevel3 { color: white; background: color-mix(in srgb, var(--flowlet-color-primary) 68%, var(--flowlet-color-surface)); }
 .monthHeatmap button.heatmapCell.heatLevel4 { color: white; background: var(--flowlet-color-primary); }
 .monthHeatmap .weekend:not(.heatLevel3):not(.heatLevel4) { color: var(--flowlet-color-primary); }
+.monthHeatmap button.heatmapCell.adjacentMonth {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--flowlet-color-border) 55%, transparent);
+}
+.monthHeatmap button.heatmapCell.adjacentMonth span { opacity: .5; }
+.monthHeatmap button.heatmapCell.adjacentMonth[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px var(--flowlet-color-primary);
+}
+.monthHeatmap button.heatmapCell.adjacentMonth.heatLevel3[aria-pressed="true"],
+.monthHeatmap button.heatmapCell.adjacentMonth.heatLevel4[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px white;
+}
+.monthHeatmap button.heatmapCell.adjacentMonth[aria-pressed="true"] span { opacity: 1; }
 button.heatmapCell[aria-pressed="true"], .hourCell[aria-pressed="true"] {
   z-index: 1;
   outline: none;
@@ -158,9 +173,55 @@ button.heatmapCell.heatLevel4[aria-pressed="true"],
 .hourCell.heatLevel3[aria-pressed="true"],
 .hourCell.heatLevel4[aria-pressed="true"] { box-shadow: inset 0 0 0 2px white; }
 button.heatmapCell:hover:not(:disabled), .hourCell:hover:not(:disabled) { filter: saturate(1.12); }
-.outside { opacity: .38; }
 button.heatmapCell.outside, .hourCell.outside { cursor: pointer; }
-button.heatmapCell.outside[aria-pressed="true"], .hourCell.outside[aria-pressed="true"] { opacity: 1; }
+
+.dailyHeatmapFrame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.dailyHeatmap {
+  --daily-heatmap-cell-height: 50px;
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 2px 0;
+  display: grid;
+  grid-template-columns: 42px 48px repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(6, minmax(40px, var(--daily-heatmap-cell-height)));
+  align-content: center;
+  gap: 6px;
+}
+.dailyDateLabel, .dailyRangeLabel {
+  display: grid;
+  place-items: center;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+}
+.dailyDateLabel { grid-column: 1; font-weight: 650; white-space: nowrap; }
+.dailyRangeLabel { grid-column: 2; }
+.currentDateLabel { color: var(--flowlet-color-text-secondary); }
+.contextDateLabel { color: var(--flowlet-color-text-tertiary); font-weight: 500; }
+.fourRowDateLabel { grid-row: span 4; }
+.dailyHourCell { min-height: 40px; max-height: var(--daily-heatmap-cell-height); border-radius: 10px; color: var(--flowlet-color-text-secondary); display: grid; place-items: center; }
+.dailyHourCell.heatLevel1, .dailyHourCell.heatLevel2 { color: var(--flowlet-color-primary); }
+.dailyHourCell span { font-size: 13px; line-height: 1; font-weight: 650; font-variant-numeric: tabular-nums; }
+.dayBoundary { position: relative; }
+.dayBoundary::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: -3px;
+  right: -3px;
+  border-top: 1px solid var(--flowlet-color-border);
+  pointer-events: none;
+}
+.dailyHourCell:disabled { cursor: default; }
+.hourCell:disabled, .monthHeatmap button.heatmapCell:disabled { cursor: default; }
 
 .hourlyHeatmapFrame {
   --hourly-heatmap-cell-height: 30px;
@@ -178,7 +239,7 @@ button.heatmapCell.outside[aria-pressed="true"], .hourCell.outside[aria-pressed=
   padding: 2px 0;
   display: grid;
   grid-template-columns: 48px repeat(7, minmax(0, 1fr));
-  grid-template-rows: 18px repeat(8, minmax(var(--hourly-heatmap-cell-height), 1fr)) 16px;
+  grid-template-rows: 18px repeat(6, minmax(var(--hourly-heatmap-cell-height), 1fr)) 16px;
   gap: 6px;
 }
 .hourLabel, .hourDayLabel, .hourDateLabel {
@@ -235,6 +296,9 @@ button.heatmapCell.outside[aria-pressed="true"], .hourCell.outside[aria-pressed=
 .selectedPeriodHeader span { flex: none; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
 .selectedPeriodStats { min-width: 0; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .selectedPeriodMetric { min-width: 0; padding: 8px 12px; display: grid; align-content: center; gap: 4px; }
+button.selectedPeriodMetric { border: 0; background: transparent; font: inherit; text-align: left; }
+.expandableMetric { padding-right: 28px; position: relative; cursor: pointer; transition: background-color 120ms ease; }
+.expandableMetric:hover { background: var(--flowlet-color-surface-muted); }
 .selectedPeriodMetric:nth-child(odd) { padding-left: 0; border-right: 1px solid var(--flowlet-color-border); }
 .selectedPeriodMetric:nth-child(even) { padding-right: 0; }
 .selectedPeriodMetric:nth-child(n + 3) { border-top: 1px solid var(--flowlet-color-border); }

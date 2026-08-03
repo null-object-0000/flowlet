@@ -9,7 +9,7 @@ use thiserror::Error;
 
 const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
 const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
-pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 10;
+pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 11;
 
 #[derive(Debug, Error)]
 pub enum DeviceIdentityError {
@@ -191,6 +191,7 @@ pub struct DailyUsageTotal {
     /// 原生带用量消息事件数（不是 HTTP 请求数）。
     #[serde(default)]
     pub native_event_count: i64,
+    /// 标准化后的原生未缓存输入；Codex 原始 input_tokens 含缓存，聚合时已扣除。
     #[serde(default)]
     pub native_input_tokens: i64,
     #[serde(default)]
@@ -227,10 +228,17 @@ pub struct HourlyUsageTotal {
     pub estimated_cost: f64,
     #[serde(default)]
     pub native_event_count: i64,
+    /// 标准化后的原生未缓存输入；Codex 原始 input_tokens 含缓存，聚合时已扣除。
     #[serde(default)]
     pub native_input_tokens: i64,
     #[serde(default)]
+    pub native_cached_input_tokens: i64,
+    #[serde(default)]
+    pub native_cache_write_input_tokens: i64,
+    #[serde(default)]
     pub native_output_tokens: i64,
+    #[serde(default)]
+    pub native_reasoning_tokens: i64,
     #[serde(default)]
     pub native_total_tokens: i64,
 }
@@ -283,7 +291,10 @@ pub fn merge_hourly_usage_total(into: &mut HourlyUsageTotal, other: &HourlyUsage
     into.estimated_cost += other.estimated_cost;
     into.native_event_count += other.native_event_count;
     into.native_input_tokens += other.native_input_tokens;
+    into.native_cached_input_tokens += other.native_cached_input_tokens;
+    into.native_cache_write_input_tokens += other.native_cache_write_input_tokens;
     into.native_output_tokens += other.native_output_tokens;
+    into.native_reasoning_tokens += other.native_reasoning_tokens;
     into.native_total_tokens += other.native_total_tokens;
 }
 
@@ -1161,7 +1172,10 @@ mod tests {
                 hour: "2026-07-30T09:00:00".to_string(),
                 native_event_count: 3,
                 native_input_tokens: 60,
+                native_cached_input_tokens: 20,
+                native_cache_write_input_tokens: 10,
                 native_output_tokens: 40,
+                native_reasoning_tokens: 5,
                 native_total_tokens: 100,
                 ..Default::default()
             },
@@ -1178,7 +1192,10 @@ mod tests {
         assert_eq!(merged[0].estimated_cost, 0.125);
         assert_eq!(merged[0].native_event_count, 3);
         assert_eq!(merged[0].native_input_tokens, 60);
+        assert_eq!(merged[0].native_cached_input_tokens, 20);
+        assert_eq!(merged[0].native_cache_write_input_tokens, 10);
         assert_eq!(merged[0].native_output_tokens, 40);
+        assert_eq!(merged[0].native_reasoning_tokens, 5);
         assert_eq!(merged[0].native_total_tokens, 100);
     }
 

@@ -12,6 +12,7 @@ export type DailyUsageTotal = {
   estimatedCost?: number;
   /** 未经过 Flowlet 代理的 Agent 原生会话用量（快照 schema v6 起；旧快照缺省为 0）。 */
   nativeEventCount?: number;
+  /** 标准化后的未缓存输入；Codex 原始输入中的缓存部分已扣除。 */
   nativeInputTokens?: number;
   nativeCachedInputTokens?: number;
   nativeCacheWriteInputTokens?: number;
@@ -32,8 +33,12 @@ export type HourlyUsageTotal = {
   unknownCount?: number;
   estimatedCost?: number;
   nativeEventCount?: number;
+  /** 标准化后的未缓存输入；Codex 原始输入中的缓存部分已扣除。 */
   nativeInputTokens?: number;
+  nativeCachedInputTokens?: number;
+  nativeCacheWriteInputTokens?: number;
   nativeOutputTokens?: number;
+  nativeReasoningTokens?: number;
   nativeTotalTokens?: number;
 };
 

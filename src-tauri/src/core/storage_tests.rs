@@ -2424,6 +2424,48 @@ fn native_usage_totals_exclude_flowlet_observed_sessions() {
 }
 
 #[test]
+fn native_usage_totals_normalize_codex_inclusive_input_tokens() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_usage_events (
+                agent_type, session_id, event_id, event_time, model,
+                input_tokens, cached_input_tokens, cache_write_input_tokens,
+                output_tokens, reasoning_tokens, total_tokens, synced_at
+             ) VALUES (
+                'codex-desktop', 'codex-session', 'codex-event', datetime('now'), 'gpt-test',
+                100, 75, 5, 10, 3, 110, datetime('now')
+             )",
+            [],
+        )
+        .expect("insert Codex native usage event");
+
+    let days = storage
+        .agent_native_daily_usage_totals()
+        .expect("native daily totals");
+    assert_eq!(days.len(), 1);
+    assert_eq!(days[0].native_input_tokens, 20);
+    assert_eq!(days[0].native_cached_input_tokens, 75);
+    assert_eq!(days[0].native_cache_write_input_tokens, 5);
+    assert_eq!(days[0].native_total_tokens, 110);
+
+    let hours = storage
+        .agent_native_hourly_usage_totals()
+        .expect("native hourly totals");
+    assert_eq!(hours.len(), 1);
+    assert_eq!(hours[0].native_input_tokens, 20);
+    assert_eq!(hours[0].native_cached_input_tokens, 75);
+    assert_eq!(hours[0].native_cache_write_input_tokens, 5);
+    assert_eq!(hours[0].native_total_tokens, 110);
+}
+
+#[test]
 fn imported_device_usage_roundtrips_native_and_cost_fields() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
@@ -2454,12 +2496,15 @@ fn imported_device_usage_roundtrips_native_and_cost_fields() {
         estimated_cost: 0.25,
         native_event_count: 2,
         native_input_tokens: 50,
+        native_cached_input_tokens: 12,
+        native_cache_write_input_tokens: 8,
         native_output_tokens: 20,
+        native_reasoning_tokens: 3,
         native_total_tokens: 70,
     };
     storage
         .import_device_usage(
-            10,
+            11,
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "2026-07-01T00:00:00Z",
             "Office PC",

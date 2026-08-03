@@ -53,6 +53,7 @@ export function resolvePrice(price: ModelsCnPrice): ResolvedPrice {
     inputUncached: price.input.standard,
     inputCached: price.input.cacheHit ?? null,
     inputCacheWrite: price.input.explicitCacheCreation ?? null,
+    inputCacheHit: price.input.explicitCacheHit ?? null,
     output: price.output,
     sourceUrl: price.sourceUrl,
     retrievedAt: null,
@@ -128,6 +129,13 @@ export function buildPricingStrategyRows(
       return (a.inputTokenRange?.maxInclusive ?? Number.MAX_SAFE_INTEGER)
         - (b.inputTokenRange?.maxInclusive ?? Number.MAX_SAFE_INTEGER);
     });
+}
+
+/** 是否存在按输入长度分段计价（即存在 inputTokenRange 条目）。
+ *  仅此时才应展示「按输入长度分段计价」标题——仅因显式缓存价格（explicitCache*
+ *  字段）进入策略卡片的单行「全部输入」场景不算分段，避免标题误导。 */
+export function hasInputLengthTiers(rows: readonly PricingStrategyRow[]): boolean {
+  return rows.some((row) => row.inputTokenRange != null);
 }
 
 /** 解析模型能力。缺失字段默认 false（保守降级）。 */
@@ -298,8 +306,10 @@ export function aggregateMaxPrice(subModels: ResolvedModel[]): ResolvedPrice | n
   // 缓存价：仅当全部子模型都有该字段才聚合，否则视为 null。
   const allCacheHit = withPrice.every((m) => m.officialPrice!.inputCached != null);
   const allCacheWrite = withPrice.every((m) => m.officialPrice!.inputCacheWrite != null);
+  const allCacheHitExplicit = withPrice.every((m) => m.officialPrice!.inputCacheHit != null);
   const maxCacheHit = allCacheHit ? Math.max(...withPrice.map((m) => m.officialPrice!.inputCached as number)) : null;
   const maxCacheWrite = allCacheWrite ? Math.max(...withPrice.map((m) => m.officialPrice!.inputCacheWrite as number)) : null;
+  const maxCacheHitExplicit = allCacheHitExplicit ? Math.max(...withPrice.map((m) => m.officialPrice!.inputCacheHit as number)) : null;
   // 任一子模型是 promotional 则聚合视为 promotional（更贴近用户真实负担）。
   const anyPromotional = withPrice.some((m) => m.officialPrice!.rateType === "promotional");
   // 任一子模型是 china 则聚合视为 china（Flowlet 仅服务国内）。
@@ -313,6 +323,7 @@ export function aggregateMaxPrice(subModels: ResolvedModel[]): ResolvedPrice | n
     inputUncached: maxInputUncached,
     inputCached: maxCacheHit,
     inputCacheWrite: maxCacheWrite,
+    inputCacheHit: maxCacheHitExplicit,
     output: maxOutput,
     sourceUrl: sample.sourceUrl,
     retrievedAt: null,
@@ -341,6 +352,7 @@ export function aggregateMaxStandardPrice(subModels: ResolvedModel[]): ResolvedP
     inputUncached: maxInputUncached,
     inputCached: maxCacheHit,
     inputCacheWrite: null,
+    inputCacheHit: null,
     output: maxOutput,
     sourceUrl: sample.sourceUrl,
     retrievedAt: null,

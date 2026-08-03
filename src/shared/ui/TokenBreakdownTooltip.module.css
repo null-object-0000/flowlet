@@ -5,4 +5,5 @@
 .breakdown small { color: rgba(255, 255, 255, .72); font-size: 11px; }
 .breakdown b { color: #fff; font-size: 11px; font-weight: 650; }
 .divider { margin: 0; border: none; border-top: 1px solid rgba(255, 255, 255, .18); }
+.breakdown > .sectionTitle { display: block; color: rgba(255, 255, 255, .72); font-size: 10px; font-weight: 650; }
 .breakdown .missing { padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .18); }

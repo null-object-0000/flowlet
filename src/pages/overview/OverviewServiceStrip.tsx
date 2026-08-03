@@ -10,12 +10,11 @@ import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import styles from "./OverviewServiceStrip.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
-type Protocol = "openai" | "anthropic" | "responses";
+type Protocol = "openai" | "anthropic";
 
 const PROTOCOL_LABELS: Record<Protocol, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
-  responses: "Responses",
 };
 
 type Props = {
@@ -51,7 +50,6 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
     ? t("启动于 {time}", { time: formatFullTimestamp(status.started_at, language) })
     : undefined;
 
-  // Responses 与 OpenAI 共享 Base URL（`/v1`），实际端点为 POST /v1/responses。
   const endpoint = protocol === "anthropic" ? `${baseUrl}/anthropic` : `${baseUrl}/v1`;
 
   const copy = async (value: string, message: string) => {
@@ -115,13 +113,6 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
             >
               Anthropic
             </button>
-            <button
-              type="button"
-              className={`${styles.protocolBtn} ${protocol === "responses" ? styles.protocolBtnActive : ""}`}
-              onClick={() => setProtocol("responses")}
-            >
-              Responses
-            </button>
           </div>
           <button type="button" className={styles.accessDetail} onClick={onOpenDetails}>
             {t("接入详情")}
@@ -130,13 +121,9 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
         <div className={styles.inlineEndpoint}>
           <div
             className={styles.inlineCode}
-            title={protocol === "responses" ? t("Responses 端点：POST {url}（无状态透传）", { url: `${endpoint}/responses` }) : undefined}
           >
             {endpoint}
           </div>
-          {protocol === "responses" ? (
-            <span className={styles.endpointHint}>POST /v1/responses</span>
-          ) : null}
           <button
             type="button"
             className={styles.iconBtn}

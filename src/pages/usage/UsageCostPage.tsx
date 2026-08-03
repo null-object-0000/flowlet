@@ -391,7 +391,6 @@ export function UsageCostPage() {
                             styles.dailyHourCell,
                             styles["heatLevel" + cell.level],
                             cell.outside ? styles.outside : "",
-                            row.context ? styles.contextHourCell : "",
                             boundary ? styles.dayBoundary : "",
                           ].join(" ")}
                           disabled={cell.future}

@@ -283,9 +283,8 @@ button.heatmapCell[aria-pressed="true"] {
 }
 button.heatmapCell.heatLevel3[aria-pressed="true"],
 button.heatmapCell.heatLevel4[aria-pressed="true"] { box-shadow: inset 0 0 0 2px white; }
-.heatmapCell.outside { opacity: .3; cursor: default; }
+.heatmapCell.outside { cursor: default; }
 .mobileHeatmap button.heatmapCell.outside { cursor: pointer; }
-.mobileHeatmap button.heatmapCell.outside[aria-pressed="true"] { opacity: 1; }
 .hourCell:disabled, .mobileHeatmap button.heatmapCell:disabled { cursor: default; }
 .dailyHeatmap {
   width: 100%;
@@ -311,8 +310,6 @@ button.heatmapCell.heatLevel4[aria-pressed="true"] { box-shadow: inset 0 0 0 2px
 .dailyHourCell { min-height: 34px; border-radius: 9px; color: var(--flowlet-color-text-secondary); display: grid; place-items: center; }
 .dailyHourCell.heatLevel1, .dailyHourCell.heatLevel2 { color: var(--flowlet-color-primary); }
 .dailyHourCell span { font-size: 12px; line-height: 1; font-weight: 650; font-variant-numeric: tabular-nums; }
-.contextHourCell { filter: saturate(.56); }
-.contextHourCell[aria-pressed="true"] { filter: saturate(.7); }
 .dayBoundary { position: relative; }
 .dayBoundary::before {
   content: "";
@@ -357,7 +354,7 @@ button.heatmapCell.heatLevel4[aria-pressed="true"] { box-shadow: inset 0 0 0 2px
 }
 .hourCell.heatLevel3[aria-pressed="true"],
 .hourCell.heatLevel4[aria-pressed="true"] { box-shadow: inset 0 0 0 2px white; }
-.hourCell.outside { opacity: .3; cursor: default; }
+.hourCell.outside { cursor: default; }
 .heatLevel1 { background: color-mix(in srgb, var(--flowlet-color-primary) 18%, var(--flowlet-color-surface-strong)); }
 .heatLevel2 { background: color-mix(in srgb, var(--flowlet-color-primary) 38%, var(--flowlet-color-surface-strong)); }
 .heatLevel3 { color: white; background: color-mix(in srgb, var(--flowlet-color-primary) 64%, var(--flowlet-color-surface-strong)); }

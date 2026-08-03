@@ -319,7 +319,7 @@ export function MobileOverviewPage() {
                       <button
                         key={cell.hour}
                         type="button"
-                        className={`${styles.hourCell} ${styles.dailyHourCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""} ${row.context ? styles.contextHourCell : ""} ${boundary ? styles.dayBoundary : ""}`}
+                        className={`${styles.hourCell} ${styles.dailyHourCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""} ${boundary ? styles.dayBoundary : ""}`}
                         disabled={cell.future}
                         aria-label={title}
                         aria-pressed={selectedHourlyCell?.hour === cell.hour}

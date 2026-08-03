@@ -70,14 +70,16 @@ export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   longcat: ["LongCat-2.0"],
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
   kimi: ["kimi-k3", "kimi-k2.7-code"],
-  qwen: ["qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
+  qwen: ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
 };
 
-/** Token Plan 个人版账号的默认开放模型（qwen3.8-max-preview 仅 Token Plan 可用）。
+/** Token Plan 个人版账号的默认开放模型。
+ *  qwen3.8-max 为正式版（Token Plan 与按量付费均可用）；
+ *  qwen3.8-max-preview 仅 Token Plan 可用。
  *  按量付费账号使用 DEFAULT_EXPOSED_MODELS_BY_CHANNEL.qwen。
  *  必须与 src-tauri/src/core/channels_config.rs 的
  *  QWEN_TOKEN_PLAN_DEFAULT_MODELS 保持一致。 */
-export const QWEN_TOKEN_PLAN_DEFAULT_MODELS = ["qwen3.8-max-preview", "qwen3.6-flash"];
+export const QWEN_TOKEN_PLAN_DEFAULT_MODELS = ["qwen3.8-max", "qwen3.8-max-preview", "qwen3.6-flash"];
 
 /** Flowlet 支持开放的上游模型全集（所有渠道的并集）。
  *  任意渠道账号只要底层 /models 返回了其中的模型，就可勾选开放——不再按渠道区分。

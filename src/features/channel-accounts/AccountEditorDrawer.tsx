@@ -353,6 +353,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                       <span className={styles.channelOptionLabel}>
                         {item.id === CUSTOM_CHANNEL_ID ? (
                           <span className={styles.customChannelIcon}>↗</span>
+                        ) : item.id === CHATGPT_CHANNEL_ID ? (
+                          <img src="/icons/lobe/openai.svg" alt="" className={styles.logoIcon} />
                         ) : item.id === "kimi" ? (
                           <span className={styles.kimiSwatch}><img src={`/icons/lobe/${item.id}-color.svg`} alt="" className={styles.logoIcon} /></span>
                         ) : (

@@ -164,15 +164,15 @@ describe("mergeDefaultRoutes", () => {
       id: "account-qwen-plan",
       channel_id: "qwen",
       resource_mode: "token_plan",
-      exposed_models: ["qwen3.8-max-preview", "qwen3.6-flash"],
-      synced_models: ["qwen3.8-max-preview", "qwen3.6-flash"],
+      exposed_models: ["qwen3.8-max", "qwen3.8-max-preview", "qwen3.6-flash"],
+      synced_models: ["qwen3.8-max", "qwen3.8-max-preview", "qwen3.6-flash"],
     } as ChannelAccount;
 
     const paygRoutes = mergeDefaultRoutes([], [paygAccount], [qwenPreset]);
     expect(new Set(paygRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"]));
 
     const planRoutes = mergeDefaultRoutes([], [planAccount], [qwenPreset]);
-    expect(new Set(planRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.8-max-preview", "qwen3.6-flash"]));
+    expect(new Set(planRoutes.map((route) => route.upstream_model))).toEqual(new Set(["qwen3.8-max", "qwen3.8-max-preview", "qwen3.6-flash"]));
     expect(planRoutes.some((route) => route.virtual_model_id.startsWith("flowlet-"))).toBe(false);
 
     // 跨渠道：千问账号勾选原属 DeepSeek 的 deepseek-v4-pro，全局白名单下仍可开放为直连模型。

@@ -313,6 +313,9 @@ describe("AccountManagementSideSheet", () => {
     );
 
     expect(await screen.findByText("ChatGPT 账号授权")).toBeInTheDocument();
+    await user.click(screen.getByRole("combobox"));
+    expect(document.querySelector('img[src="/icons/lobe/openai.svg"]')).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "授权登录" })).toBeEnabled();
     // 非表单创建：没有 API Key 输入，也没有保存按钮。
     expect(screen.queryByPlaceholderText("请输入渠道 API Key")).not.toBeInTheDocument();

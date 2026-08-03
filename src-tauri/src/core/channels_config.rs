@@ -38,7 +38,8 @@ pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static s
         "longcat-2.0" => Some("longcat"),
         "deepseek-v4-flash" | "deepseek-v4-pro" => Some("deepseek"),
         "kimi-k3" | "kimi-k2.7-code" => Some("kimi"),
-        "qwen3.8-max-preview"
+        "qwen3.8-max"
+        | "qwen3.8-max-preview"
         | "qwen3.7-max"
         | "qwen3.7-plus"
         | "qwen3.7-flash"
@@ -583,9 +584,11 @@ fn route_signature(route: &RouteCandidate) -> String {
     .join("\0")
 }
 
-/// 千问 Token Plan 账号的默认开放模型（套餐专属：qwen3.8-max-preview 仅订阅可用）。
+/// 千问 Token Plan 账号的默认开放模型。
+/// qwen3.8-max 为正式版（Token Plan 与按量付费均可用）；
+/// qwen3.8-max-preview 套餐专属，仅订阅可用。
 /// 必须与 src/domains/channel/types.ts 的 QWEN_TOKEN_PLAN_DEFAULT_MODELS 保持一致。
-const QWEN_TOKEN_PLAN_DEFAULT_MODELS: [&str; 2] = ["qwen3.8-max-preview", "qwen3.6-flash"];
+const QWEN_TOKEN_PLAN_DEFAULT_MODELS: [&str; 3] = ["qwen3.8-max", "qwen3.8-max-preview", "qwen3.6-flash"];
 
 /// 判断账号是否为千问 Token Plan 订阅模式（sk-sp 专属 Key + 套餐端点，
 /// 通过账号级 Base URL 覆盖接入）。
@@ -1162,8 +1165,13 @@ mod tests {
         let config = ChannelsConfig::from_config_json(&json).unwrap();
         let supported: std::collections::HashSet<String> =
             config.supported_models().into_iter().collect();
-        // 渠道列表 + Token Plan 专属模型(qwen3.8-max-preview) 的并集。
-        for expected in ["qwen3.7-max", "qwen3.6-flash", "qwen3.8-max-preview"] {
+        // 渠道列表 + Token Plan 专属模型(qwen3.8-max / qwen3.8-max-preview) 的并集。
+        for expected in [
+            "qwen3.7-max",
+            "qwen3.6-flash",
+            "qwen3.8-max",
+            "qwen3.8-max-preview",
+        ] {
             assert!(supported.contains(expected), "缺少支持的模型: {expected}");
         }
         // 去重：qwen3.6-flash 同时出现在渠道列表与 Token Plan 列表，只出现一次。

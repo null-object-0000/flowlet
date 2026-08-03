@@ -47,6 +47,7 @@ const english: Record<string, string> = {
   "全部项目": "All projects",
   "会话视角": "Sessions",
   "任务视角": "Tasks",
+  "切换项目视角，当前：{name}": "Switch project view, current: {name}",
   "按实时运行状态展示该目录及其子目录中的主会话。": "Main sessions in this directory and its subdirectories, grouped by live runtime status.",
   "暂无会话": "No sessions",
   "纯本地任务看板，当前不与 Agent 会话关联。": "A local-only task board. Tasks are not linked to Agent sessions yet.",

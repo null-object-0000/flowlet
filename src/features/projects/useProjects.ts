@@ -15,11 +15,13 @@ export function useProject(projectId: string | undefined) {
   });
 }
 
-export function useProjectTasks(projectId: string | undefined) {
+export function useProjectTasks(projectId: string | undefined, autoRefresh = false) {
   return useQuery({
     queryKey: queryKeys.project.tasks(projectId ?? ""),
     queryFn: () => projectCommands.listTasks(projectId!),
     enabled: Boolean(projectId),
+    refetchInterval: autoRefresh ? 15_000 : false,
+    refetchOnWindowFocus: false,
   });
 }
 

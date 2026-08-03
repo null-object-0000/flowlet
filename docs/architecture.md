@@ -353,7 +353,15 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 - `device_hourly_usage`
 - `device_agent_sessions`
 - `account_balance_snapshots`
+- `projects`
+- `project_tasks`
 - `app_meta`
+
+项目管理是桌面端本地工作台能力。第一版一个 `projects` 记录只绑定一个本机目录；
+项目会话视角不复制会话数据，而是按目录（含子目录）过滤现有 Agent 会话目录，并按
+实时 `runtime_status` 分栏。`project_tasks` 是不关联会话的纯本地任务表，状态限定为
+`todo`、`in_progress`、`done`；删除项目只级联删除这些本地任务，不删除目录、Agent
+原始会话或 Flowlet 请求观测记录。项目与任务 CRUD 写入 SQLite 后立即生效，无需重启。
 
 安装实例身份独立保存在 SQLite 同目录的 `flowlet-device.json`。首次启动生成 UUID，
 后续启动稳定复用；配置导入、数据库替换和普通数据包不得覆盖或携带该文件，避免把
@@ -596,6 +604,26 @@ USD 等原始计价币种；同时展示 `codex-native` 官方 credits 费率计
 输入混入。Agent 自动或手动同步完成后会失效设备用量查询；设备快照携带 `native_*` 聚合字段，使其他
 设备和移动端看到相同的来源拆分。费用、API 等价价值和套餐 credits 不换汇、不相加；缺少可靠价格
 映射时保留未计价状态。
+
+PC 运行概览顶部“今日消耗”与用量统计页的“日 / 全部设备”使用相同口径：本机代理 Token、本机未经过
+Flowlet 的 Agent 原生 Token，以及 `device_daily_usage` 中其他设备当天快照共同计入。概览仍通过
+`usage_today_tokens` 返回单条当天聚合，不轮询整段历史；指标点击后进入用量统计页，不再展示悬浮拆解。
+
+PC 用量分析页的 `usage_summary` 进一步把能够确认具体模型的纯原生事件映射为同一只读分析行：
+事件自身的 `model` 优先；Codex 等 token 事件不携带模型时，仅在同一会话的
+`agent_session_snapshots.summary_json.models` 能确认唯一规范模型时回填，多模型或未知模型会话不猜。
+时间范围比较先通过 SQLite `datetime()` 统一 RFC3339 表示，避免周期起点当天的边界误收。
+`channel_id = agent-native` 仅表示来源，`account_id` 保存 Agent 类型，
+`client_id` 保存统一客户端归属，`request_count = 0`，并用 `native_event_count` 单独表达消息级事件数。
+该映射不新增数据库列；`estimated_cost_currency` 只存在于 command 返回结构中，用于让前端优先按
+后端实际命中的价格币种聚合。公开价匹配顺序为模型官方渠道、`openai-api` 保留命名空间、唯一非套餐
+价格；`codex-native` credits 不进入预估费用。模型无法精确计价时金额为 0、币种为空，Token 仍参与
+模型、客户端和设备维度分析。
+
+设备同步快照的 `usage_breakdowns` 同时携带最近 90 天的代理请求维度行与上述 Agent 原生模型维度行。
+原生行从本机 `agent_usage_events` 和会话快照动态生成，保留 `native_event_count`、公开价币种与预估费用；
+接收端写入 `device_usage_breakdowns` 后即可按远端设备筛选。版本升级后既有原生账本会在下一次正常设备同步
+自动补发，无需通过数据完整性检查改写历史记录；源设备与接收设备均需运行支持该同步字段的版本。
 
 Codex 账号与用量另有独立的周期性后台同步：应用启动约 20 秒后首次执行，此后固定每 5 分钟一轮，前台与
 后台同周期（Codex 官方用量窗口本身是 5 小时 / 周级粒度，5 分钟足够新鲜，也避免高频调用官方用量接口与

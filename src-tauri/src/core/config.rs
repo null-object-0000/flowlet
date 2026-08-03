@@ -1035,6 +1035,14 @@ pub struct UsageSummaryRow {
     pub output_tokens: i64,
     pub unknown_count: i64,
     pub estimated_cost: f64,
+    /// 费用估算的原始币种。代理历史行仍可为空，由前端按模型价格目录回退解析；
+    /// Agent 原生行在后端计价时直接写入，避免把 USD/CNY/CREDITS 混合相加。
+    #[serde(default)]
+    pub estimated_cost_currency: Option<String>,
+    /// 未经过 Flowlet 的 Agent 原生用量事件数。代理请求行为 0；原生行的
+    /// `request_count` 保持 0，避免把消息级事件误称为 HTTP 请求。
+    #[serde(default)]
+    pub native_event_count: i64,
     /// 请求总耗时之和（毫秒），取 `COALESCE(duration_ms, latency_ms)`，
     /// 与请求日志页「总耗时」列同口径；配合 `elapsed_measured_count` 求平均。
     pub elapsed_total_ms: i64,
@@ -1075,6 +1083,10 @@ pub struct DeviceUsageBreakdownRow {
     pub output_tokens: i64,
     pub unknown_count: i64,
     pub estimated_cost: f64,
+    #[serde(default)]
+    pub estimated_cost_currency: Option<String>,
+    #[serde(default)]
+    pub native_event_count: i64,
     pub elapsed_total_ms: i64,
     pub elapsed_measured_count: i64,
     pub generation_total_ms: i64,
@@ -1277,6 +1289,8 @@ pub struct AgentSessionsFilter {
     pub agent_type: String,
     #[serde(default)]
     pub runtime_status: String,
+    #[serde(default)]
+    pub project_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -5,7 +5,7 @@ use crate::core::channels_config::{canonical_model_key, official_channel_id_for_
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionRepairResult,
     AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult, AgentUsageEvent,
-    LogFilterClient, LogsFilter, LogsPageResult, LogsSummary, ModelPrice, RequestLogInput,
+    DeviceUsageBreakdownRow, LogFilterClient, LogsFilter, LogsPageResult, LogsSummary, ModelPrice, RequestLogInput,
     RequestLogModelOptions, RequestLogRow, UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
 };
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
@@ -206,6 +206,13 @@ fn matching_root_session_keys(
             .map(agent_session_key)
             .collect();
     }
+    matching_root_session_keys_by(catalog, |row| session_matches_search(row, search))
+}
+
+fn matching_root_session_keys_by(
+    catalog: &[AgentSessionRow],
+    matches: impl Fn(&AgentSessionRow) -> bool,
+) -> HashSet<AgentSessionKey> {
     let parent_by_key = catalog
         .iter()
         .filter_map(|row| {
@@ -223,10 +230,7 @@ fn matching_root_session_keys(
         .collect::<HashSet<_>>();
     let mut roots = HashSet::new();
 
-    for row in catalog
-        .iter()
-        .filter(|row| session_matches_search(row, search))
-    {
+    for row in catalog.iter().filter(|row| matches(row)) {
         let mut current = agent_session_key(row);
         let mut visited = HashSet::new();
         while visited.insert(current.clone()) {
@@ -419,6 +423,123 @@ fn estimate_cost(
         input_cache_write: input_cache_write_cost,
         output: output_cost,
     })
+}
+
+fn session_matches_project_path(row: &AgentSessionRow, project_path: &str) -> bool {
+    if project_path.is_empty() {
+        return true;
+    }
+    let Some(session_path) = row.project_path.as_deref() else {
+        return false;
+    };
+    let normalize = |value: &str| {
+        value
+            .trim()
+            .replace('\\', "/")
+            .trim_end_matches('/')
+            .to_lowercase()
+    };
+    let project = normalize(project_path);
+    let session = normalize(session_path);
+    session == project
+        || session
+            .strip_prefix(&project)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+/// 为未经过 Flowlet 的 Agent 原生事件计算标准公开 API 等价费用。
+///
+/// 原生事件没有实际路由渠道，因此只接受可解释的价格归属：Flowlet 白名单模型
+/// 使用官方渠道基准价；OpenAI/Codex 模型使用 `openai-api` 保留命名空间；其余
+/// 模型仅在价格表中存在唯一的非套餐价格时才计价。无法唯一确定时返回 None，
+/// 不猜测渠道、不换汇，也不把 Codex credits 当作现金费用。
+fn estimate_native_public_cost(
+    prices: &[ModelPrice],
+    model: &str,
+    input_uncached_tokens: i64,
+    input_cached_tokens: i64,
+    input_cache_write_tokens: i64,
+    output_tokens: i64,
+) -> Option<(f64, String)> {
+    let canonical_model = canonical_model_key(model);
+    let official_channel = official_channel_id_for_model(&canonical_model);
+    let price = official_channel
+        .and_then(|channel_id| {
+            prices.iter().find(|price| {
+                price.channel_id.eq_ignore_ascii_case(channel_id)
+                    && price.upstream_model.eq_ignore_ascii_case(&canonical_model)
+            })
+        })
+        .or_else(|| {
+            prices.iter().find(|price| {
+                price.channel_id.eq_ignore_ascii_case("openai-api")
+                    && price.upstream_model.eq_ignore_ascii_case(&canonical_model)
+            })
+        })
+        .or_else(|| {
+            let mut candidates = prices.iter().filter(|price| {
+                !price.channel_id.eq_ignore_ascii_case("codex-native")
+                    && price.upstream_model.eq_ignore_ascii_case(&canonical_model)
+            });
+            let first = candidates.next()?;
+            candidates.next().is_none().then_some(first)
+        })?;
+
+    // 原生日志无法可靠还原每次请求的完整上下文长度，与会话详情一致使用基础价。
+    let (uncached_price, cached_price, cache_write_price, output_price) =
+        price.resolve_prices(None);
+    let amount = input_uncached_tokens.max(0) as f64 * uncached_price / 1_000_000.0
+        + input_cached_tokens.max(0) as f64 * cached_price / 1_000_000.0
+        + input_cache_write_tokens.max(0) as f64 * cache_write_price.unwrap_or(uncached_price)
+            / 1_000_000.0
+        + output_tokens.max(0) as f64 * output_price / 1_000_000.0;
+    Some((amount, price.currency.clone()))
+}
+
+fn native_agent_client_id(agent_type: &str) -> &str {
+    match agent_type {
+        "codex-desktop" | "codex-cli" => "codex",
+        other => other,
+    }
+}
+
+fn native_agent_display_name(agent_type: &str) -> &str {
+    match agent_type {
+        "claude-code" => "Claude Code",
+        "codex-desktop" => "Codex Desktop",
+        "codex-cli" => "Codex CLI",
+        "opencode" => "OpenCode",
+        "pi" => "Pi",
+        other => other,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct NativeUsageAnalysisAggregate {
+    native_event_count: i64,
+    input_uncached_tokens: i64,
+    input_cached_tokens: i64,
+    input_cache_write_tokens: i64,
+    output_tokens: i64,
+    total_tokens: i64,
+}
+
+/// Codex 的 token_count 事件通常不重复携带 model；模型记录在同一会话的
+/// context/session 元数据中。仅当快照能确认唯一模型时才允许回填，避免把
+/// 多模型会话的累计 Token 猜给任一模型。
+fn unique_snapshot_model(summary_json: &str) -> Option<String> {
+    let summary: crate::core::config::AgentSessionNativeSummary =
+        serde_json::from_str(summary_json).ok()?;
+    let mut models = summary
+        .models
+        .into_iter()
+        .map(|model| model.trim().to_string())
+        .filter(|model| !model.is_empty());
+    let first = models.next()?;
+    let first_key = canonical_model_key(&first);
+    models
+        .all(|model| canonical_model_key(&model) == first_key)
+        .then_some(first)
 }
 
 impl Storage {
@@ -933,11 +1054,12 @@ impl Storage {
         opencode_pending_sessions: &std::collections::HashSet<String>,
     ) -> Result<AgentSessionsPageResult, StorageError> {
         let page = filter.page.max(1);
-        let page_size = filter.page_size.clamp(1, 8);
+        let page_size = filter.page_size.clamp(1, 500);
         let offset = ((page - 1) * page_size) as usize;
         let search = filter.search.trim().to_lowercase();
         let agent_type = filter.agent_type.trim();
         let runtime_status = filter.runtime_status.trim();
+        let project_path = filter.project_path.trim();
         let mut catalog = crate::core::agent_session_metadata::merge_agent_session_catalog(
             self.list_observed_agent_sessions()?,
             self.list_native_agent_sessions(),
@@ -946,9 +1068,13 @@ impl Storage {
         // 都会与实时状态不一致。
         apply_opencode_pending_sessions(&mut catalog, opencode_pending_sessions);
         let matching_roots = matching_root_session_keys(&catalog, &search);
+        let project_matching_roots = matching_root_session_keys_by(&catalog, |row| {
+            session_matches_project_path(row, project_path)
+        });
         catalog.retain(|row| {
             row.parent_session_id.is_none()
                 && matching_roots.contains(&agent_session_key(row))
+                && project_matching_roots.contains(&agent_session_key(row))
                 && matches_agent_session_type(row, agent_type)
                 && matches_agent_session_runtime_status(row, runtime_status)
         });
@@ -2707,6 +2833,7 @@ impl Storage {
         } else {
             ""
         };
+        let prices = self.prices();
         let connection = self
             .connection
             .lock()
@@ -2734,6 +2861,8 @@ impl Storage {
                 sum(output_tokens) AS output_tokens,
                 sum(unknown_count) AS unknown_count,
                 sum(estimated_cost) AS estimated_cost,
+                max(estimated_cost_currency) AS estimated_cost_currency,
+                sum(native_event_count) AS native_event_count,
                 sum(elapsed_total_ms) AS elapsed_total_ms,
                 sum(elapsed_measured_count) AS elapsed_measured_count,
                 sum(generation_total_ms) AS generation_total_ms,
@@ -2758,6 +2887,8 @@ impl Storage {
                     coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
                     sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
                     coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost,
+                    NULL AS estimated_cost_currency,
+                    0 AS native_event_count,
                     coalesce(sum(COALESCE(request_logs.duration_ms, request_logs.latency_ms)), 0) AS elapsed_total_ms,
                     sum(CASE WHEN COALESCE(request_logs.duration_ms, request_logs.latency_ms) IS NOT NULL THEN 1 ELSE 0 END) AS elapsed_measured_count,
                     coalesce(sum(CASE WHEN request_logs.duration_ms IS NOT NULL
@@ -2800,6 +2931,8 @@ impl Storage {
                     output_tokens,
                     unknown_count,
                     estimated_cost,
+                    estimated_cost_currency,
+                    native_event_count,
                     elapsed_total_ms,
                     elapsed_measured_count,
                     generation_total_ms,
@@ -2814,15 +2947,15 @@ impl Storage {
         );
         let mut stmt = connection.prepare(&sql)?;
         let map_row = Self::map_usage_summary_row;
-        let summary: Vec<UsageSummaryRow> = if !has_range {
+        let mut summary: Vec<UsageSummaryRow> = if !has_range {
             stmt.query_map(params![current_device_id, current_device_id], map_row)?
         } else {
             stmt.query_map(
                 params![
                     current_device_id,
                     current_device_id,
-                    start_at.unwrap_or_default(),
-                    end_at.unwrap_or_default(),
+                    start_at.as_deref().unwrap_or_default(),
+                    end_at.as_deref().unwrap_or_default(),
                     breakdown_start.unwrap_or_default(),
                     breakdown_end.unwrap_or_default(),
                 ],
@@ -2830,6 +2963,180 @@ impl Storage {
             )?
         }
         .collect::<Result<Vec<_>, _>>()?;
+
+        // 原生 Agent 用量与代理请求共用同一分析结果，但保持独立来源语义：
+        // 只纳入能识别具体模型、且整段会话未被 Flowlet 观测的事件，避免双算。
+        // 原生事件没有真实渠道账号，因此使用稳定的虚拟来源维度；费用仅在模型
+        // 精确命中公开价格时估算，并把币种随行返回给前端。
+        let native_date_expression = match group_by {
+            "hour" => "strftime('%Y-%m-%dT%H:00:00', event_time, 'localtime')",
+            "day" => "strftime('%Y-%m-%d', event_time, 'localtime')",
+            _ => unreachable!("group_by validated above"),
+        };
+        let native_range_clause = if has_range {
+            "AND datetime(event_time) >= datetime(?1) AND datetime(event_time) < datetime(?2)"
+        } else {
+            ""
+        };
+        let snapshot_models = {
+            let mut snapshot_stmt = connection.prepare(
+                "SELECT agent_type, session_id, summary_json FROM agent_session_snapshots",
+            )?;
+            let rows = snapshot_stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            let mut models = HashMap::new();
+            for row in rows {
+                let (agent_type, session_id, summary_json) = row?;
+                if let Some(model) = unique_snapshot_model(&summary_json) {
+                    models.insert((agent_type, session_id), model);
+                }
+            }
+            models
+        };
+        let native_sql = format!(
+            r#"
+            SELECT
+                {native_date_expression} AS usage_date,
+                agent_type,
+                session_id,
+                nullif(trim(model), '') AS model,
+                count(*) AS native_event_count,
+                coalesce(sum(CASE
+                    WHEN agent_type IN ('codex-desktop', 'codex-cli') THEN
+                        max(input_tokens - cached_input_tokens - cache_write_input_tokens, 0)
+                    ELSE input_tokens
+                END), 0) AS input_uncached_tokens,
+                coalesce(sum(cached_input_tokens), 0) AS input_cached_tokens,
+                coalesce(sum(cache_write_input_tokens), 0) AS input_cache_write_tokens,
+                coalesce(sum(output_tokens), 0) AS output_tokens,
+                coalesce(sum(total_tokens), 0) AS total_tokens
+            FROM agent_usage_events
+            WHERE 1 = 1
+              {native_range_clause}
+              AND NOT EXISTS (
+                  SELECT 1 FROM request_logs
+                  WHERE request_logs.agent_type = agent_usage_events.agent_type
+                    AND request_logs.agent_session_id = agent_usage_events.session_id
+              )
+            GROUP BY usage_date, agent_type, session_id, nullif(trim(model), '')
+            ORDER BY usage_date DESC, native_event_count DESC
+            "#,
+        );
+        let mut native_stmt = connection.prepare(&native_sql)?;
+        let mut native_rows = if !has_range {
+            native_stmt.query([])?
+        } else {
+            native_stmt.query(params![
+                start_at.as_deref().unwrap_or_default(),
+                end_at.as_deref().unwrap_or_default(),
+            ])?
+        };
+        let mut native_aggregates: HashMap<
+            (String, String, String),
+            NativeUsageAnalysisAggregate,
+        > = HashMap::new();
+        while let Some(row) = native_rows.next()? {
+            let date = row
+                .get::<_, Option<String>>(0)?
+                .unwrap_or_else(|| "未知日期".to_string());
+            let agent_type: String = row.get(1)?;
+            let session_id: String = row.get(2)?;
+            let event_model: Option<String> = row.get(3)?;
+            let model = event_model.or_else(|| {
+                snapshot_models
+                    .get(&(agent_type.clone(), session_id))
+                    .cloned()
+            });
+            let Some(model) = model else {
+                continue;
+            };
+            let aggregate = native_aggregates
+                .entry((date, agent_type, model))
+                .or_default();
+            aggregate.native_event_count = aggregate
+                .native_event_count
+                .saturating_add(row.get::<_, i64>(4)?);
+            aggregate.input_uncached_tokens = aggregate
+                .input_uncached_tokens
+                .saturating_add(row.get::<_, i64>(5)?);
+            aggregate.input_cached_tokens = aggregate
+                .input_cached_tokens
+                .saturating_add(row.get::<_, i64>(6)?);
+            aggregate.input_cache_write_tokens = aggregate
+                .input_cache_write_tokens
+                .saturating_add(row.get::<_, i64>(7)?);
+            aggregate.output_tokens = aggregate
+                .output_tokens
+                .saturating_add(row.get::<_, i64>(8)?);
+            aggregate.total_tokens = aggregate
+                .total_tokens
+                .saturating_add(row.get::<_, i64>(9)?);
+        }
+        drop(native_rows);
+        drop(native_stmt);
+
+        for ((date, agent_type, model), aggregate) in native_aggregates {
+            let NativeUsageAnalysisAggregate {
+                native_event_count,
+                input_uncached_tokens,
+                input_cached_tokens,
+                input_cache_write_tokens,
+                output_tokens,
+                total_tokens,
+            } = aggregate;
+            let input_tokens = input_uncached_tokens
+                .saturating_add(input_cached_tokens)
+                .saturating_add(input_cache_write_tokens);
+            let (estimated_cost, estimated_cost_currency) = estimate_native_public_cost(
+                &prices,
+                &model,
+                input_uncached_tokens,
+                input_cached_tokens,
+                input_cache_write_tokens,
+                output_tokens,
+            )
+            .map(|(amount, currency)| (amount, Some(currency)))
+            .unwrap_or((0.0, None));
+            let client_name = native_agent_display_name(&agent_type).to_string();
+            summary.push(UsageSummaryRow {
+                date,
+                client_id: Some(native_agent_client_id(&agent_type).to_string()),
+                client_name: Some(client_name.clone()),
+                channel_id: Some("agent-native".to_string()),
+                channel_name: Some("Agent 原生（未经过 Flowlet）".to_string()),
+                account_id: Some(agent_type.clone()),
+                account_name: Some(client_name),
+                upstream_model: Some(model),
+                request_count: 0,
+                known_tokens: total_tokens,
+                input_tokens,
+                input_cached_tokens,
+                input_uncached_tokens,
+                cache_measured_input_tokens: input_tokens,
+                output_tokens,
+                unknown_count: 0,
+                estimated_cost,
+                estimated_cost_currency,
+                native_event_count,
+                elapsed_total_ms: 0,
+                elapsed_measured_count: 0,
+                generation_total_ms: 0,
+                generation_output_tokens: 0,
+                device_id: Some(current_device_id.to_string()),
+            });
+        }
+        summary.sort_by(|left, right| {
+            right
+                .date
+                .cmp(&left.date)
+                .then_with(|| right.request_count.cmp(&left.request_count))
+                .then_with(|| right.native_event_count.cmp(&left.native_event_count))
+        });
         Ok(summary)
     }
 
@@ -2855,22 +3162,167 @@ impl Storage {
             output_tokens: row.get(15)?,
             unknown_count: row.get(16)?,
             estimated_cost: row.get(17)?,
-            elapsed_total_ms: row.get(18)?,
-            elapsed_measured_count: row.get(19)?,
-            generation_total_ms: row.get(20)?,
-            generation_output_tokens: row.get(21)?,
+            estimated_cost_currency: row.get(18)?,
+            native_event_count: row.get(19)?,
+            elapsed_total_ms: row.get(20)?,
+            elapsed_measured_count: row.get(21)?,
+            generation_total_ms: row.get(22)?,
+            generation_output_tokens: row.get(23)?,
         })
     }
 
-    /// 今日 Token 消耗聚合（总量 + 输入/缓存/未缓存/输出拆解）。
-    ///
-    /// 与 `usage_summary` 不同，这个查询只返回单条聚合行，不带分组、不带
-    /// `request_logs` JOIN，并利用 `idx_usage_records_created_at` 索引做范围
-    /// 扫描。持锁时间极短，专门喂给概览页顶部 service-strip 的「今日消耗」
-    /// 悬浮明细（总消耗 + 缓存命中率 + 输入/输出拆解），避免每 30s 拉全量
-    /// 汇总表把主线程卡死。`cache_measured_input_tokens` 的分母语义与
-    /// `usage_summary` 完全一致：只有明确返回缓存字段的请求（`input_cached_tokens`
-    /// 非空）才计入可计算缓存命中率的输入分母。
+    /// 生成供设备同步的 Agent 原生模型用量维度行。数据直接从逐事件账本和
+    /// 会话快照动态聚合，因此版本升级后的下一次同步即可补发既有历史，
+    /// 不需要先改写历史表或运行数据完整性修复。
+    pub(super) fn native_usage_breakdowns_for_sync(
+        &self,
+        history_days: i64,
+    ) -> Result<Vec<DeviceUsageBreakdownRow>, StorageError> {
+        let prices = self.prices();
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let snapshot_models = {
+            let mut statement = connection.prepare(
+                "SELECT agent_type, session_id, summary_json FROM agent_session_snapshots",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            let mut models = HashMap::new();
+            for row in rows {
+                let (agent_type, session_id, summary_json) = row?;
+                if let Some(model) = unique_snapshot_model(&summary_json) {
+                    models.insert((agent_type, session_id), model);
+                }
+            }
+            models
+        };
+        let mut statement = connection.prepare(
+            r#"
+            SELECT
+                strftime('%Y-%m-%d', event_time, 'localtime') AS usage_date,
+                agent_type,
+                session_id,
+                nullif(trim(model), '') AS model,
+                count(*) AS native_event_count,
+                coalesce(sum(CASE
+                    WHEN agent_type IN ('codex-desktop', 'codex-cli') THEN
+                        max(input_tokens - cached_input_tokens - cache_write_input_tokens, 0)
+                    ELSE input_tokens
+                END), 0) AS input_uncached_tokens,
+                coalesce(sum(cached_input_tokens), 0) AS input_cached_tokens,
+                coalesce(sum(cache_write_input_tokens), 0) AS input_cache_write_tokens,
+                coalesce(sum(output_tokens), 0) AS output_tokens,
+                coalesce(sum(total_tokens), 0) AS total_tokens
+            FROM agent_usage_events
+            WHERE event_time >= datetime('now', 'localtime', 'start of day', printf('-%d days', ?1), 'utc')
+              AND NOT EXISTS (
+                  SELECT 1 FROM request_logs
+                  WHERE request_logs.agent_type = agent_usage_events.agent_type
+                    AND request_logs.agent_session_id = agent_usage_events.session_id
+              )
+            GROUP BY usage_date, agent_type, session_id, nullif(trim(model), '')
+            ORDER BY usage_date ASC
+            "#,
+        )?;
+        let mut rows = statement.query([history_days])?;
+        let mut aggregates: HashMap<(String, String, String), NativeUsageAnalysisAggregate> =
+            HashMap::new();
+        while let Some(row) = rows.next()? {
+            let date = row
+                .get::<_, Option<String>>(0)?
+                .unwrap_or_else(|| "未知日期".to_string());
+            let agent_type: String = row.get(1)?;
+            let session_id: String = row.get(2)?;
+            let model = row.get::<_, Option<String>>(3)?.or_else(|| {
+                snapshot_models
+                    .get(&(agent_type.clone(), session_id))
+                    .cloned()
+            });
+            let Some(model) = model else {
+                continue;
+            };
+            let aggregate = aggregates
+                .entry((date, agent_type, model))
+                .or_default();
+            aggregate.native_event_count = aggregate
+                .native_event_count
+                .saturating_add(row.get::<_, i64>(4)?);
+            aggregate.input_uncached_tokens = aggregate
+                .input_uncached_tokens
+                .saturating_add(row.get::<_, i64>(5)?);
+            aggregate.input_cached_tokens = aggregate
+                .input_cached_tokens
+                .saturating_add(row.get::<_, i64>(6)?);
+            aggregate.input_cache_write_tokens = aggregate
+                .input_cache_write_tokens
+                .saturating_add(row.get::<_, i64>(7)?);
+            aggregate.output_tokens = aggregate
+                .output_tokens
+                .saturating_add(row.get::<_, i64>(8)?);
+            aggregate.total_tokens = aggregate
+                .total_tokens
+                .saturating_add(row.get::<_, i64>(9)?);
+        }
+        drop(rows);
+        drop(statement);
+
+        Ok(aggregates
+            .into_iter()
+            .map(|((date, agent_type, model), aggregate)| {
+                let input_tokens = aggregate
+                    .input_uncached_tokens
+                    .saturating_add(aggregate.input_cached_tokens)
+                    .saturating_add(aggregate.input_cache_write_tokens);
+                let (estimated_cost, estimated_cost_currency) = estimate_native_public_cost(
+                    &prices,
+                    &model,
+                    aggregate.input_uncached_tokens,
+                    aggregate.input_cached_tokens,
+                    aggregate.input_cache_write_tokens,
+                    aggregate.output_tokens,
+                )
+                .map(|(amount, currency)| (amount, Some(currency)))
+                .unwrap_or((0.0, None));
+                let client_name = native_agent_display_name(&agent_type).to_string();
+                DeviceUsageBreakdownRow {
+                    date,
+                    client_id: Some(native_agent_client_id(&agent_type).to_string()),
+                    client_name: Some(client_name.clone()),
+                    channel_id: Some("agent-native".to_string()),
+                    channel_name: Some("Agent 原生（未经过 Flowlet）".to_string()),
+                    account_id: Some(agent_type),
+                    account_name: Some(client_name),
+                    upstream_model: Some(model),
+                    request_count: 0,
+                    known_tokens: aggregate.total_tokens,
+                    input_tokens,
+                    input_cached_tokens: aggregate.input_cached_tokens,
+                    input_uncached_tokens: aggregate.input_uncached_tokens,
+                    cache_measured_input_tokens: input_tokens,
+                    output_tokens: aggregate.output_tokens,
+                    unknown_count: 0,
+                    estimated_cost,
+                    estimated_cost_currency,
+                    native_event_count: aggregate.native_event_count,
+                    elapsed_total_ms: 0,
+                    elapsed_measured_count: 0,
+                    generation_total_ms: 0,
+                    generation_output_tokens: 0,
+                }
+            })
+            .collect())
+    }
+
+    /// 今日 Token 消耗单行聚合。口径与用量统计页「日 / 全部设备」一致：
+    /// 本机 Flowlet 请求、本机未经过 Flowlet 的 Agent 原生事件，以及同步到本机的
+    /// 其他设备日快照。查询只读取今天并返回一行，避免概览页轮询整段历史。
     pub fn usage_today_summary(&self) -> Result<UsageTodaySummary, StorageError> {
         let connection = self
             .connection
@@ -2878,16 +3330,92 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let summary = connection.query_row(
             r#"
+            WITH today_sources (
+                total_tokens,
+                input_tokens,
+                input_cached_tokens,
+                input_uncached_tokens,
+                cache_measured_input_tokens,
+                output_tokens
+            ) AS (
+                SELECT
+                    coalesce(sum(ur.total_tokens), 0),
+                    coalesce(sum(ur.input_tokens), 0),
+                    coalesce(sum(ur.input_cached_tokens), 0),
+                    coalesce(sum(ur.input_uncached_tokens), 0),
+                    coalesce(sum(CASE
+                        WHEN ur.input_cached_tokens IS NOT NULL THEN ur.input_tokens ELSE 0
+                    END), 0),
+                    coalesce(sum(ur.output_tokens), 0)
+                FROM usage_records ur
+                LEFT JOIN request_logs rl
+                       ON rl.request_id = ur.request_id
+                      AND rl.is_last_attempt = 1
+                WHERE strftime(
+                    '%Y-%m-%d',
+                    coalesce(rl.created_at, ur.created_at),
+                    'localtime'
+                ) = date('now', 'localtime')
+
+                UNION ALL
+
+                SELECT
+                    coalesce(sum(a.total_tokens), 0),
+                    coalesce(sum(CASE
+                        WHEN a.agent_type IN ('codex-desktop', 'codex-cli') THEN
+                            max(a.input_tokens - a.cached_input_tokens - a.cache_write_input_tokens, 0)
+                        ELSE a.input_tokens
+                    END), 0)
+                        + coalesce(sum(a.cached_input_tokens), 0)
+                        + coalesce(sum(a.cache_write_input_tokens), 0),
+                    coalesce(sum(a.cached_input_tokens), 0),
+                    coalesce(sum(CASE
+                        WHEN a.agent_type IN ('codex-desktop', 'codex-cli') THEN
+                            max(a.input_tokens - a.cached_input_tokens - a.cache_write_input_tokens, 0)
+                        ELSE a.input_tokens
+                    END), 0),
+                    coalesce(sum(CASE
+                        WHEN a.agent_type IN ('codex-desktop', 'codex-cli') THEN
+                            max(a.input_tokens - a.cached_input_tokens - a.cache_write_input_tokens, 0)
+                        ELSE a.input_tokens
+                    END), 0)
+                        + coalesce(sum(a.cached_input_tokens), 0)
+                        + coalesce(sum(a.cache_write_input_tokens), 0),
+                    coalesce(sum(a.output_tokens), 0)
+                FROM agent_usage_events a
+                WHERE strftime('%Y-%m-%d', a.event_time, 'localtime') = date('now', 'localtime')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM request_logs rl
+                      WHERE rl.agent_type = a.agent_type
+                        AND rl.agent_session_id = a.session_id
+                  )
+
+                UNION ALL
+
+                SELECT
+                    coalesce(sum(d.known_tokens + d.native_total_tokens), 0),
+                    coalesce(sum(
+                        d.input_tokens + d.native_input_tokens
+                        + d.native_cached_input_tokens + d.native_cache_write_input_tokens
+                    ), 0),
+                    coalesce(sum(d.input_cached_tokens + d.native_cached_input_tokens), 0),
+                    coalesce(sum(d.input_uncached_tokens + d.native_input_tokens), 0),
+                    coalesce(sum(
+                        d.cache_measured_input_tokens + d.native_input_tokens
+                        + d.native_cached_input_tokens + d.native_cache_write_input_tokens
+                    ), 0),
+                    coalesce(sum(d.output_tokens + d.native_output_tokens), 0)
+                FROM device_daily_usage d
+                WHERE d.usage_date = date('now', 'localtime')
+            )
             SELECT
                 coalesce(sum(total_tokens), 0),
                 coalesce(sum(input_tokens), 0),
                 coalesce(sum(input_cached_tokens), 0),
                 coalesce(sum(input_uncached_tokens), 0),
-                coalesce(sum(CASE WHEN input_cached_tokens IS NOT NULL THEN input_tokens ELSE 0 END), 0),
+                coalesce(sum(cache_measured_input_tokens), 0),
                 coalesce(sum(output_tokens), 0)
-            FROM usage_records
-            WHERE created_at >= date('now', 'localtime')
-              AND created_at < date('now', 'localtime', '+1 day')
+            FROM today_sources
             "#,
             [],
             |row| {
@@ -3418,6 +3946,16 @@ mod agent_session_filter_tests {
         let running = session("opencode", true);
         assert!(matches_agent_session_runtime_status(&idle, ""));
         assert!(matches_agent_session_runtime_status(&running, ""));
+    }
+
+    #[test]
+    fn project_path_filter_includes_directory_and_descendants_only() {
+        let mut row = session("codex-cli", false);
+        row.project_path = Some("D:\\work\\flowlet\\src".to_string());
+        assert!(session_matches_project_path(&row, "D:\\work\\flowlet"));
+        assert!(session_matches_project_path(&row, "d:/work/flowlet/"));
+        assert!(!session_matches_project_path(&row, "D:\\work\\flow"));
+        assert!(!session_matches_project_path(&row, "D:\\work\\other"));
     }
 
     #[test]

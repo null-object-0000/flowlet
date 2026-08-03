@@ -9,6 +9,7 @@ import { UsageCostPage } from "../pages/usage/UsageCostPage";
 import { UsageAnalysisPage } from "../pages/usage-analysis/UsageAnalysisPage";
 import { AgentSessionsPage } from "../pages/agent-sessions/AgentSessionsPage";
 import { TaskLogsPage } from "../pages/task-logs/TaskLogsPage";
+import { ProjectsPage } from "../pages/projects/ProjectsPage";
 
 const RequestLogsPage = lazy(() => import("../pages/request-logs/RequestLogsPage").then((module) => ({ default: module.RequestLogsPage })));
 
@@ -20,6 +21,8 @@ export function AppRouter() {
           <Route index element={<OverviewPage />} />
           <Route path="overview" element={<OverviewPage />} />
           <Route path="models" element={<ModelServicesPage />} />
+          <Route path="projects" element={<ProjectsPage />} />
+          <Route path="projects/:projectId" element={<ProjectsPage />} />
           <Route path="logs" element={<Suspense fallback={<RequestLogsRouteFallback />}><RequestLogsPage /></Suspense>} />
           <Route path="sessions" element={<AgentSessionsPage />} />
           <Route path="tasks" element={<TaskLogsPage />} />

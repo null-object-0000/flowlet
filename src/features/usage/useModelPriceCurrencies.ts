@@ -41,14 +41,15 @@ export function useModelPriceCurrencyLookup() {
     }
     return {
       modelCurrencyOf: (row: UsageSummaryRow) =>
-        row.channel_id && row.upstream_model
-          ? byModel.get(priceKey(row.channel_id, row.upstream_model))
-            ?? byModel.get(priceKey(
-              officialChannelIdForModel(row.upstream_model) ?? row.channel_id,
-              row.upstream_model,
-            ))
-            ?? null
-          : null,
+        row.estimated_cost_currency
+          ?? (row.channel_id && row.upstream_model
+            ? byModel.get(priceKey(row.channel_id, row.upstream_model))
+              ?? byModel.get(priceKey(
+                officialChannelIdForModel(row.upstream_model) ?? row.channel_id,
+                row.upstream_model,
+              ))
+              ?? null
+            : null),
       channelCurrencyOf: (row: UsageSummaryRow) =>
         row.channel_id
           ? byChannel.get(row.channel_id)

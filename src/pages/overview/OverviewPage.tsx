@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, Toast } from "@douyinfe/semi-ui-19";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
 import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
@@ -17,6 +18,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
 export function OverviewPage() {
   const { t } = useAppPreferences();
+  const navigate = useNavigate();
   const accounts = useAccounts();
   const presets = useChannelPresets();
   const accountActions = useAccountActions(presets.data ?? []);
@@ -52,9 +54,8 @@ export function OverviewPage() {
     await codexAccounts.refetch();
   };
 
-  // 概览页顶部「今日消耗」：用专用轻量接口，拉今日 Token 聚合（总量 + 输入/
-  // 输出/缓存拆解，单条聚合行），供总数展示与悬浮明细。不要复用
-  // useUsageSummary —— 那个拉全量分组明细，每 30s 卡窗口拖动。
+  // 概览页顶部「今日消耗」仍使用单条聚合 command，但后端口径与用量统计页
+  // 的「日 / 全部设备」一致：本机代理 + 本机 Agent 原生 + 其他设备快照。
   const { summary: todayUsage } = useTodayTokens(true);
 
   return (
@@ -68,6 +69,7 @@ export function OverviewPage() {
         bindConfig={bindConfig.data}
         baseUrl={baseUrl}
         todayUsage={todayUsage}
+        onOpenUsage={() => navigate("/usage")}
         onOpenDetails={() => setDetailsVisible(true)}
       />
 

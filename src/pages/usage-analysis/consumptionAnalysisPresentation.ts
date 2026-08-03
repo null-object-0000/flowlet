@@ -1,5 +1,5 @@
 /**
- * 用量分析页「多维归因」模块的纯展示层聚合。
+ * 用量洞察页「多维归因」模块的纯展示层聚合。
  *
  * 数据来源是 `usage_summary` command 的分组明细行（粒度为
  * 日期 × client × channel × account × upstream_model），本模块在
@@ -20,6 +20,21 @@ export type ConsumptionDimension = "model" | "account" | "client" | "device";
 export type ConsumptionMetric = "tokens" | "cost";
 export type CostCurrencyLookup = (row: UsageSummaryRow) => string | null;
 
+function modelBrandId(row: UsageSummaryRow): string | null {
+  const model = (canonicalModelId(row.upstream_model) ?? row.upstream_model ?? "")
+    .trim()
+    .toLowerCase();
+  if (model.startsWith("gpt-")) return "chatgpt";
+  return officialChannelIdForModel(row.upstream_model) ?? row.channel_id ?? null;
+}
+
+export function filterConsumptionByDevice(
+  rows: UsageSummaryRow[],
+  deviceId: string | null,
+): UsageSummaryRow[] {
+  return deviceId == null ? rows : rows.filter((row) => row.device_id === deviceId);
+}
+
 export type ConsumptionAggregate = {
   tokens: number;
   inputTokens: number;
@@ -28,6 +43,7 @@ export type ConsumptionAggregate = {
   cacheMeasuredInputTokens: number;
   outputTokens: number;
   requests: number;
+  nativeEvents: number;
   unknown: number;
   cost: number;
   costByCurrency: Record<string, number>;
@@ -221,7 +237,7 @@ function dimensionSelectors(
       labelOf: (row) => canonicalModelId(row.upstream_model) ?? row.upstream_model ?? "未知模型",
       shortLabelOf: (row) => canonicalModelId(row.upstream_model) ?? row.upstream_model ?? "未知模型",
       sublabelOf: (row) => row.channel_name ?? row.channel_id ?? null,
-      brandIdOf: (row) => officialChannelIdForModel(row.upstream_model) ?? row.channel_id ?? null,
+      brandIdOf: modelBrandId,
     };
   }
   if (dimension === "account") {
@@ -284,6 +300,7 @@ function accumulate(entry: ConsumptionAggregate, row: UsageSummaryRow, currencyO
   entry.cacheMeasuredInputTokens += finite(row.cache_measured_input_tokens);
   entry.outputTokens += finite(row.output_tokens);
   entry.requests += finite(row.request_count);
+  entry.nativeEvents += finite(row.native_event_count ?? 0);
   entry.unknown += finite(row.unknown_count);
   const cost = finite(row.estimated_cost);
   entry.cost += cost;
@@ -312,6 +329,7 @@ function emptyAggregate(): ConsumptionAggregate {
     cacheMeasuredInputTokens: 0,
     outputTokens: 0,
     requests: 0,
+    nativeEvents: 0,
     unknown: 0,
     cost: 0,
     costByCurrency: {},

@@ -65,6 +65,12 @@ export const queryKeys = {
     lastInteraction: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "last-interaction", agentType, sessionId] as const,
     clients: () => [...queryKeys.agentSession.all, "clients"] as const,
   },
+  project: {
+    all: ["project"] as const,
+    list: () => [...queryKeys.project.all, "list"] as const,
+    detail: (projectId: string) => [...queryKeys.project.all, "detail", projectId] as const,
+    tasks: (projectId: string) => [...queryKeys.project.all, "tasks", projectId] as const,
+  },
   backgroundTask: {
     all: ["background-task"] as const,
     list: (filter?: unknown) => [...queryKeys.backgroundTask.all, "list", filter] as const,

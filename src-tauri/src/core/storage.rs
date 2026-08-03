@@ -34,6 +34,8 @@ mod storage_config;
 mod storage_device_usage;
 #[path = "storage_maintenance.rs"]
 mod storage_maintenance;
+#[path = "storage_projects.rs"]
+mod storage_projects;
 #[path = "storage_stats.rs"]
 mod storage_stats;
 #[path = "storage_tasks.rs"]
@@ -41,6 +43,7 @@ pub(crate) mod storage_tasks;
 #[path = "storage_usage.rs"]
 mod storage_usage;
 pub use storage_maintenance::{DatabaseCompactionResult, DatabaseMaintenanceStats};
+pub use storage_projects::{Project, ProjectTask};
 pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
 pub use storage_tasks::{
     AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
@@ -922,6 +925,29 @@ impl Storage {
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS projects (
+                id             TEXT PRIMARY KEY,
+                name           TEXT NOT NULL,
+                directory_path TEXT NOT NULL,
+                created_at     TEXT NOT NULL,
+                updated_at     TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS project_tasks (
+                id          TEXT PRIMARY KEY,
+                project_id  TEXT NOT NULL,
+                title       TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                status      TEXT NOT NULL DEFAULT 'todo'
+                            CHECK (status IN ('todo', 'in_progress', 'done')),
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
+                ON project_tasks(project_id, status, updated_at DESC);
+
             CREATE TABLE IF NOT EXISTS known_devices (
                 device_id               TEXT PRIMARY KEY,
                 device_created_at       TEXT NOT NULL,
@@ -1022,6 +1048,8 @@ impl Storage {
                 output_tokens                INTEGER NOT NULL DEFAULT 0,
                 unknown_count                INTEGER NOT NULL DEFAULT 0,
                 estimated_cost               REAL    NOT NULL DEFAULT 0,
+                estimated_cost_currency      TEXT,
+                native_event_count           INTEGER NOT NULL DEFAULT 0,
                 elapsed_total_ms             INTEGER NOT NULL DEFAULT 0,
                 elapsed_measured_count       INTEGER NOT NULL DEFAULT 0,
                 generation_total_ms          INTEGER NOT NULL DEFAULT 0,
@@ -1110,6 +1138,19 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_background_job_events_job
                 ON background_job_events(job_id, sequence);
             "#,
+        )?;
+
+        add_column_if_missing(
+            &connection,
+            "device_usage_breakdowns",
+            "estimated_cost_currency",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_usage_breakdowns",
+            "native_event_count",
+            "INTEGER NOT NULL DEFAULT 0",
         )?;
 
         add_column_if_missing(

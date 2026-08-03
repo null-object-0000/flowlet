@@ -6,25 +6,6 @@
   gap: 12px;
 }
 
-.deviceTitleTrigger {
-  min-width: 0;
-  max-width: min(360px, 34vw);
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  color: inherit;
-  background: transparent;
-  font: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.deviceTitleTrigger > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.deviceTitleTrigger :global(.semi-icon) { flex: none; color: var(--flowlet-color-text-tertiary); font-size: 16px; }
-.deviceTitleTrigger:hover { color: var(--flowlet-color-primary); }
-
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .stat {
   min-width: 0;

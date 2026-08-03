@@ -1,8 +1,9 @@
-import { IconChevronDown, IconChevronRight } from "@douyinfe/semi-icons";
-import { Button, Dropdown, Pagination, SideSheet } from "@douyinfe/semi-ui-19";
+import { IconChevronRight } from "@douyinfe/semi-icons";
+import { Button, Pagination, SideSheet } from "@douyinfe/semi-ui-19";
 import { useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useDeviceDailyUsage, useDeviceHourlyUsage, useKnownDevices } from "../../features/device-sync/useDeviceSync";
+import { DeviceUsageTitlePicker } from "../../features/device-sync/DeviceUsageTitlePicker";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
@@ -248,9 +249,10 @@ export function UsageCostPage() {
     <main className={styles.page}>
       <PageHeader
         title={(
-          <DeviceTitlePicker
+          <DeviceUsageTitlePicker
             devices={devices.data ?? []}
             deviceId={deviceId}
+            title="用量统计"
             onChange={(value) => {
               setDeviceId(value);
               resetSelection();
@@ -768,49 +770,6 @@ function HeatmapMetricSwitch({ value, onChange, t }: {
         </button>
       ))}
     </div>
-  );
-}
-
-export function DeviceTitlePicker({ devices, deviceId, onChange }: {
-  devices: Array<{ deviceId: string; displayName: string }>;
-  deviceId: string | null;
-  onChange: (deviceId: string | null) => void;
-}) {
-  const { t } = useAppPreferences();
-  const selectedDevice = devices.find((device) => device.deviceId === deviceId) ?? null;
-  const selectedName = selectedDevice?.displayName ?? t("全部设备");
-
-  return (
-    <Dropdown
-      position="bottomLeft"
-      trigger="click"
-      clickToHide
-      render={(
-        <Dropdown.Menu>
-          <Dropdown.Item active={deviceId == null} onClick={() => onChange(null)}>
-            {t("全部设备")}
-          </Dropdown.Item>
-          {devices.map((device) => (
-            <Dropdown.Item
-              key={device.deviceId}
-              active={device.deviceId === deviceId}
-              onClick={() => onChange(device.deviceId)}
-            >
-              {device.displayName}
-            </Dropdown.Item>
-          ))}
-        </Dropdown.Menu>
-      )}
-    >
-      <button
-        type="button"
-        className={styles.deviceTitleTrigger}
-        aria-label={t("切换设备，当前：{name}", { name: selectedName })}
-      >
-        <span>{selectedDevice ? `${selectedDevice.displayName} ${t("概览")}` : t("全部概览")}</span>
-        <IconChevronDown />
-      </button>
-    </Dropdown>
   );
 }
 

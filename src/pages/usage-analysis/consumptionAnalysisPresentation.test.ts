@@ -5,6 +5,7 @@ import {
   buildCrossMatrix,
   cacheHitRateOf,
   cellId,
+  filterConsumptionByDevice,
   groupConsumption,
   outputTokensPerSecondOf,
   secondaryDimensionOf,
@@ -55,6 +56,21 @@ const rows = [
 const cnyOnly = () => "CNY";
 const mixedCurrency = (r: UsageSummaryRow) => (r.channel_id === "custom" ? "USD" : "CNY");
 
+describe("filterConsumptionByDevice", () => {
+  const deviceRows = [
+    row({ device_id: "change-work", known_tokens: 120 }),
+    row({ device_id: "home", known_tokens: 80 }),
+  ];
+
+  it("keeps every device when no device is selected", () => {
+    expect(filterConsumptionByDevice(deviceRows, null)).toBe(deviceRows);
+  });
+
+  it("keeps only rows attributed to the selected device", () => {
+    expect(filterConsumptionByDevice(deviceRows, "change-work")).toEqual([deviceRows[0]]);
+  });
+});
+
 describe("groupConsumption", () => {
   it("groups by canonical model id and merges alias variants", () => {
     const entries = groupConsumption(rows, "model", cnyOnly);
@@ -64,6 +80,7 @@ describe("groupConsumption", () => {
     expect(flash.tokens).toBe(800);
     expect(flash.requests).toBe(2);
     expect(flash.brandId).toBe("deepseek");
+    expect(entries.find((entry) => entry.key === "gpt-5-mini")?.brandId).toBe("chatgpt");
     expect(flash.tokenShare).toBeCloseTo(800 / 4300);
   });
 
@@ -98,6 +115,43 @@ describe("groupConsumption", () => {
     expect(custom?.costByCurrency).toEqual({ USD: 0.4 });
     const deepseek = entries.find((entry) => entry.key === "deepseek::acc-ds-1");
     expect(deepseek?.costByCurrency).toEqual({ CNY: 0.23 });
+  });
+
+  it("includes model-known native Agent usage as a distinct source", () => {
+    const native = row({
+      client_id: "codex",
+      client_name: "Codex Desktop",
+      channel_id: "agent-native",
+      channel_name: "Agent 原生（未经过 Flowlet）",
+      account_id: "codex-desktop",
+      account_name: "Codex Desktop",
+      upstream_model: "gpt-5.6-sol",
+      request_count: 0,
+      native_event_count: 2,
+      known_tokens: 1500,
+      input_tokens: 1200,
+      input_cached_tokens: 800,
+      input_uncached_tokens: 400,
+      cache_measured_input_tokens: 1200,
+      output_tokens: 300,
+      estimated_cost: 0.12,
+      estimated_cost_currency: "USD",
+    });
+    const currencyOf = (usage: UsageSummaryRow) => usage.estimated_cost_currency ?? null;
+
+    const byModel = groupConsumption([native], "model", currencyOf);
+    expect(byModel[0]).toMatchObject({
+      key: "gpt-5.6-sol",
+      tokens: 1500,
+      requests: 0,
+      nativeEvents: 2,
+      costByCurrency: { USD: 0.12 },
+    });
+    const byAccount = groupConsumption([native], "account", currencyOf);
+    expect(byAccount[0].label).toBe("Agent 原生（未经过 Flowlet） · Codex Desktop");
+    const matrix = buildCrossMatrix([native], "client", "cost", currencyOf);
+    expect(matrix.cells.get(cellId("codex", "gpt-5.6-sol"))?.costByCurrency)
+      .toEqual({ USD: 0.12 });
   });
 
   it("derives performance metrics with request-log semantics", () => {

@@ -10,6 +10,7 @@ export const agentSessionCommands = {
         search: filter.search,
         agent_type: filter.agentType,
         runtime_status: filter.runtimeStatus,
+        ...(filter.projectPath ? { project_path: filter.projectPath } : {}),
       },
     }).catch((error: unknown) => {
       throw toAppError(error, "agent_session_list_failed");

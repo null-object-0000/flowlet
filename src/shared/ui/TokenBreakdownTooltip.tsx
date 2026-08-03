@@ -15,6 +15,8 @@ type TokenBreakdown = {
   cacheHitRate: number | null;
   /** 可选：请求量（用量分析页维度聚合等场景展示）。 */
   requests?: number | null;
+  /** 可选：未经过 Flowlet 的 Agent 原生消息级用量事件数。 */
+  nativeEvents?: number | null;
   unknownUsageCount?: number;
   /** 可选：同一聚合口径下，Flowlet 代理与 Agent 原生数据的来源拆解。 */
   sourceBreakdown?: {
@@ -46,6 +48,7 @@ export function TokenBreakdownContent({ tokens, language, t, label }: ContentPro
       <span><small>{t("缓存命中率")}</small><b>{formatPercentage(tokens.cacheHitRate)}</b></span>
       <hr className={styles.divider} />
       {tokens.requests != null ? <span><small>{t("请求量")}</small><b>{formatInteger(tokens.requests, language)}</b></span> : null}
+      {(tokens.nativeEvents ?? 0) > 0 ? <span><small>{t("Agent 原生事件")}</small><b>{formatInteger(tokens.nativeEvents ?? 0, language)}</b></span> : null}
       <span><small>{t("输入 Token")}</small><b><CompactNumber value={tokens.input} language={language} /></b></span>
       <span><small>{t("缓存输入 Token")}</small><b><CompactNumber value={tokens.cachedInput} language={language} /></b></span>
       {tokens.cacheWriteInput != null ? <span><small>{t("缓存写入")}</small><b><CompactNumber value={tokens.cacheWriteInput} language={language} /></b></span> : null}

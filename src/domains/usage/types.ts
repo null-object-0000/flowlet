@@ -16,6 +16,10 @@ export type UsageSummaryRow = {
   output_tokens: number;
   unknown_count: number;
   estimated_cost: number;
+  /** 后端已明确的费用币种；Agent 原生行会直接返回，代理旧行可为空并由价格目录回退。 */
+  estimated_cost_currency?: string | null;
+  /** 未经过 Flowlet 的 Agent 原生消息级用量事件数；代理行为 0。 */
+  native_event_count?: number;
   /** 请求总耗时之和（ms），COALESCE(duration_ms, latency_ms)，
    *  与请求日志页「总耗时」同口径；÷ elapsed_measured_count 得平均耗时。 */
   elapsed_total_ms: number;
@@ -72,7 +76,7 @@ export type AgentNativeUsageSummaryRow = {
   usage: AgentNativeUsage | null;
 };
 
-/** 概览页「今日消耗」轻量聚合：单条聚合行，供 service-strip 悬浮明细展示。 */
+/** 概览页「今日消耗」单条聚合，与用量统计页「日 / 全部设备」口径一致。 */
 export type UsageTodaySummary = {
   total_tokens: number;
   input_tokens: number;

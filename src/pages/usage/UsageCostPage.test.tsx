@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppPreferencesProvider } from "../../app/preferences/AppPreferences";
-import { DeviceTitlePicker } from "./UsageCostPage";
+import { DeviceUsageTitlePicker } from "../../features/device-sync/DeviceUsageTitlePicker";
 
 describe("usage overview device title picker", () => {
   it("shows the current scope in the page title and switches devices", async () => {
@@ -12,7 +12,7 @@ describe("usage overview device title picker", () => {
     ];
     const { rerender } = render(
       <AppPreferencesProvider>
-        <DeviceTitlePicker devices={devices} deviceId={null} onChange={onChange} />
+        <DeviceUsageTitlePicker devices={devices} deviceId={null} title="用量统计" onChange={onChange} />
       </AppPreferencesProvider>,
     );
 
@@ -22,10 +22,10 @@ describe("usage overview device title picker", () => {
 
     rerender(
       <AppPreferencesProvider>
-        <DeviceTitlePicker devices={devices} deviceId="office" onChange={onChange} />
+        <DeviceUsageTitlePicker devices={devices} deviceId="office" title="用量统计" onChange={onChange} />
       </AppPreferencesProvider>,
     );
     expect(screen.getByRole("button", { name: "Switch device, current: Office PC" }))
-      .toHaveTextContent("Office PC Overview");
+      .toHaveTextContent("Office PC · Usage");
   });
 });

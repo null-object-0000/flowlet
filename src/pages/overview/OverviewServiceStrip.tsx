@@ -6,7 +6,6 @@ import type { UsageTodaySummary } from "../../domains/usage/types";
 import { formatDuration, getProxyPhaseLabel } from "../../features/proxy-lifecycle/proxyStatusPresentation";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../shared/formatters/number";
-import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import styles from "./OverviewServiceStrip.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
@@ -23,10 +22,11 @@ type Props = {
   bindConfig: ProxyBindConfig | undefined;
   baseUrl: string;
   todayUsage: UsageTodaySummary | null;
+  onOpenUsage: () => void;
   onOpenDetails: () => void;
 };
 
-export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, onOpenDetails }: Props) {
+export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, onOpenUsage, onOpenDetails }: Props) {
   const { language, t } = useAppPreferences();
   const running = status?.running === true;
 
@@ -90,10 +90,16 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
         </div>
       </div>
 
-      <div className={styles.cell}>
+      <button
+        type="button"
+        className={`${styles.cell} ${styles.tokenMetric}`}
+        onClick={onOpenUsage}
+        title={t("打开用量统计")}
+        aria-label={t("今日消耗，打开用量统计")}
+      >
         <div className={styles.tokenLabel}>{t("今日消耗")}</div>
         <TodayTokenValue usage={todayUsage} language={language} t={t} />
-      </div>
+      </button>
 
       <div className={styles.cell}>
         <div className={styles.accessHead}>
@@ -182,30 +188,11 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
 
 function TodayTokenValue({ usage, language, t }: { usage: UsageTodaySummary | null; language: "zh-CN" | "en-US"; t: (source: string, variables?: Record<string, string | number>) => string }) {
   const text = usage ? formatCompactNumber(usage.total_tokens, language) : "—";
-  const value = (
-    <div className={usage ? `${styles.tokenValue} ${styles.tokenValueTooltip}` : styles.tokenValue}>
+  return (
+    <div className={styles.tokenValue}>
       {text}
       <span className={styles.tokenUnit}>{t("Tokens")}</span>
     </div>
-  );
-  if (!usage) return value;
-  return (
-    <TokenBreakdownTooltip
-      language={language}
-      t={t}
-      tokens={{
-        total: usage.total_tokens,
-        input: usage.input_tokens,
-        cachedInput: usage.input_cached_tokens,
-        uncachedInput: usage.input_uncached_tokens,
-        output: usage.output_tokens,
-        cacheHitRate: usage.cache_measured_input_tokens > 0
-          ? usage.input_cached_tokens / usage.cache_measured_input_tokens
-          : null,
-      }}
-    >
-      {value}
-    </TokenBreakdownTooltip>
   );
 }
 

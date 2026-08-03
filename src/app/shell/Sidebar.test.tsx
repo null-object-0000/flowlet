@@ -21,11 +21,12 @@ describe("Sidebar", () => {
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
       "运行概览",
       "模型服务",
+      "项目管理",
       "请求日志",
       "会话管理",
       "任务日志",
-      "用量概览",
-      "用量分析NEW",
+      "用量统计",
+      "用量洞察",
       "应用设置",
     ]);
     expect(screen.queryByText(/服务运行中|代理服务运行中/)).not.toBeInTheDocument();
@@ -44,11 +45,12 @@ describe("Sidebar", () => {
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
       "Overview",
       "Models",
+      "Projects",
       "Requests",
       "Sessions",
       "Tasks",
-      "Usage Overview",
-      "Usage AnalysisNEW",
+      "Usage",
+      "Usage Insights",
       "Settings",
     ]);
   });

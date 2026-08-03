@@ -1,0 +1,32 @@
+.trigger {
+  min-width: 0;
+  max-width: min(420px, 40vw);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.trigger :global(.semi-icon) {
+  flex: none;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 16px;
+}
+
+.trigger:hover {
+  color: var(--flowlet-color-primary);
+}

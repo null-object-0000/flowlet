@@ -6,6 +6,7 @@ import type { UsageSummaryRow } from "../../domains/usage/types";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { formatDuration, formatTokenRate } from "../../features/request-logs/logPresentation";
 import { useKnownDevices } from "../../features/device-sync/useDeviceSync";
+import { DeviceUsageTitlePicker } from "../../features/device-sync/DeviceUsageTitlePicker";
 import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
@@ -24,6 +25,7 @@ import {
   buildCrossMatrix,
   cacheHitRateOf,
   cellId,
+  filterConsumptionByDevice,
   groupConsumption,
   outputTokensPerSecondOf,
   type ConsumptionDimension,
@@ -55,6 +57,7 @@ export function UsageAnalysisPage() {
   const [matrixMetric, setMatrixMetric] = useState<ConsumptionMetric>("tokens");
   const [matrixExpanded, setMatrixExpanded] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
   const summaryFilter = useMemo(() => ({ ...timeRange, groupBy: "day" as const }), [timeRange]);
   const { query } = useUsageSummary(summaryFilter, refresh.autoRefresh);
   const { modelCurrencyOf } = useModelPriceCurrencyLookup();
@@ -77,7 +80,11 @@ export function UsageAnalysisPage() {
     };
   }, [deviceNameLookup, knownDevices.data, t]);
 
-  const rows = query.data ?? EMPTY_ROWS;
+  const allRows = query.data ?? EMPTY_ROWS;
+  const rows = useMemo(
+    () => filterConsumptionByDevice(allRows, deviceId),
+    [allRows, deviceId],
+  );
   const entries = useMemo(
     () => groupConsumption(rows, dimension, modelCurrencyOf, resolveDeviceName),
     [rows, dimension, modelCurrencyOf, resolveDeviceName],
@@ -111,7 +118,21 @@ export function UsageAnalysisPage() {
 
   return (
     <main className={styles.page}>
-      <PageHeader title={t("用量分析")} subtitle={t("按模型、渠道账号和客户端拆解 Token、费用与性能")}>
+      <PageHeader
+        title={(
+          <DeviceUsageTitlePicker
+            devices={knownDevices.data ?? []}
+            deviceId={deviceId}
+            title="用量洞察"
+            onChange={(value) => {
+              setDeviceId(value);
+              setSelectedKey(null);
+              setMatrixExpanded(false);
+            }}
+          />
+        )}
+        subtitle={t("合并 Flowlet 请求与可识别模型的 Agent 原生用量，拆解 Token、费用与性能")}
+      >
         <TimeScopeControl>
           <CalendarTimeRangeControl
             value={timeRange}
@@ -266,7 +287,12 @@ export function UsageAnalysisPage() {
                     </div>
                   </div>
                   <div className={styles.detailMeta}>
-                    {t("{count} 次请求", { count: formatInteger(selected.requests, language) })}
+                    {selected.requests > 0
+                      ? t("{count} 次请求", { count: formatInteger(selected.requests, language) })
+                      : t("无 Flowlet 请求")}
+                    {selected.nativeEvents > 0
+                      ? ` · ${t("{count} 条 Agent 原生事件", { count: formatInteger(selected.nativeEvents, language) })}`
+                      : ""}
                     {" · "}
                     {t("平均耗时 {elapsed}", { elapsed: formatDuration(averageElapsedMsOf(selected)) })}
                     {" · "}
@@ -441,6 +467,7 @@ function RankRow({ entry, dimension, selected, onSelect, language, t }: {
           output: entry.outputTokens,
           cacheHitRate: cacheRate,
           requests: entry.requests,
+          nativeEvents: entry.nativeEvents,
           unknownUsageCount: entry.unknown,
         }}
       >

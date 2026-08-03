@@ -562,7 +562,7 @@ impl Storage {
     pub fn import_device_usage_breakdowns(
         &self,
         device_id: &str,
-        generated_at: &str,
+        _generated_at: &str,
         usage_breakdowns: &[DeviceUsageBreakdownRow],
     ) -> Result<usize, StorageError> {
         if usage_breakdowns.is_empty() {
@@ -581,10 +581,11 @@ impl Storage {
                     account_id, account_name, upstream_model, request_count, known_tokens,
                     input_tokens, input_cached_tokens, input_uncached_tokens,
                     cache_measured_input_tokens, output_tokens, unknown_count, estimated_cost,
+                    estimated_cost_currency, native_event_count,
                     elapsed_total_ms, elapsed_measured_count, generation_total_ms,
                     generation_output_tokens, imported_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                           ?16, ?17, ?18, ?19, ?20, ?21, ?22, datetime('now'))
+                           ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, datetime('now'))
                  ON CONFLICT(device_id, breakdown_date, client_id, channel_id, account_id, upstream_model)
                  DO UPDATE SET
                     client_name = excluded.client_name,
@@ -599,6 +600,8 @@ impl Storage {
                     output_tokens = excluded.output_tokens,
                     unknown_count = excluded.unknown_count,
                     estimated_cost = excluded.estimated_cost,
+                    estimated_cost_currency = excluded.estimated_cost_currency,
+                    native_event_count = excluded.native_event_count,
                     elapsed_total_ms = excluded.elapsed_total_ms,
                     elapsed_measured_count = excluded.elapsed_measured_count,
                     generation_total_ms = excluded.generation_total_ms,
@@ -623,6 +626,8 @@ impl Storage {
                     breakdown.output_tokens,
                     breakdown.unknown_count,
                     breakdown.estimated_cost,
+                    breakdown.estimated_cost_currency,
+                    breakdown.native_event_count,
                     breakdown.elapsed_total_ms,
                     breakdown.elapsed_measured_count,
                     breakdown.generation_total_ms,
@@ -915,6 +920,7 @@ impl Storage {
         &self,
         history_days: i64,
     ) -> Result<Vec<DeviceUsageBreakdownRow>, StorageError> {
+        let native_breakdowns = self.native_usage_breakdowns_for_sync(history_days)?;
         let connection = self
             .connection
             .lock()
@@ -980,14 +986,19 @@ impl Storage {
                 output_tokens: row.get(14)?,
                 unknown_count: row.get(15)?,
                 estimated_cost: row.get(16)?,
+                estimated_cost_currency: None,
+                native_event_count: 0,
                 elapsed_total_ms: row.get(17)?,
                 elapsed_measured_count: row.get(18)?,
                 generation_total_ms: row.get(19)?,
                 generation_output_tokens: row.get(20)?,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StorageError::from)
+        let mut breakdowns = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)?;
+        breakdowns.extend(native_breakdowns);
+        Ok(breakdowns)
     }
 
     pub fn imported_device_agents(

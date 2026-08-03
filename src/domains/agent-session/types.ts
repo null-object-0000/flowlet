@@ -7,6 +7,7 @@ export type AgentSessionFilter = {
   search: string;
   agentType: "" | AgentSessionType;
   runtimeStatus: "" | AgentSessionRuntimeStatus;
+  projectPath?: string;
 };
 
 export type AgentSessionRow = {
@@ -58,6 +59,7 @@ export const DEFAULT_AGENT_SESSION_FILTER: AgentSessionFilter = {
   search: "",
   agentType: "",
   runtimeStatus: "",
+  projectPath: "",
 };
 
 export type AgentSessionNativeUsage = {

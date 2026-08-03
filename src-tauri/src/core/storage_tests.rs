@@ -1,8 +1,8 @@
 use super::Storage;
 use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
-    ChannelAccount, DeviceUsageBreakdownRow, LogsFilter, ProtocolType, RequestLogInput, RouteCandidate,
-    UsageRecordInput, UsageSummaryRow,
+    ChannelAccount, DeviceUsageBreakdownRow, LogsFilter, ModelPrice, ProtocolType, RequestLogInput,
+    RouteCandidate, UsageRecordInput, UsageSummaryRow,
 };
 use crate::core::device_identity::{
     DailyUsageTotal, HourlyUsageTotal, SyncedAgentInstallation, SyncedAgentInteraction,
@@ -507,6 +507,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 search: "ses_test".to_string(),
                 agent_type: "opencode".to_string(),
                 runtime_status: String::new(),
+                project_path: String::new(),
             },
             &std::collections::HashSet::new(),
         )
@@ -556,6 +557,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 search: String::new(),
                 agent_type: String::new(),
                 runtime_status: "waiting_user".to_string(),
+                project_path: String::new(),
             },
             &pending,
         )
@@ -571,6 +573,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 search: String::new(),
                 agent_type: String::new(),
                 runtime_status: "idle".to_string(),
+                project_path: String::new(),
             },
             &pending,
         )
@@ -585,6 +588,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 search: String::new(),
                 agent_type: "claude-code".to_string(),
                 runtime_status: String::new(),
+                project_path: String::new(),
             },
             &std::collections::HashSet::new(),
         )
@@ -599,6 +603,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 search: String::new(),
                 agent_type: String::new(),
                 runtime_status: String::new(),
+                project_path: String::new(),
             },
             &std::collections::HashSet::new(),
         )
@@ -651,6 +656,7 @@ fn groups_claude_code_requests_by_official_session_header_attribution() {
                 search: "09af5e1a".to_string(),
                 agent_type: "claude-code".to_string(),
                 runtime_status: String::new(),
+                project_path: String::new(),
             },
             &std::collections::HashSet::new(),
         )
@@ -2140,7 +2146,7 @@ fn usage_summary_aggregates_timings_with_request_log_semantics() {
 }
 
 #[test]
-fn usage_today_summary_aggregates_only_today_with_cache_denominator() {
+fn usage_today_summary_matches_all_device_daily_scope() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
     storage.migrate().expect("migrate schema");
@@ -2180,32 +2186,92 @@ fn usage_today_summary_aggregates_only_today_with_cache_denominator() {
         .expect("insert usage");
 
     for (request_id, expr) in [
-        ("today-cached", "datetime('now', 'localtime')"),
-        ("today-uncached", "datetime('now', 'localtime')"),
-        ("yesterday-x", "datetime('now', 'localtime', '-1 day')"),
+        ("today-cached", "datetime('now')"),
+        ("today-uncached", "datetime('now')"),
+        ("yesterday-x", "datetime('now', '-1 day')"),
     ] {
-        storage
-            .connection
-            .lock()
-            .unwrap()
+        let connection = storage.connection.lock().unwrap();
+        connection
             .execute(
                 &format!(
                     "UPDATE usage_records SET created_at = {expr} WHERE request_id = '{request_id}'"
                 ),
                 [],
             )
-            .expect("set created_at");
+            .expect("set usage created_at");
+        connection
+            .execute(
+                &format!(
+                    "UPDATE request_logs SET created_at = {expr} WHERE request_id = '{request_id}'"
+                ),
+                [],
+            )
+            .expect("set request created_at");
+    }
+
+    // 本机未经过 Flowlet 的 Agent 原生事件，也应计入今日消耗。
+    // Claude 的 input_tokens 是未缓存输入，另有缓存读取和缓存写入。
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_usage_events (
+                agent_type, session_id, event_id, event_time, model,
+                input_tokens, cached_input_tokens, cache_write_input_tokens,
+                output_tokens, reasoning_tokens, total_tokens, synced_at
+             ) VALUES (
+                'claude-code', 'native-today', 'native-today-event',
+                datetime('now'), 'claude-test',
+                30, 5, 2, 10, 0, 47, datetime('now')
+             )",
+            [],
+        )
+        .expect("insert today's native usage");
+
+    // 其他设备同步来的今日代理 + 原生快照，同样属于「全部设备」日口径。
+    {
+        let connection = storage.connection.lock().unwrap();
+        connection
+            .execute(
+                "INSERT INTO known_devices (
+                    device_id, device_created_at, display_name, platform, app_version,
+                    timezone_offset_minutes, profile_generated_at, first_seen_at, last_seen_at
+                 ) VALUES (
+                    'remote-device', datetime('now'), 'Remote', 'windows', '0.1.0',
+                    480, datetime('now'), datetime('now'), datetime('now')
+                 )",
+                [],
+            )
+            .expect("insert remote device");
+        connection
+            .execute(
+                "INSERT INTO device_daily_usage (
+                    device_id, usage_date, request_count, known_tokens, input_tokens,
+                    input_cached_tokens, input_uncached_tokens, cache_measured_input_tokens,
+                    output_tokens, unknown_count, native_event_count, native_input_tokens,
+                    native_cached_input_tokens, native_cache_write_input_tokens,
+                    native_output_tokens, native_reasoning_tokens, native_total_tokens,
+                    estimated_cost, snapshot_generated_at, imported_at
+                 ) VALUES (
+                    'remote-device', date('now', 'localtime'), 2, 200, 100,
+                    40, 60, 100, 60, 0, 1, 20, 10, 5, 15, 0, 50,
+                    0, datetime('now'), datetime('now')
+                 )",
+                [],
+            )
+            .expect("insert remote daily usage");
     }
 
     let summary = storage.usage_today_summary().expect("today summary");
-    assert_eq!(summary.total_tokens, 190, "只统计今日两条记录的 total");
-    assert_eq!(summary.input_tokens, 150);
-    assert_eq!(summary.input_cached_tokens, 80);
-    assert_eq!(summary.input_uncached_tokens, 70);
-    assert_eq!(summary.output_tokens, 40);
+    assert_eq!(summary.total_tokens, 487, "代理、本机原生与其他设备快照应合并");
+    assert_eq!(summary.input_tokens, 322);
+    assert_eq!(summary.input_cached_tokens, 135);
+    assert_eq!(summary.input_uncached_tokens, 180);
+    assert_eq!(summary.output_tokens, 125);
     assert_eq!(
-        summary.cache_measured_input_tokens, 100,
-        "只有带缓存字段的记录（input=100）计入缓存命中率分母"
+        summary.cache_measured_input_tokens, 272,
+        "缓存分母应覆盖三种来源中可测量的输入"
     );
 }
 
@@ -2463,6 +2529,92 @@ fn native_usage_totals_normalize_codex_inclusive_input_tokens() {
     assert_eq!(hours[0].native_cached_input_tokens, 75);
     assert_eq!(hours[0].native_cache_write_input_tokens, 5);
     assert_eq!(hours[0].native_total_tokens, 110);
+}
+
+#[test]
+fn usage_summary_includes_priced_native_model_events_without_double_counting() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    storage.set_prices(vec![ModelPrice {
+        channel_id: "openai-api".to_string(),
+        upstream_model: "gpt-test".to_string(),
+        input_uncached_price: 10.0,
+        input_cached_price: 1.0,
+        input_cache_write_price: Some(20.0),
+        output_price: 30.0,
+        currency: "USD".to_string(),
+        ..Default::default()
+    }]);
+
+    {
+        let connection = storage.connection.lock().unwrap();
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO agent_usage_events (
+                    agent_type, session_id, event_id, event_time, model,
+                    input_tokens, cached_input_tokens, cache_write_input_tokens,
+                    output_tokens, reasoning_tokens, total_tokens, synced_at
+                ) VALUES
+                    ('codex-desktop', 'native-session', 'native-event',
+                     '2026-07-30T12:00:00Z', NULL, 100, 75, 5, 10, 3, 110, datetime('now')),
+                    ('codex-desktop', 'native-session', 'before-range-event',
+                     '2026-07-30T06:00:00Z', NULL, 999, 0, 0, 1, 0, 1000, datetime('now')),
+                    ('codex-desktop', 'unknown-session', 'unknown-event',
+                     '2026-07-30T12:00:00Z', NULL, 50, 0, 0, 10, 0, 60, datetime('now')),
+                    ('codex-desktop', 'observed-session', 'observed-event',
+                     '2026-07-30T12:00:00Z', 'gpt-test', 40, 0, 0, 10, 0, 50, datetime('now'));
+
+                INSERT INTO agent_session_snapshots (
+                    agent_type, session_id, fingerprint, summary_json, session_json,
+                    source_offset, parser_version, usage_ids_json, cursor_guard, synced_at
+                ) VALUES (
+                    'codex-desktop', 'native-session', 'fingerprint',
+                    '{"sourceAvailable":true,"truncated":false,"turnCount":1,"usage":null,"models":["gpt-test"]}',
+                    '{}', 0, 4, '[]', '', datetime('now')
+                );
+                "#,
+            )
+            .expect("insert native usage events");
+    }
+
+    let mut observed = request_log_for_repair("observed-request", 0, true);
+    observed.agent_type = Some("codex-desktop".to_string());
+    observed.agent_session_id = Some("observed-session".to_string());
+    storage
+        .insert_request_log(&observed)
+        .expect("insert observed request");
+
+    let summary = storage
+        .usage_summary_range(
+            Some("2026-07-30T08:00:00Z"),
+            Some("2026-07-31T00:00:00Z"),
+            "day",
+            "local-device",
+        )
+        .expect("usage summary");
+    let native = summary
+        .iter()
+        .find(|row| row.channel_id.as_deref() == Some("agent-native"))
+        .expect("native summary row");
+
+    assert_eq!(
+        summary.len(),
+        1,
+        "unknown-model and observed events stay excluded"
+    );
+    assert_eq!(native.client_id.as_deref(), Some("codex"));
+    assert_eq!(native.account_id.as_deref(), Some("codex-desktop"));
+    assert_eq!(native.upstream_model.as_deref(), Some("gpt-test"));
+    assert_eq!(native.request_count, 0);
+    assert_eq!(native.native_event_count, 1);
+    assert_eq!(native.input_uncached_tokens, 20);
+    assert_eq!(native.input_cached_tokens, 75);
+    assert_eq!(native.input_tokens, 100);
+    assert_eq!(native.known_tokens, 110);
+    assert_eq!(native.estimated_cost_currency.as_deref(), Some("USD"));
+    assert!((native.estimated_cost - 0.000675).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -2890,6 +3042,8 @@ fn usage_summary_unions_imported_device_breakdowns() {
         output_tokens: 100,
         unknown_count: 0,
         estimated_cost: 0.3,
+        estimated_cost_currency: Some("CNY".to_string()),
+        native_event_count: 0,
         elapsed_total_ms: 0,
         elapsed_measured_count: 0,
         generation_total_ms: 0,
@@ -2918,4 +3072,93 @@ fn usage_summary_unions_imported_device_breakdowns() {
     assert_eq!(remote_pro.known_tokens, 300);
     assert!(find(current, "LongCat-2.0").is_some());
     assert!(find(remote_device, "LongCat-2.0").is_none());
+}
+
+#[test]
+fn usage_breakdown_for_sync_includes_historical_native_model_usage() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_usage_events (
+                agent_type, session_id, event_id, event_time, model,
+                input_tokens, cached_input_tokens, cache_write_input_tokens,
+                output_tokens, reasoning_tokens, total_tokens, synced_at
+             ) VALUES ('codex-desktop', 'native-session', 'event-1', datetime('now'),
+                       'gpt-5.6-sol', 120, 80, 0, 20, 5, 140, datetime('now'))",
+            [],
+        )
+        .expect("insert native event");
+
+    let rows = storage
+        .usage_breakdown_for_sync(90)
+        .expect("build sync breakdowns");
+    let native = rows
+        .iter()
+        .find(|row| row.upstream_model.as_deref() == Some("gpt-5.6-sol"))
+        .expect("native model breakdown");
+    assert_eq!(native.channel_id.as_deref(), Some("agent-native"));
+    assert_eq!(native.client_id.as_deref(), Some("codex"));
+    assert_eq!(native.request_count, 0);
+    assert_eq!(native.native_event_count, 1);
+    assert_eq!(native.known_tokens, 140);
+    assert_eq!(native.input_tokens, 120);
+    assert_eq!(native.input_cached_tokens, 80);
+    assert_eq!(native.input_uncached_tokens, 40);
+    assert_eq!(native.output_tokens, 20);
+}
+
+#[test]
+fn usage_summary_preserves_imported_native_event_semantics() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    let remote_device = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    storage
+        .import_device_usage_breakdowns(
+            remote_device,
+            "2026-08-03T10:00:00Z",
+            &[DeviceUsageBreakdownRow {
+                date: "2026-08-03".to_string(),
+                client_id: Some("codex".to_string()),
+                client_name: Some("Codex Desktop".to_string()),
+                channel_id: Some("agent-native".to_string()),
+                channel_name: Some("Agent 原生（未经过 Flowlet）".to_string()),
+                account_id: Some("codex-desktop".to_string()),
+                account_name: Some("Codex Desktop".to_string()),
+                upstream_model: Some("gpt-5.6-sol".to_string()),
+                request_count: 0,
+                known_tokens: 140,
+                input_tokens: 120,
+                input_cached_tokens: 80,
+                input_uncached_tokens: 40,
+                cache_measured_input_tokens: 120,
+                output_tokens: 20,
+                unknown_count: 0,
+                estimated_cost: 0.42,
+                estimated_cost_currency: Some("USD".to_string()),
+                native_event_count: 1,
+                elapsed_total_ms: 0,
+                elapsed_measured_count: 0,
+                generation_total_ms: 0,
+                generation_output_tokens: 0,
+            }],
+        )
+        .expect("import native breakdown");
+
+    let rows = storage
+        .usage_summary("all", "local-device")
+        .expect("usage summary");
+    let native = rows
+        .iter()
+        .find(|row| row.device_id.as_deref() == Some(remote_device))
+        .expect("remote native row");
+    assert_eq!(native.upstream_model.as_deref(), Some("gpt-5.6-sol"));
+    assert_eq!(native.request_count, 0);
+    assert_eq!(native.native_event_count, 1);
+    assert_eq!(native.estimated_cost_currency.as_deref(), Some("USD"));
 }

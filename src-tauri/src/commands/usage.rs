@@ -123,10 +123,8 @@ pub(crate) async fn agent_native_usage_summary(
         .map_err(|err| err.to_string())
 }
 
-/// 概览页「今日消耗」专用：返回今日 Token 聚合（总量 + 输入/缓存/输出拆解），
-/// 供 service-strip 悬浮明细展示总消耗、缓存命中率与输入/输出拆解。
-/// 使用 `async fn` 避免同步命令占用 Tauri 主线程；底层查询走索引范围
-/// 扫描、不带分组、不带 JOIN，持锁时间极短，不会卡住窗口拖动。
+/// 概览页「今日消耗」专用：返回与用量统计页「日 / 全部设备」一致的单行聚合，
+/// 包含本机代理、本机 Agent 原生用量和其他设备同步快照。
 #[tauri::command]
 pub(crate) async fn usage_today_tokens(
     state: tauri::State<'_, AppState>,

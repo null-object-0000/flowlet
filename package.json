@@ -13,6 +13,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "node scripts/fetch-models-cn.mjs && node scripts/fetch-models-dev.mjs && tauri build && node scripts/build-portable.mjs",
     "tauri:build:portable": "node scripts/fetch-models-cn.mjs && node scripts/fetch-models-dev.mjs && tauri build --no-bundle && node scripts/build-portable.mjs",
+    "tauri:update:portable": "node scripts/update-portable.mjs --replace-config",
     "tauri:android:init": "node scripts/tauri-android.mjs init",
     "tauri:android:dev": "node scripts/tauri-android.mjs dev",
     "tauri:android:build": "node scripts/tauri-android.mjs build --apk --target aarch64",

@@ -70,7 +70,19 @@ describe("mobile usage aggregation", () => {
         nativeTokens: 0,
         nativeInputTokens: 0,
         nativeOutputTokens: 0,
+        estimatedCost: 0,
       });
+  });
+
+  it("sums proxy estimated cost without fabricating native cost", () => {
+    const proxyDay = { ...day("2026-07-29", 3, 40), estimatedCost: 1.25 };
+    const nativeDay = {
+      ...day("2026-07-30", 0, 0),
+      nativeEventCount: 2,
+      nativeTotalTokens: 100,
+    };
+
+    expect(summarizeMobileUsage([proxyDay, nativeDay]).estimatedCost).toBe(1.25);
   });
 
   it("merges agent native usage into summaries and heatmap cells", () => {
@@ -100,11 +112,37 @@ describe("mobile usage aggregation", () => {
       .toMatchObject({ tokens: 140, requests: 5, nativeTokens: 100, nativeEvents: 2, hasData: true });
 
     const hours: HourlyUsageTotal[] = [
-      { hour: "2026-07-29T09:00:00", requestCount: 1, knownTokens: 30, nativeEventCount: 2, nativeTotalTokens: 70 },
+      {
+        hour: "2026-07-29T09:00:00",
+        requestCount: 1,
+        knownTokens: 30,
+        inputTokens: 20,
+        inputCachedTokens: 5,
+        cacheMeasuredInputTokens: 20,
+        outputTokens: 10,
+        unknownCount: 1,
+        estimatedCost: 0.25,
+        nativeEventCount: 2,
+        nativeInputTokens: 50,
+        nativeOutputTokens: 20,
+        nativeTotalTokens: 70,
+      },
     ];
     const hourly = buildMobileWeeklyHourlyHeatmap(hours, 0, new Date("2026-07-29T12:30:00"));
     expect(hourly.cells.find((cell) => cell.hour === "2026-07-29T09:00:00"))
-      .toMatchObject({ tokens: 100, requests: 3, nativeTokens: 70, nativeEvents: 2, hasData: true });
+      .toMatchObject({
+        tokens: 100,
+        requests: 3,
+        inputTokens: 70,
+        outputTokens: 30,
+        cachedInputTokens: 5,
+        cacheMeasuredInputTokens: 20,
+        estimatedCost: 0.25,
+        nativeTokens: 70,
+        nativeEvents: 2,
+        unknownRequests: 1,
+        hasData: true,
+      });
   });
 
   it("marks native-only days as heatmap data", () => {
@@ -155,7 +193,7 @@ describe("mobile usage aggregation", () => {
 
   it("aggregates a week into 7 days by 3-hour buckets", () => {
     const hours: HourlyUsageTotal[] = [
-      { hour: "2026-07-27T09:00:00", requestCount: 2, knownTokens: 20 },
+      { hour: "2026-07-27T09:00:00", requestCount: 2, knownTokens: 20, unknownCount: 1 },
       { hour: "2026-07-27T10:00:00", requestCount: 1, knownTokens: 30 },
       { hour: "2026-07-29T11:00:00", requestCount: 3, knownTokens: 80 },
     ];
@@ -167,7 +205,7 @@ describe("mobile usage aggregation", () => {
 
     expect(heatmap.cells).toHaveLength(7 * 8);
     expect(heatmap.cells.find((cell) => cell.hour === "2026-07-27T09:00:00"))
-      .toMatchObject({ hourEnd: 12, tokens: 50, requests: 3, hasData: true });
+      .toMatchObject({ hourEnd: 12, tokens: 50, requests: 3, unknownRequests: 1, hasData: true });
     expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T09:00:00"))
       .toMatchObject({ hourEnd: 12, tokens: 80, level: 4, hasData: true });
     expect(heatmap.cells.find((cell) => cell.hour === "2026-07-29T15:00:00"))

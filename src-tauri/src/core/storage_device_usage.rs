@@ -37,7 +37,8 @@ impl Storage {
                     END
                 ), 0) AS cache_measured_input_tokens,
                 coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
-                sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count
+                sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
+                coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost
             FROM usage_records
             LEFT JOIN request_logs
                    ON request_logs.request_id = usage_records.request_id
@@ -59,6 +60,7 @@ impl Storage {
                 cache_measured_input_tokens: row.get(6)?,
                 output_tokens: row.get(7)?,
                 unknown_count: row.get(8)?,
+                estimated_cost: row.get(9)?,
                 ..Default::default()
             })
         })?;
@@ -146,6 +148,8 @@ impl Storage {
             SELECT
                 strftime('%Y-%m-%dT%H:00:00', event_time, 'localtime') AS usage_hour,
                 count(*) AS native_event_count,
+                coalesce(sum(input_tokens), 0) AS native_input_tokens,
+                coalesce(sum(output_tokens), 0) AS native_output_tokens,
                 coalesce(sum(total_tokens), 0) AS native_total_tokens
             FROM agent_usage_events
             WHERE event_time >= datetime('now', 'localtime', 'start of day', '-180 days', 'utc')
@@ -164,7 +168,9 @@ impl Storage {
                     .get::<_, Option<String>>(0)?
                     .unwrap_or_else(|| "unknown".to_string()),
                 native_event_count: row.get(1)?,
-                native_total_tokens: row.get(2)?,
+                native_input_tokens: row.get(2)?,
+                native_output_tokens: row.get(3)?,
+                native_total_tokens: row.get(4)?,
                 ..Default::default()
             })
         })?;
@@ -198,7 +204,23 @@ impl Storage {
                     'localtime'
                 ) AS usage_hour,
                 count(*) AS request_count,
-                coalesce(sum(usage_records.total_tokens), 0) AS known_tokens
+                coalesce(sum(usage_records.total_tokens), 0) AS known_tokens,
+                coalesce(sum(usage_records.input_tokens), 0) AS input_tokens,
+                coalesce(sum(usage_records.input_cached_tokens), 0) AS input_cached_tokens,
+                coalesce(sum(CASE
+                    WHEN usage_records.input_cached_tokens IS NOT NULL
+                      OR usage_records.input_uncached_tokens IS NOT NULL
+                      OR usage_records.input_tokens IS NOT NULL
+                    THEN coalesce(
+                        usage_records.input_tokens,
+                        coalesce(usage_records.input_cached_tokens, 0)
+                          + coalesce(usage_records.input_uncached_tokens, 0)
+                    )
+                    ELSE 0
+                END), 0) AS cache_measured_input_tokens,
+                coalesce(sum(usage_records.output_tokens), 0) AS output_tokens,
+                sum(CASE WHEN usage_records.total_tokens IS NULL THEN 1 ELSE 0 END) AS unknown_count,
+                coalesce(sum(usage_records.estimated_cost), 0) AS estimated_cost
             FROM usage_records
             LEFT JOIN request_logs
                    ON request_logs.request_id = usage_records.request_id
@@ -216,6 +238,12 @@ impl Storage {
                     .unwrap_or_else(|| "unknown".to_string()),
                 request_count: row.get(1)?,
                 known_tokens: row.get(2)?,
+                input_tokens: row.get(3)?,
+                input_cached_tokens: row.get(4)?,
+                cache_measured_input_tokens: row.get(5)?,
+                output_tokens: row.get(6)?,
+                unknown_count: row.get(7)?,
+                estimated_cost: row.get(8)?,
                 ..Default::default()
             })
         })?;
@@ -249,6 +277,7 @@ impl Storage {
                     native_event_count, native_input_tokens, native_cached_input_tokens,
                     native_cache_write_input_tokens, native_output_tokens,
                     native_reasoning_tokens, native_total_tokens,
+                    estimated_cost,
                     snapshot_generated_at
              FROM device_daily_usage WHERE device_id = ?1 AND usage_date = ?2",
         )?;
@@ -273,8 +302,9 @@ impl Storage {
                             native_output_tokens: row.get(12)?,
                             native_reasoning_tokens: row.get(13)?,
                             native_total_tokens: row.get(14)?,
+                            estimated_cost: row.get(15)?,
                         },
-                        row.get::<_, String>(15)?,
+                        row.get::<_, String>(16)?,
                     ))
                 })
                 .optional()?;
@@ -380,8 +410,9 @@ impl Storage {
                     native_event_count, native_input_tokens, native_cached_input_tokens,
                     native_cache_write_input_tokens, native_output_tokens,
                     native_reasoning_tokens, native_total_tokens,
+                    estimated_cost,
                     snapshot_generated_at, imported_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, datetime('now'))
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, datetime('now'))
                  ON CONFLICT(device_id, usage_date) DO UPDATE SET
                     request_count = excluded.request_count,
                     known_tokens = excluded.known_tokens,
@@ -398,6 +429,7 @@ impl Storage {
                     native_output_tokens = excluded.native_output_tokens,
                     native_reasoning_tokens = excluded.native_reasoning_tokens,
                     native_total_tokens = excluded.native_total_tokens,
+                    estimated_cost = excluded.estimated_cost,
                     snapshot_generated_at = excluded.snapshot_generated_at,
                     imported_at = datetime('now')
                  WHERE excluded.snapshot_generated_at >= device_daily_usage.snapshot_generated_at",
@@ -419,6 +451,7 @@ impl Storage {
                     day.native_output_tokens,
                     day.native_reasoning_tokens,
                     day.native_total_tokens,
+                    day.estimated_cost,
                     generated_at,
                 ],
             )?;
@@ -432,15 +465,26 @@ impl Storage {
                 transaction.execute(
                     "INSERT INTO device_hourly_usage (
                         device_id, usage_hour, request_count, known_tokens,
-                        native_event_count, native_total_tokens,
+                        input_tokens, input_cached_tokens, cache_measured_input_tokens,
+                        output_tokens, unknown_count, estimated_cost,
+                        native_event_count, native_input_tokens, native_output_tokens,
+                        native_total_tokens,
                         snapshot_generated_at, imported_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))",
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, datetime('now'))",
                     params![
                         device_id,
                         hour.hour,
                         hour.request_count,
                         hour.known_tokens,
+                        hour.input_tokens,
+                        hour.input_cached_tokens,
+                        hour.cache_measured_input_tokens,
+                        hour.output_tokens,
+                        hour.unknown_count,
+                        hour.estimated_cost,
                         hour.native_event_count,
+                        hour.native_input_tokens,
+                        hour.native_output_tokens,
                         hour.native_total_tokens,
                         generated_at,
                     ],
@@ -628,7 +672,7 @@ impl Storage {
                     sum(native_event_count), sum(native_input_tokens),
                     sum(native_cached_input_tokens), sum(native_cache_write_input_tokens),
                     sum(native_output_tokens), sum(native_reasoning_tokens),
-                    sum(native_total_tokens)
+                    sum(native_total_tokens), sum(estimated_cost)
              FROM device_daily_usage WHERE device_id = ?1 GROUP BY usage_date ORDER BY usage_date"
         } else {
             "SELECT usage_date, sum(request_count), sum(known_tokens), sum(input_tokens),
@@ -637,7 +681,7 @@ impl Storage {
                     sum(native_event_count), sum(native_input_tokens),
                     sum(native_cached_input_tokens), sum(native_cache_write_input_tokens),
                     sum(native_output_tokens), sum(native_reasoning_tokens),
-                    sum(native_total_tokens)
+                    sum(native_total_tokens), sum(estimated_cost)
              FROM device_daily_usage GROUP BY usage_date ORDER BY usage_date"
         };
         let mut statement = connection.prepare(sql)?;
@@ -659,6 +703,7 @@ impl Storage {
                 native_output_tokens: row.get(13)?,
                 native_reasoning_tokens: row.get(14)?,
                 native_total_tokens: row.get(15)?,
+                estimated_cost: row.get(16)?,
             })
         };
         let mut totals = Vec::new();
@@ -684,14 +729,20 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let sql = if device_id.is_some() {
             "SELECT usage_hour, sum(request_count), sum(known_tokens),
-                    sum(native_event_count), sum(native_total_tokens)
+                    sum(input_tokens), sum(input_cached_tokens), sum(cache_measured_input_tokens),
+                    sum(output_tokens), sum(unknown_count), sum(estimated_cost),
+                    sum(native_event_count), sum(native_input_tokens), sum(native_output_tokens),
+                    sum(native_total_tokens)
              FROM device_hourly_usage
              WHERE device_id = ?1
              GROUP BY usage_hour
              ORDER BY usage_hour"
         } else {
             "SELECT usage_hour, sum(request_count), sum(known_tokens),
-                    sum(native_event_count), sum(native_total_tokens)
+                    sum(input_tokens), sum(input_cached_tokens), sum(cache_measured_input_tokens),
+                    sum(output_tokens), sum(unknown_count), sum(estimated_cost),
+                    sum(native_event_count), sum(native_input_tokens), sum(native_output_tokens),
+                    sum(native_total_tokens)
              FROM device_hourly_usage
              GROUP BY usage_hour
              ORDER BY usage_hour"
@@ -702,8 +753,16 @@ impl Storage {
                 hour: row.get(0)?,
                 request_count: row.get(1)?,
                 known_tokens: row.get(2)?,
-                native_event_count: row.get(3)?,
-                native_total_tokens: row.get(4)?,
+                input_tokens: row.get(3)?,
+                input_cached_tokens: row.get(4)?,
+                cache_measured_input_tokens: row.get(5)?,
+                output_tokens: row.get(6)?,
+                unknown_count: row.get(7)?,
+                estimated_cost: row.get(8)?,
+                native_event_count: row.get(9)?,
+                native_input_tokens: row.get(10)?,
+                native_output_tokens: row.get(11)?,
+                native_total_tokens: row.get(12)?,
             })
         };
         let mut totals = Vec::new();

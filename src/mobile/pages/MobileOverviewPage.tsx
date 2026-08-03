@@ -2,8 +2,9 @@ import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { Button } from "@douyinfe/semi-ui-19";
 import { useEffect, useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { useMobileDailyUsage, useMobileDevices, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
+import { useMobileDailyUsage, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
+import { formatCostCny } from "../../shared/formatters/cost";
 import { MobileDeviceTitlePicker, useMobileDevicePickerState } from "../MobileDevicePicker";
 import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
 import { useMobileRefreshController } from "../useMobileRefreshController";
@@ -29,7 +30,6 @@ export function MobileOverviewPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const settings = useMobileS3Settings();
-  const devices = useMobileDevices();
   const usage = useMobileDailyUsage(deviceId);
   const hourlyUsage = useMobileHourlyUsage(deviceId);
   const refreshController = useMobileRefreshController(deviceId ?? undefined);
@@ -170,7 +170,7 @@ export function MobileOverviewPage() {
         <article className={styles.stat}><span>Tokens</span><strong>{formatCompactNumber(summary.tokens + summary.nativeTokens, language)}</strong><small>{t("输入 {input} · 输出 {output}", { input: formatCompactNumber(summary.inputTokens + summary.nativeInputTokens, language), output: formatCompactNumber(summary.outputTokens + summary.nativeOutputTokens, language) })}</small></article>
         <article className={styles.stat}><span>{t("请求量")}</span><strong>{formatInteger(summary.requests + summary.nativeEvents, language)}</strong><small>{summary.nativeEvents > 0 ? t("代理 {proxy} · 原生 {native}", { proxy: formatInteger(summary.requests, language), native: formatInteger(summary.nativeEvents, language) }) : t("{count} 天数据", { count: days.length })}</small></article>
         <article className={styles.stat}><span>{t("缓存输入")}</span><strong>{formatCompactNumber(summary.cachedInputTokens, language)}</strong><small>{t("缓存命中率")} {formatCacheHitRate(summary.cacheHitRate)}</small></article>
-        <article className={styles.stat}><span>{t("设备")}</span><strong>{deviceId ? "1" : formatInteger(devices.data?.length ?? 0, language)}</strong><small>{deviceId ? t("指定设备") : t("全部设备")}</small></article>
+        <article className={styles.stat}><span>{t("预估费用")}</span><strong>{formatCostCny(summary.estimatedCost)}</strong><small>{t("Flowlet 可统计用量")}</small></article>
       </div>
 
       <article className={styles.card}>
@@ -225,13 +225,13 @@ export function MobileOverviewPage() {
               {weekdayLabels.map((label, index) => <span key={`${index}-${label}`}>{label}</span>)}
             </div>
             <div className={styles.mobileHeatmap}>
-              {heatmap.cells.map((cell) => {
+              {heatmap.cells.map((cell, cellIndex) => {
                 const title = `${cell.date} · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
                 return (
                   <button
                     key={cell.date}
                     type="button"
-                    className={`${styles.heatmapCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""}`}
+                    className={`${styles.heatmapCell} ${styles[`heatLevel${cell.level}`]} ${cellIndex % 7 >= 5 ? styles.weekend : ""} ${cell.outside ? styles.outside : ""}`}
                     disabled={!cell.hasData}
                     aria-label={title}
                     aria-pressed={selectedDay?.date === cell.date}

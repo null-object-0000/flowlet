@@ -7,6 +7,7 @@ import { PageHeader } from "../../shared/ui/PageHeader";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
+import { formatCostCny } from "../../shared/formatters/cost";
 import {
   buildMobileUsageHeatmap,
   buildMobileWeeklyHourlyHeatmap,
@@ -85,20 +86,35 @@ export function UsageCostPage() {
     [language, range.start],
   );
   const selectedPeriod = period === "week" ? selectedHourlyCell : selectedDay;
+  const selectedPeriodTitle = period === "week" && selectedHourlyCell
+    ? selectedHourlyCell.date + " " + String(selectedHourlyCell.hourOfDay).padStart(2, "0")
+      + ":00–" + String(selectedHourlyCell.hourEnd - 1).padStart(2, "0") + ":59"
+    : selectedDay?.date ?? null;
   const activeQuery = period === "week" ? hourlyUsage : usage;
   const tokenConfidence = useMemo(() => {
-    const unknownRequests = days.reduce((total, day) => total + day.unknownCount, 0);
-    const proxyRecognized = Math.max(0, summary.requests - unknownRequests);
-    const recognized = proxyRecognized + summary.nativeEvents;
-    const total = summary.requests + summary.nativeEvents;
+    const proxyRequests = period === "week"
+      ? Math.max(0, (selectedHourlyCell?.requests ?? 0) - (selectedHourlyCell?.nativeEvents ?? 0))
+      : selectedDay?.requestCount ?? 0;
+    const nativeEvents = period === "week"
+      ? selectedHourlyCell?.nativeEvents ?? 0
+      : selectedDay?.nativeEventCount ?? 0;
+    const unknownRequests = Math.min(
+      proxyRequests,
+      period === "week"
+        ? selectedHourlyCell?.unknownRequests ?? 0
+        : selectedDay?.unknownCount ?? 0,
+    );
+    const proxyRecognized = Math.max(0, proxyRequests - unknownRequests);
+    const recognized = proxyRecognized + nativeEvents;
+    const total = proxyRequests + nativeEvents;
     return {
       score: total > 0 ? recognized / total : null,
       proxyShare: total > 0 ? proxyRecognized / total : 0,
-      nativeShare: total > 0 ? summary.nativeEvents / total : 0,
+      nativeShare: total > 0 ? nativeEvents / total : 0,
       unknownShare: total > 0 ? unknownRequests / total : 0,
       unknownCount: unknownRequests,
     };
-  }, [days, summary.nativeEvents, summary.requests]);
+  }, [period, selectedDay, selectedHourlyCell]);
 
   const resetSelection = () => {
     setSelectedDate(null);
@@ -201,9 +217,9 @@ export function UsageCostPage() {
           <small>{t("缓存命中率")} {formatCacheHitRate(summary.cacheHitRate)}</small>
         </article>
         <article className={styles.stat}>
-          <span>{t("设备")}</span>
-          <strong>{deviceId ? "1" : formatInteger(devices.data?.length ?? 0, language)}</strong>
-          <small>{deviceId ? t("指定设备") : t("全部设备")}</small>
+          <span>{t("预估费用")}</span>
+          <strong>{formatCostCny(summary.estimatedCost)}</strong>
+          <small>{t("Flowlet 可统计用量")}</small>
         </article>
       </section>
 
@@ -228,7 +244,7 @@ export function UsageCostPage() {
           ) : null}
 
           {period === "week" && !activeQuery.isPending && !activeQuery.isError ? (
-            <>
+            <div className={styles.hourlyHeatmapFrame}>
               <div className={styles.hourlyHeatmap}>
                 <span />
                 {weekdayLabels.map((label, dayIndex) => (
@@ -278,16 +294,16 @@ export function UsageCostPage() {
               {!hourlyHeatmap.cells.some((cell) => cell.hasData) ? (
                 <div className={styles.emptyHint}>{t("当前周期暂无数据")}</div>
               ) : null}
-            </>
+            </div>
           ) : null}
 
           {period === "month" && !activeQuery.isPending && !activeQuery.isError ? (
-            <>
+            <div className={styles.monthHeatmapFrame}>
               <div className={styles.heatmapLabels}>
                 {weekdayLabels.map((label, index) => <span key={index + "-" + label}>{label}</span>)}
               </div>
               <div className={styles.monthHeatmap}>
-                {heatmap.cells.map((cell) => {
+                {heatmap.cells.map((cell, cellIndex) => {
                   const title = cell.date + " · " + formatInteger(cell.tokens, language) + " Tokens · "
                     + t("{count} 次请求", { count: formatInteger(cell.requests, language) })
                     + formatNativeSplit(cell.tokens, cell.nativeTokens, language, t);
@@ -298,6 +314,7 @@ export function UsageCostPage() {
                       className={[
                         styles.heatmapCell,
                         styles["heatLevel" + cell.level],
+                        cellIndex % 7 >= 5 ? styles.weekend : "",
                         cell.outside ? styles.outside : "",
                       ].join(" ")}
                       disabled={!cell.hasData}
@@ -313,49 +330,13 @@ export function UsageCostPage() {
               </div>
               <HeatmapLegend t={t} />
               {days.length === 0 ? <div className={styles.emptyHint}>{t("当前周期暂无数据")}</div> : null}
-            </>
+            </div>
           ) : null}
         </article>
 
         <aside className={styles.insightColumn}>
-          {period === "week" && selectedHourlyCell ? (
-            <SelectedPeriodCard
-              title={selectedHourlyCell.date + " " + String(selectedHourlyCell.hourOfDay).padStart(2, "0")
-                + ":00–" + String(selectedHourlyCell.hourEnd - 1).padStart(2, "0") + ":59"}
-              tokens={formatCompactNumber(selectedHourlyCell.tokens, language)}
-              detail={t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })}
-              split={selectedHourlyCell.nativeTokens > 0
-                ? t("Flowlet {proxy} · 原生 {native}", {
-                  proxy: formatCompactNumber(selectedHourlyCell.tokens - selectedHourlyCell.nativeTokens, language),
-                  native: formatCompactNumber(selectedHourlyCell.nativeTokens, language),
-                })
-                : null}
-            />
-          ) : null}
-
-          {period === "month" && selectedDay ? (
-            <SelectedPeriodCard
-              title={selectedDay.date}
-              tokens={formatCompactNumber(selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0), language)}
-              detail={t("{count} 次请求", {
-                count: formatInteger(selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0), language),
-              }) + " · "
-                + t("输入 {input} · 输出 {output}", {
-                  input: formatCompactNumber(selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0), language),
-                  output: formatCompactNumber(selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0), language),
-                })}
-              split={(selectedDay.nativeTotalTokens ?? 0) > 0
-                ? t("Flowlet {proxy} · 原生 {native}", {
-                  proxy: formatCompactNumber(selectedDay.knownTokens, language),
-                  native: formatCompactNumber(selectedDay.nativeTotalTokens ?? 0, language),
-                })
-                : null}
-            />
-          ) : null}
-
-          {!selectedPeriod ? <SelectedPeriodEmpty t={t} /> : null}
-
           <TokenConfidenceCard
+            periodTitle={selectedPeriodTitle}
             score={tokenConfidence.score}
             proxyShare={tokenConfidence.proxyShare}
             nativeShare={tokenConfidence.nativeShare}
@@ -364,6 +345,42 @@ export function UsageCostPage() {
             language={language}
             t={t}
           />
+
+          {period === "week" && selectedHourlyCell ? (
+            <SelectedPeriodCard
+              title={selectedPeriodTitle ?? selectedHourlyCell.date}
+              tokens={selectedHourlyCell.tokens}
+              inputTokens={selectedHourlyCell.inputTokens}
+              outputTokens={selectedHourlyCell.outputTokens}
+              requests={selectedHourlyCell.requests}
+              proxyRequests={selectedHourlyCell.requests - selectedHourlyCell.nativeEvents}
+              nativeEvents={selectedHourlyCell.nativeEvents}
+              cachedInputTokens={selectedHourlyCell.cachedInputTokens}
+              cacheMeasuredInputTokens={selectedHourlyCell.cacheMeasuredInputTokens}
+              estimatedCost={selectedHourlyCell.estimatedCost}
+              language={language}
+              t={t}
+            />
+          ) : null}
+
+          {period === "month" && selectedDay ? (
+            <SelectedPeriodCard
+              title={selectedPeriodTitle ?? selectedDay.date}
+              tokens={selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0)}
+              inputTokens={selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0)}
+              outputTokens={selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0)}
+              requests={selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0)}
+              proxyRequests={selectedDay.requestCount}
+              nativeEvents={selectedDay.nativeEventCount ?? 0}
+              cachedInputTokens={selectedDay.inputCachedTokens}
+              cacheMeasuredInputTokens={selectedDay.cacheMeasuredInputTokens}
+              estimatedCost={selectedDay.estimatedCost ?? 0}
+              language={language}
+              t={t}
+            />
+          ) : null}
+
+          {!selectedPeriod ? <SelectedPeriodEmpty t={t} /> : null}
         </aside>
       </section>
     </main>
@@ -382,25 +399,84 @@ function HeatmapLegend({ t }: { t: ReturnType<typeof useAppPreferences>["t"] }) 
   );
 }
 
-function SelectedPeriodCard({ title, tokens, detail, split }: {
+function SelectedPeriodCard({
+  title,
+  tokens,
+  inputTokens,
+  outputTokens,
+  requests,
+  proxyRequests,
+  nativeEvents,
+  cachedInputTokens,
+  cacheMeasuredInputTokens,
+  estimatedCost,
+  language,
+  t,
+}: {
   title: string;
-  tokens: string;
-  detail: string;
-  split?: string | null;
+  tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  requests: number;
+  proxyRequests: number;
+  nativeEvents: number;
+  cachedInputTokens: number;
+  cacheMeasuredInputTokens: number;
+  estimatedCost: number;
+  language: NumberLanguage;
+  t: ReturnType<typeof useAppPreferences>["t"];
 }) {
   return (
     <article className={styles.selectedPeriod}>
-      <div className={styles.selectedMetric}>
-        <span className={styles.selectedLabel}>Token</span>
-        <strong className={styles.selectedTokens}>{tokens}</strong>
-        <small>Tokens</small>
-      </div>
-      <div className={styles.selectedMeta}>
+      <header className={styles.selectedPeriodHeader}>
         <strong>{title}</strong>
-        <span>{detail}</span>
-        {split ? <span>{split}</span> : null}
+        <span>{t("指定时间点")}</span>
+      </header>
+      <div className={styles.selectedPeriodStats}>
+        <SelectedPeriodMetric
+          label="Tokens"
+          value={formatCompactNumber(tokens, language)}
+          detail={t("输入 {input} · 输出 {output}", {
+            input: formatCompactNumber(inputTokens, language),
+            output: formatCompactNumber(outputTokens, language),
+          })}
+        />
+        <SelectedPeriodMetric
+          label={t("请求量")}
+          value={formatInteger(requests, language)}
+          detail={t("代理 {proxy} · 原生 {native}", {
+            proxy: formatInteger(Math.max(0, proxyRequests), language),
+            native: formatInteger(nativeEvents, language),
+          })}
+        />
+        <SelectedPeriodMetric
+          label={t("缓存输入")}
+          value={formatCompactNumber(cachedInputTokens, language)}
+          detail={`${t("缓存命中率")} ${formatCacheHitRate(
+            cacheMeasuredInputTokens > 0 ? cachedInputTokens / cacheMeasuredInputTokens : null,
+          )}`}
+        />
+        <SelectedPeriodMetric
+          label={t("预估费用")}
+          value={formatCostCny(estimatedCost)}
+          detail={t("Flowlet 可统计用量")}
+        />
       </div>
     </article>
+  );
+}
+
+function SelectedPeriodMetric({ label, value, detail }: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className={styles.selectedPeriodMetric}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
   );
 }
 
@@ -415,6 +491,7 @@ function SelectedPeriodEmpty({ t }: { t: ReturnType<typeof useAppPreferences>["t
 }
 
 function TokenConfidenceCard({
+  periodTitle,
   score,
   proxyShare,
   nativeShare,
@@ -423,6 +500,7 @@ function TokenConfidenceCard({
   language,
   t,
 }: {
+  periodTitle: string | null;
   score: number | null;
   proxyShare: number;
   nativeShare: number;
@@ -437,27 +515,29 @@ function TokenConfidenceCard({
     <article className={styles.confidenceCard}>
       <header>
         <strong>{t("数据可信度")}</strong>
-        <span>{t("Token 与费用估算的数据来源构成")}</span>
+        <span>{periodTitle ?? t("暂无选定时间数据")}</span>
       </header>
-      <div className={styles.confidenceSummary}>
-        <div
-          className={styles.confidenceRing}
-          style={{ "--confidence-degrees": `${scoreDegrees}deg` } as React.CSSProperties}
-          aria-label={t("Token 已识别 {score}", { score: scoreLabel })}
-        >
-          <strong>{scoreLabel}</strong>
+      <div className={styles.confidenceBody}>
+        <div className={styles.confidenceSummary}>
+          <div
+            className={styles.confidenceRing}
+            style={{ "--confidence-degrees": `${scoreDegrees}deg` } as React.CSSProperties}
+            aria-label={t("Token 已识别 {score}", { score: scoreLabel })}
+          >
+            <strong>{scoreLabel}</strong>
+          </div>
+          <div>
+            <strong>{t("Token 已识别")}</strong>
+            <span>{score == null
+              ? t("当前筛选范围暂无数据")
+              : t("当前按可统计请求覆盖计算")}</span>
+          </div>
         </div>
-        <div>
-          <strong>{t("Token 已识别")}</strong>
-          <span>{score == null
-            ? t("当前筛选范围暂无数据")
-            : t("当前按可统计请求覆盖计算")}</span>
+        <div className={styles.confidenceBreakdown}>
+          <ConfidenceRow className={styles.proxyDot} label={t("Flowlet 可统计用量")} value={formatConfidence(proxyShare)} />
+          <ConfidenceRow className={styles.nativeDot} label={t("Agent 原生用量")} value={formatConfidence(nativeShare)} />
+          <ConfidenceRow className={styles.unknownDot} label={t("未知 / 待识别")} value={formatConfidence(unknownShare)} />
         </div>
-      </div>
-      <div className={styles.confidenceBreakdown}>
-        <ConfidenceRow className={styles.proxyDot} label={t("Flowlet 可统计用量")} value={formatConfidence(proxyShare)} />
-        <ConfidenceRow className={styles.nativeDot} label={t("Agent 原生用量")} value={formatConfidence(nativeShare)} />
-        <ConfidenceRow className={styles.unknownDot} label={t("未知 / 待识别")} value={formatConfidence(unknownShare)} />
       </div>
       {unknownCount > 0 ? (
         <p>{t("{count} 次请求暂未识别 Token，可在数据完整性检查中尝试修复。", {

@@ -2238,7 +2238,7 @@ fn native_usage_totals_exclude_flowlet_observed_sessions() {
 }
 
 #[test]
-fn imported_device_usage_roundtrips_native_fields() {
+fn imported_device_usage_roundtrips_native_and_cost_fields() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
     storage.migrate().expect("migrate schema");
@@ -2253,18 +2253,27 @@ fn imported_device_usage_roundtrips_native_fields() {
         native_output_tokens: 27,
         native_reasoning_tokens: 2,
         native_total_tokens: 77,
+        estimated_cost: 0.125,
         ..Default::default()
     };
     let hour = HourlyUsageTotal {
         hour: "2026-07-30T12:00:00".to_string(),
         request_count: 4,
         known_tokens: 30,
+        input_tokens: 20,
+        input_cached_tokens: 5,
+        cache_measured_input_tokens: 20,
+        output_tokens: 10,
+        unknown_count: 1,
+        estimated_cost: 0.25,
         native_event_count: 2,
+        native_input_tokens: 50,
+        native_output_tokens: 20,
         native_total_tokens: 70,
     };
     storage
         .import_device_usage(
-            6,
+            10,
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "2026-07-01T00:00:00Z",
             "Office PC",

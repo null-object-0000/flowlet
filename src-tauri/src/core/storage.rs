@@ -929,6 +929,7 @@ impl Storage {
                 cache_measured_input_tokens INTEGER NOT NULL,
                 output_tokens               INTEGER NOT NULL,
                 unknown_count               INTEGER NOT NULL,
+                estimated_cost              REAL NOT NULL DEFAULT 0,
                 snapshot_generated_at       TEXT NOT NULL,
                 imported_at                 TEXT NOT NULL,
                 PRIMARY KEY (device_id, usage_date),
@@ -940,6 +941,14 @@ impl Storage {
                 usage_hour            TEXT NOT NULL,
                 request_count         INTEGER NOT NULL,
                 known_tokens          INTEGER NOT NULL,
+                input_tokens          INTEGER NOT NULL DEFAULT 0,
+                input_cached_tokens   INTEGER NOT NULL DEFAULT 0,
+                cache_measured_input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens         INTEGER NOT NULL DEFAULT 0,
+                unknown_count         INTEGER NOT NULL DEFAULT 0,
+                estimated_cost        REAL NOT NULL DEFAULT 0,
+                native_input_tokens   INTEGER NOT NULL DEFAULT 0,
+                native_output_tokens  INTEGER NOT NULL DEFAULT 0,
                 snapshot_generated_at TEXT NOT NULL,
                 imported_at           TEXT NOT NULL,
                 PRIMARY KEY (device_id, usage_hour),
@@ -1131,8 +1140,62 @@ impl Storage {
         }
         add_column_if_missing(
             &connection,
+            "device_daily_usage",
+            "estimated_cost",
+            "REAL NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "input_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "input_cached_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "cache_measured_input_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "output_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "unknown_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "estimated_cost",
+            "REAL NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
             "device_hourly_usage",
             "native_event_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "native_input_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "native_output_tokens",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
         add_column_if_missing(

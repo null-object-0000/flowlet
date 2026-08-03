@@ -9,7 +9,7 @@ use thiserror::Error;
 
 const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
 const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
-pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 7;
+pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 10;
 
 #[derive(Debug, Error)]
 pub enum DeviceIdentityError {
@@ -170,10 +170,11 @@ impl DeviceIdentity {
     }
 }
 
-/// 单台设备按其本地自然日计算的最小用量汇总。不包含费用、账号、Header 或 Body。
+/// 单台设备按其本地自然日计算的最小用量汇总。不包含账号、Header 或 Body。
+/// `estimated_cost` 仅包含经过 Flowlet 代理且已成功计价的请求费用。
 /// `native_*` 字段（schema v6 起）承载未经过 Flowlet 代理的 Agent 原生会话用量，
 /// 与代理口径字段相互独立，合计由展示层计算。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DailyUsageTotal {
     pub date: String,
@@ -185,6 +186,8 @@ pub struct DailyUsageTotal {
     pub cache_measured_input_tokens: i64,
     pub output_tokens: i64,
     pub unknown_count: i64,
+    #[serde(default)]
+    pub estimated_cost: f64,
     /// 原生带用量消息事件数（不是 HTTP 请求数）。
     #[serde(default)]
     pub native_event_count: i64,
@@ -204,14 +207,30 @@ pub struct DailyUsageTotal {
 
 /// 单台设备按其本地自然小时计算的最小 Token 汇总。只同步最近 180 天，
 /// 供移动端周视图展示真实的 7×24 小时热力图。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HourlyUsageTotal {
     pub hour: String,
     pub request_count: i64,
     pub known_tokens: i64,
     #[serde(default)]
+    pub input_tokens: i64,
+    #[serde(default)]
+    pub input_cached_tokens: i64,
+    #[serde(default)]
+    pub cache_measured_input_tokens: i64,
+    #[serde(default)]
+    pub output_tokens: i64,
+    #[serde(default)]
+    pub unknown_count: i64,
+    #[serde(default)]
+    pub estimated_cost: f64,
+    #[serde(default)]
     pub native_event_count: i64,
+    #[serde(default)]
+    pub native_input_tokens: i64,
+    #[serde(default)]
+    pub native_output_tokens: i64,
     #[serde(default)]
     pub native_total_tokens: i64,
 }
@@ -227,6 +246,7 @@ pub fn merge_daily_usage_total(into: &mut DailyUsageTotal, other: &DailyUsageTot
     into.cache_measured_input_tokens += other.cache_measured_input_tokens;
     into.output_tokens += other.output_tokens;
     into.unknown_count += other.unknown_count;
+    into.estimated_cost += other.estimated_cost;
     into.native_event_count += other.native_event_count;
     into.native_input_tokens += other.native_input_tokens;
     into.native_cached_input_tokens += other.native_cached_input_tokens;
@@ -255,7 +275,15 @@ pub fn merge_daily_usage_totals(
 pub fn merge_hourly_usage_total(into: &mut HourlyUsageTotal, other: &HourlyUsageTotal) {
     into.request_count += other.request_count;
     into.known_tokens += other.known_tokens;
+    into.input_tokens += other.input_tokens;
+    into.input_cached_tokens += other.input_cached_tokens;
+    into.cache_measured_input_tokens += other.cache_measured_input_tokens;
+    into.output_tokens += other.output_tokens;
+    into.unknown_count += other.unknown_count;
+    into.estimated_cost += other.estimated_cost;
     into.native_event_count += other.native_event_count;
+    into.native_input_tokens += other.native_input_tokens;
+    into.native_output_tokens += other.native_output_tokens;
     into.native_total_tokens += other.native_total_tokens;
 }
 
@@ -567,7 +595,15 @@ impl DeviceUsageBundle {
                 return Err("设备小时用量必须严格递增且不能重复".to_string());
             }
             previous_hour = Some(hour.hour.as_str());
-            if hour.request_count < 0 || hour.known_tokens < 0 || hour.native_event_count < 0 {
+            if hour.request_count < 0
+                || hour.known_tokens < 0
+                || hour.input_tokens < 0
+                || hour.input_cached_tokens < 0
+                || hour.cache_measured_input_tokens < 0
+                || hour.output_tokens < 0
+                || hour.unknown_count < 0
+                || hour.native_event_count < 0
+            {
                 return Err(format!("设备小时用量不能为负数：{}", hour.hour));
             }
         }
@@ -1060,7 +1096,11 @@ mod tests {
 
         assert_eq!(bundle.snapshot.days[0].native_total_tokens, 0);
         assert_eq!(bundle.snapshot.days[0].native_event_count, 0);
+        assert_eq!(bundle.snapshot.days[0].estimated_cost, 0.0);
         assert_eq!(bundle.snapshot.hours[0].native_total_tokens, 0);
+        assert_eq!(bundle.snapshot.hours[0].unknown_count, 0);
+        assert_eq!(bundle.snapshot.hours[0].input_tokens, 0);
+        assert_eq!(bundle.snapshot.hours[0].estimated_cost, 0.0);
     }
 
     #[test]
@@ -1072,6 +1112,7 @@ mod tests {
                 known_tokens: 15,
                 input_tokens: 10,
                 output_tokens: 5,
+                estimated_cost: 0.125,
                 ..Default::default()
             },
             DailyUsageTotal {
@@ -1080,6 +1121,7 @@ mod tests {
                 native_input_tokens: 60,
                 native_output_tokens: 40,
                 native_total_tokens: 100,
+                estimated_cost: 0.375,
                 ..Default::default()
             },
             DailyUsageTotal {
@@ -1094,9 +1136,50 @@ mod tests {
         assert_eq!(merged[0].request_count, 2);
         assert_eq!(merged[0].known_tokens, 15);
         assert_eq!(merged[0].native_total_tokens, 100);
+        assert_eq!(merged[0].estimated_cost, 0.5);
         assert_eq!(merged[1].date, "2026-07-31");
         assert_eq!(merged[1].known_tokens, 0);
         assert_eq!(merged[1].native_total_tokens, 40);
+    }
+
+    #[test]
+    fn merge_hourly_usage_totals_sums_unknown_and_native_fields() {
+        let merged = merge_hourly_usage_totals(vec![
+            HourlyUsageTotal {
+                hour: "2026-07-30T09:00:00".to_string(),
+                request_count: 2,
+                known_tokens: 15,
+                input_tokens: 10,
+                input_cached_tokens: 4,
+                cache_measured_input_tokens: 10,
+                output_tokens: 5,
+                unknown_count: 1,
+                estimated_cost: 0.125,
+                ..Default::default()
+            },
+            HourlyUsageTotal {
+                hour: "2026-07-30T09:00:00".to_string(),
+                native_event_count: 3,
+                native_input_tokens: 60,
+                native_output_tokens: 40,
+                native_total_tokens: 100,
+                ..Default::default()
+            },
+        ]);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].request_count, 2);
+        assert_eq!(merged[0].known_tokens, 15);
+        assert_eq!(merged[0].input_tokens, 10);
+        assert_eq!(merged[0].input_cached_tokens, 4);
+        assert_eq!(merged[0].cache_measured_input_tokens, 10);
+        assert_eq!(merged[0].output_tokens, 5);
+        assert_eq!(merged[0].unknown_count, 1);
+        assert_eq!(merged[0].estimated_cost, 0.125);
+        assert_eq!(merged[0].native_event_count, 3);
+        assert_eq!(merged[0].native_input_tokens, 60);
+        assert_eq!(merged[0].native_output_tokens, 40);
+        assert_eq!(merged[0].native_total_tokens, 100);
     }
 
     #[test]

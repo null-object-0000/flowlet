@@ -32,7 +32,7 @@
   color: var(--flowlet-color-text-secondary);
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 .periodTabs button[aria-pressed="true"] {
@@ -52,7 +52,7 @@
 }
 .rangeNavigator strong {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -68,11 +68,11 @@
   background: var(--flowlet-color-surface);
   box-shadow: var(--flowlet-shadow-card);
 }
-.stat span { display: block; color: var(--flowlet-color-text-secondary); font-size: 12px; }
+.stat span { display: block; color: var(--flowlet-color-text-secondary); font-size: 13px; }
 .stat strong { display: block; margin-top: 6px; overflow: hidden; font-size: 22px; line-height: 1; white-space: nowrap; text-overflow: ellipsis; }
-.stat small { display: block; margin-top: 6px; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.stat small { display: block; margin-top: 6px; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
 
-.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 5fr) minmax(330px, 3fr); gap: 10px; }
+.workspace { min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .card, .selectedPeriod, .confidenceCard {
   min-width: 0;
   min-height: 0;
@@ -85,18 +85,24 @@
 .heatmapCard { padding: 14px 16px 12px; }
 .cardHeader { margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
 .cardHeader > div { min-width: 0; flex: 1; display: grid; gap: 2px; }
-.cardHeader strong { color: var(--flowlet-color-text); font-size: 15px; }
-.cardHeader span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.cardHeader strong { color: var(--flowlet-color-text); font-size: 16px; }
+.cardHeader span { color: var(--flowlet-color-text-tertiary); font-size: 13px; }
 .state { min-height: 260px; padding: 24px 18px; display: grid; place-items: center; align-content: center; gap: 8px; text-align: center; }
 .state span { max-width: 580px; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.5; }
 
+.monthHeatmapFrame {
+  --month-heatmap-cell-height: 44px;
+  width: 100%;
+}
 .heatmapLabels {
-  margin: 0 0 6px;
+  width: 100%;
+  margin: 2px 0 8px;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 7px;
-  color: var(--flowlet-color-text-tertiary);
-  font-size: 10px;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
   text-align: center;
 }
 .monthHeatmap {
@@ -104,7 +110,7 @@
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  grid-template-rows: repeat(6, minmax(38px, 1fr));
+  grid-template-rows: repeat(6, var(--month-heatmap-cell-height));
   gap: 7px;
 }
 .heatmapCell {
@@ -123,33 +129,60 @@ button.heatmapCell {
   font: inherit;
   cursor: pointer;
 }
-button.heatmapCell span { font-size: 10px; line-height: 1; }
+button.heatmapCell span { font-size: 15px; line-height: 1; font-weight: 650; font-variant-numeric: tabular-nums; }
+.monthHeatmap button.heatmapCell {
+  padding: 0;
+  place-items: center;
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+  transition: transform 120ms ease, filter 120ms ease;
+}
+@media (hover: hover) {
+  .monthHeatmap button.heatmapCell:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.03) saturate(1.15);
+  }
+}
+.monthHeatmap button.heatmapCell.heatLevel1 { color: var(--flowlet-color-primary); background: color-mix(in srgb, var(--flowlet-color-primary) 14%, var(--flowlet-color-surface)); }
+.monthHeatmap button.heatmapCell.heatLevel2 { color: var(--flowlet-color-primary); background: color-mix(in srgb, var(--flowlet-color-primary) 30%, var(--flowlet-color-surface)); }
+.monthHeatmap button.heatmapCell.heatLevel3 { color: white; background: color-mix(in srgb, var(--flowlet-color-primary) 68%, var(--flowlet-color-surface)); }
+.monthHeatmap button.heatmapCell.heatLevel4 { color: white; background: var(--flowlet-color-primary); }
+.monthHeatmap .weekend:not(.heatLevel3):not(.heatLevel4) { color: var(--flowlet-color-primary); }
 button.heatmapCell[aria-pressed="true"], .hourCell[aria-pressed="true"] {
-  box-shadow: inset 0 0 0 2px var(--flowlet-color-primary), 0 0 0 2px var(--flowlet-color-primary-soft);
+  z-index: 1;
+  box-shadow:
+    inset 0 0 0 2px var(--flowlet-color-primary),
+    0 0 0 2px var(--flowlet-color-surface),
+    0 0 0 4px var(--flowlet-color-primary);
 }
 button.heatmapCell:hover:not(:disabled), .hourCell:hover:not(:disabled) { filter: saturate(1.12); }
 .outside { opacity: .3; cursor: default; }
 
+.hourlyHeatmapFrame {
+  --hourly-heatmap-cell-height: 30px;
+  width: 100%;
+}
 .hourlyHeatmap {
   width: 100%;
   min-width: 0;
   padding: 2px 0;
   display: grid;
   grid-template-columns: 48px repeat(7, minmax(0, 1fr));
-  grid-template-rows: 18px repeat(8, minmax(30px, 1fr)) 16px;
+  grid-template-rows: 18px repeat(8, var(--hourly-heatmap-cell-height)) 16px;
   gap: 6px;
 }
 .hourLabel, .hourDayLabel, .hourDateLabel {
   display: grid;
   place-items: center;
   color: var(--flowlet-color-text-tertiary);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
 }
 .hourDateLabel { align-self: start; white-space: nowrap; }
 .hourCell {
-  min-width: 0;
-  min-height: 30px;
+  width: 100%;
+  height: var(--hourly-heatmap-cell-height);
   padding: 0;
   border: 0;
   border-radius: 6px;
@@ -168,48 +201,53 @@ button.heatmapCell:hover:not(:disabled), .hourCell:hover:not(:disabled) { filter
   justify-content: flex-end;
   gap: 4px;
   color: var(--flowlet-color-text-tertiary);
-  font-size: 10px;
+  font-size: 11px;
 }
 .heatmapLegend .heatmapCell { width: 10px; height: 10px; flex: none; border-radius: 3px; }
-.emptyHint { margin-top: 9px; color: var(--flowlet-color-text-tertiary); font-size: 11px; text-align: center; }
+.emptyHint { margin-top: 9px; color: var(--flowlet-color-text-tertiary); font-size: 12px; text-align: center; }
 
 .insightColumn {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(128px, .72fr) minmax(210px, 1.28fr);
+  grid-template-rows: minmax(178px, .84fr) minmax(214px, 1.16fr);
   gap: 10px;
 }
 
 .selectedPeriod {
-  padding: 16px 18px;
+  padding: 13px 16px 14px;
   display: grid;
-  grid-template-columns: minmax(92px, .72fr) minmax(0, 1.28fr);
-  align-items: center;
-  gap: 18px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 9px;
 }
-.selectedMetric { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
-.selectedLabel { color: var(--flowlet-color-text-secondary); font-size: 12px; }
-.selectedTokens { width: 100%; margin-top: 7px; overflow: hidden; color: var(--flowlet-color-text); font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.04em; white-space: nowrap; text-overflow: ellipsis; }
-.selectedMetric > small, .selectedPeriodEmpty > small { margin-top: 5px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
-.selectedMeta { min-width: 0; align-self: stretch; padding-left: 18px; display: grid; align-content: center; gap: 3px; border-left: 1px solid var(--flowlet-color-border); }
-.selectedMeta strong { color: var(--flowlet-color-text); font-size: 13px; line-height: 1.45; }
-.selectedMeta span { color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.55; }
+.selectedPeriodHeader { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.selectedPeriodHeader strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
+.selectedPeriodHeader span { flex: none; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.selectedPeriodStats { min-width: 0; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.selectedPeriodMetric { min-width: 0; padding: 8px 12px; display: grid; align-content: center; gap: 4px; }
+.selectedPeriodMetric:nth-child(odd) { padding-left: 0; border-right: 1px solid var(--flowlet-color-border); }
+.selectedPeriodMetric:nth-child(even) { padding-right: 0; }
+.selectedPeriodMetric:nth-child(n + 3) { border-top: 1px solid var(--flowlet-color-border); }
+.selectedPeriodMetric > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
+.selectedPeriodMetric > strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
+.selectedPeriodMetric > small, .selectedPeriodEmpty > small { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
+.selectedLabel { color: var(--flowlet-color-text-secondary); font-size: 13px; }
 .selectedPeriodEmpty { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
 .selectedPeriodEmpty > strong { margin-top: 8px; color: var(--flowlet-color-text); font-size: 14px; }
 
-.confidenceCard { padding: 15px 18px 14px; display: flex; flex-direction: column; }
+.confidenceCard { padding: 13px 18px 12px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 .confidenceCard > header { display: grid; gap: 2px; }
-.confidenceCard > header strong { color: var(--flowlet-color-text); font-size: 14px; }
-.confidenceCard > header span { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
-.confidenceSummary { margin-top: 12px; display: flex; align-items: center; gap: 14px; }
+.confidenceCard > header strong { color: var(--flowlet-color-text); font-size: 15px; }
+.confidenceCard > header span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.confidenceBody { min-width: 0; margin-top: 8px; display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); align-items: center; gap: 18px; }
+.confidenceSummary { min-width: 0; display: flex; align-items: center; gap: 14px; }
 .confidenceSummary > div:last-child { min-width: 0; display: grid; gap: 4px; }
-.confidenceSummary > div:last-child strong { color: var(--flowlet-color-text); font-size: 13px; }
-.confidenceSummary > div:last-child span { color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.45; }
+.confidenceSummary > div:last-child strong { color: var(--flowlet-color-text); font-size: 14px; }
+.confidenceSummary > div:last-child span { color: var(--flowlet-color-text-tertiary); font-size: 12px; line-height: 1.45; }
 .confidenceRing {
   --confidence-degrees: 0deg;
-  width: 68px;
-  height: 68px;
+  width: 58px;
+  height: 58px;
   flex: none;
   display: grid;
   place-items: center;
@@ -217,17 +255,17 @@ button.heatmapCell:hover:not(:disabled), .hourCell:hover:not(:disabled) { filter
   background: conic-gradient(var(--flowlet-color-success) var(--confidence-degrees), var(--flowlet-color-surface-muted) 0);
   position: relative;
 }
-.confidenceRing::after { content: ""; width: 52px; height: 52px; border-radius: 50%; background: var(--flowlet-color-surface); position: absolute; }
+.confidenceRing::after { content: ""; width: 44px; height: 44px; border-radius: 50%; background: var(--flowlet-color-surface); position: absolute; }
 .confidenceRing strong { z-index: 1; color: var(--flowlet-color-text); font-size: 15px; font-variant-numeric: tabular-nums; }
-.confidenceBreakdown { margin-top: 12px; padding-top: 10px; display: grid; gap: 6px; border-top: 1px solid var(--flowlet-color-border); }
+.confidenceBreakdown { min-width: 0; padding-left: 18px; display: grid; gap: 8px; border-left: 1px solid var(--flowlet-color-border); }
 .confidenceBreakdown > div { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .confidenceBreakdown i { width: 7px; height: 7px; border-radius: 50%; }
-.confidenceBreakdown span { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
-.confidenceBreakdown strong { color: var(--flowlet-color-text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.confidenceBreakdown span { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.confidenceBreakdown strong { color: var(--flowlet-color-text); font-size: 12px; font-variant-numeric: tabular-nums; }
 .proxyDot { background: var(--flowlet-color-success); }
 .nativeDot { background: var(--flowlet-color-primary); }
 .unknownDot { background: var(--flowlet-color-border-strong); }
-.confidenceCard > p { margin: auto 0 0; padding: 8px 10px; border-radius: 8px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 10px; line-height: 1.45; }
+.confidenceCard > p { margin: 8px 0 0; padding: 7px 10px; border-radius: 8px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 11px; line-height: 1.4; }
 
 @media (max-width: 980px) {
   .page { height: auto; min-height: 100%; }
@@ -236,7 +274,7 @@ button.heatmapCell:hover:not(:disabled), .hourCell:hover:not(:disabled) { filter
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace { grid-template-columns: 1fr; }
   .insightColumn { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
-  .selectedPeriod { min-height: 150px; }
+  .selectedPeriod { min-height: 214px; }
 }
 
 @media (max-width: 720px) {

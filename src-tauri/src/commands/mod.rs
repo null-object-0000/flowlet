@@ -4,6 +4,7 @@
 //! registry and frontend command strings stay stable while implementations are
 //! grouped by domain.
 
+mod account_workspace;
 mod agent;
 mod channels;
 mod device_sync;
@@ -13,6 +14,7 @@ mod proxy;
 mod scrape;
 mod usage;
 
+pub(super) use account_workspace::*;
 pub(super) use agent::*;
 pub(super) use channels::*;
 pub(super) use device_sync::*;

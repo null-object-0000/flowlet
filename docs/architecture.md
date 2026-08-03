@@ -40,6 +40,7 @@ Flowlet Desktop
   │     ├─ commands/                   Tauri command 薄适配层（按领域分组）
   │     │  ├─ mod.rs                   稳定的 command 门面与统一导出
   │     │  ├─ agent.rs                 Agent 环境、账号与全局配置
+  │     │  ├─ account_workspace.rs     S3 渠道账号工作区命令
   │     │  ├─ channels.rs              渠道、账号、模型与路由配置
   │     │  ├─ device_sync.rs           设备用量导入、导出与同步
   │     │  ├─ maintenance.rs           应用诊断、配置与存储维护
@@ -51,6 +52,7 @@ Flowlet Desktop
   │        ├─ mod.rs                   Core 模块出口
   │        ├─ config.rs                运行时配置结构
   │        ├─ channels_config.rs       config.json 反序列化与渠道默认值
+  │        ├─ account_workspace_sync.rs 加密账号目录与多桌面同步
   │        ├─ presets.rs               内置渠道模板
   │        ├─ proxy.rs                 代理生命周期（启动 / 停止 / 幂等）
   │        ├─ proxy_http.rs            HTTP 转发与请求头改写
@@ -406,6 +408,26 @@ Flowlet 代理费用；模型与渠道明细缺失时明确显示为不可用，
 `Secret Access Key` 单独存入 Windows Credential Manager、macOS Keychain 或 Linux
 Secret Service，不写入 `config.json`、导出包、任务日志或错误消息。配置保存、连接测试
 和手动同步均为热更新，不影响代理运行。
+
+桌面端可在同一 S3 空间中显式启用“渠道账号工作区”。工作区对象固定为
+`<prefix>/flowlet/v1/workspace/channel-accounts.enc`，使用独立随机 32-byte 密钥执行
+ChaCha20-Poly1305 端到端加密；密钥保存在桌面系统凭据库，并且只通过用户主动复制的
+“桌面端账号工作区接入包”迁移到另一台桌面设备。普通 S3 移动端连接包和设备快照均不携带
+该密钥，因此移动端无法解密渠道 API Key。
+
+账号工作区只统一以下全局字段：稳定 `workspace_account_id`、渠道、账号名称、API Key、
+工作区默认 OpenAI / Anthropic Base URL 与归档标记。SQLite 使用
+`channel_account_workspace_links` 保存“历史本地账号 ID → 工作区账号 ID”映射，避免重写
+请求日志；`channel_account_workspace_defaults` 保存工作区默认地址。本机的账号启停、优先级、
+路由、`synced_models` / `exposed_models`、资源状态和 Base URL override 不上传。代理与模型
+同步解析地址时遵循“本机 override → 工作区默认 → 渠道内置地址”。因此同一个 Friday
+自定义账号可以在工作区保存公网默认地址，公司设备再使用内网本机 override。
+
+启用前必须由用户确认，现有账号随后首次加密上传。全局字段保存采用远端优先和 ETag 冲突
+检查：S3 不可用或远端已被其它设备修改时拒绝全局修改，提示先同步；纯本机字段仍可离线热
+更新，代理继续使用 SQLite 缓存。远端新账号落到其它设备时默认禁用且不自动生成路由，由该
+设备自行选择模型和路由。账号工作区随启动后 5 秒及每 15 分钟的桌面 S3 周期同步刷新；
+设置页也提供独立的立即同步、初始化、桌面接入包导入与导出入口。
 
 远端对象布局为
 `<prefix>/flowlet/v1/devices/<deviceId>/snapshot.json`。每台设备只写自己的对象，

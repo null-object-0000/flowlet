@@ -5,7 +5,7 @@ import {
   isCustomChannel,
   pickUpstreamModelForCanonical,
 } from "../channel/types";
-import type { ChannelAccount } from "../account/types";
+import { effectiveAnthropicBaseUrl, effectiveOpenAiBaseUrl, type ChannelAccount } from "../account/types";
 import type { ChannelPreset, ProtocolType } from "../channel/types";
 import type { ChannelModel, ModelExposureMode, RouteCandidate } from "./types";
 
@@ -60,8 +60,8 @@ export function buildDefaultRoutes(
     if (a.channel_id !== channelId || !a.enabled || !a.api_key.trim()) return false;
     // Responses 端点从 OpenAI Base URL 派生，自定义渠道门禁与 openai 相同。
     return protocol === "openai" || protocol === "responses"
-      ? Boolean(a.base_url_override?.trim()) || channelId !== "custom"
-      : Boolean(a.anthropic_base_url_override?.trim()) || channelId !== "custom";
+      ? Boolean(effectiveOpenAiBaseUrl(a)) || channelId !== "custom"
+      : Boolean(effectiveAnthropicBaseUrl(a)) || channelId !== "custom";
   });
   const now = new Date().toISOString();
   const out: RouteCandidate[] = [];
@@ -179,8 +179,8 @@ export function reconcileAccountRoutes(
     if (account && isCustomChannel(presetById.get(account.channel_id))) {
       const hasEndpoint =
         route.client_protocol === "openai" || route.client_protocol === "responses"
-          ? Boolean(account.base_url_override?.trim())
-          : Boolean(account.anthropic_base_url_override?.trim());
+          ? Boolean(effectiveOpenAiBaseUrl(account))
+          : Boolean(effectiveAnthropicBaseUrl(account));
       if (!hasEndpoint) return false;
     }
     const exposedSet = new Set(exposed.map((m) => m.trim().toLowerCase()));

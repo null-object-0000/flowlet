@@ -4,7 +4,7 @@ import { accountCommands } from "../../domains/account/commands";
 import { modelCommands, reconcileAccountRoutes, routesDiffer } from "../../domains/model/commands";
 import { isQwenTokenPlanAccount } from "../../domains/channel/types";
 import { queryKeys } from "../../shared/query-keys";
-import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
+import { effectiveOpenAiBaseUrl, type AccountBalanceSnapshot, type ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { errorMessage } from "../../shared/errors/AppError";
@@ -44,6 +44,7 @@ export function useAccountActions(presets: ChannelPreset[]) {
       // 用量页立即按新名重新连表展示。
       void qc.invalidateQueries({ queryKey: queryKeys.requestLog.all });
       void qc.invalidateQueries({ queryKey: queryKeys.usage.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.accountWorkspace.status() });
       if (failures.length > 0) {
         Toast.warning(t("账号已保存，但自动更新失败：{message}", {
           message: failures.map((failure) => `${failure.accountName}: ${failure.message}`).join("；"),
@@ -119,7 +120,7 @@ export async function refreshSavedAccounts(
     // 千问 Token Plan 账号的 Base URL 覆盖是套餐专属端点（非用户自定义），应参与余额查询；
     // 其余用户自定义 OpenAI 端点账号跳过（无法保证余额接口语义一致）。
     const usesCustomOpenAiEndpoint =
-      Boolean(account.base_url_override?.trim()) && !isQwenTokenPlanAccount(account);
+      Boolean(effectiveOpenAiBaseUrl(account)) && !isQwenTokenPlanAccount(account);
 
     if (preset.supports_balance_query && !usesCustomOpenAiEndpoint) {
       operations.push({

@@ -24,6 +24,10 @@ export const queryKeys = {
     list: () => [...queryKeys.account.all, "list"] as const,
     balance: (accountId: string) => [...queryKeys.account.all, "balance", accountId] as const,
   },
+  accountWorkspace: {
+    all: ["account-workspace"] as const,
+    status: () => [...queryKeys.accountWorkspace.all, "status"] as const,
+  },
   model: {
     all: ["model"] as const,
     channelModels: () => [...queryKeys.model.all, "channel-models"] as const,

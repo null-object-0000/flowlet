@@ -34,6 +34,71 @@ fn channel_account_resource_sync_mode_round_trips() {
 }
 
 #[test]
+fn channel_account_workspace_identity_and_defaults_round_trip_and_survive_local_removal() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate account workspace schema");
+    let account = ChannelAccount {
+        id: "local-friday".to_string(),
+        workspace_account_id: Some("workspace-friday".to_string()),
+        channel_id: "custom".to_string(),
+        name: "Friday".to_string(),
+        api_key: "sk-friday".to_string(),
+        base_url_override: Some("http://friday.internal/v1".to_string()),
+        workspace_default_base_url: Some("https://friday.example/v1".to_string()),
+        ..Default::default()
+    };
+
+    storage.save_channel_accounts(&[account]).expect("save linked account");
+    let saved = storage.list_channel_accounts().expect("list linked account");
+    assert_eq!(saved[0].workspace_account_id.as_deref(), Some("workspace-friday"));
+    assert_eq!(saved[0].base_url_override.as_deref(), Some("http://friday.internal/v1"));
+    assert_eq!(saved[0].workspace_default_base_url.as_deref(), Some("https://friday.example/v1"));
+
+    storage.save_channel_accounts(&[]).expect("remove local account");
+    assert!(storage.list_channel_accounts().unwrap().is_empty());
+    assert_eq!(
+        storage.local_account_id_for_workspace("workspace-friday").unwrap().as_deref(),
+        Some("local-friday")
+    );
+}
+
+#[test]
+fn usage_summary_uses_workspace_account_identity_without_rewriting_history() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate usage workspace schema");
+    storage
+        .save_channel_accounts(&[ChannelAccount {
+            id: "account-1".to_string(),
+            workspace_account_id: Some("workspace-account-1".to_string()),
+            channel_id: "longcat".to_string(),
+            name: "Shared LongCat".to_string(),
+            api_key: "sk-test".to_string(),
+            ..Default::default()
+        }])
+        .expect("save workspace mapping");
+    storage
+        .insert_request_log(&request_log_for_repair("workspace-usage", 0, true))
+        .expect("insert request log");
+    storage
+        .upsert_usage_record(&UsageRecordInput {
+            request_id: "workspace-usage".to_string(),
+            account_id: Some("account-1".to_string()),
+            account_name: Some("Historical name".to_string()),
+            total_tokens: Some(42),
+            ..empty_usage_input("workspace-usage")
+        })
+        .expect("insert usage");
+
+    let summary = test_usage_summary(&storage, "all");
+    assert_eq!(summary.len(), 1);
+    assert_eq!(summary[0].account_id.as_deref(), Some("workspace-account-1"));
+    assert_eq!(summary[0].account_name.as_deref(), Some("Shared LongCat"));
+    assert_eq!(summary[0].known_tokens, 42);
+}
+
+#[test]
 fn migration_forces_qwen_token_plan_resource_sync_to_auto() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     connection

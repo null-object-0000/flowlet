@@ -217,10 +217,8 @@ pub async fn test_channel_connection(
         .map_err(|err| format!("创建 HTTP 客户端失败: {err}"))?;
 
     // 自定义 OpenAI Base URL 必须参与连接测试；未覆盖时才使用渠道配置端点。
-    let url = account
-        .base_url_override
-        .as_deref()
-        .filter(|url| !url.trim().is_empty())
+    let effective_base_url = account.effective_openai_base_url();
+    let url = effective_base_url
         .map(openai_models_url)
         .or_else(|| _config.models_endpoint_url(&account.channel_id))
         .ok_or_else(|| format!("不支持测试连接的渠道: {}", account.channel_id))?;
@@ -231,7 +229,7 @@ pub async fn test_channel_connection(
         channel_id = %account.channel_id,
         method = "GET",
         url = %url,
-        custom_base_url = account.base_url_override.as_deref().is_some_and(|value| !value.trim().is_empty()),
+        custom_base_url = effective_base_url.is_some(),
         "test_connection: 开始请求上游"
     );
 
@@ -305,9 +303,7 @@ fn openai_models_url(base_url: &str) -> String {
 /// 套餐专属端点），未覆盖时使用渠道配置的端点。与 test_channel_connection 保持一致。
 fn account_models_url(account: &ChannelAccount, config: &ChannelsConfig) -> Option<String> {
     account
-        .base_url_override
-        .as_deref()
-        .filter(|url| !url.trim().is_empty())
+        .effective_openai_base_url()
         .map(openai_models_url)
         .or_else(|| config.models_endpoint_url(&account.channel_id))
 }
@@ -653,9 +649,7 @@ pub async fn sync_openai_compatible_models(
     }
 
     let Some(base_url) = account
-        .base_url_override
-        .as_deref()
-        .filter(|url| !url.trim().is_empty())
+        .effective_openai_base_url()
         .or_else(|| {
             (!preset.openai_base_url.trim().is_empty()).then_some(preset.openai_base_url.as_str())
         })
@@ -1072,11 +1066,7 @@ pub async fn sync_longcat_models(
     let synced_at = chrono::Utc::now().to_rfc3339();
     let mut channel_models: Vec<ChannelModel> = Vec::new();
     let errors: Vec<String> = Vec::new();
-    let uses_custom_endpoint = account
-        .base_url_override
-        .as_ref()
-        .map(|url| !url.trim().is_empty())
-        .unwrap_or(false);
+    let uses_custom_endpoint = account.effective_openai_base_url().is_some();
 
     for entry in &entries {
         let detail = if uses_custom_endpoint {

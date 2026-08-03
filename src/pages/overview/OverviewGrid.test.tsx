@@ -43,6 +43,7 @@ vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
 function makeAccount(overrides: Partial<ChannelAccount> = {}): ChannelAccount {
   return {
     id: "acc-1",
+    workspace_account_id: null,
     channel_id: "longcat",
     name: "test-account",
     api_key: "sk-test",
@@ -53,6 +54,8 @@ function makeAccount(overrides: Partial<ChannelAccount> = {}): ChannelAccount {
     resource_sync_mode: "auto",
     base_url_override: null,
     anthropic_base_url_override: null,
+    workspace_default_base_url: null,
+    workspace_default_anthropic_base_url: null,
     last_used_at: null,
     last_error: null,
     credential_status: "healthy",

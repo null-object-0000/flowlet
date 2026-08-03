@@ -12,6 +12,8 @@ import type {
   DeviceUsageImportPreview,
   S3SyncConfigInput,
 } from "../../../domains/device-sync/types";
+import type { DesktopAccountWorkspacePackage } from "../../../domains/account-workspace/types";
+import { useAccountWorkspaceSync } from "../../../features/channel-accounts/useAccountWorkspaceSync";
 import {
   useDeviceUsageTransfer,
   useKnownDevices,
@@ -45,6 +47,7 @@ export function SyncTab() {
   const transfer = useDeviceUsageTransfer();
   const lanStatus = useLanServerStatus();
   const lanProbes = useLanProbes();
+  const accountWorkspace = useAccountWorkspaceSync();
   const [importPath, setImportPath] = useState<string | null>(null);
   const [preview, setPreview] = useState<DeviceUsageImportPreview | null>(null);
   const [renameValue, setRenameValue] = useState<string | null>(null);
@@ -53,6 +56,8 @@ export function SyncTab() {
   const [connectionText, setConnectionText] = useState<string | null>(null);
   const [connectionTab, setConnectionTab] = useState<ConnectionTab | null>(null);
   const [expiresIn, setExpiresIn] = useState(60);
+  const [workspaceConsentVisible, setWorkspaceConsentVisible] = useState(false);
+  const [workspaceImportText, setWorkspaceImportText] = useState<string | null>(null);
 
   const parsedConnection = useMemo(() => {
     if (connectionText == null || !connectionText.trim()) return null;
@@ -245,6 +250,47 @@ export function SyncTab() {
     }
   };
 
+  const initializeAccountWorkspace = async () => {
+    try {
+      const result = await accountWorkspace.initialize.mutateAsync();
+      setWorkspaceConsentVisible(false);
+      Toast.success(t("账号工作区已启用，已统一管理 {count} 个账号", { count: result.linkedAccounts }));
+    } catch (error) {
+      Toast.error(t("启用失败：{message}", { message: errorMessage(error) }));
+    }
+  };
+
+  const syncAccountWorkspace = async () => {
+    try {
+      const result = await accountWorkspace.sync.mutateAsync();
+      Toast.success(t("账号工作区已同步，共 {count} 个账号", { count: result.accountCount }));
+    } catch (error) {
+      Toast.error(t("同步失败：{message}", { message: errorMessage(error) }));
+    }
+  };
+
+  const copyDesktopWorkspacePackage = async () => {
+    try {
+      const accountPackage = await accountWorkspace.exportDesktopPackage.mutateAsync();
+      await navigator.clipboard.writeText(JSON.stringify(accountPackage, null, 2));
+      Toast.success(t("桌面端账号工作区接入包已复制"));
+    } catch (error) {
+      Toast.error(t("复制失败：{message}", { message: errorMessage(error) }));
+    }
+  };
+
+  const importDesktopWorkspacePackage = async () => {
+    if (!workspaceImportText?.trim()) return;
+    try {
+      const accountPackage = JSON.parse(workspaceImportText) as DesktopAccountWorkspacePackage;
+      const result = await accountWorkspace.importDesktopPackage.mutateAsync(accountPackage);
+      setWorkspaceImportText(null);
+      Toast.success(t("已加入账号工作区，同步 {count} 个账号", { count: result.accountCount }));
+    } catch (error) {
+      Toast.error(t("导入失败：{message}", { message: errorMessage(error) }));
+    }
+  };
+
   return (
     <div className={styles.root}>
       <section className={styles.card} data-keywords="S3 R2 MinIO 对象存储 同步 连接 二维码">
@@ -284,6 +330,50 @@ export function SyncTab() {
             <span>{settings.data.status.message}</span>
           </div>
         ) : null}
+        <div className={styles.workspacePanel}>
+          <div className={styles.workspaceCopy}>
+            <div className={styles.deviceTitle}>
+              <strong>{t("渠道账号工作区")}</strong>
+              {accountWorkspace.status.data?.enabled
+                ? <Tag color="blue" size="small">{t("已启用")}</Tag>
+                : <Tag size="small">{t("未启用")}</Tag>}
+            </div>
+            <span>
+              {accountWorkspace.status.data?.enabled
+                ? t("已统一管理 {count} 个渠道账号；路由、启停和本机地址仍由各设备管理", { count: accountWorkspace.status.data.linkedAccounts })
+                : t("端到端加密同步账号名称、账号 ID、API Key 与工作区默认地址")}
+            </span>
+          </div>
+          <div className={styles.actions}>
+            {accountWorkspace.status.data?.enabled ? <>
+              <Button
+                theme="outline"
+                loading={accountWorkspace.exportDesktopPackage.isPending}
+                onClick={() => void copyDesktopWorkspacePackage()}
+              >
+                {t("复制桌面接入包")}
+              </Button>
+              <Button
+                type="primary"
+                theme="solid"
+                loading={accountWorkspace.sync.isPending}
+                onClick={() => void syncAccountWorkspace()}
+              >
+                {t("同步账号")}
+              </Button>
+            </> : <>
+              <Button theme="outline" onClick={() => setWorkspaceImportText("")}>{t("加入已有工作区")}</Button>
+              <Button
+                type="primary"
+                theme="solid"
+                disabled={!settings.data?.config}
+                onClick={() => setWorkspaceConsentVisible(true)}
+              >
+                {t("启用账号工作区")}
+              </Button>
+            </>}
+          </div>
+        </div>
       </section>
 
       <section className={styles.card} data-keywords="局域网 LAN 直连 内网 同步">
@@ -538,6 +628,47 @@ export function SyncTab() {
             </div>
           </Tabs.TabPane>
         </Tabs>
+      </Modal>
+
+      <Modal
+        title={t("启用渠道账号工作区")}
+        visible={workspaceConsentVisible}
+        zIndex={APP_OVERLAY_Z_INDEX.modal}
+        onCancel={() => setWorkspaceConsentVisible(false)}
+        onOk={() => void initializeAccountWorkspace()}
+        okButtonProps={{ loading: accountWorkspace.initialize.isPending }}
+        okText={t("加密并启用")}
+        cancelText={t("取消")}
+      >
+        <div className={styles.workspaceConsent}>
+          <p>{t("现有渠道账号将使用独立密钥加密后写入已配置的 S3。加入工作区的桌面设备可读取账号凭据，但移动端连接包不会包含此密钥。")}</p>
+          <p>{t("启用后，账号名称、API Key 和工作区默认地址由 S3 统一管理；路由、启停、优先级、模型选择和本机地址仍只保存在当前设备。")}</p>
+        </div>
+      </Modal>
+
+      <Modal
+        title={t("加入渠道账号工作区")}
+        visible={workspaceImportText != null}
+        zIndex={APP_OVERLAY_Z_INDEX.modal}
+        onCancel={() => setWorkspaceImportText(null)}
+        onOk={() => void importDesktopWorkspacePackage()}
+        okButtonProps={{
+          loading: accountWorkspace.importDesktopPackage.isPending,
+          disabled: !workspaceImportText?.trim(),
+        }}
+        okText={t("校验并加入")}
+        cancelText={t("取消")}
+      >
+        <div className={styles.workspaceImport}>
+          <p>{t("粘贴另一台桌面设备导出的接入包。接入包包含 S3 凭据和账号工作区解密密钥，请仅通过可信方式传递。")}</p>
+          <TextArea
+            autoFocus
+            value={workspaceImportText ?? ""}
+            placeholder={t("粘贴 Flowlet 桌面端账号工作区接入包 JSON")}
+            autosize={{ minRows: 9, maxRows: 12 }}
+            onChange={setWorkspaceImportText}
+          />
+        </div>
       </Modal>
 
       <Modal

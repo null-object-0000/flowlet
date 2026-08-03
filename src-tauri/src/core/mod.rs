@@ -1,4 +1,5 @@
 pub mod agent_environment;
+pub mod account_workspace_sync;
 pub mod agent_global_config;
 pub(crate) mod agent_session_identity;
 pub mod agent_session_metadata;

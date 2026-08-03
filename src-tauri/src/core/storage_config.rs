@@ -3,7 +3,7 @@ use crate::core::config::{
     ACCOUNT_CREDENTIAL_HEALTHY, ACCOUNT_CREDENTIAL_INVALID_KEY, ChannelAccount, ChannelModel,
     ChannelPreset, ProtocolType, RouteCandidate, RouteRule, VirtualModel,
 };
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 impl Storage {
     // ─── Channel Presets ─────────────────────────────────────────────────────
@@ -338,6 +338,37 @@ impl Storage {
                     account.updated_at,
                 ],
             )?;
+            if let Some(workspace_account_id) = account
+                .workspace_account_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                tx.execute(
+                    r#"INSERT INTO channel_account_workspace_links (
+                           local_account_id, workspace_account_id, linked_at, updated_at
+                       ) VALUES (?1, ?2, ?3, ?3)
+                       ON CONFLICT(local_account_id) DO UPDATE SET
+                           workspace_account_id = excluded.workspace_account_id,
+                           updated_at = excluded.updated_at"#,
+                    params![account.id, workspace_account_id, account.updated_at],
+                )?;
+                tx.execute(
+                    r#"INSERT INTO channel_account_workspace_defaults (
+                           workspace_account_id, openai_base_url, anthropic_base_url, updated_at
+                       ) VALUES (?1, ?2, ?3, ?4)
+                       ON CONFLICT(workspace_account_id) DO UPDATE SET
+                           openai_base_url = excluded.openai_base_url,
+                           anthropic_base_url = excluded.anthropic_base_url,
+                           updated_at = excluded.updated_at"#,
+                    params![
+                        workspace_account_id,
+                        account.workspace_default_base_url,
+                        account.workspace_default_anthropic_base_url,
+                        account.updated_at,
+                    ],
+                )?;
+            }
         }
         tx.commit()?;
         Ok(())
@@ -349,41 +380,48 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
-            "SELECT id, channel_id, name, api_key, enabled, priority,
-                    remark, resource_mode, resource_sync_mode, base_url_override, anthropic_base_url_override,
-                    last_used_at, last_error, credential_status, synced_models, models_synced_at, exposed_models,
-                    created_at, updated_at
-             FROM channel_accounts ORDER BY channel_id ASC, priority ASC, id ASC",
+            "SELECT ca.id, links.workspace_account_id, ca.channel_id, ca.name, ca.api_key, ca.enabled, ca.priority,
+                    ca.remark, ca.resource_mode, ca.resource_sync_mode, ca.base_url_override, ca.anthropic_base_url_override,
+                    defaults.openai_base_url, defaults.anthropic_base_url,
+                    ca.last_used_at, ca.last_error, ca.credential_status, ca.synced_models, ca.models_synced_at, ca.exposed_models,
+                    ca.created_at, ca.updated_at
+             FROM channel_accounts ca
+             LEFT JOIN channel_account_workspace_links links ON links.local_account_id = ca.id
+             LEFT JOIN channel_account_workspace_defaults defaults ON defaults.workspace_account_id = links.workspace_account_id
+             ORDER BY ca.channel_id ASC, ca.priority ASC, ca.id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             let synced_models: Option<Vec<String>> = row
-                .get::<_, Option<String>>(14)?
+                .get::<_, Option<String>>(17)?
                 .and_then(|json| serde_json::from_str(&json).ok());
             let exposed_models: Option<Vec<String>> = row
-                .get::<_, Option<String>>(16)?
+                .get::<_, Option<String>>(19)?
                 .and_then(|json| serde_json::from_str(&json).ok());
             Ok(ChannelAccount {
                 id: row.get(0)?,
-                channel_id: row.get(1)?,
-                name: row.get(2)?,
-                api_key: row.get(3)?,
-                enabled: row.get::<_, i64>(4)? != 0,
-                priority: row.get(5)?,
-                remark: row.get(6)?,
-                resource_mode: row.get(7)?,
-                resource_sync_mode: row.get(8)?,
-                base_url_override: row.get(9)?,
-                anthropic_base_url_override: row.get(10)?,
-                last_used_at: row.get(11)?,
-                last_error: row.get(12)?,
+                workspace_account_id: row.get(1)?,
+                channel_id: row.get(2)?,
+                name: row.get(3)?,
+                api_key: row.get(4)?,
+                enabled: row.get::<_, i64>(5)? != 0,
+                priority: row.get(6)?,
+                remark: row.get(7)?,
+                resource_mode: row.get(8)?,
+                resource_sync_mode: row.get(9)?,
+                base_url_override: row.get(10)?,
+                anthropic_base_url_override: row.get(11)?,
+                workspace_default_base_url: row.get(12)?,
+                workspace_default_anthropic_base_url: row.get(13)?,
+                last_used_at: row.get(14)?,
+                last_error: row.get(15)?,
                 credential_status: row
-                    .get::<_, String>(13)
+                    .get::<_, String>(16)
                     .unwrap_or_else(|_| "healthy".to_string()),
                 synced_models,
-                models_synced_at: row.get(15)?,
+                models_synced_at: row.get(18)?,
                 exposed_models,
-                created_at: row.get(17)?,
-                updated_at: row.get(18)?,
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
             })
         })?;
         let mut accounts = Vec::new();
@@ -391,6 +429,24 @@ impl Storage {
             accounts.push(row?);
         }
         Ok(accounts)
+    }
+
+    pub fn local_account_id_for_workspace(
+        &self,
+        workspace_account_id: &str,
+    ) -> Result<Option<String>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection
+            .query_row(
+                "SELECT local_account_id FROM channel_account_workspace_links WHERE workspace_account_id = ?1",
+                [workspace_account_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StorageError::from)
     }
 
     pub fn update_account_last_used(&self, account_id: &str) -> Result<(), StorageError> {

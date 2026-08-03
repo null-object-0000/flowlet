@@ -879,6 +879,7 @@ fn run_desktop() {
             // Tauri runtime 仍然存活，因此定时同步会继续运行，退出 Flowlet 时停止。
             let s3_timer_storage = state.storage.clone();
             let s3_timer_identity = state.device_identity.clone();
+            let s3_timer_accounts = state.accounts.clone();
             tauri::async_runtime::spawn(async move {
                 let period = crate::core::device_sync::AUTO_SYNC_INTERVAL;
                 let mut interval = tokio::time::interval_at(
@@ -938,6 +939,34 @@ fn run_desktop() {
                         }
                         Err(error) => {
                             tracing::warn!(error = %error, "scheduled S3 device sync failed");
+                        }
+                    }
+
+                    if crate::core::account_workspace_sync::is_enabled(&s3_timer_storage) {
+                        match crate::core::account_workspace_sync::sync(
+                            s3_timer_storage.clone(),
+                        )
+                        .await
+                        {
+                            Ok(result) => {
+                                if let Ok(accounts) = s3_timer_storage.list_channel_accounts() {
+                                    if let Ok(mut current) = s3_timer_accounts.lock() {
+                                        *current = accounts;
+                                    }
+                                }
+                                tracing::info!(
+                                    revision = result.revision,
+                                    linked_accounts = result.linked_accounts,
+                                    created_local_accounts = result.created_local_accounts,
+                                    "scheduled S3 account workspace sync finished"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    error = %error,
+                                    "scheduled S3 account workspace sync failed"
+                                );
+                            }
                         }
                     }
                 }
@@ -1059,6 +1088,11 @@ fn run_desktop() {
             commands::save_channel_presets,
             commands::list_channel_accounts,
             commands::save_channel_accounts,
+            commands::initialize_account_workspace,
+            commands::get_account_workspace_status,
+            commands::sync_account_workspace,
+            commands::export_desktop_account_workspace,
+            commands::import_desktop_account_workspace,
             commands::list_route_candidates,
             commands::save_route_candidates,
             commands::list_channel_models,

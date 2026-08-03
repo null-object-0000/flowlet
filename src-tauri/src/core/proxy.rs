@@ -720,9 +720,9 @@ async fn forward_request(
         // Responses 复用 OpenAI 的覆盖地址（两者共享上游 Base URL）。
         let account_base_url = match &detected_protocol {
             ProtocolType::OpenAi | ProtocolType::Responses => {
-                account.base_url_override.as_deref()
+                account.effective_openai_base_url()
             }
-            ProtocolType::Anthropic => account.anthropic_base_url_override.as_deref(),
+            ProtocolType::Anthropic => account.effective_anthropic_base_url(),
         };
         let base_url = account_base_url
             .filter(|url| !url.trim().is_empty())

@@ -44,10 +44,19 @@ pub(crate) fn list_channel_accounts(
 }
 
 #[tauri::command]
-pub(crate) fn save_channel_accounts(
+pub(crate) async fn save_channel_accounts(
     state: tauri::State<'_, AppState>,
-    accounts: Vec<ChannelAccount>,
+    mut accounts: Vec<ChannelAccount>,
 ) -> Result<Vec<ChannelAccount>, String> {
+    let previous = state
+        .storage
+        .list_channel_accounts()
+        .map_err(|err| err.to_string())?;
+    if crate::core::account_workspace_sync::is_enabled(&state.storage)
+        && crate::core::account_workspace_sync::global_accounts_changed(&previous, &accounts)
+    {
+        crate::core::account_workspace_sync::push_accounts(&state.storage, &mut accounts).await?;
+    }
     state
         .storage
         .save_channel_accounts(&accounts)

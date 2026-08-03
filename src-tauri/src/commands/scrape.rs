@@ -394,11 +394,7 @@ pub(crate) async fn query_balance(
         });
     }
 
-    if account
-        .base_url_override
-        .as_deref()
-        .is_some_and(|url| !url.trim().is_empty())
-    {
+    if account.effective_openai_base_url().is_some() {
         return Ok(BalanceQueryResult {
             balance: None,
             currency: None,
@@ -2114,10 +2110,7 @@ fn channel_resource_sync_method(
             .iter()
             .find(|preset| preset.id == account.channel_id)
             .is_some_and(|preset| preset.supports_balance_query)
-        && !account
-            .base_url_override
-            .as_deref()
-            .is_some_and(|url| !url.trim().is_empty());
+        && account.effective_openai_base_url().is_none();
     if supports_official_balance {
         return Some(ChannelResourceSyncMethod::OfficialApi);
     }

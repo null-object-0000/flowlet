@@ -466,6 +466,9 @@ fn default_resource_sync_mode() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelAccount {
     pub id: String,
+    /// 同一 S3 工作区内稳定的账号身份。本地路由继续引用 `id`；跨设备用量按此字段归一。
+    #[serde(default)]
+    pub workspace_account_id: Option<String>,
     pub channel_id: String,
     pub name: String,
     pub api_key: String,
@@ -482,6 +485,11 @@ pub struct ChannelAccount {
     /// Account-level Anthropic-compatible upstream URL override.
     #[serde(default)]
     pub anthropic_base_url_override: Option<String>,
+    /// S3 工作区共享的默认连接地址；本设备 override 优先于默认地址。
+    #[serde(default)]
+    pub workspace_default_base_url: Option<String>,
+    #[serde(default)]
+    pub workspace_default_anthropic_base_url: Option<String>,
     pub last_used_at: Option<String>,
     pub last_error: Option<String>,
     #[serde(default = "default_credential_status")]
@@ -505,6 +513,7 @@ impl Default for ChannelAccount {
     fn default() -> Self {
         Self {
             id: String::new(),
+            workspace_account_id: None,
             channel_id: String::new(),
             name: String::new(),
             api_key: String::new(),
@@ -515,6 +524,8 @@ impl Default for ChannelAccount {
             resource_sync_mode: default_resource_sync_mode(),
             base_url_override: None,
             anthropic_base_url_override: None,
+            workspace_default_base_url: None,
+            workspace_default_anthropic_base_url: None,
             last_used_at: None,
             last_error: None,
             credential_status: ACCOUNT_CREDENTIAL_HEALTHY.to_string(),
@@ -524,6 +535,30 @@ impl Default for ChannelAccount {
             created_at: String::new(),
             updated_at: String::new(),
         }
+    }
+}
+
+impl ChannelAccount {
+    pub fn effective_openai_base_url(&self) -> Option<&str> {
+        self.base_url_override
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.workspace_default_base_url
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+            })
+    }
+
+    pub fn effective_anthropic_base_url(&self) -> Option<&str> {
+        self.anthropic_base_url_override
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.workspace_default_anthropic_base_url
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+            })
     }
 }
 

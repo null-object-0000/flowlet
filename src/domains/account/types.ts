@@ -7,6 +7,8 @@ export type AccountResourceSyncMode = "manual" | "auto";
 
 export type ChannelAccount = {
   id: string;
+  /** 同一 S3 工作区内稳定的账号身份；本地路由仍引用 id。 */
+  workspace_account_id: string | null;
   channel_id: string;
   name: string;
   api_key: string;
@@ -17,6 +19,9 @@ export type ChannelAccount = {
   resource_sync_mode: AccountResourceSyncMode;
   base_url_override: string | null;
   anthropic_base_url_override: string | null;
+  /** 工作区共享默认地址；本设备 override 的优先级更高。 */
+  workspace_default_base_url: string | null;
+  workspace_default_anthropic_base_url: string | null;
   last_used_at: string | null;
   last_error: string | null;
   credential_status: AccountCredentialStatus;
@@ -64,11 +69,24 @@ export type ModelSyncResult = {
   errors: string[];
 };
 
+export function effectiveOpenAiBaseUrl(account: ChannelAccount): string | null {
+  return account.base_url_override?.trim()
+    || account.workspace_default_base_url?.trim()
+    || null;
+}
+
+export function effectiveAnthropicBaseUrl(account: ChannelAccount): string | null {
+  return account.anthropic_base_url_override?.trim()
+    || account.workspace_default_anthropic_base_url?.trim()
+    || null;
+}
+
 /** Initial blank account draft for the create form. The id is assigned here
  *  but Rust side normalizes the list on save. */
 export function newAccount(channelId: string, index: number): ChannelAccount {
   return {
     id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    workspace_account_id: null,
     channel_id: channelId,
     name: `账号 ${index + 1}`,
     api_key: "",
@@ -79,6 +97,8 @@ export function newAccount(channelId: string, index: number): ChannelAccount {
     resource_sync_mode: "manual",
     base_url_override: null,
     anthropic_base_url_override: null,
+    workspace_default_base_url: null,
+    workspace_default_anthropic_base_url: null,
     last_used_at: null,
     last_error: null,
     credential_status: "healthy",

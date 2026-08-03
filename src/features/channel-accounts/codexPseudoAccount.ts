@@ -16,6 +16,7 @@ export function codexAccountToPseudoChannelAccount(
   const now = new Date().toISOString();
   return {
     id: `codex-${report.account_id}`,
+    workspace_account_id: null,
     channel_id: CHATGPT_CHANNEL_ID,
     name: report.email || "ChatGPT 账号",
     api_key: "",
@@ -26,6 +27,8 @@ export function codexAccountToPseudoChannelAccount(
     resource_sync_mode: "auto",
     base_url_override: null,
     anthropic_base_url_override: null,
+    workspace_default_base_url: null,
+    workspace_default_anthropic_base_url: null,
     last_used_at: null,
     last_error: report.error ?? null,
     credential_status: report.stale ? "invalid_key" : "healthy",

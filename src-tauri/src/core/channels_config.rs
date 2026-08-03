@@ -458,12 +458,10 @@ impl ChannelsConfig {
                         match protocol {
                             // Responses 从 OpenAI Base URL 派生，共用同一覆盖地址。
                             ProtocolType::OpenAi | ProtocolType::Responses => account
-                                .base_url_override
-                                .as_deref()
+                                .effective_openai_base_url()
                                 .is_some_and(|url| !url.trim().is_empty()),
                             ProtocolType::Anthropic => account
-                                .anthropic_base_url_override
-                                .as_deref()
+                                .effective_anthropic_base_url()
                                 .is_some_and(|url| !url.trim().is_empty()),
                         }
                     } else {

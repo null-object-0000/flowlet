@@ -3,7 +3,7 @@ import { Button, Checkbox, Input, Pagination, Progress, Select, SideSheet, Space
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { toAppError } from "../../platform/tauri/client";
 import { accountCommands } from "../../domains/account/commands";
-import type { AccountBalanceSnapshot, AccountResourceMode, AccountResourceSyncMode, ChannelAccount, ModelSyncResult } from "../../domains/account/types";
+import { effectiveOpenAiBaseUrl, type AccountBalanceSnapshot, type AccountResourceMode, type AccountResourceSyncMode, type ChannelAccount, type ModelSyncResult } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import {
   CHATGPT_CHANNEL_ID,
@@ -70,6 +70,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const [resource, setResource] = useState<ResourceDraft>(() => resourceDraft(snapshot));
   const [advancedOpen, setAdvancedOpen] = useState(
     () => mode.kind === "edit" && mode.account.channel_id === CUSTOM_CHANNEL_ID,
+  );
+  const [deviceOverrideEnabled, setDeviceOverrideEnabled] = useState(
+    () => mode.kind === "create" || Boolean(mode.account.base_url_override || mode.account.anthropic_base_url_override),
   );
   const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -174,13 +177,13 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       Toast.warning(t("请先填写 API Key"));
       return;
     }
-    if (customChannel && !currentDraft.base_url_override?.trim()) {
+    if (customChannel && !effectiveOpenAiBaseUrl(currentDraft)) {
       Toast.warning(t("测试连接需要先填写 OpenAI Base URL"));
       return;
     }
     setTesting(true);
     try {
-      await onTestConnection({ channel_id: currentDraft.channel_id, api_key: currentDraft.api_key.trim(), base_url_override: currentDraft.base_url_override });
+      await onTestConnection({ channel_id: currentDraft.channel_id, api_key: currentDraft.api_key.trim(), base_url_override: effectiveOpenAiBaseUrl(currentDraft) });
       update({ credential_status: "healthy", last_error: null });
       Toast.success(t("连接成功，API Key 有效"));
     } catch (error) {
@@ -218,7 +221,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       Toast.warning(t("请先填写 API Key"));
       return;
     }
-    if (customChannel && !currentDraft.base_url_override?.trim()) {
+    if (customChannel && !effectiveOpenAiBaseUrl(currentDraft)) {
       Toast.warning(t("拉取模型列表需要先填写 OpenAI Base URL"));
       return;
     }
@@ -227,7 +230,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       const result = await accountCommands.fetchChannelModels({
         channel_id: currentDraft.channel_id,
         api_key: currentDraft.api_key.trim(),
-        base_url_override: currentDraft.base_url_override,
+        base_url_override: effectiveOpenAiBaseUrl(currentDraft),
       });
       const models = result.models.filter((item) => item.model.trim());
       // /models 返回的模型按规范键归一（别名变体如 deepseek-v4-flash-0731 →
@@ -283,8 +286,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     }
     if (
       customChannel
-      && !currentDraft.base_url_override?.trim()
-      && !currentDraft.anthropic_base_url_override?.trim()
+      && !effectiveOpenAiBaseUrl(currentDraft)
+      && !(currentDraft.anthropic_base_url_override?.trim() || currentDraft.workspace_default_anthropic_base_url?.trim())
     ) {
       Toast.warning(t("自定义渠道至少需要填写一个协议的 Base URL"));
       return;
@@ -606,9 +609,40 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           </button>
           {advancedOpen ? (
             <div className={styles.advancedContent}>
-              <div className={styles.urlGrid}>
-                <Field label={t(customChannel ? "OpenAI Base URL" : "OpenAI Base URL 覆盖（可选）")}><Input aria-label={t(customChannel ? "OpenAI Base URL" : "OpenAI Base URL 覆盖（可选）")} value={draft.base_url_override ?? ""} placeholder={channel?.openai_base_url || "https://example.com/v1"} onChange={(value) => update({ base_url_override: value || null })} showClear /></Field>
-                <Field label={t(customChannel ? "Anthropic Base URL" : "Anthropic Base URL 覆盖（可选）")}><Input aria-label={t(customChannel ? "Anthropic Base URL" : "Anthropic Base URL 覆盖（可选）")} value={draft.anthropic_base_url_override ?? ""} placeholder={channel?.anthropic_base_url || "https://example.com/anthropic"} onChange={(value) => update({ anthropic_base_url_override: value || null })} showClear /></Field>
+              {draft.workspace_account_id ? (
+                <div className={styles.connectionScope}>
+                  <div className={styles.connectionScopeHeader}>
+                    <span><strong>{t("工作区默认连接")}</strong><small>{t("同步到加入该 S3 工作区的桌面设备")}</small></span>
+                    <Tag color="blue" size="small">{t("工作区")}</Tag>
+                  </div>
+                  <div className={styles.urlGrid}>
+                    <Field label={t("OpenAI Base URL（工作区默认）")}><Input aria-label={t("OpenAI Base URL（工作区默认）")} value={draft.workspace_default_base_url ?? ""} placeholder={channel?.openai_base_url || "https://example.com/v1"} onChange={(value) => update({ workspace_default_base_url: value || null })} showClear /></Field>
+                    <Field label={t("Anthropic Base URL（工作区默认）")}><Input aria-label={t("Anthropic Base URL（工作区默认）")} value={draft.workspace_default_anthropic_base_url ?? ""} placeholder={channel?.anthropic_base_url || "https://example.com/anthropic"} onChange={(value) => update({ workspace_default_anthropic_base_url: value || null })} showClear /></Field>
+                  </div>
+                </div>
+              ) : null}
+              <div className={styles.connectionScope}>
+                <div className={styles.connectionScopeHeader}>
+                  <span><strong>{t("本设备连接")}</strong><small>{draft.workspace_account_id ? t("覆盖工作区默认地址，仅保存在当前设备") : t("当前账号的本地连接地址")}</small></span>
+                  {draft.workspace_account_id ? (
+                    <Switch
+                      aria-label={t("使用本设备覆盖地址")}
+                      checked={deviceOverrideEnabled}
+                      onChange={(checked) => {
+                        setDeviceOverrideEnabled(checked);
+                        if (!checked) update({ base_url_override: null, anthropic_base_url_override: null });
+                      }}
+                    />
+                  ) : null}
+                </div>
+                {!draft.workspace_account_id || deviceOverrideEnabled ? (
+                  <div className={styles.urlGrid}>
+                    <Field label={t(customChannel ? "OpenAI Base URL" : "OpenAI Base URL 覆盖（可选）")}><Input aria-label={t(customChannel ? "OpenAI Base URL" : "OpenAI Base URL 覆盖（可选）")} value={draft.base_url_override ?? ""} placeholder={draft.workspace_default_base_url || channel?.openai_base_url || "https://example.com/v1"} onChange={(value) => update({ base_url_override: value || null })} showClear /></Field>
+                    <Field label={t(customChannel ? "Anthropic Base URL" : "Anthropic Base URL 覆盖（可选）")}><Input aria-label={t(customChannel ? "Anthropic Base URL" : "Anthropic Base URL 覆盖（可选）")} value={draft.anthropic_base_url_override ?? ""} placeholder={draft.workspace_default_anthropic_base_url || channel?.anthropic_base_url || "https://example.com/anthropic"} onChange={(value) => update({ anthropic_base_url_override: value || null })} showClear /></Field>
+                  </div>
+                ) : (
+                  <Text type="tertiary" size="small">{t("当前设备使用工作区默认连接地址")}</Text>
+                )}
               </div>
               <Text type="tertiary" size="small">{t(customChannel
                 ? "只会为已填写 Base URL 的协议生成路由；OpenAI 使用 Bearer，Anthropic 使用 x-api-key。"
@@ -692,6 +726,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
   const isQwenTokenPlan = mode.channelId === QWEN_CHANNEL_ID;
   return {
     id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    workspace_account_id: null,
     channel_id: mode.channelId,
     name: language === "en-US" ? (count === 0 ? `${channel?.name ?? "Channel"} primary account` : `${channel?.name ?? "Channel"} account ${count + 1}`) : (count === 0 ? `${channel?.name ?? "渠道"} 主账号` : `${channel?.name ?? "渠道"} 账号 ${count + 1}`),
     api_key: "",
@@ -702,6 +737,8 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     resource_sync_mode: mode.channelId === "longcat" || isQwenTokenPlan ? "auto" : "manual",
     base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
     anthropic_base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
+    workspace_default_base_url: null,
+    workspace_default_anthropic_base_url: null,
     last_used_at: null,
     last_error: null,
     credential_status: "healthy",

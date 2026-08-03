@@ -754,6 +754,22 @@ impl Storage {
                 updated_at        TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS channel_account_workspace_links (
+                local_account_id     TEXT PRIMARY KEY,
+                workspace_account_id TEXT NOT NULL,
+                linked_at            TEXT NOT NULL,
+                updated_at           TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_account_workspace_links_workspace
+                ON channel_account_workspace_links(workspace_account_id);
+
+            CREATE TABLE IF NOT EXISTS channel_account_workspace_defaults (
+                workspace_account_id TEXT PRIMARY KEY,
+                openai_base_url       TEXT,
+                anthropic_base_url    TEXT,
+                updated_at            TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS channel_models (
                 id                   TEXT PRIMARY KEY,
                 channel_id           TEXT NOT NULL,

@@ -778,6 +778,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 updated_at: String::new(),
             }])),
             accounts: Arc::new(Mutex::new(vec![ChannelAccount {
+                workspace_account_id: None,
                 id: "acc-1".to_string(),
                 channel_id: "longcat".to_string(),
                 name: "主账号".to_string(),
@@ -789,6 +790,8 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 resource_sync_mode: "manual".to_string(),
                 base_url_override: None,
                 anthropic_base_url_override: None,
+                workspace_default_base_url: None,
+                workspace_default_anthropic_base_url: None,
                 last_used_at: None,
                 last_error: None,
                 credential_status: "healthy".to_string(),

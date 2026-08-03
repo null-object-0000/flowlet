@@ -510,6 +510,22 @@ impl S3SyncConfig {
         format!("{}{device_id}/snapshot.json", self.object_prefix())
     }
 
+    pub(crate) fn workspace_accounts_key(&self) -> String {
+        if self.prefix.is_empty() {
+            "flowlet/v1/workspace/channel-accounts.enc".to_string()
+        } else {
+            format!("{}/flowlet/v1/workspace/channel-accounts.enc", self.prefix)
+        }
+    }
+
+    pub(crate) fn workspace_prefix(&self) -> String {
+        if self.prefix.is_empty() {
+            "flowlet/v1/workspace/".to_string()
+        } else {
+            format!("{}/flowlet/v1/workspace/", self.prefix)
+        }
+    }
+
     fn supports_conditional_put(&self) -> bool {
         Url::parse(&self.endpoint)
             .ok()
@@ -517,7 +533,7 @@ impl S3SyncConfig {
             .is_none_or(|host| !host.ends_with(".aliyuncs.com"))
     }
 
-    fn credential_username(&self) -> String {
+    pub(crate) fn credential_username(&self) -> String {
         let mut digest = Sha256::new();
         digest.update(self.endpoint.as_bytes());
         digest.update(b"\0");
@@ -528,7 +544,7 @@ impl S3SyncConfig {
     }
 }
 
-struct S3Store {
+pub(crate) struct S3Store {
     bucket: Bucket,
     credentials: Credentials,
     client: Client,
@@ -536,7 +552,7 @@ struct S3Store {
 }
 
 impl S3Store {
-    fn new(config: &S3SyncConfig, secret: &str) -> Result<Self, String> {
+    pub(crate) fn new(config: &S3SyncConfig, secret: &str) -> Result<Self, String> {
         let endpoint =
             Url::parse(&config.endpoint).map_err(|_| "S3 Endpoint 格式无效".to_string())?;
         let style = if config.path_style {
@@ -573,7 +589,7 @@ impl S3Store {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> Result<Vec<RemoteObject>, String> {
+    pub(crate) async fn list(&self, prefix: &str) -> Result<Vec<RemoteObject>, String> {
         let mut objects = Vec::new();
         let mut continuation: Option<String> = None;
         loop {
@@ -603,7 +619,7 @@ impl S3Store {
         Ok(objects)
     }
 
-    async fn get(&self, key: &str) -> Result<Vec<u8>, String> {
+    pub(crate) async fn get(&self, key: &str) -> Result<Vec<u8>, String> {
         let url = self
             .bucket
             .get_object(Some(&self.credentials), key)
@@ -622,7 +638,7 @@ impl S3Store {
         Ok(bytes.to_vec())
     }
 
-    async fn head_etag(&self, key: &str) -> Result<Option<String>, String> {
+    pub(crate) async fn head_etag(&self, key: &str) -> Result<Option<String>, String> {
         let url = self
             .bucket
             .head_object(Some(&self.credentials), key)
@@ -636,7 +652,7 @@ impl S3Store {
             .map(str::to_string))
     }
 
-    async fn put(
+    pub(crate) async fn put(
         &self,
         key: &str,
         body: Vec<u8>,
@@ -689,8 +705,8 @@ impl S3Store {
     }
 }
 
-struct RemoteObject {
-    key: String,
+pub(crate) struct RemoteObject {
+    pub(crate) key: String,
     etag: String,
     size: u64,
 }
@@ -741,7 +757,7 @@ fn credential_entry(config: &S3SyncConfig) -> Result<keyring::Entry, String> {
         .map_err(|_| "无法访问系统凭据库".to_string())
 }
 
-fn read_secret(config: &S3SyncConfig) -> Result<String, String> {
+pub(crate) fn read_secret(config: &S3SyncConfig) -> Result<String, String> {
     credential_entry(config)?
         .get_password()
         .map_err(|_| "未找到 S3 Secret Access Key，请重新填写并保存".to_string())

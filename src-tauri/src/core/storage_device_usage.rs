@@ -904,7 +904,7 @@ impl Storage {
                 usage_records.client_name,
                 usage_records.channel_id,
                 usage_records.channel_name,
-                usage_records.account_id,
+                COALESCE(account_links.workspace_account_id, usage_records.account_id) AS account_id,
                 COALESCE(ca.name, usage_records.account_name) AS account_name,
                 usage_records.upstream_model,
                 count(*) AS request_count,
@@ -930,9 +930,11 @@ impl Storage {
             LEFT JOIN request_logs ON request_logs.request_id = usage_records.request_id
                                   AND request_logs.is_last_attempt = 1
             LEFT JOIN channel_accounts ca ON ca.id = usage_records.account_id
+            LEFT JOIN channel_account_workspace_links account_links
+                   ON account_links.local_account_id = usage_records.account_id
             WHERE request_logs.created_at >= datetime('now', 'localtime', 'start of day', printf('-%d days', ?1), 'utc')
             GROUP BY breakdown_date, usage_records.client_id, usage_records.channel_id,
-                     usage_records.account_id, usage_records.upstream_model
+                     COALESCE(account_links.workspace_account_id, usage_records.account_id), usage_records.upstream_model
             ORDER BY breakdown_date ASC
             "#,
         )?;

@@ -276,7 +276,7 @@ export function buildUsageTokenDetails({
   };
 }
 
-/** 选定自然日的 24 个逐小时格，供桌面端和移动端日视图共用。 */
+/** 选定自然日的 24 个逐小时格，供移动端日视图及桌面端上下文视图复用。 */
 export function buildMobileDailyHourlyHeatmap(
   hours: HourlyUsageTotal[],
   offset = 0,
@@ -302,7 +302,7 @@ export function buildMobileDailyHourlyHeatmap(
       range.start.getDate(),
       hourOfDay,
     );
-    const future = offset === 0 && bucketStart > currentHour;
+    const future = bucketStart > currentHour;
     const item = future ? undefined : values.get(hour);
     const nativeInputTokens = item?.nativeInputTokens ?? 0;
     const nativeCachedInputTokens = item?.nativeCachedInputTokens ?? 0;
@@ -341,6 +341,56 @@ export function buildMobileDailyHourlyHeatmap(
     });
   }
 
+  const scale = createHeatLevelScale(
+    cells.filter((cell) => cell.hasData).map((cell) => (
+      metric === "tokens" ? cell.tokens : cell.estimatedCost
+    )),
+  );
+  return {
+    cells: cells.map((cell): MobileHourlyHeatmapCell => ({
+      ...cell,
+      level: scale.levelFor(metric === "tokens" ? cell.tokens : cell.estimatedCost),
+    })),
+  };
+}
+
+/**
+ * 桌面端日视图：前一日末 6 小时 + 选中日 24 小时 + 后一日首 6 小时。
+ * 36 个格子共用同一热度色阶，保证跨零点上下文可以直接比较。
+ */
+export function buildDesktopDailyContextHeatmap(
+  hours: HourlyUsageTotal[],
+  offset = 0,
+  now = new Date(),
+  metric: MobileUsageHeatmapMetric = "tokens",
+) {
+  const previous = buildMobileDailyHourlyHeatmap(hours, offset - 1, now, metric).cells.slice(18);
+  const current = buildMobileDailyHourlyHeatmap(hours, offset, now, metric).cells;
+  const next = buildMobileDailyHourlyHeatmap(hours, offset + 1, now, metric).cells.slice(0, 6);
+  const cells = [...previous, ...current, ...next];
+  const scale = createHeatLevelScale(
+    cells.filter((cell) => cell.hasData).map((cell) => (
+      metric === "tokens" ? cell.tokens : cell.estimatedCost
+    )),
+  );
+  return {
+    cells: cells.map((cell): MobileHourlyHeatmapCell => ({
+      ...cell,
+      level: scale.levelFor(metric === "tokens" ? cell.tokens : cell.estimatedCost),
+    })),
+  };
+}
+
+/** 移动端日视图：昨日末 6 小时 + 选中日 24 小时，不展示后一天。 */
+export function buildMobileDailyContextHeatmap(
+  hours: HourlyUsageTotal[],
+  offset = 0,
+  now = new Date(),
+  metric: MobileUsageHeatmapMetric = "tokens",
+) {
+  const previous = buildMobileDailyHourlyHeatmap(hours, offset - 1, now, metric).cells.slice(18);
+  const current = buildMobileDailyHourlyHeatmap(hours, offset, now, metric).cells;
+  const cells = [...previous, ...current];
   const scale = createHeatLevelScale(
     cells.filter((cell) => cell.hasData).map((cell) => (
       metric === "tokens" ? cell.tokens : cell.estimatedCost

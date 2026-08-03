@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { DailyUsageTotal, HourlyUsageTotal } from "../domains/device-sync/types";
 import {
+  buildDesktopDailyContextHeatmap,
+  buildMobileDailyContextHeatmap,
   buildMobileDailyHourlyHeatmap,
   buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
@@ -334,6 +336,39 @@ describe("mobile usage aggregation", () => {
     });
     expect(heatmap.cells[8]).toMatchObject({ outside: false, future: false, hasData: false, tokens: 0 });
     expect(heatmap.cells[13]).toMatchObject({ outside: true, future: true, hasData: false });
+  });
+
+  it("builds the desktop day view with 6 hours before and after the selected date", () => {
+    const hours: HourlyUsageTotal[] = [
+      { hour: "2026-08-02T20:00:00", requestCount: 1, knownTokens: 10 },
+      { hour: "2026-08-03T00:00:00", requestCount: 2, knownTokens: 20 },
+      { hour: "2026-08-04T00:00:00", requestCount: 3, knownTokens: 30 },
+    ];
+    const heatmap = buildDesktopDailyContextHeatmap(
+      hours,
+      0,
+      new Date("2026-08-03T12:30:00"),
+    );
+
+    expect(heatmap.cells).toHaveLength(36);
+    expect(heatmap.cells[0]).toMatchObject({ hour: "2026-08-02T18:00:00", future: false });
+    expect(heatmap.cells[2]).toMatchObject({ hour: "2026-08-02T20:00:00", tokens: 10, hasData: true });
+    expect(heatmap.cells[6]).toMatchObject({ hour: "2026-08-03T00:00:00", tokens: 20, hasData: true });
+    expect(heatmap.cells[30]).toMatchObject({ hour: "2026-08-04T00:00:00", future: true, hasData: false });
+  });
+
+  it("builds the mobile day view with only the previous day's final 6 hours", () => {
+    const heatmap = buildMobileDailyContextHeatmap(
+      [{ hour: "2026-08-02T23:00:00", requestCount: 1, knownTokens: 10 }],
+      0,
+      new Date("2026-08-03T12:30:00"),
+    );
+
+    expect(heatmap.cells).toHaveLength(30);
+    expect(heatmap.cells[0].hour).toBe("2026-08-02T18:00:00");
+    expect(heatmap.cells[5]).toMatchObject({ hour: "2026-08-02T23:00:00", tokens: 10 });
+    expect(heatmap.cells[6].hour).toBe("2026-08-03T00:00:00");
+    expect(heatmap.cells[heatmap.cells.length - 1]?.hour).toBe("2026-08-03T23:00:00");
   });
 
   it("switches daily and hourly heat levels between token and estimated cost", () => {

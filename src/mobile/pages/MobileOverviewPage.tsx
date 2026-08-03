@@ -12,7 +12,7 @@ import { MobilePullToRefresh } from "../MobilePullToRefresh";
 import { UsageTokenDetailSheet } from "../../features/usage/UsageTokenDetailSheet";
 import type { DailyUsageTotal } from "../../domains/device-sync/types";
 import {
-  buildMobileDailyHourlyHeatmap,
+  buildMobileDailyContextHeatmap,
   buildUsageTokenDetails,
   buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
@@ -82,9 +82,16 @@ export function MobileOverviewPage() {
     [heatmapMetric, hourlyUsage.data, now, periodOffset],
   );
   const dailyHourlyHeatmap = useMemo(
-    () => buildMobileDailyHourlyHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
+    () => buildMobileDailyContextHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
     [heatmapMetric, hourlyUsage.data, now, periodOffset],
   );
+  const dailyContextRows = useMemo(() => [
+    { date: dailyHourlyHeatmap.cells[0]?.date ?? "", start: 18, cells: dailyHourlyHeatmap.cells.slice(0, 6), context: true, showDate: true, span: 1 },
+    { date: dailyHourlyHeatmap.cells[6]?.date ?? "", start: 0, cells: dailyHourlyHeatmap.cells.slice(6, 12), context: false, showDate: true, span: 4 },
+    { date: dailyHourlyHeatmap.cells[12]?.date ?? "", start: 6, cells: dailyHourlyHeatmap.cells.slice(12, 18), context: false, showDate: false, span: 1 },
+    { date: dailyHourlyHeatmap.cells[18]?.date ?? "", start: 12, cells: dailyHourlyHeatmap.cells.slice(18, 24), context: false, showDate: false, span: 1 },
+    { date: dailyHourlyHeatmap.cells[24]?.date ?? "", start: 18, cells: dailyHourlyHeatmap.cells.slice(24, 30), context: false, showDate: false, span: 1 },
+  ], [dailyHourlyHeatmap.cells]);
   const activeHourlyHeatmap = period === "day" ? dailyHourlyHeatmap : hourlyHeatmap;
   const selectedDay = useMemo(
     () => selectedDate
@@ -276,12 +283,12 @@ export function MobileOverviewPage() {
         <div className={styles.cardHeader}>
           <div>
             <strong>{t(period === "day"
-              ? heatmapMetric === "tokens" ? "每小时 Token 热力图" : "每小时预估费用热力图"
+              ? heatmapMetric === "tokens" ? "30 小时 Token 热力图" : "30 小时预估费用热力图"
               : period === "week"
                 ? heatmapMetric === "tokens" ? "每 3 小时 Token 热力图" : "每 3 小时预估费用热力图"
                 : heatmapMetric === "tokens" ? "每日 Token 热力图" : "每日预估费用热力图")}</strong>
             <span>{t(period === "day"
-              ? "点击小时查看该时段汇总"
+              ? "包含昨日最后 6 小时，点击查看时段汇总"
               : period === "week" ? "横轴为星期，纵轴为时段" : "点击日期查看当天汇总")}</span>
           </div>
           <HeatmapMetricSwitch value={heatmapMetric} onChange={setHeatmapMetric} t={t} />
@@ -291,21 +298,28 @@ export function MobileOverviewPage() {
         {period === "day" && !hourlyUsage.isError ? (
           <>
             <div className={styles.dailyHeatmap}>
-              {Array.from({ length: 4 }, (_, groupIndex) => {
-                const hourStart = groupIndex * 6;
-                const groupCells = dailyHourlyHeatmap.cells.slice(hourStart, hourStart + 6);
+              {dailyContextRows.map((row, rowIndex) => {
+                const boundary = rowIndex === 1;
                 return [
-                  <span className={styles.dailyRangeLabel} key={`range-${hourStart}`}>
-                    {String(hourStart).padStart(2, "0")}–{String(hourStart + 5).padStart(2, "0")}
+                  row.showDate ? (
+                    <span
+                      className={`${styles.dailyDateLabel} ${row.context ? styles.contextDateLabel : styles.currentDateLabel} ${row.span === 4 ? styles.fourRowDateLabel : ""} ${boundary ? styles.dayBoundary : ""}`}
+                      key={`date-${row.date}`}
+                    >
+                      {formatMobileDateLabel(row.date, language)}
+                    </span>
+                  ) : null,
+                  <span className={`${styles.dailyRangeLabel} ${boundary ? styles.dayBoundary : ""}`} key={`range-${row.date}-${row.start}`}>
+                    {String(row.start).padStart(2, "0")}–{String(row.start + 5).padStart(2, "0")}
                   </span>,
-                  ...groupCells.map((cell) => {
+                  ...row.cells.map((cell) => {
                     const hourLabel = String(cell.hourOfDay).padStart(2, "0");
                     const title = `${cell.date} ${hourLabel}:00–${hourLabel}:59 · ${formatHeatmapValues(heatmapMetric, cell.tokens, cell.estimatedCost, language, t)} · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
                     return (
                       <button
                         key={cell.hour}
                         type="button"
-                        className={`${styles.hourCell} ${styles.dailyHourCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""}`}
+                        className={`${styles.hourCell} ${styles.dailyHourCell} ${styles[`heatLevel${cell.level}`]} ${cell.outside ? styles.outside : ""} ${row.context ? styles.contextHourCell : ""} ${boundary ? styles.dayBoundary : ""}`}
                         disabled={cell.future}
                         aria-label={title}
                         aria-pressed={selectedHourlyCell?.hour === cell.hour}
@@ -478,6 +492,14 @@ function emptyDailyUsage(date: string): DailyUsageTotal {
     unknownCount: 0,
     estimatedCost: 0,
   };
+}
+
+function formatMobileDateLabel(date: string, language: NumberLanguage) {
+  if (!date) return "—";
+  return new Date(`${date}T00:00:00`).toLocaleDateString(language, {
+    month: "numeric",
+    day: "numeric",
+  });
 }
 
 function HeatmapMetricSwitch({ value, onChange, t }: {

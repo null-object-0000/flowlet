@@ -3,15 +3,15 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@douyinfe/semi-ui-19", () => ({
-  SideSheet: ({ children, title, placement }: { children: ReactNode; title: ReactNode; placement: string }) => (
-    <section data-testid="sheet" data-placement={placement}><h2>{title}</h2>{children}</section>
+  SideSheet: ({ children, title, placement, width }: { children: ReactNode; title: ReactNode; placement: string; width: string }) => (
+    <section data-testid="desktop-sheet" data-placement={placement} data-width={width}><h2>{title}</h2>{children}</section>
   ),
 }));
 
 import { UsageTokenDetailSheet } from "./UsageTokenDetailSheet";
 
 describe("UsageTokenDetailSheet", () => {
-  it("shows total, Flowlet, and Agent native sections in a bottom sheet on mobile", () => {
+  it("compares total, Flowlet, and Agent native values by metric in the mobile bottom sheet", () => {
     render(
       <UsageTokenDetailSheet
         visible
@@ -31,9 +31,36 @@ describe("UsageTokenDetailSheet", () => {
     expect(screen.getByTestId("sheet")).toHaveAttribute("data-placement", "bottom");
     expect(screen.getByText("Token 用量明细")).toBeInTheDocument();
     expect(screen.getByText("2026年8月3日")).toBeInTheDocument();
-    expect(screen.getByText("总计").parentElement).toHaveTextContent("160 Tokens");
-    expect(screen.getByText("经过 Flowlet").parentElement).toHaveTextContent("100 Tokens");
-    expect(screen.getByText("Agent 原生").parentElement).toHaveTextContent("60 Tokens");
+    expect(screen.getByRole("table", { name: "Token 用量明细" })).toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: "Tokens" }).parentElement).toHaveTextContent("160");
+    expect(screen.getByRole("rowheader", { name: "Tokens" }).parentElement).toHaveTextContent("100");
+    expect(screen.getByRole("rowheader", { name: "Tokens" }).parentElement).toHaveTextContent("60");
+    expect(screen.getByRole("rowheader", { name: "缓存输入 Token" }).parentElement).toHaveTextContent("40");
+    expect(screen.getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+      "总计",
+      "经过 Flowlet",
+      "Agent 原生",
+    ]);
+  });
+
+  it("uses the standard detail drawer width on desktop", () => {
+    render(
+      <UsageTokenDetailSheet
+        visible
+        onClose={vi.fn()}
+        contextLabel="2026年8月3日"
+        language="zh-CN"
+        t={(source) => source}
+        details={{
+          total: column(160, 40, 6),
+          flowlet: column(100, 30, 4),
+          native: column(60, 10, 2),
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("desktop-sheet")).toHaveAttribute("data-placement", "right");
+    expect(screen.getByTestId("desktop-sheet")).toHaveAttribute("data-width", "min(760px, 96vw)");
   });
 });
 

@@ -191,6 +191,7 @@ pub struct DailyUsageTotal {
     /// 原生带用量消息事件数（不是 HTTP 请求数）。
     #[serde(default)]
     pub native_event_count: i64,
+    /// 标准化后的原生未缓存输入；Codex 原始 input_tokens 含缓存，聚合时已扣除。
     #[serde(default)]
     pub native_input_tokens: i64,
     #[serde(default)]
@@ -227,6 +228,7 @@ pub struct HourlyUsageTotal {
     pub estimated_cost: f64,
     #[serde(default)]
     pub native_event_count: i64,
+    /// 标准化后的原生未缓存输入；Codex 原始 input_tokens 含缓存，聚合时已扣除。
     #[serde(default)]
     pub native_input_tokens: i64,
     #[serde(default)]

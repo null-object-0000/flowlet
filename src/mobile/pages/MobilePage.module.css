@@ -292,20 +292,37 @@ button.heatmapCell.heatLevel4[aria-pressed="true"] { box-shadow: inset 0 0 0 2px
   min-width: 0;
   padding: 2px 0;
   display: grid;
-  grid-template-columns: 39px repeat(6, minmax(0, 1fr));
-  grid-template-rows: repeat(4, 34px);
+  grid-template-columns: 34px 37px repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(5, 34px);
   gap: 5px;
 }
-.dailyRangeLabel {
+.dailyDateLabel, .dailyRangeLabel {
   display: grid;
   place-items: center;
   color: var(--flowlet-color-text-tertiary);
   font-size: 10px;
   line-height: 1;
 }
+.dailyDateLabel { grid-column: 1; font-weight: 650; white-space: nowrap; }
+.dailyRangeLabel { grid-column: 2; }
+.currentDateLabel { color: var(--flowlet-color-text-secondary); }
+.contextDateLabel { color: var(--flowlet-color-text-tertiary); font-weight: 500; }
+.fourRowDateLabel { grid-row: span 4; }
 .dailyHourCell { min-height: 34px; border-radius: 9px; color: var(--flowlet-color-text-secondary); display: grid; place-items: center; }
 .dailyHourCell.heatLevel1, .dailyHourCell.heatLevel2 { color: var(--flowlet-color-primary); }
 .dailyHourCell span { font-size: 12px; line-height: 1; font-weight: 650; font-variant-numeric: tabular-nums; }
+.contextHourCell { filter: saturate(.56); }
+.contextHourCell[aria-pressed="true"] { filter: saturate(.7); }
+.dayBoundary { position: relative; }
+.dayBoundary::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: -3px;
+  right: -3px;
+  border-top: 1px solid var(--flowlet-color-border);
+  pointer-events: none;
+}
 .hourlyHeatmap {
   width: 100%;
   min-width: 0;

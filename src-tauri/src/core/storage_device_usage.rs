@@ -87,7 +87,11 @@ impl Storage {
             SELECT
                 strftime('%Y-%m-%d', event_time, 'localtime') AS usage_date,
                 count(*) AS native_event_count,
-                coalesce(sum(input_tokens), 0) AS native_input_tokens,
+                coalesce(sum(CASE
+                    WHEN agent_type IN ('codex-desktop', 'codex-cli') THEN
+                        max(input_tokens - cached_input_tokens - cache_write_input_tokens, 0)
+                    ELSE input_tokens
+                END), 0) AS native_input_tokens,
                 coalesce(sum(cached_input_tokens), 0) AS native_cached_input_tokens,
                 coalesce(sum(cache_write_input_tokens), 0) AS native_cache_write_input_tokens,
                 coalesce(sum(output_tokens), 0) AS native_output_tokens,
@@ -148,7 +152,11 @@ impl Storage {
             SELECT
                 strftime('%Y-%m-%dT%H:00:00', event_time, 'localtime') AS usage_hour,
                 count(*) AS native_event_count,
-                coalesce(sum(input_tokens), 0) AS native_input_tokens,
+                coalesce(sum(CASE
+                    WHEN agent_type IN ('codex-desktop', 'codex-cli') THEN
+                        max(input_tokens - cached_input_tokens - cache_write_input_tokens, 0)
+                    ELSE input_tokens
+                END), 0) AS native_input_tokens,
                 coalesce(sum(cached_input_tokens), 0) AS native_cached_input_tokens,
                 coalesce(sum(cache_write_input_tokens), 0) AS native_cache_write_input_tokens,
                 coalesce(sum(output_tokens), 0) AS native_output_tokens,

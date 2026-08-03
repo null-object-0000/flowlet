@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
+import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { AccountManagementSideSheet } from "./AccountManagementSideSheet";
 
 vi.mock("lottie-web", () => ({
@@ -223,12 +224,27 @@ describe("AccountManagementSideSheet", () => {
     const onSyncBalance = vi.fn().mockResolvedValue(undefined);
     const deepSeekAccount: ChannelAccount = { ...account, id: "account-deepseek", channel_id: "deepseek", name: "DeepSeek 主账号", resource_mode: "pay_as_you_go" };
     const deepSeekPreset: ChannelPreset = { ...preset, id: "deepseek", name: "DeepSeek", supports_balance_query: true };
+    const syncedAt = "2026-07-23T04:35:26Z";
 
     render(
       <AccountManagementSideSheet
         request={{ kind: "list" }}
         accounts={[deepSeekAccount]}
-        snapshots={[]}
+        snapshots={[{
+          id: "snapshot-deepseek",
+          account_id: deepSeekAccount.id,
+          balance: 88.5,
+          currency: "CNY",
+          token_pack_total: null,
+          token_pack_used: null,
+          token_pack_remaining: null,
+          token_pack_expire_at: null,
+          source: "sync",
+          synced_at: syncedAt,
+          remark: "官方余额接口同步",
+          created_at: syncedAt,
+          updated_at: syncedAt,
+        }]}
         presets={[deepSeekPreset]}
         busy={false}
         onClose={vi.fn()}
@@ -241,6 +257,8 @@ describe("AccountManagementSideSheet", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "编辑账号 DeepSeek 主账号" }));
+    expect(screen.getByText("88.50 CNY")).toBeInTheDocument();
+    expect(screen.getByText(`最近同步：${formatFullTimestamp(syncedAt, "zh-CN")}`)).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: /刷新/ }));
     expect(onSyncBalance).toHaveBeenCalledWith(deepSeekAccount.id);
     expect(await screen.findByText("余额已同步")).toBeInTheDocument();

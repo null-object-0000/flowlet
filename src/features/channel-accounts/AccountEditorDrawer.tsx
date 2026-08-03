@@ -421,8 +421,16 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             <div className={styles.resourcePanel}>
               <div className={styles.resourceHeading}><strong>{t("按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
               <div className={styles.balanceRow}>
-                <span><small>{t("账户余额")}</small><strong>{snapshot?.balance == null ? t("尚未同步") : `${snapshot.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`}</strong></span>
-                {isEdit ? <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} onClick={() => void handleSync()}>{t("刷新")}</Button> : null}
+                <span>
+                  <small>{t("账户余额")}</small>
+                  <strong>{snapshot?.balance == null ? t("尚未同步") : `${snapshot.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`}</strong>
+                </span>
+                {isEdit ? (
+                  <div className={styles.balanceActions}>
+                    <Text type="tertiary" size="small">{t("最近同步：{time}", { time: snapshot?.synced_at ? formatFullTimestamp(snapshot.synced_at, language) : "-" })}</Text>
+                    <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} onClick={() => void handleSync()}>{t("刷新")}</Button>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : (

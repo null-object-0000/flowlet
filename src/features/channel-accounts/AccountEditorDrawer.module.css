@@ -46,6 +46,7 @@
 .balanceRow { display: flex; align-items: center; justify-content: space-between; }
 .balanceRow > span { display: grid; gap: 5px; }
 .balanceRow small { color: var(--semi-color-text-2); }
+.balanceActions { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .packEmpty { color: var(--semi-color-text-2); font-size: 12px; }
 .longCatResourcePanel { display: grid; gap: 12px; }
 .longCatSummaryCard { padding: 12px 14px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--semi-color-bg-2); display: grid; gap: 10px; }

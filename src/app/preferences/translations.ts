@@ -947,6 +947,7 @@ const english: Record<string, string> = {
   "类型": "Type",
   "到期日期": "Expiry date",
   "最近同步": "Last synced",
+  "最近同步：{time}": "Last synced: {time}",
   "资源包剩余比例": "Package remaining percentage",
   "待使用": "Pending",
   "尚未同步资源包，请点击“立即刷新”。": "No package data has been synced. Select Refresh now.",

@@ -1016,6 +1016,7 @@ impl Storage {
                 session_id TEXT NOT NULL,
                 fingerprint TEXT NOT NULL,
                 summary_json TEXT NOT NULL,
+                session_json TEXT,
                 source_offset INTEGER NOT NULL DEFAULT 0,
                 parser_version INTEGER NOT NULL DEFAULT 0,
                 usage_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -1097,6 +1098,12 @@ impl Storage {
             "background_jobs",
             "cancel_requested",
             "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "agent_session_snapshots",
+            "session_json",
+            "TEXT",
         )?;
         add_column_if_missing(
             &connection,

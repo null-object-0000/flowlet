@@ -888,6 +888,14 @@ pub struct LogsFilter {
     /// 空串为兼容旧调用方，按两个维度 OR 匹配。
     #[serde(default)]
     pub model_kind: String,
+    /// 精确 UTC 起止时间（ISO 8601）；空串表示不限制。
+    #[serde(default)]
+    pub start_at: String,
+    #[serde(default)]
+    pub end_at: String,
+    /// Token 状态："all" | "unknown"（usage_records.total_tokens IS NULL）。
+    #[serde(default)]
+    pub token_status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1236,7 +1244,7 @@ pub struct AgentSessionsFilter {
     pub runtime_status: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionRow {
     pub agent_type: String,

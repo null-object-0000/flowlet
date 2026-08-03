@@ -9,34 +9,6 @@
   gap: 12px;
 }
 
-.periodTabs {
-  padding: 2px;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(44px, 1fr));
-  border-radius: 8px;
-  background: var(--flowlet-color-surface-strong);
-  border: 1px solid var(--flowlet-color-border);
-}
-.periodTabs button {
-  min-height: 28px;
-  padding: 0 11px;
-  border: 0;
-  border-radius: 6px;
-  color: var(--flowlet-color-text-secondary);
-  background: transparent;
-  font: inherit;
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color 140ms ease, background-color 140ms ease;
-}
-.periodTabs button[aria-pressed="true"] {
-  color: var(--flowlet-color-primary);
-  background: var(--flowlet-color-surface);
-  box-shadow: var(--flowlet-shadow-card);
-  font-weight: 700;
-}
-
 .card {
   min-height: 0;
   display: flex;

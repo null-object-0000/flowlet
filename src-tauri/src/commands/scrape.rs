@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::core::channels_config::ChannelsConfig;
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelPreset, RouteCandidate,
     RouteRule,
@@ -8,14 +8,15 @@ use crate::core::sync::{
     query_deepseek_balance, query_kimi_balance, sync_deepseek_models, sync_kimi_models,
     sync_longcat_models, sync_openai_compatible_models, sync_qwen_models,
 };
+use crate::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
 
-static SCRAPE_BALANCE_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
-struct ScrapeBalanceSyncGuard;
-impl Drop for ScrapeBalanceSyncGuard {
+static CHANNEL_RESOURCE_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+struct ChannelResourceSyncGuard;
+impl Drop for ChannelResourceSyncGuard {
     fn drop(&mut self) {
-        SCRAPE_BALANCE_SYNC_RUNNING.store(false, Ordering::Release);
+        CHANNEL_RESOURCE_SYNC_RUNNING.store(false, Ordering::Release);
     }
 }
 
@@ -467,7 +468,7 @@ pub(crate) async fn query_balance(
             raw_scraped_json: None,
             source: "sync".to_string(),
             synced_at: Some(now.clone()),
-            remark: Some("余额自动同步".to_string()),
+            remark: Some("官方余额接口同步".to_string()),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -956,10 +957,19 @@ pub(crate) async fn handle_intercepted_response(
 #[cfg(test)]
 mod scrape_capture_tests {
     use super::{
-        channel_resource_sync_completion_status, is_explicit_login_url, merge_longcat_token_packs,
-        scrape_responses_complete,
+        channel_resource_sync_completion_status, channel_resource_sync_method,
+        is_explicit_login_url, merge_longcat_token_packs, scrape_responses_complete,
+        ChannelResourceSyncMethod,
     };
+    use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
+    use crate::core::config::ChannelAccount;
     use crate::core::scrape_console::ScrapeModeRuntime;
+
+    fn default_channels_config() -> ChannelsConfig {
+        let json: serde_json::Value =
+            serde_json::from_str(DEFAULT_CONFIG_JSON).expect("valid embedded config");
+        ChannelsConfig::from_config_json(&json).expect("valid channels config")
+    }
 
     #[test]
     fn completed_business_response_is_login_evidence() {
@@ -1021,6 +1031,65 @@ mod scrape_capture_tests {
             "succeeded_with_warnings"
         );
         assert_eq!(channel_resource_sync_completion_status(0, 0), "succeeded");
+    }
+
+    #[test]
+    fn official_balance_accounts_sync_even_with_legacy_manual_mode() {
+        let config = default_channels_config();
+        for channel_id in ["deepseek", "kimi"] {
+            let account = ChannelAccount {
+                channel_id: channel_id.to_string(),
+                resource_mode: Some("pay_as_you_go".to_string()),
+                resource_sync_mode: "manual".to_string(),
+                ..Default::default()
+            };
+            assert_eq!(
+                channel_resource_sync_method(&config, &account),
+                Some(ChannelResourceSyncMethod::OfficialApi)
+            );
+        }
+    }
+
+    #[test]
+    fn official_balance_sync_skips_disabled_or_custom_endpoint_accounts() {
+        let config = default_channels_config();
+        let disabled = ChannelAccount {
+            channel_id: "deepseek".to_string(),
+            enabled: false,
+            ..Default::default()
+        };
+        let custom_endpoint = ChannelAccount {
+            channel_id: "kimi".to_string(),
+            base_url_override: Some("https://proxy.example/v1".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(channel_resource_sync_method(&config, &disabled), None);
+        assert_eq!(
+            channel_resource_sync_method(&config, &custom_endpoint),
+            None
+        );
+    }
+
+    #[test]
+    fn console_sync_still_requires_auto_mode() {
+        let config = default_channels_config();
+        let automatic = ChannelAccount {
+            channel_id: "longcat".to_string(),
+            resource_mode: Some("hybrid".to_string()),
+            resource_sync_mode: "auto".to_string(),
+            ..Default::default()
+        };
+        let manual = ChannelAccount {
+            resource_sync_mode: "manual".to_string(),
+            ..automatic.clone()
+        };
+
+        assert_eq!(
+            channel_resource_sync_method(&config, &automatic),
+            Some(ChannelResourceSyncMethod::ConsoleScrape)
+        );
+        assert_eq!(channel_resource_sync_method(&config, &manual), None);
     }
 
     #[test]
@@ -2014,6 +2083,55 @@ pub struct ScrapeBalanceSyncResult {
     pub message: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChannelResourceSyncMethod {
+    OfficialApi,
+    ConsoleScrape,
+}
+
+impl ChannelResourceSyncMethod {
+    fn label(self) -> &'static str {
+        match self {
+            Self::OfficialApi => "官方余额 API",
+            Self::ConsoleScrape => "官方控制台",
+        }
+    }
+}
+
+/// 官方余额 API 账号默认周期同步；控制台抓取账号仍由 resource_sync_mode 控制。
+/// 自定义 Base URL 无法保证官方余额接口语义，与手动刷新和保存后刷新保持一致地跳过。
+fn channel_resource_sync_method(
+    config: &ChannelsConfig,
+    account: &ChannelAccount,
+) -> Option<ChannelResourceSyncMethod> {
+    if !account.enabled {
+        return None;
+    }
+
+    let supports_official_balance = matches!(account.channel_id.as_str(), "deepseek" | "kimi")
+        && config
+            .presets
+            .iter()
+            .find(|preset| preset.id == account.channel_id)
+            .is_some_and(|preset| preset.supports_balance_query)
+        && !account
+            .base_url_override
+            .as_deref()
+            .is_some_and(|url| !url.trim().is_empty());
+    if supports_official_balance {
+        return Some(ChannelResourceSyncMethod::OfficialApi);
+    }
+
+    (account.resource_sync_mode == "auto"
+        && resolve_scrape_mode(
+            config,
+            &account.channel_id,
+            account.resource_mode.as_deref(),
+        )
+        .is_some())
+    .then_some(ChannelResourceSyncMethod::ConsoleScrape)
+}
+
 fn channel_resource_sync_completion_status(failed: usize, skipped: usize) -> &'static str {
     if failed > 0 || skipped > 0 {
         "succeeded_with_warnings"
@@ -2022,8 +2140,9 @@ fn channel_resource_sync_completion_status(failed: usize, skipped: usize) -> &'s
     }
 }
 
-/// 周期同步所有启用了 WebView 自动同步的渠道账号。后台运行时保持窗口隐藏，
-/// 登录失效或页面需要交互只记入任务日志，等待用户从账号编辑页手动刷新处理。
+/// 周期同步渠道资源：DeepSeek / Kimi 使用官方余额 API，LongCat / Qwen 等
+/// 控制台渠道使用隐藏 WebView。后台抓取遇到登录失效或页面需要交互时只记入
+/// 任务日志，等待用户从账号编辑页手动刷新处理。
 #[tauri::command]
 pub(crate) async fn sync_scrape_balances(
     app: AppHandle,
@@ -2041,30 +2160,22 @@ pub(crate) async fn sync_scrape_balances(
             .map_err(|_| "锁定渠道配置失败".to_string())?;
         accounts
             .iter()
-            .filter(|account| {
-                account.enabled
-                    && account.resource_sync_mode == "auto"
-                    && resolve_scrape_mode(
-                        &config,
-                        &account.channel_id,
-                        account.resource_mode.as_deref(),
-                    )
-                    .is_some()
-            })
-            .map(|account| {
+            .filter_map(|account| {
+                let method = channel_resource_sync_method(&config, account)?;
                 let channel_name = config
                     .presets
                     .iter()
                     .find(|preset| preset.id == account.channel_id)
                     .map(|preset| preset.name.clone())
                     .unwrap_or_else(|| account.channel_id.clone());
-                (
+                Some((
                     account.id.clone(),
                     account.name.clone(),
                     account.channel_id.clone(),
                     channel_name,
                     account.resource_mode.clone(),
-                )
+                    method,
+                ))
             })
             .collect::<Vec<_>>()
     };
@@ -2076,10 +2187,10 @@ pub(crate) async fn sync_scrape_balances(
             accounts: 0,
             synced: 0,
             failed: 0,
-            message: "没有启用控制台自动同步的账号".to_string(),
+            message: "没有可自动同步的渠道资源账号".to_string(),
         });
     }
-    if SCRAPE_BALANCE_SYNC_RUNNING
+    if CHANNEL_RESOURCE_SYNC_RUNNING
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
@@ -2092,7 +2203,7 @@ pub(crate) async fn sync_scrape_balances(
             message: "已有渠道资源自动同步正在运行".to_string(),
         });
     }
-    let _guard = ScrapeBalanceSyncGuard;
+    let _guard = ChannelResourceSyncGuard;
     let started_at = std::time::Instant::now();
     let job_id = uuid::Uuid::new_v4().to_string();
     state
@@ -2111,7 +2222,7 @@ pub(crate) async fn sync_scrape_balances(
     let mut synced = 0usize;
     let mut failed = 0usize;
     let mut skipped = 0usize;
-    for (index, (account_id, account_name, channel_id, channel_name, resource_mode)) in
+    for (index, (account_id, account_name, channel_id, channel_name, resource_mode, method)) in
         accounts.iter().enumerate()
     {
         let account_suffix = account_id.rsplit('-').next().unwrap_or(account_id);
@@ -2123,9 +2234,12 @@ pub(crate) async fn sync_scrape_balances(
             channel_id = %channel_id,
             channel_name = %channel_name,
             resource_mode = ?resource_mode,
+            sync_method = method.label(),
             "开始同步渠道账号资源"
         );
-        if scrape_interaction_required(&state, account_id)? {
+        if *method == ChannelResourceSyncMethod::ConsoleScrape
+            && scrape_interaction_required(&state, account_id)?
+        {
             skipped += 1;
             let _ = state.storage.add_job_event(
                 &job_id,
@@ -2140,14 +2254,31 @@ pub(crate) async fn sync_scrape_balances(
             );
             continue;
         }
-        match scrape_balance(app.clone(), state.clone(), account_id.clone(), Some(false)).await {
+        let sync_result = match method {
+            ChannelResourceSyncMethod::OfficialApi => {
+                match query_balance(state.clone(), account_id.clone()).await {
+                    Ok(result) => match result.error {
+                        Some(error) => Err(error),
+                        None if result.is_available => Ok(()),
+                        None => Err("官方余额接口当前不可用".to_string()),
+                    },
+                    Err(error) => Err(error),
+                }
+            }
+            ChannelResourceSyncMethod::ConsoleScrape => {
+                scrape_balance(app.clone(), state.clone(), account_id.clone(), Some(false))
+                    .await
+                    .map(|_| ())
+            }
+        };
+        match sync_result {
             Ok(_) => {
                 synced += 1;
                 let _ = state.storage.add_job_event(
                     &job_id,
                     "info",
                     "同步账号资源",
-                    &format!("{account_label} 同步成功"),
+                    &format!("{account_label} 通过{}同步成功", method.label()),
                 );
             }
             Err(error) => {
@@ -2156,7 +2287,7 @@ pub(crate) async fn sync_scrape_balances(
                     &job_id,
                     "warning",
                     "同步账号资源",
-                    &format!("{account_label} 同步失败：{error}"),
+                    &format!("{account_label} 通过{}同步失败：{error}", method.label()),
                 );
             }
         }
@@ -2167,8 +2298,15 @@ pub(crate) async fn sync_scrape_balances(
     }
 
     let duration_ms = started_at.elapsed().as_millis() as u64;
+    let official_api_accounts = accounts
+        .iter()
+        .filter(|account| account.5 == ChannelResourceSyncMethod::OfficialApi)
+        .count();
+    let console_accounts = accounts.len() - official_api_accounts;
     let summary = serde_json::json!({
         "accounts": accounts.len(),
+        "officialApiAccounts": official_api_accounts,
+        "consoleAccounts": console_accounts,
         "syncedAccounts": synced,
         "failedAccounts": failed,
         "skippedAccounts": skipped,

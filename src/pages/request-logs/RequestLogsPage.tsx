@@ -14,6 +14,7 @@ import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import styles from "./RequestLogsPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
+import { TimePresetSelect, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
 
 const { Text } = Typography;
 
@@ -79,6 +80,14 @@ export function RequestLogsPage() {
   return (
     <main className={styles.page}>
       <PageHeader title={t("请求日志")} subtitle={t("查看代理服务的实时请求、模型路由和 Token 消耗")}>
+        <TimeScopeControl>
+          <TimePresetSelect
+            value={filter.timeRange}
+            options={TIME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+            onChange={(timeRange) => apply({ timeRange })}
+            ariaLabel={t("时间范围")}
+          />
+        </TimeScopeControl>
         <RefreshControl
           autoRefresh={refresh.autoRefresh}
           onToggleAutoRefresh={refresh.toggleAutoRefresh}
@@ -101,7 +110,6 @@ export function RequestLogsPage() {
 
       <section className={styles.toolbar} aria-label={t("日志筛选")}>
         <Input className={styles.search} prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索请求 ID、模型、账号或会话")} showClear onChange={setSearchDraft} />
-        <Select value={filter.timeRange} optionList={TIME_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))} onChange={(value) => apply({ timeRange: value as RequestLogTimeRange })} aria-label={t("时间")} />
         <Select
           value={clientSelectValue}
           loading={clients.isLoading}

@@ -1,4 +1,4 @@
-use super::super::config::AgentSessionNativeSummary;
+use super::super::config::{AgentSessionNativeSummary, AgentSessionRow};
 use super::{Storage, StorageError};
 use crate::core::agent_session_timeline::{
     AgentSessionSummaryCheckpoint, AgentSessionSummaryParseResult,
@@ -13,6 +13,46 @@ const MAX_AUTO_SYNC_SESSIONS: usize = 12;
 const MAX_MANUAL_SYNC_SESSIONS: usize = 20;
 const SESSION_PARSE_TIMEOUT: Duration = Duration::from_secs(5);
 const SLOW_SESSION_THRESHOLD: Duration = Duration::from_secs(1);
+
+fn archived_agent_session_row(
+    agent_type: &str,
+    session_id: &str,
+    synced_at: &str,
+) -> AgentSessionRow {
+    AgentSessionRow {
+        agent_type: agent_type.to_string(),
+        session_id: session_id.to_string(),
+        runtime_status: "unknown".to_string(),
+        title: None,
+        project_path: None,
+        parent_session_id: None,
+        client_id: None,
+        client_name: None,
+        native_started_at: None,
+        native_updated_at: None,
+        activity_at: synced_at.to_string(),
+        flowlet_observed: false,
+        started_at: synced_at.to_string(),
+        updated_at: synced_at.to_string(),
+        request_count: 0,
+        success_count: 0,
+        error_count: 0,
+        known_tokens: 0,
+        input_tokens: 0,
+        input_cached_tokens: 0,
+        input_uncached_tokens: 0,
+        cache_measured_input_tokens: 0,
+        output_tokens: 0,
+        unknown_usage_count: 0,
+        estimated_cost: 0.0,
+        estimated_input_uncached_cost: 0.0,
+        estimated_input_cached_cost: 0.0,
+        estimated_input_cache_write_cost: 0.0,
+        estimated_output_cost: 0.0,
+        native_summary: None,
+        native_synced_at: Some(synced_at.to_string()),
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,6 +180,50 @@ impl Storage {
                     session.native_synced_at = Some(synced_at);
                 }
             }
+        }
+        drop(statement);
+
+        let live_keys = sessions
+            .iter()
+            .map(|session| (session.agent_type.clone(), session.session_id.clone()))
+            .collect::<std::collections::HashSet<_>>();
+        let Ok(mut archived_statement) = connection.prepare(
+            "SELECT agent_type, session_id, session_json, summary_json, synced_at
+             FROM agent_session_snapshots",
+        ) else {
+            return sessions;
+        };
+        let Ok(archived_rows) = archived_statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        }) else {
+            return sessions;
+        };
+        for row in archived_rows.flatten() {
+            let (agent_type, session_id, session_json, summary_json, synced_at) = row;
+            if live_keys.contains(&(agent_type.clone(), session_id.clone())) {
+                continue;
+            }
+            let Ok(summary) = serde_json::from_str::<AgentSessionNativeSummary>(&summary_json)
+            else {
+                continue;
+            };
+            if summary.source_available {
+                continue;
+            }
+            let mut session = session_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str::<AgentSessionRow>(json).ok())
+                .unwrap_or_else(|| archived_agent_session_row(&agent_type, &session_id, &synced_at));
+            session.runtime_status = "unknown".to_string();
+            session.native_summary = Some(summary);
+            session.native_synced_at = Some(synced_at);
+            sessions.push(session);
         }
         sessions
     }
@@ -467,17 +551,29 @@ impl Storage {
                 .collect::<std::collections::HashSet<_>>();
             let stored_keys = {
                 let mut statement = connection
-                    .prepare("SELECT agent_type, session_id FROM agent_session_snapshots")?;
+                    .prepare("SELECT agent_type, session_id, summary_json FROM agent_session_snapshots")?;
                 let rows = statement
                     .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
                     })?
                     .collect::<Result<Vec<_>, _>>()?;
                 rows
             };
             let deleted = stored_keys
                 .into_iter()
-                .filter(|key| available_sources.contains(&key.0) && !current_keys.contains(key))
+                .filter(|(agent_type, session_id, summary_json)| {
+                    let source_available = serde_json::from_str::<AgentSessionNativeSummary>(summary_json)
+                        .map(|summary| summary.source_available)
+                        .unwrap_or(true);
+                    available_sources.contains(agent_type)
+                        && !current_keys.contains(&(agent_type.clone(), session_id.clone()))
+                        && source_available
+                })
+                .map(|(agent_type, session_id, _)| (agent_type, session_id))
                 .collect::<Vec<_>>();
             for session in &sessions {
                 let fingerprint = format!(
@@ -487,8 +583,21 @@ impl Storage {
                     session.title.as_deref().unwrap_or(""),
                     session.project_path.as_deref().unwrap_or("")
                 );
-                let existing: Option<(String, i64)> = connection.query_row("SELECT fingerprint, parser_version FROM agent_session_snapshots WHERE agent_type = ?1 AND session_id = ?2", params![session.agent_type, session.session_id], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
-                if needs_agent_snapshot_refresh(force, &fingerprint, existing.as_ref()) {
+                let session_json = serde_json::to_string(session)
+                    .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+                connection.execute(
+                    "UPDATE agent_session_snapshots SET session_json=?3
+                     WHERE agent_type=?1 AND session_id=?2 AND (session_json IS NULL OR session_json='')",
+                    params![session.agent_type, session.session_id, session_json],
+                )?;
+                let existing: Option<(String, i64, String)> = connection.query_row("SELECT fingerprint, parser_version, summary_json FROM agent_session_snapshots WHERE agent_type = ?1 AND session_id = ?2", params![session.agent_type, session.session_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
+                let active_existing = existing.and_then(|(fingerprint, parser_version, summary_json)| {
+                    let source_available = serde_json::from_str::<AgentSessionNativeSummary>(&summary_json)
+                        .map(|summary| summary.source_available)
+                        .unwrap_or(true);
+                    source_available.then_some((fingerprint, parser_version))
+                });
+                if needs_agent_snapshot_refresh(force, &fingerprint, active_existing.as_ref()) {
                     changed.push((session.clone(), fingerprint));
                 }
             }
@@ -678,8 +787,7 @@ impl Storage {
                     }
                     let write_started = Instant::now();
                     self.save_agent_snapshot(
-                        &session.agent_type,
-                        &session.session_id,
+                        session,
                         fingerprint,
                         &parsed,
                     )?;
@@ -731,7 +839,7 @@ impl Storage {
                     message: "Agent 数据同步已取消".into(),
                 });
             }
-            self.delete_agent_snapshot(agent_type, session_id)?;
+            self.mark_agent_snapshot_source_deleted(agent_type, session_id)?;
             self.update_job_progress(
                 job_id,
                 (changed.len() + offset + 1) as i64,
@@ -771,7 +879,7 @@ impl Storage {
             failed,
             message: if failed == 0 {
                 format!(
-                    "已整理 {} 个会话，清理 {} 个失效快照",
+                    "已整理 {} 个会话，标记 {} 个源文件已删除",
                     changed.len(),
                     deleted.len()
                 )
@@ -801,14 +909,15 @@ impl Storage {
     }
     fn save_agent_snapshot(
         &self,
-        agent_type: &str,
-        session_id: &str,
+        session: &AgentSessionRow,
         fingerprint: &str,
         parsed: &AgentSessionSummaryParseResult,
     ) -> Result<(), StorageError> {
         let json = serde_json::to_string(&parsed.summary)
             .map_err(|e| StorageError::InvalidImport(e.to_string()))?;
         let usage_ids_json = serde_json::to_string(&parsed.usage_ids)
+            .map_err(|e| StorageError::InvalidImport(e.to_string()))?;
+        let session_json = serde_json::to_string(session)
             .map_err(|e| StorageError::InvalidImport(e.to_string()))?;
         let stored_fingerprint = if parsed.complete {
             fingerprint.to_string()
@@ -819,7 +928,7 @@ impl Storage {
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        connection.execute("INSERT INTO agent_session_snapshots (agent_type, session_id, fingerprint, summary_json, source_offset, parser_version, usage_ids_json, cursor_guard, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) ON CONFLICT(agent_type, session_id) DO UPDATE SET fingerprint=excluded.fingerprint, summary_json=excluded.summary_json, source_offset=excluded.source_offset, parser_version=excluded.parser_version, usage_ids_json=excluded.usage_ids_json, cursor_guard=excluded.cursor_guard, synced_at=excluded.synced_at", params![agent_type, session_id, stored_fingerprint, json, parsed.source_offset as i64, parsed.parser_version, usage_ids_json, parsed.cursor_guard])?;
+        connection.execute("INSERT INTO agent_session_snapshots (agent_type, session_id, fingerprint, summary_json, session_json, source_offset, parser_version, usage_ids_json, cursor_guard, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now')) ON CONFLICT(agent_type, session_id) DO UPDATE SET fingerprint=excluded.fingerprint, summary_json=excluded.summary_json, session_json=excluded.session_json, source_offset=excluded.source_offset, parser_version=excluded.parser_version, usage_ids_json=excluded.usage_ids_json, cursor_guard=excluded.cursor_guard, synced_at=excluded.synced_at", params![session.agent_type, session.session_id, stored_fingerprint, json, session_json, parsed.source_offset as i64, parsed.parser_version, usage_ids_json, parsed.cursor_guard])?;
         Ok(())
     }
 
@@ -910,7 +1019,7 @@ impl Storage {
             cursor_guard,
         }))
     }
-    fn delete_agent_snapshot(
+    fn mark_agent_snapshot_source_deleted(
         &self,
         agent_type: &str,
         session_id: &str,
@@ -919,13 +1028,25 @@ impl Storage {
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
+        let summary_json: Option<String> = connection
+            .query_row(
+                "SELECT summary_json FROM agent_session_snapshots WHERE agent_type=?1 AND session_id=?2",
+                params![agent_type, session_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(summary_json) = summary_json else {
+            return Ok(());
+        };
+        let mut summary: AgentSessionNativeSummary = serde_json::from_str(&summary_json)
+            .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+        summary.source_available = false;
+        let archived_json = serde_json::to_string(&summary)
+            .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
         connection.execute(
-            "DELETE FROM agent_session_snapshots WHERE agent_type=?1 AND session_id=?2",
-            params![agent_type, session_id],
-        )?;
-        connection.execute(
-            "DELETE FROM agent_usage_events WHERE agent_type=?1 AND session_id=?2",
-            params![agent_type, session_id],
+            "UPDATE agent_session_snapshots SET summary_json=?3
+             WHERE agent_type=?1 AND session_id=?2",
+            params![agent_type, session_id, archived_json],
         )?;
         Ok(())
     }
@@ -2045,8 +2166,10 @@ mod tests {
             bytes_processed: 256,
             usage_events: Vec::new(),
         };
+        let mut session = native_session();
+        session.agent_type = "codex-desktop".to_string();
         storage
-            .save_agent_snapshot("codex-desktop", "session-1", "fingerprint", &parsed)
+            .save_agent_snapshot(&session, "fingerprint", &parsed)
             .unwrap();
         let checkpoint = storage
             .load_agent_summary_checkpoint("codex-desktop", "session-1")
@@ -2168,12 +2291,43 @@ mod tests {
         assert_eq!(days[0].native_event_count, 1);
         assert_eq!(days[0].native_total_tokens, 5);
 
-        // 会话删除时事件随快照一并清理。
+        let mut archived_session = native_session();
+        archived_session.agent_type = "claude-code".to_string();
+        let archived_parsed = make_parsed(false, Vec::new());
         storage
-            .delete_agent_snapshot("claude-code", "session-1")
+            .save_agent_snapshot(&archived_session, "fingerprint", &archived_parsed)
             .unwrap();
-        assert!(storage.agent_native_daily_usage_totals().unwrap().is_empty());
-        assert!(storage.agent_native_hourly_usage_totals().unwrap().is_empty());
+
+        // 源会话删除时只归档快照，逐事件账本继续保留历史统计。
+        storage
+            .mark_agent_snapshot_source_deleted("claude-code", "session-1")
+            .unwrap();
+        assert_eq!(
+            storage
+                .agent_native_daily_usage_totals()
+                .unwrap()
+                .iter()
+                .map(|day| day.native_total_tokens)
+                .sum::<i64>(),
+            5
+        );
+        assert_eq!(
+            storage
+                .agent_native_hourly_usage_totals()
+                .unwrap()
+                .iter()
+                .map(|hour| hour.native_total_tokens)
+                .sum::<i64>(),
+            5
+        );
+        let archived = storage.enrich_native_agent_sessions(Vec::new());
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].title.as_deref(), Some("Task"));
+        assert!(!archived[0]
+            .native_summary
+            .as_ref()
+            .unwrap()
+            .source_available);
     }
 
     #[test]

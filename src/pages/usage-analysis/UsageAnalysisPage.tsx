@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { Button, SideSheet, Tooltip } from "@douyinfe/semi-ui-19";
 import { IconChevronRight, IconExternalOpen } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { UsagePeriod, UsageSummaryRow } from "../../domains/usage/types";
+import type { UsageSummaryRow } from "../../domains/usage/types";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { formatDuration, formatTokenRate } from "../../features/request-logs/logPresentation";
 import { useKnownDevices } from "../../features/device-sync/useDeviceSync";
@@ -17,6 +17,8 @@ import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { weekRange, type TimeRangeValue } from "../../shared/timeRange";
+import { CalendarTimeRangeControl, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
 import {
   averageElapsedMsOf,
   buildCrossMatrix,
@@ -35,13 +37,6 @@ import styles from "./UsageAnalysisPage.module.css";
 const EMPTY_ROWS: UsageSummaryRow[] = [];
 const COMPACT_MATRIX_COLUMN_COUNT = 4;
 
-const PERIOD_OPTIONS: Array<{ value: UsagePeriod; label: string }> = [
-  { value: "today", label: "今日" },
-  { value: "week", label: "本周" },
-  { value: "month", label: "本月" },
-  { value: "all", label: "全部" },
-];
-
 const DIMENSION_OPTIONS: Array<{ value: ConsumptionDimension; label: string }> = [
   { value: "model", label: "按模型" },
   { value: "account", label: "按渠道账号" },
@@ -55,12 +50,13 @@ const BRANDED_AGENT_IDS = new Set(["claude-code", "opencode", "pi", "chatgpt-des
 export function UsageAnalysisPage() {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 30_000 });
-  const [period, setPeriod] = useState<UsagePeriod>("week");
+  const [timeRange, setTimeRange] = useState<TimeRangeValue>(() => weekRange());
   const [dimension, setDimension] = useState<ConsumptionDimension>("model");
   const [matrixMetric, setMatrixMetric] = useState<ConsumptionMetric>("tokens");
   const [matrixExpanded, setMatrixExpanded] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const { query } = useUsageSummary(period, refresh.autoRefresh);
+  const summaryFilter = useMemo(() => ({ ...timeRange, groupBy: "day" as const }), [timeRange]);
+  const { query } = useUsageSummary(summaryFilter, refresh.autoRefresh);
   const { modelCurrencyOf } = useModelPriceCurrencyLookup();
   const knownDevices = useKnownDevices();
 
@@ -99,8 +95,8 @@ export function UsageAnalysisPage() {
     setMatrixExpanded(false);
   };
 
-  const changePeriod = (next: UsagePeriod) => {
-    setPeriod(next);
+  const changeTimeRange = (next: TimeRangeValue) => {
+    setTimeRange(next);
     setMatrixExpanded(false);
   };
 
@@ -116,18 +112,14 @@ export function UsageAnalysisPage() {
   return (
     <main className={styles.page}>
       <PageHeader title={t("用量分析")} subtitle={t("按模型、渠道账号和客户端拆解 Token、费用与性能")}>
-        <div className={styles.periodTabs} aria-label={t("统计周期")}>
-          {PERIOD_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={period === option.value}
-              onClick={() => changePeriod(option.value)}
-            >
-              {t(option.label)}
-            </button>
-          ))}
-        </div>
+        <TimeScopeControl>
+          <CalendarTimeRangeControl
+            value={timeRange}
+            onChange={changeTimeRange}
+            language={language}
+            t={t}
+          />
+        </TimeScopeControl>
         <RefreshControl
           autoRefresh={refresh.autoRefresh}
           onToggleAutoRefresh={refresh.toggleAutoRefresh}

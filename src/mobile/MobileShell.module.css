@@ -14,7 +14,12 @@
   min-height: calc(100dvh - 64px);
   margin: 0 auto;
   padding: calc(16px + env(safe-area-inset-top)) 14px calc(84px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
 }
+
+/* Outlet 的页面根节点填满短页面，使空白区域也能接收页面级下拉刷新手势。 */
+.content > * { width: 100%; flex: 1 0 auto; }
 
 .navigation {
   position: fixed;

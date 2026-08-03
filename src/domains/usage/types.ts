@@ -32,6 +32,13 @@ export type UsageSummaryRow = {
 
 export type UsagePeriod = "all" | "year" | "quarter" | "month" | "week" | "today";
 
+export type UsageSummaryFilter = {
+  /** UTC ISO timestamps forming a half-open range. Both null means all time. */
+  startAt: string | null;
+  endAt: string | null;
+  groupBy: "hour" | "day";
+};
+
 export type AgentNativeCostEstimate = {
   amount: number | null;
   currency: string | null;

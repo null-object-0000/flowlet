@@ -357,6 +357,7 @@ function NativeUsageSection({
   return (
     <DetailSection title={t("Agent 原生用量")}>
       <p className={styles.usageHint}>{agentType === "codex-desktop" || agentType === "codex-cli" ? t("优先展示官方 API 原币估值，并单独展示 Codex 套餐消耗；两者不换汇、不相加") : t("来自 Agent 本地记录，与 Flowlet 请求统计独立，不参与相加")}</p>
+      {!loading && !error && data?.sourceAvailable === false ? <p className={styles.usageHint}>{t("源文件已删除，以下为 Flowlet 最后一次同步保存的数据")}</p> : null}
       {loading ? <div className={styles.nativeUsageLoading} aria-label={t("正在读取 Agent 原生用量")} /> : null}
       {error ? (
         <div className={styles.childError}>
@@ -364,7 +365,7 @@ function NativeUsageSection({
           <Button size="small" onClick={onRetry}>{t("重试")}</Button>
         </div>
       ) : null}
-      {!loading && !error && (!data?.sourceAvailable || !data.usage) ? (
+      {!loading && !error && !data?.usage ? (
         <div className={styles.emptyState}>{t("Agent 原生数据未提供 Token 用量")}</div>
       ) : null}
       {!loading && !error && data?.usage ? (
@@ -802,6 +803,7 @@ function SessionHeader({ session, language }: { session: AgentSessionRow; langua
       </div>
       <div className={styles.meta}>
         <span className={styles.state} data-state={session.runtimeStatus}><i />{runtimeLabel(session.runtimeStatus, t)}</span>
+        {!session.flowletObserved && session.nativeSummary?.sourceAvailable === false ? <Tag size="small" color="grey">{t("源文件已删除")}</Tag> : null}
         <span>{t("最近活跃：{time}", { time: formatFullTimestamp(session.activityAt, language) })}</span>
       </div>
     </div>

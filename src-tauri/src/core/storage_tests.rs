@@ -210,6 +210,9 @@ fn lists_paginated_request_logs_with_usage_join() {
             time_range: "1h".to_string(),
             model: String::new(),
             model_kind: String::new(),
+            start_at: String::new(),
+            end_at: String::new(),
+            token_status: String::new(),
         })
         .expect("query request logs with qualified joined columns");
 
@@ -229,7 +232,67 @@ fn model_filter(model: &str, kind: &str) -> LogsFilter {
         time_range: "all".to_string(),
         model: model.to_string(),
         model_kind: kind.to_string(),
+        start_at: String::new(),
+        end_at: String::new(),
+        token_status: String::new(),
     }
+}
+
+#[test]
+fn request_log_filter_supports_unknown_tokens_and_exact_time_bounds() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+
+    for (request_id, total_tokens) in [("req-unknown", None), ("req-known", Some(12))] {
+        let log = request_log_for_repair(request_id, 0, true);
+        storage
+            .insert_request_log(&log)
+            .expect("insert request log");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: request_id.to_string(),
+                client_id: log.client_id.clone(),
+                client_name: log.client_name.clone(),
+                channel_id: log.channel_id.clone(),
+                channel_name: log.channel_name.clone(),
+                account_id: log.account_id.clone(),
+                account_name: log.account_name.clone(),
+                client_protocol: log.client_protocol.clone(),
+                upstream_protocol: log.upstream_protocol.clone(),
+                virtual_model: log.virtual_model.clone(),
+                upstream_model: log.upstream_model.clone(),
+                input_tokens: total_tokens.map(|_| 10),
+                input_cached_tokens: None,
+                input_uncached_tokens: total_tokens.map(|_| 10),
+                input_cache_write_tokens: None,
+                output_tokens: total_tokens.map(|_| 2),
+                total_tokens,
+            })
+            .expect("insert usage record");
+    }
+
+    let page = storage
+        .list_request_logs_page(LogsFilter {
+            token_status: "unknown".to_string(),
+            start_at: "2000-01-01T00:00:00Z".to_string(),
+            end_at: "2100-01-01T00:00:00Z".to_string(),
+            ..model_filter("", "")
+        })
+        .expect("filter unknown token requests");
+    assert_eq!(page.total, 1);
+    assert_eq!(page.rows[0].request_id, "req-unknown");
+    assert_eq!(page.rows[0].total_tokens, None);
+
+    let outside = storage
+        .list_request_logs_page(LogsFilter {
+            token_status: "unknown".to_string(),
+            start_at: "2000-01-01T00:00:00Z".to_string(),
+            end_at: "2001-01-01T00:00:00Z".to_string(),
+            ..model_filter("", "")
+        })
+        .expect("exclude requests outside exact time range");
+    assert_eq!(outside.total, 0);
 }
 
 #[test]
@@ -855,6 +918,9 @@ data: [DONE]
             time_range: "1h".to_string(),
             model: String::new(),
             model_kind: String::new(),
+            start_at: String::new(),
+            end_at: String::new(),
+            token_status: String::new(),
         })
         .expect("query reparsed stream usage");
     assert_eq!(page.rows[0].input_tokens, Some(100));
@@ -886,6 +952,9 @@ data: [DONE]
             time_range: "1h".to_string(),
             model: String::new(),
             model_kind: String::new(),
+            start_at: String::new(),
+            end_at: String::new(),
+            token_status: String::new(),
         })
         .unwrap();
     assert_eq!(reparsed_page.rows[0].input_tokens, Some(100));
@@ -1828,6 +1897,58 @@ fn usage_summary_filters_at_the_database_boundary() {
     );
     let all_time = test_usage_summary(&storage, "all");
     assert_eq!(all_time.iter().map(|row| row.request_count).sum::<i64>(), 2);
+}
+
+#[test]
+fn usage_summary_accepts_explicit_historical_ranges() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+
+    for (request_id, created_at) in [
+        ("usage-last-week", "2026-07-29T08:00:00Z"),
+        ("usage-this-week", "2026-08-03T08:00:00Z"),
+    ] {
+        storage
+            .insert_request_log(&request_log_for_repair(request_id, 0, true))
+            .expect("insert request log");
+        storage
+            .upsert_usage_record(&UsageRecordInput {
+                request_id: request_id.to_string(),
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                total_tokens: Some(15),
+                ..empty_usage_input(request_id)
+            })
+            .expect("insert usage");
+        storage
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE request_logs SET created_at = ?1 WHERE request_id = ?2",
+                rusqlite::params![created_at, request_id],
+            )
+            .expect("set request timestamp");
+    }
+
+    let previous_week = storage
+        .usage_summary_range(
+            Some("2026-07-27T00:00:00Z"),
+            Some("2026-08-03T00:00:00Z"),
+            "day",
+            "local-device",
+        )
+        .expect("query explicit historical week");
+
+    assert_eq!(
+        previous_week
+            .iter()
+            .map(|row| row.request_count)
+            .sum::<i64>(),
+        1
+    );
+    assert_eq!(previous_week[0].date, "2026-07-29");
 }
 
 #[test]

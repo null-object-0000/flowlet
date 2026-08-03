@@ -11,8 +11,8 @@ use crate::core::config::{
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_captured_stream_usage, extract_response_usage};
 use base64::Engine;
-use chrono::{DateTime, Datelike};
-use rusqlite::{OptionalExtension, params};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone};
+use rusqlite::{params, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 
 type AgentSessionKey = (String, String);
@@ -27,6 +27,52 @@ struct NativeUsageRepairRequest {
     model: Option<String>,
     channel_id: Option<String>,
     needs_repair: bool,
+}
+
+fn invalid_usage_range(message: &str) -> StorageError {
+    StorageError::Sqlite(rusqlite::Error::InvalidParameterName(message.to_string()))
+}
+
+fn usage_period_bounds(period: &str) -> (Option<String>, Option<String>) {
+    let today = Local::now().date_naive();
+    let range = match period {
+        "today" => Some((today, today + Duration::days(1))),
+        "week" => {
+            let monday = today - Duration::days(today.weekday().num_days_from_monday() as i64);
+            Some((monday, monday + Duration::days(7)))
+        }
+        "month" => NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+            .and_then(|start| first_day_after_month(start, 1).map(|end| (start, end))),
+        "quarter" => {
+            let start_month = ((today.month() - 1) / 3) * 3 + 1;
+            NaiveDate::from_ymd_opt(today.year(), start_month, 1)
+                .and_then(|start| first_day_after_month(start, 3).map(|end| (start, end)))
+        }
+        "year" => NaiveDate::from_ymd_opt(today.year(), 1, 1).zip(NaiveDate::from_ymd_opt(
+            today.year() + 1,
+            1,
+            1,
+        )),
+        _ => None,
+    };
+    let Some((start, end)) = range else {
+        return (None, None);
+    };
+    (local_boundary(start), local_boundary(end))
+}
+
+fn first_day_after_month(start: NaiveDate, months: u32) -> Option<NaiveDate> {
+    let zero_based = start.month0() + months;
+    let year = start.year() + (zero_based / 12) as i32;
+    NaiveDate::from_ymd_opt(year, zero_based % 12 + 1, 1)
+}
+
+fn local_boundary(date: NaiveDate) -> Option<String> {
+    let midnight = date.and_hms_opt(0, 0, 0)?;
+    Local
+        .from_local_datetime(&midnight)
+        .earliest()
+        .map(|value| value.to_rfc3339())
 }
 
 #[cfg(test)]
@@ -247,9 +293,6 @@ fn build_agent_native_usage_summary(
         .filter(|row| row.parent_session_id.is_none() && !row.flowlet_observed)
         .filter_map(|row| {
             let summary = row.native_summary?;
-            if !summary.source_available {
-                return None;
-            }
             let activity_at = row
                 .native_updated_at
                 .as_deref()
@@ -2600,114 +2643,69 @@ impl Storage {
         period: &str,
         current_device_id: &str,
     ) -> Result<Vec<UsageSummaryRow>, StorageError> {
-        // 保留 request_logs.created_at 作为统计日期来源：历史修复可能在请求发生后才
-        // 补写 usage_records，直接使用 usage_records.created_at 会把历史用量归到修复日。
-        // period 只接受 command 边界校验后的固定枚举值，下面的 match 片段不包含用户输入。
-        // "today"/"week" 按小时分组，给前端分时热力图提供粒度；其它周期按自然日分组。
-        //
-        // 结果由两部分 UNION ALL 后再按 device_id 二次分组：
-        //   1. 本机 usage_records，标记为 current_device_id；
-        //   2. 跨设备同步来的 device_usage_breakdowns（已按设备/日期/维度预聚合）。
-        // 这样前端即可把「设备」作为与模型、渠道账号、客户端并列的第四维度。
-        let (date_expression, period_clause) = match period {
-            "today" => (
-                "strftime('%Y-%m-%dT%H:00:00', request_logs.created_at, 'localtime')",
-                r#"
-                AND request_logs.created_at >= datetime('now', 'localtime', 'start of day', 'utc')
-                AND request_logs.created_at < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')
-            "#,
-            ),
-            "week" => (
-                "strftime('%Y-%m-%dT%H:00:00', request_logs.created_at, 'localtime')",
-                r#"
-                AND request_logs.created_at >= datetime(
-                    'now', 'localtime', 'start of day',
-                    printf('-%d days', (CAST(strftime('%w', 'now', 'localtime') AS INTEGER) + 6) % 7),
-                    'utc'
-                )
-                AND request_logs.created_at < datetime(
-                    'now', 'localtime', 'start of day',
-                    printf('-%d days', (CAST(strftime('%w', 'now', 'localtime') AS INTEGER) + 6) % 7),
-                    '+7 days', 'utc'
-                )
-            "#,
-            ),
-            "month" => (
-                "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
-                r#"
-                AND request_logs.created_at >= datetime('now', 'localtime', 'start of month', 'utc')
-                AND request_logs.created_at < datetime('now', 'localtime', 'start of month', '+1 month', 'utc')
-            "#,
-            ),
-            "quarter" => (
-                "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
-                r#"
-                AND request_logs.created_at >= datetime(
-                    'now', 'localtime', 'start of month',
-                    printf('-%d months', (CAST(strftime('%m', 'now', 'localtime') AS INTEGER) - 1) % 3),
-                    'utc'
-                )
-                AND request_logs.created_at < datetime(
-                    'now', 'localtime', 'start of month',
-                    printf('-%d months', (CAST(strftime('%m', 'now', 'localtime') AS INTEGER) - 1) % 3),
-                    '+3 months', 'utc'
-                )
-            "#,
-            ),
-            "year" => (
-                "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
-                r#"
-                AND request_logs.created_at >= datetime('now', 'localtime', 'start of year', 'utc')
-                AND request_logs.created_at < datetime('now', 'localtime', 'start of year', '+1 year', 'utc')
-            "#,
-            ),
-            _ => (
-                "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
-                "",
-            ),
+        let (start_at, end_at) = usage_period_bounds(period);
+        let group_by = if matches!(period, "today" | "week") {
+            "hour"
+        } else {
+            "day"
         };
-        // 同步来的 device_usage_breakdowns 按自然日存储，需要对应的日期范围过滤。
-        // "all" 不限制日期，其余周期按自然日起止过滤。起止修饰符与本地查询的
-        // period 语义一致（含当天），以 ISO 日期字符串传入。
-        let breakdown_period_clause = match period {
-            "all" => "",
-            _ => "AND breakdown_date >= ?3 AND breakdown_date <= ?4",
-        };
-        // 为同步数据的日期过滤计算起止日期（自然日），与 period 语义一致。
-        let (breakdown_start, breakdown_end): (Option<String>, Option<String>) = match period {
-            "all" => (None, None),
-            _ => {
-                let today = chrono::Local::now().date_naive();
-                let (start, end) = match period {
-                    "today" => (today, today),
-                    "week" => {
-                        let monday_offset = today.weekday().num_days_from_monday() as i64;
-                        (today - chrono::Duration::days(monday_offset), today)
-                    }
-                    "month" => {
-                        let first = chrono::NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
-                        let last = chrono::NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1)
-                            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap())
-                            - chrono::Duration::days(1);
-                        (first, last)
-                    }
-                    "quarter" => {
-                        let quarter_start_month = ((today.month() - 1) / 3) * 3 + 1;
-                        let start = chrono::NaiveDate::from_ymd_opt(today.year(), quarter_start_month, 1).unwrap();
-                        let end = chrono::NaiveDate::from_ymd_opt(today.year(), quarter_start_month + 3, 1)
-                            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap())
-                            - chrono::Duration::days(1);
-                        (start, end)
-                    }
-                    "year" => {
-                        let start = chrono::NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap();
-                        let end = chrono::NaiveDate::from_ymd_opt(today.year(), 12, 31).unwrap();
-                        (start, end)
-                    }
-                    _ => (today, today),
-                };
-                (Some(start.to_string()), Some(end.to_string()))
+        self.usage_summary_range(
+            start_at.as_deref(),
+            end_at.as_deref(),
+            group_by,
+            current_device_id,
+        )
+    }
+
+    /// Query usage in an explicit UTC half-open range. Calendar presets are resolved by the
+    /// frontend, so historical days/weeks/months and arbitrary date ranges share one contract.
+    /// The local request scan keeps timestamp bounds for the created_at index; synchronized
+    /// device breakdowns are filtered by their natural local date keys.
+    pub fn usage_summary_range(
+        &self,
+        start_at: Option<&str>,
+        end_at: Option<&str>,
+        group_by: &str,
+        current_device_id: &str,
+    ) -> Result<Vec<UsageSummaryRow>, StorageError> {
+        let has_range = start_at.is_some() || end_at.is_some();
+        let (start_at, end_at, breakdown_start, breakdown_end) = match (start_at, end_at) {
+            (None, None) => (None, None, None, None),
+            (Some(start), Some(end)) => {
+                let start_parsed = DateTime::parse_from_rfc3339(start)
+                    .map_err(|_| invalid_usage_range("开始时间不是有效的 RFC3339 时间"))?;
+                let end_parsed = DateTime::parse_from_rfc3339(end)
+                    .map_err(|_| invalid_usage_range("结束时间不是有效的 RFC3339 时间"))?;
+                if start_parsed >= end_parsed {
+                    return Err(invalid_usage_range("开始时间必须早于结束时间"));
+                }
+                let start_date = start_parsed.with_timezone(&Local).date_naive().to_string();
+                let end_date = (end_parsed.with_timezone(&Local) - Duration::seconds(1))
+                    .date_naive()
+                    .to_string();
+                (
+                    Some(start.to_string()),
+                    Some(end.to_string()),
+                    Some(start_date),
+                    Some(end_date),
+                )
             }
+            _ => return Err(invalid_usage_range("开始时间和结束时间必须同时提供")),
+        };
+        let date_expression = match group_by {
+            "hour" => "strftime('%Y-%m-%dT%H:00:00', request_logs.created_at, 'localtime')",
+            "day" => "strftime('%Y-%m-%d', request_logs.created_at, 'localtime')",
+            _ => return Err(invalid_usage_range("不支持的用量分组粒度")),
+        };
+        let local_range_clause = if has_range {
+            "AND request_logs.created_at >= datetime(?3) AND request_logs.created_at < datetime(?4)"
+        } else {
+            ""
+        };
+        let breakdown_range_clause = if has_range {
+            "AND breakdown_date >= ?5 AND breakdown_date <= ?6"
+        } else {
+            ""
         };
         let connection = self
             .connection
@@ -2775,7 +2773,7 @@ impl Storage {
                                       AND request_logs.is_last_attempt = 1
                 LEFT JOIN channel_accounts ca ON ca.id = usage_records.account_id
                 WHERE 1 = 1
-                {period_clause}
+                {local_range_clause}
                 GROUP BY usage_date, usage_records.client_id, usage_records.channel_id,
                          usage_records.account_id, usage_records.upstream_model
 
@@ -2806,22 +2804,23 @@ impl Storage {
                     generation_output_tokens
                 FROM device_usage_breakdowns
                 WHERE device_id != ?2
-                {breakdown_period_clause}
+                {breakdown_range_clause}
             ) combined
             GROUP BY device_id, usage_date, client_id, channel_id, account_id, upstream_model
             ORDER BY usage_date DESC, request_count DESC
             "#,
         );
         let mut stmt = connection.prepare(&sql)?;
-        // 同步数据的日期过滤仅非 "all" 周期出现（SQL 中 ?3/?4），按周期动态拼参。
         let map_row = Self::map_usage_summary_row;
-        let summary: Vec<UsageSummaryRow> = if period == "all" {
+        let summary: Vec<UsageSummaryRow> = if !has_range {
             stmt.query_map(params![current_device_id, current_device_id], map_row)?
         } else {
             stmt.query_map(
                 params![
                     current_device_id,
                     current_device_id,
+                    start_at.unwrap_or_default(),
+                    end_at.unwrap_or_default(),
                     breakdown_start.unwrap_or_default(),
                     breakdown_end.unwrap_or_default(),
                 ],
@@ -3106,6 +3105,23 @@ impl Storage {
             _ => None,
         };
 
+        let start_clause = if filter.start_at.is_empty() {
+            None
+        } else {
+            refs.push(&filter.start_at);
+            Some("rl.created_at >= datetime(?)")
+        };
+        let end_clause = if filter.end_at.is_empty() {
+            None
+        } else {
+            refs.push(&filter.end_at);
+            Some("rl.created_at < datetime(?)")
+        };
+        let token_clause = match filter.token_status.as_str() {
+            "unknown" => Some("ur.total_tokens IS NULL"),
+            _ => None,
+        };
+
         let search_clause = if filter.search.is_empty() {
             None
         } else {
@@ -3139,6 +3155,15 @@ impl Storage {
             clauses.push(c);
         }
         if let Some(c) = time_clause {
+            clauses.push(c);
+        }
+        if let Some(c) = start_clause {
+            clauses.push(c);
+        }
+        if let Some(c) = end_clause {
+            clauses.push(c);
+        }
+        if let Some(c) = token_clause {
             clauses.push(c);
         }
         if let Some(c) = search_clause {
@@ -3399,7 +3424,7 @@ mod agent_session_filter_tests {
         native.session_id = "native-root".to_string();
         native.native_updated_at = Some("2026-07-20T08:30:00Z".to_string());
         native.native_summary = Some(crate::core::config::AgentSessionNativeSummary {
-            source_available: true,
+            source_available: false,
             truncated: false,
             turn_count: 3,
             usage: Some(crate::core::config::AgentSessionNativeUsage {

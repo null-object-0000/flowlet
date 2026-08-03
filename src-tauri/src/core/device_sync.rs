@@ -1011,8 +1011,7 @@ pub async fn pull_device_usage(
 fn synced_agent_session_from_row(row: crate::core::config::AgentSessionRow) -> SyncedAgentSession {
     let native_summary = row
         .native_summary
-        .as_ref()
-        .filter(|summary| summary.source_available);
+        .as_ref();
     SyncedAgentSession {
         agent_type: row.agent_type,
         session_id: row.session_id,

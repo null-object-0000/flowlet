@@ -75,7 +75,7 @@ export const queryKeys = {
   },
   usage: {
     all: ["usage"] as const,
-    summary: (period: string) => [...queryKeys.usage.all, "summary", period] as const,
+    summary: (filter: unknown) => [...queryKeys.usage.all, "summary", filter] as const,
     nativeSummary: () => [...queryKeys.usage.all, "native-summary"] as const,
     todayTokens: () => [...queryKeys.usage.all, "today-tokens"] as const,
     accountStats: () => [...queryKeys.usage.all, "account-stats"] as const,

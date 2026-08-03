@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import styles from "./PageHeader.module.css";
 
 type PageHeaderProps = {
-  title: string;
+  title: ReactNode;
   subtitle?: string;
   /** 右上角控件区：RefreshControl、筛选器、页面动作等。 */
   children?: ReactNode;

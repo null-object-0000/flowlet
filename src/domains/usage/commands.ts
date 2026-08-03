@@ -1,9 +1,13 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { AgentNativeUsageSummaryRow, UsagePeriod, UsageSummaryRow, UsageTodaySummary } from "./types";
+import type { AgentNativeUsageSummaryRow, UsageSummaryFilter, UsageSummaryRow, UsageTodaySummary } from "./types";
 
 export const usageCommands = {
-  summary: (period: UsagePeriod): Promise<UsageSummaryRow[]> =>
-    invokeCommand<UsageSummaryRow[]>("usage_summary", { period }).catch(toUsageError("usage_summary_failed")),
+  summary: (filter: UsageSummaryFilter): Promise<UsageSummaryRow[]> =>
+    invokeCommand<UsageSummaryRow[]>("usage_summary", {
+      startAt: filter.startAt,
+      endAt: filter.endAt,
+      groupBy: filter.groupBy,
+    }).catch(toUsageError("usage_summary_failed")),
   nativeSummary: (): Promise<AgentNativeUsageSummaryRow[]> =>
     invokeCommand<AgentNativeUsageSummaryRow[]>("agent_native_usage_summary").catch(toUsageError("agent_native_usage_summary_failed")),
   // 概览页「今日消耗」专用：拉取今日 Token 聚合（总量 + 输入/缓存/输出拆解），

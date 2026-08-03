@@ -14,6 +14,11 @@ export type RequestLogFilter = {
   model: string;
   /** 所选模型的来源分组；空串表示未按模型筛选（或兼容旧行为的 OR 匹配）。 */
   modelKind: "" | RequestLogModelKind;
+  /** 可选的精确 UTC 起止时间，用于从用量视图下钻请求明细。 */
+  startAt: string;
+  endAt: string;
+  /** 仅展示尚未得到 total_tokens 的请求。 */
+  tokenStatus: "all" | "unknown";
 };
 
 export type RequestLogRow = {
@@ -116,4 +121,7 @@ export const DEFAULT_REQUEST_LOG_FILTER: RequestLogFilter = {
   timeRange: "all",
   model: "",
   modelKind: "",
+  startAt: "",
+  endAt: "",
+  tokenStatus: "all",
 };

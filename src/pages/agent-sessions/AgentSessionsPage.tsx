@@ -145,10 +145,9 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
     : nativeUsage
       ? nativeTokenBreakdown(row.agentType, nativeUsage)
       : null;
-  const nativeAvailable = resolvedNativeSummary?.sourceAvailable === true;
   const nativeTruncated = resolvedNativeSummary?.truncated === true;
   const nativeTokenTruncated = nativeTruncated && row.agentType !== "opencode";
-  const requestCount = row.flowletObserved ? row.requestCount : nativeAvailable ? resolvedNativeSummary?.turnCount ?? null : null;
+  const requestCount = row.flowletObserved ? row.requestCount : resolvedNativeSummary?.turnCount ?? null;
   return (
     <button type="button" className={`${styles.grid} ${styles.row}`} onClick={onOpen}>
       <span>{formatTimestamp(row.activityAt, language)}</span>
@@ -208,6 +207,7 @@ function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language:
 
 function SessionStatus({ row }: { row: AgentSessionRow }) {
   const { t } = useAppPreferences();
+  const sourceDeleted = !row.flowletObserved && row.nativeSummary?.sourceAvailable === false;
   const presentation = {
     running: { label: t("自动运行中"), color: "green" as const, className: styles.runtimeActive },
     waiting_user: { label: t("等待用户确认"), color: "orange" as const, className: styles.runtimeWaiting },
@@ -215,7 +215,7 @@ function SessionStatus({ row }: { row: AgentSessionRow }) {
     unknown: { label: t("无法判断"), color: "grey" as const, className: styles.runtimeUnknown },
   }[row.runtimeStatus];
   const health = !row.flowletObserved
-    ? t("本地会话")
+    ? sourceDeleted ? t("源文件已删除") : t("本地会话")
     : row.errorCount > 0
       ? t("{count} 次失败", { count: row.errorCount })
       : t("请求正常");

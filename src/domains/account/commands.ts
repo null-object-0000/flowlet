@@ -87,8 +87,9 @@ export const accountCommands = {
     invokeCommand<ScrapeBalanceResult>("scrape_balance", { accountId, interactive }, SCRAPE_BALANCE_TIMEOUT_MS).catch(
       toAppErr("account_scrape_failed"),
     ),
-  syncScrapeBalances: (triggerSource: string): Promise<ScrapeBalanceSyncResult> =>
-    invokeCommand<ScrapeBalanceSyncResult>("sync_scrape_balances", { triggerSource }, 10 * 60_000).catch(
+  /** 周期同步渠道资源。官方余额接口与控制台抓取由 Rust 按账号能力分流。 */
+  syncChannelResources: (triggerSource: string): Promise<ChannelResourceSyncResult> =>
+    invokeCommand<ChannelResourceSyncResult>("sync_scrape_balances", { triggerSource }, 10 * 60_000).catch(
       toAppErr("account_scrape_sync_failed"),
     ),
 };
@@ -117,7 +118,7 @@ export type ScrapeLoginStatus = {
   message: string | null;
 };
 
-export type ScrapeBalanceSyncResult = {
+export type ChannelResourceSyncResult = {
   started: boolean;
   jobId: string | null;
   accounts: number;

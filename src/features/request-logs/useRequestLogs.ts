@@ -3,12 +3,13 @@ import { requestLogCommands } from "../../domains/request-log/commands";
 import type { RequestLogFilter } from "../../domains/request-log/types";
 import { queryKeys } from "../../shared/query-keys";
 
-export function useRequestLogs(filter: RequestLogFilter, autoRefresh: boolean) {
+export function useRequestLogs(filter: RequestLogFilter, autoRefresh: boolean, enabled = true) {
   return useQuery({
     queryKey: queryKeys.requestLog.list(filter),
     queryFn: () => requestLogCommands.list(filter),
     placeholderData: keepPreviousData,
     refetchInterval: autoRefresh ? 5_000 : false,
+    enabled,
   });
 }
 

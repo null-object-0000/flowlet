@@ -2,6 +2,7 @@ import type { DailyUsageTotal, HourlyUsageTotal } from "../../domains/device-syn
 import { createHeatLevelScale, type HeatLevel } from "../../shared/visualization/heatmapLevels";
 
 export type MobileUsagePeriod = "week" | "month";
+export type MobileUsageHeatmapMetric = "tokens" | "cost";
 
 export type MobileUsageRange = {
   start: Date;
@@ -19,6 +20,8 @@ export type MobileUsageHeatmapCell = {
   /** 其中 Agent 原生部分（未经过 Flowlet）。 */
   nativeTokens: number;
   nativeEvents: number;
+  /** Flowlet 可统计请求的预估费用；Agent 原生用量暂不计价。 */
+  estimatedCost: number;
   level: HeatLevel;
   outside: boolean;
   hasData: boolean;
@@ -115,6 +118,7 @@ export function buildMobileUsageHeatmap(
   period: MobileUsagePeriod,
   offset = 0,
   now = new Date(),
+  metric: MobileUsageHeatmapMetric = "tokens",
 ): MobileUsageHeatmap {
   const today = startOfLocalDay(now);
   const range = getMobileUsageRange(period, offset, today);
@@ -137,6 +141,7 @@ export function buildMobileUsageHeatmap(
       requests: outside ? 0 : (day?.requestCount ?? 0) + (day?.nativeEventCount ?? 0),
       nativeTokens: outside ? 0 : day?.nativeTotalTokens ?? 0,
       nativeEvents: outside ? 0 : day?.nativeEventCount ?? 0,
+      estimatedCost: outside ? 0 : day?.estimatedCost ?? 0,
       level: 0,
       outside,
       hasData: !outside && day !== undefined,
@@ -144,10 +149,13 @@ export function buildMobileUsageHeatmap(
   }
 
   const scale = createHeatLevelScale(
-    cells.filter((cell) => !cell.outside).map((cell) => cell.tokens),
+    cells.filter((cell) => !cell.outside).map((cell) => metric === "tokens" ? cell.tokens : cell.estimatedCost),
   );
   return {
-    cells: cells.map((cell) => ({ ...cell, level: scale.levelFor(cell.tokens) })),
+    cells: cells.map((cell) => ({
+      ...cell,
+      level: scale.levelFor(metric === "tokens" ? cell.tokens : cell.estimatedCost),
+    })),
     columns: 7,
   };
 }
@@ -156,6 +164,7 @@ export function buildMobileWeeklyHourlyHeatmap(
   hours: HourlyUsageTotal[],
   offset = 0,
   now = new Date(),
+  metric: MobileUsageHeatmapMetric = "tokens",
 ) {
   const currentHour = new Date(
     now.getFullYear(),
@@ -246,12 +255,12 @@ export function buildMobileWeeklyHourlyHeatmap(
   }
 
   const scale = createHeatLevelScale(
-    cells.filter((cell) => !cell.outside).map((cell) => cell.tokens),
+    cells.filter((cell) => !cell.outside).map((cell) => metric === "tokens" ? cell.tokens : cell.estimatedCost),
   );
   return {
     cells: cells.map((cell): MobileHourlyHeatmapCell => ({
       ...cell,
-      level: scale.levelFor(cell.tokens),
+      level: scale.levelFor(metric === "tokens" ? cell.tokens : cell.estimatedCost),
     })),
   };
 }

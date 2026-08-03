@@ -14,6 +14,9 @@ export const requestLogCommands = {
         time_range: filter.timeRange,
         model: filter.model,
         model_kind: filter.modelKind,
+        start_at: filter.startAt,
+        end_at: filter.endAt,
+        token_status: filter.tokenStatus,
       },
     }).catch(toRequestLogError("request_log_list_failed")),
 

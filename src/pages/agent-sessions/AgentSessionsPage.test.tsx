@@ -208,6 +208,47 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByLabelText("Token 明细：总计 13.50万，缓存命中率 16.0%")).toHaveAttribute("title", "135,000");
   });
 
+  it("keeps archived native usage visible after the source file is deleted", () => {
+    listedSessions = [{
+      ...session,
+      agentType: "claude-code",
+      flowletObserved: false,
+      clientId: null,
+      clientName: null,
+      requestCount: 0,
+      knownTokens: 0,
+      nativeSummary: {
+        sourceAvailable: false,
+        truncated: false,
+        turnCount: 2,
+        models: ["native-model"],
+        usage: {
+          inputTokens: 100000,
+          cachedInputTokens: 20000,
+          cacheWriteInputTokens: 5000,
+          outputTokens: 10000,
+          reasoningTokens: 0,
+          totalTokens: 135000,
+          cost: null,
+          costCurrency: null,
+        },
+      },
+      nativeSyncedAt: "2026-07-18T09:01:00Z",
+    }];
+
+    render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
+
+    expect(screen.getByText("源文件已删除")).toBeInTheDocument();
+    expect(screen.getByTitle("Agent 原生 turn 数：2")).toHaveTextContent("2");
+    expect(screen.getByLabelText("Token 明细：总计 13.50万，缓存命中率 16.0%")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Native session title").closest("button")!);
+    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
+    const usage = screen.getByRole("tabpanel", { name: "用量" });
+    expect(within(usage).getByText("源文件已删除，以下为 Flowlet 最后一次同步保存的数据")).toBeInTheDocument();
+    expect(within(usage).getByText("13.50万")).toBeInTheDocument();
+  });
+
   it("offers client and runtime status filters", () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 

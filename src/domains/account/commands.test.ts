@@ -95,9 +95,9 @@ describe("accountCommands contract", () => {
     );
   });
 
-  it("runs periodic WebView resource synchronization in non-interactive mode", async () => {
+  it("runs periodic channel resource synchronization with a long-running timeout", async () => {
     invokeMock.mockResolvedValueOnce({ started: true, accounts: 1, synced: 1, failed: 0 });
-    await accountCommands.syncScrapeBalances("background");
+    await accountCommands.syncChannelResources("background");
     expect(invokeMock).toHaveBeenCalledWith(
       "sync_scrape_balances",
       { triggerSource: "background" },

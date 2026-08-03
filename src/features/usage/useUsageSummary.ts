@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { usageCommands } from "../../domains/usage/commands";
-import type { UsagePeriod } from "../../domains/usage/types";
+import type { UsageSummaryFilter } from "../../domains/usage/types";
 import { queryKeys } from "../../shared/query-keys";
 
-export function useUsageSummary(period: UsagePeriod, autoRefresh: boolean) {
+export function useUsageSummary(filter: UsageSummaryFilter, autoRefresh: boolean) {
   const query = useQuery({
-    queryKey: queryKeys.usage.summary(period),
-    queryFn: () => usageCommands.summary(period),
+    queryKey: queryKeys.usage.summary(filter),
+    queryFn: () => usageCommands.summary(filter),
     networkMode: "always",
     refetchOnWindowFocus: false,
     retry: false,

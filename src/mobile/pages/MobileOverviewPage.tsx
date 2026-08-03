@@ -1,6 +1,6 @@
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { Button } from "@douyinfe/semi-ui-19";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useMobileDailyUsage, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
@@ -17,6 +17,7 @@ import {
   getMobileUsageRange,
   MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS,
   summarizeMobileUsage,
+  type MobileUsageHeatmapMetric,
   type MobileUsagePeriod,
 } from "../../features/usage/deviceUsagePresentation";
 import styles from "./MobilePage.module.css";
@@ -27,8 +28,11 @@ export function MobileOverviewPage() {
   const deviceId = devicePicker.deviceId;
   const [period, setPeriod] = useState<MobileUsagePeriod>("month");
   const [periodOffset, setPeriodOffset] = useState(0);
+  const [heatmapMetric, setHeatmapMetric] = useState<MobileUsageHeatmapMetric>("tokens");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
+  const [detailScrollRequest, setDetailScrollRequest] = useState(0);
+  const selectedDetailRef = useRef<HTMLElement | null>(null);
   const settings = useMobileS3Settings();
   const usage = useMobileDailyUsage(deviceId);
   const hourlyUsage = useMobileHourlyUsage(deviceId);
@@ -48,12 +52,12 @@ export function MobileOverviewPage() {
   );
   const summary = useMemo(() => summarizeMobileUsage(days), [days]);
   const heatmap = useMemo(
-    () => buildMobileUsageHeatmap(usage.data ?? [], period, periodOffset, now),
-    [now, period, periodOffset, usage.data],
+    () => buildMobileUsageHeatmap(usage.data ?? [], period, periodOffset, now, heatmapMetric),
+    [heatmapMetric, now, period, periodOffset, usage.data],
   );
   const hourlyHeatmap = useMemo(
-    () => buildMobileWeeklyHourlyHeatmap(hourlyUsage.data ?? [], periodOffset, now),
-    [hourlyUsage.data, now, periodOffset],
+    () => buildMobileWeeklyHourlyHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
+    [heatmapMetric, hourlyUsage.data, now, periodOffset],
   );
   const selectedDay = useMemo(
     () => days.find((day) => day.date === selectedDate)
@@ -89,6 +93,19 @@ export function MobileOverviewPage() {
     setSelectedDate(null);
     setSelectedHour(null);
   }, [deviceId]);
+
+  useEffect(() => {
+    if (detailScrollRequest === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      selectedDetailRef.current?.scrollIntoView({
+        behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "nearest",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [detailScrollRequest]);
+
+  const revealSelectedDetail = () => setDetailScrollRequest((request) => request + 1);
 
   return (
     <MobilePullToRefresh
@@ -174,7 +191,15 @@ export function MobileOverviewPage() {
       </div>
 
       <article className={styles.card}>
-        <div className={styles.cardHeader}><div><strong>{t(period === "week" ? "每 3 小时 Token 热力图" : "每日 Token 热力图")}</strong><span>{t(period === "week" ? "横轴为星期，纵轴为时段" : "点击日期查看当天汇总")}</span></div></div>
+        <div className={styles.cardHeader}>
+          <div>
+            <strong>{t(period === "week"
+              ? heatmapMetric === "tokens" ? "每 3 小时 Token 热力图" : "每 3 小时预估费用热力图"
+              : heatmapMetric === "tokens" ? "每日 Token 热力图" : "每日预估费用热力图")}</strong>
+            <span>{t(period === "week" ? "横轴为星期，纵轴为时段" : "点击日期查看当天汇总")}</span>
+          </div>
+          <HeatmapMetricSwitch value={heatmapMetric} onChange={setHeatmapMetric} t={t} />
+        </div>
         {period === "week" && hourlyUsage.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{hourlyUsage.error.message}</span></div> : null}
         {period === "month" && usage.isError ? <div className={styles.state}><strong>{t("用量数据加载失败")}</strong><span>{usage.error.message}</span></div> : null}
         {period === "week" && !hourlyUsage.isError ? (
@@ -194,7 +219,7 @@ export function MobileOverviewPage() {
                     {String(hourStart).padStart(2, "0")}–{String(hourStart + MOBILE_WEEKLY_HEATMAP_BUCKET_HOURS).padStart(2, "0")}
                   </span>,
                   ...bucketCells.map((cell) => {
-                    const title = `${cell.date} ${String(cell.hourOfDay).padStart(2, "0")}:00–${String(cell.hourEnd - 1).padStart(2, "0")}:59 · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
+                    const title = `${cell.date} ${String(cell.hourOfDay).padStart(2, "0")}:00–${String(cell.hourEnd - 1).padStart(2, "0")}:59 · ${formatHeatmapValues(heatmapMetric, cell.tokens, cell.estimatedCost, language, t)} · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
                     return (
                       <button
                         key={cell.hour}
@@ -204,7 +229,10 @@ export function MobileOverviewPage() {
                         aria-label={title}
                         aria-pressed={selectedHourlyCell?.hour === cell.hour}
                         title={title}
-                        onClick={() => setSelectedHour(cell.hour)}
+                        onClick={() => {
+                          setSelectedHour(cell.hour);
+                          revealSelectedDetail();
+                        }}
                       />
                     );
                   }),
@@ -226,7 +254,7 @@ export function MobileOverviewPage() {
             </div>
             <div className={styles.mobileHeatmap}>
               {heatmap.cells.map((cell, cellIndex) => {
-                const title = `${cell.date} · ${formatInteger(cell.tokens, language)} Tokens · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
+                const title = `${cell.date} · ${formatHeatmapValues(heatmapMetric, cell.tokens, cell.estimatedCost, language, t)} · ${t("{count} 次请求", { count: formatInteger(cell.requests, language) })}${formatNativeSplit(cell.tokens, cell.nativeTokens, language, t)}`;
                 return (
                   <button
                     key={cell.date}
@@ -236,7 +264,10 @@ export function MobileOverviewPage() {
                     aria-label={title}
                     aria-pressed={selectedDay?.date === cell.date}
                     title={title}
-                    onClick={() => setSelectedDate(cell.date)}
+                    onClick={() => {
+                      setSelectedDate(cell.date);
+                      revealSelectedDetail();
+                    }}
                   >
                     <span>{Number(cell.date.slice(-2))}</span>
                   </button>
@@ -250,9 +281,9 @@ export function MobileOverviewPage() {
       </article>
 
       {period === "week" && selectedHourlyCell ? (
-        <article className={styles.selectedDay}>
-          <div><strong>{selectedHourlyCell.date} {String(selectedHourlyCell.hourOfDay).padStart(2, "0")}:00–{String(selectedHourlyCell.hourEnd - 1).padStart(2, "0")}:59</strong><span>{formatCompactNumber(selectedHourlyCell.tokens, language)} Tokens</span></div>
-          <small>{t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })}</small>
+        <article ref={selectedDetailRef} className={styles.selectedDay}>
+          <div><strong>{selectedHourlyCell.date} {String(selectedHourlyCell.hourOfDay).padStart(2, "0")}:00–{String(selectedHourlyCell.hourEnd - 1).padStart(2, "0")}:59</strong><span>{formatHeatmapPrimary(heatmapMetric, selectedHourlyCell.tokens, selectedHourlyCell.estimatedCost, language)}</span></div>
+          <small>{t("{count} 次请求", { count: formatInteger(selectedHourlyCell.requests, language) })} · {formatHeatmapSecondary(heatmapMetric, selectedHourlyCell.tokens, selectedHourlyCell.estimatedCost, language, t)}</small>
           {selectedHourlyCell.nativeTokens > 0 ? (
             <small>{t("Flowlet {proxy} · 原生 {native}", {
               proxy: formatCompactNumber(selectedHourlyCell.tokens - selectedHourlyCell.nativeTokens, language),
@@ -263,9 +294,10 @@ export function MobileOverviewPage() {
       ) : null}
 
       {period === "month" && selectedDay ? (
-        <article className={styles.selectedDay}>
-          <div><strong>{selectedDay.date}</strong><span>{formatCompactNumber(selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0), language)} Tokens</span></div>
-          <small>{t("{count} 次请求", { count: formatInteger(selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0), language) })} · {t("输入 {input} · 输出 {output}", { input: formatCompactNumber(selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0), language), output: formatCompactNumber(selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0), language) })}</small>
+        <article ref={selectedDetailRef} className={styles.selectedDay}>
+          <div><strong>{selectedDay.date}</strong><span>{formatHeatmapPrimary(heatmapMetric, selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0), selectedDay.estimatedCost ?? 0, language)}</span></div>
+          <small>{t("{count} 次请求", { count: formatInteger(selectedDay.requestCount + (selectedDay.nativeEventCount ?? 0), language) })} · {formatHeatmapSecondary(heatmapMetric, selectedDay.knownTokens + (selectedDay.nativeTotalTokens ?? 0), selectedDay.estimatedCost ?? 0, language, t)}</small>
+          <small>{t("输入 {input} · 输出 {output}", { input: formatCompactNumber(selectedDay.inputTokens + (selectedDay.nativeInputTokens ?? 0), language), output: formatCompactNumber(selectedDay.outputTokens + (selectedDay.nativeOutputTokens ?? 0), language) })}</small>
           {(selectedDay.nativeTotalTokens ?? 0) > 0 ? (
             <small>{t("Flowlet {proxy} · 原生 {native}", {
               proxy: formatCompactNumber(selectedDay.knownTokens, language),
@@ -281,6 +313,38 @@ export function MobileOverviewPage() {
 
 function formatCacheHitRate(value: number | null) {
   return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+function HeatmapMetricSwitch({ value, onChange, t }: {
+  value: MobileUsageHeatmapMetric;
+  onChange: (value: MobileUsageHeatmapMetric) => void;
+  t: ReturnType<typeof useAppPreferences>["t"];
+}) {
+  return (
+    <div className={styles.metricSeg} aria-label={t("热力图指标")}>
+      {(["tokens", "cost"] as const).map((metric) => (
+        <button key={metric} type="button" aria-pressed={value === metric} onClick={() => onChange(metric)}>
+          {metric === "tokens" ? "Token" : t("预估费用")}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function formatHeatmapPrimary(metric: MobileUsageHeatmapMetric, tokens: number, estimatedCost: number, language: NumberLanguage) {
+  return metric === "tokens" ? `${formatCompactNumber(tokens, language)} Tokens` : formatCostCny(estimatedCost);
+}
+
+function formatHeatmapSecondary(metric: MobileUsageHeatmapMetric, tokens: number, estimatedCost: number, language: NumberLanguage, t: ReturnType<typeof useAppPreferences>["t"]) {
+  return metric === "tokens"
+    ? `${t("预估费用")} ${formatCostCny(estimatedCost)}`
+    : `Token ${formatCompactNumber(tokens, language)}`;
+}
+
+function formatHeatmapValues(metric: MobileUsageHeatmapMetric, tokens: number, estimatedCost: number, language: NumberLanguage, t: ReturnType<typeof useAppPreferences>["t"]) {
+  const tokenLabel = `${formatInteger(tokens, language)} Tokens`;
+  const costLabel = `${t("预估费用")} ${formatCostCny(estimatedCost)}`;
+  return metric === "tokens" ? `${tokenLabel} · ${costLabel}` : `${costLabel} · ${tokenLabel}`;
 }
 
 /** 热力图 tooltip 的来源拆分后缀：存在原生用量时追加「Flowlet X · 原生 Y」。 */

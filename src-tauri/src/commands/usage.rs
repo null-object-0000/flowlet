@@ -1,5 +1,6 @@
-use crate::AppState;
 use crate::core::config::{AgentNativeUsageSummaryRow, UsageSummaryRow, UsageTodaySummary};
+use crate::AppState;
+use chrono::DateTime;
 
 #[tauri::command]
 pub(crate) fn analyze_usage(state: tauri::State<'_, AppState>) -> Result<usize, String> {
@@ -71,13 +72,25 @@ pub(crate) fn repair_usage_costs(
 #[tauri::command]
 pub(crate) async fn usage_summary(
     state: tauri::State<'_, AppState>,
-    period: String,
+    start_at: Option<String>,
+    end_at: Option<String>,
+    group_by: String,
 ) -> Result<Vec<UsageSummaryRow>, String> {
-    if !matches!(
-        period.as_str(),
-        "all" | "year" | "quarter" | "month" | "week" | "today"
-    ) {
-        return Err(format!("不支持的用量统计周期：{period}"));
+    if !matches!(group_by.as_str(), "hour" | "day") {
+        return Err(format!("不支持的用量分组粒度：{group_by}"));
+    }
+    match (&start_at, &end_at) {
+        (None, None) => {}
+        (Some(start), Some(end)) => {
+            let start_value = DateTime::parse_from_rfc3339(start)
+                .map_err(|_| "用量统计开始时间格式无效".to_string())?;
+            let end_value = DateTime::parse_from_rfc3339(end)
+                .map_err(|_| "用量统计结束时间格式无效".to_string())?;
+            if start_value >= end_value {
+                return Err("用量统计开始时间必须早于结束时间".to_string());
+            }
+        }
+        _ => return Err("用量统计开始时间和结束时间必须同时提供".to_string()),
     }
     let storage = state.storage.clone();
     let current_device_id = state
@@ -86,10 +99,17 @@ pub(crate) async fn usage_summary(
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .device_id
         .clone();
-    tauri::async_runtime::spawn_blocking(move || storage.usage_summary(&period, &current_device_id))
-        .await
-        .map_err(|err| format!("读取用量统计任务失败：{err}"))?
-        .map_err(|err| err.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        storage.usage_summary_range(
+            start_at.as_deref(),
+            end_at.as_deref(),
+            &group_by,
+            &current_device_id,
+        )
+    })
+    .await
+    .map_err(|err| format!("读取用量统计任务失败：{err}"))?
+    .map_err(|err| err.to_string())
 }
 
 #[tauri::command]

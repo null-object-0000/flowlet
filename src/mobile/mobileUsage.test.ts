@@ -230,6 +230,55 @@ describe("mobile usage aggregation", () => {
     expect(levels).toEqual([1, 1, 2, 3, 4]);
   });
 
+  it("switches daily and hourly heat levels between token and estimated cost", () => {
+    const days: DailyUsageTotal[] = [
+      { ...day("2026-07-27", 1, 1_000), estimatedCost: 0.01 },
+      { ...day("2026-07-28", 1, 10), estimatedCost: 10 },
+    ];
+    const tokenDays = buildMobileUsageHeatmap(
+      days,
+      "week",
+      0,
+      new Date("2026-08-02T23:00:00"),
+      "tokens",
+    );
+    const costDays = buildMobileUsageHeatmap(
+      days,
+      "week",
+      0,
+      new Date("2026-08-02T23:00:00"),
+      "cost",
+    );
+
+    expect(tokenDays.cells.find((cell) => cell.date === "2026-07-27"))
+      .toMatchObject({ estimatedCost: 0.01, level: 4 });
+    expect(tokenDays.cells.find((cell) => cell.date === "2026-07-28")?.level).toBe(1);
+    expect(costDays.cells.find((cell) => cell.date === "2026-07-27")?.level).toBe(1);
+    expect(costDays.cells.find((cell) => cell.date === "2026-07-28")?.level).toBe(4);
+
+    const hours: HourlyUsageTotal[] = [
+      { hour: "2026-07-27T09:00:00", requestCount: 1, knownTokens: 1_000, estimatedCost: 0.01 },
+      { hour: "2026-07-28T09:00:00", requestCount: 1, knownTokens: 10, estimatedCost: 10 },
+    ];
+    const tokenHours = buildMobileWeeklyHourlyHeatmap(
+      hours,
+      0,
+      new Date("2026-08-02T23:00:00"),
+      "tokens",
+    );
+    const costHours = buildMobileWeeklyHourlyHeatmap(
+      hours,
+      0,
+      new Date("2026-08-02T23:00:00"),
+      "cost",
+    );
+
+    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-27T09:00:00")?.level).toBe(4);
+    expect(tokenHours.cells.find((cell) => cell.hour === "2026-07-28T09:00:00")?.level).toBe(1);
+    expect(costHours.cells.find((cell) => cell.hour === "2026-07-27T09:00:00")?.level).toBe(1);
+    expect(costHours.cells.find((cell) => cell.hour === "2026-07-28T09:00:00")?.level).toBe(4);
+  });
+
   it("builds a complete calendar grid for the selected month", () => {
     const heatmap = buildMobileUsageHeatmap(
       [day("2026-07-01", 1, 10), day("2026-07-29", 1, 20)],

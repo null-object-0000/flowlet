@@ -14,8 +14,17 @@ afterEach(() => invokeMock.mockReset());
 describe("usageCommands contract", () => {
   it("reads usage summaries through the typed Tauri boundary", async () => {
     invokeMock.mockResolvedValueOnce([]);
-    expect(await usageCommands.summary("month")).toEqual([]);
-    expect(invokeMock).toHaveBeenCalledWith("usage_summary", { period: "month" });
+    const filter = {
+      startAt: "2026-07-31T16:00:00.000Z",
+      endAt: "2026-08-31T16:00:00.000Z",
+      groupBy: "day" as const,
+    };
+    expect(await usageCommands.summary(filter)).toEqual([]);
+    expect(invokeMock).toHaveBeenCalledWith("usage_summary", {
+      startAt: filter.startAt,
+      endAt: filter.endAt,
+      groupBy: filter.groupBy,
+    });
   });
 
   it("reads Agent native usage through the typed Tauri boundary", async () => {

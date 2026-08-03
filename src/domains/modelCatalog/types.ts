@@ -123,7 +123,10 @@ export interface ResolvedPrice {
   inputUncached: number;
   /** 缓存命中价。仅在官方 input.cacheHit 存在时有值。 */
   inputCached: number | null;
+  /** 显式缓存创建（写入）价。仅在官方 input.explicitCacheCreation 存在时有值。 */
   inputCacheWrite: number | null;
+  /** 显式缓存命中价。仅在官方 input.explicitCacheHit 存在时有值。 */
+  inputCacheHit: number | null;
   output: number;
   sourceUrl: string;
   /** 来源抓取时间（来自 provider.sources 的 retrievedAt）。 */

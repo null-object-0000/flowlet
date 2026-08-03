@@ -16,6 +16,13 @@ type TokenBreakdown = {
   /** 可选：请求量（用量分析页维度聚合等场景展示）。 */
   requests?: number | null;
   unknownUsageCount?: number;
+  /** 可选：同一聚合口径下，Flowlet 代理与 Agent 原生数据的来源拆解。 */
+  sourceBreakdown?: {
+    flowletTotal: number | null;
+    nativeTotal: number | null;
+    flowletCachedInput: number | null;
+    nativeCachedInput: number | null;
+  };
 };
 
 type ContentProps = {
@@ -45,6 +52,16 @@ export function TokenBreakdownContent({ tokens, language, t, label }: ContentPro
       <span><small>{t("未缓存输入 Token")}</small><b><CompactNumber value={tokens.uncachedInput} language={language} /></b></span>
       <span><small>{t("输出 Token")}</small><b><CompactNumber value={tokens.output} language={language} /></b></span>
       {tokens.reasoning != null ? <span><small>{t("推理")}</small><b><CompactNumber value={tokens.reasoning} language={language} /></b></span> : null}
+      {tokens.sourceBreakdown ? (
+        <>
+          <hr className={styles.divider} />
+          <span className={styles.sectionTitle}>{t("来源拆分")}</span>
+          <span><small>{t("Flowlet Token")}</small><b><CompactNumber value={tokens.sourceBreakdown.flowletTotal} language={language} /></b></span>
+          <span><small>{t("Agent 原生 Token")}</small><b><CompactNumber value={tokens.sourceBreakdown.nativeTotal} language={language} /></b></span>
+          <span><small>{t("Flowlet 缓存输入")}</small><b><CompactNumber value={tokens.sourceBreakdown.flowletCachedInput} language={language} /></b></span>
+          <span><small>{t("Agent 原生缓存输入")}</small><b><CompactNumber value={tokens.sourceBreakdown.nativeCachedInput} language={language} /></b></span>
+        </>
+      ) : null}
       {(tokens.unknownUsageCount ?? 0) > 0 ? (
         <span className={styles.missing}><small>{t("无 Token 明细请求")}</small><b>{tokens.unknownUsageCount}</b></span>
       ) : null}

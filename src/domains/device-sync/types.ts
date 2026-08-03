@@ -33,7 +33,10 @@ export type HourlyUsageTotal = {
   estimatedCost?: number;
   nativeEventCount?: number;
   nativeInputTokens?: number;
+  nativeCachedInputTokens?: number;
+  nativeCacheWriteInputTokens?: number;
   nativeOutputTokens?: number;
+  nativeReasoningTokens?: number;
   nativeTotalTokens?: number;
 };
 

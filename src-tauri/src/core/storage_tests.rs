@@ -2389,12 +2389,15 @@ fn imported_device_usage_roundtrips_native_and_cost_fields() {
         estimated_cost: 0.25,
         native_event_count: 2,
         native_input_tokens: 50,
+        native_cached_input_tokens: 12,
+        native_cache_write_input_tokens: 8,
         native_output_tokens: 20,
+        native_reasoning_tokens: 3,
         native_total_tokens: 70,
     };
     storage
         .import_device_usage(
-            10,
+            11,
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "2026-07-01T00:00:00Z",
             "Office PC",

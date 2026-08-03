@@ -63,4 +63,35 @@ describe("TokenBreakdownTooltip", () => {
 
     expect(screen.getByText("请求量").parentElement).toHaveTextContent("827");
   });
+
+  it("renders Flowlet and Agent native source totals and cached input separately", () => {
+    render(
+      <TokenBreakdownTooltip
+        language="zh-CN"
+        t={(source) => source}
+        tokens={{
+          total: 1200,
+          input: 1000,
+          cachedInput: 450,
+          uncachedInput: 550,
+          output: 200,
+          cacheHitRate: 0.45,
+          sourceBreakdown: {
+            flowletTotal: 800,
+            nativeTotal: 400,
+            flowletCachedInput: 300,
+            nativeCachedInput: 150,
+          },
+        }}
+      >
+        <span>1,200</span>
+      </TokenBreakdownTooltip>,
+    );
+
+    expect(screen.getByText("来源拆分")).toBeInTheDocument();
+    expect(screen.getByText("Flowlet Token").parentElement).toHaveTextContent("800");
+    expect(screen.getByText("Agent 原生 Token").parentElement).toHaveTextContent("400");
+    expect(screen.getByText("Flowlet 缓存输入").parentElement).toHaveTextContent("300");
+    expect(screen.getByText("Agent 原生缓存输入").parentElement).toHaveTextContent("150");
+  });
 });

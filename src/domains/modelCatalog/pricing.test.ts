@@ -8,6 +8,7 @@ import {
   estimateCost,
   findModelByAlias,
   findModelInCatalog,
+  hasInputLengthTiers,
   isPromotionalDiscount,
   resolveCapabilities,
   resolveLimits,
@@ -16,6 +17,7 @@ import {
   selectOfficialPrice,
 } from "./pricing";
 import type { ModelsCnModel, ModelsCnPrice, ModelsCnProvider, ResolvedModel, ResolvedPrice } from "./types";
+import type { PricingStrategyRow } from "./pricing";
 
 function makeResolvedPrice(overrides: Partial<Parameters<typeof resolvePrice>[0]> = {}) {
   return resolvePrice({
@@ -115,6 +117,13 @@ describe("resolvePrice", () => {
     const p2 = resolvePrice({ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 1 }, output: 2, sourceUrl: "u" });
     expect(p2.inputCacheWrite).toBeNull();
   });
+
+  it("captures explicitCacheHit only when present", () => {
+    const p = resolvePrice({ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 1, explicitCacheHit: 0.5 }, output: 2, sourceUrl: "u" });
+    expect(p.inputCacheHit).toBe(0.5);
+    const p2 = resolvePrice({ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 1 }, output: 2, sourceUrl: "u" });
+    expect(p2.inputCacheHit).toBeNull();
+  });
 });
 
 describe("isPromotionalDiscount", () => {
@@ -158,6 +167,50 @@ describe("buildPricingStrategyRows", () => {
     const rows = buildPricingStrategyRows(prices, "china", "CNY");
 
     expect(rows.map((row) => row.inputTokenRange?.label)).toEqual(["<=256k", "256k-1m"]);
+  });
+});
+
+describe("hasInputLengthTiers", () => {
+  const range = (overrides: Partial<ModelsCnPrice["inputTokenRange"]> = {}) => ({
+    label: "输入<=256k",
+    maxInclusive: 256_000,
+    ...overrides,
+  });
+
+  it("is true when any row carries an input token range", () => {
+    const rows = [
+      {
+        key: "a",
+        inputTokenRange: null,
+        current: { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 12 }, output: 36, sourceUrl: "u" },
+        standard: null,
+      },
+      {
+        key: "b",
+        inputTokenRange: range(),
+        current: { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 18 }, output: 54, sourceUrl: "u" },
+        standard: null,
+      },
+    ] as unknown as PricingStrategyRow[];
+    expect(hasInputLengthTiers(rows)).toBe(true);
+  });
+
+  it("is false for a single flat row with only explicit-cache prices (no input token range)", () => {
+    // 对应 qwen3.8-max：models-cn 仅返回一条无分段的 standard 价格，
+    // 但带显式缓存价格，因此会走策略卡片分支——此时不应标记为「分段计价」。
+    const rows = [
+      {
+        key: "a",
+        inputTokenRange: null,
+        current: { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 12, cacheHit: 1.5, explicitCacheCreation: 15, explicitCacheHit: 1 }, output: 36, sourceUrl: "u" },
+        standard: null,
+      },
+    ] as unknown as PricingStrategyRow[];
+    expect(hasInputLengthTiers(rows)).toBe(false);
+  });
+
+  it("is false when rows is empty", () => {
+    expect(hasInputLengthTiers([])).toBe(false);
   });
 });
 
@@ -290,6 +343,7 @@ function makeAggPrice(overrides: Partial<ResolvedPrice> = {}): ResolvedPrice {
     inputUncached: 2,
     inputCached: 0.04,
     inputCacheWrite: null,
+    inputCacheHit: null,
     output: 8,
     sourceUrl: "https://example.com",
     retrievedAt: null,

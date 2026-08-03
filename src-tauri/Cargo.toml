@@ -57,6 +57,8 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+# 记住主窗口上次的尺寸/位置/最大化状态，跨启动恢复；隐藏到托盘与退出时保存。
+tauri-plugin-window-state = "2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-native-keyring-store = "1.0.0"

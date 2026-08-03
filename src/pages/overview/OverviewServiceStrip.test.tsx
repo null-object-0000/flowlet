@@ -25,4 +25,21 @@ describe("OverviewServiceStrip", () => {
     expect(screen.getByText("客户端 Token")).toBeInTheDocument();
     expect(screen.getByText("••••••••••••••••")).toBeInTheDocument();
   });
+
+  it("does not expose a redundant Responses protocol option in the overview", () => {
+    render(
+      <OverviewServiceStrip
+        status={{ running: true, bind_addr: "127.0.0.1:18640", started_at: "2026-07-29T00:00:00Z" }}
+        phase="running"
+        bindConfig={{ host: "127.0.0.1", port: 18640, allow_lan: false, default_client_token: "client-token" }}
+        baseUrl="http://127.0.0.1:18640"
+        todayUsage={null}
+        onOpenDetails={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "OpenAI" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Anthropic" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Responses" })).not.toBeInTheDocument();
+  });
 });

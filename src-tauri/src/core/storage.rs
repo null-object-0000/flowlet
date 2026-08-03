@@ -948,7 +948,10 @@ impl Storage {
                 unknown_count         INTEGER NOT NULL DEFAULT 0,
                 estimated_cost        REAL NOT NULL DEFAULT 0,
                 native_input_tokens   INTEGER NOT NULL DEFAULT 0,
+                native_cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+                native_cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
                 native_output_tokens  INTEGER NOT NULL DEFAULT 0,
+                native_reasoning_tokens INTEGER NOT NULL DEFAULT 0,
                 snapshot_generated_at TEXT NOT NULL,
                 imported_at           TEXT NOT NULL,
                 PRIMARY KEY (device_id, usage_hour),
@@ -1202,7 +1205,25 @@ impl Storage {
         add_column_if_missing(
             &connection,
             "device_hourly_usage",
+            "native_cached_input_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "native_cache_write_input_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
             "native_output_tokens",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            &connection,
+            "device_hourly_usage",
+            "native_reasoning_tokens",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
         add_column_if_missing(

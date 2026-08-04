@@ -83,8 +83,8 @@ export function useProjectTaskRunnerActions() {
     onSuccess: refreshAll,
   });
   const setTaskStatus = useMutation({
-    mutationFn: ({ taskId, status }: { taskId: string; status: ProjectTaskMutableStatus }) =>
-      projectCommands.setTaskStatus(taskId, status),
+    mutationFn: ({ taskId, status, reason }: { taskId: string; status: ProjectTaskMutableStatus; reason?: string }) =>
+      projectCommands.setTaskStatus(taskId, status, reason),
     onSuccess: refreshAll,
   });
   return { startTask, setTaskStatus };
@@ -137,6 +137,7 @@ export function newProjectTask(projectId: string, title: string): ProjectTask {
     agentProfile: "Claude Code",
     priority: "p2",
     lastJobId: null,
+    rejectionReason: null,
     createdAt: now,
     updatedAt: now,
   };

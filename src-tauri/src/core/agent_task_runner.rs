@@ -156,8 +156,15 @@ pub(crate) async fn run_project_task(
     }
 
     // 7. 组装 prompt 并启动 Claude Code。
-    let prompt = build_task_prompt(&task);
-    let result = execute_agent(&storage, &app_handle, &executable, &task, &project_id, &job_id, &prompt).await;
+    //    退回重跑会复用上次会话（--resume）+ 注入退回原因，让 Agent 带着上下文修正。
+    let resume_session = resolve_resume_session(&storage, &task)?;
+    let rejection_reason = task.rejection_reason.as_deref();
+    let prompt = build_task_prompt(&task, rejection_reason);
+    // 原因已注入 prompt，清空避免下次执行重复注入（留档靠 job event）。
+    if rejection_reason.is_some_and(|reason| !reason.trim().is_empty()) {
+        let _ = storage.set_task_rejection_reason(&task.id, None);
+    }
+    let result = execute_agent(&storage, &app_handle, &executable, &task, &project_id, &job_id, &prompt, resume_session.as_deref()).await;
 
     match result {
         Ok(outcome) => {
@@ -181,9 +188,20 @@ pub(crate) async fn run_project_task(
 }
 
 /// 组装发给 Claude Code 的任务 prompt。
-fn build_task_prompt(task: &ProjectTask) -> String {
+/// 若带了退回原因，则作为首段修正指令注入，让 Agent 先修正再完成原任务。
+fn build_task_prompt(task: &ProjectTask, rejection_reason: Option<&str>) -> String {
     let mut prompt = String::new();
     prompt.push_str("你是由 Flowlet 调度执行的编程 Agent，请在当前项目目录内完成以下任务。\n\n");
+    if let Some(reason) = rejection_reason {
+        let trimmed = reason.trim();
+        if !trimmed.is_empty() {
+            prompt.push_str(&format!(
+                "注意：本任务上一轮执行被退回，退回原因：{}\n",
+                truncate(trimmed, 500)
+            ));
+            prompt.push_str("请先针对该退回原因修正上一轮的结果，再完成原任务。\n\n");
+        }
+    }
     prompt.push_str(&format!("任务标题：{}\n", task.title));
     if !task.description.trim().is_empty() {
         prompt.push_str(&format!("任务描述：{}\n", task.description.trim()));
@@ -194,6 +212,33 @@ fn build_task_prompt(task: &ProjectTask) -> String {
     }
     prompt.push_str("\n完成后，请简要总结你做了什么、修改了哪些文件以及最终结论。");
     prompt
+}
+
+/// 从任务最近一次执行的 job 摘要里解析 session_id，用于退回重跑时 --resume。
+/// 首次执行或摘要里没有 session 时返回 None（全新会话）。
+fn resolve_resume_session(
+    storage: &Storage,
+    task: &ProjectTask,
+) -> Result<Option<String>, String> {
+    let Some(last_job_id) = task.last_job_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(detail) = storage
+        .get_background_job_detail(last_job_id)
+        .map_err(|error| format!("读取上次执行记录失败：{error}"))?
+    else {
+        return Ok(None);
+    };
+    let Some(summary) = detail.job.summary_json else {
+        return Ok(None);
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&summary) else {
+        return Ok(None);
+    };
+    Ok(value
+        .get("sessionId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string))
 }
 
 /// 解析 Claude Code 可执行路径。未安装返回明确错误。
@@ -219,6 +264,7 @@ async fn execute_agent(
     project_id: &str,
     job_id: &str,
     prompt: &str,
+    resume_session: Option<&str>,
 ) -> Result<ExecutionOutcome, String> {
     let project = storage
         .get_project(project_id)
@@ -233,7 +279,12 @@ async fn execute_agent(
         .arg("--output-format")
         .arg("stream-json")
         .arg("--verbose")
-        .arg("--dangerously-skip-permissions")
+        .arg("--dangerously-skip-permissions");
+    // 退回重跑复用上次会话：Agent 带着之前的上下文 + 本轮注入的退回原因继续修正。
+    if let Some(session) = resume_session {
+        command.arg("--resume").arg(session);
+    }
+    command
         .current_dir(&project_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

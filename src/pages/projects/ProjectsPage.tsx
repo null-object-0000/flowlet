@@ -154,6 +154,8 @@ function TaskBoard({ project, tasks, runnerState }: { project: Project; tasks: R
   const runnerActions = useProjectTaskRunnerActions();
   const [editing, setEditing] = useState<ProjectTask | "new" | null>(null);
   const [viewing, setViewing] = useState<ProjectTask | null>(null);
+  const [rejecting, setRejecting] = useState<ProjectTask | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
   const [draft, setDraft] = useState({ title: "", description: "", taskType: "code" as ProjectTaskType, agentProfile: "Claude Code", priority: "p2" as ProjectTaskPriority });
   const [runningLogs, setRunningLogs] = useState<Record<string, string>>({});
   const grouped = useMemo(() => Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, tasks.data?.filter((task) => column.statuses.includes(task.status)) ?? []])) as Record<string, ProjectTask[]>, [tasks.data]);
@@ -169,12 +171,22 @@ function TaskBoard({ project, tasks, runnerState }: { project: Project; tasks: R
     if (!editing || editing === "new") return;
     try { await actions.deleteTask.mutateAsync(editing.id); Toast.success(t("任务已删除")); setEditing(null); } catch (error) { Toast.error(errorMessage(error)); }
   };
-  // 待审核推进：批准 → done，退回 → submitted 重新排队（卡片 footer 快捷操作）。
-  const reviewTask = async (task: ProjectTask, status: ProjectTaskMutableStatus) => {
+  // 审核推进：批准 → done（直接）；退回 → 弹原因 Modal → submitted 重新排队。
+  const approveTask = async (task: ProjectTask) => {
     try {
-      await runnerActions.setTaskStatus.mutateAsync({ taskId: task.id, status });
+      await runnerActions.setTaskStatus.mutateAsync({ taskId: task.id, status: "done" });
       setViewing(null);
-      Toast.success(status === "done" ? t("任务已通过审核") : t("任务已退回重新排队"));
+      Toast.success(t("任务已通过审核"));
+    } catch (error) { Toast.error(errorMessage(error)); }
+  };
+  const openReject = (task: ProjectTask) => { setRejecting(task); setRejectReason(""); };
+  const rejectTask = async () => {
+    if (!rejecting) return;
+    try {
+      await runnerActions.setTaskStatus.mutateAsync({ taskId: rejecting.id, status: "submitted", reason: rejectReason.trim() });
+      setRejecting(null);
+      setViewing(null);
+      Toast.success(t("任务已退回重新排队"));
     } catch (error) { Toast.error(errorMessage(error)); }
   };
   const cancelRunning = async (jobId: string) => {
@@ -202,7 +214,7 @@ function TaskBoard({ project, tasks, runnerState }: { project: Project; tasks: R
         return <button className={`${styles.taskCardAction} ${styles.taskCardCancel}`} onClick={() => void cancelRunning(runnerState.current!.jobId)}>{t("取消执行")}</button>;
       }
       case "review":
-        return <div className={styles.taskReviewActions}><Button size="small" onClick={() => void reviewTask(task, "submitted")}>{t("退回")}</Button><Button size="small" type="primary" theme="solid" onClick={() => void reviewTask(task, "done")}>{t("批准")}</Button></div>;
+        return <div className={styles.taskReviewActions}><Button size="small" onClick={() => openReject(task)}>{t("退回")}</Button><Button size="small" type="primary" theme="solid" onClick={() => void approveTask(task)}>{t("批准")}</Button></div>;
       default:
         return null;
     }
@@ -218,7 +230,10 @@ function TaskBoard({ project, tasks, runnerState }: { project: Project; tasks: R
     <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建任务") : t("编辑任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span>{editing !== "new" && editing ? <Popconfirm className={styles.taskDeletePopconfirm} title={t("删除任务“{name}”？", { name: editing.title })} okText={t("删除")} cancelText={t("取消")} okType="danger" onConfirm={() => void removeEditingTask()}><Button type="danger" theme="borderless" icon={<IconDelete />}>{t("删除")}</Button></Popconfirm> : null}</span><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button type="primary" theme="solid" loading={actions.saveTask.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
       <div className={styles.form}><div className={styles.formRow}><label><span>{t("优先级")}</span><Select value={draft.priority} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} renderSelectedItem={(optionNode: { value?: string | number }) => String(optionNode.value ?? "").toUpperCase()} optionList={PRIORITIES.map((item) => ({ value: item.value, label: `${t(item.label)} · ${t(item.description)}` }))} onChange={(value) => setDraft((current) => ({ ...current, priority: String(value) as ProjectTaskPriority }))} /></label><label><span>{t("任务标题")}</span><Input autoFocus value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /></label></div><label><span>{t("任务描述（可选）")}</span><TextArea value={draft.description} autosize={{ minRows: 3, maxRows: 6 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div></div>
     </SideSheet>
-    <TaskReadonlySideSheet task={viewing} onClose={() => setViewing(null)} />
+    <TaskReadonlySideSheet task={viewing} onClose={() => setViewing(null)} onApprove={(task) => void approveTask(task)} onReject={(task) => openReject(task)} />
+    <Modal title={t("退回任务")} visible={rejecting != null} zIndex={APP_OVERLAY_Z_INDEX.modal} okText={t("退回")} cancelText={t("取消")} okType="danger" onCancel={() => setRejecting(null)} onOk={() => void rejectTask()} okButtonProps={{ loading: runnerActions.setTaskStatus.isPending, disabled: !rejectReason.trim() }}>
+      <div className={styles.form}><label><span>{t("退回原因（必填）")}</span><TextArea value={rejectReason} autosize={{ minRows: 3, maxRows: 6 }} placeholder={t("说明哪里不符合预期，Agent 将据此修正后重新执行")} onChange={(value) => setRejectReason(value)} /></label></div>
+    </Modal>
   </div>;
 }
 
@@ -247,29 +262,19 @@ function statusTagClass(status: ProjectTaskStatus) {
 }
 
 /** 提交后任务的只读详情抽屉：顶部任务信息 + Agent 执行情况与输出。 */
-function TaskReadonlySideSheet({ task, onClose }: { task: ProjectTask | null; onClose: () => void }) {
+function TaskReadonlySideSheet({ task, onClose, onApprove, onReject }: { task: ProjectTask | null; onClose: () => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void }) {
   const { language, t } = useAppPreferences();
-  const runnerActions = useProjectTaskRunnerActions();
   const jobId = task?.lastJobId ?? null;
   const detail = useBackgroundTaskDetail(jobId);
-
-  const reviewTask = async (status: ProjectTaskMutableStatus) => {
-    if (!task) return;
-    try {
-      await runnerActions.setTaskStatus.mutateAsync({ taskId: task.id, status });
-      Toast.success(status === "done" ? t("任务已通过审核") : t("任务已退回重新排队"));
-      onClose();
-    } catch (error) { Toast.error(errorMessage(error)); }
-  };
 
   const isReview = task?.status === "review";
   const job = detail.data?.job;
   const footer = (
     <div className={styles.taskSheetFooter}><span></span><span className={styles.taskSheetFooterActions}>
-      {isReview ? (
+      {isReview && task ? (
         <>
-          <Button loading={runnerActions.setTaskStatus.isPending} onClick={() => void reviewTask("submitted")}>{t("退回")}</Button>
-          <Button type="primary" theme="solid" loading={runnerActions.setTaskStatus.isPending} onClick={() => void reviewTask("done")}>{t("批准")}</Button>
+          <Button onClick={() => onReject(task)}>{t("退回")}</Button>
+          <Button type="primary" theme="solid" onClick={() => onApprove(task)}>{t("批准")}</Button>
         </>
       ) : null}
       <Button onClick={onClose}>{t("关闭")}</Button>

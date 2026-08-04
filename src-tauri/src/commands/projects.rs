@@ -98,6 +98,17 @@ pub(crate) fn save_project_task(
     {
         return Err("项目不存在".to_string());
     }
+    // 状态机：已存在的任务只有草稿可编辑。执行中 / 待审核 / 已完成都是只读，
+    // 状态由执行器或审核通道管理，前端编辑通道一律拦截（防止把运行中任务改掉）。
+    if let Some(status) = state
+        .storage
+        .get_task_status(&task.id)
+        .map_err(|error| error.to_string())?
+    {
+        if status != "draft" {
+            return Err("只有草稿状态的任务可以编辑".to_string());
+        }
+    }
     state
         .storage
         .save_project_task(&ProjectTask {
@@ -110,6 +121,7 @@ pub(crate) fn save_project_task(
             agent_profile: task.agent_profile.trim().to_string(),
             priority: task.priority,
             last_job_id: task.last_job_id,
+            rejection_reason: task.rejection_reason,
             created_at: task.created_at,
             updated_at: task.updated_at,
         })
@@ -160,13 +172,32 @@ pub(crate) fn set_project_task_status(
     state: tauri::State<'_, AppState>,
     task_id: String,
     status: String,
+    reason: Option<String>,
 ) -> Result<(), String> {
-    if !matches!(status.as_str(), "submitted" | "in_progress" | "review" | "done") {
-        return Err("任务状态无效".to_string());
+    // 状态机：前端审核通道只允许「待审核 → 批准(done) / 退回(submitted)」。
+    // 其余迁移（含把 in_progress 撤销）由执行器内部管理，这里一律拦截。
+    let current = state
+        .storage
+        .get_task_status(&task_id)
+        .map_err(|error| error.to_string())?;
+    let allowed = matches!(
+        (current.as_deref(), status.as_str()),
+        (Some("review"), "done") | (Some("review"), "submitted")
+    );
+    if !allowed {
+        return Err("当前任务状态不允许此操作".to_string());
     }
     state
         .storage
         .set_task_status(&task_id, &status)
         .map_err(|error| error.to_string())?;
+    // 退回时记录原因：供下次执行读取注入 prompt，也让审核留档。
+    if status == "submitted" {
+        let trimmed = reason.as_deref().map(str::trim).unwrap_or("").to_string();
+        state
+            .storage
+            .set_task_rejection_reason(&task_id, Some(&trimmed))
+            .map_err(|error| error.to_string())?;
+    }
     Ok(())
 }

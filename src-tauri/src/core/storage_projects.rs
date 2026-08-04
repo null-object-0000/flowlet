@@ -1,5 +1,5 @@
 use super::{Storage, StorageError};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -25,6 +25,8 @@ pub struct ProjectTask {
     pub priority: String,
     /// 最近一次执行的 background_job id（用于只读详情展示 Agent 执行情况）。
     pub last_job_id: Option<String>,
+    /// 最近一次被退回的原因。执行开始时读取注入 prompt 后清空（不重复注入）。
+    pub rejection_reason: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -110,7 +112,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, created_at, updated_at
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at
              FROM project_tasks WHERE project_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
         )?;
@@ -129,7 +131,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, created_at, updated_at
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at
              FROM project_tasks WHERE id = ?1 AND project_id = ?2",
         )?;
         let mut rows = statement.query(params![task_id, project_id])?;
@@ -137,6 +139,22 @@ impl Storage {
             return Ok(None);
         };
         Ok(Some(map_project_task_row(row)?))
+    }
+
+    /// 读取单个任务的当前状态（仅任务 id，供状态迁移校验）。
+    pub fn get_task_status(&self, task_id: &str) -> Result<Option<String>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection
+            .query_row(
+                "SELECT status FROM project_tasks WHERE id = ?1",
+                [task_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StorageError::from)
     }
 
     /// 单字段更新任务状态（只改 status + updated_at，不整表覆盖）。
@@ -160,7 +178,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, created_at, updated_at
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at
              FROM project_tasks WHERE status = 'submitted'
              ORDER BY CASE priority WHEN 'p0' THEN 0 WHEN 'p1' THEN 1 WHEN 'p2' THEN 2 ELSE 3 END,
                       created_at ASC",
@@ -175,10 +193,11 @@ impl Storage {
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        // last_job_id 只在任务执行时由 set_task_last_job 写入，编辑保存不覆盖它。
+        // last_job_id / rejection_reason 只在任务执行或退回时由专用方法写入，
+        // 编辑保存不覆盖它们。
         connection.execute(
-            "INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
                title = excluded.title,
                description = excluded.description,
@@ -188,7 +207,7 @@ impl Storage {
                priority = excluded.priority,
                updated_at = excluded.updated_at
              WHERE project_tasks.project_id = excluded.project_id",
-            params![task.id, task.project_id, task.title, task.description, task.status, task.task_type, task.agent_profile, task.priority, task.last_job_id, task.created_at, task.updated_at],
+            params![task.id, task.project_id, task.title, task.description, task.status, task.task_type, task.agent_profile, task.priority, task.last_job_id, task.rejection_reason, task.created_at, task.updated_at],
         )?;
         Ok(())
     }
@@ -202,6 +221,23 @@ impl Storage {
         Ok(connection.execute(
             "UPDATE project_tasks SET last_job_id = ?2 WHERE id = ?1",
             params![task_id, job_id],
+        )? > 0)
+    }
+
+    /// 写入 / 清空任务的退回原因。执行开始时读取并注入 prompt 后调用 None 清空，
+    /// 避免下次执行重复注入同一个原因。
+    pub fn set_task_rejection_reason(
+        &self,
+        task_id: &str,
+        reason: Option<&str>,
+    ) -> Result<bool, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        Ok(connection.execute(
+            "UPDATE project_tasks SET rejection_reason = ?2 WHERE id = ?1",
+            params![task_id, reason],
         )? > 0)
     }
 
@@ -232,8 +268,9 @@ fn map_project_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectTask
         agent_profile: row.get(6)?,
         priority: row.get(7)?,
         last_job_id: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        rejection_reason: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 
@@ -265,6 +302,7 @@ mod tests {
                 agent_profile: "Claude Code".into(),
                 priority: "p1".into(),
                 last_job_id: None,
+                rejection_reason: None,
                 created_at: project.created_at.clone(),
                 updated_at: project.updated_at.clone(),
             })
@@ -285,6 +323,7 @@ mod tests {
             agent_profile: "Claude Code".into(),
             priority: priority.into(),
             last_job_id: None,
+            rejection_reason: None,
             created_at: created_at.into(),
             updated_at: created_at.into(),
         }

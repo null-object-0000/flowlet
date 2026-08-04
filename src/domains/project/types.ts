@@ -26,6 +26,8 @@ export type ProjectTask = {
   priority: ProjectTaskPriority;
   /** 最近一次执行的 background_job id（只读详情展示 Agent 执行情况用）。 */
   lastJobId: string | null;
+  /** 最近一次被退回的原因。执行时注入给 Agent 后清空（不重复注入）。 */
+  rejectionReason: string | null;
   createdAt: string;
   updatedAt: string;
 };

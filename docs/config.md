@@ -109,8 +109,8 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "capture_res_body": true,          // 记录响应 Body
   "max_body_bytes": 1048576,         // 单条 Body 最大字节数（1 MB）
   "redact_sensitive_headers": false, // 是否脱敏敏感 Header
-  "body_retention_days": 3,          // Body 保留天数（-1=永久, 0=不保留, N=保留 N 天后清除）
-  "body_max_size_mb": 512,           // Body 数据体积上限（MB），超出后按比例清理最老的记录（0=不限制）
+  "body_retention_days": 7,          // Body 保留天数（-1=永久, 0=不保留, N=保留 N 天后清除）
+  "body_max_size_mb": 1024,          // Body 数据体积上限（MB），超出后按比例清理最老的记录（0=不限制）
   "body_prune_ratio": 0.1            // 超出体积上限时，清理最老记录的比例（0.0~1.0）
 }
 ```
@@ -125,8 +125,8 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `capture_res_body` | `bool` | `true` | 是否记录响应 Body |
 | `max_body_bytes` | `number` | `1048576` | 单条 Body 截断上限（1 MB） |
 | `redact_sensitive_headers` | `bool` | `false` | 关闭时原样保存、展示和复制；开启后，`authorization` / `x-api-key` / `cookie` / `set-cookie` / `x-auth-token` 在落库前被替换为 `[redacted]` |
-| `body_retention_days` | `number` | `3` | Body 保留天数：`-1` = 永久保留；`0` = 不保留（落库后立即清除 Body）；`N` = 保留 N 天后自动清除 |
-| `body_max_size_mb` | `number` | `512` | Body 数据体积上限（MB）。超出后按 `body_prune_ratio` 比例清理至少一小时前、已有完整 Token 统计的记录。`0` = 不限制（仅受 `body_retention_days` 控制） |
+| `body_retention_days` | `number` | `7` | Body 保留天数：`-1` = 永久保留；`0` = 不保留（落库后立即清除 Body）；`N` = 保留 N 天后自动清除 |
+| `body_max_size_mb` | `number` | `1024` | Body 数据体积上限（MB）。超出后按 `body_prune_ratio` 比例清理至少一小时前、已有完整 Token 统计的记录。`0` = 不限制（仅受 `body_retention_days` 控制） |
 | `body_prune_ratio` | `number` | `0.1` | 超出 `body_max_size_mb` 时，单次清理最老记录的比例（`0.0`~`1.0`）。例如 `0.1` = 清理最老的 10%（按 `created_at` 升序），将体积压回阈值以下 |
 
 **行为**：

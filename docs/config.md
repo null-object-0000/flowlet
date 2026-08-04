@@ -457,3 +457,61 @@ LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、�
 | 前端读写 command | `src-tauri/src/commands.rs`（`read_config`、`write_config`） |
 | 便携版打包 | `scripts/build-portable.mjs` |
 | 前端渠道类型与默认开放模型 | `src/domains/channel/types.ts` |
+
+
+---
+
+## 10. `codex-models.json` — Codex 模型目录
+
+`codex-models.json` 是 Flowlet 的 **Codex 模型目录数据源**，位于项目根目录（与 `config.json` 同级）。
+
+Codex 使用自定义模型（`flowlet-pro` / `flowlet-flash`）时，必须通过 `~/.codex/config.toml` 的
+`model_catalog_json` 指向一个声明模型元数据（上下文窗口、推理档位）的 JSON 文件，否则 Codex
+无法正确识别这些模型。官方参照：DeepSeek 与千问 AI 平台的 Codex 接入文档均要求该文件。
+
+### 文件内容
+
+```json
+{
+  "models": [
+    {
+      "slug": "flowlet-pro",
+      "display_name": "Flowlet Pro",
+      "description": "Flowlet aggregated coding model routed to available accounts.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        { "effort": "low", "description": "Fast responses with lighter reasoning" },
+        { "effort": "high", "description": "Extra high reasoning depth for complex problems" },
+        { "effort": "max", "description": "Maximum reasoning depth for the hardest problems" }
+      ],
+      "context_window": 1048576,
+      "supported_in_api": true
+    }
+  ]
+}
+```
+
+`context_window` 与 `supported_reasoning_levels` 是 Flowlet 对外声明值：实际可用上下文与推理档位
+取决于当前路由模型，仅当路由模型支持时才完整生效。调整后需**重新执行 Codex 一键接入**并重启
+Codex（`model_catalog_json` 仅在 Codex 启动时读取一次）。
+
+### 加载方式
+
+- **编译时内置**：`src-tauri/src/core/codex_model_catalog.rs` 通过 `include_str!` 把仓库根目录
+  `codex-models.json` 编译进二进制；`apply_codex` 写入 `~/.codex/config.toml` 的
+  `model_catalog_json = "~/.codex/model-catalog.flowlet.json"`，并把本文件内容原样写入
+  `~/.codex/model-catalog.flowlet.json`。
+- **命名空间**：生成文件名带 `flowlet` 前缀，避免覆盖 DeepSeek（`~/.codex/models.json`）或
+  千问（`~/.codex/model-catalog.local.json`）等其他厂商的模型目录文件。
+- **备份与恢复**：写入前会备份 `~/.codex/model-catalog.flowlet.json` 的原有内容与
+  `model_catalog_json` 原值；恢复接入前配置时一并还原。
+
+### 默认值同步（重要）
+
+| 位置 | 作用 |
+|------|------|
+| `codex-models.json`（仓库根目录） | 唯一数据源：Rust `include_str!` 内置 + 写入 `~/.codex/model-catalog.flowlet.json` |
+| `src/features/agent-access/AgentAccessSideSheet.tsx` 中的 `CODEX_MODEL_CATALOG_JSON` | 前端手动配置片段的展示与复制 |
+
+修改 `codex-models.json` 时，务必同步更新 `CODEX_MODEL_CATALOG_JSON`，否则手动片段与一键写入
+内容不一致。

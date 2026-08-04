@@ -9,6 +9,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::agent_environment::display_path;
 use super::codex_account::codex_home;
+use super::codex_model_catalog;
 
 const BACKUP_VERSION: u32 = 1;
 const PRIMARY_MODEL: &str = "flowlet-pro";
@@ -35,6 +36,10 @@ const CODEX_WIRE_API: &str = "responses";
 /// Codex 系（CLI / ChatGPT Desktop / VS Code 插件）读取同一份 auth.json 中的
 /// OPENAI_API_KEY（配合 provider 的 requires_openai_auth）。
 const CODEX_AUTH_KEY: &str = "OPENAI_API_KEY";
+/// Codex `model_catalog_json` 指向的模型目录引用值（`~` 由 Codex 展开，与 DeepSeek/千问文档一致）。
+const CODEX_MODEL_CATALOG_REF: &str = "~/.codex/model-catalog.flowlet.json";
+/// `~/.codex` 下由 Flowlet 生成的模型目录文件名（带 Flowlet 命名空间，避免覆盖 DeepSeek/千问的目录文件）。
+const CODEX_MODEL_CATALOG_FILE: &str = "model-catalog.flowlet.json";
 
 const MANAGED_FIELDS: &[&str] = &[
     "ANTHROPIC_BASE_URL",
@@ -93,6 +98,12 @@ pub struct AgentGlobalConfigReport {
     pub primary_model: Option<String>,
     pub fast_model: Option<String>,
     pub subagent_model: Option<String>,
+    /// 仅 Codex：config.toml 中 `model_catalog_json` 的当前值。
+    #[serde(default)]
+    pub model_catalog_path: Option<String>,
+    /// 仅 Codex：`model_catalog_json` 指向 Flowlet 生成的模型目录且文件在位。
+    #[serde(default)]
+    pub model_catalog_configured: bool,
     /// Claude Code 主模型是否写入 `[1m]` 长上下文后缀；其他 Agent 恒为 false。
     #[serde(default)]
     pub long_context: bool,
@@ -220,7 +231,12 @@ pub fn inspect_agent_global_config(
             &pi_extension_path()?,
             expected_base_url,
         ),
-        "codex" => inspect_codex(&codex_config_path(), &codex_auth_path(), expected_base_url),
+        "codex" => inspect_codex(
+            &codex_config_path(),
+            &codex_auth_path(),
+            &codex_models_path(),
+            expected_base_url,
+        ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
     }
 }
@@ -263,6 +279,7 @@ pub fn apply_agent_global_config(
         "codex" => apply_codex(
             &codex_config_path(),
             &codex_auth_path(),
+            &codex_models_path(),
             expected_base_url,
             client_token,
         ),
@@ -292,7 +309,12 @@ pub fn restore_agent_global_config(
             &pi_extension_path()?,
             expected_base_url,
         ),
-        "codex" => restore_codex(&codex_config_path(), &codex_auth_path(), expected_base_url),
+        "codex" => restore_codex(
+            &codex_config_path(),
+            &codex_auth_path(),
+            &codex_models_path(),
+            expected_base_url,
+        ),
         _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
     }
 }
@@ -539,6 +561,8 @@ fn inspect_claude_code(
             primary_model: None,
             fast_model: None,
             subagent_model: None,
+            model_catalog_path: None,
+            model_catalog_configured: false,
             long_context: false,
             backup_available,
             external_environment_overrides,
@@ -563,6 +587,8 @@ fn inspect_claude_code(
                 primary_model: None,
                 fast_model: None,
                 subagent_model: None,
+                model_catalog_path: None,
+                model_catalog_configured: false,
                 long_context: false,
                 backup_available,
                 external_environment_overrides,
@@ -682,6 +708,8 @@ fn report_from_settings(
         primary_model,
         fast_model,
         subagent_model,
+        model_catalog_path: None,
+        model_catalog_configured: false,
         long_context,
         backup_available,
         external_environment_overrides,
@@ -858,6 +886,8 @@ fn inspect_opencode(
             primary_model: None,
             fast_model: None,
             subagent_model: None,
+            model_catalog_path: None,
+            model_catalog_configured: false,
             long_context: false,
             backup_available,
             external_environment_overrides,
@@ -882,6 +912,8 @@ fn inspect_opencode(
                 primary_model: None,
                 fast_model: None,
                 subagent_model: None,
+                model_catalog_path: None,
+                model_catalog_configured: false,
                 long_context: false,
                 backup_available,
                 external_environment_overrides,
@@ -906,6 +938,8 @@ fn inspect_opencode(
                 primary_model: None,
                 fast_model: None,
                 subagent_model: None,
+                model_catalog_path: None,
+                model_catalog_configured: false,
                 long_context: false,
                 backup_available,
                 external_environment_overrides,
@@ -988,6 +1022,8 @@ fn inspect_opencode(
         primary_model,
         fast_model,
         subagent_model: None,
+        model_catalog_path: None,
+        model_catalog_configured: false,
         long_context: false,
         backup_available,
         external_environment_overrides,
@@ -1310,6 +1346,8 @@ fn inspect_pi(
             primary_model,
             fast_model: None,
             subagent_model: None,
+            model_catalog_path: None,
+            model_catalog_configured: false,
             long_context: false,
             backup_available,
             external_environment_overrides: Vec::new(),
@@ -1696,6 +1734,7 @@ const CODEX_MANAGED_TOP_LEVEL: &[&str] = &[
     "model_provider",
     "disable_response_storage",
     "preferred_auth_method",
+    "model_catalog_json",
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1715,6 +1754,15 @@ struct CodexConfigBackup {
     flowlet_provider: BackedUpValue,
     /// 写入前 auth.json 中 OPENAI_API_KEY 的值。
     auth_key: BackedUpValue,
+    /// 模型目录文件路径；旧版本备份缺失该字段时默认空串（恢复时跳过模型目录还原）。
+    #[serde(default)]
+    models_path: String,
+    /// 写入前模型目录文件是否存在。
+    #[serde(default)]
+    models_existed: bool,
+    /// 写入前模型目录文件的原始内容；None 表示原本不存在。
+    #[serde(default)]
+    models_content: Option<String>,
 }
 
 fn codex_config_path() -> PathBuf {
@@ -1723,6 +1771,9 @@ fn codex_config_path() -> PathBuf {
 
 fn codex_auth_path() -> PathBuf {
     codex_home().join("auth.json")
+}
+fn codex_models_path() -> PathBuf {
+    codex_home().join(CODEX_MODEL_CATALOG_FILE)
 }
 
 fn codex_backup_path(config_path: &Path) -> PathBuf {
@@ -1841,6 +1892,7 @@ fn build_codex_flowlet_provider(base_url: &str) -> toml_edit::Item {
 fn inspect_codex(
     config_path: &Path,
     auth_path: &Path,
+    models_path: &Path,
     expected_base_url: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     let settings_exists = config_path.is_file();
@@ -1865,6 +1917,8 @@ fn inspect_codex(
         primary_model: None,
         fast_model: None,
         subagent_model: None,
+        model_catalog_path: None,
+        model_catalog_configured: false,
         long_context: false,
         backup_available,
         external_environment_overrides: Vec::new(),
@@ -1894,6 +1948,13 @@ fn inspect_codex(
         .unwrap_or(false);
     let preferred_auth_method = codex_top_level_value(&doc, "preferred_auth_method")
         .and_then(|value| value.as_str().map(str::to_string));
+    let model_catalog_json = codex_top_level_value(&doc, "model_catalog_json")
+        .and_then(|value| value.as_str().map(str::to_string));
+    // 模型目录是否由 Flowlet 管理：config.toml 指向 Flowlet 的目录引用，且文件在位。
+    let model_catalog_configured =
+        model_catalog_json.as_deref() == Some(CODEX_MODEL_CATALOG_REF) && models_path.is_file();
+    report.model_catalog_path = model_catalog_json.clone();
+    report.model_catalog_configured = model_catalog_configured;
     report.primary_model = model.clone();
 
     let provider = codex_flowlet_provider_table(&doc);
@@ -1939,7 +2000,8 @@ fn inspect_codex(
         && provider_wire_api == Some(CODEX_WIRE_API)
         && provider_requires_auth
         && matches_expected
-        && auth_token_configured;
+        && auth_token_configured
+        && model_catalog_configured;
 
     report.state = if is_flowlet {
         AgentGlobalConfigState::Flowlet
@@ -1963,6 +2025,7 @@ fn inspect_codex(
 fn apply_codex(
     config_path: &Path,
     auth_path: &Path,
+    models_path: &Path,
     expected_base_url: &str,
     client_token: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
@@ -1971,6 +2034,9 @@ fn apply_codex(
     }
     let config_existed = config_path.is_file();
     let auth_existed = auth_path.is_file();
+    // 模型目录当前内容（存在时），用于备份与恢复；Flowlet 命名空间文件通常由 Flowlet 创建。
+    let models_content_before =
+        std::fs::read_to_string(models_path).ok();
     let mut doc = read_codex_document(config_path)?;
     let mut auth = read_optional_json_object(auth_path)?;
 
@@ -1999,17 +2065,37 @@ fn apply_codex(
                 .collect(),
             flowlet_provider: backed_up_value(provider_json.as_ref()),
             auth_key: backed_up_value(auth.get(CODEX_AUTH_KEY)),
+            models_path: display_path(models_path),
+            models_existed: models_content_before.is_some(),
+            models_content: models_content_before.clone(),
         };
         write_json_file(
             &backup,
             &serde_json::to_value(snapshot).map_err(|error| error.to_string())?,
         )?;
+    } else {
+        // 旧版本备份没有模型目录字段：升级备份，使恢复时能清理 Flowlet 生成的模型目录。
+        let existing = read_settings(&backup)?;
+        if existing.get("models_path").is_none()
+            && existing.as_object().is_some_and(|object| object.contains_key("agent_id"))
+        {
+            let mut upgraded = existing.clone();
+            if let Some(object) = upgraded.as_object_mut() {
+                object.insert("models_path".to_string(), Value::String(display_path(models_path)));
+                object.insert("models_existed".to_string(), Value::Bool(false));
+                object.insert("models_content".to_string(), Value::Null);
+            }
+            write_json_file(&backup, &upgraded)?;
+        }
     }
 
     doc["model"] = toml_edit::value(CODEX_PRIMARY_MODEL);
     doc["model_provider"] = toml_edit::value(CODEX_PROVIDER_ID);
     doc["disable_response_storage"] = toml_edit::value(true);
     doc["preferred_auth_method"] = toml_edit::value("apikey");
+    // 自定义模型必须声明模型目录（上下文窗口、推理档位），仅应用启动时读取一次，
+    // 补写后需重启 Codex 才生效（与 DeepSeek/千问官方 Codex 接入文档一致）。
+    doc["model_catalog_json"] = toml_edit::value(CODEX_MODEL_CATALOG_REF);
     // 嵌套下标赋值在父表不存在时的自动派生不可靠（会被渲染成空内联表），
     // 先显式确保 model_providers 是表再写入 flowlet 子表。
     if !doc
@@ -2023,14 +2109,17 @@ fn apply_codex(
         .unwrap()
         .insert(CODEX_AUTH_KEY.to_string(), Value::String(client_token.trim().to_string()));
 
+    // 模型目录内容取内置数据源（仓库根目录 codex-models.json 的编译时快照）。
+    let models_bytes = codex_model_catalog::DEFAULT_CODEX_MODELS_JSON.as_bytes().to_vec();
     if let Err(failure) = write_files_transactionally(
-        "Codex 配置与凭据文件",
+        "Codex 配置、凭据与模型目录文件",
         &[
             (
                 config_path.to_path_buf(),
                 Some(doc.to_string().into_bytes()),
             ),
             (auth_path.to_path_buf(), Some(json_file_bytes(&auth)?)),
+            (models_path.to_path_buf(), Some(models_bytes)),
         ],
     ) {
         if backup_created && failure.rolled_back {
@@ -2038,12 +2127,13 @@ fn apply_codex(
         }
         return Err(failure.message);
     }
-    inspect_codex(config_path, auth_path, expected_base_url)
+    inspect_codex(config_path, auth_path, models_path, expected_base_url)
 }
 
 fn restore_codex(
     config_path: &Path,
     auth_path: &Path,
+    models_path: &Path,
     expected_base_url: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     let backup_path = codex_backup_path(config_path);
@@ -2057,6 +2147,8 @@ fn restore_codex(
     }
     if !paths_equal(&PathBuf::from(&backup.config_path), config_path)
         || !paths_equal(&PathBuf::from(&backup.auth_path), auth_path)
+        || (!backup.models_path.is_empty()
+            && !paths_equal(&PathBuf::from(&backup.models_path), models_path))
     {
         return Err("Codex 配置备份路径与当前用户配置不一致".to_string());
     }
@@ -2112,17 +2204,23 @@ fn restore_codex(
     } else {
         Some(json_file_bytes(&auth)?)
     };
+    // 模型目录还原：写入前存在则恢复原内容，不存在则删除 Flowlet 生成的文件。
+    let models_content = backup
+        .models_content
+        .as_deref()
+        .map(|content| content.as_bytes().to_vec());
     write_files_transactionally(
-        "Codex 配置与凭据文件",
+        "Codex 配置、凭据与模型目录文件",
         &[
             (config_path.to_path_buf(), config_content),
             (auth_path.to_path_buf(), auth_content),
+            (models_path.to_path_buf(), models_content),
         ],
     )
     .map_err(|failure| failure.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("配置已恢复，但清理 Flowlet 备份标记失败：{error}"))?;
-    inspect_codex(config_path, auth_path, expected_base_url)
+    inspect_codex(config_path, auth_path, models_path, expected_base_url)
 }
 
 fn restore_json_property(root: &mut Value, name: &str, backed_up: &BackedUpValue) {
@@ -3335,13 +3433,17 @@ mod tests {
 
     /// 测试用临时 Codex 配置路径。inspect/apply/restore 均以路径为参数，
     /// 不需要改写进程级 CODEX_HOME 环境变量（避免并行测试互相干扰）。
-    fn test_codex_paths() -> (PathBuf, PathBuf) {
+    fn test_codex_paths() -> (PathBuf, PathBuf, PathBuf) {
         let directory = std::env::temp_dir().join(format!(
             "flowlet-codex-global-config-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
-        (directory.join("config.toml"), directory.join("auth.json"))
+        (
+            directory.join("config.toml"),
+            directory.join("auth.json"),
+            directory.join(CODEX_MODEL_CATALOG_FILE),
+        )
     }
 
     fn parse_toml(path: &Path) -> toml_edit::DocumentMut {
@@ -3367,7 +3469,7 @@ mod tests {
 
     #[test]
     fn applies_and_restores_codex_config_and_credentials() {
-        let (config_path, auth_path) = test_codex_paths();
+        let (config_path, auth_path, models_path) = test_codex_paths();
         // 用户既有配置：注释、其它 provider、以及一份指向旧端口的 flowlet provider
         //（含多余字段，写入时应被整体替换）。auth.json 保留 ChatGPT 登录凭据。
         std::fs::write(
@@ -3398,6 +3500,7 @@ extra = "stale"
         let report = apply_codex(
             &config_path,
             &auth_path,
+            &models_path,
             CODEX_EXPECTED_BASE_URL,
             "flowlet-token",
         )
@@ -3420,6 +3523,27 @@ extra = "stale"
         assert_eq!(toml_str(&doc, "model_provider"), Some("flowlet"));
         assert_eq!(toml_bool(&doc, "disable_response_storage"), Some(true));
         assert_eq!(toml_str(&doc, "preferred_auth_method"), Some("apikey"));
+        // 模型目录：config.toml 指向 Flowlet 目录引用，且 ~/.codex 下的目录文件已生成
+        assert_eq!(toml_str(&doc, "model_catalog_json"), Some(CODEX_MODEL_CATALOG_REF));
+        assert!(models_path.is_file());
+        let catalog: Value =
+            serde_json::from_str(&std::fs::read_to_string(&models_path).unwrap()).unwrap();
+        let catalog_slugs = catalog
+            .get("models")
+            .and_then(Value::as_array)
+            .map(|models| {
+                models
+                    .iter()
+                    .filter_map(|model| model.get("slug").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        assert!(catalog_slugs.contains(&"flowlet-pro"), "{catalog_slugs:?}");
+        assert!(report.model_catalog_configured);
+        assert_eq!(
+            report.model_catalog_path.as_deref(),
+            Some(CODEX_MODEL_CATALOG_REF)
+        );
         let flowlet_base = doc
             .get("model_providers")
             .and_then(|item| item.get("flowlet"))
@@ -3450,7 +3574,7 @@ extra = "stale"
         );
 
         // 恢复：旧 model/provider/auth 值全部回位
-        let restored = restore_codex(&config_path, &auth_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        let restored = restore_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
         // 恢复后 model_provider 指回 other（base_url 非 Flowlet）→ OtherGateway
         assert_eq!(restored.state, AgentGlobalConfigState::OtherGateway);
         assert!(!restored.backup_available);
@@ -3462,6 +3586,9 @@ extra = "stale"
         assert_eq!(toml_str(&doc, "model_provider"), Some("other"));
         assert_eq!(toml_bool(&doc, "disable_response_storage"), None);
         assert_eq!(toml_str(&doc, "preferred_auth_method"), None);
+        assert_eq!(toml_str(&doc, "model_catalog_json"), None);
+        // 模型目录文件由 Flowlet 创建且原本不存在，恢复后应被删除
+        assert!(!models_path.exists());
         // 旧 flowlet provider 表（含多余字段）整体回位
         assert!(config_text.contains("http://127.0.0.1:9999/v1"));
         assert!(config_text.contains("stale"));
@@ -3480,13 +3607,14 @@ extra = "stale"
 
     #[test]
     fn removes_codex_files_created_only_for_flowlet() {
-        let (config_path, auth_path) = test_codex_paths();
+        let (config_path, auth_path, models_path) = test_codex_paths();
         assert!(!config_path.exists());
         assert!(!auth_path.exists());
 
         let report = apply_codex(
             &config_path,
             &auth_path,
+            &models_path,
             CODEX_EXPECTED_BASE_URL,
             "flowlet-token",
         )
@@ -3495,16 +3623,17 @@ extra = "stale"
         assert!(config_path.is_file());
         assert!(auth_path.is_file());
 
-        let restored = restore_codex(&config_path, &auth_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        let restored = restore_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
         assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
         assert!(!config_path.exists());
         assert!(!auth_path.exists());
+        assert!(!models_path.exists());
         assert!(!codex_backup_path(&config_path).exists());
     }
 
     #[test]
     fn reports_not_configured_other_gateway_and_partial_for_codex() {
-        let (config_path, auth_path) = test_codex_paths();
+        let (config_path, auth_path, models_path) = test_codex_paths();
 
         // 与 Flowlet 无关的配置 → NotConfigured
         std::fs::write(
@@ -3512,7 +3641,7 @@ extra = "stale"
             "model = \"gpt-5\"\nmodel_provider = \"openai\"\n",
         )
         .unwrap();
-        let report = inspect_codex(&config_path, &auth_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        let report = inspect_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::NotConfigured);
 
         // 指向别的网关 → OtherGateway
@@ -3525,28 +3654,74 @@ base_url = "https://gateway.example/v1"
 "#,
         )
         .unwrap();
-        let report = inspect_codex(&config_path, &auth_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        let report = inspect_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::OtherGateway);
 
         // 只有部分 Flowlet 标记（model 对了，provider 缺失）→ Partial
         std::fs::write(&config_path, "model = \"flowlet-pro\"\n").unwrap();
-        let report = inspect_codex(&config_path, &auth_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        let report = inspect_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Partial);
+
+        // Flowlet 标记齐全但缺少模型目录 → Partial（提示用户重新写入以补齐目录）
+        std::fs::write(
+            &config_path,
+            r##"model = "flowlet-pro"
+model_provider = "flowlet"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+
+[model_providers.flowlet]
+name = "flowlet"
+base_url = "http://127.0.0.1:18640/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"##,
+        )
+        .unwrap();
+        std::fs::write(&auth_path, r#"{"OPENAI_API_KEY":"flowlet-token"}"#).unwrap();
+        let report = inspect_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Partial);
+        assert!(!report.model_catalog_configured);
+
+        // 补齐 model_catalog_json 且目录文件在位 → Flowlet
+        std::fs::write(
+            &config_path,
+            &format!(
+                r##"model = "flowlet-pro"
+model_provider = "flowlet"
+disable_response_storage = true
+preferred_auth_method = "apikey"
+model_catalog_json = "{CODEX_MODEL_CATALOG_REF}"
+
+[model_providers.flowlet]
+name = "flowlet"
+base_url = "http://127.0.0.1:18640/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"##
+            ),
+        )
+        .unwrap();
+        std::fs::write(&models_path, codex_model_catalog::DEFAULT_CODEX_MODELS_JSON).unwrap();
+        let report = inspect_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
+        assert!(report.model_catalog_configured);
     }
 
     #[test]
     fn reports_invalid_codex_toml_without_overwriting_it() {
-        let (config_path, auth_path) = test_codex_paths();
+        let (config_path, auth_path, models_path) = test_codex_paths();
         let broken = "model = [invalid";
         std::fs::write(&config_path, broken).unwrap();
 
-        let report = inspect_codex(&config_path, &auth_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        let report = inspect_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Invalid);
         assert!(report.error.is_some());
 
         let error = apply_codex(
             &config_path,
             &auth_path,
+            &models_path,
             CODEX_EXPECTED_BASE_URL,
             "flowlet-token",
         )
@@ -3554,14 +3729,104 @@ base_url = "https://gateway.example/v1"
         assert!(error.contains("解析"));
         assert_eq!(std::fs::read_to_string(&config_path).unwrap(), broken);
         assert!(!codex_backup_path(&config_path).exists());
+        assert!(!models_path.exists());
     }
 
     #[test]
     fn apply_codex_requires_client_token() {
-        let (config_path, auth_path) = test_codex_paths();
-        let error = apply_codex(&config_path, &auth_path, CODEX_EXPECTED_BASE_URL, "  ")
+        let (config_path, auth_path, models_path) = test_codex_paths();
+        let error = apply_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL, "  ")
             .unwrap_err();
         assert!(error.contains("Client Token"));
         assert!(!config_path.exists());
+        assert!(!models_path.exists());
+    }
+
+    #[test]
+    fn preserves_existing_models_catalog_and_reference_on_restore() {
+        let (config_path, auth_path, models_path) = test_codex_paths();
+        // 用户已有模型目录文件（例如 DeepSeek 的目录）与自定义 model_catalog_json。
+        let original_catalog = r#"{"models":[{"slug":"deepseek-v4-flash","context_window":1048576}]}"#;
+        std::fs::write(&models_path, original_catalog).unwrap();
+        std::fs::write(
+            &config_path,
+            r##"model = "gpt-5"
+model_provider = "other"
+model_catalog_json = "~/.codex/models.json"
+
+[model_providers.other]
+name = "other"
+base_url = "https://gateway.example/v1"
+wire_api = "responses"
+"##,
+        )
+        .unwrap();
+
+        let report = apply_codex(
+            &config_path,
+            &auth_path,
+            &models_path,
+            CODEX_EXPECTED_BASE_URL,
+            "flowlet-token",
+        )
+        .unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
+        // 目录被 Flowlet 内容替换
+        assert_eq!(
+            std::fs::read_to_string(&models_path).unwrap(),
+            codex_model_catalog::DEFAULT_CODEX_MODELS_JSON
+        );
+
+        // 恢复：model_catalog_json 与目录内容都回位
+        let restored =
+            restore_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::OtherGateway);
+        assert_eq!(std::fs::read_to_string(&models_path).unwrap(), original_catalog);
+        let doc = parse_toml(&config_path);
+        assert_eq!(toml_str(&doc, "model_catalog_json"), Some("~/.codex/models.json"));
+    }
+
+    #[test]
+    fn legacy_codex_backup_without_models_fields_is_upgraded_on_reapply() {
+        let (config_path, auth_path, models_path) = test_codex_paths();
+        // 模拟旧版本生成的备份：没有 models_path/models_content 字段。
+        let backup_path = codex_backup_path(&config_path);
+        std::fs::create_dir_all(backup_path.parent().unwrap()).unwrap();
+        let legacy_backup = serde_json::json!({
+            "version": 1,
+            "agent_id": "codex",
+            "created_at": "2026-01-01T00:00:00Z",
+            "config_path": display_path(&config_path),
+            "auth_path": display_path(&auth_path),
+            "config_existed": false,
+            "auth_existed": false,
+            "provider_table_existed": false,
+            "top_level": {},
+            "flowlet_provider": {"present": false, "value": null},
+            "auth_key": {"present": false, "value": null},
+        });
+        std::fs::write(
+            &backup_path,
+            serde_json::to_vec(&legacy_backup).unwrap(),
+        )
+        .unwrap();
+
+        let report = apply_codex(
+            &config_path,
+            &auth_path,
+            &models_path,
+            CODEX_EXPECTED_BASE_URL,
+            "flowlet-token",
+        )
+        .unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
+        assert!(models_path.is_file());
+        // 旧备份被升级，恢复时应删除 Flowlet 生成的模型目录
+        let restored =
+            restore_codex(&config_path, &auth_path, &models_path, CODEX_EXPECTED_BASE_URL).unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+        assert!(!models_path.exists());
+        assert!(!config_path.exists());
+        assert!(!backup_path.exists());
     }
 }

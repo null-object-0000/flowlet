@@ -97,6 +97,10 @@ export type AgentGlobalConfigReport = {
   primary_model?: string | null;
   fast_model?: string | null;
   subagent_model?: string | null;
+  /** 仅 Codex：config.toml 中 `model_catalog_json` 的当前值。 */
+  model_catalog_path?: string | null;
+  /** 仅 Codex：`model_catalog_json` 指向 Flowlet 生成的模型目录且文件在位。 */
+  model_catalog_configured?: boolean;
   /** Claude Code 主模型是否已写入 `[1m]` 长上下文后缀；其他 Agent 恒为 false。 */
   long_context?: boolean;
   backup_available: boolean;

@@ -1,0 +1,48 @@
+{
+  "models": [
+    {
+      "slug": "flowlet-pro",
+      "display_name": "Flowlet Pro",
+      "description": "Flowlet aggregated coding model routed to available accounts.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Fast responses with lighter reasoning"
+        },
+        {
+          "effort": "high",
+          "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
+        }
+      ],
+      "context_window": 1048576,
+      "supported_in_api": true
+    },
+    {
+      "slug": "flowlet-flash",
+      "display_name": "Flowlet Flash",
+      "description": "Flowlet aggregated fast model routed to available accounts.",
+      "default_reasoning_level": "low",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Fast responses with lighter reasoning"
+        },
+        {
+          "effort": "high",
+          "description": "Extra high reasoning depth for complex problems"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning depth for the hardest problems"
+        }
+      ],
+      "context_window": 1048576,
+      "supported_in_api": true
+    }
+  ]
+}

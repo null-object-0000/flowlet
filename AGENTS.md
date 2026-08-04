@@ -432,6 +432,13 @@ Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent（`AgentKind = "c
 `disable_response_storage = true`——后者是无状态 Responses 路由的**强制项**，
 防止 Codex 携带 `store`/`previous_response_id` 破坏多账号路由；Client Token 写入
 `auth.json` 的 `OPENAI_API_KEY`（不动系统环境变量，备份/恢复保留原有登录态字段）。
+`flowlet-pro` / `flowlet-flash` 是 Flowlet 私有聚合模型，不在 Codex 内置模型目录，
+必须额外声明模型元数据（上下文窗口、推理档位）：一键写入会生成
+`~/.codex/model-catalog.flowlet.json`（内容来自仓库根目录 `codex-models.json` 的
+内置快照，前端手动片段常量 `CODEX_MODEL_CATALOG_JSON` 需与其保持一致）并写入顶层
+`model_catalog_json = "~/.codex/model-catalog.flowlet.json"`；该字段仅在 Codex 启动时
+读取一次，补写后需重启 Codex。生成文件名带 `flowlet` 前缀，避免覆盖 DeepSeek
+（`~/.codex/models.json`）或千问（`~/.codex/model-catalog.local.json`）的目录文件。
 Codex 的 User-Agent（`codex_cli_rs/`）可区分，归属走 UA 规则（config.json 默认集 +
 内置兜底规则），不需要 `x-flowlet-client` 标记头。
 

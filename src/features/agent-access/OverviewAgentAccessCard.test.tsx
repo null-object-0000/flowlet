@@ -151,6 +151,8 @@ vi.mock("./useAgentEnvironment", () => ({
         primary_model: "flowlet-pro",
         fast_model: null,
         subagent_model: null,
+        model_catalog_path: "~/.codex/model-catalog.flowlet.json",
+        model_catalog_configured: true,
         backup_available: true,
         external_environment_overrides: [],
       },
@@ -291,11 +293,16 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("C:\\Users\\test\\.codex\\auth.json")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
-    // 手动配置片段：config.toml + auth.json。
+    // 手动配置片段：config.toml + auth.json + 模型目录。
     expect(screen.getByText("config.toml 配置片段")).toBeInTheDocument();
     expect(screen.getByText("auth.json 凭据片段")).toBeInTheDocument();
-    // config.toml 片段应包含 Responses 协议配置（文本在 code 块内被拆分，用正则模糊匹配）。
+    expect(screen.getByText("模型目录片段（保存为 ~/.codex/model-catalog.flowlet.json）")).toBeInTheDocument();
+    // config.toml 片段应包含 Responses 协议与模型目录配置（文本在 code 块内被拆分，用正则模糊匹配）。
     expect(screen.getByText(/wire_api\s*=\s*"responses"/, { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText(/model_catalog_json\s*=\s*"~\/.codex\/model-catalog.flowlet.json"/, { selector: "code" })).toBeInTheDocument();
+    // 全局配置区展示模型目录状态。
+    expect(screen.getByText("模型目录")).toBeInTheDocument();
+    expect(screen.getByText("已配置")).toBeInTheDocument();
 
     // 切到 Desktop 标签页：探测到的是 ChatGPT 桌面应用。
     fireEvent.click(screen.getByRole("tab", { name: "Codex Desktop 接入" }));

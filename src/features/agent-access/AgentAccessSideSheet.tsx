@@ -108,6 +108,11 @@ export const FlowletPermissionBridge = async ({ client, serverUrl, directory, wo
 }
 `;
 
+// Codex 模型目录内容，与仓库根目录 codex-models.json（Rust include_str! 内置）保持一致。
+// 声明 flowlet-pro / flowlet-flash 的上下文窗口与推理档位，供 config.toml 的
+// model_catalog_json 指向生成到 ~/.codex/model-catalog.flowlet.json。
+const CODEX_MODEL_CATALOG_JSON = "{\n  \"models\": [\n    {\n      \"slug\": \"flowlet-pro\",\n      \"display_name\": \"Flowlet Pro\",\n      \"description\": \"Flowlet aggregated coding model routed to available accounts.\",\n      \"default_reasoning_level\": \"high\",\n      \"supported_reasoning_levels\": [\n        {\n          \"effort\": \"low\",\n          \"description\": \"Fast responses with lighter reasoning\"\n        },\n        {\n          \"effort\": \"high\",\n          \"description\": \"Extra high reasoning depth for complex problems\"\n        },\n        {\n          \"effort\": \"max\",\n          \"description\": \"Maximum reasoning depth for the hardest problems\"\n        }\n      ],\n      \"context_window\": 1048576,\n      \"supported_in_api\": true\n    },\n    {\n      \"slug\": \"flowlet-flash\",\n      \"display_name\": \"Flowlet Flash\",\n      \"description\": \"Flowlet aggregated fast model routed to available accounts.\",\n      \"default_reasoning_level\": \"low\",\n      \"supported_reasoning_levels\": [\n        {\n          \"effort\": \"low\",\n          \"description\": \"Fast responses with lighter reasoning\"\n        },\n        {\n          \"effort\": \"high\",\n          \"description\": \"Extra high reasoning depth for complex problems\"\n        },\n        {\n          \"effort\": \"max\",\n          \"description\": \"Maximum reasoning depth for the hardest problems\"\n        }\n      ],\n      \"context_window\": 1048576,\n      \"supported_in_api\": true\n    }\n  ]\n}";
+
 export type AgentKind = "claude-code" | "opencode" | "pi" | "codex";
 type Copy = (value: string, message: string) => Promise<void>;
 
@@ -362,6 +367,12 @@ export function AgentAccessSideSheet({
                 {globalConfig.base_url ? <StatusRow label="Base URL" value={globalConfig.base_url} /> : null}
                 <StatusRow label="Client Token" value={t(globalConfig.auth_token_configured ? "已配置（内容已隐藏）" : "未配置")} />
                 <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
+                {agent === "codex" ? (
+                  <StatusRow
+                    label={t("模型目录")}
+                    value={t(globalConfig.model_catalog_configured ? "已配置" : "未配置")}
+                  />
+                ) : null}
                 {meta.showsFastModel ? <StatusRow label={t("快速模型")} value={globalConfig.fast_model || "-"} /> : null}
                 {meta.showsSubagentModel ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}
                 {agent === "opencode" ? (
@@ -621,12 +632,14 @@ function buildManualSnippets(
   }, null, 2);
   if (agent === "codex") {
     // 与 Rust apply_codex 受管字段完全一致：Responses 协议、本地 Base URL、
-    // 强制关闭响应存储（避免 store/previous_response_id 破坏无状态多账号路由）。
+    // 强制关闭响应存储（避免 store/previous_response_id 破坏无状态多账号路由），
+    // 以及指向 Flowlet 生成的模型目录（flowlet-pro / flowlet-flash 的上下文与推理档位声明）。
     const configToml = [
       'model = "flowlet-pro"',
       'model_provider = "flowlet"',
       "disable_response_storage = true",
       'preferred_auth_method = "apikey"',
+      'model_catalog_json = "~/.codex/model-catalog.flowlet.json"',
       "",
       "[model_providers.flowlet]",
       'name = "flowlet"',
@@ -647,6 +660,11 @@ function buildManualSnippets(
         label: t("auth.json 凭据片段"),
         displayValue: credentials(displayedToken),
         copyValue: credentials(token),
+      },
+      {
+        label: t("模型目录片段（保存为 ~/.codex/model-catalog.flowlet.json）"),
+        displayValue: CODEX_MODEL_CATALOG_JSON,
+        copyValue: CODEX_MODEL_CATALOG_JSON,
       },
     ];
   }

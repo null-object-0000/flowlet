@@ -8,6 +8,7 @@ pub mod agent_session_timeline;
 pub mod agent_source_watcher;
 pub mod channels_config;
 pub mod codex_account;
+pub mod codex_model_catalog;
 pub mod config;
 pub mod cost_ledger_source_probe;
 pub mod device_identity;
@@ -34,3 +35,4 @@ pub use rate_limiter::RateLimiter;
 pub use storage::Storage;
 pub use web::WebState;
 pub use web::create_web_router;
+

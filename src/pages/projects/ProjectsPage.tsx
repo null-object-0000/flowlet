@@ -1,11 +1,14 @@
-import { useMemo, useState } from "react";
-import { Button, Empty, Input, Modal, Popconfirm, Select, SideSheet, TextArea, Toast } from "@douyinfe/semi-ui-19";
+import { useEffect, useMemo, useState } from "react";
+import { Button, Empty, Input, Modal, Popconfirm, Progress, Select, SideSheet, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconFolder, IconPlus } from "@douyinfe/semi-icons";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { Project, ProjectTask, ProjectTaskPriority, ProjectTaskStatus, ProjectTaskType } from "../../domains/project/types";
-import { newProject, newProjectTask, useProject, useProjectActions, useProjects, useProjectTaskActions, useProjectTasks } from "../../features/projects/useProjects";
+import { backgroundTaskCommands } from "../../domains/background-task/commands";
+import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskPriority, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType } from "../../domains/project/types";
+import { useBackgroundTaskDetail } from "../../features/background-tasks/useBackgroundTasks";
+import { newProject, newProjectTask, useProject, useProjectActions, useProjects, useProjectTaskActions, useProjectTaskRunnerActions, useProjectTaskScheduler, useProjectTasks } from "../../features/projects/useProjects";
 import { errorMessage } from "../../shared/errors/AppError";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import { PageHeader } from "../../shared/ui/PageHeader";
@@ -105,13 +108,15 @@ function LoadedProjectDetail({ project }: { project: Project }) {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 15_000 });
   const tasks = useProjectTasks(project.id, refresh.autoRefresh);
+  // 前端调度器：进入项目详情页即自动轮询「槽空闲 && 有待处理任务」，有空闲就领取执行。
+  const scheduler = useProjectTaskScheduler(refresh.autoRefresh);
   return <main className={styles.page}>
     <PageHeader title={project.name} subtitle={project.directoryPath}>
       <RefreshControl
         autoRefresh={refresh.autoRefresh}
         onToggleAutoRefresh={refresh.toggleAutoRefresh}
-        isFetching={tasks.isFetching}
-        lastUpdatedAt={tasks.dataUpdatedAt}
+        isFetching={tasks.isFetching || scheduler.runnerState.isFetching}
+        lastUpdatedAt={Math.max(tasks.dataUpdatedAt, scheduler.runnerState.dataUpdatedAt)}
         intervalMs={refresh.intervalMs}
         onRefresh={() => void tasks.refetch()}
         language={language}
@@ -119,7 +124,7 @@ function LoadedProjectDetail({ project }: { project: Project }) {
       />
     </PageHeader>
     <section className={styles.detailContent}>
-      <TaskBoard project={project} tasks={tasks} />
+      <TaskBoard project={project} tasks={tasks} runnerState={scheduler.runnerState.data} />
     </section>
   </main>;
 }
@@ -143,11 +148,14 @@ const PRIORITIES: Array<{ value: ProjectTaskPriority; label: string; description
   { value: "p2", label: "P2", description: "普通" },
 ];
 
-function TaskBoard({ project, tasks }: { project: Project; tasks: ReturnType<typeof useProjectTasks> }) {
+function TaskBoard({ project, tasks, runnerState }: { project: Project; tasks: ReturnType<typeof useProjectTasks>; runnerState?: ProjectTaskRunnerState }) {
   const { t } = useAppPreferences();
   const actions = useProjectTaskActions(project.id);
+  const runnerActions = useProjectTaskRunnerActions();
   const [editing, setEditing] = useState<ProjectTask | "new" | null>(null);
+  const [viewing, setViewing] = useState<ProjectTask | null>(null);
   const [draft, setDraft] = useState({ title: "", description: "", taskType: "code" as ProjectTaskType, agentProfile: "Claude Code", priority: "p2" as ProjectTaskPriority });
+  const [runningLogs, setRunningLogs] = useState<Record<string, string>>({});
   const grouped = useMemo(() => Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, tasks.data?.filter((task) => column.statuses.includes(task.status)) ?? []])) as Record<string, ProjectTask[]>, [tasks.data]);
   const openEditor = (task: ProjectTask | "new") => { setEditing(task); setDraft(task === "new" ? { title: "", description: "", taskType: "code", agentProfile: "Claude Code", priority: "p2" } : { title: task.title, description: task.description, taskType: task.taskType, agentProfile: task.agentProfile, priority: task.priority }); };
   const save = async () => {
@@ -155,28 +163,202 @@ function TaskBoard({ project, tasks }: { project: Project; tasks: ReturnType<typ
     const task = editing === "new" ? { ...newProjectTask(project.id, draft.title), description: draft.description.trim(), taskType: draft.taskType, agentProfile: draft.agentProfile, priority: draft.priority } : { ...editing, ...draft, title: draft.title.trim(), description: draft.description.trim(), updatedAt: new Date().toISOString() };
     try { await actions.saveTask.mutateAsync(task); Toast.success(t("任务已保存")); setEditing(null); } catch (error) { Toast.error(errorMessage(error)); }
   };
-  const changeStatus = async (task: ProjectTask, status: ProjectTaskStatus) => { try { await actions.saveTask.mutateAsync({ ...task, status, updatedAt: new Date().toISOString() }); } catch (error) { Toast.error(errorMessage(error)); } };
+  // 提交 / 撤回仅在草稿与已提交之间流转（in_progress 由执行器管理，review 由审核管理）。
+  const toggleSubmitted = async (task: ProjectTask, submitted: boolean) => { try { await actions.saveTask.mutateAsync({ ...task, status: submitted ? "submitted" : "draft", updatedAt: new Date().toISOString() }); } catch (error) { Toast.error(errorMessage(error)); } };
   const removeEditingTask = async () => {
     if (!editing || editing === "new") return;
     try { await actions.deleteTask.mutateAsync(editing.id); Toast.success(t("任务已删除")); setEditing(null); } catch (error) { Toast.error(errorMessage(error)); }
   };
+  // 待审核推进：批准 → done，退回 → submitted 重新排队（卡片 footer 快捷操作）。
+  const reviewTask = async (task: ProjectTask, status: ProjectTaskMutableStatus) => {
+    try {
+      await runnerActions.setTaskStatus.mutateAsync({ taskId: task.id, status });
+      setViewing(null);
+      Toast.success(status === "done" ? t("任务已通过审核") : t("任务已退回重新排队"));
+    } catch (error) { Toast.error(errorMessage(error)); }
+  };
+  const cancelRunning = async (jobId: string) => {
+    try { await backgroundTaskCommands.cancel(jobId); Toast.info(t("已请求取消执行")); } catch (error) { Toast.error(errorMessage(error)); }
+  };
+  // 订阅执行实时日志：Agent 输出逐条追加到对应进行中任务卡片。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<{ projectId: string; taskId: string; text: string }>("project-task-log", (event) => {
+      if (event.payload.projectId !== project.id) return;
+      const taskId = event.payload.taskId;
+      setRunningLogs((current) => ({ ...current, [taskId]: `${current[taskId] ?? ""}${event.payload.text}` }));
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [project.id]);
+
+  const renderCardFooter = (task: ProjectTask) => {
+    switch (task.status) {
+      case "draft":
+        return <button className={`${styles.taskCardAction} ${styles.taskCardSubmit}`} onClick={() => void toggleSubmitted(task, true)}>{t("提交")}</button>;
+      case "submitted":
+        return <button className={`${styles.taskCardAction} ${styles.taskCardWithdraw}`} onClick={() => void toggleSubmitted(task, false)}>{t("撤回")}</button>;
+      case "in_progress": {
+        if (runnerState?.current?.taskId !== task.id) return null;
+        return <button className={`${styles.taskCardAction} ${styles.taskCardCancel}`} onClick={() => void cancelRunning(runnerState.current!.jobId)}>{t("取消执行")}</button>;
+      }
+      case "review":
+        return <div className={styles.taskReviewActions}><Button size="small" onClick={() => void reviewTask(task, "submitted")}>{t("退回")}</Button><Button size="small" type="primary" theme="solid" onClick={() => void reviewTask(task, "done")}>{t("批准")}</Button></div>;
+      default:
+        return null;
+    }
+  };
+
   return <div className={styles.boardView}>
     {tasks.isError ? <div className={styles.state}>{tasks.error.message}</div> : <div className={`${styles.board} ${styles.taskBoard}`}>
       {TASK_COLUMNS.map((column) => <section className={styles.column} key={column.id}><header><span className={styles.colTitle}><span>{t(column.label)}</span><span className={styles.colCount}>{grouped[column.id].length}</span></span>{column.addable ? <button className={styles.addColButton} aria-label={t("添加任务")} title={t("添加任务")} onClick={() => openEditor("new")}><IconPlus /></button> : null}</header><div className={styles.columnBody}>
-        {grouped[column.id].map((task) => {
-          const isDraft = task.status === "draft";
-          return <article className={styles.taskCard} key={task.id}><div className={styles.taskTags}><span className={`${styles.taskTag} ${styles.taskTagPriority}`}>{t(priorityLabel(task.priority))}</span><span className={isDraft ? styles.taskStatusDraft : styles.taskStatusSubmitted}>{isDraft ? t("未提交") : t("已提交")}</span><span className={`${styles.taskTag} ${styles.taskTagType}`}>{t(taskTypeLabel(task.taskType))}</span><span className={`${styles.taskTag} ${styles.taskTagAgent}`}>{task.agentProfile}</span></div><div className={styles.taskTitle}>{isDraft ? <button className={styles.taskTitleLink} title={t("编辑任务")} onClick={() => openEditor(task)}><strong>{task.title}</strong></button> : <strong>{task.title}</strong>}</div><button className={`${styles.taskCardAction} ${isDraft ? styles.taskCardSubmit : styles.taskCardWithdraw}`} onClick={() => void changeStatus(task, isDraft ? "submitted" : "draft")}>{isDraft ? t("提交") : t("撤回")}</button></article>;
-        })}
+        {grouped[column.id].map((task) => <article className={styles.taskCard} key={task.id}><div className={styles.taskTags}><span className={`${styles.taskTag} ${styles.taskTagPriority}`}>{t(priorityLabel(task.priority))}</span><span className={statusTagClass(task.status)}>{t(statusTagLabel(task.status))}</span><span className={`${styles.taskTag} ${styles.taskTagType}`}>{t(taskTypeLabel(task.taskType))}</span><span className={`${styles.taskTag} ${styles.taskTagAgent}`}>{task.agentProfile}</span></div><div className={styles.taskTitle}>{task.status === "draft" ? <button className={styles.taskTitleLink} title={t("编辑任务")} onClick={() => openEditor(task)}><strong>{task.title}</strong></button> : <button className={styles.taskTitleLink} title={t("查看任务详情")} onClick={() => setViewing(task)}><strong>{task.title}</strong></button>}</div>{renderCardFooter(task)}{task.status === "in_progress" && runningLogs[task.id] ? <div className={styles.taskLogBlock}>{runningLogs[task.id]}</div> : null}</article>)}
         {column.addable ? <button className={styles.addCard} onClick={() => openEditor("new")}><IconPlus />{t("添加任务")}</button> : null}
       </div></section>)}
     </div>}
     <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建任务") : t("编辑任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span>{editing !== "new" && editing ? <Popconfirm className={styles.taskDeletePopconfirm} title={t("删除任务“{name}”？", { name: editing.title })} okText={t("删除")} cancelText={t("取消")} okType="danger" onConfirm={() => void removeEditingTask()}><Button type="danger" theme="borderless" icon={<IconDelete />}>{t("删除")}</Button></Popconfirm> : null}</span><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button type="primary" theme="solid" loading={actions.saveTask.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
       <div className={styles.form}><div className={styles.formRow}><label><span>{t("优先级")}</span><Select value={draft.priority} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} renderSelectedItem={(optionNode: { value?: string | number }) => String(optionNode.value ?? "").toUpperCase()} optionList={PRIORITIES.map((item) => ({ value: item.value, label: `${t(item.label)} · ${t(item.description)}` }))} onChange={(value) => setDraft((current) => ({ ...current, priority: String(value) as ProjectTaskPriority }))} /></label><label><span>{t("任务标题")}</span><Input autoFocus value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /></label></div><label><span>{t("任务描述（可选）")}</span><TextArea value={draft.description} autosize={{ minRows: 3, maxRows: 6 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div></div>
     </SideSheet>
+    <TaskReadonlySideSheet task={viewing} onClose={() => setViewing(null)} />
   </div>;
 }
 
 function taskTypeLabel(taskType: ProjectTaskType) { return taskType === "code" ? "代码修改" : "只读分析"; }
 
 function priorityLabel(priority: ProjectTaskPriority) { return priority.toUpperCase(); }
+
+function statusTagLabel(status: ProjectTaskStatus) {
+  switch (status) {
+    case "draft": return "未提交";
+    case "submitted": return "已提交";
+    case "in_progress": return "执行中";
+    case "review": return "待审核";
+    case "done": return "已完成";
+  }
+}
+
+function statusTagClass(status: ProjectTaskStatus) {
+  switch (status) {
+    case "draft": return styles.taskStatusDraft;
+    case "submitted": return styles.taskStatusSubmitted;
+    case "in_progress": return styles.taskStatusInProgress;
+    case "review": return styles.taskStatusReview;
+    case "done": return styles.taskStatusDone;
+  }
+}
+
+/** 提交后任务的只读详情抽屉：顶部任务信息 + Agent 执行情况与输出。 */
+function TaskReadonlySideSheet({ task, onClose }: { task: ProjectTask | null; onClose: () => void }) {
+  const { language, t } = useAppPreferences();
+  const runnerActions = useProjectTaskRunnerActions();
+  const jobId = task?.lastJobId ?? null;
+  const detail = useBackgroundTaskDetail(jobId);
+
+  const reviewTask = async (status: ProjectTaskMutableStatus) => {
+    if (!task) return;
+    try {
+      await runnerActions.setTaskStatus.mutateAsync({ taskId: task.id, status });
+      Toast.success(status === "done" ? t("任务已通过审核") : t("任务已退回重新排队"));
+      onClose();
+    } catch (error) { Toast.error(errorMessage(error)); }
+  };
+
+  const isReview = task?.status === "review";
+  const job = detail.data?.job;
+  const footer = (
+    <div className={styles.taskSheetFooter}><span></span><span className={styles.taskSheetFooterActions}>
+      {isReview ? (
+        <>
+          <Button loading={runnerActions.setTaskStatus.isPending} onClick={() => void reviewTask("submitted")}>{t("退回")}</Button>
+          <Button type="primary" theme="solid" loading={runnerActions.setTaskStatus.isPending} onClick={() => void reviewTask("done")}>{t("批准")}</Button>
+        </>
+      ) : null}
+      <Button onClick={onClose}>{t("关闭")}</Button>
+    </span></div>
+  );
+
+  return (
+    <SideSheet
+      visible={task != null}
+      width={DETAIL_SHEET_WIDTH}
+      motion={false}
+      title={task ? <TaskReadonlyHeader task={task} /> : null}
+      onCancel={onClose}
+      zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
+      footer={footer}
+    >
+      {task ? (
+        <div className={styles.readonlyBody}>
+          <section className={styles.readonlySection}><strong className={styles.readonlySectionTitle}>{t("任务信息")}</strong>
+            <div className={styles.readonlyGrid}>
+              <ReadonlyItem label={t("优先级")} value={task.priority.toUpperCase()} />
+              <ReadonlyItem label={t("状态")} value={t(statusTagLabel(task.status))} />
+              <ReadonlyItem label={t("任务类型")} value={t(taskTypeLabel(task.taskType))} />
+              <ReadonlyItem label={t("Agent Profile")} value={task.agentProfile} />
+              <ReadonlyItem label={t("创建时间")} value={formatTimestamp(task.createdAt, language)} />
+              <ReadonlyItem label={t("更新时间")} value={formatTimestamp(task.updatedAt, language)} />
+              <ReadonlyItem label={t("任务描述")} value={task.description.trim() || t("无描述")} wide />
+            </div>
+          </section>
+          <section className={styles.readonlySection}><strong className={styles.readonlySectionTitle}>{t("Agent 执行情况")}</strong>
+            {!jobId ? <div className={styles.readonlyEmpty}>{t("该任务尚未执行，暂无 Agent 执行记录")}</div> : null}
+            {jobId && detail.isLoading ? <div className={styles.readonlyEmpty}>{t("正在读取执行记录…")}</div> : null}
+            {jobId && detail.isError ? <div className={styles.readonlyEmpty}>{t("执行记录读取失败：{message}", { message: detail.error.message })}</div> : null}
+            {job ? (
+              <div className={styles.readonlyJob}>
+                <div className={styles.readonlyJobHead}><strong>{job.title}</strong><JobStatusTag status={job.status} t={t} /></div>
+                {job.stage ? <p className={styles.readonlyJobStage}>{job.stage}</p> : null}
+                {job.progressTotal > 0 ? <Progress percent={Math.round(job.progressCurrent / job.progressTotal * 100)} showInfo size="small" /> : null}
+                {job.errorMessage ? <div className={styles.readonlyJobError}>{job.errorMessage}</div> : null}
+                <div className={styles.readonlyTimeline}>
+                  {detail.data?.events.map((event) => (
+                    <article key={event.id}>
+                      <i className={styles[`readonlyLevel${capLevel(event.level)}`] ?? ""} />
+                      <div><strong>{event.stage ?? t("处理")}</strong><time>{formatTimestamp(event.createdAt, language)}</time><p>{event.message}</p></div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+    </SideSheet>
+  );
+}
+
+function TaskReadonlyHeader({ task }: { task: ProjectTask }) {
+  const { t } = useAppPreferences();
+  return (
+    <div className={styles.readonlyHeader}>
+      <div className={styles.readonlyHeaderTopline}>
+        <span className={styles.readonlyHeaderBadge}>{task.agentProfile}</span>
+        <strong className={styles.readonlyHeaderTitle} title={task.title}>{task.title}</strong>
+      </div>
+      <div className={styles.readonlyHeaderMeta}><span className={statusTagClass(task.status)}>{t(statusTagLabel(task.status))}</span><span>{t("优先级 {priority}", { priority: task.priority.toUpperCase() })}</span><span>{t("任务类型：{type}", { type: t(taskTypeLabel(task.taskType)) })}</span></div>
+    </div>
+  );
+}
+
+function ReadonlyItem({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  return <div className={`${styles.readonlyItem} ${wide ? styles.readonlyItemWide : ""}`}><span>{label}</span><strong title={value}>{value}</strong></div>;
+}
+
+function JobStatusTag({ status, t }: { status: string; t: (key: string) => string }) {
+  const map: Record<string, [string, "green" | "blue" | "orange" | "red" | "grey"]> = {
+    running: ["运行中", "blue"],
+    succeeded: ["成功", "green"],
+    succeeded_with_warnings: ["部分失败", "orange"],
+    failed: ["失败", "red"],
+    cancelled: ["已取消", "grey"],
+    interrupted: ["已中断", "grey"],
+    queued: ["等待中", "grey"],
+  };
+  const [label, color] = map[status] ?? [status, "grey"];
+  return <Tag size="small" color={color}>{t(label)}</Tag>;
+}
+
+function capLevel(level: string) {
+  if (!level) return "";
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
 

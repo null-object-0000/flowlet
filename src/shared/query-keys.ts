@@ -71,6 +71,11 @@ export const queryKeys = {
     detail: (projectId: string) => [...queryKeys.project.all, "detail", projectId] as const,
     tasks: (projectId: string) => [...queryKeys.project.all, "tasks", projectId] as const,
   },
+  projectTaskRunner: {
+    all: ["project", "task-runner"] as const,
+    state: () => [...queryKeys.projectTaskRunner.all, "state"] as const,
+    queued: () => [...queryKeys.projectTaskRunner.all, "queued"] as const,
+  },
   backgroundTask: {
     all: ["background-task"] as const,
     list: (filter?: unknown) => [...queryKeys.backgroundTask.all, "list", filter] as const,

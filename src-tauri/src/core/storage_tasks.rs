@@ -1166,7 +1166,7 @@ impl Storage {
         connection.execute("UPDATE background_jobs SET progress_current=?2, progress_total=?3, updated_at=datetime('now') WHERE id=?1", params![id,current,total])?;
         Ok(())
     }
-    fn is_job_cancel_requested(&self, id: &str) -> Result<bool, StorageError> {
+    pub(crate) fn is_job_cancel_requested(&self, id: &str) -> Result<bool, StorageError> {
         let connection = self
             .connection
             .lock()

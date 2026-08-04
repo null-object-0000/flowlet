@@ -109,6 +109,7 @@ pub(crate) fn save_project_task(
             task_type: task.task_type,
             agent_profile: task.agent_profile.trim().to_string(),
             priority: task.priority,
+            last_job_id: task.last_job_id,
             created_at: task.created_at,
             updated_at: task.updated_at,
         })
@@ -125,4 +126,47 @@ pub(crate) fn delete_project_task(
         .storage
         .delete_project_task(&project_id, &task_id)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn run_project_task(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    project_id: String,
+    task_id: String,
+) -> Result<crate::core::agent_task_runner::RunProjectTaskResult, String> {
+    let storage = state.storage.clone();
+    crate::core::agent_task_runner::run_project_task(storage, app_handle, project_id, task_id).await
+}
+
+#[tauri::command]
+pub(crate) fn get_project_task_runner_state(
+) -> Result<crate::core::agent_task_runner::ProjectTaskRunnerState, String> {
+    Ok(crate::core::agent_task_runner::task_runner_state())
+}
+
+#[tauri::command]
+pub(crate) fn list_queued_project_tasks(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ProjectTask>, String> {
+    state
+        .storage
+        .list_queued_project_tasks()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn set_project_task_status(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    status: String,
+) -> Result<(), String> {
+    if !matches!(status.as_str(), "submitted" | "in_progress" | "review" | "done") {
+        return Err("任务状态无效".to_string());
+    }
+    state
+        .storage
+        .set_task_status(&task_id, &status)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }

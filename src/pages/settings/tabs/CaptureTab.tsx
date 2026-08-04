@@ -59,7 +59,7 @@ export function CaptureTab() {
             help={t("超过保留时间后自动清理，统计汇总不会受影响")}
             control={(
               <Select
-                value={data?.body_retention_days ?? 3}
+                value={data?.body_retention_days ?? 7}
                 optionList={[
                   { value: 1, label: t("1 天") },
                   { value: 3, label: t("3 天") },
@@ -76,7 +76,7 @@ export function CaptureTab() {
             help={t("达到上限后优先清理较早的数据")}
             control={(
               <Select
-                value={data?.body_max_size_mb ?? 512}
+                value={data?.body_max_size_mb ?? 1024}
                 className={styles.smallSelect}
                 optionList={[
                   { value: 128, label: "128 MB" },

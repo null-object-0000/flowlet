@@ -147,9 +147,9 @@ function TaskBoard({ project, tasks }: { project: Project; tasks: ReturnType<typ
   const { t } = useAppPreferences();
   const actions = useProjectTaskActions(project.id);
   const [editing, setEditing] = useState<ProjectTask | "new" | null>(null);
-  const [draft, setDraft] = useState({ title: "", description: "", taskType: "code" as ProjectTaskType, agentProfile: "Claude Code", priority: "p1" as ProjectTaskPriority });
+  const [draft, setDraft] = useState({ title: "", description: "", taskType: "code" as ProjectTaskType, agentProfile: "Claude Code", priority: "p2" as ProjectTaskPriority });
   const grouped = useMemo(() => Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, tasks.data?.filter((task) => column.statuses.includes(task.status)) ?? []])) as Record<string, ProjectTask[]>, [tasks.data]);
-  const openEditor = (task: ProjectTask | "new") => { setEditing(task); setDraft(task === "new" ? { title: "", description: "", taskType: "code", agentProfile: "Claude Code", priority: "p1" } : { title: task.title, description: task.description, taskType: task.taskType, agentProfile: task.agentProfile, priority: task.priority }); };
+  const openEditor = (task: ProjectTask | "new") => { setEditing(task); setDraft(task === "new" ? { title: "", description: "", taskType: "code", agentProfile: "Claude Code", priority: "p2" } : { title: task.title, description: task.description, taskType: task.taskType, agentProfile: task.agentProfile, priority: task.priority }); };
   const save = async () => {
     if (!editing || !draft.title.trim()) return;
     const task = editing === "new" ? { ...newProjectTask(project.id, draft.title), description: draft.description.trim(), taskType: draft.taskType, agentProfile: draft.agentProfile, priority: draft.priority } : { ...editing, ...draft, title: draft.title.trim(), description: draft.description.trim(), updatedAt: new Date().toISOString() };

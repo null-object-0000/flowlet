@@ -64,7 +64,7 @@ export function newProjectTask(projectId: string, title: string): ProjectTask {
     status: "draft",
     taskType: "code",
     agentProfile: "Claude Code",
-    priority: "p1",
+    priority: "p2",
     createdAt: now,
     updatedAt: now,
   };

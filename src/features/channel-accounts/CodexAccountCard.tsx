@@ -90,7 +90,7 @@ export function CodexAccountCard({ account, language }: { account: CodexAccountR
   );
 }
 
-function ResetCredits({
+export function ResetCredits({
   credits,
   language,
 }: {
@@ -175,7 +175,7 @@ function UsageWindow({ window, language }: { window: CodexUsageWindow; language:
   );
 }
 
-function formatPlan(plan: string | null | undefined, fallback: string) {
+export function formatPlan(plan: string | null | undefined, fallback: string) {
   if (!plan) return fallback;
   const labels: Record<string, string> = {
     free: "Free",
@@ -190,13 +190,13 @@ function formatPlan(plan: string | null | undefined, fallback: string) {
   return labels[plan.toLowerCase()] || plan;
 }
 
-function formatAuthMode(mode: string | null | undefined, t: (source: string) => string) {
+export function formatAuthMode(mode: string | null | undefined, t: (source: string) => string) {
   if (mode === "chatgpt") return "ChatGPT";
   if (mode === "apiKey") return "API Key";
   return mode || t("未知");
 }
 
-function formatCredits(
+export function formatCredits(
   credits: NonNullable<CodexAccountReport["credits"]>,
   t: (source: string, variables?: Record<string, string | number>) => string,
 ) {

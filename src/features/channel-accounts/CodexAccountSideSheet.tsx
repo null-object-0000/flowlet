@@ -4,6 +4,7 @@ import type { CodexAccountReport, CodexAccountsReport } from "../../domains/agen
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { CodexAccountCard } from "./CodexAccountCard";
+import { CodexAccountEditor } from "./CodexAccountEditor";
 import styles from "./CodexAccountSideSheet.module.css";
 
 const { Text, Title } = Typography;
@@ -120,6 +121,14 @@ export function CodexAccountSideSheet({
             <Text className={styles.environmentMessage} type="tertiary">{t("正在查询 Codex 账号与用量…")}</Text>
           ) : !visibleAccounts.length ? (
             <Text className={styles.environmentMessage} type="tertiary">{t("未检测到 Codex 登录账号")}</Text>
+          ) : accountId && focused ? (
+            <CodexAccountEditor
+              account={focused}
+              language={language}
+              refreshing={accountLoading}
+              error={accountError}
+              onRefresh={() => onRefreshAccountOne?.()}
+            />
           ) : (
             <div className={styles.codexAccountList}>
               {visibleAccounts.map((account) => (

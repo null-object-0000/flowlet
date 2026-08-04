@@ -199,3 +199,203 @@
 .resetCreditNotice {
   display: block;
 }
+
+/* Codex 账号编辑页（Qwen Token Plan 风格，只读）。 */
+.editor {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.editorSection {
+  display: grid;
+  gap: 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.editorSection:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.editorSection h3 {
+  margin: 0;
+  color: var(--semi-color-text-0);
+  font-size: 17px;
+}
+
+.resourceModeHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.resourceModeHeading > span {
+  display: grid;
+  gap: 4px;
+}
+
+.resourceModeHeading small {
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.basicFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+  color: var(--semi-color-text-1);
+  font-size: 13px;
+}
+
+.quotaSummaryCard {
+  padding: 12px 14px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  background: var(--semi-color-bg-2);
+  display: grid;
+  gap: 10px;
+}
+
+.quotaSummaryHeading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.quotaSummaryHeading > strong {
+  color: var(--semi-color-text-0);
+  font-size: 14px;
+}
+
+.quotaSummaryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1.65fr) minmax(0, 1.15fr);
+}
+
+.quotaSummaryGrid > div {
+  min-width: 0;
+  padding: 0 12px;
+  border-left: 1px solid var(--flowlet-color-border);
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.quotaSummaryGrid > div:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.quotaSummaryGrid > div:last-child {
+  padding-right: 0;
+}
+
+.quotaSummaryGrid small {
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+}
+
+.quotaSummaryGrid strong {
+  color: var(--semi-color-text-0);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.quotaProgress {
+  display: grid;
+  gap: 5px;
+}
+
+.quotaProgressHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quotaProgressHeading strong {
+  color: var(--semi-color-text-1);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.quotaResetTime {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quotaResetTime b {
+  color: var(--semi-color-text-1);
+  font-weight: 500;
+  text-align: right;
+}
+
+.quotaSpanAll {
+  grid-column: span 2;
+}
+
+.timeSummary {
+  gap: 8px;
+}
+
+.timeSummary > span {
+  display: grid;
+  gap: 2px;
+}
+
+.syncSection {
+  display: grid;
+  gap: 8px;
+}
+
+.syncControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.syncError {
+  display: block;
+}
+
+.accountInfo {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.accountInfo > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  align-content: start;
+  justify-items: start;
+}
+
+.accountInfo strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 620px) {
+  .basicFields, .accountInfo { grid-template-columns: 1fr; }
+  .quotaSummaryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 14px; }
+  .quotaSummaryGrid > div { padding: 0 10px; }
+  .quotaSummaryGrid > div:nth-child(3) { padding-left: 0; border-left: 0; }
+  .quotaSpanAll { grid-column: span 2; }
+}

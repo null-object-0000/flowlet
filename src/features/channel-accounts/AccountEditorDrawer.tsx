@@ -1140,7 +1140,7 @@ function QwenTokenPlanPanel({
             </span>
             <span>
               <small>{t("最近同步")}</small>
-              <strong>{syncedAt ? formatLocalDate(syncedAt) : "-"}</strong>
+              <strong>{syncedAt ? formatFullTimestamp(syncedAt, language) : "-"}</strong>
             </span>
           </div>
         </div>

@@ -165,3 +165,109 @@ describe("CodexAccountSideSheet single-account mode", () => {
     expect(onShowAll).toHaveBeenCalled();
   });
 });
+
+describe("CodexAccountSideSheet single-account editor (Qwen Token Plan style)", () => {
+  it("renders the editor layout with read-only basics and a 7-day-only quota module", () => {
+    render(
+      <CodexAccountSideSheet
+        visible
+        accounts={cachedAccounts}
+        accountId="user-1"
+        onRefreshAccount={noop}
+        onRefreshAccountOne={noop}
+        onAuthorizeAccount={noop}
+        onClose={noop}
+        onCopy={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    // 基础信息：账号名称只读，无 API Key。
+    expect(screen.getByText("基础信息")).toBeInTheDocument();
+    expect(screen.getByLabelText("账号名称")).toHaveValue("cached@example.com");
+    expect(screen.getByLabelText("账号名称")).toBeDisabled();
+    expect(screen.getByText("启用状态")).toBeInTheDocument();
+    expect(screen.getByText("已启用")).toBeInTheDocument();
+
+    // 资源模式：订阅额度自动同步。
+    expect(screen.getByText("资源模式")).toBeInTheDocument();
+    expect(screen.getByText("订阅额度自动同步")).toBeInTheDocument();
+    expect(screen.getByText("Codex 账户用量")).toBeInTheDocument();
+    expect(screen.getByText("自动同步")).toBeInTheDocument();
+
+    // 仅 7 天窗口（primary 10 080 分钟，used_percent 38），渲染 7 天模块，不渲染 5 小时。
+    expect(screen.getByText("7 天 62%")).toBeInTheDocument();
+    expect(screen.queryByText(/5 小时/)).not.toBeInTheDocument();
+
+    // 时间汇总只保留「最近同步」，无「套餐到期」。
+    expect(screen.getByText("最近同步")).toBeInTheDocument();
+    expect(screen.queryByText("套餐到期")).not.toBeInTheDocument();
+
+    // 同步区：立即刷新。
+    expect(screen.getByRole("button", { name: /立即刷新/ })).toBeInTheDocument();
+  });
+
+  it("renders both 5-hour and 7-day quota modules when both windows exist", () => {
+    const bothWindows: CodexAccountsReport = {
+      accounts: [{
+        account_id: "user-3",
+        signed_in: true,
+        auth_mode: "chatgpt",
+        email: "both@example.com",
+        plan_type: "plus",
+        primary: { used_percent: 20, window_duration_mins: 360, resets_at: 1_789_200_000 },
+        secondary: { used_percent: 40, window_duration_mins: 10_080, resets_at: 1_789_200_000 },
+        credits: null,
+        rate_limit_reset_credits: null,
+        rate_limit_reached_type: null,
+        source: "oauth",
+        updated_at: "2026-07-18T10:00:00Z",
+        stale: false,
+        error: null,
+      }],
+    };
+
+    render(
+      <CodexAccountSideSheet
+        visible
+        accounts={bothWindows}
+        accountId="user-3"
+        onRefreshAccount={noop}
+        onRefreshAccountOne={noop}
+        onAuthorizeAccount={noop}
+        onClose={noop}
+        onCopy={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText("5 小时 80%")).toBeInTheDocument();
+    expect(screen.getByText("7 天 60%")).toBeInTheDocument();
+  });
+
+  it("keeps extra account info (plan, auth mode, credits) below the editor", () => {
+    const withCredits: CodexAccountsReport = {
+      accounts: [{
+        ...cachedAccounts.accounts[0],
+        credits: { has_credits: true, unlimited: false, balance: "120" },
+      }],
+    };
+
+    render(
+      <CodexAccountSideSheet
+        visible
+        accounts={withCredits}
+        accountId="user-1"
+        onRefreshAccount={noop}
+        onRefreshAccountOne={noop}
+        onAuthorizeAccount={noop}
+        onClose={noop}
+        onCopy={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText("会员套餐")).toBeInTheDocument();
+    expect(screen.getByText("Plus")).toBeInTheDocument();
+    expect(screen.getByText("登录方式")).toBeInTheDocument();
+    expect(screen.getByText("ChatGPT")).toBeInTheDocument();
+    expect(screen.getByText("余额 120")).toBeInTheDocument();
+  });
+});

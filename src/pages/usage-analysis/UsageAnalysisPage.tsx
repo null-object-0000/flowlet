@@ -19,7 +19,7 @@ import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
-import { weekRange, type TimeRangeValue } from "../../shared/timeRange";
+import { dayRange, type TimeRangeValue } from "../../shared/timeRange";
 import { CalendarTimeRangeControl, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
 import {
   averageElapsedMsOf,
@@ -53,7 +53,7 @@ const BRANDED_AGENT_IDS = new Set(["claude-code", "opencode", "pi", "chatgpt-des
 export function UsageAnalysisPage() {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 30_000 });
-  const [timeRange, setTimeRange] = useState<TimeRangeValue>(() => weekRange());
+  const [timeRange, setTimeRange] = useState<TimeRangeValue>(() => dayRange());
   const [dimension, setDimension] = useState<ConsumptionDimension>("model");
   const [matrixMetric, setMatrixMetric] = useState<ConsumptionMetric>("tokens");
   const [matrixExpanded, setMatrixExpanded] = useState(false);

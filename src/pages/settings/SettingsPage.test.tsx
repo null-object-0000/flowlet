@@ -31,8 +31,8 @@ vi.mock("../../features/settings/useLogCaptureSetting", () => ({
       data: {
         capture_req_body: true,
         capture_res_body: true,
-        body_retention_days: 3,
-        body_max_size_mb: 512,
+        body_retention_days: 7,
+        body_max_size_mb: 1024,
         redact_sensitive_headers: false,
       },
       isLoading: false,

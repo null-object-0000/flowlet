@@ -30,8 +30,14 @@ export function WindowControls() {
     };
   }, []);
 
-  const startWindowDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+  const onDragRegionMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.buttons !== 1) return;
+    if (event.detail === 2) {
+      // 双击标题栏：切换最大化/还原。Windows 上 startDragging 会进入系统拖动
+      // 模态循环并吞掉 dblclick，因此不能依赖 onDoubleClick，需在 mousedown 直接处理。
+      void windowCommands.toggleMaximize();
+      return;
+    }
     event.preventDefault();
     void windowCommands.startDragging();
   };
@@ -39,7 +45,7 @@ export function WindowControls() {
 
   return (
     <>
-      <div className={styles.dragRegion} onPointerDown={startWindowDrag} onDoubleClick={toggleMaximize} role="presentation" />
+      <div className={styles.dragRegion} onMouseDown={onDragRegionMouseDown} role="presentation" data-testid="titlebar-drag-region" />
       <div className={styles.controls}>
         <Button
           className={styles.control}

@@ -15,6 +15,8 @@ export function configureAppOverlayLayers(options: { mobile?: boolean } = {}) {
   });
 }
 
+// 抽屉头部只有「空白区域」作为窗口拖拽区；标题、按钮、标签等有内容或交互的
+// 元素保持原有功能（如标题文字可选中、按钮可点击），不参与拖拽。
 const SIDE_SHEET_DRAG_EXCLUDE_SELECTOR = [
   "a",
   "button",
@@ -29,6 +31,7 @@ const SIDE_SHEET_DRAG_EXCLUDE_SELECTOR = [
   ".semi-input-wrapper",
   ".semi-select",
   ".semi-tabs-tab",
+  ".semi-sidesheet-title",
 ].join(",");
 
 export function configureSideSheetWindowDragging(startDragging: () => Promise<void>) {

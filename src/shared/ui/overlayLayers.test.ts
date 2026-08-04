@@ -56,6 +56,22 @@ describe("app overlay layers", () => {
     expect(startDragging).toHaveBeenCalledOnce();
   });
 
+  it("keeps SideSheet header title text selectable instead of dragging", () => {
+    const startDragging = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const header = document.createElement("div");
+    header.className = "semi-sidesheet-header";
+    const title = document.createElement("div");
+    title.className = "semi-sidesheet-title";
+    title.textContent = "Token 用量明细";
+    header.append(title);
+    document.body.append(header);
+    cleanup = configureSideSheetWindowDragging(startDragging);
+
+    title.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+
+    expect(startDragging).not.toHaveBeenCalled();
+  });
+
   it("keeps SideSheet header controls interactive", () => {
     const startDragging = vi.fn<() => Promise<void>>().mockResolvedValue();
     const header = document.createElement("div");

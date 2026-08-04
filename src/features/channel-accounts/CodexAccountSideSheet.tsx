@@ -3,6 +3,7 @@ import { IconChevronRight, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
 import type { CodexAccountReport, CodexAccountsReport } from "../../domains/agent/types";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { CodexAccountCard } from "./CodexAccountCard";
 import { CodexAccountEditor } from "./CodexAccountEditor";
 import styles from "./CodexAccountSideSheet.module.css";
@@ -65,7 +66,7 @@ export function CodexAccountSideSheet({
       motion={false}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
       title={sheetTitle}
-      width="min(760px, 96vw)"
+      width={DETAIL_SHEET_WIDTH}
       onCancel={onClose}
       bodyStyle={{ padding: 0 }}
     >

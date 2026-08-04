@@ -28,6 +28,7 @@ import { formatFullTimestamp } from "../../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../../shared/formatters/number";
 import { queryKeys } from "../../../shared/query-keys";
 import { APP_OVERLAY_Z_INDEX } from "../../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../../shared/ui/drawerWidth";
 import styles from "./SyncTab.module.css";
 
 type S3Draft = Omit<S3SyncConfigInput, "secretAccessKey"> & { secretAccessKey: string };
@@ -779,7 +780,7 @@ function S3ConfigSideSheet({
     visible={draft != null}
     motion={false}
     zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
-    width="min(760px, 96vw)"
+    width={DETAIL_SHEET_WIDTH}
     bodyStyle={{ padding: 0 }}
     onCancel={onCancel}
     footer={(

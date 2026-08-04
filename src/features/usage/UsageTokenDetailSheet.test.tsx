@@ -9,6 +9,7 @@ vi.mock("@douyinfe/semi-ui-19", () => ({
 }));
 
 import { UsageTokenDetailSheet } from "./UsageTokenDetailSheet";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 
 describe("UsageTokenDetailSheet", () => {
   it("compares total, Flowlet, and Agent native values by metric in the mobile bottom sheet", () => {
@@ -60,7 +61,7 @@ describe("UsageTokenDetailSheet", () => {
     );
 
     expect(screen.getByTestId("desktop-sheet")).toHaveAttribute("data-placement", "right");
-    expect(screen.getByTestId("desktop-sheet")).toHaveAttribute("data-width", "min(760px, 96vw)");
+    expect(screen.getByTestId("desktop-sheet")).toHaveAttribute("data-width", DETAIL_SHEET_WIDTH);
   });
 });
 

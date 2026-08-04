@@ -4,6 +4,7 @@ import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { ConfigRow, StatusRow, globalConfigTag } from "./globalConfigPresentation";
 import type {
   AgentEnvironmentReport,
@@ -267,7 +268,7 @@ export function AgentAccessSideSheet({
         </Tabs>
       }
       headerStyle={{ paddingBottom: 0 }}
-      width="min(760px, 96vw)"
+      width={DETAIL_SHEET_WIDTH}
       footer={null}
       bodyStyle={{ padding: 0 }}
       onCancel={onClose}
@@ -721,4 +722,3 @@ function InstallationPathRow({
     </div>
   );
 }
-

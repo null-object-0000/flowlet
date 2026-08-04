@@ -18,6 +18,7 @@ import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { weekRange, type TimeRangeValue } from "../../shared/timeRange";
 import { CalendarTimeRangeControl, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
 import {
@@ -308,7 +309,7 @@ export function UsageAnalysisPage() {
       <SideSheet
         visible={matrixExpanded}
         motion={false}
-        width="min(760px, 96vw)"
+        width={DETAIL_SHEET_WIDTH}
         title={t("完整交叉归因矩阵")}
         onCancel={() => setMatrixExpanded(false)}
         footer={null}

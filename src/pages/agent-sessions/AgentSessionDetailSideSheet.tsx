@@ -5,6 +5,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { AgentSessionInteractionEvent, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionNativeUsage, AgentSessionRow, OpenCodePermissionRequest } from "../../domains/agent-session/types";
 import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { Markdown } from "../../shared/ui/Markdown";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
@@ -65,7 +66,7 @@ export function AgentSessionDetailSideSheet({
     <SideSheet
       visible
       motion={false}
-      width="min(760px, 96vw)"
+      width={DETAIL_SHEET_WIDTH}
       title={<SessionHeader session={session} language={language} />}
       onCancel={onClose}
       footer={null}

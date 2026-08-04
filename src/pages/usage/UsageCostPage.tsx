@@ -14,6 +14,7 @@ import { useRequestLogs } from "../../features/request-logs/useRequestLogs";
 import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLogDetailSideSheet";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { TimePeriodSwitch, TimeRangeNavigator, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
 import { UsageTokenDetailSheet } from "../../features/usage/UsageTokenDetailSheet";
 import type { DailyUsageTotal } from "../../domains/device-sync/types";
@@ -587,7 +588,7 @@ export function UsageCostPage() {
         title={t("未识别 Token 的请求")}
         visible={unknownRequestsOpen && selectedRequestId == null}
         onCancel={() => setUnknownRequestsOpen(false)}
-        width="min(760px, 96vw)"
+        width={DETAIL_SHEET_WIDTH}
         bodyStyle={{ padding: 0 }}
         zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
         footer={null}

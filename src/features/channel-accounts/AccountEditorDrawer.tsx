@@ -25,6 +25,7 @@ import {
 import styles from "./AccountEditorDrawer.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { useScrapeConsole } from "./useScrapeConsole";
 import type { ScrapeBalanceResult } from "../../domains/account/commands";
 import { formatFullTimestamp, parseTimestamp } from "../../shared/formatters/datetime";
@@ -319,7 +320,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       visible
       motion={false}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
-      width="min(760px, 96vw)"
+      width={DETAIL_SHEET_WIDTH}
       title={(
         <div className={styles.title}>
           <strong>{t(isEdit ? "编辑渠道账号" : "新增渠道账号")}</strong>

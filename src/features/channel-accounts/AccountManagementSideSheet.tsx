@@ -9,6 +9,7 @@ import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./AccountManagementSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import type { ScrapeBalanceResult } from "../../domains/account/commands";
 
@@ -102,7 +103,7 @@ export function AccountManagementSideSheet(props: Props) {
         motion={false}
         zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
         title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("已启用 {enabled} / 共 {total} 个账号", { enabled: accounts.filter((item) => item.enabled).length, total: accounts.length })}</em></span>}
-        width="min(760px, 96vw)"
+        width={DETAIL_SHEET_WIDTH}
         footer={(
           <Space style={{ justifyContent: "flex-end", width: "100%" }}>
             <Button onClick={closeManager}>{t("关闭")}</Button>

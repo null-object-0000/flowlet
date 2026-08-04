@@ -22,6 +22,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatInteger } from "../../shared/formatters/number";
 import { formatCostCny } from "../../shared/formatters/cost";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 
 const JSON_VIEWER_OPTIONS = { readOnly: true, autoWrap: true } as const;
 type Translate = (source: string, variables?: Record<string, string | number>) => string;
@@ -39,7 +40,7 @@ export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { 
     <SideSheet
       visible
       motion={false}
-      width="min(760px, 96vw)"
+      width={DETAIL_SHEET_WIDTH}
       title={finalRow ? <DetailTitle row={finalRow} requestId={requestId} /> : <div className={styles.title}><strong>{t("请求详情")}</strong><span>{requestId}</span></div>}
       onCancel={onClose}
       footer={null}

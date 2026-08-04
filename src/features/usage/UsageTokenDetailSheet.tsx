@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { formatInteger, type NumberLanguage } from "../../shared/formatters/number";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import type { UsageTokenDetailColumn, UsageTokenDetails } from "./deviceUsagePresentation";
 import styles from "./UsageTokenDetailSheet.module.css";
 
@@ -101,7 +102,7 @@ export function UsageTokenDetailSheet({
       visible={visible}
       onCancel={onClose}
       placement="right"
-      width="min(760px, 96vw)"
+      width={DETAIL_SHEET_WIDTH}
       bodyStyle={{ padding: "16px 18px 24px" }}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
       footer={null}

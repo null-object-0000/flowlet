@@ -4,6 +4,7 @@ import { CopyableAccessValue } from "./CopyableAccessValue";
 import styles from "./ApiAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 
 const { Text, Title } = Typography;
 
@@ -50,7 +51,7 @@ export function ApiAccessSideSheet({ visible, onClose, baseUrl, bindConfig, runn
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
       onCancel={onClose}
       title={t("API 接入详情")}
-      width="min(760px, 96vw)"
+      width={DETAIL_SHEET_WIDTH}
       footer={null}
       bodyStyle={{ padding: 0 }}
     >

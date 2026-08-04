@@ -1518,8 +1518,8 @@ impl Default for LogCaptureConfig {
             capture_res_body: true,
             max_body_bytes: 1024 * 1024,
             redact_sensitive_headers: false,
-            body_retention_days: 3,
-            body_max_size_mb: 512,
+            body_retention_days: 7,
+            body_max_size_mb: 1024,
             body_prune_ratio: 0.1,
         }
     }

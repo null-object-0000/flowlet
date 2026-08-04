@@ -481,19 +481,72 @@ Codex 使用自定义模型（`flowlet-pro` / `flowlet-flash`）时，必须通�
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         { "effort": "low", "description": "Fast responses with lighter reasoning" },
+        { "effort": "medium", "description": "Greater reasoning depth for complex problems" },
         { "effort": "high", "description": "Extra high reasoning depth for complex problems" },
-        { "effort": "max", "description": "Maximum reasoning depth for the hardest problems" }
+        { "effort": "xhigh", "description": "Maximum reasoning depth for the hardest problems" }
       ],
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 1,
+      "base_instructions": "",
+      "supports_reasoning_summaries": false,
+      "default_reasoning_summary": "none",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": "freeform",
+      "web_search_tool_type": "text",
+      "truncation_policy": { "mode": "tokens", "limit": 10000 },
+      "supports_parallel_tool_calls": true,
+      "supports_image_detail_original": false,
       "context_window": 1048576,
-      "supported_in_api": true
+      "max_context_window": 1048576,
+      "auto_compact_token_limit": null,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
+      "input_modalities": [ "text" ],
+      "availability_nux": null,
+      "upgrade": null
     }
   ]
 }
 ```
 
+### 字段与 Codex 版本兼容性
+
+Codex CLI 通过 serde 反序列化该文件，**缺失必填字段会导致 Codex 启动直接报错**：
+
+```text
+failed to parse model_catalog_json path `...` as JSON: missing field `shell_type` ...
+```
+
+必填/关键字段：
+
+- `slug` / `display_name` / `description`：模型标识与展示名；
+- `default_reasoning_level` / `supported_reasoning_levels`：默认推理档位与可选档位；
+- `shell_type`：shell 工具类型，Flowlet 取值 `shell_command`（启用 shell 工具；`disabled` 会禁用）；
+- `visibility`：`list`（出现在模型选择器）或 `hide`；
+- `supported_in_api` / `priority`：是否可用于 API 与模型选择器排序（数值越小越靠前）；
+- `base_instructions`：发送给上游的系统提示词，Flowlet 聚合模型取空串；
+- `supports_reasoning_summaries` / `support_verbosity` / `default_verbosity`：0.137.0 起为必填/可空
+  字段，Flowlet 置 `false` / `false` / `null`；
+- `truncation_policy`：工具输出截断策略，`{ "mode": "tokens", "limit": 10000 }` 与官方内置模型一致；
+- `context_window` / `max_context_window` / `effective_context_window_percent`：上下文窗口声明与
+  可用输入比例（默认 95）；
+- `experimental_supported_tools`：实验性工具列表，空数组；
+- `availability_nux` / `upgrade` / `auto_compact_token_limit`：可空字段，Flowlet 置 `null`。
+
+推理档位注意：Codex CLI 0.137.0 只接受 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`，
+**不接受 `max` / `ultra`**（更高版本才支持）。DeepSeek 官方示例中的 `"effort": "max"` 与
+`minimal_client_version: "0.144.0"` 面向 Codex ≥ 0.144；Flowlet 目录面向 0.137.0 及以后，
+统一用 `xhigh` 表达最高推理档位，且不声明 `minimal_client_version`。
+
 `context_window` 与 `supported_reasoning_levels` 是 Flowlet 对外声明值：实际可用上下文与推理档位
 取决于当前路由模型，仅当路由模型支持时才完整生效。调整后需**重新执行 Codex 一键接入**并重启
 Codex（`model_catalog_json` 仅在 Codex 启动时读取一次）。
+
+`src-tauri/src/core/codex_model_catalog.rs` 的回归测试会校验每个模型的必填字段与推理档位合法值，
+防止再次出现缺字段导致 Codex 无法启动。
 
 ### 加载方式
 

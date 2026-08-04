@@ -439,6 +439,10 @@ Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent（`AgentKind = "c
 `model_catalog_json = "~/.codex/model-catalog.flowlet.json"`；该字段仅在 Codex 启动时
 读取一次，补写后需重启 Codex。生成文件名带 `flowlet` 前缀，避免覆盖 DeepSeek
 （`~/.codex/models.json`）或千问（`~/.codex/model-catalog.local.json`）的目录文件。
+模型目录是 Codex 启动时 serde 反序列化的必填字段集合，缺 `shell_type` 等字段会直接报错
+（`missing field ...`）；推理档位只使用 `none` / `minimal` / `low` / `medium` / `high` /
+`xhigh`，不使用 `max` / `ultra`（后者需 Codex ≥ 0.144）。字段清单见 `docs/config.md` 第 10 节，
+`src-tauri/src/core/codex_model_catalog.rs` 有对应回归测试。
 Codex 的 User-Agent（`codex_cli_rs/`）可区分，归属走 UA 规则（config.json 默认集 +
 内置兜底规则），不需要 `x-flowlet-client` 标记头。
 

@@ -33,9 +33,12 @@
 .workspacePanel { min-height: 68px; padding: 12px 14px; display: flex; align-items: center; gap: 16px; border-top: 1px solid var(--flowlet-color-border); }
 .workspaceCopy { min-width: 0; display: grid; gap: 4px; }
 .workspaceCopy > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); line-height: 1.5; }
-.workspaceConsent, .workspaceImport { display: grid; gap: 12px; }
-.workspaceConsent p, .workspaceImport p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); line-height: 1.65; }
-.workspaceImport textarea { font-family: var(--flowlet-font-family-mono, monospace); font-size: var(--flowlet-font-size-caption); }
+.workspaceJoinHint { grid-column: 1 / -1; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.workspaceConsent { display: grid; gap: 12px; }
+.workspaceConsent p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); line-height: 1.65; }
+.workspaceOption { display: grid; gap: 4px; }
+.workspaceOption > span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.qrWorkspaceHint { margin: 14px 0 -6px; color: var(--flowlet-color-text-tertiary); font-size: 12px; line-height: 1.6; }
 .lanBody { display: grid; }
 .lanService { padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 2fr) minmax(140px, 1fr); gap: 12px; border-bottom: 1px solid var(--flowlet-color-border); }
 .lanService > div { min-width: 0; display: grid; gap: 4px; align-content: start; }

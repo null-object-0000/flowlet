@@ -1,18 +1,19 @@
 import { IconCopy, IconMore, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
-import { Button, Dropdown, Input, Modal, SideSheet, Switch, Tabs, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
+import { Button, Checkbox, Dropdown, Input, Modal, SideSheet, Switch, Tabs, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
+import { useQueryClient } from "@tanstack/react-query";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useAppPreferences } from "../../../app/preferences/AppPreferences";
 import {
-  parseS3ConnectionPackage,
-  serializeS3ConnectionPackage,
-} from "../../../domains/device-sync/s3ConnectionPackage";
+  parseSyncPackage,
+  serializeDesktopWorkspacePackage,
+} from "../../../domains/account-workspace/syncPackage";
+import { serializeS3ConnectionPackage } from "../../../domains/device-sync/s3ConnectionPackage";
 import type {
   DeviceUsageImportPreview,
   S3SyncConfigInput,
 } from "../../../domains/device-sync/types";
-import type { DesktopAccountWorkspacePackage } from "../../../domains/account-workspace/types";
 import { useAccountWorkspaceSync } from "../../../features/channel-accounts/useAccountWorkspaceSync";
 import {
   useDeviceUsageTransfer,
@@ -24,6 +25,7 @@ import {
 import { errorMessage } from "../../../shared/errors/AppError";
 import { formatFullTimestamp } from "../../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../../shared/formatters/number";
+import { queryKeys } from "../../../shared/query-keys";
 import { APP_OVERLAY_Z_INDEX } from "../../../shared/ui/overlayLayers";
 import styles from "./SyncTab.module.css";
 
@@ -42,12 +44,14 @@ const EMPTY_S3_DRAFT: S3Draft = {
 
 export function SyncTab() {
   const { language, t } = useAppPreferences();
+  const queryClient = useQueryClient();
   const devices = useKnownDevices();
   const settings = useS3SyncSettings();
   const transfer = useDeviceUsageTransfer();
   const lanStatus = useLanServerStatus();
   const lanProbes = useLanProbes();
   const accountWorkspace = useAccountWorkspaceSync();
+  const workspaceEnabled = Boolean(accountWorkspace.status.data?.enabled);
   const [importPath, setImportPath] = useState<string | null>(null);
   const [preview, setPreview] = useState<DeviceUsageImportPreview | null>(null);
   const [renameValue, setRenameValue] = useState<string | null>(null);
@@ -57,14 +61,14 @@ export function SyncTab() {
   const [connectionTab, setConnectionTab] = useState<ConnectionTab | null>(null);
   const [expiresIn, setExpiresIn] = useState(60);
   const [workspaceConsentVisible, setWorkspaceConsentVisible] = useState(false);
-  const [workspaceImportText, setWorkspaceImportText] = useState<string | null>(null);
+  const [includeWorkspace, setIncludeWorkspace] = useState(false);
 
-  const parsedConnection = useMemo(() => {
+  const parsedPackage = useMemo(() => {
     if (connectionText == null || !connectionText.trim()) return null;
     try {
-      return { config: parseS3ConnectionPackage(connectionText), error: null };
+      return { result: parseSyncPackage(connectionText), error: null as string | null };
     } catch (error) {
-      return { config: null, error: errorMessage(error) };
+      return { result: null, error: errorMessage(error) };
     }
   }, [connectionText]);
 
@@ -202,17 +206,37 @@ export function SyncTab() {
     }
   };
 
-  const openShare = async (tab: Extract<ConnectionTab, "qr" | "text"> = "qr") => {
+  const generateShare = async (tab: Extract<ConnectionTab, "qr" | "text">, withWorkspace: boolean) => {
     setConnectionTab(tab);
     try {
-      const config = await transfer.exportS3ConnectionConfig.mutateAsync();
-      setSharePackage({
-        text: serializeS3ConnectionPackage(config),
-        qr: serializeS3ConnectionPackage(config, true),
-      });
+      if (withWorkspace) {
+        const accountPackage = await accountWorkspace.exportDesktopPackage.mutateAsync();
+        setSharePackage({
+          text: serializeDesktopWorkspacePackage(accountPackage),
+          qr: serializeDesktopWorkspacePackage(accountPackage, true),
+        });
+      } else {
+        const config = await transfer.exportS3ConnectionConfig.mutateAsync();
+        setSharePackage({
+          text: serializeS3ConnectionPackage(config),
+          qr: serializeS3ConnectionPackage(config, true),
+        });
+      }
     } catch (error) {
       setConnectionTab(null);
       Toast.error(t("生成连接包失败：{message}", { message: errorMessage(error) }));
+    }
+  };
+
+  const openShare = (tab: Extract<ConnectionTab, "qr" | "text"> = "qr") => {
+    void generateShare(tab, tab === "text" && includeWorkspace);
+  };
+
+  const toggleIncludeWorkspace = (checked: boolean) => {
+    setIncludeWorkspace(checked);
+    if (connectionTab === "text") {
+      setSharePackage(null);
+      void generateShare("text", checked);
     }
   };
 
@@ -225,6 +249,7 @@ export function SyncTab() {
     setConnectionTab(null);
     setSharePackage(null);
     setConnectionText(null);
+    setIncludeWorkspace(false);
   };
 
   const copyConnectionText = async () => {
@@ -238,11 +263,20 @@ export function SyncTab() {
   };
 
   const importConnection = async () => {
-    const config = parsedConnection?.config;
-    if (!config) return;
+    const parsed = parsedPackage?.result;
+    if (!parsed) return;
     try {
-      await transfer.testS3Connection.mutateAsync(config);
-      await transfer.saveS3Config.mutateAsync(config);
+      if (parsed.kind === "workspace") {
+        // 工作区接入包内嵌 S3 连接配置，Rust 端导入时会一并写入并立即同步；
+        // 拉取远端工作区对象本身就完成了凭据与连通性校验。
+        const result = await accountWorkspace.importDesktopPackage.mutateAsync(parsed.package);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.deviceSync.s3Settings() });
+        closeConnectionDialog();
+        Toast.success(t("已加入账号工作区，同步 {count} 个账号", { count: result.accountCount }));
+        return;
+      }
+      await transfer.testS3Connection.mutateAsync(parsed.config);
+      await transfer.saveS3Config.mutateAsync(parsed.config);
       closeConnectionDialog();
       Toast.success(t("S3 连接配置已导入并通过测试"));
     } catch (error) {
@@ -266,28 +300,6 @@ export function SyncTab() {
       Toast.success(t("账号工作区已同步，共 {count} 个账号", { count: result.accountCount }));
     } catch (error) {
       Toast.error(t("同步失败：{message}", { message: errorMessage(error) }));
-    }
-  };
-
-  const copyDesktopWorkspacePackage = async () => {
-    try {
-      const accountPackage = await accountWorkspace.exportDesktopPackage.mutateAsync();
-      await navigator.clipboard.writeText(JSON.stringify(accountPackage, null, 2));
-      Toast.success(t("桌面端账号工作区接入包已复制"));
-    } catch (error) {
-      Toast.error(t("复制失败：{message}", { message: errorMessage(error) }));
-    }
-  };
-
-  const importDesktopWorkspacePackage = async () => {
-    if (!workspaceImportText?.trim()) return;
-    try {
-      const accountPackage = JSON.parse(workspaceImportText) as DesktopAccountWorkspacePackage;
-      const result = await accountWorkspace.importDesktopPackage.mutateAsync(accountPackage);
-      setWorkspaceImportText(null);
-      Toast.success(t("已加入账号工作区，同步 {count} 个账号", { count: result.accountCount }));
-    } catch (error) {
-      Toast.error(t("导入失败：{message}", { message: errorMessage(error) }));
     }
   };
 
@@ -343,16 +355,14 @@ export function SyncTab() {
                 ? t("已统一管理 {count} 个渠道账号；路由、启停和本机地址仍由各设备管理", { count: accountWorkspace.status.data.linkedAccounts })
                 : t("端到端加密同步账号名称、账号 ID、API Key 与工作区默认地址")}
             </span>
+            {!accountWorkspace.status.data?.enabled ? (
+              <span className={styles.workspaceJoinHint}>
+                {t("已有工作区？在「连接新设备 → 导入连接」粘贴接入包即可加入")}
+              </span>
+            ) : null}
           </div>
           <div className={styles.actions}>
             {accountWorkspace.status.data?.enabled ? <>
-              <Button
-                theme="outline"
-                loading={accountWorkspace.exportDesktopPackage.isPending}
-                onClick={() => void copyDesktopWorkspacePackage()}
-              >
-                {t("复制桌面接入包")}
-              </Button>
               <Button
                 type="primary"
                 theme="solid"
@@ -362,7 +372,6 @@ export function SyncTab() {
                 {t("同步账号")}
               </Button>
             </> : <>
-              <Button theme="outline" onClick={() => setWorkspaceImportText("")}>{t("加入已有工作区")}</Button>
               <Button
                 type="primary"
                 theme="solid"
@@ -560,10 +569,10 @@ export function SyncTab() {
             if (next === "import") {
               setConnectionText((current) => current ?? "");
               setConnectionTab(next);
-            } else if (sharePackage) {
-              setConnectionTab(next);
             } else {
-              void openShare(next);
+              // 二维码固定使用普通连接包（面向移动端，不含工作区密钥）；
+              // 连接文本按是否勾选工作区重新生成，切换页签时始终与当前选项一致。
+              void generateShare(next, next === "text" && includeWorkspace);
             }
           }}
         >
@@ -580,6 +589,11 @@ export function SyncTab() {
                   <li><span>2</span><p>{t("点击「扫码连接」，扫描左侧二维码。")}</p></li>
                   <li><span>3</span><p>{t("确认设备名称后，即可开始同步每日用量。")}</p></li>
                 </ol>
+                {workspaceEnabled ? (
+                  <p className={styles.qrWorkspaceHint}>
+                    {t("二维码面向移动端，不包含账号工作区密钥；桌面设备请使用「连接文本」并勾选工作区")}
+                  </p>
+                ) : null}
                 <div className={styles.expireBox}>
                   <span>{t("连接信息将在 {seconds} 秒后失效", { seconds: expiresIn })}</span>
                   <Button icon={<IconRefresh />} theme="outline" loading={transfer.exportS3ConnectionConfig.isPending} onClick={() => void openShare("qr")}>{t("刷新二维码")}</Button>
@@ -589,6 +603,17 @@ export function SyncTab() {
           </Tabs.TabPane>
           <Tabs.TabPane tab={t("连接文本")} itemKey="text">
             <div className={styles.connectionPanel}>
+              {workspaceEnabled ? (
+                <div className={styles.workspaceOption}>
+                  <Checkbox
+                    checked={includeWorkspace}
+                    onChange={(event) => toggleIncludeWorkspace(event.target.checked ?? false)}
+                  >
+                    {t("包含渠道账号工作区")}
+                  </Checkbox>
+                  <span>{t("勾选后连接文本附带工作区解密密钥，仅用于可信的桌面设备")}</span>
+                </div>
+              ) : null}
               <p className={styles.secretNotice}>{t("连接文本包含访问凭证，仅用于你信任的设备。界面默认隐藏 Secret，复制时会复制完整内容。")}</p>
               <pre className={styles.connectionCode}>{sharePackage ? maskConnectionPackage(sharePackage.text) : ""}</pre>
               <div className={styles.connectionFoot}>
@@ -603,26 +628,36 @@ export function SyncTab() {
               <TextArea
                 autoFocus
                 value={connectionText ?? ""}
-                placeholder={t("粘贴 Flowlet S3 连接包 JSON")}
+                placeholder={t("粘贴 Flowlet 连接文本（连接包或账号工作区接入包）")}
                 autosize={{ minRows: 10, maxRows: 10 }}
                 onChange={setConnectionText}
               />
-              {parsedConnection ? <div className={styles.importResult}>
-                {parsedConnection.config ? <>
-                  <strong>{parsedConnection.config.bucket}</strong>
-                  <span>{parsedConnection.config.endpoint} · {parsedConnection.config.prefix || "flowlet/"}</span>
-                </> : <span className={styles.importError}>{parsedConnection.error}</span>}
+              {parsedPackage ? <div className={styles.importResult}>
+                {parsedPackage.result ? (
+                  parsedPackage.result.kind === "workspace" ? <>
+                    <Tag color="blue" size="small">{t("账号工作区接入包")}</Tag>
+                    <strong>{parsedPackage.result.package.s3.bucket}</strong>
+                    <span>{parsedPackage.result.package.s3.endpoint} · {parsedPackage.result.package.s3.prefix || "flowlet/"}</span>
+                  </> : <>
+                    <strong>{parsedPackage.result.config.bucket}</strong>
+                    <span>{parsedPackage.result.config.endpoint} · {parsedPackage.result.config.prefix || "flowlet/"}</span>
+                  </>
+                ) : <span className={styles.importError}>{parsedPackage.error}</span>}
               </div> : null}
               <div className={styles.connectionFoot}>
-                <span>{t("导入后仅共享设备身份与每日 Token 汇总")}</span>
+                <span>
+                  {parsedPackage?.result?.kind === "workspace"
+                    ? t("导入后将同时配置 S3 同步并加入渠道账号工作区")
+                    : t("导入后仅共享设备身份与每日 Token 汇总")}
+                </span>
                 <Button
                   type="primary"
                   theme="solid"
-                  disabled={!parsedConnection?.config}
-                  loading={transfer.testS3Connection.isPending || transfer.saveS3Config.isPending}
+                  disabled={!parsedPackage?.result}
+                  loading={transfer.testS3Connection.isPending || transfer.saveS3Config.isPending || accountWorkspace.importDesktopPackage.isPending}
                   onClick={() => void importConnection()}
                 >
-                  {t("校验并导入")}
+                  {parsedPackage?.result?.kind === "workspace" ? t("校验并加入") : t("校验并导入")}
                 </Button>
               </div>
             </div>
@@ -643,31 +678,6 @@ export function SyncTab() {
         <div className={styles.workspaceConsent}>
           <p>{t("现有渠道账号将使用独立密钥加密后写入已配置的 S3。加入工作区的桌面设备可读取账号凭据，但移动端连接包不会包含此密钥。")}</p>
           <p>{t("启用后，账号名称、API Key 和工作区默认地址由 S3 统一管理；路由、启停、优先级、模型选择和本机地址仍只保存在当前设备。")}</p>
-        </div>
-      </Modal>
-
-      <Modal
-        title={t("加入渠道账号工作区")}
-        visible={workspaceImportText != null}
-        zIndex={APP_OVERLAY_Z_INDEX.modal}
-        onCancel={() => setWorkspaceImportText(null)}
-        onOk={() => void importDesktopWorkspacePackage()}
-        okButtonProps={{
-          loading: accountWorkspace.importDesktopPackage.isPending,
-          disabled: !workspaceImportText?.trim(),
-        }}
-        okText={t("校验并加入")}
-        cancelText={t("取消")}
-      >
-        <div className={styles.workspaceImport}>
-          <p>{t("粘贴另一台桌面设备导出的接入包。接入包包含 S3 凭据和账号工作区解密密钥，请仅通过可信方式传递。")}</p>
-          <TextArea
-            autoFocus
-            value={workspaceImportText ?? ""}
-            placeholder={t("粘贴 Flowlet 桌面端账号工作区接入包 JSON")}
-            autosize={{ minRows: 9, maxRows: 12 }}
-            onChange={setWorkspaceImportText}
-          />
         </div>
       </Modal>
 
@@ -847,12 +857,21 @@ function formatSyncTime(value: string | null | undefined) {
 
 function maskConnectionPackage(value: string) {
   try {
-    const data = JSON.parse(value) as { config?: { accessKeyId?: string; secretAccessKey?: string } };
-    if (data.config?.accessKeyId) {
-      data.config.accessKeyId = `${data.config.accessKeyId.slice(0, 12)}••••••`;
+    const data = JSON.parse(value) as {
+      config?: { accessKeyId?: string; secretAccessKey?: string };
+      s3?: { accessKeyId?: string; secretAccessKey?: string };
+      accountWorkspaceKey?: string;
+    };
+    // 普通连接包的凭据在 config，账号工作区接入包在 s3；两种包都要隐藏密钥。
+    const secrets = data.config ?? data.s3;
+    if (secrets?.accessKeyId) {
+      secrets.accessKeyId = `${secrets.accessKeyId.slice(0, 12)}••••••`;
     }
-    if (data.config?.secretAccessKey) {
-      data.config.secretAccessKey = "••••••••••••••••••••••••••••";
+    if (secrets?.secretAccessKey) {
+      secrets.secretAccessKey = "••••••••••••••••••••••••••••";
+    }
+    if (data.accountWorkspaceKey) {
+      data.accountWorkspaceKey = "••••••••••••••••••••••••••••";
     }
     return JSON.stringify(data, null, 2);
   } catch {

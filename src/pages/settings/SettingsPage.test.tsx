@@ -314,7 +314,7 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("tab", { name: "扫码连接" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "连接文本" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "导入连接" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByPlaceholderText("粘贴 Flowlet S3 连接包 JSON")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("粘贴 Flowlet 连接文本（连接包或账号工作区接入包）")).toBeInTheDocument();
   });
 
   it("renders the settings navigation and general settings in English", () => {

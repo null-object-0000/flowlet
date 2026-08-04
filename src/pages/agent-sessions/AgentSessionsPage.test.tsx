@@ -253,7 +253,7 @@ describe("AgentSessionsPage", () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     fireEvent.click(screen.getByText("全部客户端"));
-    const codexOption = screen.getByText("ChatGPT (Codex)");
+    const codexOption = screen.getByText("Codex Desktop");
     expect(codexOption).toBeInTheDocument();
     expect(screen.getByText("Codex CLI")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
@@ -394,8 +394,8 @@ describe("AgentSessionsPage", () => {
 
     // 概览：native 来源的统计行显示为 Agent 原生，而非请求指标
     const overview = screen.getByRole("tabpanel", { name: "概览" });
-    expect(screen.getAllByText("ChatGPT (Codex)").some((element) => !overview.contains(element))).toBe(true);
-    expect(within(overview).queryByText("ChatGPT (Codex)")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Codex Desktop").some((element) => !overview.contains(element))).toBe(true);
+    expect(within(overview).queryByText("Codex Desktop")).not.toBeInTheDocument();
     expect(within(overview).getByText("Agent 原生")).toBeInTheDocument();
 
     // 会话 Tab：显示 Agent 来源，无请求日志入口

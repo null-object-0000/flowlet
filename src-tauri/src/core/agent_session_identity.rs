@@ -18,7 +18,7 @@ pub(crate) fn from_http_headers(headers: &HeaderMap) -> Option<AgentSessionIdent
         headers
             .get(name)
             .and_then(|value| value.to_str().ok())
-            .and_then(valid_header_value)
+            .and_then(|value| session_header_value(value, name))
     })
 }
 
@@ -34,7 +34,7 @@ pub(crate) fn from_header_json(headers_json: &str) -> Option<AgentSessionIdentit
             .iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .and_then(|(_, value)| value.as_str())
-            .and_then(valid_header_value)
+            .and_then(|value| session_header_value(value, name))
     })
 }
 
@@ -89,6 +89,20 @@ fn parse_with(header: impl Fn(&str) -> Option<String>) -> Option<AgentSessionIde
         }
     }
 
+    // Codex Desktop：以 UA 子串为门控，避免误读其他客户端的同名 `session-id` 头。
+    let user_agent_is_codex_desktop = header("user-agent")
+        .is_some_and(|value| value.to_ascii_lowercase().contains("codex desktop/"));
+    if user_agent_is_codex_desktop {
+        let session_id = header("session-id")
+            .or_else(|| header("x-session-id"))
+            .or_else(|| codex_turn_metadata_session_id(&header))?;
+        return Some(AgentSessionIdentity {
+            agent_type: "codex-desktop".to_string(),
+            session_id,
+            parent_session_id: None,
+        });
+    }
+
     let opencode_session = header("x-opencode-session");
     let user_agent_is_opencode =
         header("user-agent").is_some_and(|value| value.to_ascii_lowercase().contains("opencode/"));
@@ -110,6 +124,26 @@ fn valid_header_value(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty() && value != "[redacted]" && value.len() <= MAX_AGENT_SESSION_ID_BYTES)
         .then(|| value.to_string())
+}
+
+/// 从 Codex Desktop 的 `x-codex-turn-metadata` JSON 头解析会话 id（`session_id` 字段）。
+/// 该头是 JSON 元数据而非会话 id，可能远超会话 id 的 512 字节上限，
+/// 读取时放行（见 `session_header_value`），解析出的 `session_id` 仍按会话 id 校验。
+fn codex_turn_metadata_session_id(header: &impl Fn(&str) -> Option<String>) -> Option<String> {
+    let metadata = header("x-codex-turn-metadata")?;
+    let value = serde_json::from_str::<serde_json::Value>(&metadata).ok()?;
+    let session_id = value.get("session_id").and_then(serde_json::Value::as_str)?;
+    valid_header_value(session_id)
+}
+
+/// 读取单个会话相关头的值。`x-codex-turn-metadata` 是 JSON 元数据而非会话 id，
+/// 可能远超 512 字节上限，需放行（trim 后原样返回）；其余头按会话 id 规则校验。
+fn session_header_value(value: &str, name: &str) -> Option<String> {
+    if name.eq_ignore_ascii_case("x-codex-turn-metadata") {
+        let value = value.trim();
+        return (!value.is_empty()).then(|| value.to_string());
+    }
+    valid_header_value(value)
 }
 
 #[cfg(test)]
@@ -164,6 +198,103 @@ mod tests {
         assert_eq!(
             from_header_json(r#"{"X-Flowlet-Client":"pi","X-Flowlet-Session":"pi-session"}"#,),
             Some(expected),
+        );
+    }
+
+    #[test]
+    fn codex_desktop_session_from_http_and_json_paths() {
+        let ua = "Codex Desktop/0.146.0-alpha.3.1 (Windows 10.0.26200; x86_64) unknown";
+        let session = "019fcb47-4f45-7703-95ed-b036943789ab";
+
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static(ua));
+        headers.insert("session-id", HeaderValue::from_static(session));
+
+        let expected = AgentSessionIdentity {
+            agent_type: "codex-desktop".to_string(),
+            session_id: session.to_string(),
+            parent_session_id: None,
+        };
+        assert_eq!(from_http_headers(&headers), Some(expected.clone()));
+        assert_eq!(
+            from_header_json(
+                &serde_json::json!({
+                    "User-Agent": ua,
+                    "Session-Id": session,
+                })
+                .to_string(),
+            ),
+            Some(expected),
+        );
+    }
+
+    #[test]
+    fn codex_desktop_session_requires_ua_gate() {
+        // 没有 Codex Desktop 的 UA 门控时，`session-id` 头不被识别，
+        // 避免误读其他客户端的同名头。
+        let session = "019fcb47-4f45-7703-95ed-b036943789ab";
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static("other-agent/1.0"));
+        headers.insert("session-id", HeaderValue::from_static(session));
+        assert_eq!(from_http_headers(&headers), None);
+    }
+
+    #[test]
+    fn codex_desktop_session_falls_back_to_turn_metadata() {
+        // 无 `session-id` 头时，从 `x-codex-turn-metadata` JSON 解析 `session_id`。
+        let ua = "Codex Desktop/0.146.0-alpha.3.1";
+        let session = "019fcb47-4f45-7703-95ed-b036943789ab";
+        let metadata = serde_json::json!({
+            "installation_id": "3607006f-68c5-4fb5-9c5c-421d59a95a9f",
+            "session_id": session,
+            "thread_id": "019fcb47-4f45-7703-95ed-b036943789ab",
+            "turn_id": "019fcb55-e0e7-7b53-92db-d29689118d30",
+        })
+        .to_string();
+
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static(ua));
+        headers.insert("x-codex-turn-metadata", HeaderValue::from_str(&metadata).unwrap());
+
+        let expected = AgentSessionIdentity {
+            agent_type: "codex-desktop".to_string(),
+            session_id: session.to_string(),
+            parent_session_id: None,
+        };
+        assert_eq!(from_http_headers(&headers), Some(expected.clone()));
+        assert_eq!(
+            from_header_json(
+                &serde_json::json!({ "user-agent": ua, "x-codex-turn-metadata": metadata }).to_string(),
+            ),
+            Some(expected),
+        );
+    }
+
+    #[test]
+    fn codex_desktop_turn_metadata_may_exceed_session_id_limit() {
+        // turn-metadata 可能远超 512 字节：读取放行，但解析出的 session_id 仍校验。
+        let ua = "Codex Desktop/0.146.0-alpha.3.1";
+        let session = "019fcb47-4f45-7703-95ed-b036943789ab";
+        let metadata = serde_json::json!({
+            "session_id": session,
+            "big": "x".repeat(MAX_AGENT_SESSION_ID_BYTES * 2),
+        })
+        .to_string();
+        assert!(metadata.len() > MAX_AGENT_SESSION_ID_BYTES);
+
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static(ua));
+        headers.insert(
+            "x-codex-turn-metadata",
+            HeaderValue::from_str(&metadata).unwrap(),
+        );
+        assert_eq!(
+            from_http_headers(&headers),
+            Some(AgentSessionIdentity {
+                agent_type: "codex-desktop".to_string(),
+                session_id: session.to_string(),
+                parent_session_id: None,
+            }),
         );
     }
 

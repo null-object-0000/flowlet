@@ -2737,7 +2737,7 @@ fn usage_summary_includes_priced_native_model_events_without_double_counting() {
         1,
         "unknown-model and observed events stay excluded"
     );
-    assert_eq!(native.client_id.as_deref(), Some("codex"));
+    assert_eq!(native.client_id.as_deref(), Some("codex-desktop"));
     assert_eq!(native.account_id.as_deref(), Some("codex-desktop"));
     assert_eq!(native.upstream_model.as_deref(), Some("gpt-test"));
     assert_eq!(native.request_count, 0);
@@ -3235,7 +3235,7 @@ fn usage_breakdown_for_sync_includes_historical_native_model_usage() {
         .find(|row| row.upstream_model.as_deref() == Some("gpt-5.6-sol"))
         .expect("native model breakdown");
     assert_eq!(native.channel_id.as_deref(), Some("agent-native"));
-    assert_eq!(native.client_id.as_deref(), Some("codex"));
+    assert_eq!(native.client_id.as_deref(), Some("codex-desktop"));
     assert_eq!(native.request_count, 0);
     assert_eq!(native.native_event_count, 1);
     assert_eq!(native.known_tokens, 140);

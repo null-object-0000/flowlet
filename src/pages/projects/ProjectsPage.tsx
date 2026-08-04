@@ -203,4 +203,4 @@ function TaskBoard({ project, tasks }: { project: Project; tasks: ReturnType<typ
   </div>;
 }
 
-function agentLabel(agentType: AgentSessionRow["agentType"]) { return ({ "codex-desktop": "ChatGPT (Codex)", "codex-cli": "Codex CLI", "claude-code": "Claude Code", opencode: "OpenCode", pi: "Pi" } as const)[agentType]; }
+function agentLabel(agentType: AgentSessionRow["agentType"]) { return ({ "codex-desktop": "Codex Desktop", "codex-cli": "Codex CLI", "claude-code": "Claude Code", opencode: "OpenCode", pi: "Pi" } as const)[agentType]; }

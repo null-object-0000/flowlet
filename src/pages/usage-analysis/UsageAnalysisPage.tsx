@@ -47,7 +47,7 @@ const DIMENSION_OPTIONS: Array<{ value: ConsumptionDimension; label: string }> =
 ];
 
 /** AgentBrandMark 已内置品牌图标的客户端 ID（其余客户端展示首字母徽标）。 */
-const BRANDED_AGENT_IDS = new Set(["claude-code", "opencode", "pi", "chatgpt-desktop", "codex"]);
+const BRANDED_AGENT_IDS = new Set(["claude-code", "opencode", "pi", "chatgpt-desktop", "codex", "codex-desktop"]);
 
 export function UsageAnalysisPage() {
   const { language, t } = useAppPreferences();

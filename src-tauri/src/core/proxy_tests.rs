@@ -355,6 +355,47 @@ fn identifies_client_by_ua_substring() {
 }
 
 #[test]
+fn identifies_codex_desktop_and_cli_by_ua() {
+    let rules = vec![
+        UaClientRule {
+            id: "codex".to_string(),
+            pattern: "codex_cli_rs/".to_string(),
+            name: "Codex".to_string(),
+            enabled: true,
+        },
+        UaClientRule {
+            id: "codex-desktop".to_string(),
+            pattern: "Codex Desktop/".to_string(),
+            name: "Codex Desktop".to_string(),
+            enabled: true,
+        },
+    ];
+
+    // Codex Desktop 的 UA 与 CLI 互不冲突：各自命中自己的规则。
+    let mut desktop = HeaderMap::new();
+    desktop.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static(
+            "Codex Desktop/0.146.0-alpha.3.1 (Windows 10.0.26200; x86_64) unknown",
+        ),
+    );
+    assert_eq!(
+        identify_client_by_ua(&desktop, &rules),
+        Some(("codex-desktop".to_string(), "Codex Desktop".to_string()))
+    );
+
+    let mut cli = HeaderMap::new();
+    cli.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("codex_cli_rs/0.40.0"),
+    );
+    assert_eq!(
+        identify_client_by_ua(&cli, &rules),
+        Some(("codex".to_string(), "Codex".to_string()))
+    );
+}
+
+#[test]
 fn ua_no_match_returns_none() {
     let mut headers = HeaderMap::new();
     headers.insert(

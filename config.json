@@ -19,6 +19,12 @@
       "enabled": true
     },
     {
+      "id": "codex-desktop",
+      "pattern": "Codex Desktop/",
+      "name": "Codex Desktop",
+      "enabled": true
+    },
+    {
       "id": "flowlet",
       "pattern": "Flowlet/",
       "name": "Flowlet",

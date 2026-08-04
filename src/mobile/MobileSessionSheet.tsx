@@ -459,7 +459,7 @@ function sessionInteractionVersion(events: SyncedAgentInteractionEvent[]) {
 export function agentLabel(agentType: string) {
   switch (agentType) {
     case "claude-code": return "Claude Code";
-    case "codex-desktop": return "Codex";
+    case "codex-desktop": return "Codex Desktop";
     case "codex-cli": return "Codex CLI";
     case "opencode": return "OpenCode";
     case "pi": return "Pi";

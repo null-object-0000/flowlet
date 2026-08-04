@@ -498,7 +498,10 @@ fn estimate_native_public_cost(
 
 fn native_agent_client_id(agent_type: &str) -> &str {
     match agent_type {
-        "codex-desktop" | "codex-cli" => "codex",
+        // Codex Desktop 保持与 UA 归属（client_id = "codex-desktop"）一致；
+        // Codex CLI 仍归 "codex"（与 UA 规则 id 一致）。
+        "codex-desktop" => "codex-desktop",
+        "codex-cli" => "codex",
         other => other,
     }
 }

@@ -579,12 +579,20 @@ pub(super) fn ensure_config_file(path: &std::path::Path) {
 ///（config.json 早于新规则）无需手动改配置即可获得新 Agent 的客户端归属；
 /// 新安装则从 config.json 默认集中直接获得同样的规则。
 fn builtin_ua_rules() -> Vec<UaClientRule> {
-    vec![UaClientRule {
-        id: "codex".to_string(),
-        pattern: "codex_cli_rs/".to_string(),
-        name: "Codex".to_string(),
-        enabled: true,
-    }]
+    vec![
+        UaClientRule {
+            id: "codex".to_string(),
+            pattern: "codex_cli_rs/".to_string(),
+            name: "Codex".to_string(),
+            enabled: true,
+        },
+        UaClientRule {
+            id: "codex-desktop".to_string(),
+            pattern: "Codex Desktop/".to_string(),
+            name: "Codex Desktop".to_string(),
+            enabled: true,
+        },
+    ]
 }
 
 /// 从本地 config.json 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。

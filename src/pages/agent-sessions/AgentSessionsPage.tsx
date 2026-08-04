@@ -75,7 +75,7 @@ export function AgentSessionsPage() {
           value={filter.agentType || "__all__"}
           optionList={[
             { value: "__all__", label: t("全部客户端") },
-            { value: "codex-desktop", label: "ChatGPT (Codex)" },
+            { value: "codex-desktop", label: "Codex Desktop" },
             { value: "codex-cli", label: "Codex CLI" },
             { value: "claude-code", label: "Claude Code" },
             { value: "opencode", label: "OpenCode" },
@@ -232,7 +232,7 @@ function SessionStatus({ row }: { row: AgentSessionRow }) {
 
 function agentLabel(agentType: AgentSessionRow["agentType"]) {
   if (agentType === "claude-code") return "Claude Code";
-  if (agentType === "codex-desktop") return "ChatGPT (Codex)";
+  if (agentType === "codex-desktop") return "Codex Desktop";
   if (agentType === "codex-cli") return "Codex CLI";
   if (agentType === "pi") return "Pi";
   return "OpenCode";

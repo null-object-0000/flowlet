@@ -744,7 +744,7 @@ function projectName(path: string | null) {
 
 function agentLabel(agentType: AgentSessionRow["agentType"]) {
   if (agentType === "claude-code") return "Claude Code";
-  if (agentType === "codex-desktop") return "ChatGPT (Codex)";
+  if (agentType === "codex-desktop") return "Codex Desktop";
   if (agentType === "codex-cli") return "Codex CLI";
   if (agentType === "pi") return "Pi";
   return "OpenCode";

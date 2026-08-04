@@ -944,7 +944,7 @@ impl Storage {
                               CHECK (task_type IN ('code', 'readonly')),
                 agent_profile TEXT NOT NULL DEFAULT '',
                 priority      TEXT NOT NULL DEFAULT 'p1'
-                              CHECK (priority IN ('p0', 'p1', 'p2', 'p3')),
+                              CHECK (priority IN ('p0', 'p1', 'p2')),
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -1793,8 +1793,8 @@ fn table_has_column(
 }
 
 /// 项目任务表结构迁移：补齐 task_type / agent_profile / priority 三列，
-/// 并保证 status 的 CHECK 含 'draft'（草稿/已提交拆分）、priority 的 CHECK 含 'p0'。
-/// SQLite 修改 CHECK 需重建表；判断依据是 status CHECK 是否已含 'draft'。
+/// 并保证 status 的 CHECK 含 'draft'（草稿/已提交拆分）、priority 的 CHECK 不含 'p3'（已移除 P3 档）。
+/// SQLite 修改 CHECK 需重建表；判断依据是 status CHECK 是否已含 'draft'、priority 是否仍含 'p3'。
 fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageError> {
     for (column, definition) in [
         ("task_type", "TEXT NOT NULL DEFAULT 'code'"),
@@ -1804,13 +1804,13 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
         add_column_if_missing(connection, "project_tasks", column, definition)?;
     }
 
-    // status CHECK 是否已含 'draft'（含则新 schema 已生效，无需重建）。
+    // status CHECK 是否已含 'draft'、priority 是否已移除 'p3'（都满足则新 schema 已生效，无需重建）。
     let sql: String = connection.query_row(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_tasks'",
         [],
         |row| row.get(0),
     )?;
-    if !sql.contains("'draft'") {
+    if !sql.contains("'draft'") || sql.contains("'p3'") {
         connection.execute_batch(
             "BEGIN;
              ALTER TABLE project_tasks RENAME TO project_tasks_legacy;
@@ -1825,7 +1825,7 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
                                CHECK (task_type IN ('code', 'readonly')),
                  agent_profile TEXT NOT NULL DEFAULT '',
                  priority      TEXT NOT NULL DEFAULT 'p1'
-                               CHECK (priority IN ('p0', 'p1', 'p2', 'p3')),
+                               CHECK (priority IN ('p0', 'p1', 'p2')),
                  created_at    TEXT NOT NULL,
                  updated_at    TEXT NOT NULL,
                  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE

@@ -10,7 +10,7 @@ export type ProjectTaskStatus = "draft" | "submitted" | "in_progress" | "review"
 
 export type ProjectTaskType = "code" | "readonly";
 
-export type ProjectTaskPriority = "p0" | "p1" | "p2" | "p3";
+export type ProjectTaskPriority = "p0" | "p1" | "p2";
 
 export type ProjectTask = {
   id: string;

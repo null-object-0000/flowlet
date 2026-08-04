@@ -87,7 +87,7 @@ pub(crate) fn save_project_task(
     if task.agent_profile.trim().is_empty() {
         return Err("Agent Profile 不能为空".to_string());
     }
-    if !matches!(task.priority.as_str(), "p0" | "p1" | "p2" | "p3") {
+    if !matches!(task.priority.as_str(), "p0" | "p1" | "p2") {
         return Err("任务优先级无效".to_string());
     }
     if state

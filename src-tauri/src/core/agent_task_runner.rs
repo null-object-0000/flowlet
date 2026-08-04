@@ -138,10 +138,11 @@ pub(crate) async fn run_project_task(
     storage
         .set_task_status(&task_id, "in_progress")
         .map_err(|error| format!("标记任务执行中失败：{error}"))?;
-    // 记录最近一次执行的 job，供只读详情展示 Agent 执行情况。
+    // 记录最近一次执行的 job + 追加执行历史，供只读详情展示 Agent 执行情况。
     storage
         .set_task_last_job(&task_id, &job_id)
         .map_err(|error| format!("记录任务执行日志失败：{error}"))?;
+    let _ = storage.append_task_execution(&task_id, &job_id);
 
     // 6. 记录当前运行信息供前端查询。
     if let Ok(mut current) = AGENT_TASK_CURRENT.lock() {

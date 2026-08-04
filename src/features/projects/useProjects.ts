@@ -138,6 +138,7 @@ export function newProjectTask(projectId: string, title: string): ProjectTask {
     priority: "p2",
     lastJobId: null,
     rejectionReason: null,
+    executionHistory: null,
     createdAt: now,
     updatedAt: now,
   };

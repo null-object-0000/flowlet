@@ -122,6 +122,7 @@ pub(crate) fn save_project_task(
             priority: task.priority,
             last_job_id: task.last_job_id,
             rejection_reason: task.rejection_reason,
+            execution_history: task.execution_history,
             created_at: task.created_at,
             updated_at: task.updated_at,
         })
@@ -198,6 +199,20 @@ pub(crate) fn set_project_task_status(
             .storage
             .set_task_rejection_reason(&task_id, Some(&trimmed))
             .map_err(|error| error.to_string())?;
+        // 原因写进该次执行的 job timeline，并标记执行历史为已退回 → 只读详情长期可见。
+        if let Some(job_id) = state
+            .storage
+            .get_task_last_job(&task_id)
+            .map_err(|error| error.to_string())?
+        {
+            let message = if trimmed.is_empty() {
+                "任务被退回".to_string()
+            } else {
+                format!("任务被退回：{trimmed}")
+            };
+            let _ = state.storage.add_job_event(&job_id, "warning", "退回", &message);
+            let _ = state.storage.mark_task_execution_rejected(&task_id, &job_id, &trimmed);
+        }
     }
     Ok(())
 }

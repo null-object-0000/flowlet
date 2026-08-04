@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Empty, Input, Modal, Popconfirm, Progress, Select, SideSheet, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
+import { Button, Empty, Input, Modal, Popconfirm, Progress, Select, SideSheet, Tabs, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconFolder, IconPlus } from "@douyinfe/semi-icons";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { backgroundTaskCommands } from "../../domains/background-task/commands";
-import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskPriority, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType } from "../../domains/project/types";
+import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskPriority, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
+import { parseTaskExecutionHistory } from "../../domains/project/types";
 import { useBackgroundTaskDetail } from "../../features/background-tasks/useBackgroundTasks";
 import { newProject, newProjectTask, useProject, useProjectActions, useProjects, useProjectTaskActions, useProjectTaskRunnerActions, useProjectTaskScheduler, useProjectTasks } from "../../features/projects/useProjects";
 import { errorMessage } from "../../shared/errors/AppError";
@@ -261,14 +262,16 @@ function statusTagClass(status: ProjectTaskStatus) {
   }
 }
 
-/** 提交后任务的只读详情抽屉：顶部任务信息 + Agent 执行情况与输出。 */
+/** 提交后任务的只读详情抽屉：顶部任务信息 + 执行历史（每次执行的 Agent 情况）。 */
 function TaskReadonlySideSheet({ task, onClose, onApprove, onReject }: { task: ProjectTask | null; onClose: () => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void }) {
   const { language, t } = useAppPreferences();
-  const jobId = task?.lastJobId ?? null;
-  const detail = useBackgroundTaskDetail(jobId);
+  // 执行历史按时间正序（history[0] 最早），默认选中最近一次。
+  const history = useMemo(() => parseTaskExecutionHistory(task?.executionHistory ?? null), [task?.executionHistory]);
+  const [activeIndex, setActiveIndex] = useState(history.length > 0 ? history.length - 1 : 0);
+  // 切换任务时重置到最近一次执行。
+  useEffect(() => { setActiveIndex(history.length > 0 ? history.length - 1 : 0); }, [task?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isReview = task?.status === "review";
-  const job = detail.data?.job;
   const footer = (
     <div className={styles.taskSheetFooter}><span></span><span className={styles.taskSheetFooterActions}>
       {isReview && task ? (
@@ -305,29 +308,60 @@ function TaskReadonlySideSheet({ task, onClose, onApprove, onReject }: { task: P
             </div>
           </section>
           <section className={styles.readonlySection}><strong className={styles.readonlySectionTitle}>{t("Agent 执行情况")}</strong>
-            {!jobId ? <div className={styles.readonlyEmpty}>{t("该任务尚未执行，暂无 Agent 执行记录")}</div> : null}
-            {jobId && detail.isLoading ? <div className={styles.readonlyEmpty}>{t("正在读取执行记录…")}</div> : null}
-            {jobId && detail.isError ? <div className={styles.readonlyEmpty}>{t("执行记录读取失败：{message}", { message: detail.error.message })}</div> : null}
-            {job ? (
-              <div className={styles.readonlyJob}>
-                <div className={styles.readonlyJobHead}><strong>{job.title}</strong><JobStatusTag status={job.status} t={t} /></div>
-                {job.stage ? <p className={styles.readonlyJobStage}>{job.stage}</p> : null}
-                {job.progressTotal > 0 ? <Progress percent={Math.round(job.progressCurrent / job.progressTotal * 100)} showInfo size="small" /> : null}
-                {job.errorMessage ? <div className={styles.readonlyJobError}>{job.errorMessage}</div> : null}
-                <div className={styles.readonlyTimeline}>
-                  {detail.data?.events.map((event) => (
-                    <article key={event.id}>
-                      <i className={styles[`readonlyLevel${capLevel(event.level)}`] ?? ""} />
-                      <div><strong>{event.stage ?? t("处理")}</strong><time>{formatTimestamp(event.createdAt, language)}</time><p>{event.message}</p></div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+            {history.length === 0 ? <div className={styles.readonlyEmpty}>{t("该任务尚未执行，暂无 Agent 执行记录")}</div> : (
+              <Tabs type="line" activeKey={String(activeIndex)} onChange={(key) => setActiveIndex(Number(key))}>
+                {history.map((record, index) => (
+                  <Tabs.TabPane tab={executionTabLabel(index, record, t)} itemKey={String(index)} key={record.jobId}>
+                    <JobExecutionView jobId={record.jobId} record={record} />
+                  </Tabs.TabPane>
+                ))}
+              </Tabs>
+            )}
           </section>
         </div>
       ) : null}
     </SideSheet>
+  );
+}
+
+function executionTabLabel(index: number, record: TaskExecutionRecord, t: (key: string, params?: Record<string, string | number>) => string) {
+  const base = t("第 {n} 次执行", { n: index + 1 });
+  return <span className={styles.readonlyTabLabel}>{base}{record.rejected ? <span className={styles.readonlyTabRejected}>{t("已退回")}</span> : null}</span>;
+}
+
+/** 单次执行的详情：job 状态 + 进度 + 事件流（含退回原因 timeline 事件）。 */
+function JobExecutionView({ jobId, record }: { jobId: string; record: TaskExecutionRecord }) {
+  const { language, t } = useAppPreferences();
+  const detail = useBackgroundTaskDetail(jobId);
+  const job = detail.data?.job;
+  return (
+    <div className={styles.readonlyJob}>
+      {record.rejected && record.rejectionReason ? (
+        <div className={styles.readonlyRejected}>
+          <strong>{t("已退回：{reason}", { reason: record.rejectionReason })}</strong>
+          {record.rejectedAt ? <time>{formatTimestamp(record.rejectedAt, language)}</time> : null}
+        </div>
+      ) : null}
+      {detail.isLoading ? <div className={styles.readonlyEmpty}>{t("正在读取执行记录…")}</div> : null}
+      {detail.isError ? <div className={styles.readonlyEmpty}>{t("执行记录读取失败：{message}", { message: detail.error.message })}</div> : null}
+      {!detail.isLoading && !detail.isError && !job ? <div className={styles.readonlyEmpty}>{t("执行记录已清理或不可用")}</div> : null}
+      {job ? (
+        <>
+          <div className={styles.readonlyJobHead}><strong>{job.title}</strong><JobStatusTag status={job.status} t={t} /></div>
+          {job.stage ? <p className={styles.readonlyJobStage}>{job.stage}</p> : null}
+          {job.progressTotal > 0 ? <Progress percent={Math.round(job.progressCurrent / job.progressTotal * 100)} showInfo size="small" /> : null}
+          {job.errorMessage ? <div className={styles.readonlyJobError}>{job.errorMessage}</div> : null}
+          <div className={styles.readonlyTimeline}>
+            {detail.data?.events.map((event) => (
+              <article key={event.id}>
+                <i className={styles[`readonlyLevel${capLevel(event.level)}`] ?? ""} />
+                <div><strong>{event.stage ?? t("处理")}</strong><time>{formatTimestamp(event.createdAt, language)}</time><p>{event.message}</p></div>
+              </article>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 

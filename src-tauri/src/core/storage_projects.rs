@@ -1,6 +1,7 @@
 use super::{Storage, StorageError};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +28,10 @@ pub struct ProjectTask {
     pub last_job_id: Option<String>,
     /// 最近一次被退回的原因。执行开始时读取注入 prompt 后清空（不重复注入）。
     pub rejection_reason: Option<String>,
+    /// 执行历史（JSON 数组，可空）。每次执行追加一条
+    /// `{jobId, startedAt, rejected, rejectionReason, rejectedAt}`，供只读详情
+    /// 展示全部历史执行与退回原因。
+    pub execution_history: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -112,7 +117,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, execution_history, created_at, updated_at
              FROM project_tasks WHERE project_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
         )?;
@@ -131,7 +136,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, execution_history, created_at, updated_at
              FROM project_tasks WHERE id = ?1 AND project_id = ?2",
         )?;
         let mut rows = statement.query(params![task_id, project_id])?;
@@ -178,7 +183,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, execution_history, created_at, updated_at
              FROM project_tasks WHERE status = 'submitted'
              ORDER BY CASE priority WHEN 'p0' THEN 0 WHEN 'p1' THEN 1 WHEN 'p2' THEN 2 ELSE 3 END,
                       created_at ASC",
@@ -193,11 +198,11 @@ impl Storage {
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        // last_job_id / rejection_reason 只在任务执行或退回时由专用方法写入，
-        // 编辑保存不覆盖它们。
+        // last_job_id / rejection_reason / execution_history 只在任务执行或退回时
+        // 由专用方法写入，编辑保存不覆盖它们。
         connection.execute(
-            "INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, execution_history, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                title = excluded.title,
                description = excluded.description,
@@ -207,7 +212,7 @@ impl Storage {
                priority = excluded.priority,
                updated_at = excluded.updated_at
              WHERE project_tasks.project_id = excluded.project_id",
-            params![task.id, task.project_id, task.title, task.description, task.status, task.task_type, task.agent_profile, task.priority, task.last_job_id, task.rejection_reason, task.created_at, task.updated_at],
+            params![task.id, task.project_id, task.title, task.description, task.status, task.task_type, task.agent_profile, task.priority, task.last_job_id, task.rejection_reason, task.execution_history, task.created_at, task.updated_at],
         )?;
         Ok(())
     }
@@ -221,6 +226,97 @@ impl Storage {
         Ok(connection.execute(
             "UPDATE project_tasks SET last_job_id = ?2 WHERE id = ?1",
             params![task_id, job_id],
+        )? > 0)
+    }
+
+    /// 读取任务最近一次执行的 job id（供退回时把原因写进对应 job 的 timeline）。
+    pub fn get_task_last_job(&self, task_id: &str) -> Result<Option<String>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection
+            .query_row(
+                "SELECT last_job_id FROM project_tasks WHERE id = ?1",
+                [task_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StorageError::from)
+    }
+
+    /// 在执行开始时追加一条执行历史 `{jobId, startedAt, rejected:false}`。
+    pub fn append_task_execution(&self, task_id: &str, job_id: &str) -> Result<bool, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let current: Option<String> = connection
+            .query_row(
+                "SELECT execution_history FROM project_tasks WHERE id = ?1",
+                [task_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let mut entries: Vec<Value> = current
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        entries.push(json!({
+            "jobId": job_id,
+            "startedAt": chrono::Utc::now().to_rfc3339(),
+            "rejected": false,
+            "rejectionReason": null,
+            "rejectedAt": null,
+        }));
+        let serialized = serde_json::to_string(&entries)
+            .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+        Ok(connection.execute(
+            "UPDATE project_tasks SET execution_history = ?2 WHERE id = ?1",
+            params![task_id, serialized],
+        )? > 0)
+    }
+
+    /// 退回时标记执行历史中对应 job 为已退回，并记录原因与时间。
+    pub fn mark_task_execution_rejected(
+        &self,
+        task_id: &str,
+        job_id: &str,
+        reason: &str,
+    ) -> Result<bool, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let current: Option<String> = connection
+            .query_row(
+                "SELECT execution_history FROM project_tasks WHERE id = ?1",
+                [task_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(current) = current else {
+            return Ok(false);
+        };
+        let mut entries: Vec<Value> =
+            serde_json::from_str(&current).unwrap_or_default();
+        let mut found = false;
+        for entry in &mut entries {
+            if entry.get("jobId").and_then(Value::as_str) == Some(job_id) {
+                entry["rejected"] = json!(true);
+                entry["rejectionReason"] = json!(reason);
+                entry["rejectedAt"] = json!(chrono::Utc::now().to_rfc3339());
+                found = true;
+            }
+        }
+        if !found {
+            return Ok(false);
+        }
+        let serialized = serde_json::to_string(&entries)
+            .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+        Ok(connection.execute(
+            "UPDATE project_tasks SET execution_history = ?2 WHERE id = ?1",
+            params![task_id, serialized],
         )? > 0)
     }
 
@@ -269,8 +365,9 @@ fn map_project_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectTask
         priority: row.get(7)?,
         last_job_id: row.get(8)?,
         rejection_reason: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        execution_history: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -303,6 +400,7 @@ mod tests {
                 priority: "p1".into(),
                 last_job_id: None,
                 rejection_reason: None,
+                execution_history: None,
                 created_at: project.created_at.clone(),
                 updated_at: project.updated_at.clone(),
             })
@@ -324,6 +422,7 @@ mod tests {
             priority: priority.into(),
             last_job_id: None,
             rejection_reason: None,
+            execution_history: None,
             created_at: created_at.into(),
             updated_at: created_at.into(),
         }

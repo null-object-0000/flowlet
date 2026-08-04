@@ -28,9 +28,31 @@ export type ProjectTask = {
   lastJobId: string | null;
   /** 最近一次被退回的原因。执行时注入给 Agent 后清空（不重复注入）。 */
   rejectionReason: string | null;
+  /** 执行历史（JSON 数组字符串），每次执行追加一条，供只读详情展示全部历史与退回原因。 */
+  executionHistory: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+/** executionHistory JSON 数组的单条记录。 */
+export type TaskExecutionRecord = {
+  jobId: string;
+  startedAt: string;
+  rejected: boolean;
+  rejectionReason: string | null;
+  rejectedAt: string | null;
+};
+
+/** 解析任务 executionHistory JSON 字符串。 */
+export function parseTaskExecutionHistory(history: string | null): TaskExecutionRecord[] {
+  if (!history) return [];
+  try {
+    const parsed: unknown = JSON.parse(history);
+    return Array.isArray(parsed) ? parsed as TaskExecutionRecord[] : [];
+  } catch {
+    return [];
+  }
+}
 
 /** 全局唯一执行槽状态：当前是否有任务在执行、是哪个任务。 */
 export type ProjectTaskRunnerState = {

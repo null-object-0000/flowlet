@@ -1802,6 +1802,7 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
         ("priority", "TEXT NOT NULL DEFAULT 'p2'"),
         ("last_job_id", "TEXT"),
         ("rejection_reason", "TEXT"),
+        ("execution_history", "TEXT"),
     ] {
         add_column_if_missing(connection, "project_tasks", column, definition)?;
     }
@@ -1831,14 +1832,15 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
                                CHECK (priority IN ('p0', 'p1', 'p2')),
                  last_job_id   TEXT,
                  rejection_reason TEXT,
+                 execution_history TEXT,
                  created_at    TEXT NOT NULL,
                  updated_at    TEXT NOT NULL,
                  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
              );
-             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, created_at, updated_at)
+             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, execution_history, created_at, updated_at)
                  SELECT id, project_id, title, description,
                         CASE WHEN status = 'todo' THEN 'draft' ELSE status END,
-                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), last_job_id, rejection_reason, created_at, updated_at
+                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), last_job_id, rejection_reason, execution_history, created_at, updated_at
                  FROM project_tasks_legacy;
              DROP TABLE project_tasks_legacy;
              CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated

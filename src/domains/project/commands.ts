@@ -21,4 +21,5 @@ export const projectCommands = {
   getTaskRunnerState: (): Promise<ProjectTaskRunnerState> => invokeCommand<ProjectTaskRunnerState>("get_project_task_runner_state").catch(wrap),
   listQueuedTasks: (): Promise<ProjectTask[]> => invokeCommand<ProjectTask[]>("list_queued_project_tasks").catch(wrap),
   setTaskStatus: (taskId: string, status: ProjectTaskMutableStatus, reason?: string): Promise<void> => invokeCommand<void>("set_project_task_status", { taskId, status, reason: reason ?? null }).catch(wrap),
+  openDetailWindow: (projectId: string): Promise<void> => invokeCommand<void>("open_project_detail_window", { projectId }).catch(wrap),
 };

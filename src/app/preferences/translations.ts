@@ -44,6 +44,8 @@ const english: Record<string, string> = {
   "更新于 {time}": "Updated {time}",
   "项目不存在或加载失败": "Project not found or failed to load",
   "返回项目列表": "Back to projects",
+  "在独立窗口打开": "Open in separate window",
+  "在独立窗口打开此项目看板，可同时操作主窗口": "Open this project board in a separate window so you can keep using the main window",
   "全部项目": "All projects",
   "会话视角": "Sessions",
   "任务视角": "Tasks",

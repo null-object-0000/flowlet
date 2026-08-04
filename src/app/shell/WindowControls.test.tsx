@@ -40,6 +40,20 @@ describe("WindowControls", () => {
     expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
   });
 
+  it("extends the drag region to the window left edge in standalone mode", () => {
+    render(<WindowControls standalone />);
+
+    const region = screen.getByTestId("titlebar-drag-region");
+    expect(region.className).toContain("dragRegionStandalone");
+  });
+
+  it("keeps the sidebar offset drag region for the main window by default", () => {
+    render(<WindowControls />);
+
+    const region = screen.getByTestId("titlebar-drag-region");
+    expect(region.className).not.toContain("dragRegionStandalone");
+  });
+
   it("toggles maximize on a double mousedown without starting a drag or selecting text", () => {
     render(<WindowControls />);
 

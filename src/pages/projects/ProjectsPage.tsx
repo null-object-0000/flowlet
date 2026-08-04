@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Empty, Input, Modal, Popconfirm, Progress, Select, SideSheet, Tabs, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
-import { IconDelete, IconEdit, IconFolder, IconPlus } from "@douyinfe/semi-icons";
+import { IconDelete, IconEdit, IconExternalOpen, IconFolder, IconPlus } from "@douyinfe/semi-icons";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { backgroundTaskCommands } from "../../domains/background-task/commands";
+import { projectCommands } from "../../domains/project/commands";
 import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskPriority, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
 import { parseTaskExecutionHistory } from "../../domains/project/types";
 import { useBackgroundTaskDetail } from "../../features/background-tasks/useBackgroundTasks";
@@ -96,7 +97,7 @@ function ProjectList() {
   </main>;
 }
 
-function ProjectDetail({ projectId }: { projectId: string }) {
+export function ProjectDetail({ projectId }: { projectId: string }) {
   const { t } = useAppPreferences();
   const navigate = useNavigate();
   const project = useProject(projectId);
@@ -107,12 +108,32 @@ function ProjectDetail({ projectId }: { projectId: string }) {
 
 function LoadedProjectDetail({ project }: { project: Project }) {
   const { language, t } = useAppPreferences();
+  const location = useLocation();
   const refresh = useRefreshControl({ intervalMs: 15_000 });
   const tasks = useProjectTasks(project.id, refresh.autoRefresh);
   // 前端调度器：进入项目详情页即自动轮询「槽空闲 && 有待处理任务」，有空闲就领取执行。
   const scheduler = useProjectTaskScheduler(refresh.autoRefresh);
+  // 独立窗口（#/project-window/...）里不再显示「打开独立窗口」按钮。
+  const isStandaloneWindow = location.pathname.startsWith("/project-window");
+  const openDetailWindow = async () => {
+    try {
+      await projectCommands.openDetailWindow(project.id);
+    } catch (error) {
+      Toast.error(errorMessage(error));
+    }
+  };
   return <main className={styles.page}>
     <PageHeader title={project.name} subtitle={project.directoryPath}>
+      {isStandaloneWindow ? null : (
+        <Button
+          theme="borderless"
+          type="tertiary"
+          icon={<IconExternalOpen />}
+          aria-label={t("在独立窗口打开")}
+          title={t("在独立窗口打开此项目看板，可同时操作主窗口")}
+          onClick={() => void openDetailWindow()}
+        />
+      )}
       <RefreshControl
         autoRefresh={refresh.autoRefresh}
         onToggleAutoRefresh={refresh.toggleAutoRefresh}

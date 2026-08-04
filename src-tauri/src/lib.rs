@@ -1156,6 +1156,7 @@ fn run_desktop() {
             commands::list_project_tasks,
             commands::save_project_task,
             commands::delete_project_task,
+            commands::open_project_detail_window,
             commands::run_project_task,
             commands::get_project_task_runner_state,
             commands::list_queued_project_tasks,

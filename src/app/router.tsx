@@ -10,6 +10,7 @@ import { UsageAnalysisPage } from "../pages/usage-analysis/UsageAnalysisPage";
 import { AgentSessionsPage } from "../pages/agent-sessions/AgentSessionsPage";
 import { TaskLogsPage } from "../pages/task-logs/TaskLogsPage";
 import { ProjectsPage } from "../pages/projects/ProjectsPage";
+import { ProjectDetailWindow } from "../pages/projects/ProjectDetailWindow";
 
 const RequestLogsPage = lazy(() => import("../pages/request-logs/RequestLogsPage").then((module) => ({ default: module.RequestLogsPage })));
 
@@ -31,6 +32,8 @@ export function AppRouter() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
+        {/* 独立窗口：项目详情看板（无侧边栏，自带无边框窗口控制条）。 */}
+        <Route path="project-window/:projectId" element={<ProjectDetailWindow />} />
       </Routes>
     </HashRouter>
   );

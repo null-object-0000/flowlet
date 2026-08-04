@@ -7,6 +7,11 @@
   -webkit-user-select: none;
 }
 
+/* 独立窗口（无侧边栏）：拖拽区从窗口左边缘开始。 */
+.dragRegionStandalone {
+  inset: 0 138px auto 0;
+}
+
 .controls {
   position: fixed;
   top: 0;

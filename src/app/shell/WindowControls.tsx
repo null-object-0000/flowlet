@@ -5,7 +5,12 @@ import { windowCommands } from "../../platform/tauri/window";
 import styles from "./WindowControls.module.css";
 import { useAppPreferences } from "../preferences/AppPreferences";
 
-export function WindowControls() {
+/**
+ * 无边框窗口的顶部控制条：整行拖拽区 + 最小化 / 最大化 / 关闭。
+ * `standalone` 用于独立窗口（没有左侧边栏），拖拽区延伸至窗口左边缘；
+ * 主窗口保持默认值（左侧留出侧边栏宽度）。
+ */
+export function WindowControls({ standalone = false }: { standalone?: boolean }) {
   const { t } = useAppPreferences();
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -47,7 +52,12 @@ export function WindowControls() {
 
   return (
     <>
-      <div className={styles.dragRegion} onMouseDown={onDragRegionMouseDown} role="presentation" data-testid="titlebar-drag-region" />
+      <div
+        className={`${styles.dragRegion}${standalone ? ` ${styles.dragRegionStandalone}` : ""}`}
+        onMouseDown={onDragRegionMouseDown}
+        role="presentation"
+        data-testid="titlebar-drag-region"
+      />
       <div className={styles.controls}>
         <Button
           className={styles.control}

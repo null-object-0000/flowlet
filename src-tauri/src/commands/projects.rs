@@ -1,5 +1,6 @@
 use crate::core::storage::{Project, ProjectTask};
 use crate::AppState;
+use tauri::Manager;
 
 #[tauri::command]
 pub(crate) fn list_projects(state: tauri::State<'_, AppState>) -> Result<Vec<Project>, String> {
@@ -214,5 +215,59 @@ pub(crate) fn set_project_task_status(
             let _ = state.storage.mark_task_execution_rejected(&task_id, &job_id, &trimmed);
         }
     }
+    Ok(())
+}
+
+/// 在独立窗口中打开项目详情看板（无侧边栏、无边框窗口）。
+/// 同一项目已打开过窗口时聚焦复用，避免重复创建。
+/// 独立窗口复用主窗口的 WebView 数据目录，保证语言/主题等本地偏好一致。
+#[tauri::command]
+pub(crate) fn open_project_detail_window(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+) -> Result<(), String> {
+    let label = format!("project-detail-{project_id}");
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let project = state
+        .storage
+        .get_project(&project_id)
+        .map_err(|error| format!("读取项目失败：{error}"))?
+        .ok_or_else(|| "项目不存在".to_string())?;
+
+    let data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("解析应用数据目录失败：{error}"))?
+        .join("main-webview");
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|error| format!("创建应用数据目录失败：{error}"))?;
+
+    // 与主窗口同一份 index.html，通过 hash 路由进入独立窗口专属页面。
+    let url = tauri::WebviewUrl::App(format!("index.html#/project-window/{project_id}").into());
+    let builder = tauri::WebviewWindowBuilder::new(&app, label, url)
+        .title(format!("Flowlet · {}", project.name))
+        .inner_size(960.0, 720.0)
+        .min_inner_size(720.0, 480.0)
+        .decorations(false)
+        .resizable(true)
+        .maximizable(true)
+        .visible(false)
+        .data_directory(data_dir);
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(
+        crate::core::webview_profile::WINDOWS_CACHE_LIMIT_BROWSER_ARGS,
+    );
+    let window = builder
+        .build()
+        .map_err(|error| format!("创建项目详情独立窗口失败：{error}"))?;
+    let _ = window.show();
+    let _ = window.set_focus();
     Ok(())
 }

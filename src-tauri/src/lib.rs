@@ -961,6 +961,7 @@ fn run_desktop() {
                     if crate::core::account_workspace_sync::is_enabled(&s3_timer_storage) {
                         match crate::core::account_workspace_sync::sync(
                             s3_timer_storage.clone(),
+                            "background",
                         )
                         .await
                         {

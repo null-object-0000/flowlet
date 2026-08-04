@@ -4,7 +4,12 @@ import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/accou
 import { CHATGPT_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
-import { codexAccountToPseudoChannelAccount, getCodexUsageDisplay, getCodexNameSummary } from "./codexPseudoAccount";
+import {
+  codexAccountToPseudoChannelAccount,
+  getCodexUsageDisplay,
+  getCodexNameSummary,
+  isObservableCodexAccount,
+} from "./codexPseudoAccount";
 import { OverviewActionLink } from "../../shared/ui/OverviewActionLink";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import { ChannelBrandLogo } from "./ChannelBrandLogo";
@@ -31,9 +36,9 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
   const enabledCount = accounts.filter((a) => a.enabled).length;
 
   // 将 Codex 账号转为伪渠道账号，排在所有正常账号后面。
-  const codexPseudoAccounts = (codexAccounts ?? []).map((report, index) =>
-    codexAccountToPseudoChannelAccount(report, index),
-  );
+  const codexPseudoAccounts = (codexAccounts ?? [])
+    .filter(isObservableCodexAccount)
+    .map((report, index) => codexAccountToPseudoChannelAccount(report, index));
   const allAccounts = [...accounts, ...codexPseudoAccounts];
 
   return (

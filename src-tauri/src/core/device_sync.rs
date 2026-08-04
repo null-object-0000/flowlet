@@ -1222,6 +1222,7 @@ pub async fn run_configured_pull(
 pub async fn sync_device_usage(
     storage: Storage,
     identity: DeviceIdentity,
+    job_id: &str,
 ) -> Result<S3DeviceSyncResult, String> {
     let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
     let secret = read_secret(&config)?;
@@ -1229,6 +1230,12 @@ pub async fn sync_device_usage(
     let prefix = config.object_prefix();
     let current_key = config.snapshot_key(&identity.device_id);
     let objects = store.list(&prefix).await?;
+    let _ = storage.add_job_event(
+        job_id,
+        "info",
+        "列出远端对象",
+        &format!("在 {prefix} 下共发现 {} 个对象", objects.len()),
+    );
     let current_etag = objects
         .iter()
         .find(|object| object.key == current_key)
@@ -1252,6 +1259,12 @@ pub async fn sync_device_usage(
         .into_iter()
         .filter(|object| object.key != current_key && object.key.ends_with("/snapshot.json"))
         .collect::<Vec<_>>();
+    let _ = storage.add_job_event(
+        job_id,
+        "info",
+        "读取远端设备",
+        &format!("发现 {} 台远端设备快照（不含本机）", remote_objects.len()),
+    );
 
     let mut bundles = Vec::new();
     let mut failed_objects = 0usize;
@@ -1328,11 +1341,27 @@ pub async fn sync_device_usage(
     })
     .await
     .map_err(|_| "导入远端设备快照任务失败".to_string())??;
+    let _ = storage.add_job_event(
+        job_id,
+        "info",
+        "导入远端用量",
+        &format!(
+            "成功导入 {} 台设备，新增或更新 {} 天，{} 天未变化",
+            import_result.0, import_result.1, import_result.2
+        ),
+    );
 
     let snapshot = build_device_snapshot(storage.clone(), identity.clone()).await?;
     let bundle = DeviceUsageBundle::new(snapshot);
     let bytes =
         serde_json::to_vec_pretty(&bundle).map_err(|_| "序列化当前设备快照失败".to_string())?;
+    let uploaded_bytes = bytes.len();
+    let _ = storage.add_job_event(
+        job_id,
+        "info",
+        "上传本机快照",
+        &format!("已上传当前设备快照 {current_key}（{uploaded_bytes} 字节）"),
+    );
     let expected_etag = saved_etag
         .as_ref()
         .map(|state| state.etag.as_str())
@@ -1423,8 +1452,16 @@ pub async fn run_configured_sync(
         },
     );
 
-    match sync_device_usage(storage.clone(), identity).await {
+    match sync_device_usage(storage.clone(), identity, &job_id).await {
         Ok(result) => {
+            if result.failed_objects > 0 {
+                let _ = storage.add_job_event(
+                    &job_id,
+                    "warning",
+                    "失败对象",
+                    &format!("共 {} 个对象读取或导入失败", result.failed_objects),
+                );
+            }
             let status = if result.failed_objects == 0 {
                 "success"
             } else {

@@ -108,6 +108,40 @@ describe("OverviewChannelAccountsCard", () => {
     expect(onOpenCodexAgent).toHaveBeenCalledWith("acc-1");
   });
 
+  it("hides empty Codex pseudo accounts with no observable data (API Key login)", () => {
+    const emptyApiKeyAccount: CodexAccountReport = {
+      account_id: "unknown-account",
+      signed_in: true,
+      auth_mode: "apiKey",
+      email: null,
+      plan_type: null,
+      primary: null,
+      secondary: null,
+      credits: null,
+      rate_limit_reset_credits: null,
+      rate_limit_reached_type: null,
+      source: "app_server",
+      updated_at: "2026-07-18T10:00:00Z",
+      stale: false,
+      error: null,
+    };
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[]}
+        snapshots={[]}
+        codexAccounts={[emptyApiKeyAccount]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+        onOpenCodexAgent={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("ChatGPT 账号")).not.toBeInTheDocument();
+    expect(screen.queryByText("unknown-account")).not.toBeInTheDocument();
+  });
+
   it("renders legacy account summaries and routes all three actions", async () => {
     vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
     const user = userEvent.setup();

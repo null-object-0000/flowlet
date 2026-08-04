@@ -14,6 +14,7 @@ const WORKSPACE_KEYRING_SERVICE: &str = "Flowlet Account Workspace";
 const WORKSPACE_ETAG_META_KEY: &str = "account_workspace_etag_v1";
 const ENVELOPE_AAD: &[u8] = b"flowlet-account-workspace-v1";
 const CATALOG_VERSION: u32 = 1;
+const WORKSPACE_JOB_TYPE: &str = "account-workspace-sync";
 static ACCOUNT_WORKSPACE_SYNC_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -390,9 +391,72 @@ fn apply_catalog(
     Ok((linked, created, catalog_changed))
 }
 
+fn create_workspace_job(
+    storage: &Storage,
+    trigger_source: &str,
+    title: &str,
+    first_event: &str,
+) -> Result<String, String> {
+    let job_id = uuid::Uuid::new_v4().to_string();
+    storage
+        .create_job(
+            &job_id,
+            WORKSPACE_JOB_TYPE,
+            title,
+            "同步渠道账号工作区目录",
+            trigger_source,
+            1,
+            first_event,
+        )
+        .map_err(|error| format!("创建账号工作区同步任务失败：{error}"))?;
+    Ok(job_id)
+}
+
+fn finish_workspace_job(
+    storage: &Storage,
+    job_id: &str,
+    result: &AccountWorkspaceSyncResult,
+    stage_message: &str,
+) {
+    let summary = serde_json::json!({
+        "revision": result.revision,
+        "accountCount": result.account_count,
+        "linkedAccounts": result.linked_accounts,
+        "createdLocalAccounts": result.created_local_accounts,
+        "uploaded": result.uploaded,
+    })
+    .to_string();
+    let _ = storage.update_job_progress(job_id, 1, 1);
+    if let Err(error) = storage.finish_job(job_id, "succeeded", &summary, stage_message) {
+        tracing::warn!(%error, job_id = %job_id, "failed to finish account workspace sync task log");
+    }
+}
+
 pub async fn initialize(storage: Storage) -> Result<AccountWorkspaceSyncResult, String> {
     let _guard = ACCOUNT_WORKSPACE_SYNC_GUARD.lock().await;
-    let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
+    let job_id = create_workspace_job(&storage, "manual", "启用渠道账号工作区", "开始创建账号工作区目录")?;
+    match initialize_inner(&storage).await {
+        Ok(result) => {
+            finish_workspace_job(
+                &storage,
+                &job_id,
+                &result,
+                &format!(
+                    "账号工作区已创建并启用：目录版本 {}，共 {} 个账号",
+                    result.revision, result.account_count
+                ),
+            );
+            Ok(result)
+        }
+        Err(error) => {
+            let _ = storage.fail_job(&job_id, &error);
+            Err(error)
+        }
+    }
+}
+
+async fn initialize_inner(storage: &Storage) -> Result<AccountWorkspaceSyncResult, String> {
+    let config = load_config(storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
     let secret = read_secret(&config)?;
     let store = S3Store::new(&config, &secret)?;
     let object_key = config.workspace_accounts_key();
@@ -455,9 +519,40 @@ pub async fn initialize(storage: Storage) -> Result<AccountWorkspaceSyncResult, 
     })
 }
 
-pub async fn sync(storage: Storage) -> Result<AccountWorkspaceSyncResult, String> {
+pub async fn sync(
+    storage: Storage,
+    trigger_source: &str,
+) -> Result<AccountWorkspaceSyncResult, String> {
     let _guard = ACCOUNT_WORKSPACE_SYNC_GUARD.lock().await;
-    let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
+    let job_id = create_workspace_job(&storage, trigger_source, "渠道账号工作区同步", "开始同步渠道账号工作区目录")?;
+    match sync_inner(&storage).await {
+        Ok(result) => {
+            let stage_message = if result.uploaded {
+                format!(
+                    "账号工作区同步完成：目录版本 {}，共 {} 个账号，本机关联 {} 个，新增 {} 个",
+                    result.revision,
+                    result.account_count,
+                    result.linked_accounts,
+                    result.created_local_accounts
+                )
+            } else {
+                format!(
+                    "账号工作区同步完成：目录版本 {} 无变化，共 {} 个账号",
+                    result.revision, result.account_count
+                )
+            };
+            finish_workspace_job(&storage, &job_id, &result, &stage_message);
+            Ok(result)
+        }
+        Err(error) => {
+            let _ = storage.fail_job(&job_id, &error);
+            Err(error)
+        }
+    }
+}
+
+async fn sync_inner(storage: &Storage) -> Result<AccountWorkspaceSyncResult, String> {
+    let config = load_config(storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
     let secret = read_secret(&config)?;
     let key = read_workspace_key(&config)?;
     let store = S3Store::new(&config, &secret)?;
@@ -465,7 +560,7 @@ pub async fn sync(storage: Storage) -> Result<AccountWorkspaceSyncResult, String
     let remote_etag = store.head_etag(&object_key).await?;
     let bytes = store.get(&object_key).await?;
     let mut catalog = decrypt_catalog(&bytes, &key)?;
-    let (linked, created, changed) = apply_catalog(&storage, &mut catalog, &key)?;
+    let (linked, created, changed) = apply_catalog(storage, &mut catalog, &key)?;
     let uploaded = if changed {
         catalog.revision += 1;
         catalog.updated_at = chrono::Utc::now().to_rfc3339();
@@ -707,8 +802,50 @@ mod tests {
             storage
                 .local_account_id_for_workspace("workspace-friday")
                 .unwrap()
-                .as_deref(),
+            .as_deref(),
             Some("local-friday")
         );
+    }
+
+    #[test]
+    fn workspace_sync_records_detailed_task_log() {
+        let storage = Storage::from_connection_for_test(
+            rusqlite::Connection::open_in_memory().expect("open sqlite"),
+        );
+        storage.migrate().expect("migrate workspace schema");
+        let job_id = create_workspace_job(
+            &storage,
+            "background",
+            "渠道账号工作区同步",
+            "开始同步渠道账号工作区目录",
+        )
+        .expect("create job");
+        let result = AccountWorkspaceSyncResult {
+            revision: 3,
+            account_count: 5,
+            linked_accounts: 4,
+            created_local_accounts: 1,
+            uploaded: true,
+        };
+        finish_workspace_job(&storage, &job_id, &result, "账号工作区同步完成");
+
+        let detail = storage
+            .get_background_job_detail(&job_id)
+            .expect("read job")
+            .expect("job exists");
+        assert_eq!(detail.job.job_type, "account-workspace-sync");
+        assert_eq!(detail.job.title, "渠道账号工作区同步");
+        assert_eq!(detail.job.trigger_source, "background");
+        assert_eq!(detail.job.status, "succeeded");
+        assert_eq!(detail.job.progress_total, 1);
+        let summary: serde_json::Value =
+            serde_json::from_str(detail.job.summary_json.as_deref().unwrap()).unwrap();
+        assert_eq!(summary["revision"], 3);
+        assert_eq!(summary["accountCount"], 5);
+        assert_eq!(summary["linkedAccounts"], 4);
+        assert_eq!(summary["createdLocalAccounts"], 1);
+        assert_eq!(summary["uploaded"], true);
+        // 首事件 + 完成事件
+        assert_eq!(detail.events.len(), 2);
     }
 }

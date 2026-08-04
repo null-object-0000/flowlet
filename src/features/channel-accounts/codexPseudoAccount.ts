@@ -41,6 +41,27 @@ export function codexAccountToPseudoChannelAccount(
 }
 
 /**
+ * Codex 账号观测只展示有实际可观测数据的账号（订阅、用量、Credits 或错误）。
+ *
+ * Flowlet 代理 Codex 时会把 `~/.codex/auth.json` 写成 `OPENAI_API_KEY`（API Key
+ * 登录态）。Codex app-server 的 `account/read` 会把该 Key 识别为一个已登录账号
+ * （`auth_mode=apiKey`），但 API Key 模式拿不到任何订阅数据（email/plan/用量/
+ * Credits 全空），只会渲染成一行空的「ChatGPT 账号」噪音，应过滤掉。
+ * ChatGPT 订阅账号即使暂时无用量，也会有 email / plan 可展示，不会误伤。
+ */
+export function isObservableCodexAccount(report: CodexAccountReport): boolean {
+  return Boolean(
+    report.email ||
+      report.plan_type ||
+      report.primary ||
+      report.secondary ||
+      report.credits ||
+      report.rate_limit_reset_credits ||
+      report.error,
+  );
+}
+
+/**
  * 从 Codex 用量窗口中提取展示信息。
  * 与 Qwen Token Plan 类似：主列显示周用量，副列显示 5 小时用量。
  */

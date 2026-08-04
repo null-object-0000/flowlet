@@ -308,7 +308,7 @@ export function UsageAnalysisPage() {
       <SideSheet
         visible={matrixExpanded}
         motion={false}
-        width="min(1080px, calc(100vw - 48px))"
+        width="min(760px, 96vw)"
         title={t("完整交叉归因矩阵")}
         onCancel={() => setMatrixExpanded(false)}
         footer={null}

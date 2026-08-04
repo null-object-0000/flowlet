@@ -587,7 +587,7 @@ export function UsageCostPage() {
         title={t("未识别 Token 的请求")}
         visible={unknownRequestsOpen && selectedRequestId == null}
         onCancel={() => setUnknownRequestsOpen(false)}
-        width="min(640px, 96vw)"
+        width="min(760px, 96vw)"
         bodyStyle={{ padding: 0 }}
         zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
         footer={null}

@@ -92,7 +92,7 @@ function TaskDetail({ jobId, onClose }: { jobId: string | null; onClose: () => v
     }
   };
   const sideTitle = <div className={styles.sideTitle}><strong>{detail.data?.job.title ?? t("任务详情")}</strong><span>{detail.data ? `${triggerLabel(detail.data.job.triggerSource, t)} · ${formatTimestamp(detail.data.job.createdAt, language)}` : t("后台任务")}</span></div>;
-  return <SideSheet title={sideTitle} visible={Boolean(jobId)} onCancel={onClose} width="min(680px, 96vw)" bodyStyle={{ padding: 0 }} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={detail.data?.job.status === "running" ? <Button type="danger" loading={cancel.isPending} disabled={detail.data.job.cancelRequested} onClick={() => void cancelTask()}>{detail.data.job.cancelRequested ? t("正在取消…") : t("取消任务")}</Button> : null}>
+  return <SideSheet title={sideTitle} visible={Boolean(jobId)} onCancel={onClose} width="min(760px, 96vw)" bodyStyle={{ padding: 0 }} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={detail.data?.job.status === "running" ? <Button type="danger" loading={cancel.isPending} disabled={detail.data.job.cancelRequested} onClick={() => void cancelTask()}>{detail.data.job.cancelRequested ? t("正在取消…") : t("取消任务")}</Button> : null}>
     {detail.isLoading ? <div className={styles.state}>{t("正在加载任务详情…")}</div> : null}
     {detail.data ? <div className={styles.detail}>
       <section><div className={styles.detailTitle}><strong>{detail.data.job.title}</strong><StatusTag job={detail.data.job} t={t} /></div><p>{detail.data.job.stage ?? "—"}</p><Progress percent={detail.data.job.progressTotal ? Math.round(detail.data.job.progressCurrent / detail.data.job.progressTotal * 100) : 0} showInfo /></section>

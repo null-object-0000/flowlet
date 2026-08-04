@@ -8,6 +8,7 @@ import { useAppPreferences } from "../../../app/preferences/AppPreferences";
 import {
   parseSyncPackage,
   serializeDesktopWorkspacePackage,
+  DESKTOP_WORKSPACE_PACKAGE_FORMAT,
 } from "../../../domains/account-workspace/syncPackage";
 import { serializeS3ConnectionPackage } from "../../../domains/device-sync/s3ConnectionPackage";
 import type {
@@ -256,7 +257,9 @@ export function SyncTab() {
     if (!sharePackage) return;
     try {
       await navigator.clipboard.writeText(sharePackage.text);
-      Toast.success(t("S3 连接文本已复制"));
+      Toast.success(t(sharePackage.text.includes(DESKTOP_WORKSPACE_PACKAGE_FORMAT)
+        ? "账号工作区连接文本已复制"
+        : "S3 连接文本已复制"));
     } catch (error) {
       Toast.error(t("复制失败：{message}", { message: errorMessage(error) }));
     }
@@ -776,7 +779,7 @@ function S3ConfigSideSheet({
     visible={draft != null}
     motion={false}
     zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
-    width="min(600px, 96vw)"
+    width="min(760px, 96vw)"
     bodyStyle={{ padding: 0 }}
     onCancel={onCancel}
     footer={(

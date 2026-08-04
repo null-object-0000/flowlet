@@ -50,7 +50,7 @@ export function ApiAccessSideSheet({ visible, onClose, baseUrl, bindConfig, runn
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
       onCancel={onClose}
       title={t("API 接入详情")}
-      width="min(720px, 92vw)"
+      width="min(760px, 96vw)"
       footer={null}
       bodyStyle={{ padding: 0 }}
     >

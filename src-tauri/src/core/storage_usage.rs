@@ -1892,6 +1892,7 @@ impl Storage {
             upstream_protocol: String,
             virtual_model: Option<String>,
             upstream_model: Option<String>,
+            created_at: String,
             is_stream: bool,
             res_body_b64: Option<String>,
         }
@@ -1907,7 +1908,8 @@ impl Storage {
                     rl.id, rl.request_id, rl.client_id, rl.client_name,
                     rl.channel_id, rl.channel_name, rl.account_id, rl.account_name,
                     rl.client_protocol, rl.upstream_protocol,
-                    rl.virtual_model, rl.upstream_model, rl.is_stream, rl.res_body_b64
+                    rl.virtual_model, rl.upstream_model, rl.created_at,
+                    rl.is_stream, rl.res_body_b64
                 FROM request_logs rl
                 LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
                 WHERE rl.is_last_attempt = 1
@@ -1932,8 +1934,9 @@ impl Storage {
                         upstream_protocol: row.get(9)?,
                         virtual_model: row.get(10)?,
                         upstream_model: row.get(11)?,
-                        is_stream: row.get::<_, i64>(12)? != 0,
-                        res_body_b64: row.get(13)?,
+                        created_at: row.get(12)?,
+                        is_stream: row.get::<_, i64>(13)? != 0,
+                        res_body_b64: row.get(14)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1956,6 +1959,7 @@ impl Storage {
             upstream_protocol: String,
             virtual_model: Option<String>,
             upstream_model: Option<String>,
+            created_at: String,
             input_tokens: Option<i64>,
             input_cached_tokens: Option<i64>,
             input_uncached_tokens: Option<i64>,
@@ -2016,6 +2020,7 @@ impl Storage {
                 upstream_protocol: row.upstream_protocol,
                 virtual_model: row.virtual_model,
                 upstream_model: row.upstream_model,
+                created_at: row.created_at,
                 input_tokens: usage.input_tokens,
                 input_cached_tokens: usage.input_cached_tokens,
                 input_uncached_tokens: usage.input_uncached_tokens,
@@ -2064,6 +2069,7 @@ impl Storage {
                     estimated_input_cached_cost = ?20,
                     estimated_input_cache_write_cost = ?21,
                     estimated_output_cost = ?22,
+                    created_at = ?23,
                     analyzed_at = datetime('now')
                 WHERE request_id = ?1
                 "#,
@@ -2090,6 +2096,7 @@ impl Storage {
                     row.estimated_input_cached_cost,
                     row.estimated_input_cache_write_cost,
                     row.estimated_output_cost,
+                    row.created_at,
                 ],
             )?;
             if updated == 0 {
@@ -2107,7 +2114,7 @@ impl Storage {
                         lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                         ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
                         'complete', 'captured_response', ?18, ?19, ?20, ?21, ?22,
-                        datetime('now'), datetime('now')
+                        datetime('now'), ?23
                     )
                     "#,
                     params![
@@ -2133,6 +2140,7 @@ impl Storage {
                         row.estimated_input_cached_cost,
                         row.estimated_input_cache_write_cost,
                         row.estimated_output_cost,
+                        row.created_at,
                     ],
                 )?;
             }

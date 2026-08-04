@@ -551,6 +551,47 @@ fn ignores_response_without_usage() {
 }
 
 #[test]
+fn decodes_compressed_buffered_usage_without_mutating_passthrough_bytes() {
+    use flate2::{
+        Compression,
+        write::{DeflateEncoder, GzEncoder},
+    };
+    use std::io::Write;
+
+    let plain = br#"{"type":"message","usage":{"input_tokens":1024,"output_tokens":440,"cache_creation_input_tokens":0,"cache_read_input_tokens":24576}}"#;
+
+    let mut gzip = GzEncoder::new(Vec::new(), Compression::default());
+    gzip.write_all(plain).unwrap();
+    let gzip = gzip.finish().unwrap();
+
+    let mut deflate = DeflateEncoder::new(Vec::new(), Compression::default());
+    deflate.write_all(plain).unwrap();
+    let deflate = deflate.finish().unwrap();
+
+    let mut brotli = brotli::CompressorWriter::new(Vec::new(), 4096, 5, 22);
+    brotli.write_all(plain).unwrap();
+    let brotli = brotli.into_inner();
+
+    for (encoding, compressed) in [("gzip", gzip), ("deflate", deflate), ("br", brotli)] {
+        let passthrough = compressed.clone();
+        let decoded = decode_usage_body(compressed.clone(), Some(encoding)).unwrap();
+        assert_eq!(compressed, passthrough);
+        assert_eq!(decoded, plain);
+        assert_eq!(
+            extract_response_usage(&decoded),
+            Some(ResponseUsage {
+                input_tokens: Some(25_600),
+                input_cached_tokens: Some(24_576),
+                input_uncached_tokens: Some(1_024),
+                input_cache_write_tokens: Some(0),
+                output_tokens: Some(440),
+                total_tokens: Some(26_040),
+            })
+        );
+    }
+}
+
+#[test]
 fn build_upstream_url_preserves_v1_prefix_for_openai() {
     let uri: Uri = "/v1/chat/completions".parse().unwrap();
     let url = build_upstream_url(

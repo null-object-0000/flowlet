@@ -1328,6 +1328,7 @@ async fn build_response(
             upstream_protocol: protocol.as_str().to_string(),
             virtual_model: log_context.virtual_model.clone(),
             upstream_model: Some(log_context.upstream_model.clone()),
+            content_encoding: None,
             enabled: true,
             body: Vec::new(),
         };
@@ -1404,7 +1405,8 @@ async fn build_response(
         upstream_protocol: protocol.as_str().to_string(),
         virtual_model: log_context.virtual_model.clone(),
         upstream_model: Some(log_context.upstream_model.clone()),
-        enabled: body.len() <= MAX_USAGE_CAPTURE_BYTES,
+        content_encoding: proxy_http::content_encoding_value(&headers),
+        enabled: true,
         body: body.to_vec(),
     };
     record_response_usage(usage_capture);
@@ -1439,7 +1441,8 @@ fn build_buffered_response(
         upstream_protocol: protocol.as_str().to_string(),
         virtual_model: log.virtual_model.clone(),
         upstream_model: log.upstream_model.clone(),
-        enabled: body.len() <= MAX_USAGE_CAPTURE_BYTES,
+        content_encoding: proxy_http::content_encoding_value(&headers),
+        enabled: true,
         body: body.to_vec(),
     };
     record_request_log(storage, log);
@@ -1468,19 +1471,43 @@ struct UsageCapture {
     upstream_protocol: String,
     virtual_model: Option<String>,
     upstream_model: Option<String>,
+    content_encoding: Option<String>,
     enabled: bool,
     body: Vec<u8>,
 }
 
-fn record_response_usage(capture: UsageCapture) {
+fn record_response_usage(mut capture: UsageCapture) {
     if !capture.enabled {
         return;
     }
-    let Some(usage) = extract_response_usage(&capture.body) else {
+    let content_encoding = capture.content_encoding.take();
+    let Some(body) = decode_usage_body(
+        std::mem::take(&mut capture.body),
+        content_encoding.as_deref(),
+    ) else {
+        return;
+    };
+    let Some(usage) = extract_response_usage(&body) else {
         return;
     };
 
     record_parsed_usage(capture, usage, "complete", "upstream_response");
+}
+
+/// Decode a buffered upstream response for usage parsing without changing the
+/// original bytes or Content-Encoding header returned to the client. reqwest is
+/// intentionally built without automatic decompression, so gzip/deflate/br
+/// responses must be decoded on this bounded side copy before JSON parsing.
+fn decode_usage_body(body: Vec<u8>, content_encoding: Option<&str>) -> Option<Vec<u8>> {
+    if content_encoding.is_none() {
+        return (body.len() <= MAX_USAGE_CAPTURE_BYTES).then_some(body);
+    }
+    let decoded = proxy_http::decompress_for_capture(
+        &body,
+        content_encoding,
+        MAX_USAGE_CAPTURE_BYTES.saturating_add(1),
+    );
+    (decoded.len() <= MAX_USAGE_CAPTURE_BYTES).then_some(decoded)
 }
 
 fn record_parsed_usage(

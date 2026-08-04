@@ -977,7 +977,38 @@ data: [DONE]
         )
         .expect("record stream timing");
 
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET created_at = datetime('now', '-2 days') WHERE request_id = 'longcat-stream-usage'",
+            [],
+        )
+        .unwrap();
+    let original_created_at: String = storage
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT created_at FROM request_logs WHERE request_id = 'longcat-stream-usage'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
     assert_eq!(storage.reanalyze_captured_usage("all").unwrap(), 1);
+    let repaired_created_at: String = storage
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT created_at FROM usage_records WHERE request_id = 'longcat-stream-usage'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(repaired_created_at, original_created_at);
     let page = storage
         .list_request_logs_page(LogsFilter {
             page: 1,
@@ -986,7 +1017,7 @@ data: [DONE]
             client_id: String::new(),
             channel_id: String::new(),
             search: String::new(),
-            time_range: "1h".to_string(),
+            time_range: "all".to_string(),
             model: String::new(),
             model_kind: String::new(),
             start_at: String::new(),
@@ -1007,11 +1038,22 @@ data: [DONE]
     assert_eq!(page.summary.cache_hit_rate, Some(0.9));
     storage.connection.lock().unwrap()
         .execute(
-            "UPDATE usage_records SET input_tokens = 1, total_tokens = 1 WHERE request_id = 'longcat-stream-usage'",
+            "UPDATE usage_records SET input_tokens = 1, total_tokens = 1, created_at = datetime('now') WHERE request_id = 'longcat-stream-usage'",
             [],
         )
         .unwrap();
     assert_eq!(storage.reanalyze_captured_usage("all").unwrap(), 1);
+    let rerepaired_created_at: String = storage
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT created_at FROM usage_records WHERE request_id = 'longcat-stream-usage'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(rerepaired_created_at, original_created_at);
     let reparsed_page = storage
         .list_request_logs_page(LogsFilter {
             page: 1,
@@ -1020,7 +1062,7 @@ data: [DONE]
             client_id: String::new(),
             channel_id: String::new(),
             search: String::new(),
-            time_range: "1h".to_string(),
+            time_range: "all".to_string(),
             model: String::new(),
             model_kind: String::new(),
             start_at: String::new(),
@@ -1686,6 +1728,97 @@ fn request_bodies_live_in_capture_files_and_stream_updates_replace_the_reference
     assert_eq!(rows[0].req_body_b64.as_deref(), Some("aGVsbG8="));
     assert_eq!(rows[0].res_body_b64.as_deref(), Some("c3RyZWFtLWRvbmU="));
     assert_eq!(rows[0].capture_state.as_deref(), Some("ready"));
+
+    drop(storage);
+    let _ = std::fs::remove_dir_all(capture_root);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}
+
+#[test]
+fn data_maintenance_backfills_missing_usage_from_capture_file_at_request_time() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet_test_capture_usage_repair_{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let storage = Storage::open(&path).expect("open storage");
+    let capture_root = storage.capture_store.root_path().to_path_buf();
+    let response = br#"{"type":"message","usage":{"input_tokens":1024,"output_tokens":440,"cache_creation_input_tokens":0,"cache_read_input_tokens":24576}}"#;
+    let mut log = body_request_log("captured-qwen-usage");
+    log.channel_id = Some("qwen".to_string());
+    log.channel_name = Some("Qwen".to_string());
+    log.upstream_model = Some("deepseek-v4-flash-0731".to_string());
+    log.client_protocol = "anthropic".to_string();
+    log.upstream_protocol = "anthropic".to_string();
+    log.path = "/anthropic/v1/messages".to_string();
+    log.res_body_b64 = Some(base64::engine::general_purpose::STANDARD.encode(response));
+    let request_log_id = storage.insert_request_log(&log).expect("insert captured response");
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE request_logs SET created_at = datetime('now', '-2 days') WHERE id = ?1",
+            [&request_log_id],
+        )
+        .unwrap();
+    let request_created_at: String = storage
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT created_at FROM request_logs WHERE id = ?1",
+            [&request_log_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    let sqlite_body: Option<String> = storage
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT res_body_b64 FROM request_logs WHERE id = ?1",
+            [&request_log_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        sqlite_body.is_none(),
+        "new response bodies must live in .flcap files"
+    );
+
+    assert_eq!(storage.reanalyze_captured_usage("all").unwrap(), 1);
+    let repaired: (i64, i64, i64, i64, i64, String, String) = storage
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            r#"SELECT input_tokens, input_cached_tokens, input_uncached_tokens,
+                      output_tokens, total_tokens, usage_source, created_at
+               FROM usage_records WHERE request_id = 'captured-qwen-usage'"#,
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(repaired.0, 25_600);
+    assert_eq!(repaired.1, 24_576);
+    assert_eq!(repaired.2, 1_024);
+    assert_eq!(repaired.3, 440);
+    assert_eq!(repaired.4, 26_040);
+    assert_eq!(repaired.5, "captured_response");
+    assert_eq!(repaired.6, request_created_at);
 
     drop(storage);
     let _ = std::fs::remove_dir_all(capture_root);

@@ -6,7 +6,11 @@ export type Project = {
   updatedAt: string;
 };
 
-export type ProjectTaskStatus = "todo" | "in_progress" | "done";
+export type ProjectTaskStatus = "draft" | "submitted" | "in_progress" | "review" | "done";
+
+export type ProjectTaskType = "code" | "readonly";
+
+export type ProjectTaskPriority = "p0" | "p1" | "p2" | "p3";
 
 export type ProjectTask = {
   id: string;
@@ -14,6 +18,9 @@ export type ProjectTask = {
   title: string;
   description: string;
   status: ProjectTaskStatus;
+  taskType: ProjectTaskType;
+  agentProfile: string;
+  priority: ProjectTaskPriority;
   createdAt: string;
   updatedAt: string;
 };

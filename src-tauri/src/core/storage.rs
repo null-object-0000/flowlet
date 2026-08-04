@@ -934,14 +934,19 @@ impl Storage {
             );
 
             CREATE TABLE IF NOT EXISTS project_tasks (
-                id          TEXT PRIMARY KEY,
-                project_id  TEXT NOT NULL,
-                title       TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                status      TEXT NOT NULL DEFAULT 'todo'
-                            CHECK (status IN ('todo', 'in_progress', 'done')),
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL,
+                id            TEXT PRIMARY KEY,
+                project_id    TEXT NOT NULL,
+                title         TEXT NOT NULL,
+                description   TEXT NOT NULL DEFAULT '',
+                status        TEXT NOT NULL DEFAULT 'draft'
+                              CHECK (status IN ('draft', 'submitted', 'in_progress', 'review', 'done')),
+                task_type     TEXT NOT NULL DEFAULT 'code'
+                              CHECK (task_type IN ('code', 'readonly')),
+                agent_profile TEXT NOT NULL DEFAULT '',
+                priority      TEXT NOT NULL DEFAULT 'p1'
+                              CHECK (priority IN ('p0', 'p1', 'p2', 'p3')),
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
@@ -1745,6 +1750,10 @@ impl Storage {
             connection.execute("ALTER TABLE request_logs DROP COLUMN stream_summary", [])?;
         }
 
+        // 项目任务表新增任务类型 / Agent Profile / 优先级（2026-08-04）。
+        // 旧库用 ADD COLUMN 补齐；status 的 CHECK 约束需要包含 review，必须重建表。
+        migrate_project_tasks_schema(&connection)?;
+
         tracing::info!("migrate: 完成");
         Ok(())
     }
@@ -1781,6 +1790,59 @@ fn table_has_column(
         |row| row.get(0),
     )?;
     Ok(exists > 0)
+}
+
+/// 项目任务表结构迁移：补齐 task_type / agent_profile / priority 三列，
+/// 并保证 status 的 CHECK 含 'draft'（草稿/已提交拆分）、priority 的 CHECK 含 'p0'。
+/// SQLite 修改 CHECK 需重建表；判断依据是 status CHECK 是否已含 'draft'。
+fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageError> {
+    for (column, definition) in [
+        ("task_type", "TEXT NOT NULL DEFAULT 'code'"),
+        ("agent_profile", "TEXT NOT NULL DEFAULT ''"),
+        ("priority", "TEXT NOT NULL DEFAULT 'p1'"),
+    ] {
+        add_column_if_missing(connection, "project_tasks", column, definition)?;
+    }
+
+    // status CHECK 是否已含 'draft'（含则新 schema 已生效，无需重建）。
+    let sql: String = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_tasks'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !sql.contains("'draft'") {
+        connection.execute_batch(
+            "BEGIN;
+             ALTER TABLE project_tasks RENAME TO project_tasks_legacy;
+             CREATE TABLE project_tasks (
+                 id            TEXT PRIMARY KEY,
+                 project_id    TEXT NOT NULL,
+                 title         TEXT NOT NULL,
+                 description   TEXT NOT NULL DEFAULT '',
+                 status        TEXT NOT NULL DEFAULT 'draft'
+                               CHECK (status IN ('draft', 'submitted', 'in_progress', 'review', 'done')),
+                 task_type     TEXT NOT NULL DEFAULT 'code'
+                               CHECK (task_type IN ('code', 'readonly')),
+                 agent_profile TEXT NOT NULL DEFAULT '',
+                 priority      TEXT NOT NULL DEFAULT 'p1'
+                               CHECK (priority IN ('p0', 'p1', 'p2', 'p3')),
+                 created_at    TEXT NOT NULL,
+                 updated_at    TEXT NOT NULL,
+                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+             );
+             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, created_at, updated_at)
+                 SELECT id, project_id, title, description,
+                        CASE WHEN status = 'todo' THEN 'draft' ELSE status END,
+                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), created_at, updated_at
+                 FROM project_tasks_legacy;
+             DROP TABLE project_tasks_legacy;
+             CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
+                 ON project_tasks(project_id, status, updated_at DESC);
+             COMMIT;",
+        )?;
+    }
+
+    Ok(())
 }
 
 fn normalize_legacy_virtual_model_routes_schema(

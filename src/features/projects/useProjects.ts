@@ -56,5 +56,16 @@ export function newProject(name: string, directoryPath: string): Project {
 
 export function newProjectTask(projectId: string, title: string): ProjectTask {
   const now = new Date().toISOString();
-  return { id: crypto.randomUUID(), projectId, title: title.trim(), description: "", status: "todo", createdAt: now, updatedAt: now };
+  return {
+    id: crypto.randomUUID(),
+    projectId,
+    title: title.trim(),
+    description: "",
+    status: "draft",
+    taskType: "code",
+    agentProfile: "Claude Code",
+    priority: "p1",
+    createdAt: now,
+    updatedAt: now,
+  };
 }

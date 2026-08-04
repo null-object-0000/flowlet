@@ -78,8 +78,17 @@ pub(crate) fn save_project_task(
     {
         return Err("任务 ID、项目和标题不能为空".to_string());
     }
-    if !matches!(task.status.as_str(), "todo" | "in_progress" | "done") {
+    if !matches!(task.status.as_str(), "draft" | "submitted" | "in_progress" | "review" | "done") {
         return Err("任务状态无效".to_string());
+    }
+    if !matches!(task.task_type.as_str(), "code" | "readonly") {
+        return Err("任务类型无效".to_string());
+    }
+    if task.agent_profile.trim().is_empty() {
+        return Err("Agent Profile 不能为空".to_string());
+    }
+    if !matches!(task.priority.as_str(), "p0" | "p1" | "p2" | "p3") {
+        return Err("任务优先级无效".to_string());
     }
     if state
         .storage
@@ -97,6 +106,9 @@ pub(crate) fn save_project_task(
             title: task.title.trim().to_string(),
             description: task.description.trim().to_string(),
             status: task.status,
+            task_type: task.task_type,
+            agent_profile: task.agent_profile.trim().to_string(),
+            priority: task.priority,
             created_at: task.created_at,
             updated_at: task.updated_at,
         })

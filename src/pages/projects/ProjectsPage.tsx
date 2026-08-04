@@ -1,12 +1,10 @@
 import { useMemo, useState } from "react";
-import { Button, Dropdown, Empty, Input, Modal, Select, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
-import { IconChevronDown, IconDelete, IconEdit, IconFolder, IconPlus } from "@douyinfe/semi-icons";
+import { Button, Empty, Input, Modal, Popconfirm, Select, SideSheet, TextArea, Toast } from "@douyinfe/semi-ui-19";
+import { IconDelete, IconEdit, IconFolder, IconPlus } from "@douyinfe/semi-icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { AgentSessionRow, AgentSessionRuntimeStatus } from "../../domains/agent-session/types";
-import type { Project, ProjectTask, ProjectTaskStatus } from "../../domains/project/types";
-import { useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
+import type { Project, ProjectTask, ProjectTaskPriority, ProjectTaskStatus, ProjectTaskType } from "../../domains/project/types";
 import { newProject, newProjectTask, useProject, useProjectActions, useProjects, useProjectTaskActions, useProjectTasks } from "../../features/projects/useProjects";
 import { errorMessage } from "../../shared/errors/AppError";
 import { formatTimestamp } from "../../shared/formatters/datetime";
@@ -14,7 +12,7 @@ import { PageHeader } from "../../shared/ui/PageHeader";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
-import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "../agent-sessions/AgentSessionDetailSideSheet";
+import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import styles from "./ProjectsPage.module.css";
 
 export function ProjectsPage() {
@@ -106,101 +104,76 @@ function ProjectDetail({ projectId }: { projectId: string }) {
 function LoadedProjectDetail({ project }: { project: Project }) {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 15_000 });
-  const [view, setView] = useState<"sessions" | "tasks">("sessions");
-  const sessions = useAgentSessions({ page: 1, pageSize: 500, search: "", agentType: "", runtimeStatus: "", projectPath: project.directoryPath }, refresh.autoRefresh);
   const tasks = useProjectTasks(project.id, refresh.autoRefresh);
-  const activeQuery = view === "sessions" ? sessions : tasks;
   return <main className={styles.page}>
-    <PageHeader title={<ProjectViewTitlePicker projectName={project.name} view={view} onChange={setView} />} subtitle={project.directoryPath}>
+    <PageHeader title={project.name} subtitle={project.directoryPath}>
       <RefreshControl
         autoRefresh={refresh.autoRefresh}
         onToggleAutoRefresh={refresh.toggleAutoRefresh}
-        isFetching={activeQuery.isFetching}
-        lastUpdatedAt={activeQuery.dataUpdatedAt}
+        isFetching={tasks.isFetching}
+        lastUpdatedAt={tasks.dataUpdatedAt}
         intervalMs={refresh.intervalMs}
-        onRefresh={() => void activeQuery.refetch()}
+        onRefresh={() => void tasks.refetch()}
         language={language}
         t={t}
       />
     </PageHeader>
     <section className={styles.detailContent}>
-      {view === "sessions" ? <SessionBoard sessions={sessions} /> : <TaskBoard project={project} tasks={tasks} />}
+      <TaskBoard project={project} tasks={tasks} />
     </section>
   </main>;
 }
 
-function ProjectViewTitlePicker({ projectName, view, onChange }: {
-  projectName: string;
-  view: "sessions" | "tasks";
-  onChange: (view: "sessions" | "tasks") => void;
-}) {
-  const { t } = useAppPreferences();
-  const viewLabel = view === "sessions" ? t("会话") : t("任务");
-  return <Dropdown
-    position="bottomLeft"
-    trigger="click"
-    clickToHide
-    render={<Dropdown.Menu>
-      <Dropdown.Item active={view === "sessions"} onClick={() => onChange("sessions")}>{t("会话")}</Dropdown.Item>
-      <Dropdown.Item active={view === "tasks"} onClick={() => onChange("tasks")}>{t("任务")}</Dropdown.Item>
-    </Dropdown.Menu>}
-  >
-    <button type="button" className={styles.viewTitleTrigger} aria-label={t("切换项目视角，当前：{name}", { name: viewLabel })}>
-      <span>{projectName} · {viewLabel}</span>
-      <IconChevronDown />
-    </button>
-  </Dropdown>;
-}
-
-const SESSION_COLUMNS: Array<{ status: AgentSessionRuntimeStatus; label: string; color: "green" | "orange" | "grey" }> = [
-  { status: "running", label: "自动运行中", color: "green" }, { status: "waiting_user", label: "等待用户确认", color: "orange" },
-  { status: "idle", label: "空闲", color: "grey" }, { status: "unknown", label: "无法判断", color: "grey" },
+const TASK_COLUMNS: Array<{ id: string; statuses: ProjectTaskStatus[]; label: string; addable?: boolean }> = [
+  { id: "backlog", statuses: ["draft", "submitted"], label: "待处理", addable: true },
+  { id: "in_progress", statuses: ["in_progress"], label: "进行中" },
+  { id: "review", statuses: ["review"], label: "待审核" },
 ];
 
-function SessionBoard({ sessions }: { sessions: ReturnType<typeof useAgentSessions> }) {
-  const { language, t } = useAppPreferences();
-  const navigate = useNavigate();
-  const [selected, setSelected] = useState<AgentSessionRow | null>(null);
-  const grouped = useMemo(() => Object.fromEntries(SESSION_COLUMNS.map(({ status }) => [status, sessions.data?.rows.filter((row) => row.runtimeStatus === status) ?? []])) as Record<AgentSessionRuntimeStatus, AgentSessionRow[]>, [sessions.data]);
-  return <div className={styles.boardView}>
-    {sessions.isError ? <div className={styles.state}>{sessions.error.message}</div> : <div className={styles.board}>
-      {SESSION_COLUMNS.map((column) => <section className={styles.column} key={column.status}><header><span>{t(column.label)}</span><Tag color={column.color} size="small">{grouped[column.status].length}</Tag></header><div className={styles.columnBody}>
-        {grouped[column.status].map((session) => <button className={styles.sessionCard} key={`${session.agentType}:${session.sessionId}`} onClick={() => setSelected(session)}><strong>{sessionDisplayTitle(session)}</strong><small className={styles.sessionMeta}>{formatTimestamp(session.activityAt, language)}<span> · {agentLabel(session.agentType)}</span></small></button>)}
-        {!sessions.isLoading && grouped[column.status].length === 0 ? <div className={styles.columnEmpty}>{t("暂无会话")}</div> : null}
-      </div></section>)}
-    </div>}
-    {selected ? <AgentSessionDetailSideSheet session={selected} onClose={() => setSelected(null)} onViewRequestLogs={(sessionId) => navigate(`/logs?search=${encodeURIComponent(sessionId)}`)} onRefreshOverview={async () => { await sessions.refetch(); }} /> : null}
-  </div>;
-}
+const TASK_TYPES: Array<{ value: ProjectTaskType; label: string }> = [
+  { value: "code", label: "代码修改" },
+  { value: "readonly", label: "只读分析" },
+];
 
-const TASK_COLUMNS: Array<{ status: ProjectTaskStatus; label: string }> = [{ status: "todo", label: "待处理" }, { status: "in_progress", label: "进行中" }, { status: "done", label: "已完成" }];
+const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi"];
+
+const PRIORITIES: Array<{ value: ProjectTaskPriority; label: string }> = [
+  { value: "p0", label: "P0" },
+  { value: "p1", label: "P1" },
+  { value: "p2", label: "P2" },
+  { value: "p3", label: "P3" },
+];
 
 function TaskBoard({ project, tasks }: { project: Project; tasks: ReturnType<typeof useProjectTasks> }) {
   const { t } = useAppPreferences();
   const actions = useProjectTaskActions(project.id);
   const [editing, setEditing] = useState<ProjectTask | "new" | null>(null);
-  const [draft, setDraft] = useState({ title: "", description: "", status: "todo" as ProjectTaskStatus });
-  const grouped = useMemo(() => Object.fromEntries(TASK_COLUMNS.map(({ status }) => [status, tasks.data?.filter((task) => task.status === status) ?? []])) as Record<ProjectTaskStatus, ProjectTask[]>, [tasks.data]);
-  const openEditor = (task: ProjectTask | "new", status: ProjectTaskStatus = "todo") => { setEditing(task); setDraft(task === "new" ? { title: "", description: "", status } : { title: task.title, description: task.description, status: task.status }); };
+  const [draft, setDraft] = useState({ title: "", description: "", taskType: "code" as ProjectTaskType, agentProfile: "Claude Code", priority: "p1" as ProjectTaskPriority });
+  const grouped = useMemo(() => Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, tasks.data?.filter((task) => column.statuses.includes(task.status)) ?? []])) as Record<string, ProjectTask[]>, [tasks.data]);
+  const openEditor = (task: ProjectTask | "new") => { setEditing(task); setDraft(task === "new" ? { title: "", description: "", taskType: "code", agentProfile: "Claude Code", priority: "p1" } : { title: task.title, description: task.description, taskType: task.taskType, agentProfile: task.agentProfile, priority: task.priority }); };
   const save = async () => {
     if (!editing || !draft.title.trim()) return;
-    const task = editing === "new" ? { ...newProjectTask(project.id, draft.title), description: draft.description.trim(), status: draft.status } : { ...editing, ...draft, title: draft.title.trim(), description: draft.description.trim(), updatedAt: new Date().toISOString() };
+    const task = editing === "new" ? { ...newProjectTask(project.id, draft.title), description: draft.description.trim(), taskType: draft.taskType, agentProfile: draft.agentProfile, priority: draft.priority } : { ...editing, ...draft, title: draft.title.trim(), description: draft.description.trim(), updatedAt: new Date().toISOString() };
     try { await actions.saveTask.mutateAsync(task); Toast.success(t("任务已保存")); setEditing(null); } catch (error) { Toast.error(errorMessage(error)); }
   };
   const changeStatus = async (task: ProjectTask, status: ProjectTaskStatus) => { try { await actions.saveTask.mutateAsync({ ...task, status, updatedAt: new Date().toISOString() }); } catch (error) { Toast.error(errorMessage(error)); } };
-  const remove = (task: ProjectTask) => Modal.confirm({ title: t("删除任务“{name}”？", { name: task.title }), zIndex: APP_OVERLAY_Z_INDEX.modal, okType: "danger", onOk: () => actions.deleteTask.mutateAsync(task.id) });
   return <div className={styles.boardView}>
-    <div className={styles.taskActions}><Button type="primary" theme="solid" icon={<IconPlus />} onClick={() => openEditor("new")}>{t("新建任务")}</Button></div>
     {tasks.isError ? <div className={styles.state}>{tasks.error.message}</div> : <div className={`${styles.board} ${styles.taskBoard}`}>
-      {TASK_COLUMNS.map((column) => <section className={styles.column} key={column.status}><header><span>{t(column.label)}</span><Tag size="small">{grouped[column.status].length}</Tag></header><div className={styles.columnBody}>
-        {grouped[column.status].map((task) => <article className={styles.taskCard} key={task.id}><div className={styles.taskTitle}><strong>{task.title}</strong><div><Button theme="borderless" icon={<IconEdit />} onClick={() => openEditor(task)} /><Button theme="borderless" type="danger" icon={<IconDelete />} onClick={() => remove(task)} /></div></div>{task.description ? <p>{task.description}</p> : null}<Select size="small" value={task.status} optionList={TASK_COLUMNS.map((item) => ({ value: item.status, label: t(item.label) }))} onChange={(value) => void changeStatus(task, value as ProjectTaskStatus)} /></article>)}
-        <button className={styles.addCard} onClick={() => openEditor("new", column.status)}><IconPlus />{t("添加任务")}</button>
+      {TASK_COLUMNS.map((column) => <section className={styles.column} key={column.id}><header><span className={styles.colTitle}><span>{t(column.label)}</span><span className={styles.colCount}>{grouped[column.id].length}</span></span>{column.addable ? <button className={styles.addColButton} aria-label={t("添加任务")} title={t("添加任务")} onClick={() => openEditor("new")}><IconPlus /></button> : null}</header><div className={styles.columnBody}>
+        {grouped[column.id].map((task) => {
+          const isDraft = task.status === "draft";
+          return <article className={styles.taskCard} key={task.id}><div className={styles.taskTitle}><div className={styles.taskTitleText}><span className={`${styles.taskTag} ${styles.taskTagPriority}`}>{t(priorityLabel(task.priority))}</span><strong>{task.title}</strong></div><div>{isDraft ? <Button theme="borderless" icon={<IconEdit />} onClick={() => openEditor(task)} /> : null}<Button theme="borderless" type={isDraft ? undefined : "primary"} onClick={() => void changeStatus(task, isDraft ? "submitted" : "draft")}>{isDraft ? t("提交") : t("撤回")}</Button>{isDraft ? <Popconfirm className={styles.taskDeletePopconfirm} title={t("删除任务“{name}”？", { name: task.title })} okText={t("删除")} cancelText={t("取消")} okType="danger" onConfirm={() => void actions.deleteTask.mutateAsync(task.id)}><Button theme="borderless" type="danger" icon={<IconDelete />} /></Popconfirm> : null}</div></div><div className={styles.taskTags}><span className={isDraft ? styles.taskStatusDraft : styles.taskStatusSubmitted}>{isDraft ? t("草稿") : t("已提交")}</span><span className={`${styles.taskTag} ${styles.taskTagType}`}>{t(taskTypeLabel(task.taskType))}</span><span className={styles.taskTagAgent}>{task.agentProfile}</span></div></article>;
+        })}
+        {column.addable ? <button className={styles.addCard} onClick={() => openEditor("new")}><IconPlus />{t("添加任务")}</button> : null}
       </div></section>)}
     </div>}
-    <Modal title={editing === "new" ? t("新建任务") : t("编辑任务")} visible={editing != null} zIndex={APP_OVERLAY_Z_INDEX.modal} okText={t("保存")} cancelText={t("取消")} onCancel={() => setEditing(null)} onOk={() => void save()} okButtonProps={{ loading: actions.saveTask.isPending, disabled: !draft.title.trim() }}>
-      <div className={styles.form}><label><span>{t("任务标题")}</span><Input autoFocus value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /></label><label><span>{t("任务描述（可选）")}</span><TextArea value={draft.description} autosize={{ minRows: 3, maxRows: 6 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><label><span>{t("状态")}</span><Select value={draft.status} optionList={TASK_COLUMNS.map((item) => ({ value: item.status, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, status: value as ProjectTaskStatus }))} /></label></div>
-    </Modal>
+    <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建任务") : t("编辑任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button type="primary" theme="solid" loading={actions.saveTask.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></div>}>
+      <div className={styles.form}><div className={styles.formRow}><label><span>{t("优先级")}</span><Select value={draft.priority} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={PRIORITIES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, priority: String(value) as ProjectTaskPriority }))} /></label><label><span>{t("任务标题")}</span><Input autoFocus value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /></label></div><label><span>{t("任务描述（可选）")}</span><TextArea value={draft.description} autosize={{ minRows: 3, maxRows: 6 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div></div>
+    </SideSheet>
   </div>;
 }
 
-function agentLabel(agentType: AgentSessionRow["agentType"]) { return ({ "codex-desktop": "Codex Desktop", "codex-cli": "Codex CLI", "claude-code": "Claude Code", opencode: "OpenCode", pi: "Pi" } as const)[agentType]; }
+function taskTypeLabel(taskType: ProjectTaskType) { return taskType === "code" ? "代码修改" : "只读分析"; }
+
+function priorityLabel(priority: ProjectTaskPriority) { return priority.toUpperCase(); }
+

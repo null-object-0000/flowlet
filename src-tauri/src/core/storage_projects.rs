@@ -20,6 +20,9 @@ pub struct ProjectTask {
     pub title: String,
     pub description: String,
     pub status: String,
+    pub task_type: String,
+    pub agent_profile: String,
+    pub priority: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -105,7 +108,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, created_at, updated_at
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, created_at, updated_at
              FROM project_tasks WHERE project_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
         )?;
@@ -116,8 +119,11 @@ impl Storage {
                 title: row.get(2)?,
                 description: row.get(3)?,
                 status: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                task_type: row.get(5)?,
+                agent_profile: row.get(6)?,
+                priority: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -130,15 +136,18 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         connection.execute(
-            "INSERT INTO project_tasks (id, project_id, title, description, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET
                title = excluded.title,
                description = excluded.description,
                status = excluded.status,
+               task_type = excluded.task_type,
+               agent_profile = excluded.agent_profile,
+               priority = excluded.priority,
                updated_at = excluded.updated_at
              WHERE project_tasks.project_id = excluded.project_id",
-            params![task.id, task.project_id, task.title, task.description, task.status, task.created_at, task.updated_at],
+            params![task.id, task.project_id, task.title, task.description, task.status, task.task_type, task.agent_profile, task.priority, task.created_at, task.updated_at],
         )?;
         Ok(())
     }
@@ -182,7 +191,10 @@ mod tests {
                 project_id: project.id.clone(),
                 title: "First task".into(),
                 description: String::new(),
-                status: "todo".into(),
+                status: "draft".into(),
+                task_type: "code".into(),
+                agent_profile: "Claude Code".into(),
+                priority: "p1".into(),
                 created_at: project.created_at.clone(),
                 updated_at: project.updated_at.clone(),
             })

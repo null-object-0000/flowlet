@@ -27,6 +27,13 @@ pub(crate) async fn detect_agent_environment(
     crate::core::agent_environment::detect_agent_environment(&agent_id).await
 }
 
+/// 检查所有受支持 Agent 的最新发布版本（npm registry），用于版本更新提示。
+#[tauri::command]
+pub(crate) async fn check_agent_latest_versions(
+) -> Result<crate::core::agent_version::AgentLatestVersionsReport, String> {
+    crate::core::agent_version::check_agent_latest_versions().await
+}
+
 #[tauri::command]
 pub(crate) async fn query_codex_accounts(
     state: tauri::State<'_, AppState>,

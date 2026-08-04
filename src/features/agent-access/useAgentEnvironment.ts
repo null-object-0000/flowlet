@@ -5,6 +5,7 @@ import {
   applyOpenCodeGlobalConfig,
   applyPiGlobalConfig,
   authorizeCodexAccount,
+  checkAgentLatestVersions,
   detectChatGptDesktopEnvironment,
   detectClaudeCodeEnvironment,
   detectOpenCodeEnvironment,
@@ -56,6 +57,18 @@ export function useChatGptDesktopEnvironment() {
     queryKey: queryKeys.agent.environment("chatgpt-desktop"),
     queryFn: detectChatGptDesktopEnvironment,
     staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+// Agent 最新版本提示：概览页卡片 Badge dot 与接入抽屉共用。npm 版本不会高频变化，
+// 30 分钟 staleTime + Rust 端 15 分钟进程内 TTL 缓存，避免重复请求 registry。
+export function useAgentLatestVersions(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.agent.latestVersions(),
+    queryFn: checkAgentLatestVersions,
+    enabled,
+    staleTime: 30 * 60_000,
     retry: 1,
   });
 }

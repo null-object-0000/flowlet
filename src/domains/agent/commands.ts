@@ -1,5 +1,12 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentGlobalConfigReport, CodexAccountReport, CodexAccountsReport } from "./types";
+import type {
+  AgentEnvironmentReport,
+  AgentGlobalConfigOptions,
+  AgentGlobalConfigReport,
+  AgentLatestVersionsReport,
+  CodexAccountReport,
+  CodexAccountsReport,
+} from "./types";
 
 export function detectAgentEnvironment(agentId: string): Promise<AgentEnvironmentReport> {
   return invokeCommand<AgentEnvironmentReport>("detect_agent_environment", { agentId }, 10_000).catch((error) => {
@@ -21,6 +28,13 @@ export function detectPiEnvironment(): Promise<AgentEnvironmentReport> {
 
 export function detectChatGptDesktopEnvironment(): Promise<AgentEnvironmentReport> {
   return detectAgentEnvironment("chatgpt-desktop");
+}
+
+/** 检查所有受支持 Agent 的最新发布版本（npm registry），用于版本更新提示。 */
+export function checkAgentLatestVersions(): Promise<AgentLatestVersionsReport> {
+  return invokeCommand<AgentLatestVersionsReport>("check_agent_latest_versions", undefined, 30_000).catch((error) => {
+    throw toAppError(error, "agent_version_check_failed");
+  });
 }
 
 export function queryCodexAccounts(): Promise<CodexAccountsReport> {

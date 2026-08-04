@@ -87,6 +87,7 @@ export const queryKeys = {
     environment: (agentId: string) => [...queryKeys.agent.all, "environment", agentId] as const,
     globalConfig: (agentId: string) => [...queryKeys.agent.all, "global-config", agentId] as const,
     codexAccount: () => [...queryKeys.agent.all, "codex-accounts"] as const,
+    latestVersions: () => [...queryKeys.agent.all, "latest-versions"] as const,
   },
   usage: {
     all: ["usage"] as const,

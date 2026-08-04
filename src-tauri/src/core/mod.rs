@@ -7,6 +7,7 @@ pub mod agent_session_metadata;
 pub(crate) mod agent_session_sources;
 pub mod agent_session_timeline;
 pub mod agent_source_watcher;
+pub mod agent_version;
 pub mod channels_config;
 pub mod codex_account;
 pub mod codex_model_catalog;

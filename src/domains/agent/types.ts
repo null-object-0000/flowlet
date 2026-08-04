@@ -119,3 +119,20 @@ export type AgentGlobalConfigOptions = {
   /** 仅 Pi：是否安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。安装后可按会话归并请求。 */
   sessionExtension?: boolean;
 };
+
+/** Agent 最新版本查询结果（来自 npm registry，仅提示用，不执行升级）。 */
+export type AgentLatestVersionReport = {
+  agent_id: string;
+  /** npm 包名；不支持的 agent_id 为空字符串。 */
+  package: string;
+  /** 最新发布版本（如 2.1.221）；查询失败时为 null。 */
+  latest_version: string | null;
+  /** 本次检查的 Unix 时间戳（秒）。 */
+  checked_at: number;
+  /** 该 Agent 查询失败的原因；成功时为 null/undefined。 */
+  error?: string | null;
+};
+
+export type AgentLatestVersionsReport = {
+  agents: AgentLatestVersionReport[];
+};

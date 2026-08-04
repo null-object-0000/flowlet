@@ -1,8 +1,11 @@
 .page {
-  height: 100%;
+  /* 固定高度布局：模块高度不再随窗口高度拉伸。
+     workspace 行高度由 .workspace 的固定高度决定；窗口更高时页面保持该
+     高度并顶端对齐，剩余空间留白。宽度仍保持响应式。 */
+  height: auto;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
   gap: 12px;
 }
 
@@ -24,7 +27,15 @@ button.stat { color: var(--flowlet-color-text); font: inherit; text-align: left;
 .stat strong { display: block; margin-top: 6px; overflow: hidden; font-size: 22px; line-height: 1; white-space: nowrap; text-overflow: ellipsis; }
 .stat small { display: block; margin-top: 6px; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
 
-.workspace { min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.workspace {
+  min-height: 0;
+  /* 固定高度：适配 720px 最小窗口（内容区 654px − 页头/统计 ≈ 162px − 两处 12px 间距）。
+     保持近似当前 720px 窗口下的自然高度，窗口更高时不再增长。 */
+  height: 480px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
 .card, .selectedPeriod, .confidenceCard {
   min-width: 0;
   min-height: 0;
@@ -375,6 +386,7 @@ button.selectedPeriodMetric { border: 0; background: transparent; font: inherit;
   .toolbar { flex-wrap: wrap; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace { grid-template-columns: 1fr; }
+  .workspace { height: auto; }
   .insightColumn { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
   .selectedPeriod { min-height: 214px; }
 }

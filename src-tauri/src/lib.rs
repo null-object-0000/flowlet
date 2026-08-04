@@ -1087,6 +1087,7 @@ fn run_desktop() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::detect_agent_environment,
+            commands::check_agent_latest_versions,
             commands::list_cached_codex_accounts,
             commands::query_codex_account,
             commands::query_codex_accounts,

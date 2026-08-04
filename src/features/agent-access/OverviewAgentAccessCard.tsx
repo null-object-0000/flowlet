@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { Toast } from "@douyinfe/semi-ui-19";
+import { Badge, Toast } from "@douyinfe/semi-ui-19";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import styles from "./OverviewAgentAccessCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
-import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentSurface } from "../../domains/agent/types";
+import { cliInstalledVersion, isNewerVersion } from "../../domains/agent/versions";
+import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentLatestVersionReport, AgentSurface } from "../../domains/agent/types";
 import {
   useChatGptDesktopEnvironment,
   useClaudeCodeEnvironment,
   useClaudeCodeGlobalConfig,
   useCodexGlobalConfig,
+  useAgentLatestVersions,
   useOpenCodeEnvironment,
   useOpenCodeGlobalConfig,
   usePiEnvironment,
@@ -65,10 +67,16 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const openCodeEnvironment = useOpenCodeEnvironment();
   const piEnvironment = usePiEnvironment();
   const chatGptEnvironment = useChatGptDesktopEnvironment();
+  const latestVersions = useAgentLatestVersions();
   const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
   const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
   const piGlobalConfig = usePiGlobalConfig(selectedAgent === "pi");
   const codexGlobalConfig = useCodexGlobalConfig(selectedAgent === "codex");
+
+  const latestByAgent = new Map<string, AgentLatestVersionReport>();
+  for (const report of latestVersions.data?.agents ?? []) {
+    latestByAgent.set(report.agent_id, report);
+  }
 
   const copy = async (value: string, message: string) => {
     try {
@@ -141,15 +149,22 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                 : kind === "pi"
                   ? piEnvironment
                   : chatGptEnvironment;
+            // 版本更新提示只针对 CLI 包：桌面应用（ChatGPT Desktop / OpenCode Desktop）
+            // 是独立版本体系，不参与 npm latest 比较。
+            const installedVersion = cliInstalledVersion(environmentQuery.data);
+            const hasNewer = isNewerVersion(latestByAgent.get(kind)?.latest_version, installedVersion);
             return (
               <button
                 key={name}
                 type="button"
                 className={styles.agentCard}
                 aria-label={t("配置 {name}", { name })}
+                title={hasNewer ? t("检测到新版本，点击查看详情") : undefined}
                 onClick={() => setSelectedAgent(kind)}
               >
-                <span className={`${styles.icon} ${iconClassName}`}>{icon}</span>
+                <Badge dot={hasNewer} type="danger">
+                  <span className={`${styles.icon} ${iconClassName}`}>{icon}</span>
+                </Badge>
                 <span className={styles.agentText}>
                   <strong>{name}</strong>
                   <span className={styles.surfaceStatuses}>
@@ -186,7 +201,16 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         environment={activeEnvironment.data}
         environmentLoading={activeEnvironment.isFetching}
         environmentError={activeEnvironment.error?.message}
-        onRefreshEnvironment={() => void activeEnvironment.refetch()}
+        onRefreshEnvironment={() => {
+          void activeEnvironment.refetch();
+          void latestVersions.refetch();
+        }}
+        latestVersion={selectedAgent ? latestByAgent.get(selectedAgent)?.latest_version ?? null : null}
+        latestVersionLoading={latestVersions.isFetching}
+        latestVersionError={selectedAgent
+          ? latestByAgent.get(selectedAgent)?.error ?? (latestVersions.isError ? latestVersions.error?.message : undefined)
+          : undefined}
+        onRefreshLatestVersion={() => void latestVersions.refetch()}
         globalConfig={activeGlobalConfig.query.data}
         globalConfigLoading={Boolean(selectedAgent && activeGlobalConfig.query.isLoading)}
         globalConfigBusy={activeGlobalConfig.apply.isPending || activeGlobalConfig.restore.isPending}

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { OverviewAgentAccessCard } from "./OverviewAgentAccessCard";
+import { useChatGptDesktopEnvironment } from "./useAgentEnvironment";
 
 const refetch = vi.fn();
 const mutateAsync = vi.fn();
@@ -102,7 +103,7 @@ vi.mock("./useAgentEnvironment", () => ({
     isLoading: false,
     refetch,
   }),
-  useChatGptDesktopEnvironment: () => ({
+  useChatGptDesktopEnvironment: vi.fn(() => ({
     data: {
       agent_id: "chatgpt-desktop",
       agent_name: "ChatGPT (Codex)",
@@ -135,6 +136,20 @@ vi.mock("./useAgentEnvironment", () => ({
     isError: false,
     isFetching: false,
     isLoading: false,
+    refetch,
+  })),
+  useAgentLatestVersions: () => ({
+    data: {
+      agents: [
+        { agent_id: "claude-code", package: "@anthropic-ai/claude-code", latest_version: "2.1.221", checked_at: 0, error: null },
+        { agent_id: "opencode", package: "opencode-ai", latest_version: "1.18.13", checked_at: 0, error: null },
+        { agent_id: "pi", package: "@earendil-works/pi-coding-agent", latest_version: "0.83.0", checked_at: 0, error: null },
+        { agent_id: "codex", package: "@openai/codex", latest_version: "0.146.0", checked_at: 0, error: null },
+      ],
+    },
+    isFetching: false,
+    isError: false,
+    error: null,
     refetch,
   }),
   useCodexGlobalConfig: () => ({
@@ -353,5 +368,69 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
     expect(screen.getByText("models.json Provider 片段")).toBeInTheDocument();
     expect(screen.getByText("settings.json 默认模型片段")).toBeInTheDocument();
+  });
+
+  it("shows a new-version badge on the logo and version details in the drawer", () => {
+    const { container } = render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    // 已安装且存在更新版本的 Agent：Logo 上带 Badge dot，按钮带标题提示。
+    const claudeButton = screen.getByRole("button", { name: "配置 Claude Code" });
+    expect(claudeButton.title).toBe("检测到新版本，点击查看详情");
+    expect(container.querySelector(".semi-badge-dot")).not.toBeNull();
+
+    fireEvent.click(claudeButton);
+    // 抽屉内展示已安装版本与最新版本。
+    expect(screen.getByText("已安装版本")).toBeInTheDocument();
+    expect(screen.getByText("最新版本")).toBeInTheDocument();
+    expect(screen.getByText("2.1.221")).toBeInTheDocument();
+    expect(screen.getByText(/检测到新版本：2.1.207 → 2.1.221/)).toBeInTheDocument();
+    expect(screen.getByText("前往官网查看更新说明")).toBeInTheDocument();
+  });
+
+  it("bases the Codex update badge only on the CLI version, ignoring the desktop version", () => {
+    // 桌面版本远小于 npm latest，但 ChatGPT Desktop 使用独立版本体系，不应触发更新提示。
+    vi.mocked(useChatGptDesktopEnvironment).mockReturnValueOnce({
+      data: {
+        agent_id: "chatgpt-desktop",
+        agent_name: "ChatGPT (Codex)",
+        installed: true,
+        primary: {
+          surface: "desktop",
+          executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+          install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0",
+          install_method: "desktop",
+          version: "0.9.0",
+          available_on_path: false,
+        },
+        installations: [
+          {
+            surface: "desktop",
+            executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+            install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0",
+            install_method: "desktop",
+            version: "0.9.0",
+            available_on_path: false,
+          },
+          {
+            surface: "cli",
+            executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\codex.cmd",
+            install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex",
+            install_method: "npm",
+            version: "0.146.0",
+            available_on_path: true,
+          },
+        ],
+      },
+      error: null,
+      isError: false,
+      isFetching: false,
+      isLoading: false,
+      refetch,
+    } as unknown as ReturnType<typeof useChatGptDesktopEnvironment>);
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    // CLI 0.146.0 与 npm latest 0.146.0 一致 → 无新版本提示（title 为空）。
+    const codexButton = screen.getByRole("button", { name: "配置 Codex" });
+    expect(codexButton.title).toBe("");
   });
 });

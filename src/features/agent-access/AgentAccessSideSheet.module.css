@@ -74,6 +74,94 @@
   margin-top: 14px;
 }
 
+.installGuide {
+  margin-top: 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  background: var(--flowlet-color-surface-muted);
+}
+
+.officialLink {
+  flex: none;
+  color: var(--flowlet-color-primary);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.officialLink:hover {
+  text-decoration: underline;
+}
+
+.versionBlock {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.versionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.versionItem {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 9px 12px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  background: var(--flowlet-color-surface-muted);
+}
+
+.versionItem > span {
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 12px;
+}
+
+.versionItem code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--flowlet-color-text);
+  font-family: "Cascadia Code", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.updateNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--semi-color-danger-light-active);
+  border-radius: 8px;
+  background: var(--semi-color-danger-light-default);
+}
+
+.updateNotice span {
+  min-width: 0;
+  color: var(--flowlet-color-text);
+}
+
+.versionMuted {
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 12px;
+}
+
+.versionErrorRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .accountRefreshNotice {
   display: block;
   margin-top: 12px;

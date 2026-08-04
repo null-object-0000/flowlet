@@ -6,6 +6,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { ConfigRow, StatusRow, globalConfigTag } from "./globalConfigPresentation";
+import { cliInstalledVersion, isNewerVersion } from "../../domains/agent/versions";
 import type {
   AgentEnvironmentReport,
   AgentGlobalConfigOptions,
@@ -121,6 +122,8 @@ type AgentMeta = {
   name: string;
   endpointSuffix: "/anthropic" | "/v1";
   hasDesktop: boolean;
+  /** 官方安装 / 更新说明地址：未安装时引导安装，有新版本时查看更新。 */
+  officialUrl: string;
   showsCredentialsFile: boolean;
   showsFastModel: boolean;
   showsSubagentModel: boolean;
@@ -136,6 +139,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     name: "Claude Code",
     endpointSuffix: "/anthropic",
     hasDesktop: false,
+    officialUrl: "https://code.claude.com/docs/en/setup",
     showsCredentialsFile: false,
     showsFastModel: true,
     showsSubagentModel: true,
@@ -149,6 +153,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     name: "OpenCode",
     endpointSuffix: "/v1",
     hasDesktop: true,
+    officialUrl: "https://opencode.ai/docs",
     showsCredentialsFile: true,
     showsFastModel: true,
     showsSubagentModel: false,
@@ -162,6 +167,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     name: "Pi",
     endpointSuffix: "/v1",
     hasDesktop: false,
+    officialUrl: "https://pi.dev",
     showsCredentialsFile: true,
     showsFastModel: false,
     showsSubagentModel: false,
@@ -175,6 +181,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     name: "Codex",
     endpointSuffix: "/v1",
     hasDesktop: true,
+    officialUrl: "https://developers.openai.com/codex/cli",
     showsCredentialsFile: true,
     showsFastModel: false,
     showsSubagentModel: false,
@@ -195,6 +202,10 @@ type Props = {
   environmentLoading?: boolean;
   environmentError?: string;
   onRefreshEnvironment: () => void;
+  latestVersion?: string | null;
+  latestVersionLoading?: boolean;
+  latestVersionError?: string;
+  onRefreshLatestVersion: () => void;
   globalConfig?: AgentGlobalConfigReport;
   globalConfigLoading?: boolean;
   globalConfigBusy?: boolean;
@@ -215,6 +226,10 @@ export function AgentAccessSideSheet({
   environmentLoading = false,
   environmentError,
   onRefreshEnvironment,
+  latestVersion,
+  latestVersionLoading = false,
+  latestVersionError,
+  onRefreshLatestVersion,
   globalConfig,
   globalConfigLoading = false,
   globalConfigBusy = false,
@@ -247,6 +262,10 @@ export function AgentAccessSideSheet({
   const surfaceInstallations = environment?.installations.filter(
     (installation) => (installation.surface || "cli") === surface,
   );
+  // 版本更新提示只针对 CLI 包（npm latest 对应 CLI 版本），桌面应用不参与比较。
+  const cliInstalled = environment?.installations.some((item) => (item.surface ?? "cli") === "cli") ?? false;
+  const installedVersion = cliInstalledVersion(environment);
+  const newer = isNewerVersion(latestVersion, installedVersion);
 
   return (
     <SideSheet
@@ -294,9 +313,57 @@ export function AgentAccessSideSheet({
 
             {environmentError ? <Text className={styles.environmentMessage} type="danger">{t("检测失败：{message}", { message: environmentError })}</Text> : null}
             {!environmentError && !environmentLoading && !environment?.installed ? (
-              <Text className={styles.environmentMessage} type="tertiary">
-                {t(meta.notInstalledText)}
-              </Text>
+              <div className={styles.installGuide}>
+                <Text type="tertiary" size="small">{t(meta.notInstalledText)}</Text>
+                <a className={styles.officialLink} href={meta.officialUrl} target="_blank" rel="noreferrer">
+                  {t("前往官网安装")}
+                </a>
+              </div>
+            ) : null}
+            {/* 版本更新提示仅适用于 CLI：npm latest 是 CLI 包版本，桌面标签页不展示。 */}
+            {!environmentError && !environmentLoading && environment?.installed && surface === "cli" && cliInstalled ? (
+              <div className={styles.versionBlock}>
+                <div className={styles.versionGrid}>
+                  <div className={styles.versionItem}>
+                    <span>{t("已安装版本")}</span>
+                    <code>{installedVersion || "-"}</code>
+                  </div>
+                  <div className={styles.versionItem}>
+                    <span>{t("最新版本")}</span>
+                    <code>
+                      {latestVersionLoading
+                        ? t("检查中…")
+                        : latestVersion || (latestVersionError ? t("检查失败") : "-")}
+                    </code>
+                  </div>
+                </div>
+                {newer ? (
+                  <div className={styles.updateNotice}>
+                    <span>
+                      {t("检测到新版本：{installed} → {latest}", {
+                        installed: installedVersion || "-",
+                        latest: latestVersion || "-",
+                      })}
+                    </span>
+                    <a className={styles.officialLink} href={meta.officialUrl} target="_blank" rel="noreferrer">
+                      {t("前往官网查看更新说明")}
+                    </a>
+                  </div>
+                ) : latestVersionError ? (
+                  <div className={styles.versionErrorRow}>
+                    <Text className={styles.versionMuted} type="tertiary" size="small">
+                      {t("版本检查失败：{message}", { message: latestVersionError })}
+                    </Text>
+                    <Button size="small" theme="borderless" onClick={onRefreshLatestVersion}>
+                      {t("重新检查")}
+                    </Button>
+                  </div>
+                ) : latestVersion && !latestVersionLoading ? (
+                  <Text className={styles.versionMuted} type="tertiary" size="small">
+                    {t("已是最新版本")}
+                  </Text>
+                ) : null}
+              </div>
             ) : null}
             {!environmentError && !environmentLoading && environment?.installed && !surfaceInstallations?.length ? (
               <Text className={styles.environmentMessage} type="tertiary">

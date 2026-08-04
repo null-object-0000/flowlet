@@ -212,6 +212,8 @@ OpenCode CLI 与 Desktop 共用用户级配置。Flowlet 在 `~/.config/opencode
 
 Agent 接入抽屉中的 Client Token 默认使用固定长度掩码；查看按钮只在当前抽屉会话中临时展示，关闭后恢复掩码，复制始终使用真实值。Claude Code 手动片段与一键写入字段保持一致；OpenCode 将 Provider 配置和 `auth.json` 凭据拆成两个片段。OpenCode 配置与凭据采用双文件事务写入，第二个文件失败时恢复两个文件的原始字节内容。
 
+Agent 安装引导与版本更新提示：`check_agent_latest_versions` command（`src-tauri/src/core/agent_version.rs`）从 npm registry 并行查询 Claude Code / OpenCode / Pi / Codex 四个包的最新发布版本，带进程内 TTL 缓存（15 分钟）与单 Agent 独立错误处理，只做提示、不执行升级。npm latest 对应的是各 Agent 的 **CLI 包版本**，因此更新比较只取「CLI 面」的已安装版本（`cliInstalledVersion`，`src/domains/agent/versions.ts`）——ChatGPT Desktop / OpenCode Desktop 使用独立版本体系，不参与比较，概览页 Logo 的 Badge dot 与抽屉的版本对比都只在 CLI 标签页出现。前端用纯函数 `isNewerVersion` 判断「有新版」：接入抽屉展示已安装版本与最新版本、检测到新版本时给出「x → y」与官网更新说明链接。未检测到安装时，抽屉内提供官网安装引导链接（Claude Code / OpenCode / Pi / Codex 官方地址）。版本检查数据仅存在于前端 Query 缓存，不写入 SQLite 或 `config.json`。
+
 ## Channel Preset 架构
 
 ### Channel Preset

@@ -44,6 +44,7 @@ export function OverviewGrid({
       <div className={styles.accountCard}>
         <OverviewChannelAccountsCard
           accounts={accounts}
+          channels={channels}
           snapshots={balanceSnapshots}
           codexAccounts={codexAccounts}
           onCreate={(channelId) => onAccountRequest({ kind: "create", channelId })}

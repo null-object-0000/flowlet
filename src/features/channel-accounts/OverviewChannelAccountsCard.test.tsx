@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
+import type { ChannelPreset } from "../../domains/channel/types";
 import { formatTime } from "../../shared/formatters/datetime";
 import { OverviewChannelAccountsCard } from "./OverviewChannelAccountsCard";
 
@@ -26,6 +27,13 @@ const snapshot = {
   token_pack_expire_at: "2026-07-30T00:00:00Z",
 } as AccountBalanceSnapshot;
 
+const channels = [
+  { id: "longcat", name: "LongCat", supports_balance_query: false, supports_scrape_balance: true },
+  { id: "deepseek", name: "DeepSeek", supports_balance_query: true, supports_scrape_balance: false },
+  { id: "kimi", name: "Kimi", supports_balance_query: true, supports_scrape_balance: false },
+  { id: "qwen", name: "Qwen", supports_balance_query: false, supports_scrape_balance: true },
+] as ChannelPreset[];
+
 describe("OverviewChannelAccountsCard", () => {
   it("renders provider choices inside the empty card", async () => {
     const user = userEvent.setup();
@@ -34,6 +42,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[]}
+        channels={channels}
         snapshots={[]}
         onCreate={onCreate}
         onViewAll={vi.fn()}
@@ -59,6 +68,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[]}
+        channels={channels}
         snapshots={[]}
         onCreate={onCreate}
         onViewAll={vi.fn()}
@@ -94,6 +104,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[]}
+        channels={channels}
         snapshots={[]}
         codexAccounts={codexAccounts}
         onCreate={vi.fn()}
@@ -129,6 +140,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[]}
+        channels={channels}
         snapshots={[]}
         codexAccounts={[emptyApiKeyAccount]}
         onCreate={vi.fn()}
@@ -152,6 +164,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[account]}
+        channels={channels}
         snapshots={[snapshot]}
         onCreate={onCreate}
         onViewAll={onViewAll}
@@ -177,6 +190,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[account]}
+        channels={channels}
         snapshots={[exhaustedSnapshot]}
         onCreate={vi.fn()}
         onViewAll={vi.fn()}
@@ -213,6 +227,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[qwenAccount]}
+        channels={channels}
         snapshots={[qwenSnapshot]}
         onCreate={vi.fn()}
         onViewAll={vi.fn()}
@@ -241,6 +256,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[account]}
+        channels={channels}
         snapshots={[todaySnapshot]}
         onCreate={vi.fn()}
         onViewAll={vi.fn()}
@@ -277,6 +293,7 @@ describe("OverviewChannelAccountsCard", () => {
     render(
       <OverviewChannelAccountsCard
         accounts={[qwenAccount]}
+        channels={channels}
         snapshots={[qwenSnapshot]}
         onCreate={vi.fn()}
         onViewAll={vi.fn()}
@@ -285,6 +302,270 @@ describe("OverviewChannelAccountsCard", () => {
     );
 
     expect(screen.getByText(/七天重置 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("shows a green badge on the logo when an auto-sync account is freshly synced", () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
+    const autoAccount = {
+      id: "account-longcat-auto",
+      channel_id: "longcat",
+      name: "LongCat 自动同步",
+      api_key: "configured",
+      enabled: true,
+      credential_status: "healthy",
+      resource_mode: "hybrid",
+      resource_sync_mode: "auto",
+    } as ChannelAccount;
+    const freshSnapshot = {
+      account_id: autoAccount.id,
+      synced_at: "2026-07-29T09:58:00Z",
+    } as AccountBalanceSnapshot;
+
+    const { container } = render(
+      <OverviewChannelAccountsCard
+        accounts={[autoAccount]}
+        channels={channels}
+        snapshots={[freshSnapshot]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".semi-badge-dot.semi-badge-success")).toBeTruthy();
+    expect(container.querySelector(".semi-badge-dot.semi-badge-warning")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows a yellow badge on the logo when an auto-sync account missed a sync cycle", () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
+    const autoAccount = {
+      id: "account-longcat-auto",
+      channel_id: "longcat",
+      name: "LongCat 自动同步",
+      api_key: "configured",
+      enabled: true,
+      credential_status: "healthy",
+      resource_mode: "hybrid",
+      resource_sync_mode: "auto",
+    } as ChannelAccount;
+    const staleSnapshot = {
+      account_id: autoAccount.id,
+      synced_at: "2026-07-29T09:00:00Z",
+    } as AccountBalanceSnapshot;
+
+    const { container } = render(
+      <OverviewChannelAccountsCard
+        accounts={[autoAccount]}
+        channels={channels}
+        snapshots={[staleSnapshot]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".semi-badge-dot.semi-badge-warning")).toBeTruthy();
+    expect(container.querySelector(".semi-badge-dot.semi-badge-success")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows a yellow badge when an auto-sync account has never been synced", () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
+    const autoAccount = {
+      id: "account-longcat-auto",
+      channel_id: "longcat",
+      name: "LongCat 自动同步",
+      api_key: "configured",
+      enabled: true,
+      credential_status: "healthy",
+      resource_mode: "hybrid",
+      resource_sync_mode: "auto",
+    } as ChannelAccount;
+
+    const { container } = render(
+      <OverviewChannelAccountsCard
+        accounts={[autoAccount]}
+        channels={channels}
+        snapshots={[]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".semi-badge-dot.semi-badge-warning")).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("shows a green badge for DeepSeek official-balance-api accounts without a base URL override", () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
+    const deepseekAccount = {
+      id: "account-deepseek",
+      channel_id: "deepseek",
+      name: "DeepSeek 主账号",
+      api_key: "configured",
+      enabled: true,
+      credential_status: "healthy",
+      resource_mode: "pay_as_you_go",
+      resource_sync_mode: "manual",
+      base_url_override: null,
+      workspace_default_base_url: null,
+    } as ChannelAccount;
+    const freshSnapshot = {
+      account_id: deepseekAccount.id,
+      synced_at: "2026-07-29T09:58:00Z",
+    } as AccountBalanceSnapshot;
+
+    const { container } = render(
+      <OverviewChannelAccountsCard
+        accounts={[deepseekAccount]}
+        channels={channels}
+        snapshots={[freshSnapshot]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".semi-badge-dot.semi-badge-success")).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("does not show a badge for manual-sync accounts", () => {
+    const manualAccount = {
+      id: "account-longcat-manual",
+      channel_id: "longcat",
+      name: "LongCat 手动维护",
+      api_key: "configured",
+      enabled: true,
+      credential_status: "healthy",
+      resource_mode: "hybrid",
+      resource_sync_mode: "manual",
+    } as ChannelAccount;
+
+    const { container } = render(
+      <OverviewChannelAccountsCard
+        accounts={[manualAccount]}
+        channels={channels}
+        snapshots={[]}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".semi-badge-dot")).toBeNull();
+  });
+
+  it("shows a green badge on the logo when a Codex account was freshly synced", () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
+    const codexAccounts: CodexAccountReport[] = [{
+      account_id: "acc-codex",
+      signed_in: true,
+      auth_mode: "chatgpt",
+      email: "codex@example.com",
+      plan_type: "plus",
+      primary: { used_percent: 25, window_duration_mins: 300, resets_at: 1_779_459_394 },
+      secondary: null,
+      credits: null,
+      rate_limit_reset_credits: null,
+      rate_limit_reached_type: null,
+      source: "oauth",
+      updated_at: "2026-07-29T09:58:00Z",
+      stale: false,
+      error: null,
+    }];
+
+    const { container } = render(
+      <OverviewChannelAccountsCard
+        accounts={[]}
+        channels={channels}
+        snapshots={[]}
+        codexAccounts={codexAccounts}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+        onOpenCodexAgent={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".semi-badge-dot.semi-badge-success")).toBeTruthy();
+    expect(container.querySelector(".semi-badge-dot.semi-badge-warning")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows a yellow badge on the logo when a Codex account refresh failed", () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
+    const codexAccounts: CodexAccountReport[] = [{
+      account_id: "acc-codex",
+      signed_in: true,
+      auth_mode: "chatgpt",
+      email: "codex@example.com",
+      plan_type: "plus",
+      primary: { used_percent: 25, window_duration_mins: 300, resets_at: 1_779_459_394 },
+      secondary: null,
+      credits: null,
+      rate_limit_reset_credits: null,
+      rate_limit_reached_type: null,
+      source: "oauth",
+      updated_at: "2026-07-29T09:58:00Z",
+      stale: true,
+      error: "Codex 账号刷新失败。OAuth 会话：登录已过期",
+    }];
+
+    const { container } = render(
+      <OverviewChannelAccountsCard
+        accounts={[]}
+        channels={channels}
+        snapshots={[]}
+        codexAccounts={codexAccounts}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+        onOpenCodexAgent={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".semi-badge-dot.semi-badge-warning")).toBeTruthy();
+    expect(container.querySelector(".semi-badge-dot.semi-badge-success")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows a yellow badge on the logo when a Codex account missed a sync cycle", () => {
+    vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
+    const codexAccounts: CodexAccountReport[] = [{
+      account_id: "acc-codex",
+      signed_in: true,
+      auth_mode: "chatgpt",
+      email: "codex@example.com",
+      plan_type: "plus",
+      primary: { used_percent: 25, window_duration_mins: 300, resets_at: 1_779_459_394 },
+      secondary: null,
+      credits: null,
+      rate_limit_reset_credits: null,
+      rate_limit_reached_type: null,
+      source: "oauth",
+      updated_at: "2026-07-29T09:00:00Z",
+      stale: false,
+      error: null,
+    }];
+
+    const { container } = render(
+      <OverviewChannelAccountsCard
+        accounts={[]}
+        channels={channels}
+        snapshots={[]}
+        codexAccounts={codexAccounts}
+        onCreate={vi.fn()}
+        onViewAll={vi.fn()}
+        onEdit={vi.fn()}
+        onOpenCodexAgent={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".semi-badge-dot.semi-badge-warning")).toBeTruthy();
     vi.useRealTimers();
   });
 });

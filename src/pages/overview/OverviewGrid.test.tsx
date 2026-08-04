@@ -18,6 +18,7 @@ vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
   useOpenCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
   usePiEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
   useChatGptDesktopEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
+  useAgentLatestVersions: () => ({ data: { agents: [] }, isLoading: false, isFetching: false, isError: false, error: null, refetch: vi.fn() }),
   useCodexGlobalConfig: () => ({
     query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
     apply: { isPending: false, mutateAsync: vi.fn() },

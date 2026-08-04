@@ -585,6 +585,8 @@ const english: Record<string, string> = {
   "未检测到 Codex 登录账号": "No signed-in Codex account detected",
   "登录账号": "Signed-in account",
   "数据已过期": "Data stale",
+  "数据同步正常": "Data is up to date",
+  "数据同步可能已过期": "Data sync may be outdated",
   "最后更新": "Last updated",
   "预计下次刷新：{time}": "Next refresh expected: {time}",
   "数据即将自动刷新": "Data will refresh shortly",

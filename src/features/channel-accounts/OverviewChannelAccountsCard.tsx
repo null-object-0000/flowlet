@@ -1,7 +1,9 @@
-import { Button, Tag, Typography } from "@douyinfe/semi-ui-19";
+import { useEffect, useState } from "react";
+import { Badge, Button, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronRight, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { CHATGPT_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
+import type { ChannelPreset } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
 import {
@@ -17,11 +19,13 @@ import styles from "./OverviewChannelAccountsCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import { formatTime, parseTimestamp } from "../../shared/formatters/datetime";
+import { accountSyncStatus, codexSyncStatus, type AccountSyncStatus } from "./accountSyncStatus";
 
 const { Text } = Typography;
 
 type Props = {
   accounts: ChannelAccount[];
+  channels: ChannelPreset[];
   snapshots: AccountBalanceSnapshot[];
   codexAccounts?: CodexAccountReport[];
   onCreate: (channelId: string) => void;
@@ -30,10 +34,18 @@ type Props = {
   onOpenCodexAgent?: (accountId: string) => void;
 };
 
-export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts, onCreate, onViewAll, onEdit, onOpenCodexAgent }: Props) {
+export function OverviewChannelAccountsCard({ accounts, channels, snapshots, codexAccounts, onCreate, onViewAll, onEdit, onOpenCodexAgent }: Props) {
   const { language, t } = useAppPreferences();
   const snapshotByAccount = new Map(snapshots.map((snapshot) => [snapshot.account_id, snapshot]));
+  const presetByChannelId = new Map(channels.map((preset) => [preset.id, preset]));
   const enabledCount = accounts.filter((a) => a.enabled).length;
+  // 自动同步失败时不刷新快照查询，过期提示需要按当前时间周期性重算，
+  // 否则应用空闲时 Logo 上的状态点不会在超出一轮同步周期后转为黄色。
+  const [, setSyncTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setSyncTick((value) => value + 1), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // 将 Codex 账号转为伪渠道账号，排在所有正常账号后面。
   const codexPseudoAccounts = (codexAccounts ?? [])
@@ -63,6 +75,11 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
           const status = isCodex
             ? { label: "", color: "green" as const }
             : accountStatus(account, t);
+          const syncStatus = isCodex
+            ? codexReport
+              ? codexSyncStatus(codexReport)
+              : null
+            : accountSyncStatus(account, snapshot, presetByChannelId.get(account.channel_id));
           const nameSummary = isCodex && codexReport
             ? getCodexNameSummary(codexReport)
             : nameLineSummary(account, snapshot, t, language);
@@ -75,7 +92,12 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
                   type="button"
                   onClick={() => onOpenCodexAgent?.(codexReport?.account_id ?? "")}
                 >
-                  <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
+                  <AccountLogo
+                    channelId={account.channel_id}
+                    name={account.name}
+                    syncStatus={syncStatus}
+                    tooltip={syncStatus === "stale" && codexReport?.error ? codexReport.error : undefined}
+                  />
                   <span className={styles.accountText}>
                     <span className={styles.nameRow}>
                       <span className={styles.codexNameWrapper}>
@@ -111,7 +133,7 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
                 </button>
               ) : (
                 <button className={styles.rowMain} type="button" onClick={() => onEdit(account.id)}>
-                  <ChannelBrandLogo channelId={account.channel_id} name={account.name} />
+                  <AccountLogo channelId={account.channel_id} name={account.name} syncStatus={syncStatus} />
                   <span className={styles.accountText}>
                     <span className={styles.nameRow}>
                       <Text strong className={nameSummary ? styles.namePrimary : styles.nameText} title={accountName}>
@@ -177,6 +199,23 @@ export function OverviewChannelAccountsCard({ accounts, snapshots, codexAccounts
         </div>
       )}
     </OverviewModuleCard>
+  );
+}
+
+/** 渠道 Logo。参与自动同步的账号在 Logo 右上角展示 Badge dot：
+ *  数据正常（一轮同步周期内更新成功）为绿色，过期为黄色。
+ *  `tooltip` 可覆盖悬浮文案（如 Codex 刷新失败的详细错误）。 */
+function AccountLogo({ channelId, name, syncStatus, tooltip }: { channelId: string; name: string; syncStatus: AccountSyncStatus | null; tooltip?: string }) {
+  const { t } = useAppPreferences();
+  const logo = <ChannelBrandLogo channelId={channelId} name={name} />;
+  if (!syncStatus) return logo;
+  const content = tooltip ?? (syncStatus === "stale" ? t("数据同步可能已过期") : t("数据同步正常"));
+  return (
+    <Tooltip content={content}>
+      <Badge dot type={syncStatus === "stale" ? "warning" : "success"}>
+        {logo}
+      </Badge>
+    </Tooltip>
   );
 }
 

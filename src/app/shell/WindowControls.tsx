@@ -35,6 +35,8 @@ export function WindowControls() {
     if (event.detail === 2) {
       // 双击标题栏：切换最大化/还原。Windows 上 startDragging 会进入系统拖动
       // 模态循环并吞掉 dblclick，因此不能依赖 onDoubleClick，需在 mousedown 直接处理。
+      // preventDefault 阻断双击默认的文本选中行为。
+      event.preventDefault();
       void windowCommands.toggleMaximize();
       return;
     }

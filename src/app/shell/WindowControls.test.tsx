@@ -40,13 +40,18 @@ describe("WindowControls", () => {
     expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
   });
 
-  it("toggles maximize on a double mousedown without starting a drag", () => {
+  it("toggles maximize on a double mousedown without starting a drag or selecting text", () => {
     render(<WindowControls />);
 
-    fireEvent.mouseDown(screen.getByTestId("titlebar-drag-region"), { buttons: 1, detail: 2 });
+    const node = screen.getByTestId("titlebar-drag-region");
+    const event = new MouseEvent("mousedown", { bubbles: true, buttons: 1, detail: 2 });
+    const preventDefault = vi.spyOn(event, "preventDefault");
+    node.dispatchEvent(event);
 
     expect(windowApi.toggleMaximize).toHaveBeenCalledOnce();
     expect(windowApi.startDragging).not.toHaveBeenCalled();
+    // 双击最大化的同时，必须阻止默认的文本选中行为。
+    expect(preventDefault).toHaveBeenCalledOnce();
   });
 
   it("ignores non-primary mouse buttons on the drag region", () => {

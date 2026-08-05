@@ -36,51 +36,44 @@ type ChatRequest = {
  * 请求路由由本地代理完成（flowlet-flash 是聚合模型，无单一上游）；请求通过
  * `User-Agent: Flowlet/…` 与 `x-flowlet-client` 标记头让请求日志识别为 Flowlet。
  *
- * 用 `response_format: { type: "json_object" }` 约束模型**结构化输出**，要求返回
- * `{"title": "…"}`，从根上避免模型回显自由文本或请求体：
- * 1. 主路径：JSON 输出，解析 `title` 字段；无有效 `title`（含回显/非法 JSON）即失败；
- * 2. 首轮失败时用更强调「必须输出 JSON」的提示词重试一次；
- * 3. 仍失败则回退到从任务描述提取的可读标题，保证功能始终可用。
- *
- * 真实错误（代理未运行、上游 4xx/5xx、网络失败、上游返回 error 体）会直接抛出，
- * 不回退掩盖。
+ * 用 `response_format: { type: "json_object" }` 约束模型结构化输出 `{"title": "…"}`，
+ * 单次请求不做重试；解析时同时兼容普通 `content` 与推理类模型的
+ * `reasoning_content`（部分推理模型把结构化结果放在该字段）。拿不到有效标题
+ * 或上游调用失败时直接抛出用户可读错误，不做任何兜底。
  * 前置条件：已经校验 `canAutoGenerateTaskTitle(description)`。
  */
 export async function generateTaskTitle(input: GenerateTaskTitleInput): Promise<string> {
   const { baseUrl, clientToken, description, taskType } = input;
   const taskTypeLabel = taskType === "code" ? "代码修改" : "只读分析";
-  const requests = [
-    buildChatRequest(taskTypeLabel, description, false),
-    buildChatRequest(taskTypeLabel, description, true),
-  ];
+  const request = buildChatRequest(taskTypeLabel, description);
 
-  for (const request of requests) {
-    // 真实错误（HTTP / 网络 / 错误体）在此抛出，不进入重试与回退。
-    const content = await callProxy(baseUrl, clientToken, request);
-    if (content) {
-      const title = extractTitle(content);
-      if (title && isPlausibleTitle(title)) {
-        return title;
-      }
+  // 真实错误（HTTP / 网络 / 错误体）在 callProxy 内抛出。
+  const content = await callProxy(baseUrl, clientToken, request);
+  if (content) {
+    const title = extractTitle(content);
+    if (title && isPlausibleTitle(title)) {
+      return title;
     }
   }
-
-  // 模型仍不可靠（回显 / 非 JSON / 无 title），回退到从描述生成的可读标题。
-  return fallbackTitle(description);
+  throw new Error("标题生成失败：模型未返回有效标题，请重试");
 }
 
-/** 组装发给本地代理的 chat completions 请求：JSON 结构化输出，`retry=true` 时更强调整必须 JSON。 */
-function buildChatRequest(taskTypeLabel: string, description: string, retry: boolean): ChatRequest {
-  const system = retry
-    ? "你是任务标题生成助手。必须用 JSON 输出任务标题，格式为 {\"title\": \"简短准确的中文标题\"}。要求：标题一句话、不超过 30 字；不要回显或复述任务描述。只输出一个 JSON 对象，不要输出任何 JSON 之外的纯文本、解释或请求体。"
-    : "你是任务标题生成助手。用 JSON 输出任务标题，格式为 {\"title\": \"简短准确的中文标题\"}。要求：标题一句话、不超过 30 字；不要回显或复述任务描述。只输出 JSON，不要输出任何其他内容。";
+/** 组装发给本地代理的 chat completions 请求：JSON 结构化输出。 */
+function buildChatRequest(taskTypeLabel: string, description: string): ChatRequest {
   return {
     model: "flowlet-flash",
     messages: [
-      { role: "system", content: system },
-      { role: "user", content: `请为下面的任务生成一个简短准确的任务标题。\n\n任务类型：${taskTypeLabel}\n任务描述：${description.trim()}\n\n用 JSON 输出：{"title": "标题"}` },
+      {
+        role: "system",
+        content:
+          "你是任务标题生成助手。用 JSON 输出任务标题，格式为 {\"title\": \"简短准确的中文标题\"}。要求：标题一句话、不超过 30 字；不要回显或复述任务描述。只输出 JSON，不要输出任何其他内容。",
+      },
+      {
+        role: "user",
+        content: `请为下面的任务生成一个简短准确的任务标题。\n\n任务类型：${taskTypeLabel}\n任务描述：${description.trim()}\n\n用 JSON 输出：{"title": "标题"}`,
+      },
     ],
-    // 给足 token 并对推理类模型置零温度，降低被截断 / 变体输出导致回显的概率。
+    // 给足 token 并对推理类模型置零温度，降低被截断 / 变体输出导致拿不到结果。
     max_tokens: 512,
     temperature: 0,
     stream: false,
@@ -88,7 +81,7 @@ function buildChatRequest(taskTypeLabel: string, description: string, retry: boo
   };
 }
 
-/** 发起一次请求并取回模型文本内容；HTTP / 网络 / 错误体时抛出，无有效文本返回 null。 */
+/** 发起一次请求并取回模型文本；HTTP / 网络 / 错误体时抛出，无有效文本返回 null。 */
 async function callProxy(baseUrl: string, clientToken: string | null | undefined, request: ChatRequest): Promise<string | null> {
   const response = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: "POST",
@@ -107,15 +100,18 @@ async function callProxy(baseUrl: string, clientToken: string | null | undefined
   }
   const data = (await response.json()) as {
     error?: { message?: unknown };
-    choices?: Array<{ message?: { content?: unknown } }>;
+    choices?: Array<{ message?: { content?: unknown; reasoning_content?: unknown } }>;
   };
   if (data.error) {
     throw new Error(`标题生成失败：${typeof data.error.message === "string" ? data.error.message : "模型返回错误"}`);
   }
-  return extractTextContent(data.choices?.[0]?.message?.content);
+  const message = data.choices?.[0]?.message;
+  if (!message) return null;
+  // 优先 content；推理类模型可能把结构化结果放在 reasoning_content。
+  return extractTextContent(message.content) ?? extractTextContent(message.reasoning_content);
 }
 
-/** 从模型 message.content 中提取纯文本：兼容字符串、内容分片数组与 { text } 对象。 */
+/** 从模型 message 字段中提取纯文本：兼容字符串、内容分片数组与 { text } 对象。 */
 function extractTextContent(content: unknown): string | null {
   if (typeof content === "string") return content.trim() || null;
   if (Array.isArray(content)) {
@@ -157,13 +153,12 @@ function extractTitle(text: string): string | null {
         const cleaned = cleanTitle(candidate);
         return cleaned || null;
       }
-      return null; // 是 JSON 但没有可用标题字段（如回显的请求体）
+      return null; // 是 JSON 但没有可用标题字段
     } catch {
-      return null; // 非法 JSON，视为失败
+      return null; // 非法 JSON
     }
   }
-  const cleaned = cleanTitle(trimmed);
-  return cleaned || null;
+  return cleanTitle(trimmed) || null;
 }
 
 /** 标题合理性校验：排除回显、超长等异常内容（对不走 JSON 的纯文本输出兜底）。 */
@@ -171,16 +166,6 @@ function isPlausibleTitle(title: string): boolean {
   if (title.length > 60) return false;
   if (/messages|"model"\s*:|任务类型|任务描述/.test(title)) return false;
   return true;
-}
-
-/** 模型不可靠时的回退标题：取任务描述的第一句（按常见标点切分），截断到 30 字。 */
-function fallbackTitle(description: string): string {
-  const first = description
-    .split(/[\n\r,，。、；;.!！?？]+/)
-    .map((s) => s.replace(/\s+/g, " ").trim())
-    .find((s) => s.length > 0);
-  const base = (first ?? description.trim()) || "新任务";
-  return base.length > 30 ? `${base.slice(0, 30)}…` : base;
 }
 
 /** 清理标题文本：去掉包裹的引号、首尾句号与多余空白。 */

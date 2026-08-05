@@ -24,7 +24,7 @@ describe("generateTaskTitle", () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
 
-  it("requests JSON structured output and returns the extracted title", async () => {
+  it("requests JSON output once and returns the extracted title", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ choices: [{ message: { content: '{"title": "修复登录页空白"}' } }] }),
@@ -38,6 +38,8 @@ describe("generateTaskTitle", () => {
     });
 
     expect(title).toBe("修复登录页空白");
+    // 单次请求，不做重试。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:18640/v1/chat/completions");
     const headers = init.headers as Record<string, string>;
@@ -55,6 +57,24 @@ describe("generateTaskTitle", () => {
     expect(body.messages[1].content).toContain("代码修改");
   });
 
+  it("reads the title from reasoning_content when content is empty (reasoning model)", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: {
+            role: "assistant",
+            content: "",
+            reasoning_content: '{  "title": "优化父任务信息展示与关联任务交互"  }',
+          },
+        }],
+      }),
+    });
+
+    const title = await generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "分状态任务列表里展示父任务信息，改为展示父任务 id", taskType: "code" });
+    expect(title).toBe("优化父任务信息展示与关联任务交互");
+  });
+
   it("parses content returned as an array of text parts", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
@@ -65,49 +85,28 @@ describe("generateTaskTitle", () => {
     expect(title).toBe("梳理请求日志链路");
   });
 
-  it("retries once when the first call echoes the request body instead of JSON", async () => {
+  it("throws when the model echoes the request body instead of a title (no retry)", async () => {
     const echo = JSON.stringify({
       model: "LongCat-2.0",
       messages: [{ role: "system", content: "你是任务标题生成助手" }],
     });
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: echo } }] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: '{"title": "展示父任务 ID"}' } }] }) });
-
-    const title = await generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "分状态任务列表里展示父任务信息，改为展示父任务 id", taskType: "code" });
-
-    expect(title).toBe("展示父任务 ID");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back to a readable description-derived title when the model keeps echoing", async () => {
-    const echo = JSON.stringify({
-      model: "LongCat-2.0",
-      messages: [
-        { role: "system", content: "你是任务标题生成助手" },
-        { role: "user", content: "请为下面的任务生成一个简短准确的任务标题。\n\n任务类型：代码修改\n任务描述：分状态任务列表里展示父任务信息，改为展示父任务 id" },
-      ],
-    });
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: echo } }] }) });
 
-    const title = await generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "分状态任务列表里展示父任务信息，改为展示父任务 id", taskType: "code" });
-
-    expect(title).toBe("分状态任务列表里展示父任务信息");
+    await expect(generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "分状态任务列表里展示父任务信息，改为展示父任务 id", taskType: "code" }))
+      .rejects.toThrow("模型未返回有效标题");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to a description-derived title when the model returns no content", async () => {
+  it("throws when the model returns no usable content", async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ choices: [] }) });
-    const title = await generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "梳理当前请求日志的存储与查询链路", taskType: "readonly" });
-    expect(title).toBe("梳理当前请求日志的存储与查询链路");
+    await expect(generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "梳理当前请求日志的存储与查询链路", taskType: "readonly" }))
+      .rejects.toThrow("模型未返回有效标题");
   });
 
   it("treats JSON without a usable title field as a failure", async () => {
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: '{"foo": "bar"}' } }] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: '{"title": ""}' } }] }) });
-
-    const title = await generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "整理当前项目的目录结构说明", taskType: "readonly" });
-    expect(title).toBe("整理当前项目的目录结构说明");
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: '{"foo": "bar"}' } }] }) });
+    await expect(generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "整理当前项目的目录结构说明", taskType: "readonly" }))
+      .rejects.toThrow("模型未返回有效标题");
   });
 
   it("omits the Authorization header when no client token is provided", async () => {

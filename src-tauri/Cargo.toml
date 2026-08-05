@@ -56,6 +56,7 @@ zstd = "0.13"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 # 记住主窗口上次的尺寸/位置/最大化状态，跨启动恢复；隐藏到托盘与退出时保存。
 tauri-plugin-window-state = "2"
@@ -71,6 +72,8 @@ keyring-core = "1.0.0"
 webview2-com = "0.38.2"
 windows = { version = "0.61", features = ["Win32_System_Com"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_Power"] }
+# 便携版注册 AppUserModelID，使 Windows toast 通知可用（见 notification_registry）。
+winreg = "0.55"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Ubuntu 使用 WebKitGTK 的 resource-load-started + WebResource::data 获取页面

@@ -107,6 +107,16 @@ export type AgentSessionLastInteraction = {
   events: AgentSessionInteractionEvent[];
 };
 
+/** Agent 原生会话完整时间线（全部交互轮次），供任务抽屉「会话」Tab 展示完整对话。 */
+export type AgentSessionTimeline = {
+  sourceAvailable: boolean;
+  truncated: boolean;
+  turnCount: number;
+  usage: AgentSessionNativeUsage | null;
+  models: string[];
+  events: AgentSessionInteractionEvent[];
+};
+
 export type AgentSessionCostEstimate = {
   amount: number | null;
   currency: string | null;

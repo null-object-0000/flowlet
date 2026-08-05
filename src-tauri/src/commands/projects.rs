@@ -121,6 +121,7 @@ pub(crate) fn save_project_task(
             task_type: task.task_type,
             agent_profile: task.agent_profile.trim().to_string(),
             priority: task.priority,
+            base_task_id: task.base_task_id,
             last_job_id: task.last_job_id,
             rejection_reason: task.rejection_reason,
             execution_history: task.execution_history,
@@ -144,13 +145,13 @@ pub(crate) fn delete_project_task(
 
 #[tauri::command]
 pub(crate) async fn run_project_task(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
     project_id: String,
     task_id: String,
 ) -> Result<crate::core::agent_task_runner::RunProjectTaskResult, String> {
     let storage = state.storage.clone();
-    crate::core::agent_task_runner::run_project_task(storage, app_handle, project_id, task_id).await
+    crate::core::agent_task_runner::run_project_task(app, storage, project_id, task_id).await
 }
 
 #[tauri::command]
@@ -218,6 +219,50 @@ pub(crate) fn set_project_task_status(
     Ok(())
 }
 
+/// 待审核的只读分析任务转为代码修改任务。
+/// 与退回一样，转换必须填写描述信息（新的代码修改要求）；转换后任务回到已提交
+/// 状态重新排队，以代码修改类型重新执行。转换动作写入最近一次执行的 job timeline
+/// 留档，供只读详情追溯。
+#[tauri::command]
+pub(crate) fn convert_project_task_to_code(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    description: String,
+) -> Result<(), String> {
+    let trimmed = description.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("转为代码修改任务需要填写代码修改要求".to_string());
+    }
+    let converted = state
+        .storage
+        .convert_task_to_code(&task_id, &trimmed)
+        .map_err(|error| error.to_string())?;
+    if !converted {
+        let (status, task_type) = state
+            .storage
+            .get_task_state(&task_id)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_else(|| ("不存在".to_string(), "未知".to_string()));
+        return Err(format!(
+            "只有待审核的只读分析任务可以转为代码修改任务（当前状态：{status}，类型：{task_type}）"
+        ));
+    }
+    // 转换动作写入该次执行的 job timeline，供审核详情长期可见。
+    if let Some(job_id) = state
+        .storage
+        .get_task_last_job(&task_id)
+        .map_err(|error| error.to_string())?
+    {
+        let _ = state.storage.add_job_event(
+            &job_id,
+            "warning",
+            "类型转换",
+            &format!("任务已由只读分析转为代码修改：{trimmed}"),
+        );
+    }
+    Ok(())
+}
+
 /// 在独立窗口中打开项目详情看板（无侧边栏、无边框窗口）。
 /// 同一项目已打开过窗口时聚焦复用，避免重复创建。
 /// 独立窗口复用主窗口的 WebView 数据目录，保证语言/主题等本地偏好一致。
@@ -229,6 +274,16 @@ pub(crate) async fn open_project_detail_window(
     state: tauri::State<'_, AppState>,
     project_id: String,
 ) -> Result<(), String> {
+    open_detail_window(&app, state.inner(), &project_id).await
+}
+
+/// 真正的独立窗口创建逻辑。既被上述 command 调用，也被应用启动时用于
+/// 恢复上次退出的独立窗口 —— 两者共用同一套「创建 + 记录 + 关闭清理」流程。
+pub(crate) async fn open_detail_window(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    project_id: &str,
+) -> Result<(), String> {
     let label = format!("project-detail-{project_id}");
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.unminimize();
@@ -239,7 +294,7 @@ pub(crate) async fn open_project_detail_window(
 
     let project = state
         .storage
-        .get_project(&project_id)
+        .get_project(project_id)
         .map_err(|error| format!("读取项目失败：{error}"))?
         .ok_or_else(|| "项目不存在".to_string())?;
 
@@ -253,7 +308,7 @@ pub(crate) async fn open_project_detail_window(
 
     // 与主窗口同一份 index.html，通过 hash 路由进入独立窗口专属页面。
     let url = tauri::WebviewUrl::App(format!("index.html#/project-window/{project_id}").into());
-    let builder = tauri::WebviewWindowBuilder::new(&app, label, url)
+    let builder = tauri::WebviewWindowBuilder::new(app, label, url)
         .title(format!("Flowlet · {}", project.name))
         .inner_size(1200.0, 720.0)
         .min_inner_size(1200.0, 720.0)
@@ -269,6 +324,24 @@ pub(crate) async fn open_project_detail_window(
     let window = builder
         .build()
         .map_err(|error| format!("创建项目详情独立窗口失败：{error}"))?;
+
+    // 启动时的恢复窗口也可能落在已变化/消失的屏幕外，先兜底拉回可见区域。
+    crate::core::window_visibility::ensure_window_on_screen(&window);
+
+    // 记录该窗口以支持重启恢复；用户主动关闭时从记录移除（应用退出时除外）。
+    state.detail_windows.add(project_id);
+    let registry = state.detail_windows.clone();
+    let app_exiting = state.app_exiting.clone();
+    let project_id = project_id.to_string();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { .. } = event {
+            let exiting = app_exiting.lock().map(|g| *g).unwrap_or(false);
+            if !exiting {
+                registry.remove(&project_id);
+            }
+        }
+    });
+
     let _ = window.show();
     let _ = window.set_focus();
     Ok(())

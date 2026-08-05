@@ -67,6 +67,10 @@ struct AppState {
     /// 只有一次交互式抓取完整成功后才移除；后台同步必须跳过这些账号，
     /// 避免在用户登录过程中重新导航同一个 WebView。
     scrape_interaction_required: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// 已打开的「项目详情独立窗口」的 project_id 记录，用于应用重启后自动恢复。
+    detail_windows: Arc<core::detail_windows::DetailWindowRegistry>,
+    /// 应用是否正在退出。退出时窗口销毁事件不应再清空上面的独立窗口记录。
+    app_exiting: Arc<Mutex<bool>>,
 }
 
 #[derive(Clone)]
@@ -450,6 +454,13 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         scrape_ready: Arc::new(Mutex::new(std::collections::HashMap::new())),
         scrape_native_ready: Arc::new(Mutex::new(std::collections::HashSet::new())),
         scrape_interaction_required: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        detail_windows: Arc::new(core::detail_windows::DetailWindowRegistry::new(
+            db_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("detail-windows.json"),
+        )),
+        app_exiting: Arc::new(Mutex::new(false)),
     };
     tracing::info!(
         t_ms = _t0.elapsed().as_millis() as u64,
@@ -653,6 +664,7 @@ fn run_desktop() {
             Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         // 记住主窗口上次的尺寸/位置/最大化状态。不恢复 VISIBLE，
         // 避免覆盖 --hidden 后台启动与「关闭=隐藏到托盘」的可见性控制。
@@ -707,6 +719,14 @@ fn run_desktop() {
             let state = build_app_state(app_database_path(app), config_path.clone());
             app.manage(state.clone());
             let state_for_tray = state.clone();
+
+            // 便携版（无安装器/快捷方式）注册 Windows AppUserModelID，
+            // 否则任务完成等 toast 通知会被系统静默丢弃。幂等，仅 HKCU。
+            #[cfg(windows)]
+            crate::core::notification_registry::register_app_user_model_id(
+                &app.config().identifier,
+                "Flowlet",
+            );
             tracing::info!(
                 t_ms = setup_t0.elapsed().as_millis() as u64,
                 "setup: state managed"
@@ -750,6 +770,36 @@ fn run_desktop() {
             );
 
             let app_handle = app.handle();
+
+            // 主窗口状态插件会异步恢复上次的尺寸/位置/最大化。延时校验一次，
+            // 把因显示器布局变化或上次关闭位置异常而「一半在屏外」的主窗口拉回
+            // 可见区域；同时恢复上次退出时仍打开的「项目详情独立窗口」。
+            {
+                let app_handle_restore = app_handle.clone();
+                let state_restore = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    if let Some(window) = app_handle_restore.get_webview_window("main") {
+                        crate::core::window_visibility::ensure_window_on_screen(&window);
+                    }
+                    for project_id in state_restore.detail_windows.snapshot() {
+                        if let Err(error) = crate::commands::open_detail_window(
+                            &app_handle_restore,
+                            &state_restore,
+                            &project_id,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                project_id = %project_id,
+                                %error,
+                                "恢复项目详情独立窗口失败"
+                            );
+                        }
+                    }
+                });
+            }
+
             match core::agent_source_watcher::start_agent_source_watcher(app_handle.clone()) {
                 Ok(watcher) => {
                     if let Ok(mut guard) = state.agent_source_watcher.lock() {
@@ -864,6 +914,13 @@ fn run_desktop() {
                         let app_clone = app.clone();
                         let proxy = app.try_state::<AppState>().map(|state| state.proxy.clone());
                         tauri::async_runtime::spawn(async move {
+                            // 标记正在退出：随后的窗口销毁事件不应再清空
+                            // 「项目详情独立窗口」记录，否则下次启动无法恢复。
+                            if let Some(state) = app_clone.try_state::<AppState>() {
+                                if let Ok(mut exiting) = state.app_exiting.lock() {
+                                    *exiting = true;
+                                }
+                            }
                             if let Some(proxy) = proxy {
                                 let _ = proxy.stop().await;
                             }
@@ -1161,11 +1218,13 @@ fn run_desktop() {
             commands::get_project_task_runner_state,
             commands::list_queued_project_tasks,
             commands::set_project_task_status,
+            commands::convert_project_task_to_code,
             commands::list_agent_session_children,
             commands::list_opencode_session_permissions,
             commands::reply_opencode_permission,
             commands::get_agent_session_native_summary,
             commands::get_agent_session_last_interaction,
+            commands::get_agent_session_timeline,
             commands::sync_agent_data,
             commands::list_background_jobs,
             commands::get_background_job_detail,
@@ -1201,6 +1260,8 @@ fn run_desktop() {
             commands::is_autostart_enabled,
             commands::enable_autostart,
             commands::disable_autostart,
+            commands::get_task_review_notification_enabled,
+            commands::set_task_review_notification_enabled,
             commands::list_route_rules,
             commands::save_route_rules,
             commands::account_routing_scores,

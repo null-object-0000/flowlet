@@ -32,7 +32,7 @@ applyInitialPreferences();
 configureAppOverlayLayers({ mobile: mobileTarget });
 if (!mobileTarget) {
   void import("./platform/tauri/window").then(({ windowCommands }) => {
-    configureSideSheetWindowDragging(windowCommands.startDragging);
+    configureSideSheetWindowDragging(windowCommands.startDragging, windowCommands.toggleMaximize);
   });
 }
 

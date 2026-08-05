@@ -1,5 +1,6 @@
 use super::config::{AuthStrategy, ConfigBundle, ModelPrice};
 use rusqlite::{Connection, OptionalExtension};
+use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -945,6 +946,7 @@ impl Storage {
                 agent_profile TEXT NOT NULL DEFAULT '',
                 priority      TEXT NOT NULL DEFAULT 'p2'
                               CHECK (priority IN ('p0', 'p1', 'p2')),
+                base_task_id  TEXT,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -1753,6 +1755,10 @@ impl Storage {
         // 项目任务表新增任务类型 / Agent Profile / 优先级（2026-08-04）。
         // 旧库用 ADD COLUMN 补齐；status 的 CHECK 约束需要包含 review，必须重建表。
         migrate_project_tasks_schema(&connection)?;
+        // 修复早期版本执行历史从未落库的任务（见 backfill_task_execution_history 注释）。
+        backfill_task_execution_history(&connection)?;
+        // 为已有执行历史补执行耗时（无需重建任务，从 background_jobs 回填 finishedAt / executionMs）。
+        backfill_task_execution_durations(&connection)?;
 
         tracing::info!("migrate: 完成");
         Ok(())
@@ -1800,6 +1806,7 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
         ("task_type", "TEXT NOT NULL DEFAULT 'code'"),
         ("agent_profile", "TEXT NOT NULL DEFAULT ''"),
         ("priority", "TEXT NOT NULL DEFAULT 'p2'"),
+        ("base_task_id", "TEXT"),
         ("last_job_id", "TEXT"),
         ("rejection_reason", "TEXT"),
         ("execution_history", "TEXT"),
@@ -1830,6 +1837,7 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
                  agent_profile TEXT NOT NULL DEFAULT '',
                  priority      TEXT NOT NULL DEFAULT 'p2'
                                CHECK (priority IN ('p0', 'p1', 'p2')),
+                 base_task_id  TEXT,
                  last_job_id   TEXT,
                  rejection_reason TEXT,
                  execution_history TEXT,
@@ -1837,10 +1845,10 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
                  updated_at    TEXT NOT NULL,
                  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
              );
-             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, last_job_id, rejection_reason, execution_history, created_at, updated_at)
+             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at)
                  SELECT id, project_id, title, description,
                         CASE WHEN status = 'todo' THEN 'draft' ELSE status END,
-                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), last_job_id, rejection_reason, execution_history, created_at, updated_at
+                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at
                  FROM project_tasks_legacy;
              DROP TABLE project_tasks_legacy;
              CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
@@ -1850,6 +1858,145 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
     }
 
     Ok(())
+}
+
+/// 任务执行历史修复（2026-08-05）：早期版本 `append_task_execution` 对 NULL 的
+/// `execution_history` 用 `row.get::<_, String>()` 读取会报 `InvalidColumnType`，
+/// 导致执行历史从未落库（只有 last_job_id 被记录）。这里对「有 last_job_id 但
+/// execution_history 为空」的任务，按 `background_jobs` 中同名的 project-task-run
+/// 记录重建历史。幂等：只补空，填充后条件不再命中；job 已清理的任务保持原样，
+/// 由前端 `lastJobId` 兜底展示最近一次。
+fn backfill_task_execution_history(connection: &Connection) -> Result<(), StorageError> {
+    let mut task_stmt = connection.prepare(
+        "SELECT id, title FROM project_tasks
+         WHERE last_job_id IS NOT NULL
+           AND (execution_history IS NULL OR trim(execution_history) = '')",
+    )?;
+    let tasks: Vec<(String, String)> = task_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    drop(task_stmt);
+
+    for (task_id, title) in tasks {
+        let job_title = format!("任务执行：{title}");
+        let mut job_stmt = connection.prepare(
+            "SELECT id, COALESCE(started_at, created_at), finished_at FROM background_jobs
+             WHERE job_type = 'project-task-run' AND title = ?1
+             ORDER BY created_at ASC, rowid ASC",
+        )?;
+        let jobs: Vec<(String, String, Option<String>)> = job_stmt
+            .query_map(rusqlite::params![job_title], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        drop(job_stmt);
+        if jobs.is_empty() {
+            continue;
+        }
+        let entries: Vec<serde_json::Value> = jobs
+            .into_iter()
+            .map(|(job_id, started_at, finished_at)| {
+                // 历史任务无法恢复每轮进入待处理的时刻 → submittedAt 空、waitingMs 0；
+                // 执行耗时从 background_jobs 的真实结束时刻推算。
+                let execution_ms = finished_at
+                    .as_deref()
+                    .and_then(parse_epoch_millis)
+                    .zip(parse_epoch_millis(&started_at))
+                    .map(|(finished, started)| (finished - started).max(0));
+                serde_json::json!({
+                    "jobId": job_id,
+                    "startedAt": started_at,
+                    "submittedAt": Value::Null,
+                    "finishedAt": finished_at,
+                    "waitingMs": 0,
+                    "executionMs": execution_ms,
+                    "rejected": false,
+                    "rejectionReason": null,
+                    "rejectedAt": null,
+                })
+            })
+            .collect();
+        let serialized = serde_json::to_string(&entries)
+            .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+        connection.execute(
+            "UPDATE project_tasks SET execution_history = ?1 WHERE id = ?2",
+            rusqlite::params![serialized, task_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// 执行耗时回填（2026-08-05）：为「已有 execution_history 但记录缺少执行耗时」的历史任务，
+/// 从 `background_jobs` 按 jobId 补上 `finishedAt` 与 `executionMs`。
+/// 幂等：已有 executionMs 且 finishedAt 的记录不覆盖；job 已清理 / 仍在运行（无 finished_at）
+/// 的记录保持原样，由前端实时或现有兜底逻辑处理。
+fn backfill_task_execution_durations(connection: &Connection) -> Result<(), StorageError> {
+    let mut task_stmt = connection.prepare(
+        "SELECT id, execution_history FROM project_tasks
+         WHERE execution_history IS NOT NULL AND trim(execution_history) != ''",
+    )?;
+    let tasks: Vec<(String, String)> = task_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    drop(task_stmt);
+
+    for (task_id, history) in tasks {
+        let mut entries: Vec<serde_json::Value> =
+            serde_json::from_str(&history).unwrap_or_default();
+        let mut changed = false;
+        for entry in &mut entries {
+            // 已有 executionMs 且 finishedAt → 真实值已记录，不覆盖。
+            if entry.get("executionMs").is_some()
+                && entry.get("finishedAt").and_then(Value::as_str).is_some()
+            {
+                continue;
+            }
+            let Some(job_id) = entry.get("jobId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(started_ms) = entry
+                .get("startedAt")
+                .and_then(Value::as_str)
+                .and_then(parse_epoch_millis)
+            else {
+                continue;
+            };
+            let finished_at: Option<String> = connection
+                .query_row(
+                    "SELECT finished_at FROM background_jobs WHERE id = ?1",
+                    [job_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(finished_at) = finished_at else { continue };
+            let Some(finished_ms) = parse_epoch_millis(&finished_at) else {
+                continue;
+            };
+            entry["finishedAt"] = json!(finished_at);
+            entry["executionMs"] = json!((finished_ms - started_ms).max(0));
+            changed = true;
+        }
+        if changed {
+            let serialized = serde_json::to_string(&entries)
+                .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+            connection.execute(
+                "UPDATE project_tasks SET execution_history = ?1 WHERE id = ?2",
+                rusqlite::params![serialized, task_id],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// 解析时间戳为 Unix 毫秒。支持 ISO 8601（RFC3339）与 SQLite `datetime('now')`
+/// 产出的 `YYYY-MM-DD HH:MM:SS`（UTC 无时区标记）。
+fn parse_epoch_millis(value: &str) -> Option<i64> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Some(dt.timestamp_millis());
+    }
+    chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+        .ok()
+        .map(|dt| dt.and_utc().timestamp_millis())
 }
 
 fn normalize_legacy_virtual_model_routes_schema(

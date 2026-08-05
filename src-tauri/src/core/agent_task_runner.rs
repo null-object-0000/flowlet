@@ -11,7 +11,11 @@ use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::Emitter;
+#[cfg(desktop)]
+use tauri::AppHandle;
+
+/// 任务执行完成进入待审核时是否发送系统通知的全局设置键（app_meta）。默认开启。
+pub(crate) const TASK_REVIEW_NOTIFICATION_KEY: &str = "task_review_notification_enabled";
 
 /// 全局唯一执行槽：`true` 表示已有任务在跑。
 pub(crate) static AGENT_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -84,9 +88,14 @@ pub(crate) fn task_runner_state() -> ProjectTaskRunnerState {
 ///
 /// 返回 `started: true` 表示抢到全局执行槽并已开始执行；`started: false`
 /// 表示槽被占用或任务状态不允许，调用方应下个周期重试。
+///
+/// 领取成功后**立即返回**，Agent 执行放到后台任务：只有这样才能让调用方
+/// （提交后立即执行 / 前端调度器）第一时间拿到 `started` 结果并刷新看板，
+/// 而不是等整个 Agent 执行过程结束才返回（那样前端一直拿不到结果）。
+#[cfg(desktop)]
 pub(crate) async fn run_project_task(
+    app: AppHandle,
     storage: Storage,
-    app_handle: tauri::AppHandle,
     project_id: String,
     task_id: String,
 ) -> Result<RunProjectTaskResult, String> {
@@ -101,8 +110,8 @@ pub(crate) async fn run_project_task(
             message: "已有任务在执行中，请稍后重试".to_string(),
         });
     }
-    // guard 在函数结束（含所有 await 点之后）drop 时释放槽。
-    let _guard = AgentTaskRunningGuard;
+    // 执行槽在准备阶段持有，随后台执行任务 move，Agent 结束后 drop 释放。
+    let guard = AgentTaskRunningGuard;
 
     // 2. 读取任务并校验：调度器只领取「已提交」状态的任务。
     let task = storage
@@ -142,7 +151,7 @@ pub(crate) async fn run_project_task(
     storage
         .set_task_last_job(&task_id, &job_id)
         .map_err(|error| format!("记录任务执行日志失败：{error}"))?;
-    let _ = storage.append_task_execution(&task_id, &job_id);
+    let _ = storage.append_task_execution(&task_id, &job_id, &task.updated_at);
 
     // 6. 记录当前运行信息供前端查询。
     if let Ok(mut current) = AGENT_TASK_CURRENT.lock() {
@@ -157,29 +166,61 @@ pub(crate) async fn run_project_task(
     }
 
     // 7. 组装 prompt 并启动 Claude Code。
-    //    退回重跑会复用上次会话（--resume）+ 注入退回原因，让 Agent 带着上下文修正。
-    let resume_session = resolve_resume_session(&storage, &task)?;
+    //    退回重跑会复用上次会话（--resume）+ 注入退回原因，让 Agent 带着上下文修正；
+    //    基于已完成任务创建时，首次执行复用基础任务的会话，让新任务延续上个任务的上下文。
+    let base_task = match task.base_task_id.as_deref() {
+        Some(base_id) => storage
+            .get_project_task(&project_id, base_id)
+            .map_err(|error| format!("读取基础任务失败：{error}"))?,
+        None => None,
+    };
+    let resume_session = resolve_resume_session(&storage, &task, base_task.as_ref())?;
     let rejection_reason = task.rejection_reason.as_deref();
-    let prompt = build_task_prompt(&task, rejection_reason);
+    let prompt = build_task_prompt(&task, rejection_reason, base_task.as_ref());
     // 原因已注入 prompt，清空避免下次执行重复注入（留档靠 job event）。
     if rejection_reason.is_some_and(|reason| !reason.trim().is_empty()) {
         let _ = storage.set_task_rejection_reason(&task.id, None);
     }
-    let result = execute_agent(&storage, &app_handle, &executable, &task, &project_id, &job_id, &prompt, resume_session.as_deref()).await;
 
-    match result {
-        Ok(outcome) => {
-            storage
-                .finish_job(&job_id, outcome.job_status, &outcome.summary_json, &outcome.done_message)
-                .map_err(|error| format!("写入任务日志失败：{error}"))?;
+    // 8. 后台执行：Agent 执行放到后台任务，command 立即返回领取结果。
+    //    执行槽由 guard 在后台任务中持有，Agent 结束后释放，调度器下个周期才能领取下一个。
+    //    Agent 结果（成功/失败/取消）在后台任务内处理，不再向上层传播。
+    //    job_id 需要在返回结果里使用，克隆一份给后台任务。
+    let spawned_job_id = job_id.clone();
+    let task_title = task.title.clone();
+    let notify_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _guard = guard;
+        let result = execute_agent(
+            &storage,
+            &executable,
+            &task,
+            &project_id,
+            &spawned_job_id,
+            &prompt,
+            resume_session.as_deref(),
+        )
+        .await;
+        match result {
+            Ok(outcome) => {
+                let _ = storage
+                    .finish_job(&spawned_job_id, outcome.job_status, &outcome.summary_json, &outcome.done_message);
+                // Agent 执行结束（成功或失败）后任务进入待审核，此时发系统通知提醒审核；
+                // 取消路径会回到草稿，不进入待审核，不通知。用户可在全局设置关闭该通知。
+                if outcome.job_status != "cancelled" {
+                    notify_task_review(&notify_app, &storage, &task_title);
+                }
+            }
+            Err(error) => {
+                // 进程层异常：任务回退到已提交状态，下个周期重新排队。
+                let _ = storage.set_task_status(&task_id, "submitted");
+                let _ = storage.fail_job(&spawned_job_id, &error);
+            }
         }
-        Err(error) => {
-            // 进程层异常：任务回退到已提交状态，下个周期重新排队。
-            let _ = storage.set_task_status(&task_id, "submitted");
-            let _ = storage.fail_job(&job_id, &error);
-            return Err(error);
-        }
-    }
+        // 无论成功 / 失败 / 取消 / 进程异常，本轮执行都已结束，
+        // 统一写入结束时间供看板卡片累计执行时间。
+        let _ = storage.finish_task_execution(&task_id, &spawned_job_id);
+    });
 
     Ok(RunProjectTaskResult {
         started: true,
@@ -190,9 +231,24 @@ pub(crate) async fn run_project_task(
 
 /// 组装发给 Claude Code 的任务 prompt。
 /// 若带了退回原因，则作为首段修正指令注入，让 Agent 先修正再完成原任务。
-fn build_task_prompt(task: &ProjectTask, rejection_reason: Option<&str>) -> String {
+/// 若基于某个已完成任务创建，则注入会话延续说明，让 Agent 知道自己在复用上个任务的
+/// 会话上下文（--resume），这是一个新任务但仍在原会话中推进。
+fn build_task_prompt(
+    task: &ProjectTask,
+    rejection_reason: Option<&str>,
+    base_task: Option<&ProjectTask>,
+) -> String {
     let mut prompt = String::new();
     prompt.push_str("你是由 Flowlet 调度执行的编程 Agent，请在当前项目目录内完成以下任务。\n\n");
+    if let Some(base) = base_task {
+        let base_title = base.title.trim();
+        if !base_title.is_empty() {
+            prompt.push_str(&format!(
+                "注意：本任务基于已完成任务「{}」继续推进。请复用上个任务的 Agent 会话上下文——这是个新任务，但你仍然在该会话中进行，可以延续此前的讨论与结论，在此基础上完成本任务。\n\n",
+                truncate(base_title, 120)
+            ));
+        }
+    }
     if let Some(reason) = rejection_reason {
         let trimmed = reason.trim();
         if !trimmed.is_empty() {
@@ -215,17 +271,61 @@ fn build_task_prompt(task: &ProjectTask, rejection_reason: Option<&str>) -> Stri
     prompt
 }
 
-/// 从任务最近一次执行的 job 摘要里解析 session_id，用于退回重跑时 --resume。
-/// 首次执行或摘要里没有 session 时返回 None（全新会话）。
+/// 会话显示名上限（字符数）。CLI 内部对名称清理控制字符后截断到 200 字符
+/// （`efn` 处理），这里在发送前先清理并截短，避免超长任务标题撑大命令行参数。
+const MAX_SESSION_NAME_CHARS: usize = 80;
+
+/// 生成 Claude Code 会话显示名：`任务：<任务标题>`。
+/// 清理控制字符（与 CLI 内部 `efn` 的 `[\x00-\x1f\x7f-\x9f]` 一致），
+/// 并按字符截断，避免脏标题进入会话名。空标题回退为 `任务`。
+fn build_session_name(task: &ProjectTask) -> String {
+    let cleaned: String = task
+        .title
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .collect();
+    let title: String = cleaned
+        .trim()
+        .chars()
+        .take(MAX_SESSION_NAME_CHARS)
+        .collect();
+    if title.is_empty() {
+        "任务".to_string()
+    } else {
+        format!("任务：{title}")
+    }
+}
+
+/// 解析执行时要复用的 session_id（--resume），优先级：
+/// 1. 本任务最近一次执行的会话（退回重跑场景，带着上一轮的上下文继续修正）；
+/// 2. 基于已完成任务创建且首次执行时，复用基础任务的会话，让新任务延续上个任务的上下文。
+/// 都解析不到时返回 None（全新会话）。
 fn resolve_resume_session(
     storage: &Storage,
     task: &ProjectTask,
+    base_task: Option<&ProjectTask>,
 ) -> Result<Option<String>, String> {
-    let Some(last_job_id) = task.last_job_id.as_deref() else {
+    if let Some(session) = session_from_job(storage, task.last_job_id.as_deref())? {
+        return Ok(Some(session));
+    }
+    if let Some(base) = base_task {
+        if let Some(session) = session_from_job(storage, base.last_job_id.as_deref())? {
+            return Ok(Some(session));
+        }
+    }
+    Ok(None)
+}
+
+/// 从某个 job 的摘要里解析 session_id。
+fn session_from_job(
+    storage: &Storage,
+    job_id: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(job_id) = job_id else {
         return Ok(None);
     };
     let Some(detail) = storage
-        .get_background_job_detail(last_job_id)
+        .get_background_job_detail(job_id)
         .map_err(|error| format!("读取上次执行记录失败：{error}"))?
     else {
         return Ok(None);
@@ -259,7 +359,6 @@ async fn resolve_claude_executable() -> Result<String, String> {
 /// 启动 Claude Code 并持续读取 stream-json 输出，直到进程退出。
 async fn execute_agent(
     storage: &Storage,
-    app_handle: &tauri::AppHandle,
     executable: &str,
     task: &ProjectTask,
     project_id: &str,
@@ -281,7 +380,12 @@ async fn execute_agent(
         .arg("stream-json")
         .arg("--verbose")
         .arg("--dangerously-skip-permissions");
+    // 会话显示名：`-p` 非交互模式不会自动生成 ai-title，必须显式传 --name，
+    // 否则会话在 Flowlet 列表 / resume 里没有名称。值用任务标题，便于识别。
+    let session_name = build_session_name(task);
+    command.arg("--name").arg(session_name);
     // 退回重跑复用上次会话：Agent 带着之前的上下文 + 本轮注入的退回原因继续修正。
+    // --name 也会一并传入，覆盖旧名称（custom-title 语义为 last-wins）。
     if let Some(session) = resume_session {
         command.arg("--resume").arg(session);
     }
@@ -356,7 +460,7 @@ async fn execute_agent(
                 match line {
                     Ok(Some(line)) => {
                         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-                            process_stream_event(storage, app_handle, job_id, task, &value, &mut text_buffer, &mut session_id)?;
+                            process_stream_event(storage, job_id, &value, &mut text_buffer, &mut session_id)?;
                         }
                     }
                     Ok(None) => break,
@@ -373,7 +477,7 @@ async fn execute_agent(
     }
 
     // 冲刷剩余的累积文本。
-    flush_text(storage, app_handle, job_id, task, &mut text_buffer)?;
+    flush_text(storage, job_id, &mut text_buffer)?;
 
     let status = child
         .wait()
@@ -416,12 +520,10 @@ async fn execute_agent(
     })
 }
 
-/// 解析 stream-json 的单个事件行，把有用的文本累积并定时落日志 / 推送前端。
+/// 解析 stream-json 的单个事件行，把有用的文本累积并定时落 job event（供只读详情展示）。
 fn process_stream_event(
     storage: &Storage,
-    app_handle: &tauri::AppHandle,
     job_id: &str,
-    task: &ProjectTask,
     value: &serde_json::Value,
     text_buffer: &mut String,
     session_id: &mut Option<String>,
@@ -445,7 +547,7 @@ fn process_stream_event(
                         if let Some(text) = block.get("text").and_then(serde_json::Value::as_str) {
                             text_buffer.push_str(text);
                             if text_buffer.len() >= TEXT_FLUSH_THRESHOLD {
-                                flush_text(storage, app_handle, job_id, task, text_buffer)?;
+                                flush_text(storage, job_id, text_buffer)?;
                             }
                         }
                     }
@@ -462,12 +564,10 @@ fn process_stream_event(
     Ok(())
 }
 
-/// 把累积文本写入一条 job event，并 emit 到前端（进行中卡片实时展示）。
+/// 把累积文本写入一条 job event（供只读详情 / 任务日志页展示）。
 fn flush_text(
     storage: &Storage,
-    app_handle: &tauri::AppHandle,
     job_id: &str,
-    task: &ProjectTask,
     text_buffer: &mut String,
 ) -> Result<(), String> {
     let text = std::mem::take(text_buffer);
@@ -477,16 +577,6 @@ fn flush_text(
     storage
         .add_job_event(job_id, "info", "输出", &text)
         .map_err(|error| error.to_string())?;
-    let _ = app_handle.emit(
-        "project-task-log",
-        serde_json::json!({
-            "projectId": task.project_id,
-            "taskId": task.id,
-            "jobId": job_id,
-            "text": text,
-            "at": chrono::Utc::now().to_rfc3339(),
-        }),
-    );
     Ok(())
 }
 
@@ -528,7 +618,174 @@ fn truncate(text: &str, max: usize) -> String {
     format!("{head}…")
 }
 
+/// 任务执行完成进入待审核时发送系统通知。
+/// 是否发送由全局设置 `TASK_REVIEW_NOTIFICATION_KEY` 控制，默认开启。
+/// 通知失败只记录日志，不影响任务执行流程。
+#[cfg(desktop)]
+fn notify_task_review(app: &AppHandle, storage: &Storage, task_title: &str) {
+    let enabled = storage
+        .get_app_meta(TASK_REVIEW_NOTIFICATION_KEY)
+        .ok()
+        .flatten()
+        .map(|value| value != "0")
+        .unwrap_or(true);
+    if !enabled {
+        tracing::debug!("任务待审核通知已被用户关闭，跳过");
+        return;
+    }
+    use tauri_plugin_notification::NotificationExt;
+    let result = app
+        .notification()
+        .builder()
+        .title("任务执行完成")
+        .body(format!("任务「{}」执行完成，等待审核", truncate(task_title, 50)))
+        .show();
+    match result {
+        Ok(()) => tracing::info!("已发送任务待审核系统通知"),
+        Err(error) => tracing::warn!(%error, "发送任务待审核系统通知失败"),
+    }
+}
+
 /// 供 summary 记录输出行数（截断后的完整累积量）。
 fn text_buffer_lines(text: &str) -> usize {
     text.lines().count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::storage::Storage;
+    use rusqlite::Connection;
+
+    fn task(title: &str) -> ProjectTask {
+        ProjectTask {
+            id: "task-1".to_string(),
+            project_id: "project-1".to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            status: "submitted".to_string(),
+            task_type: "code".to_string(),
+            agent_profile: String::new(),
+            priority: "p2".to_string(),
+            base_task_id: None,
+            last_job_id: None,
+            rejection_reason: None,
+            execution_history: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn session_name_prefixes_task_title() {
+        assert_eq!(build_session_name(&task("修复登录页")), "任务：修复登录页");
+    }
+
+    #[test]
+    fn session_name_cleans_control_characters() {
+        // 与 CLI 内部 efn 的 [\x00-\x1f\x7f-\x9f] 处理一致：控制字符被剥离。
+        assert_eq!(
+            build_session_name(&task("修复\n登录\t页\x07")),
+            "任务：修复登录页"
+        );
+    }
+
+    #[test]
+    fn session_name_truncates_oversized_title() {
+        let long = "很".repeat(MAX_SESSION_NAME_CHARS + 50);
+        let name = build_session_name(&task(&long));
+        assert!(name.starts_with("任务："));
+        assert_eq!(name.chars().count(), 3 + MAX_SESSION_NAME_CHARS);
+    }
+
+    #[test]
+    fn session_name_falls_back_when_title_is_blank() {
+        assert_eq!(build_session_name(&task("   ")), "任务");
+        assert_eq!(build_session_name(&task("")), "任务");
+    }
+
+    fn test_storage() -> Storage {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        storage
+    }
+
+    /// 在 storage 中造一条带 sessionId 摘要的 project-task-run job。
+    fn job_with_session(storage: &Storage, job_id: &str, session_id: &str) {
+        storage
+            .create_job(
+                job_id,
+                "project-task-run",
+                "任务执行：测试",
+                "正在启动",
+                "manual",
+                1,
+                "开始执行",
+            )
+            .unwrap();
+        let summary = serde_json::json!({ "sessionId": session_id }).to_string();
+        storage
+            .finish_job(job_id, "succeeded", &summary, "任务执行完成")
+            .unwrap();
+    }
+
+    #[test]
+    fn prompt_injects_base_task_context_when_based_on_done_task() {
+        let mut base = task("修复登录页");
+        base.title = "修复登录页".to_string();
+        let prompt = build_task_prompt(&task("补充缓存"), None, Some(&base));
+        assert!(prompt.contains("基于已完成任务「修复登录页」"));
+        assert!(prompt.contains("这是个新任务，但你仍然在该会话中进行"));
+    }
+
+    #[test]
+    fn prompt_omits_base_context_when_no_base_task() {
+        let prompt = build_task_prompt(&task("补充缓存"), None, None);
+        assert!(!prompt.contains("基于已完成任务"));
+        assert!(prompt.contains("任务标题：补充缓存"));
+    }
+
+    #[test]
+    fn resume_prefers_own_job_session_over_base_task() {
+        let storage = test_storage();
+        job_with_session(&storage, "own-job", "own-session");
+        job_with_session(&storage, "base-job", "base-session");
+        let mut rerun = task("重跑");
+        rerun.last_job_id = Some("own-job".to_string());
+        let mut base = task("基础任务");
+        base.last_job_id = Some("base-job".to_string());
+        // 本任务已有会话（退回重跑）时优先复用本任务会话，而不是基础任务会话。
+        assert_eq!(
+            resolve_resume_session(&storage, &rerun, Some(&base)).unwrap(),
+            Some("own-session".to_string())
+        );
+    }
+
+    #[test]
+    fn resume_falls_back_to_base_task_session_on_first_run() {
+        let storage = test_storage();
+        job_with_session(&storage, "base-job", "base-session");
+        let fresh = task("新任务");
+        let mut base = task("基础任务");
+        base.last_job_id = Some("base-job".to_string());
+        // 首次执行没有本任务会话，复用基础任务的会话继续推进。
+        assert_eq!(
+            resolve_resume_session(&storage, &fresh, Some(&base)).unwrap(),
+            Some("base-session".to_string())
+        );
+    }
+
+    #[test]
+    fn resume_returns_none_without_sessions() {
+        let storage = test_storage();
+        let fresh = task("全新任务");
+        assert_eq!(resolve_resume_session(&storage, &fresh, None).unwrap(), None);
+        // base task 有 last_job_id 但 job 已清理时也返回 None（全新会话）。
+        let mut base = task("基础任务");
+        base.last_job_id = Some("missing-job".to_string());
+        assert_eq!(
+            resolve_resume_session(&storage, &fresh, Some(&base)).unwrap(),
+            None
+        );
+    }
 }

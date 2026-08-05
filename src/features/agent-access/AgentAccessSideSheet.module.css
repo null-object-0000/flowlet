@@ -104,36 +104,6 @@
   gap: 10px;
 }
 
-.versionGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.versionItem {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-  padding: 9px 12px;
-  border: 1px solid var(--flowlet-color-border);
-  border-radius: 8px;
-  background: var(--flowlet-color-surface-muted);
-}
-
-.versionItem > span {
-  color: var(--flowlet-color-text-tertiary);
-  font-size: 12px;
-}
-
-.versionItem code {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--flowlet-color-text);
-  font-family: "Cascadia Code", Consolas, monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .updateNotice {
   display: flex;
   align-items: center;

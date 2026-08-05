@@ -25,6 +25,13 @@ vi.mock("../../features/settings/useAutostartSetting", () => ({
   }),
 }));
 
+vi.mock("../../features/settings/useTaskReviewNotification", () => ({
+  useTaskReviewNotification: () => ({
+    query: { data: true, isLoading: false, isError: false },
+    mutation: { isPending: false, mutateAsync: vi.fn().mockResolvedValue(true) },
+  }),
+}));
+
 vi.mock("../../features/settings/useLogCaptureSetting", () => ({
   useLogCaptureSetting: () => ({
     query: {
@@ -333,6 +340,6 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Display language")).toBeInTheDocument();
     expect(screen.getByText("Theme")).toBeInTheDocument();
     expect(screen.getByText("Launch Flowlet at sign-in")).toBeInTheDocument();
-    expect(screen.getByText("System notifications")).toBeInTheDocument();
+    expect(screen.getByText("Task awaiting review notification")).toBeInTheDocument();
   });
 });

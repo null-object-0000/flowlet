@@ -1202,7 +1202,7 @@ function QwenQuotaProgress({
         showInfo={false}
       />
       <small className={styles.qwenResetTime}>
-        {t("额度充值时间")} <b>{quota?.resetAt ? formatFullTimestamp(quota.resetAt, language) : "-"}</b>
+        {t("额度重置时间")} <b>{quota?.resetAt ? formatFullTimestamp(quota.resetAt, language) : "-"}</b>
       </small>
     </div>
   );

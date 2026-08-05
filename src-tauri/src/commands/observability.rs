@@ -117,6 +117,32 @@ pub(crate) async fn get_agent_session_last_interaction(
     .map_err(|error| format!("读取会话最后一次交互任务失败：{error}"))?
 }
 
+/// 读取 Agent 原生会话的完整时间线（全部交互轮次），供任务抽屉「会话」Tab 展示完整对话。
+/// 与 `get_agent_session_last_interaction` 只读最后一轮不同，这里返回整段会话事件。
+#[tauri::command]
+pub(crate) async fn get_agent_session_timeline(
+    state: tauri::State<'_, AppState>,
+    agent_type: String,
+    session_id: String,
+) -> Result<crate::core::config::AgentSessionTimeline, String> {
+    let prices = state.storage.prices();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut timeline =
+            crate::core::agent_session_timeline::get_native_agent_session_timeline(
+                &agent_type,
+                &session_id,
+            )?;
+        crate::core::agent_session_timeline::apply_native_cost_estimate_to_timeline(
+            &agent_type,
+            &mut timeline,
+            &prices,
+        );
+        Ok(timeline)
+    })
+    .await
+    .map_err(|error| format!("读取会话时间线任务失败：{error}"))?
+}
+
 #[tauri::command]
 pub(crate) async fn sync_agent_data(
     state: tauri::State<'_, AppState>,

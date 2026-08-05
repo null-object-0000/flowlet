@@ -43,6 +43,23 @@ export async function setAutostartEnabled(enabled: boolean) {
   }
 }
 
+export async function getTaskReviewNotificationEnabled() {
+  try {
+    return await invokeCommand<boolean>("get_task_review_notification_enabled");
+  } catch (error) {
+    throw toAppError(error, "task_review_notification_read_failed");
+  }
+}
+
+export async function setTaskReviewNotificationEnabled(enabled: boolean) {
+  try {
+    await invokeCommand<void>("set_task_review_notification_enabled", { enabled });
+    return enabled;
+  } catch (error) {
+    throw toAppError(error, "task_review_notification_update_failed");
+  }
+}
+
 export async function getStorageUsage(scanId: string) {
   try {
     return await invokeCommand<StorageUsageSummary>("storage_usage_summary", { scanId });

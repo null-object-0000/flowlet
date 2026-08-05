@@ -13,6 +13,7 @@ describe("app overlay layers", () => {
     cleanup?.();
     cleanup = undefined;
     document.body.replaceChildren();
+    vi.useRealTimers();
   });
 
   it("keeps feedback above dialogs and side sheets", () => {
@@ -41,23 +42,47 @@ describe("app overlay layers", () => {
     config.mockRestore();
   });
 
-  it("starts window dragging from a SideSheet header blank area", () => {
+  it("starts window dragging on a single mousedown on the header blank area", () => {
     const startDragging = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const toggleMaximize = vi.fn<() => Promise<void>>().mockResolvedValue();
     const header = document.createElement("div");
     header.className = "semi-sidesheet-header";
-    const title = document.createElement("span");
-    title.textContent = "详情";
-    header.append(title);
+    const blank = document.createElement("span");
+    blank.textContent = "详情";
+    header.append(blank);
     document.body.append(header);
-    cleanup = configureSideSheetWindowDragging(startDragging);
+    cleanup = configureSideSheetWindowDragging(startDragging, toggleMaximize);
 
-    title.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    blank.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, buttons: 1, detail: 1 }));
 
     expect(startDragging).toHaveBeenCalledOnce();
+    expect(toggleMaximize).not.toHaveBeenCalled();
   });
 
-  it("keeps SideSheet header title text selectable instead of dragging", () => {
+  it("toggles maximize on a double mousedown without starting a drag", () => {
     const startDragging = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const toggleMaximize = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const header = document.createElement("div");
+    header.className = "semi-sidesheet-header";
+    const blank = document.createElement("span");
+    blank.textContent = "详情";
+    header.append(blank);
+    document.body.append(header);
+    cleanup = configureSideSheetWindowDragging(startDragging, toggleMaximize);
+
+    const event = new MouseEvent("mousedown", { bubbles: true, buttons: 1, detail: 2 });
+    const preventDefault = vi.spyOn(event, "preventDefault");
+    blank.dispatchEvent(event);
+
+    expect(toggleMaximize).toHaveBeenCalledOnce();
+    expect(startDragging).not.toHaveBeenCalled();
+    // 双击时必须阻止默认的文本选中行为。
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("supports dragging on the SideSheet header title blank area too", () => {
+    const startDragging = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const toggleMaximize = vi.fn<() => Promise<void>>().mockResolvedValue();
     const header = document.createElement("div");
     header.className = "semi-sidesheet-header";
     const title = document.createElement("div");
@@ -65,15 +90,16 @@ describe("app overlay layers", () => {
     title.textContent = "Token 用量明细";
     header.append(title);
     document.body.append(header);
-    cleanup = configureSideSheetWindowDragging(startDragging);
+    cleanup = configureSideSheetWindowDragging(startDragging, toggleMaximize);
 
-    title.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    title.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, buttons: 1, detail: 1 }));
 
-    expect(startDragging).not.toHaveBeenCalled();
+    expect(startDragging).toHaveBeenCalledOnce();
   });
 
   it("keeps SideSheet header controls interactive", () => {
     const startDragging = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const toggleMaximize = vi.fn<() => Promise<void>>().mockResolvedValue();
     const header = document.createElement("div");
     header.className = "semi-sidesheet-header";
     const tab = document.createElement("button");
@@ -83,11 +109,29 @@ describe("app overlay layers", () => {
     close.textContent = "关闭";
     header.append(tab, close);
     document.body.append(header);
-    cleanup = configureSideSheetWindowDragging(startDragging);
+    cleanup = configureSideSheetWindowDragging(startDragging, toggleMaximize);
 
-    tab.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
-    close.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, buttons: 1, detail: 1 }));
+    close.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, buttons: 1, detail: 1 }));
 
     expect(startDragging).not.toHaveBeenCalled();
+    expect(toggleMaximize).not.toHaveBeenCalled();
+  });
+
+  it("ignores right-button clicks on the header", () => {
+    const startDragging = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const toggleMaximize = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const header = document.createElement("div");
+    header.className = "semi-sidesheet-header";
+    const blank = document.createElement("span");
+    blank.textContent = "详情";
+    header.append(blank);
+    document.body.append(header);
+    cleanup = configureSideSheetWindowDragging(startDragging, toggleMaximize);
+
+    blank.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, buttons: 2, detail: 1 }));
+
+    expect(startDragging).not.toHaveBeenCalled();
+    expect(toggleMaximize).not.toHaveBeenCalled();
   });
 });

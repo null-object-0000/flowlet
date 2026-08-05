@@ -2,11 +2,11 @@ import { Button, SideSheet, Tabs, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-
 import { IconAlertTriangle, IconCopy, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { AgentSessionInteractionEvent, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionNativeUsage, AgentSessionRow, OpenCodePermissionRequest } from "../../domains/agent-session/types";
+import type { AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionNativeUsage, AgentSessionRow, OpenCodePermissionRequest } from "../../domains/agent-session/types";
+import { groupInteractionEvents, InteractionOutputEvent, InteractionProcessGroup } from "../../features/agent-sessions/SessionConversation";
 import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
-import { Markdown } from "../../shared/ui/Markdown";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
 import { formatFullTimestamp, formatTimestamp } from "../../shared/formatters/datetime";
@@ -252,41 +252,6 @@ function LastInteractionSection({
   );
 }
 
-type InteractionDisplayItem =
-  | { kind: "event"; event: AgentSessionInteractionEvent }
-  | { kind: "process"; id: string; events: AgentSessionInteractionEvent[] };
-
-export function groupInteractionEvents(events: AgentSessionInteractionEvent[]): InteractionDisplayItem[] {
-  const items: InteractionDisplayItem[] = [];
-  let processEvents: AgentSessionInteractionEvent[] = [];
-  const flushProcess = () => {
-    if (processEvents.length === 0) return;
-    items.push({ kind: "process", id: `process:${processEvents[0].id}`, events: processEvents });
-    processEvents = [];
-  };
-  for (const event of events) {
-    if (isProcessEvent(event)) {
-      processEvents.push(event);
-    } else {
-      flushProcess();
-      items.push({ kind: "event", event });
-    }
-  }
-  flushProcess();
-  return items;
-}
-
-function isProcessEvent(event: AgentSessionInteractionEvent) {
-  return matchesInteractionKind(event.kind, ["reasoning", "tool-call", "tool-result"]);
-}
-
-function matchesInteractionKind(
-  kind: AgentSessionInteractionEvent["kind"],
-  candidates: AgentSessionInteractionEvent["kind"][],
-) {
-  return candidates.includes(kind);
-}
-
 function OpenCodeApprovalSection({ session, permissions }: { session: AgentSessionRow; permissions: ReturnType<typeof useOpenCodeSessionPermissions> }) {
   const { t } = useAppPreferences();
   const reply = useReplyOpenCodePermission(session);
@@ -392,200 +357,6 @@ function NativeUsageSection({
   );
 }
 
-function InteractionProcessGroup({
-  events,
-  language,
-}: {
-  events: AgentSessionInteractionEvent[];
-  language: "zh-CN" | "en-US";
-}) {
-  const { t } = useAppPreferences();
-  const toolCalls = events.filter((event) => event.kind === "tool-call").length;
-  const reasoning = events.filter((event) => event.kind === "reasoning").length;
-  return (
-    <details className={styles.processGroup}>
-      <summary className={styles.processGroupHeader}>
-        <span>{t("已处理 {count} 项", { count: events.length })}</span>
-        <small>
-          {[
-            reasoning > 0 ? t("{count} 项思考", { count: reasoning }) : null,
-            toolCalls > 0 ? t("{count} 次工具调用", { count: toolCalls }) : null,
-          ].filter(Boolean).join(" · ")}
-        </small>
-      </summary>
-      <div className={styles.processGroupBody}>
-        {events.map((event) => (
-          <ProcessEvent key={event.id} event={event} language={language} />
-        ))}
-      </div>
-    </details>
-  );
-}
-
-function ProcessEvent({ event, language }: { event: AgentSessionInteractionEvent; language: "zh-CN" | "en-US" }) {
-  const { t } = useAppPreferences();
-  const label = interactionEventLabel(event.kind, t);
-  return (
-    <article className={styles.processEvent}>
-      <header>
-        <span>{label}</span>
-        <strong>{event.title ?? event.model ?? label}</strong>
-        {event.timestamp ? <time>{formatTimestamp(event.timestamp, language)}</time> : null}
-      </header>
-      {event.content ? <ToolEventContent event={event} /> : null}
-      <InteractionEventStatus event={event} language={language} />
-      {event.usage ? <InteractionEventUsage usage={event.usage} language={language} /> : null}
-    </article>
-  );
-}
-
-function ToolEventContent({ event }: { event: AgentSessionInteractionEvent }) {
-  const { t } = useAppPreferences();
-  const parsed = parseToolPayload(event.content ?? "");
-  const fallbackLabel = event.kind === "tool-result"
-    ? t("执行结果")
-    : toolInputLabel(event.title, t);
-  if (!parsed) {
-    return (
-      <div className={styles.toolPayload}>
-        <span>{fallbackLabel}</span>
-        <pre>{event.content}</pre>
-      </div>
-    );
-  }
-  return (
-    <div className={styles.toolPayloadList}>
-      {parsed.map(({ key, value }) => (
-        <div className={styles.toolPayload} key={key}>
-          <span>{toolFieldLabel(key, fallbackLabel, t)}</span>
-          <pre>{value}</pre>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function parseToolPayload(content: string): Array<{ key: string; value: string }> | null {
-  const trimmed = content.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return null;
-    return Object.entries(parsed).map(([key, value]) => ({
-      key,
-      value: typeof value === "string" ? value : JSON.stringify(value, null, 2),
-    }));
-  } catch {
-    return null;
-  }
-}
-
-function toolInputLabel(title: string | null, t: (key: string) => string) {
-  if (title === "exec") return t("执行脚本");
-  if (title === "exec_command" || title === "shell" || title === "bash") return t("命令");
-  if (title === "apply_patch") return t("补丁内容");
-  return t("调用参数");
-}
-
-function toolFieldLabel(key: string, fallback: string, t: (key: string) => string) {
-  if (key === "cmd" || key === "command") return t("命令");
-  if (key === "output") return t("输出");
-  if (key === "workdir" || key === "cwd") return t("工作目录");
-  if (key === "exit_code" || key === "exitCode") return t("退出码");
-  if (key === "status") return t("状态");
-  if (key === "input" || key === "arguments") return fallback;
-  return key;
-}
-
-function InteractionOutputEvent({
-  event,
-  language,
-}: {
-  event: AgentSessionInteractionEvent;
-  language: "zh-CN" | "en-US";
-}) {
-  const { t } = useAppPreferences();
-  if (event.kind === "assistant-message") {
-    return (
-      <article
-        className={styles.outputMessage}
-        aria-label={t("助手回复")}
-      >
-        {event.content ? <Markdown content={event.content} /> : null}
-        {event.usage ? <InteractionEventUsage usage={event.usage} language={language} /> : null}
-      </article>
-    );
-  }
-
-  if (event.kind === "error") {
-    return (
-      <article
-        className={`${styles.outputMessage} ${styles.assistantError}`}
-        aria-label={t("错误")}
-      >
-        {event.content ? <pre className={styles.errorContent}>{event.content}</pre> : null}
-        {event.usage ? <InteractionEventUsage usage={event.usage} language={language} /> : null}
-      </article>
-    );
-  }
-
-  return null;
-}
-
-function InteractionEventStatus({ event, language }: { event: AgentSessionInteractionEvent; language: "zh-CN" | "en-US" }) {
-  const { t } = useAppPreferences();
-  if (!event.status && event.durationMs == null && event.timeToFirstTokenMs == null) return null;
-  return (
-    <small className={styles.interactionStatus}>
-      {[
-        event.status ? t("状态：{status}", { status: interactionStatusLabel(event.status, t) }) : null,
-        event.durationMs != null ? t("耗时 {duration}", { duration: formatDuration(event.durationMs, language) }) : null,
-        event.timeToFirstTokenMs != null ? t("首 Token {duration}", { duration: formatDuration(event.timeToFirstTokenMs, language) }) : null,
-      ].filter(Boolean).join(" · ")}
-    </small>
-  );
-}
-
-function InteractionEventUsage({ usage, language }: { usage: AgentSessionNativeUsage; language: "zh-CN" | "en-US" }) {
-  const { t } = useAppPreferences();
-  const items = [
-    [t("总计"), usage.totalTokens],
-    [t("输入"), usage.inputTokens],
-    [t("输出"), usage.outputTokens],
-    [t("缓存读取"), usage.cachedInputTokens],
-    [t("缓存写入"), usage.cacheWriteInputTokens],
-    [t("推理"), usage.reasoningTokens],
-  ] as const;
-  return (
-    <div className={styles.eventUsage} aria-label={t("单次原生用量")}>
-      {items.filter(([, value], index) => index === 0 || value > 0).map(([label, value]) => (
-        <span key={label}>{label} {formatCompactNumber(value, language)}</span>
-      ))}
-      {usage.inputTokens > 0 ? <span>{t("缓存命中率")} {formatCacheHitRate(usage, language)}</span> : null}
-      {usage.apiEquivalent?.amount != null ? <span>{t("API 等价")} {formatCostAmount(usage.apiEquivalent, 4)}</span> : null}
-      {usage.planConsumption?.amount != null ? <span>{t("套餐消耗")} {formatCostAmount(usage.planConsumption, 4)}</span> : null}
-      {usage.cost != null ? <span>{t("原生实际费用")} {formatNativeCost(usage)}</span> : null}
-    </div>
-  );
-}
-
-function interactionEventLabel(kind: AgentSessionInteractionEvent["kind"], t: (key: string, params?: Record<string, string | number>) => string) {
-  if (kind === "turn") return t("Agent 轮次");
-  if (kind === "user-message") return t("用户消息");
-  if (kind === "assistant-message") return t("助手回复");
-  if (kind === "reasoning") return t("思考摘要");
-  if (kind === "tool-call") return t("工具调用");
-  if (kind === "tool-result") return t("工具结果");
-  return t("错误");
-}
-
-function interactionStatusLabel(status: string, t: (key: string) => string) {
-  if (status === "running") return t("运行中");
-  if (status === "completed") return t("已完成");
-  if (status === "cancelled") return t("已取消");
-  return status;
-}
-
 function EstimateMeta({ label, estimate }: { label: string; estimate: NonNullable<AgentSessionNativeUsage["apiEquivalent"]> }) {
   const { t } = useAppPreferences();
   const total = estimate.pricedTurnCount + estimate.unpricedTurnCount;
@@ -597,13 +368,6 @@ function formatCacheHitRate(usage: AgentSessionNativeUsage, language: "zh-CN" | 
   const totalInput = usage.inputTokens + usage.cachedInputTokens + usage.cacheWriteInputTokens;
   if (totalInput <= 0) return "—";
   return new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 1 }).format(usage.cachedInputTokens / totalInput);
-}
-
-function formatDuration(milliseconds: number, language: "zh-CN" | "en-US") {
-  if (milliseconds < 1_000) return `${milliseconds} ms`;
-  const seconds = milliseconds / 1_000;
-  if (seconds < 60) return `${new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(seconds)} s`;
-  return `${new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(seconds / 60)} min`;
 }
 
 function DetailSection({ title, children }: { title: string; children: ReactNode }) {

@@ -63,6 +63,7 @@ export const queryKeys = {
     openCodePermissions: (sessionId: string) => [...queryKeys.agentSession.all, "opencode-permissions", sessionId] as const,
     nativeSummary: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "native-summary", agentType, sessionId] as const,
     lastInteraction: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "last-interaction", agentType, sessionId] as const,
+    timeline: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "timeline", agentType, sessionId] as const,
     clients: () => [...queryKeys.agentSession.all, "clients"] as const,
   },
   project: {
@@ -120,6 +121,7 @@ export const queryKeys = {
   settings: {
     all: ["settings"] as const,
     autostart: () => [...queryKeys.settings.all, "autostart"] as const,
+    taskReviewNotification: () => [...queryKeys.settings.all, "task-review-notification"] as const,
     logCapture: () => [...queryKeys.settings.all, "log-capture"] as const,
     dbStats: () => [...queryKeys.settings.all, "db-stats"] as const,
     storageUsage: () => [...queryKeys.settings.all, "storage-usage"] as const,

@@ -365,7 +365,7 @@ pub fn get_native_agent_session_summary_incremental(
 }
 
 /// 全量解析时间线并在解析过程中同步采集消息级用量事件（Pi / OpenCode 路径）。
-/// 事件采集发生在渲染事件截断（MAX_TIMELINE_EVENTS）之前，长会话不会低估。
+/// 时间线路径完整读取（不设事件/正文上限），用量事件自然覆盖整段会话，长会话不会低估。
 fn get_native_agent_session_summary_with_events(
     agent_type: &str,
     session_id: &str,
@@ -610,11 +610,8 @@ fn read_opencode_timeline_from_mode(
         })
         .map_err(|error| format!("读取 OpenCode 会话失败：{error}"))?;
 
-    let mut timeline = if latest_interaction_only {
-        complete_timeline()
-    } else {
-        empty_timeline()
-    };
+    // 完整时间线不设事件/正文上限：任务「会话」Tab 需要展示整段会话，不截断。
+    let mut timeline = complete_timeline();
     timeline.source_available = true;
     timeline.usage = read_opencode_session_usage(connection, session_id);
     timeline.models = read_opencode_session_models(connection, session_id);
@@ -1150,7 +1147,8 @@ fn read_pi_timeline_from(
     path: &Path,
     usage_sink: Option<&mut Vec<super::config::AgentUsageEvent>>,
 ) -> Result<AgentSessionTimeline, String> {
-    read_pi_timeline_from_mode(path, Some(MAX_TIMELINE_FILE_BYTES), false, usage_sink)
+    // 完整时间线不设文件字节上限：任务「会话」Tab 需要展示整段会话，不截断。
+    read_pi_timeline_from_mode(path, None, false, usage_sink)
 }
 
 fn read_pi_timeline_from_mode(
@@ -1242,11 +1240,8 @@ fn read_pi_timeline_from_mode(
     }
     branch_indices.reverse();
 
-    let mut timeline = if latest_interaction_only {
-        complete_timeline()
-    } else {
-        empty_timeline()
-    };
+    // 完整时间线不设事件/正文上限：任务「会话」Tab 需要展示整段会话，不截断。
+    let mut timeline = complete_timeline();
     timeline.source_available = true;
     let mut seen_usage_ids: HashSet<String> = HashSet::new();
     for entry_index in branch_indices {
@@ -1482,17 +1477,12 @@ fn read_jsonl_timeline(
     parser: fn(&Value, usize, &mut AgentSessionTimeline, &mut HashSet<String>),
 ) -> Result<AgentSessionTimeline, String> {
     let file = File::open(path).map_err(|error| format!("无法读取原生会话文件：{error}"))?;
-    let mut timeline = empty_timeline();
+    // 完整时间线不设事件/正文/文件字节上限：任务「会话」Tab 需要展示整段会话，不截断。
+    let mut timeline = complete_timeline();
     timeline.source_available = true;
-    let mut bytes_read = 0usize;
     let mut seen_usage_ids = HashSet::new();
     for (index, line) in BufReader::new(file).lines().enumerate() {
         let line = line.map_err(|error| format!("读取原生会话文件失败：{error}"))?;
-        bytes_read = bytes_read.saturating_add(line.len());
-        if bytes_read > MAX_TIMELINE_FILE_BYTES {
-            timeline.truncated = true;
-            break;
-        }
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -2148,9 +2138,9 @@ mod tests {
     }
 
     #[test]
-    fn keeps_scanning_codex_totals_after_display_event_limit() {
+    fn reads_complete_codex_timeline_with_totals() {
         let root =
-            std::env::temp_dir().join(format!("flowlet-codex-event-limit-{}", Uuid::new_v4()));
+            std::env::temp_dir().join(format!("flowlet-codex-complete-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         let path = root.join("session.jsonl");
         let mut records = String::from(
@@ -2170,9 +2160,10 @@ mod tests {
         );
         fs::write(&path, records).unwrap();
 
+        // 完整时间线不做展示截断：超过旧事件上限的全部事件都保留，truncated 恒为 false。
         let mut timeline = read_jsonl_timeline(&path, parse_codex_line).unwrap();
-        assert!(timeline.truncated);
-        assert_eq!(timeline.events.len(), MAX_TIMELINE_EVENTS);
+        assert!(!timeline.truncated);
+        assert_eq!(timeline.events.len(), MAX_TIMELINE_EVENTS + 3);
         assert_eq!(timeline.turn_count, 2);
         assert_eq!(timeline.usage.as_ref().unwrap().total_tokens, 1100);
 
@@ -2189,6 +2180,42 @@ mod tests {
         let estimate = timeline.usage.unwrap().api_equivalent.unwrap();
         assert_eq!(estimate.priced_turn_count, 2);
         assert!((estimate.amount.unwrap() - 0.0044).abs() < f64::EPSILON);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn claude_timeline_returns_full_session_without_truncation() {
+        let root = std::env::temp_dir().join(format!("flowlet-claude-full-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("session.jsonl");
+        // 长会话（远超旧事件上限）：任务「会话」Tab 需要完整会话，时间线不做任何截断，
+        // 首条用户消息与全部助手消息都保留。
+        let mut records = String::from(
+            "{\"type\":\"user\",\"uuid\":\"u0\",\"timestamp\":\"2026-07-30T08:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"task prompt\"}}\n",
+        );
+        for index in 0..(MAX_TIMELINE_EVENTS + 10) {
+            records.push_str(&format!(
+                "{{\"type\":\"assistant\",\"uuid\":\"a-{index}\",\"timestamp\":\"2026-07-30T08:01:00Z\",\"message\":{{\"id\":\"m-{index}\",\"role\":\"assistant\",\"usage\":{{\"input_tokens\":100,\"output_tokens\":20}},\"content\":\"event {index}\"}}}}\n"
+            ));
+        }
+        fs::write(&path, records).unwrap();
+
+        let timeline = read_jsonl_timeline(&path, parse_claude_line).unwrap();
+        assert!(!timeline.truncated);
+        assert_eq!(timeline.events.len(), MAX_TIMELINE_EVENTS + 11);
+        let first = timeline.events.first().unwrap();
+        let last = timeline.events.last().unwrap();
+        assert_eq!(first.kind, "user-message");
+        assert_eq!(first.content.as_deref(), Some("task prompt"));
+        assert_eq!(last.kind, "assistant-message");
+        assert_eq!(last.content.as_deref(), Some("event 309"));
+        // 用量归属仍准确：每个 assistant 事件都带所属消息的用量。
+        assert_eq!(last.usage.as_ref().unwrap().total_tokens, 120);
+        assert_eq!(timeline.turn_count, (MAX_TIMELINE_EVENTS + 10) as i64);
+        assert_eq!(
+            timeline.usage.as_ref().unwrap().total_tokens,
+            (MAX_TIMELINE_EVENTS + 10) as i64 * 120
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

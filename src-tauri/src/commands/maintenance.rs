@@ -243,6 +243,33 @@ pub(crate) fn disable_autostart(app: AppHandle) -> Result<(), String> {
         .map_err(|error| format!("禁用自启动失败: {error}"))
 }
 
+/// 任务执行完成进入待审核时是否发送系统通知。默认开启。
+/// 键名与执行器共用，见 `agent_task_runner::TASK_REVIEW_NOTIFICATION_KEY`。
+pub(crate) use crate::core::agent_task_runner::TASK_REVIEW_NOTIFICATION_KEY;
+
+#[tauri::command]
+pub(crate) fn get_task_review_notification_enabled(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    Ok(state
+        .storage
+        .get_app_meta(TASK_REVIEW_NOTIFICATION_KEY)
+        .map_err(|err| err.to_string())?
+        .map(|value| value != "0")
+        .unwrap_or(true))
+}
+
+#[tauri::command]
+pub(crate) fn set_task_review_notification_enabled(
+    state: tauri::State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .storage
+        .set_app_meta(TASK_REVIEW_NOTIFICATION_KEY, if enabled { "1" } else { "0" })
+        .map_err(|err| err.to_string())
+}
+
 #[tauri::command]
 pub(crate) fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()

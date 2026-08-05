@@ -72,3 +72,18 @@ export function useAgentSessionLastInteraction(session: AgentSessionRow, enabled
     retry: 1,
   });
 }
+
+/** 读取 Agent 原生会话完整时间线（全部交互），供任务抽屉「会话」Tab 展示完整对话。 */
+export function useAgentSessionTimeline(
+  agentType: AgentSessionRow["agentType"] | null,
+  sessionId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.agentSession.timeline(agentType ?? "", sessionId ?? ""),
+    queryFn: () => agentSessionCommands.timeline(agentType!, sessionId!),
+    enabled: enabled && Boolean(agentType) && Boolean(sessionId),
+    staleTime: 30_000,
+    retry: 1,
+  });
+}

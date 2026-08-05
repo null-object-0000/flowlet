@@ -203,7 +203,7 @@ describe("AccountManagementSideSheet", () => {
     expect(screen.getByText("7 天 21.1%")).toBeInTheDocument();
     expect(screen.getByText("总量 10,000 Credits")).toBeInTheDocument();
     expect(screen.getByLabelText("7 天额度")).toBeInTheDocument();
-    expect(screen.getAllByText("额度充值时间")).toHaveLength(2);
+    expect(screen.getAllByText("额度重置时间")).toHaveLength(2);
     expect(screen.getByText("套餐到期")).toBeInTheDocument();
     expect(screen.getByText("最近同步")).toBeInTheDocument();
     expect(screen.getByText("套餐到期").parentElement?.parentElement)

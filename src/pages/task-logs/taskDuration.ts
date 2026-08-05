@@ -29,7 +29,7 @@ function parseSummaryDuration(value: string | null) {
   }
 }
 
-function formatElapsed(milliseconds: number, language: "zh-CN" | "en-US") {
+export function formatElapsed(milliseconds: number, language: "zh-CN" | "en-US") {
   if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
   const seconds = milliseconds / 1000;
   if (seconds < 60) {

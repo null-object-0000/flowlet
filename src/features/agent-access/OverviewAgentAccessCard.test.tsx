@@ -379,12 +379,11 @@ describe("OverviewAgentAccessCard", () => {
     expect(container.querySelector(".semi-badge-dot")).not.toBeNull();
 
     fireEvent.click(claudeButton);
-    // 抽屉内展示已安装版本与最新版本。
-    expect(screen.getByText("已安装版本")).toBeInTheDocument();
-    expect(screen.getByText("最新版本")).toBeInTheDocument();
-    expect(screen.getByText("2.1.221")).toBeInTheDocument();
+    // 抽屉内通过更新提示条展示新旧版本号，不再单独列出已安装/最新版本模块。
     expect(screen.getByText(/检测到新版本：2.1.207 → 2.1.221/)).toBeInTheDocument();
     expect(screen.getByText("前往官网查看更新说明")).toBeInTheDocument();
+    expect(screen.queryByText("已安装版本")).not.toBeInTheDocument();
+    expect(screen.queryByText("最新版本")).not.toBeInTheDocument();
   });
 
   it("bases the Codex update badge only on the CLI version, ignoring the desktop version", () => {

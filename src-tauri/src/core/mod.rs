@@ -13,11 +13,13 @@ pub mod codex_account;
 pub mod codex_model_catalog;
 pub mod config;
 pub mod cost_ledger_source_probe;
+pub(crate) mod detail_windows;
 pub mod device_identity;
 pub mod device_sync;
 pub mod lan_sync;
 pub mod logging;
 pub mod metrics;
+pub(crate) mod notification_registry;
 pub mod opencode_control;
 pub mod power;
 pub mod presets;
@@ -29,6 +31,7 @@ pub mod sync;
 pub mod usage;
 pub mod web;
 pub mod webview_profile;
+pub(crate) mod window_visibility;
 
 // Re-export commonly used types for headless binary
 pub use metrics::Metrics;

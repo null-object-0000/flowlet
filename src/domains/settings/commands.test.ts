@@ -7,7 +7,7 @@ vi.mock("../../platform/tauri/client", () => ({
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
-import { compactDatabase, getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, parseModelPriceCurrencies, setAutostartEnabled } from "./commands";
+import { compactDatabase, getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, getTaskReviewNotificationEnabled, parseModelPriceCurrencies, setAutostartEnabled, setTaskReviewNotificationEnabled } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
 
@@ -42,6 +42,18 @@ describe("settings command contract", () => {
     invokeMock.mockResolvedValueOnce(result);
     await expect(compactDatabase()).resolves.toBe(result);
     expect(invokeMock).toHaveBeenCalledWith("compact_database");
+  });
+
+  it("reads the task-review system notification setting", async () => {
+    invokeMock.mockResolvedValueOnce(true);
+    await expect(getTaskReviewNotificationEnabled()).resolves.toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith("get_task_review_notification_enabled");
+  });
+
+  it("writes the task-review system notification setting", async () => {
+    invokeMock.mockResolvedValueOnce(undefined);
+    await expect(setTaskReviewNotificationEnabled(false)).resolves.toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("set_task_review_notification_enabled", { enabled: false });
   });
 
   it("reads model price currencies through the read_config command", async () => {

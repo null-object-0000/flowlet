@@ -2,11 +2,13 @@ import { Select, Switch } from "@douyinfe/semi-ui-19";
 import type { AppLanguage } from "../../../app/preferences/translations";
 import { useAppPreferences, type ThemePreference } from "../../../app/preferences/AppPreferences";
 import { useAutostartSetting } from "../../../features/settings/useAutostartSetting";
+import { useTaskReviewNotification } from "../../../features/settings/useTaskReviewNotification";
 import { SettingRow, SettingSection } from "../SettingRow";
 
 export function GeneralTab() {
   const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
   const autostart = useAutostartSetting();
+  const taskReviewNotification = useTaskReviewNotification();
 
   return (
     <div>
@@ -65,11 +67,24 @@ export function GeneralTab() {
         />
       </SettingSection>
 
-      <SettingSection title={t("通知")} keywords="通知 系统通知 错误 完成">
+      <SettingSection title={t("通知")} keywords="通知 系统通知 任务 待审核 完成">
         <SettingRow
-          name={t("系统通知")}
-          help={t("在同步失败、修复完成等重要状态变化时发送通知")}
-          control={<Switch aria-label={t("系统通知")} />}
+          name={t("任务完成待审核通知")}
+          help={t("任务执行完成进入待审核时发送系统通知")}
+          control={(
+            <Switch
+              aria-label={t("任务完成待审核通知")}
+              checked={taskReviewNotification.query.data ?? true}
+              loading={
+                taskReviewNotification.query.isLoading ||
+                taskReviewNotification.mutation.isPending
+              }
+              disabled={taskReviewNotification.query.isError}
+              onChange={(checked) => {
+                void taskReviewNotification.mutation.mutateAsync(checked);
+              }}
+            />
+          )}
         />
       </SettingSection>
     </div>

@@ -323,20 +323,6 @@ export function AgentAccessSideSheet({
             {/* 版本更新提示仅适用于 CLI：npm latest 是 CLI 包版本，桌面标签页不展示。 */}
             {!environmentError && !environmentLoading && environment?.installed && surface === "cli" && cliInstalled ? (
               <div className={styles.versionBlock}>
-                <div className={styles.versionGrid}>
-                  <div className={styles.versionItem}>
-                    <span>{t("已安装版本")}</span>
-                    <code>{installedVersion || "-"}</code>
-                  </div>
-                  <div className={styles.versionItem}>
-                    <span>{t("最新版本")}</span>
-                    <code>
-                      {latestVersionLoading
-                        ? t("检查中…")
-                        : latestVersion || (latestVersionError ? t("检查失败") : "-")}
-                    </code>
-                  </div>
-                </div>
                 {newer ? (
                   <div className={styles.updateNotice}>
                     <span>

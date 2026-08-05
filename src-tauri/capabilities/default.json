@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main Flowlet desktop window.",
-  "windows": ["main"],
+  "description": "Permissions for the main Flowlet desktop window and standalone project-detail windows.",
+  "windows": ["main", "project-detail-*"],
   "platforms": ["windows", "macOS", "linux"],
   "permissions": [
     "core:default",

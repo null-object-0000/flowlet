@@ -221,8 +221,10 @@ pub(crate) fn set_project_task_status(
 /// 在独立窗口中打开项目详情看板（无侧边栏、无边框窗口）。
 /// 同一项目已打开过窗口时聚焦复用，避免重复创建。
 /// 独立窗口复用主窗口的 WebView 数据目录，保证语言/主题等本地偏好一致。
+/// 必须保持 async：WebView2 窗口创建会在主线程消息循环上同步等待初始化，
+/// 若放在同步 command（主线程执行）里会造成整个事件循环死锁，所有 invoke 超时。
 #[tauri::command]
-pub(crate) fn open_project_detail_window(
+pub(crate) async fn open_project_detail_window(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     project_id: String,
@@ -253,8 +255,8 @@ pub(crate) fn open_project_detail_window(
     let url = tauri::WebviewUrl::App(format!("index.html#/project-window/{project_id}").into());
     let builder = tauri::WebviewWindowBuilder::new(&app, label, url)
         .title(format!("Flowlet · {}", project.name))
-        .inner_size(960.0, 720.0)
-        .min_inner_size(720.0, 480.0)
+        .inner_size(1200.0, 720.0)
+        .min_inner_size(1200.0, 720.0)
         .decorations(false)
         .resizable(true)
         .maximizable(true)

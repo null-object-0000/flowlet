@@ -2,7 +2,7 @@ use crate::core::device_identity::{
     DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, LanPeerDescriptor, SyncedAgentSession,
 };
 use crate::core::opencode_control::{OpenCodePermissionDecision, OpenCodePermissionReport};
-use crate::core::storage::Storage;
+use crate::core::storage::{ProjectTask, Storage};
 use axum::{
     body::Bytes,
     extract::{ConnectInfo, Path, State},
@@ -104,6 +104,42 @@ struct SessionReadInput {
 pub struct LanSessionSnapshot {
     pub generated_at: String,
     pub session: SyncedAgentSession,
+}
+
+/// 移动端通过 LAN 直连向目标设备提交任务。
+/// `project_id` 是工作区项目 id（移动端从设备快照的 projects 目录获得）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSubmitInput {
+    pub project_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default = "default_task_type")]
+    pub task_type: String,
+    #[serde(default = "default_task_priority")]
+    pub priority: String,
+    #[serde(default = "default_agent_profile")]
+    pub agent_profile: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSubmitResult {
+    pub task_id: String,
+    pub status: String,
+}
+
+fn default_task_type() -> String {
+    "code".to_string()
+}
+
+fn default_task_priority() -> String {
+    "p2".to_string()
+}
+
+fn default_agent_profile() -> String {
+    "Claude Code".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,6 +290,7 @@ pub async fn start_server(
             "/flowlet/v1/opencode/permissions/{permission_id}/reply",
             post(permission_reply_handler),
         )
+        .route("/flowlet/v1/task/submit", post(task_submit_handler))
         .with_state(state);
     tokio::spawn(async move {
         if let Err(error) = axum::serve(
@@ -392,6 +429,7 @@ fn current_capabilities() -> Vec<String> {
         "session.read".to_string(),
         "opencode.permission.read".to_string(),
         "opencode.permission.reply".to_string(),
+        "task.submit".to_string(),
     ]
 }
 
@@ -488,6 +526,89 @@ async fn permission_reply_handler(
     let result =
         crate::core::opencode_control::reply_permission(&permission_id, input.decision).await;
     encrypted_response(&state.auth_key, &headers, &result)
+}
+
+/// 移动端通过签名 LAN 通道向目标设备提交任务。任务直接以 `submitted` 状态创建，
+/// 由目标设备本机调度器领取执行（只领取已绑定目录的项目）。
+async fn task_submit_handler(
+    State(state): State<LanServerState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    const PATH: &str = "/flowlet/v1/task/submit";
+    if let Err(error) = authorize(&state, &Method::POST, PATH, &headers, &body) {
+        return (StatusCode::UNAUTHORIZED, error).into_response();
+    }
+    let input = match serde_json::from_slice::<TaskSubmitInput>(&body) {
+        Ok(input)
+            if !input.project_id.trim().is_empty()
+                && !input.title.trim().is_empty()
+                && matches!(input.task_type.as_str(), "code" | "readonly")
+                && matches!(input.priority.as_str(), "p0" | "p1" | "p2") =>
+        {
+            input
+        }
+        _ => return (StatusCode::BAD_REQUEST, "无效的任务提交参数").into_response(),
+    };
+    record_inbound(&state, Some(&remote), PATH);
+
+    let local_project = match state
+        .storage
+        .get_project_by_workspace_id(&input.project_id.trim())
+        .map_err(|error| error.to_string())
+    {
+        Ok(Some(project)) => project,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, "目标设备上没有该项目").into_response();
+        }
+        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    };
+    if local_project.directory_path.is_none() {
+        return (
+            StatusCode::CONFLICT,
+            "目标设备尚未绑定该项目目录，无法执行任务",
+        )
+            .into_response();
+    }
+
+    let now = Utc::now().to_rfc3339();
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let task = ProjectTask {
+        id: task_id.clone(),
+        project_id: local_project.id.clone(),
+        title: input.title.trim().to_string(),
+        description: input.description.trim().to_string(),
+        status: "submitted".to_string(),
+        task_type: input.task_type.clone(),
+        agent_profile: input.agent_profile.trim().to_string(),
+        priority: input.priority.clone(),
+        base_task_id: None,
+        last_job_id: None,
+        rejection_reason: None,
+        execution_history: None,
+        created_at: now.clone(),
+        updated_at: now,
+        claimed_by: None,
+        claimed_at: None,
+        deleted: false,
+    };
+    if let Err(error) = state.storage.save_project_task(&task) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+    // 即时推送工作区，让其他设备尽快看到新任务。
+    crate::core::project_workspace_sync::notify_project_changed(
+        state.storage.clone(),
+        &local_project.id,
+    );
+    encrypted_response(
+        &state.auth_key,
+        &headers,
+        &TaskSubmitResult {
+            task_id,
+            status: "submitted".to_string(),
+        },
+    )
 }
 
 fn authorize(
@@ -778,6 +899,30 @@ pub async fn fetch_session(
     Err(last_error)
 }
 
+/// 通过签名 LAN 通道向目标设备提交任务（移动端 → 桌面端）。
+/// 目标设备离线或未绑定项目目录时返回明确错误。
+pub async fn submit_task(
+    storage: &Storage,
+    device_id: &str,
+    input: &TaskSubmitInput,
+) -> Result<TaskSubmitResult, String> {
+    let peer = peer_descriptor(storage, device_id)
+        .ok_or_else(|| "目标设备没有可用的局域网连接信息".to_string())?;
+    if !peer.capabilities.iter().any(|cap| cap == "task.submit") {
+        return Err("目标设备版本过旧，不支持任务提交".to_string());
+    }
+    let path = "/flowlet/v1/task/submit";
+    let body = serde_json::to_vec(input).map_err(|error| error.to_string())?;
+    let mut last_error = "没有可用的局域网端点".to_string();
+    for endpoint in &peer.endpoints {
+        match request(&peer, endpoint, Method::POST, path, body.clone()).await {
+            Ok(result) => return Ok(result),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
 /// 单台设备的直连探测结果。移动端与桌面端共用同一份结构展示
 /// 「能不能连上这台设备」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -978,6 +1123,9 @@ pub async fn refresh_known_peers(
                     &snapshot.generated_at,
                     &snapshot.usage_breakdowns,
                 )
+                .map_err(|error| error.to_string())?;
+            import_storage
+                .import_device_projects(&snapshot.device_id, &snapshot.generated_at, &snapshot.projects)
                 .map_err(|error| error.to_string())?;
         }
         Ok::<_, String>(())

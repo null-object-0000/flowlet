@@ -927,11 +927,13 @@ impl Storage {
             );
 
             CREATE TABLE IF NOT EXISTS projects (
-                id             TEXT PRIMARY KEY,
-                name           TEXT NOT NULL,
-                directory_path TEXT NOT NULL,
-                created_at     TEXT NOT NULL,
-                updated_at     TEXT NOT NULL
+                id                  TEXT PRIMARY KEY,
+                name                TEXT NOT NULL,
+                directory_path      TEXT,
+                workspace_project_id TEXT,
+                workspace_archived  INTEGER NOT NULL DEFAULT 0,
+                created_at          TEXT NOT NULL,
+                updated_at          TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS project_tasks (
@@ -947,6 +949,9 @@ impl Storage {
                 priority      TEXT NOT NULL DEFAULT 'p2'
                               CHECK (priority IN ('p0', 'p1', 'p2')),
                 base_task_id  TEXT,
+                claimed_by    TEXT,
+                claimed_at    TEXT,
+                deleted       INTEGER NOT NULL DEFAULT 0,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -1030,6 +1035,21 @@ impl Storage {
                 snapshot_generated_at TEXT NOT NULL,
                 imported_at           TEXT NOT NULL,
                 PRIMARY KEY (device_id, agent_id),
+                FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
+            );
+
+            -- 跨设备同步来的轻量项目目录：移动端据此发现「哪台设备能执行哪个项目」
+            -- 并只读查看任务状态。`project_id` 是工作区项目 id。整表只读共享区。
+            CREATE TABLE IF NOT EXISTS device_projects (
+                device_id             TEXT NOT NULL,
+                project_id            TEXT NOT NULL,
+                project_name          TEXT NOT NULL,
+                has_local_binding     INTEGER NOT NULL DEFAULT 0,
+                tasks_json            TEXT NOT NULL DEFAULT '[]',
+                updated_at            TEXT NOT NULL DEFAULT '',
+                snapshot_generated_at TEXT NOT NULL,
+                imported_at           TEXT NOT NULL,
+                PRIMARY KEY (device_id, project_id),
                 FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
             );
 
@@ -1759,6 +1779,8 @@ impl Storage {
         backfill_task_execution_history(&connection)?;
         // 为已有执行历史补执行耗时（无需重建任务，从 background_jobs 回填 finishedAt / executionMs）。
         backfill_task_execution_durations(&connection)?;
+        // 多设备同步（2026-08）：目录可空化 + 工作区归属 + 任务领取租约字段。
+        migrate_projects_workspace_schema(&connection)?;
 
         tracing::info!("migrate: 完成");
         Ok(())
@@ -1841,20 +1863,121 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
                  last_job_id   TEXT,
                  rejection_reason TEXT,
                  execution_history TEXT,
+                 claimed_by    TEXT,
+                 claimed_at    TEXT,
+                 deleted       INTEGER NOT NULL DEFAULT 0,
                  created_at    TEXT NOT NULL,
                  updated_at    TEXT NOT NULL,
                  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
              );
-             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at)
+             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, deleted, created_at, updated_at)
                  SELECT id, project_id, title, description,
                         CASE WHEN status = 'todo' THEN 'draft' ELSE status END,
-                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at
+                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), base_task_id, last_job_id, rejection_reason, execution_history, NULL, NULL, 0, created_at, updated_at
                  FROM project_tasks_legacy;
              DROP TABLE project_tasks_legacy;
              CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
                  ON project_tasks(project_id, status, updated_at DESC);
              COMMIT;",
         )?;
+    }
+
+    Ok(())
+}
+
+/// 多设备同步迁移（2026-08）：
+/// - `projects.directory_path` 由 NOT NULL 改为可空（远端项目未绑定本机目录）；
+/// - `projects` 增加 `workspace_project_id` / `workspace_archived`（工作区归属与墓碑）；
+/// - `project_tasks` 增加 `claimed_by` / `claimed_at`（跨设备领取租约）。
+/// SQLite 修改列约束需重建表；`add_column_if_missing` 处理只加列的情况。
+fn migrate_projects_workspace_schema(connection: &Connection) -> Result<(), StorageError> {
+    // 任务表：只加列即可（新库已在建表 SQL 中声明）。
+    for (column, definition) in [
+        ("claimed_by", "TEXT"),
+        ("claimed_at", "TEXT"),
+        ("deleted", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        add_column_if_missing(connection, "project_tasks", column, definition)?;
+    }
+
+    // 项目表：判断是否需要重建。旧库 directory_path 带 NOT NULL，或缺失工作区列。
+    let sql: Option<String> = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let needs_rebuild = match sql {
+        Some(sql) => {
+            sql.contains("directory_path TEXT NOT NULL")
+                || !sql.contains("workspace_project_id")
+                || !sql.contains("workspace_archived")
+        }
+        None => false,
+    };
+    if needs_rebuild {
+        // 重建 projects 会连带改写 project_tasks 的外键引用（RENAME 会把引用更新为
+        // legacy 名）。因此必须连同 project_tasks 一起重建，保证外键最终指向新的
+        // projects 表。期间临时关闭外键强制，避免 RENAME / DROP 在级联检查上出错。
+        connection.execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let result = connection.execute_batch(
+            "BEGIN;
+             ALTER TABLE project_tasks RENAME TO project_tasks_legacy;
+             ALTER TABLE projects RENAME TO projects_legacy;
+             CREATE TABLE projects (
+                 id                   TEXT PRIMARY KEY,
+                 name                 TEXT NOT NULL,
+                 directory_path       TEXT,
+                 workspace_project_id TEXT,
+                 workspace_archived   INTEGER NOT NULL DEFAULT 0,
+                 created_at           TEXT NOT NULL,
+                 updated_at           TEXT NOT NULL
+             );
+             INSERT INTO projects (id, name, directory_path, workspace_project_id, workspace_archived, created_at, updated_at)
+                 SELECT id, name, directory_path, NULL, 0, created_at, updated_at
+                 FROM projects_legacy;
+             DROP TABLE projects_legacy;
+             CREATE TABLE project_tasks (
+                 id            TEXT PRIMARY KEY,
+                 project_id    TEXT NOT NULL,
+                 title         TEXT NOT NULL,
+                 description   TEXT NOT NULL DEFAULT '',
+                 status        TEXT NOT NULL DEFAULT 'draft'
+                               CHECK (status IN ('draft', 'submitted', 'in_progress', 'review', 'done')),
+                 task_type     TEXT NOT NULL DEFAULT 'code'
+                               CHECK (task_type IN ('code', 'readonly')),
+                 agent_profile TEXT NOT NULL DEFAULT '',
+                 priority      TEXT NOT NULL DEFAULT 'p2'
+                               CHECK (priority IN ('p0', 'p1', 'p2')),
+                 base_task_id  TEXT,
+                 last_job_id   TEXT,
+                 rejection_reason TEXT,
+                 execution_history TEXT,
+                 claimed_by    TEXT,
+                 claimed_at    TEXT,
+                 deleted       INTEGER NOT NULL DEFAULT 0,
+                 created_at    TEXT NOT NULL,
+                 updated_at    TEXT NOT NULL,
+                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+             );
+             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, deleted, created_at, updated_at)
+                 SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, deleted, created_at, updated_at
+                 FROM project_tasks_legacy;
+             DROP TABLE project_tasks_legacy;
+             CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
+                 ON project_tasks(project_id, status, updated_at DESC);
+             COMMIT;",
+        );
+        let _ = connection.execute_batch("PRAGMA foreign_keys = ON;");
+        result?;
+    }
+    // 新库缺列时兜底（与重建同一目标，幂等）。
+    for (column, definition) in [
+        ("workspace_project_id", "TEXT"),
+        ("workspace_archived", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        add_column_if_missing(connection, "projects", column, definition)?;
     }
 
     Ok(())

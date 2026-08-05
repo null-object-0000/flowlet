@@ -4,6 +4,7 @@ import { MobileOverviewPage } from "./pages/MobileOverviewPage";
 import { MobileDevicesPage } from "./pages/MobileDevicesPage";
 import { MobileSessionsPage } from "./pages/MobileSessionsPage";
 import { MobileSettingsPage } from "./pages/MobileSettingsPage";
+import { MobileTasksPage } from "./pages/MobileTasksPage";
 
 export function MobileRouter() {
   return (
@@ -14,6 +15,7 @@ export function MobileRouter() {
           <Route path="usage" element={<Navigate to="/" replace />} />
           <Route path="devices" element={<MobileDevicesPage />} />
           <Route path="sessions" element={<MobileSessionsPage />} />
+          <Route path="tasks" element={<MobileTasksPage />} />
           <Route path="settings" element={<MobileSettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

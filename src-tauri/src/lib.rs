@@ -1043,6 +1043,31 @@ fn run_desktop() {
                             }
                         }
                     }
+
+                    // 项目工作区同步：与账号工作区共用密钥。拉取远端项目/任务变更，
+                    // 并把本机项目/任务的变更推送到各自对象。
+                    if crate::core::project_workspace_sync::is_enabled(&s3_timer_storage) {
+                        match crate::core::project_workspace_sync::sync_all(
+                            s3_timer_storage.clone(),
+                            "background",
+                        )
+                        .await
+                        {
+                            Ok(result) => {
+                                tracing::info!(
+                                    synced_projects = result.synced_projects,
+                                    uploaded_objects = result.uploaded_objects,
+                                    "scheduled project workspace sync finished"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    error = %error,
+                                    "scheduled project workspace sync failed"
+                                );
+                            }
+                        }
+                    }
                 }
             });
 
@@ -1219,6 +1244,8 @@ fn run_desktop() {
             commands::list_queued_project_tasks,
             commands::set_project_task_status,
             commands::convert_project_task_to_code,
+            commands::get_project_workspace_status,
+            commands::sync_project_workspace,
             commands::list_agent_session_children,
             commands::list_opencode_session_permissions,
             commands::reply_opencode_permission,
@@ -1389,6 +1416,8 @@ fn run_mobile() {
             mobile_commands::refresh_shared_device_session_lan,
             mobile_commands::probe_lan_peers,
             mobile_commands::list_cached_lan_probes,
+            mobile_commands::list_shared_device_projects,
+            mobile_commands::submit_task_lan,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet Mobile 失败");

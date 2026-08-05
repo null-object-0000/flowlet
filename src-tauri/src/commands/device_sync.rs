@@ -460,6 +460,9 @@ pub(crate) async fn import_device_usage_bundle(
                 &snapshot.usage_breakdowns,
             )
             .map_err(|error| error.to_string())?;
+        storage
+            .import_device_projects(&snapshot.device_id, &snapshot.generated_at, &snapshot.projects)
+            .map_err(|error| error.to_string())?;
         Ok(DeviceUsageImportResult {
             device_id: snapshot.device_id,
             imported_days: 0,

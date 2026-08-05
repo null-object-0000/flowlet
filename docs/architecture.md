@@ -372,6 +372,28 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 删除这些本地任务，不删除目录、Agent 原始会话或 Flowlet 请求观测记录。项目与任务 CRUD
 写入 SQLite 后立即生效，无需重启。
 
+多设备同步（2026-08）把项目与任务升级为「工作区实体」：`projects.directory_path`
+改为可空（远端项目落到新设备后需先「绑定本机目录」才能执行），并新增服务端托管的
+`workspace_project_id` / `workspace_archived`；`project_tasks` 新增 `claimed_by` /
+`claimed_at`（跨设备领取租约）与 `deleted`（软删除墓碑）。同步通过 S3 工作区加密对象
+`<prefix>/flowlet/v1/workspace/projects/<workspace_project_id>.enc`（ChaCha20-Poly1305，
+复用账号工作区密钥，AAD 独立），每个项目一个对象，revision + ETag + If-Match 条件写入，
+由 `project_workspace_sync` 模块管理。合并规则为 last-writer-wins + 状态机守卫 +
+软删除墓碑：新增任务（UUID）双向合并都保留；同一任务编辑按 `updated_at` 新者胜（只有
+草稿可编辑，冲突窗口极小）；状态迁移保持既有状态机；删除任务以墓碑传播、删除优先；
+删除项目写入 `deleted` 墓碑，其他设备同步后删除各自副本。目录绑定、领取归属与最近
+执行 job 是设备本地字段，不进入工作区对象。任务保存 / 提交 / 审核 / 转换后即时推送
+该项目到工作区；启动后与设备同步共用同一 15 分钟周期拉取合并。调度器只领取
+「本机已绑定目录且未被其他设备在租约窗口内领取」的 `submitted` 任务，防止多台设备对
+同一任务重复执行。
+
+移动端任务提交：设备快照（schema v12）携带轻量 `projects` 目录（工作区项目 id、
+名称、是否已绑定目录、任务标题/状态/优先级，不含描述与执行历史），接收端导入只读
+`device_projects` 表。移动端据此发现「哪台设备能执行哪个项目」，通过签名 LAN 通道
+`POST /flowlet/v1/task/submit`（新增 `task.submit` 能力）把任务直接以 `submitted` 状态
+提交到目标设备；目标设备离线、版本过旧或未绑定目录时返回明确错误，离线排队（S3
+收件箱）为后续可选增强。移动端 S3 权限保持只读，不接触工作区加密对象。
+
 安装实例身份独立保存在 SQLite 同目录的 `flowlet-device.json`。首次启动生成 UUID，
 后续启动稳定复用；配置导入、数据库替换和普通数据包不得覆盖或携带该文件，避免把
 来源设备恢复成当前设备身份。设备身份格式无效时启动明确失败，不静默生成新 ID。

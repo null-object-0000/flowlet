@@ -15,8 +15,11 @@ import type {
   S3SyncConfigInput,
   S3SyncSettings,
   SharedAgentSession,
+  SharedDeviceProject,
   SyncedAgentSession,
   SyncedAgentProfile,
+  TaskSubmitInput,
+  TaskSubmitResult,
 } from "./types";
 import type { OpenCodePermissionDecision, OpenCodePermissionReport } from "../agent-session/types";
 
@@ -119,6 +122,12 @@ export const mobileDeviceSyncCommands = {
   ): Promise<void> =>
     invokeCommand<void>("reply_remote_opencode_permission", { deviceId, permissionId, decision })
       .catch(toDeviceSyncError("remote_opencode_permission_reply_failed")),
+  projects: (deviceId: string | null): Promise<SharedDeviceProject[]> =>
+    invokeCommand<SharedDeviceProject[]>("list_shared_device_projects", { deviceId })
+      .catch(toDeviceSyncError("shared_device_projects_failed")),
+  submitTask: (deviceId: string, input: TaskSubmitInput): Promise<TaskSubmitResult> =>
+    invokeCommand<TaskSubmitResult>("submit_task_lan", { deviceId, input }, 15_000)
+      .catch(toDeviceSyncError("lan_task_submit_failed")),
 };
 
 function toDeviceSyncError(code: string): (error: unknown) => never {

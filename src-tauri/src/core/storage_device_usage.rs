@@ -2,8 +2,8 @@ use super::{Storage, StorageError};
 use crate::core::config::DeviceUsageBreakdownRow;
 use crate::core::device_identity::{
     DailyUsageTotal, DeviceUsageImportPreview, DeviceUsageImportResult, HourlyUsageTotal,
-    KnownDevice, SharedAgentSession, SyncedAgentProfile, SyncedAgentSession,
-    resolve_device_display_name,
+    KnownDevice, SharedAgentSession, SharedDeviceProject, SyncedAgentProfile, SyncedAgentSession,
+    SyncedProject, resolve_device_display_name,
 };
 use rusqlite::{OptionalExtension, params};
 
@@ -638,6 +638,93 @@ impl Storage {
         }
         transaction.commit()?;
         Ok(imported)
+    }
+
+    /// 导入单个设备同步来的轻量项目目录到 `device_projects`。
+    /// 按 `snapshot_generated_at` 幂等覆盖：较新的整份快照整体替换旧快照，
+    /// 与 device_agent_sessions 的语义一致。
+    pub fn import_device_projects(
+        &self,
+        device_id: &str,
+        generated_at: &str,
+        projects: &[SyncedProject],
+    ) -> Result<usize, StorageError> {
+        if projects.is_empty() {
+            return Ok(0);
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let transaction = connection.transaction()?;
+        let mut imported = 0;
+        for project in projects {
+            let tasks_json = serde_json::to_string(&project.tasks)
+                .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+            let changes = transaction.execute(
+                "INSERT INTO device_projects (
+                    device_id, project_id, project_name, has_local_binding, tasks_json,
+                    updated_at, snapshot_generated_at, imported_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
+                 ON CONFLICT(device_id, project_id) DO UPDATE SET
+                    project_name = excluded.project_name,
+                    has_local_binding = excluded.has_local_binding,
+                    tasks_json = excluded.tasks_json,
+                    updated_at = excluded.updated_at,
+                    snapshot_generated_at = excluded.snapshot_generated_at,
+                    imported_at = datetime('now')
+                 WHERE excluded.snapshot_generated_at >= device_projects.snapshot_generated_at",
+                params![
+                    device_id,
+                    project.project_id,
+                    project.name,
+                    project.has_local_binding,
+                    tasks_json,
+                    project.updated_at,
+                    generated_at
+                ],
+            )?;
+            imported += changes;
+        }
+        transaction.commit()?;
+        Ok(imported)
+    }
+
+    /// 读取共享设备项目目录（移动端任务提交入口的数据源）。
+    /// `device_id` 为 None 时返回全部设备。
+    pub fn imported_device_projects(
+        &self,
+        device_id: Option<&str>,
+    ) -> Result<Vec<SharedDeviceProject>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT p.device_id, d.display_name, d.platform,
+                    p.project_id, p.project_name, p.has_local_binding, p.tasks_json, p.updated_at
+             FROM device_projects p
+             JOIN known_devices d ON d.device_id = p.device_id
+             WHERE (?1 IS NULL OR p.device_id = ?1)
+             ORDER BY d.display_name ASC, p.project_name ASC",
+        )?;
+        let rows = statement.query_map([device_id], |row| {
+            let device_id: String = row.get(0)?;
+            let platform: String = row.get(2)?;
+            let tasks_json: String = row.get(6)?;
+            Ok(SharedDeviceProject {
+                device_id: device_id.clone(),
+                device_display_name: resolve_device_display_name(&row.get::<_, String>(1)?, &platform, &device_id),
+                device_platform: platform,
+                project_id: row.get(3)?,
+                project_name: row.get(4)?,
+                has_local_binding: row.get::<_, i64>(5)? != 0,
+                updated_at: row.get(7)?,
+                tasks: serde_json::from_str(&tasks_json).unwrap_or_default(),
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub fn imported_known_devices(&self) -> Result<Vec<KnownDevice>, StorageError> {

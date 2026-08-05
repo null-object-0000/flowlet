@@ -4,6 +4,7 @@ use crate::core::config::ProxyBindConfig;
 use crate::core::device_identity::{
     DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, SyncedAgentInstallation,
     SyncedAgentInteraction, SyncedAgentInteractionEvent, SyncedAgentProfile, SyncedAgentSession,
+    SyncedProject, SyncedProjectTask,
 };
 use crate::core::storage::Storage;
 use reqwest::{Client, Response, StatusCode};
@@ -249,7 +250,45 @@ pub async fn build_device_snapshot(
     let mut snapshot = DeviceUsageSnapshot::new(&identity, days, hours, sessions, agents);
     snapshot.lan_peer = crate::core::lan_sync::current_descriptor(&storage);
     snapshot.usage_breakdowns = usage_breakdowns;
+    // 轻量项目目录：让其他设备 / 移动端知道本机能执行哪些项目、任务状态如何。
+    // 刻意只带标题 / 状态 / 优先级，不带描述与执行历史（敏感任务正文不外泄）。
+    snapshot.projects = build_synced_projects(&storage)?;
     Ok(snapshot)
+}
+
+/// 生成本机项目的轻量快照目录（见 `SyncedProject`）。
+fn build_synced_projects(storage: &Storage) -> Result<Vec<SyncedProject>, String> {
+    let projects = storage
+        .list_projects_for_workspace()
+        .map_err(|error| error.to_string())?;
+    let mut synced = Vec::with_capacity(projects.len());
+    for project in projects {
+        let tasks = storage
+            .list_project_tasks(&project.id)
+            .map_err(|error| error.to_string())?;
+        synced.push(SyncedProject {
+            // 未同步过的工作区 id 用本机 id 兜底（首次推送会以此作为工作区 id）。
+            project_id: project
+                .workspace_project_id
+                .clone()
+                .unwrap_or_else(|| project.id.clone()),
+            name: project.name,
+            archived: project.workspace_archived,
+            updated_at: project.updated_at,
+            has_local_binding: project.directory_path.is_some(),
+            tasks: tasks
+                .into_iter()
+                .map(|task| SyncedProjectTask {
+                    id: task.id,
+                    title: task.title,
+                    status: task.status,
+                    priority: task.priority,
+                    updated_at: task.updated_at,
+                })
+                .collect(),
+        });
+    }
+    Ok(synced)
 }
 
 async fn build_synced_agent_profiles(
@@ -1095,6 +1134,9 @@ async fn pull_device_usage_for_device(
                 &snapshot.usage_breakdowns,
             )
             .map_err(|error| error.to_string())?;
+        import_storage
+            .import_device_projects(&snapshot.device_id, &snapshot.generated_at, &snapshot.projects)
+            .map_err(|error| error.to_string())?;
         Ok::<_, String>(result)
     })
     .await
@@ -1324,6 +1366,13 @@ pub async fn sync_device_usage(
                     &snapshot.generated_at,
                     &snapshot.usage_breakdowns,
                 )
+                .is_err()
+            {
+                import_failures += 1;
+            }
+            // 轻量项目目录：让移动端 / 其他桌面看到该设备可执行的项目与任务状态。
+            if import_storage
+                .import_device_projects(&snapshot.device_id, &snapshot.generated_at, &snapshot.projects)
                 .is_err()
             {
                 import_failures += 1;

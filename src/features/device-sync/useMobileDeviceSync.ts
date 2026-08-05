@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mobileDeviceSyncCommands } from "../../domains/device-sync/commands";
 import { queryKeys } from "../../shared/query-keys";
 import type { OpenCodePermissionDecision } from "../../domains/agent-session/types";
+import type { TaskSubmitInput } from "../../domains/device-sync/types";
 
 export function useMobileDevices() {
   return useQuery({
@@ -109,6 +110,34 @@ export function useMobileS3Settings() {
     queryKey: queryKeys.mobileDeviceSync.s3Settings(),
     queryFn: mobileDeviceSyncCommands.s3Settings,
     staleTime: 15_000,
+  });
+}
+
+/** 共享设备项目目录：移动端任务提交入口的数据源。 */
+export function useMobileProjects(deviceId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.mobileDeviceSync.projects(deviceId),
+    queryFn: () => mobileDeviceSyncCommands.projects(deviceId),
+    enabled: deviceId != null,
+    staleTime: 15_000,
+  });
+}
+
+/** 向指定设备提交任务（签名 LAN 通道）。 */
+export function useMobileSubmitTask(deviceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: TaskSubmitInput) => {
+      if (!deviceId) throw new Error("请先选择设备");
+      return mobileDeviceSyncCommands.submitTask(deviceId, input);
+    },
+    onSuccess: async () => {
+      if (!deviceId) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
+      ]);
+    },
   });
 }
 

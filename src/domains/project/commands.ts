@@ -4,6 +4,8 @@ import type {
   ProjectTask,
   ProjectTaskMutableStatus,
   ProjectTaskRunnerState,
+  ProjectWorkspaceStatus,
+  ProjectWorkspaceSyncResult,
   RunProjectTaskResult,
 } from "./types";
 
@@ -23,4 +25,6 @@ export const projectCommands = {
   setTaskStatus: (taskId: string, status: ProjectTaskMutableStatus, reason?: string): Promise<void> => invokeCommand<void>("set_project_task_status", { taskId, status, reason: reason ?? null }).catch(wrap),
   convertTaskToCode: (taskId: string, description: string): Promise<void> => invokeCommand<void>("convert_project_task_to_code", { taskId, description }).catch(wrap),
   openDetailWindow: (projectId: string): Promise<void> => invokeCommand<void>("open_project_detail_window", { projectId }).catch(wrap),
+  getWorkspaceStatus: (): Promise<ProjectWorkspaceStatus> => invokeCommand<ProjectWorkspaceStatus>("get_project_workspace_status").catch(wrap),
+  syncWorkspace: (): Promise<ProjectWorkspaceSyncResult> => invokeCommand<ProjectWorkspaceSyncResult>("sync_project_workspace", undefined, Number.POSITIVE_INFINITY).catch(wrap),
 };

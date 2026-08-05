@@ -150,7 +150,15 @@ export function useProjectTaskScheduler(autoRefresh = false) {
 
 export function newProject(name: string, directoryPath: string): Project {
   const now = new Date().toISOString();
-  return { id: crypto.randomUUID(), name: name.trim(), directoryPath, createdAt: now, updatedAt: now };
+  return {
+    id: crypto.randomUUID(),
+    name: name.trim(),
+    directoryPath,
+    workspaceProjectId: null,
+    workspaceArchived: false,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 export function newProjectTask(projectId: string, title: string, baseTaskId: string | null = null): ProjectTask {

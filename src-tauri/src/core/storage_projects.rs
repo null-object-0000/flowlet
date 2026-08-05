@@ -8,7 +8,16 @@ use serde_json::{Value, json};
 pub struct Project {
     pub id: String,
     pub name: String,
-    pub directory_path: String,
+    /// 本机绑定目录。可空：远端项目同步到本机后未绑定目录时为空，
+    /// 绑定目录后该设备才成为该项目的执行候选。
+    #[serde(default)]
+    pub directory_path: Option<String>,
+    /// 项目在工作区（S3 加密对象）中的稳定标识。本机新建尚未同步时为 None。
+    #[serde(default)]
+    pub workspace_project_id: Option<String>,
+    /// 远端归档标记（墓碑）。归档项目在列表中隐藏，删除动作传播到其它设备。
+    #[serde(default)]
+    pub workspace_archived: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -36,6 +45,16 @@ pub struct ProjectTask {
     pub execution_history: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// 跨设备领取归属：最近一次执行该任务的设备 id。仅用于防止多台设备
+    /// 对同一任务重复执行，不参与同步。
+    #[serde(default)]
+    pub claimed_by: Option<String>,
+    /// 最近一次领取时间（RFC3339）。领取超过租约窗口后其他设备可重新领取。
+    #[serde(default)]
+    pub claimed_at: Option<String>,
+    /// 软删除标记：删除任务跨设备传播时使用墓碑，列表中过滤 `deleted = 1`。
+    #[serde(default)]
+    pub deleted: bool,
 }
 
 impl Storage {
@@ -45,18 +64,30 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, name, directory_path, created_at, updated_at
-             FROM projects ORDER BY updated_at DESC, name COLLATE NOCASE ASC",
+            "SELECT id, name, directory_path, workspace_project_id, workspace_archived, created_at, updated_at
+             FROM projects
+             WHERE workspace_archived = 0
+             ORDER BY updated_at DESC, name COLLATE NOCASE ASC",
         )?;
-        let rows = statement.query_map([], |row| {
-            Ok(Project {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                directory_path: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-            })
-        })?;
+        let rows = statement.query_map([], map_project_row)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
+
+    /// 供项目工作区同步使用：返回全部未归档项目（含未绑定目录的远端项目），
+    /// 不含 `workspace_archived` 过滤。同步方据此决定推送或合并。
+    pub fn list_projects_for_workspace(&self) -> Result<Vec<Project>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT id, name, directory_path, workspace_project_id, workspace_archived, created_at, updated_at
+             FROM projects
+             WHERE workspace_archived = 0
+             ORDER BY updated_at ASC, name COLLATE NOCASE ASC",
+        )?;
+        let rows = statement.query_map([], map_project_row)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
     }
@@ -67,19 +98,33 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, name, directory_path, created_at, updated_at FROM projects WHERE id = ?1",
+            "SELECT id, name, directory_path, workspace_project_id, workspace_archived, created_at, updated_at FROM projects WHERE id = ?1",
         )?;
         let mut rows = statement.query([project_id])?;
         let Some(row) = rows.next()? else {
             return Ok(None);
         };
-        Ok(Some(Project {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            directory_path: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
-        }))
+        Ok(Some(map_project_row(row)?))
+    }
+
+    /// 按工作区项目 id 查找本机项目（远端项目同步到本机后的关联方式）。
+    pub fn get_project_by_workspace_id(
+        &self,
+        workspace_project_id: &str,
+    ) -> Result<Option<Project>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT id, name, directory_path, workspace_project_id, workspace_archived, created_at, updated_at
+             FROM projects WHERE workspace_project_id = ?1",
+        )?;
+        let mut rows = statement.query([workspace_project_id])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        Ok(Some(map_project_row(row)?))
     }
 
     pub fn save_project(&self, project: &Project) -> Result<(), StorageError> {
@@ -88,16 +133,20 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         connection.execute(
-            "INSERT INTO projects (id, name, directory_path, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO projects (id, name, directory_path, workspace_project_id, workspace_archived, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(id) DO UPDATE SET
                name = excluded.name,
                directory_path = excluded.directory_path,
+               workspace_project_id = excluded.workspace_project_id,
+               workspace_archived = excluded.workspace_archived,
                updated_at = excluded.updated_at",
             params![
                 project.id,
                 project.name,
                 project.directory_path,
+                project.workspace_project_id,
+                project.workspace_archived,
                 project.created_at,
                 project.updated_at
             ],
@@ -113,15 +162,64 @@ impl Storage {
         Ok(connection.execute("DELETE FROM projects WHERE id = ?1", [project_id])? > 0)
     }
 
+    /// 按工作区项目 id 删除本机项目（远端墓碑落地时使用），级联删除任务。
+    pub fn delete_project_by_workspace_id(
+        &self,
+        workspace_project_id: &str,
+    ) -> Result<bool, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        Ok(connection.execute(
+            "DELETE FROM projects WHERE workspace_project_id = ?1",
+            [workspace_project_id],
+        )? > 0)
+    }
+
+    /// 标记本机项目归档（墓碑由远端工作区对象带到本机后调用）。
+    pub fn archive_project_by_workspace_id(
+        &self,
+        workspace_project_id: &str,
+    ) -> Result<bool, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        Ok(connection.execute(
+            "UPDATE projects SET workspace_archived = 1, updated_at = datetime('now') WHERE workspace_project_id = ?1",
+            [workspace_project_id],
+        )? > 0)
+    }
+
     pub fn list_project_tasks(&self, project_id: &str) -> Result<Vec<ProjectTask>, StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at
-             FROM project_tasks WHERE project_id = ?1
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at, claimed_by, claimed_at, deleted
+             FROM project_tasks WHERE project_id = ?1 AND deleted = 0
              ORDER BY updated_at DESC, created_at DESC",
+        )?;
+        let rows = statement.query_map([project_id], map_project_task_row)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
+    }
+
+    /// 读取项目下全部任务（含软删除），供工作区合并使用。
+    /// 普通列表使用 `list_project_tasks`（过滤 `deleted = 1`）。
+    pub fn list_project_tasks_including_deleted(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ProjectTask>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at, claimed_by, claimed_at, deleted
+             FROM project_tasks WHERE project_id = ?1",
         )?;
         let rows = statement.query_map([project_id], map_project_task_row)?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -138,14 +236,30 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at
-             FROM project_tasks WHERE id = ?1 AND project_id = ?2",
+            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at, claimed_by, claimed_at, deleted
+             FROM project_tasks WHERE id = ?1 AND project_id = ?2 AND deleted = 0",
         )?;
         let mut rows = statement.query(params![task_id, project_id])?;
         let Some(row) = rows.next()? else {
             return Ok(None);
         };
         Ok(Some(map_project_task_row(row)?))
+    }
+
+    /// 读取任务所属项目 id（供状态变更后按项目推送工作区）。
+    pub fn get_task_project(&self, task_id: &str) -> Result<Option<String>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        connection
+            .query_row(
+                "SELECT project_id FROM project_tasks WHERE id = ?1 AND deleted = 0",
+                [task_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StorageError::from)
     }
 
     /// 读取单个任务的当前状态（仅任务 id，供状态迁移校验）。
@@ -156,7 +270,7 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         connection
             .query_row(
-                "SELECT status FROM project_tasks WHERE id = ?1",
+                "SELECT status FROM project_tasks WHERE id = ?1 AND deleted = 0",
                 [task_id],
                 |row| row.get(0),
             )
@@ -179,20 +293,88 @@ impl Storage {
 
     /// 跨项目聚合「已提交、待执行」的任务，供调度器领取。
     /// 排序：优先级 p0 > p1 > p2，同优先级按创建时间先到先执行。
-    pub fn list_queued_project_tasks(&self) -> Result<Vec<ProjectTask>, StorageError> {
+    ///
+    /// 多设备约束（2026-08）：
+    /// - 只返回「本机已绑定目录」（`directory_path IS NOT NULL`）的项目下的任务，
+    ///   远端未绑定目录的项目不能在本机执行，避免调度器误领；
+    /// - 排除被其它设备在租约窗口内领取的任务（`claimed_by` 指向其他设备且
+    ///   `claimed_at` 距今未超过 `TASK_CLAIM_LEASE`），防止两台设备重复执行。
+    pub fn list_queued_project_tasks(
+        &self,
+        current_device_id: &str,
+    ) -> Result<Vec<ProjectTask>, StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
-            "SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at
-             FROM project_tasks WHERE status = 'submitted'
-             ORDER BY CASE priority WHEN 'p0' THEN 0 WHEN 'p1' THEN 1 WHEN 'p2' THEN 2 ELSE 3 END,
-                      created_at ASC",
+            "SELECT pt.id, pt.project_id, pt.title, pt.description, pt.status, pt.task_type, pt.agent_profile, pt.priority, pt.base_task_id, pt.last_job_id, pt.rejection_reason, pt.execution_history, pt.created_at, pt.updated_at, pt.claimed_by, pt.claimed_at, pt.deleted
+             FROM project_tasks pt
+             JOIN projects p ON p.id = pt.project_id
+             WHERE pt.status = 'submitted'
+               AND pt.deleted = 0
+               AND p.directory_path IS NOT NULL
+               AND p.workspace_archived = 0
+             ORDER BY CASE pt.priority WHEN 'p0' THEN 0 WHEN 'p1' THEN 1 WHEN 'p2' THEN 2 ELSE 3 END,
+                      pt.created_at ASC",
         )?;
         let rows = statement.query_map([], |row| map_project_task_row(row))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StorageError::from)
+        let mut tasks = rows.collect::<Result<Vec<_>, _>>()?;
+        tasks.retain(|task| {
+            let Some(claimed_by) = task.claimed_by.as_deref() else {
+                return true;
+            };
+            if claimed_by == current_device_id {
+                return true;
+            }
+            // 其他设备领取且仍在租约窗口内 → 本机不领取；超过窗口视为租约失效。
+            task.claimed_at
+                .as_deref()
+                .and_then(parse_epoch_millis)
+                .is_none_or(|claimed_at| {
+                    chrono::Utc::now().timestamp_millis() - claimed_at > TASK_CLAIM_LEASE_MS
+                })
+        });
+        Ok(tasks)
+    }
+
+    /// 领取任务：把任务的执行归属标记为当前设备。仅当任务当前未被其他设备
+    /// 在租约窗口内领取时成功；本机已领取或租约过期可重新领取。
+    pub fn claim_task(
+        &self,
+        task_id: &str,
+        current_device_id: &str,
+    ) -> Result<bool, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let current = connection
+            .query_row(
+                "SELECT claimed_by, claimed_at FROM project_tasks WHERE id = ?1",
+                [task_id],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+        let Some((claimed_by, claimed_at)) = current else {
+            return Ok(false);
+        };
+        if let Some(claimed_by) = claimed_by {
+            if claimed_by != current_device_id {
+                if let Some(claimed_at) = claimed_at {
+                    if let Some(millis) = parse_epoch_millis(&claimed_at) {
+                        if chrono::Utc::now().timestamp_millis() - millis <= TASK_CLAIM_LEASE_MS {
+                            return Ok(false);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(connection.execute(
+            "UPDATE project_tasks SET claimed_by = ?2, claimed_at = ?3, updated_at = ?4 WHERE id = ?1",
+            params![task_id, current_device_id, now, now],
+        )? > 0)
     }
 
     pub fn save_project_task(&self, task: &ProjectTask) -> Result<(), StorageError> {
@@ -200,11 +382,11 @@ impl Storage {
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-        // last_job_id / rejection_reason / execution_history 只在任务执行或退回时
-        // 由专用方法写入，编辑保存不覆盖它们。
+        // last_job_id / rejection_reason / execution_history / claimed_by / claimed_at
+        // 只在任务执行或退回时由专用方法写入，编辑保存不覆盖它们。
         connection.execute(
-            "INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            "INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, created_at, updated_at, claimed_by, claimed_at, deleted)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
              ON CONFLICT(id) DO UPDATE SET
                title = excluded.title,
                description = excluded.description,
@@ -213,9 +395,28 @@ impl Storage {
                agent_profile = excluded.agent_profile,
                priority = excluded.priority,
                base_task_id = excluded.base_task_id,
+               deleted = excluded.deleted,
                updated_at = excluded.updated_at
              WHERE project_tasks.project_id = excluded.project_id",
-            params![task.id, task.project_id, task.title, task.description, task.status, task.task_type, task.agent_profile, task.priority, task.base_task_id, task.last_job_id, task.rejection_reason, task.execution_history, task.created_at, task.updated_at],
+            params![
+                task.id,
+                task.project_id,
+                task.title,
+                task.description,
+                task.status,
+                task.task_type,
+                task.agent_profile,
+                task.priority,
+                task.base_task_id,
+                task.last_job_id,
+                task.rejection_reason,
+                task.execution_history,
+                task.created_at,
+                task.updated_at,
+                task.claimed_by,
+                task.claimed_at,
+                task.deleted
+            ],
         )?;
         Ok(())
     }
@@ -462,9 +663,11 @@ impl Storage {
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
+        // 软删除：置 deleted = 1，跨设备同步时以墓碑形式传播删除。
+        let now = chrono::Utc::now().to_rfc3339();
         Ok(connection.execute(
-            "DELETE FROM project_tasks WHERE id = ?1 AND project_id = ?2",
-            params![task_id, project_id],
+            "UPDATE project_tasks SET deleted = 1, updated_at = ?3 WHERE id = ?1 AND project_id = ?2",
+            params![task_id, project_id, now],
         )? > 0)
     }
 }
@@ -496,8 +699,27 @@ fn map_project_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectTask
         execution_history: row.get(11)?,
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
+        claimed_by: row.get(14)?,
+        claimed_at: row.get(15)?,
+        deleted: row.get(16)?,
     })
 }
+
+fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        directory_path: row.get(2)?,
+        workspace_project_id: row.get(3)?,
+        workspace_archived: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+/// 跨设备任务领取租约（毫秒）：其他设备领取后在此窗口内不被重新领取，
+/// 超过窗口视为领取设备已离线/崩溃，可重新领取。
+const TASK_CLAIM_LEASE_MS: i64 = 10 * 60 * 1000;
 
 #[cfg(test)]
 mod tests {
@@ -511,7 +733,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -530,6 +754,9 @@ mod tests {
                 last_job_id: None,
                 rejection_reason: None,
                 execution_history: None,
+                claimed_by: None,
+                claimed_at: None,
+                deleted: false,
                 created_at: project.created_at.clone(),
                 updated_at: project.updated_at.clone(),
             })
@@ -553,6 +780,9 @@ mod tests {
             last_job_id: None,
             rejection_reason: None,
             execution_history: None,
+            claimed_by: None,
+            claimed_at: None,
+            deleted: false,
             created_at: created_at.into(),
             updated_at: created_at.into(),
         }
@@ -565,7 +795,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -588,7 +820,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -616,7 +850,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -630,10 +866,57 @@ mod tests {
             storage.save_project_task(&task).unwrap();
         }
 
-        let queued = storage.list_queued_project_tasks().unwrap();
+        let queued = storage.list_queued_project_tasks("device-a").unwrap();
         let ids: Vec<&str> = queued.iter().map(|task| task.id.as_str()).collect();
         // 只含 submitted；p0 优先、再 p1、再 p2；草稿不参与调度。
         assert_eq!(ids, vec!["p0-early", "p1-mid", "p2-late"]);
+    }
+
+    #[test]
+    fn queued_tasks_exclude_unbound_and_foreign_claimed_projects() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        // 本机绑定目录的项目。
+        storage
+            .save_project(&Project {
+                id: "project-1".into(),
+                name: "Flowlet".into(),
+                directory_path: Some("D:\\work\\flowlet".into()),
+                workspace_project_id: Some("ws-1".into()),
+                workspace_archived: false,
+                created_at: "2026-08-03T00:00:00Z".into(),
+                updated_at: "2026-08-03T00:00:00Z".into(),
+            })
+            .unwrap();
+        // 远端同步、未绑定目录的项目：任务不可在本机执行。
+        storage
+            .save_project(&Project {
+                id: "project-2".into(),
+                name: "Remote".into(),
+                directory_path: None,
+                workspace_project_id: Some("ws-2".into()),
+                workspace_archived: false,
+                created_at: "2026-08-03T00:00:00Z".into(),
+                updated_at: "2026-08-03T00:00:00Z".into(),
+            })
+            .unwrap();
+        let mut bound = sample_task("bound", "submitted", "p1", "2026-08-03T00:00:00Z");
+        bound.project_id = "project-1".into();
+        let mut unbound = sample_task("unbound", "submitted", "p1", "2026-08-03T00:00:00Z");
+        unbound.project_id = "project-2".into();
+        // 被其他设备领取、仍在租约窗口内。
+        let mut foreign_claimed = sample_task("claimed", "submitted", "p1", "2026-08-03T00:00:00Z");
+        foreign_claimed.project_id = "project-1".into();
+        foreign_claimed.claimed_by = Some("device-b".into());
+        foreign_claimed.claimed_at = Some(chrono::Utc::now().to_rfc3339());
+        for task in [bound, unbound, foreign_claimed] {
+            storage.save_project_task(&task).unwrap();
+        }
+
+        let queued = storage.list_queued_project_tasks("device-a").unwrap();
+        let ids: Vec<&str> = queued.iter().map(|task| task.id.as_str()).collect();
+        // 未绑定目录项目与被其他设备租约占用的任务都不出现在本机队列。
+        assert_eq!(ids, vec!["bound"]);
     }
 
     #[test]
@@ -643,7 +926,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -674,7 +959,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -699,7 +986,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -734,7 +1023,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -761,7 +1052,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -785,7 +1078,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -837,7 +1132,9 @@ mod tests {
         let project = Project {
             id: "project-1".into(),
             name: "Flowlet".into(),
-            directory_path: "D:\\work\\flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
             created_at: "2026-08-03T00:00:00Z".into(),
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
@@ -875,5 +1172,70 @@ mod tests {
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
         assert!(history[0]["finishedAt"].as_str().is_some());
         assert!(history[0]["executionMs"].as_u64().unwrap() > 0);
+    }
+
+    /// 旧库（2026-08-05 之前：projects.directory_path NOT NULL、任务表缺工作区/领取/
+    /// 软删除列）升级到多设备工作区 schema：目录可空化、新列补齐、数据保留、
+    /// 外键级联仍生效（重建 projects 不能破坏 project_tasks 的 ON DELETE CASCADE）。
+    #[test]
+    fn migrate_projects_workspace_schema_upgrades_legacy_database() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 CREATE TABLE projects (
+                     id             TEXT PRIMARY KEY,
+                     name           TEXT NOT NULL,
+                     directory_path TEXT NOT NULL,
+                     created_at     TEXT NOT NULL,
+                     updated_at     TEXT NOT NULL
+                 );
+                 CREATE TABLE project_tasks (
+                     id            TEXT PRIMARY KEY,
+                     project_id    TEXT NOT NULL,
+                     title         TEXT NOT NULL,
+                     description   TEXT NOT NULL DEFAULT '',
+                     status        TEXT NOT NULL DEFAULT 'draft',
+                     created_at    TEXT NOT NULL,
+                     updated_at    TEXT NOT NULL,
+                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                 );
+                 INSERT INTO projects (id, name, directory_path, created_at, updated_at)
+                     VALUES ('legacy-p', '旧项目', 'D:\\old', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
+                 INSERT INTO project_tasks (id, project_id, title, description, status, created_at, updated_at)
+                     VALUES ('legacy-t', 'legacy-p', '旧任务', '描述', 'submitted', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');",
+            )
+            .unwrap();
+        let storage = Storage::from_connection_for_test(connection);
+        storage.migrate().unwrap();
+
+        // 目录可空化 + 工作区列补齐。
+        let project = storage.get_project("legacy-p").unwrap().unwrap();
+        assert_eq!(project.directory_path.as_deref(), Some("D:\\old"));
+        assert!(project.workspace_project_id.is_none());
+        assert!(!project.workspace_archived);
+        // 新列可写。
+        storage
+            .save_project(&Project {
+                directory_path: None,
+                workspace_project_id: Some("ws-legacy".into()),
+                workspace_archived: false,
+                ..project.clone()
+            })
+            .unwrap();
+        let rebound = storage.get_project("legacy-p").unwrap().unwrap();
+        assert!(rebound.directory_path.is_none());
+        assert_eq!(rebound.workspace_project_id.as_deref(), Some("ws-legacy"));
+
+        // 任务数据保留，新列（claimed/deleted）存在并可写。
+        let task = storage.get_project_task("legacy-p", "legacy-t").unwrap().unwrap();
+        assert_eq!(task.title, "旧任务");
+        assert!(storage.claim_task("legacy-t", "device-a").unwrap());
+        let claimed = storage.get_project_task("legacy-p", "legacy-t").unwrap().unwrap();
+        assert_eq!(claimed.claimed_by.as_deref(), Some("device-a"));
+
+        // 外键级联仍生效：删除项目会级联删除任务。
+        assert!(storage.delete_project("legacy-p").unwrap());
+        assert!(storage.list_project_tasks("legacy-p").unwrap().is_empty());
     }
 }

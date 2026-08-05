@@ -117,6 +117,7 @@ export const queryKeys = {
     permissions: (deviceId: string, sessionId: string) => [...queryKeys.mobileDeviceSync.all, "permissions", deviceId, sessionId] as const,
     s3Settings: () => [...queryKeys.mobileDeviceSync.all, "s3-settings"] as const,
     lanProbes: () => [...queryKeys.mobileDeviceSync.all, "lan-probes"] as const,
+    projects: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "projects", deviceId ?? "all"] as const,
   },
   settings: {
     all: ["settings"] as const,

@@ -22,6 +22,7 @@ pub mod metrics;
 pub(crate) mod notification_registry;
 pub mod opencode_control;
 pub mod power;
+pub(crate) mod project_workspace_sync;
 pub mod presets;
 pub mod proxy;
 pub mod rate_limiter;

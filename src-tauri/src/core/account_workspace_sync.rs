@@ -114,7 +114,9 @@ fn save_workspace_key(
         .map_err(|_| "保存账号工作区密钥失败".to_string())
 }
 
-fn read_workspace_key(config: &crate::core::device_sync::S3SyncConfig) -> Result<[u8; 32], String> {
+pub(crate) fn read_workspace_key(
+    config: &crate::core::device_sync::S3SyncConfig,
+) -> Result<[u8; 32], String> {
     let encoded = workspace_key_entry(config)?
         .get_password()
         .map_err(|_| "缺少账号工作区密钥，请导入桌面端工作区接入包".to_string())?;

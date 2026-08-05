@@ -252,3 +252,42 @@ export type MobileSyncUpdate = {
   s3Error: string | null;
   lanProbeCount: number;
 };
+
+/** 设备快照携带的轻量项目任务（移动端只读查看状态）。 */
+export type SyncedProjectTask = {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  updatedAt: string;
+};
+
+/** 共享设备项目目录：移动端据此发现「哪台设备能执行哪个项目」并提交任务。 */
+export type SharedDeviceProject = {
+  deviceId: string;
+  deviceDisplayName: string;
+  devicePlatform: string;
+  /** 工作区项目 id（提交任务时使用）。 */
+  projectId: string;
+  projectName: string;
+  hasLocalBinding: boolean;
+  /** 最近一次项目更新（含任务变更）。 */
+  updatedAt: string;
+  tasks: SyncedProjectTask[];
+};
+
+/** 移动端 LAN 提交任务入参。 */
+export type TaskSubmitInput = {
+  projectId: string;
+  title: string;
+  description?: string;
+  taskType?: "code" | "readonly";
+  priority?: "p0" | "p1" | "p2";
+  agentProfile?: string;
+};
+
+/** LAN 提交任务返回。 */
+export type TaskSubmitResult = {
+  taskId: string;
+  status: string;
+};

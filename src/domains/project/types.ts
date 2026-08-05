@@ -1,7 +1,12 @@
 export type Project = {
   id: string;
   name: string;
-  directoryPath: string;
+  /** 本机绑定目录。远端同步来的项目在绑定目录前为 null。 */
+  directoryPath: string | null;
+  /** 项目在工作区（S3 加密对象）中的稳定标识；本机新建尚未同步时为 null。 */
+  workspaceProjectId: string | null;
+  /** 远端归档标记（墓碑）。归档项目在列表中隐藏。 */
+  workspaceArchived: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -182,4 +187,20 @@ export type RunProjectTaskResult = {
   started: boolean;
   jobId: string | null;
   message: string;
+};
+
+/** 项目工作区同步状态（设置页展示）。 */
+export type ProjectWorkspaceStatus = {
+  enabled: boolean;
+  syncedProjects: number;
+  localOnlyProjects: number;
+};
+
+/** sync_project_workspace 结果。 */
+export type ProjectWorkspaceSyncResult = {
+  syncedProjects: number;
+  createdLocalProjects: number;
+  archivedProjects: number;
+  taskCount: number;
+  uploadedObjects: number;
 };

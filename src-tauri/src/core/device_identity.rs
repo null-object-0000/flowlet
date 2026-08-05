@@ -9,7 +9,7 @@ use thiserror::Error;
 
 const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
 const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
-pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 11;
+pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 12;
 
 #[derive(Debug, Error)]
 pub enum DeviceIdentityError {
@@ -373,6 +373,21 @@ pub struct SharedAgentSession {
     pub session: SyncedAgentSession,
 }
 
+/// 共享设备项目目录：移动端读取的扁平结构（含设备归属与轻量任务）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedDeviceProject {
+    pub device_id: String,
+    pub device_display_name: String,
+    pub device_platform: String,
+    pub project_id: String,
+    pub project_name: String,
+    pub has_local_binding: bool,
+    /// 最近一次项目更新（含任务变更）。
+    pub updated_at: String,
+    pub tasks: Vec<SyncedProjectTask>,
+}
+
 /// 设备快照中携带的 Agent 安装摘要。刻意不包含可执行文件路径和安装目录。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -410,6 +425,32 @@ pub struct LanPeerDescriptor {
     pub expires_at: String,
 }
 
+/// 设备快照中携带的轻量项目任务（供移动端查看状态与提交目标）。
+/// 刻意不带描述与执行历史，避免把任务正文扩散到所有设备快照。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedProjectTask {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub priority: String,
+    pub updated_at: String,
+}
+
+/// 设备快照中携带的轻量项目目录：移动端据此发现「哪台设备能执行哪个项目」，
+/// 并只读查看任务状态。`project_id` 是工作区项目 id（移动端用它提交任务）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedProject {
+    pub project_id: String,
+    pub name: String,
+    pub archived: bool,
+    pub updated_at: String,
+    /// 该设备是否已绑定本地目录（决定能否在其上执行任务）。
+    pub has_local_binding: bool,
+    pub tasks: Vec<SyncedProjectTask>,
+}
+
 /// 供本地导出和未来同步传输共同使用的最小快照契约。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -438,6 +479,10 @@ pub struct DeviceUsageSnapshot {
     /// 发给其他设备。接收端导入 `device_usage_breakdowns`，供用量分析页按设备汇总。
     #[serde(default)]
     pub usage_breakdowns: Vec<DeviceUsageBreakdownRow>,
+    /// 轻量项目目录（工作区项目 id + 任务状态），供移动端发现可执行项目并提交任务。
+    /// 只读观测数据：接收端写入 `device_projects` 只读共享表，不进入本机事实表。
+    #[serde(default)]
+    pub projects: Vec<SyncedProject>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -516,6 +561,7 @@ impl DeviceUsageSnapshot {
             agents,
             lan_peer: None,
             usage_breakdowns: Vec::new(),
+            projects: Vec::new(),
         }
     }
 }

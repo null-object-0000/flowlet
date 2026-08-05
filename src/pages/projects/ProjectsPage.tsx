@@ -43,7 +43,7 @@ function ProjectList() {
 
   const openEditor = (project: Project | "new") => {
     setEditing(project);
-    setDraft(project === "new" ? { name: "", directoryPath: "" } : { name: project.name, directoryPath: project.directoryPath });
+    setDraft(project === "new" ? { name: "", directoryPath: "" } : { name: project.name, directoryPath: project.directoryPath ?? "" });
   };
   const chooseDirectory = async () => {
     const path = await open({ directory: true, multiple: false, title: t("选择项目目录") });
@@ -55,11 +55,13 @@ function ProjectList() {
     }
   };
   const save = async () => {
-    if (!editing || !draft.name.trim() || !draft.directoryPath) return;
+    if (!editing || !draft.name.trim()) return;
+    // 新建项目必须绑定目录；编辑远端项目可先留空（保持未绑定），之后单独绑定。
+    if (editing === "new" && !draft.directoryPath.trim()) return;
     const now = new Date().toISOString();
     const project = editing === "new"
       ? newProject(draft.name, draft.directoryPath)
-      : { ...editing, name: draft.name.trim(), directoryPath: draft.directoryPath, updatedAt: now };
+      : { ...editing, name: draft.name.trim(), directoryPath: draft.directoryPath.trim() || null, updatedAt: now };
     try {
       await actions.saveProject.mutateAsync(project);
       Toast.success(editing === "new" ? t("项目已创建") : t("项目已更新"));
@@ -89,14 +91,14 @@ function ProjectList() {
     <section className={styles.projectGrid}>
       {projects.data?.map((project) => <article key={project.id} className={styles.projectCard} onClick={() => navigate(`/projects/${project.id}`)}>
         <div className={styles.projectIcon}><IconFolder /></div>
-        <div className={styles.projectCopy}><strong>{project.name}</strong><span title={project.directoryPath}>{project.directoryPath}</span><small>{t("更新于 {time}", { time: formatTimestamp(project.updatedAt, language) })}</small></div>
+        <div className={styles.projectCopy}><strong>{project.name}</strong><span title={project.directoryPath ?? undefined}>{project.directoryPath ?? t("未绑定目录")}</span><small>{t("更新于 {time}", { time: formatTimestamp(project.updatedAt, language) })}</small></div>
         <div className={styles.cardActions}>
           <Button theme="borderless" icon={<IconEdit />} aria-label={t("编辑项目")} onClick={(event) => { event.stopPropagation(); openEditor(project); }} />
           <Button theme="borderless" type="danger" icon={<IconDelete />} aria-label={t("删除项目")} onClick={(event) => { event.stopPropagation(); remove(project); }} />
         </div>
       </article>)}
     </section>
-    <Modal title={editing === "new" ? t("新建项目") : t("编辑项目")} visible={editing != null} zIndex={APP_OVERLAY_Z_INDEX.modal} okText={t("保存")} cancelText={t("取消")} onCancel={() => setEditing(null)} onOk={() => void save()} okButtonProps={{ loading: actions.saveProject.isPending, disabled: !draft.name.trim() || !draft.directoryPath }}>
+    <Modal title={editing === "new" ? t("新建项目") : t("编辑项目")} visible={editing != null} zIndex={APP_OVERLAY_Z_INDEX.modal} okText={t("保存")} cancelText={t("取消")} onCancel={() => setEditing(null)} onOk={() => void save()} okButtonProps={{ loading: actions.saveProject.isPending, disabled: !draft.name.trim() || (editing === "new" && !draft.directoryPath.trim()) }}>
       <div className={styles.form}>
         <label><span>{t("项目名称")}</span><Input autoFocus value={draft.name} maxLength={80} placeholder={t("例如：Flowlet 桌面端")} onChange={(name) => setDraft((current) => ({ ...current, name }))} /></label>
         <label><span>{t("项目目录")}</span><div className={styles.pathInput}><Input value={draft.directoryPath} readonly placeholder={t("选择一个本机目录")} /><Button icon={<IconFolder />} onClick={() => void chooseDirectory()}>{t("选择目录")}</Button></div><small>{t("第一版每个项目绑定一个目录；目录本身不会被 Flowlet 修改。")}</small></label>
@@ -134,7 +136,7 @@ function LoadedProjectDetail({ project }: { project: Project }) {
     }
   };
   return <main className={styles.page}>
-    <PageHeader title={project.name} subtitle={project.directoryPath}>
+    <PageHeader title={project.name} subtitle={project.directoryPath ?? t("未绑定目录")}>
       {isStandaloneWindow ? null : (
         <Button
           theme="borderless"

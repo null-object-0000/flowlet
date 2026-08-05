@@ -30,27 +30,68 @@ pub(crate) fn save_project(
     if project.id.trim().is_empty() || project.name.trim().is_empty() {
         return Err("项目 ID 和名称不能为空".to_string());
     }
-    let directory = std::path::Path::new(project.directory_path.trim());
-    if !directory.is_dir() {
-        return Err("项目目录不存在或不是文件夹".to_string());
-    }
+    // 目录可空：远端项目未绑定目录时保持 None，绑定/修改时校验目录存在。
+    // 工作区归属字段是服务端托管：编辑时保留数据库中已有值，前端传入值不采信。
+    let existing = state
+        .storage
+        .get_project(&project.id)
+        .map_err(|error| error.to_string())?;
+    let workspace_project_id = existing
+        .as_ref()
+        .and_then(|existing| existing.workspace_project_id.clone());
+    let workspace_archived = existing
+        .as_ref()
+        .map(|existing| existing.workspace_archived)
+        .unwrap_or(false);
+    let directory_path = match project.directory_path.as_deref() {
+        Some(path) if !path.trim().is_empty() => {
+            let directory = std::path::Path::new(path.trim());
+            if !directory.is_dir() {
+                return Err("项目目录不存在或不是文件夹".to_string());
+            }
+            Some(directory.to_string_lossy().into_owned())
+        }
+        _ => None,
+    };
     state
         .storage
         .save_project(&Project {
             id: project.id.trim().to_string(),
             name: project.name.trim().to_string(),
-            directory_path: directory.to_string_lossy().into_owned(),
+            directory_path,
+            workspace_project_id,
+            workspace_archived,
             created_at: project.created_at,
             updated_at: project.updated_at,
         })
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    // 项目名 / 目录绑定变更后即时推送工作区（目录是本地字段，只同步名字）。
+    crate::core::project_workspace_sync::notify_project_changed(
+        state.storage.clone(),
+        &project.id,
+    );
+    Ok(())
 }
 
 #[tauri::command]
-pub(crate) fn delete_project(
+pub(crate) async fn delete_project(
     state: tauri::State<'_, AppState>,
     project_id: String,
 ) -> Result<bool, String> {
+    // 先取工作区项目 id 并写入墓碑，再删除本机项目：远端墓碑落地后其他设备
+    // 会删除各自副本，避免删除动作在下一轮同步中被重新拉回。
+    let workspace_project_id = state
+        .storage
+        .get_project(&project_id)
+        .map_err(|error| error.to_string())?
+        .and_then(|project| project.workspace_project_id);
+    if let Some(ws_id) = workspace_project_id {
+        let _ = crate::core::project_workspace_sync::push_tombstone(
+            state.storage.clone(),
+            &ws_id,
+        )
+        .await;
+    }
     state
         .storage
         .delete_project(&project_id)
@@ -127,8 +168,18 @@ pub(crate) fn save_project_task(
             execution_history: task.execution_history,
             created_at: task.created_at,
             updated_at: task.updated_at,
+            // 领取归属是服务端托管，前端传入不采信（反序列化默认 None）。
+            claimed_by: None,
+            claimed_at: None,
+            deleted: false,
         })
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    // 保存成功后把该项目的最新状态即时推送工作区，其他设备 / 移动端尽快看到。
+    crate::core::project_workspace_sync::notify_project_changed(
+        state.storage.clone(),
+        &task.project_id,
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -151,7 +202,20 @@ pub(crate) async fn run_project_task(
     task_id: String,
 ) -> Result<crate::core::agent_task_runner::RunProjectTaskResult, String> {
     let storage = state.storage.clone();
-    crate::core::agent_task_runner::run_project_task(app, storage, project_id, task_id).await
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    crate::core::agent_task_runner::run_project_task(
+        app,
+        storage,
+        project_id,
+        task_id,
+        current_device_id,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -161,12 +225,32 @@ pub(crate) fn get_project_task_runner_state(
 }
 
 #[tauri::command]
+pub(crate) fn get_project_workspace_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::project_workspace_sync::ProjectWorkspaceStatus, String> {
+    crate::core::project_workspace_sync::status(&state.storage)
+}
+
+#[tauri::command]
+pub(crate) async fn sync_project_workspace(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::project_workspace_sync::ProjectWorkspaceSyncResult, String> {
+    crate::core::project_workspace_sync::sync_all(state.storage.clone(), "manual").await
+}
+
+#[tauri::command]
 pub(crate) fn list_queued_project_tasks(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ProjectTask>, String> {
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
     state
         .storage
-        .list_queued_project_tasks()
+        .list_queued_project_tasks(&current_device_id)
         .map_err(|error| error.to_string())
 }
 
@@ -216,6 +300,17 @@ pub(crate) fn set_project_task_status(
             let _ = state.storage.mark_task_execution_rejected(&task_id, &job_id, &trimmed);
         }
     }
+    // 状态变更即时推送工作区，其他设备尽快看到审核结果 / 重新排队。
+    if let Some(project_id) = state
+        .storage
+        .get_task_project(&task_id)
+        .map_err(|error| error.to_string())?
+    {
+        crate::core::project_workspace_sync::notify_project_changed(
+            state.storage.clone(),
+            &project_id,
+        );
+    }
     Ok(())
 }
 
@@ -258,6 +353,17 @@ pub(crate) fn convert_project_task_to_code(
             "warning",
             "类型转换",
             &format!("任务已由只读分析转为代码修改：{trimmed}"),
+        );
+    }
+    // 转换后任务回到 submitted 重新排队，即时推送工作区。
+    if let Some(project_id) = state
+        .storage
+        .get_task_project(&task_id)
+        .map_err(|error| error.to_string())?
+    {
+        crate::core::project_workspace_sync::notify_project_changed(
+            state.storage.clone(),
+            &project_id,
         );
     }
     Ok(())

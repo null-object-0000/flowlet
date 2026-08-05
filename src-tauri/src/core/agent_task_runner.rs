@@ -98,6 +98,7 @@ pub(crate) async fn run_project_task(
     storage: Storage,
     project_id: String,
     task_id: String,
+    current_device_id: String,
 ) -> Result<RunProjectTaskResult, String> {
     // 1. 抢全局唯一执行槽（并发安全下沉 Rust，参考 AGENT_DATA_SYNC_RUNNING 模式）。
     if AGENT_TASK_RUNNING
@@ -123,6 +124,19 @@ pub(crate) async fn run_project_task(
             started: false,
             job_id: None,
             message: "任务不是已提交状态，无法执行".to_string(),
+        });
+    }
+
+    // 2.5. 跨设备领取：把任务归属标记为本机。被其他设备在租约窗口内领取时拒绝，
+    //      防止多台绑定了同一目录的设备对同一任务重复执行。
+    if !storage
+        .claim_task(&task_id, &current_device_id)
+        .map_err(|error| format!("标记任务领取失败：{error}"))?
+    {
+        return Ok(RunProjectTaskResult {
+            started: false,
+            job_id: None,
+            message: "该任务正由其他设备执行中，请稍后重试".to_string(),
         });
     }
 
@@ -370,7 +384,13 @@ async fn execute_agent(
         .get_project(project_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "项目不存在".to_string())?;
-    let project_dir = std::path::PathBuf::from(&project.directory_path);
+    // 只有绑定本机目录的项目能被调度器领取执行；兜底拦截未绑定项目。
+    let project_dir = std::path::PathBuf::from(
+        project
+            .directory_path
+            .as_deref()
+            .ok_or_else(|| "项目未绑定本机目录，无法执行".to_string())?,
+    );
 
     let mut command = build_claude_command(executable);
     command
@@ -671,6 +691,9 @@ mod tests {
             last_job_id: None,
             rejection_reason: None,
             execution_history: None,
+            claimed_by: None,
+            claimed_at: None,
+            deleted: false,
             created_at: String::new(),
             updated_at: String::new(),
         }

@@ -12,7 +12,7 @@ describe("projectCommands", () => {
   beforeEach(() => invokeMock.mockReset().mockResolvedValue(undefined));
 
   it("uses the typed project command boundary", async () => {
-    const project = { id: "p1", name: "Flowlet", directoryPath: "D:\\work\\flowlet", createdAt: "now", updatedAt: "now" };
+    const project = { id: "p1", name: "Flowlet", directoryPath: "D:\\work\\flowlet", workspaceProjectId: null, workspaceArchived: false, createdAt: "now", updatedAt: "now" };
     await projectCommands.save(project);
     expect(invokeMock).toHaveBeenCalledWith("save_project", { project });
   });

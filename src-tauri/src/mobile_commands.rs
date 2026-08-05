@@ -1,7 +1,7 @@
 use super::MobileAppState;
 use crate::core::device_identity::{
-    DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession, SyncedAgentProfile,
-    SyncedAgentSession,
+    DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession, SharedDeviceProject,
+    SyncedAgentProfile, SyncedAgentSession,
 };
 
 #[tauri::command]
@@ -31,6 +31,32 @@ pub(super) async fn list_shared_device_agents(
     })
     .await
     .map_err(|error| format!("读取共享设备 Agent 资料任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn list_shared_device_projects(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: Option<String>,
+) -> Result<Vec<SharedDeviceProject>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_device_projects(device_id.as_deref())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享设备项目目录任务失败：{error}"))?
+}
+
+/// 移动端通过签名 LAN 通道把任务提交到指定桌面设备。
+/// 目标设备离线、版本过旧或未绑定项目目录时返回明确错误。
+#[tauri::command]
+pub(super) async fn submit_task_lan(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: String,
+    input: crate::core::lan_sync::TaskSubmitInput,
+) -> Result<crate::core::lan_sync::TaskSubmitResult, String> {
+    crate::core::lan_sync::submit_task(&state.storage, &device_id, &input).await
 }
 
 #[tauri::command]

@@ -108,7 +108,7 @@ pub(crate) async fn run_project_task(
         return Ok(RunProjectTaskResult {
             started: false,
             job_id: None,
-            message: "已有任务在执行中，请稍后重试".to_string(),
+            message: "已有任务在执行中，任务已进入队列等待".to_string(),
         });
     }
     // 执行槽在准备阶段持有，随后台执行任务 move，Agent 结束后 drop 释放。

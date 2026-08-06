@@ -261,7 +261,8 @@ pub(crate) fn set_project_task_status(
     status: String,
     reason: Option<String>,
 ) -> Result<(), String> {
-    // 状态机：前端审核通道只允许「待审核 → 批准(done) / 退回(submitted)」。
+    // 状态机：前端审核通道允许「待审核 → 批准(done) / 退回(submitted)」，
+    // 并允许「已提交 → 草稿」撤回（提交后悔窗口内用户撤回，回到草稿后可再次编辑/提交）。
     // 其余迁移（含把 in_progress 撤销）由执行器内部管理，这里一律拦截。
     let current = state
         .storage
@@ -269,7 +270,9 @@ pub(crate) fn set_project_task_status(
         .map_err(|error| error.to_string())?;
     let allowed = matches!(
         (current.as_deref(), status.as_str()),
-        (Some("review"), "done") | (Some("review"), "submitted")
+        (Some("review"), "done")
+            | (Some("review"), "submitted")
+            | (Some("submitted"), "draft")
     );
     if !allowed {
         return Err("当前任务状态不允许此操作".to_string());

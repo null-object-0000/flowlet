@@ -377,6 +377,100 @@ impl Storage {
         )? > 0)
     }
 
+    /// 应用重启后恢复被中断的执行中任务。
+    ///
+    /// Flowlet 在任务执行中（`status = 'in_progress'`）退出 / 重启时，全局执行槽
+    /// （内存态 `AGENT_TASK_RUNNING`）随之丢失，任务状态会永久卡在 in_progress，
+    /// 调度器（`list_queued_project_tasks` 只领取 submitted）不会再执行它。
+    /// 应用启动时调用本方法把这些任务恢复为 submitted（待处理）：调度器下个周期
+    /// 自动重新领取，`--resume` 复用上次会话继续推进。
+    ///
+    /// 只恢复「本机领取」或「租约已过期」的任务：其他设备领取且仍在租约窗口内的
+    /// in_progress 任务不动，避免打扰另一台设备正在执行的任务。
+    ///
+    /// 恢复时在 `execution_history` 最近一次未结束记录上标记 `interrupted: true`
+    /// 与中断时刻（finishedAt / executionMs），供前端看板与执行历史标注异常。
+    /// 返回恢复的任务数量。
+    pub fn recover_interrupted_project_tasks(
+        &self,
+        current_device_id: &str,
+    ) -> Result<usize, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT id, claimed_by, claimed_at, execution_history
+             FROM project_tasks WHERE status = 'in_progress' AND deleted = 0",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        let mut targets: Vec<(String, Option<String>)> = Vec::new();
+        for row in rows {
+            let (task_id, claimed_by, claimed_at, execution_history) = row?;
+            let should_recover = match claimed_by.as_deref() {
+                Some(owner) if owner != current_device_id => {
+                    // 其他设备领取：租约已过期视为领取设备已离线，可恢复；
+                    // 仍在租约窗口内说明对方可能还在执行，跳过。
+                    claimed_at
+                        .as_deref()
+                        .and_then(parse_epoch_millis)
+                        .is_none_or(|claimed_at| {
+                            chrono::Utc::now().timestamp_millis() - claimed_at > TASK_CLAIM_LEASE_MS
+                        })
+                }
+                _ => true,
+            };
+            if should_recover {
+                targets.push((task_id, execution_history));
+            }
+        }
+        let now = chrono::Utc::now();
+        let now_str = now.to_rfc3339();
+        let mut recovered = 0;
+        for (task_id, execution_history) in targets {
+            // 在最近一次未结束的执行记录上打中断标记：finishedAt 取当前时刻，
+            // executionMs 为真实中断耗时，interrupted 供前端标注异常。
+            if let Some(history) = execution_history.as_deref() {
+                if let Ok(mut entries) = serde_json::from_str::<Vec<Value>>(history) {
+                    for entry in entries.iter_mut().rev() {
+                        if entry.get("finishedAt").and_then(Value::as_str).is_some() {
+                            continue;
+                        }
+                        let execution_ms = entry
+                            .get("startedAt")
+                            .and_then(Value::as_str)
+                            .and_then(parse_epoch_millis)
+                            .map(|start| (now.timestamp_millis() - start).max(0))
+                            .unwrap_or(0);
+                        entry["finishedAt"] = json!(now_str);
+                        entry["executionMs"] = json!(execution_ms);
+                        entry["interrupted"] = json!(true);
+                        if let Ok(serialized) = serde_json::to_string(&entries) {
+                            let _ = connection.execute(
+                                "UPDATE project_tasks SET execution_history = ?2 WHERE id = ?1",
+                                params![task_id, serialized],
+                            );
+                        }
+                        break;
+                    }
+                }
+            }
+            connection.execute(
+                "UPDATE project_tasks SET status = 'submitted', updated_at = ?2 WHERE id = ?1",
+                params![task_id, now_str],
+            )?;
+            recovered += 1;
+        }
+        Ok(recovered)
+    }
+
     pub fn save_project_task(&self, task: &ProjectTask) -> Result<(), StorageError> {
         let connection = self
             .connection
@@ -814,6 +908,34 @@ mod tests {
     }
 
     #[test]
+    fn set_task_status_supports_withdraw_from_submitted_to_draft() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let project = Project {
+            id: "project-1".into(),
+            name: "Flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
+            created_at: "2026-08-03T00:00:00Z".into(),
+            updated_at: "2026-08-03T00:00:00Z".into(),
+        };
+        storage.save_project(&project).unwrap();
+        storage.save_project_task(&sample_task("task-1", "submitted", "p1", "2026-08-03T00:00:00Z")).unwrap();
+
+        // 撤回：已提交 → 草稿。撤回到草稿后任务不再出现在待执行队列（只查 submitted）。
+        assert!(storage.set_task_status("task-1", "draft").unwrap());
+        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        assert_eq!(task.status, "draft");
+        assert!(task.updated_at.as_str() > "2026-08-03T00:00:00Z");
+        assert!(storage
+            .list_queued_project_tasks("device-1")
+            .unwrap()
+            .iter()
+            .all(|queued| queued.id != "task-1"));
+    }
+
+    #[test]
     fn project_task_persists_base_task_id() {
         let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
@@ -1172,6 +1294,149 @@ mod tests {
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
         assert!(history[0]["finishedAt"].as_str().is_some());
         assert!(history[0]["executionMs"].as_u64().unwrap() > 0);
+    }
+
+    /// 造一个带执行历史（最近一轮未结束）的 in_progress 任务。
+    fn in_progress_task_with_open_run(
+        storage: &Storage,
+        task_id: &str,
+        claimed_by: Option<&str>,
+        claimed_at: Option<&str>,
+    ) {
+        let mut task = sample_task(task_id, "in_progress", "p1", "2026-08-03T00:00:00Z");
+        task.execution_history = Some(
+            serde_json::json!([{
+                "jobId": "job-1",
+                "startedAt": "2026-08-03T00:10:00Z",
+                "submittedAt": "2026-08-03T00:00:00Z",
+                "finishedAt": null,
+                "waitingMs": 0,
+                "executionMs": null,
+                "rejected": false,
+                "rejectionReason": null,
+                "rejectedAt": null,
+            }])
+            .to_string(),
+        );
+        task.claimed_by = claimed_by.map(str::to_string);
+        task.claimed_at = claimed_at.map(str::to_string);
+        storage.save_project_task(&task).unwrap();
+    }
+
+    #[test]
+    fn recover_interrupted_tasks_returns_own_claimed_to_submitted() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let project = Project {
+            id: "project-1".into(),
+            name: "Flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
+            created_at: "2026-08-03T00:00:00Z".into(),
+            updated_at: "2026-08-03T00:00:00Z".into(),
+        };
+        storage.save_project(&project).unwrap();
+        in_progress_task_with_open_run(
+            &storage,
+            "task-1",
+            Some("device-a"),
+            Some("2026-08-03T00:10:00Z"),
+        );
+
+        // 本机领取的执行中任务：恢复为 submitted，并在执行历史打中断标记。
+        assert_eq!(storage.recover_interrupted_project_tasks("device-a").unwrap(), 1);
+        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        assert_eq!(task.status, "submitted");
+        let history: Vec<Value> =
+            serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
+        assert_eq!(history[0]["interrupted"].as_bool(), Some(true));
+        assert!(history[0]["finishedAt"].as_str().is_some());
+        assert!(history[0]["executionMs"].as_u64().is_some());
+    }
+
+    #[test]
+    fn recover_interrupted_tasks_skips_foreign_claimed_within_lease() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let project = Project {
+            id: "project-1".into(),
+            name: "Flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
+            created_at: "2026-08-03T00:00:00Z".into(),
+            updated_at: "2026-08-03T00:00:00Z".into(),
+        };
+        storage.save_project(&project).unwrap();
+        // 其他设备领取且仍在租约窗口内：视为对方还在执行，本机不恢复。
+        in_progress_task_with_open_run(
+            &storage,
+            "task-1",
+            Some("device-b"),
+            Some(&chrono::Utc::now().to_rfc3339()),
+        );
+
+        assert_eq!(storage.recover_interrupted_project_tasks("device-a").unwrap(), 0);
+        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        assert_eq!(task.status, "in_progress");
+    }
+
+    #[test]
+    fn recover_interrupted_tasks_claims_expired_foreign_lease() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let project = Project {
+            id: "project-1".into(),
+            name: "Flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
+            created_at: "2026-08-03T00:00:00Z".into(),
+            updated_at: "2026-08-03T00:00:00Z".into(),
+        };
+        storage.save_project(&project).unwrap();
+        // 其他设备领取但租约已过期（超过 TASK_CLAIM_LEASE_MS）：视为对方离线，可恢复。
+        let expired = chrono::Utc::now() - chrono::Duration::minutes(11);
+        in_progress_task_with_open_run(
+            &storage,
+            "task-1",
+            Some("device-b"),
+            Some(&expired.to_rfc3339()),
+        );
+
+        assert_eq!(storage.recover_interrupted_project_tasks("device-a").unwrap(), 1);
+        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        assert_eq!(task.status, "submitted");
+    }
+
+    #[test]
+    fn recover_interrupted_tasks_leaves_non_running_tasks_untouched() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let project = Project {
+            id: "project-1".into(),
+            name: "Flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
+            created_at: "2026-08-03T00:00:00Z".into(),
+            updated_at: "2026-08-03T00:00:00Z".into(),
+        };
+        storage.save_project(&project).unwrap();
+        storage.save_project_task(&sample_task("draft", "draft", "p1", "2026-08-03T00:00:00Z")).unwrap();
+        storage.save_project_task(&sample_task("submitted", "submitted", "p1", "2026-08-03T00:00:00Z")).unwrap();
+
+        // 草稿与已提交任务不参与恢复。
+        assert_eq!(storage.recover_interrupted_project_tasks("device-a").unwrap(), 0);
+        assert_eq!(
+            storage.get_task_status("draft").unwrap().as_deref(),
+            Some("draft")
+        );
+        assert_eq!(
+            storage.get_task_status("submitted").unwrap().as_deref(),
+            Some("submitted")
+        );
     }
 
     /// 旧库（2026-08-05 之前：projects.directory_path NOT NULL、任务表缺工作区/领取/

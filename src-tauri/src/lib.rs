@@ -210,6 +210,22 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         .ensure_preset_scrape_balance(&migration_presets)
         .expect("同步渠道控制台抓取标志失败");
 
+    // 应用重启恢复：上次退出时仍处于执行中（in_progress）的项目任务会被恢复为
+    // submitted（待处理），调度器会自动重新领取执行（--resume 复用上次会话）；
+    // 被中断的那轮执行记录打上 interrupted 标记，供看板 / 执行历史标注异常。
+    // 只在 desktop 主进程启动时执行一次；其他设备领取且在租约窗口内的任务不受影响。
+    let current_device_id = device_identity.device_id.clone();
+    match storage.recover_interrupted_project_tasks(&current_device_id) {
+        Ok(recovered) => {
+            if recovered > 0 {
+                tracing::info!(recovered, "已恢复应用重启中断的项目任务");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "恢复中断的项目任务失败");
+        }
+    }
+
     tracing::info!(
         t_ms = _t0.elapsed().as_millis() as u64,
         "Storage 初始化完成, 开始加载渠道模板"

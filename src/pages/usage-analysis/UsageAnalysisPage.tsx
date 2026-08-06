@@ -12,7 +12,7 @@ import { useUsageSummary } from "../../features/usage/useUsageSummary";
 import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { PageHeader } from "../../shared/ui/PageHeader";
-import { dominantCostCurrency, formatCostAmount, formatMultiCurrencyCost } from "../../shared/formatters/cost";
+import { dominantCostCurrency, formatAggregateCost, formatCostAmount } from "../../shared/formatters/cost";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
@@ -248,17 +248,18 @@ export function UsageAnalysisPage() {
 
               <div className={styles.matrixFoot}>
                 <HeatLegend t={t} />
-                <Button
-                  className={styles.expandMatrixButton}
-                  theme="borderless"
-                  size="small"
-                  icon={<IconExternalOpen />}
-                  onClick={() => setMatrixExpanded(true)}
-                >
-                  {matrix.columns.length > COMPACT_MATRIX_COLUMN_COUNT
-                    ? t("展开全部 {count} 项", { count: matrix.columns.length })
-                    : t("展开查看")}
-                </Button>
+                {/* 矩阵列数未超过紧凑视图上限时，全部数据已完全呈现，无需展开入口。 */}
+                {matrix.columns.length > COMPACT_MATRIX_COLUMN_COUNT ? (
+                  <Button
+                    className={styles.expandMatrixButton}
+                    theme="borderless"
+                    size="small"
+                    icon={<IconExternalOpen />}
+                    onClick={() => setMatrixExpanded(true)}
+                  >
+                    {t("展开全部 {count} 项", { count: matrix.columns.length })}
+                  </Button>
+                ) : null}
               </div>
 
               {selected ? (
@@ -509,15 +510,10 @@ function HeatLegend({ t }: { t: Translate }) {
   );
 }
 
-/** 聚合费用展示：优先按币种拆分（避免 ¥ 与 $ 混合相加），无币种信息时退化为纯数值。 */
-function formatAggregateCost(costByCurrency: Record<string, number>, cost: number) {
-  if (Object.keys(costByCurrency).length > 0) return formatMultiCurrencyCost(costByCurrency);
-  return formatCostAmount({ amount: cost, currency: null }, 2);
-}
-
-/** 矩阵单元格费用：空间有限，只展示主导币种金额，完整拆分在悬浮层。 */
+/** 矩阵单元格费用：空间有限，只展示主导币种金额，完整拆分在悬浮层；
+ *  无币种信息时按默认人民币兜底，避免显示无货币符号的裸数值。 */
 function formatCellCost(cost: number, costByCurrency: Record<string, number>) {
-  return formatCostAmount({ amount: cost, currency: dominantCostCurrency(costByCurrency) }, 2);
+  return formatCostAmount({ amount: cost, currency: dominantCostCurrency(costByCurrency) ?? "CNY" }, 2);
 }
 
 function formatPercent(rate: number | null) {

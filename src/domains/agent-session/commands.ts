@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { AgentSessionClient, AgentSessionFilter, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionRow, AgentSessionsPage, AgentSessionTimeline, OpenCodePermissionDecision, OpenCodePermissionReport } from "./types";
+import type { AgentSessionClient, AgentSessionFilter, AgentSessionFlowletUsage, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionRow, AgentSessionsPage, AgentSessionTimeline, OpenCodePermissionDecision, OpenCodePermissionReport } from "./types";
 
 export const agentSessionCommands = {
   list: (filter: AgentSessionFilter): Promise<AgentSessionsPage> =>
@@ -30,6 +30,10 @@ export const agentSessionCommands = {
   timeline: (agentType: AgentSessionRow["agentType"], sessionId: string): Promise<AgentSessionTimeline> =>
     invokeCommand<AgentSessionTimeline>("get_agent_session_timeline", { agentType, sessionId }).catch((error: unknown) => {
       throw toAppError(error, "agent_session_timeline_failed");
+    }),
+  flowletUsage: (agentType: AgentSessionRow["agentType"], sessionId: string): Promise<AgentSessionFlowletUsage | null> =>
+    invokeCommand<AgentSessionFlowletUsage | null>("get_agent_session_flowlet_usage", { agentType, sessionId }).catch((error: unknown) => {
+      throw toAppError(error, "agent_session_flowlet_usage_failed");
     }),
   openCodePermissions: (sessionId: string): Promise<OpenCodePermissionReport> =>
     invokeCommand<OpenCodePermissionReport>("list_opencode_session_permissions", { sessionId }).catch((error: unknown) => {

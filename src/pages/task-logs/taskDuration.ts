@@ -42,6 +42,18 @@ export function formatElapsed(milliseconds: number, language: "zh-CN" | "en-US")
   return `${new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(minutes / 60)} h`;
 }
 
+/** 看板卡片实时耗时（等待 / 执行）的具体到秒呈现：`8m 36s`、`24s`。
+ *  用于待处理等待时长与进行中执行时长等持续增长的计时；已定耗时仍用 formatElapsed。 */
+export function formatElapsedSeconds(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const hours = Math.floor(totalSeconds / 3600);
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${totalSeconds}s`;
+}
+
 function parseDateMillis(value: string | null | undefined) {
   if (!value) return null;
   const date = new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`);

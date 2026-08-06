@@ -18,6 +18,7 @@ import type {
   SharedDeviceProject,
   SyncedAgentSession,
   SyncedAgentProfile,
+  TaskStatusInput,
   TaskSubmitInput,
   TaskSubmitResult,
 } from "./types";
@@ -128,6 +129,9 @@ export const mobileDeviceSyncCommands = {
   submitTask: (deviceId: string, input: TaskSubmitInput): Promise<TaskSubmitResult> =>
     invokeCommand<TaskSubmitResult>("submit_task_lan", { deviceId, input }, 15_000)
       .catch(toDeviceSyncError("lan_task_submit_failed")),
+  setTaskStatus: (deviceId: string, input: TaskStatusInput): Promise<TaskSubmitResult> =>
+    invokeCommand<TaskSubmitResult>("set_task_status_lan", { deviceId, ...input }, 15_000)
+      .catch(toDeviceSyncError("lan_task_status_failed")),
 };
 
 function toDeviceSyncError(code: string): (error: unknown) => never {

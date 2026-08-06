@@ -1115,6 +1115,7 @@ function QwenTokenPlanPanel({
     : "";
   const fiveHour = details?.fiveHour;
   const sevenDay = details?.sevenDay;
+  const resetCards = details?.resetCards;
 
   async function handleScrape() {
     await startScrape(account.id);
@@ -1146,6 +1147,34 @@ function QwenTokenPlanPanel({
           </div>
         </div>
       </div>
+
+      {resetCards ? (
+        <div className={styles.qwenResetCards}>
+          <div className={styles.qwenResetCardsHeader}>
+            <strong>{t("重置机会")}</strong>
+            <Tag color="green">{t("可用 {count} 次", { count: resetCards.available_count })}</Tag>
+          </div>
+          {resetCards.credits?.length ? (
+            <div className={styles.qwenResetCardList}>
+              {resetCards.credits.map((card) => {
+                const typeLabel = card.reset_type === "RESET_1W"
+                  ? t("周额度重置")
+                  : card.reset_type || t("用量限额重置");
+                return (
+                  <div className={styles.qwenResetCard} key={card.id}>
+                    <strong>{typeLabel}</strong>
+                    <Text type="tertiary">
+                      {typeof card.expires_at === "number"
+                        ? t("将于 {time} 到期", { time: formatResetCardExpiry(card.expires_at, language) })
+                        : t("未提供过期时间")}
+                    </Text>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className={styles.longCatSyncSection}>
         <div className={styles.longCatSyncControls}>
@@ -1232,4 +1261,14 @@ function formatLocalDate(value: string) {
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
   return `${month}月${day}日 ${hour}:${minute}`;
+}
+
+/** 重置卡到期时间的短格式（与 Codex 重置机会明细一致：月/日 + 时分）。 */
+function formatResetCardExpiry(epochMs: number, language: "zh-CN" | "en-US") {
+  return new Intl.DateTimeFormat(language, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(epochMs));
 }

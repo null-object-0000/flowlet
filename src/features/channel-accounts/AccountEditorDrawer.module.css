@@ -104,6 +104,13 @@
 .qwenResetTime b { color: var(--semi-color-text-1); font-weight: 500; text-align: right; }
 .qwenTimeSummary { gap: 8px; }
 .qwenTimeSummary > span { display: grid; gap: 2px; }
+.qwenResetCards { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--semi-color-primary-light-active); border-radius: 8px; background: var(--semi-color-primary-light-default); }
+.qwenResetCardsHeader, .qwenResetCard { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.qwenResetCardsHeader strong { color: var(--semi-color-text-0); font-size: 13px; }
+.qwenResetCardList { display: grid; gap: 6px; }
+.qwenResetCard { min-height: 28px; padding-top: 6px; border-top: 1px solid var(--semi-color-primary-light-active); }
+.qwenResetCard > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qwenResetCard > :last-child { flex: none; white-space: nowrap; }
 .scrapeHint { color: var(--semi-color-text-2); font-size: 12px; line-height: 1.5; }
 .modelHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .modelHeading > span { display: grid; gap: 4px; }

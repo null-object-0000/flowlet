@@ -86,6 +86,21 @@ describe("RequestLogsPage", () => {
     expect(screen.getByText("flowlet-pro → LongCat-2.0 · 直接路由")).toBeInTheDocument();
     expect(screen.getByText("https://api.longcat.chat/anthropic/v1/messages")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制底层接口地址" })).toBeInTheDocument();
+    // 入口请求地址已包含完整路径，"请求接口"（method + path）会与它重复展示 path，
+    // 因此详情只保留完整的入口请求地址，method 由独立的"请求方法"字段展示。
+    expect(screen.getByText("请求方法")).toBeInTheDocument();
+    expect(screen.queryByText("请求接口")).not.toBeInTheDocument();
+    // 请求方法 / 客户端 / 客户端协议 / HTTP 状态 合并到同一行展示，提高信息密度。
+    // 表格列头也有"客户端"文本，因此限定在 metaRow 行容器内断言。
+    const metaRow = screen.getByText("请求方法").closest("div")?.parentElement;
+    expect(metaRow).not.toBeNull();
+    for (const label of ["请求方法", "客户端", "客户端协议", "HTTP 状态"]) {
+      expect(within(metaRow as HTMLElement).getByText(label)).toBeInTheDocument();
+    }
+    expect(metaRow?.textContent).toContain("POST");
+    expect(metaRow?.textContent).toContain("Claude Code");
+    expect(metaRow?.textContent).toContain("anthropic");
+    expect(metaRow?.textContent).toContain("200");
     await user.click(screen.getByRole("tab", { name: "性能" }));
     expect(screen.getByText("响应性能")).toBeInTheDocument();
     expect(screen.getByText("Token 明细")).toBeInTheDocument();

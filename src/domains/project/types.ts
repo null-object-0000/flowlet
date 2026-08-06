@@ -13,8 +13,8 @@ export type Project = {
 
 export type ProjectTaskStatus = "draft" | "submitted" | "in_progress" | "review" | "done";
 
-/** 前端可手动写入的任务状态（审核推进 / 退回重排），不含草稿。 */
-export type ProjectTaskMutableStatus = "submitted" | "in_progress" | "review" | "done";
+/** 前端可手动写入的任务状态（审核推进 / 退回重排 / 撤回），不含执行器管理的 in_progress。 */
+export type ProjectTaskMutableStatus = "draft" | "submitted" | "review" | "done";
 
 export type ProjectTaskType = "code" | "readonly";
 
@@ -56,6 +56,8 @@ export type TaskExecutionRecord = {
   rejected: boolean;
   rejectionReason: string | null;
   rejectedAt: string | null;
+  /** 本轮执行是否被应用重启中断（由 Rust 启动恢复时写入）。中断后任务回到待处理重新排队。 */
+  interrupted?: boolean;
 };
 
 /** 解析任务 executionHistory JSON 字符串。 */
@@ -131,6 +133,37 @@ export function taskTotalExecutionDuration(
 }
 
 /**
+ * 计算任务最近一次（本轮）执行耗时（毫秒）。用于看板卡片进行中 / 待审核状态
+ * 展示「本轮耗时」：该状态下卡片只关心当前这轮跑了多久，不累计历史轮次。
+ * 取最后一条执行历史记录：
+ * 1. `runningJobId` 命中（当前正在执行的轮次）时取 `now - startedAt`（实时增长）；
+ * 2. `executionMs`（执行结束时按真实结束时刻写入）；
+ * 3. `finishedAt - startedAt`（旧数据回退）。
+ * 无法解析开始时间时返回 0。
+ */
+export function taskLatestExecutionDuration(
+  task: Pick<ProjectTask, "executionHistory" | "lastJobId">,
+  runningJobId: string | null,
+  now: number,
+): number {
+  const records = taskExecutionHistory(task);
+  const latest = records[records.length - 1];
+  if (!latest) return 0;
+  if (runningJobId != null && latest.jobId === runningJobId) {
+    const start = parseTaskTimestamp(latest.startedAt);
+    if (start == null) return 0;
+    return Math.max(0, now - start);
+  }
+  if (typeof latest.executionMs === "number") {
+    return Math.max(0, latest.executionMs);
+  }
+  const start = parseTaskTimestamp(latest.startedAt);
+  const endedAt = parseTaskTimestamp(latest.finishedAt);
+  if (start == null || endedAt == null) return 0;
+  return Math.max(0, endedAt - start);
+}
+
+/**
  * 计算任务累计等待时间（毫秒）。每轮等待时长 = 开始执行 - 进入待处理时刻，
  * 由 Rust 在执行开始时写入 `waitingMs`；多轮（含被退回后重新提交）累计每一轮。
  * 旧数据缺失该字段的轮次贡献 0。
@@ -159,6 +192,41 @@ export function taskWaitingDuration(
   const start = parseTaskTimestamp(task.updatedAt);
   if (start == null) return null;
   return Math.max(0, now - start);
+}
+
+/**
+ * 单轮执行记录的等待耗时（毫秒）。优先 `waitingMs`（执行开始时由 Rust 写入
+ * 进入待处理 → 开始执行）；旧数据缺失时回退 `submittedAt → startedAt`；
+ * 无法解析返回 null。
+ */
+export function taskRecordWaitingDuration(record: TaskExecutionRecord): number | null {
+  if (typeof record.waitingMs === "number") return Math.max(0, record.waitingMs);
+  const submitted = parseTaskTimestamp(record.submittedAt);
+  const started = parseTaskTimestamp(record.startedAt);
+  if (submitted == null || started == null) return null;
+  return Math.max(0, started - submitted);
+}
+
+/**
+ * 单轮执行记录的执行耗时（毫秒）。`runningJobId` 命中当前轮次时取
+ * `now - startedAt`（实时增长，进行中轮次）；否则优先 `executionMs`
+ * （执行结束时按真实结束时刻写入）；旧数据缺失时回退 `startedAt → finishedAt`；
+ * 无法解析返回 null。
+ */
+export function taskRecordExecutionDuration(
+  record: TaskExecutionRecord,
+  runningJobId: string | null,
+  now: number,
+): number | null {
+  if (runningJobId != null && record.jobId === runningJobId) {
+    const started = parseTaskTimestamp(record.startedAt);
+    return started == null ? null : Math.max(0, now - started);
+  }
+  if (typeof record.executionMs === "number") return Math.max(0, record.executionMs);
+  const started = parseTaskTimestamp(record.startedAt);
+  const finished = parseTaskTimestamp(record.finishedAt);
+  if (started == null || finished == null) return null;
+  return Math.max(0, finished - started);
 }
 
 /** 解析后端时间戳：ISO 8601 原样，SQLite "YYYY-MM-DD HH:MM:SS" 视为 UTC 归一化。解析失败返回 null。 */

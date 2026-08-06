@@ -1,3 +1,5 @@
+import type { CodexRateLimitResetCredit, CodexRateLimitResetCredits } from "../../domains/agent/types";
+
 type JsonRecord = Record<string, unknown>;
 
 export type QwenQuotaWindow = {
@@ -17,6 +19,8 @@ export type QwenTokenPlanDetails = {
   expireAt: string | null;
   fiveHour: QwenQuotaWindow | null;
   sevenDay: QwenQuotaWindow | null;
+  /** 重置卡列表，字段结构与 Codex 重置机会对齐；无生效中的卡时为 null。 */
+  resetCards: CodexRateLimitResetCredits | null;
 };
 
 export function parseQwenTokenPlanDetails(raw?: string | null): QwenTokenPlanDetails | null {
@@ -54,7 +58,56 @@ export function parseQwenTokenPlanDetails(raw?: string | null): QwenTokenPlanDet
       numberValue(usage.per1WeekPercentage),
       usage.per1WeekResetTime,
     ),
+    resetCards: parseQwenResetCards(bundle.reset_card_list),
   };
+}
+
+/** 重置卡列表是可选项槽位：`/tokenplan/personal/api/v2/reset-card/list` 有响应时
+ *  进入数据 bundle，无卡/无响应时返回 null 且不阻断订阅同步。只保留生效中的卡
+ *  （now >= effectiveAt && now < expiresAt），字段结构与 Codex 重置机会对齐：
+ *  cardNo → id、cardType → reset_type、effectiveAt → granted_at、expiresAt → expires_at。 */
+function parseQwenResetCards(value: unknown, nowMs = Date.now()): CodexRateLimitResetCredits | null {
+  const items = resetCardItems(unwrapResetCardList(value));
+  if (items.length === 0) return null;
+  const credits: CodexRateLimitResetCredit[] = [];
+  for (const card of items) {
+    const grantedAt = epochMs(card.effectiveAt);
+    const expiresAt = epochMs(card.expiresAt);
+    if (grantedAt == null || expiresAt == null) continue;
+    if (nowMs < grantedAt || nowMs >= expiresAt) continue;
+    credits.push({
+      id: stringValue(card.cardNo) ?? String(credits.length + 1),
+      reset_type: stringValue(card.cardType),
+      status: stringValue(card.status) ?? "ACTIVE",
+      granted_at: grantedAt,
+      expires_at: expiresAt,
+      title: null,
+    });
+  }
+  if (credits.length === 0) return null;
+  return { available_count: credits.length, credits };
+}
+
+/** 逐层解开 token-plan 接口的 data.DataV2.data.data 信封；最内层 data 可能是
+ *  卡片数组（responseData 只能返回对象，不能直接复用）。 */
+function unwrapResetCardList(value: unknown): unknown {
+  const root = recordValue(value);
+  const data = recordValue(root?.data);
+  const dataV2 = recordValue(data?.DataV2);
+  const envelope = recordValue(dataV2?.data);
+  if (envelope != null && "data" in envelope) return envelope.data;
+  return envelope?.data ?? dataV2?.data ?? data?.data ?? data ?? root;
+}
+
+function resetCardItems(value: unknown): JsonRecord[] {
+  if (Array.isArray(value)) return value as JsonRecord[];
+  const record = recordValue(value);
+  if (!record) return [];
+  for (const key of ["list", "items", "records", "cards", "cardList", "result"]) {
+    const child = record[key];
+    if (Array.isArray(child)) return child as JsonRecord[];
+  }
+  return [];
 }
 
 function responseData(value: unknown): JsonRecord | null {
@@ -108,6 +161,19 @@ function timestampValue(value: unknown): string | null {
     if (Number.isFinite(numeric) && numeric > 0) return new Date(numeric).toISOString();
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? value : date.toISOString();
+  }
+  return null;
+}
+
+/** 重置卡时间归一化为 epoch 毫秒：数字优先按毫秒处理，秒级时间戳（< 1e11）自动换算。 */
+function epochMs(value: unknown): number | null {
+  const number = numberValue(value);
+  if (number != null) {
+    return number > 1e11 ? number : number * 1000;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.getTime();
   }
   return null;
 }

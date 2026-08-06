@@ -284,9 +284,12 @@ describe("AgentSessionsPage", () => {
     expect(within(overview).getByText("4")).toBeInTheDocument();
     expect(within(overview).getByText("1")).toBeInTheDocument();
 
-    // 刷新概览：最近一轮 + 子会话 + 原生用量 + 列表
+    // 刷新概览：最近一轮 + 子会话 + 原生用量 + 列表。
+    // 抽屉打开时会立即自动刷新一次（移动端同款行为），先清除该次调用再验证手动刷新。
     const tabList = screen.getByRole("tablist");
-    fireEvent.click(within(tabList).getByRole("button", { name: "刷新" }));
+    const drawer = screen.getByRole("dialog");
+    [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock, lastInteractionRefetchMock].forEach((mock) => mock.mockClear());
+    fireEvent.click(within(drawer).getByRole("button", { name: "刷新数据" }));
     await waitFor(() => {
       expect(lastInteractionRefetchMock).toHaveBeenCalledOnce();
       expect(childrenRefetchMock).toHaveBeenCalledOnce();
@@ -326,7 +329,7 @@ describe("AgentSessionsPage", () => {
     expect(within(usage).getByText("模型：native-model")).toBeInTheDocument();
 
     // 用量 Tab 刷新：只刷新原生用量与子会话
-    fireEvent.click(within(tabList).getByRole("button", { name: "刷新" }));
+    fireEvent.click(within(drawer).getByRole("button", { name: "刷新数据" }));
     await waitFor(() => {
       expect(nativeSummaryRefetchMock).toHaveBeenCalledOnce();
       expect(childrenRefetchMock).toHaveBeenCalledOnce();

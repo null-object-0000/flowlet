@@ -72,10 +72,12 @@ export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { 
                     wide
                     copyable={Boolean(selectedRow.upstream_url)}
                   />
-                  <DetailItem label={t("请求接口")} value={`${selectedRow.method} ${selectedRow.path}`} />
-                  <DetailItem label={t("客户端")} value={selectedRow.client_name || selectedRow.client_id || t("未知客户端")} />
-                  <DetailItem label={t("客户端协议")} value={selectedRow.client_protocol || "-"} />
-                  <DetailItem label={t("HTTP 状态")} value={selectedRow.status?.toString() || t("失败")} />
+                  <div className={styles.metaRow}>
+                    <MetaItem label={t("请求方法")} value={selectedRow.method || "-"} />
+                    <MetaItem label={t("客户端")} value={selectedRow.client_name || selectedRow.client_id || t("未知客户端")} />
+                    <MetaItem label={t("客户端协议")} value={selectedRow.client_protocol || "-"} />
+                    <MetaItem label={t("HTTP 状态")} value={selectedRow.status?.toString() || t("失败")} />
+                  </div>
                   <DetailItem
                     label={t("会话 ID")}
                     value={sessionId || "-"}
@@ -193,6 +195,16 @@ function DetailItem({ label, value, wide = false, copyable = false, onOpen }: { 
         ) : <strong title={value}>{value}</strong>}
         {copyable ? <Button aria-label={t("复制{label}", { label })} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copy()} /> : null}
       </div>
+    </div>
+  );
+}
+
+/** 紧凑元信息项：与相邻项共享同一行，用于提高「接口信息」的信息密度。 */
+function MetaItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.metaItem}>
+      <span>{label}</span>
+      <strong title={value}>{value}</strong>
     </div>
   );
 }

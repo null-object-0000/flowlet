@@ -406,9 +406,7 @@ export function UsageCostPage() {
                           aria-pressed={selectedHourlyCell?.hour === cell.hour}
                           title={title}
                           onClick={() => setSelectedHour(cell.hour)}
-                        >
-                          <span>{hourLabel}</span>
-                        </button>
+                        />
                       );
                     }),
                   ];
@@ -501,9 +499,7 @@ export function UsageCostPage() {
                       aria-pressed={selectedDay?.date === cell.date}
                       title={title}
                       onClick={() => setSelectedDate(cell.date)}
-                    >
-                      <span>{Number(cell.date.slice(-2))}</span>
-                    </button>
+                    />
                   );
                 })}
               </div>

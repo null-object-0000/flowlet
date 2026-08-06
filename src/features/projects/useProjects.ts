@@ -16,12 +16,12 @@ export function useProject(projectId: string | undefined) {
   });
 }
 
-export function useProjectTasks(projectId: string | undefined, autoRefresh = false) {
+export function useProjectTasks(projectId: string | undefined, autoRefresh = false, intervalMs = 15_000) {
   return useQuery({
     queryKey: queryKeys.project.tasks(projectId ?? ""),
     queryFn: () => projectCommands.listTasks(projectId!),
     enabled: Boolean(projectId),
-    refetchInterval: autoRefresh ? 15_000 : false,
+    refetchInterval: autoRefresh ? intervalMs : false,
     refetchOnWindowFocus: false,
   });
 }
@@ -51,21 +51,21 @@ export function useProjectTaskActions(projectId: string) {
 }
 
 /** 全局唯一执行槽状态（是否空闲、当前在跑的任务）。 */
-export function useProjectTaskRunnerState(autoRefresh = false): ReturnType<typeof useQuery<ProjectTaskRunnerState>> {
+export function useProjectTaskRunnerState(autoRefresh = false, intervalMs = 5_000): ReturnType<typeof useQuery<ProjectTaskRunnerState>> {
   return useQuery({
     queryKey: queryKeys.projectTaskRunner.state(),
     queryFn: () => projectCommands.getTaskRunnerState(),
-    refetchInterval: autoRefresh ? 5_000 : false,
+    refetchInterval: autoRefresh ? intervalMs : false,
     refetchOnWindowFocus: false,
   });
 }
 
 /** 跨项目聚合的「已提交、待执行」任务（按优先级 + 创建时间排序）。 */
-export function useQueuedProjectTasks(autoRefresh = false): ReturnType<typeof useQuery<ProjectTask[]>> {
+export function useQueuedProjectTasks(autoRefresh = false, intervalMs = 10_000): ReturnType<typeof useQuery<ProjectTask[]>> {
   return useQuery({
     queryKey: queryKeys.projectTaskRunner.queued(),
     queryFn: () => projectCommands.listQueuedTasks(),
-    refetchInterval: autoRefresh ? 10_000 : false,
+    refetchInterval: autoRefresh ? intervalMs : false,
     refetchOnWindowFocus: false,
   });
 }
@@ -121,13 +121,31 @@ export function isTaskWithinSubmitGrace(updatedAt: string, now: number = Date.no
  * 后悔窗口：任务刚提交（updatedAt 太新）时不领取，避免用户没有撤回机会；
  * 只有提交超过 SUBMIT_GRACE_MS 才允许调度器自动领取。
  */
-export function useProjectTaskScheduler(autoRefresh = false) {
-  const runnerState = useProjectTaskRunnerState(autoRefresh);
-  const queued = useQueuedProjectTasks(autoRefresh);
+/**
+ * 前端调度器：按固定节奏轮询「执行槽空闲 && 有待处理（已提交）任务」，
+ * 有空闲就领取队首任务。领取成功后 Rust 端原子地把任务推进 in_progress，
+ * 前端无需手动标记状态，只负责触发。
+ *
+ * 领取失败（如 Agent 未安装、进程启动失败等）时，若提供了 `onClaimError` 回调则调用，
+ * 让用户能看到原因，而不是任务静默卡在待处理。失败后对同一任务进入冷却，
+ * 避免每 5 秒轮询反复触发同一条错误提示。
+ */
+export function useProjectTaskScheduler(
+  autoRefresh = false,
+  intervalMs = 5_000,
+  onClaimError?: (message: string, taskId: string) => void,
+) {
+  const runnerState = useProjectTaskRunnerState(autoRefresh, intervalMs);
+  const queued = useQueuedProjectTasks(autoRefresh, intervalMs);
   const actions = useProjectTaskRunnerActions();
   // StrictMode 下 effect 会同步执行两次，mutate 的 isPending 状态更新在 effect
   // 全部跑完前不会生效，需用 ref 锁防止同一个待执行任务被重复领取。
   const claimingRef = useRef(false);
+  // 领取失败回调用 ref 存储，避免内联箭头函数每次渲染变化导致 effect 重跑。
+  const onClaimErrorRef = useRef(onClaimError);
+  onClaimErrorRef.current = onClaimError;
+  // 领取失败冷却：记录「任务 id → 上次失败提示时间」，避免无限轮询刷屏。
+  const lastErrorRef = useRef<{ taskId: string; at: number } | null>(null);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -141,6 +159,16 @@ export function useProjectTaskScheduler(autoRefresh = false) {
     claimingRef.current = true;
     actions.startTask.mutate({ projectId: next.projectId, taskId: next.id }, {
       onSettled: () => { claimingRef.current = false; },
+      onError: (error) => {
+        const handleError = onClaimErrorRef.current;
+        if (!handleError) return;
+        const now = Date.now();
+        // 冷却窗口：同一任务短时间内只提示一次，避免每 5 秒重试刷屏。
+        const last = lastErrorRef.current;
+        if (last && last.taskId === next.id && now - last.at < 30_000) return;
+        lastErrorRef.current = { taskId: next.id, at: now };
+        handleError(error instanceof Error ? error.message : String(error), next.id);
+      },
     });
     // 依赖 runnerState / queued 变化：领取后刷新看板，避免重复领取。
   }, [autoRefresh, runnerState.data, queued.data, actions.startTask.isPending, actions.startTask]);

@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mobileDeviceSyncCommands } from "../../domains/device-sync/commands";
 import { queryKeys } from "../../shared/query-keys";
 import type { OpenCodePermissionDecision } from "../../domains/agent-session/types";
-import type { TaskSubmitInput } from "../../domains/device-sync/types";
+import type { TaskStatusInput, TaskSubmitInput } from "../../domains/device-sync/types";
 
 export function useMobileDevices() {
   return useQuery({
@@ -123,13 +123,31 @@ export function useMobileProjects(deviceId: string | null) {
   });
 }
 
-/** 向指定设备提交任务（签名 LAN 通道）。 */
+/** 向指定设备提交任务（签名 LAN 通道）。任务默认以草稿状态创建。 */
 export function useMobileSubmitTask(deviceId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (input: TaskSubmitInput) => {
       if (!deviceId) throw new Error("请先选择设备");
       return mobileDeviceSyncCommands.submitTask(deviceId, input);
+    },
+    onSuccess: async () => {
+      if (!deviceId) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
+      ]);
+    },
+  });
+}
+
+/** 通过签名 LAN 通道提交 / 撤回任务（草稿 ↔ 已提交），与 PC 看板交互一致。 */
+export function useMobileSetTaskStatus(deviceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: TaskStatusInput) => {
+      if (!deviceId) throw new Error("请先选择设备");
+      return mobileDeviceSyncCommands.setTaskStatus(deviceId, input);
     },
     onSuccess: async () => {
       if (!deviceId) return;
@@ -175,6 +193,7 @@ export function useMobileDeviceRefresh(deviceId: string | null) {
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.dailyUsage(deviceId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.hourlyUsage(deviceId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.sessions(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(deviceId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.lanProbes() }),
       ]);
     },

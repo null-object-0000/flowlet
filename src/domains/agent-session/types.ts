@@ -46,6 +46,10 @@ export type AgentSessionRow = {
 
 export type AgentSessionClient = { id: string; name: string };
 
+/** 单个 Agent 会话的 Flowlet 观测用量与预估费用（人民币，来自 `usage_records` 聚合）。
+ *  任务看板进行中 / 待审核卡片据此展示「1.8k tokens ≈¥0.03」。 */
+export type AgentSessionFlowletUsage = { totalTokens: number; estimatedCost: number };
+
 export type AgentSessionsPage = {
   rows: AgentSessionRow[];
   total: number;

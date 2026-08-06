@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BACKGROUND_JOBS_FILTER, type BackgroundJobRow } from "../../domains/background-task/types";
-import { formatJobDuration } from "./taskDuration";
+import { formatElapsedSeconds, formatJobDuration } from "./taskDuration";
 
 const baseJob: BackgroundJobRow = {
   id: "job-1",
@@ -32,6 +32,26 @@ describe("formatJobDuration", () => {
   it("shows elapsed time for a running task", () => {
     const running = { ...baseJob, status: "running" as const, finishedAt: null, startedAt: "2026-07-19T08:00:00Z" };
     expect(formatJobDuration(running, Date.parse("2026-07-19T08:00:12Z"), "en-US")).toBe("12 s");
+  });
+});
+
+describe("formatElapsedSeconds", () => {
+  it("formats sub-minute durations in seconds only", () => {
+    expect(formatElapsedSeconds(24_000)).toBe("24s");
+    expect(formatElapsedSeconds(8_000)).toBe("8s");
+  });
+
+  it("formats minute-and-second durations exactly", () => {
+    expect(formatElapsedSeconds(516_000)).toBe("8m 36s");
+  });
+
+  it("rounds to the nearest second", () => {
+    expect(formatElapsedSeconds(1_500)).toBe("2s");
+    expect(formatElapsedSeconds(0)).toBe("0s");
+  });
+
+  it("formats hour-level durations down to seconds", () => {
+    expect(formatElapsedSeconds(3_725_000)).toBe("1h 2m 5s");
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { taskExecutionHistory, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "./types";
+import { taskExecutionHistory, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "./types";
 
 describe("taskExecutionHistory", () => {
   it("parses the recorded execution history when present", () => {
@@ -92,6 +92,50 @@ describe("taskTotalExecutionDuration", () => {
   });
 });
 
+describe("taskLatestExecutionDuration", () => {
+  const task = (history: unknown) => ({ executionHistory: JSON.stringify(history), lastJobId: "job-2" });
+
+  it("uses the live clock for the currently running round", () => {
+    const now = Date.parse("2026-08-04T20:40:00.000Z");
+    const duration = taskLatestExecutionDuration(
+      task([
+        { jobId: "job-1", startedAt: "2026-08-04T20:00:00.000Z", finishedAt: null, waitingMs: 0, executionMs: null, rejected: false, rejectionReason: null, rejectedAt: null },
+      ]),
+      "job-1",
+      now,
+    );
+    expect(duration).toBe(40 * 60_000);
+  });
+
+  it("returns the latest finished round's executionMs, not the total", () => {
+    const duration = taskLatestExecutionDuration(
+      task([
+        // 第 1 轮被退回（30min），第 2 轮完成（10min）→ 本轮只看最近一轮 = 10min。
+        { jobId: "job-1", startedAt: "2026-08-04T20:00:00.000Z", finishedAt: "2026-08-04T20:30:00.000Z", waitingMs: 0, executionMs: 1800000, rejected: true, rejectionReason: "不行", rejectedAt: "2026-08-04T20:35:00.000Z" },
+        { jobId: "job-2", startedAt: "2026-08-04T21:00:00.000Z", finishedAt: "2026-08-04T21:10:00.000Z", waitingMs: 0, executionMs: 600000, rejected: false, rejectionReason: null, rejectedAt: null },
+      ]),
+      null,
+      Date.parse("2026-08-04T22:00:00.000Z"),
+    );
+    expect(duration).toBe(10 * 60_000);
+  });
+
+  it("falls back to finishedAt minus startedAt for legacy rounds without executionMs", () => {
+    const duration = taskLatestExecutionDuration(
+      task([
+        { jobId: "job-1", startedAt: "2026-08-04T20:00:00.000Z", finishedAt: "2026-08-04T20:25:00.000Z", waitingMs: null, executionMs: null, rejected: false, rejectionReason: null, rejectedAt: null },
+      ]),
+      null,
+      Date.parse("2026-08-04T22:00:00.000Z"),
+    );
+    expect(duration).toBe(25 * 60_000);
+  });
+
+  it("returns 0 when there is no execution history", () => {
+    expect(taskLatestExecutionDuration({ executionHistory: null, lastJobId: null }, null, 0)).toBe(0);
+  });
+});
+
 describe("taskTotalWaitingDuration", () => {
   it("sums each round's waitingMs", () => {
     const waiting = taskTotalWaitingDuration({
@@ -130,5 +174,66 @@ describe("taskWaitingDuration", () => {
 
   it("returns null when the timestamp cannot be parsed", () => {
     expect(taskWaitingDuration({ updatedAt: "not-a-date" }, now)).toBeNull();
+  });
+});
+
+describe("taskRecordWaitingDuration", () => {
+  const record = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    jobId: "job-1",
+    startedAt: "2026-08-04T20:00:00.000Z",
+    submittedAt: "2026-08-04T19:50:00.000Z",
+    finishedAt: null,
+    waitingMs: null,
+    executionMs: null,
+    rejected: false,
+    rejectionReason: null,
+    rejectedAt: null,
+    ...overrides,
+  });
+
+  it("prefers the recorded waitingMs", () => {
+    expect(taskRecordWaitingDuration(record({ waitingMs: 600000 }))).toBe(600000);
+  });
+
+  it("falls back to submittedAt minus startedAt for legacy rounds without waitingMs", () => {
+    expect(taskRecordWaitingDuration(record({ waitingMs: null }))).toBe(10 * 60_000);
+  });
+
+  it("returns null when the wait is unknowable", () => {
+    expect(taskRecordWaitingDuration(record({ waitingMs: null, submittedAt: null }))).toBeNull();
+    expect(taskRecordWaitingDuration(record({ waitingMs: null, startedAt: "not-a-date" }))).toBeNull();
+  });
+});
+
+describe("taskRecordExecutionDuration", () => {
+  const record = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    jobId: "job-1",
+    startedAt: "2026-08-04T20:00:00.000Z",
+    submittedAt: null,
+    finishedAt: "2026-08-04T20:30:00.000Z",
+    waitingMs: 0,
+    executionMs: null,
+    rejected: false,
+    rejectionReason: null,
+    rejectedAt: null,
+    ...overrides,
+  });
+
+  it("uses the live clock for the currently running round", () => {
+    const now = Date.parse("2026-08-04T20:40:00.000Z");
+    expect(taskRecordExecutionDuration(record({ finishedAt: null }), "job-1", now)).toBe(40 * 60_000);
+  });
+
+  it("prefers the recorded executionMs of a finished round", () => {
+    expect(taskRecordExecutionDuration(record({ executionMs: 1800000 }), null, 0)).toBe(1800000);
+  });
+
+  it("falls back to finishedAt minus startedAt for legacy rounds without executionMs", () => {
+    expect(taskRecordExecutionDuration(record(), null, 0)).toBe(30 * 60_000);
+  });
+
+  it("returns null when the execution end is unknowable", () => {
+    expect(taskRecordExecutionDuration(record({ finishedAt: null }), null, 0)).toBeNull();
+    expect(taskRecordExecutionDuration(record({ startedAt: "not-a-date" }), null, 0)).toBeNull();
   });
 });

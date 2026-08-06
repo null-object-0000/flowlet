@@ -291,3 +291,9 @@ export type TaskSubmitResult = {
   taskId: string;
   status: string;
 };
+
+/** 移动端 LAN 直连变更任务状态入参（提交 / 撤回，草稿 ↔ 已提交）。 */
+export type TaskStatusInput = {
+  taskId: string;
+  status: "draft" | "submitted";
+};

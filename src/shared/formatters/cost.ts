@@ -60,3 +60,10 @@ export function dominantCostCurrency(costByCurrency: Record<string, number>): st
   }
   return best === "" ? null : best;
 }
+
+/** 聚合费用展示：有币种拆分时只按货币类型展示（避免把 ¥、$ 与 credits 混合相加，
+ *  相同货币已在聚合层累加），没有任何币种信息时按默认人民币展示，保证费用列始终带货币符号。 */
+export function formatAggregateCost(costByCurrency: Record<string, number>, cost: number) {
+  if (Object.keys(costByCurrency).length > 0) return formatMultiCurrencyCost(costByCurrency);
+  return formatCostAmount({ amount: cost, currency: "CNY" }, 2);
+}

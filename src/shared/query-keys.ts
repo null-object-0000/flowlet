@@ -62,6 +62,7 @@ export const queryKeys = {
     children: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "children", agentType, sessionId] as const,
     openCodePermissions: (sessionId: string) => [...queryKeys.agentSession.all, "opencode-permissions", sessionId] as const,
     nativeSummary: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "native-summary", agentType, sessionId] as const,
+    flowletUsage: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "flowlet-usage", agentType, sessionId] as const,
     lastInteraction: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "last-interaction", agentType, sessionId] as const,
     timeline: (agentType: string, sessionId: string) => [...queryKeys.agentSession.all, "timeline", agentType, sessionId] as const,
     clients: () => [...queryKeys.agentSession.all, "clients"] as const,

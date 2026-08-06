@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dominantCostCurrency, formatCost, formatCostAmount, formatCostCny, formatMultiCurrencyCost, formatNativeCost } from "./cost";
+import { dominantCostCurrency, formatAggregateCost, formatCost, formatCostAmount, formatCostCny, formatMultiCurrencyCost, formatNativeCost } from "./cost";
 
 describe("formatNativeCost", () => {
   it("formats Codex native estimates in credits", () => {
@@ -54,6 +54,20 @@ describe("formatMultiCurrencyCost", () => {
   it("orders mixed currencies CNY, USD, CREDITS, then unresolvable", () => {
     expect(formatMultiCurrencyCost({ USD: 5.6, CREDITS: 9, CNY: 1.2, "": 3.4 }))
       .toBe("¥1.20 + $5.60 + 9.00 credits + 3.40");
+  });
+});
+
+describe("formatAggregateCost", () => {
+  it("splits mixed-currency costs by currency only", () => {
+    expect(formatAggregateCost({ CNY: 1.2, USD: 3.4 }, 4.6)).toBe("¥1.20 + $3.40");
+  });
+
+  it("renders a single currency with its own symbol", () => {
+    expect(formatAggregateCost({ CNY: 0.23 }, 0.23)).toBe("¥0.23");
+  });
+
+  it("falls back to the default CNY symbol when no currency info exists", () => {
+    expect(formatAggregateCost({}, 0.43)).toBe("¥0.43");
   });
 });
 

@@ -666,6 +666,9 @@ Flowlet 的 Agent 原生 Token，以及 `device_daily_usage` 中其他设备当�
 PC 用量分析页的 `usage_summary` 进一步把能够确认具体模型的纯原生事件映射为同一只读分析行：
 事件自身的 `model` 优先；Codex 等 token 事件不携带模型时，仅在同一会话的
 `agent_session_snapshots.summary_json.models` 能确认唯一规范模型时回填，多模型或未知模型会话不猜。
+`flowlet-pro` / `flowlet-flash` 是客户端公开聚合别名，不是真实上游模型，因此不会作为 Codex 原生
+模型分析行计入；这类会话的真实模型与用量以 Flowlet 请求账本中的 `upstream_model` 为准。该规则也
+避免共享 Codex 会话被多台设备同时扫描、但只有实际请求设备持有代理日志时产生跨设备重复统计。
 时间范围比较先通过 SQLite `datetime()` 统一 RFC3339 表示，避免周期起点当天的边界误收。
 `channel_id = agent-native` 仅表示来源，`account_id` 保存 Agent 类型，
 `client_id` 保存统一客户端归属，`request_count = 0`，并用 `native_event_count` 单独表达消息级事件数。
@@ -676,8 +679,10 @@ PC 用量分析页的 `usage_summary` 进一步把能够确认具体模型的纯
 
 设备同步快照的 `usage_breakdowns` 同时携带最近 90 天的代理请求维度行与上述 Agent 原生模型维度行。
 原生行从本机 `agent_usage_events` 和会话快照动态生成，保留 `native_event_count`、公开价币种与预估费用；
-接收端写入 `device_usage_breakdowns` 后即可按远端设备筛选。版本升级后既有原生账本会在下一次正常设备同步
-自动补发，无需通过数据完整性检查改写历史记录；源设备与接收设备均需运行支持该同步字段的版本。
+接收端按设备全量替换 `device_usage_breakdowns` 快照，并在导入边界把旧版 Codex Desktop 的 `codex`
+客户端键规范化为 `codex-desktop`，因此归并键或模型规则升级后不会残留旧维度行。版本升级后既有原生
+账本会在下一次正常设备同步自动补发，无需通过数据完整性检查改写历史记录；源设备与接收设备均需运行
+支持该同步字段的版本。
 
 Codex 账号与用量另有独立的周期性后台同步：应用启动约 20 秒后首次执行，此后固定每 5 分钟一轮，前台与
 后台同周期（Codex 官方用量窗口本身是 5 小时 / 周级粒度，5 分钟足够新鲜，也避免高频调用官方用量接口与

@@ -8,6 +8,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { BackgroundJobEvent } from "../../domains/background-task/types";
 import { agentSessionCommands } from "../../domains/agent-session/commands";
 import type { AgentSessionFlowletUsage, AgentSessionNativeUsage } from "../../domains/agent-session/types";
+import { deviceSyncCommands } from "../../domains/device-sync/commands";
 import { projectCommands } from "../../domains/project/commands";
 import { MIN_TITLE_GENERATION_DESCRIPTION_LENGTH, canAutoGenerateTaskTitle, generateTaskTitle } from "../../domains/project/generateTaskTitle";
 import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskPriority, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
@@ -30,6 +31,7 @@ import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { formatElapsed, formatElapsedSeconds } from "../task-logs/taskDuration";
+import { mergeProjectTasks, type RemoteTaskOrigin } from "./mergeProjectTasks";
 import styles from "./ProjectsPage.module.css";
 
 // 任务概览抽屉「会话」Tab 在任务执行中自动刷新对话的间隔，与移动端会话详情抽屉一致。
@@ -129,6 +131,12 @@ function LoadedProjectDetail({ project }: { project: Project }) {
   const navigate = useNavigate();
   const refresh = useRefreshControl({ intervalMs: 1_000 });
   const tasks = useProjectTasks(project.id, refresh.autoRefresh, refresh.intervalMs);
+  const sharedProjects = useQuery({
+    queryKey: queryKeys.deviceSync.projects(null),
+    queryFn: () => deviceSyncCommands.projects(null),
+    refetchInterval: refresh.autoRefresh ? refresh.intervalMs : false,
+    refetchOnWindowFocus: false,
+  });
   // 看板任务搜索词：标题 / ID / 描述等关键词过滤，只影响当前看板展示。
   const [search, setSearch] = useState("");
   // 前端调度器：进入项目详情页即自动轮询「槽空闲 && 有待处理任务」，有空闲就领取执行。
@@ -178,16 +186,16 @@ function LoadedProjectDetail({ project }: { project: Project }) {
       <RefreshControl
         autoRefresh={refresh.autoRefresh}
         onToggleAutoRefresh={refresh.toggleAutoRefresh}
-        isFetching={tasks.isFetching || scheduler.runnerState.isFetching}
-        lastUpdatedAt={Math.max(tasks.dataUpdatedAt, scheduler.runnerState.dataUpdatedAt)}
+        isFetching={tasks.isFetching || sharedProjects.isFetching || scheduler.runnerState.isFetching}
+        lastUpdatedAt={Math.max(tasks.dataUpdatedAt, sharedProjects.dataUpdatedAt, scheduler.runnerState.dataUpdatedAt)}
         intervalMs={refresh.intervalMs}
-        onRefresh={() => void tasks.refetch()}
+        onRefresh={() => void Promise.all([tasks.refetch(), sharedProjects.refetch()])}
         language={language}
         t={t}
       />
     </PageHeader>
     <section className={styles.detailContent}>
-      <TaskBoard project={project} tasks={tasks} runnerState={scheduler.runnerState.data} search={search} />
+      <TaskBoard project={project} tasks={tasks} sharedProjects={sharedProjects.data ?? []} sharedProjectsError={sharedProjects.isError ? sharedProjects.error.message : null} runnerState={scheduler.runnerState.data} search={search} />
     </section>
   </main>;
 }
@@ -265,7 +273,7 @@ const PRIORITIES: Array<{ value: ProjectTaskPriority; label: string; description
   { value: "p2", label: "P2", description: "普通" },
 ];
 
-function TaskBoard({ project, tasks, runnerState, search }: { project: Project; tasks: ReturnType<typeof useProjectTasks>; runnerState?: ProjectTaskRunnerState; search: string }) {
+function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runnerState, search }: { project: Project; tasks: ReturnType<typeof useProjectTasks>; sharedProjects: Awaited<ReturnType<typeof deviceSyncCommands.projects>>; sharedProjectsError: string | null; runnerState?: ProjectTaskRunnerState; search: string }) {
   const { language, t } = useAppPreferences();
   const actions = useProjectTaskActions(project.id);
   const runnerActions = useProjectTaskRunnerActions();
@@ -312,13 +320,20 @@ function TaskBoard({ project, tasks, runnerState, search }: { project: Project; 
     () => (showDoneColumn ? TASK_COLUMNS : TASK_COLUMNS.filter((column) => column.id !== "done")),
     [showDoneColumn],
   );
+  // 展示层合并本机事实任务与其他设备轻量快照；本机 UUID 优先，远端任务保持只读。
+  const mergedTasks = useMemo(
+    () => mergeProjectTasks(project, tasks.data ?? [], sharedProjects),
+    [project, tasks.data, sharedProjects],
+  );
+  const boardTasks = mergedTasks.tasks;
+  const remoteOrigins = mergedTasks.remoteOrigins;
   // 搜索过滤：关键词匹配标题 / 任务 ID / 描述 / 类型 / Agent / 优先级，空关键词返回全部。
   const searchKeyword = search.trim().toLowerCase();
-  const filteredTasks = useMemo(() => filterProjectTasks(tasks.data ?? [], searchKeyword), [tasks.data, searchKeyword]);
+  const filteredTasks = useMemo(() => filterProjectTasks(boardTasks, searchKeyword), [boardTasks, searchKeyword]);
   const grouped = useMemo(() => Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, filteredTasks.filter((task) => column.statuses.includes(task.status))])) as Record<string, ProjectTask[]>, [filteredTasks]);
   // 已完成任务（「已完成」列/抽屉）与任务 id → 任务 映射（展示「基于任务」关系、点击打开父任务、创建子任务提示）。
   const doneTasks = useMemo(() => filteredTasks.filter((task) => task.status === "done"), [filteredTasks]);
-  const taskById = useMemo(() => new Map((tasks.data ?? []).map((task) => [task.id, task])), [tasks.data]);
+  const taskById = useMemo(() => new Map(boardTasks.map((task) => [task.id, task])), [boardTasks]);
   // 已完成任务树：baseTaskId 指向已完成任务的子任务收缩到父任务卡片中展示。
   // 父任务不在已完成列表（或不在当前搜索命中结果）中的任务作为独立根任务展示。
   const doneTree = useMemo(() => buildDoneTaskTree(doneTasks), [doneTasks]);
@@ -327,7 +342,7 @@ function TaskBoard({ project, tasks, runnerState, search }: { project: Project; 
   const showDoneDrawerEntry = !showDoneColumn && !(searchKeyword.length > 0 && doneTasks.length === 0);
   const openEditor = (task: ProjectTask | "new", presetBaseTaskId: string | null = null) => { setEditing(task); setDraft(task === "new" ? { title: "", description: "", taskType: "code", agentProfile: "Claude Code", priority: "p2", baseTaskId: presetBaseTaskId } : { title: task.title, description: task.description, taskType: task.taskType, agentProfile: task.agentProfile, priority: task.priority, baseTaskId: task.baseTaskId }); };
   // 打开任意任务：草稿进编辑抽屉，其余打开只读详情（父任务跳转 / 相关任务跳转共用）。
-  const openAnyTask = (clicked: ProjectTask) => { if (clicked.status === "draft") openEditor(clicked); else setViewing(clicked); };
+  const openAnyTask = (clicked: ProjectTask) => { if (clicked.status === "draft" && !remoteOrigins.has(clicked.id)) openEditor(clicked); else setViewing(clicked); };
   const save = async () => {
     if (!editing || !draft.title.trim()) return;
     const task = editing === "new" ? { ...newProjectTask(project.id, draft.title, draft.baseTaskId), description: draft.description.trim(), taskType: draft.taskType, agentProfile: draft.agentProfile, priority: draft.priority } : { ...editing, ...draft, title: draft.title.trim(), description: draft.description.trim(), updatedAt: new Date().toISOString() };
@@ -440,6 +455,7 @@ function TaskBoard({ project, tasks, runnerState, search }: { project: Project; 
   /** 卡片交互动作：按状态聚合。
    *  单个动作直接在卡片右下角渲染按钮；多个动作收进右上角 ⋯ 菜单（悬停卡片时露出）。 */
   const renderCardActions = (task: ProjectTask): CardAction[] => {
+    if (remoteOrigins.has(task.id)) return [];
     switch (task.status) {
       case "draft":
         return [{ key: "submit", label: t("提交"), icon: <IconTickCircle />, onClick: () => void toggleSubmitted(task, true) }];
@@ -463,6 +479,10 @@ function TaskBoard({ project, tasks, runnerState, search }: { project: Project; 
   /** 卡片左下角时间标签：草稿显示创建时间，已提交显示等待时间，其余显示累计执行时间。
    *  已提交且上次执行被应用重启中断的任务，在时间标签前附加「上次执行中断」警示标记。 */
   const renderCardMeta = (task: ProjectTask, now: number): ReactNode => {
+    const remoteOrigin = remoteOrigins.get(task.id);
+    if (remoteOrigin) {
+      return <span className={styles.taskCardTime} title={formatFullTimestamp(task.updatedAt, language)}>{t("{device} · 更新于 {time}", { device: remoteOrigin.deviceDisplayName, time: formatTimestamp(task.updatedAt, language) })}</span>;
+    }
     switch (task.status) {
       case "draft":
         return <span className={styles.taskCardTime} title={formatFullTimestamp(task.createdAt, language)}>{t("创建于 {time}", { time: formatTimestamp(task.createdAt, language) })}</span>;
@@ -531,6 +551,7 @@ function TaskBoard({ project, tasks, runnerState, search }: { project: Project; 
         expanded={expanded}
         childCount={children.length}
         onToggleExpand={hasChildren ? toggle : undefined}
+        sourceLabel={remoteOrigins.get(task.id)?.deviceDisplayName}
       >
         {hasChildren && expanded ? (
           <div className={styles.taskCardChildren}>
@@ -542,11 +563,12 @@ function TaskBoard({ project, tasks, runnerState, search }: { project: Project; 
   };
 
   return <div className={styles.boardView}>
+    {sharedProjectsError ? <div className={styles.remoteLoadWarning}>{t("其他设备任务读取失败：{message}", { message: sharedProjectsError })}</div> : null}
     {tasks.isError ? <div className={styles.state}>{tasks.error.message}</div> : <div ref={boardRef} className={`${styles.board} ${styles.taskBoard}`} style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(${TASK_COLUMN_MIN_WIDTH}px, 1fr))` }}>
       {noSearchMatch ? <div className={styles.searchEmpty}><Empty title={t("没有匹配的任务")} description={t("试试搜索标题、任务 ID 或描述关键词")} /></div> : visibleColumns.map((column) => <section className={styles.column} key={column.id}><header><span className={styles.colTitle}><span>{t(column.label)}</span><span className={`${styles.colCount} ${columnCountClass(column.id)}`}>{grouped[column.id].length}</span></span>{column.addable ? <button className={styles.addColButton} aria-label={t("添加任务")} title={t("添加任务")} onClick={() => openEditor("new")}><IconPlus /></button> : null}</header><div className={styles.columnBody}>
         {column.id === "done"
           ? doneTree.roots.map((task) => renderDoneTask(task))
-          : grouped[column.id].map((task) => <TaskBoardCard key={task.id} task={task} taskById={taskById} onOpen={openAnyTask} actions={renderCardActions(task)} meta={renderCardMeta(task, now)} />)}
+          : grouped[column.id].map((task) => <TaskBoardCard key={task.id} task={task} taskById={taskById} onOpen={openAnyTask} actions={renderCardActions(task)} meta={renderCardMeta(task, now)} sourceLabel={remoteOrigins.get(task.id)?.deviceDisplayName} />)}
         {column.addable ? <button className={styles.addCard} onClick={() => openEditor("new")}><IconPlus />{t("添加任务")}</button> : null}
       </div></section>)}
     </div>}
@@ -557,7 +579,7 @@ function TaskBoard({ project, tasks, runnerState, search }: { project: Project; 
     <Modal title={t("删除任务“{name}”？", { name: deleting?.title ?? "" })} visible={deleting != null} zIndex={APP_OVERLAY_Z_INDEX.modal} okType="danger" okText={t("删除")} cancelText={t("取消")} maskClosable={false} onCancel={() => setDeleting(null)} onOk={() => void removeEditingTask()} okButtonProps={{ loading: actions.deleteTask.isPending }}>
       <div className={styles.form}><p>{t("删除后任务将从项目看板移除，此操作不可撤销。")}</p></div>
     </Modal>
-    <TaskReadonlySideSheet task={viewing} now={now} runningJobId={viewing?.id ? (runnerState?.current?.taskId === viewing.id ? runnerState.current.jobId : null) : null} baseTask={viewing?.baseTaskId ? taskById.get(viewing.baseTaskId) ?? null : null} relatedTasks={viewing ? (tasks.data ?? []).filter((child) => child.baseTaskId === viewing.id) : []} onOpenTask={openAnyTask} onClose={() => setViewing(null)} onApprove={(task) => void approveTask(task)} onReject={(task) => openReject(task)} onConvert={(task) => openConvert(task)} onCreateChildTask={(task) => createChildTask(task)} />
+    <TaskReadonlySideSheet task={viewing} remoteOrigin={viewing ? remoteOrigins.get(viewing.id) ?? null : null} now={now} runningJobId={viewing?.id ? (runnerState?.current?.taskId === viewing.id ? runnerState.current.jobId : null) : null} baseTask={viewing?.baseTaskId ? taskById.get(viewing.baseTaskId) ?? null : null} relatedTasks={viewing ? boardTasks.filter((child) => child.baseTaskId === viewing.id) : []} onOpenTask={openAnyTask} onClose={() => setViewing(null)} onApprove={(task) => void approveTask(task)} onReject={(task) => openReject(task)} onConvert={(task) => openConvert(task)} onCreateChildTask={(task) => createChildTask(task)} />
     <SideSheet
       visible={doneDrawerOpen}
       width={DETAIL_SHEET_WIDTH}
@@ -641,7 +663,7 @@ function statusTagClass(status: ProjectTaskStatus) {
  *  - 其他状态（待处理 / 进行中 / 待审核）：保持原有行结构——第一行合并元信息
  *    （P2 代码修改 · Claude Code，P2 为唯一彩色标签），第二行标题，第三行「基于」（可选），第四行时间。
  *  待审核卡片左侧橙色强调线提示。depth > 0 表示作为已完成树内子任务渲染。 */
-export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing, depth = 0, expandable = false, expanded = false, childCount = 0, onToggleExpand, children }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions?: CardAction[]; meta: ReactNode; trailing?: ReactNode; depth?: number; expandable?: boolean; expanded?: boolean; childCount?: number; onToggleExpand?: () => void; children?: ReactNode }) {
+export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing, sourceLabel, depth = 0, expandable = false, expanded = false, childCount = 0, onToggleExpand, children }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions?: CardAction[]; meta: ReactNode; trailing?: ReactNode; sourceLabel?: string; depth?: number; expandable?: boolean; expanded?: boolean; childCount?: number; onToggleExpand?: () => void; children?: ReactNode }) {
   const { t } = useAppPreferences();
   const isReview = task.status === "review";
   const isDone = task.status === "done";
@@ -729,7 +751,7 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
         {baseRow}
         <div className={`${styles.taskCardMeta} ${styles.taskCardMetaRow}`}>
           <span className={styles.taskCardInfo}>
-            <span className={styles.taskCardTypeAgent}>{t(taskTypeLabel(task.taskType))} · {task.agentProfile}</span>
+            {sourceLabel ? <span className={styles.remoteTaskTag}>{t("其他设备")} · {sourceLabel}</span> : <span className={styles.taskCardTypeAgent}>{t(taskTypeLabel(task.taskType))} · {task.agentProfile}</span>}
           </span>
           {meta}
         </div>
@@ -744,7 +766,7 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
       <div className={styles.taskCardHead}>
         <div className={styles.taskTags}>
           <span className={`${styles.taskTag} ${styles.taskTagPriority}`}>{t(priorityLabel(task.priority))}</span>
-          <span className={styles.taskCardTypeAgent}>{t(taskTypeLabel(task.taskType))} · {task.agentProfile}</span>
+          {sourceLabel ? <span className={styles.remoteTaskTag}>{t("其他设备")} · {sourceLabel}</span> : <span className={styles.taskCardTypeAgent}>{t(taskTypeLabel(task.taskType))} · {task.agentProfile}</span>}
         </div>
         {moreMenu}
       </div>
@@ -762,12 +784,12 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
 
 /** 看板列中的普通任务卡片：在 TaskCard 之上按需挂载本轮 Token 消耗与预估费用
  *  （进行中 / 待审核展示在执行耗时行右侧，无 Token 数据时显示「消耗统计中」）。 */
-function TaskBoardCard({ task, taskById, onOpen, actions, meta }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions: CardAction[]; meta: ReactNode }) {
+function TaskBoardCard({ task, taskById, onOpen, actions, meta, sourceLabel }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions: CardAction[]; meta: ReactNode; sourceLabel?: string }) {
   const usage = useTaskTokenUsage(task);
-  const trailing = task.status === "in_progress" || task.status === "review"
+  const trailing = !sourceLabel && (task.status === "in_progress" || task.status === "review")
     ? <TaskTokenSummary usage={usage.usage} flowletUsage={usage.flowletUsage} hasData={usage.hasData} />
     : undefined;
-  return <TaskCard task={task} taskById={taskById} onOpen={onOpen} actions={actions} meta={meta} trailing={trailing} />;
+  return <TaskCard task={task} taskById={taskById} onOpen={onOpen} actions={actions} meta={meta} trailing={trailing} sourceLabel={sourceLabel} />;
 }
 
 /** 进行中 / 待审核任务的本轮 Token 消耗与预估费用：经最近一次执行的 background job
@@ -853,7 +875,7 @@ function trimScale(value: string): string {
 
 /** 提交后任务的只读详情抽屉：概览（任务信息 + 运行/调度记录）+ 会话（完整对话）
  *  + 相关任务（基于本任务创建的子任务）。 */
-function TaskReadonlySideSheet({ task, now, runningJobId, baseTask, relatedTasks, onOpenTask, onClose, onApprove, onReject, onConvert, onCreateChildTask }: { task: ProjectTask | null; now: number; runningJobId: string | null; baseTask: ProjectTask | null; relatedTasks: ProjectTask[]; onOpenTask: (task: ProjectTask) => void; onClose: () => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void; onConvert: (task: ProjectTask) => void; onCreateChildTask: (task: ProjectTask) => void }) {
+function TaskReadonlySideSheet({ task, remoteOrigin, now, runningJobId, baseTask, relatedTasks, onOpenTask, onClose, onApprove, onReject, onConvert, onCreateChildTask }: { task: ProjectTask | null; remoteOrigin: RemoteTaskOrigin | null; now: number; runningJobId: string | null; baseTask: ProjectTask | null; relatedTasks: ProjectTask[]; onOpenTask: (task: ProjectTask) => void; onClose: () => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void; onConvert: (task: ProjectTask) => void; onCreateChildTask: (task: ProjectTask) => void }) {
   const { language, t } = useAppPreferences();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"overview" | "session" | "related">("overview");
@@ -883,7 +905,7 @@ function TaskReadonlySideSheet({ task, now, runningJobId, baseTask, relatedTasks
     return null;
   }, [task, history]);
   // 刷新按钮只在任务进行中时出现：此时执行记录与对话仍在增长，需要手动拉取最新状态。
-  const isRunning = task?.status === "in_progress";
+  const isRunning = task?.status === "in_progress" && !remoteOrigin;
   // 切换任务时回到概览。
   useEffect(() => { setActiveTab("overview"); }, [task?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -911,8 +933,8 @@ function TaskReadonlySideSheet({ task, now, runningJobId, baseTask, relatedTasks
   };
   const footer = (
     <div className={styles.taskSheetFooter}><span></span><span className={styles.taskSheetFooterActions}>
-      {isDone && task ? <Button type="primary" theme="solid" onClick={() => onCreateChildTask(task)}>{t("基于此任务创建子任务")}</Button> : null}
-      {isReview && task ? (
+      {isDone && task && !remoteOrigin ? <Button type="primary" theme="solid" onClick={() => onCreateChildTask(task)}>{t("基于此任务创建子任务")}</Button> : null}
+      {isReview && task && !remoteOrigin ? (
         <>
           {task.taskType === "readonly" ? <Button onClick={() => onConvert(task)}>{t("转为代码修改")}</Button> : null}
           <Button onClick={() => onReject(task)}>{t("退回")}</Button>
@@ -928,11 +950,17 @@ function TaskReadonlySideSheet({ task, now, runningJobId, baseTask, relatedTasks
       visible={task != null}
       width={DETAIL_SHEET_WIDTH}
       motion={false}
-      title={task ? <TaskReadonlyHeader task={task} /> : null}
+      title={task ? <TaskReadonlyHeader task={task} remoteOrigin={remoteOrigin} /> : null}
       onCancel={onClose}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
       footer={footer}
-      bodyStyle={{ padding: 0 }}
+      bodyStyle={{
+        padding: 0,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
     >
       {task ? (
         <div className={styles.drawer}>
@@ -962,32 +990,43 @@ function TaskReadonlySideSheet({ task, now, runningJobId, baseTask, relatedTasks
               <div className={styles.tabFrame}>
                 <div className={styles.tabScroll}>
                   <div className={styles.readonlyTabsBody}>
+                    {remoteOrigin ? <div className={styles.remoteTaskNotice}>{t("这是来自“{device}”的只读任务快照，仅包含标题、状态、优先级和更新时间；编辑、审核及执行请在来源设备完成。", { device: remoteOrigin.deviceDisplayName })}</div> : null}
                     <section className={styles.readonlySection}><strong className={styles.readonlySectionTitle}>{t("任务信息")}</strong>
                       <div className={styles.readonlyGrid}>
                         <ReadonlyItem label={t("任务 ID")} value={task.id} copyable copyLabel={t("任务 ID")} />
-                        <ReadonlyItem label={t("Agent 会话 ID")} value={sessionId ?? t("未执行")} copyable={Boolean(sessionId)} copyLabel={t("Agent 会话 ID")} />
-                        <ReadonlyItem label={t("创建时间")} value={formatTimestamp(task.createdAt, language)} />
-                        <ReadonlyItem label={t("更新时间")} value={formatTimestamp(task.updatedAt, language)} />
-                        <ReadonlyItem label={t("总等待耗时")} value={formatElapsed(taskTotalWaitingDuration(task), language)} />
-                        <ReadonlyItem label={t("总执行耗时")} value={formatElapsed(taskTotalExecutionDuration(task, runningJobId, now), language)} />
-                        {baseTask ? <ReadonlyItem label={t("父任务 ID")} value={baseTask.id} copyable copyLabel={t("父任务 ID")} onClick={() => onOpenTask(baseTask)} /> : null}
-                        {baseTask ? <ReadonlyItem label={t("父任务标题")} value={baseTask.title} wide /> : null}
-                        {latestRejectionReason ? <ReadonlyItem label={t("退回原因")} value={latestRejectionReason} wide /> : null}
-                        <ReadonlyItem label={t("任务描述")} value={task.description.trim() || t("无描述")} wide />
+                        {remoteOrigin ? (
+                          <>
+                            <ReadonlyItem label={t("来源设备")} value={remoteOrigin.deviceDisplayName} />
+                            <ReadonlyItem label={t("任务更新时间")} value={formatTimestamp(task.updatedAt, language)} />
+                            <ReadonlyItem label={t("快照更新时间")} value={formatTimestamp(remoteOrigin.snapshotUpdatedAt, language)} />
+                          </>
+                        ) : (
+                          <>
+                            <ReadonlyItem label={t("Agent 会话 ID")} value={sessionId ?? t("未执行")} copyable={Boolean(sessionId)} copyLabel={t("Agent 会话 ID")} />
+                            <ReadonlyItem label={t("创建时间")} value={formatTimestamp(task.createdAt, language)} />
+                            <ReadonlyItem label={t("更新时间")} value={formatTimestamp(task.updatedAt, language)} />
+                            <ReadonlyItem label={t("总等待耗时")} value={formatElapsed(taskTotalWaitingDuration(task), language)} />
+                            <ReadonlyItem label={t("总执行耗时")} value={formatElapsed(taskTotalExecutionDuration(task, runningJobId, now), language)} />
+                            {baseTask ? <ReadonlyItem label={t("父任务 ID")} value={baseTask.id} copyable copyLabel={t("父任务 ID")} onClick={() => onOpenTask(baseTask)} /> : null}
+                            {baseTask ? <ReadonlyItem label={t("父任务标题")} value={baseTask.title} wide /> : null}
+                            {latestRejectionReason ? <ReadonlyItem label={t("退回原因")} value={latestRejectionReason} wide /> : null}
+                            <ReadonlyItem label={t("任务描述")} value={task.description.trim() || t("无描述")} wide />
+                          </>
+                        )}
                       </div>
                     </section>
-                    <section className={styles.readonlySection}><strong className={styles.readonlySectionTitle}>{t("Agent 执行情况")}</strong>
+                    {!remoteOrigin ? <section className={styles.readonlySection}><strong className={styles.readonlySectionTitle}>{t("Agent 执行情况")}</strong>
                       {history.length === 0 ? <div className={styles.readonlyEmpty}>{t("该任务尚未执行，暂无 Agent 执行记录")}</div> : (
                         <div className={styles.runRecordList}>
                           {history.map((record, index) => <TaskExecutionRun key={record.jobId} record={record} index={index} runningJobId={runningJobId} now={now} />)}
                         </div>
                       )}
-                    </section>
+                    </section> : null}
                   </div>
                 </div>
               </div>
             </Tabs.TabPane>
-            <Tabs.TabPane tab={t("会话")} itemKey="session">
+            {!remoteOrigin ? <Tabs.TabPane tab={t("会话")} itemKey="session">
               <div className={styles.tabFrame}>
                 <TaskSessionView
                   task={task}
@@ -995,7 +1034,7 @@ function TaskReadonlySideSheet({ task, now, runningJobId, baseTask, relatedTasks
                   onRefreshed={() => setLastUpdatedAt(Date.now())}
                 />
               </div>
-            </Tabs.TabPane>
+            </Tabs.TabPane> : null}
             {relatedTasks.length > 0 ? (
               <Tabs.TabPane tab={t("相关任务")} itemKey="related">
                 <div className={styles.tabFrame}>
@@ -1197,7 +1236,7 @@ function projectAgentType(agentProfile: string): "claude-code" | "opencode" | "p
   return null;
 }
 
-function TaskReadonlyHeader({ task }: { task: ProjectTask }) {
+function TaskReadonlyHeader({ task, remoteOrigin }: { task: ProjectTask; remoteOrigin: RemoteTaskOrigin | null }) {
   const { t } = useAppPreferences();
   return (
     <div className={styles.readonlyHeader}>
@@ -1205,8 +1244,12 @@ function TaskReadonlyHeader({ task }: { task: ProjectTask }) {
       <div className={styles.taskTags}>
         <span className={`${styles.taskTag} ${styles.taskTagPriority}`}>{t(priorityLabel(task.priority))}</span>
         <span className={statusTagClass(task.status)}>{t(statusTagLabel(task.status))}</span>
-        <span className={`${styles.taskTag} ${styles.taskTagType}`}>{t(taskTypeLabel(task.taskType))}</span>
-        <span className={`${styles.taskTag} ${styles.taskTagAgent}`}>{task.agentProfile}</span>
+        {remoteOrigin ? <span className={styles.remoteTaskTag}>{t("其他设备")} · {remoteOrigin.deviceDisplayName}</span> : (
+          <>
+            <span className={`${styles.taskTag} ${styles.taskTagType}`}>{t(taskTypeLabel(task.taskType))}</span>
+            <span className={`${styles.taskTag} ${styles.taskTagAgent}`}>{task.agentProfile}</span>
+          </>
+        )}
       </div>
     </div>
   );

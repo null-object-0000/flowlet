@@ -1,7 +1,7 @@
 use crate::AppState;
 use crate::core::device_identity::{
     DailyUsageTotal, DeviceUsageBundle, DeviceUsageImportPreview, DeviceUsageImportResult,
-    DeviceUsageSnapshot, HourlyUsageTotal, KnownDevice,
+    DeviceUsageSnapshot, HourlyUsageTotal, KnownDevice, SharedDeviceProject,
 };
 
 #[tauri::command]
@@ -71,6 +71,23 @@ pub(crate) async fn list_shared_devices(
     })
     .await
     .map_err(|error| format!("读取共享设备目录任务失败：{error}"))?
+}
+
+/// 桌面端项目看板读取其他设备的只读项目/任务快照。
+/// 数据只来自 `device_projects`，不会写入本机 `projects` / `project_tasks` 事实表。
+#[tauri::command]
+pub(crate) async fn list_shared_device_projects(
+    state: tauri::State<'_, AppState>,
+    device_id: Option<String>,
+) -> Result<Vec<SharedDeviceProject>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_device_projects(device_id.as_deref())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享设备项目目录任务失败：{error}"))?
 }
 
 #[tauri::command]

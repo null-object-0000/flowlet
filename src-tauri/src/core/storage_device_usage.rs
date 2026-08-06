@@ -556,25 +556,62 @@ impl Storage {
         })
     }
 
-    /// 导入单个设备同步来的维度用量聚合到 `device_usage_breakdowns`。
-    /// 与 `import_device_usage` 中的 device_daily_usage 同理：按快照版本覆盖，
-    /// 高版本 generated_at 覆盖低版本，同版本保留先入库者。
+    /// 导入单个设备同步来的完整维度用量快照到 `device_usage_breakdowns`。
+    ///
+    /// 快照只包含发送端当前保留的历史窗口，因此必须先删除该设备的旧行再整体写入；
+    /// 否则客户端归并键或模型归属修正后，旧维度行会永久残留并造成重复统计。
     pub fn import_device_usage_breakdowns(
         &self,
         device_id: &str,
-        _generated_at: &str,
+        generated_at: &str,
         usage_breakdowns: &[DeviceUsageBreakdownRow],
     ) -> Result<usize, StorageError> {
-        if usage_breakdowns.is_empty() {
-            return Ok(0);
-        }
         let mut connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let transaction = connection.transaction()?;
+        let newest_profile_at = transaction
+            .query_row(
+                "SELECT profile_generated_at FROM known_devices WHERE device_id = ?1",
+                [device_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if newest_profile_at
+            .as_deref()
+            .is_some_and(|newest| newest > generated_at)
+        {
+            return Ok(0);
+        }
+        transaction.execute(
+            "DELETE FROM device_usage_breakdowns WHERE device_id = ?1",
+            [device_id],
+        )?;
         let mut imported = 0;
         for breakdown in usage_breakdowns {
+            let is_stale_flowlet_native_alias = breakdown.request_count == 0
+                && breakdown.native_event_count > 0
+                && breakdown.upstream_model.as_deref().is_some_and(|model| {
+                    matches!(
+                        model.trim().to_ascii_lowercase().as_str(),
+                        "flowlet-pro" | "flowlet-flash"
+                    )
+                });
+            if is_stale_flowlet_native_alias {
+                continue;
+            }
+            // 旧版本曾把 Codex Desktop 原生用量同步为 client_id = "codex"，
+            // 而代理请求使用 "codex-desktop"。在接收边界规范化，兼容尚未升级的发送端。
+            let client_id = match (
+                breakdown.client_id.as_deref(),
+                breakdown.client_name.as_deref(),
+            ) {
+                (Some("codex"), Some(name)) if name.eq_ignore_ascii_case("Codex Desktop") => {
+                    Some("codex-desktop")
+                }
+                (value, _) => value,
+            };
             let changes = transaction.execute(
                 "INSERT INTO device_usage_breakdowns (
                     device_id, breakdown_date, client_id, client_name, channel_id, channel_name,
@@ -610,7 +647,7 @@ impl Storage {
                 params![
                     device_id,
                     breakdown.date,
-                    breakdown.client_id,
+                    client_id,
                     breakdown.client_name,
                     breakdown.channel_id,
                     breakdown.channel_name,

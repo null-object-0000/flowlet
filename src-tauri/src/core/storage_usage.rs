@@ -546,6 +546,19 @@ fn unique_snapshot_model(summary_json: &str) -> Option<String> {
         .then_some(first)
 }
 
+/// Flowlet 聚合模型是客户端侧公开别名，不是真实上游模型。
+///
+/// Codex 的原生会话文件会记录该别名；同一份会话还可能被多个设备扫描到，而只有
+/// 实际发起请求的设备拥有对应的 Flowlet 请求日志。因此原生分析不能把聚合别名当成
+/// 独立模型计入，否则跨设备汇总会重复统计并展示错误模型。真实模型统一由代理请求
+/// 账本中的 `upstream_model` 提供。
+fn is_flowlet_aggregate_model(model: &str) -> bool {
+    matches!(
+        model.trim().to_ascii_lowercase().as_str(),
+        "flowlet-pro" | "flowlet-flash"
+    )
+}
+
 impl Storage {
     pub(crate) fn cost_ledger_gateway_probe_snapshot(
         &self,
@@ -2974,7 +2987,11 @@ impl Storage {
                 SELECT
                     device_id,
                     breakdown_date AS usage_date,
-                    client_id,
+                    CASE
+                        WHEN client_id = 'codex' AND client_name = 'Codex Desktop'
+                        THEN 'codex-desktop'
+                        ELSE client_id
+                    END AS client_id,
                     client_name,
                     channel_id,
                     channel_name,
@@ -2996,8 +3013,27 @@ impl Storage {
                     elapsed_measured_count,
                     generation_total_ms,
                     generation_output_tokens
-                FROM device_usage_breakdowns
+                FROM device_usage_breakdowns remote
                 WHERE device_id != ?2
+                  -- 兼容已落库的旧快照：聚合别名不是上游模型，不能作为原生模型行。
+                  AND NOT (
+                      request_count = 0 AND native_event_count > 0
+                      AND lower(trim(upstream_model)) IN ('flowlet-pro', 'flowlet-flash')
+                  )
+                  -- 旧版 Codex Desktop 使用 client_id = codex；若同维度的新键已经存在，
+                  -- 只保留 codex-desktop 行，避免升级前后两份完整快照相加。
+                  AND NOT (
+                      remote.client_id = 'codex' AND remote.client_name = 'Codex Desktop'
+                      AND EXISTS (
+                          SELECT 1 FROM device_usage_breakdowns current
+                          WHERE current.device_id = remote.device_id
+                            AND current.breakdown_date = remote.breakdown_date
+                            AND current.client_id = 'codex-desktop'
+                            AND current.channel_id IS remote.channel_id
+                            AND current.account_id IS remote.account_id
+                            AND current.upstream_model IS remote.upstream_model
+                      )
+                  )
                 {breakdown_range_clause}
             ) combined
             GROUP BY device_id, usage_date, client_id, channel_id, account_id, upstream_model
@@ -3114,6 +3150,9 @@ impl Storage {
             let Some(model) = model else {
                 continue;
             };
+            if is_flowlet_aggregate_model(&model) {
+                continue;
+            }
             let aggregate = native_aggregates
                 .entry((date, agent_type, model))
                 .or_default();
@@ -3307,6 +3346,9 @@ impl Storage {
             let Some(model) = model else {
                 continue;
             };
+            if is_flowlet_aggregate_model(&model) {
+                continue;
+            }
             let aggregate = aggregates
                 .entry((date, agent_type, model))
                 .or_default();

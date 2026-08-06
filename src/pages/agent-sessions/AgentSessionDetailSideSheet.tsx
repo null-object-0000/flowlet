@@ -102,7 +102,13 @@ export function AgentSessionDetailSideSheet({
       title={<SessionHeader session={session} language={language} />}
       onCancel={onClose}
       footer={null}
-      bodyStyle={{ padding: 0 }}
+      bodyStyle={{
+        padding: 0,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
       zIndex={APP_OVERLAY_Z_INDEX.sideSheet}
     >
       <div className={styles.drawer}>

@@ -1225,6 +1225,7 @@ fn run_desktop() {
             commands::device_usage_snapshot,
             commands::list_known_devices,
             commands::list_shared_devices,
+            commands::list_shared_device_projects,
             commands::device_daily_usage,
             commands::device_hourly_usage,
             commands::shared_device_daily_usage,

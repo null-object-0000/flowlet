@@ -3246,6 +3246,34 @@ fn usage_breakdown_for_sync_includes_historical_native_model_usage() {
 }
 
 #[test]
+fn usage_breakdown_for_sync_excludes_flowlet_aggregate_aliases() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    storage
+        .connection
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_usage_events (
+                agent_type, session_id, event_id, event_time, model,
+                input_tokens, cached_input_tokens, cache_write_input_tokens,
+                output_tokens, reasoning_tokens, total_tokens, synced_at
+             ) VALUES ('codex-desktop', 'flowlet-session', 'event-1', datetime('now'),
+                       'flowlet-pro', 120, 80, 0, 20, 5, 140, datetime('now'))",
+            [],
+        )
+        .expect("insert aggregate alias event");
+
+    let rows = storage
+        .usage_breakdown_for_sync(90)
+        .expect("build sync breakdowns");
+    assert!(rows
+        .iter()
+        .all(|row| row.upstream_model.as_deref() != Some("flowlet-pro")));
+}
+
+#[test]
 fn usage_summary_preserves_imported_native_event_semantics() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
@@ -3291,7 +3319,66 @@ fn usage_summary_preserves_imported_native_event_semantics() {
         .find(|row| row.device_id.as_deref() == Some(remote_device))
         .expect("remote native row");
     assert_eq!(native.upstream_model.as_deref(), Some("gpt-5.6-sol"));
+    assert_eq!(native.client_id.as_deref(), Some("codex-desktop"));
     assert_eq!(native.request_count, 0);
     assert_eq!(native.native_event_count, 1);
     assert_eq!(native.estimated_cost_currency.as_deref(), Some("USD"));
+}
+
+#[test]
+fn importing_device_breakdown_snapshot_removes_stale_rows() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    let remote_device = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let row = |model: &str| DeviceUsageBreakdownRow {
+        date: "2026-08-03".to_string(),
+        client_id: Some("codex-desktop".to_string()),
+        client_name: Some("Codex Desktop".to_string()),
+        channel_id: Some("deepseek".to_string()),
+        channel_name: Some("DeepSeek".to_string()),
+        account_id: Some("account-1".to_string()),
+        account_name: Some("Work".to_string()),
+        upstream_model: Some(model.to_string()),
+        request_count: 1,
+        known_tokens: 100,
+        input_tokens: 80,
+        input_cached_tokens: 0,
+        input_uncached_tokens: 80,
+        cache_measured_input_tokens: 80,
+        output_tokens: 20,
+        unknown_count: 0,
+        estimated_cost: 0.1,
+        estimated_cost_currency: Some("CNY".to_string()),
+        native_event_count: 0,
+        elapsed_total_ms: 10,
+        elapsed_measured_count: 1,
+        generation_total_ms: 5,
+        generation_output_tokens: 20,
+    };
+
+    storage
+        .import_device_usage_breakdowns(
+            remote_device,
+            "2026-08-03T10:00:00Z",
+            &[row("stale-model")],
+        )
+        .expect("import first snapshot");
+    storage
+        .import_device_usage_breakdowns(
+            remote_device,
+            "2026-08-03T11:00:00Z",
+            &[row("current-model")],
+        )
+        .expect("replace snapshot");
+
+    let rows = storage
+        .usage_summary("all", "local-device")
+        .expect("usage summary");
+    let remote_models = rows
+        .iter()
+        .filter(|item| item.device_id.as_deref() == Some(remote_device))
+        .filter_map(|item| item.upstream_model.as_deref())
+        .collect::<Vec<_>>();
+    assert_eq!(remote_models, vec!["current-model"]);
 }

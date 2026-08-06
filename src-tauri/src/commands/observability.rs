@@ -143,6 +143,20 @@ pub(crate) async fn get_agent_session_timeline(
     .map_err(|error| format!("读取会话时间线任务失败：{error}"))?
 }
 
+/// 读取单个 Agent 会话的 Flowlet 观测用量与预估费用（人民币）。
+/// 任务看板进行中 / 待审核卡片据此展示「1.8k tokens ≈¥0.03」。
+#[tauri::command]
+pub(crate) fn get_agent_session_flowlet_usage(
+    state: tauri::State<'_, AppState>,
+    agent_type: String,
+    session_id: String,
+) -> Result<Option<crate::core::config::AgentSessionFlowletUsage>, String> {
+    state
+        .storage
+        .get_agent_session_flowlet_usage(&agent_type, &session_id)
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub(crate) async fn sync_agent_data(
     state: tauri::State<'_, AppState>,

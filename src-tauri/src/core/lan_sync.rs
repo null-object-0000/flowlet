@@ -291,6 +291,7 @@ pub async fn start_server(
             post(permission_reply_handler),
         )
         .route("/flowlet/v1/task/submit", post(task_submit_handler))
+        .route("/flowlet/v1/task/status", post(task_status_handler))
         .with_state(state);
     tokio::spawn(async move {
         if let Err(error) = axum::serve(
@@ -430,6 +431,7 @@ fn current_capabilities() -> Vec<String> {
         "opencode.permission.read".to_string(),
         "opencode.permission.reply".to_string(),
         "task.submit".to_string(),
+        "task.status".to_string(),
     ]
 }
 
@@ -528,8 +530,9 @@ async fn permission_reply_handler(
     encrypted_response(&state.auth_key, &headers, &result)
 }
 
-/// 移动端通过签名 LAN 通道向目标设备提交任务。任务直接以 `submitted` 状态创建，
-/// 由目标设备本机调度器领取执行（只领取已绑定目录的项目）。
+/// 移动端通过签名 LAN 通道向目标设备提交任务。任务默认以 `draft`（草稿待提交）
+/// 状态创建，与 PC 看板一致；由移动端通过「提交」动作（LAN 直连）转成 `submitted`
+/// 后，目标设备本机调度器才会领取执行（只领取已绑定目录的项目）。
 async fn task_submit_handler(
     State(state): State<LanServerState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
@@ -579,7 +582,7 @@ async fn task_submit_handler(
         project_id: local_project.id.clone(),
         title: input.title.trim().to_string(),
         description: input.description.trim().to_string(),
-        status: "submitted".to_string(),
+        status: "draft".to_string(),
         task_type: input.task_type.clone(),
         agent_profile: input.agent_profile.trim().to_string(),
         priority: input.priority.clone(),
@@ -606,7 +609,71 @@ async fn task_submit_handler(
         &headers,
         &TaskSubmitResult {
             task_id,
-            status: "submitted".to_string(),
+            status: "draft".to_string(),
+        },
+    )
+}
+
+/// 移动端通过签名 LAN 通道提交 / 撤回任务的入参（草稿 ↔ 已提交）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStatusInput {
+    pub task_id: String,
+    pub status: String,
+}
+
+/// 移动端通过签名 LAN 通道变更任务状态（提交 / 撤回）。
+/// 与桌面端审核状态机一致：只允许「草稿 → 已提交」与「已提交 → 草稿」，
+/// 其余迁移（含把进行中撤销）由执行器内部管理，这里一律拒绝。
+async fn task_status_handler(
+    State(state): State<LanServerState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    const PATH: &str = "/flowlet/v1/task/status";
+    if let Err(error) = authorize(&state, &Method::POST, PATH, &headers, &body) {
+        return (StatusCode::UNAUTHORIZED, error).into_response();
+    }
+    let input = match serde_json::from_slice::<TaskStatusInput>(&body) {
+        Ok(input)
+            if !input.task_id.trim().is_empty()
+                && matches!(input.status.as_str(), "draft" | "submitted") =>
+        {
+            input
+        }
+        _ => return (StatusCode::BAD_REQUEST, "无效的任务状态参数").into_response(),
+    };
+    record_inbound(&state, Some(&remote), PATH);
+
+    let task_id = input.task_id.trim().to_string();
+    let current = match state.storage.get_task_status(&task_id) {
+        Ok(status) => status,
+        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    };
+    let allowed = matches!(
+        (current.as_deref(), input.status.as_str()),
+        (Some("draft"), "submitted") | (Some("submitted"), "draft")
+    );
+    if !allowed {
+        return (StatusCode::CONFLICT, "当前任务状态不允许此操作").into_response();
+    }
+    if let Err(error) = state.storage.set_task_status(&task_id, &input.status) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+    // 状态变更即时推送工作区，其他设备尽快看到提交 / 撤回结果。
+    if let Ok(Some(project_id)) = state.storage.get_task_project(&task_id) {
+        crate::core::project_workspace_sync::notify_project_changed(
+            state.storage.clone(),
+            &project_id,
+        );
+    }
+    encrypted_response(
+        &state.auth_key,
+        &headers,
+        &TaskSubmitResult {
+            task_id,
+            status: input.status,
         },
     )
 }
@@ -913,6 +980,35 @@ pub async fn submit_task(
     }
     let path = "/flowlet/v1/task/submit";
     let body = serde_json::to_vec(input).map_err(|error| error.to_string())?;
+    let mut last_error = "没有可用的局域网端点".to_string();
+    for endpoint in &peer.endpoints {
+        match request(&peer, endpoint, Method::POST, path, body.clone()).await {
+            Ok(result) => return Ok(result),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+/// 通过签名 LAN 通道提交 / 撤回任务（移动端 → 桌面端，草稿 ↔ 已提交）。
+/// 目标设备离线或版本过旧时返回明确错误。
+pub async fn set_task_status(
+    storage: &Storage,
+    device_id: &str,
+    task_id: &str,
+    status: &str,
+) -> Result<TaskSubmitResult, String> {
+    let peer = peer_descriptor(storage, device_id)
+        .ok_or_else(|| "目标设备没有可用的局域网连接信息".to_string())?;
+    if !peer.capabilities.iter().any(|cap| cap == "task.status") {
+        return Err("目标设备版本过旧，不支持任务提交与撤回".to_string());
+    }
+    let path = "/flowlet/v1/task/status";
+    let body = serde_json::to_vec(&TaskStatusInput {
+        task_id: task_id.to_string(),
+        status: status.to_string(),
+    })
+    .map_err(|error| error.to_string())?;
     let mut last_error = "没有可用的局域网端点".to_string();
     for endpoint in &peer.endpoints {
         match request(&peer, endpoint, Method::POST, path, body.clone()).await {
@@ -1342,6 +1438,133 @@ mod tests {
             hex::encode(signature).parse().unwrap(),
         );
         (headers, nonce)
+    }
+
+    fn signed_headers_with_body(
+        key: &[u8; 32],
+        method: &str,
+        path: &str,
+        body: &[u8],
+    ) -> (HeaderMap, String) {
+        let timestamp = Utc::now().timestamp().to_string();
+        let nonce = uuid::Uuid::new_v4().to_string();
+        let signature = sign(key, method, path, &timestamp, &nonce, body).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-flowlet-timestamp", timestamp.parse().unwrap());
+        headers.insert("x-flowlet-nonce", nonce.parse().unwrap());
+        headers.insert(
+            "x-flowlet-signature",
+            hex::encode(signature).parse().unwrap(),
+        );
+        (headers, nonce)
+    }
+
+    fn seed_project_and_task(storage: &Storage, task_status: &str) {
+        storage.migrate().unwrap();
+        let now = Utc::now().to_rfc3339();
+        storage
+            .save_project(&crate::core::storage::Project {
+                id: "project-1".to_string(),
+                name: "demo".to_string(),
+                directory_path: Some("C:\\demo".to_string()),
+                workspace_project_id: Some("ws-1".to_string()),
+                workspace_archived: false,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        storage
+            .save_project_task(&ProjectTask {
+                id: "task-1".to_string(),
+                project_id: "project-1".to_string(),
+                title: "demo task".to_string(),
+                description: String::new(),
+                status: task_status.to_string(),
+                task_type: "code".to_string(),
+                agent_profile: "Claude Code".to_string(),
+                priority: "p2".to_string(),
+                base_task_id: None,
+                last_job_id: None,
+                rejection_reason: None,
+                execution_history: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+                claimed_by: None,
+                claimed_at: None,
+                deleted: false,
+            })
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn task_status_handler_submits_and_withdraws_draft() {
+        let (state, _, auth_key, _) = test_state();
+        seed_project_and_task(&state.storage, "draft");
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+
+        // 提交：draft → submitted
+        let body = serde_json::to_vec(&TaskStatusInput {
+            task_id: "task-1".to_string(),
+            status: "submitted".to_string(),
+        })
+        .unwrap();
+        let (headers, nonce) = signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
+        let response = task_status_handler(State(state.clone()), ConnectInfo(remote), headers, body.into())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: EncryptedPayload =
+            serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+        let result: TaskSubmitResult = decrypt(&auth_key, nonce.as_bytes(), payload).unwrap();
+        assert_eq!(result.task_id, "task-1");
+        assert_eq!(result.status, "submitted");
+        assert_eq!(
+            state.storage.get_task_status("task-1").unwrap().as_deref(),
+            Some("submitted")
+        );
+
+        // 撤回：submitted → draft
+        let body = serde_json::to_vec(&TaskStatusInput {
+            task_id: "task-1".to_string(),
+            status: "draft".to_string(),
+        })
+        .unwrap();
+        let (headers, nonce) = signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
+        let response = task_status_handler(State(state.clone()), ConnectInfo(remote), headers, body.into())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: EncryptedPayload =
+            serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+        let result: TaskSubmitResult = decrypt(&auth_key, nonce.as_bytes(), payload).unwrap();
+        assert_eq!(result.status, "draft");
+        assert_eq!(
+            state.storage.get_task_status("task-1").unwrap().as_deref(),
+            Some("draft")
+        );
+    }
+
+    #[tokio::test]
+    async fn task_status_handler_rejects_illegal_transition() {
+        let (state, _, auth_key, _) = test_state();
+        seed_project_and_task(&state.storage, "in_progress");
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+
+        // 进行中任务不允许撤回为草稿
+        let body = serde_json::to_vec(&TaskStatusInput {
+            task_id: "task-1".to_string(),
+            status: "draft".to_string(),
+        })
+        .unwrap();
+        let (headers, _) = signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
+        let response = task_status_handler(State(state.clone()), ConnectInfo(remote), headers, body.into())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            state.storage.get_task_status("task-1").unwrap().as_deref(),
+            Some("in_progress")
+        );
     }
 
     #[tokio::test]

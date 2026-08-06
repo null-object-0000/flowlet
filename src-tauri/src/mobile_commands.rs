@@ -49,7 +49,7 @@ pub(super) async fn list_shared_device_projects(
 }
 
 /// 移动端通过签名 LAN 通道把任务提交到指定桌面设备。
-/// 目标设备离线、版本过旧或未绑定项目目录时返回明确错误。
+/// 任务默认以草稿（draft）状态创建，目标设备离线、版本过旧或未绑定项目目录时返回明确错误。
 #[tauri::command]
 pub(super) async fn submit_task_lan(
     state: tauri::State<'_, MobileAppState>,
@@ -57,6 +57,18 @@ pub(super) async fn submit_task_lan(
     input: crate::core::lan_sync::TaskSubmitInput,
 ) -> Result<crate::core::lan_sync::TaskSubmitResult, String> {
     crate::core::lan_sync::submit_task(&state.storage, &device_id, &input).await
+}
+
+/// 移动端通过签名 LAN 通道提交 / 撤回任务（草稿 ↔ 已提交）。
+/// 与 PC 看板交互一致，任务默认草稿待提交，可手动提交、撤回；仅允许局域网直连方式变更。
+#[tauri::command]
+pub(super) async fn set_task_status_lan(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: String,
+    task_id: String,
+    status: String,
+) -> Result<crate::core::lan_sync::TaskSubmitResult, String> {
+    crate::core::lan_sync::set_task_status(&state.storage, &device_id, &task_id, &status).await
 }
 
 #[tauri::command]

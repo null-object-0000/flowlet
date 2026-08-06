@@ -328,9 +328,7 @@ export function MobileOverviewPage() {
                           setSelectedHour(cell.hour);
                           revealSelectedDetail();
                         }}
-                      >
-                        <span>{hourLabel}</span>
-                      </button>
+                      />
                     );
                   }),
                 ];
@@ -404,9 +402,7 @@ export function MobileOverviewPage() {
                       setSelectedDate(cell.date);
                       revealSelectedDetail();
                     }}
-                  >
-                    <span>{Number(cell.date.slice(-2))}</span>
-                  </button>
+                  />
                 );
               })}
             </div>

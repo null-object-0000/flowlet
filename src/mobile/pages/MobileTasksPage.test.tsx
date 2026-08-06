@@ -6,6 +6,7 @@ import { MobileDeviceSelectionProvider } from "../MobileDeviceSelection";
 const useMobileDevicesMock = vi.fn();
 const useMobileProjectsMock = vi.fn();
 const useMobileSubmitTaskMock = vi.fn();
+const useMobileSetTaskStatusMock = vi.fn();
 const useMobileS3SettingsMock = vi.fn();
 const refreshDeviceMock = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
 const refreshS3Mock = vi.hoisted(() => vi.fn<() => Promise<void>>());
@@ -18,6 +19,7 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileDevices: () => useMobileDevicesMock(),
   useMobileProjects: (deviceId: string | null) => useMobileProjectsMock(deviceId),
   useMobileSubmitTask: (deviceId: string | null) => useMobileSubmitTaskMock(deviceId),
+  useMobileSetTaskStatus: (deviceId: string | null) => useMobileSetTaskStatusMock(deviceId),
   useMobileS3Settings: () => useMobileS3SettingsMock(),
   useMobileDeviceSyncActions: () => ({
     saveS3Config: { isPending: false, mutateAsync: vi.fn() },
@@ -66,18 +68,79 @@ describe("MobileTasksPage", () => {
       isPending: false,
       mutateAsync: vi.fn(),
     });
+    useMobileSetTaskStatusMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    });
     useMobileS3SettingsMock.mockReturnValue({
       data: { config: { endpoint: "https://oss.example.com" }, status: { status: "ok", lastSuccessAt: null } },
       isLoading: false,
     });
   });
 
-  it("renders device projects and their tasks", () => {
+  it("renders PC-consistent status tabs and task cards", () => {
     renderPage();
+    // 四个折叠 Tab：待处理 / 进行中 / 待审核 / 已完成，无「全部」
+    expect(screen.getByRole("button", { name: /待处理/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /进行中/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /待审核/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /已完成/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /全部/ })).toBeNull();
+    // 任务卡片：项目名、完整标题、设备与提交入口
     expect(screen.getByText("flowlet")).toBeInTheDocument();
-    expect(screen.getByText(/Office PC · 更新于/)).toBeInTheDocument();
     expect(screen.getByText("修复登录页")).toBeInTheDocument();
-    expect(screen.getByText("可执行")).toBeInTheDocument();
+    expect(screen.getByText("Office PC")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /提交任务/ })).toBeInTheDocument();
+  });
+
+  it("filters tasks by status tab", () => {
+    useMobileProjectsMock.mockReturnValue({
+      data: [{
+        ...PROJECT,
+        tasks: [
+          { id: "task-1", title: "已提交任务", status: "submitted", priority: "p1", updatedAt: "2026-07-30T01:00:00Z" },
+          { id: "task-2", title: "已完成任务", status: "done", priority: "p2", updatedAt: "2026-07-30T01:10:00Z" },
+        ],
+      }],
+      isLoading: false,
+      isError: false,
+    });
+    renderPage();
+    expect(screen.getByText("已提交任务")).toBeInTheDocument();
+    expect(screen.queryByText("已完成任务")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /已完成/ }));
+    expect(screen.queryByText("已提交任务")).toBeNull();
+    expect(screen.getByText("已完成任务")).toBeInTheDocument();
+  });
+
+  it("opens task detail sheet and submits a draft task via LAN direct", async () => {
+    useMobileProjectsMock.mockReturnValue({
+      data: [{
+        ...PROJECT,
+        tasks: [
+          { id: "task-1", title: "草稿任务", status: "draft", priority: "p0", updatedAt: "2026-07-30T01:00:00Z" },
+        ],
+      }],
+      isLoading: false,
+      isError: false,
+    });
+    const setStatus = vi.fn().mockResolvedValue({ taskId: "task-1", status: "submitted" });
+    useMobileSetTaskStatusMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: setStatus,
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByText("草稿任务"));
+    // 详情抽屉展示完整信息与状态说明
+    expect(screen.getByRole("dialog", { name: /草稿任务/ })).toBeInTheDocument();
+    expect(screen.getByText("任务等待提交到桌面端")).toBeInTheDocument();
+    expect(screen.getByText("task-1")).toBeInTheDocument();
+
+    // 点击「提交」走局域网直连
+    fireEvent.click(screen.getByRole("button", { name: /^提交$/ }));
+    await waitFor(() => expect(setStatus).toHaveBeenCalledWith({ taskId: "task-1", status: "submitted" }));
   });
 
   it("refreshes the selected device via pull to refresh", async () => {

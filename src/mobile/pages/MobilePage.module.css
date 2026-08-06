@@ -101,6 +101,90 @@ button.stat { border: 1px solid transparent; color: var(--flowlet-color-text); f
   overflow-wrap: anywhere;
 }
 .syncFailureDetails strong { color: var(--semi-color-danger); font-size: 12px; }
+.taskSubmitBar { display: grid; }
+.taskSubmitBar :global(.semi-button) { width: 100%; }
+.taskTabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 4px;
+  scrollbar-width: none;
+}
+.taskTabs::-webkit-scrollbar { display: none; }
+.taskTabs button {
+  flex: none;
+  min-height: 32px;
+  padding: 0 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 999px;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.taskTabs button span {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--flowlet-color-text-tertiary);
+  background: var(--flowlet-color-surface-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.taskTabs button[aria-pressed="true"] {
+  color: var(--flowlet-color-primary);
+  border-color: var(--flowlet-color-primary);
+  background: var(--flowlet-color-primary-soft);
+  font-weight: 700;
+}
+.taskTabs button[aria-pressed="true"] span {
+  color: white;
+  background: var(--flowlet-color-primary);
+}
+.taskList { display: grid; gap: 10px; }
+.taskCard {
+  min-width: 0;
+  padding: 14px;
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 14px;
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+}
+.taskTopline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.taskProject {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.taskTitle {
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.taskMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; }
+.taskMeta span, .taskMeta time { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.taskMeta span + span::before, .taskMeta time::before { content: "·"; margin-right: 12px; }
+.priorityBadge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
 .deviceList { display: grid; gap: 10px; }
 .deviceCard {
   overflow: hidden;

@@ -375,6 +375,8 @@ pub fn classify_response_url(url: &str) -> &'static str {
         "subscription"
     } else if normalized.contains("/tokenplan/personal/api/v2/quota-config") {
         "quota_config"
+    } else if normalized.contains("/tokenplan/personal/api/v2/reset-card/list") {
+        "reset_card_list"
     } else if normalized.contains("/api/pay/commercial/entitlements/token-packs/list") {
         // 必须在 token-packs/summary 之前判断,但二者路径不同无冲突。
         // 放在前面是为了让"token-packs"前缀的匹配更明确可读。
@@ -638,6 +640,18 @@ mod tests {
                 "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fusage"
             ),
             "usage"
+        );
+        assert_eq!(
+            classify_response_url(
+                "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Freset-card%2Flist"
+            ),
+            "reset_card_list"
+        );
+        assert_eq!(
+            classify_response_url(
+                "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Freset-card%2Fdetail"
+            ),
+            "unknown"
         );
         assert_eq!(
             classify_response_url(
@@ -909,6 +923,44 @@ mod tests {
             mode.required_slots,
             vec!["token_packs_summary", "api_usage_summary"]
         );
+    }
+
+    #[test]
+    fn qwen_reset_card_list_is_optional_slot() {
+        let mode = ScrapeModeRuntime {
+            console_url: "https://example.com".to_string(),
+            console_url_secondary: None,
+            console_url_tertiary: None,
+            interceptor_js: String::new(),
+            extractor_js: String::new(),
+            aggregate: true,
+            required_slots: vec![
+                "subscription".to_string(),
+                "quota_config".to_string(),
+                "usage".to_string(),
+            ],
+        };
+        // 无重置卡响应时不阻断聚合完成。
+        let mut slots = HashMap::new();
+        slots.insert("subscription".to_string(), "{}".to_string());
+        slots.insert("quota_config".to_string(), "{}".to_string());
+        slots.insert("usage".to_string(), "{}".to_string());
+        assert!(aggregate_complete(&slots, &mode));
+
+        // 有重置卡响应时同样完成，且进入数据 bundle 供 extractor/前端解析。
+        slots.insert(
+            "reset_card_list".to_string(),
+            r#"{"data":{"DataV2":{"data":{"data":[]}}}}"#.to_string(),
+        );
+        assert!(aggregate_complete(&slots, &mode));
+        let bundle = build_aggregate_bundle(&slots);
+        assert!(bundle.get("reset_card_list").is_some());
+
+        // 缺少必需槽位时即使有重置卡也不完成。
+        let mut incomplete = HashMap::new();
+        incomplete.insert("subscription".to_string(), "{}".to_string());
+        incomplete.insert("reset_card_list".to_string(), "{}".to_string());
+        assert!(!aggregate_complete(&incomplete, &mode));
     }
 
     #[test]

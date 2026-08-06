@@ -1392,6 +1392,15 @@ pub struct AgentSessionNativeUsage {
     pub plan_consumption: Option<AgentSessionCostEstimate>,
 }
 
+/// 单个 Agent 会话的 Flowlet 观测用量与预估费用（人民币，来自 `usage_records` 聚合）。
+/// 供任务看板进行中 / 待审核卡片展示「1.8k tokens ≈¥0.03」。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionFlowletUsage {
+    pub total_tokens: i64,
+    pub estimated_cost: f64,
+}
+
 /// Agent 原生会话中一条带用量的消息级事件。写入 `agent_usage_events` 账本表，
 /// 供按天/小时精确归集「未经过 Flowlet 代理」的 Token。与 `usage_records`
 /// （HTTP 请求级、含费用与渠道）刻意分离；不含费用。

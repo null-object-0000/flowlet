@@ -3,10 +3,11 @@ use super::{Storage, StorageError};
 use crate::core::agent_session_identity::from_header_json;
 use crate::core::channels_config::{canonical_model_key, official_channel_id_for_model};
 use crate::core::config::{
-    AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionRepairResult,
-    AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult, AgentUsageEvent,
-    DeviceUsageBreakdownRow, LogFilterClient, LogsFilter, LogsPageResult, LogsSummary, ModelPrice, RequestLogInput,
-    RequestLogModelOptions, RequestLogRow, UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
+    AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionFlowletUsage,
+    AgentSessionRepairResult, AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult,
+    AgentUsageEvent, DeviceUsageBreakdownRow, LogFilterClient, LogsFilter, LogsPageResult, LogsSummary,
+    ModelPrice, RequestLogInput, RequestLogModelOptions, RequestLogRow, UsageRecordInput,
+    UsageSummaryRow, UsageTodaySummary,
 };
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_captured_stream_usage, extract_response_usage};
@@ -1245,6 +1246,53 @@ impl Storage {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// 单个 Agent 会话的 Flowlet 观测用量与预估费用（人民币，来自 `usage_records`）。
+    /// 任务看板进行中 / 待审核卡片据此展示「1.8k tokens ≈¥0.03」；会话无 Flowlet
+    /// 观测记录时返回 None。
+    pub fn get_agent_session_flowlet_usage(
+        &self,
+        agent_type: &str,
+        session_id: &str,
+    ) -> Result<Option<AgentSessionFlowletUsage>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        // 会话聚合：先确认该会话存在 Flowlet 观测请求，再汇总 token 与费用。
+        // SUM 对空集也会返回一行 0，故必须用 COUNT 门控，避免不存在的会话返回空值行。
+        let row = connection.query_row(
+            r#"
+            SELECT
+                (SELECT COUNT(1) FROM request_logs
+                 WHERE is_last_attempt = 1 AND agent_type = ?1
+                   AND agent_session_id = ?2 AND agent_session_id IS NOT NULL)
+                    AS matched,
+                (SELECT COALESCE(SUM(ur.total_tokens), 0)
+                 FROM request_logs rl
+                 LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+                 WHERE rl.is_last_attempt = 1 AND rl.agent_type = ?1
+                   AND rl.agent_session_id = ?2 AND rl.agent_session_id IS NOT NULL)
+                    AS total_tokens,
+                (SELECT COALESCE(SUM(ur.estimated_cost), 0)
+                 FROM request_logs rl
+                 LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+                 WHERE rl.is_last_attempt = 1 AND rl.agent_type = ?1
+                   AND rl.agent_session_id = ?2 AND rl.agent_session_id IS NOT NULL)
+                    AS estimated_cost
+            "#,
+            params![agent_type, session_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, f64>(2)?)),
+        )?;
+        let (matched, total_tokens, estimated_cost) = row;
+        if matched == 0 {
+            return Ok(None);
+        }
+        Ok(Some(AgentSessionFlowletUsage {
+            total_tokens,
+            estimated_cost,
+        }))
     }
 
     fn list_native_agent_sessions(&self) -> Vec<AgentSessionRow> {
@@ -4285,5 +4333,80 @@ mod estimate_cost_tests {
         approx(cached, 0.0);
         assert!(cache_write.is_none());
         approx(output, 7.2);
+    }
+
+    #[test]
+    fn get_agent_session_flowlet_usage_aggregates_tokens_and_cost() {
+        let storage = Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let connection = storage.connection.lock().unwrap();
+        // 造两条同一会话的请求日志（is_last_attempt = 1）与对应用量记录。
+        connection
+            .execute(
+                r#"INSERT INTO request_logs (
+                    id, request_id, agent_type, agent_session_id, client_id, client_name,
+                    channel_id, channel_name, account_id, account_name, client_protocol,
+                    upstream_protocol, virtual_model, public_model, upstream_model,
+                    request_type, method, path, status, latency_ms, is_stream, error_message,
+                    fallback_count, route_reason, created_at, ttfb_ms, duration_ms, attempt_seq,
+                    req_headers_json, req_body_b64, res_headers_json, res_body_b64,
+                    is_last_attempt, upstream_url
+                ) VALUES
+                ('rl-1', 'req-1', 'claude-code', 'ses-abc', NULL, NULL, NULL, NULL, NULL, NULL,
+                 'openai', 'openai', NULL, NULL, NULL, 'chat', 'POST', '/v1/messages', 200, 100, 0,
+                 NULL, 0, NULL, datetime('now'), NULL, NULL, 1, NULL, NULL, NULL, NULL, 1, NULL),
+                ('rl-2', 'req-2', 'claude-code', 'ses-abc', NULL, NULL, NULL, NULL, NULL, NULL,
+                 'openai', 'openai', NULL, NULL, NULL, 'chat', 'POST', '/v1/messages', 200, 100, 0,
+                 NULL, 0, NULL, datetime('now'), NULL, NULL, 1, NULL, NULL, NULL, NULL, 1, NULL),
+                ('rl-other', 'req-3', 'opencode', 'ses-other', NULL, NULL, NULL, NULL, NULL, NULL,
+                 'openai', 'openai', NULL, NULL, NULL, 'chat', 'POST', '/v1/messages', 200, 100, 0,
+                 NULL, 0, NULL, datetime('now'), NULL, NULL, 1, NULL, NULL, NULL, NULL, 1, NULL)"#,
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                r#"INSERT INTO usage_records (
+                    id, request_id, client_id, client_name, channel_id, channel_name,
+                    account_id, account_name, client_protocol, upstream_protocol,
+                    virtual_model, upstream_model, input_tokens, input_cached_tokens,
+                    input_uncached_tokens, input_cache_write_tokens, output_tokens, total_tokens,
+                    usage_status, usage_source, estimated_cost, analyzed_at, created_at
+                ) VALUES
+                ('u-1', 'req-1', NULL, NULL, NULL, NULL, NULL, NULL, 'openai', 'openai', NULL, NULL,
+                 1000, 800, 200, 0, 500, 1500, 'complete', 'upstream_response', 0.02,
+                 datetime('now'), datetime('now')),
+                ('u-2', 'req-2', NULL, NULL, NULL, NULL, NULL, NULL, 'openai', 'openai', NULL, NULL,
+                 2000, 1000, 1000, 0, 300, 2300, 'complete', 'upstream_response', 0.01,
+                 datetime('now'), datetime('now')),
+                ('u-3', 'req-3', NULL, NULL, NULL, NULL, NULL, NULL, 'openai', 'openai', NULL, NULL,
+                 100, 0, 100, 0, 100, 200, 'complete', 'upstream_response', 0.005,
+                 datetime('now'), datetime('now'))"#,
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        // 命中会话：聚合会话内全部请求的 token 与预估费用。
+        let cluster = storage
+            .get_agent_session_flowlet_usage("claude-code", "ses-abc")
+            .unwrap()
+            .expect("会话应有 Flowlet 观测用量");
+        assert_eq!(cluster.total_tokens, 3800);
+        approx(cluster.estimated_cost, 0.03);
+
+        // 非本会话（不同 agent / 不同 session）不混入。
+        let other = storage
+            .get_agent_session_flowlet_usage("opencode", "ses-other")
+            .unwrap()
+            .expect("其他会话应有独立用量");
+        assert_eq!(other.total_tokens, 200);
+        approx(other.estimated_cost, 0.005);
+
+        // 无观测记录的会话返回 None。
+        assert!(storage
+            .get_agent_session_flowlet_usage("claude-code", "ses-nonexistent")
+            .unwrap()
+            .is_none());
     }
 }

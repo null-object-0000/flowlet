@@ -1268,6 +1268,7 @@ fn run_desktop() {
             commands::get_agent_session_native_summary,
             commands::get_agent_session_last_interaction,
             commands::get_agent_session_timeline,
+            commands::get_agent_session_flowlet_usage,
             commands::sync_agent_data,
             commands::list_background_jobs,
             commands::get_background_job_detail,
@@ -1434,6 +1435,7 @@ fn run_mobile() {
             mobile_commands::list_cached_lan_probes,
             mobile_commands::list_shared_device_projects,
             mobile_commands::submit_task_lan,
+            mobile_commands::set_task_status_lan,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet Mobile 失败");

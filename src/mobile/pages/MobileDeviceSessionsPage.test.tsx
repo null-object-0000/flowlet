@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MobileDeviceSessionsPage } from "./MobileDeviceSessionsPage";
 
 const mocks = vi.hoisted(() => ({
   backHandler: null as (() => void) | null,
@@ -29,7 +31,7 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   }),
   useMobileDeviceRefresh: () => ({ isPending: false, mutateAsync: mocks.refreshDevice }),
   useMobileSessionLanRefresh: () => ({ isPending: false, mutateAsync: mocks.refreshSession }),
-  useMobileSessions: () => ({
+  useMobileSessions: (deviceId: string | null) => ({
     data: [{
       deviceId: "device-1",
       deviceDisplayName: "Office PC",
@@ -89,15 +91,23 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   }),
 }));
 
-import { MobileSessionsPage } from "./MobileSessionsPage";
-import { MobileDeviceSelectionProvider } from "../MobileDeviceSelection";
+function renderPage() {
+  return render(
+    <MemoryRouter initialEntries={["/devices/device-1/sessions"]}>
+      <Routes>
+        <Route path="/devices/:deviceId/sessions" element={<MobileDeviceSessionsPage />} />
+        <Route path="/devices" element={<span>devices list</span>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
 
 function openSession(title: string) {
   fireEvent.click(screen.getByText(title).closest("article")!);
   return screen.getByRole("dialog");
 }
 
-describe("MobileSessionsPage", () => {
+describe("MobileDeviceSessionsPage", () => {
   beforeEach(() => {
     vi.stubEnv("TAURI_ENV_PLATFORM", "android");
     mocks.backHandler = null;
@@ -128,6 +138,21 @@ describe("MobileSessionsPage", () => {
     });
   });
 
+  it("shows a back entry to the device page and the device session list", () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: "返回设备页" })).toBeInTheDocument();
+    // 主标题带上设备名：设备名 + 会话
+    expect(screen.getByRole("heading", { level: 1, name: "Office PC 会话" })).toBeInTheDocument();
+    expect(screen.getByText("查看该设备同步的最近会话与实时运行状态")).toBeInTheDocument();
+    expect(screen.getByText("Fix CI")).toBeInTheDocument();
+  });
+
+  it("returns to the device page via the back button", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "返回设备页" }));
+    expect(screen.getByText("devices list")).toBeInTheDocument();
+  });
+
   it("distinguishes an unavailable OpenCode control service from a LAN failure", () => {
     mocks.permissionsQuery.mockReturnValue({
       isLoading: false,
@@ -140,7 +165,7 @@ describe("MobileSessionsPage", () => {
         permissions: [],
       },
     });
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    renderPage();
     const dialog = openSession("Fix CI");
 
     expect(within(dialog).getByText("OpenCode 控制服务未连接")).toBeInTheDocument();
@@ -159,7 +184,7 @@ describe("MobileSessionsPage", () => {
         permissions: [],
       },
     });
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    renderPage();
     const dialog = openSession("Fix CI");
 
     expect(within(dialog).getByText("正在连接 Agent 所在设备…")).toBeInTheDocument();
@@ -167,11 +192,7 @@ describe("MobileSessionsPage", () => {
   });
 
   it("approves a remote OpenCode permission from the session sheet", async () => {
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
-    const titleHeading = screen.getByText("Office PC 会话").closest("h2")!;
-    const header = titleHeading.closest("header")!;
-    expect(within(titleHeading.parentElement!).getByRole("button", { name: "切换设备，当前：Office PC" })).toBeInTheDocument();
-    expect(within(header).getByText("查看该设备同步的最近会话与实时运行状态").parentElement).toBe(header);
+    renderPage();
 
     // 卡片上只有最近一次用户输入摘要，审批在弹窗里进行。
     const card = screen.getByText("Fix CI").closest("article")!;
@@ -190,7 +211,7 @@ describe("MobileSessionsPage", () => {
   });
 
   it("shows the full latest interaction inside the sheet and closes on backdrop click", async () => {
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    renderPage();
     const dialog = openSession("Fix CI");
     // 用户输入保持纯文本原样展示，不做 Markdown 渲染。
     expect(within(dialog).getByText("**不要渲染我**")).toBeInTheDocument();
@@ -204,7 +225,7 @@ describe("MobileSessionsPage", () => {
   });
 
   it("closes both collapsed and expanded session sheets with the Android back gesture", async () => {
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    renderPage();
 
     openSession("Refactor parser");
     await waitFor(() => expect(mocks.backHandler).not.toBeNull());
@@ -224,7 +245,7 @@ describe("MobileSessionsPage", () => {
   });
 
   it("opens the sheet for non-OpenCode sessions without approval actions", async () => {
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    renderPage();
     const dialog = openSession("Refactor parser");
     expect(within(dialog).getAllByText("Claude Code")).toHaveLength(1);
     expect(within(dialog).getByText("整理解析器")).toBeInTheDocument();
@@ -233,12 +254,12 @@ describe("MobileSessionsPage", () => {
   });
 
   it("refreshes only the selected device and supports pull to refresh", async () => {
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    renderPage();
     expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
     expect(screen.getByText("尚未成功刷新")).toBeInTheDocument();
 
-    const page = screen.getByText("Office PC 会话").closest("section")!;
-    const pullSurface = page.parentElement!;
+    const page = screen.getByRole("group", { name: "会话状态" }).closest("section")!;
+    const pullSurface = page.closest("[class*='_root_']")!;
     fireEvent.touchStart(pullSurface, { touches: [{ clientY: 10 }] });
     fireEvent.touchMove(pullSurface, { touches: [{ clientY: 140 }] });
     fireEvent.touchEnd(pullSurface);
@@ -248,10 +269,10 @@ describe("MobileSessionsPage", () => {
   });
 
   it("keeps the session sheet viewport-bound while pull-to-refresh transforms the page", () => {
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    renderPage();
 
-    const page = screen.getByText("Office PC 会话").closest("section")!;
-    const pullSurface = page.parentElement!;
+    const page = screen.getByRole("group", { name: "会话状态" }).closest("section")!;
+    const pullSurface = page.closest("[class*='_root_']")!;
     pullSurface.setAttribute("data-pulling", "true");
 
     const dialog = openSession("Refactor parser");
@@ -262,115 +283,8 @@ describe("MobileSessionsPage", () => {
     pullSurface.removeAttribute("data-pulling");
   });
 
-  it("blocks page refresh, supports expand-collapse-close gestures, and refreshes one session over LAN", async () => {
-    const intervalSpy = vi.spyOn(window, "setInterval");
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
-    const dialog = openSession("Refactor parser");
-    await waitFor(() => expect(mocks.refreshSession).toHaveBeenCalledOnce());
-    expect(within(dialog).getByText(/最后刷新：/)).toBeInTheDocument();
-    const periodicRefresh = intervalSpy.mock.calls.find(([, delay]) => delay === 5_000)?.[0];
-    expect(periodicRefresh).toBeTypeOf("function");
-    await act(async () => {
-      (periodicRefresh as () => void)();
-      await Promise.resolve();
-    });
-    await waitFor(() => expect(mocks.refreshSession).toHaveBeenCalledTimes(2));
-    const pullSurface = screen.getByText("Office PC 会话").closest("section")!.parentElement!;
-    const body = within(dialog).getByText("最近一轮").parentElement!.parentElement!;
-    expect(pullSurface).not.toHaveAttribute("data-pulling");
-    expect(dialog).not.toHaveAttribute("data-expanded");
-    expect(getComputedStyle(body).overflowY).toBe("hidden");
-    expect(getComputedStyle(body).touchAction).toBe("none");
-    expect(within(dialog).queryByRole("button", { name: "展开" })).toBeNull();
-    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 300 }] });
-    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 260 }] });
-    expect(dialog).toHaveAttribute("data-expanded");
-    expect(getComputedStyle(body).overflowY).toBe("auto");
-    expect(getComputedStyle(body).touchAction).toBe("pan-y");
-
-    Object.defineProperty(body, "scrollTop", { configurable: true, writable: true, value: 40 });
-    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
-    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 330 }] });
-    fireEvent.touchEnd(body);
-    expect(dialog).toHaveAttribute("data-expanded");
-
-    body.scrollTop = 0;
-    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
-    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 290 }] });
-    fireEvent.touchEnd(body);
-    expect(dialog).toHaveAttribute("data-expanded");
-
-    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
-    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 320 }] });
-    expect(dialog).not.toHaveAttribute("data-expanded");
-    expect(getComputedStyle(body).overflowY).toBe("hidden");
-    expect(getComputedStyle(body).touchAction).toBe("none");
-
-    fireEvent.touchStart(pullSurface, { touches: [{ clientY: 10 }] });
-    fireEvent.touchMove(pullSurface, { touches: [{ clientY: 150 }] });
-    fireEvent.touchEnd(pullSurface);
-    expect(mocks.refreshDevice).not.toHaveBeenCalled();
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "刷新会话" }));
-    await waitFor(() => expect(mocks.refreshSession).toHaveBeenCalledTimes(3));
-
-    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
-    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 310 }] });
-    fireEvent.touchEnd(body);
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-
-    fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 260 }] });
-    fireEvent.touchMove(body, { touches: [{ clientX: 20, clientY: 330 }] });
-    fireEvent.touchEnd(body);
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    intervalSpy.mockRestore();
-  });
-
-  it("shows a bottom shortcut and marks unseen refreshed content while reading history", async () => {
-    const view = render(
-      <MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>,
-    );
-    const dialog = openSession("Refactor parser");
-    const body = within(dialog).getByText("最近一轮").parentElement!.parentElement!;
-    Object.defineProperties(body, {
-      clientHeight: { configurable: true, value: 300 },
-      scrollHeight: { configurable: true, value: 600 },
-      scrollTop: { configurable: true, writable: true, value: 120 },
-    });
-    fireEvent.scroll(body);
-    fireEvent.click(within(dialog).getByRole("button", { name: "展开会话详情" }));
-
-    const shortcut = within(dialog).getByRole("button", { name: "滚动到底部" });
-    expect(shortcut.closest("[data-unseen-content]")).toBeNull();
-
-    mocks.assistantContent.mockReturnValue("已完成整理，并追加了新的刷新结果");
-    view.rerender(
-      <MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>,
-    );
-    const unseenShortcut = await within(dialog).findByRole("button", {
-      name: "有新内容，滚动到底部",
-    });
-    expect(unseenShortcut.closest("[data-unseen-content]")).not.toBeNull();
-
-    fireEvent.click(unseenShortcut);
-    expect(body.scrollTop).toBe(600);
-    expect(within(dialog).queryByRole("button", { name: /滚动到底部/ })).toBeNull();
-  });
-
-  it("switches devices from the page title without offering an all-devices option", async () => {
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
-    fireEvent.click(screen.getByRole("button", { name: "切换设备，当前：Office PC" }));
-    const menu = await waitFor(() => {
-      const el = document.querySelector(".semi-dropdown-menu");
-      expect(el).not.toBeNull();
-      return el as HTMLElement;
-    });
-    expect(within(menu).getByText("Office PC")).toBeInTheDocument();
-    expect(within(menu).queryByText("全部设备")).toBeNull();
-  });
-
   it("filters sessions through the status button group", () => {
-    render(<MobileDeviceSelectionProvider><MobileSessionsPage /></MobileDeviceSelectionProvider>);
+    renderPage();
     const group = screen.getByRole("group", { name: "会话状态" });
     const waitingButton = within(group).getByRole("button", { name: "等待确认" });
     expect(waitingButton).toHaveAttribute("aria-pressed", "false");

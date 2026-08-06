@@ -1,4 +1,4 @@
-import { IconComment, IconDesktop, IconHome, IconList, IconSetting } from "@douyinfe/semi-icons";
+import { IconDesktop, IconHome, IconList, IconSetting } from "@douyinfe/semi-icons";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
 import { MobileDeviceSyncAutoRefresh } from "../features/device-sync/MobileDeviceSyncAutoRefresh";
@@ -7,8 +7,7 @@ import styles from "./MobileShell.module.css";
 
 const items = [
   { to: "/", label: "概览", icon: <IconHome /> },
-  { to: "/sessions", label: "会话", icon: <IconComment /> },
-  { to: "/tasks", label: "任务", icon: <IconList /> },
+  { to: "/projects", label: "项目", icon: <IconList /> },
   { to: "/devices", label: "设备", icon: <IconDesktop /> },
   { to: "/settings", label: "设置", icon: <IconSetting /> },
 ];

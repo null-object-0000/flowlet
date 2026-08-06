@@ -9,6 +9,8 @@ import { formatFullTimestamp, type TimestampLanguage } from "../../shared/format
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { MobileDeviceTitlePicker, useMobileDevicePickerState } from "../MobileDevicePicker";
 import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
+import { useMobileRefreshController } from "../useMobileRefreshController";
+import { MobilePullToRefresh } from "../MobilePullToRefresh";
 import styles from "./MobilePage.module.css";
 
 type TaskStatus = "draft" | "submitted" | "in_progress" | "review" | "done";
@@ -19,6 +21,7 @@ export function MobileTasksPage() {
   const deviceId = picker.effectiveDeviceId;
   const projects = useMobileProjects(deviceId);
   const submit = useMobileSubmitTask(deviceId);
+  const refreshController = useMobileRefreshController(deviceId);
   const [draftProject, setDraftProject] = useState<SharedDeviceProject | null>(null);
   const [form, setForm] = useState({ title: "", description: "", taskType: "code", priority: "p2" });
 
@@ -52,14 +55,19 @@ export function MobileTasksPage() {
   };
 
   return (
+    <MobilePullToRefresh
+      disabled={refreshController.disabled}
+      refreshing={refreshController.loading}
+      onRefresh={refreshController.refresh}
+    >
     <section className={styles.page}>
       <header className={`${styles.heading} ${styles.headingWithPicker}`}>
         <div className={styles.headingTitleRow}>
           <MobileDeviceTitlePicker
             state={picker}
-            formatTitle={(name) => t("任务 · {device}", { device: name ?? "…" })}
+            formatTitle={(name) => t("项目 · {device}", { device: name ?? "…" })}
           />
-          <MobileLastRefreshTime value={null} />
+          <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
         </div>
         <p>{t("把任务提交到指定设备的项目，由该设备上的 Flowlet 调度执行")}</p>
       </header>
@@ -125,6 +133,7 @@ export function MobileTasksPage() {
         </div>
       </SideSheet>
     </section>
+    </MobilePullToRefresh>
   );
 }
 

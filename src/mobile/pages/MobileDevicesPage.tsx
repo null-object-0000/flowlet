@@ -1,11 +1,11 @@
-import { IconChevronDown, IconChevronUp, IconDesktop } from "@douyinfe/semi-icons";
+import { IconChevronDown, IconChevronRight, IconChevronUp, IconComment, IconDesktop } from "@douyinfe/semi-icons";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { LanPeerProbe, SyncedAgentProfile } from "../../domains/device-sync/types";
-import { useMobileDeviceAgents, useMobileDevices, useMobileLanProbes } from "../../features/device-sync/useMobileDeviceSync";
+import type { LanPeerProbe } from "../../domains/device-sync/types";
+import { useMobileDeviceAgents, useMobileDevices, useMobileLanProbes, useMobileSessions } from "../../features/device-sync/useMobileDeviceSync";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
-import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
 import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
 import { useMobileRefreshController } from "../useMobileRefreshController";
 import { MobilePullToRefresh } from "../MobilePullToRefresh";
@@ -78,7 +78,7 @@ export function MobileDevicesPage() {
                 </span>
                 <time>{t("最近快照：{time}", { time: formatFullTimestamp(device.lastSeenAt, language) })}</time>
               </button>
-              {expanded ? <DeviceAgents deviceId={device.deviceId} /> : null}
+              {expanded ? <DeviceEntryCards deviceId={device.deviceId} /> : null}
             </article>
           );
         })}
@@ -87,6 +87,8 @@ export function MobileDevicesPage() {
     </MobilePullToRefresh>
   );
 }
+
+type Translate = (source: string, variables?: Record<string, string | number>) => string;
 
 function LanStateBadge({ probe, loading, t }: { probe: LanPeerProbe | undefined; loading: boolean; t: Translate }) {
   if (loading && !probe) {
@@ -109,66 +111,71 @@ function LanStateBadge({ probe, loading, t }: { probe: LanPeerProbe | undefined;
   );
 }
 
-function DeviceAgents({ deviceId }: { deviceId: string }) {
-  const { t } = useAppPreferences();
+/**
+ * 展开设备后的两个聚合入口卡片：会话 / Agent。
+ * 各自展示该设备的会话与 Agent 核心信息，点击进入对应设备二级页。
+ */
+function DeviceEntryCards({ deviceId }: { deviceId: string }) {
+  const { language, t } = useAppPreferences();
+  const navigate = useNavigate();
+  const sessions = useMobileSessions(deviceId);
   const agents = useMobileDeviceAgents(deviceId);
+
+  const sessionRows = sessions.data ?? [];
+  const sessionLoading = sessions.isLoading;
+  const runningCount = sessionRows.filter((s) => s.runtimeStatus === "running").length;
+  const waitingCount = sessionRows.filter((s) => s.runtimeStatus === "waiting_user").length;
+  const sessionTokens = sessionRows.reduce((sum, s) => sum + (s.knownTokens || 0), 0);
+
   const installedAgents = (agents.data ?? []).filter((agent) => agent.installed);
+  const agentLoading = agents.isLoading;
+  const flowletCount = installedAgents.filter((agent) => agent.flowletConfigState === "flowlet").length;
 
   return (
-    <div className={styles.deviceDetails} id={`device-agents-${deviceId}`}>
+    <div className={styles.deviceDetails} id={`device-entries-${deviceId}`}>
       <div className={styles.deviceDetailsHeader}>
-        <strong>{t("已安装 Agent")}</strong>
-        {!agents.isLoading && !agents.isError ? <span>{installedAgents.length}</span> : null}
+        <strong>{t("设备入口")}</strong>
       </div>
-      {agents.isLoading ? <div className={styles.deviceDetailsState}>{t("正在读取 Agent 状态…")}</div> : null}
-      {agents.isError ? <div className={styles.deviceDetailsState} data-error="true">{agents.error.message}</div> : null}
-      {!agents.isLoading && !agents.isError && installedAgents.length === 0 ? (
-        <div className={styles.deviceDetailsState}>{t("未检测到已安装的 Agent")}</div>
-      ) : null}
-      {installedAgents.map((agent) => <AgentRow key={agent.agentId} agent={agent} />)}
+      <button
+        type="button"
+        className={styles.entryCard}
+        onClick={() => navigate(`/devices/${encodeURIComponent(deviceId)}/sessions`)}
+      >
+        <span className={styles.entryIcon}><IconComment /></span>
+        <span className={styles.entryMain}>
+          <strong>{t("会话")}</strong>
+          <span>{sessionLoading ? t("正在读取…") : t("{count} 个会话，{tokens} Tokens", {
+            count: formatInteger(sessionRows.length, language),
+            tokens: formatCompactNumber(sessionTokens, language),
+          })}</span>
+          <small>{sessionLoading || sessionRows.length === 0
+            ? t("查看该设备同步的最近会话")
+            : t("{running} 个运行中 · {waiting} 个等待确认", {
+                running: formatInteger(runningCount, language),
+                waiting: formatInteger(waitingCount, language),
+              })}</small>
+        </span>
+        <IconChevronRight className={styles.entryChevron} />
+      </button>
+      <button
+        type="button"
+        className={styles.entryCard}
+        onClick={() => navigate(`/devices/${encodeURIComponent(deviceId)}/agents`)}
+      >
+        <span className={styles.entryIcon}><IconDesktop /></span>
+        <span className={styles.entryMain}>
+          <strong>{t("Agent")}</strong>
+          <span>{agentLoading ? t("正在读取…") : t("{count} 个已安装 Agent", {
+            count: formatInteger(installedAgents.length, language),
+          })}</span>
+          <small>{agentLoading || installedAgents.length === 0
+            ? t("查看该设备已安装的 Agent 及接入状态")
+            : t("{count} 个已接入 Flowlet", { count: formatInteger(flowletCount, language) })}</small>
+        </span>
+        <IconChevronRight className={styles.entryChevron} />
+      </button>
     </div>
   );
-}
-
-function AgentRow({ agent }: { agent: SyncedAgentProfile }) {
-  const { t } = useAppPreferences();
-  const status = agentConnectionStatus(agent, t);
-  return (
-    <div className={styles.installedAgent}>
-      <AgentBrandMark agentId={agent.agentId} />
-      <div className={styles.installedAgentMain}>
-        <strong>{agent.agentName}</strong>
-        <span>{agent.installations.map((installation) => installationLabel(installation, t)).join(" · ")}</span>
-      </div>
-      <span className={styles.agentConnection} data-state={status.state}>
-        <i />{status.label}
-      </span>
-    </div>
-  );
-}
-
-type Translate = (source: string, variables?: Record<string, string | number>) => string;
-
-function agentConnectionStatus(agent: SyncedAgentProfile, t: Translate) {
-  switch (agent.flowletConfigState) {
-    case "flowlet": return { label: t("已接入 Flowlet"), state: "success" };
-    case "partial": return { label: t("部分接入 Flowlet"), state: "partial" };
-    case "other_gateway": return { label: t("已接入其它网关"), state: "neutral" };
-    case "invalid": return { label: t("配置异常"), state: "failed" };
-    case "not_configured":
-      return agent.flowletObserved
-        ? { label: t("近期通过 Flowlet"), state: "observed" }
-        : { label: t("未接入 Flowlet"), state: "neutral" };
-    default:
-      return agent.flowletObserved
-        ? { label: t("近期通过 Flowlet"), state: "observed" }
-        : { label: t("暂未观测到 Flowlet 请求"), state: "neutral" };
-  }
-}
-
-function installationLabel(installation: SyncedAgentProfile["installations"][number], t: Translate) {
-  const surface = installation.surface === "desktop" ? t("桌面端") : "CLI";
-  return installation.version ? `${surface} ${installation.version}` : surface;
 }
 
 function platformLabel(platform: string) {

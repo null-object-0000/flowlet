@@ -33,7 +33,7 @@ describe("MobileShell", () => {
           <Route path="/origin" element={<span>Origin</span>} />
           <Route element={<MobileShell />}>
             <Route path="/" element={<SelectionPage name="Overview page" />} />
-            <Route path="/sessions" element={<SelectionPage name="Sessions page" />} />
+            <Route path="/projects" element={<SelectionPage name="Projects page" />} />
             <Route path="/devices" element={<span>Devices page</span>} />
             <Route path="/settings" element={<span>Settings page</span>} />
           </Route>
@@ -44,7 +44,7 @@ describe("MobileShell", () => {
     const navigation = screen.getByRole("navigation", { name: "主导航" });
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent)).toEqual([
       "概览",
-      "会话",
+      "项目",
       "设备",
       "设置",
     ]);
@@ -53,8 +53,8 @@ describe("MobileShell", () => {
     fireEvent.click(screen.getByText("Office PC"));
     expect(screen.getByLabelText("selected-device")).toHaveTextContent("device-1");
 
-    fireEvent.click(within(navigation).getByText("会话").closest("a")!);
-    expect(screen.getByText("Sessions page")).toBeInTheDocument();
+    fireEvent.click(within(navigation).getByText("项目").closest("a")!);
+    expect(screen.getByText("Projects page")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "切换设备，当前：Office PC" })).toBeInTheDocument();
     expect(screen.getByLabelText("selected-device")).toHaveTextContent("device-1");
 

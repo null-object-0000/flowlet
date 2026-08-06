@@ -1,0 +1,78 @@
+.shell {
+  width: 100%;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  touch-action: pan-x pan-y;
+  color: var(--flowlet-color-text);
+  background:
+    radial-gradient(circle at 100% 0, var(--flowlet-color-shell-glow), transparent 34%),
+    var(--flowlet-color-page);
+  display: flex;
+  justify-content: center;
+}
+
+/* 带顶部 padding 的页面框：下拉刷新的 root 从安全区下方开始，
+   刷新指示器（root 顶部 -34px）落在内容上方的空隙里，不顶到系统状态栏。 */
+.frame {
+  width: min(100%, 720px);
+  min-height: 100dvh;
+  padding: calc(16px + env(safe-area-inset-top)) 14px calc(24px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* 下拉刷新的 root 撑满页面框剩余高度，使手势区域覆盖全屏。 */
+.frame > * { width: 100%; flex: 1 0 auto; }
+
+.content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* 只有正文撑满剩余高度；页头保持自然高度贴顶，避免内容不足一屏时正文被往下挤。 */
+.body { width: 100%; flex: 1 0 auto; }
+
+.header {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  margin-bottom: 14px;
+  padding: 2px 0 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: color-mix(in srgb, var(--flowlet-color-page) 88%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.back {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  color: var(--flowlet-color-text);
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.back:active { background: var(--flowlet-color-surface-muted); }
+
+.heading { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.titleRow { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.heading h1 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 19px;
+  letter-spacing: -.02em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.heading p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: 12px; }

@@ -1,10 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileDevicesPage } from "./MobileDevicesPage";
 
 const useMobileDevicesMock = vi.fn();
 const useMobileDeviceAgentsMock = vi.fn();
 const useMobileLanProbesMock = vi.fn();
+const useMobileSessionsMock = vi.fn();
 const refreshMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
 
 vi.mock("lottie-web", () => ({
@@ -15,6 +17,7 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileDevices: () => useMobileDevicesMock(),
   useMobileDeviceAgents: (deviceId: string | null) => useMobileDeviceAgentsMock(deviceId),
   useMobileLanProbes: () => useMobileLanProbesMock(),
+  useMobileSessions: (deviceId: string | null) => useMobileSessionsMock(deviceId),
 }));
 
 vi.mock("../useMobileRefreshController", () => ({
@@ -42,6 +45,18 @@ const DEVICE = {
   lastSeenAt: "2026-07-30T02:00:00Z",
 };
 
+function renderPage() {
+  return render(
+    <MemoryRouter initialEntries={["/devices"]}>
+      <Routes>
+        <Route path="/devices" element={<MobileDevicesPage />} />
+        <Route path="/devices/:deviceId/sessions" element={<span>sessions sub</span>} />
+        <Route path="/devices/:deviceId/agents" element={<span>agents sub</span>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe("MobileDevicesPage", () => {
   beforeEach(() => {
     refreshMock.mockReset().mockResolvedValue(undefined);
@@ -62,6 +77,27 @@ describe("MobileDevicesPage", () => {
       isLoading: false,
       isError: false,
     });
+    useMobileSessionsMock.mockReturnValue({
+      data: [{
+        deviceId: "device-1",
+        deviceDisplayName: "Office PC",
+        devicePlatform: "windows",
+        agentType: "claude-code",
+        sessionId: "session-1",
+        parentSessionId: null,
+        runtimeStatus: "running",
+        title: "Fix parser",
+        clientName: "Claude Code",
+        activityAt: "2026-07-30T01:00:00Z",
+        flowletObserved: true,
+        requestCount: 3,
+        errorCount: 0,
+        knownTokens: 800,
+        lastInteraction: null,
+      }],
+      isLoading: false,
+      isError: false,
+    });
     useMobileLanProbesMock.mockReturnValue({
       data: [],
       isLoading: false,
@@ -70,7 +106,7 @@ describe("MobileDevicesPage", () => {
   });
 
   it("uses page pull-to-refresh without a header refresh button", async () => {
-    render(<MobileDevicesPage />);
+    renderPage();
     expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
     expect(screen.getByText(/最后刷新：/)).toBeInTheDocument();
 
@@ -83,16 +119,40 @@ describe("MobileDevicesPage", () => {
     expect(refreshMock).toHaveBeenCalledOnce();
   });
 
-  it("expands a device and shows installed agents with Flowlet status", () => {
-    render(<MobileDevicesPage />);
+  it("expands a device into session and agent entry cards instead of inline agents", () => {
+    renderPage();
 
     expect(screen.queryByText("Claude Code")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Office PC/ }));
 
+    expect(useMobileSessionsMock).toHaveBeenCalledWith("device-1");
     expect(useMobileDeviceAgentsMock).toHaveBeenCalledWith("device-1");
-    expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getByText("CLI 1.2.3")).toBeInTheDocument();
-    expect(screen.getByText("已接入 Flowlet")).toBeInTheDocument();
+
+    // 两个聚合入口卡片，展示核心信息。
+    expect(screen.getByText("会话")).toBeInTheDocument();
+    expect(screen.getByText(/1 个会话/)).toBeInTheDocument();
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText(/1 个已安装 Agent/)).toBeInTheDocument();
+
+    // 已安装 Agent 明细不再直接展示在设备页，需进入 Agent 二级页。
+    expect(screen.queryByText("Claude Code")).not.toBeInTheDocument();
+    expect(screen.queryByText("CLI 1.2.3")).not.toBeInTheDocument();
+  });
+
+  it("navigates to the session and agent sub-pages from the entry cards", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /Office PC/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: /会话/ }));
+    expect(screen.getByText("sessions sub")).toBeInTheDocument();
+  });
+
+  it("navigates to the agent sub-page from the agent entry card", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /Office PC/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Agent/ }));
+    expect(screen.getByText("agents sub")).toBeInTheDocument();
   });
 
   it("shows cloud-only badge when device has no LAN descriptor", () => {
@@ -101,7 +161,7 @@ describe("MobileDevicesPage", () => {
       isLoading: false,
       isError: false,
     });
-    render(<MobileDevicesPage />);
+    renderPage();
     expect(screen.getByText("仅云端")).toBeInTheDocument();
   });
 
@@ -111,7 +171,7 @@ describe("MobileDevicesPage", () => {
       isLoading: false,
       isError: false,
     });
-    render(<MobileDevicesPage />);
+    renderPage();
     expect(screen.getByText("直连 12ms")).toBeInTheDocument();
   });
 
@@ -121,7 +181,7 @@ describe("MobileDevicesPage", () => {
       isLoading: false,
       isError: false,
     });
-    render(<MobileDevicesPage />);
+    renderPage();
     const badge = screen.getByText("不可直连");
     expect(badge).toBeInTheDocument();
     expect(badge.closest("span")).toHaveAttribute("title", "局域网设备不可达");

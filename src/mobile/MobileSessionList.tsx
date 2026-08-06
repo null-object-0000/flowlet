@@ -1,23 +1,16 @@
 import { IconChevronRight } from "@douyinfe/semi-icons";
-import { useMemo, useState } from "react";
-import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { SharedAgentSession } from "../../domains/device-sync/types";
+import { useEffect, useMemo, useState } from "react";
+import { useAppPreferences } from "../app/preferences/AppPreferences";
+import type { SharedAgentSession } from "../domains/device-sync/types";
 import {
   useMobileSessions,
   useMobileWaitingSessionLanRefresh,
-} from "../../features/device-sync/useMobileDeviceSync";
-import { formatFullTimestamp } from "../../shared/formatters/datetime";
-import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
-import {
-  MobileDeviceTitlePicker,
-  useMobileDevicePickerState,
-} from "../MobileDevicePicker";
-import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
-import { useMobileRefreshController } from "../useMobileRefreshController";
-import { MobilePullToRefresh } from "../MobilePullToRefresh";
-import { MobileSessionSheet, agentLabel, runtimeLabel } from "../MobileSessionSheet";
-import { mobileSessionMetrics } from "../sessionMetrics";
-import styles from "./MobilePage.module.css";
+} from "../features/device-sync/useMobileDeviceSync";
+import { formatFullTimestamp } from "../shared/formatters/datetime";
+import { formatCompactNumber, formatInteger } from "../shared/formatters/number";
+import { MobileSessionSheet, agentLabel, runtimeLabel } from "./MobileSessionSheet";
+import { mobileSessionMetrics } from "./sessionMetrics";
+import styles from "./pages/MobilePage.module.css";
 
 type SessionStatusFilter = "all" | "active" | "waiting_user" | "idle";
 
@@ -28,13 +21,21 @@ const STATUS_FILTERS: Array<{ value: SessionStatusFilter; labelKey: string }> = 
   { value: "idle", labelKey: "已空闲" },
 ];
 
-export function MobileSessionsPage() {
+/**
+ * 指定设备的会话列表正文（状态筛选 + 列表 + 详情弹层），设备二级页复用。
+ * 下拉刷新由外层 MobileSubpageShell 统一承载，这里只透出刷新状态。
+ */
+export function MobileSessionList({
+  deviceId,
+  onRefreshDisabledChange,
+}: {
+  deviceId: string;
+  onRefreshDisabledChange?: (disabled: boolean) => void;
+}) {
   const { language, t } = useAppPreferences();
-  const devicePicker = useMobileDevicePickerState({ allowAll: false });
   const [statusFilter, setStatusFilter] = useState<SessionStatusFilter>("all");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const sessions = useMobileSessions(devicePicker.effectiveDeviceId);
-  const refreshController = useMobileRefreshController(devicePicker.effectiveDeviceId);
+  const sessions = useMobileSessions(deviceId);
   const waitingDeviceIds = useMemo(
     () => [...new Set(
       (sessions.data ?? [])
@@ -53,21 +54,14 @@ export function MobileSessionsPage() {
     [sessions.data, selectedKey],
   );
 
-  return (
-    <MobilePullToRefresh
-      disabled={refreshController.disabled || selectedKey !== null}
-      refreshing={refreshController.loading}
-      onRefresh={refreshController.refresh}
-    >
-    <section className={styles.page}>
-      <header className={`${styles.heading} ${styles.headingWithPicker}`}>
-        <div className={styles.headingTitleRow}>
-          <h2><MobileDeviceTitlePicker state={devicePicker} formatTitle={(name) => `${name ?? "…"} ${t("会话")}`} /></h2>
-          <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
-        </div>
-        <p>{t("查看该设备同步的最近会话与实时运行状态")}</p>
-      </header>
+  // 会话详情弹层打开时禁用整页下拉刷新，避免手势冲突。
+  const refreshDisabled = selectedKey !== null;
+  useEffect(() => {
+    onRefreshDisabledChange?.(refreshDisabled);
+  }, [onRefreshDisabledChange, refreshDisabled]);
 
+  return (
+    <section className={styles.page}>
       <div className={styles.statusTabs} role="group" aria-label={t("会话状态")}>
         {STATUS_FILTERS.map((filter) => (
           <button
@@ -112,7 +106,6 @@ export function MobileSessionsPage() {
 
       <MobileSessionSheet session={selectedSession} onClose={() => setSelectedKey(null)} />
     </section>
-    </MobilePullToRefresh>
   );
 }
 

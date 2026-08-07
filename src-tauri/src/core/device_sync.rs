@@ -278,17 +278,32 @@ fn build_synced_projects(storage: &Storage) -> Result<Vec<SyncedProject>, String
             has_local_binding: project.directory_path.is_some(),
             tasks: tasks
                 .into_iter()
-                .map(|task| SyncedProjectTask {
-                    id: task.id,
-                    title: task.title,
-                    status: task.status,
-                    priority: task.priority,
-                    updated_at: task.updated_at,
+                .map(|task| {
+                    // 执行轮次计数需在字段移动前读取（execution_history 借用整个 task）。
+                    let execution_count = project_task_execution_count(&task);
+                    SyncedProjectTask {
+                        id: task.id,
+                        title: task.title,
+                        status: task.status,
+                        priority: task.priority,
+                        execution_count,
+                        updated_at: task.updated_at,
+                    }
                 })
                 .collect(),
         });
     }
     Ok(synced)
+}
+
+/// 任务已开始的执行轮次数（execution_history JSON 数组长度；缺失/非法按 0）。
+/// 供移动端展示「第 N 轮执行」。
+fn project_task_execution_count(task: &crate::core::storage::ProjectTask) -> u32 {
+    task.execution_history
+        .as_deref()
+        .and_then(|history| serde_json::from_str::<Vec<serde_json::Value>>(history).ok())
+        .map(|entries| entries.len() as u32)
+        .unwrap_or(0)
 }
 
 async fn build_synced_agent_profiles(

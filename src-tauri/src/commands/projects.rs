@@ -1,6 +1,16 @@
 use crate::core::storage::{Project, ProjectTask};
 use crate::AppState;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+/// 项目详情独立窗口打开后，通知前端定位到某个任务（激活任务概览抽屉）。
+/// 前端在 `#/project-window/:projectId` 页面监听该事件；新窗口首次挂载时
+/// 也通过 URL 查询参数 `?task=` 兜底（事件可能在页面监听就绪前发出）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TaskDetailOpenPayload {
+    pub project_id: String,
+    pub task_id: String,
+}
 
 #[tauri::command]
 pub(crate) fn list_projects(state: tauri::State<'_, AppState>) -> Result<Vec<Project>, String> {
@@ -49,7 +59,22 @@ pub(crate) fn save_project(
             if !directory.is_dir() {
                 return Err("项目目录不存在或不是文件夹".to_string());
             }
-            Some(directory.to_string_lossy().into_owned())
+            // 目录唯一性约束：同一目录只能绑定一个项目，否则两个项目并行执行同一
+            // 目录会互相冲突（Agent 会话、工作区文件被并发读写）。
+            let directory = directory.to_string_lossy().into_owned();
+            if let Some(other) = state
+                .storage
+                .get_project_by_directory(&directory)
+                .map_err(|error| error.to_string())?
+            {
+                if other.id != project.id {
+                    return Err(format!(
+                        "项目目录已被项目「{}」占用，一个目录只能绑定一个项目，请选择其它目录",
+                        other.name
+                    ));
+                }
+            }
+            Some(directory)
         }
         _ => None,
     };
@@ -129,9 +154,8 @@ pub(crate) fn save_project_task(
     if task.agent_profile.trim().is_empty() {
         return Err("Agent Profile 不能为空".to_string());
     }
-    if !matches!(task.priority.as_str(), "p0" | "p1" | "p2") {
-        return Err("任务优先级无效".to_string());
-    }
+    // 优先级能力已从前端移除，后端继续保留字段但默认写死 P2（输入值不采信）。
+    let priority = "p2".to_string();
     if state
         .storage
         .get_project(&task.project_id)
@@ -139,6 +163,23 @@ pub(crate) fn save_project_task(
         .is_none()
     {
         return Err("项目不存在".to_string());
+    }
+    // 跨设备权限：不能基于其他设备的任务在本机建立子任务（或继续编辑）。
+    // 父任务不在本机 / 父任务已被其他设备执行 → 一律拒绝，本机只读。
+    if let Some(base_id) = task.base_task_id.as_deref() {
+        let current_device_id = state
+            .device_identity
+            .lock()
+            .map_err(|_| "读取当前设备身份失败".to_string())?
+            .device_id
+            .clone();
+        if state
+            .storage
+            .task_is_owned_by_other_device(base_id, &current_device_id)
+            .map_err(|error| error.to_string())?
+        {
+            return Err("父任务由其他设备执行，本机不能基于它创建或编辑子任务".to_string());
+        }
     }
     // 状态机：已存在的任务只有草稿可编辑。执行中 / 待审核 / 已完成都是只读，
     // 状态由执行器或审核通道管理，前端编辑通道一律拦截（防止把运行中任务改掉）。
@@ -151,6 +192,24 @@ pub(crate) fn save_project_task(
             return Err("只有草稿状态的任务可以编辑".to_string());
         }
     }
+    // 执行归属（claimed_by / claimed_at）与最近执行 job（last_job_id）是服务端托管字段：
+    // 前端传入不采信，保存时保留数据库已有值——避免编辑草稿把本机已执行任务的
+    // 执行归属清空，导致本机任务被误判为其他设备任务。
+    let existing = state
+        .storage
+        .get_project_task_by_id(&task.id)
+        .map_err(|error| error.to_string())?;
+    // 队列置顶同样是服务端托管字段：编辑草稿不触碰，已有值保留（新任务为 None）。
+    let (claimed_by, claimed_at, last_job_id, queue_boosted_at) = existing
+        .map(|existing| {
+            (
+                existing.claimed_by,
+                existing.claimed_at,
+                existing.last_job_id,
+                existing.queue_boosted_at,
+            )
+        })
+        .unwrap_or((None, None, task.last_job_id, None));
     state
         .storage
         .save_project_task(&ProjectTask {
@@ -161,16 +220,17 @@ pub(crate) fn save_project_task(
             status: task.status,
             task_type: task.task_type,
             agent_profile: task.agent_profile.trim().to_string(),
-            priority: task.priority,
+            priority: priority.clone(),
             base_task_id: task.base_task_id,
-            last_job_id: task.last_job_id,
+            last_job_id,
             rejection_reason: task.rejection_reason,
             execution_history: task.execution_history,
             created_at: task.created_at,
             updated_at: task.updated_at,
-            // 领取归属是服务端托管，前端传入不采信（反序列化默认 None）。
-            claimed_by: None,
-            claimed_at: None,
+            // 领取归属是服务端托管，前端传入不采信；已有值保留。
+            claimed_by,
+            claimed_at,
+            queue_boosted_at,
             deleted: false,
         })
         .map_err(|error| error.to_string())?;
@@ -188,6 +248,20 @@ pub(crate) fn delete_project_task(
     project_id: String,
     task_id: String,
 ) -> Result<bool, String> {
+    // 跨设备权限：其他设备执行过/执行中的任务，本机只读，不能删除。
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    if state
+        .storage
+        .task_is_owned_by_other_device(&task_id, &current_device_id)
+        .map_err(|error| error.to_string())?
+    {
+        return Err("该任务由其他设备执行，本机只读，不能删除".to_string());
+    }
     state
         .storage
         .delete_project_task(&project_id, &task_id)
@@ -222,6 +296,48 @@ pub(crate) async fn run_project_task(
 pub(crate) fn get_project_task_runner_state(
 ) -> Result<crate::core::agent_task_runner::ProjectTaskRunnerState, String> {
     Ok(crate::core::agent_task_runner::task_runner_state())
+}
+
+/// 提高任务优先级：把已提交待执行任务置顶到队列最前。
+/// 只允许操作本机可执行（非其他设备归属）的 submitted 任务。
+#[tauri::command]
+pub(crate) fn boost_project_task(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<bool, String> {
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    // 跨设备权限：其他设备执行过/执行中的任务，本机只读，不能置顶。
+    if state
+        .storage
+        .task_is_owned_by_other_device(&task_id, &current_device_id)
+        .map_err(|error| error.to_string())?
+    {
+        return Err("该任务由其他设备执行，本机只读，不能提高优先级".to_string());
+    }
+    let boosted = state
+        .storage
+        .boost_project_task(&task_id)
+        .map_err(|error| error.to_string())?;
+    if !boosted {
+        return Err("只有已提交待执行的任务可以提高优先级".to_string());
+    }
+    // 置顶后刷新队列顺序，其他设备/移动端尽快看到。
+    if let Some(project_id) = state
+        .storage
+        .get_task_project(&task_id)
+        .map_err(|error| error.to_string())?
+    {
+        crate::core::project_workspace_sync::notify_project_changed(
+            state.storage.clone(),
+            &project_id,
+        );
+    }
+    Ok(true)
 }
 
 #[tauri::command]
@@ -277,6 +393,20 @@ pub(crate) fn set_project_task_status(
     if !allowed {
         return Err("当前任务状态不允许此操作".to_string());
     }
+    // 跨设备权限：其他设备执行过/执行中的任务，本机只读，不能撤回/审核/退回。
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    if state
+        .storage
+        .task_is_owned_by_other_device(&task_id, &current_device_id)
+        .map_err(|error| error.to_string())?
+    {
+        return Err("该任务由其他设备执行，本机只读，请在执行设备上操作".to_string());
+    }
     state
         .storage
         .set_task_status(&task_id, &status)
@@ -331,6 +461,20 @@ pub(crate) fn convert_project_task_to_code(
     if trimmed.is_empty() {
         return Err("转为代码修改任务需要填写代码修改要求".to_string());
     }
+    // 跨设备权限：其他设备执行过的任务，本机只读，不能转为代码修改。
+    let current_device_id = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .device_id
+        .clone();
+    if state
+        .storage
+        .task_is_owned_by_other_device(&task_id, &current_device_id)
+        .map_err(|error| error.to_string())?
+    {
+        return Err("该任务由其他设备执行，本机只读，不能转为代码修改任务".to_string());
+    }
     let converted = state
         .storage
         .convert_task_to_code(&task_id, &trimmed)
@@ -382,22 +526,36 @@ pub(crate) async fn open_project_detail_window(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     project_id: String,
+    task_id: Option<String>,
 ) -> Result<(), String> {
-    open_detail_window(&app, state.inner(), &project_id).await
+    open_detail_window(&app, state.inner(), &project_id, task_id.as_deref()).await
 }
 
 /// 真正的独立窗口创建逻辑。既被上述 command 调用，也被应用启动时用于
 /// 恢复上次退出的独立窗口 —— 两者共用同一套「创建 + 记录 + 关闭清理」流程。
+/// 传入 `task_id` 时，窗口打开后向前端发送 `task-detail-open` 事件，
+/// 让任务看板激活对应任务的概览抽屉；新窗口首次挂载还通过 URL `?task=` 兜底。
 pub(crate) async fn open_detail_window(
     app: &tauri::AppHandle,
     state: &AppState,
     project_id: &str,
+    task_id: Option<&str>,
 ) -> Result<(), String> {
     let label = format!("project-detail-{project_id}");
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        if let Some(task_id) = task_id {
+            let _ = app.emit_to(
+                &label,
+                "task-detail-open",
+                TaskDetailOpenPayload {
+                    project_id: project_id.to_string(),
+                    task_id: task_id.to_string(),
+                },
+            );
+        }
         return Ok(());
     }
 
@@ -416,8 +574,14 @@ pub(crate) async fn open_detail_window(
         .map_err(|error| format!("创建应用数据目录失败：{error}"))?;
 
     // 与主窗口同一份 index.html，通过 hash 路由进入独立窗口专属页面。
-    let url = tauri::WebviewUrl::App(format!("index.html#/project-window/{project_id}").into());
-    let builder = tauri::WebviewWindowBuilder::new(app, label, url)
+    // 携带 task 查询参数：新窗口首次挂载时前端据此直接激活任务概览抽屉，
+    // 避免「事件在页面监听就绪前发出而丢失」的竞态。
+    let route = match task_id {
+        Some(task_id) => format!("index.html#/project-window/{project_id}?task={task_id}"),
+        None => format!("index.html#/project-window/{project_id}"),
+    };
+    let url = tauri::WebviewUrl::App(route.into());
+    let builder = tauri::WebviewWindowBuilder::new(app, label.clone(), url)
         .title(format!("Flowlet · {}", project.name))
         .inner_size(1200.0, 720.0)
         .min_inner_size(1200.0, 720.0)
@@ -441,17 +605,30 @@ pub(crate) async fn open_detail_window(
     state.detail_windows.add(project_id);
     let registry = state.detail_windows.clone();
     let app_exiting = state.app_exiting.clone();
-    let project_id = project_id.to_string();
+    let project_id_owned = project_id.to_string();
+    let project_id_for_emit = project_id_owned.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { .. } = event {
             let exiting = app_exiting.lock().map(|g| *g).unwrap_or(false);
             if !exiting {
-                registry.remove(&project_id);
+                registry.remove(&project_id_owned);
             }
         }
     });
 
     let _ = window.show();
     let _ = window.set_focus();
+
+    // 新窗口同样发一次事件：页面若已就绪可立即响应；未就绪则由 URL 查询参数兜底。
+    if let Some(task_id) = task_id {
+        let _ = app.emit_to(
+            &label,
+            "task-detail-open",
+            TaskDetailOpenPayload {
+                project_id: project_id_for_emit,
+                task_id: task_id.to_string(),
+            },
+        );
+    }
     Ok(())
 }

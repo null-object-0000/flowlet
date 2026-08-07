@@ -803,6 +803,7 @@ fn run_desktop() {
                             &app_handle_restore,
                             &state_restore,
                             &project_id,
+                            None,
                         )
                         .await
                         {
@@ -1259,6 +1260,7 @@ fn run_desktop() {
             commands::run_project_task,
             commands::get_project_task_runner_state,
             commands::list_queued_project_tasks,
+            commands::boost_project_task,
             commands::set_project_task_status,
             commands::convert_project_task_to_code,
             commands::get_project_workspace_status,

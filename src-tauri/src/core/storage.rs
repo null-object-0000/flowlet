@@ -951,6 +951,7 @@ impl Storage {
                 base_task_id  TEXT,
                 claimed_by    TEXT,
                 claimed_at    TEXT,
+                queue_boosted_at TEXT,
                 deleted       INTEGER NOT NULL DEFAULT 0,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL,
@@ -1832,6 +1833,9 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
         ("last_job_id", "TEXT"),
         ("rejection_reason", "TEXT"),
         ("execution_history", "TEXT"),
+        // 队列置顶时间（RFC3339）：已提交待执行任务被用户「提高优先级」置顶到队列最前。
+        // 设备本地字段，不参与工作区同步；任务被领取执行时清空。
+        ("queue_boosted_at", "TEXT"),
     ] {
         add_column_if_missing(connection, "project_tasks", column, definition)?;
     }
@@ -1865,15 +1869,16 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
                  execution_history TEXT,
                  claimed_by    TEXT,
                  claimed_at    TEXT,
+                 queue_boosted_at TEXT,
                  deleted       INTEGER NOT NULL DEFAULT 0,
                  created_at    TEXT NOT NULL,
                  updated_at    TEXT NOT NULL,
                  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
              );
-             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, deleted, created_at, updated_at)
+             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, queue_boosted_at, deleted, created_at, updated_at)
                  SELECT id, project_id, title, description,
                         CASE WHEN status = 'todo' THEN 'draft' ELSE status END,
-                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), base_task_id, last_job_id, rejection_reason, execution_history, NULL, NULL, 0, created_at, updated_at
+                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), base_task_id, last_job_id, rejection_reason, execution_history, NULL, NULL, NULL, 0, created_at, updated_at
                  FROM project_tasks_legacy;
              DROP TABLE project_tasks_legacy;
              CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
@@ -1956,13 +1961,14 @@ fn migrate_projects_workspace_schema(connection: &Connection) -> Result<(), Stor
                  execution_history TEXT,
                  claimed_by    TEXT,
                  claimed_at    TEXT,
+                 queue_boosted_at TEXT,
                  deleted       INTEGER NOT NULL DEFAULT 0,
                  created_at    TEXT NOT NULL,
                  updated_at    TEXT NOT NULL,
                  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
              );
-             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, deleted, created_at, updated_at)
-                 SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, deleted, created_at, updated_at
+             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, queue_boosted_at, deleted, created_at, updated_at)
+                 SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, queue_boosted_at, deleted, created_at, updated_at
                  FROM project_tasks_legacy;
              DROP TABLE project_tasks_legacy;
              CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated

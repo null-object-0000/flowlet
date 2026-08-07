@@ -547,8 +547,7 @@ async fn task_submit_handler(
         Ok(input)
             if !input.project_id.trim().is_empty()
                 && !input.title.trim().is_empty()
-                && matches!(input.task_type.as_str(), "code" | "readonly")
-                && matches!(input.priority.as_str(), "p0" | "p1" | "p2") =>
+                && matches!(input.task_type.as_str(), "code" | "readonly") =>
         {
             input
         }
@@ -585,7 +584,8 @@ async fn task_submit_handler(
         status: "draft".to_string(),
         task_type: input.task_type.clone(),
         agent_profile: input.agent_profile.trim().to_string(),
-        priority: input.priority.clone(),
+        // 优先级能力已从前端移除，后端继续保留字段但默认写死 P2（LAN 提交不采信输入值）。
+        priority: "p2".to_string(),
         base_task_id: None,
         last_job_id: None,
         rejection_reason: None,
@@ -594,6 +594,7 @@ async fn task_submit_handler(
         updated_at: now,
         claimed_by: None,
         claimed_at: None,
+        queue_boosted_at: None,
         deleted: false,
     };
     if let Err(error) = state.storage.save_project_task(&task) {
@@ -1491,6 +1492,7 @@ mod tests {
                 updated_at: now.clone(),
                 claimed_by: None,
                 claimed_at: None,
+                queue_boosted_at: None,
                 deleted: false,
             })
             .unwrap();

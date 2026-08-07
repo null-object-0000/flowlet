@@ -261,6 +261,7 @@ fn local_task_from_workspace(task: &WorkspaceTask, local_project_id: &str) -> Pr
         updated_at: task.updated_at.clone(),
         claimed_by: None,
         claimed_at: None,
+        queue_boosted_at: None,
         deleted: task.deleted,
     }
 }
@@ -383,10 +384,11 @@ fn apply_catalog(
                 // 内容合并：新者胜。
                 if workspace_task.updated_at >= local_task.updated_at {
                     let mut merged = local_task_from_workspace(workspace_task, &local_project.id);
-                    // 保留本机领取归属与最近执行 job（设备本地字段）。
+                    // 保留本机领取归属与最近执行 job、队列置顶（设备本地字段，不进入工作区对象）。
                     merged.claimed_by = local_task.claimed_by;
                     merged.claimed_at = local_task.claimed_at;
                     merged.last_job_id = local_task.last_job_id;
+                    merged.queue_boosted_at = local_task.queue_boosted_at;
                     storage
                         .save_project_task(&merged)
                         .map_err(|error| error.to_string())?;
@@ -810,6 +812,7 @@ mod tests {
             updated_at: "2026-08-03T00:00:00Z".to_string(),
             claimed_by: None,
             claimed_at: None,
+            queue_boosted_at: None,
             deleted: false,
         }
     }

@@ -426,7 +426,8 @@ pub struct LanPeerDescriptor {
 }
 
 /// 设备快照中携带的轻量项目任务（供移动端查看状态与提交目标）。
-/// 刻意不带描述与执行历史，避免把任务正文扩散到所有设备快照。
+/// 刻意不带描述与执行历史，避免把任务正文扩散到所有设备快照；
+/// 只携带执行轮次计数，供移动端展示「第 N 轮执行」。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncedProjectTask {
@@ -434,6 +435,9 @@ pub struct SyncedProjectTask {
     pub title: String,
     pub status: String,
     pub priority: String,
+    /// 已开始的执行轮次数（execution_history 长度）；旧快照缺失时按 0 处理。
+    #[serde(default)]
+    pub execution_count: u32,
     pub updated_at: String,
 }
 

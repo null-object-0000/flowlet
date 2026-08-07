@@ -1,7 +1,8 @@
 //! Agent 任务执行核心：按任务 `agent_profile` 驱动 Claude Code / OpenCode / Pi
 //! CLI 在项目目录内执行项目任务。
 //!
-//! 全局唯一执行槽：整个 Flowlet 同一时刻至多一个任务在执行，其余排队。
+//! 按项目隔离的执行槽：每个项目同一时刻至多一个任务在执行，其余在该项目内排队；
+//! 不同项目互不影响，可并行执行。并发安全下沉 Rust（参考 AGENT_DATA_SYNC_RUNNING 模式）。
 //! 三种 Agent 都以非交互模式执行（Claude Code `-p --output-format stream-json`、
 //! OpenCode `run --format json`、Pi `-p`），权限走各 CLI 的非交互放行参数
 //! （`--dangerously-skip-permissions` / `--auto` / `--approve`）。
@@ -10,20 +11,24 @@
 
 use crate::core::storage::{ProjectTask, Storage};
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 #[cfg(desktop)]
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 /// 任务执行完成进入待审核时是否发送系统通知的全局设置键（app_meta）。默认开启。
 pub(crate) const TASK_REVIEW_NOTIFICATION_KEY: &str = "task_review_notification_enabled";
 
-/// 全局唯一执行槽：`true` 表示已有任务在跑。
-pub(crate) static AGENT_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
+/// 按项目隔离的执行槽：key = project_id，value = 该项目正在执行的任务信息。
+/// 每个项目同一时刻至多一个任务在执行，不同项目可并行执行。
+pub(crate) static AGENT_TASK_RUNNING: OnceLock<Mutex<HashMap<String, RunningTaskInfo>>> =
+    OnceLock::new();
 
-/// 当前运行中的任务信息，供前端查询。
-static AGENT_TASK_CURRENT: Mutex<Option<RunningTaskInfo>> = Mutex::new(None);
+/// 获取按项目隔离的执行槽（首次访问时初始化）。
+fn agent_task_running() -> &'static Mutex<HashMap<String, RunningTaskInfo>> {
+    AGENT_TASK_RUNNING.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// 取消请求轮询间隔。
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(300);
@@ -45,8 +50,10 @@ pub(crate) struct RunningTaskInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProjectTaskRunnerState {
+    /// 是否有任意项目的任务在执行（调度器按项目粒度判断，不再依赖该字段阻塞全局）。
     pub running: bool,
-    pub current: Option<RunningTaskInfo>,
+    /// 当前正在执行的任务列表（按项目隔离：每个项目至多一个，不同项目可并行）。
+    pub current: Vec<RunningTaskInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -64,32 +71,38 @@ struct ExecutionOutcome {
     done_message: String,
 }
 
-struct AgentTaskRunningGuard;
+/// 按项目粒度的执行槽守卫：持有期间占用该项目的槽位，Drop 时释放。
+/// 领取即占位（在运行集合中插入占位信息），执行失败提前返回时随函数结束释放。
+struct AgentTaskRunningGuard {
+    project_id: String,
+}
 
 impl Drop for AgentTaskRunningGuard {
     fn drop(&mut self) {
-        AGENT_TASK_RUNNING.store(false, Ordering::Release);
-        if let Ok(mut current) = AGENT_TASK_CURRENT.lock() {
-            *current = None;
+        if let Ok(mut running) = agent_task_running().lock() {
+            running.remove(&self.project_id);
         }
     }
 }
 
-/// 查询执行槽状态（是否空闲、当前在跑的任务）。
+/// 查询执行槽状态：是否有任务在跑、每个项目当前在跑的任务列表。
 pub(crate) fn task_runner_state() -> ProjectTaskRunnerState {
+    let current = agent_task_running()
+        .lock()
+        .ok()
+        .map(|running| running.values().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
     ProjectTaskRunnerState {
-        running: AGENT_TASK_RUNNING.load(Ordering::Acquire),
-        current: AGENT_TASK_CURRENT
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone()),
+        running: !current.is_empty(),
+        current,
     }
 }
 
 /// 尝试领取并执行一个项目任务。
 ///
-/// 返回 `started: true` 表示抢到全局执行槽并已开始执行；`started: false`
-/// 表示槽被占用或任务状态不允许，调用方应下个周期重试。
+/// 返回 `started: true` 表示抢到该项目隔离的执行槽并已开始执行；`started: false`
+/// 表示该项目槽被占用（同项目已有任务在跑）或任务状态不允许，调用方应下个周期重试。
+/// 不同项目的任务互不阻塞，可并行执行。
 ///
 /// 领取成功后**立即返回**，Agent 执行放到后台任务：只有这样才能让调用方
 /// （提交后立即执行 / 前端调度器）第一时间拿到 `started` 结果并刷新看板，
@@ -102,19 +115,36 @@ pub(crate) async fn run_project_task(
     task_id: String,
     current_device_id: String,
 ) -> Result<RunProjectTaskResult, String> {
-    // 1. 抢全局唯一执行槽（并发安全下沉 Rust，参考 AGENT_DATA_SYNC_RUNNING 模式）。
-    if AGENT_TASK_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
+    // 1. 抢「按项目隔离」的执行槽（并发安全下沉 Rust，参考 AGENT_DATA_SYNC_RUNNING 模式）：
+    //    同一项目至多一个任务在跑，不同项目互不影响。领取即占位，执行失败提前返回时
+    //    随函数结束 drop 释放；成功则随后台执行任务 move，Agent 结束后释放。
     {
-        return Ok(RunProjectTaskResult {
-            started: false,
-            job_id: None,
-            message: "已有任务在执行中，任务已进入队列等待".to_string(),
-        });
+        let mut running = agent_task_running()
+            .lock()
+            .map_err(|_| "读取执行槽状态失败".to_string())?;
+        if running.contains_key(&project_id) {
+            return Ok(RunProjectTaskResult {
+                started: false,
+                job_id: None,
+                message: "该项目已有任务在执行中，任务已进入队列等待".to_string(),
+            });
+        }
+        // 占位：完整运行信息在任务进入执行中（步骤 6）写入，防止同项目并发领取竞态。
+        running.insert(
+            project_id.clone(),
+            RunningTaskInfo {
+                project_id: project_id.clone(),
+                task_id: String::new(),
+                task_title: String::new(),
+                agent_profile: String::new(),
+                job_id: String::new(),
+                started_at: String::new(),
+            },
+        );
     }
-    // 执行槽在准备阶段持有，随后台执行任务 move，Agent 结束后 drop 释放。
-    let guard = AgentTaskRunningGuard;
+    let guard = AgentTaskRunningGuard {
+        project_id: project_id.clone(),
+    };
 
     // 2. 读取任务并校验：调度器只领取「已提交」状态的任务。
     let task = storage
@@ -129,8 +159,8 @@ pub(crate) async fn run_project_task(
         });
     }
 
-    // 2.5. 跨设备领取：把任务归属标记为本机。被其他设备在租约窗口内领取时拒绝，
-    //      防止多台绑定了同一目录的设备对同一任务重复执行。
+    // 2.5. 跨设备领取：把任务归属标记为本机（永久归属）。任务被其他设备执行过或
+    //      正在执行时拒绝，防止多台设备对同一任务重复执行。
     if !storage
         .claim_task(&task_id, &current_device_id)
         .map_err(|error| format!("标记任务领取失败：{error}"))?
@@ -138,7 +168,7 @@ pub(crate) async fn run_project_task(
         return Ok(RunProjectTaskResult {
             started: false,
             job_id: None,
-            message: "该任务正由其他设备执行中，请稍后重试".to_string(),
+            message: "该任务已由其他设备执行，本机只读，请在执行设备上操作".to_string(),
         });
     }
 
@@ -169,16 +199,19 @@ pub(crate) async fn run_project_task(
         .map_err(|error| format!("记录任务执行日志失败：{error}"))?;
     let _ = storage.append_task_execution(&task_id, &job_id, &task.updated_at);
 
-    // 6. 记录当前运行信息供前端查询。
-    if let Ok(mut current) = AGENT_TASK_CURRENT.lock() {
-        *current = Some(RunningTaskInfo {
-            project_id: project_id.clone(),
-            task_id: task_id.clone(),
-            task_title: task.title.clone(),
-            agent_profile: task.agent_profile.clone(),
-            job_id: job_id.clone(),
-            started_at: chrono::Utc::now().to_rfc3339(),
-        });
+    // 6. 记录当前运行信息供前端查询（覆盖步骤 1 的占位；锁失败只跳过展示，不影响执行）。
+    if let Ok(mut running) = agent_task_running().lock() {
+        running.insert(
+            project_id.clone(),
+            RunningTaskInfo {
+                project_id: project_id.clone(),
+                task_id: task_id.clone(),
+                task_title: task.title.clone(),
+                agent_profile: task.agent_profile.clone(),
+                job_id: job_id.clone(),
+                started_at: chrono::Utc::now().to_rfc3339(),
+            },
+        );
     }
 
     // 7. 组装 prompt 并启动 Claude Code。
@@ -203,7 +236,6 @@ pub(crate) async fn run_project_task(
     //    Agent 结果（成功/失败/取消）在后台任务内处理，不再向上层传播。
     //    job_id 需要在返回结果里使用，克隆一份给后台任务。
     let spawned_job_id = job_id.clone();
-    let task_title = task.title.clone();
     let notify_app = app.clone();
     tauri::async_runtime::spawn(async move {
         let _guard = guard;
@@ -219,12 +251,17 @@ pub(crate) async fn run_project_task(
         .await;
         match result {
             Ok(outcome) => {
-                let _ = storage
-                    .finish_job(&spawned_job_id, outcome.job_status, &outcome.summary_json, &outcome.done_message);
+                let _ = storage.finish_job(
+                    &spawned_job_id,
+                    outcome.job_status,
+                    &outcome.summary_json,
+                    &outcome.done_message,
+                );
                 // Agent 执行结束（成功或失败）后任务进入待审核，此时发系统通知提醒审核；
                 // 取消路径会回到草稿，不进入待审核，不通知。用户可在全局设置关闭该通知。
+                // 通知携带项目与任务上下文，点击通知会打开独立窗口并激活该任务概览抽屉。
                 if outcome.job_status != "cancelled" {
-                    notify_task_review(&notify_app, &storage, &task_title);
+                    notify_task_review(&notify_app, &storage, &task);
                 }
             }
             Err(error) => {
@@ -280,7 +317,8 @@ fn build_task_prompt(
         prompt.push_str(&format!("任务描述：{}\n", task.description.trim()));
     }
     match task.task_type.as_str() {
-        "readonly" => prompt.push_str("任务类型：只读分析。请不要修改任何文件，只读取与分析，并在结尾给出结论。\n"),
+        "readonly" => prompt
+            .push_str("任务类型：只读分析。请不要修改任何文件，只读取与分析，并在结尾给出结论。\n"),
         _ => prompt.push_str("任务类型：代码修改。\n"),
     }
     prompt.push_str("\n完成后，请简要总结你做了什么、修改了哪些文件以及最终结论。");
@@ -295,11 +333,7 @@ const MAX_SESSION_NAME_CHARS: usize = 80;
 /// 清理控制字符（与 CLI 内部 `efn` 的 `[\x00-\x1f\x7f-\x9f]` 一致），
 /// 并按字符截断，避免脏标题进入会话名。空标题回退为 `任务`。
 fn build_session_name(task: &ProjectTask) -> String {
-    let cleaned: String = task
-        .title
-        .chars()
-        .filter(|ch| !ch.is_control())
-        .collect();
+    let cleaned: String = task.title.chars().filter(|ch| !ch.is_control()).collect();
     let title: String = cleaned
         .trim()
         .chars()
@@ -333,10 +367,7 @@ fn resolve_resume_session(
 }
 
 /// 从某个 job 的摘要里解析 session_id。
-fn session_from_job(
-    storage: &Storage,
-    job_id: Option<&str>,
-) -> Result<Option<String>, String> {
+fn session_from_job(storage: &Storage, job_id: Option<&str>) -> Result<Option<String>, String> {
     let Some(job_id) = job_id else {
         return Ok(None);
     };
@@ -405,15 +436,38 @@ async fn execute_agent(
 ) -> Result<ExecutionOutcome, String> {
     match task.agent_profile.as_str() {
         "OpenCode" => {
-            execute_opencode(storage, executable, task, project_id, job_id, prompt, resume_session)
-                .await
+            execute_opencode(
+                storage,
+                executable,
+                task,
+                project_id,
+                job_id,
+                prompt,
+                resume_session,
+            )
+            .await
         }
         "Pi" => {
-            execute_pi(storage, executable, task, project_id, job_id, prompt, resume_session).await
+            execute_pi(
+                storage,
+                executable,
+                task,
+                project_id,
+                job_id,
+                prompt,
+                resume_session,
+            )
+            .await
         }
         _ => {
             execute_claude_code(
-                storage, executable, task, project_id, job_id, prompt, resume_session,
+                storage,
+                executable,
+                task,
+                project_id,
+                job_id,
+                prompt,
+                resume_session,
             )
             .await
         }
@@ -438,6 +492,7 @@ fn required_project_dir(storage: &Storage, project_id: &str) -> Result<std::path
 /// 已启动的 Agent 子进程及其输出流。
 struct SpawnedAgent {
     child: tokio::process::Child,
+    stdin: Option<tokio::process::ChildStdin>,
     stdout: tokio::process::ChildStdout,
     stderr: tokio::process::ChildStderr,
 }
@@ -448,13 +503,19 @@ fn spawn_agent(
     executable: &str,
     project_dir: &std::path::Path,
     display_name: &str,
+    pipe_stdin: bool,
     build: impl FnOnce(&mut tokio::process::Command),
 ) -> Result<SpawnedAgent, String> {
     let mut command = build_agent_command(executable);
     build(&mut command);
+    let stdin = if pipe_stdin {
+        std::process::Stdio::piped()
+    } else {
+        std::process::Stdio::null()
+    };
     command
         .current_dir(project_dir)
-        .stdin(std::process::Stdio::null())
+        .stdin(stdin)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
@@ -472,6 +533,7 @@ fn spawn_agent(
         .take()
         .ok_or_else(|| format!("无法连接 {display_name} 标准错误"))?;
     Ok(SpawnedAgent {
+        stdin: child.stdin.take(),
         child,
         stdout,
         stderr,
@@ -528,6 +590,7 @@ async fn read_agent_output(
     let mut text_buffer = String::new();
     let mut session_id: Option<String> = None;
     let mut stderr_lines: Vec<String> = Vec::new();
+    let mut output_lines = 0usize;
 
     let mut cancel_poll = tokio::time::interval(CANCEL_POLL_INTERVAL);
     cancel_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -556,6 +619,7 @@ async fn read_agent_output(
                     Ok(Some(line)) => {
                         on_stdout_line(storage, job_id, &line, &mut text_buffer, &mut session_id)?;
                         if text_buffer.len() >= TEXT_FLUSH_THRESHOLD {
+                            output_lines = output_lines.saturating_add(text_buffer_lines(&text_buffer));
                             flush_text(storage, job_id, &mut text_buffer)?;
                         }
                     }
@@ -573,7 +637,7 @@ async fn read_agent_output(
     }
 
     // 冲刷剩余的累积文本，并统计总输出行数（供 summary 记录）。
-    let output_lines = text_buffer_lines(&text_buffer);
+    output_lines = output_lines.saturating_add(text_buffer_lines(&text_buffer));
     flush_text(storage, job_id, &mut text_buffer)?;
     Ok((
         AgentProcessOutcome {
@@ -663,7 +727,7 @@ async fn execute_claude_code(
     // 会话显示名：`-p` 非交互模式不会自动生成 ai-title，必须显式传 --name，
     // 否则会话在 Flowlet 列表 / resume 里没有名称。值用任务标题，便于识别。
     let session_name = build_session_name(task);
-    let agent = spawn_agent(executable, &project_dir, "Claude Code", |command| {
+    let agent = spawn_agent(executable, &project_dir, "Claude Code", false, |command| {
         command
             .arg("-p")
             .arg(prompt)
@@ -680,9 +744,15 @@ async fn execute_claude_code(
         }
     })?;
 
-    let (outcome, mut child) =
-        read_agent_output(storage, job_id, &task.id, agent, "Claude Code", process_claude_line)
-            .await?;
+    let (outcome, mut child) = read_agent_output(
+        storage,
+        job_id,
+        &task.id,
+        agent,
+        "Claude Code",
+        process_claude_line,
+    )
+    .await?;
     finish_agent_outcome(storage, task, "Claude Code", &mut child, outcome).await
 }
 
@@ -755,7 +825,7 @@ async fn execute_opencode(
     let project_dir = required_project_dir(storage, project_id)?;
     // 会话显示名：`run` 默认用截断后的 prompt 当标题，任务场景显式传 --title。
     let session_name = build_session_name(task);
-    let agent = spawn_agent(executable, &project_dir, "OpenCode", |command| {
+    let agent = spawn_agent(executable, &project_dir, "OpenCode", false, |command| {
         command
             .arg("run")
             .arg(prompt)
@@ -799,7 +869,10 @@ fn process_opencode_line(
         return Ok(());
     };
     if value.get("type").and_then(serde_json::Value::as_str) == Some("text") {
-        if let Some(text) = value.pointer("/part/text").and_then(serde_json::Value::as_str) {
+        if let Some(text) = value
+            .pointer("/part/text")
+            .and_then(serde_json::Value::as_str)
+        {
             text_buffer.push_str(text);
         }
     }
@@ -834,6 +907,59 @@ fn execute_pi_session_id(resume_session: Option<&str>) -> Option<String> {
     }
 }
 
+/// 校验 Pi 确实按指定 id 在 Flowlet 专属目录创建 / 更新了会话，并收到完整任务正文。
+///
+/// Windows npm 安装通常解析为 `pi.cmd` / `pi.ps1`。多行 prompt 若经 cmd / PowerShell
+/// shim 作为参数传递，会在首个换行处截断，后续 `--session-id` / `--session-dir` 也会丢失。
+/// 因此执行器改用 stdin 传正文，并在进程结束前以真实 JSONL 做后置校验，防止仅凭退出码 0
+/// 把“没有收到任务”的回复误判为执行成功。
+fn validate_pi_session(
+    session_dir: &std::path::Path,
+    session_id: &str,
+    expected_prompt: &str,
+) -> Result<std::path::PathBuf, String> {
+    let suffix = format!("_{session_id}.jsonl");
+    let entries = std::fs::read_dir(session_dir)
+        .map_err(|error| format!("读取 Pi 任务会话目录失败：{error}"))?;
+    let session_file = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(&suffix))
+        })
+        .ok_or_else(|| format!("Pi 未在任务会话目录创建会话 {session_id}"))?;
+    let contents = std::fs::read_to_string(&session_file)
+        .map_err(|error| format!("读取 Pi 任务会话失败：{error}"))?;
+    let received_full_prompt = contents.lines().any(|line| {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            return false;
+        };
+        if value
+            .pointer("/message/role")
+            .and_then(serde_json::Value::as_str)
+            != Some("user")
+        {
+            return false;
+        }
+        value
+            .pointer("/message/content")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|content| {
+                content.iter().any(|block| {
+                    block.get("type").and_then(serde_json::Value::as_str) == Some("text")
+                        && block.get("text").and_then(serde_json::Value::as_str)
+                            == Some(expected_prompt)
+                })
+            })
+    });
+    if !received_full_prompt {
+        return Err(format!("Pi 会话 {session_id} 未收到完整任务正文"));
+    }
+    Ok(session_file)
+}
+
 /// 启动 Pi 并读取非交互 `-p` 输出，直到进程退出。
 ///
 /// 会话 id 在执行前确定：首次执行生成新 UUID 并通过 `--session-id` 让 Pi 以此创建会话，
@@ -853,13 +979,12 @@ async fn execute_pi(
     std::fs::create_dir_all(&session_dir)
         .map_err(|error| format!("创建 Pi 任务会话目录失败：{error}"))?;
     // 会话 id 在执行前确定：首次用新 UUID，resume 用上次的。
-    let session_uuid = execute_pi_session_id(resume_session)
-        .ok_or_else(|| "无法生成 Pi 会话 id".to_string())?;
+    let session_uuid =
+        execute_pi_session_id(resume_session).ok_or_else(|| "无法生成 Pi 会话 id".to_string())?;
     let session_name = build_session_name(task);
-    let agent = spawn_agent(executable, &project_dir, "Pi", |command| {
+    let mut agent = spawn_agent(executable, &project_dir, "Pi", true, |command| {
         command
             .arg("-p")
-            .arg(prompt)
             // 信任项目本地文件（AGENTS.md / CLAUDE.md）：Pi headless 模式默认忽略它们。
             .arg("--approve")
             .arg("--name")
@@ -870,6 +995,23 @@ async fn execute_pi(
             .arg("--session-dir")
             .arg(&session_dir);
     })?;
+    // Pi 会把 stdin 与首个位置参数合并为初始消息。正文通过 stdin 传递，避免 Windows
+    // Windows npm shim 对带换行命令行参数的截断，并规避超长任务的命令行长度上限。
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = agent
+            .stdin
+            .take()
+            .ok_or_else(|| "无法连接 Pi 标准输入".to_string())?;
+        stdin
+            .write_all(prompt.as_bytes())
+            .await
+            .map_err(|error| format!("写入 Pi 任务正文失败：{error}"))?;
+        stdin
+            .shutdown()
+            .await
+            .map_err(|error| format!("关闭 Pi 标准输入失败：{error}"))?;
+    }
     // 明确告知 Pi 已启动：headless 模式抑制中间输出，完成前任务日志无逐字进展，
     // 避免用户误以为「没执行 / 停止了」。执行靠模型多轮调用，可能耗时数分钟。
     let _ = storage.add_job_event(
@@ -898,6 +1040,7 @@ async fn execute_pi(
     let session_id = if outcome.cancelled {
         None
     } else {
+        validate_pi_session(&session_dir, &session_uuid, prompt)?;
         Some(session_uuid)
     };
     if let Some(id) = &session_id {
@@ -913,11 +1056,7 @@ async fn execute_pi(
 }
 
 /// 把累积文本写入一条 job event（供只读详情 / 任务日志页展示）。
-fn flush_text(
-    storage: &Storage,
-    job_id: &str,
-    text_buffer: &mut String,
-) -> Result<(), String> {
+fn flush_text(storage: &Storage, job_id: &str, text_buffer: &mut String) -> Result<(), String> {
     let text = std::mem::take(text_buffer);
     if text.trim().is_empty() {
         return Ok(());
@@ -944,8 +1083,15 @@ fn build_agent_command(executable: &str) -> tokio::process::Command {
         command
     } else if extension == "ps1" {
         let mut command = tokio::process::Command::new("powershell.exe");
-        command
-            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", executable]);
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            executable,
+        ]);
         command
     } else {
         tokio::process::Command::new(executable)
@@ -968,9 +1114,11 @@ fn truncate(text: &str, max: usize) -> String {
 
 /// 任务执行完成进入待审核时发送系统通知。
 /// 是否发送由全局设置 `TASK_REVIEW_NOTIFICATION_KEY` 控制，默认开启。
+/// 通知携带项目与任务上下文：Windows 下点击通知会打开该项目的独立窗口
+/// 并激活任务概览抽屉（其它桌面平台退化为插件的基础 toast，暂无点击跳转）。
 /// 通知失败只记录日志，不影响任务执行流程。
 #[cfg(desktop)]
-fn notify_task_review(app: &AppHandle, storage: &Storage, task_title: &str) {
+fn notify_task_review(app: &AppHandle, storage: &Storage, task: &ProjectTask) {
     let enabled = storage
         .get_app_meta(TASK_REVIEW_NOTIFICATION_KEY)
         .ok()
@@ -981,14 +1129,68 @@ fn notify_task_review(app: &AppHandle, storage: &Storage, task_title: &str) {
         tracing::debug!("任务待审核通知已被用户关闭，跳过");
         return;
     }
-    use tauri_plugin_notification::NotificationExt;
-    let result = app
-        .notification()
-        .builder()
+    let body = format!("任务「{}」执行完成，等待审核", truncate(&task.title, 50));
+    #[cfg(windows)]
+    {
+        show_windows_review_toast(app, task, &body);
+    }
+    #[cfg(not(windows))]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let result = app
+            .notification()
+            .builder()
+            .title("任务执行完成")
+            .body(&body)
+            .show();
+        match result {
+            Ok(()) => tracing::info!("已发送任务待审核系统通知"),
+            Err(error) => tracing::warn!(%error, "发送任务待审核系统通知失败"),
+        }
+    }
+}
+
+/// Windows 专属：直接用 tauri-winrt-notification 构造带点击回调的 toast。
+/// 插件桌面 `show()` 不透出点击事件，这里注册 `on_activated`：用户点击
+/// 通知（正文或按钮）时在回调里打开项目独立窗口并定位到该任务。
+/// 回调捕获 `project_id` / `task_id`，不依赖 toast 的 launch 参数。
+#[cfg(all(desktop, windows))]
+fn show_windows_review_toast(app: &AppHandle, task: &ProjectTask, body: &str) {
+    use tauri_winrt_notification::{Duration, Toast};
+
+    let aumid = app.config().identifier.clone();
+    let project_id = task.project_id.clone();
+    let task_id = task.id.clone();
+    let activate_app = app.clone();
+
+    let toast = Toast::new(&aumid)
         .title("任务执行完成")
-        .body(format!("任务「{}」执行完成，等待审核", truncate(task_title, 50)))
-        .show();
-    match result {
+        .text1(body)
+        .duration(Duration::Short)
+        .on_activated(move |_action| {
+            let activate_app = activate_app.clone();
+            let project_id = project_id.clone();
+            let task_id = task_id.clone();
+            // 点击回调运行在 WinRT 后台线程，把打开窗口的动作移到 Tauri 异步运行时。
+            tauri::async_runtime::spawn(async move {
+                if let Some(state) = activate_app.try_state::<crate::AppState>() {
+                    if let Err(error) = crate::commands::open_detail_window(
+                        &activate_app,
+                        state.inner(),
+                        &project_id,
+                        Some(&task_id),
+                    )
+                    .await
+                    {
+                        tracing::warn!(%error, "点击通知打开任务看板失败");
+                    }
+                }
+            });
+            Ok(())
+        })
+        .on_dismissed(|_| Ok(()));
+
+    match toast.show() {
         Ok(()) => tracing::info!("已发送任务待审核系统通知"),
         Err(error) => tracing::warn!(%error, "发送任务待审核系统通知失败"),
     }
@@ -1021,6 +1223,7 @@ mod tests {
             execution_history: None,
             claimed_by: None,
             claimed_at: None,
+            queue_boosted_at: None,
             deleted: false,
             created_at: String::new(),
             updated_at: String::new(),
@@ -1130,7 +1333,10 @@ mod tests {
     fn resume_returns_none_without_sessions() {
         let storage = test_storage();
         let fresh = task("全新任务");
-        assert_eq!(resolve_resume_session(&storage, &fresh, None).unwrap(), None);
+        assert_eq!(
+            resolve_resume_session(&storage, &fresh, None).unwrap(),
+            None
+        );
         // base task 有 last_job_id 但 job 已清理时也返回 None（全新会话）。
         let mut base = task("基础任务");
         base.last_job_id = Some("missing-job".to_string());
@@ -1146,12 +1352,18 @@ mod tests {
             agent_profile_meta("Claude Code"),
             Some(("claude-code", "Claude Code"))
         );
-        assert_eq!(agent_profile_meta("OpenCode"), Some(("opencode", "OpenCode")));
+        assert_eq!(
+            agent_profile_meta("OpenCode"),
+            Some(("opencode", "OpenCode"))
+        );
         assert_eq!(agent_profile_meta("Pi"), Some(("pi", "Pi")));
         assert_eq!(agent_profile_meta("Unknown Agent"), None);
         // 空串是历史任务在 agent_profile 列引入前的默认值，视为 Claude Code。
         assert_eq!(agent_profile_meta(""), Some(("claude-code", "Claude Code")));
-        assert_eq!(agent_profile_meta("   "), Some(("claude-code", "Claude Code")));
+        assert_eq!(
+            agent_profile_meta("   "),
+            Some(("claude-code", "Claude Code"))
+        );
     }
 
     #[test]
@@ -1273,6 +1485,52 @@ mod tests {
         assert!(execute_pi_session_id(Some("   ")).is_some());
     }
 
+    #[test]
+    fn pi_session_validation_requires_real_session_and_full_prompt() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-pi-session-validation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let session_id = "550e8400-e29b-41d4-a716-446655440000";
+        let prompt = "调度前缀\n\n任务标题：修复布局\n任务描述：完整正文";
+        let path = root.join(format!("2026-08-07T00-00-00-000Z_{session_id}.jsonl"));
+        let user_message = serde_json::json!({
+            "type": "message",
+            "message": {
+                "role": "user",
+                "content": [{ "type": "text", "text": prompt }]
+            }
+        });
+        std::fs::write(&path, format!("{}\n", user_message)).unwrap();
+
+        assert_eq!(
+            validate_pi_session(&root, session_id, prompt).unwrap(),
+            path
+        );
+        let error = validate_pi_session(&root, session_id, "调度前缀")
+            .expect_err("截断后的任务正文不能通过校验");
+        assert!(error.contains("未收到完整任务正文"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pi_session_validation_rejects_fabricated_session_id() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-pi-session-validation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let error = validate_pi_session(
+            &root,
+            "550e8400-e29b-41d4-a716-446655440000",
+            "完整任务正文",
+        )
+        .expect_err("不存在的 Pi 会话不能通过校验");
+        assert!(error.contains("未在任务会话目录创建会话"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// 真实环境集成测试：用本机已安装的 Pi CLI 完整跑一遍 execute_pi，
     /// 验证 Pi 进程能启动、输出能累积、任务能回写待审核、会话 id 能发现。
     /// 需要本机已安装 Pi 且 Flowlet 代理在 18640 运行；正常测试默认跳过。
@@ -1282,10 +1540,8 @@ mod tests {
         use crate::core::storage::Project;
         let storage = test_storage();
         // 用临时目录作为项目目录，避免污染真实项目。
-        let project_dir = std::env::temp_dir().join(format!(
-            "flowlet-pi-integration-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let project_dir =
+            std::env::temp_dir().join(format!("flowlet-pi-integration-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&project_dir).unwrap();
         storage
             .save_project(&Project {
@@ -1315,8 +1571,11 @@ mod tests {
         task.id = "task-integ".to_string();
         task.project_id = "project-integ".to_string();
         task.status = "submitted".to_string();
-        task.title = "任务支持委派给 OpenCode 和 Pi 去执行".to_string();
-        task.description = "参考已有委派给 Claude Code 执行的所有能力".to_string();
+        task.task_type = "readonly".to_string();
+        task.title = "验证 Pi stdin 任务传递".to_string();
+        task.description =
+            "不要调用任何工具，不要运行命令，不要修改文件。请只回复固定文本 FLOWLET_PI_STDIN_OK。"
+                .to_string();
         storage.save_project_task(&task).unwrap();
 
         // 用真实 build_task_prompt 生成的中文长 prompt（含换行），贴近真实执行路径。
@@ -1343,7 +1602,10 @@ mod tests {
             "Pi 执行后 summary 应包含确定的会话 id"
         );
         // 输出已累积为 job event（summary 只记录行数，文本在 events 里）。
-        let detail = storage.get_background_job_detail("job-integ").unwrap().unwrap();
+        let detail = storage
+            .get_background_job_detail("job-integ")
+            .unwrap()
+            .unwrap();
         let collected: String = detail
             .events
             .iter()
@@ -1351,13 +1613,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(collected.contains(session_id), "会话事件应记录会话 id");
+        assert!(
+            collected.contains("FLOWLET_PI_STDIN_OK"),
+            "Pi 应收到完整任务正文并回复约定文本"
+        );
         assert!(summary["outputLines"].as_u64().unwrap_or(0) > 0);
         // 任务应回写待审核。
         assert_eq!(
-            storage
-                .get_task_status("task-integ")
-                .unwrap()
-                .as_deref(),
+            storage.get_task_status("task-integ").unwrap().as_deref(),
             Some("review")
         );
         let _ = std::fs::remove_dir_all(&project_dir);
@@ -1426,10 +1689,7 @@ mod tests {
         let session_id = summary["sessionId"].as_str().unwrap_or("");
         assert!(!session_id.is_empty(), "OpenCode 应能解析会话 id");
         assert_eq!(
-            storage
-                .get_task_status("task-opening")
-                .unwrap()
-                .as_deref(),
+            storage.get_task_status("task-opening").unwrap().as_deref(),
             Some("review")
         );
         let _ = std::fs::remove_dir_all(&project_dir);

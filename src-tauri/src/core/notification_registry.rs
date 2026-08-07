@@ -18,9 +18,17 @@ pub(crate) fn register_app_user_model_id(aumid: &str, display_name: &str) {
     match hkcu.create_subkey(&path) {
         Ok((key, _)) => {
             if let Err(error) = key.set_value("DisplayName", &display_name) {
-                tracing::warn!(
-                    aumid, %error, "写入 AppUserModelID DisplayName 失败"
-                );
+                tracing::warn!(aumid, %error, "写入 AppUserModelID DisplayName 失败");
+            }
+            // 指向应用自身的 exe，让 toast 显示应用图标而不是空白占位。
+            let exe_path = std::env::current_exe()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if !exe_path.is_empty() {
+                if let Err(error) = key.set_value("IconUri", &exe_path) {
+                    tracing::warn!(aumid, %error, "写入 AppUserModelID IconUri 失败");
+                }
             }
         }
         Err(error) => {

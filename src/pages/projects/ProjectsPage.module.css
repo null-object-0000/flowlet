@@ -47,6 +47,16 @@
 .taskReadonlyTabs :global(.semi-tabs-tab) { height: 44px; padding: 0 3px; margin-right: 25px; font-size: var(--flowlet-font-size-body); }
 .tabFrame { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .tabScroll { position: absolute; inset: 0; overflow-y: auto; }
+/* 任务会话按执行轮次分 Tab：嵌套 Tabs 填满会话 Tab 容器，与顶部外层 Tabs 同构。 */
+.roundTabs { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+.roundTabs :global(.semi-tabs) { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.roundTabs :global(.semi-tabs-bar) { flex: none; height: 36px; margin: 0; padding: 0 18px; border-bottom: 1px solid var(--flowlet-color-border); }
+.roundTabs :global(.semi-tabs-content) { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.roundTabs :global(.semi-tabs-pane) { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.roundTabs :global(.semi-tabs-pane-inactive) { display: none; }
+.roundTabs :global(.semi-tabs-tab) { height: 36px; padding: 0 2px; margin-right: 18px; font-size: 12px; }
+/* 会话滚动容器可聚焦以支持 PgUp/PgDn/Home/End 标准键盘滚动，聚焦时不显示焦点框。 */
+.sessionScrollKeyboard { outline: none; }
 .readonlyTabsBody { padding: 16px 18px 24px; display: flex; flex-direction: column; gap: 26px; }
 .taskSessionBody { padding: 16px 18px 24px; }
 .remoteTaskTag { min-width: 0; max-width: 150px; height: 22px; padding: 0 8px; border-radius: 6px; display: inline-flex; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--semi-color-teal-light-default); color: var(--semi-color-teal); font-size: 12px; font-weight: 500; line-height: 1; }

@@ -1000,8 +1000,9 @@ function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJ
         return;
       }
       if (activeTab === "related") return;
-      const refetches: Promise<void>[] = [];
-      if (latestJobId) refetches.push(queryClient.invalidateQueries({ queryKey: queryKeys.backgroundTask.detail(latestJobId) }));
+      // 会话按执行轮次分 Tab：刷新所有历史轮次的 job 详情（重新解析各轮 sessionId），
+      // 并精确失效最新一轮的时间线（其余轮次数据已完成，随 job 详情刷新即可）。
+      const refetches: Promise<void>[] = history.map((record) => queryClient.invalidateQueries({ queryKey: queryKeys.backgroundTask.detail(record.jobId) }));
       // sessionId 缺失时（运行中尚未落库）只刷新 job 详情，TaskSessionView 会在拿到 sessionId 后自动加载时间线。
       if (agentType && sessionId) refetches.push(queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.timeline(agentType, sessionId) }));
       await Promise.all(refetches);
@@ -1110,6 +1111,7 @@ function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJ
               <div className={styles.tabFrame}>
                 <TaskSessionView
                   task={task}
+                  visible={activeTab === "session"}
                   autoRefresh={refreshControl.autoRefresh}
                   onRefreshed={() => setLastUpdatedAt(Date.now())}
                 />
@@ -1204,18 +1206,77 @@ function TaskExecutionRun({ record, index, runningJobId, now }: { record: TaskEx
   );
 }
 
-/** 任务「会话」Tab：读取最近一次执行产生的 Agent 会话，展示完整对话（全部交互）。
- *  autoRefresh 由外层公共刷新控件控制；onRefreshed 在自动刷新成功后触发，
- * 供外层抽屉更新「最后刷新」指示。 */
-function TaskSessionView({ task, autoRefresh, onRefreshed }: { task: ProjectTask; autoRefresh: boolean; onRefreshed?: () => void }) {
-  const { language, t } = useAppPreferences();
+/** 任务「会话」Tab：按执行轮次分 Tab 隔离展示每一轮产生的 Agent 会话（完整对话）。
+ *  默认激活最后一轮（最新一轮）；visible 由外层抽屉的「会话」Tab 是否激活决定，
+ *  用于在面板真正可见时才聚焦滚动容器（隐藏期间 clientHeight 为 0）；
+ *  autoRefresh 由外层公共刷新控件控制，仅作用于最新一轮（任务执行中只有它的对话
+ *  在增长）；onRefreshed 在自动刷新成功后触发，供外层抽屉更新「最后刷新」指示。 */
+function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: ProjectTask; visible: boolean; autoRefresh: boolean; onRefreshed?: () => void }) {
+  const { t } = useAppPreferences();
   const history = useMemo(() => taskExecutionHistory(task), [task]);
-  const latestJobId = history.length > 0 ? history[history.length - 1].jobId : null;
-  const jobDetail = useBackgroundTaskDetail(latestJobId);
+  const isRunning = task.status === "in_progress";
+  const agentType = projectAgentType(task.agentProfile);
+  // 默认激活最新一轮；切换任务时回到最新一轮。
+  const [activeRound, setActiveRound] = useState(() => Math.max(0, history.length - 1));
+  useEffect(() => { setActiveRound(Math.max(0, history.length - 1)); }, [task.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const activeIndex = history.length > 0 ? Math.min(Math.max(activeRound, 0), history.length - 1) : -1;
+  const onRefreshedRef = useRef(onRefreshed);
+  onRefreshedRef.current = onRefreshed;
+
+  if (history.length === 0) {
+    return (
+      <div className={styles.tabScroll}>
+        <div className={styles.taskSessionBody}>
+          <div className={styles.readonlyEmpty}>{t("该任务尚未执行，暂无会话记录")}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.roundTabs}>
+      <Tabs
+        type="line"
+        activeKey={String(activeIndex)}
+        tabPaneMotion={false}
+        onChange={(key) => setActiveRound(Number(key))}
+      >
+        {history.map((record, index) => (
+          <Tabs.TabPane key={record.jobId} tab={t("第 {n} 轮", { n: index + 1 })} itemKey={String(index)}>
+            <div className={styles.tabFrame}>
+              <TaskSessionRound
+                record={record}
+                agentType={agentType}
+                roundIndex={index}
+                active={visible && index === activeIndex}
+                autoRefresh={autoRefresh && isRunning && index === history.length - 1}
+                onRefreshed={() => onRefreshedRef.current?.()}
+              />
+            </div>
+          </Tabs.TabPane>
+        ))}
+      </Tabs>
+    </div>
+  );
+}
+
+/** 单轮执行的会话展示：读取该轮 job 产生的 Agent 会话时间线并渲染完整对话。
+ *  active 为 true 时重新测量滚动位置（pane 隐藏期间 clientHeight 为 0 会把
+ *  atBottom 误判为 true）并聚焦滚动容器，让 PgUp/PgDn/End 等键盘操作立即可用；
+ *  autoRefresh 仅对最新一轮开启（任务执行中对话仍在增长）。 */
+function TaskSessionRound({ record, agentType, roundIndex, active, autoRefresh, onRefreshed }: {
+  record: TaskExecutionRecord;
+  agentType: "claude-code" | "opencode" | "pi" | null;
+  roundIndex: number;
+  active: boolean;
+  autoRefresh: boolean;
+  onRefreshed?: () => void;
+}) {
+  const { language, t } = useAppPreferences();
+  const jobDetail = useBackgroundTaskDetail(record.jobId);
   // 运行中的任务 summary_json 尚无 sessionId（完成后才写入），回退从 job 的「会话」事件解析。
   const sessionId = parseJobSessionId(jobDetail.data?.job.summaryJson ?? null)
     ?? parseSessionIdFromEvents(jobDetail.data?.events ?? []);
-  const agentType = projectAgentType(task.agentProfile);
   const timeline = useAgentSessionTimeline(agentType, sessionId, Boolean(sessionId));
   // 完整对话的滚动跟随：在底部时新内容自动滚到底，离开底部时右下角出现滚动按钮
   // 并用红点提示新内容（与移动端会话弹窗一致）。
@@ -1227,12 +1288,19 @@ function TaskSessionView({ task, autoRefresh, onRefreshed }: { task: ProjectTask
   useLayoutEffect(() => {
     sessionScroll.observeContent(conversationVersion);
   }, [sessionScroll.observeContent, conversationVersion]);
+  // 轮次 Tab 激活后重新测量滚动位置并聚焦滚动容器：激活前 pane 是 display:none，
+  // clientHeight 为 0，observeContent 会把 atBottom 误判为 true；聚焦后标准键盘
+  // 滚动立即可用。
+  useLayoutEffect(() => {
+    if (!active) return;
+    sessionScroll.handleScroll();
+    sessionScroll.containerRef.current?.focus({ preventScroll: true });
+  }, [active, sessionScroll.handleScroll, sessionScroll.containerRef]);
   // 任务执行中对话仍在增长：自动刷新开启时每 5 秒刷新完整对话；页面不可见时跳过。
-  const isRunning = task.status === "in_progress";
   const onRefreshedRef = useRef(onRefreshed);
   onRefreshedRef.current = onRefreshed;
   useEffect(() => {
-    if (!isRunning || !sessionId || !autoRefresh) return;
+    if (!autoRefresh || !sessionId) return;
     const timer = window.setInterval(() => {
       if (document.hidden) return;
       void timeline.refetch()
@@ -1240,12 +1308,10 @@ function TaskSessionView({ task, autoRefresh, onRefreshed }: { task: ProjectTask
         .catch(() => undefined);
     }, SESSION_AUTO_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [isRunning, sessionId, autoRefresh, timeline.refetch]);
+  }, [autoRefresh, sessionId, timeline.refetch]);
 
   let content: ReactNode;
-  if (!latestJobId) {
-    content = <div className={styles.readonlyEmpty}>{t("该任务尚未执行，暂无会话记录")}</div>;
-  } else if (jobDetail.isLoading) {
+  if (jobDetail.isLoading) {
     content = <div className={styles.readonlyEmpty}>{t("正在读取执行记录…")}</div>;
   } else if (jobDetail.isError) {
     content = <div className={styles.readonlyEmpty}>{t("执行记录读取失败：{message}", { message: jobDetail.error.message })}</div>;
@@ -1268,8 +1334,46 @@ function TaskSessionView({ task, autoRefresh, onRefreshed }: { task: ProjectTask
     <>
       <div
         ref={sessionScroll.containerRef}
-        className={styles.tabScroll}
+        className={`${styles.tabScroll} ${styles.sessionScrollKeyboard}`}
+        tabIndex={0}
+        role="region"
+        aria-label={t("第 {n} 轮会话内容", { n: roundIndex + 1 })}
         onScroll={sessionScroll.handleScroll}
+        onClick={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("button, a, input, textarea, select, summary, [contenteditable='true'], [role='button']")) return;
+          event.currentTarget.focus({ preventScroll: true });
+        }}
+        onKeyDown={(event) => {
+          // 标准键盘滚动：会话滚动容器需要保持键盘焦点，否则 PgUp/PgDn/End 会落到
+          // 文档根节点而不是容器。输入/可交互元素内保留原生按键语义，不劫持。
+          const container = sessionScroll.containerRef.current;
+          if (!container) return;
+          const target = event.target as HTMLElement;
+          if (target.closest("button, a, input, textarea, select, summary, [contenteditable='true'], [role='button']")) return;
+          const step = Math.max(1, Math.round(container.clientHeight * 0.9));
+          switch (event.key) {
+            case "PageDown":
+              container.scrollBy({ top: step });
+              break;
+            case "PageUp":
+              container.scrollBy({ top: -step });
+              break;
+            case "Home":
+              container.scrollTop = 0;
+              break;
+            case "End":
+              container.scrollTop = container.scrollHeight;
+              break;
+            case " ":
+              if (event.shiftKey) container.scrollBy({ top: -step }); else container.scrollBy({ top: step });
+              break;
+            default:
+              return;
+          }
+          event.preventDefault();
+          sessionScroll.handleScroll();
+        }}
       >
         {/* 会话内容与概览 Tab 保持一致的内边距，避免内容贴边 */}
         <div className={styles.taskSessionBody}>

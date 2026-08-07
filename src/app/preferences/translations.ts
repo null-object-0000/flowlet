@@ -159,6 +159,7 @@ const english: Record<string, string> = {
   "该任务尚未执行，暂无会话记录": "This task has not run yet, no session records",
   "该任务执行未产生可展示的 Agent 会话": "This run produced no readable Agent session",
   "第 {n} 轮": "Turn #{n}",
+  "第 {n} 轮会话内容": "Turn #{n} conversation",
   "执行轮次": "Execution round",
   "执行记录已清理或不可用": "Execution record cleaned up or unavailable",
   "代码修改": "Code change",

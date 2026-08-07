@@ -35,15 +35,16 @@
   min-width: 0;
   overflow: hidden;
   color: var(--flowlet-color-text);
-  font-size: 17px;
+  font-size: var(--flowlet-font-size-section-title);
   font-weight: 700;
+  line-height: var(--flowlet-line-height-section-title);
 }
 
 .description {
   margin-top: -2px;
   color: var(--flowlet-color-text-secondary);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--flowlet-font-size-body-compact);
+  line-height: var(--flowlet-line-height-body-compact);
 }
 
 .content {

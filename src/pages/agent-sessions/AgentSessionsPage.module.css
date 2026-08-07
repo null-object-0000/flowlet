@@ -6,14 +6,14 @@
 .toolbar :global(.semi-select) { width: 210px; flex: none; }
 .tableCard { min-height: 0; display: grid; grid-template-rows: 38px minmax(0, 1fr) 38px; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .grid { display: grid; grid-template-columns: 120px minmax(210px, 1.7fr) minmax(130px, 1fr) 70px 90px 80px 90px; align-items: center; gap: 10px; padding: 0 14px; }
-.head { color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: 11px; font-weight: 650; }
+.head { color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); font-weight: 650; }
 .body { min-height: 0; overflow: auto; }
-.row { width: 100%; min-height: 54px; border: 0; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: transparent; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.row { width: 100%; min-height: 54px; border: 0; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: transparent; text-align: left; font: inherit; font-size: var(--flowlet-font-size-body-compact); line-height: var(--flowlet-line-height-body-compact); cursor: pointer; }
 .row:hover { background: var(--flowlet-color-surface-muted); }
 .row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session { display: grid; gap: 3px; }
 .session strong, .session small, .client strong, .client small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session small, .client small { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.session small, .client small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .client { display: grid; gap: 3px; }
 .tokenTotal { width: fit-content; color: var(--flowlet-color-text-secondary); border-bottom: 1px dotted var(--flowlet-color-text-tertiary); font-variant-numeric: tabular-nums; line-height: 1.4; white-space: nowrap; cursor: help; }
 .success { color: var(--flowlet-color-success); }
@@ -22,7 +22,7 @@
 .statusCell { display: grid; justify-items: start; gap: 3px; overflow: visible; }
 .statusCell :global(.semi-tag) { max-width: 100%; margin: 0; }
 .statusCell :global(.semi-tag-content) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.statusCell small { font-size: 9px; white-space: nowrap; }
+.statusCell small { font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); white-space: nowrap; }
 .statusHint { color: var(--flowlet-color-text-tertiary); }
 .runtimeActive { font-weight: 650; }
 .runtimeWaiting { font-weight: 650; }
@@ -32,6 +32,6 @@
 .skeleton { cursor: default; }
 .skeleton span { height: 11px; border-radius: 4px; background: var(--flowlet-color-surface-strong); animation: pulse 1.2s ease-in-out infinite alternate; }
 .footer { min-height: 38px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--flowlet-color-border); }
-.footer :global(.semi-page-item) { min-width: 25px; height: 25px; line-height: 25px; border-radius: 6px; font-size: 11px; }
+.footer :global(.semi-page-item) { min-width: 25px; height: 25px; line-height: 25px; border-radius: 6px; font-size: var(--flowlet-font-size-caption); }
 @keyframes pulse { to { opacity: .45; } }
 @media (max-width: 900px) { .page { overflow: auto; } .tableCard { min-width: 860px; } }

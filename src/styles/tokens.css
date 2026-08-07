@@ -3,24 +3,38 @@
    visual details belong in co-located CSS Modules, not here. */
 
 :root {
-  --flowlet-font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
-  --flowlet-font-size-body: 13px;
+  --flowlet-font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Microsoft YaHei UI", "Segoe UI", "PingFang SC", system-ui, sans-serif;
+  --flowlet-font-family-mono: "Cascadia Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --flowlet-font-size-body: 14px;
+  --flowlet-line-height-body: 20px;
+  --flowlet-font-size-body-compact: 13px;
+  --flowlet-line-height-body-compact: 18px;
   --flowlet-font-size-body-strong: 14px;
+  --flowlet-line-height-body-strong: 20px;
   --flowlet-font-size-caption: 12px;
+  --flowlet-line-height-caption: 16px;
   --flowlet-font-size-chart-label: 11px;
+  --flowlet-line-height-chart-label: 14px;
+  --flowlet-font-size-section-title: 16px;
+  --flowlet-line-height-section-title: 22px;
+  --flowlet-font-size-page-title: 20px;
+  --flowlet-line-height-page-title: 28px;
+  --flowlet-font-size-code: 12px;
+  --flowlet-line-height-code: 18px;
 
   /* Global visual language — shared by every page and feature. */
-  --flowlet-color-app-bg: #edf2f9;
-  --flowlet-color-main-bg: rgba(246, 248, 252, 0.78);
-  --flowlet-color-sidebar-bg: rgba(244, 247, 251, 0.92);
-  --flowlet-color-surface: rgba(255, 255, 255, 0.9);
-  --flowlet-color-surface-strong: #ffffff;
-  --flowlet-color-surface-muted: #f7f9fc;
+  --flowlet-color-app-bg: #eef1f5;
+  --flowlet-color-main-bg: rgba(245, 247, 250, 0.9);
+  --flowlet-color-sidebar-bg: rgba(243, 245, 248, 0.96);
+  --flowlet-color-surface: rgba(252, 252, 253, 0.94);
+  --flowlet-color-surface-strong: #fafbfc;
+  --flowlet-color-surface-muted: #f3f5f7;
   --flowlet-color-border: rgba(33, 45, 66, 0.09);
   --flowlet-color-border-strong: rgba(33, 45, 66, 0.14);
   --flowlet-color-text: #141821;
-  --flowlet-color-text-secondary: #5f6979;
-  --flowlet-color-text-tertiary: #9199a7;
+  --flowlet-color-text-secondary: #4f5a6b;
+  --flowlet-color-text-tertiary: #626b7d;
+  --flowlet-color-text-disabled: #8a93a2;
   --flowlet-color-primary: #1769ff;
   --flowlet-color-success: #2fa64a;
   --flowlet-color-code-bg: #edf3ff;
@@ -29,7 +43,7 @@
   --flowlet-color-warning-border: #f3dfb3;
   --flowlet-color-warning-text: #6f4a14;
   --flowlet-color-warning-strong: #7a4a0c;
-  --flowlet-color-shell-glow: rgba(214, 231, 255, 0.4);
+  --flowlet-color-shell-glow: rgba(220, 228, 240, 0.3);
   --flowlet-radius-control: 7px;
   --flowlet-radius-card: 12px;
   --flowlet-radius-dialog: 16px;
@@ -65,6 +79,8 @@
   --semi-color-text-0: var(--flowlet-color-text);
   --semi-color-text-1: var(--flowlet-color-text-secondary);
   --semi-color-text-2: var(--flowlet-color-text-tertiary);
+  --semi-color-text-3: var(--flowlet-color-text-disabled);
+  --semi-color-disabled-text: var(--flowlet-color-text-disabled);
   --semi-color-bg-0: var(--flowlet-color-surface);
   --semi-color-bg-1: var(--flowlet-color-surface);
   --semi-color-bg-2: var(--flowlet-color-surface);
@@ -88,7 +104,8 @@ body[theme-mode="dark"] {
   --flowlet-color-border-strong: rgba(222, 231, 245, 0.16);
   --flowlet-color-text: #f0f4fa;
   --flowlet-color-text-secondary: #aeb9c9;
-  --flowlet-color-text-tertiary: #7e8a9c;
+  --flowlet-color-text-tertiary: #98a6b8;
+  --flowlet-color-text-disabled: #6f7c8e;
   --flowlet-color-primary: #4d8dff;
   --flowlet-color-success: #4fbe68;
   --flowlet-color-code-bg: #131d2c;
@@ -113,6 +130,8 @@ body[theme-mode="dark"] {
   --semi-color-text-0: var(--flowlet-color-text);
   --semi-color-text-1: var(--flowlet-color-text-secondary);
   --semi-color-text-2: var(--flowlet-color-text-tertiary);
+  --semi-color-text-3: var(--flowlet-color-text-disabled);
+  --semi-color-disabled-text: var(--flowlet-color-text-disabled);
   --semi-color-bg-0: var(--flowlet-color-surface);
   --semi-color-bg-1: var(--flowlet-color-surface);
   --semi-color-bg-2: var(--flowlet-color-surface-strong);
@@ -123,6 +142,8 @@ body[theme-mode="dark"] {
 
 body {
   font-family: var(--flowlet-font-family);
+  font-size: var(--flowlet-font-size-body);
+  line-height: var(--flowlet-line-height-body);
   color: var(--semi-color-text-0);
   background: var(--flowlet-color-app-bg);
   transition: color 160ms ease, background-color 160ms ease;

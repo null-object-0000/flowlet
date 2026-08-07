@@ -4,6 +4,7 @@
 
 ## UI/UX 优化
 
+- [ ] 分阶段改善桌面端与移动端的字体、颜色、界面密度、系统缩放和窗口自适应，实施计划与验收矩阵见 [`ui-readability-adaptive-layout-todo.md`](./ui-readability-adaptive-layout-todo.md)
 - [ ] Codex 账号与用量里的最后更新时间支持鼠标悬浮上去查看下次刷新数据时间
 
 ## 请求日志

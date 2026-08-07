@@ -1,6 +1,6 @@
 .conversation { min-width: 0; display: grid; gap: 22px; }
 .unit { min-width: 0; display: grid; gap: 14px; }
-.unitDivider { display: flex; align-items: center; gap: 8px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.unitDivider { display: flex; align-items: center; gap: 8px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .unitDivider::after { content: ""; flex: 1; height: 1px; background: var(--flowlet-color-border); }
 .truncated { padding: 8px 10px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
 .userRow { min-width: 0; display: flex; justify-content: flex-end; }
@@ -17,21 +17,21 @@
 .processGroupHeader::marker { content: ""; }
 .processGroupHeader::-webkit-details-marker { display: none; }
 .processGroupHeader > span { flex: none; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); font-weight: 500; }
-.processGroupHeader > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.processGroupHeader > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); text-overflow: ellipsis; white-space: nowrap; }
 .processGroupBody { margin: 7px 0 2px 6px; padding-left: 16px; display: grid; gap: 12px; border-left: 1px solid var(--flowlet-color-border); }
 .processEvent { min-width: 0; padding-top: 10px; }
 .processEvent + .processEvent { border-top: 1px dashed var(--flowlet-color-border); }
 .processEvent > header { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
-.processEvent > header span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.processEvent > header span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .processEvent > header strong { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
-.processEvent time { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.processEvent time { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); text-overflow: ellipsis; white-space: nowrap; }
 .toolPayloadList { display: grid; gap: 8px; }
 .toolPayload { margin-top: 7px; display: grid; gap: 4px; }
-.toolPayload > span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
-.toolPayload > pre { max-height: 280px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.interactionStatus { display: block; margin-top: 7px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.toolPayload > span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
+.toolPayload > pre { max-height: 280px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-family: var(--flowlet-font-family-mono); font-size: var(--flowlet-font-size-code); line-height: var(--flowlet-line-height-code); white-space: pre-wrap; overflow-wrap: anywhere; }
+.interactionStatus { display: block; margin-top: 7px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .eventUsage { margin-top: 12px; padding-top: 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; border-top: 1px solid var(--flowlet-color-border); }
-.eventUsage span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.eventUsage span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .progress, .notice { width: fit-content; display: flex; align-items: center; gap: 7px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
 .progress i { width: 6px; height: 6px; border-radius: 50%; background: var(--flowlet-color-primary); box-shadow: 0 0 0 3px var(--semi-color-primary-light-default); animation: interactionPulse 1.2s ease-in-out infinite alternate; }
 .loading { display: grid; gap: 8px; }

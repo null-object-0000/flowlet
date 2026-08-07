@@ -53,13 +53,14 @@
 }
 
 .statusTitle {
-  font-size: 13px;
+  font-size: var(--flowlet-font-size-body-strong);
   font-weight: 720;
-  line-height: 1.15;
+  line-height: var(--flowlet-line-height-body-strong);
 }
 
 .statusSub {
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   color: var(--flowlet-color-text-tertiary);
   margin-top: 5px;
   white-space: nowrap;
@@ -74,13 +75,15 @@
 
 /* ---- Today token ---- */
 .tokenLabel {
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   color: var(--flowlet-color-text-tertiary);
   margin-bottom: 5px;
 }
 
 .tokenValue {
-  font-size: 14px;
+  font-size: var(--flowlet-font-size-body-strong);
+  line-height: var(--flowlet-line-height-body-strong);
   font-weight: 740;
   white-space: nowrap;
 }
@@ -109,7 +112,7 @@
 }
 
 .tokenUnit {
-  font-size: 10px;
+  font-size: var(--flowlet-font-size-caption);
   color: var(--flowlet-color-text-tertiary);
   font-weight: 580;
   margin-left: 3px;
@@ -125,7 +128,8 @@
 }
 
 .accessLabel {
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   color: var(--flowlet-color-text-tertiary);
   white-space: nowrap;
 }
@@ -146,7 +150,7 @@
   border-radius: 5px;
   padding: 0 8px;
   color: var(--flowlet-color-text-tertiary);
-  font-size: 11px;
+  font-size: var(--flowlet-font-size-caption);
   font-weight: 650;
   cursor: pointer;
 }
@@ -161,7 +165,7 @@
   border: 0;
   background: transparent;
   color: var(--flowlet-color-primary);
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-caption);
   font-weight: 680;
   padding: 3px 0;
   display: inline-flex;
@@ -192,7 +196,9 @@
   padding: 0 9px;
   display: flex;
   align-items: center;
-  font: 11px "SFMono-Regular", Consolas, "Cascadia Code", monospace;
+  font-family: var(--flowlet-font-family-mono);
+  font-size: var(--flowlet-font-size-code);
+  line-height: var(--flowlet-line-height-code);
   color: var(--flowlet-color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -219,7 +225,8 @@
 
 /* ---- Client token ---- */
 .tokenCellLabel {
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   color: var(--flowlet-color-text-tertiary);
   margin-bottom: 8px;
 }
@@ -234,7 +241,9 @@
 .tokenValueMasked {
   min-width: 0;
   flex: 1;
-  font: 12px "SFMono-Regular", Consolas, "Cascadia Code", monospace;
+  font-family: var(--flowlet-font-family-mono);
+  font-size: var(--flowlet-font-size-code);
+  line-height: var(--flowlet-line-height-code);
   color: var(--flowlet-color-text-secondary);
   white-space: nowrap;
   overflow: hidden;

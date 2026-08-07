@@ -1,6 +1,6 @@
 .sessionHeader { min-width: 0; max-width: 560px; display: grid; gap: 6px; }
 .sessionHeaderTopline { min-width: 0; display: flex; align-items: center; gap: 10px; }
-.sessionTitle { min-width: 0; overflow: hidden; color: var(--flowlet-color-text); font-size: 16px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.sessionTitle { min-width: 0; overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-section-title); line-height: var(--flowlet-line-height-section-title); font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .drawer { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .drawerToolbar { flex: none; display: flex; justify-content: flex-end; padding: 8px 20px; border-bottom: 1px solid var(--flowlet-color-border); }
 .tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -22,7 +22,7 @@
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .stat { min-width: 0; min-height: 72px; padding: 11px; display: grid; align-content: center; gap: 6px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface); }
 .stat span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
-.stat strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.stat strong { overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-section-title); line-height: var(--flowlet-line-height-section-title); text-overflow: ellipsis; white-space: nowrap; }
 .stat[data-error] strong { color: var(--semi-color-danger); }
 .sectionHeading { display: flex; align-items: center; justify-content: space-between; }
 .sectionLabel { margin: 0; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong); font-weight: 680; }
@@ -38,9 +38,9 @@
 .linkText { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .metrics > div { min-width: 0; min-height: 72px; padding: 11px; display: grid; align-content: center; gap: 6px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface); }
-.metrics strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.metrics strong { overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-section-title); line-height: var(--flowlet-line-height-section-title); text-overflow: ellipsis; white-space: nowrap; }
 .metrics .metricWarning strong { color: var(--semi-color-danger); }
-.usageHint { margin: -4px 0 0; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.usageHint { margin: -4px 0 0; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .nativeMetrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .nativeMetrics > div { min-height: 66px; }
 .usageModels { margin: 0; overflow-wrap: anywhere; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
@@ -51,9 +51,9 @@
 .approvalHeader { min-width: 0; display: flex; align-items: center; gap: 8px; }
 .approvalIcon { flex: none; color: var(--semi-color-warning); font-size: 15px; animation: interactionPulse 1.6s ease-in-out infinite alternate; }
 .approvalHeader > strong { flex: none; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
-.approvalHeader > code { min-width: 0; padding: 1px 6px; overflow: hidden; border-radius: 4px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.approvalHeader > code { min-width: 0; padding: 1px 6px; overflow: hidden; border-radius: 4px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: var(--flowlet-font-family-mono); font-size: var(--flowlet-font-size-code); line-height: var(--flowlet-line-height-code); text-overflow: ellipsis; white-space: nowrap; }
 .approvalActions { margin-left: auto; display: flex; flex: none; gap: 6px; }
-.approvalCard pre { max-height: 120px; margin: 0; padding: 7px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.approvalCard pre { max-height: 120px; margin: 0; padding: 7px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: var(--flowlet-font-family-mono); font-size: var(--flowlet-font-size-code); line-height: var(--flowlet-line-height-code); white-space: pre-wrap; overflow-wrap: anywhere; }
 .approvalNotice { padding: 10px 12px; display: grid; gap: 3px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
 .approvalNotice strong { color: var(--flowlet-color-text); }
 .emptyState { padding: 12px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
@@ -61,7 +61,7 @@
 .interactionFlow > * + * { margin-top: 24px; }
 .userMessageRow { min-width: 0; display: flex; justify-content: flex-end; }
 .userMessageBubble { width: fit-content; max-width: 82%; margin: 0; padding: 10px 13px; border-radius: 12px 12px 3px 12px; color: var(--flowlet-color-text); background: var(--semi-color-fill-0); font-family: inherit; font-size: var(--flowlet-font-size-body); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
-.processEvent time { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.processEvent time { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); text-overflow: ellipsis; white-space: nowrap; }
 .outputStream { min-width: 0; display: grid; gap: 17px; }
 .outputMessage { min-width: 0; max-width: 96%; }
 .errorContent { margin: 0; color: var(--flowlet-color-text); font-family: inherit; font-size: var(--flowlet-font-size-body); line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -74,20 +74,20 @@
 .processGroupHeader::marker { content: ""; }
 .processGroupHeader::-webkit-details-marker { display: none; }
 .processGroupHeader > span { flex: none; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); font-weight: 500; }
-.processGroupHeader > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.processGroupHeader > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); text-overflow: ellipsis; white-space: nowrap; }
 .processGroupBody { margin: 7px 0 2px 6px; padding-left: 16px; display: grid; gap: 12px; border-left: 1px solid var(--flowlet-color-border); }
 .processEvent { min-width: 0; padding-top: 10px; }
 .processEvent + .processEvent { border-top: 1px dashed var(--flowlet-color-border); }
 .processEvent > header { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
-.processEvent > header span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.processEvent > header span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .processEvent > header strong { overflow: hidden; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
 .toolPayloadList { display: grid; gap: 8px; }
 .toolPayload { margin-top: 7px; display: grid; gap: 4px; }
-.toolPayload > span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
-.toolPayload > pre { max-height: 280px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.interactionStatus { display: block; margin-top: 7px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.toolPayload > span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
+.toolPayload > pre { max-height: 280px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-family: var(--flowlet-font-family-mono); font-size: var(--flowlet-font-size-code); line-height: var(--flowlet-line-height-code); white-space: pre-wrap; overflow-wrap: anywhere; }
+.interactionStatus { display: block; margin-top: 7px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .eventUsage { margin-top: 12px; padding-top: 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; border-top: 1px solid var(--flowlet-color-border); }
-.eventUsage span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.eventUsage span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .interactionProgress, .interactionNotice { width: fit-content; display: flex; align-items: center; gap: 7px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
 .interactionProgress i { width: 6px; height: 6px; border-radius: 50%; background: var(--flowlet-color-primary); box-shadow: 0 0 0 3px var(--semi-color-primary-light-default); animation: interactionPulse 1.2s ease-in-out infinite alternate; }
 .interactionLoading { display: grid; gap: 8px; }
@@ -97,7 +97,7 @@
 .childIdentity, .childMeta { min-width: 0; display: grid; gap: 3px; }
 .childIdentity strong, .childIdentity small, .childMeta span, .childMeta small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .childIdentity strong { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); }
-.childIdentity small, .childMeta small { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.childIdentity small, .childMeta small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .childMeta span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
 .childActions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .childLoading { display: grid; gap: 8px; }

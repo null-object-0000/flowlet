@@ -15,12 +15,14 @@ export function parseCatalogJson(json: string): ModelsCnCatalog | null {
 }
 
 /** Flowlet channel_id → models-cn providerId 映射。
- *  kimi → moonshot-cn（中国大陆官方价优先），qwen → qwen-cn。 */
+ *  kimi → moonshot-cn（中国大陆官方价优先），qwen → qwen-cn，
+ *  zhipu → zhipu-cn（中国大陆官方价优先）。 */
 export const PROVIDER_BY_CHANNEL: Record<string, string> = {
   longcat: "longcat",
   deepseek: "deepseek",
   kimi: "moonshot-cn",
   qwen: "qwen-cn",
+  zhipu: "zhipu-cn",
 };
 
 /** 尝试在 calibration.modelsDev 中查找参考链接（用于补全标记）。 */

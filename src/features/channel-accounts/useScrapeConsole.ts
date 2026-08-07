@@ -64,6 +64,10 @@ export function useScrapeConsole(runScrape?: (accountId: string) => Promise<Scra
       setState("success");
       activeAccountId.current = null;
     } catch (err) {
+      // 登录/验证码分支会在上方提前返回并保留可见窗口；其余监听、提取或保存错误
+      // 不需要 WebView 常驻，立即释放对应的 WebView2 子进程。登录态仍保存在
+      // per-account 数据目录中，下次重试会按需重建窗口。
+      await accountCommands.closeScrapeConsole(accountId).catch(() => undefined);
       const message = err && typeof err === "object" && "message" in err
         ? String((err as { message: unknown }).message)
         : err instanceof Error ? err.message : String(err);

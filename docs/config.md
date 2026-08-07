@@ -193,7 +193,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 ### 6.1 `channels` — 渠道模板
 
-每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、Qwen）。
+每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、Qwen、智谱）。
 
 ```jsonc
 {
@@ -292,10 +292,13 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 - 已有渠道模板的 `name`、`supported_protocols`、`openai_base_url`、`anthropic_base_url`、`openai_auth`、`anthropic_auth` 会在启动时从有效配置同步，确保渠道更名、新增协议和端点修正能迁移到已有安装。
 - 后续通过 `list_channel_presets` command 供前端使用。
 - 同步渠道模板**不会**修改已创建账号的覆盖地址，也不会新增、删除或改变现有路由的启用状态。
-- Qwen（`id = "qwen"`）的渠道级端点是**按量付费**端点；Token Plan 订阅账号
-  （`resource_mode = "token_plan"`）通过账号级 `base_url_override` /
+- Qwen（`id = "qwen"`）是双资源模式渠道：渠道级端点是**按量付费 API** 端点
+  （通用 `sk-` 前缀 Key，`resource_mode = "pay_as_you_go"`，默认）；Token Plan 订阅账号
+  （`sk-sp-` 前缀 Key，`resource_mode = "token_plan"`）通过账号级 `base_url_override` /
   `anthropic_base_url_override` 指向 `https://token-plan.cn-beijing.maas.aliyuncs.com`
-  下的专属端点，由账号编辑器在选择 Token Plan 模式时自动写入。
+  下的专属端点，由账号编辑器在选择 Token Plan 模式时自动写入。API 按量付费账号
+  没有官方余额接口也没有可用的控制台抓取模式，走手动维护余额，不参与自动同步；
+  Token Plan 订阅额度由官方控制台抓取并固定自动同步。
 
 ### 6.2 `model_prices` — 模型价格预设
 
@@ -353,7 +356,8 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
   "longcat": ["LongCat-2.0"],
   "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
   "kimi": ["kimi-k3", "kimi-k2.7-code"],
-  "qwen": ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"]
+  "qwen": ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
+  "zhipu": ["glm-5.2"]
 }
 ```
 

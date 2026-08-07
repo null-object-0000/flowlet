@@ -54,6 +54,17 @@
   mask: url("/icons/lobe/deepseek.svg") center / contain no-repeat;
 }
 
+.zhipu {
+  background: #ffffff;
+  border: 1px solid var(--flowlet-color-border);
+}
+
+.zhipu img {
+  width: 32px;
+  height: 32px;
+  transform: scale(0.7);
+}
+
 .chatgpt {
   color: var(--flowlet-color-text);
   background: var(--flowlet-color-surface-muted);

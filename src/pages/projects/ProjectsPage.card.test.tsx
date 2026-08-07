@@ -117,6 +117,22 @@ describe("TaskCard 其他状态：保持原有行结构，仅合并元信息", (
     expect(screen.getByText("第 2 轮")).toBeTruthy();
   });
 
+  it("执行过一轮后撤回的修订草稿展示第 2 轮草稿标签", () => {
+    const executionHistory = JSON.stringify([{
+      jobId: "job-1",
+      startedAt: "2026-08-06T00:00:00.000Z",
+      submittedAt: null,
+      finishedAt: "2026-08-06T01:00:00.000Z",
+      waitingMs: 0,
+      executionMs: 3_600_000,
+      rejected: true,
+      rejectionReason: "补充第二轮要求",
+      rejectedAt: "2026-08-06T02:00:00.000Z",
+    }]);
+    renderCard(makeTask({ status: "draft", executionHistory }));
+    expect(screen.getByText("第 2 轮草稿")).toBeTruthy();
+  });
+
   it("只读分析类型展示「只读分析 · Agent」", () => {
     const task = makeTask({ status: "submitted", taskType: "readonly", agentProfile: "OpenCode" });
     renderCard(task);
@@ -203,7 +219,7 @@ describe("TaskCard 交互动作：单个直接按钮 / 多个三点菜单", () =
 
   it("非菜单状态（submitted）的多个动作直接并排渲染，不进三点菜单", () => {
     const { container } = renderCard(makeTask({ status: "submitted" }), {
-      actions: [action("boost", "提高优先级"), action("withdraw", "撤回")],
+      actions: [action("boost", "置顶"), action("withdraw", "撤回")],
     });
 
     // 两个动作都作为右下角直接按钮渲染，且包裹在 actionRow 容器中。
@@ -211,7 +227,7 @@ describe("TaskCard 交互动作：单个直接按钮 / 多个三点菜单", () =
     expect(row).toBeTruthy();
     const buttons = row.querySelectorAll(`.${styles.taskCardAction}`);
     expect(buttons.length).toBe(2);
-    expect(buttons[0].textContent).toContain("提高优先级");
+    expect(buttons[0].textContent).toContain("置顶");
     expect(buttons[1].textContent).toContain("撤回");
     // 不渲染三点菜单。
     expect(container.querySelector(`.${styles.taskCardMenu}`)).toBeNull();

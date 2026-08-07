@@ -240,6 +240,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - qwen3.7-flash
 - qwen3.6-plus
 - qwen3.6-flash
+- glm-5.2
 ```
 
 这是 Flowlet **总共支持哪些模型**（前端 `FLOWLET_SUPPORTED_MODELS` 与 Rust
@@ -322,7 +323,7 @@ DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即�
 
 * 顶部 service-strip 完整展示代理状态、今日 Token、客户端接入和 Client Token；
 * 主体仍展示渠道账号、开放模型和 AI Agent 接入三个模块；
-* 渠道账号模块在空状态中展示简短引导，以及 LongCat、DeepSeek、Kimi 和 Qwen 添加入口；
+* 渠道账号模块在空状态中展示简短引导，以及 LongCat、DeepSeek、Kimi、Qwen 和智谱添加入口；
 * 开放模型模块展示与当前配置相符的空状态，引导用户添加账号并明确选择开放模型；
 * AI Agent 接入保持可用，允许用户提前查看或写入客户端配置；
 * 不展示独立的“开始接入”页面或大段三步说明。

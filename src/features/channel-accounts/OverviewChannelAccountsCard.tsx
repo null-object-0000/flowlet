@@ -224,6 +224,7 @@ const EMPTY_CHANNEL_OPTIONS = [
   { id: "deepseek", name: "DeepSeek", actionLabel: "添加 DeepSeek" },
   { id: "kimi", name: "Kimi", actionLabel: "添加 Kimi" },
   { id: "qwen", name: "Qwen", actionLabel: "添加 Qwen" },
+  { id: "zhipu", name: "智谱", actionLabel: "添加智谱" },
   { id: CHATGPT_CHANNEL_ID, name: "ChatGPT", actionLabel: "ChatGPT 授权登录" },
 ];
 

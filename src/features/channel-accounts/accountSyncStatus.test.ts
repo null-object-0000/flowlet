@@ -83,13 +83,25 @@ function makeSnapshot(overrides: Partial<AccountBalanceSnapshot> = {}): AccountB
 }
 
 describe("hasChannelAutoSync", () => {
-  it("auto-syncs LongCat / Qwen console-scrape accounts only in auto mode", () => {
+  it("auto-syncs LongCat console-scrape accounts only in auto mode", () => {
     const longcat = makePreset();
     expect(hasChannelAutoSync(makeAccount({ resource_sync_mode: "auto" }), longcat)).toBe(true);
     expect(hasChannelAutoSync(makeAccount({ resource_sync_mode: "manual" }), longcat)).toBe(false);
+  });
+
+  it("auto-syncs Qwen Token Plan subscription accounts only, not pay-as-you-go API accounts", () => {
+    const qwen = makePreset({ id: "qwen" });
     expect(
-      hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_sync_mode: "auto" }), makePreset({ id: "qwen" })),
+      hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_mode: "token_plan", resource_sync_mode: "auto" }), qwen),
     ).toBe(true);
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_mode: "token_plan", resource_sync_mode: "manual" }), qwen),
+    ).toBe(false);
+    // Qwen API 按量付费账号没有官方余额接口也没有可用的控制台抓取模式，
+    // 即使标记 auto 也不参与自动同步。
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_mode: "pay_as_you_go", resource_sync_mode: "auto" }), qwen),
+    ).toBe(false);
   });
 
   it("auto-syncs DeepSeek / Kimi official-balance-api accounts regardless of sync mode", () => {

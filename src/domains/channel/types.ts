@@ -71,6 +71,7 @@ export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
   kimi: ["kimi-k3", "kimi-k2.7-code"],
   qwen: ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
+  zhipu: ["glm-5.2"],
 };
 
 /** Token Plan 个人版账号的默认开放模型。

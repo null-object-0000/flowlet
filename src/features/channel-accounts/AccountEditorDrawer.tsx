@@ -109,13 +109,16 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     }
   };
   const autoSyncBalance = channel?.supports_balance_query === true;
-  const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
   const resourceOptions = resourceModeOptions(draft?.channel_id ?? "");
   const resourceMode = draft?.resource_mode ?? defaultResourceMode(draft?.channel_id ?? "");
   // LongCat 统一为 hybrid 模式(同时抓取 token 资源包与按量余额),强制自动同步；
   const isLongCatHybrid = draft.channel_id === "longcat" && resourceMode === "hybrid";
   // Qwen Token Plan 的额度只来自官方控制台，也固定为自动同步，不再提供手动维护路径。
   const isQwenTokenPlan = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "token_plan";
+  // Qwen API 按量付费账号没有官方余额接口，也没有可用的控制台抓取模式
+  // （scrape 配置只针对 Token Plan 订阅端点），因此不提供自动同步，走手动维护。
+  const isQwenPayAsYouGo = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "pay_as_you_go";
+  const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance && !isQwenPayAsYouGo;
   const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan ? "auto" : (draft.resource_sync_mode ?? "manual");
   const isResourceAutoSync = supportsScrape && resourceSyncMode === "auto";
   const tokenRemaining = useMemo(() => {
@@ -134,7 +137,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     if (isEdit) return;
     const next = presets.find((item) => item.id === channelId);
     const count = accounts.filter((item) => item.channel_id === channelId).length;
-    // 千问默认 Token Plan 订阅，需配套专属端点。
+    // 千问默认 API 按量付费（渠道级 dashscope 端点），切到 Token Plan 时由
+    // selectResourceMode 写入套餐专属端点。
     const nextIsQwenTokenPlan = channelId === QWEN_CHANNEL_ID && defaultResourceMode(channelId) === "token_plan";
     update({
       channel_id: channelId,
@@ -148,9 +152,10 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     setResource(resourceDraft());
   }
 
-  /** 切换资源模式。千问 Token Plan 需要配套专属端点：选入时自动写入
-   *  账号级 Base URL 覆盖，切回按量付费时仅清除仍是 Token Plan 地址的覆盖，
-   *  保留用户在高级设置中自定义的地址（如团队版专属 URL）。 */
+  /** 切换资源模式。千问支持双资源模式：Token Plan 需要配套专属端点——选入时
+   *  自动写入账号级 Base URL 覆盖并强制自动同步；切回 API 按量付费时清除仍
+   *  是 Token Plan 地址的覆盖（保留用户在高级设置中自定义的地址，如团队版
+   *  专属 URL），并回到手动维护。 */
   function selectResourceMode(nextMode: AccountResourceMode) {
     // 账号保存后资源模式不允许切换（避免与已维护的资源数据/订阅端点冲突）。
     if (isEdit) return;
@@ -161,6 +166,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     if (nextMode === "token_plan") {
       update({
         resource_mode: nextMode,
+        resource_sync_mode: "auto",
         base_url_override: QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
         anthropic_base_url_override: QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL,
       });
@@ -168,6 +174,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     }
     update({
       resource_mode: nextMode,
+      resource_sync_mode: "manual",
       base_url_override: currentDraft.base_url_override?.trim() === QWEN_TOKEN_PLAN_OPENAI_BASE_URL ? null : currentDraft.base_url_override,
       anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() === QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL ? null : currentDraft.anthropic_base_url_override,
     });
@@ -686,22 +693,24 @@ function ModeOption({ selected, disabled, title, description, onClick }: { selec
 
 function defaultResourceMode(channelId: string): AccountResourceMode {
   if (channelId === "longcat") return "hybrid";
-  if (channelId === QWEN_CHANNEL_ID) return "token_plan";
+  if (channelId === QWEN_CHANNEL_ID) return "pay_as_you_go";
   if (channelId === CHATGPT_CHANNEL_ID) return "codex";
   return "pay_as_you_go";
 }
 
 /** 各渠道可选的资源模式。LongCat 为 hybrid(同时抓取资源包与余额),不在选择器中
- *  出现；千问仅支持 Token Plan 订阅（专属 sk-sp Key 与套餐端点），不提供按量付费；
- *  其余渠道只有按量付费。 */
+ *  出现；千问支持双资源模式：API 按量付费（通用 sk- Key + 渠道级 dashscope
+ *  端点）与 Token Plan 订阅（sk-sp 专属 Key + 套餐专属端点）；其余渠道只有
+ *  按量付费。 */
 function resourceModeOptions(channelId: string): { value: AccountResourceMode; title: string; description: string }[] {
   // LongCat 统一 hybrid,不再提供计费模式切换。
   if (channelId === "longcat") {
     return [];
   }
-  // 千问仅支持 Token Plan 订阅，不提供按量付费/手动维护余额入口。
+  // 千问双资源模式：API 按量付费 + Token Plan 订阅。
   if (channelId === QWEN_CHANNEL_ID) {
     return [
+      { value: "pay_as_you_go", title: "API 按量付费", description: "通用 API Key（sk- 前缀），按用量计费" },
       { value: "token_plan", title: "Token Plan", description: "订阅套餐，sk-sp 专属 Key，按 Credits 计量" },
     ];
   }
@@ -724,7 +733,10 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
   const channel = presets.find((item) => item.id === mode.channelId);
   const count = accounts.filter((item) => item.channel_id === mode.channelId).length;
   const now = new Date().toISOString();
-  const isQwenTokenPlan = mode.channelId === QWEN_CHANNEL_ID;
+  const nextQwenMode = defaultResourceMode(mode.channelId);
+  // 只有默认资源模式为 Token Plan 时才预填套餐专属端点（当前默认 API 按量付费，
+  // 新建账号走渠道级端点；用户切到 Token Plan 时由 selectResourceMode 补端点）。
+  const qwenTokenPlanDefault = mode.channelId === QWEN_CHANNEL_ID && nextQwenMode === "token_plan";
   return {
     id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     workspace_account_id: null,
@@ -734,10 +746,10 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     enabled: true,
     priority: accounts.length,
     remark: "",
-    resource_mode: defaultResourceMode(mode.channelId),
-    resource_sync_mode: mode.channelId === "longcat" || isQwenTokenPlan ? "auto" : "manual",
-    base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
-    anthropic_base_url_override: isQwenTokenPlan ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
+    resource_mode: nextQwenMode,
+    resource_sync_mode: mode.channelId === "longcat" || qwenTokenPlanDefault ? "auto" : "manual",
+    base_url_override: qwenTokenPlanDefault ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
+    anthropic_base_url_override: qwenTokenPlanDefault ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
     workspace_default_base_url: null,
     workspace_default_anthropic_base_url: null,
     last_used_at: null,

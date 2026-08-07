@@ -17,6 +17,9 @@ export function ChannelBrandLogo({ channelId, name }: { channelId: string; name:
   if (channelId === "deepseek") {
     return <span className={`${styles.logo} ${styles.deepseek}`} aria-hidden="true"><i /></span>;
   }
+  if (channelId === "zhipu") {
+    return <span className={`${styles.logo} ${styles.zhipu}`} aria-hidden="true"><img src="/icons/lobe/zhipu-color.svg" alt="" /></span>;
+  }
   if (channelId === "chatgpt") {
     return <span className={`${styles.logo} ${styles.chatgpt}`} aria-hidden="true"><i /></span>;
   }

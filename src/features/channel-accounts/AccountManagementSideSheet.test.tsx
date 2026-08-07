@@ -309,6 +309,52 @@ describe("AccountManagementSideSheet", () => {
     expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
   });
 
+  it("creates a Qwen API pay-as-you-go account by default without Token Plan endpoint overrides", async () => {
+    const user = userEvent.setup();
+    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
+    const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
+    const qwenPreset = {
+      id: "qwen",
+      name: "Qwen",
+      openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic",
+    } as ChannelPreset;
+
+    render(
+      <AccountManagementSideSheet
+        request={{ kind: "create", channelId: "qwen" }}
+        accounts={[]}
+        snapshots={[]}
+        presets={[qwenPreset]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={onSaveAccounts}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={onSaveBalanceSnapshot}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText("新增渠道账号")).toBeInTheDocument();
+    // 默认资源模式为 API 按量付费，同时提供 Token Plan 订阅选项。
+    expect(screen.getByRole("button", { name: /API 按量付费/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Token Plan/ })).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("请输入渠道 API Key"), "sk-test");
+    await user.click(screen.getByRole("button", { name: "保存账号" }));
+
+    expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({
+      channel_id: "qwen",
+      api_key: "sk-test",
+      resource_mode: "pay_as_you_go",
+      resource_sync_mode: "manual",
+      base_url_override: null,
+      anthropic_base_url_override: null,
+    })]);
+    // API 按量付费账号没有订阅快照，不触发余额快照保存。
+    expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
+  });
+
   it("shows the ChatGPT authorization panel instead of the API-key form for a chatgpt create", async () => {
     const user = userEvent.setup();
     const onAuthorizeChatGpt = vi.fn().mockResolvedValue(undefined);

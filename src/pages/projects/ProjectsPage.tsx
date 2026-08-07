@@ -13,7 +13,7 @@ import { deviceSyncCommands } from "../../domains/device-sync/commands";
 import { MIN_TITLE_GENERATION_DESCRIPTION_LENGTH, canAutoGenerateTaskTitle, generateTaskTitle } from "../../domains/project/generateTaskTitle";
 import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
 import { proxyCommands } from "../../domains/proxy/commands";
-import { taskExecutionHistory, taskExecutionRound, taskHasExecution, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "../../domains/project/types";
+import { taskExecutionHistory, taskExecutionRound, taskHasExecution, taskIsRevisionDraft, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "../../domains/project/types";
 import { SessionConversation } from "../../features/agent-sessions/SessionConversation";
 import { interactionEventsVersion, useSessionScrollFollow } from "../../features/agent-sessions/useSessionScrollFollow";
 import { useAgentSessionTimeline } from "../../features/agent-sessions/useAgentSessions";
@@ -127,7 +127,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
 function LoadedProjectDetail({ project }: { project: Project }) {
   const { language, t } = useAppPreferences();
-  const refresh = useRefreshControl({ intervalMs: 3_000 });
+  const refresh = useRefreshControl({ intervalMs: 1_000 });
   const tasks = useProjectTasks(project.id, refresh.autoRefresh, refresh.intervalMs);
   const sharedProjects = useQuery({
     queryKey: queryKeys.deviceSync.projects(null),
@@ -260,6 +260,7 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
   );
   const [editing, setEditing] = useState<ProjectTask | "new" | null>(null);
   const [viewing, setViewing] = useState<ProjectTask | null>(null);
+  const [historyReturnTaskId, setHistoryReturnTaskId] = useState<string | null>(null);
   // 系统通知点击跳转：独立窗口首次挂载从 URL `?task=` 读取目标任务，
   // 之后监听 `task-detail-open` 事件更新。任务加载完成后自动打开其概览抽屉。
   const [searchParams] = useSearchParams();
@@ -279,11 +280,12 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
   // 自动生成标题需要本地代理（Base URL）与客户端 Token。
   const proxyBindConfig = useProxyBindConfig();
   // 看板卡片左下角的时间标签（等待 / 执行时长）需要持续前进的时钟：
-  // 与看板数据刷新保持同一节奏（每 3 秒推进一次），让进行中任务的执行时间
-  // 与排队任务的等待时间实时变化，同时避免每秒重渲染整块看板。
+  // 看板卡片左下角的时间标签（等待 / 执行时长）需要持续前进的时钟：
+  // 与看板数据刷新保持同一节奏（每秒推进一次），让进行中任务的执行时间
+  // 与排队任务的等待时间实时变化。
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 3000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
   // 看板容器宽度 → 动态列数：默认 1200×720 非独立窗口（含左侧菜单）恰好放下 3 列，
@@ -331,6 +333,17 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
   const openAnyTask = (clicked: ProjectTask) => {
     if (clicked.status === "draft" && !remoteOrigins.has(clicked.id) && !taskOwnedByOtherDevice(clicked, taskById, currentDeviceId)) openEditor(clicked);
     else setViewing(clicked);
+  };
+  const openTaskHistory = (task: ProjectTask, returnToCurrentDraft = false) => {
+    setHistoryReturnTaskId(returnToCurrentDraft ? task.id : null);
+    setEditing(null);
+    setViewing(task);
+  };
+  const editDraftFromHistory = (task: ProjectTask) => {
+    setViewing(null);
+    if (historyReturnTaskId === task.id) setEditing(task);
+    else openEditor(task);
+    setHistoryReturnTaskId(null);
   };
   // 监听「任务详情打开」事件（Rust 侧在通知点击时向本独立窗口发出）。
   // 事件只定向到 project-detail-<projectId> 窗口，主窗口不会收到。
@@ -460,11 +473,11 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
       }
     } catch (error) { Toast.error(errorMessage(error)); }
   };
-  // 提高优先级：把已提交待执行任务置顶到队列最前。
+  // 置顶：把已提交待执行任务提到队列最前。
   const boostTaskInQueue = async (task: ProjectTask) => {
     try {
       await runnerActions.boostTask.mutateAsync(task.id);
-      Toast.success(t("任务已提高优先级，已进入队列最前"));
+      Toast.success(t("任务已置顶到队列最前"));
     } catch (error) { Toast.error(errorMessage(error)); }
   };
   // 只读分析任务转为代码修改任务：与退回一样必填描述（新的代码修改要求）。
@@ -486,10 +499,15 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
     if (taskOwnedByOtherDevice(task, taskById, currentDeviceId)) return [];
     switch (task.status) {
       case "draft":
-        return [{ key: "submit", label: t("提交"), icon: <IconTickCircle />, onClick: () => void toggleSubmitted(task, true) }];
+        return taskIsRevisionDraft(task)
+          ? [
+              { key: "history", label: t("查看历史"), onClick: () => openTaskHistory(task) },
+              { key: "submit", label: t("提交"), icon: <IconTickCircle />, onClick: () => void toggleSubmitted(task, true) },
+            ]
+          : [{ key: "submit", label: t("提交"), icon: <IconTickCircle />, onClick: () => void toggleSubmitted(task, true) }];
       case "submitted":
         return [
-          { key: "boost", label: t("提高优先级"), icon: <IconTop />, onClick: () => void boostTaskInQueue(task) },
+          { key: "boost", label: t("置顶"), icon: <IconTop />, onClick: () => void boostTaskInQueue(task) },
           { key: "withdraw", label: t("撤回"), icon: <IconUndo />, onClick: () => void toggleSubmitted(task, false) },
         ];
       case "in_progress":
@@ -521,7 +539,9 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
     }
     switch (task.status) {
       case "draft":
-        return <span className={styles.taskCardTime} title={formatFullTimestamp(task.createdAt, language)}>{t("创建于 {time}", { time: formatTimestamp(task.createdAt, language) })}</span>;
+        return taskIsRevisionDraft(task)
+          ? <span className={styles.taskCardTime} title={formatFullTimestamp(task.updatedAt, language)}>{t("更新于 {time}", { time: formatTimestamp(task.updatedAt, language) })}</span>
+          : <span className={styles.taskCardTime} title={formatFullTimestamp(task.createdAt, language)}>{t("创建于 {time}", { time: formatTimestamp(task.createdAt, language) })}</span>;
       case "submitted": {
         const waiting = taskWaitingDuration(task, now);
         const interrupted = taskLastExecutionInterrupted(task);
@@ -614,13 +634,13 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
       </div></section>)}
     </div>}
     {!tasks.isError && showDoneDrawerEntry ? <button className={styles.doneDrawerEntry} onClick={() => setDoneDrawerOpen(true)} title={t("查看已完成任务")}><IconChevronRight size="small" /><span>{t("已完成")}</span></button> : null}
-    <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建任务") : t("编辑任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span>{editing !== "new" && editing ? <Button type="danger" theme="borderless" icon={<IconDelete />} onClick={() => setDeleting(editing)}>{t("删除")}</Button> : null}</span><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button type="primary" theme="solid" loading={actions.saveTask.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
-      <div className={styles.form}><label><span className={styles.titleFieldLabel}>{t("任务标题")}{generatingTitle && titleGenStatus ? <small className={styles.titleGenStatus}>{titleGenStatus}</small> : null}</span><div className={styles.titleInputRow}><Input autoFocus value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /><Button icon={<IconAIEditLevel1 />} aria-label={t("自动生成标题")} title={canAutoGenerateTaskTitle(draft.description) ? t("根据任务描述自动生成标题") : t("任务描述至少 {n} 字后可自动生成", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })} loading={generatingTitle} disabled={!canAutoGenerateTaskTitle(draft.description)} onClick={() => void autoGenerateTitle()} /></div>{!canAutoGenerateTaskTitle(draft.description) ? <small className={styles.titleGenerateHint}>{t("任务描述至少 {n} 字后可自动生成标题", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })}</small> : null}</label><label><span>{t("任务描述（可选）")}</span><TextArea value={draft.description} autosize={{ minRows: 9, maxRows: 12 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div>{draft.baseTaskId ? <div className={styles.formNote}>{t("基于父任务：{id}（{title}）", { id: shortTaskId(draft.baseTaskId), title: taskById.get(draft.baseTaskId)?.title ?? t("已完成任务") })}</div> : null}</div>
+    <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建任务") : editing && taskIsRevisionDraft(editing) ? t("编辑第 {n} 轮草稿", { n: taskExecutionRound(editing) }) : t("编辑任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span>{editing !== "new" && editing ? <Button type="danger" theme="borderless" icon={<IconDelete />} onClick={() => setDeleting(editing)}>{t("删除")}</Button> : null}</span><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button type="primary" theme="solid" loading={actions.saveTask.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
+      <div className={styles.form}>{editing !== "new" && editing && taskIsRevisionDraft(editing) ? <div className={`${styles.formNote} ${styles.revisionDraftNote}`}><span>{t("之前各轮的执行历史和最近退回原因已保留。")}</span><Button size="small" theme="borderless" onClick={() => openTaskHistory(editing, true)}>{t("查看历史")}</Button></div> : null}<label><span className={styles.titleFieldLabel}>{t("任务标题")}{generatingTitle && titleGenStatus ? <small className={styles.titleGenStatus}>{titleGenStatus}</small> : null}</span><div className={styles.titleInputRow}><Input autoFocus value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /><Button icon={<IconAIEditLevel1 />} aria-label={t("自动生成标题")} title={canAutoGenerateTaskTitle(draft.description) ? t("根据任务描述自动生成标题") : t("任务描述至少 {n} 字后可自动生成", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })} loading={generatingTitle} disabled={!canAutoGenerateTaskTitle(draft.description)} onClick={() => void autoGenerateTitle()} /></div>{!canAutoGenerateTaskTitle(draft.description) ? <small className={styles.titleGenerateHint}>{t("任务描述至少 {n} 字后可自动生成标题", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })}</small> : null}</label><label><span>{t("任务描述（可选）")}</span><TextArea value={draft.description} autosize={{ minRows: 9, maxRows: 12 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div>{draft.baseTaskId ? <div className={styles.formNote}>{t("基于父任务：{id}（{title}）", { id: shortTaskId(draft.baseTaskId), title: taskById.get(draft.baseTaskId)?.title ?? t("已完成任务") })}</div> : null}</div>
     </SideSheet>
     <Modal title={t("删除任务“{name}”？", { name: deleting?.title ?? "" })} visible={deleting != null} zIndex={APP_OVERLAY_Z_INDEX.modal} okType="danger" okText={t("删除")} cancelText={t("取消")} maskClosable={false} onCancel={() => setDeleting(null)} onOk={() => void removeEditingTask()} okButtonProps={{ loading: actions.deleteTask.isPending }}>
       <div className={styles.form}><p>{t("删除后任务将从项目看板移除，此操作不可撤销。")}</p></div>
     </Modal>
-    <TaskReadonlySideSheet task={viewing} remoteOrigin={viewing ? remoteOrigins.get(viewing.id) ?? null : null} ownedByOther={viewing ? taskOwnedByOtherDevice(viewing, taskById, currentDeviceId) : false} now={now} runningJobId={viewing?.id ? (runnerState?.current ?? []).find((info) => info.taskId === viewing.id)?.jobId ?? null : null} baseTask={viewing?.baseTaskId ? taskById.get(viewing.baseTaskId) ?? null : null} relatedTasks={viewing ? boardTasks.filter((child) => child.baseTaskId === viewing.id) : []} onOpenTask={openAnyTask} onClose={() => setViewing(null)} onApprove={(task) => void approveTask(task)} onReject={(task) => openReject(task)} onConvert={(task) => openConvert(task)} onCreateChildTask={(task) => createChildTask(task)} />
+    <TaskReadonlySideSheet task={viewing} remoteOrigin={viewing ? remoteOrigins.get(viewing.id) ?? null : null} ownedByOther={viewing ? taskOwnedByOtherDevice(viewing, taskById, currentDeviceId) : false} now={now} runningJobId={viewing?.id ? (runnerState?.current ?? []).find((info) => info.taskId === viewing.id)?.jobId ?? null : null} baseTask={viewing?.baseTaskId ? taskById.get(viewing.baseTaskId) ?? null : null} relatedTasks={viewing ? boardTasks.filter((child) => child.baseTaskId === viewing.id) : []} onOpenTask={openAnyTask} onClose={() => { setViewing(null); setHistoryReturnTaskId(null); }} onEditDraft={editDraftFromHistory} onApprove={(task) => void approveTask(task)} onReject={(task) => openReject(task)} onConvert={(task) => openConvert(task)} onCreateChildTask={(task) => createChildTask(task)} />
     <SideSheet
       visible={doneDrawerOpen}
       width={DETAIL_SHEET_WIDTH}
@@ -779,7 +799,7 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
     </button>
   ) : null;
   // 交互动作：非进行中/待审核（menuRequired）状态的动作直接在卡片右下角展示按钮（常驻），
-  // 多个动作并排显示（如已提交待执行的「提高优先级」+「撤回」）；
+  // 多个动作并排显示（如已提交待执行的「置顶」+「撤回」）；
   // 进行中/待审核状态的动作统一收进右上角 ⋯ 菜单（悬停卡片时露出）。
   const directActions = !menuRequired && actions.length > 0 ? (
     <span className={styles.taskCardActionRow}>
@@ -842,7 +862,7 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
     <article className={`${styles.taskCard} ${isReview ? styles.taskCardReview : ""} ${depth > 0 ? styles.taskCardChild : ""}`}>
       <div className={styles.taskCardHead}>
         <div className={styles.taskTags}>
-          <span className={`${styles.taskTag} ${styles.taskTagRound}`}>{t("第 {n} 轮", { n: taskExecutionRound(task) })}</span>
+          <span className={`${styles.taskTag} ${styles.taskTagRound}`}>{taskIsRevisionDraft(task) ? t("第 {n} 轮草稿", { n: taskExecutionRound(task) }) : t("第 {n} 轮", { n: taskExecutionRound(task) })}</span>
           {sourceLabel ? <span className={styles.remoteTaskTag}>{t("其他设备")} · {sourceLabel}</span> : <span className={styles.taskCardTypeAgent}>{t(taskTypeLabel(task.taskType))} · {task.agentProfile}</span>}
         </div>
         {moreMenu}
@@ -872,13 +892,13 @@ function TaskBoardCard({ task, taskById, onOpen, actions, meta, sourceLabel }: {
 /** 进行中 / 待审核任务的本轮 Token 消耗与预估费用：经最近一次执行的 background job
  *  解析出 Agent 会话 id，优先读取该会话的 Flowlet 观测用量（真实经代理的 token 与
  *  人民币预估费用）；无 Flowlet 观测记录时回退到原生会话用量摘要（仅 token，费用缺失）。
- *  进行中与看板整体刷新同节奏（每 3 秒），待审核执行结束数据已定，只查一次。 */
+ *  进行中与看板整体刷新同节奏（每秒），待审核执行结束数据已定，只查一次。 */
 function useTaskTokenUsage(task: ProjectTask): { usage: AgentSessionNativeUsage | null; flowletUsage: AgentSessionFlowletUsage | null; hasData: boolean } {
   const needsUsage = task.status === "in_progress" || task.status === "review";
   const history = useMemo(() => (needsUsage ? taskExecutionHistory(task) : []), [task, needsUsage]);
   const latestJobId = history.length > 0 ? history[history.length - 1].jobId : null;
-  // 看板卡片与整体刷新同节奏（3 秒）：进行中任务的 job 详情每 3 秒更新一次。
-  const jobDetail = useBackgroundTaskDetail(latestJobId, 3_000);
+  // 看板卡片与整体刷新同节奏（每秒）：进行中任务的 job 详情每秒更新一次。
+  const jobDetail = useBackgroundTaskDetail(latestJobId, 1_000);
   const sessionId = parseJobSessionId(jobDetail.data?.job.summaryJson ?? null)
     ?? parseSessionIdFromEvents(jobDetail.data?.events ?? []);
   const agentType = projectAgentType(task.agentProfile);
@@ -889,8 +909,8 @@ function useTaskTokenUsage(task: ProjectTask): { usage: AgentSessionNativeUsage 
     queryKey: queryKeys.agentSession.flowletUsage(agentType ?? "", sessionId ?? ""),
     queryFn: () => agentSessionCommands.flowletUsage(agentType!, sessionId!),
     enabled,
-    refetchInterval: isRunning ? 3_000 : false,
-    staleTime: isRunning ? 3_000 : 5 * 60_000,
+    refetchInterval: isRunning ? 1_000 : false,
+    staleTime: isRunning ? 1_000 : 5 * 60_000,
     retry: 1,
   });
   // 原生会话用量：仅作为 Flowlet 观测缺失（会话未走代理）时的 token 回退。
@@ -898,8 +918,8 @@ function useTaskTokenUsage(task: ProjectTask): { usage: AgentSessionNativeUsage 
     queryKey: queryKeys.agentSession.nativeSummary(agentType ?? "", sessionId ?? ""),
     queryFn: () => agentSessionCommands.nativeSummary(agentType!, sessionId!),
     enabled,
-    refetchInterval: isRunning ? 3_000 : false,
-    staleTime: isRunning ? 3_000 : 5 * 60_000,
+    refetchInterval: isRunning ? 1_000 : false,
+    staleTime: isRunning ? 1_000 : 5 * 60_000,
     retry: 1,
   });
   const flowletUsage = flowletQuery.data ?? null;
@@ -953,7 +973,7 @@ function trimScale(value: string): string {
 
 /** 提交后任务的只读详情抽屉：概览（任务信息 + 运行/调度记录）+ 会话（完整对话）
  *  + 相关任务（基于本任务创建的子任务）。 */
-function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJobId, baseTask, relatedTasks, onOpenTask, onClose, onApprove, onReject, onConvert, onCreateChildTask }: { task: ProjectTask | null; remoteOrigin: RemoteTaskOrigin | null; ownedByOther: boolean; now: number; runningJobId: string | null; baseTask: ProjectTask | null; relatedTasks: ProjectTask[]; onOpenTask: (task: ProjectTask) => void; onClose: () => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void; onConvert: (task: ProjectTask) => void; onCreateChildTask: (task: ProjectTask) => void }) {
+function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJobId, baseTask, relatedTasks, onOpenTask, onClose, onEditDraft, onApprove, onReject, onConvert, onCreateChildTask }: { task: ProjectTask | null; remoteOrigin: RemoteTaskOrigin | null; ownedByOther: boolean; now: number; runningJobId: string | null; baseTask: ProjectTask | null; relatedTasks: ProjectTask[]; onOpenTask: (task: ProjectTask) => void; onClose: () => void; onEditDraft: (task: ProjectTask) => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void; onConvert: (task: ProjectTask) => void; onCreateChildTask: (task: ProjectTask) => void }) {
   const { language, t } = useAppPreferences();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"overview" | "session" | "related">("overview");
@@ -990,6 +1010,7 @@ function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJ
 
   const isReview = task?.status === "review";
   const isDone = task?.status === "done";
+  const isRevisionDraft = task ? taskIsRevisionDraft(task) : false;
 
   /** 与「会话详情抽屉」一致：按当前 Tab 刷新对应数据。概览刷新各次执行的 job 详情，会话刷新最近一次执行及其 Agent 时间线。 */
   const refreshActiveTab = async () => {
@@ -1021,6 +1042,7 @@ function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJ
           <Button type="primary" theme="solid" onClick={() => onApprove(task)}>{t("批准")}</Button>
         </>
       ) : null}
+      {isRevisionDraft && task && !remoteOrigin && !ownedByOther ? <Button type="primary" theme="solid" onClick={() => onEditDraft(task)}>{t("继续编辑")}</Button> : null}
       <Button onClick={onClose}>{t("关闭")}</Button>
     </span></div>
   );
@@ -1206,23 +1228,31 @@ function TaskExecutionRun({ record, index, runningJobId, now }: { record: TaskEx
   );
 }
 
-/** 任务「会话」Tab：按执行轮次分 Tab 隔离展示每一轮产生的 Agent 会话（完整对话）。
- *  默认激活最后一轮（最新一轮）；visible 由外层抽屉的「会话」Tab 是否激活决定，
- *  用于在面板真正可见时才聚焦滚动容器（隐藏期间 clientHeight 为 0）；
- *  autoRefresh 由外层公共刷新控件控制，仅作用于最新一轮（任务执行中只有它的对话
- *  在增长）；onRefreshed 在自动刷新成功后触发，供外层抽屉更新「最后刷新」指示。 */
+/** 任务「会话」Tab：按执行轮次分 Tab 隔离展示每一轮产生的 Agent 会话（完整对话），
+ *  并且是懒加载——visible 为 false（外层「会话」Tab 未激活）时整块不渲染，不拉取任何
+ *  轮次的 job/时间线；visible 后也只挂载当前激活轮次（keepDOM=false，切换轮次即卸载
+ *  旧轮次并挂载新轮次）。这样大会话只在该轮被查看时才真正加载与渲染，解决性能问题。
+ *  默认激活最后一轮（最新一轮）；autoRefresh 由外层公共刷新控件控制，仅作用于最新
+ *  一轮（任务执行中只有它的对话在增长）；onRefreshed 在自动刷新成功后触发，供外层
+ *  抽屉更新「最后刷新」指示。 */
 function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: ProjectTask; visible: boolean; autoRefresh: boolean; onRefreshed?: () => void }) {
   const { t } = useAppPreferences();
   const history = useMemo(() => taskExecutionHistory(task), [task]);
   const isRunning = task.status === "in_progress";
   const agentType = projectAgentType(task.agentProfile);
-  // 默认激活最新一轮；切换任务时回到最新一轮。
+  // 默认激活最新一轮；进入会话 Tab 或切换任务时回到最新一轮；查看期间新增轮次保留当前选择。
   const [activeRound, setActiveRound] = useState(() => Math.max(0, history.length - 1));
+  const wasVisibleRef = useRef(false);
+  useEffect(() => {
+    if (visible && !wasVisibleRef.current) setActiveRound(Math.max(0, history.length - 1));
+    wasVisibleRef.current = visible;
+  }, [visible, history.length]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setActiveRound(Math.max(0, history.length - 1)); }, [task.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const activeIndex = history.length > 0 ? Math.min(Math.max(activeRound, 0), history.length - 1) : -1;
   const onRefreshedRef = useRef(onRefreshed);
   onRefreshedRef.current = onRefreshed;
 
+  // 懒加载：会话 Tab 未激活时不挂载轮次 Tabs，避免提前拉取和渲染大对话。
+  if (!visible) return null;
   if (history.length === 0) {
     return (
       <div className={styles.tabScroll}>
@@ -1232,6 +1262,7 @@ function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: Pr
       </div>
     );
   }
+  const activeIndex = Math.min(Math.max(activeRound, 0), history.length - 1);
 
   return (
     <div className={styles.roundTabs}>
@@ -1239,6 +1270,7 @@ function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: Pr
         type="line"
         activeKey={String(activeIndex)}
         tabPaneMotion={false}
+        keepDOM={false}
         onChange={(key) => setActiveRound(Number(key))}
       >
         {history.map((record, index) => (
@@ -1248,7 +1280,7 @@ function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: Pr
                 record={record}
                 agentType={agentType}
                 roundIndex={index}
-                active={visible && index === activeIndex}
+                active={index === activeIndex}
                 autoRefresh={autoRefresh && isRunning && index === history.length - 1}
                 onRefreshed={() => onRefreshedRef.current?.()}
               />
@@ -1261,8 +1293,8 @@ function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: Pr
 }
 
 /** 单轮执行的会话展示：读取该轮 job 产生的 Agent 会话时间线并渲染完整对话。
- *  active 为 true 时重新测量滚动位置（pane 隐藏期间 clientHeight 为 0 会把
- *  atBottom 误判为 true）并聚焦滚动容器，让 PgUp/PgDn/End 等键盘操作立即可用；
+ *  懒加载下该组件只在「会话」Tab 可见且本轮为激活轮次时挂载（keepDOM=false），
+ *  挂载即激活：测量真实滚动位置并聚焦滚动容器，让 PgUp/PgDn/End 等键盘操作立即可用；
  *  autoRefresh 仅对最新一轮开启（任务执行中对话仍在增长）。 */
 function TaskSessionRound({ record, agentType, roundIndex, active, autoRefresh, onRefreshed }: {
   record: TaskExecutionRecord;
@@ -1288,9 +1320,7 @@ function TaskSessionRound({ record, agentType, roundIndex, active, autoRefresh, 
   useLayoutEffect(() => {
     sessionScroll.observeContent(conversationVersion);
   }, [sessionScroll.observeContent, conversationVersion]);
-  // 轮次 Tab 激活后重新测量滚动位置并聚焦滚动容器：激活前 pane 是 display:none，
-  // clientHeight 为 0，observeContent 会把 atBottom 误判为 true；聚焦后标准键盘
-  // 滚动立即可用。
+  // 挂载即激活（keepDOM=false）：重新测量滚动位置并聚焦滚动容器，标准键盘滚动立即可用。
   useLayoutEffect(() => {
     if (!active) return;
     sessionScroll.handleScroll();

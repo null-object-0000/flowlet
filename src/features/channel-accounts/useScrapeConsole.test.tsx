@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const commandMocks = vi.hoisted(() => ({
   openScrapeConsole: vi.fn(),
+  closeScrapeConsole: vi.fn(),
   probeScrapeLogin: vi.fn(),
   scrapeBalance: vi.fn(),
 }));
@@ -21,6 +22,7 @@ describe("useScrapeConsole", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     commandMocks.openScrapeConsole.mockResolvedValue(undefined);
+    commandMocks.closeScrapeConsole.mockResolvedValue(undefined);
   });
 
   it("opens an actionable console state without treating capture timeout as logged out", async () => {
@@ -42,6 +44,7 @@ describe("useScrapeConsole", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.consoleActionMessage).toBe("未捕获到套餐接口响应，已打开控制台窗口。请重新抓取。");
     expect(commandMocks.scrapeBalance).not.toHaveBeenCalled();
+    expect(commandMocks.closeScrapeConsole).not.toHaveBeenCalled();
   });
 
   it("keeps listener initialization failure as an error", async () => {
@@ -61,6 +64,7 @@ describe("useScrapeConsole", () => {
     expect(result.current.state).toBe("error");
     expect(result.current.error).toBe("控制台页面监听初始化失败，请重新抓取。");
     expect(result.current.consoleActionMessage).toBeNull();
+    expect(commandMocks.closeScrapeConsole).toHaveBeenCalledWith("account-qwen");
   });
 
   it("requests login only for an explicit login page", async () => {
@@ -81,5 +85,6 @@ describe("useScrapeConsole", () => {
     expect(result.current.state).toBe("need-login");
     expect(result.current.error).toBeNull();
     expect(commandMocks.scrapeBalance).not.toHaveBeenCalled();
+    expect(commandMocks.closeScrapeConsole).not.toHaveBeenCalled();
   });
 });

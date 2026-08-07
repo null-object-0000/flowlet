@@ -176,6 +176,12 @@ describe("taskExecutionRound / executionRoundFromCount", () => {
     expect(executionRoundFromCount(1, "submitted")).toBe(2);
   });
 
+  it("a withdrawn re-run remains a draft for the next round", () => {
+    const history = JSON.stringify([{ jobId: "job-1", startedAt: "2026-08-04T20:00:00.000Z", rejected: true }]);
+    expect(taskExecutionRound({ executionHistory: history, status: "draft" })).toBe(2);
+    expect(executionRoundFromCount(1, "draft")).toBe(2);
+  });
+
   it("running / review tasks stay on the current round number", () => {
     const history = JSON.stringify([{ jobId: "job-1", startedAt: "2026-08-04T20:00:00.000Z" }]);
     expect(taskExecutionRound({ executionHistory: history, status: "in_progress" })).toBe(1);

@@ -1,6 +1,7 @@
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { effectiveOpenAiBaseUrl } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
+import { isQwenTokenPlanAccount } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { CHANNEL_RESOURCE_SYNC_INTERVAL_MS } from "../background-tasks/ChannelResourceAutoSync";
 import { CODEX_ACCOUNT_SYNC_INTERVAL_MS } from "../background-tasks/CodexAccountAutoSync";
@@ -12,7 +13,9 @@ export type AccountSyncStatus = "fresh" | "stale";
  *  `sync_scrape_balances` 的 `channel_resource_sync_method` 保持一致：
  *  - DeepSeek / Kimi 官方余额 API 账号默认周期同步（不受 resource_sync_mode 控制），
  *    自定义 OpenAI 端点覆盖的账号不保证官方余额接口语义，跳过；
- *  - LongCat / Qwen 控制台抓取账号仅 `resource_sync_mode === "auto"` 时自动同步；
+ *  - LongCat 控制台抓取账号仅 `resource_sync_mode === "auto"` 时自动同步；
+ *  - Qwen 仅 Token Plan 订阅账号参与控制台抓取（API 按量付费账号没有官方余额接口，
+ *    也没有可用的控制台抓取模式，走手动维护）；
  *  - 未启用账号不参与自动同步。 */
 export function hasChannelAutoSync(
   account: ChannelAccount,
@@ -28,7 +31,7 @@ export function hasChannelAutoSync(
 
   return (
     account.resource_sync_mode === "auto" &&
-    (account.channel_id === "longcat" || account.channel_id === "qwen")
+    (account.channel_id === "longcat" || isQwenTokenPlanAccount(account))
   );
 }
 

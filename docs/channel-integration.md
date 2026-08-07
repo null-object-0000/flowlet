@@ -37,17 +37,17 @@
 
 ## 2. 已接入渠道对照
 
-| 能力 | LongCat | DeepSeek | Kimi | Qwen | 自定义渠道 |
-|------|---------|----------|------|-----------|------------|
-| 渠道 ID | `longcat` | `deepseek` | `kimi` | `qwen` | `custom` |
-| OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 账号级填写 |
-| Anthropic Base URL | `https://api.longcat.chat/anthropic` | `https://api.deepseek.com/anthropic` | `https://api.moonshot.cn/anthropic` | `https://dashscope.aliyuncs.com/apps/anthropic` | 账号级填写 |
-| Responses | ✅ 从 OpenAI Base URL 派生（无状态） | ✅ 从 OpenAI Base URL 派生（无状态，暂仅 v4-flash） | — 不支持 | ✅ 从 OpenAI Base URL 派生（仅透传无状态子集） | 填写 OpenAI Base URL 即启用 |
-| 鉴权 | Bearer | Bearer | Bearer | Bearer | OpenAI Bearer / Anthropic x-api-key |
-| 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 | 标准模型列表（无上下文详情） | 标准 OpenAI `/models` |
-| 自动余额 | 否 | 是 | 是 | 否 | 否 |
-| 资源模式 | Token 资源包 UI | 否 | 否 | Token Plan 订阅模式（额度仅官方控制台可见） | 手动维护 |
-| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.8-max-preview → pro`、`qwen3.6-flash → flash` | 无 |
+| 能力 | LongCat | DeepSeek | Kimi | Qwen | 智谱 | 自定义渠道 |
+|------|---------|----------|------|-----------|------------|------------|
+| 渠道 ID | `longcat` | `deepseek` | `kimi` | `qwen` | `zhipu` | `custom` |
+| OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `https://open.bigmodel.cn/api/paas/v4` | 账号级填写 |
+| Anthropic Base URL | `https://api.longcat.chat/anthropic` | `https://api.deepseek.com/anthropic` | `https://api.moonshot.cn/anthropic` | `https://dashscope.aliyuncs.com/apps/anthropic` | `https://open.bigmodel.cn/api/anthropic` | 账号级填写 |
+| Responses | ✅ 从 OpenAI Base URL 派生（无状态） | ✅ 从 OpenAI Base URL 派生（无状态，暂仅 v4-flash） | — 不支持 | ✅ 从 OpenAI Base URL 派生（仅透传无状态子集） | — 上游未确认 | 填写 OpenAI Base URL 即启用 |
+| 鉴权 | Bearer | Bearer | Bearer | Bearer | OpenAI Bearer / Anthropic x-api-key | OpenAI Bearer / Anthropic x-api-key |
+| 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 | 标准模型列表（无上下文详情） | 标准 OpenAI `/models`（端点不以 `/v1` 结尾，必须 `endpoints.models` 覆盖） | 标准 OpenAI `/models` |
+| 自动余额 | 否 | 是 | 是 | 否 | 否 | 否 |
+| 资源模式 | Token 资源包 UI | 否 | 否 | API 按量付费 + Token Plan 订阅双模式（API 手动维护余额；Token Plan 额度仅官方控制台可见） | 手动维护（按量付费） | 手动维护 |
+| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.8-max-preview → pro`、`qwen3.6-flash → flash` | `glm-5.2 → pro` | 无 |
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
 
@@ -57,12 +57,14 @@ OpenAI-compatible `/models` 的实际返回结果，并统一受 Flowlet 全局�
 白名单外模型照常展示，但标记为“不支持”且不可勾选。最终候选必须同时存在于
 最近一次 `/models` 结果、用户勾选列表和全局白名单中。
 
-Qwen 的一个账号级特性是 **Token Plan**（订阅制，`sk-sp-` 前缀 Key）：
-渠道级端点保持按量付费地址，Token Plan 账号通过账号级 Base URL 覆盖指向
-`https://token-plan.cn-beijing.maas.aliyuncs.com` 下的专属端点
-（OpenAI `/compatible-mode/v1`，Anthropic `/apps/anthropic`），
-账号编辑器在选择 Token Plan 模式时自动写入覆盖。Token Plan 没有公开额度查询
-接口，订阅额度由官方控制台抓取并固定自动同步，不提供手动维护入口；账号级覆盖
+Qwen 是双资源模式渠道：默认 **API 按量付费**（通用 `sk-` 前缀 Key + 渠道级
+dashscope 端点，`resource_mode = "pay_as_you_go"`），并支持 **Token Plan** 订阅
+（`sk-sp-` 前缀 Key，`resource_mode = "token_plan"`）：Token Plan 账号通过账号级
+Base URL 覆盖指向 `https://token-plan.cn-beijing.maas.aliyuncs.com` 下的专属端点
+（OpenAI `/compatible-mode/v1`，Anthropic `/apps/anthropic`），账号编辑器在选择
+Token Plan 模式时自动写入覆盖。Token Plan 没有公开额度查询接口，订阅额度由官方
+控制台抓取并固定自动同步，不提供手动维护入口；API 按量付费账号同样没有官方余额
+接口，也没有可用的控制台抓取模式，走手动维护余额，不参与自动同步。账号级覆盖
 地址用于套餐专属的模型列表同步与代理请求。
 
 ## 3. 配置与默认值

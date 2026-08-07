@@ -181,13 +181,37 @@
         "supports_usage_query": false,
         "supports_scrape_balance": false,
         "endpoints": {}
+      },
+      {
+        "id": "zhipu",
+        "name": "智谱",
+        "vendor": "zhipu",
+        "platform_url": "https://www.bigmodel.cn/apikey/platform",
+        "supported_protocols": ["openai", "anthropic"],
+        "openai_base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "anthropic_base_url": "https://open.bigmodel.cn/api/anthropic",
+        "openai_auth": "bearer",
+        "anthropic_auth": "x_api_key",
+        "default_model": "glm-5.2",
+        "small_model": null,
+        "supports_model_list": true,
+        "supports_model_detail": false,
+        "supports_price_sync": false,
+        "supports_balance_query": false,
+        "supports_quota_query": false,
+        "supports_usage_query": false,
+        "supports_scrape_balance": false,
+        "endpoints": {
+          "models": "https://open.bigmodel.cn/api/paas/v4/models"
+        }
       }
     ],
     "default_exposed_models": {
       "longcat": ["LongCat-2.0"],
       "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
       "kimi": ["kimi-k3", "kimi-k2.7-code"],
-      "qwen": ["qwen3.8-max", "qwen3.8-max-preview", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"]
+      "qwen": ["qwen3.8-max", "qwen3.8-max-preview", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
+      "zhipu": ["glm-5.2"]
     }
   }
 }

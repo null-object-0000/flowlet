@@ -2,7 +2,7 @@
   /* 固定高度布局：模块高度不再随窗口高度拉伸。
      workspace 行高度由 .workspace 的固定高度决定；窗口更高时页面保持该
      高度并顶端对齐，剩余空间留白。宽度仍保持响应式。
-     月维度使用 .pageFill：热力图+数据可信度一行固定高度，
+     周维度使用 .pageFill：热力图+数据可信度一行固定高度，
      下方「指定时间点」卡片行随窗口高度伸缩。 */
   height: auto;
   min-height: 0;
@@ -42,22 +42,22 @@ button.stat { color: var(--flowlet-color-text); font: inherit; text-align: left;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-/* 月维度：左侧「每日 Token 热力图」模块宽度固定（横向长方形，1:1 方格），
+/* 周维度：左侧「星期 × 小时」热力图模块宽度固定（横向长方形，1:1 方格），
    右侧「数据可信度」模块高度与之相同、宽度占剩余空间。 */
-.workspaceMonth {
+.workspaceWeek {
   height: 280px;
   grid-template-columns: 586px minmax(0, 1fr);
   grid-template-rows: 280px;
 }
-.workspaceMonth .state { min-height: 0; }
-/* 月维度：指定时间点的 Token / 费用拆解卡片移到热力图与数据可信度下方，
+.workspaceWeek .state { min-height: 0; }
+/* 周维度：指定时间点的 Token / 费用拆解卡片移到热力图与数据可信度下方，
    模块高度随应用窗口高度伸缩。 */
-.monthSelectedStrip {
+.weekSelectedStrip {
   min-width: 0;
   min-height: 0;
   display: grid;
 }
-.monthSelectedStrip .selectedPeriod { min-height: 0; }
+.weekSelectedStrip .selectedPeriod { min-height: 0; }
 .card, .selectedPeriod, .confidenceCard {
   min-width: 0;
   min-height: 0;
@@ -102,37 +102,37 @@ button.stat { color: var(--flowlet-color-text); font: inherit; text-align: left;
 .state { min-height: 260px; padding: 24px 18px; display: grid; place-items: center; align-content: center; gap: 8px; text-align: center; }
 .state span { max-width: 580px; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.5; }
 
-.monthHourlyFrame {
-  --month-hourly-cell: 18px;
-  --month-hourly-gap: 4px;
+.weekHourlyFrame {
+  --week-hourly-cell: 18px;
+  --week-hourly-gap: 4px;
   flex: 1;
   min-height: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
 }
-.monthHourlyHeatmap {
+.weekHourlyHeatmap {
   flex: 1;
   min-width: 0;
   min-height: 0;
   align-content: center;
   display: grid;
   /* 左列星期标签 + 24 个小时列；底行小时标签。格子保持 1:1 固定尺寸，不随容器拉伸。 */
-  grid-template-columns: 26px repeat(24, var(--month-hourly-cell));
-  grid-template-rows: repeat(7, var(--month-hourly-cell)) 18px;
-  gap: var(--month-hourly-gap);
+  grid-template-columns: 26px repeat(24, var(--week-hourly-cell));
+  grid-template-rows: repeat(7, var(--week-hourly-cell)) 18px;
+  gap: var(--week-hourly-gap);
 }
-.monthHourlyWeekdayLabel, .monthHourlyHourLabel {
+.weekHourlyWeekdayLabel, .weekHourlyHourLabel {
   display: grid;
   place-items: center;
   color: var(--flowlet-color-text-tertiary);
   font-size: 11px;
   line-height: 1;
 }
-.monthHourlyWeekdayLabel { font-weight: 650; }
-.monthHourlyWeekdayLabel.weekend { color: var(--flowlet-color-text-secondary); }
-.monthHourlyHourLabel { align-self: start; }
-.monthHourlyCell {
+.weekHourlyWeekdayLabel { font-weight: 650; }
+.weekHourlyWeekdayLabel.weekend { color: var(--flowlet-color-text-secondary); }
+.weekHourlyHourLabel { align-self: start; }
+.weekHourlyCell {
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -146,12 +146,43 @@ button.stat { color: var(--flowlet-color-text); font: inherit; text-align: left;
   transition: transform 120ms ease, filter 120ms ease;
 }
 @media (hover: hover) {
-  .monthHourlyCell:hover:not(:disabled) {
+  .weekHourlyCell:hover:not(:disabled) {
     transform: translateY(-1px);
     filter: saturate(1.12);
   }
 }
-.monthHourlyCell:disabled { cursor: default; opacity: .5; }
+.weekHourlyCell:disabled { cursor: default; opacity: .5; }
+
+/* 月视图：日历式热力图（恢复原版）。 */
+.monthHeatmapFrame {
+  --month-heatmap-cell-height: 44px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.heatmapLabels {
+  width: 100%;
+  margin: 2px 0 8px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 7px;
+  color: var(--flowlet-color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+.monthHeatmap {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: repeat(6, minmax(var(--month-heatmap-cell-height), 1fr));
+  gap: 7px;
+}
 
 .heatmapCell {
   min-width: 0;
@@ -162,7 +193,44 @@ button.stat { color: var(--flowlet-color-text); font: inherit; text-align: left;
   background: var(--flowlet-color-surface-muted);
   box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
 }
-button.heatmapCell[aria-pressed="true"], .hourCell[aria-pressed="true"], .monthHourlyCell[aria-pressed="true"] {
+button.heatmapCell {
+  padding: 6px;
+  display: grid;
+  place-items: start;
+  font: inherit;
+  cursor: pointer;
+}
+button.heatmapCell span { font-size: 15px; line-height: 1; font-weight: 650; font-variant-numeric: tabular-nums; }
+.monthHeatmap button.heatmapCell {
+  padding: 0;
+  place-items: center;
+  border-radius: 12px;
+  transition: transform 120ms ease, filter 120ms ease;
+}
+@media (hover: hover) {
+  .monthHeatmap button.heatmapCell:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.03) saturate(1.15);
+  }
+}
+.monthHeatmap button.heatmapCell.heatLevel1 { color: var(--flowlet-color-primary); background: color-mix(in srgb, var(--flowlet-color-primary) 14%, var(--flowlet-color-surface)); }
+.monthHeatmap button.heatmapCell.heatLevel2 { color: var(--flowlet-color-primary); background: color-mix(in srgb, var(--flowlet-color-primary) 30%, var(--flowlet-color-surface)); }
+.monthHeatmap button.heatmapCell.heatLevel3 { color: white; background: color-mix(in srgb, var(--flowlet-color-primary) 68%, var(--flowlet-color-surface)); }
+.monthHeatmap button.heatmapCell.heatLevel4 { color: white; background: var(--flowlet-color-primary); }
+.monthHeatmap .weekend:not(.heatLevel3):not(.heatLevel4) { color: var(--flowlet-color-primary); }
+.monthHeatmap button.heatmapCell.adjacentMonth {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--flowlet-color-border) 55%, transparent);
+}
+.monthHeatmap button.heatmapCell.adjacentMonth span { opacity: .5; }
+.monthHeatmap button.heatmapCell.adjacentMonth[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px var(--flowlet-color-primary);
+}
+.monthHeatmap button.heatmapCell.adjacentMonth.heatLevel3[aria-pressed="true"],
+.monthHeatmap button.heatmapCell.adjacentMonth.heatLevel4[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px white;
+}
+.monthHeatmap button.heatmapCell.adjacentMonth[aria-pressed="true"] span { opacity: 1; }
+button.heatmapCell[aria-pressed="true"], .hourCell[aria-pressed="true"], .weekHourlyCell[aria-pressed="true"] {
   z-index: 1;
   outline: none;
   box-shadow: inset 0 0 0 2px var(--flowlet-color-primary);
@@ -171,8 +239,8 @@ button.heatmapCell.heatLevel3[aria-pressed="true"],
 button.heatmapCell.heatLevel4[aria-pressed="true"],
 .hourCell.heatLevel3[aria-pressed="true"],
 .hourCell.heatLevel4[aria-pressed="true"],
-.monthHourlyCell.heatLevel3[aria-pressed="true"],
-.monthHourlyCell.heatLevel4[aria-pressed="true"] { box-shadow: inset 0 0 0 2px white; }
+.weekHourlyCell.heatLevel3[aria-pressed="true"],
+.weekHourlyCell.heatLevel4[aria-pressed="true"] { box-shadow: inset 0 0 0 2px white; }
 button.heatmapCell:hover:not(:disabled), .hourCell:hover:not(:disabled) { filter: saturate(1.12); }
 button.heatmapCell.outside, .hourCell.outside { cursor: pointer; }
 
@@ -222,35 +290,8 @@ button.heatmapCell.outside, .hourCell.outside { cursor: pointer; }
   pointer-events: none;
 }
 .dailyHourCell:disabled { cursor: default; }
-.hourCell:disabled, .monthHourlyCell:disabled { cursor: default; }
+.hourCell:disabled, .weekHourlyCell:disabled, .monthHeatmap button.heatmapCell:disabled { cursor: default; }
 
-.hourlyHeatmapFrame {
-  --hourly-heatmap-cell-height: 30px;
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-}
-.hourlyHeatmap {
-  flex: 1;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  padding: 2px 0;
-  display: grid;
-  grid-template-columns: 48px repeat(7, minmax(0, 1fr));
-  grid-template-rows: 18px repeat(6, minmax(var(--hourly-heatmap-cell-height), 1fr)) 16px;
-  gap: 6px;
-}
-.hourLabel, .hourDayLabel, .hourDateLabel {
-  display: grid;
-  place-items: center;
-  color: var(--flowlet-color-text-tertiary);
-  font-size: 11px;
-  line-height: 1;
-}
-.hourDateLabel { align-self: start; white-space: nowrap; }
 .hourCell {
   width: 100%;
   height: 100%;
@@ -285,8 +326,8 @@ button.heatmapCell.outside, .hourCell.outside { cursor: pointer; }
   grid-template-rows: minmax(178px, .84fr) minmax(214px, 1.16fr);
   gap: 10px;
 }
-/* 月维度右侧：只放「数据可信度」一个模块，高度与左侧热力图一致。 */
-.insightMonth {
+/* 周维度右侧：只放「数据可信度」一个模块，高度与左侧热力图一致。 */
+.insightWeek {
   grid-template-rows: minmax(0, 1fr);
 }
 
@@ -307,6 +348,12 @@ button.selectedPeriodMetric { border: 0; background: transparent; font: inherit;
 .selectedPeriodMetric:nth-child(odd) { padding-left: 0; border-right: 1px solid var(--flowlet-color-border); }
 .selectedPeriodMetric:nth-child(even) { padding-right: 0; }
 .selectedPeriodMetric:nth-child(n + 3) { border-top: 1px solid var(--flowlet-color-border); }
+/* 周视图底部全宽卡片：四项指标单行排开（一行四列），不再两行两列。 */
+.selectedPeriodStatsHorizontal { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.selectedPeriodStatsHorizontal .selectedPeriodMetric { padding-right: 12px; }
+.selectedPeriodStatsHorizontal .selectedPeriodMetric:nth-child(n + 3) { border-top: 0; }
+.selectedPeriodStatsHorizontal .selectedPeriodMetric:not(:last-child) { border-right: 1px solid var(--flowlet-color-border); }
+.selectedPeriodStatsHorizontal .selectedPeriodMetric:last-child { border-right: 0; }
 .selectedPeriodMetric > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
 .selectedPeriodMetric > strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
 .selectedPeriodMetric > small, .selectedPeriodEmpty > small { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
@@ -396,15 +443,16 @@ button.selectedPeriodMetric { border: 0; background: transparent; font: inherit;
 
 @media (max-width: 980px) {
   .page { height: auto; min-height: 100%; }
-  /* 月维度布局不随窗口收窄改变：热力图宽度固定，仅数据可信度宽度变化。 */
+  /* 周维度布局不随窗口收窄改变：热力图宽度固定，仅数据可信度宽度变化。 */
   .pageFill { height: calc(100vh - var(--flowlet-shell-top) - var(--flowlet-shell-bottom)); grid-template-rows: auto auto auto minmax(0, 1fr); }
   .toolbar { flex-wrap: wrap; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace { grid-template-columns: 1fr; }
   .workspace { height: auto; }
-  .workspaceMonth { grid-template-columns: 586px minmax(0, 1fr); grid-template-rows: 280px; height: 280px; }
+  .workspaceWeek { grid-template-columns: 586px minmax(0, 1fr); grid-template-rows: 280px; height: 280px; }
   .insightColumn { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
-  .insightMonth { grid-template-rows: minmax(0, 1fr); }
+  .insightWeek { grid-template-rows: minmax(0, 1fr); }
+  .weekSelectedStrip .selectedPeriod { min-height: 0; }
   .selectedPeriod { min-height: 214px; }
 }
 

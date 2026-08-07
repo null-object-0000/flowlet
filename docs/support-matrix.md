@@ -44,7 +44,7 @@ Responses 是独立协议（`ProtocolType::Responses`），不是 OpenAI 通配�
 
 ## 3. 渠道支持
 
-Flowlet 当前有五种渠道模板：LongCat、DeepSeek、Kimi、Qwen 和自定义渠道。
+Flowlet 当前有六种渠道模板：LongCat、DeepSeek、Kimi、Qwen、智谱和自定义渠道。
 千问按量付费与 Token Plan 共用 `qwen` 渠道模板，但使用不同的 API Key 和 Base URL，
 因此在矩阵中分开列出。
 
@@ -57,6 +57,7 @@ Flowlet 当前有五种渠道模板：LongCat、DeepSeek、Kimi、Qwen 和自定
 | Kimi / Moonshot | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | — 官方确认暂不支持 | —（不生成 responses 路由） |
 | Qwen 按量付费 | ✅ | ✅ | ✅ | — | — | ✅ 官方明确支持（含有状态 store/retrieve） | ✅（仅无状态透传） |
 | Qwen Token Plan | ✅ | ✅ | ✅ | — | ✅ 控制台抓取套餐额度 | ✅ 官方明确支持 | ✅（仅无状态透传） |
+| 智谱 | ✅ | ✅ | ✅ | — | — 官方暂无公开余额接口，先只支持 API 模式 | — 官方文档未确认 | —（不生成 responses 路由） |
 | 自定义渠道 | 取决于已填写的 OpenAI Base URL | 取决于已填写的 Anthropic Base URL | ✅ 使用标准 OpenAI `/models` | — | — | 取决于上游，当前无自动检测 | ✅（填写 OpenAI Base URL 即生成路由，上游是否支持由用户保证） |
 
 上游 Responses API 的当前结论：
@@ -99,7 +100,7 @@ Flowlet 当前有五种渠道模板：LongCat、DeepSeek、Kimi、Qwen 和自定
 
 ## 4. 模型支持
 
-Flowlet 当前总共支持 12 个规范化模型。这个列表是全局白名单，不是按渠道切分的
+Flowlet 当前总共支持 13 个规范化模型。这个列表是全局白名单，不是按渠道切分的
 固定路由表。
 
 | 官方归属 | 规范化模型 ID | Responses 说明 |
@@ -116,6 +117,7 @@ Flowlet 当前总共支持 12 个规范化模型。这个列表是全局白名�
 | Qwen | `qwen3.7-flash` | ✅ 上游确认 |
 | Qwen | `qwen3.6-plus` | ✅ 上游确认 |
 | Qwen | `qwen3.6-flash` | ✅ 上游确认 |
+| 智谱 | `glm-5.2` | — 上游文档未确认支持 |
 
 `flowlet-pro` 与 `flowlet-flash` 没有固定档位对应关系；用户可把上述任意已有渠道模型加入任一聚合模型。
 

@@ -40,7 +40,7 @@ export type ProjectTask = {
   /** 最近一次执行该任务的设备 id（跨设备执行归属）。任务被某设备执行后永久归属该设备，
    *  其他设备只能查看。工作区同步来的已执行任务在本机为 null（归属在源设备）。 */
   claimedBy: string | null;
-  /** 队列置顶时间（RFC3339）：已提交待执行任务被用户「提高优先级」置顶到队列最前。
+  /** 队列置顶时间（RFC3339）：已提交待执行任务被用户「置顶」提到队列最前。
    *  设备本地字段，不参与工作区同步；任务被领取执行时清空。 */
   queueBoostedAt: string | null;
   createdAt: string;
@@ -55,15 +55,22 @@ export function taskHasExecution(task: Pick<ProjectTask, "executionHistory">): b
   return parseTaskExecutionHistory(task.executionHistory).length > 0;
 }
 
+/** 已执行过、又从重新排队状态撤回的草稿：正在准备下一轮，而不是首次草稿。 */
+export function taskIsRevisionDraft(
+  task: Pick<ProjectTask, "executionHistory" | "status">,
+): boolean {
+  return task.status === "draft" && taskHasExecution(task);
+}
+
 /**
  * 由执行轮次计数 + 状态推导「任务当前处于第几轮执行」。
  * `executionHistory` 每条记录代表一轮已开始（或已完成）的执行：
- * - `submitted`（正在排队）即将执行下一轮 → 历史轮数 + 1；
- * - 进行中 / 待审核 / 草稿 → 当前轮次即历史轮数（从未执行过的任务记为第 1 轮）。
+ * - `draft` / `submitted` 正在准备或排队下一轮 → 历史轮数 + 1；
+ * - 进行中 / 待审核 / 已完成 → 当前轮次即历史轮数（从未执行过的任务记为第 1 轮）。
  * 与 PC 看板 `taskExecutionRound` 共用，移动端快照只带计数时复用。
  */
 export function executionRoundFromCount(count: number, status: ProjectTaskStatus): number {
-  if (status === "submitted") return count + 1;
+  if (status === "draft" || status === "submitted") return count + 1;
   return Math.max(1, count);
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HourlyUsageTotal } from "../../domains/device-sync/types";
-import { buildMonthWeekdayHourHeatmap } from "./deviceUsagePresentation";
+import { buildWeekdayHourHeatmap } from "./deviceUsagePresentation";
 
 const hour = (date: string, hourOfDay: number, tokens: number, requests = 1): HourlyUsageTotal => ({
   hour: `${date}T${String(hourOfDay).padStart(2, "0")}:00:00`,
@@ -8,64 +8,77 @@ const hour = (date: string, hourOfDay: number, tokens: number, requests = 1): Ho
   knownTokens: tokens,
 });
 
-describe("buildMonthWeekdayHourHeatmap", () => {
-  it("aggregates hourly usage by (weekday, hour) across the selected month", () => {
-    // 2026-08-03 为周一；offset -1 选定 2026-07 自然月（2026-07-06、07-13 均为周一）。
+describe("buildWeekdayHourHeatmap", () => {
+  it("builds 7×24 concrete hour cells for the selected week, ordered day-major", () => {
+    // 2026-08-03 为周一；offset -1 选定上一自然周 2026-07-27（周一）～ 2026-08-02（周日）。
     const now = new Date("2026-08-03T12:00:00");
-    const result = buildMonthWeekdayHourHeatmap([
-      hour("2026-07-06", 9, 100), // 周一 09 点
-      hour("2026-07-13", 9, 50), // 下个周一 09 点 → 与上面合计
-      hour("2026-07-13", 10, 30), // 周一 10 点
+    const result = buildWeekdayHourHeatmap([
+      hour("2026-07-27", 9, 100), // 周一 09 点
+      hour("2026-07-27", 10, 30), // 周一 10 点
+      hour("2026-07-28", 9, 50), // 周二 09 点
     ], -1, now, "tokens");
 
     expect(result.cells).toHaveLength(7 * 24);
-    const monday9 = result.cells.find((cell) => cell.weekday === 0 && cell.hourOfDay === 9);
+    // 第 index 个格子的星期 = floor(index / 24)。
+    expect(result.cells[0]).toMatchObject({ date: "2026-07-27", hourOfDay: 0, hour: "2026-07-27T00:00:00" });
+    expect(result.cells[24]).toMatchObject({ date: "2026-07-28", hourOfDay: 0 });
+
+    const monday9 = result.cells.find((cell) => cell.date === "2026-07-27" && cell.hourOfDay === 9);
     expect(monday9).toBeDefined();
-    expect(monday9!.tokens).toBe(150);
-    expect(monday9!.requests).toBe(2);
+    expect(monday9!.hour).toBe("2026-07-27T09:00:00");
+    expect(monday9!.hourEnd).toBe(10);
+    expect(monday9!.tokens).toBe(100);
+    expect(monday9!.requests).toBe(1);
     expect(monday9!.hasData).toBe(true);
 
-    const monday10 = result.cells.find((cell) => cell.weekday === 0 && cell.hourOfDay === 10);
-    expect(monday10!.tokens).toBe(30);
+    const tuesday9 = result.cells.find((cell) => cell.date === "2026-07-28" && cell.hourOfDay === 9);
+    expect(tuesday9!.tokens).toBe(50);
+    expect(tuesday9!.hasData).toBe(true);
 
-    const monday8 = result.cells.find((cell) => cell.weekday === 0 && cell.hourOfDay === 8);
-    expect(monday8!.tokens).toBe(0);
-    expect(monday8!.hasData).toBe(false);
-
-    // 周二任意时段都不该有数据。
-    const tuesday = result.cells.find((cell) => cell.weekday === 1 && cell.hourOfDay === 9);
-    expect(tuesday!.hasData).toBe(false);
+    // 周内无数据的小时保持空态。
+    const sunday23 = result.cells.find((cell) => cell.date === "2026-08-02" && cell.hourOfDay === 23);
+    expect(sunday23!.tokens).toBe(0);
+    expect(sunday23!.hasData).toBe(false);
+    expect(sunday23!.future).toBe(false);
   });
 
-  it("excludes future hours and future days of the current month", () => {
-    // 2026-07-15 为周三，now 为该日 12 点。
-    const now = new Date("2026-07-15T12:00:00");
-    const result = buildMonthWeekdayHourHeatmap([
-      hour("2026-07-15", 10, 100), // 过去小时
-      hour("2026-07-15", 15, 200), // 当天未来小时
-      hour("2026-07-16", 10, 300), // 未来日期
+  it("excludes future hours of the current week", () => {
+    // 2026-07-27 为周一，now 为该日 12 点（offset 0 = 本周）。
+    const now = new Date("2026-07-27T12:00:00");
+    const result = buildWeekdayHourHeatmap([
+      hour("2026-07-27", 10, 100), // 过去小时
+      hour("2026-07-27", 15, 200), // 当天未来小时
+      hour("2026-07-28", 10, 300), // 未来日期
     ], 0, now, "tokens");
 
-    const wed10 = result.cells.find((cell) => cell.weekday === 2 && cell.hourOfDay === 10);
-    const wed15 = result.cells.find((cell) => cell.weekday === 2 && cell.hourOfDay === 15);
-    const thu10 = result.cells.find((cell) => cell.weekday === 3 && cell.hourOfDay === 10);
+    const monday10 = result.cells.find((cell) => cell.date === "2026-07-27" && cell.hourOfDay === 10);
+    const monday15 = result.cells.find((cell) => cell.date === "2026-07-27" && cell.hourOfDay === 15);
+    const tuesday10 = result.cells.find((cell) => cell.date === "2026-07-28" && cell.hourOfDay === 10);
 
-    expect(wed10!.tokens).toBe(100);
-    expect(wed10!.hasData).toBe(true);
-    expect(wed15!.tokens).toBe(0);
-    expect(wed15!.hasData).toBe(false);
-    expect(thu10!.tokens).toBe(0);
-    expect(thu10!.hasData).toBe(false);
+    expect(monday10!.tokens).toBe(100);
+    expect(monday10!.hasData).toBe(true);
+    expect(monday10!.future).toBe(false);
+
+    expect(monday15!.tokens).toBe(0);
+    expect(monday15!.hasData).toBe(false);
+    expect(monday15!.future).toBe(true);
+
+    expect(tuesday10!.tokens).toBe(0);
+    expect(tuesday10!.hasData).toBe(false);
+    expect(tuesday10!.future).toBe(true);
   });
 
   it("builds cost metric levels from estimated cost when requested", () => {
     const now = new Date("2026-08-03T12:00:00");
-    const result = buildMonthWeekdayHourHeatmap([
-      { ...hour("2026-07-06", 9, 0), estimatedCost: 1.2 },
-      { ...hour("2026-07-13", 9, 0), estimatedCost: 0.8 },
+    const result = buildWeekdayHourHeatmap([
+      { ...hour("2026-07-27", 9, 0), estimatedCost: 1.2 },
+      { ...hour("2026-07-27", 10, 0), estimatedCost: 0.8 },
     ], -1, now, "cost");
-    const monday9 = result.cells.find((cell) => cell.weekday === 0 && cell.hourOfDay === 9);
-    expect(monday9!.estimatedCost).toBe(2.0);
+    const monday9 = result.cells.find((cell) => cell.date === "2026-07-27" && cell.hourOfDay === 9);
+    const monday10 = result.cells.find((cell) => cell.date === "2026-07-27" && cell.hourOfDay === 10);
+    expect(monday9!.estimatedCost).toBe(1.2);
+    expect(monday10!.estimatedCost).toBe(0.8);
     expect(monday9!.level).toBeGreaterThanOrEqual(0);
+    expect(monday10!.level).toBeLessThanOrEqual(monday9!.level);
   });
 });

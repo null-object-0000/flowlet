@@ -636,9 +636,12 @@ pub async fn sync_deepseek_models(
 /// 同步通用 OpenAI-compatible 渠道的 `/models`。
 ///
 /// 自定义渠道没有渠道级默认地址，必须由账号提供 OpenAI Base URL 覆盖。
+/// `models_url` 非 None 时优先使用该显式模型列表端点（如智谱 `/api/paas/v4/models`
+/// 不以 `/v1` 结尾，`openai_models_url` 拼接会得到非标准变体，需显式传入）。
 pub async fn sync_openai_compatible_models(
     account: &ChannelAccount,
     preset: &ChannelPreset,
+    models_url: Option<String>,
 ) -> ModelSyncResult {
     if account.api_key.trim().is_empty() {
         return ModelSyncResult {
@@ -660,7 +663,7 @@ pub async fn sync_openai_compatible_models(
             errors: vec!["请先填写 OpenAI Base URL".to_string()],
         };
     };
-    let url = openai_models_url(base_url);
+    let url = models_url.unwrap_or_else(|| openai_models_url(base_url));
     let client = match Client::builder()
         .timeout(std::time::Duration::from_secs(
             preset.timeout_seconds.unwrap_or(15),

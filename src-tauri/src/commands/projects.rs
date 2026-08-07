@@ -298,7 +298,7 @@ pub(crate) fn get_project_task_runner_state(
     Ok(crate::core::agent_task_runner::task_runner_state())
 }
 
-/// 提高任务优先级：把已提交待执行任务置顶到队列最前。
+/// 置顶任务：把已提交待执行任务提到队列最前。
 /// 只允许操作本机可执行（非其他设备归属）的 submitted 任务。
 #[tauri::command]
 pub(crate) fn boost_project_task(
@@ -317,14 +317,14 @@ pub(crate) fn boost_project_task(
         .task_is_owned_by_other_device(&task_id, &current_device_id)
         .map_err(|error| error.to_string())?
     {
-        return Err("该任务由其他设备执行，本机只读，不能提高优先级".to_string());
+        return Err("该任务由其他设备执行，本机只读，不能置顶".to_string());
     }
     let boosted = state
         .storage
         .boost_project_task(&task_id)
         .map_err(|error| error.to_string())?;
     if !boosted {
-        return Err("只有已提交待执行的任务可以提高优先级".to_string());
+        return Err("只有已提交待执行的任务可以置顶".to_string());
     }
     // 置顶后刷新队列顺序，其他设备/移动端尽快看到。
     if let Some(project_id) = state

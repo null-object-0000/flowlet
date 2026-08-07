@@ -887,16 +887,12 @@ fn process_opencode_line(
     Ok(())
 }
 
-/// Pi 任务会话目录：`~/.flowlet/pi-task-sessions/<project_id>`。
-/// 用 `--session-dir` 把 Flowlet 调度的会话与用户主 Pi 会话列表隔离。
-fn pi_task_session_dir(project_id: &str) -> Result<std::path::PathBuf, String> {
+/// Pi 原生会话目录。Flowlet 调度的任务与用户直接运行 Pi 一样写入这里，确保
+/// Pi 自身以及 Flowlet 既有的会话枚举、时间线和用量同步都能读取同一份会话。
+fn pi_native_session_dir() -> Result<std::path::PathBuf, String> {
     dirs::home_dir()
-        .map(|home| {
-            home.join(".flowlet")
-                .join("pi-task-sessions")
-                .join(project_id)
-        })
-        .ok_or_else(|| "无法确定 Pi 任务会话目录".to_string())
+        .map(|home| home.join(".pi").join("agent").join("sessions"))
+        .ok_or_else(|| "无法确定 Pi 原生会话目录".to_string())
 }
 
 /// 解析 Pi 执行要用的会话 id：resume 时复用上次的，否则（首次/空值）生成新 UUID。
@@ -907,10 +903,10 @@ fn execute_pi_session_id(resume_session: Option<&str>) -> Option<String> {
     }
 }
 
-/// 校验 Pi 确实按指定 id 在 Flowlet 专属目录创建 / 更新了会话，并收到完整任务正文。
+/// 校验 Pi 确实按指定 id 在原生目录创建 / 更新了会话，并收到完整任务正文。
 ///
 /// Windows npm 安装通常解析为 `pi.cmd` / `pi.ps1`。多行 prompt 若经 cmd / PowerShell
-/// shim 作为参数传递，会在首个换行处截断，后续 `--session-id` / `--session-dir` 也会丢失。
+/// shim 作为参数传递，会在首个换行处截断，后续 `--session-id` 也会丢失。
 /// 因此执行器改用 stdin 传正文，并在进程结束前以真实 JSONL 做后置校验，防止仅凭退出码 0
 /// 把“没有收到任务”的回复误判为执行成功。
 fn validate_pi_session(
@@ -919,19 +915,32 @@ fn validate_pi_session(
     expected_prompt: &str,
 ) -> Result<std::path::PathBuf, String> {
     let suffix = format!("_{session_id}.jsonl");
-    let entries = std::fs::read_dir(session_dir)
-        .map_err(|error| format!("读取 Pi 任务会话目录失败：{error}"))?;
-    let session_file = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.file_name()
+    let mut pending = vec![session_dir.to_path_buf()];
+    let mut session_file = None;
+    while let Some(dir) = pending.pop() {
+        let entries = std::fs::read_dir(&dir)
+            .map_err(|error| format!("读取 Pi 原生会话目录失败（{}）：{error}", dir.display()))?;
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path
+                .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.ends_with(&suffix))
-        })
-        .ok_or_else(|| format!("Pi 未在任务会话目录创建会话 {session_id}"))?;
+            {
+                session_file = Some(path);
+                break;
+            }
+        }
+        if session_file.is_some() {
+            break;
+        }
+    }
+    let session_file =
+        session_file.ok_or_else(|| format!("Pi 未在原生会话目录创建会话 {session_id}"))?;
     let contents = std::fs::read_to_string(&session_file)
-        .map_err(|error| format!("读取 Pi 任务会话失败：{error}"))?;
+        .map_err(|error| format!("读取 Pi 原生会话失败：{error}"))?;
     let received_full_prompt = contents.lines().any(|line| {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             return false;
@@ -975,9 +984,7 @@ async fn execute_pi(
     resume_session: Option<&str>,
 ) -> Result<ExecutionOutcome, String> {
     let project_dir = required_project_dir(storage, project_id)?;
-    let session_dir = pi_task_session_dir(project_id)?;
-    std::fs::create_dir_all(&session_dir)
-        .map_err(|error| format!("创建 Pi 任务会话目录失败：{error}"))?;
+    let session_dir = pi_native_session_dir()?;
     // 会话 id 在执行前确定：首次用新 UUID，resume 用上次的。
     let session_uuid =
         execute_pi_session_id(resume_session).ok_or_else(|| "无法生成 Pi 会话 id".to_string())?;
@@ -991,9 +998,7 @@ async fn execute_pi(
             .arg(session_name)
             // 指定精确会话 id：首次创建该 id 的会话，resume 继续同一会话。
             .arg("--session-id")
-            .arg(&session_uuid)
-            .arg("--session-dir")
-            .arg(&session_dir);
+            .arg(&session_uuid);
     })?;
     // Pi 会把 stdin 与首个位置参数合并为初始消息。正文通过 stdin 传递，避免 Windows
     // Windows npm shim 对带换行命令行参数的截断，并规避超长任务的命令行长度上限。
@@ -1453,8 +1458,8 @@ mod tests {
     }
 
     #[test]
-    fn pi_session_dir_is_scoped_to_project() {
-        let dir = pi_task_session_dir("project-1").unwrap();
+    fn pi_session_dir_uses_pi_native_location() {
+        let dir = pi_native_session_dir().unwrap();
         let tail: Vec<String> = dir
             .components()
             .rev()
@@ -1464,9 +1469,9 @@ mod tests {
         assert_eq!(
             tail,
             vec![
-                "project-1".to_string(),
-                "pi-task-sessions".to_string(),
-                ".flowlet".to_string()
+                "sessions".to_string(),
+                "agent".to_string(),
+                ".pi".to_string()
             ]
         );
     }
@@ -1491,10 +1496,11 @@ mod tests {
             "flowlet-pi-session-validation-{}",
             uuid::Uuid::new_v4()
         ));
-        std::fs::create_dir_all(&root).unwrap();
+        let project_dir = root.join("encoded-project");
+        std::fs::create_dir_all(&project_dir).unwrap();
         let session_id = "550e8400-e29b-41d4-a716-446655440000";
         let prompt = "调度前缀\n\n任务标题：修复布局\n任务描述：完整正文";
-        let path = root.join(format!("2026-08-07T00-00-00-000Z_{session_id}.jsonl"));
+        let path = project_dir.join(format!("2026-08-07T00-00-00-000Z_{session_id}.jsonl"));
         let user_message = serde_json::json!({
             "type": "message",
             "message": {
@@ -1527,7 +1533,7 @@ mod tests {
             "完整任务正文",
         )
         .expect_err("不存在的 Pi 会话不能通过校验");
-        assert!(error.contains("未在任务会话目录创建会话"));
+        assert!(error.contains("未在原生会话目录创建会话"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1623,6 +1629,10 @@ mod tests {
             storage.get_task_status("task-integ").unwrap().as_deref(),
             Some("review")
         );
+        // 集成测试也走 Pi 原生目录，只删除本次测试精确创建的会话文件。
+        let session_file =
+            validate_pi_session(&pi_native_session_dir().unwrap(), session_id, &prompt).unwrap();
+        let _ = std::fs::remove_file(session_file);
         let _ = std::fs::remove_dir_all(&project_dir);
     }
 

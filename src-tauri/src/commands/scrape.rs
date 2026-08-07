@@ -556,7 +556,23 @@ pub(crate) async fn fetch_channel_models(
                     .enable_all()
                     .build()
                     .unwrap_or_else(|_| panic!("创建运行时失败"));
-                rt.block_on(sync_openai_compatible_models(&account, &preset))
+                rt.block_on(sync_openai_compatible_models(&account, &preset, None))
+            })
+            .await
+            .map_err(|e| format!("任务执行失败: {e}"))?
+        }
+        "zhipu" => {
+            let preset = preset.ok_or_else(|| "智谱渠道模板不存在".to_string())?;
+            // 智谱 models 端点是 /api/paas/v4/models（不以 /v1 结尾），
+            // 显式传入配置的 endpoints.models 覆盖，避免 openai_models_url 拼出
+            // 非标准 /v1/models 变体；与 test_channel_connection 保持一致。
+            let models_url = config.models_endpoint_url("zhipu");
+            tauri::async_runtime::spawn_blocking(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap_or_else(|_| panic!("创建运行时失败"));
+                rt.block_on(sync_openai_compatible_models(&account, &preset, models_url))
             })
             .await
             .map_err(|e| format!("任务执行失败: {e}"))?
@@ -1086,6 +1102,39 @@ mod scrape_capture_tests {
             Some(ChannelResourceSyncMethod::ConsoleScrape)
         );
         assert_eq!(channel_resource_sync_method(&config, &manual), None);
+    }
+
+    #[test]
+    fn qwen_console_sync_only_for_token_plan_subscription() {
+        let config = default_channels_config();
+        let token_plan = ChannelAccount {
+            channel_id: "qwen".to_string(),
+            resource_mode: Some("token_plan".to_string()),
+            resource_sync_mode: "auto".to_string(),
+            ..Default::default()
+        };
+        let token_plan_manual = ChannelAccount {
+            resource_sync_mode: "manual".to_string(),
+            ..token_plan.clone()
+        };
+        let pay_as_you_go = ChannelAccount {
+            channel_id: "qwen".to_string(),
+            resource_mode: Some("pay_as_you_go".to_string()),
+            resource_sync_mode: "auto".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            channel_resource_sync_method(&config, &token_plan),
+            Some(ChannelResourceSyncMethod::ConsoleScrape)
+        );
+        assert_eq!(
+            channel_resource_sync_method(&config, &token_plan_manual),
+            None
+        );
+        // API 按量付费账号没有官方余额接口也没有可用的控制台抓取模式，
+        // 即使标记 auto 也不参与自动同步。
+        assert_eq!(channel_resource_sync_method(&config, &pay_as_you_go), None);
     }
 
     #[test]
@@ -2051,18 +2100,18 @@ pub(crate) async fn scrape_balance(
         source: "scrape".to_string(),
         synced_at: now,
     };
-    // 10. 隐藏 webview(保活供下次抓取)
-    {
-        let guard = state
-            .scrape_webviews
-            .lock()
-            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-        if let Some(window) = guard.get(&account_id) {
-            let _ = window.hide();
-        }
-    }
+    // 10. 登录态由 per-account WebView 数据目录持久化，不需要保活浏览器进程。
+    // 完整抓取成功后立即关闭窗口；下次同步按需重建，避免隐藏 WebView 长期占用
+    // renderer / GPU / network 等 WebView2 子进程。
     if interactive {
         set_scrape_interaction_required(&state, &account_id, false)?;
+    }
+    if let Err(error) = close_scrape_console(state.clone(), account_id.clone()).await {
+        tracing::warn!(
+            account_id = %account_id,
+            error = %error,
+            "抓取成功后关闭 WebView 失败"
+        );
     }
 
     Ok(result)
@@ -2259,9 +2308,21 @@ pub(crate) async fn sync_scrape_balances(
                 }
             }
             ChannelResourceSyncMethod::ConsoleScrape => {
-                scrape_balance(app.clone(), state.clone(), account_id.clone(), Some(false))
-                    .await
-                    .map(|_| ())
+                let result =
+                    scrape_balance(app.clone(), state.clone(), account_id.clone(), Some(false))
+                        .await
+                        .map(|_| ());
+                // 后台任务逐账号串行执行。无论成功、登录失效还是抓取超时，本轮使用的
+                // 隐藏 WebView 都应在切换到下一个账号前关闭；需要人工登录的状态由
+                // scrape_interaction_required 单独记录，不依赖浏览器进程常驻。
+                if let Err(error) = close_scrape_console(state.clone(), account_id.clone()).await {
+                    tracing::warn!(
+                        account_id = %account_id,
+                        error = %error,
+                        "后台抓取结束后关闭 WebView 失败"
+                    );
+                }
+                result
             }
         };
         match sync_result {

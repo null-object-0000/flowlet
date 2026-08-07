@@ -54,7 +54,8 @@ struct AppState {
     /// LAN 直连服务的运行状态与最近入站请求，供「局域网直连」卡片展示。
     lan_status: Arc<Mutex<core::lan_sync::LanServerStatus>>,
     lan_inbound: Arc<Mutex<std::collections::VecDeque<core::lan_sync::LanInboundEvent>>>,
-    /// per-account 后台抓取 webview,key=account_id。webview 自身即会话容器。
+    /// 当前活动的 per-account 抓取 WebView，key=account_id。窗口只在抓取或等待
+    /// 用户交互期间存在；登录态由账号独立的数据目录持久化，不依赖进程保活。
     scrape_webviews: Arc<Mutex<std::collections::HashMap<String, tauri::WebviewWindow>>>,
     /// per-account 待处理拦截响应缓冲(抓取过程中临时存放)。
     scrape_pending: Arc<Mutex<std::collections::HashMap<String, Vec<(String, String)>>>>,
@@ -180,6 +181,23 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
             panic!("初始化 SQLite 存储失败: {e}");
         }
     };
+
+    // 旧版项目任务曾通过 --session-dir 把 Pi 会话写到 ~/.flowlet。先迁入 Pi 原生
+    // sessions 目录，再启动会话扫描与文件监听；失败只记日志，不阻断应用启动。
+    let pi_migration = core::pi_session_migration::migrate_legacy_pi_task_sessions();
+    if pi_migration.migrated > 0
+        || pi_migration.skipped_existing > 0
+        || pi_migration.skipped_invalid > 0
+        || pi_migration.failed > 0
+    {
+        tracing::info!(
+            migrated = pi_migration.migrated,
+            skipped_existing = pi_migration.skipped_existing,
+            skipped_invalid = pi_migration.skipped_invalid,
+            failed = pi_migration.failed,
+            "Pi 历史任务会话迁移完成"
+        );
+    }
 
     storage
         .ensure_preset_platform_urls(&channels_config.presets)

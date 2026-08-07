@@ -1833,7 +1833,7 @@ fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageEr
         ("last_job_id", "TEXT"),
         ("rejection_reason", "TEXT"),
         ("execution_history", "TEXT"),
-        // 队列置顶时间（RFC3339）：已提交待执行任务被用户「提高优先级」置顶到队列最前。
+        // 队列置顶时间（RFC3339）：已提交待执行任务被用户「置顶」提到队列最前。
         // 设备本地字段，不参与工作区同步；任务被领取执行时清空。
         ("queue_boosted_at", "TEXT"),
     ] {

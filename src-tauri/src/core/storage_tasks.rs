@@ -1634,6 +1634,7 @@ fn provider_id_to_channel_id(provider_id: &str) -> Option<&'static str> {
         "deepseek" => Some("deepseek"),
         "moonshot-cn" => Some("kimi"),
         "qwen-cn" => Some("qwen"),
+        "zhipu-cn" => Some("zhipu"),
         _ => None,
     }
 }
@@ -2951,6 +2952,33 @@ mod tests {
                 .iter()
                 .any(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.8-max-preview")
         );
+    }
+
+    #[test]
+    fn models_cn_builder_maps_zhipu_cn_to_zhipu_glm() {
+        // 智谱已在 models-cn 收录，provider id 为 zhipu-cn（中国大陆官方价）。
+        assert_eq!(provider_id_to_channel_id("zhipu-cn"), Some("zhipu"));
+        assert_eq!(provider_id_to_channel_id("zhipu-intl"), None);
+
+        let fixture = r#"{
+            "providers": [{
+                "id": "zhipu-cn",
+                "models": [
+                    {"id": "glm-5.2", "prices": [
+                        {"market": "china", "currency": "CNY", "unit": "1M_tokens", "rateType": "standard",
+                         "input": {"standard": 8, "cacheHit": 2},
+                         "output": 28, "sourceUrl": "https://bigmodel.cn/pricing"}
+                    ]}
+                ]
+            }]
+        }"#;
+        let prices = build_prices_from_models_cn_catalog(fixture).unwrap();
+        let glm = find_price(&prices, "zhipu", "glm-5.2");
+        assert_eq!(glm.currency, "CNY");
+        assert!(glm.tiers.is_empty());
+        assert!((glm.input_uncached_price - 8.0).abs() < 1e-9);
+        assert!((glm.input_cached_price - 2.0).abs() < 1e-9);
+        assert!((glm.output_price - 28.0).abs() < 1e-9);
     }
 
     #[test]

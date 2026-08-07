@@ -39,14 +39,16 @@ pub struct ScrapeInterceptorReady {
 /// 根据账号的 resource_mode / 渠道,解析出本次抓取的模式配置。
 /// LongCat 统一走 hybrid 模式(同时抓取 token 资源包与按量余额),不再按
 /// resource_mode 区分 token_pack / pay_as_you_go。
+/// Qwen 仅 Token Plan 订阅账号使用控制台抓取；API 按量付费账号没有官方
+/// 余额接口也没有可用的抓取模式，走手动维护，不参与自动同步。
 pub fn resolve_scrape_mode(
     channels_config: &ChannelsConfig,
     channel_id: &str,
-    _resource_mode: Option<&str>,
+    resource_mode: Option<&str>,
 ) -> Option<ScrapeModeRuntime> {
     let mode_key = match channel_id {
         "longcat" => "hybrid",
-        "qwen" => "token_plan",
+        "qwen" if resource_mode == Some("token_plan") => "token_plan",
         _ => return None,
     };
     let cfg = channels_config.scrape_config(channel_id, mode_key)?;
@@ -824,6 +826,51 @@ mod tests {
         // LongCat 统一走 hybrid,不再区分 token_pack / pay_as_you_go
         assert!(resolve_scrape_mode(&config, "longcat", Some("token_pack")).is_none());
         assert!(resolve_scrape_mode(&config, "longcat", Some("hybrid")).is_none());
+        assert!(resolve_scrape_mode(&config, "qwen", None).is_none());
+    }
+
+    #[test]
+    fn resolve_scrape_mode_qwen_only_for_token_plan() {
+        use crate::core::channels_config::{ChannelsConfig, ScrapeModeConfig};
+        use crate::core::config::ChannelPreset;
+        use std::collections::HashMap;
+        let mut modes = HashMap::new();
+        modes.insert(
+            "token_plan".to_string(),
+            ScrapeModeConfig {
+                console_url:
+                    "https://platform.qianwenai.com/home/billing/subscription/token-plan-individual"
+                        .to_string(),
+                console_url_secondary: None,
+                console_url_tertiary: None,
+                interceptor_js: String::new(),
+                extractor_js: String::new(),
+                aggregate: true,
+                required_slots: vec![
+                    "subscription".to_string(),
+                    "quota_config".to_string(),
+                    "usage".to_string(),
+                ],
+            },
+        );
+        let mut scrape = HashMap::new();
+        scrape.insert("qwen".to_string(), modes);
+        let config = ChannelsConfig {
+            presets: vec![ChannelPreset::qwen()],
+            prices: vec![],
+            default_exposed_models: HashMap::new(),
+            endpoints: HashMap::new(),
+            scrape,
+        };
+        // Token Plan 订阅账号使用控制台抓取。
+        let mode = resolve_scrape_mode(&config, "qwen", Some("token_plan")).unwrap();
+        assert!(mode.aggregate);
+        assert_eq!(
+            mode.required_slots,
+            vec!["subscription", "quota_config", "usage"]
+        );
+        // API 按量付费账号没有可用的抓取模式，即使配置了 token_plan scrape 也不返回。
+        assert!(resolve_scrape_mode(&config, "qwen", Some("pay_as_you_go")).is_none());
         assert!(resolve_scrape_mode(&config, "qwen", None).is_none());
     }
 

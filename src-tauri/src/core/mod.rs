@@ -21,6 +21,7 @@ pub mod logging;
 pub mod metrics;
 pub(crate) mod notification_registry;
 pub mod opencode_control;
+pub(crate) mod pi_session_migration;
 pub mod power;
 pub(crate) mod project_workspace_sync;
 pub mod presets;

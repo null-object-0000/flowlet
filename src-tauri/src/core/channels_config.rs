@@ -45,6 +45,7 @@ pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static s
         | "qwen3.7-flash"
         | "qwen3.6-plus"
         | "qwen3.6-flash" => Some("qwen"),
+        "glm-5.2" => Some("zhipu"),
         _ => None,
     }
 }
@@ -564,6 +565,10 @@ impl ChannelsConfig {
             } else if c.id == "qwen" {
                 // 千问 openai_base_url 以 /v1 结尾，直接拼 /models
                 format!("{}/models", c.openai_base_url.trim_end_matches('/'))
+            } else if c.id == "zhipu" {
+                // 智谱 models 端点在 /api/paas/v4 下，不以 /v1 结尾；模板已显式
+                // endpoints.models 覆盖，这里兜底保证外部配置缺失覆盖时仍正确。
+                format!("{}/models", c.openai_base_url.trim_end_matches('/'))
             } else {
                 format!("{}/v1/models", c.openai_base_url)
             }
@@ -934,6 +939,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn official_channel_id_resolves_zhipu_glm() {
+        assert_eq!(official_channel_id_for_model("glm-5.2"), Some("zhipu"));
+        assert_eq!(official_channel_id_for_model("GLM-5.2"), Some("zhipu"));
+        // 智谱其他模型未纳入白名单，不应解析为 zhipu 归属。
+        assert_eq!(official_channel_id_for_model("glm-5.1"), None);
+    }
+
     fn qwen_alias_test_config() -> ChannelsConfig {
         let json = serde_json::json!({
             "channels_config": {
@@ -1180,6 +1193,57 @@ mod tests {
                 .filter(|m| *m == "qwen3.6-flash")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn supported_models_includes_zhipu_glm() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "zhipu",
+                    "name": "智谱",
+                    "vendor": "zhipu",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "https://open.bigmodel.cn/api/paas/v4",
+                    "anthropic_base_url": "https://open.bigmodel.cn/api/anthropic"
+                }],
+                "default_exposed_models": {
+                    "zhipu": ["glm-5.2"]
+                }
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let supported: std::collections::HashSet<String> =
+            config.supported_models().into_iter().collect();
+        assert!(supported.contains("glm-5.2"), "缺少支持的模型: glm-5.2");
+        // 智谱 models 端点不以 /v1 结尾，显式 endpoints 覆盖优先。
+        let config_with_endpoint = ChannelsConfig::from_config_json(&serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "zhipu",
+                    "name": "智谱",
+                    "vendor": "zhipu",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "https://open.bigmodel.cn/api/paas/v4",
+                    "anthropic_base_url": "https://open.bigmodel.cn/api/anthropic"
+                }],
+                "endpoints": {
+                    "zhipu": {
+                        "models": "https://open.bigmodel.cn/api/paas/v4/models"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            config_with_endpoint.models_endpoint_url("zhipu").as_deref(),
+            Some("https://open.bigmodel.cn/api/paas/v4/models")
+        );
+        // 无 endpoints 覆盖时回退到 zhipu 拼接规则（/models 而非 /v1/models）。
+        assert_eq!(
+            config.models_endpoint_url("zhipu").as_deref(),
+            Some("https://open.bigmodel.cn/api/paas/v4/models")
         );
     }
 

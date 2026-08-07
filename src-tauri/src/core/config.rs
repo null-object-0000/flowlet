@@ -428,6 +428,33 @@ impl ChannelPreset {
         }
     }
 
+    /// 智谱（BigModel）渠道，先只支持 API 模式（OpenAI + Anthropic 兼容）。
+    /// 模型列表端点 /api/paas/v4/models 不以 /v1 结尾，必须显式覆盖，
+    /// 否则 openai_models_url 会错误拼成 /v1/models。
+    pub fn zhipu() -> Self {
+        Self {
+            id: "zhipu".to_string(),
+            name: "智谱".to_string(),
+            vendor: "zhipu".to_string(),
+            platform_url: Some("https://www.bigmodel.cn/apikey/platform".to_string()),
+            enabled: true,
+            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+            openai_base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            anthropic_base_url: "https://open.bigmodel.cn/api/anthropic".to_string(),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::XApiKey,
+            default_model: "glm-5.2".to_string(),
+            small_model: None,
+            supports_model_list: true,
+            supports_model_detail: false,
+            supports_balance_query: false,
+            supports_quota_query: false,
+            supports_usage_query: false,
+            supports_scrape_balance: false,
+            ..Default::default()
+        }
+    }
+
     pub fn base_url_for(&self, protocol: &ProtocolType) -> &str {
         match protocol {
             // Responses API 端点统一从 OpenAI Base URL 派生（`{base}/responses`，

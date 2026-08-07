@@ -8,6 +8,7 @@ pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
         ChannelPreset::kimi(),
         ChannelPreset::qwen(),
         ChannelPreset::custom(),
+        ChannelPreset::zhipu(),
     ]
 }
 

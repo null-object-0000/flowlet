@@ -1211,7 +1211,7 @@ mod tests {
             "channels_config": {
                 "channels": [{
                     "id": "zhipu",
-                    "name": "智谱",
+                    "name": "Z.AI",
                     "vendor": "zhipu",
                     "supported_protocols": ["openai", "anthropic"],
                     "openai_base_url": "https://open.bigmodel.cn/api/paas/v4",
@@ -1231,7 +1231,7 @@ mod tests {
             "channels_config": {
                 "channels": [{
                     "id": "zhipu",
-                    "name": "智谱",
+                    "name": "Z.AI",
                     "vendor": "zhipu",
                     "supported_protocols": ["openai", "anthropic"],
                     "openai_base_url": "https://open.bigmodel.cn/api/paas/v4",

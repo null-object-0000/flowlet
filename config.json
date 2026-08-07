@@ -184,7 +184,7 @@
       },
       {
         "id": "zhipu",
-        "name": "智谱",
+        "name": "Z.AI",
         "vendor": "zhipu",
         "platform_url": "https://www.bigmodel.cn/apikey/platform",
         "supported_protocols": ["openai", "anthropic"],

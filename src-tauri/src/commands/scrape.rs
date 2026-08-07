@@ -562,7 +562,7 @@ pub(crate) async fn fetch_channel_models(
             .map_err(|e| format!("任务执行失败: {e}"))?
         }
         "zhipu" => {
-            let preset = preset.ok_or_else(|| "智谱渠道模板不存在".to_string())?;
+            let preset = preset.ok_or_else(|| "Z.AI 渠道模板不存在".to_string())?;
             // 智谱 models 端点是 /api/paas/v4/models（不以 /v1 结尾），
             // 显式传入配置的 endpoints.models 覆盖，避免 openai_models_url 拼出
             // 非标准 /v1/models 变体；与 test_channel_connection 保持一致。

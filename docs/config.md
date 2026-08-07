@@ -193,7 +193,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 ### 6.1 `channels` — 渠道模板
 
-每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、Qwen、智谱）。
+每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、Qwen、Z.AI）。
 
 ```jsonc
 {

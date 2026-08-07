@@ -434,7 +434,7 @@ impl ChannelPreset {
     pub fn zhipu() -> Self {
         Self {
             id: "zhipu".to_string(),
-            name: "智谱".to_string(),
+            name: "Z.AI".to_string(),
             vendor: "zhipu".to_string(),
             platform_url: Some("https://www.bigmodel.cn/apikey/platform".to_string()),
             enabled: true,

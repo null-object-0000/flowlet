@@ -509,7 +509,7 @@ const english: Record<string, string> = {
   "添加 LongCat": "Add LongCat",
   "添加 Qwen": "Add Qwen",
   "添加 DeepSeek": "Add DeepSeek",
-  "添加智谱": "Add Zhipu",
+  "添加 Z.AI": "Add Z.AI",
   "管理渠道账号": "Manage accounts",
   "正在加载模型和接入配置…": "Loading models and access configuration…",
   "加载开放模型失败：{message}": "Failed to load exposed models: {message}",

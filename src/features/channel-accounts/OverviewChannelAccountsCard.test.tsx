@@ -55,7 +55,7 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByRole("button", { name: "添加 DeepSeek" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 Kimi" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 Qwen" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "添加智谱" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 Z.AI" })).toBeInTheDocument();
     expect(screen.queryByText("管理账号")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "添加 Qwen" }));

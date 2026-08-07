@@ -37,7 +37,7 @@
 
 ## 2. 已接入渠道对照
 
-| 能力 | LongCat | DeepSeek | Kimi | Qwen | 智谱 | 自定义渠道 |
+| 能力 | LongCat | DeepSeek | Kimi | Qwen | Z.AI | 自定义渠道 |
 |------|---------|----------|------|-----------|------------|------------|
 | 渠道 ID | `longcat` | `deepseek` | `kimi` | `qwen` | `zhipu` | `custom` |
 | OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `https://open.bigmodel.cn/api/paas/v4` | 账号级填写 |
@@ -51,7 +51,7 @@
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
 
-智谱（`zhipu`）是首个「OpenAI 兼容但路径不带 `/v1`」的官方渠道：官方端点为
+Z.AI（`zhipu`）是首个「OpenAI 兼容但路径不带 `/v1`」的官方渠道：官方端点为
 `https://open.bigmodel.cn/api/paas/v4/chat/completions` 与
 `/api/paas/v4/models`，均无 `/v1` 前缀。代理转发时必须走小型渠道适配函数
 `openai_path_strips_v1` + `build_upstream_url_without_openai_v1`，去掉入站

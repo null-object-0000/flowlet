@@ -35,7 +35,7 @@ export function MobileTasksPage() {
   const [activeProjectKey, setActiveProjectKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ task: SyncedProjectTask; project: SharedDeviceProject } | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
-  const [form, setForm] = useState({ projectId: "", title: "", description: "", taskType: "code" });
+  const [form, setForm] = useState({ target: "", title: "", description: "", taskType: "code" });
 
   // 跨设备逻辑项目（同名/同 workspaceProjectId 合并），按最近更新倒序，默认选中第一个。
   const projectGroups = useMemo(() => groupMobileProjects(projects.data ?? []), [projects.data]);
@@ -49,6 +49,8 @@ export function MobileTasksPage() {
     () => (projects.data ?? []).filter((project) => project.hasLocalBinding),
     [projects.data],
   );
+  // 同一项目可能出现在多台设备，表单选中值用「设备 + 项目」组合 key 区分目标。
+  const targetKey = (project: SharedDeviceProject) => `${project.deviceId}@${project.projectId}`;
 
   const allTasks = useMemo(() => activeProject?.tasks ?? [], [activeProject]);
 
@@ -67,25 +69,26 @@ export function MobileTasksPage() {
     return counts;
   }, [allTasks]);
 
-  const draftProject = executableProjects.find((project) => project.projectId === form.projectId) ?? null;
+  const draftTarget = executableProjects.find((project) => targetKey(project) === form.target) ?? null;
   // 提交目标设备由表单选中的可执行项目决定，允许任意设备的可执行项目。
-  const submit = useMobileSubmitTask(draftProject?.deviceId ?? null);
-  const canSubmit = form.projectId.length > 0 && form.title.trim().length > 0 && !submit.isPending;
+  const submit = useMobileSubmitTask(draftTarget?.deviceId ?? null);
+  const canSubmit = form.target.length > 0 && form.title.trim().length > 0 && !submit.isPending;
 
   const openSubmit = () => {
     // 优先预选当前项目的可执行设备；当前项目不可执行时取第一个可执行项目。
     const candidates = activeProject
       ? executableProjects.filter((project) => project.projectId === activeProject.projectId)
       : [];
-    setForm((f) => ({ ...f, projectId: candidates[0]?.projectId ?? executableProjects[0]?.projectId ?? "" }));
+    const fallback = candidates[0] ?? executableProjects[0] ?? null;
+    setForm((f) => ({ ...f, target: fallback ? targetKey(fallback) : "" }));
     setSubmitOpen(true);
   };
 
   const doSubmit = async () => {
-    if (!draftProject || !canSubmit) return;
+    if (!draftTarget || !canSubmit) return;
     try {
       await submit.mutateAsync({
-        projectId: draftProject.projectId,
+        projectId: draftTarget.projectId,
         title: form.title.trim(),
         description: form.description.trim(),
         taskType: form.taskType as "code" | "readonly",
@@ -196,7 +199,7 @@ export function MobileTasksPage() {
       ) : null}
 
       <SideSheet
-        title={draftProject ? t("添加任务到「{name}」", { name: draftProject.projectName }) : t("添加任务")}
+        title={draftTarget ? t("添加任务到「{name}」", { name: draftTarget.projectName }) : t("添加任务")}
         visible={submitOpen}
         placement="right"
         width="100%"
@@ -217,9 +220,9 @@ export function MobileTasksPage() {
           {executableProjects.length > 1 ? (
             <label>{t("目标设备与项目")}
               <Select
-                value={form.projectId}
-                optionList={executableProjects.map((project) => ({ value: project.projectId, label: `${project.projectName} · ${project.deviceDisplayName}` }))}
-                onChange={(projectId) => setForm((f) => ({ ...f, projectId: String(projectId) }))}
+                value={form.target}
+                optionList={executableProjects.map((project) => ({ value: targetKey(project), label: `${project.projectName} · ${project.deviceDisplayName}` }))}
+                onChange={(target) => setForm((f) => ({ ...f, target: String(target) }))}
               />
             </label>
           ) : null}

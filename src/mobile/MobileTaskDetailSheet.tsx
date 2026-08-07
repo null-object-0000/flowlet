@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
 import type { SharedDeviceProject, SyncedProjectTask } from "../domains/device-sync/types";
+import { executionRoundFromCount, type ProjectTaskStatus } from "../domains/project/types";
 import { useMobileSetTaskStatus } from "../features/device-sync/useMobileDeviceSync";
 import { errorMessage } from "../shared/errors/AppError";
 import { formatFullTimestamp } from "../shared/formatters/datetime";
@@ -14,11 +15,15 @@ import styles from "./MobileTaskDetailSheet.module.css";
 type TaskStatus = "draft" | "submitted" | "in_progress" | "review" | "done";
 
 const CLOSE_ANIMATION_MS = 200;
+const EXPAND_GESTURE_PX = 28;
+const COLLAPSE_GESTURE_PX = 48;
+const CLOSE_GESTURE_PX = 64;
 
 /**
  * 任务详情底部弹窗：展示任务完整信息，并支持「提交 / 撤回」状态迁移。
  * 状态迁移与 PC 看板一致（草稿 ↔ 已提交），仅通过局域网直连变更。
- * UI/UX 参考移动端会话详情抽屉（MobileSessionSheet）。
+ * 交互与移动端会话详情抽屉（MobileSessionSheet）对齐：
+ * 默认半屏展示核心状态，上滑/点击把手进入完整视图，下滑收回半屏，半屏状态下再下滑关闭。
  */
 export function MobileTaskDetailSheet({
   task,
@@ -36,8 +41,11 @@ export function MobileTaskDetailSheet({
   const { language, t } = useAppPreferences();
   const setStatus = useMobileSetTaskStatus(deviceId);
   const [closing, setClosing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const gesture = useRef<{ x: number; y: number; allowDownGesture: boolean } | null>(null);
 
   const requestClose = () => {
     setClosing((wasClosing) => {
@@ -50,9 +58,10 @@ export function MobileTaskDetailSheet({
   const requestCloseRef = useRef(requestClose);
   requestCloseRef.current = requestClose;
 
-  // 切换任务或重新打开时复位退出动画并聚焦关闭按钮。
+  // 切换任务或重新打开时复位退出动画与展开状态，并聚焦关闭按钮。
   useEffect(() => {
     setClosing(false);
+    setExpanded(false);
     if (closeTimer.current != null) {
       window.clearTimeout(closeTimer.current);
       closeTimer.current = null;
@@ -132,9 +141,56 @@ export function MobileTaskDetailSheet({
         aria-modal="true"
         aria-label={`${task.title}，${t("任务详情")}`}
         data-closing={closing || undefined}
+        data-expanded={expanded || undefined}
         onClick={(event) => event.stopPropagation()}
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          const target = event.target as Element;
+          const isHandle = target.closest(`.${styles.handle}`) != null;
+          const isInteractive = target.closest("button, a, input, textarea, select") != null;
+          if (!touch || (isInteractive && !isHandle)) {
+            gesture.current = null;
+            return;
+          }
+          const fromFixedHeader = isHandle || target.closest(`.${styles.header}`) != null;
+          const fromBodyTop = target.closest(`.${styles.body}`) != null
+            && (bodyRef.current?.scrollTop ?? 0) <= 1;
+          gesture.current = {
+            x: touch.clientX,
+            y: touch.clientY,
+            allowDownGesture: fromFixedHeader || fromBodyTop,
+          };
+        }}
+        onTouchMove={(event) => {
+          const start = gesture.current;
+          const touch = event.touches[0];
+          if (!start || !touch) return;
+          const deltaX = touch.clientX - start.x;
+          const deltaY = touch.clientY - start.y;
+          if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+            gesture.current = null;
+            return;
+          }
+          if (!expanded && deltaY <= -EXPAND_GESTURE_PX) {
+            gesture.current = null;
+            setExpanded(true);
+          } else if (expanded && start.allowDownGesture && deltaY >= COLLAPSE_GESTURE_PX) {
+            gesture.current = null;
+            setExpanded(false);
+          } else if (!expanded && start.allowDownGesture && deltaY >= CLOSE_GESTURE_PX) {
+            gesture.current = null;
+            requestClose();
+          }
+        }}
+        onTouchEnd={() => { gesture.current = null; }}
+        onTouchCancel={() => { gesture.current = null; }}
       >
-        <button type="button" className={styles.handle} aria-label={t("关闭")} onClick={requestClose}>
+        <button
+          type="button"
+          className={styles.handle}
+          aria-label={expanded ? t("收起任务详情") : t("展开任务详情")}
+          onClick={() => setExpanded((value) => !value)}
+        >
           <span />
         </button>
         <header className={styles.header}>
@@ -154,23 +210,32 @@ export function MobileTaskDetailSheet({
             <span>{t("更新于 {time}", { time: formatFullTimestamp(task.updatedAt, language) })}</span>
           </div>
         </header>
-        <div className={styles.body}>
-          <div className={styles.stats}>
-            <div className={styles.stat}><span>{t("任务状态")}</span><strong>{taskStatusLabel(task.status as TaskStatus, t)}</strong></div>
-            <div className={styles.stat}><span>{t("优先级")}</span><strong>{task.priority.toUpperCase()}</strong></div>
-            <div className={styles.stat}><span>{t("所属项目")}</span><strong className={styles.ellipsis}>{project.projectName}</strong></div>
-          </div>
-          <section className={styles.section}>
-            <strong className={styles.sectionTitle}>{t("任务信息")}</strong>
-            <div className={styles.infoList}>
-              <InfoItem label={t("任务 ID")} value={task.id} copyable t={t} />
-              <InfoItem label={t("所属项目")} value={project.projectName} t={t} />
-              <InfoItem label={t("设备")} value={project.deviceDisplayName} t={t} />
-              <InfoItem label={t("优先级")} value={task.priority.toUpperCase()} t={t} />
-              <InfoItem label={t("更新时间")} value={formatFullTimestamp(task.updatedAt, language)} t={t} />
+        <div className={styles.bodyFrame}>
+          <div
+            ref={bodyRef}
+            className={styles.body}
+            style={{
+              overflowY: expanded ? "auto" : "hidden",
+              touchAction: expanded ? "pan-y" : "none",
+            }}
+          >
+            <div className={styles.stats}>
+              <div className={styles.stat}><span>{t("任务状态")}</span><strong>{taskStatusLabel(task.status as TaskStatus, t)}</strong></div>
+              <div className={styles.stat}><span>{t("执行轮次")}</span><strong>{t("第 {n} 轮", { n: executionRoundFromCount(task.executionCount ?? 0, task.status as ProjectTaskStatus) })}</strong></div>
+              <div className={styles.stat}><span>{t("所属项目")}</span><strong className={styles.ellipsis}>{project.projectName}</strong></div>
             </div>
-          </section>
-          <div className={styles.hint}>{taskStatusHint(task.status as TaskStatus, t)}</div>
+            <section className={styles.section}>
+              <strong className={styles.sectionTitle}>{t("任务信息")}</strong>
+              <div className={styles.infoList}>
+                <InfoItem label={t("任务 ID")} value={task.id} copyable t={t} />
+                <InfoItem label={t("所属项目")} value={project.projectName} t={t} />
+                <InfoItem label={t("设备")} value={project.deviceDisplayName} t={t} />
+                <InfoItem label={t("执行轮次")} value={t("第 {n} 轮", { n: executionRoundFromCount(task.executionCount ?? 0, task.status as ProjectTaskStatus) })} t={t} />
+                <InfoItem label={t("更新时间")} value={formatFullTimestamp(task.updatedAt, language)} t={t} />
+              </div>
+            </section>
+            <div className={styles.hint}>{taskStatusHint(task.status as TaskStatus, t)}</div>
+          </div>
         </div>
         {canMutate ? (
           <footer className={styles.footer}>

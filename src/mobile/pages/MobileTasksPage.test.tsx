@@ -86,11 +86,44 @@ describe("MobileTasksPage", () => {
     expect(screen.getByRole("button", { name: /待审核/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /已完成/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /全部/ })).toBeNull();
-    // 任务卡片：项目名、完整标题、设备与提交入口
+    // 任务卡片：项目名、完整标题、设备与右下角添加任务悬浮按钮
     expect(screen.getByText("flowlet")).toBeInTheDocument();
     expect(screen.getByText("修复登录页")).toBeInTheDocument();
     expect(screen.getByText("Office PC")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /提交任务/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /添加任务/ })).toBeInTheDocument();
+  });
+
+  it("switches project via the header picker", () => {
+    useMobileProjectsMock.mockReturnValue({
+      data: [
+        {
+          ...PROJECT,
+          projectId: "project-1",
+          projectName: "flowlet",
+          updatedAt: "2026-07-30T01:00:00Z",
+          tasks: [{ id: "task-1", title: "项目一任务", status: "submitted", priority: "p1", updatedAt: "2026-07-30T01:00:00Z" }],
+        },
+        {
+          ...PROJECT,
+          projectId: "project-2",
+          projectName: "blog",
+          updatedAt: "2026-07-30T02:00:00Z",
+          tasks: [{ id: "task-2", title: "项目二任务", status: "submitted", priority: "p1", updatedAt: "2026-07-30T02:00:00Z" }],
+        },
+      ],
+      isLoading: false,
+      isError: false,
+    });
+    renderPage();
+    // 默认选中最近更新的项目（blog）
+    expect(screen.getByText("项目二任务")).toBeInTheDocument();
+    expect(screen.queryByText("项目一任务")).toBeNull();
+
+    // 点击标题切换器打开项目下拉，切换到 flowlet
+    fireEvent.click(screen.getByRole("button", { name: /切换项目/ }));
+    fireEvent.click(screen.getByText("flowlet"));
+    expect(screen.queryByText("项目二任务")).toBeNull();
+    expect(screen.getByText("项目一任务")).toBeInTheDocument();
   });
 
   it("filters tasks by status tab", () => {
@@ -143,7 +176,7 @@ describe("MobileTasksPage", () => {
     await waitFor(() => expect(setStatus).toHaveBeenCalledWith({ taskId: "task-1", status: "submitted" }));
   });
 
-  it("refreshes the selected device via pull to refresh", async () => {
+  it("refreshes all shared projects via pull to refresh", async () => {
     renderPage();
     expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
     expect(screen.getByText("尚未成功刷新")).toBeInTheDocument();
@@ -154,8 +187,8 @@ describe("MobileTasksPage", () => {
     fireEvent.touchMove(pullSurface, { touches: [{ clientY: 140 }] });
     fireEvent.touchEnd(pullSurface);
 
-    await waitFor(() => expect(refreshDeviceMock).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refreshS3Mock).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByText(/最后刷新：/)).toBeInTheDocument());
-    expect(refreshS3Mock).not.toHaveBeenCalled();
+    expect(refreshDeviceMock).not.toHaveBeenCalled();
   });
 });

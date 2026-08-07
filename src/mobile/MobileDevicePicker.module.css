@@ -29,3 +29,16 @@
 }
 .titleTrigger > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .titleTrigger :global(.semi-icon) { flex: none; color: var(--flowlet-color-text-tertiary); font-size: 16px; }
+
+/* 项目标题切换器下拉选项：项目名 + 设备数两行。 */
+.projectOption { min-width: 0; display: grid; gap: 2px; }
+.projectOptionName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--flowlet-color-text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.projectOptionMeta { color: var(--flowlet-color-text-tertiary); font-size: 11px; }

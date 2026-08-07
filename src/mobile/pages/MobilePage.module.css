@@ -101,8 +101,21 @@ button.stat { border: 1px solid transparent; color: var(--flowlet-color-text); f
   overflow-wrap: anywhere;
 }
 .syncFailureDetails strong { color: var(--semi-color-danger); font-size: 12px; }
-.taskSubmitBar { display: grid; }
-.taskSubmitBar :global(.semi-button) { width: 100%; }
+/* 右下角悬浮「添加任务」按钮：避开底部导航（导航高 64px + 安全区），
+   宽屏时右边缘与 720px 内容区对齐。 */
+.addTaskFab {
+  position: fixed;
+  z-index: 5;
+  right: max(18px, calc((100vw - 720px) / 2 + 18px));
+  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  width: 54px;
+  height: 54px;
+  min-width: 54px;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: 0 10px 28px rgba(9, 13, 24, .28);
+}
+.addTaskFab :global(.semi-icon) { font-size: 22px; }
 .taskTabs {
   display: flex;
   gap: 8px;
@@ -177,7 +190,7 @@ button.stat { border: 1px solid transparent; color: var(--flowlet-color-text); f
 .taskMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; }
 .taskMeta span, .taskMeta time { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
 .taskMeta span + span::before, .taskMeta time::before { content: "·"; margin-right: 12px; }
-.priorityBadge {
+.roundBadge {
   padding: 1px 7px;
   border-radius: 999px;
   color: var(--flowlet-color-text-secondary);

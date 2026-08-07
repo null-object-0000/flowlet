@@ -3,12 +3,14 @@ import { Button, Input, Select, SideSheet, Tag, TextArea, Toast } from "@douyinf
 import { useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { SharedDeviceProject, SyncedProjectTask } from "../../domains/device-sync/types";
+import { executionRoundFromCount, type ProjectTaskStatus } from "../../domains/project/types";
 import { useMobileProjects, useMobileSubmitTask } from "../../features/device-sync/useMobileDeviceSync";
 import { errorMessage } from "../../shared/errors/AppError";
 import { formatFullTimestamp, type TimestampLanguage } from "../../shared/formatters/datetime";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
-import { MobileDeviceTitlePicker, useMobileDevicePickerState } from "../MobileDevicePicker";
 import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
+import { MobileProjectTitlePicker } from "../MobileProjectTitlePicker";
+import { groupMobileProjects } from "../groupMobileProjects";
 import { useMobileRefreshController } from "../useMobileRefreshController";
 import { MobilePullToRefresh } from "../MobilePullToRefresh";
 import { MobileTaskDetailSheet } from "../MobileTaskDetailSheet";
@@ -26,31 +28,29 @@ const STATUS_TABS: Array<{ id: string; labelKey: string; statuses: TaskStatus[] 
 
 export function MobileTasksPage() {
   const { language, t } = useAppPreferences();
-  const picker = useMobileDevicePickerState({ allowAll: false });
-  const deviceId = picker.effectiveDeviceId;
-  const projects = useMobileProjects(deviceId);
-  const submit = useMobileSubmitTask(deviceId);
-  const refreshController = useMobileRefreshController(deviceId);
+  // 项目页展示全部设备的项目快照，头部在逻辑项目间切换，每个项目内混合多设备任务。
+  const projects = useMobileProjects(null);
+  const refreshController = useMobileRefreshController();
   const [statusTab, setStatusTab] = useState(STATUS_TABS[0].id);
+  const [activeProjectKey, setActiveProjectKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ task: SyncedProjectTask; project: SharedDeviceProject } | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
-  const [form, setForm] = useState({ projectId: "", title: "", description: "", taskType: "code", priority: "p2" });
+  const [form, setForm] = useState({ projectId: "", title: "", description: "", taskType: "code" });
 
+  // 跨设备逻辑项目（同名/同 workspaceProjectId 合并），按最近更新倒序，默认选中第一个。
+  const projectGroups = useMemo(() => groupMobileProjects(projects.data ?? []), [projects.data]);
+  const activeProject = useMemo(
+    () => projectGroups.find((group) => group.key === activeProjectKey) ?? projectGroups[0] ?? null,
+    [activeProjectKey, projectGroups],
+  );
+
+  // 可执行项目（hasLocalBinding）：添加任务时选择「目标设备 + 项目」。
   const executableProjects = useMemo(
     () => (projects.data ?? []).filter((project) => project.hasLocalBinding),
     [projects.data],
   );
 
-  // 跨项目聚合任务，统一按最近更新时间倒序。
-  const allTasks = useMemo(() => {
-    const items: Array<{ task: SyncedProjectTask; project: SharedDeviceProject }> = [];
-    for (const project of projects.data ?? []) {
-      for (const task of project.tasks) {
-        items.push({ task, project });
-      }
-    }
-    return items.sort((a, b) => b.task.updatedAt.localeCompare(a.task.updatedAt));
-  }, [projects.data]);
+  const allTasks = useMemo(() => activeProject?.tasks ?? [], [activeProject]);
 
   const activeTab = STATUS_TABS.find((tab) => tab.id === statusTab) ?? STATUS_TABS[0];
   const filteredTasks = useMemo(
@@ -68,10 +68,16 @@ export function MobileTasksPage() {
   }, [allTasks]);
 
   const draftProject = executableProjects.find((project) => project.projectId === form.projectId) ?? null;
+  // 提交目标设备由表单选中的可执行项目决定，允许任意设备的可执行项目。
+  const submit = useMobileSubmitTask(draftProject?.deviceId ?? null);
   const canSubmit = form.projectId.length > 0 && form.title.trim().length > 0 && !submit.isPending;
 
   const openSubmit = () => {
-    setForm((f) => ({ ...f, projectId: executableProjects[0]?.projectId ?? "" }));
+    // 优先预选当前项目的可执行设备；当前项目不可执行时取第一个可执行项目。
+    const candidates = activeProject
+      ? executableProjects.filter((project) => project.projectId === activeProject.projectId)
+      : [];
+    setForm((f) => ({ ...f, projectId: candidates[0]?.projectId ?? executableProjects[0]?.projectId ?? "" }));
     setSubmitOpen(true);
   };
 
@@ -83,7 +89,6 @@ export function MobileTasksPage() {
         title: form.title.trim(),
         description: form.description.trim(),
         taskType: form.taskType as "code" | "readonly",
-        priority: form.priority as "p0" | "p1" | "p2",
       });
       Toast.success(t("任务已创建为草稿"));
       setSubmitOpen(false);
@@ -109,22 +114,18 @@ export function MobileTasksPage() {
     <section className={styles.page}>
       <header className={`${styles.heading} ${styles.headingWithPicker}`}>
         <div className={styles.headingTitleRow}>
-          <MobileDeviceTitlePicker
-            state={picker}
-            formatTitle={(name) => t("项目 · {device}", { device: name ?? "…" })}
-          />
+          <h2>
+            <MobileProjectTitlePicker
+              groups={projectGroups}
+              selectedKey={activeProject?.key ?? null}
+              onChange={setActiveProjectKey}
+              formatTitle={(name) => t("项目 · {project}", { project: name ?? "…" })}
+            />
+          </h2>
           <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
         </div>
-        <p>{t("把任务提交到指定设备的项目，由该设备上的 Flowlet 调度执行")}</p>
+        <p>{t("查看所有设备上单个项目的任务，并提交新任务到指定设备")}</p>
       </header>
-
-      {executableProjects.length > 0 ? (
-        <div className={styles.taskSubmitBar}>
-          <Button theme="solid" type="primary" icon={<IconPlus />} onClick={openSubmit}>
-            {t("提交任务")}
-          </Button>
-        </div>
-      ) : null}
 
       {projects.isLoading ? (
         <div className={`${styles.card} ${styles.state}`}><span>{t("正在加载项目…")}</span></div>
@@ -138,7 +139,7 @@ export function MobileTasksPage() {
       {!projects.isLoading && !projects.isError && (projects.data?.length ?? 0) === 0 ? (
         <div className={`${styles.card} ${styles.state}`}>
           <strong>{t("暂无项目")}</strong>
-          <span>{t("该设备尚未同步任何项目，或项目同步尚未完成。")}</span>
+          <span>{t("尚未同步任何项目，或项目同步尚未完成。")}</span>
         </div>
       ) : null}
 
@@ -164,7 +165,7 @@ export function MobileTasksPage() {
           {filteredTasks.length === 0 ? (
             <div className={`${styles.card} ${styles.state}`}>
               <strong>{t("暂无任务")}</strong>
-              <span>{t("当前状态下没有任务，点击「提交任务」创建。")}</span>
+              <span>{t("当前状态下没有任务，点击右下角「添加任务」创建。")}</span>
             </div>
           ) : (
             <div className={styles.taskList}>
@@ -183,8 +184,19 @@ export function MobileTasksPage() {
         </>
       ) : null}
 
+      {executableProjects.length > 0 ? (
+        <Button
+          className={styles.addTaskFab}
+          type="primary"
+          theme="solid"
+          icon={<IconPlus />}
+          aria-label={t("添加任务")}
+          onClick={openSubmit}
+        />
+      ) : null}
+
       <SideSheet
-        title={draftProject ? t("提交任务到「{name}」", { name: draftProject.projectName }) : t("提交任务")}
+        title={draftProject ? t("添加任务到「{name}」", { name: draftProject.projectName }) : t("添加任务")}
         visible={submitOpen}
         placement="right"
         width="100%"
@@ -196,17 +208,17 @@ export function MobileTasksPage() {
           <div className={styles.importFooter}>
             <Button onClick={() => setSubmitOpen(false)}>{t("取消")}</Button>
             <Button theme="solid" type="primary" disabled={!canSubmit} loading={submit.isPending} onClick={() => void doSubmit()}>
-              {t("提交任务")}
+              {t("添加任务")}
             </Button>
           </div>
         )}
       >
         <div className={styles.form}>
           {executableProjects.length > 1 ? (
-            <label>{t("项目")}
+            <label>{t("目标设备与项目")}
               <Select
                 value={form.projectId}
-                optionList={executableProjects.map((project) => ({ value: project.projectId, label: project.projectName }))}
+                optionList={executableProjects.map((project) => ({ value: project.projectId, label: `${project.projectName} · ${project.deviceDisplayName}` }))}
                 onChange={(projectId) => setForm((f) => ({ ...f, projectId: String(projectId) }))}
               />
             </label>
@@ -215,7 +227,6 @@ export function MobileTasksPage() {
           <label>{t("任务描述")}<TextArea value={form.description} placeholder={t("补充上下文与期望结果（可选）")} autosize onChange={(description) => setForm((f) => ({ ...f, description }))} /></label>
           <div className={styles.formGrid}>
             <label>{t("任务类型")}<Select value={form.taskType} optionList={[{ value: "code", label: t("代码修改") }, { value: "readonly", label: t("只读分析") }]} onChange={(taskType) => setForm((f) => ({ ...f, taskType: String(taskType) }))} /></label>
-            <label>{t("优先级")}<Select value={form.priority} optionList={[{ value: "p0", label: "P0" }, { value: "p1", label: "P1" }, { value: "p2", label: "P2" }]} onChange={(priority) => setForm((f) => ({ ...f, priority: String(priority) }))} /></label>
           </div>
           <div className={styles.permissions}>
             <strong>{t("执行说明")}</strong>
@@ -227,7 +238,7 @@ export function MobileTasksPage() {
       <MobileTaskDetailSheet
         task={selected?.task ?? null}
         project={selected?.project ?? null}
-        deviceId={deviceId}
+        deviceId={selected?.project?.deviceId ?? null}
         onClose={() => setSelected(null)}
         onStatusChanged={handleStatusChanged}
       />
@@ -269,7 +280,7 @@ function TaskCard({
       </div>
       <strong className={styles.taskTitle}>{task.title}</strong>
       <div className={styles.taskMeta}>
-        {task.priority ? <span className={styles.priorityBadge}>{task.priority.toUpperCase()}</span> : null}
+        <span className={styles.roundBadge}>{t("第 {n} 轮", { n: executionRoundFromCount(task.executionCount ?? 0, task.status as ProjectTaskStatus) })}</span>
         <span>{project.deviceDisplayName}</span>
         <time>{t("更新于 {time}", { time: formatFullTimestamp(task.updatedAt, language) })}</time>
       </div>

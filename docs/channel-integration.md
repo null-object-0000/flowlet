@@ -51,6 +51,14 @@
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
 
+智谱（`zhipu`）是首个「OpenAI 兼容但路径不带 `/v1`」的官方渠道：官方端点为
+`https://open.bigmodel.cn/api/paas/v4/chat/completions` 与
+`/api/paas/v4/models`，均无 `/v1` 前缀。代理转发时必须走小型渠道适配函数
+`openai_path_strips_v1` + `build_upstream_url_without_openai_v1`，去掉入站
+`/v1/chat/completions` 中的 `/v1`；Anthropic 协议（`/api/anthropic/v1/messages`）
+保持标准拼接。`config.json` 模板还必须显式覆盖 `endpoints.models`
+（`/api/paas/v4/models`），否则 `openai_models_url` 会拼出 `/v1/models` 变体。
+
 `custom` 是面向中转站的通用模板，不代表单一厂商。每个账号独立保存 API Key 和
 两种协议的 Base URL；未填写地址的协议不生成候选路由。模型必须来自该账号标准
 OpenAI-compatible `/models` 的实际返回结果，并统一受 Flowlet 全局白名单约束：

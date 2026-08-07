@@ -50,6 +50,15 @@ pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static s
     }
 }
 
+/// 该渠道的 OpenAI-compatible 端点是否使用不带 `/v1` 前缀的路径。
+/// 智谱官方 OpenAI 端点为 `/api/paas/v4/chat/completions`（无 `/v1`），
+/// 而 `build_upstream_url` 默认在入站 `/v1/...` 路径上保留 `/v1`，会拼出
+/// `/api/paas/v4/v1/chat/completions` 这类错误地址，因此须单独走无 `/v1` 拼接。
+/// 其余渠道（LongCat / DeepSeek / Kimi / Qwen / custom）均保留 `/v1`。
+pub(crate) fn openai_path_strips_v1(channel_id: &str) -> bool {
+    channel_id == "zhipu"
+}
+
 // ─── JSON 反序列化结构 ─────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone)]

@@ -1,4 +1,5 @@
 use super::agent_session_identity::{AgentSessionIdentity, from_http_headers};
+use super::channels_config::openai_path_strips_v1;
 use super::config::{
     ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig,
     RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput, classify_request,
@@ -140,9 +141,10 @@ mod proxy_routing;
 
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
-    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
-    extract_model, identify_client, identify_client_agent, is_model_list_request,
-    is_streaming_response, load_ua_rules, rewrite_model, sanitize_headers,
+    build_upstream_url_without_openai_v1, copy_response_headers, cors_preflight_response,
+    encode_body_base64, ensure_config_file, extract_model, identify_client,
+    identify_client_agent, is_model_list_request, is_streaming_response, load_ua_rules,
+    rewrite_model, sanitize_headers,
 };
 // 仅测试（proxy_tests）需要直接调用 UA 子串匹配；非测试构建不应引入以免告警。
 #[cfg(test)]
@@ -727,7 +729,19 @@ async fn forward_request(
         let base_url = account_base_url
             .filter(|url| !url.trim().is_empty())
             .unwrap_or_else(|| channel.base_url_for(&detected_protocol));
-        let upstream_url = build_upstream_url(base_url, &parts.uri, &detected_protocol);
+        // 智谱 OpenAI 兼容端点为 /api/paas/v4/chat/completions（无 /v1），
+        // 通用拼接会得到错误的 /api/paas/v4/v1/chat/completions，须单独走无 /v1 分支。
+        // Anthropic 协议（/api/anthropic/v1/messages）保持标准拼接，不在此列。
+        let upstream_url = if openai_path_strips_v1(&channel.id)
+            && matches!(
+                detected_protocol,
+                ProtocolType::OpenAi | ProtocolType::Responses
+            )
+        {
+            build_upstream_url_without_openai_v1(base_url, &parts.uri)
+        } else {
+            build_upstream_url(base_url, &parts.uri, &detected_protocol)
+        };
         let mut builder = http_client.request(parts.method.clone(), upstream_url.clone());
 
         // 渠道超时限制等待响应头，以及流式响应连续无数据的时长。

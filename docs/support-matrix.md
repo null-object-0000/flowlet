@@ -57,7 +57,7 @@ Flowlet 当前有六种渠道模板：LongCat、DeepSeek、Kimi、Qwen、智谱�
 | Kimi / Moonshot | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | — 官方确认暂不支持 | —（不生成 responses 路由） |
 | Qwen 按量付费 | ✅ | ✅ | ✅ | — | — | ✅ 官方明确支持（含有状态 store/retrieve） | ✅（仅无状态透传） |
 | Qwen Token Plan | ✅ | ✅ | ✅ | — | ✅ 控制台抓取套餐额度 | ✅ 官方明确支持 | ✅（仅无状态透传） |
-| 智谱 | ✅ | ✅ | ✅ | — | — 官方暂无公开余额接口，先只支持 API 模式 | — 官方文档未确认 | —（不生成 responses 路由） |
+| 智谱 | ✅（路径无 `/v1`：`/api/paas/v4/chat/completions`） | ✅ | ✅（端点 `/api/paas/v4/models`） | — | — 官方暂无公开余额接口，先只支持 API 模式 | — 官方文档未确认 | —（不生成 responses 路由） |
 | 自定义渠道 | 取决于已填写的 OpenAI Base URL | 取决于已填写的 Anthropic Base URL | ✅ 使用标准 OpenAI `/models` | — | — | 取决于上游，当前无自动检测 | ✅（填写 OpenAI Base URL 即生成路由，上游是否支持由用户保证） |
 
 上游 Responses API 的当前结论：

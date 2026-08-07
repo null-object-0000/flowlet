@@ -710,6 +710,44 @@ fn build_upstream_url_keeps_v1_in_base_when_path_has_no_v1() {
 }
 
 #[test]
+fn build_upstream_url_without_openai_v1_strips_v1_for_zhipu() {
+    // 智谱官方 OpenAI 端点为 /api/paas/v4/chat/completions（无 /v1），
+    // 通用 build_upstream_url 会拼出 /api/paas/v4/v1/chat/completions 的错误地址。
+    let chat: Uri = "/v1/chat/completions".parse().unwrap();
+    let url = build_upstream_url_without_openai_v1(
+        "https://open.bigmodel.cn/api/paas/v4",
+        &chat,
+    );
+    assert_eq!(
+        url,
+        "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    );
+
+    // 模型列表路径同样去掉 /v1。
+    let models: Uri = "/v1/models".parse().unwrap();
+    let url =
+        build_upstream_url_without_openai_v1("https://open.bigmodel.cn/api/paas/v4", &models);
+    assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4/models");
+
+    // 防御性处理 /openai/v1 入口前缀。
+    let prefixed: Uri = "/openai/v1/chat/completions".parse().unwrap();
+    let url =
+        build_upstream_url_without_openai_v1("https://open.bigmodel.cn/api/paas/v4", &prefixed);
+    assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+}
+
+#[test]
+fn openai_path_strips_v1_only_for_zhipu() {
+    assert!(crate::core::channels_config::openai_path_strips_v1("zhipu"));
+    for channel in ["longcat", "deepseek", "kimi", "qwen", "custom"] {
+        assert!(
+            !crate::core::channels_config::openai_path_strips_v1(channel),
+            "{channel} 应保留 /v1 前缀"
+        );
+    }
+}
+
+#[test]
 fn build_upstream_url_responses_for_longcat_base() {
     let uri: Uri = "/v1/responses".parse().unwrap();
     let url = build_upstream_url(

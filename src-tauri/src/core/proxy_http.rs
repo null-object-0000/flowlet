@@ -293,6 +293,23 @@ pub(super) fn build_upstream_url(
     }
 }
 
+/// 智谱（zhipu）OpenAI 兼容端点的路径不带 `/v1` 前缀：
+/// 官方端点为 `/api/paas/v4/chat/completions` 而非 `/api/paas/v4/v1/chat/completions`。
+/// 入站 `/v1/chat/completions` / `/v1/models` 转发时去掉 `/v1`（同时兼容
+/// `/openai/v1/...` 入口前缀的防御性去除），得到 `{base}/chat/completions`。
+pub(super) fn build_upstream_url_without_openai_v1(
+    base_url: &str,
+    original_uri: &Uri,
+) -> String {
+    let base = base_url.trim_end_matches('/');
+    let path = original_uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("/");
+    let path = path.trim_start_matches("/openai").trim_start_matches("/v1");
+    format!("{base}{path}")
+}
+
 /// 许多 OpenAI-compatible 端点的官方 Base URL 本身就带 `/v1` 后缀
 /// （dashscope `compatible-mode/v1`、token-plan、moonshot `api.moonshot.cn/v1` 等），
 /// 而入站请求路径同样以 `/v1` 开头。直接拼接会得到 `.../v1/v1/chat/completions`，

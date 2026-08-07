@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileTasksPage } from "./MobileTasksPage";
 import { MobileDeviceSelectionProvider } from "../MobileDeviceSelection";
@@ -52,6 +52,7 @@ function renderPage() {
 
 describe("MobileTasksPage", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     refreshDeviceMock.mockReset().mockResolvedValue({ source: "lan", refreshedDevices: 1 });
     refreshS3Mock.mockReset().mockResolvedValue(undefined);
     useMobileDevicesMock.mockReturnValue({
@@ -93,7 +94,7 @@ describe("MobileTasksPage", () => {
     expect(screen.getByRole("button", { name: /添加任务/ })).toBeInTheDocument();
   });
 
-  it("switches project via the header picker", () => {
+  it("switches project via the header picker and remembers the choice", () => {
     useMobileProjectsMock.mockReturnValue({
       data: [
         {
@@ -114,7 +115,7 @@ describe("MobileTasksPage", () => {
       isLoading: false,
       isError: false,
     });
-    renderPage();
+    const { unmount } = renderPage();
     // 默认选中最近更新的项目（blog）
     expect(screen.getByText("项目二任务")).toBeInTheDocument();
     expect(screen.queryByText("项目一任务")).toBeNull();
@@ -124,6 +125,15 @@ describe("MobileTasksPage", () => {
     fireEvent.click(screen.getByText("flowlet"));
     expect(screen.queryByText("项目二任务")).toBeNull();
     expect(screen.getByText("项目一任务")).toBeInTheDocument();
+
+    // 选择已写入本地存储
+    expect(window.localStorage.getItem("flowlet.mobile.projects.activeKey")).toBe("project-1");
+
+    // 重新挂载后默认选中上次的项目（flowlet），而不是最近更新的 blog
+    unmount();
+    renderPage();
+    expect(screen.getByText("项目一任务")).toBeInTheDocument();
+    expect(screen.queryByText("项目二任务")).toBeNull();
   });
 
   it("filters tasks by status tab", () => {
@@ -174,6 +184,32 @@ describe("MobileTasksPage", () => {
     // 点击「提交」走局域网直连
     fireEvent.click(screen.getByRole("button", { name: /^提交$/ }));
     await waitFor(() => expect(setStatus).toHaveBeenCalledWith({ taskId: "task-1", status: "submitted" }));
+  });
+
+  it("opens the compose sheet from the FAB and creates a draft task", async () => {
+    const submitTask = vi.fn().mockResolvedValue({ taskId: "new-task", status: "draft" });
+    useMobileSubmitTaskMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: submitTask,
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /^添加任务$/ }));
+    // 半屏/大半屏添加任务抽屉出现
+    const dialog = screen.getByRole("dialog", { name: /添加任务/ });
+    expect(dialog).toBeInTheDocument();
+    // 展开后展示完整表单
+    fireEvent.click(screen.getByRole("button", { name: /展开添加任务表单/ }));
+    expect(screen.getByPlaceholderText("补充上下文与期望结果（可选）")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/修复登录页样式/), { target: { value: "新任务标题" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^添加任务$/ }));
+    await waitFor(() => expect(submitTask).toHaveBeenCalledWith({
+      projectId: "project-1",
+      title: "新任务标题",
+      description: "",
+      taskType: "code",
+    }));
   });
 
   it("refreshes all shared projects via pull to refresh", async () => {

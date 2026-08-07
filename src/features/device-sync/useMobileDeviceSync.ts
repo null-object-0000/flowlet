@@ -113,17 +113,18 @@ export function useMobileS3Settings() {
   });
 }
 
-/** 共享设备项目目录：移动端任务提交入口的数据源。 */
+/** 共享设备项目目录：移动端任务提交入口的数据源。
+ *  deviceId 传 null 表示读取全部设备的项目快照（跨设备任务混合展示用）。 */
 export function useMobileProjects(deviceId: string | null) {
   return useQuery({
     queryKey: queryKeys.mobileDeviceSync.projects(deviceId),
     queryFn: () => mobileDeviceSyncCommands.projects(deviceId),
-    enabled: deviceId != null,
     staleTime: 15_000,
   });
 }
 
-/** 向指定设备提交任务（签名 LAN 通道）。任务默认以草稿状态创建。 */
+/** 向指定设备提交任务（签名 LAN 通道）。任务默认以草稿状态创建。
+ *  deviceId 由页面从表单选中的可执行项目派生；成功后失效全部设备项目，保证跨设备混合列表即时更新。 */
 export function useMobileSubmitTask(deviceId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -132,9 +133,8 @@ export function useMobileSubmitTask(deviceId: string | null) {
       return mobileDeviceSyncCommands.submitTask(deviceId, input);
     },
     onSuccess: async () => {
-      if (!deviceId) return;
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
       ]);
     },
@@ -150,9 +150,8 @@ export function useMobileSetTaskStatus(deviceId: string | null) {
       return mobileDeviceSyncCommands.setTaskStatus(deviceId, input);
     },
     onSuccess: async () => {
-      if (!deviceId) return;
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
       ]);
     },

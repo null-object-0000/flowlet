@@ -4,7 +4,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 import type { ProjectTask } from "../../domains/project/types";
-import { buildDoneTaskTree, computeTaskBoardColumns, filterProjectTasks, taskLastExecutionInterrupted } from "./ProjectsPage";
+import { buildDoneTaskTree, computeTaskBoardColumns, filterProjectTasks, taskLastExecutionInterrupted, taskOwnedByOtherDevice } from "./ProjectsPage";
 
 function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
   return {
@@ -20,6 +20,8 @@ function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
     lastJobId: null,
     rejectionReason: null,
     executionHistory: null,
+    claimedBy: null,
+    queueBoostedAt: null,
     createdAt: "2026-08-06T00:00:00.000Z",
     updatedAt: "2026-08-06T00:00:00.000Z",
     ...overrides,
@@ -69,11 +71,10 @@ describe("filterProjectTasks", () => {
     expect(filterProjectTasks(tasks, "bbbb-cccc").map((task) => task.title)).toEqual(["添加用量统计图表"]);
   });
 
-  it("matches type value, Chinese type label, agent and priority", () => {
+  it("matches type value, Chinese type label and agent", () => {
     expect(filterProjectTasks(tasks, "readonly").map((task) => task.title)).toEqual(["只读分析接口性能"]);
     expect(filterProjectTasks(tasks, "只读分析").map((task) => task.title)).toEqual(["只读分析接口性能"]);
     expect(filterProjectTasks(tasks, "opencode").map((task) => task.title)).toEqual(["只读分析接口性能"]);
-    expect(filterProjectTasks(tasks, "p0").map((task) => task.title)).toEqual(["只读分析接口性能"]);
   });
 
   it("returns an empty list when nothing matches", () => {
@@ -159,5 +160,65 @@ describe("taskLastExecutionInterrupted", () => {
 
   it("is false when there is no execution history", () => {
     expect(taskLastExecutionInterrupted(makeTask({ status: "submitted" }))).toBe(false);
+  });
+});
+
+describe("taskOwnedByOtherDevice", () => {
+  const executedHistory = JSON.stringify([{ jobId: "job-1", startedAt: "2026-08-06T00:00:00.000Z" }]);
+
+  it("allows a local task that was never executed", () => {
+    const task = makeTask({ status: "draft" });
+    expect(taskOwnedByOtherDevice(task, new Map([[task.id, task]]), "device-a")).toBe(false);
+  });
+
+  it("treats a task claimed by another device as read-only (executing)", () => {
+    const task = makeTask({ status: "in_progress", claimedBy: "device-b" });
+    expect(taskOwnedByOtherDevice(task, new Map([[task.id, task]]), "device-a")).toBe(true);
+  });
+
+  it("treats an executed task without a local claim as read-only (synced from another device)", () => {
+    const task = makeTask({ status: "review", executionHistory: executedHistory });
+    expect(taskOwnedByOtherDevice(task, new Map([[task.id, task]]), "device-a")).toBe(true);
+  });
+
+  it("allows an executed task claimed by this device (resubmitted after rejection)", () => {
+    const task = makeTask({ status: "submitted", claimedBy: "device-a", executionHistory: executedHistory });
+    expect(taskOwnedByOtherDevice(task, new Map([[task.id, task]]), "device-a")).toBe(false);
+  });
+
+  it("treats an executed task with a local job id as ours even when the claim does not match", () => {
+    // 本机创建并执行过的任务：即使 claimedBy 因设备身份变化 / 数据库迁移与当前设备不一致，
+    // 只要 lastJobId 非空（本机写入的本地字段）就不是其他设备任务。
+    const task = makeTask({
+      status: "review",
+      claimedBy: "old-device-id",
+      lastJobId: "job-local",
+      executionHistory: executedHistory,
+    });
+    expect(taskOwnedByOtherDevice(task, new Map([[task.id, task]]), "device-a")).toBe(false);
+  });
+
+  it("is not affected by an unknown current device when the task was executed locally", () => {
+    // currentDeviceId 未知（known_devices 尚未加载）：本机执行过的任务不误判为其他设备。
+    const task = makeTask({ status: "review", lastJobId: "job-local", executionHistory: executedHistory });
+    expect(taskOwnedByOtherDevice(task, new Map([[task.id, task]]), null)).toBe(false);
+  });
+
+  it("treats a child of a parent executed on another device as read-only", () => {
+    const parent = makeTask({ id: "parent", status: "done", claimedBy: "device-b", executionHistory: executedHistory });
+    const child = makeTask({ id: "child", status: "submitted", baseTaskId: parent.id });
+    expect(taskOwnedByOtherDevice(child, new Map([[parent.id, parent], [child.id, child]]), "device-a")).toBe(true);
+  });
+
+  it("treats a child whose parent is missing locally as read-only", () => {
+    const child = makeTask({ id: "child", status: "submitted", baseTaskId: "missing-parent" });
+    expect(taskOwnedByOtherDevice(child, new Map([[child.id, child]]), "device-a")).toBe(true);
+  });
+
+  it("allows a child whose parent was executed locally even if the parent's claim is lost", () => {
+    // 父任务在本机执行过（lastJobId 非空）但 claimedBy 不一致 → 父任务仍属本机，子任务可执行。
+    const parent = makeTask({ id: "parent", status: "done", claimedBy: "old-device-id", lastJobId: "job-local", executionHistory: executedHistory });
+    const child = makeTask({ id: "child", status: "submitted", baseTaskId: parent.id });
+    expect(taskOwnedByOtherDevice(child, new Map([[parent.id, parent], [child.id, child]]), "device-a")).toBe(false);
   });
 });

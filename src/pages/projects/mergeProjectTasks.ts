@@ -45,6 +45,8 @@ function toProjectTask(task: SyncedProjectTask, projectId: string): ProjectTask 
     lastJobId: null,
     rejectionReason: null,
     executionHistory: null,
+    claimedBy: null,
+    queueBoostedAt: null,
     createdAt: task.updatedAt,
     updatedAt: task.updatedAt,
   };

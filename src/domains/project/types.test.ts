@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { taskExecutionHistory, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "./types";
+import { executionRoundFromCount, taskExecutionHistory, taskExecutionRound, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "./types";
 
 describe("taskExecutionHistory", () => {
   it("parses the recorded execution history when present", () => {
@@ -157,6 +157,36 @@ describe("taskTotalWaitingDuration", () => {
       lastJobId: "job-1",
     });
     expect(waiting).toBe(0);
+  });
+});
+
+describe("taskExecutionRound / executionRoundFromCount", () => {
+  it("counts a never-executed task as round 1 across draft / submitted / review", () => {
+    for (const status of ["draft", "submitted", "in_progress", "review", "done"] as const) {
+      expect(taskExecutionRound({ executionHistory: null, status })).toBe(1);
+    }
+    expect(executionRoundFromCount(0, "submitted")).toBe(1);
+    expect(executionRoundFromCount(0, "draft")).toBe(1);
+  });
+
+  it("a submitted task queued for a re-run shows the next round", () => {
+    const history = JSON.stringify([{ jobId: "job-1", startedAt: "2026-08-04T20:00:00.000Z" }]);
+    // 执行过一轮被退回重新排队：第 2 轮。
+    expect(taskExecutionRound({ executionHistory: history, status: "submitted" })).toBe(2);
+    expect(executionRoundFromCount(1, "submitted")).toBe(2);
+  });
+
+  it("running / review tasks stay on the current round number", () => {
+    const history = JSON.stringify([{ jobId: "job-1", startedAt: "2026-08-04T20:00:00.000Z" }]);
+    expect(taskExecutionRound({ executionHistory: history, status: "in_progress" })).toBe(1);
+    expect(taskExecutionRound({ executionHistory: history, status: "review" })).toBe(1);
+    expect(taskExecutionRound({ executionHistory: history, status: "done" })).toBe(1);
+    expect(executionRoundFromCount(2, "review")).toBe(2);
+  });
+
+  it("ignores malformed history", () => {
+    expect(taskExecutionRound({ executionHistory: "not-json", status: "submitted" })).toBe(1);
+    expect(taskExecutionRound({ executionHistory: "[]", status: "submitted" })).toBe(1);
   });
 });
 

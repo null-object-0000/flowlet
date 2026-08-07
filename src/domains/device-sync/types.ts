@@ -259,6 +259,8 @@ export type SyncedProjectTask = {
   title: string;
   status: string;
   priority: string;
+  /** 已开始的执行轮次数（execution_history 长度）；旧快照缺失时按 0 处理。 */
+  executionCount?: number;
   updatedAt: string;
 };
 

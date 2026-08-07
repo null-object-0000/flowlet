@@ -100,4 +100,20 @@ describe("WindowControls", () => {
 
     expect(windowApi.close).toHaveBeenCalledOnce();
   });
+
+  it("renders the open-in-separate-window button only when openDetailWindow is provided", () => {
+    const openDetailWindow = vi.fn();
+    render(<WindowControls openDetailWindow={openDetailWindow} />);
+
+    const button = screen.getByRole("button", { name: "在独立窗口打开" });
+    fireEvent.click(button);
+
+    expect(openDetailWindow).toHaveBeenCalledOnce();
+  });
+
+  it("hides the open-in-separate-window button when openDetailWindow is not provided", () => {
+    render(<WindowControls />);
+
+    expect(screen.queryByRole("button", { name: "在独立窗口打开" })).toBeNull();
+  });
 });

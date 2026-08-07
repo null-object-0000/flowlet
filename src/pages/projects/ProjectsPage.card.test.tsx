@@ -5,7 +5,12 @@ import { TaskCard, type CardAction } from "./ProjectsPage";
 import styles from "./ProjectsPage.module.css";
 
 vi.mock("../../app/preferences/AppPreferences", () => ({
-  useAppPreferences: () => ({ t: (key: string) => key }),
+  useAppPreferences: () => ({
+    t: (key: string, variables?: Record<string, string | number>) => {
+      if (!variables) return key;
+      return key.replace(/\{(\w+)\}/g, (_, name: string) => String(variables[name]));
+    },
+  }),
 }));
 
 function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
@@ -22,6 +27,8 @@ function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
     lastJobId: null,
     rejectionReason: null,
     executionHistory: null,
+    claimedBy: null,
+    queueBoostedAt: null,
     createdAt: "2026-08-06T00:00:00.000Z",
     updatedAt: "2026-08-06T00:00:00.000Z",
     ...overrides,
@@ -43,14 +50,14 @@ function renderCard(task: ProjectTask, props: Partial<Parameters<typeof TaskCard
 }
 
 describe("TaskCard 已完成卡片：下方两行布局", () => {
-  it("标题在上，基础信息行「代码修改 · Claude Code」+ 时间，不展示 P2", () => {
+  it("标题在上，基础信息行「代码修改 · Claude Code」+ 时间，不展示执行轮次", () => {
     const task = makeTask({ status: "done" });
     const { container } = renderCard(task);
 
     expect(screen.getByText(task.title)).toBeTruthy();
     expect(screen.getByText("代码修改 · Claude Code")).toBeTruthy();
     expect(screen.getByText("执行 23.1 min")).toBeTruthy();
-    expect(screen.queryByText("P2")).toBeNull();
+    expect(screen.queryByText("第 1 轮")).toBeNull();
 
     // 标题位于第一行（head），基础信息行包含「类型 · Agent」与时间（两端对齐）。
     const head = container.querySelector(`.${styles.taskCardHead}`)!;
@@ -63,18 +70,18 @@ describe("TaskCard 已完成卡片：下方两行布局", () => {
 });
 
 describe("TaskCard 其他状态：保持原有行结构，仅合并元信息", () => {
-  it("第一行合并元信息（P2 代码修改 · Claude Code），第二行标题，时间独立一行", () => {
+  it("第一行合并元信息（第 1 轮 代码修改 · Claude Code），第二行标题，时间独立一行", () => {
     const task = makeTask({ status: "submitted" });
     const { container } = renderCard(task);
 
     expect(screen.getByText(task.title)).toBeTruthy();
-    expect(screen.getByText("P2")).toBeTruthy();
+    expect(screen.getByText("第 1 轮")).toBeTruthy();
     expect(screen.getByText("代码修改 · Claude Code")).toBeTruthy();
     expect(screen.getByText("执行 23.1 min")).toBeTruthy();
 
-    // 元信息行在标题上方：P2 位于第一行 head 内，标题位于其后的独立行（taskTitleStandalone）。
+    // 元信息行在标题上方：执行轮次位于第一行 head 内，标题位于其后的独立行（taskTitleStandalone）。
     const head = container.querySelector(`.${styles.taskCardHead}`)!;
-    expect(head.textContent).toContain("P2");
+    expect(head.textContent).toContain("第 1 轮");
     expect(head.textContent).toContain("代码修改 · Claude Code");
     const titleStandalone = container.querySelector(`.${styles.taskTitleStandalone}`)!;
     expect(titleStandalone).toBeTruthy();
@@ -85,13 +92,29 @@ describe("TaskCard 其他状态：保持原有行结构，仅合并元信息", (
     expect(container.querySelector(`.${styles.taskCardMetaRow}`)).toBeNull();
   });
 
-  it("待处理 / 进行中 / 待审核均保留 P2 标签", () => {
+  it("待处理 / 进行中 / 待审核均展示第 1 轮标签（从未执行的任务）", () => {
     for (const status of ["draft", "submitted", "in_progress", "review"] as const) {
       const { unmount } = renderCard(makeTask({ status }));
-      expect(screen.getByText("P2")).toBeTruthy();
+      expect(screen.getByText("第 1 轮")).toBeTruthy();
       expect(screen.getByText("代码修改 · Claude Code")).toBeTruthy();
       unmount();
     }
+  });
+
+  it("执行过一轮并退回重排的任务展示第 2 轮标签", () => {
+    const executionHistory = JSON.stringify([{
+      jobId: "job-1",
+      startedAt: "2026-08-06T00:00:00.000Z",
+      submittedAt: null,
+      finishedAt: null,
+      waitingMs: 0,
+      executionMs: null,
+      rejected: true,
+      rejectionReason: "不符合预期",
+      rejectedAt: "2026-08-06T01:00:00.000Z",
+    }]);
+    renderCard(makeTask({ status: "submitted", executionHistory }));
+    expect(screen.getByText("第 2 轮")).toBeTruthy();
   });
 
   it("只读分析类型展示「只读分析 · Agent」", () => {
@@ -176,6 +199,22 @@ describe("TaskCard 交互动作：单个直接按钮 / 多个三点菜单", () =
 
     expect(container.querySelector(`.${styles.taskCardMenu}`)).toBeTruthy();
     expect(container.querySelector(`.${styles.taskCardAction}`)).toBeNull();
+  });
+
+  it("非菜单状态（submitted）的多个动作直接并排渲染，不进三点菜单", () => {
+    const { container } = renderCard(makeTask({ status: "submitted" }), {
+      actions: [action("boost", "提高优先级"), action("withdraw", "撤回")],
+    });
+
+    // 两个动作都作为右下角直接按钮渲染，且包裹在 actionRow 容器中。
+    const row = container.querySelector(`.${styles.taskCardActionRow}`)!;
+    expect(row).toBeTruthy();
+    const buttons = row.querySelectorAll(`.${styles.taskCardAction}`);
+    expect(buttons.length).toBe(2);
+    expect(buttons[0].textContent).toContain("提高优先级");
+    expect(buttons[1].textContent).toContain("撤回");
+    // 不渲染三点菜单。
+    expect(container.querySelector(`.${styles.taskCardMenu}`)).toBeNull();
   });
 
   it("进行中任务的单个动作收进右上角 ⋯ 菜单，右下角不再渲染按钮", () => {

@@ -61,6 +61,35 @@ export type MobileHourlyHeatmapCell = {
   hasData: boolean;
 };
 
+export type MonthWeekdayHourCell = {
+  /** 复合键 `${weekday}-${hourOfDay}`（weekday 0 = 周一），用于选中态。 */
+  hour: string;
+  /** 0 = 周一 … 6 = 周日，与月视图星期轴一致。 */
+  weekday: number;
+  /** 0–23。 */
+  hourOfDay: number;
+  /** 当月所有命中该 (星期, 小时) 的合计（Flowlet 代理 + Agent 原生）。 */
+  tokens: number;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheMeasuredInputTokens: number;
+  estimatedCost: number;
+  nativeTokens: number;
+  nativeInputTokens: number;
+  nativeCachedInputTokens: number;
+  nativeCacheWriteInputTokens: number;
+  nativeOutputTokens: number;
+  nativeReasoningTokens: number;
+  nativeEvents: number;
+  unknownRequests: number;
+  level: HeatLevel;
+  /** 当月该时段全部位于未来（如月初），不可点击。 */
+  future: boolean;
+  hasData: boolean;
+};
+
 export const MOBILE_WEEKLY_HEATMAP_BUCKETS = [
   { start: 0, end: 4 },
   { start: 4, end: 8 },
@@ -543,6 +572,123 @@ export function buildMobileWeeklyHourlyHeatmap(
         (metric === "tokens" ? cell.tokens : cell.estimatedCost)
           / (cell.hourEnd - cell.hourOfDay),
       ),
+    })),
+  };
+}
+
+/**
+ * PC 月视图热力图：按 (星期, 小时) 聚合当月逐小时用量。
+ * y 轴 7 个星期、x 轴 24 个小时，每个格子为当月所有命中该 (星期, 小时)
+ * 的逐小时记录合计，用于观察月度活跃节奏。
+ */
+export function buildMonthWeekdayHourHeatmap(
+  hours: HourlyUsageTotal[],
+  offset = 0,
+  now = new Date(),
+  metric: MobileUsageHeatmapMetric = "tokens",
+) {
+  const currentHour = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    now.getHours(),
+  );
+  const range = getMobileUsageRange("month", offset, currentHour);
+  const values = new Map(hours.map((item) => [item.hour, item]));
+  const datesByWeekday: string[][] = Array.from({ length: 7 }, () => []);
+  for (let cursor = range.start; cursor <= range.end; cursor = addLocalDays(cursor, 1)) {
+    datesByWeekday[mondayIndex(cursor)].push(localDate(cursor));
+  }
+
+  const cells: Omit<MonthWeekdayHourCell, "level">[] = [];
+  for (let weekday = 0; weekday < 7; weekday += 1) {
+    for (let hourOfDay = 0; hourOfDay < 24; hourOfDay += 1) {
+      let tokens = 0;
+      let requests = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let cachedInputTokens = 0;
+      let cacheMeasuredInputTokens = 0;
+      let estimatedCost = 0;
+      let nativeTokens = 0;
+      let nativeInputTokens = 0;
+      let nativeCachedInputTokens = 0;
+      let nativeCacheWriteInputTokens = 0;
+      let nativeOutputTokens = 0;
+      let nativeReasoningTokens = 0;
+      let nativeEvents = 0;
+      let unknownRequests = 0;
+      let hasData = false;
+      let future = true;
+
+      for (const date of datesByWeekday[weekday]) {
+        const bucketStart = new Date(
+          Number(date.slice(0, 4)),
+          Number(date.slice(5, 7)) - 1,
+          Number(date.slice(8, 10)),
+          hourOfDay,
+        );
+        if (offset === 0 && bucketStart > currentHour) continue;
+        future = false;
+        const item = values.get(`${date}T${String(hourOfDay).padStart(2, "0")}:00:00`);
+        if (!item) continue;
+        tokens += item.knownTokens + (item.nativeTotalTokens ?? 0);
+        requests += item.requestCount + (item.nativeEventCount ?? 0);
+        inputTokens += (item.inputTokens ?? 0)
+          + (item.nativeInputTokens ?? 0)
+          + (item.nativeCachedInputTokens ?? 0)
+          + (item.nativeCacheWriteInputTokens ?? 0);
+        outputTokens += (item.outputTokens ?? 0) + (item.nativeOutputTokens ?? 0);
+        cachedInputTokens += (item.inputCachedTokens ?? 0) + (item.nativeCachedInputTokens ?? 0);
+        cacheMeasuredInputTokens += (item.cacheMeasuredInputTokens ?? 0)
+          + (item.nativeInputTokens ?? 0)
+          + (item.nativeCachedInputTokens ?? 0)
+          + (item.nativeCacheWriteInputTokens ?? 0);
+        estimatedCost += item.estimatedCost ?? 0;
+        nativeTokens += item.nativeTotalTokens ?? 0;
+        nativeInputTokens += item.nativeInputTokens ?? 0;
+        nativeCachedInputTokens += item.nativeCachedInputTokens ?? 0;
+        nativeCacheWriteInputTokens += item.nativeCacheWriteInputTokens ?? 0;
+        nativeOutputTokens += item.nativeOutputTokens ?? 0;
+        nativeReasoningTokens += item.nativeReasoningTokens ?? 0;
+        nativeEvents += item.nativeEventCount ?? 0;
+        unknownRequests += item.unknownCount ?? 0;
+        hasData = true;
+      }
+
+      cells.push({
+        hour: `${weekday}-${hourOfDay}`,
+        weekday,
+        hourOfDay,
+        tokens,
+        requests,
+        inputTokens,
+        outputTokens,
+        cachedInputTokens,
+        cacheMeasuredInputTokens,
+        estimatedCost,
+        nativeTokens,
+        nativeInputTokens,
+        nativeCachedInputTokens,
+        nativeCacheWriteInputTokens,
+        nativeOutputTokens,
+        nativeReasoningTokens,
+        nativeEvents,
+        unknownRequests,
+        future,
+        hasData,
+      });
+    }
+  }
+
+  const scale = createHeatLevelScale(
+    cells.filter((cell) => cell.hasData && !cell.future)
+      .map((cell) => (metric === "tokens" ? cell.tokens : cell.estimatedCost)),
+  );
+  return {
+    cells: cells.map((cell): MonthWeekdayHourCell => ({
+      ...cell,
+      level: scale.levelFor(metric === "tokens" ? cell.tokens : cell.estimatedCost),
     })),
   };
 }

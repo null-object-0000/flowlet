@@ -50,7 +50,7 @@ export function useProjectTaskActions(projectId: string) {
   return { saveTask, deleteTask };
 }
 
-/** 全局唯一执行槽状态（是否空闲、当前在跑的任务）。 */
+/** 按项目隔离的执行槽状态（当前哪些项目的任务在跑、各自是哪个任务）。 */
 export function useProjectTaskRunnerState(autoRefresh = false, intervalMs = 5_000): ReturnType<typeof useQuery<ProjectTaskRunnerState>> {
   return useQuery({
     queryKey: queryKeys.projectTaskRunner.state(),
@@ -92,7 +92,11 @@ export function useProjectTaskRunnerActions() {
       projectCommands.convertTaskToCode(taskId, description),
     onSuccess: refreshAll,
   });
-  return { startTask, setTaskStatus, convertTaskToCode };
+  const boostTask = useMutation({
+    mutationFn: (taskId: string) => projectCommands.boostTask(taskId),
+    onSuccess: refreshAll,
+  });
+  return { startTask, setTaskStatus, convertTaskToCode, boostTask };
 }
 
 /**
@@ -114,17 +118,25 @@ export function isTaskWithinSubmitGrace(updatedAt: string, now: number = Date.no
 }
 
 /**
- * 前端调度器：按固定节奏轮询「执行槽空闲 && 有待处理（已提交）任务」，
- * 有空闲就领取队首任务。领取成功后 Rust 端原子地把任务推进 in_progress，
- * 前端无需手动标记状态，只负责触发。
+ * 按项目隔离选出下一个可领取的任务：跳过已有任务在执行的项目的所有任务，
+ * 从其余项目取队首任务（保持全局优先级排序）。不同项目互不阻塞，可并行执行。
+ * 无可用任务时返回 undefined。
+ */
+export function pickNextClaimableTask(
+  queued: ProjectTask[],
+  runningProjectIds: ReadonlySet<string>,
+): ProjectTask | undefined {
+  return queued.find((task) => !runningProjectIds.has(task.projectId));
+}
+
+/**
+ * 前端调度器：按固定节奏轮询「有待处理（已提交）任务」，按项目隔离领取执行。
+ * 每个项目同一时刻至多一个任务在跑：跳过已有任务在执行的项目的所有任务，
+ * 从其余项目的队首任务开始领取。不同项目互不阻塞，可并行执行。
+ * 领取成功后 Rust 端原子地把任务推进 in_progress，前端无需手动标记状态，只负责触发。
  *
  * 后悔窗口：任务刚提交（updatedAt 太新）时不领取，避免用户没有撤回机会；
  * 只有提交超过 SUBMIT_GRACE_MS 才允许调度器自动领取。
- */
-/**
- * 前端调度器：按固定节奏轮询「执行槽空闲 && 有待处理（已提交）任务」，
- * 有空闲就领取队首任务。领取成功后 Rust 端原子地把任务推进 in_progress，
- * 前端无需手动标记状态，只负责触发。
  *
  * 领取失败（如 Agent 未安装、进程启动失败等）时，若提供了 `onClaimError` 回调则调用，
  * 让用户能看到原因，而不是任务静默卡在待处理。失败后对同一任务进入冷却，
@@ -151,8 +163,10 @@ export function useProjectTaskScheduler(
     if (!autoRefresh) return;
     if (claimingRef.current) return;
     if (actions.startTask.isPending) return;
-    if (runnerState.data?.running) return;
-    const next = queued.data?.[0];
+    // 按项目隔离领取：跳过已有任务在执行的项目的所有任务，从其余项目取队首任务。
+    // 不同项目可并行执行，每个项目至多一个任务在跑。
+    const runningProjectIds = new Set((runnerState.data?.current ?? []).map((info) => info.projectId));
+    const next = pickNextClaimableTask(queued.data ?? [], runningProjectIds);
     if (!next) return;
     // 后悔窗口：任务刚提交（updatedAt 太新）时不领取，避免用户没有撤回机会。
     if (isTaskWithinSubmitGrace(next.updatedAt)) return;
@@ -204,6 +218,8 @@ export function newProjectTask(projectId: string, title: string, baseTaskId: str
     lastJobId: null,
     rejectionReason: null,
     executionHistory: null,
+    claimedBy: null,
+    queueBoostedAt: null,
     createdAt: now,
     updatedAt: now,
   };

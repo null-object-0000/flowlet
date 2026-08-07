@@ -1,5 +1,58 @@
 import { describe, expect, it } from "vitest";
-import { SUBMIT_GRACE_MS, isTaskWithinSubmitGrace } from "./useProjects";
+import type { ProjectTask } from "../../domains/project/types";
+import { SUBMIT_GRACE_MS, isTaskWithinSubmitGrace, pickNextClaimableTask } from "./useProjects";
+
+function task(id: string, projectId: string): ProjectTask {
+  return {
+    id,
+    projectId,
+    title: `Task ${id}`,
+    description: "",
+    status: "submitted",
+    taskType: "code",
+    agentProfile: "Claude Code",
+    priority: "p2",
+    baseTaskId: null,
+    lastJobId: null,
+    rejectionReason: null,
+    executionHistory: null,
+    claimedBy: null,
+    queueBoostedAt: null,
+    createdAt: "2026-08-05T00:00:00Z",
+    updatedAt: "2026-08-05T00:00:00Z",
+  };
+}
+
+describe("pickNextClaimableTask", () => {
+  const queued = [
+    task("a-1", "project-a"),
+    task("a-2", "project-a"),
+    task("b-1", "project-b"),
+    task("c-1", "project-c"),
+  ];
+
+  it("picks the global head when no project is running", () => {
+    expect(pickNextClaimableTask(queued, new Set())?.id).toBe("a-1");
+  });
+
+  it("skips projects that already have a running task", () => {
+    // project-a 正在执行：跳过 a-1 / a-2，从其余项目取队首 b-1。
+    expect(pickNextClaimableTask(queued, new Set(["project-a"]) )?.id).toBe("b-1");
+  });
+
+  it("allows a different project while another runs (per-project parallelism)", () => {
+    // project-b 正在执行：跳过 b-1，但 project-a 空闲，仍可取 a-1。
+    expect(pickNextClaimableTask(queued, new Set(["project-b"]))?.id).toBe("a-1");
+  });
+
+  it("returns undefined when every queued project is running", () => {
+    expect(pickNextClaimableTask(queued, new Set(["project-a", "project-b", "project-c"]))).toBeUndefined();
+  });
+
+  it("returns undefined on an empty queue", () => {
+    expect(pickNextClaimableTask([], new Set())).toBeUndefined();
+  });
+});
 
 describe("isTaskWithinSubmitGrace", () => {
   const now = new Date("2026-08-05T10:00:00.000Z").getTime();

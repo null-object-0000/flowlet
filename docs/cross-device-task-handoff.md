@@ -12,7 +12,8 @@ Flowlet 当前存在两条不同的数据通路：
    状态、任务类型、Agent Profile、父任务、退回原因与执行历史；本机目录、领取租约和
    最近 Job 保持设备本地。
 2. **设备快照同步**：通过 LAN / S3 设备快照写入只读 `device_projects`，任务仅包含
-   ID、标题、状态、优先级和更新时间，用于跨设备发现与移动端观测。
+   ID、标题、状态、优先级（后端保留写死 P2，前端不再维护）和执行轮次计数，用于跨设备
+   发现与移动端观测。
 
 设备快照刻意不携带任务描述和执行历史，因此它适合合并展示，但不足以直接创建一条可执行的
 本机任务。此前通过直接复制 SQLite 记录实现“同步”，会造成项目 ID 重映射、重复任务、
@@ -148,7 +149,8 @@ type SyncedProjectTask = {
   id: string;
   title: string;
   status: string;
-  priority: string;
+  priority: string; // 前端已移除优先级能力，后端保留字段写死 P2
+  executionCount?: number; // 已开始的执行轮次数，供「第 N 轮执行」展示
   updatedAt: string;
   executionDeviceId?: string | null;
   handoffHint?: "eligible" | "has_parent" | "has_execution" | "not_draft";

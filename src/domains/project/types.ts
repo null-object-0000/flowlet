@@ -37,9 +37,42 @@ export type ProjectTask = {
   rejectionReason: string | null;
   /** 执行历史（JSON 数组字符串），每次执行追加一条，供只读详情展示全部历史与退回原因。 */
   executionHistory: string | null;
+  /** 最近一次执行该任务的设备 id（跨设备执行归属）。任务被某设备执行后永久归属该设备，
+   *  其他设备只能查看。工作区同步来的已执行任务在本机为 null（归属在源设备）。 */
+  claimedBy: string | null;
+  /** 队列置顶时间（RFC3339）：已提交待执行任务被用户「提高优先级」置顶到队列最前。
+   *  设备本地字段，不参与工作区同步；任务被领取执行时清空。 */
+  queueBoostedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+/**
+ * 任务是否已执行过：`executionHistory` 存在且解析出的执行记录非空
+ * （`[]` / 空串视为未执行）。用于跨设备权限判断——执行过的任务只允许执行设备操作。
+ */
+export function taskHasExecution(task: Pick<ProjectTask, "executionHistory">): boolean {
+  return parseTaskExecutionHistory(task.executionHistory).length > 0;
+}
+
+/**
+ * 由执行轮次计数 + 状态推导「任务当前处于第几轮执行」。
+ * `executionHistory` 每条记录代表一轮已开始（或已完成）的执行：
+ * - `submitted`（正在排队）即将执行下一轮 → 历史轮数 + 1；
+ * - 进行中 / 待审核 / 草稿 → 当前轮次即历史轮数（从未执行过的任务记为第 1 轮）。
+ * 与 PC 看板 `taskExecutionRound` 共用，移动端快照只带计数时复用。
+ */
+export function executionRoundFromCount(count: number, status: ProjectTaskStatus): number {
+  if (status === "submitted") return count + 1;
+  return Math.max(1, count);
+}
+
+/** 计算任务当前所处执行轮次（详见 `executionRoundFromCount`）。 */
+export function taskExecutionRound(
+  task: Pick<ProjectTask, "executionHistory" | "status">,
+): number {
+  return executionRoundFromCount(parseTaskExecutionHistory(task.executionHistory).length, task.status);
+}
 
 /** executionHistory JSON 数组的单条记录。 */
 export type TaskExecutionRecord = {
@@ -237,17 +270,19 @@ function parseTaskTimestamp(value: string | null | undefined): number | null {
   return Number.isNaN(millis) ? null : millis;
 }
 
-/** 全局唯一执行槽状态：当前是否有任务在执行、是哪个任务。 */
+/** 按项目隔离的执行槽状态：当前有哪些任务在执行（每个项目至多一个）。 */
 export type ProjectTaskRunnerState = {
+  /** 是否有任意项目的任务在执行（调度器按项目粒度判断，不依赖该字段阻塞全局）。 */
   running: boolean;
-  current: {
+  /** 当前正在执行的任务列表（不同项目可并行，每个项目至多一个）。 */
+  current: Array<{
     projectId: string;
     taskId: string;
     taskTitle: string;
     agentProfile: string;
     jobId: string;
     startedAt: string;
-  } | null;
+  }>;
 };
 
 /** run_project_task 领取结果。 */

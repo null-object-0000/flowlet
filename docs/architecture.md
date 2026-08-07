@@ -372,10 +372,16 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 删除这些本地任务，不删除目录、Agent 原始会话或 Flowlet 请求观测记录。项目与任务 CRUD
 写入 SQLite 后立即生效，无需重启。
 
+任务执行器按 `agent_profile` 分派 Claude Code、OpenCode 或 Pi。Pi 在 Windows npm 安装下
+通常通过 cmd / PowerShell shim 启动；为避免多行任务正文被命令行转义截断，Flowlet 使用 stdin
+传递完整 prompt，CLI 参数只承载权限、会话名与会话目录。Pi 正常返回后还必须在 Flowlet
+专属会话目录中找到指定 session id，并确认 JSONL 的 user message 含完整 prompt；校验失败
+按执行失败处理，不得仅凭退出码 0 进入待审核。
+
 多设备同步（2026-08）把项目与任务升级为「工作区实体」：`projects.directory_path`
 改为可空（远端项目落到新设备后需先「绑定本机目录」才能执行），并新增服务端托管的
 `workspace_project_id` / `workspace_archived`；`project_tasks` 新增 `claimed_by` /
-`claimed_at`（跨设备领取租约）与 `deleted`（软删除墓碑）。同步通过 S3 工作区加密对象
+`claimed_at`（跨设备执行归属）与 `deleted`（软删除墓碑）。同步通过 S3 工作区加密对象
 `<prefix>/flowlet/v1/workspace/projects/<workspace_project_id>.enc`（ChaCha20-Poly1305，
 复用账号工作区密钥，AAD 独立），每个项目一个对象，revision + ETag + If-Match 条件写入，
 由 `project_workspace_sync` 模块管理。合并规则为 last-writer-wins + 状态机守卫 +
@@ -384,22 +390,45 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 删除项目写入 `deleted` 墓碑，其他设备同步后删除各自副本。目录绑定、领取归属与最近
 执行 job 是设备本地字段，不进入工作区对象。任务保存 / 提交 / 审核 / 转换后即时推送
 该项目到工作区；启动后与设备同步共用同一 15 分钟周期拉取合并。调度器只领取
-「本机已绑定目录且未被其他设备在租约窗口内领取」的 `submitted` 任务，防止多台设备对
-同一任务重复执行。
+「本机已绑定目录且未被其他设备执行 / 领取」的 `submitted` 任务。任务一旦被某台设备
+执行过（`execution_history` 非空）或正在执行（`claimed_by` 指向其他设备），就永久归属
+该设备，其他设备只能查看；基于其他设备任务的子任务（`base_task_id` 指向的父任务归属
+其他设备）同样只读。由于 `claimed_by` 是设备本地字段不跨设备同步，其他设备通过
+`execution_history` 非空（工作区对象同步）识别「该任务已被执行过」，从而禁止本机领取。
+`last_job_id` 是本机执行时写入的设备本地字段（工作区同步不携带、合并时保留本地值），
+作为「本机执行过」的强证据：即使任务因设备身份变化 / 数据库迁移导致 `claimed_by`
+与当前设备不一致，只要 `last_job_id` 非空就不判为其他设备任务，避免本机创建并执行的
+任务被误展示成只读。防止多台设备对同一任务重复执行。
 
-应用重启恢复（2026-08）：Flowlet 在任务执行中（`in_progress`）退出 / 重启时，全局
-执行槽是内存态（`AGENT_TASK_RUNNING`）会随之丢失，任务会永久卡在 `in_progress`
+队列排序与置顶（2026-08）：待执行队列按「置顶 → 优先级 → 提交时间」排序——被用户
+「提高优先级」（`boost_project_task` 写入 `queue_boosted_at`）的任务排最前，置顶任务之间
+按置顶时间倒序（再次置顶可把任务提到队列第一名）；未置顶任务按优先级 p0 > p1 > p2，
+同优先级按提交时间（`updated_at`，最近一次提交 / 退回时刻）先到先执行，不再按创建时间。
+`queue_boosted_at` 是设备本地字段、不进入工作区对象，合并时保留本地值；任务被领取执行
+（`claim_task`）或中断恢复重新排队时自动清空，置顶只对「当前这一轮排队」有效。
+
+执行槽按项目隔离（2026-08）：任务执行槽以「项目」为粒度——每个项目同一时刻至多
+一个任务在跑（并行度 1），不同项目互不阻塞、可并行执行。前端调度器跳过「已有任务在
+执行的项目」的任务，从其余项目按全局优先级取队首领取；Rust 端 `AGENT_TASK_RUNNING`
+以 project_id 为 key 记录运行中任务，领取与释放原子、并发安全。为配合按项目并行，
+`save_project` 约束同一本机目录只能绑定一个项目，避免两个项目并行执行同一目录时
+Agent 会话、工作区文件被并发读写冲突。
+
+应用重启恢复（2026-08）：Flowlet 在任务执行中（`in_progress`）退出 / 重启时，按项目
+隔离的执行槽是内存态（`AGENT_TASK_RUNNING`）会随之丢失，任务会永久卡在 `in_progress`
 （调度器只领取 `submitted`）。桌面端启动时调用 `recover_interrupted_project_tasks`
-把「本机领取或租约已过期」的执行中任务恢复为 `submitted`（待处理）重新排队，调度器
+把「本机领取或未领取」的执行中任务恢复为 `submitted`（待处理）重新排队，调度器
 下个周期自动领取执行，按任务的 `agent_profile` 复用上次会话继续推进（Claude Code
-`--resume`、OpenCode `--session`、Pi `--session`）；恢复时在 `execution_history`
+`--resume`、OpenCode `--session`、Pi `--session-id`）；恢复时在 `execution_history`
 最近一条未结束记录上打 `interrupted: true` 标记（含中断时刻 `finishedAt`），前端
 待处理列标注「上次执行中断」、执行历史展示「已中断」，与 background_jobs 的
-`interrupted`（应用已重启）先例保持一致。其他设备领取且仍在租约窗口内的任务不恢复。
+`interrupted`（应用已重启）先例保持一致。其他设备领取的任务永久归属对方，即使对方
+离线也不由本机恢复，避免两台设备对同一任务重复执行。
 
 移动端任务提交：设备快照（schema v12）携带轻量 `projects` 目录（工作区项目 id、
-名称、是否已绑定目录、任务标题/状态/优先级，不含描述与执行历史），接收端导入只读
-`device_projects` 表。移动端据此发现「哪台设备能执行哪个项目」，通过签名 LAN 通道
+名称、是否已绑定目录、任务标题/状态/优先级（前端已移除优先级能力，后端保留字段
+写死 P2）/执行轮次计数（供移动端展示「第 N 轮执行」），不含描述与执行历史），
+接收端导入只读 `device_projects` 表。移动端据此发现「哪台设备能执行哪个项目」，通过签名 LAN 通道
 `POST /flowlet/v1/task/submit`（新增 `task.submit` 能力）把任务默认以 `draft`（草稿待提交）
 状态创建到目标设备，与 PC 看板交互一致；移动端再通过 `POST /flowlet/v1/task/status`
 （新增 `task.status` 能力）提交（`draft → submitted`）或撤回（`submitted → draft`），

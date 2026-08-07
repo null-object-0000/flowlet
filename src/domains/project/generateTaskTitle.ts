@@ -187,10 +187,9 @@ function titleFromJsonObject(json: string): string | null {
   return null;
 }
 
-/** 标题合理性校验：排除回显、超长等异常内容。 */
+/** 标题合理性校验：只限制极端超长结果，内容本身交由 JSON 结构化输出约束。 */
 function isPlausibleTitle(title: string): boolean {
   if (title.length > 60) return false;
-  if (/messages|"model"\s*:|任务类型|任务描述/.test(title)) return false;
   return true;
 }
 

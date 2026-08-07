@@ -1,19 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Dropdown, Empty, Input, Modal, Select, SideSheet, Tabs, Tag, TextArea, Toast, Tooltip } from "@douyinfe/semi-ui-19";
-import { IconAIEditLevel1, IconChevronRight, IconCopy, IconDelete, IconEdit, IconExternalOpen, IconFolder, IconMore, IconPlus, IconRefresh, IconSearch, IconStop, IconTickCircle, IconUndo } from "@douyinfe/semi-icons";
+import { IconAIEditLevel1, IconChevronRight, IconCopy, IconDelete, IconEdit, IconFolder, IconMore, IconPlus, IconRefresh, IconSearch, IconStop, IconTickCircle, IconTop, IconUndo } from "@douyinfe/semi-icons";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { BackgroundJobEvent } from "../../domains/background-task/types";
 import { agentSessionCommands } from "../../domains/agent-session/commands";
 import type { AgentSessionFlowletUsage, AgentSessionNativeUsage } from "../../domains/agent-session/types";
 import { deviceSyncCommands } from "../../domains/device-sync/commands";
-import { projectCommands } from "../../domains/project/commands";
 import { MIN_TITLE_GENERATION_DESCRIPTION_LENGTH, canAutoGenerateTaskTitle, generateTaskTitle } from "../../domains/project/generateTaskTitle";
-import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskPriority, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
+import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
 import { proxyCommands } from "../../domains/proxy/commands";
-import { taskExecutionHistory, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "../../domains/project/types";
+import { taskExecutionHistory, taskExecutionRound, taskHasExecution, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "../../domains/project/types";
 import { SessionConversation } from "../../features/agent-sessions/SessionConversation";
 import { interactionEventsVersion, useSessionScrollFollow } from "../../features/agent-sessions/useSessionScrollFollow";
 import { useAgentSessionTimeline } from "../../features/agent-sessions/useAgentSessions";
@@ -127,9 +127,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
 function LoadedProjectDetail({ project }: { project: Project }) {
   const { language, t } = useAppPreferences();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const refresh = useRefreshControl({ intervalMs: 1_000 });
+  const refresh = useRefreshControl({ intervalMs: 3_000 });
   const tasks = useProjectTasks(project.id, refresh.autoRefresh, refresh.intervalMs);
   const sharedProjects = useQuery({
     queryKey: queryKeys.deviceSync.projects(null),
@@ -152,29 +150,9 @@ function LoadedProjectDetail({ project }: { project: Project }) {
       }));
     },
   );
-  // 独立窗口（#/project-window/...）里不再显示「打开独立窗口」按钮。
-  const isStandaloneWindow = location.pathname.startsWith("/project-window");
-  const openDetailWindow = async () => {
-    try {
-      await projectCommands.openDetailWindow(project.id);
-      // 项目详情已移交独立窗口展示，主窗口自动回退到项目管理页。
-      navigate("/projects");
-    } catch (error) {
-      Toast.error(errorMessage(error));
-    }
-  };
+  // 「在独立窗口打开」能力已移至右上角窗口控制区（AppShell → WindowControls 注入）。
   return <main className={styles.page}>
     <PageHeader title={project.name} subtitle={project.directoryPath ?? t("未绑定目录")}>
-      {isStandaloneWindow ? null : (
-        <Button
-          theme="borderless"
-          type="tertiary"
-          icon={<IconExternalOpen />}
-          aria-label={t("在独立窗口打开")}
-          title={t("在独立窗口打开此项目看板，可同时操作主窗口")}
-          onClick={() => void openDetailWindow()}
-        />
-      )}
       <Input
         className={styles.taskSearch}
         prefix={<IconSearch />}
@@ -195,7 +173,7 @@ function LoadedProjectDetail({ project }: { project: Project }) {
       />
     </PageHeader>
     <section className={styles.detailContent}>
-      <TaskBoard project={project} tasks={tasks} sharedProjects={sharedProjects.data ?? []} sharedProjectsError={sharedProjects.isError ? sharedProjects.error.message : null} runnerState={scheduler.runnerState.data} search={search} />
+      <TaskBoard project={project} tasks={tasks} sharedProjects={sharedProjects.data ?? []} sharedProjectsError={sharedProjects.isError ? sharedProjects.error.message : null} runnerState={scheduler.runnerState.data} queued={scheduler.queued.data ?? []} search={search} />
     </section>
   </main>;
 }
@@ -226,8 +204,8 @@ export function computeTaskBoardColumns(containerWidth: number): number {
   return Math.min(4, Math.max(3, Math.floor((width + TASK_COLUMN_GAP) / (TASK_COLUMN_MIN_WIDTH + TASK_COLUMN_GAP))));
 }
 
-/** 看板任务搜索：关键词过滤任务，匹配标题、任务 ID、描述、类型（值/中文标签）、
- *  Agent 与优先级（值/大写标签），不区分大小写。空关键词返回原列表。 */
+/** 看板任务搜索：关键词过滤任务，匹配标题、任务 ID、描述、类型（值/中文标签）与
+ *  Agent，不区分大小写。空关键词返回原列表。 */
 export function filterProjectTasks(tasks: ProjectTask[], keyword: string): ProjectTask[] {
   const kw = keyword.trim().toLowerCase();
   if (!kw) return tasks;
@@ -238,8 +216,6 @@ export function filterProjectTasks(tasks: ProjectTask[], keyword: string): Proje
     || task.agentProfile.toLowerCase().includes(kw)
     || task.taskType.toLowerCase().includes(kw)
     || taskTypeLabel(task.taskType).toLowerCase().includes(kw)
-    || task.priority.toLowerCase().includes(kw)
-    || priorityLabel(task.priority).toLowerCase().includes(kw)
   ));
 }
 
@@ -267,24 +243,33 @@ const TASK_TYPES: Array<{ value: ProjectTaskType; label: string }> = [
 
 const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi"];
 
-const PRIORITIES: Array<{ value: ProjectTaskPriority; label: string; description: string }> = [
-  { value: "p0", label: "P0", description: "紧急" },
-  { value: "p1", label: "P1", description: "高" },
-  { value: "p2", label: "P2", description: "普通" },
-];
-
-function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runnerState, search }: { project: Project; tasks: ReturnType<typeof useProjectTasks>; sharedProjects: Awaited<ReturnType<typeof deviceSyncCommands.projects>>; sharedProjectsError: string | null; runnerState?: ProjectTaskRunnerState; search: string }) {
+function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runnerState, queued, search }: { project: Project; tasks: ReturnType<typeof useProjectTasks>; sharedProjects: Awaited<ReturnType<typeof deviceSyncCommands.projects>>; sharedProjectsError: string | null; runnerState?: ProjectTaskRunnerState; queued: ProjectTask[]; search: string }) {
   const { language, t } = useAppPreferences();
   const actions = useProjectTaskActions(project.id);
   const runnerActions = useProjectTaskRunnerActions();
+  // 当前设备 id（known_devices 中 isCurrent）：用于判断任务是否归属其他设备（只读）。
+  const knownDevices = useQuery({
+    queryKey: queryKeys.deviceSync.devices(),
+    queryFn: () => deviceSyncCommands.devices(),
+    refetchOnWindowFocus: false,
+  });
+  const currentDeviceId = knownDevices.data?.find((device) => device.isCurrent)?.deviceId ?? null;
+  const deviceNameById = useMemo(
+    () => new Map((knownDevices.data ?? []).map((device) => [device.deviceId, device.displayName])),
+    [knownDevices.data],
+  );
   const [editing, setEditing] = useState<ProjectTask | "new" | null>(null);
   const [viewing, setViewing] = useState<ProjectTask | null>(null);
+  // 系统通知点击跳转：独立窗口首次挂载从 URL `?task=` 读取目标任务，
+  // 之后监听 `task-detail-open` 事件更新。任务加载完成后自动打开其概览抽屉。
+  const [searchParams] = useSearchParams();
+  const [targetTaskId, setTargetTaskId] = useState<string | null>(() => searchParams.get("task"));
   const [rejecting, setRejecting] = useState<ProjectTask | null>(null);
   const [deleting, setDeleting] = useState<ProjectTask | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [converting, setConverting] = useState<ProjectTask | null>(null);
   const [convertDescription, setConvertDescription] = useState("");
-  const [draft, setDraft] = useState({ title: "", description: "", taskType: "code" as ProjectTaskType, agentProfile: "Claude Code", priority: "p2" as ProjectTaskPriority, baseTaskId: null as string | null });
+  const [draft, setDraft] = useState({ title: "", description: "", taskType: "code" as ProjectTaskType, agentProfile: "Claude Code", baseTaskId: null as string | null });
   const [generatingTitle, setGeneratingTitle] = useState(false);
   // 标题流式生成过程中的实时进度（展示在「任务标题」名称右侧，缓解等待焦虑）。
   const [titleGenStatus, setTitleGenStatus] = useState<string | null>(null);
@@ -294,10 +279,11 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
   // 自动生成标题需要本地代理（Base URL）与客户端 Token。
   const proxyBindConfig = useProxyBindConfig();
   // 看板卡片左下角的时间标签（等待 / 执行时长）需要持续前进的时钟：
-  // 每秒推进一次，让进行中任务的执行时间与排队任务的等待时间实时变化。
+  // 与看板数据刷新保持同一节奏（每 3 秒推进一次），让进行中任务的执行时间
+  // 与排队任务的等待时间实时变化，同时避免每秒重渲染整块看板。
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), 3000);
     return () => clearInterval(timer);
   }, []);
   // 看板容器宽度 → 动态列数：默认 1200×720 非独立窗口（含左侧菜单）恰好放下 3 列，
@@ -327,7 +313,7 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
   );
   const boardTasks = mergedTasks.tasks;
   const remoteOrigins = mergedTasks.remoteOrigins;
-  // 搜索过滤：关键词匹配标题 / 任务 ID / 描述 / 类型 / Agent / 优先级，空关键词返回全部。
+  // 搜索过滤：关键词匹配标题 / 任务 ID / 描述 / 类型 / Agent，空关键词返回全部。
   const searchKeyword = search.trim().toLowerCase();
   const filteredTasks = useMemo(() => filterProjectTasks(boardTasks, searchKeyword), [boardTasks, searchKeyword]);
   const grouped = useMemo(() => Object.fromEntries(TASK_COLUMNS.map((column) => [column.id, filteredTasks.filter((task) => column.statuses.includes(task.status))])) as Record<string, ProjectTask[]>, [filteredTasks]);
@@ -340,12 +326,45 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
   // 搜索词命中不到任何任务时，看板整体显示空态；「已完成」抽屉入口在搜索下无匹配已完成任务时同样隐藏。
   const noSearchMatch = searchKeyword.length > 0 && filteredTasks.length === 0;
   const showDoneDrawerEntry = !showDoneColumn && !(searchKeyword.length > 0 && doneTasks.length === 0);
-  const openEditor = (task: ProjectTask | "new", presetBaseTaskId: string | null = null) => { setEditing(task); setDraft(task === "new" ? { title: "", description: "", taskType: "code", agentProfile: "Claude Code", priority: "p2", baseTaskId: presetBaseTaskId } : { title: task.title, description: task.description, taskType: task.taskType, agentProfile: task.agentProfile, priority: task.priority, baseTaskId: task.baseTaskId }); };
-  // 打开任意任务：草稿进编辑抽屉，其余打开只读详情（父任务跳转 / 相关任务跳转共用）。
-  const openAnyTask = (clicked: ProjectTask) => { if (clicked.status === "draft" && !remoteOrigins.has(clicked.id)) openEditor(clicked); else setViewing(clicked); };
+  const openEditor = (task: ProjectTask | "new", presetBaseTaskId: string | null = null) => { setEditing(task); setDraft(task === "new" ? { title: "", description: "", taskType: "code", agentProfile: "Claude Code", baseTaskId: presetBaseTaskId } : { title: task.title, description: task.description, taskType: task.taskType, agentProfile: task.agentProfile, baseTaskId: task.baseTaskId }); };
+  // 打开任意任务：本机草稿进编辑抽屉；远端快照 / 其他设备执行过的任务只读打开详情。
+  const openAnyTask = (clicked: ProjectTask) => {
+    if (clicked.status === "draft" && !remoteOrigins.has(clicked.id) && !taskOwnedByOtherDevice(clicked, taskById, currentDeviceId)) openEditor(clicked);
+    else setViewing(clicked);
+  };
+  // 监听「任务详情打开」事件（Rust 侧在通知点击时向本独立窗口发出）。
+  // 事件只定向到 project-detail-<projectId> 窗口，主窗口不会收到。
+  useEffect(() => {
+    const unlistenPromise = listen<{ projectId: string; taskId: string }>("task-detail-open", (event) => {
+      const { projectId, taskId } = event.payload;
+      if (projectId === project.id) {
+        setTargetTaskId(taskId);
+      }
+    });
+    return () => {
+      void unlistenPromise.then((dispose) => dispose());
+    };
+  }, [project.id]);
+  // 目标任务已加载到看板时自动打开其概览抽屉（URL ?task= 与事件共用此入口）。
+  useEffect(() => {
+    if (!targetTaskId) return;
+    const target = taskById.get(targetTaskId);
+    if (!target) return;
+    openAnyTask(target);
+    setTargetTaskId(null);
+  }, [targetTaskId, taskById, openAnyTask]);
+  // 卡片「来源设备」标签：远端快照显示来源设备名；其他设备执行过的本机任务显示执行设备名。
+  const taskSourceLabel = (task: ProjectTask): string | undefined => {
+    const remote = remoteOrigins.get(task.id);
+    if (remote) return remote.deviceDisplayName;
+    if (taskOwnedByOtherDevice(task, taskById, currentDeviceId) && task.claimedBy) {
+      return deviceNameById.get(task.claimedBy) ?? task.claimedBy;
+    }
+    return undefined;
+  };
   const save = async () => {
     if (!editing || !draft.title.trim()) return;
-    const task = editing === "new" ? { ...newProjectTask(project.id, draft.title, draft.baseTaskId), description: draft.description.trim(), taskType: draft.taskType, agentProfile: draft.agentProfile, priority: draft.priority } : { ...editing, ...draft, title: draft.title.trim(), description: draft.description.trim(), updatedAt: new Date().toISOString() };
+    const task = editing === "new" ? { ...newProjectTask(project.id, draft.title, draft.baseTaskId), description: draft.description.trim(), taskType: draft.taskType, agentProfile: draft.agentProfile } : { ...editing, ...draft, title: draft.title.trim(), description: draft.description.trim(), updatedAt: new Date().toISOString() };
     try { await actions.saveTask.mutateAsync(task); Toast.success(t("任务已保存")); setEditing(null); } catch (error) { Toast.error(errorMessage(error)); }
   };
   // 自动生成标题：调用本地代理的 flowlet-flash 生成 -> 写入标题输入框。
@@ -441,6 +460,13 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
       }
     } catch (error) { Toast.error(errorMessage(error)); }
   };
+  // 提高优先级：把已提交待执行任务置顶到队列最前。
+  const boostTaskInQueue = async (task: ProjectTask) => {
+    try {
+      await runnerActions.boostTask.mutateAsync(task.id);
+      Toast.success(t("任务已提高优先级，已进入队列最前"));
+    } catch (error) { Toast.error(errorMessage(error)); }
+  };
   // 只读分析任务转为代码修改任务：与退回一样必填描述（新的代码修改要求）。
   const openConvert = (task: ProjectTask) => { setConverting(task); setConvertDescription(""); };
   const convertToCode = async () => {
@@ -453,14 +479,19 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
     } catch (error) { Toast.error(errorMessage(error)); }
   };
   /** 卡片交互动作：按状态聚合。
-   *  单个动作直接在卡片右下角渲染按钮；多个动作收进右上角 ⋯ 菜单（悬停卡片时露出）。 */
+   *  单个动作直接在卡片右下角渲染按钮；多个动作收进右上角 ⋯ 菜单（悬停卡片时露出）。
+   *  远端快照与其他设备执行/归属的任务：本机只读，不提供任何操作。 */
   const renderCardActions = (task: ProjectTask): CardAction[] => {
     if (remoteOrigins.has(task.id)) return [];
+    if (taskOwnedByOtherDevice(task, taskById, currentDeviceId)) return [];
     switch (task.status) {
       case "draft":
         return [{ key: "submit", label: t("提交"), icon: <IconTickCircle />, onClick: () => void toggleSubmitted(task, true) }];
       case "submitted":
-        return [{ key: "withdraw", label: t("撤回"), icon: <IconUndo />, onClick: () => void toggleSubmitted(task, false) }];
+        return [
+          { key: "boost", label: t("提高优先级"), icon: <IconTop />, onClick: () => void boostTaskInQueue(task) },
+          { key: "withdraw", label: t("撤回"), icon: <IconUndo />, onClick: () => void toggleSubmitted(task, false) },
+        ];
       case "in_progress":
         // 进行中任务不提供取消执行，交给执行器自然完成后流转到待审核。
         return [];
@@ -476,12 +507,17 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
     }
   };
 
-  /** 卡片左下角时间标签：草稿显示创建时间，已提交显示等待时间，其余显示累计执行时间。
-   *  已提交且上次执行被应用重启中断的任务，在时间标签前附加「上次执行中断」警示标记。 */
+  /** 卡片左下角时间标签：草稿显示创建时间，已提交显示等待时间 + 排队顺序，其余显示累计执行时间。
+   *  已提交且上次执行被应用重启中断的任务，在时间标签前附加「上次执行中断」警示标记。
+   *  其他设备执行/归属的任务只读展示更新时间。 */
   const renderCardMeta = (task: ProjectTask, now: number): ReactNode => {
     const remoteOrigin = remoteOrigins.get(task.id);
     if (remoteOrigin) {
       return <span className={styles.taskCardTime} title={formatFullTimestamp(task.updatedAt, language)}>{t("{device} · 更新于 {time}", { device: remoteOrigin.deviceDisplayName, time: formatTimestamp(task.updatedAt, language) })}</span>;
+    }
+    // 其他设备执行/归属的任务：本机只读，「其他设备 · 设备名」由来源标签展示，这里展示更新时间。
+    if (taskOwnedByOtherDevice(task, taskById, currentDeviceId)) {
+      return <span className={styles.taskCardTime} title={formatFullTimestamp(task.updatedAt, language)}>{t("更新于 {time}", { time: formatTimestamp(task.updatedAt, language) })}</span>;
     }
     switch (task.status) {
       case "draft":
@@ -489,6 +525,10 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
       case "submitted": {
         const waiting = taskWaitingDuration(task, now);
         const interrupted = taskLastExecutionInterrupted(task);
+        // 排队顺序：任务在全局待执行队列（list_queued_project_tasks 排序）中的第几位；
+        // 不在队列中（已被领取执行）时不展示。
+        const queueIndex = queued.findIndex((item) => item.id === task.id);
+        const queuePosition = queueIndex >= 0 ? queueIndex + 1 : null;
         return (
           <span className={styles.taskCardMetaRight}>
             {interrupted ? (
@@ -500,18 +540,19 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
               </span>
             ) : null}
             {waiting == null ? null : <span className={styles.taskCardTime} title={formatFullTimestamp(task.updatedAt, language)}>{t("等待 {time}", { time: formatElapsedSeconds(waiting) })}</span>}
+            {queuePosition != null ? <span className={styles.taskCardTime}>{t("队列第 {n} 位", { n: queuePosition })}</span> : null}
           </span>
         );
       }
       case "in_progress": {
         // 进行中取实时时钟（当前轮次未结束），具体到秒展示，随看板每秒刷新。
-        const runningJobId = runnerState?.current?.taskId === task.id ? runnerState.current.jobId : null;
+        const runningJobId = (runnerState?.current ?? []).find((info) => info.taskId === task.id)?.jobId ?? null;
         const duration = taskLatestExecutionDuration(task, runningJobId, now);
         return <span className={styles.taskCardTime} title={t("本轮执行时间")}>{t("执行 {time}", { time: formatElapsedSeconds(duration) })}</span>;
       }
       case "review": {
         // 待审核取最近一轮的真实执行耗时（时间已定），保持原有分钟级呈现。
-        const runningJobId = runnerState?.current?.taskId === task.id ? runnerState.current.jobId : null;
+        const runningJobId = (runnerState?.current ?? []).find((info) => info.taskId === task.id)?.jobId ?? null;
         const duration = taskLatestExecutionDuration(task, runningJobId, now);
         return <span className={styles.taskCardTime} title={t("本轮执行时间")}>{t("执行 {time}", { time: formatElapsed(duration, language) })}</span>;
       }
@@ -551,7 +592,7 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
         expanded={expanded}
         childCount={children.length}
         onToggleExpand={hasChildren ? toggle : undefined}
-        sourceLabel={remoteOrigins.get(task.id)?.deviceDisplayName}
+        sourceLabel={taskSourceLabel(task)}
       >
         {hasChildren && expanded ? (
           <div className={styles.taskCardChildren}>
@@ -568,18 +609,18 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
       {noSearchMatch ? <div className={styles.searchEmpty}><Empty title={t("没有匹配的任务")} description={t("试试搜索标题、任务 ID 或描述关键词")} /></div> : visibleColumns.map((column) => <section className={styles.column} key={column.id}><header><span className={styles.colTitle}><span>{t(column.label)}</span><span className={`${styles.colCount} ${columnCountClass(column.id)}`}>{grouped[column.id].length}</span></span>{column.addable ? <button className={styles.addColButton} aria-label={t("添加任务")} title={t("添加任务")} onClick={() => openEditor("new")}><IconPlus /></button> : null}</header><div className={styles.columnBody}>
         {column.id === "done"
           ? doneTree.roots.map((task) => renderDoneTask(task))
-          : grouped[column.id].map((task) => <TaskBoardCard key={task.id} task={task} taskById={taskById} onOpen={openAnyTask} actions={renderCardActions(task)} meta={renderCardMeta(task, now)} sourceLabel={remoteOrigins.get(task.id)?.deviceDisplayName} />)}
+          : grouped[column.id].map((task) => <TaskBoardCard key={task.id} task={task} taskById={taskById} onOpen={openAnyTask} actions={renderCardActions(task)} meta={renderCardMeta(task, now)} sourceLabel={taskSourceLabel(task)} />)}
         {column.addable ? <button className={styles.addCard} onClick={() => openEditor("new")}><IconPlus />{t("添加任务")}</button> : null}
       </div></section>)}
     </div>}
     {!tasks.isError && showDoneDrawerEntry ? <button className={styles.doneDrawerEntry} onClick={() => setDoneDrawerOpen(true)} title={t("查看已完成任务")}><IconChevronRight size="small" /><span>{t("已完成")}</span></button> : null}
     <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建任务") : t("编辑任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span>{editing !== "new" && editing ? <Button type="danger" theme="borderless" icon={<IconDelete />} onClick={() => setDeleting(editing)}>{t("删除")}</Button> : null}</span><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button type="primary" theme="solid" loading={actions.saveTask.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
-      <div className={styles.form}><div className={styles.formRow}><label><span>{t("优先级")}</span><Select value={draft.priority} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} renderSelectedItem={(optionNode: { value?: string | number }) => String(optionNode.value ?? "").toUpperCase()} optionList={PRIORITIES.map((item) => ({ value: item.value, label: `${t(item.label)} · ${t(item.description)}` }))} onChange={(value) => setDraft((current) => ({ ...current, priority: String(value) as ProjectTaskPriority }))} /></label><label><span className={styles.titleFieldLabel}>{t("任务标题")}{generatingTitle && titleGenStatus ? <small className={styles.titleGenStatus}>{titleGenStatus}</small> : null}</span><div className={styles.titleInputRow}><Input autoFocus value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /><Button icon={<IconAIEditLevel1 />} aria-label={t("自动生成标题")} title={canAutoGenerateTaskTitle(draft.description) ? t("根据任务描述自动生成标题") : t("任务描述至少 {n} 字后可自动生成", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })} loading={generatingTitle} disabled={!canAutoGenerateTaskTitle(draft.description)} onClick={() => void autoGenerateTitle()} /></div>{!canAutoGenerateTaskTitle(draft.description) ? <small className={styles.titleGenerateHint}>{t("任务描述至少 {n} 字后可自动生成标题", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })}</small> : null}</label></div><label><span>{t("任务描述（可选）")}</span><TextArea value={draft.description} autosize={{ minRows: 3, maxRows: 6 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div>{draft.baseTaskId ? <div className={styles.formNote}>{t("基于父任务：{id}（{title}）", { id: shortTaskId(draft.baseTaskId), title: taskById.get(draft.baseTaskId)?.title ?? t("已完成任务") })}</div> : null}</div>
+      <div className={styles.form}><label><span className={styles.titleFieldLabel}>{t("任务标题")}{generatingTitle && titleGenStatus ? <small className={styles.titleGenStatus}>{titleGenStatus}</small> : null}</span><div className={styles.titleInputRow}><Input autoFocus value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /><Button icon={<IconAIEditLevel1 />} aria-label={t("自动生成标题")} title={canAutoGenerateTaskTitle(draft.description) ? t("根据任务描述自动生成标题") : t("任务描述至少 {n} 字后可自动生成", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })} loading={generatingTitle} disabled={!canAutoGenerateTaskTitle(draft.description)} onClick={() => void autoGenerateTitle()} /></div>{!canAutoGenerateTaskTitle(draft.description) ? <small className={styles.titleGenerateHint}>{t("任务描述至少 {n} 字后可自动生成标题", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })}</small> : null}</label><label><span>{t("任务描述（可选）")}</span><TextArea value={draft.description} autosize={{ minRows: 9, maxRows: 12 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div>{draft.baseTaskId ? <div className={styles.formNote}>{t("基于父任务：{id}（{title}）", { id: shortTaskId(draft.baseTaskId), title: taskById.get(draft.baseTaskId)?.title ?? t("已完成任务") })}</div> : null}</div>
     </SideSheet>
     <Modal title={t("删除任务“{name}”？", { name: deleting?.title ?? "" })} visible={deleting != null} zIndex={APP_OVERLAY_Z_INDEX.modal} okType="danger" okText={t("删除")} cancelText={t("取消")} maskClosable={false} onCancel={() => setDeleting(null)} onOk={() => void removeEditingTask()} okButtonProps={{ loading: actions.deleteTask.isPending }}>
       <div className={styles.form}><p>{t("删除后任务将从项目看板移除，此操作不可撤销。")}</p></div>
     </Modal>
-    <TaskReadonlySideSheet task={viewing} remoteOrigin={viewing ? remoteOrigins.get(viewing.id) ?? null : null} now={now} runningJobId={viewing?.id ? (runnerState?.current?.taskId === viewing.id ? runnerState.current.jobId : null) : null} baseTask={viewing?.baseTaskId ? taskById.get(viewing.baseTaskId) ?? null : null} relatedTasks={viewing ? boardTasks.filter((child) => child.baseTaskId === viewing.id) : []} onOpenTask={openAnyTask} onClose={() => setViewing(null)} onApprove={(task) => void approveTask(task)} onReject={(task) => openReject(task)} onConvert={(task) => openConvert(task)} onCreateChildTask={(task) => createChildTask(task)} />
+    <TaskReadonlySideSheet task={viewing} remoteOrigin={viewing ? remoteOrigins.get(viewing.id) ?? null : null} ownedByOther={viewing ? taskOwnedByOtherDevice(viewing, taskById, currentDeviceId) : false} now={now} runningJobId={viewing?.id ? (runnerState?.current ?? []).find((info) => info.taskId === viewing.id)?.jobId ?? null : null} baseTask={viewing?.baseTaskId ? taskById.get(viewing.baseTaskId) ?? null : null} relatedTasks={viewing ? boardTasks.filter((child) => child.baseTaskId === viewing.id) : []} onOpenTask={openAnyTask} onClose={() => setViewing(null)} onApprove={(task) => void approveTask(task)} onReject={(task) => openReject(task)} onConvert={(task) => openConvert(task)} onCreateChildTask={(task) => createChildTask(task)} />
     <SideSheet
       visible={doneDrawerOpen}
       width={DETAIL_SHEET_WIDTH}
@@ -615,6 +656,38 @@ export function taskLastExecutionInterrupted(task: ProjectTask): boolean {
   return Boolean(last?.interrupted);
 }
 
+/**
+ * 任务是否归属其他设备（本机只能查看，不可执行 / 审核 / 编辑 / 建子任务）。
+ *
+ * 跨设备归属规则（与 Rust `list_queued_project_tasks` / `task_is_owned_by_other_device` 一致）：
+ * - 任务被其他设备领取（claimedBy 非空且非本机）→ 正在被其他设备执行；
+ * - 任务执行过（executionHistory 非空）但未标记为本机领取 → 工作区同步来的其他设备已执行任务；
+ * - `lastJobId` 是本机执行时写入的设备本地字段（工作区同步不携带）：只要非空就说明任务
+ *   在本机执行过，即使 `claimedBy` 因设备身份变化 / 数据库迁移与当前设备不一致，也不把
+ *   本机执行过的任务误判为其他设备；
+ * - 父任务归属其他设备（或本机没有父任务）→ 子任务跟随父任务归属。
+ */
+export function taskOwnedByOtherDevice(
+  task: ProjectTask,
+  taskById: Map<string, ProjectTask>,
+  currentDeviceId: string | null,
+): boolean {
+  if (currentDeviceId != null && task.claimedBy === currentDeviceId) return false;
+  // 本机执行过：lastJobId 是本机本地字段，即使 claimedBy 与当前设备不一致也不是其他设备任务。
+  if (task.lastJobId) return false;
+  if (currentDeviceId != null && task.claimedBy != null) return true;
+  if (taskHasExecution(task)) return true;
+  if (task.baseTaskId) {
+    const parent = taskById.get(task.baseTaskId);
+    if (!parent) return true;
+    if (currentDeviceId != null && parent.claimedBy === currentDeviceId) return false;
+    if (parent.lastJobId) return false;
+    if (currentDeviceId != null && parent.claimedBy != null) return true;
+    if (taskHasExecution(parent)) return true;
+  }
+  return false;
+}
+
 /** 任务 id 缩短展示：完整 id 是 UUID（36 字符），看板卡片等紧凑场景只展示后半段
  *  （第 4 段起，`xxxx-xxxxxxxxxxxx`），既保留可辨识度又避免侵占卡片空间。 */
 function shortTaskId(id: string): string {
@@ -622,8 +695,6 @@ function shortTaskId(id: string): string {
   if (parts.length >= 5) return `${parts[3]}-${parts[4]}`;
   return id.length <= 12 ? id : id.slice(-12);
 }
-
-function priorityLabel(priority: ProjectTaskPriority) { return priority.toUpperCase(); }
 
 function statusTagLabel(status: ProjectTaskStatus) {
   switch (status) {
@@ -659,9 +730,9 @@ function statusTagClass(status: ProjectTaskStatus) {
 
 /** 看板任务卡片。看板列与已完成抽屉共用，按状态分为两种布局：
  *  - 已完成：下方两行——标题（占一行或两行）+ 基础信息行（「类型 · Agent」弱化元信息 + 时间），
- *    不展示优先级，无「基于」行（树内子任务由父任务卡片承载层级）；有子任务的父任务可展开/收缩。
+ *    无「基于」行（树内子任务由父任务卡片承载层级）；有子任务的父任务可展开/收缩。
  *  - 其他状态（待处理 / 进行中 / 待审核）：保持原有行结构——第一行合并元信息
- *    （P2 代码修改 · Claude Code，P2 为唯一彩色标签），第二行标题，第三行「基于」（可选），第四行时间。
+ *    （执行轮次 代码修改 · Claude Code，执行轮次为唯一彩色标签），第二行标题，第三行「基于」（可选），第四行时间。
  *  待审核卡片左侧橙色强调线提示。depth > 0 表示作为已完成树内子任务渲染。 */
 export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing, sourceLabel, depth = 0, expandable = false, expanded = false, childCount = 0, onToggleExpand, children }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions?: CardAction[]; meta: ReactNode; trailing?: ReactNode; sourceLabel?: string; depth?: number; expandable?: boolean; expanded?: boolean; childCount?: number; onToggleExpand?: () => void; children?: ReactNode }) {
   const { t } = useAppPreferences();
@@ -707,19 +778,25 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
       <IconChevronRight size="small" className={expanded ? styles.taskCardExpandOpen : undefined} />
     </button>
   ) : null;
-  // 交互动作：非进行中/待审核的单个动作直接在卡片右下角展示按钮（常驻）；
-  // 多个动作以及进行中/待审核状态的动作统一收进右上角 ⋯ 菜单（悬停卡片时露出）。
-  const singleAction = actions.length === 1 && !menuRequired ? (
-    <button
-      className={styles.taskCardAction}
-      title={actions[0].label}
-      onClick={(event) => { event.stopPropagation(); actions[0].onClick(); }}
-    >
-      {actions[0].icon}
-      <span>{actions[0].label}</span>
-    </button>
+  // 交互动作：非进行中/待审核（menuRequired）状态的动作直接在卡片右下角展示按钮（常驻），
+  // 多个动作并排显示（如已提交待执行的「提高优先级」+「撤回」）；
+  // 进行中/待审核状态的动作统一收进右上角 ⋯ 菜单（悬停卡片时露出）。
+  const directActions = !menuRequired && actions.length > 0 ? (
+    <span className={styles.taskCardActionRow}>
+      {actions.map((action) => (
+        <button
+          key={action.key}
+          className={styles.taskCardAction}
+          title={action.label}
+          onClick={(event) => { event.stopPropagation(); action.onClick(); }}
+        >
+          {action.icon}
+          <span>{action.label}</span>
+        </button>
+      ))}
+    </span>
   ) : null;
-  const moreMenu = actions.length > 1 || (menuRequired && actions.length > 0) ? (
+  const moreMenu = menuRequired && actions.length > 0 ? (
     <Dropdown
       position="bottomRight"
       trigger="click"
@@ -765,7 +842,7 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
     <article className={`${styles.taskCard} ${isReview ? styles.taskCardReview : ""} ${depth > 0 ? styles.taskCardChild : ""}`}>
       <div className={styles.taskCardHead}>
         <div className={styles.taskTags}>
-          <span className={`${styles.taskTag} ${styles.taskTagPriority}`}>{t(priorityLabel(task.priority))}</span>
+          <span className={`${styles.taskTag} ${styles.taskTagRound}`}>{t("第 {n} 轮", { n: taskExecutionRound(task) })}</span>
           {sourceLabel ? <span className={styles.remoteTaskTag}>{t("其他设备")} · {sourceLabel}</span> : <span className={styles.taskCardTypeAgent}>{t(taskTypeLabel(task.taskType))} · {task.agentProfile}</span>}
         </div>
         {moreMenu}
@@ -776,7 +853,7 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
         </button>
       </div>
       {baseRow}
-      {meta || singleAction || trailing ? <div className={styles.taskCardMetaActions}><span className={styles.taskCardMetaRight}>{meta}</span>{singleAction ?? trailing}</div> : null}
+      {meta || directActions || trailing ? <div className={styles.taskCardMetaActions}><span className={styles.taskCardMetaRight}>{meta}</span>{directActions ?? trailing}</div> : null}
       {children}
     </article>
   );
@@ -795,12 +872,13 @@ function TaskBoardCard({ task, taskById, onOpen, actions, meta, sourceLabel }: {
 /** 进行中 / 待审核任务的本轮 Token 消耗与预估费用：经最近一次执行的 background job
  *  解析出 Agent 会话 id，优先读取该会话的 Flowlet 观测用量（真实经代理的 token 与
  *  人民币预估费用）；无 Flowlet 观测记录时回退到原生会话用量摘要（仅 token，费用缺失）。
- *  进行中每 5s 刷新一次，待审核执行结束数据已定，只查一次。 */
+ *  进行中与看板整体刷新同节奏（每 3 秒），待审核执行结束数据已定，只查一次。 */
 function useTaskTokenUsage(task: ProjectTask): { usage: AgentSessionNativeUsage | null; flowletUsage: AgentSessionFlowletUsage | null; hasData: boolean } {
   const needsUsage = task.status === "in_progress" || task.status === "review";
   const history = useMemo(() => (needsUsage ? taskExecutionHistory(task) : []), [task, needsUsage]);
   const latestJobId = history.length > 0 ? history[history.length - 1].jobId : null;
-  const jobDetail = useBackgroundTaskDetail(latestJobId);
+  // 看板卡片与整体刷新同节奏（3 秒）：进行中任务的 job 详情每 3 秒更新一次。
+  const jobDetail = useBackgroundTaskDetail(latestJobId, 3_000);
   const sessionId = parseJobSessionId(jobDetail.data?.job.summaryJson ?? null)
     ?? parseSessionIdFromEvents(jobDetail.data?.events ?? []);
   const agentType = projectAgentType(task.agentProfile);
@@ -811,7 +889,7 @@ function useTaskTokenUsage(task: ProjectTask): { usage: AgentSessionNativeUsage 
     queryKey: queryKeys.agentSession.flowletUsage(agentType ?? "", sessionId ?? ""),
     queryFn: () => agentSessionCommands.flowletUsage(agentType!, sessionId!),
     enabled,
-    refetchInterval: isRunning ? 5_000 : false,
+    refetchInterval: isRunning ? 3_000 : false,
     staleTime: isRunning ? 3_000 : 5 * 60_000,
     retry: 1,
   });
@@ -820,7 +898,7 @@ function useTaskTokenUsage(task: ProjectTask): { usage: AgentSessionNativeUsage 
     queryKey: queryKeys.agentSession.nativeSummary(agentType ?? "", sessionId ?? ""),
     queryFn: () => agentSessionCommands.nativeSummary(agentType!, sessionId!),
     enabled,
-    refetchInterval: isRunning ? 5_000 : false,
+    refetchInterval: isRunning ? 3_000 : false,
     staleTime: isRunning ? 3_000 : 5 * 60_000,
     retry: 1,
   });
@@ -875,7 +953,7 @@ function trimScale(value: string): string {
 
 /** 提交后任务的只读详情抽屉：概览（任务信息 + 运行/调度记录）+ 会话（完整对话）
  *  + 相关任务（基于本任务创建的子任务）。 */
-function TaskReadonlySideSheet({ task, remoteOrigin, now, runningJobId, baseTask, relatedTasks, onOpenTask, onClose, onApprove, onReject, onConvert, onCreateChildTask }: { task: ProjectTask | null; remoteOrigin: RemoteTaskOrigin | null; now: number; runningJobId: string | null; baseTask: ProjectTask | null; relatedTasks: ProjectTask[]; onOpenTask: (task: ProjectTask) => void; onClose: () => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void; onConvert: (task: ProjectTask) => void; onCreateChildTask: (task: ProjectTask) => void }) {
+function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJobId, baseTask, relatedTasks, onOpenTask, onClose, onApprove, onReject, onConvert, onCreateChildTask }: { task: ProjectTask | null; remoteOrigin: RemoteTaskOrigin | null; ownedByOther: boolean; now: number; runningJobId: string | null; baseTask: ProjectTask | null; relatedTasks: ProjectTask[]; onOpenTask: (task: ProjectTask) => void; onClose: () => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void; onConvert: (task: ProjectTask) => void; onCreateChildTask: (task: ProjectTask) => void }) {
   const { language, t } = useAppPreferences();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"overview" | "session" | "related">("overview");
@@ -905,7 +983,8 @@ function TaskReadonlySideSheet({ task, remoteOrigin, now, runningJobId, baseTask
     return null;
   }, [task, history]);
   // 刷新按钮只在任务进行中时出现：此时执行记录与对话仍在增长，需要手动拉取最新状态。
-  const isRunning = task?.status === "in_progress" && !remoteOrigin;
+  // 其他设备执行中的任务本机只读，不展示自动刷新控件。
+  const isRunning = task?.status === "in_progress" && !remoteOrigin && !ownedByOther;
   // 切换任务时回到概览。
   useEffect(() => { setActiveTab("overview"); }, [task?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -933,8 +1012,8 @@ function TaskReadonlySideSheet({ task, remoteOrigin, now, runningJobId, baseTask
   };
   const footer = (
     <div className={styles.taskSheetFooter}><span></span><span className={styles.taskSheetFooterActions}>
-      {isDone && task && !remoteOrigin ? <Button type="primary" theme="solid" onClick={() => onCreateChildTask(task)}>{t("基于此任务创建子任务")}</Button> : null}
-      {isReview && task && !remoteOrigin ? (
+      {isDone && task && !remoteOrigin && !ownedByOther ? <Button type="primary" theme="solid" onClick={() => onCreateChildTask(task)}>{t("基于此任务创建子任务")}</Button> : null}
+      {isReview && task && !remoteOrigin && !ownedByOther ? (
         <>
           {task.taskType === "readonly" ? <Button onClick={() => onConvert(task)}>{t("转为代码修改")}</Button> : null}
           <Button onClick={() => onReject(task)}>{t("退回")}</Button>
@@ -990,7 +1069,8 @@ function TaskReadonlySideSheet({ task, remoteOrigin, now, runningJobId, baseTask
               <div className={styles.tabFrame}>
                 <div className={styles.tabScroll}>
                   <div className={styles.readonlyTabsBody}>
-                    {remoteOrigin ? <div className={styles.remoteTaskNotice}>{t("这是来自“{device}”的只读任务快照，仅包含标题、状态、优先级和更新时间；编辑、审核及执行请在来源设备完成。", { device: remoteOrigin.deviceDisplayName })}</div> : null}
+                    {remoteOrigin ? <div className={styles.remoteTaskNotice}>{t("这是来自“{device}”的只读任务快照，仅包含标题、状态和更新时间；编辑、审核及执行请在来源设备完成。", { device: remoteOrigin.deviceDisplayName })}</div> : null}
+                    {!remoteOrigin && ownedByOther ? <div className={styles.remoteTaskNotice}>{t("该任务由其他设备执行，本机只读，请在执行设备上操作。")}</div> : null}
                     <section className={styles.readonlySection}><strong className={styles.readonlySectionTitle}>{t("任务信息")}</strong>
                       <div className={styles.readonlyGrid}>
                         <ReadonlyItem label={t("任务 ID")} value={task.id} copyable copyLabel={t("任务 ID")} />
@@ -1191,7 +1271,10 @@ function TaskSessionView({ task, autoRefresh, onRefreshed }: { task: ProjectTask
         className={styles.tabScroll}
         onScroll={sessionScroll.handleScroll}
       >
-        {content}
+        {/* 会话内容与概览 Tab 保持一致的内边距，避免内容贴边 */}
+        <div className={styles.taskSessionBody}>
+          {content}
+        </div>
       </div>
       {!sessionScroll.atBottom ? (
         <ScrollBottomControl
@@ -1242,7 +1325,7 @@ function TaskReadonlyHeader({ task, remoteOrigin }: { task: ProjectTask; remoteO
     <div className={styles.readonlyHeader}>
       <strong className={styles.readonlyHeaderTitle} title={task.title}>{task.title}</strong>
       <div className={styles.taskTags}>
-        <span className={`${styles.taskTag} ${styles.taskTagPriority}`}>{t(priorityLabel(task.priority))}</span>
+        <span className={`${styles.taskTag} ${styles.taskTagRound}`}>{t("第 {n} 轮", { n: taskExecutionRound(task) })}</span>
         <span className={statusTagClass(task.status)}>{t(statusTagLabel(task.status))}</span>
         {remoteOrigin ? <span className={styles.remoteTaskTag}>{t("其他设备")} · {remoteOrigin.deviceDisplayName}</span> : (
           <>

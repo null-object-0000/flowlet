@@ -117,6 +117,16 @@ describe("generateTaskTitle", () => {
     expect(title).toBe("开发 Flowlet 内置 AI SDK 统一前端 LLM 调用");
   });
 
+  it("accepts a structured title containing task description wording", async () => {
+    fetchMock.mockResolvedValue(sseResponse([
+      delta({ content: '{"title": "调整任务描述框高度并移除前端优先级"}' }),
+      "data: [DONE]",
+    ]));
+
+    const title = await generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "调整新建任务中的任务描述框高度，并移除前端优先级功能", taskType: "code" });
+    expect(title).toBe("调整任务描述框高度并移除前端优先级");
+  });
+
   it("throws when the model streams only an implausibly long title", async () => {
     fetchMock.mockResolvedValue(sseResponse([
       delta({ reasoning_content: "这是一段很长的推理过程，它没有包含任何可用的标题字段，只是把任务描述里的内容原样复述了很多遍，导致整体长度远超标题合理范围，因此应该被判定为无有效标题并抛出错误。" }),

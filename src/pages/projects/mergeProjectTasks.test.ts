@@ -27,6 +27,8 @@ function localTask(id: string, title = "本机任务"): ProjectTask {
     lastJobId: null,
     rejectionReason: null,
     executionHistory: null,
+    claimedBy: null,
+    queueBoostedAt: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
   };

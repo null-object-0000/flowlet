@@ -1,13 +1,14 @@
 .dragRegion {
   position: fixed;
-  inset: 0 138px auto 188px;
+  inset: 0 184px auto 188px;
   height: 40px;
   z-index: 1000;
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* 独立窗口（无侧边栏）：拖拽区从窗口左边缘开始。 */
+/* 独立窗口（无侧边栏）：拖拽区从窗口左边缘开始。
+   独立窗口不注入 openDetailWindow，仍是 3 个控制按钮（46×3 = 138px）。 */
 .dragRegionStandalone {
   inset: 0 138px auto 0;
 }

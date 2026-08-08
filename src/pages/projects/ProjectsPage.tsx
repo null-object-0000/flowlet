@@ -97,10 +97,11 @@ function ProjectList() {
     {projects.isLoading ? <div className={styles.state}>{t("正在读取项目…")}</div> : null}
     {projects.isError ? <div className={styles.state}><strong>{t("项目加载失败")}</strong><span>{projects.error.message}</span><Button onClick={() => void projects.refetch()}>{t("重试")}</Button></div> : null}
     {!projects.isLoading && !projects.isError && projects.data?.length === 0 ? <div className={styles.empty}><Empty title={t("还没有项目")} description={t("创建一个项目并绑定本机目录，相关 Agent 会话会自动归入项目看板。")}/><Button type="primary" theme="solid" icon={<IconPlus />} onClick={() => openEditor("new")}>{t("创建第一个项目")}</Button></div> : null}
-    <section className={styles.projectGrid}>
+    <section className={styles.projectList}>
       {projects.data?.map((project) => <article key={project.id} className={styles.projectCard} onClick={() => navigate(`/projects/${project.id}`)}>
         <div className={styles.projectIcon}><IconFolder /></div>
-        <div className={styles.projectCopy}><strong>{project.name}</strong><span title={project.directoryPath ?? undefined}>{project.directoryPath ?? t("未绑定目录")}</span><small>{t("更新于 {time}", { time: formatTimestamp(project.updatedAt, language) })}</small></div>
+        <div className={styles.projectCopy}><strong>{project.name}</strong><span title={project.directoryPath ?? undefined}>{project.directoryPath ?? t("未绑定目录")}</span></div>
+        <small className={styles.projectUpdated}>{t("更新于 {time}", { time: formatTimestamp(project.updatedAt, language) })}</small>
         <div className={styles.cardActions}>
           <Button theme="borderless" icon={<IconEdit />} aria-label={t("编辑项目")} onClick={(event) => { event.stopPropagation(); openEditor(project); }} />
           <Button theme="borderless" type="danger" icon={<IconDelete />} aria-label={t("删除项目")} onClick={(event) => { event.stopPropagation(); remove(project); }} />

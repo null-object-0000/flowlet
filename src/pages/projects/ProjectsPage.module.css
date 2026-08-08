@@ -1,11 +1,15 @@
 .page { display: flex; min-height: 0; height: 100%; flex-direction: column; gap: var(--flowlet-space-4); }
 .state, .empty { min-height: 220px; border: 1px solid var(--flowlet-color-border); border-radius: var(--flowlet-radius-card); background: var(--flowlet-color-surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
-.projectGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; overflow: auto; padding: 2px 2px 14px; }
-.projectCard { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 98px; padding: 16px; border: 1px solid var(--flowlet-color-border); border-radius: var(--flowlet-radius-card); background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); cursor: pointer; }
-.projectCard:hover { border-color: color-mix(in srgb, var(--flowlet-color-primary) 38%, var(--flowlet-color-border)); transform: translateY(-1px); }
-.projectIcon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 10px; color: var(--flowlet-color-primary); background: var(--semi-color-primary-light-default); font-size: 20px; }
-.projectCopy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.projectCopy strong { font-size: 15px; }.projectCopy span, .projectCopy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--flowlet-color-text-tertiary); }.cardActions { display: flex; }
+.projectList { overflow: auto; border: 1px solid var(--flowlet-color-border); border-radius: var(--flowlet-radius-card); background: var(--flowlet-color-surface); }
+.projectCard { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; min-height: 66px; padding: 10px 12px; cursor: pointer; transition: background-color .15s ease; }
+.projectCard + .projectCard { border-top: 1px solid var(--flowlet-color-border); }
+.projectCard:hover { background: var(--flowlet-color-surface-muted); }
+.projectIcon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; color: var(--flowlet-color-primary); background: var(--semi-color-primary-light-default); font-size: 18px; }
+.projectCopy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.projectCopy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--flowlet-font-size-body-strong); line-height: var(--flowlet-line-height-body-strong); }
+.projectCopy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body-compact); line-height: var(--flowlet-line-height-body-compact); }
+.projectUpdated { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cardActions { display: flex; align-items: center; gap: 2px; }
 .form { display: flex; flex-direction: column; gap: 18px; padding: 4px 0; }.form label { display: flex; flex-direction: column; gap: 7px; }.form label > span { font-weight: 600; }.form small { color: var(--flowlet-color-text-tertiary); }.pathInput { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }.taskSheetFooter { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.taskSheetFooterActions { display: flex; justify-content: flex-end; gap: 8px; }
 .detailContent { min-height: 0; flex: 1; overflow: hidden; }
 .taskSearch { width: 220px; flex: none; }

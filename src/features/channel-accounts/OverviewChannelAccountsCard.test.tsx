@@ -45,7 +45,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[]}
         onCreate={onCreate}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -72,7 +71,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[]}
         onCreate={onCreate}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -109,7 +107,6 @@ describe("OverviewChannelAccountsCard", () => {
         snapshots={[]}
         codexAccounts={codexAccounts}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
         onOpenCodexAgent={onOpenCodexAgent}
       />,
@@ -145,7 +142,6 @@ describe("OverviewChannelAccountsCard", () => {
         snapshots={[]}
         codexAccounts={[emptyApiKeyAccount]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
         onOpenCodexAgent={vi.fn()}
       />,
@@ -155,12 +151,13 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.queryByText("unknown-account")).not.toBeInTheDocument();
   });
 
-  it("renders legacy account summaries and routes all three actions", async () => {
+  it("keeps account operations in the row overflow menu", async () => {
     vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
     const user = userEvent.setup();
     const onCreate = vi.fn();
-    const onViewAll = vi.fn();
     const onEdit = vi.fn();
+    const onToggle = vi.fn();
+    const onDelete = vi.fn();
 
     render(
       <OverviewChannelAccountsCard
@@ -168,8 +165,9 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[snapshot]}
         onCreate={onCreate}
-        onViewAll={onViewAll}
         onEdit={onEdit}
+        onToggle={onToggle}
+        onDelete={onDelete}
       />,
     );
 
@@ -177,6 +175,23 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByText(/资源包 4398\.70万 Tokens/)).toBeInTheDocument();
     expect(screen.getByText(/有效期至 2026-07-30/)).toBeInTheDocument();
     expect(screen.getByText("启用")).toBeInTheDocument();
+    expect(screen.queryByText("管理账号")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("LongCat 主账号").closest("button")!);
+    expect(onEdit).toHaveBeenCalledWith(account.id);
+    onEdit.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "账号操作：LongCat 主账号" }));
+    await user.click(await screen.findByText("编辑账号"));
+    expect(onEdit).toHaveBeenCalledWith(account.id);
+
+    await user.click(screen.getByRole("button", { name: "账号操作：LongCat 主账号" }));
+    await user.click(await screen.findByText("停用账号"));
+    expect(onToggle).toHaveBeenCalledWith(account.id, false);
+
+    await user.click(screen.getByRole("button", { name: "账号操作：LongCat 主账号" }));
+    await user.click(await screen.findByText("删除账号"));
+    expect(onDelete).toHaveBeenCalledWith(account.id);
     vi.useRealTimers();
   });
 
@@ -194,7 +209,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[exhaustedSnapshot]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -231,7 +245,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[qwenSnapshot]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -260,7 +273,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[todaySnapshot]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -297,7 +309,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[qwenSnapshot]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -329,7 +340,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[freshSnapshot]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -362,7 +372,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[staleSnapshot]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -391,7 +400,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -425,7 +433,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[freshSnapshot]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -452,7 +459,6 @@ describe("OverviewChannelAccountsCard", () => {
         channels={channels}
         snapshots={[]}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
@@ -486,7 +492,6 @@ describe("OverviewChannelAccountsCard", () => {
         snapshots={[]}
         codexAccounts={codexAccounts}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
         onOpenCodexAgent={vi.fn()}
       />,
@@ -523,7 +528,6 @@ describe("OverviewChannelAccountsCard", () => {
         snapshots={[]}
         codexAccounts={codexAccounts}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
         onOpenCodexAgent={vi.fn()}
       />,
@@ -560,7 +564,6 @@ describe("OverviewChannelAccountsCard", () => {
         snapshots={[]}
         codexAccounts={codexAccounts}
         onCreate={vi.fn()}
-        onViewAll={vi.fn()}
         onEdit={vi.fn()}
         onOpenCodexAgent={vi.fn()}
       />,

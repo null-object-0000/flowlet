@@ -4,7 +4,7 @@ import { Card, Toast } from "@douyinfe/semi-ui-19";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
 import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
 import { useCodexAccounts, useCodexAccountRefresh, useCodexAccountRefreshOne, useCodexAccountAuthorization } from "../../features/agent-access/useAgentEnvironment";
-import { AccountManagementSideSheet, type AccountManagerRequest } from "../../features/channel-accounts/AccountManagementSideSheet";
+import { AccountActionOverlay, type AccountActionRequest } from "../../features/channel-accounts/AccountActionOverlay";
 import { CodexAccountSideSheet } from "../../features/channel-accounts/CodexAccountSideSheet";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
 import { useModelActions } from "../../features/exposed-models/useModelActions";
@@ -23,7 +23,7 @@ export function OverviewPage() {
   const presets = useChannelPresets();
   const accountActions = useAccountActions(presets.data ?? []);
   const modelActions = useModelActions();
-  const [accountRequest, setAccountRequest] = useState<AccountManagerRequest | null>(null);
+  const [accountRequest, setAccountRequest] = useState<AccountActionRequest | null>(null);
   const [detailsVisible, setDetailsVisible] = useState(false);
   const routes = useRouteCandidates();
   const bindConfig = useProxyBindConfig();
@@ -37,6 +37,20 @@ export function OverviewPage() {
   const [codexSheetVisible, setCodexSheetVisible] = useState(false);
   const [focusedCodexAccount, setFocusedCodexAccount] = useState<string | undefined>(undefined);
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
+
+  const toggleAccount = async (accountId: string, enabled: boolean) => {
+    const current = accounts.data ?? [];
+    const target = current.find((account) => account.id === accountId);
+    if (!target) return;
+    try {
+      await accountActions.saveAll.mutateAsync(
+        current.map((account) => account.id === accountId ? { ...account, enabled } : account),
+      );
+      Toast.success(t(enabled ? "账号已启用" : "账号已停用"));
+    } catch (error) {
+      Toast.error(t("保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
 
   const authorizeCodexAccount = async () => {
     try {
@@ -90,6 +104,8 @@ export function OverviewPage() {
           baseUrl={baseUrl}
           bindConfig={bindConfig.data}
           onAccountRequest={setAccountRequest}
+          onToggleAccount={(accountId, enabled) => void toggleAccount(accountId, enabled)}
+          accountActionBusy={accountActions.saveAll.isPending}
           onOpenCodexAgent={(accountId) => {
             setFocusedCodexAccount(accountId || undefined);
             setCodexSheetVisible(true);
@@ -116,7 +132,7 @@ export function OverviewPage() {
         />
       ) : null}
 
-      <AccountManagementSideSheet
+      <AccountActionOverlay
         request={accountRequest}
         accounts={accounts.data ?? []}
         snapshots={balanceSnapshots.data ?? []}

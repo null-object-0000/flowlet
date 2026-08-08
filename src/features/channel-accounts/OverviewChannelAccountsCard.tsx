@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Badge, Button, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
-import { IconChevronRight, IconMore, IconPlus } from "@douyinfe/semi-icons";
+import { Badge, Button, Dropdown, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
+import { IconDelete, IconEdit, IconMore, IconPlus } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { CHATGPT_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { ChannelPreset } from "../../domains/channel/types";
@@ -29,12 +29,14 @@ type Props = {
   snapshots: AccountBalanceSnapshot[];
   codexAccounts?: CodexAccountReport[];
   onCreate: (channelId: string) => void;
-  onViewAll: () => void;
   onEdit: (accountId: string) => void;
+  onToggle?: (accountId: string, enabled: boolean) => void;
+  onDelete?: (accountId: string) => void;
   onOpenCodexAgent?: (accountId: string) => void;
+  busy?: boolean;
 };
 
-export function OverviewChannelAccountsCard({ accounts, channels, snapshots, codexAccounts, onCreate, onViewAll, onEdit, onOpenCodexAgent }: Props) {
+export function OverviewChannelAccountsCard({ accounts, channels, snapshots, codexAccounts, onCreate, onEdit, onToggle = () => undefined, onDelete = () => undefined, onOpenCodexAgent, busy = false }: Props) {
   const { language, t } = useAppPreferences();
   const snapshotByAccount = new Map(snapshots.map((snapshot) => [snapshot.account_id, snapshot]));
   const presetByChannelId = new Map(channels.map((preset) => [preset.id, preset]));
@@ -59,9 +61,6 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
       headerExtra={allAccounts.length > 0 ? (
         <div className={styles.headerActions}>
           <OverviewActionLink leadingIcon={<IconPlus />} onClick={() => onCreate("longcat")}>{t("新增账号")}</OverviewActionLink>
-          <OverviewActionLink trailingIcon={<IconChevronRight />} onClick={onViewAll}>
-            {t("管理账号")}
-          </OverviewActionLink>
         </div>
       ) : undefined}
     >
@@ -165,12 +164,26 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
               {isCodex ? (
                 <span className={styles.rowSpacer} aria-hidden="true" />
               ) : (
-                <Button
-                  icon={<IconMore />}
-                  theme="borderless"
-                  aria-label={t("编辑账号 {name}", { name: accountName })}
-                  onClick={() => onEdit(account.id)}
-                />
+                <Dropdown
+                  trigger="click"
+                  position="bottomRight"
+                  render={(
+                    <Dropdown.Menu>
+                      <Dropdown.Item icon={<IconEdit />} onClick={() => onEdit(account.id)}>{t("编辑账号")}</Dropdown.Item>
+                      <Dropdown.Item disabled={busy} onClick={() => onToggle(account.id, !account.enabled)}>
+                        {t(account.enabled ? "停用账号" : "启用账号")}
+                      </Dropdown.Item>
+                      <Dropdown.Divider />
+                      <Dropdown.Item type="danger" icon={<IconDelete />} onClick={() => onDelete(account.id)}>{t("删除账号")}</Dropdown.Item>
+                    </Dropdown.Menu>
+                  )}
+                >
+                  <Button
+                    icon={<IconMore />}
+                    theme="borderless"
+                    aria-label={t("账号操作：{name}", { name: accountName })}
+                  />
+                </Dropdown>
               )}
             </div>
           );

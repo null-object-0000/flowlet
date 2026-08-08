@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
-import { AccountManagementSideSheet } from "./AccountManagementSideSheet";
+import { AccountActionOverlay } from "./AccountActionOverlay";
 
 vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
@@ -27,14 +27,14 @@ const preset = {
   openai_base_url: "https://example.com",
 } as ChannelPreset;
 
-describe("AccountManagementSideSheet", () => {
+describe("AccountActionOverlay", () => {
   it("edits in the drawer flow and preserves an unchanged API key", async () => {
     const user = userEvent.setup();
     const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
 
     render(
-      <AccountManagementSideSheet
-        request={{ kind: "list" }}
+      <AccountActionOverlay
+        request={{ kind: "edit", accountId: account.id }}
         accounts={[account]}
         snapshots={[]}
         presets={[preset]}
@@ -48,8 +48,6 @@ describe("AccountManagementSideSheet", () => {
       />,
     );
 
-    expect(screen.getByText(/^渠道账号$/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "编辑账号 主账号" }));
     expect(await screen.findByText("编辑渠道账号")).toBeInTheDocument();
     expect(screen.queryByText(/渠道账号管理/)).not.toBeInTheDocument();
     expect(screen.queryByText("选择渠道")).not.toBeInTheDocument();
@@ -77,7 +75,7 @@ describe("AccountManagementSideSheet", () => {
     ]);
 
     render(
-      <AccountManagementSideSheet
+      <AccountActionOverlay
         request={{ kind: "edit", accountId: autoAccount.id }}
         accounts={[autoAccount]}
         snapshots={[{
@@ -158,7 +156,7 @@ describe("AccountManagementSideSheet", () => {
     });
 
     render(
-      <AccountManagementSideSheet
+      <AccountActionOverlay
         request={{ kind: "edit", accountId: qwenAccount.id }}
         accounts={[qwenAccount]}
         snapshots={[{
@@ -227,8 +225,8 @@ describe("AccountManagementSideSheet", () => {
     const syncedAt = "2026-07-23T04:35:26Z";
 
     render(
-      <AccountManagementSideSheet
-        request={{ kind: "list" }}
+      <AccountActionOverlay
+        request={{ kind: "edit", accountId: deepSeekAccount.id }}
         accounts={[deepSeekAccount]}
         snapshots={[{
           id: "snapshot-deepseek",
@@ -256,7 +254,6 @@ describe("AccountManagementSideSheet", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "编辑账号 DeepSeek 主账号" }));
     expect(screen.getByText("88.50 CNY")).toBeInTheDocument();
     expect(screen.getByText(`最近同步：${formatFullTimestamp(syncedAt, "zh-CN")}`)).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: /刷新/ }));
@@ -276,7 +273,7 @@ describe("AccountManagementSideSheet", () => {
     } as ChannelPreset;
 
     render(
-      <AccountManagementSideSheet
+      <AccountActionOverlay
         request={{ kind: "create", channelId: "qwen" }}
         accounts={[]}
         snapshots={[]}
@@ -321,7 +318,7 @@ describe("AccountManagementSideSheet", () => {
     } as ChannelPreset;
 
     render(
-      <AccountManagementSideSheet
+      <AccountActionOverlay
         request={{ kind: "create", channelId: "qwen" }}
         accounts={[]}
         snapshots={[]}
@@ -360,7 +357,7 @@ describe("AccountManagementSideSheet", () => {
     const onAuthorizeChatGpt = vi.fn().mockResolvedValue(undefined);
 
     render(
-      <AccountManagementSideSheet
+      <AccountActionOverlay
         request={{ kind: "create", channelId: "chatgpt" }}
         accounts={[]}
         snapshots={[]}
@@ -409,7 +406,7 @@ describe("AccountManagementSideSheet", () => {
     } as ChannelPreset;
 
     render(
-      <AccountManagementSideSheet
+      <AccountActionOverlay
         request={{ kind: "edit", accountId: planAccount.id }}
         accounts={[planAccount]}
         snapshots={[]}
@@ -437,6 +434,35 @@ describe("AccountManagementSideSheet", () => {
       base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
       anthropic_base_url_override: "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
     })]);
+  });
+
+  it("confirms deletion without opening an account-list drawer", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
+
+    render(
+      <AccountActionOverlay
+        request={{ kind: "delete", accountId: account.id }}
+        accounts={[account]}
+        snapshots={[]}
+        presets={[preset]}
+        busy={false}
+        onClose={onClose}
+        onSaveAccounts={onSaveAccounts}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.queryByText(/^渠道账号$/)).not.toBeInTheDocument();
+    expect(screen.getByText("确认删除账号")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(onSaveAccounts).toHaveBeenCalledWith([]);
+    expect(onClose).toHaveBeenCalled();
   });
 });
 

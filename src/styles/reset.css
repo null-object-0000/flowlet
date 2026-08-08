@@ -28,3 +28,13 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Native form controls do not reliably inherit the document font. Without
+   this reset, custom text buttons can silently fall back to the WebView
+   default font and look different from adjacent Flowlet text. */
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}

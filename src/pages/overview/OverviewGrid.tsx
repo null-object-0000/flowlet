@@ -6,7 +6,7 @@ import type { RouteCandidate } from "../../domains/model/types";
 import type { ProxyBindConfig } from "../../domains/proxy/types";
 import { OverviewAgentAccessCard } from "../../features/agent-access/OverviewAgentAccessCard";
 import { OverviewChannelAccountsCard } from "../../features/channel-accounts/OverviewChannelAccountsCard";
-import type { AccountManagerRequest } from "../../features/channel-accounts/AccountManagementSideSheet";
+import type { AccountActionRequest } from "../../features/channel-accounts/AccountActionOverlay";
 import { OverviewExposedModelsCard } from "../../features/exposed-models/OverviewExposedModelsCard";
 import styles from "./OverviewGrid.module.css";
 
@@ -18,7 +18,9 @@ type Props = {
   routes: RouteCandidate[];
   baseUrl: string;
   bindConfig?: ProxyBindConfig;
-  onAccountRequest: (request: AccountManagerRequest) => void;
+  onAccountRequest: (request: AccountActionRequest) => void;
+  onToggleAccount: (accountId: string, enabled: boolean) => void;
+  accountActionBusy?: boolean;
   onOpenCodexAgent?: (accountId: string) => void;
   busyModelId?: string;
   onToggleModel: (routeIds: string[], modelId: string, enabled: boolean) => void;
@@ -33,6 +35,8 @@ export function OverviewGrid({
   baseUrl,
   bindConfig,
   onAccountRequest,
+  onToggleAccount,
+  accountActionBusy,
   onOpenCodexAgent,
   busyModelId,
   onToggleModel,
@@ -48,9 +52,11 @@ export function OverviewGrid({
           snapshots={balanceSnapshots}
           codexAccounts={codexAccounts}
           onCreate={(channelId) => onAccountRequest({ kind: "create", channelId })}
-          onViewAll={() => onAccountRequest({ kind: "list" })}
           onEdit={(accountId) => onAccountRequest({ kind: "edit", accountId })}
+          onToggle={onToggleAccount}
+          onDelete={(accountId) => onAccountRequest({ kind: "delete", accountId })}
           onOpenCodexAgent={onOpenCodexAgent}
+          busy={accountActionBusy}
         />
       </div>
       <div className={styles.modelsCard}>

@@ -31,6 +31,13 @@
   overflow: hidden;
 }
 
+.calendarRange,
+.rangePanel,
+.periodSwitch,
+.navigator {
+  font-family: var(--flowlet-font-family);
+}
+
 .calendarRange .navButton,
 .navigator :global(.semi-button) {
   width: 30px;
@@ -53,7 +60,9 @@
   gap: 6px;
   color: var(--flowlet-color-text-secondary);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-body-compact);
+  font-weight: 500;
+  line-height: var(--flowlet-line-height-body-compact);
   cursor: pointer;
 }
 
@@ -65,7 +74,7 @@
 .rangePopover :global(.semi-popover-content) { padding: 0; }
 
 .rangePanel {
-  width: 276px;
+  width: 288px;
   overflow: hidden;
   border: 1px solid var(--flowlet-color-border);
   border-radius: 12px;
@@ -83,30 +92,46 @@
   border-bottom: 1px solid var(--flowlet-color-border);
 }
 
-.rangePanelHeader strong { color: var(--flowlet-color-text); font-size: 13px; }
+.rangePanelHeader strong {
+  color: var(--flowlet-color-text);
+  font-size: var(--flowlet-font-size-body-strong);
+  font-weight: 650;
+  line-height: var(--flowlet-line-height-body-strong);
+}
 .rangePanelHeader button {
   padding: 4px 7px;
   border: 0;
   border-radius: 6px;
   color: var(--flowlet-color-primary);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-body-compact);
+  font-weight: 500;
+  line-height: var(--flowlet-line-height-body-compact);
   cursor: pointer;
 }
 .rangePanelHeader button:hover,
 .rangePanelHeader button[aria-pressed="true"] { background: var(--flowlet-color-primary-soft); }
 
 .quickRangeSection { padding: 12px; }
-.quickRangeSection > span { display: block; margin-bottom: 8px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.quickRangeSection > span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: var(--flowlet-font-size-caption);
+  font-weight: 500;
+  line-height: var(--flowlet-line-height-caption);
+}
 .quickRangeGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .quickRangeGrid button {
-  height: 30px;
+  height: 32px;
   padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 7px;
   color: var(--flowlet-color-text-secondary);
   background: var(--flowlet-color-surface-muted);
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-body-compact);
+  font-weight: 500;
+  line-height: var(--flowlet-line-height-body-compact);
   text-align: left;
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
@@ -116,7 +141,7 @@
   color: var(--flowlet-color-primary);
   border-color: color-mix(in srgb, var(--flowlet-color-primary) 28%, transparent);
   background: var(--flowlet-color-primary-soft);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .customRangeSection { padding: 8px 12px 12px; border-top: 1px solid var(--flowlet-color-border); }
@@ -132,7 +157,9 @@
   gap: 6px;
   color: var(--flowlet-color-text-secondary);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-body-compact);
+  font-weight: 500;
+  line-height: var(--flowlet-line-height-body-compact);
   text-align: left;
   cursor: pointer;
 }
@@ -158,18 +185,28 @@
   border-radius: 6px;
   color: var(--flowlet-color-text-secondary);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--flowlet-font-size-body-compact);
+  font-weight: 500;
+  line-height: var(--flowlet-line-height-body-compact);
   cursor: pointer;
 }
 
 .periodSwitch button[aria-pressed="true"] {
   color: var(--flowlet-color-primary);
   background: var(--flowlet-color-primary-soft);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .navigator { min-width: 176px; justify-content: space-between; }
-.navigator strong { min-width: 112px; color: var(--flowlet-color-text); font-size: 12px; text-align: center; white-space: nowrap; }
+.navigator strong {
+  min-width: 112px;
+  color: var(--flowlet-color-text);
+  font-size: var(--flowlet-font-size-body-compact);
+  font-weight: 600;
+  line-height: var(--flowlet-line-height-body-compact);
+  text-align: center;
+  white-space: nowrap;
+}
 
 @media (max-width: 1100px) {
   .rangeTrigger { min-width: 145px; max-width: 190px; }

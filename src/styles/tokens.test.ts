@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(resolve(process.cwd(), "src/styles/tokens.css"), "utf8");
+const resetCss = readFileSync(resolve(process.cwd(), "src/styles/reset.css"), "utf8");
 const lightScope = css.match(/:root\s*{([\s\S]*?)\n}/)?.[1] ?? "";
 const darkScope = css.match(/body\[theme-mode="dark"\]\s*{([\s\S]*?)\n}/)?.[1] ?? "";
 
@@ -23,6 +24,12 @@ describe("readability color tokens", () => {
     const background = readHexToken(backgroundScope, backgroundName);
 
     expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("typography reset", () => {
+  it("keeps native form controls on the same font as surrounding Flowlet text", () => {
+    expect(resetCss).toMatch(/button,[\s\S]*?input,[\s\S]*?textarea,[\s\S]*?select\s*{[\s\S]*?font:\s*inherit;/);
   });
 });
 

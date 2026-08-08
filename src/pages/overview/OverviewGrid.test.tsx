@@ -101,6 +101,7 @@ describe("OverviewGrid", () => {
           baseUrl="http://127.0.0.1:18640"
           bindConfig={bindConfig}
           onAccountRequest={vi.fn()}
+          onToggleAccount={vi.fn()}
           onToggleModel={vi.fn()}
         />
       </MemoryRouter>,
@@ -124,6 +125,7 @@ describe("OverviewGrid", () => {
           baseUrl="http://127.0.0.1:18640"
           bindConfig={bindConfig}
           onAccountRequest={onAccountRequest}
+          onToggleAccount={vi.fn()}
           onToggleModel={vi.fn()}
         />
       </MemoryRouter>,

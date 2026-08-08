@@ -20,11 +20,12 @@ pub fn is_portable() -> bool {
 }
 
 /// WebView 数据根目录：
-/// - 便携模式 → exe 旁（渠道控制台登录态随身拷贝）；
+/// - 便携模式 → exe 旁 `data/webview` 子目录（渠道控制台登录态随身拷贝，与
+///   config.json / flowlet.sqlite / logs 等根目录文件分离，便于管理）；
 /// - 安装模式 → app_local_data_dir（%LOCALAPPDATA%\site.snewbie.flowlet，维持现状）。
 pub fn webview_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if is_portable() {
-        Ok(exe_dir())
+        Ok(exe_dir().join("data").join("webview"))
     } else {
         app.path()
             .app_local_data_dir()
@@ -40,7 +41,8 @@ pub struct WebviewProfileMigrationReport {
 }
 
 /// 便携模式下把 %LOCALAPPDATA% 的 main-webview / scrape-webview-* 登录态迁移到
-/// exe 旁。目标已存在（已迁移 / 用户手动放置）则跳过，不覆盖。非便携模式下
+/// 便携 WebView 数据根目录（webview_data_root，即 exe 旁 data/webview）。
+/// 目标已存在（已迁移 / 用户手动放置）则跳过，不覆盖。非便携模式下
 /// legacy_root == portable_root，自动为空操作。
 ///
 /// 单个 profile 迁移失败仅记入 failures 并 warn，不阻塞应用启动（登录态丢失顶多

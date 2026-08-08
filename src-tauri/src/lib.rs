@@ -733,9 +733,28 @@ fn run_desktop() {
             }
 
             let app_local_data_dir = app.path().app_local_data_dir()?;
+            // WebView 数据根目录：便携版在 exe 旁（登录态随身），安装版在
+            // %LOCALAPPDATA%。便携版首次启动时把旧位置的登录态 profile 迁移过来
+            // （幂等，目标已存在即跳过）；非便携版两个根相同，迁移自动为空操作。
+            let webview_root = core::webview_profile::webview_data_root(app.handle())?;
+            let migration = core::webview_profile::migrate_webview_profiles_to_portable(
+                &app_local_data_dir,
+                &webview_root,
+            );
+            if migration.migrated > 0 || !migration.failures.is_empty() {
+                tracing::info!(
+                    migrated = migration.migrated,
+                    skipped = migration.skipped,
+                    failures = migration.failures.len(),
+                    root = %webview_root.display(),
+                    "setup: WebView 登录态目录迁移完成"
+                );
+                for error in migration.failures {
+                    tracing::warn!(%error, "setup: WebView 登录态目录迁移失败");
+                }
+            }
             let cache_prune_t0 = std::time::Instant::now();
-            let cache_report =
-                core::webview_profile::prune_oversized_webview_caches(&app_local_data_dir);
+            let cache_report = core::webview_profile::prune_oversized_webview_caches(&webview_root);
             if cache_report.profiles_pruned > 0 || !cache_report.failures.is_empty() {
                 tracing::info!(
                     profiles_scanned = cache_report.profiles_scanned,
@@ -781,7 +800,7 @@ fn run_desktop() {
                         "tauri.conf.json 缺少 main 窗口配置",
                     )
                 })?;
-            let main_webview_data_dir = app_local_data_dir.join("main-webview");
+            let main_webview_data_dir = webview_root.join("main-webview");
             let main_webview_t0 = std::time::Instant::now();
             tracing::info!(
                 data_dir = %main_webview_data_dir.display(),

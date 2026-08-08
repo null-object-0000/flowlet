@@ -12,7 +12,6 @@ use crate::core::channels_config::ChannelsConfig;
 use std::collections::HashMap;
 #[cfg(any(windows, target_os = "linux"))]
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
 
 /// 单个抓取模式的运行时配置(从 ChannelsConfig 解析后传入)。
 #[derive(Debug, Clone)]
@@ -99,12 +98,10 @@ pub fn build_scrape_webview(
 }})();"#,
         mode.interceptor_js, channel_id_json
     );
-    // per-account 隔离的 WebView 数据目录。路径位于 app_local_data_dir 下,与主窗口
-    // (main-webview) 同等模式。目录不存在时主动创建,避免 Tauri 直接报错。
-    let data_dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|error| format!("解析应用数据目录失败: {error}"))?
+    // per-account 隔离的 WebView 数据目录。路径位于 WebView 数据根目录下（便携版
+    // 在 exe 旁、安装版在 %LOCALAPPDATA%），与主窗口 (main-webview) 同等模式。
+    // 目录不存在时主动创建,避免 Tauri 直接报错。
+    let data_dir = super::webview_profile::webview_data_root(app)?
         .join(format!("scrape-webview-{account_id}"));
     if let Some(parent) = data_dir.parent() {
         std::fs::create_dir_all(parent)

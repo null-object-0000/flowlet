@@ -565,10 +565,7 @@ pub(crate) async fn open_detail_window(
         .map_err(|error| format!("读取项目失败：{error}"))?
         .ok_or_else(|| "项目不存在".to_string())?;
 
-    let data_dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|error| format!("解析应用数据目录失败：{error}"))?
+    let data_dir = crate::core::webview_profile::webview_data_root(app)?
         .join("main-webview");
     std::fs::create_dir_all(&data_dir)
         .map_err(|error| format!("创建应用数据目录失败：{error}"))?;

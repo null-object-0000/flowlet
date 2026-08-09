@@ -579,7 +579,7 @@ button.selectedPeriodMetric { border: 0; background: transparent; font: inherit;
 .unknownRequestMain strong { font-size: 13px; }
 .unknownRequestMain small { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
 .unknownRequestStatus { min-width: 36px; color: var(--flowlet-color-success); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
-.unknownRequestStatus[data-error="true"] { color: var(--flowlet-color-danger); }
+.unknownRequestStatus[data-error="true"] { color: var(--semi-color-danger); }
 .unknownRequestRow > svg { color: var(--flowlet-color-text-tertiary); }
 .unknownRequestsState { min-height: 220px; padding: 28px 20px; display: grid; place-items: center; align-content: center; gap: 8px; text-align: center; }
 .unknownRequestsState strong { color: var(--flowlet-color-text); font-size: 14px; }

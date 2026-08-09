@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Badge, Button, Dropdown, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
+import { Badge, Button, Dropdown, Switch, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconMore, IconPlay, IconPlus, IconStop } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { CHATGPT_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
@@ -18,7 +18,7 @@ import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import styles from "./OverviewChannelAccountsCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber } from "../../shared/formatters/number";
-import { formatTime, parseTimestamp } from "../../shared/formatters/datetime";
+import { formatFullTimestamp, formatTime, parseTimestamp } from "../../shared/formatters/datetime";
 import { accountSyncStatus, codexSyncStatus, type AccountSyncStatus } from "./accountSyncStatus";
 
 const { Text } = Typography;
@@ -38,9 +38,11 @@ type Props = {
 
 export function OverviewChannelAccountsCard({ accounts, channels, snapshots, codexAccounts, onCreate, onEdit, onToggle = () => undefined, onDelete = () => undefined, onOpenCodexAgent, busy = false }: Props) {
   const { language, t } = useAppPreferences();
+  const [showDisabledAccounts, setShowDisabledAccounts] = useState(false);
   const snapshotByAccount = new Map(snapshots.map((snapshot) => [snapshot.account_id, snapshot]));
   const presetByChannelId = new Map(channels.map((preset) => [preset.id, preset]));
   const enabledCount = accounts.filter((a) => a.enabled).length;
+  const hasDisabledAccounts = enabledCount < accounts.length;
   // 自动同步失败时不刷新快照查询，过期提示需要按当前时间周期性重算，
   // 否则应用空闲时 Logo 上的状态点不会在超出两轮同步周期后转为黄色。
   const [, setSyncTick] = useState(0);
@@ -54,18 +56,32 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
     .filter(isObservableCodexAccount)
     .map((report, index) => codexAccountToPseudoChannelAccount(report, index));
   const allAccounts = [...accounts, ...codexPseudoAccounts];
+  const visibleAccounts = showDisabledAccounts
+    ? allAccounts
+    : allAccounts.filter((account) => isChatGptAccount(account) || account.enabled);
 
   return (
     <OverviewModuleCard
       title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("已启用 {enabled} / 共 {total} 个账号", { enabled: enabledCount, total: accounts.length })}</em></span>}
       headerExtra={allAccounts.length > 0 ? (
         <div className={styles.headerActions}>
+          {hasDisabledAccounts ? (
+            <div className={styles.disabledFilter}>
+              <span>{t("显示停用账号")}</span>
+              <Switch
+                size="small"
+                checked={showDisabledAccounts}
+                aria-label={t("显示停用账号")}
+                onChange={setShowDisabledAccounts}
+              />
+            </div>
+          ) : null}
           <OverviewActionLink leadingIcon={<IconPlus />} onClick={() => onCreate("longcat")}>{t("新增账号")}</OverviewActionLink>
         </div>
       ) : undefined}
     >
-      {allAccounts.length > 0 ? <div className={styles.list}>
-        {allAccounts.map((account) => {
+      {allAccounts.length > 0 ? visibleAccounts.length > 0 ? <div className={styles.list}>
+        {visibleAccounts.map((account) => {
           const snapshot = snapshotByAccount.get(account.id);
           const isCodex = isChatGptAccount(account);
           const codexReport = isCodex
@@ -193,6 +209,11 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
           );
         })}
       </div> : (
+        <div className={styles.filteredEmpty}>
+          <strong>{t("暂无启用账号")}</strong>
+          <span>{t("开启“显示停用账号”即可查看全部账号。")}</span>
+        </div>
+      ) : (
         <div className={styles.emptyState}>
           <div className={styles.emptyCopy}>
             <strong>{t("选择一个渠道添加首个账号")}</strong>
@@ -259,9 +280,11 @@ function formatBalance(value: number, currency: string | null | undefined, langu
 function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): ResourceSummaryColumn {
   if (isQwenTokenPlanAccount(account)) {
     const details = parseQwenTokenPlanDetails(snapshot?.raw_scraped_json);
-    const sevenDay = details?.sevenDay ? t("7天 剩余 {percent}%", { percent: details.sevenDay.remainingPercent.toFixed(1) }) : "";
-    const fiveHour = details?.fiveHour ? t("5小时 剩余 {percent}%", { percent: details.fiveHour.remainingPercent.toFixed(1) }) : "";
-    return { label: "", value: sevenDay, secondary: fiveHour };
+    const sevenDay = details?.sevenDay ? t("7天剩余 {percent}%", { percent: details.sevenDay.remainingPercent.toFixed(1) }) : "";
+    const resetAt = details?.sevenDay?.resetAt
+      ? formatFullTimestamp(details.sevenDay.resetAt, language)
+      : "";
+    return { label: "", value: sevenDay, secondary: resetAt };
   }
   // LongCat hybrid:主列展示余额，副列展示资源包剩余。
   if (account.channel_id === "longcat") {
@@ -287,14 +310,12 @@ function nameLineSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
     }
     return t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) });
   }
-  // Qwen Token Plan 将 7 天重置时间放到账号名称行。
+  // Qwen Token Plan 名称行展示具体套餐；7 天重置时间与剩余额度放在资源行。
   if (isQwenTokenPlanAccount(account)) {
     const details = parseQwenTokenPlanDetails(snapshot?.raw_scraped_json);
-    if (!details?.sevenDay?.resetAt) return "";
-    if (isToday(details.sevenDay.resetAt)) {
-      return t("七天重置 {time}", { time: formatTime(details.sevenDay.resetAt, language) });
-    }
-    return t("七天重置 {date}", { date: details.sevenDay.resetAt.slice(0, 10) });
+    if (!details) return "";
+    const planName = `${details.specCode.charAt(0).toUpperCase()}${details.specCode.slice(1)}`;
+    return t("个人版 {name} 套餐", { name: planName });
   }
   const tokenPack = (account.resource_mode ?? "pay_as_you_go") === "token_pack";
   if (!tokenPack || !snapshot?.token_pack_expire_at) return "";

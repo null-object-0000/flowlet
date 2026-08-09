@@ -110,7 +110,7 @@
   cursor: pointer;
 }
 .rangePanelHeader button:hover,
-.rangePanelHeader button[aria-pressed="true"] { background: var(--flowlet-color-primary-soft); }
+.rangePanelHeader button[aria-pressed="true"] { background: var(--semi-color-primary-light-default); }
 
 .quickRangeSection { padding: 12px; }
 .quickRangeSection > span {
@@ -140,7 +140,7 @@
 .quickRangeGrid button[aria-pressed="true"] {
   color: var(--flowlet-color-primary);
   border-color: color-mix(in srgb, var(--flowlet-color-primary) 28%, transparent);
-  background: var(--flowlet-color-primary-soft);
+  background: var(--semi-color-primary-light-default);
   font-weight: 600;
 }
 
@@ -193,7 +193,7 @@
 
 .periodSwitch button[aria-pressed="true"] {
   color: var(--flowlet-color-primary);
-  background: var(--flowlet-color-primary-soft);
+  background: var(--semi-color-primary-light-default);
   font-weight: 600;
 }
 

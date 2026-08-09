@@ -1,10 +1,10 @@
-import { Switch, Typography } from "@douyinfe/semi-ui-19";
+import { Tag, Typography } from "@douyinfe/semi-ui-19";
 import type { ChannelAccount } from "../../domains/account/types";
-import type { ChannelPreset } from "../../domains/channel/types";
+import type { ChannelPreset, ProtocolType } from "../../domains/channel/types";
 import type { RouteCandidate } from "../../domains/model/types";
 import { ChannelBrandLogo } from "../channel-accounts/ChannelBrandLogo";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
-import { buildOverviewExposedModels } from "./modelView";
+import { buildOverviewAggregateModels, type OverviewAggregateModel } from "./modelView";
 import styles from "./OverviewExposedModelsCard.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
@@ -14,54 +14,64 @@ type Props = {
   routes: RouteCandidate[];
   accounts: ChannelAccount[];
   channels: ChannelPreset[];
-  busyModelId?: string;
   onManage: () => void;
-  onToggle: (routeIds: string[], modelId: string, enabled: boolean) => void;
 };
 
-export function OverviewExposedModelsCard({ routes, accounts, channels, busyModelId, onManage, onToggle }: Props) {
+export function OverviewExposedModelsCard({ routes, accounts, channels, onManage }: Props) {
   const { t } = useAppPreferences();
-  const models = buildOverviewExposedModels(routes, accounts, channels);
-  const enabledCount = models.filter((model) => model.enabled).length;
-  const totalCount = models.length;
+  const models = buildOverviewAggregateModels(routes, accounts, channels);
 
   return (
-    <OverviewModuleCard title={<span className={styles.cardTitle}>{t("开放模型")} <em>{t("已启用 {enabled} / 共 {total} 个模型", { enabled: enabledCount, total: totalCount })}</em></span>} action={t("管理模型")} onAction={onManage}>
-      {models.length > 0 ? (
-        <div className={styles.list}>
-          {models.map((model) => {
-            const abnormal = model.enabled && !model.hasAvailableAccount;
-            return (
-              <div className={styles.row} key={model.publicModel}>
-                <ChannelBrandLogo
-                  channelId={model.channelId ?? "flowlet"}
-                  name={model.channelName ?? "Flowlet"}
-                />
-                <div className={styles.main}>
+    <OverviewModuleCard
+      title={<span className={styles.cardTitle}>{t("聚合模型")} <em>{t("共 {count} 个聚合模型", { count: models.length })}</em></span>}
+      action={t("管理模型")}
+      onAction={onManage}
+    >
+      {accounts.length > 0 ? <div className={styles.list}>
+        {models.map((model) => {
+          const status = aggregateStatus(model);
+          const protocols = model.protocols.length > 0
+            ? model.protocols.map(protocolLabel).join(" / ")
+            : t("暂无可用协议");
+          return (
+            <div className={styles.row} key={model.publicModel}>
+              <ChannelBrandLogo channelId="flowlet" name="Flowlet" />
+              <div className={styles.main}>
+                <div className={styles.nameLine}>
                   <Text strong>{model.publicModel}</Text>
-                  <Text className={abnormal ? styles.warning : styles.meta} size="small">
-                    {model.availableAccountCount > 0 ? t("{count} 个可用账号", { count: model.availableAccountCount }) : t("无可用账号")}
-                    {abnormal ? ` · ${t("异常")}` : !model.hasAvailableAccount ? ` · ${t("不可用")}` : ""}
+                  <Text className={styles.tier} size="small">
+                    {t(model.publicModel === "flowlet-pro" ? "能力优先" : "速度优先")}
                   </Text>
                 </div>
-                <Switch
-                  aria-label={t("{model} 对外开放", { model: model.publicModel })}
-                  checked={model.enabled}
-                  disabled={busyModelId != null}
-                  loading={busyModelId === model.publicModel}
-                  onChange={(checked) => onToggle(model.routeIds, model.publicModel, checked)}
-                />
+                <div className={styles.metaLine}>
+                  <span>{model.candidateAccountCount > 0
+                    ? t("{available} / {total} 个账号可用", { available: model.availableAccountCount, total: model.candidateAccountCount })
+                    : t("尚无候选账号")}</span>
+                  <span className={styles.separator}>·</span>
+                  <span>{protocols}</span>
+                </div>
               </div>
-            );
-          })}
-        </div>
-      ) : (
+              <Tag color={status.color}>{t(status.label)}</Tag>
+            </div>
+          );
+        })}
+      </div> : (
         <div className={styles.empty}>
-          {accounts.length === 0
-            ? t("添加渠道账号并选择开放模型后，这里会显示模型。")
-            : t("暂无开放模型，请前往模型服务选择要开放的模型。")}
+          {t("添加渠道账号并配置聚合路由后，这里会显示可用状态。")}
         </div>
       )}
     </OverviewModuleCard>
   );
+}
+
+function aggregateStatus(model: OverviewAggregateModel): { label: string; color: "green" | "orange" | "grey" } {
+  if (model.availableAccountCount === 0) return { label: "不可用", color: "grey" };
+  if (model.availableAccountCount < model.candidateAccountCount) return { label: "部分可用", color: "orange" };
+  return { label: "可用", color: "green" };
+}
+
+function protocolLabel(protocol: ProtocolType): string {
+  if (protocol === "openai") return "OpenAI";
+  if (protocol === "anthropic") return "Anthropic";
+  return "Responses";
 }

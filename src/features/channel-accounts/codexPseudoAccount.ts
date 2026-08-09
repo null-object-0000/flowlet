@@ -1,4 +1,4 @@
-import type { CodexAccountReport, CodexUsageWindow } from "../../domains/agent/types";
+import type { CodexAccountReport } from "../../domains/agent/types";
 import type { ChannelAccount } from "../../domains/account/types";
 import { CHATGPT_CHANNEL_ID } from "../../domains/channel/types";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
@@ -63,34 +63,26 @@ export function isObservableCodexAccount(report: CodexAccountReport): boolean {
 
 /**
  * 从 Codex 用量窗口中提取展示信息。
- * 与 Qwen Token Plan 类似：主列显示周用量，副列显示 5 小时用量。
+ * 与 Qwen Token Plan 保持一致：主列显示 7 天剩余，副列显示周窗口重置时间。
  */
 export function getCodexUsageDisplay(
   report: CodexAccountReport,
   t: (source: string, variables?: Record<string, string | number>) => string,
   language: "zh-CN" | "en-US",
 ): { value: string; secondary: string; resetAt: string | null } {
-  const primary = getWindowLabel(report.primary, t);
-  const secondary = getWindowLabel(report.secondary, t);
-  // 用量窗口重置时间：优先 primary，其次 secondary。
-  const resetWindow = report.primary ?? report.secondary;
-  const resetAt = resetWindow?.resets_at
-    ? formatFullTimestamp(new Date(resetWindow.resets_at * 1000).toISOString(), language)
+  const weeklyWindow = [report.primary, report.secondary]
+    .find((window) => window && window.window_duration_mins > 360)
+    ?? report.secondary
+    ?? report.primary;
+  const value = weeklyWindow
+    ? t("7天剩余 {percent}%", {
+      percent: Math.max(0, Math.round(100 - weeklyWindow.used_percent)),
+    })
+    : "";
+  const resetAt = weeklyWindow?.resets_at
+    ? formatFullTimestamp(new Date(weeklyWindow.resets_at * 1000).toISOString(), language)
     : null;
-  return { value: primary, secondary, resetAt };
-}
-
-function getWindowLabel(
-  window: CodexUsageWindow | null | undefined,
-  t: (source: string, variables?: Record<string, string | number>) => string,
-): string {
-  if (!window) return "";
-  const remaining = Math.max(0, Math.round(100 - window.used_percent));
-  const label =
-    window.window_duration_mins <= 360
-      ? t("5小时用量剩余 {percent}%", { percent: remaining })
-      : t("用量剩余 {percent}%", { percent: remaining });
-  return label;
+  return { value, secondary: "", resetAt };
 }
 
 /**

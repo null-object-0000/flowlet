@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import type { ChannelPreset } from "../../domains/channel/types";
-import { formatTime } from "../../shared/formatters/datetime";
+import { formatFullTimestamp, formatTime } from "../../shared/formatters/datetime";
 import { OverviewChannelAccountsCard } from "./OverviewChannelAccountsCard";
 
 vi.mock("lottie-web", () => ({
@@ -90,7 +90,7 @@ describe("OverviewChannelAccountsCard", () => {
       email: "one@example.com",
       plan_type: "plus",
       primary: { used_percent: 25, window_duration_mins: 300, resets_at: 1_779_459_394 },
-      secondary: null,
+      secondary: { used_percent: 22, window_duration_mins: 10_080, resets_at: 1_779_632_194 },
       credits: null,
       rate_limit_reset_credits: null,
       rate_limit_reached_type: null,
@@ -113,6 +113,10 @@ describe("OverviewChannelAccountsCard", () => {
     );
 
     expect(screen.getByText("one@example.com")).toBeInTheDocument();
+    expect(screen.getByText("Plus")).toBeInTheDocument();
+    expect(screen.getByText("7天剩余 78%")).toBeInTheDocument();
+    expect(screen.getByText(formatFullTimestamp(new Date(1_779_632_194 * 1000).toISOString(), "zh-CN"))).toBeInTheDocument();
+    expect(screen.queryByText(/用量剩余/)).not.toBeInTheDocument();
     await user.click(screen.getByText("one@example.com").closest("button")!);
     expect(onOpenCodexAgent).toHaveBeenCalledWith("acc-1");
   });
@@ -195,6 +199,34 @@ describe("OverviewChannelAccountsCard", () => {
     vi.useRealTimers();
   });
 
+  it("hides disabled accounts by default and reveals them with the header filter", async () => {
+    const user = userEvent.setup();
+    const disabledAccount = {
+      ...account,
+      id: "account-disabled",
+      name: "已停用账号",
+      enabled: false,
+    } as ChannelAccount;
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[account, disabledAccount]}
+        channels={channels}
+        snapshots={[]}
+        onCreate={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("已启用 1 / 共 2 个账号")).toBeInTheDocument();
+    expect(screen.queryByText("已停用账号")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("switch", { name: "显示停用账号" }));
+
+    expect(screen.getByText("已停用账号")).toBeInTheDocument();
+    expect(screen.getByText("停用")).toBeInTheDocument();
+  });
+
   it("renders LongCat resource pack row with 0 tokens when the pack is fully consumed", () => {
     const exhaustedSnapshot = {
       account_id: account.id,
@@ -218,8 +250,7 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByText(/余额/)).toBeInTheDocument();
   });
 
-  it("renders Qwen Token Plan subscription with 5h and 7d remaining percentages", () => {
-    // 固定为重置日前一天，避免测试在 2026-07-29 当天运行时切换为“仅时间”展示。
+  it("renders Qwen Token Plan name, 7d remaining percentage and full reset timestamp", () => {
     vi.setSystemTime(new Date("2026-07-28T10:00:00Z"));
     const qwenAccount = {
       id: "account-qwen",
@@ -249,11 +280,13 @@ describe("OverviewChannelAccountsCard", () => {
       />,
     );
 
-    const sevenDay = screen.getByText("7天 剩余 78.9%");
-    const fiveHour = screen.getByText("5小时 剩余 21.1%");
-    expect(sevenDay.parentElement?.parentElement).toContainElement(fiveHour);
-    expect(sevenDay.compareDocumentPosition(fiveHour) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText(/七天重置 2026-07-29/)).toBeInTheDocument();
+    const resetAt = new Date(1_785_331_200_000).toISOString();
+    const sevenDay = screen.getByText("7天剩余 78.9%");
+    const resetTime = screen.getByText(formatFullTimestamp(resetAt, "zh-CN"));
+    expect(sevenDay.parentElement?.parentElement).toContainElement(resetTime);
+    expect(screen.getByText("个人版 Standard 套餐")).toBeInTheDocument();
+    expect(screen.queryByText(/5小时 剩余/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/七天重置/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Token Plan 订阅/)).not.toBeInTheDocument();
     vi.useRealTimers();
   });
@@ -282,7 +315,7 @@ describe("OverviewChannelAccountsCard", () => {
     vi.useRealTimers();
   });
 
-  it("renders Qwen reset time as clock time when resetting today", () => {
+  it("keeps the full Qwen reset timestamp when resetting today", () => {
     vi.setSystemTime(new Date("2026-07-29T10:00:00Z"));
     const resetAt = new Date().toISOString();
     const qwenAccount = {
@@ -313,7 +346,9 @@ describe("OverviewChannelAccountsCard", () => {
       />,
     );
 
-    expect(screen.getByText(/七天重置 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument();
+    expect(screen.getByText("个人版 Standard 套餐")).toBeInTheDocument();
+    expect(screen.getByText(formatFullTimestamp(resetAt, "zh-CN"))).toBeInTheDocument();
+    expect(screen.queryByText(/七天重置/)).not.toBeInTheDocument();
     vi.useRealTimers();
   });
 

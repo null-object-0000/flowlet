@@ -102,13 +102,13 @@ describe("OverviewGrid", () => {
           bindConfig={bindConfig}
           onAccountRequest={vi.fn()}
           onToggleAccount={vi.fn()}
-          onToggleModel={vi.fn()}
         />
       </MemoryRouter>,
     );
 
     expect(screen.getByText("已启用 1 / 共 1 个账号")).toBeInTheDocument();
-    expect(screen.getByText("已启用 1 / 共 1 个模型")).toBeInTheDocument();
+    expect(screen.getByText("聚合模型")).toBeInTheDocument();
+    expect(screen.getByText("共 2 个聚合模型")).toBeInTheDocument();
     expect(screen.getByText("AI Agent 接入")).toBeInTheDocument();
   });
 
@@ -126,14 +126,14 @@ describe("OverviewGrid", () => {
           bindConfig={bindConfig}
           onAccountRequest={onAccountRequest}
           onToggleAccount={vi.fn()}
-          onToggleModel={vi.fn()}
         />
       </MemoryRouter>,
     );
 
     expect(screen.getByText("已启用 0 / 共 0 个账号")).toBeInTheDocument();
     expect(screen.getByText("选择一个渠道添加首个账号")).toBeInTheDocument();
-    expect(screen.getByText("添加渠道账号并选择开放模型后，这里会显示模型。")).toBeInTheDocument();
+    expect(screen.getByText("聚合模型")).toBeInTheDocument();
+    expect(screen.getByText("添加渠道账号并配置聚合路由后，这里会显示可用状态。")).toBeInTheDocument();
     expect(screen.getByText("AI Agent 接入")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "添加 DeepSeek" }));

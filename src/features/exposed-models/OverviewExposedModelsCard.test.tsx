@@ -14,48 +14,59 @@ const accounts = [
 ] as ChannelAccount[];
 
 const routes = [
-  { id: "r1", virtual_model_id: "deepseek-v4-pro", upstream_model: "deepseek-v4-pro", channel_id: "deepseek", account_id: "a1", client_protocol: "openai", enabled: true },
-  { id: "r2", virtual_model_id: "deepseek-v4-pro", upstream_model: "deepseek-v4-pro", channel_id: "deepseek", account_id: "a2", client_protocol: "openai", enabled: true },
-  { id: "r3", virtual_model_id: "deepseek-v4-flash", upstream_model: "deepseek-v4-flash", channel_id: "deepseek", account_id: "a1", client_protocol: "openai", enabled: false },
+  { id: "r1", virtual_model_id: "flowlet-pro", upstream_model: "deepseek-v4-pro", channel_id: "deepseek", account_id: "a1", client_protocol: "openai", enabled: true },
+  { id: "r2", virtual_model_id: "flowlet-pro", upstream_model: "deepseek-v4-pro", channel_id: "deepseek", account_id: "a1", client_protocol: "anthropic", enabled: true },
+  { id: "r3", virtual_model_id: "flowlet-pro", upstream_model: "deepseek-v4-pro", channel_id: "deepseek", account_id: "a2", client_protocol: "openai", enabled: true },
+  { id: "r4", virtual_model_id: "flowlet-flash", upstream_model: "deepseek-v4-flash", channel_id: "deepseek", account_id: "a1", client_protocol: "responses", enabled: true },
+  { id: "r5", virtual_model_id: "deepseek-v4-pro", upstream_model: "deepseek-v4-pro", channel_id: "deepseek", account_id: "a1", client_protocol: "openai", enabled: true },
 ] as RouteCandidate[];
 
-const channels = [{ id: "deepseek", name: "DeepSeek" }] as ChannelPreset[];
+const channels = [{
+  id: "deepseek",
+  name: "DeepSeek",
+  supported_protocols: ["openai", "anthropic", "responses"],
+}] as ChannelPreset[];
 
 describe("OverviewExposedModelsCard", () => {
-  it("explains the empty model state when no account exists", () => {
+  it("explains how to make aggregate models available when no account exists", () => {
     render(
       <OverviewExposedModelsCard
         routes={[]}
         accounts={[]}
-        channels={[]}
+        channels={channels}
         onManage={vi.fn()}
-        onToggle={vi.fn()}
       />,
     );
 
-    expect(screen.getByText("添加渠道账号并选择开放模型后，这里会显示模型。")).toBeInTheDocument();
+    expect(screen.getByText("聚合模型")).toBeInTheDocument();
+    expect(screen.getByText("共 2 个聚合模型")).toBeInTheDocument();
+    expect(screen.getByText("添加渠道账号并配置聚合路由后，这里会显示可用状态。")).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
-  it("groups routes by public model and saves all grouped switches together", async () => {
+  it("shows real candidate health and available protocols while ignoring direct models", async () => {
     const user = userEvent.setup();
-    const onToggle = vi.fn();
+    const onManage = vi.fn();
 
     render(
       <OverviewExposedModelsCard
         routes={routes}
         accounts={accounts}
         channels={channels}
-        onManage={vi.fn()}
-        onToggle={onToggle}
+        onManage={onManage}
       />,
     );
 
-    expect(screen.getByText("已启用 1 / 共 2 个模型")).toBeInTheDocument();
-    expect(screen.getByText("deepseek-v4-pro")).toBeInTheDocument();
-    expect(screen.getAllByText("1 个可用账号")).toHaveLength(2);
-    expect(screen.getByText("deepseek-v4-flash")).toBeInTheDocument();
+    expect(screen.getByText("1 / 2 个账号可用")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI / Anthropic")).toBeInTheDocument();
+    expect(screen.getByText("1 / 1 个账号可用")).toBeInTheDocument();
+    expect(screen.getByText("Responses")).toBeInTheDocument();
+    expect(screen.getByText("部分可用")).toBeInTheDocument();
+    expect(screen.getByText("可用")).toBeInTheDocument();
+    expect(screen.queryByText("deepseek-v4-pro")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("switch", { name: "deepseek-v4-pro 对外开放" }));
-    expect(onToggle).toHaveBeenCalledWith(["r1", "r2"], "deepseek-v4-pro", false);
+    await user.click(screen.getByRole("link", { name: "管理模型" }));
+    expect(onManage).toHaveBeenCalledOnce();
   });
 });

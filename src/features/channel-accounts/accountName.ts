@@ -1,4 +1,4 @@
-export const ACCOUNT_NAME_MAX_DISPLAY_UNITS = 16;
+export const ACCOUNT_NAME_MAX_DISPLAY_UNITS = 20;
 
 const WIDE_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Extended_Pictographic}\uFF01-\uFF60\uFFE0-\uFFE6]/u;
 

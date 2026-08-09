@@ -7,7 +7,6 @@ import { useCodexAccounts, useCodexAccountRefreshOne, useCodexAccountAuthorizati
 import { AccountActionOverlay, type AccountActionRequest } from "../../features/channel-accounts/AccountActionOverlay";
 import { CodexAccountSideSheet } from "../../features/channel-accounts/CodexAccountSideSheet";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
-import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
 import { useProxyOverviewLifecycle } from "../../features/proxy-lifecycle/useProxyOverviewLifecycle";
 import { useTodayTokens } from "../../features/usage/useTodayTokens";
@@ -23,7 +22,6 @@ export function OverviewPage() {
   const accounts = useAccounts();
   const presets = useChannelPresets();
   const accountActions = useAccountActions(presets.data ?? []);
-  const modelActions = useModelActions();
   const [accountRequest, setAccountRequest] = useState<AccountActionRequest | null>(null);
   const [detailsVisible, setDetailsVisible] = useState(false);
   const routes = useRouteCandidates();
@@ -92,7 +90,7 @@ export function OverviewPage() {
       {accounts.isError ? <Card>{t("加载渠道账号失败：{message}", { message: accounts.error.message })}</Card> : null}
 
       {hasAccounts && (routes.isLoading || bindConfig.isLoading) ? <Card>{t("正在加载模型和接入配置…")}</Card> : null}
-      {hasAccounts && routes.isError ? <Card>{t("加载开放模型失败：{message}", { message: routes.error.message })}</Card> : null}
+      {hasAccounts && routes.isError ? <Card>{t("加载聚合模型失败：{message}", { message: routes.error.message })}</Card> : null}
       {hasAccounts && bindConfig.isError ? <Card>{t("加载客户端配置失败：{message}", { message: bindConfig.error.message })}</Card> : null}
 
       {!accounts.isLoading && !accounts.isError ? (
@@ -111,8 +109,6 @@ export function OverviewPage() {
             setFocusedCodexAccount(accountId || undefined);
             setCodexSheetVisible(true);
           }}
-          busyModelId={modelActions.toggleExposedModel.isPending ? modelActions.toggleExposedModel.variables?.modelId : undefined}
-          onToggleModel={(routeIds, modelId, enabled) => modelActions.toggleExposedModel.mutate({ routes: routes.data ?? [], routeIds, modelId, enabled })}
         />
       ) : null}
 

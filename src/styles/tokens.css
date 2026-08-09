@@ -32,6 +32,7 @@
   --flowlet-color-border: rgba(33, 45, 66, 0.09);
   --flowlet-color-border-strong: rgba(33, 45, 66, 0.14);
   --flowlet-color-text: #141821;
+  --flowlet-color-text-primary: var(--flowlet-color-text);
   --flowlet-color-text-secondary: #4f5a6b;
   --flowlet-color-text-tertiary: #626b7d;
   --flowlet-color-text-disabled: #8a93a2;

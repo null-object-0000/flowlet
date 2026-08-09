@@ -22,8 +22,6 @@ type Props = {
   onToggleAccount: (accountId: string, enabled: boolean) => void;
   accountActionBusy?: boolean;
   onOpenCodexAgent?: (accountId: string) => void;
-  busyModelId?: string;
-  onToggleModel: (routeIds: string[], modelId: string, enabled: boolean) => void;
 };
 
 export function OverviewGrid({
@@ -38,8 +36,6 @@ export function OverviewGrid({
   onToggleAccount,
   accountActionBusy,
   onOpenCodexAgent,
-  busyModelId,
-  onToggleModel,
 }: Props) {
   const navigate = useNavigate();
 
@@ -64,9 +60,7 @@ export function OverviewGrid({
           routes={routes}
           accounts={accounts}
           channels={channels}
-          busyModelId={busyModelId}
           onManage={() => navigate("/models")}
-          onToggle={onToggleModel}
         />
       </div>
       <div className={styles.agentCard}>

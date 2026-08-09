@@ -2,8 +2,8 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1.08fr 0.92fr;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+  grid-template-rows: minmax(190px, 0.72fr) minmax(0, 1.28fr);
   gap: 12px;
 }
 

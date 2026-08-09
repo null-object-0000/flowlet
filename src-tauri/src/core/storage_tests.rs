@@ -49,16 +49,34 @@ fn channel_account_workspace_identity_and_defaults_round_trip_and_survive_local_
         ..Default::default()
     };
 
-    storage.save_channel_accounts(&[account]).expect("save linked account");
-    let saved = storage.list_channel_accounts().expect("list linked account");
-    assert_eq!(saved[0].workspace_account_id.as_deref(), Some("workspace-friday"));
-    assert_eq!(saved[0].base_url_override.as_deref(), Some("http://friday.internal/v1"));
-    assert_eq!(saved[0].workspace_default_base_url.as_deref(), Some("https://friday.example/v1"));
+    storage
+        .save_channel_accounts(&[account])
+        .expect("save linked account");
+    let saved = storage
+        .list_channel_accounts()
+        .expect("list linked account");
+    assert_eq!(
+        saved[0].workspace_account_id.as_deref(),
+        Some("workspace-friday")
+    );
+    assert_eq!(
+        saved[0].base_url_override.as_deref(),
+        Some("http://friday.internal/v1")
+    );
+    assert_eq!(
+        saved[0].workspace_default_base_url.as_deref(),
+        Some("https://friday.example/v1")
+    );
 
-    storage.save_channel_accounts(&[]).expect("remove local account");
+    storage
+        .save_channel_accounts(&[])
+        .expect("remove local account");
     assert!(storage.list_channel_accounts().unwrap().is_empty());
     assert_eq!(
-        storage.local_account_id_for_workspace("workspace-friday").unwrap().as_deref(),
+        storage
+            .local_account_id_for_workspace("workspace-friday")
+            .unwrap()
+            .as_deref(),
         Some("local-friday")
     );
 }
@@ -93,7 +111,10 @@ fn usage_summary_uses_workspace_account_identity_without_rewriting_history() {
 
     let summary = test_usage_summary(&storage, "all");
     assert_eq!(summary.len(), 1);
-    assert_eq!(summary[0].account_id.as_deref(), Some("workspace-account-1"));
+    assert_eq!(
+        summary[0].account_id.as_deref(),
+        Some("workspace-account-1")
+    );
     assert_eq!(summary[0].account_name.as_deref(), Some("Shared LongCat"));
     assert_eq!(summary[0].known_tokens, 42);
 }
@@ -896,11 +917,7 @@ fn count_tokens_requests_never_become_unknown_usage_and_legacy_placeholders_are_
     misassigned_usage.output_tokens = Some(5);
     misassigned_usage.total_tokens = Some(105);
     storage
-        .upsert_usage_record_with_metadata(
-            &misassigned_usage,
-            "complete",
-            "agent_native",
-        )
+        .upsert_usage_record_with_metadata(&misassigned_usage, "complete", "agent_native")
         .unwrap();
     assert_eq!(storage.analyze_unknown_usage("all").unwrap(), 1);
 
@@ -1321,22 +1338,18 @@ fn adds_new_channel_preset_columns_to_legacy_schema() {
 
     storage.migrate().expect("migrate channel preset schema");
 
-    assert!(
-        super::table_has_column(
-            &storage.connection.lock().unwrap(),
-            "channel_presets",
-            "small_model",
-        )
-        .unwrap()
-    );
-    assert!(
-        super::table_has_column(
-            &storage.connection.lock().unwrap(),
-            "channel_presets",
-            "timeout_seconds",
-        )
-        .unwrap()
-    );
+    assert!(super::table_has_column(
+        &storage.connection.lock().unwrap(),
+        "channel_presets",
+        "small_model",
+    )
+    .unwrap());
+    assert!(super::table_has_column(
+        &storage.connection.lock().unwrap(),
+        "channel_presets",
+        "timeout_seconds",
+    )
+    .unwrap());
 }
 
 #[test]
@@ -1377,9 +1390,21 @@ fn migrates_legacy_usage_rows_with_explicit_status_and_source() {
     assert_eq!(
         rows,
         vec![
-            ("complete".to_string(), "complete".to_string(), "legacy".to_string()),
-            ("partial".to_string(), "partial".to_string(), "legacy".to_string()),
-            ("unknown".to_string(), "unknown".to_string(), "legacy".to_string()),
+            (
+                "complete".to_string(),
+                "complete".to_string(),
+                "legacy".to_string()
+            ),
+            (
+                "partial".to_string(),
+                "partial".to_string(),
+                "legacy".to_string()
+            ),
+            (
+                "unknown".to_string(),
+                "unknown".to_string(),
+                "legacy".to_string()
+            ),
         ]
     );
 }
@@ -1613,7 +1638,9 @@ fn cleanup_expired_body_data_never_retention() {
 
 // 测试辅助：本机用量汇总统一视为「本地设备」，与生产命令传入当前 device_id 同义。
 fn test_usage_summary(storage: &Storage, period: &str) -> Vec<UsageSummaryRow> {
-    storage.usage_summary(period, "local-device").expect("usage summary")
+    storage
+        .usage_summary(period, "local-device")
+        .expect("usage summary")
 }
 
 fn empty_usage_input(request_id: &str) -> UsageRecordInput {
@@ -1753,7 +1780,9 @@ fn data_maintenance_backfills_missing_usage_from_capture_file_at_request_time() 
     log.upstream_protocol = "anthropic".to_string();
     log.path = "/anthropic/v1/messages".to_string();
     log.res_body_b64 = Some(base64::engine::general_purpose::STANDARD.encode(response));
-    let request_log_id = storage.insert_request_log(&log).expect("insert captured response");
+    let request_log_id = storage
+        .insert_request_log(&log)
+        .expect("insert captured response");
     storage
         .connection
         .lock()
@@ -2272,10 +2301,16 @@ fn usage_summary_aggregates_timings_with_request_log_semantics() {
     let elapsed_measured: i64 = summary.iter().map(|row| row.elapsed_measured_count).sum();
     let generation_total: i64 = summary.iter().map(|row| row.generation_total_ms).sum();
     let generation_output: i64 = summary.iter().map(|row| row.generation_output_tokens).sum();
-    assert_eq!(elapsed_total, 8700, "总耗时应回退到 latency_ms 并跳过无记录请求");
+    assert_eq!(
+        elapsed_total, 8700,
+        "总耗时应回退到 latency_ms 并跳过无记录请求"
+    );
     assert_eq!(elapsed_measured, 3, "平均耗时分母只计有耗时记录的请求");
     assert_eq!(generation_total, 8000, "生成耗时应为 duration − ttft 之和");
-    assert_eq!(generation_output, 300, "生成速度分子应与生成耗时来自同一批请求");
+    assert_eq!(
+        generation_output, 300,
+        "生成速度分子应与生成耗时来自同一批请求"
+    );
 }
 
 #[test]
@@ -2397,7 +2432,10 @@ fn usage_today_summary_matches_all_device_daily_scope() {
     }
 
     let summary = storage.usage_today_summary().expect("today summary");
-    assert_eq!(summary.total_tokens, 487, "代理、本机原生与其他设备快照应合并");
+    assert_eq!(
+        summary.total_tokens, 487,
+        "代理、本机原生与其他设备快照应合并"
+    );
     assert_eq!(summary.input_tokens, 322);
     assert_eq!(summary.input_cached_tokens, 135);
     assert_eq!(summary.input_uncached_tokens, 180);
@@ -2540,7 +2578,10 @@ fn local_daily_usage_totals_with_native_merges_proxy_and_agent_events() {
         140
     );
     assert_eq!(
-        merged_hours.iter().map(|hour| hour.known_tokens).sum::<i64>(),
+        merged_hours
+            .iter()
+            .map(|hour| hour.known_tokens)
+            .sum::<i64>(),
         15
     );
 }
@@ -3144,8 +3185,16 @@ fn usage_summary_unions_imported_device_breakdowns() {
         storage
             .upsert_usage_record(&UsageRecordInput {
                 request_id: request_id.to_string(),
-                channel_id: Some(if model == "deepseek-v4-pro" { "deepseek".to_string() } else { "longcat".to_string() }),
-                channel_name: Some(if model == "deepseek-v4-pro" { "DeepSeek".to_string() } else { "LongCat".to_string() }),
+                channel_id: Some(if model == "deepseek-v4-pro" {
+                    "deepseek".to_string()
+                } else {
+                    "longcat".to_string()
+                }),
+                channel_name: Some(if model == "deepseek-v4-pro" {
+                    "DeepSeek".to_string()
+                } else {
+                    "LongCat".to_string()
+                }),
                 upstream_model: Some(model.to_string()),
                 input_tokens: Some(10),
                 output_tokens: Some(5),
@@ -3193,9 +3242,9 @@ fn usage_summary_unions_imported_device_breakdowns() {
 
     // 按 (device, model) 聚合：本机 deepseek 1条 + 远端 deepseek 1条，本机 longcat 1条。
     let find = |device: &str, model: &str| {
-        summary
-            .iter()
-            .find(|r| r.device_id.as_deref() == Some(device) && r.upstream_model.as_deref() == Some(model))
+        summary.iter().find(|r| {
+            r.device_id.as_deref() == Some(device) && r.upstream_model.as_deref() == Some(model)
+        })
     };
     let local_pro = find(current, "deepseek-v4-pro").expect("local deepseek row");
     assert_eq!(local_pro.request_count, 1);

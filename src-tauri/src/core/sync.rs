@@ -651,12 +651,9 @@ pub async fn sync_openai_compatible_models(
         };
     }
 
-    let Some(base_url) = account
-        .effective_openai_base_url()
-        .or_else(|| {
-            (!preset.openai_base_url.trim().is_empty()).then_some(preset.openai_base_url.as_str())
-        })
-    else {
+    let Some(base_url) = account.effective_openai_base_url().or_else(|| {
+        (!preset.openai_base_url.trim().is_empty()).then_some(preset.openai_base_url.as_str())
+    }) else {
         return ModelSyncResult {
             models_synced: 0,
             models: Vec::new(),

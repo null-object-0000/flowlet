@@ -1,8 +1,8 @@
-use crate::AppState;
 use crate::core::config::{
     LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, RequestLogModelOptions,
     RequestLogRow,
 };
+use crate::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static AGENT_DATA_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -129,11 +129,10 @@ pub(crate) async fn get_agent_session_timeline(
 ) -> Result<crate::core::config::AgentSessionTimeline, String> {
     let prices = state.storage.prices();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut timeline =
-            crate::core::agent_session_timeline::get_native_agent_session_timeline(
-                &agent_type,
-                &session_id,
-            )?;
+        let mut timeline = crate::core::agent_session_timeline::get_native_agent_session_timeline(
+            &agent_type,
+            &session_id,
+        )?;
         timeline = crate::core::agent_session_timeline::slice_native_agent_session_timeline(
             timeline,
             started_at.as_deref(),

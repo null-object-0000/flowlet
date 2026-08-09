@@ -5,7 +5,7 @@ use super::config::{
     AgentSessionCostEstimate, AgentSessionNativeUsage, AgentSessionTimeline,
     AgentSessionTimelineEvent, ModelPrice,
 };
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{params, Connection, OpenFlags};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -84,9 +84,7 @@ pub fn slice_native_agent_session_timeline(
     let mut interactions: Vec<Vec<AgentSessionTimelineEvent>> = Vec::new();
     let mut current: Vec<AgentSessionTimelineEvent> = Vec::new();
     for event in std::mem::take(&mut timeline.events) {
-        if event.kind == "user-message"
-            && current.iter().any(|item| item.kind == "user-message")
-        {
+        if event.kind == "user-message" && current.iter().any(|item| item.kind == "user-message") {
             interactions.push(std::mem::take(&mut current));
         }
         current.push(event);
@@ -102,7 +100,11 @@ pub fn slice_native_agent_session_timeline(
                 .iter()
                 .find(|event| event.kind == "user-message")
                 .and_then(|event| event.timestamp.as_deref())
-                .or_else(|| interaction.iter().find_map(|event| event.timestamp.as_deref()))
+                .or_else(|| {
+                    interaction
+                        .iter()
+                        .find_map(|event| event.timestamp.as_deref())
+                })
                 .and_then(parse_timeline_timestamp);
             timestamp.is_some_and(|timestamp| {
                 started_ms.map_or(true, |started| timestamp >= started)
@@ -1707,12 +1709,9 @@ fn parse_jsonl_summary_line(
         }
         summary.turn_count += 1;
         if let Some(usage) = usage_from_claude_message(message) {
-            if let Some(event) = agent_usage_event(
-                usage_id,
-                string_field(value, "timestamp"),
-                model,
-                &usage,
-            ) {
+            if let Some(event) =
+                agent_usage_event(usage_id, string_field(value, "timestamp"), model, &usage)
+            {
                 usage_events.push(event);
             }
             add_native_usage(&mut summary.usage, &usage);
@@ -2039,7 +2038,11 @@ fn find_codex_session_file(root: &Path, agent_type: &str, session_id: &str) -> O
         let originator = payload.get("originator").and_then(Value::as_str);
         let matches_agent = match agent_type {
             "codex-desktop" => originator == Some("Codex Desktop"),
-            "codex-cli" => matches!(originator, Some("codex_cli_rs" | "Codex CLI" | "codex-cli")),
+            // codex_exec：Rust 版 Codex CLI（0.147+）非交互 `codex exec` 写入的 originator。
+            "codex-cli" => matches!(
+                originator,
+                Some("codex_exec" | "codex_cli_rs" | "Codex CLI" | "codex-cli")
+            ),
             _ => false,
         };
         matches_agent && string_field(payload, "id").as_deref() == Some(session_id)
@@ -2267,9 +2270,43 @@ mod tests {
     }
 
     #[test]
+    fn finds_codex_exec_session_file_and_reads_timeline() {
+        // Rust 版 Codex CLI `codex exec` 的会话文件 originator 是 codex_exec（0.147+）。
+        // find_codex_session_file 必须能找到该文件，read_codex_timeline 才能读出对话，
+        // 否则任务详情「会话」Tab 与「最近一轮」都会显示无可读内容。
+        let root = std::env::temp_dir().join(format!("flowlet-codex-exec-tl-{}", Uuid::new_v4()));
+        let sessions = root.join("sessions").join("2026").join("08").join("09");
+        fs::create_dir_all(&sessions).unwrap();
+        let path = sessions.join("rollout-2026-08-09T17-59-52-019fe5f6-eb7c-72d3-8ebc-f1be1d251993.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"timestamp\":\"2026-08-09T09:59:52.511Z\",\"type\":\"session_meta\",\"payload\":{\"session_id\":\"019fe5f6-eb7c-72d3-8ebc-f1be1d251993\",\"id\":\"019fe5f6-eb7c-72d3-8ebc-f1be1d251993\",\"originator\":\"codex_exec\",\"cwd\":\"D:\\\\flowlet\"}}\n",
+                "{\"timestamp\":\"2026-08-09T09:59:52.682Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"turn-1\"}}\n",
+                "{\"timestamp\":\"2026-08-09T10:00:00Z\",\"type\":\"response_item\",\"payload\":{\"id\":\"m1\",\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"任务正文\"}]}}\n",
+                "{\"timestamp\":\"2026-08-09T10:00:17Z\",\"type\":\"response_item\",\"payload\":{\"id\":\"m2\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"执行完成\"}]}}\n",
+                "{\"timestamp\":\"2026-08-09T10:00:20Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"turn-1\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let found = find_codex_session_file(&sessions, "codex-cli", "019fe5f6-eb7c-72d3-8ebc-f1be1d251993");
+        assert_eq!(found.as_deref(), Some(path.as_path()));
+        // 直接对临时文件跑解析器（read_codex_timeline 固定读 codex_home，不做端到端依赖）。
+        let timeline = read_jsonl_timeline(&path, parse_codex_line).unwrap();
+        assert_eq!(timeline.turn_count, 1);
+        let contents: Vec<String> = timeline
+            .events
+            .iter()
+            .filter_map(|event| event.content.clone())
+            .collect();
+        assert_eq!(contents, vec!["任务正文", "执行完成"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn reads_complete_codex_timeline_with_totals() {
-        let root =
-            std::env::temp_dir().join(format!("flowlet-codex-complete-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("flowlet-codex-complete-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         let path = root.join("session.jsonl");
         let mut records = String::from(
@@ -2529,10 +2566,7 @@ mod tests {
         assert_eq!(first_events.len(), 1);
         assert_eq!(first_events[0].event_id, "msg-1");
         assert_eq!(first_events[0].total_tokens, 120);
-        assert_eq!(
-            first_events[0].model.as_deref(),
-            Some("claude-a")
-        );
+        assert_eq!(first_events[0].model.as_deref(), Some("claude-a"));
 
         let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
         file.write_all(first_line.as_bytes()).unwrap();
@@ -2600,7 +2634,8 @@ mod tests {
         )
         .unwrap();
         let mut usage_events = Vec::new();
-        let timeline = read_opencode_timeline_from(&connection, "ses", Some(&mut usage_events)).unwrap();
+        let timeline =
+            read_opencode_timeline_from(&connection, "ses", Some(&mut usage_events)).unwrap();
         assert_eq!(timeline.events.len(), 4);
         assert_eq!(timeline.events[0].kind, "user-message");
         assert_eq!(timeline.events[2].kind, "tool-call");

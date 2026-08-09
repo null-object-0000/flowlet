@@ -148,7 +148,10 @@ async fn fetch_latest_version(package: &str) -> Result<String, String> {
     let response = reqwest::Client::new()
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/json")
-        .header(reqwest::header::USER_AGENT, "Flowlet/0.1.0 (agent version check)")
+        .header(
+            reqwest::header::USER_AGENT,
+            "Flowlet/0.1.0 (agent version check)",
+        )
         .timeout(REQUEST_TIMEOUT)
         .send()
         .await
@@ -174,9 +177,15 @@ mod tests {
 
     #[test]
     fn npm_package_for_maps_supported_agents() {
-        assert_eq!(npm_package_for("claude-code"), Some("@anthropic-ai/claude-code"));
+        assert_eq!(
+            npm_package_for("claude-code"),
+            Some("@anthropic-ai/claude-code")
+        );
         assert_eq!(npm_package_for("opencode"), Some("opencode-ai"));
-        assert_eq!(npm_package_for("pi"), Some("@earendil-works/pi-coding-agent"));
+        assert_eq!(
+            npm_package_for("pi"),
+            Some("@earendil-works/pi-coding-agent")
+        );
         assert_eq!(npm_package_for("codex"), Some("@openai/codex"));
         assert_eq!(npm_package_for("unknown"), None);
     }

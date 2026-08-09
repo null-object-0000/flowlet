@@ -1,11 +1,11 @@
 use super::{Storage, StorageError};
 use crate::core::config::DeviceUsageBreakdownRow;
 use crate::core::device_identity::{
-    DailyUsageTotal, DeviceUsageImportPreview, DeviceUsageImportResult, HourlyUsageTotal,
-    KnownDevice, SharedAgentSession, SharedDeviceProject, SyncedAgentProfile, SyncedAgentSession,
-    SyncedProject, resolve_device_display_name,
+    resolve_device_display_name, DailyUsageTotal, DeviceUsageImportPreview,
+    DeviceUsageImportResult, HourlyUsageTotal, KnownDevice, SharedAgentSession,
+    SharedDeviceProject, SyncedAgentProfile, SyncedAgentSession, SyncedProject,
 };
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 
 impl Storage {
     /// 为本地导出和未来设备同步生成按设备本地自然日聚合的最小用量数据。
@@ -140,9 +140,7 @@ impl Storage {
 
     /// 最近 180 天本机 Agent 原生会话按本地自然小时聚合的 Token 用量。
     /// 同样排除已被 Flowlet 观测的会话（见 `agent_native_daily_usage_totals`）。
-    pub fn agent_native_hourly_usage_totals(
-        &self,
-    ) -> Result<Vec<HourlyUsageTotal>, StorageError> {
+    pub fn agent_native_hourly_usage_totals(&self) -> Result<Vec<HourlyUsageTotal>, StorageError> {
         let connection = self
             .connection
             .lock()
@@ -751,7 +749,11 @@ impl Storage {
             let tasks_json: String = row.get(6)?;
             Ok(SharedDeviceProject {
                 device_id: device_id.clone(),
-                device_display_name: resolve_device_display_name(&row.get::<_, String>(1)?, &platform, &device_id),
+                device_display_name: resolve_device_display_name(
+                    &row.get::<_, String>(1)?,
+                    &platform,
+                    &device_id,
+                ),
                 device_platform: platform,
                 project_id: row.get(3)?,
                 project_name: row.get(4)?,

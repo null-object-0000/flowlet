@@ -91,10 +91,7 @@ pub(crate) fn save_project(
         })
         .map_err(|error| error.to_string())?;
     // 项目名 / 目录绑定变更后即时推送工作区（目录是本地字段，只同步名字）。
-    crate::core::project_workspace_sync::notify_project_changed(
-        state.storage.clone(),
-        &project.id,
-    );
+    crate::core::project_workspace_sync::notify_project_changed(state.storage.clone(), &project.id);
     Ok(())
 }
 
@@ -111,11 +108,8 @@ pub(crate) async fn delete_project(
         .map_err(|error| error.to_string())?
         .and_then(|project| project.workspace_project_id);
     if let Some(ws_id) = workspace_project_id {
-        let _ = crate::core::project_workspace_sync::push_tombstone(
-            state.storage.clone(),
-            &ws_id,
-        )
-        .await;
+        let _ = crate::core::project_workspace_sync::push_tombstone(state.storage.clone(), &ws_id)
+            .await;
     }
     state
         .storage
@@ -145,7 +139,10 @@ pub(crate) fn save_project_task(
     {
         return Err("任务 ID、项目和标题不能为空".to_string());
     }
-    if !matches!(task.status.as_str(), "draft" | "submitted" | "in_progress" | "review" | "done") {
+    if !matches!(
+        task.status.as_str(),
+        "draft" | "submitted" | "in_progress" | "review" | "done"
+    ) {
         return Err("任务状态无效".to_string());
     }
     if !matches!(task.task_type.as_str(), "code" | "readonly") {
@@ -357,17 +354,21 @@ pub(crate) async fn sync_project_workspace(
 #[tauri::command]
 pub(crate) fn list_queued_project_tasks(
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<ProjectTask>, String> {
+) -> Result<crate::core::agent_task_runner::ProjectTaskQueueReport, String> {
     let current_device_id = state
         .device_identity
         .lock()
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .device_id
         .clone();
-    state
+    let queued = state
         .storage
         .list_queued_project_tasks(&current_device_id)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(crate::core::agent_task_runner::project_task_queue_report(
+        &state.storage,
+        queued,
+    ))
 }
 
 #[tauri::command]
@@ -386,9 +387,7 @@ pub(crate) fn set_project_task_status(
         .map_err(|error| error.to_string())?;
     let allowed = matches!(
         (current.as_deref(), status.as_str()),
-        (Some("review"), "done")
-            | (Some("review"), "submitted")
-            | (Some("submitted"), "draft")
+        (Some("review"), "done") | (Some("review"), "submitted") | (Some("submitted"), "draft")
     );
     if !allowed {
         return Err("当前任务状态不允许此操作".to_string());
@@ -429,8 +428,12 @@ pub(crate) fn set_project_task_status(
             } else {
                 format!("任务被退回：{trimmed}")
             };
-            let _ = state.storage.add_job_event(&job_id, "warning", "退回", &message);
-            let _ = state.storage.mark_task_execution_rejected(&task_id, &job_id, &trimmed);
+            let _ = state
+                .storage
+                .add_job_event(&job_id, "warning", "退回", &message);
+            let _ = state
+                .storage
+                .mark_task_execution_rejected(&task_id, &job_id, &trimmed);
         }
     }
     // 状态变更即时推送工作区，其他设备尽快看到审核结果 / 重新排队。
@@ -565,10 +568,8 @@ pub(crate) async fn open_detail_window(
         .map_err(|error| format!("读取项目失败：{error}"))?
         .ok_or_else(|| "项目不存在".to_string())?;
 
-    let data_dir = crate::core::webview_profile::webview_data_root(app)?
-        .join("main-webview");
-    std::fs::create_dir_all(&data_dir)
-        .map_err(|error| format!("创建应用数据目录失败：{error}"))?;
+    let data_dir = crate::core::webview_profile::webview_data_root(app)?.join("main-webview");
+    std::fs::create_dir_all(&data_dir).map_err(|error| format!("创建应用数据目录失败：{error}"))?;
 
     // 与主窗口同一份 index.html，通过 hash 路由进入独立窗口专属页面。
     // 携带 task 查询参数：新窗口首次挂载时前端据此直接激活任务概览抽屉，
@@ -588,9 +589,8 @@ pub(crate) async fn open_detail_window(
         .visible(false)
         .data_directory(data_dir);
     #[cfg(windows)]
-    let builder = builder.additional_browser_args(
-        crate::core::webview_profile::WINDOWS_CACHE_LIMIT_BROWSER_ARGS,
-    );
+    let builder = builder
+        .additional_browser_args(crate::core::webview_profile::WINDOWS_CACHE_LIMIT_BROWSER_ARGS);
     let window = builder
         .build()
         .map_err(|error| format!("创建项目详情独立窗口失败：{error}"))?;

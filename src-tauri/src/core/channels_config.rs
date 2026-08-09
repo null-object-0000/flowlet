@@ -40,7 +40,7 @@ pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static s
         "kimi-k3" | "kimi-k2.7-code" => Some("kimi"),
         "qwen3.8-max" | "qwen3.7-max" | "qwen3.7-plus" | "qwen3.7-flash" | "qwen3.6-plus"
         | "qwen3.6-flash" => Some("qwen"),
-        "glm-5.2" => Some("zhipu"),
+        "glm-5.2" | "glm-4.7" | "glm-4.5-air" => Some("zhipu"),
         _ => None,
     }
 }
@@ -417,9 +417,9 @@ impl ChannelsConfig {
     /// 路由由前端保存时的对账逻辑负责）。全局最早创建账号的新路由默认开启，后续
     /// 所有官方或自定义账号的新路由默认关闭，等待用户手动开启。
     ///
-    /// 候选上游模型 = 用户在账号编辑器中勾选的 `exposed_models` ∩ 最近一次
-    /// `/models` 返回的 `synced_models` ∩ 全局支持模型集。白名单不按渠道区分——
-    /// 任意账号只要其 `/models` 返回了 Flowlet 支持的模型，就可勾选开放。
+    /// 候选上游模型 = 用户在账号编辑器中勾选的上游原始 ID `exposed_models` ∩
+    /// 最近一次 `/models` 返回的 `synced_models` ∩ 全局支持模型集。白名单按规范
+    /// 模型判断；同一规范模型映射到多个独立上游资源时分别生成候选路由。
     /// - `exposed_models = None`：账号尚未用新流程配置过，不生成任何路由（保持现状）。
     /// - `exposed_models = Some(list)`（可为空）：仅为列表中的模型补齐路由。
     pub fn merge_default_routes(
@@ -475,14 +475,11 @@ impl ChannelsConfig {
                     if !protocol_has_endpoint {
                         continue;
                     }
-                    // 候选 = exposed_models ∩ synced_models ∩ 全局支持模型集。
-                    // exposed_models 为 None（未配置）或空 → 不生成路由。
+                    // 候选 = 原始上游 exposed_models ∩ synced_models ∩ 全局支持模型集。
+                    // 同一规范模型的多个独立上游资源分别保留；exposed_models 为
+                    // None（未配置）或空 → 不生成路由。
                     let exposed = account.exposed_models.as_deref().unwrap_or(&[]);
-                    let exposed_set: std::collections::HashSet<String> =
-                        exposed.iter().map(|m| m.trim().to_lowercase()).collect();
-                    // synced_models 保留 /models 返回的原名（仅 trim 去空）：求交时
-                    // 按规范键匹配白名单（别名变体如 deepseek-v4-flash-0731 命中
-                    // deepseek-v4-flash），转发时仍以原名作为 upstream_model 发起请求。
+                    // synced_models 保留 /models 返回的原名（仅 trim 去空）。
                     let synced_raw: Vec<String> = account
                         .synced_models
                         .as_deref()
@@ -491,30 +488,46 @@ impl ChannelsConfig {
                         .map(|m| m.trim().to_owned())
                         .filter(|m| !m.is_empty())
                         .collect();
-                    let synced_keys: std::collections::HashSet<String> =
-                        synced_raw.iter().map(|m| canonical_model_key(m)).collect();
+                    let canonical_by_key: std::collections::HashMap<String, String> = whitelist
+                        .iter()
+                        .map(|model| (model.trim().to_lowercase(), model.clone()))
+                        .collect();
+                    let synced_by_id: std::collections::HashMap<String, String> = synced_raw
+                        .iter()
+                        .map(|model| (model.to_lowercase(), model.clone()))
+                        .collect();
                     let exposed_models: Vec<(String, String)> = if exposed.is_empty() {
                         Vec::new()
                     } else {
-                        whitelist
+                        let mut seen_upstream = std::collections::HashSet::new();
+                        exposed
                             .iter()
-                            .filter_map(|m| {
-                                let key = m.trim().to_lowercase();
-                                if !exposed_set.contains(&key) || !synced_keys.contains(&key) {
+                            .filter_map(|selected| {
+                                let selected_raw = selected.trim();
+                                if selected_raw.is_empty() {
                                     return None;
                                 }
-                                // /models 精确返回同名时用白名单规范名（保持历史路由
-                                // 签名稳定）；否则取第一个映射到该规范的变体原名。
-                                let upstream = if synced_raw.iter().any(|s| s.to_lowercase() == key)
-                                {
-                                    m.clone()
-                                } else {
-                                    synced_raw
-                                        .iter()
-                                        .find(|s| canonical_model_key(s) == key)
-                                        .cloned()?
-                                };
-                                Some((m.clone(), upstream))
+                                let selected_key = selected_raw.to_lowercase();
+                                let canonical_key = canonical_model_key(selected_raw);
+                                let canonical = canonical_by_key.get(&canonical_key)?.clone();
+                                // 新数据精确选择上游原始 ID。兼容旧数据：旧版选择
+                                // 别名时只保存规范 ID，规范 ID 未返回则回退到同规范
+                                // 模型的首个上游资源。
+                                let upstream =
+                                    synced_by_id.get(&selected_key).cloned().or_else(|| {
+                                        (selected_key == canonical_key).then(|| {
+                                            synced_raw
+                                                .iter()
+                                                .find(|model| {
+                                                    canonical_model_key(model) == canonical_key
+                                                })
+                                                .cloned()
+                                        })?
+                                    })?;
+                                if !seen_upstream.insert(upstream.to_lowercase()) {
+                                    return None;
+                                }
+                                Some((canonical, upstream))
                             })
                             .collect()
                     };
@@ -943,6 +956,8 @@ mod tests {
     fn official_channel_id_resolves_zhipu_glm() {
         assert_eq!(official_channel_id_for_model("glm-5.2"), Some("zhipu"));
         assert_eq!(official_channel_id_for_model("GLM-5.2"), Some("zhipu"));
+        assert_eq!(official_channel_id_for_model("glm-4.7"), Some("zhipu"));
+        assert_eq!(official_channel_id_for_model("glm-4.5-air"), Some("zhipu"));
         // 智谱其他模型未纳入白名单，不应解析为 zhipu 归属。
         assert_eq!(official_channel_id_for_model("glm-5.1"), None);
     }
@@ -996,9 +1011,8 @@ mod tests {
     }
 
     #[test]
-    fn merge_default_routes_prefers_exact_model_over_alias_variant() {
-        // /models 同时返回规范名与别名变体时，upstream_model 用规范名，
-        // 保持历史路由签名稳定，不产生重复路由。
+    fn merge_default_routes_selects_only_exact_resource_when_only_canonical_is_checked() {
+        // /models 同时返回规范名与别名变体，但只勾选规范 ID 时只生成规范资源路由。
         let config = qwen_alias_test_config();
         let account = ChannelAccount {
             id: "qwen-token-plan".to_string(),
@@ -1022,6 +1036,75 @@ mod tests {
             "精确同名优先于别名变体: {routes:?}"
         );
         assert_eq!(routes.len(), 1);
+    }
+
+    #[test]
+    fn merge_default_routes_selects_alias_resource_by_raw_id() {
+        let config = qwen_alias_test_config();
+        let account = ChannelAccount {
+            id: "qwen-token-plan".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: String::new(),
+            enabled: true,
+            resource_mode: Some("token_plan".to_string()),
+            exposed_models: Some(vec!["deepseek-v4-flash-0731".to_string()]),
+            synced_models: Some(vec![
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-flash-0731".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        let pairs: Vec<(&str, &str)> = routes
+            .iter()
+            .map(|route| {
+                (
+                    route.virtual_model_id.as_str(),
+                    route.upstream_model.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(pairs, vec![("deepseek-v4-flash", "deepseek-v4-flash-0731")]);
+    }
+
+    #[test]
+    fn merge_default_routes_keeps_two_resources_for_same_canonical_model() {
+        let config = qwen_alias_test_config();
+        let account = ChannelAccount {
+            id: "qwen-token-plan".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: String::new(),
+            enabled: true,
+            resource_mode: Some("token_plan".to_string()),
+            exposed_models: Some(vec![
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-flash-0731".to_string(),
+            ]),
+            synced_models: Some(vec![
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-flash-0731".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        let pairs: Vec<(&str, &str)> = routes
+            .iter()
+            .map(|route| {
+                (
+                    route.virtual_model_id.as_str(),
+                    route.upstream_model.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("deepseek-v4-flash", "deepseek-v4-flash"),
+                ("deepseek-v4-flash", "deepseek-v4-flash-0731"),
+            ]
+        );
     }
 
     #[test]
@@ -1202,14 +1285,16 @@ mod tests {
                     "anthropic_base_url": "https://open.bigmodel.cn/api/anthropic"
                 }],
                 "default_exposed_models": {
-                    "zhipu": ["glm-5.2"]
+                    "zhipu": ["glm-5.2", "glm-4.7", "glm-4.5-air"]
                 }
             }
         });
         let config = ChannelsConfig::from_config_json(&json).unwrap();
         let supported: std::collections::HashSet<String> =
             config.supported_models().into_iter().collect();
-        assert!(supported.contains("glm-5.2"), "缺少支持的模型: glm-5.2");
+        for expected in ["glm-5.2", "glm-4.7", "glm-4.5-air"] {
+            assert!(supported.contains(expected), "缺少支持的模型: {expected}");
+        }
         // 智谱 models 端点不以 /v1 结尾，显式 endpoints 覆盖优先。
         let config_with_endpoint = ChannelsConfig::from_config_json(&serde_json::json!({
             "channels_config": {

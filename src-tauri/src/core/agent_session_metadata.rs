@@ -613,7 +613,9 @@ fn read_codex_session(
     let payload = value.get("payload")?;
     let agent_type = match string_field(payload, "originator")?.as_str() {
         "Codex Desktop" => "codex-desktop",
-        "codex_cli_rs" | "Codex CLI" | "codex-cli" => "codex-cli",
+        // codex_exec：Rust 版 Codex CLI（0.147+）非交互 `codex exec` 写入的 originator；
+        // codex_cli_rs / Codex CLI / codex-cli 兼容旧版本与桌面端内嵌 CLI。
+        "codex_exec" | "codex_cli_rs" | "Codex CLI" | "codex-cli" => "codex-cli",
         _ => return None,
     };
     let session_id = string_field(payload, "id")?;
@@ -1661,6 +1663,35 @@ mod tests {
             .unwrap();
         assert_eq!(cli.agent_type, "codex-cli");
         assert_eq!(cli.parent_session_id, None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lists_codex_exec_cli_sessions_from_rollout_files() {
+        // Rust 版 Codex CLI（0.147+）`codex exec` 写入的 session_meta originator 是
+        // `codex_exec`（文件名为 rollout-<时间戳>-<会话id>.jsonl，按年/月/日分目录）。
+        // 必须能被识别为 codex-cli，否则任务执行后的会话在列表与时间线中都不可见。
+        let root = std::env::temp_dir().join(format!("flowlet-codex-exec-{}", Uuid::new_v4()));
+        let sessions = root.join("sessions").join("2026").join("08").join("09");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(
+            sessions.join("rollout-2026-08-09T17-59-52-019fe5f6-eb7c-72d3-8ebc-f1be1d251993.jsonl"),
+            concat!(
+                "{\"timestamp\":\"2026-08-09T09:59:52.511Z\",\"type\":\"session_meta\",\"payload\":{\"session_id\":\"019fe5f6-eb7c-72d3-8ebc-f1be1d251993\",\"id\":\"019fe5f6-eb7c-72d3-8ebc-f1be1d251993\",\"timestamp\":\"2026-08-09T09:59:52.511Z\",\"cwd\":\"D:\\\\flowlet\",\"originator\":\"codex_exec\",\"cli_version\":\"0.147.0\",\"source\":\"exec\",\"thread_source\":\"user\"}}\n",
+                "{\"timestamp\":\"2026-08-09T10:00:17.240Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"任务正文\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        let rows = list_codex_native_sessions_from(&root);
+        assert_eq!(rows.len(), 1);
+        let exec = &rows[0];
+        assert_eq!(exec.agent_type, "codex-cli");
+        assert_eq!(
+            exec.session_id,
+            "019fe5f6-eb7c-72d3-8ebc-f1be1d251993"
+        );
+        assert_eq!(exec.project_path.as_deref(), Some("D:\\flowlet"));
         fs::remove_dir_all(root).unwrap();
     }
 

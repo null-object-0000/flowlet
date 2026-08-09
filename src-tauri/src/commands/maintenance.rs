@@ -266,7 +266,10 @@ pub(crate) fn set_task_review_notification_enabled(
 ) -> Result<(), String> {
     state
         .storage
-        .set_app_meta(TASK_REVIEW_NOTIFICATION_KEY, if enabled { "1" } else { "0" })
+        .set_app_meta(
+            TASK_REVIEW_NOTIFICATION_KEY,
+            if enabled { "1" } else { "0" },
+        )
         .map_err(|err| err.to_string())
 }
 

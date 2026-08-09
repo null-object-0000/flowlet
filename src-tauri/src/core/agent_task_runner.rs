@@ -1,14 +1,16 @@
-//! Agent 任务执行核心：按任务 `agent_profile` 驱动 Claude Code / OpenCode / Pi
+//! Agent 任务执行核心：按任务 `agent_profile` 驱动 Claude Code / Codex / OpenCode / Pi
 //! CLI 在项目目录内执行项目任务。
 //!
 //! 按项目隔离的执行槽：每个项目同一时刻至多一个任务在执行，其余在该项目内排队；
 //! 不同项目互不影响，可并行执行。并发安全下沉 Rust（参考 AGENT_DATA_SYNC_RUNNING 模式）。
-//! 三种 Agent 都以非交互模式执行（Claude Code `-p --output-format stream-json`、
-//! OpenCode `run --format json`、Pi `-p`），权限走各 CLI 的非交互放行参数
-//! （`--dangerously-skip-permissions` / `--auto` / `--approve`）。
+//! 四种 Agent 都以非交互模式执行（Claude Code `-p --output-format stream-json`、
+//! OpenCode `run --format json`、Pi `-p`、Codex `exec --json`），权限走各 CLI 的非交互
+//! 放行参数（`--dangerously-skip-permissions` / `--auto` / `--approve` /
+//! `--dangerously-bypass-approvals-and-sandbox`）。
 //! 执行过程中的模型请求会经过 Flowlet 本地代理，自动进入请求日志与用量账本。
 //! Agent 退出后由 Rust 自动把任务状态回写 `review`（等待人工审核）。
 
+use crate::core::agent_environment::AgentSurface;
 use crate::core::storage::{ProjectTask, Storage};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -62,6 +64,21 @@ pub(crate) struct RunProjectTaskResult {
     pub started: bool,
     pub job_id: Option<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProjectTaskQueueBlocker {
+    pub task_id: String,
+    pub code: &'static str,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProjectTaskQueueReport {
+    pub tasks: Vec<ProjectTask>,
+    pub blockers: Vec<ProjectTaskQueueBlocker>,
 }
 
 /// 执行结束的汇总信息，用于 finish_job。
@@ -159,6 +176,14 @@ pub(crate) async fn run_project_task(
         });
     }
 
+    // 在领取任务、更新状态和创建后台 job 之前完成确定性的本机环境校验。
+    // 目录失效时直接向调用方返回可处理错误，避免任务在 submitted / in_progress
+    // 之间反复切换并持续制造失败 job。
+    required_project_dir(&storage, &project_id)?;
+
+    // Agent 探测同样不应改变任务归属或状态。执行前仍会在真正创建子进程时再次校验 cwd。
+    let executable = resolve_agent_executable(&task.agent_profile).await?;
+
     // 2.5. 跨设备领取：把任务归属标记为本机（永久归属）。任务被其他设备执行过或
     //      正在执行时拒绝，防止多台设备对同一任务重复执行。
     if !storage
@@ -171,9 +196,6 @@ pub(crate) async fn run_project_task(
             message: "该任务已由其他设备执行，本机只读，请在执行设备上操作".to_string(),
         });
     }
-
-    // 3. 解析任务指定 Agent 的可执行文件（复用安装探测，未安装返回明确错误）。
-    let executable = resolve_agent_executable(&task.agent_profile).await?;
 
     // 4. 创建后台任务日志，任务日志页可见（job_type=project-task-run）。
     let job_id = uuid::Uuid::new_v4().to_string();
@@ -287,6 +309,9 @@ fn build_task_prompt(
 ) -> String {
     let mut prompt = String::new();
     prompt.push_str("你是由 Flowlet 调度执行的编程 Agent，请在当前项目目录内完成以下任务。\n\n");
+    if task_last_execution_interrupted(task) {
+        prompt.push_str("注意：上一轮执行因 Flowlet 或系统重启而中断，本次已恢复同一个 Agent 会话。请先结合已有会话上下文检查工作区现状，从中断位置继续，不要重复已经完成的工作。\n\n");
+    }
     if let Some(base) = base_task {
         let base_title = base.title.trim();
         if !base_title.is_empty() {
@@ -317,6 +342,19 @@ fn build_task_prompt(
     }
     prompt.push_str("\n完成后，请简要总结你做了什么、修改了哪些文件以及最终结论。");
     prompt
+}
+
+fn task_last_execution_interrupted(task: &ProjectTask) -> bool {
+    task.execution_history
+        .as_deref()
+        .and_then(|history| serde_json::from_str::<Vec<serde_json::Value>>(history).ok())
+        .and_then(|history| history.last().cloned())
+        .and_then(|entry| {
+            entry
+                .get("interrupted")
+                .and_then(serde_json::Value::as_bool)
+        })
+        .unwrap_or(false)
 }
 
 /// 会话显示名上限（字符数）。CLI 内部对名称清理控制字符后截断到 200 字符
@@ -371,15 +409,39 @@ fn session_from_job(storage: &Storage, job_id: Option<&str>) -> Result<Option<St
     else {
         return Ok(None);
     };
-    let Some(summary) = detail.job.summary_json else {
+    // 用户主动取消表示放弃当前执行，不应在下次重新提交时偷偷恢复该会话。
+    if detail.job.status == "cancelled" {
         return Ok(None);
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&summary) else {
-        return Ok(None);
-    };
-    Ok(value
-        .get("sessionId")
-        .and_then(serde_json::Value::as_str)
+    }
+    // 正常收尾会把 sessionId 写进 summary；应用被关闭/重启时来不及执行收尾，
+    // 但 Claude Code / OpenCode 已在启动事件中记录了原生会话 id，因此回退读取事件。
+    if let Some(session) = detail
+        .job
+        .summary_json
+        .as_deref()
+        .and_then(|summary| serde_json::from_str::<serde_json::Value>(summary).ok())
+        .and_then(|value| {
+            value
+                .get("sessionId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .filter(|session| !session.trim().is_empty())
+    {
+        return Ok(Some(session));
+    }
+    Ok(detail
+        .events
+        .iter()
+        .rev()
+        .find(|event| event.stage.as_deref() == Some("会话"))
+        .and_then(|event| {
+            event
+                .message
+                .rsplit_once('：')
+                .map(|(_, value)| value.trim())
+        })
+        .filter(|session| !session.is_empty())
         .map(str::to_string))
 }
 
@@ -390,6 +452,7 @@ fn session_from_job(storage: &Storage, job_id: Option<&str>) -> Result<Option<St
 fn agent_profile_meta(agent_profile: &str) -> Option<(&'static str, &'static str)> {
     match agent_profile.trim() {
         "" | "Claude Code" => Some(("claude-code", "Claude Code")),
+        "Codex" => Some(("chatgpt-desktop", "Codex")),
         "OpenCode" => Some(("opencode", "OpenCode")),
         "Pi" => Some(("pi", "Pi")),
         _ => None,
@@ -411,10 +474,19 @@ async fn resolve_agent_executable(agent_profile: &str) -> Result<String, String>
             "未检测到 {agent_name} CLI 可执行文件（接入配置不包含 CLI），请先安装 {agent_name} 后重试。"
         ));
     }
-    report
-        .primary
-        .map(|installation| installation.executable_path)
-        .ok_or_else(|| format!("未检测到 {agent_name} 可执行文件"))
+    // 任务执行需要 CLI 进程：OpenCode / Codex 的探测会同时返回桌面应用安装，而桌面
+    // 应用没有 run / exec 接口，不能作为任务执行器。primary 已是 CLI 时直接使用
+    // （保留探测的优先级逻辑：PATH + 有版本优先）；primary 是桌面应用时回退到
+    // 列表里第一个 CLI 安装，仍无则给出明确错误。
+    match report.primary {
+        Some(primary) if primary.surface == AgentSurface::Cli => Ok(primary.executable_path),
+        _ => report
+            .installations
+            .iter()
+            .find(|installation| installation.surface == AgentSurface::Cli)
+            .map(|installation| installation.executable_path.clone())
+            .ok_or_else(|| format!("未检测到 {agent_name} CLI 可执行文件")),
+    }
 }
 
 /// 任务执行分派：按任务的 agent_profile 选择执行器。
@@ -429,6 +501,18 @@ async fn execute_agent(
     resume_session: Option<&str>,
 ) -> Result<ExecutionOutcome, String> {
     match task.agent_profile.as_str() {
+        "Codex" => {
+            execute_codex(
+                storage,
+                executable,
+                task,
+                project_id,
+                job_id,
+                prompt,
+                resume_session,
+            )
+            .await
+        }
         "OpenCode" => {
             execute_opencode(
                 storage,
@@ -491,6 +575,27 @@ fn required_project_dir(storage: &Storage, project_id: &str) -> Result<std::path
         ));
     }
     Ok(directory)
+}
+
+/// 把数据库中的 submitted 任务拆为可执行队列与本机环境阻塞项。
+/// 阻塞项仍保留 submitted 状态，只是不交给调度器；目录重新绑定或恢复后，下一次轮询会自动入队。
+pub(crate) fn project_task_queue_report(
+    storage: &Storage,
+    queued: Vec<ProjectTask>,
+) -> ProjectTaskQueueReport {
+    let mut tasks = Vec::with_capacity(queued.len());
+    let mut blockers = Vec::new();
+    for task in queued {
+        match required_project_dir(storage, &task.project_id) {
+            Ok(_) => tasks.push(task),
+            Err(message) => blockers.push(ProjectTaskQueueBlocker {
+                task_id: task.id,
+                code: "project_directory_unavailable",
+                message,
+            }),
+        }
+    }
+    ProjectTaskQueueReport { tasks, blockers }
 }
 
 /// 已启动的 Agent 子进程及其输出流。
@@ -767,7 +872,6 @@ async fn execute_claude_code(
         }
     })?;
     record_started_execution(storage, task, job_id)?;
-
     let (outcome, mut child) = read_agent_output(
         storage,
         job_id,
@@ -829,6 +933,100 @@ fn process_claude_line(
         "result" => {
             if let Some(result) = value.get("result").and_then(serde_json::Value::as_str) {
                 text_buffer.push_str(result);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// 启动 Codex CLI 并读取 `exec --json` 事件输出，直到进程退出。
+///
+/// 新会话：`codex exec <prompt>`；退回重跑复用上次会话：`codex exec resume <session> <prompt>`
+/// （Codex 不保留上次执行参数，resume 时必须重新传入放行与 JSON 输出参数）。
+/// 会话 id 即 `--json` 首条 `thread.started` 事件的 `thread_id`，可用于后续 resume。
+/// `--dangerously-bypass-approvals-and-sandbox` 非交互自动放行并关闭沙箱（等价于
+/// Claude Code `--dangerously-skip-permissions` / OpenCode `--auto`）；`--skip-git-repo-check`
+/// 允许在非 git 目录执行（项目目录不保证是 git 仓库）。
+async fn execute_codex(
+    storage: &Storage,
+    executable: &str,
+    task: &ProjectTask,
+    project_id: &str,
+    job_id: &str,
+    prompt: &str,
+    resume_session: Option<&str>,
+) -> Result<ExecutionOutcome, String> {
+    let project_dir = required_project_dir(storage, project_id)?;
+    let agent = spawn_agent(executable, &project_dir, "Codex", false, |command| {
+        // resume 是 exec 的子命令：`codex exec resume <session> <prompt>`。
+        if let Some(session) = resume_session {
+            command.arg("exec").arg("resume").arg(session);
+        } else {
+            command.arg("exec");
+        }
+        command
+            .arg("--json")
+            .arg("--dangerously-bypass-approvals-and-sandbox")
+            .arg("--skip-git-repo-check")
+            .arg(prompt);
+    })?;
+    record_started_execution(storage, task, job_id)?;
+
+    let (outcome, mut child) = read_agent_output(
+        storage,
+        job_id,
+        &task.id,
+        agent,
+        "Codex",
+        |storage, job_id, line, text_buffer, session_id| {
+            process_codex_line(storage, job_id, line, text_buffer, session_id)
+        },
+    )
+    .await?;
+    finish_agent_outcome(storage, task, "Codex", &mut child, outcome).await
+}
+
+/// 解析 Codex `exec --json` 的单行事件：从 `thread.started` 捕获会话 id
+/// （`thread_id` 即可用于 resume，首次发现时记录一条会话事件），累积
+/// `item.completed` 中 `agent_message` 的文本，并把顶层 `error` 事件并入输出。
+fn process_codex_line(
+    storage: &Storage,
+    job_id: &str,
+    line: &str,
+    text_buffer: &mut String,
+    session_id: &mut Option<String>,
+) -> Result<(), String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return Ok(());
+    };
+    let event_type = value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    match event_type {
+        "thread.started" => {
+            if session_id.is_none() {
+                if let Some(id) = value.get("thread_id").and_then(serde_json::Value::as_str) {
+                    *session_id = Some(id.to_string());
+                    storage
+                        .add_job_event(job_id, "info", "会话", &format!("Codex 会话：{id}"))
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        "item.completed" => {
+            if let Some(item) = value.get("item").and_then(serde_json::Value::as_object) {
+                if item.get("type").and_then(serde_json::Value::as_str) == Some("agent_message") {
+                    if let Some(text) = item.get("text").and_then(serde_json::Value::as_str) {
+                        text_buffer.push_str(text);
+                    }
+                }
+            }
+        }
+        "error" => {
+            if let Some(message) = value.get("message").and_then(serde_json::Value::as_str) {
+                text_buffer.push_str(&format!("\n[Codex 错误] {message}\n"));
             }
         }
         _ => {}
@@ -1026,6 +1224,11 @@ async fn execute_pi(
             .arg(&session_uuid);
     })?;
     record_started_execution(storage, task, job_id)?;
+    // Pi 的 session id 在进程启动前就已确定，立即落事件。这样应用重启导致进程中断时，
+    // 恢复调度仍能取回同一个 id，而不必等待正常收尾写 summary_json。
+    storage
+        .add_job_event(job_id, "info", "会话", &format!("Pi 会话：{session_uuid}"))
+        .map_err(|error| error.to_string())?;
     // Pi 会把 stdin 与首个位置参数合并为初始消息。正文通过 stdin 传递，避免 Windows
     // Windows npm shim 对带换行命令行参数的截断，并规避超长任务的命令行长度上限。
     {
@@ -1074,9 +1277,6 @@ async fn execute_pi(
         validate_pi_session(&session_dir, &session_uuid, prompt)?;
         Some(session_uuid)
     };
-    if let Some(id) = &session_id {
-        let _ = storage.add_job_event(job_id, "info", "会话", &format!("Pi 会话：{id}"));
-    }
     let outcome = AgentProcessOutcome {
         session_id,
         cancelled: outcome.cancelled,
@@ -1320,6 +1520,37 @@ mod tests {
         assert!(error.contains("重新绑定目录"));
     }
 
+    #[test]
+    fn queue_report_excludes_stale_directory_and_preserves_blocker() {
+        use crate::core::storage::Project;
+
+        let storage = test_storage();
+        let missing =
+            std::env::temp_dir().join(format!("flowlet-missing-project-{}", uuid::Uuid::new_v4()));
+        storage
+            .save_project(&Project {
+                id: "stale-project".to_string(),
+                name: "旧路径项目".to_string(),
+                directory_path: Some(missing.to_string_lossy().into_owned()),
+                workspace_project_id: None,
+                workspace_archived: false,
+                created_at: "2026-08-08T00:00:00Z".to_string(),
+                updated_at: "2026-08-08T00:00:00Z".to_string(),
+            })
+            .unwrap();
+        let mut queued_task = task("无法执行的任务");
+        queued_task.id = "blocked-task".to_string();
+        queued_task.project_id = "stale-project".to_string();
+
+        let report = project_task_queue_report(&storage, vec![queued_task]);
+
+        assert!(report.tasks.is_empty());
+        assert_eq!(report.blockers.len(), 1);
+        assert_eq!(report.blockers[0].task_id, "blocked-task");
+        assert_eq!(report.blockers[0].code, "project_directory_unavailable");
+        assert!(report.blockers[0].message.contains("重新绑定目录"));
+    }
+
     /// 在 storage 中造一条带 sessionId 摘要的 project-task-run job。
     fn job_with_session(storage: &Storage, job_id: &str, session_id: &str) {
         storage
@@ -1336,6 +1567,28 @@ mod tests {
         let summary = serde_json::json!({ "sessionId": session_id }).to_string();
         storage
             .finish_job(job_id, "succeeded", &summary, "任务执行完成")
+            .unwrap();
+    }
+
+    fn unfinished_job_with_session_event(storage: &Storage, job_id: &str, session_id: &str) {
+        storage
+            .create_job(
+                job_id,
+                "project-task-run",
+                "任务执行：测试",
+                "正在启动",
+                "manual",
+                1,
+                "开始执行",
+            )
+            .unwrap();
+        storage
+            .add_job_event(
+                job_id,
+                "info",
+                "会话",
+                &format!("Claude Code 会话已初始化：{session_id}"),
+            )
             .unwrap();
     }
 
@@ -1356,6 +1609,24 @@ mod tests {
     }
 
     #[test]
+    fn prompt_tells_resumed_session_to_continue_from_interruption() {
+        let mut interrupted = task("继续修复");
+        interrupted.execution_history = Some(
+            serde_json::json!([{
+                "jobId": "job-before-restart",
+                "interrupted": true
+            }])
+            .to_string(),
+        );
+
+        let prompt = build_task_prompt(&interrupted, None, None);
+
+        assert!(prompt.contains("本次已恢复同一个 Agent 会话"));
+        assert!(prompt.contains("从中断位置继续"));
+        assert!(prompt.contains("不要重复已经完成的工作"));
+    }
+
+    #[test]
     fn resume_prefers_own_job_session_over_base_task() {
         let storage = test_storage();
         job_with_session(&storage, "own-job", "own-session");
@@ -1368,6 +1639,40 @@ mod tests {
         assert_eq!(
             resolve_resume_session(&storage, &rerun, Some(&base)).unwrap(),
             Some("own-session".to_string())
+        );
+    }
+
+    #[test]
+    fn resume_falls_back_to_session_event_when_job_was_interrupted() {
+        let storage = test_storage();
+        unfinished_job_with_session_event(&storage, "interrupted-job", "session-before-restart");
+        let mut rerun = task("应用重启后继续");
+        rerun.last_job_id = Some("interrupted-job".to_string());
+
+        assert_eq!(
+            resolve_resume_session(&storage, &rerun, None).unwrap(),
+            Some("session-before-restart".to_string())
+        );
+    }
+
+    #[test]
+    fn resume_does_not_restore_a_cancelled_job_event() {
+        let storage = test_storage();
+        unfinished_job_with_session_event(&storage, "cancelled-job", "cancelled-session");
+        storage
+            .finish_job(
+                "cancelled-job",
+                "cancelled",
+                r#"{"cancelled":true,"sessionId":null}"#,
+                "任务已取消",
+            )
+            .unwrap();
+        let mut rerun = task("取消后重新提交");
+        rerun.last_job_id = Some("cancelled-job".to_string());
+
+        assert_eq!(
+            resolve_resume_session(&storage, &rerun, None).unwrap(),
+            None
         );
     }
 
@@ -1407,6 +1712,12 @@ mod tests {
         assert_eq!(
             agent_profile_meta("Claude Code"),
             Some(("claude-code", "Claude Code"))
+        );
+        // Codex 复用 chatgpt-desktop 的探测（含 Codex CLI 与 ChatGPT Desktop），
+        // 执行时 resolve_agent_executable 会优先选 CLI 表面的安装。
+        assert_eq!(
+            agent_profile_meta("Codex"),
+            Some(("chatgpt-desktop", "Codex"))
         );
         assert_eq!(
             agent_profile_meta("OpenCode"),
@@ -1506,6 +1817,85 @@ mod tests {
         )
         .unwrap();
         assert_eq!(buffer, "分析结果总结");
+    }
+
+    #[test]
+    fn codex_line_captures_thread_id_and_agent_message() {
+        let storage = test_storage();
+        let mut buffer = String::new();
+        let mut session_id = None;
+        // thread.started：捕获 thread_id 作为会话 id（Codex resume 用），并记录会话事件。
+        process_codex_line(
+            &storage,
+            "job-1",
+            r#"{"type":"thread.started","thread_id":"019fd700-0000-4000-8000-000000000001"}"#,
+            &mut buffer,
+            &mut session_id,
+        )
+        .unwrap();
+        assert_eq!(
+            session_id.as_deref(),
+            Some("019fd700-0000-4000-8000-000000000001")
+        );
+        // item.completed 的 agent_message：累积 item.text。
+        process_codex_line(
+            &storage,
+            "job-1",
+            r#"{"type":"item.completed","item":{"id":"1","type":"agent_message","text":"分析完成"}}"#,
+            &mut buffer,
+            &mut session_id,
+        )
+        .unwrap();
+        assert_eq!(buffer, "分析完成");
+        // 会话事件只记录一次：后续 thread.started 不再重复写事件。
+        let mut buffer2 = String::new();
+        let mut session_id2 = Some("019fd700-0000-4000-8000-000000000001".to_string());
+        process_codex_line(
+            &storage,
+            "job-1",
+            r#"{"type":"thread.started","thread_id":"019fd700-0000-4000-8000-000000000001"}"#,
+            &mut buffer2,
+            &mut session_id2,
+        )
+        .unwrap();
+        assert!(buffer2.is_empty());
+    }
+
+    #[test]
+    fn codex_line_ignores_non_text_events_and_surfaces_errors() {
+        let storage = test_storage();
+        let mut buffer = String::new();
+        let mut session_id = None;
+        // turn.completed / 非 agent_message 的 item 不累积文本。
+        process_codex_line(
+            &storage,
+            "job-1",
+            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#,
+            &mut buffer,
+            &mut session_id,
+        )
+        .unwrap();
+        process_codex_line(
+            &storage,
+            "job-1",
+            r#"{"type":"item.completed","item":{"id":"1","type":"command_execution","command":"echo hi"}}"#,
+            &mut buffer,
+            &mut session_id,
+        )
+        .unwrap();
+        assert!(buffer.is_empty());
+        // 顶层 error 事件并入输出，供任务日志排查。
+        process_codex_line(
+            &storage,
+            "job-1",
+            r#"{"type":"error","message":"approval required"}"#,
+            &mut buffer,
+            &mut session_id,
+        )
+        .unwrap();
+        assert!(buffer.contains("[Codex 错误] approval required"));
+        // 非 JSON 行（日志噪音）直接忽略。
+        process_codex_line(&storage, "job-1", "not json", &mut buffer, &mut session_id).unwrap();
     }
 
     #[test]
@@ -1751,6 +2141,75 @@ mod tests {
         assert!(!session_id.is_empty(), "OpenCode 应能解析会话 id");
         assert_eq!(
             storage.get_task_status("task-opening").unwrap().as_deref(),
+            Some("review")
+        );
+        let _ = std::fs::remove_dir_all(&project_dir);
+    }
+
+    /// 真实环境集成测试：用本机已安装的 Codex CLI 完整跑一遍 execute_codex，
+    /// 验证 Codex 进程能启动、`--json` 事件能累积、会话 id（`thread.started` 的
+    /// `thread_id`）能解析、任务能回写待审核。
+    /// 需要本机已安装 Codex CLI 且 Flowlet 代理在 18640 运行（Codex 默认模型走代理）；
+    /// 正常测试默认跳过。
+    #[tokio::test]
+    #[ignore]
+    async fn execute_codex_integration_runs_real_codex() {
+        use crate::core::storage::Project;
+        let storage = test_storage();
+        let project_dir = std::env::temp_dir().join(format!(
+            "flowlet-codex-integration-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&project_dir).unwrap();
+        storage
+            .save_project(&Project {
+                id: "project-codex".to_string(),
+                name: "集成测试".to_string(),
+                directory_path: Some(project_dir.to_string_lossy().into_owned()),
+                workspace_project_id: None,
+                workspace_archived: false,
+                created_at: "2026-08-06T00:00:00Z".to_string(),
+                updated_at: "2026-08-06T00:00:00Z".to_string(),
+            })
+            .unwrap();
+        storage
+            .create_job(
+                "job-codex",
+                "project-task-run",
+                "任务执行：集成",
+                "正在启动",
+                "manual",
+                1,
+                "开始执行",
+            )
+            .unwrap();
+
+        let mut task = task("集成测试");
+        task.agent_profile = "Codex".to_string();
+        task.id = "task-codex".to_string();
+        task.project_id = "project-codex".to_string();
+        task.status = "submitted".to_string();
+        storage.save_project_task(&task).unwrap();
+
+        let executable = resolve_agent_executable("Codex").await.expect("Codex 应已安装");
+        let outcome = execute_codex(
+            &storage,
+            &executable,
+            &task,
+            "project-codex",
+            "job-codex",
+            "reply with exactly: CODEX_EXECUTED_OK",
+            None,
+        )
+        .await
+        .expect("execute_codex 应成功执行");
+        assert_eq!(outcome.job_status, "succeeded");
+        // Codex 的会话 id 即 --json 首条 thread.started 的 thread_id，summary 应含非空会话 id。
+        let summary: serde_json::Value = serde_json::from_str(&outcome.summary_json).unwrap();
+        let session_id = summary["sessionId"].as_str().unwrap_or("");
+        assert!(!session_id.is_empty(), "Codex 应能解析会话 id");
+        assert_eq!(
+            storage.get_task_status("task-codex").unwrap().as_deref(),
             Some("review")
         );
         let _ = std::fs::remove_dir_all(&project_dir);

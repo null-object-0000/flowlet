@@ -91,8 +91,9 @@ Flowlet 当前有六种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI �
 - 同一渠道可以添加多个账号；
 - 账号和开放模型为空时，代理仍可正常启动；
 - 模型候选来自最近一次上游 `/models` 返回的 `synced_models`；
-- 用户必须在账号编辑器中显式选择 `exposed_models`；
-- 实际路由取“全局白名单 ∩ `synced_models` ∩ `exposed_models`”；
+- 用户必须在账号编辑器中显式选择上游原始模型 ID `exposed_models`；
+- 实际路由取“全局白名单（按规范模型判断）∩ `synced_models` ∩ `exposed_models`”；
+- 同一规范模型的多个上游 ID 分别生成候选路由，对外模型列表与用量仍按规范 ID 合并；
 - 自定义渠道只为已经填写 Base URL 的协议生成路由；
 - 客户端协议与上游协议必须一致，Flowlet 不在协议之间转换；
 - 第一个渠道账号的新路由默认开启，后续账号的新路由默认关闭；
@@ -100,7 +101,7 @@ Flowlet 当前有六种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI �
 
 ## 4. 模型支持
 
-Flowlet 当前总共支持 13 个规范化模型。这个列表是全局白名单，不是按渠道切分的
+Flowlet 当前总共支持 14 个规范化模型。这个列表是全局白名单，不是按渠道切分的
 固定路由表。
 
 | 官方归属 | 规范化模型 ID | Responses 说明 |
@@ -117,6 +118,8 @@ Flowlet 当前总共支持 13 个规范化模型。这个列表是全局白名�
 | Qwen | `qwen3.6-plus` | ✅ 上游确认 |
 | Qwen | `qwen3.6-flash` | ✅ 上游确认 |
 | Z.AI | `glm-5.2` | — 上游文档未确认支持 |
+| Z.AI | `glm-4.7` | — 上游文档未确认支持 |
+| Z.AI | `glm-4.5-air` | — 上游文档未确认支持 |
 
 `flowlet-pro` 与 `flowlet-flash` 没有固定档位对应关系；用户可把上述任意已有渠道模型加入任一聚合模型。
 

@@ -1,10 +1,10 @@
 use crate::core::config::{
-    ACCOUNT_CREDENTIAL_HEALTHY, AuthStrategy, ChannelAccount, ChannelPreset, ProtocolType,
-    RouteCandidate, UaClientRule,
+    AuthStrategy, ChannelAccount, ChannelPreset, ProtocolType, RouteCandidate, UaClientRule,
+    ACCOUNT_CREDENTIAL_HEALTHY,
 };
 use axum::{
     body::Body,
-    http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::Response,
 };
 use base64::Engine;
@@ -297,10 +297,7 @@ pub(super) fn build_upstream_url(
 /// 官方端点为 `/api/paas/v4/chat/completions` 而非 `/api/paas/v4/v1/chat/completions`。
 /// 入站 `/v1/chat/completions` / `/v1/models` 转发时去掉 `/v1`（同时兼容
 /// `/openai/v1/...` 入口前缀的防御性去除），得到 `{base}/chat/completions`。
-pub(super) fn build_upstream_url_without_openai_v1(
-    base_url: &str,
-    original_uri: &Uri,
-) -> String {
+pub(super) fn build_upstream_url_without_openai_v1(base_url: &str, original_uri: &Uri) -> String {
     let base = base_url.trim_end_matches('/');
     let path = original_uri
         .path_and_query()
@@ -803,8 +800,8 @@ mod tests {
     }
 
     fn gzip_compress(bytes: &[u8]) -> Vec<u8> {
-        use flate2::Compression;
         use flate2::write::GzEncoder;
+        use flate2::Compression;
         use std::io::Write;
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(bytes).unwrap();

@@ -182,8 +182,8 @@ fn attach_webview2_response_capture(
 ) -> Result<(), String> {
     use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2_2};
     use webview2_com::{
-        WebResourceResponseReceivedEventHandler, WebResourceResponseViewGetContentCompletedHandler,
-        take_pwstr,
+        take_pwstr, WebResourceResponseReceivedEventHandler,
+        WebResourceResponseViewGetContentCompletedHandler,
     };
     use windows::core::{Interface, PWSTR};
 

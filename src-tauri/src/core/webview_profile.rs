@@ -66,9 +66,10 @@ pub fn migrate_webview_profiles_to_portable(
         return report;
     }
     if let Err(error) = std::fs::create_dir_all(portable_root) {
-        report
-            .failures
-            .push(format!("创建便携 WebView 数据目录 {} 失败: {error}", portable_root.display()));
+        report.failures.push(format!(
+            "创建便携 WebView 数据目录 {} 失败: {error}",
+            portable_root.display()
+        ));
         return report;
     }
 
@@ -360,10 +361,8 @@ mod tests {
 
     #[test]
     fn migrates_legacy_profiles_to_portable_root() {
-        let root = std::env::temp_dir().join(format!(
-            "flowlet-webview-migrate-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("flowlet-webview-migrate-{}", uuid::Uuid::new_v4()));
         let legacy = root.join("legacy");
         let portable = root.join("portable");
         make_profile_with_cookies(&legacy, "main-webview");

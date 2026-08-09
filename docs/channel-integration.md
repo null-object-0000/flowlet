@@ -47,7 +47,7 @@
 | 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 | 标准模型列表（无上下文详情） | 标准 OpenAI `/models`（端点不以 `/v1` 结尾，必须 `endpoints.models` 覆盖） | 标准 OpenAI `/models` |
 | 自动余额 | 否 | 是 | 是 | 否 | 否 | 否 |
 | 资源模式 | Token 资源包 UI | 否 | 否 | API 按量付费 + Token Plan 订阅双模式（API 手动维护余额；Token Plan 额度仅官方控制台可见） | 手动维护（按量付费） | 手动维护 |
-| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.6-flash → flash` | `glm-5.2 → pro` | 无 |
+| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.6-flash → flash` | `glm-5.2 → pro`、`glm-4.7 → pro`、`glm-4.5-air → flash` | 无 |
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
 

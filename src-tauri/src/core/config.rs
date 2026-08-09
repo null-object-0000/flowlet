@@ -216,10 +216,8 @@ impl ProtocolType {
             .next()
             .unwrap_or(path)
             .trim_start_matches('/');
-        matches!(
-            p,
-            "v1/responses" | "openai/v1/responses" | "responses"
-        ) || p.starts_with("v1/responses/")
+        matches!(p, "v1/responses" | "openai/v1/responses" | "responses")
+            || p.starts_with("v1/responses/")
             || p.starts_with("openai/v1/responses/")
             || p.starts_with("responses/")
     }
@@ -528,7 +526,8 @@ pub struct ChannelAccount {
     /// 最近一次 /models 拉取成功的时间（RFC3339），与 synced_models 配套。
     #[serde(default)]
     pub models_synced_at: Option<String>,
-    /// 用户显式勾选要开放的上游模型 ID 列表（已收敛到渠道白名单内）。
+    /// 用户显式勾选要开放的上游原始模型 ID 列表（按规范模型映射受全局白名单约束）。
+    /// 同一规范模型的多个上游 ID 可同时存在，分别生成 Route Candidate。
     /// None 表示尚未用新流程配置过（路由保持现状）；Some（可为空）表示按此列表严格对账路由。
     #[serde(default)]
     pub exposed_models: Option<Vec<String>>,

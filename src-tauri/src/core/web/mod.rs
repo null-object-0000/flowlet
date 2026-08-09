@@ -7,11 +7,11 @@ use super::config::{
 use super::metrics::Metrics;
 use super::storage::Storage;
 use axum::{
-    Router,
     extract::State,
-    http::{HeaderMap, StatusCode, header},
+    http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json, Response},
     routing::get,
+    Router,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -160,7 +160,12 @@ async fn logs_handler(State(state): State<Arc<WebState>>) -> Json<Vec<RequestLog
 
 async fn usage_handler(State(state): State<Arc<WebState>>) -> Json<Vec<UsageSummaryRow>> {
     // Web 嵌入式视图仅展示本机用量，设备维度固定为 "local"。
-    Json(state.storage.usage_summary("all", "local").unwrap_or_default())
+    Json(
+        state
+            .storage
+            .usage_summary("all", "local")
+            .unwrap_or_default(),
+    )
 }
 
 async fn stats_handler(State(state): State<Arc<WebState>>) -> Json<Vec<AccountStatsRow>> {

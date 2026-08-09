@@ -1,7 +1,7 @@
-use super::Storage;
 use super::agent_session_metadata::list_native_agent_sessions;
 use super::agent_session_timeline::get_native_agent_session_timeline;
 use super::config::{AgentSessionNativeUsage, AgentSessionRow};
+use super::Storage;
 use chrono::Utc;
 use serde::Serialize;
 
@@ -620,16 +620,12 @@ mod tests {
         assert!(!NativeSourceKind::Codex.matches("claude-code"));
         assert!(NativeSourceKind::ClaudeCode.matches("claude-code"));
         assert!(NativeSourceKind::OpenCode.matches("opencode"));
-        assert!(
-            !NativeSourceKind::Codex
-                .capabilities()
-                .contains(&"native_cost".to_string())
-        );
-        assert!(
-            NativeSourceKind::OpenCode
-                .capabilities()
-                .contains(&"native_cost".to_string())
-        );
+        assert!(!NativeSourceKind::Codex
+            .capabilities()
+            .contains(&"native_cost".to_string()));
+        assert!(NativeSourceKind::OpenCode
+            .capabilities()
+            .contains(&"native_cost".to_string()));
     }
 
     #[test]

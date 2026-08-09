@@ -839,8 +839,7 @@ fn classify_codex_cli_method(path: &Path) -> AgentInstallMethod {
         || normalized.ends_with("/.local/bin/codex.exe")
         || normalized.contains("/programs/openai/codex/bin/")
         || (normalized.contains("/.codex/packages/standalone/releases/")
-            && (normalized.ends_with("/bin/codex")
-                || normalized.ends_with("/bin/codex.exe")))
+            && (normalized.ends_with("/bin/codex") || normalized.ends_with("/bin/codex.exe")))
     {
         AgentInstallMethod::Native
     } else if normalized.starts_with("/usr/bin/") || normalized.starts_with("/usr/local/bin/") {
@@ -904,7 +903,7 @@ fn desktop_version(path: &Path) -> Option<String> {
 fn windows_file_version(path: &Path) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
     };
 
     let wide = path
@@ -1147,7 +1146,7 @@ fn decode_process_output(bytes: &[u8]) -> String {
 
 #[cfg(windows)]
 fn decode_windows_acp(bytes: &[u8]) -> String {
-    use windows_sys::Win32::Globalization::{CP_ACP, MultiByteToWideChar};
+    use windows_sys::Win32::Globalization::{MultiByteToWideChar, CP_ACP};
     if bytes.is_empty() {
         return String::new();
     }

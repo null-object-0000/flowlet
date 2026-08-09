@@ -426,10 +426,7 @@ fn apply_catalog(
 // ---------------------------------------------------------------------------
 
 /// 同步单个工作区项目：拉远端 → 合并到本地 → 本机有新状态则回写上传。
-async fn sync_project_inner(
-    storage: &Storage,
-    ws_id: &str,
-) -> Result<(bool, bool, usize), String> {
+async fn sync_project_inner(storage: &Storage, ws_id: &str) -> Result<(bool, bool, usize), String> {
     let config = load_config(storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
     let secret = read_secret(&config)?;
     let key = account_workspace_sync::read_workspace_key(&config)?;
@@ -480,7 +477,11 @@ async fn sync_project_inner(
         catalog.revision += 1;
         catalog.updated_at = chrono::Utc::now().to_rfc3339();
         let uploaded_etag = store
-            .put(&object_key, encrypt_catalog(&catalog, &key)?, remote_etag.as_deref())
+            .put(
+                &object_key,
+                encrypt_catalog(&catalog, &key)?,
+                remote_etag.as_deref(),
+            )
             .await?
             .or(store.head_etag(&object_key).await?);
         if let Some(etag) = uploaded_etag {
@@ -697,7 +698,11 @@ pub async fn push_project(storage: Storage, project_id: &str) -> Result<bool, St
         catalog.revision += 1;
         catalog.updated_at = chrono::Utc::now().to_rfc3339();
         let uploaded_etag = store
-            .put(&object_key, encrypt_catalog(&catalog, &key)?, remote_etag.as_deref())
+            .put(
+                &object_key,
+                encrypt_catalog(&catalog, &key)?,
+                remote_etag.as_deref(),
+            )
             .await?
             .or(store.head_etag(&object_key).await?);
         if let Some(etag) = uploaded_etag {
@@ -717,7 +722,10 @@ pub async fn push_project(storage: Storage, project_id: &str) -> Result<bool, St
 
 /// 项目发生变更后异步通知：立即推送该项目到工作区。
 /// 命令层调用，不阻塞保存流程；工作区未启用时静默跳过。
-pub fn notify_project_changed(storage: Storage, project_id: &str) -> tauri::async_runtime::JoinHandle<()> {
+pub fn notify_project_changed(
+    storage: Storage,
+    project_id: &str,
+) -> tauri::async_runtime::JoinHandle<()> {
     let storage = storage.clone();
     let project_id = project_id.to_string();
     tauri::async_runtime::spawn(async move {
@@ -755,7 +763,11 @@ pub async fn push_tombstone(storage: Storage, ws_id: &str) -> Result<bool, Strin
     catalog.revision += 1;
     catalog.updated_at = chrono::Utc::now().to_rfc3339();
     let uploaded_etag = store
-        .put(&object_key, encrypt_catalog(&catalog, &key)?, remote_etag.as_deref())
+        .put(
+            &object_key,
+            encrypt_catalog(&catalog, &key)?,
+            remote_etag.as_deref(),
+        )
         .await?
         .or(store.head_etag(&object_key).await?);
     let mut etag_map = read_etag_map(&storage)?;
@@ -888,7 +900,10 @@ mod tests {
         let outcome = apply_catalog(&storage, &mut catalog).unwrap();
         assert!(outcome.created_project);
         assert_eq!(outcome.created_tasks, 1);
-        let local = storage.get_project_by_workspace_id("ws-remote").unwrap().unwrap();
+        let local = storage
+            .get_project_by_workspace_id("ws-remote")
+            .unwrap()
+            .unwrap();
         assert_eq!(local.name, "远端项目");
         assert!(local.directory_path.is_none());
         let tasks = storage.list_project_tasks(&local.id).unwrap();

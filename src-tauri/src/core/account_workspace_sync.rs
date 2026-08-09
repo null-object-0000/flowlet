@@ -436,7 +436,12 @@ fn finish_workspace_job(
 
 pub async fn initialize(storage: Storage) -> Result<AccountWorkspaceSyncResult, String> {
     let _guard = ACCOUNT_WORKSPACE_SYNC_GUARD.lock().await;
-    let job_id = create_workspace_job(&storage, "manual", "启用渠道账号工作区", "开始创建账号工作区目录")?;
+    let job_id = create_workspace_job(
+        &storage,
+        "manual",
+        "启用渠道账号工作区",
+        "开始创建账号工作区目录",
+    )?;
     match initialize_inner(&storage).await {
         Ok(result) => {
             finish_workspace_job(
@@ -526,7 +531,12 @@ pub async fn sync(
     trigger_source: &str,
 ) -> Result<AccountWorkspaceSyncResult, String> {
     let _guard = ACCOUNT_WORKSPACE_SYNC_GUARD.lock().await;
-    let job_id = create_workspace_job(&storage, trigger_source, "渠道账号工作区同步", "开始同步渠道账号工作区目录")?;
+    let job_id = create_workspace_job(
+        &storage,
+        trigger_source,
+        "渠道账号工作区同步",
+        "开始同步渠道账号工作区目录",
+    )?;
     match sync_inner(&storage).await {
         Ok(result) => {
             let stage_message = if result.uploaded {
@@ -804,7 +814,7 @@ mod tests {
             storage
                 .local_account_id_for_workspace("workspace-friday")
                 .unwrap()
-            .as_deref(),
+                .as_deref(),
             Some("local-friday")
         );
     }

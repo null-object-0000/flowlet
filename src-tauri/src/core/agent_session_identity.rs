@@ -132,7 +132,9 @@ fn valid_header_value(value: &str) -> Option<String> {
 fn codex_turn_metadata_session_id(header: &impl Fn(&str) -> Option<String>) -> Option<String> {
     let metadata = header("x-codex-turn-metadata")?;
     let value = serde_json::from_str::<serde_json::Value>(&metadata).ok()?;
-    let session_id = value.get("session_id").and_then(serde_json::Value::as_str)?;
+    let session_id = value
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)?;
     valid_header_value(session_id)
 }
 
@@ -254,7 +256,10 @@ mod tests {
 
         let mut headers = HeaderMap::new();
         headers.insert("user-agent", HeaderValue::from_static(ua));
-        headers.insert("x-codex-turn-metadata", HeaderValue::from_str(&metadata).unwrap());
+        headers.insert(
+            "x-codex-turn-metadata",
+            HeaderValue::from_str(&metadata).unwrap(),
+        );
 
         let expected = AgentSessionIdentity {
             agent_type: "codex-desktop".to_string(),
@@ -264,7 +269,8 @@ mod tests {
         assert_eq!(from_http_headers(&headers), Some(expected.clone()));
         assert_eq!(
             from_header_json(
-                &serde_json::json!({ "user-agent": ua, "x-codex-turn-metadata": metadata }).to_string(),
+                &serde_json::json!({ "user-agent": ua, "x-codex-turn-metadata": metadata })
+                    .to_string(),
             ),
             Some(expected),
         );

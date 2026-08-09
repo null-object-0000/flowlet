@@ -240,6 +240,8 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - qwen3.6-plus
 - qwen3.6-flash
 - glm-5.2
+- glm-4.7
+- glm-4.5-air
 ```
 
 这是 Flowlet **总共支持哪些模型**（前端 `FLOWLET_SUPPORTED_MODELS` 与 Rust
@@ -251,12 +253,14 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 1. 用户在账号编辑器里点「拉取模型列表」→ 调底层 `/models`（Rust command
    `fetch_channel_models`，用连接参数拉取，不依赖账号是否已保存）；
 2. 编辑器展示 `/models` 返回的**全量**上游模型，白名单之外的模型展示但**禁用勾选**；
-3. 用户勾选要开放的模型 → 保存到 `channel_accounts.exposed_models`；
+3. 用户勾选要开放的上游模型资源 → 将 `/models` 返回的原始 ID 保存到
+   `channel_accounts.exposed_models`；同一规范模型的多个上游 ID 可以分别勾选；
 4. 保存账号时前端按 `exposed_models` **对账**路由（删除取消勾选的、补齐新勾选的，
    保留已有启停/优先级）。一个都不勾 → 该账号不开放任何模型。
 
-实际生成的路由 = 全局白名单 **∩ 最近一次 `/models` 返回的 `synced_models`
-∩ 用户勾选的 `exposed_models`**：未被 `/models` 返回或白名单外的模型绝不生成路由。
+实际生成的路由 = 全局白名单（按规范模型判断）**∩ 最近一次 `/models` 返回的
+`synced_models` ∩ 用户勾选的上游原始 ID `exposed_models`**：未被 `/models` 返回或
+无法映射到白名单规范模型的上游 ID 绝不生成路由。
 
 `custom` 自定义渠道同样遵守全局白名单：用于中转站等非内置服务，账号级至少填写
 一个 OpenAI/Anthropic Base URL，只为已填写地址的协议生成路由；模型必须来自该账号
@@ -266,7 +270,10 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 `exposed_models` 的语义（保证向后兼容）：
 
 * `null` = 尚未用新流程配置过 → 路由保持原样不动（老账号升级不受影响，启动补齐与保存对账都跳过它）；
-* 数组（可为空）= 按此列表严格对账路由。
+* 数组（可为空）= 上游原始模型 ID 选择列表，按此列表严格对账路由；同一规范模型
+  可对应多个独立上游资源并分别生成 Route Candidate；
+* 向后兼容：旧版本曾将别名选择只保存为规范 ID；当该规范 ID 未被 `/models` 精确返回时，
+  允许回退命中同规范模型的首个上游 ID。
 
 `channel_accounts.synced_models` 是候选池缓存和最近一次 `/models` 的来源凭据：
 记录最近一次拉取结果，既供编辑器预填，也参与已配置账号的路由生成校验。合并逻辑位于 Rust
@@ -280,15 +287,16 @@ DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即�
 
 上游模型变体（别名）映射：
 
-部分渠道端点的 `/models` 会返回与白名单规范名不同、但实际是同一模型的日期快照
-或别名（如千问 Token Plan 套餐端点返回 `deepseek-v4-flash-0731`，实际就是
-`deepseek-v4-flash`）。Flowlet 维护「上游变体 → 规范模型 ID」映射表（前端
+部分渠道端点的 `/models` 会返回与白名单规范名不同、但属于同一规范模型身份的日期
+快照或别名。它们可能是独立计费、独立额度或不同有效期的上游资源；例如千问端点可同时
+返回 `deepseek-v4-flash` 与 `deepseek-v4-flash-0731`，两者必须允许分别选择和路由。
+Flowlet 维护「上游变体 → 规范模型 ID」映射表（前端
 `src/domains/channel/types.ts` 的 `MODEL_ALIASES` 与 Rust `channels_config.rs`
-的 `MODEL_ALIASES`，两侧必须保持一致）。变体按规范 ID 命中白名单、参与编辑器
-勾选、路由生成、用量合并与品牌/档位/基准价格解析；`synced_models` 与路由的
-`upstream_model` 仍保留 `/models` 返回的上游原名，转发时按上游实际支持的名字
-发起请求；路由 `virtual_model_id` 使用规范 ID。`/models` 同时返回规范名与变体时
-优先使用规范名，保持历史路由签名稳定。别名只影响匹配与展示，不新增模型身份。
+的 `MODEL_ALIASES`，两侧必须保持一致）。变体按规范 ID 命中白名单、参与用量合并与
+品牌/档位/基准价格解析；编辑器勾选、`synced_models`、`exposed_models` 与路由的
+`upstream_model` 均保留 `/models` 返回的上游原名，路由 `virtual_model_id` 使用规范 ID。
+同一规范模型的多个上游 ID 不新增对外模型身份，但会生成多个可独立启停、排序和失败
+降级的 Route Candidate；`/models` 对外仍只返回一次规范模型 ID。
 
 ---
 

@@ -357,7 +357,7 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
   "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
   "kimi": ["kimi-k3", "kimi-k2.7-code"],
   "qwen": ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
-  "zhipu": ["glm-5.2"]
+  "zhipu": ["glm-5.2", "glm-4.7", "glm-4.5-air"]
 }
 ```
 
@@ -373,12 +373,16 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
   例如千问套餐端点也会返回 `deepseek-v4-pro`，该模型在全局白名单内，故可勾选。
 - 一个账号开放哪些模型由**用户显式选择**：在账号编辑器里手动「拉取模型列表」
   （底层 `/models`，Rust command `fetch_channel_models`），编辑器展示全量上游模型、
-  白名单之外的模型展示但禁用勾选，用户勾选后保存到 `channel_accounts.exposed_models`。
+  白名单之外的模型展示但禁用勾选，用户勾选后将上游返回的原始模型 ID 保存到
+  `channel_accounts.exposed_models`；同一规范模型映射到多个独立上游资源时可分别勾选。
 - 实际为账号自动生成的直连路由 = 全局白名单 **∩ 最近一次 `/models` 返回的
-  `synced_models` ∩ 用户勾选的 `exposed_models`**。
+  `synced_models` ∩ 用户勾选的上游原始 ID `exposed_models`**。白名单按规范模型判断，
+  路由 `virtual_model_id` 使用规范 ID，`upstream_model` 保留原始 ID；同一规范模型的
+  多个上游 ID 分别生成 Route Candidate，对外 `/models` 仍只暴露一个规范模型。
   - 白名单之外的模型**绝不生成路由**（即使上游 `/models` 返回了、用户也看得到，仍不可勾选）。
   - `exposed_models` 为 `NULL`（尚未用新流程配置）的账号**保持路由现状不动**（老账号升级不受影响）；
-    为空数组的账号**不开放任何模型**。
+    为空数组的账号**不开放任何模型**；旧版本只保存规范 ID 的别名选择在规范 ID 未
+    精确返回时，兼容回退到同规范模型的首个上游 ID。
 - `channel_accounts.synced_models` / `models_synced_at` 保存最近一次 `/models` 结果，
   既作为编辑器候选池缓存，也作为已配置账号生成路由时的来源校验；未在
   `synced_models` 中的模型不会生成或保留路由。

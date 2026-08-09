@@ -1,7 +1,7 @@
-use super::{Storage, StorageError, parse_auth_strategy};
+use super::{parse_auth_strategy, Storage, StorageError};
 use crate::core::config::{
-    ACCOUNT_CREDENTIAL_HEALTHY, ACCOUNT_CREDENTIAL_INVALID_KEY, ChannelAccount, ChannelModel,
-    ChannelPreset, ProtocolType, RouteCandidate, RouteRule, VirtualModel,
+    ChannelAccount, ChannelModel, ChannelPreset, ProtocolType, RouteCandidate, RouteRule,
+    VirtualModel, ACCOUNT_CREDENTIAL_HEALTHY, ACCOUNT_CREDENTIAL_INVALID_KEY,
 };
 use rusqlite::{params, OptionalExtension};
 

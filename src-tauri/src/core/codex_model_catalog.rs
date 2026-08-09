@@ -48,7 +48,8 @@ mod tests {
     ];
 
     /// Codex CLI 0.137.0 的 `ReasoningEffort` 合法值（不含 max/ultra）。
-    const CODEX_MODEL_VALID_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh"];
+    const CODEX_MODEL_VALID_EFFORTS: &[&str] =
+        &["none", "minimal", "low", "medium", "high", "xhigh"];
 
     #[test]
     fn builtin_catalog_is_valid_json_with_flowlet_models() {
@@ -61,8 +62,14 @@ mod tests {
             .iter()
             .filter_map(|model| model.get("slug").and_then(Value::as_str))
             .collect::<Vec<_>>();
-        assert!(slugs.contains(&"flowlet-pro"), "缺少 flowlet-pro: {slugs:?}");
-        assert!(slugs.contains(&"flowlet-flash"), "缺少 flowlet-flash: {slugs:?}");
+        assert!(
+            slugs.contains(&"flowlet-pro"),
+            "缺少 flowlet-pro: {slugs:?}"
+        );
+        assert!(
+            slugs.contains(&"flowlet-flash"),
+            "缺少 flowlet-flash: {slugs:?}"
+        );
         for model in models {
             for field in CODEX_MODEL_REQUIRED_FIELDS {
                 assert!(

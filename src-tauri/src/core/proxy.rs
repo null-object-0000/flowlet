@@ -1,23 +1,23 @@
-use super::agent_session_identity::{AgentSessionIdentity, from_http_headers};
+use super::agent_session_identity::{from_http_headers, AgentSessionIdentity};
 use super::channels_config::openai_path_strips_v1;
 use super::config::{
-    ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig,
-    RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput, classify_request,
+    classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType,
+    ProxyBindConfig, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
 };
 use super::power::{ActivityPermit, ActivityTracker};
 use super::rate_limiter::RateLimiter;
 use super::storage::Storage;
 use super::usage::{
-    ResponseUsage, StreamUsageAccumulator, contains_sse_output_token, extract_response_usage,
-    extract_stream_usage,
+    contains_sse_output_token, extract_response_usage, extract_stream_usage, ResponseUsage,
+    StreamUsageAccumulator,
 };
 use axum::{
-    Router,
     body::Body,
     extract::{Request, State},
     http::{HeaderMap, Method, StatusCode},
     response::Response,
     routing::any,
+    Router,
 };
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -142,9 +142,8 @@ mod proxy_routing;
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
     build_upstream_url_without_openai_v1, copy_response_headers, cors_preflight_response,
-    encode_body_base64, ensure_config_file, extract_model, identify_client,
-    identify_client_agent, is_model_list_request, is_streaming_response, load_ua_rules,
-    rewrite_model, sanitize_headers,
+    encode_body_base64, ensure_config_file, extract_model, identify_client, identify_client_agent,
+    is_model_list_request, is_streaming_response, load_ua_rules, rewrite_model, sanitize_headers,
 };
 // 仅测试（proxy_tests）需要直接调用 UA 子串匹配；非测试构建不应引入以免告警。
 #[cfg(test)]
@@ -721,9 +720,7 @@ async fn forward_request(
         // 账号级 Base URL 按协议分别覆盖，未配置时回退到渠道默认地址。
         // Responses 复用 OpenAI 的覆盖地址（两者共享上游 Base URL）。
         let account_base_url = match &detected_protocol {
-            ProtocolType::OpenAi | ProtocolType::Responses => {
-                account.effective_openai_base_url()
-            }
+            ProtocolType::OpenAi | ProtocolType::Responses => account.effective_openai_base_url(),
             ProtocolType::Anthropic => account.effective_anthropic_base_url(),
         };
         let base_url = account_base_url
@@ -736,8 +733,7 @@ async fn forward_request(
             && matches!(
                 detected_protocol,
                 ProtocolType::OpenAi | ProtocolType::Responses
-            )
-        {
+            ) {
             build_upstream_url_without_openai_v1(base_url, &parts.uri)
         } else {
             build_upstream_url(base_url, &parts.uri, &detected_protocol)
@@ -1377,9 +1373,7 @@ async fn build_response(
                     usage_capture,
                     usage,
                     done.usage_status.as_deref().unwrap_or("complete"),
-                    done.usage_source
-                        .as_deref()
-                        .unwrap_or("upstream_response"),
+                    done.usage_source.as_deref().unwrap_or("upstream_response"),
                 );
             }
         });
@@ -1552,11 +1546,11 @@ fn record_parsed_usage(
             output_tokens: usage.output_tokens,
             total_tokens: usage.total_tokens,
         };
-        if let Err(err) = capture.storage.upsert_usage_record_with_metadata(
-            &input,
-            &usage_status,
-            &usage_source,
-        ) {
+        if let Err(err) =
+            capture
+                .storage
+                .upsert_usage_record_with_metadata(&input, &usage_status, &usage_source)
+        {
             tracing::warn!("写入 usage 记录失败: {err}");
         }
     });

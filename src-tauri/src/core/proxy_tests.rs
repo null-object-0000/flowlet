@@ -2,7 +2,7 @@ use super::proxy_routing::rank_candidates_by_score;
 use super::*;
 use crate::core::config::{AuthStrategy, UaClientRule};
 use axum::{
-    http::{HeaderValue, Uri, header},
+    http::{header, HeaderValue, Uri},
     routing::post,
 };
 use std::path::PathBuf;
@@ -154,8 +154,12 @@ fn is_responses_path_detects_responses_entry_paths() {
     assert!(ProtocolType::is_responses_path("/openai/v1/responses"));
     assert!(ProtocolType::is_responses_path("/responses"));
     assert!(ProtocolType::is_responses_path("/v1/responses/resp_1"));
-    assert!(ProtocolType::is_responses_path("/openai/v1/responses/resp_1"));
-    assert!(ProtocolType::is_responses_path("/v1/responses/resp_1/input_items"));
+    assert!(ProtocolType::is_responses_path(
+        "/openai/v1/responses/resp_1"
+    ));
+    assert!(ProtocolType::is_responses_path(
+        "/v1/responses/resp_1/input_items"
+    ));
     assert!(ProtocolType::is_responses_path("/v1/responses?stream=true"));
 }
 
@@ -594,8 +598,8 @@ fn ignores_response_without_usage() {
 #[test]
 fn decodes_compressed_buffered_usage_without_mutating_passthrough_bytes() {
     use flate2::{
-        Compression,
         write::{DeflateEncoder, GzEncoder},
+        Compression,
     };
     use std::io::Write;
 
@@ -714,19 +718,12 @@ fn build_upstream_url_without_openai_v1_strips_v1_for_zhipu() {
     // 智谱官方 OpenAI 端点为 /api/paas/v4/chat/completions（无 /v1），
     // 通用 build_upstream_url 会拼出 /api/paas/v4/v1/chat/completions 的错误地址。
     let chat: Uri = "/v1/chat/completions".parse().unwrap();
-    let url = build_upstream_url_without_openai_v1(
-        "https://open.bigmodel.cn/api/paas/v4",
-        &chat,
-    );
-    assert_eq!(
-        url,
-        "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-    );
+    let url = build_upstream_url_without_openai_v1("https://open.bigmodel.cn/api/paas/v4", &chat);
+    assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
 
     // 模型列表路径同样去掉 /v1。
     let models: Uri = "/v1/models".parse().unwrap();
-    let url =
-        build_upstream_url_without_openai_v1("https://open.bigmodel.cn/api/paas/v4", &models);
+    let url = build_upstream_url_without_openai_v1("https://open.bigmodel.cn/api/paas/v4", &models);
     assert_eq!(url, "https://open.bigmodel.cn/api/paas/v4/models");
 
     // 防御性处理 /openai/v1 入口前缀。
@@ -1397,15 +1394,13 @@ fn cors_preflight_allows_browser_requests() {
         response.headers().get(header::ACCESS_CONTROL_ALLOW_HEADERS),
         Some(&HeaderValue::from_static("authorization,content-type"))
     );
-    assert!(
-        response
-            .headers()
-            .get(header::ACCESS_CONTROL_ALLOW_METHODS)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("OPTIONS")
-    );
+    assert!(response
+        .headers()
+        .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("OPTIONS"));
 }
 
 #[test]
@@ -1417,14 +1412,12 @@ fn cors_headers_are_added_to_regular_responses() {
         headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
         Some(&HeaderValue::from_static("*"))
     );
-    assert!(
-        headers
-            .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("authorization")
-    );
+    assert!(headers
+        .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("authorization"));
 }
 fn temp_db_path() -> PathBuf {
     std::env::temp_dir().join(format!("flowlet-test-{}.sqlite", uuid::Uuid::new_v4()))
@@ -1663,11 +1656,9 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
             .collect::<Vec<_>>(),
         vec!["b", "a", "c"]
     );
-    assert!(
-        second
-            .iter()
-            .all(|route| route.virtual_model_id == "flowlet-pro")
-    );
+    assert!(second
+        .iter()
+        .all(|route| route.virtual_model_id == "flowlet-pro"));
 }
 
 #[test]
@@ -1694,25 +1685,27 @@ fn flowlet_pool_rejects_single_protocol_channels() {
         ..Default::default()
     }];
     let mut round_robin = std::collections::HashMap::new();
-    assert!(
-        match_candidates(
-            &routes,
-            &[],
-            &[],
-            Some("flowlet-pro"),
-            &ProtocolType::OpenAi,
-            None,
-            &accounts,
-            &channels,
-            &mut round_robin
-        )
-        .is_empty()
-    );
+    assert!(match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("flowlet-pro"),
+        &ProtocolType::OpenAi,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin
+    )
+    .is_empty());
 }
 
 #[test]
 fn match_candidates_filters_routes_by_responses_protocol() {
-    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", "http://upstream")];
+    let channels = vec![dual_protocol_channel(
+        "deepseek",
+        "DeepSeek",
+        "http://upstream",
+    )];
     let accounts = vec![test_account("a", "deepseek", "key", 0)];
     let routes = vec![
         test_route(
@@ -1767,20 +1760,18 @@ fn match_candidates_excludes_channels_without_responses_routes() {
         0,
     )];
     let mut round_robin = std::collections::HashMap::new();
-    assert!(
-        match_candidates(
-            &routes,
-            &[],
-            &[],
-            Some("kimi-k3"),
-            &ProtocolType::Responses,
-            None,
-            &accounts,
-            &channels,
-            &mut round_robin
-        )
-        .is_empty()
-    );
+    assert!(match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("kimi-k3"),
+        &ProtocolType::Responses,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin
+    )
+    .is_empty());
 }
 
 // ─── End-to-end routing test helpers ─────────────────────────────────────────
@@ -2073,7 +2064,10 @@ async fn streaming_timeout_preserves_message_start_usage_as_partial() {
     );
     let done = rx_done.await.unwrap();
     assert_eq!(done.usage_status.as_deref(), Some("partial"));
-    assert_eq!(done.usage_source.as_deref(), Some("upstream_stream_partial"));
+    assert_eq!(
+        done.usage_source.as_deref(),
+        Some("upstream_stream_partial")
+    );
     let usage = done.usage.unwrap();
     assert_eq!(usage.input_tokens, Some(35103));
     assert_eq!(usage.output_tokens, None);

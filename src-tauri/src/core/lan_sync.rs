@@ -650,7 +650,9 @@ async fn task_status_handler(
     let task_id = input.task_id.trim().to_string();
     let current = match state.storage.get_task_status(&task_id) {
         Ok(status) => status,
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
     };
     let allowed = matches!(
         (current.as_deref(), input.status.as_str()),
@@ -1222,7 +1224,11 @@ pub async fn refresh_known_peers(
                 )
                 .map_err(|error| error.to_string())?;
             import_storage
-                .import_device_projects(&snapshot.device_id, &snapshot.generated_at, &snapshot.projects)
+                .import_device_projects(
+                    &snapshot.device_id,
+                    &snapshot.generated_at,
+                    &snapshot.projects,
+                )
                 .map_err(|error| error.to_string())?;
         }
         Ok::<_, String>(())
@@ -1274,14 +1280,8 @@ pub async fn reply_remote_permission(
     .map_err(|error| error.to_string())?;
     let mut last_error = "没有可用的局域网端点".to_string();
     for endpoint in &peer.endpoints {
-        match request::<Result<(), String>>(
-            &peer,
-            endpoint,
-            Method::POST,
-            &path,
-            body.clone(),
-        )
-        .await
+        match request::<Result<(), String>>(&peer, endpoint, Method::POST, &path, body.clone())
+            .await
         {
             Ok(Ok(())) => return Ok(()),
             Ok(Err(error)) | Err(error) => last_error = error,
@@ -1510,13 +1510,23 @@ mod tests {
             status: "submitted".to_string(),
         })
         .unwrap();
-        let (headers, nonce) = signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
-        let response = task_status_handler(State(state.clone()), ConnectInfo(remote), headers, body.into())
-            .await
-            .into_response();
+        let (headers, nonce) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
+        let response = task_status_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
         assert_eq!(response.status(), StatusCode::OK);
-        let payload: EncryptedPayload =
-            serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+        let payload: EncryptedPayload = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         let result: TaskSubmitResult = decrypt(&auth_key, nonce.as_bytes(), payload).unwrap();
         assert_eq!(result.task_id, "task-1");
         assert_eq!(result.status, "submitted");
@@ -1531,13 +1541,23 @@ mod tests {
             status: "draft".to_string(),
         })
         .unwrap();
-        let (headers, nonce) = signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
-        let response = task_status_handler(State(state.clone()), ConnectInfo(remote), headers, body.into())
-            .await
-            .into_response();
+        let (headers, nonce) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
+        let response = task_status_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
         assert_eq!(response.status(), StatusCode::OK);
-        let payload: EncryptedPayload =
-            serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+        let payload: EncryptedPayload = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         let result: TaskSubmitResult = decrypt(&auth_key, nonce.as_bytes(), payload).unwrap();
         assert_eq!(result.status, "draft");
         assert_eq!(
@@ -1558,10 +1578,16 @@ mod tests {
             status: "draft".to_string(),
         })
         .unwrap();
-        let (headers, _) = signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
-        let response = task_status_handler(State(state.clone()), ConnectInfo(remote), headers, body.into())
-            .await
-            .into_response();
+        let (headers, _) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/status", &body);
+        let response = task_status_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
         assert_eq!(response.status(), StatusCode::CONFLICT);
         assert_eq!(
             state.storage.get_task_status("task-1").unwrap().as_deref(),

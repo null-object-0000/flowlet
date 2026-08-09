@@ -122,7 +122,8 @@
   border: 0;
   color: var(--semi-color-danger);
   background: transparent;
-  font-size: 11px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   cursor: pointer;
 }
 
@@ -205,8 +206,8 @@
 .storageNote,
 .storageState {
   color: var(--flowlet-color-text-secondary);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
 }
 
 .storageTotal b {
@@ -227,7 +228,8 @@
   align-items: center;
   gap: 6px;
   color: var(--semi-color-primary);
-  font-size: 11px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
 }
 
 .storageTotal > .storageReclaimable {
@@ -296,8 +298,8 @@
 .storageItem small {
   overflow: hidden;
   color: var(--flowlet-color-text-secondary);
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -337,7 +339,8 @@
   border: 0;
   color: var(--semi-color-primary);
   background: transparent;
-  font-size: 11px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   cursor: pointer;
 }
 
@@ -448,7 +451,8 @@
 .repairStage small {
   overflow: hidden;
   color: var(--flowlet-color-text-secondary);
-  font-size: 11px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   white-space: nowrap;
   text-overflow: ellipsis;
 }

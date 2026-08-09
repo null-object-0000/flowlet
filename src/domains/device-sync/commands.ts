@@ -18,6 +18,7 @@ import type {
   SharedDeviceProject,
   SyncedAgentSession,
   SyncedAgentProfile,
+  TaskDeleteInput,
   TaskEditInput,
   TaskStatusInput,
   TaskSubmitInput,
@@ -140,6 +141,9 @@ export const mobileDeviceSyncCommands = {
   editTask: (deviceId: string, input: TaskEditInput): Promise<TaskSubmitResult> =>
     invokeCommand<TaskSubmitResult>("edit_task_lan", { deviceId, input }, 15_000)
       .catch(toDeviceSyncError("lan_task_edit_failed")),
+  deleteTask: (deviceId: string, input: TaskDeleteInput): Promise<TaskSubmitResult> =>
+    invokeCommand<TaskSubmitResult>("delete_task_lan", { deviceId, input }, 15_000)
+      .catch(toDeviceSyncError("lan_task_delete_failed")),
 };
 
 function toDeviceSyncError(code: string): (error: unknown) => never {

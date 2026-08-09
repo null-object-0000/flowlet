@@ -44,7 +44,7 @@ describe("OverviewExposedModelsCard", () => {
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
-  it("shows real candidate health and available protocols while ignoring direct models", async () => {
+  it("shows real candidate health without exposing protocol details", async () => {
     const user = userEvent.setup();
     const onManage = vi.fn();
 
@@ -58,9 +58,9 @@ describe("OverviewExposedModelsCard", () => {
     );
 
     expect(screen.getByText("1 / 2 个账号可用")).toBeInTheDocument();
-    expect(screen.getByText("OpenAI / Anthropic")).toBeInTheDocument();
     expect(screen.getByText("1 / 1 个账号可用")).toBeInTheDocument();
-    expect(screen.getByText("Responses")).toBeInTheDocument();
+    expect(screen.queryByText("OpenAI / Anthropic")).not.toBeInTheDocument();
+    expect(screen.queryByText("Responses")).not.toBeInTheDocument();
     expect(screen.getByText("部分可用")).toBeInTheDocument();
     expect(screen.getByText("可用")).toBeInTheDocument();
     expect(screen.queryByText("deepseek-v4-pro")).not.toBeInTheDocument();

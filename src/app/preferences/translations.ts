@@ -78,6 +78,7 @@ const english: Record<string, string> = {
   "任务已退回，已进入队列，完成后将自动执行": "Task rejected; queued and will start automatically",
   "删除任务“{name}”？": "Delete task “{name}”?",
   "删除后任务将从项目看板移除，此操作不可撤销。": "The task will be removed from the project board. This cannot be undone.",
+  "删除": "Delete",
   "待处理": "To do",
   "进行中": "In progress",
   "待审核": "Awaiting review",

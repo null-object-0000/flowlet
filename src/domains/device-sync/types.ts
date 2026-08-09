@@ -310,3 +310,8 @@ export type TaskEditInput = {
   taskType?: "code" | "readonly";
   agentProfile?: string;
 };
+
+/** 移动端 LAN 直连删除草稿任务入参（与编辑一致，只允许删除草稿状态任务）。 */
+export type TaskDeleteInput = {
+  taskId: string;
+};

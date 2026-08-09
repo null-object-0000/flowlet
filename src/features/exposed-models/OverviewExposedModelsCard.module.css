@@ -54,11 +54,6 @@
   line-height: var(--flowlet-line-height-caption);
 }
 
-.separator {
-  flex: none;
-  color: var(--flowlet-color-text-tertiary);
-}
-
 .empty {
   width: 100%;
   height: 100%;

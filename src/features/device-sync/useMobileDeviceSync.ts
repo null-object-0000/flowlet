@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mobileDeviceSyncCommands } from "../../domains/device-sync/commands";
 import { queryKeys } from "../../shared/query-keys";
 import type { OpenCodePermissionDecision } from "../../domains/agent-session/types";
-import type { TaskEditInput, TaskStatusInput, TaskSubmitInput } from "../../domains/device-sync/types";
+import type { TaskDeleteInput, TaskEditInput, TaskStatusInput, TaskSubmitInput } from "../../domains/device-sync/types";
 
 export function useMobileDevices() {
   return useQuery({
@@ -175,6 +175,26 @@ export function useMobileEditTask(deviceId: string | null) {
     mutationFn: async (input: TaskEditInput) => {
       if (!deviceId) throw new Error("请先选择设备");
       return mobileDeviceSyncCommands.editTask(deviceId, input);
+    },
+    onSuccess: async () => {
+      if (!deviceId) return;
+      await mobileDeviceSyncCommands.refreshLan(deviceId).catch(() => undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
+      ]);
+    },
+  });
+}
+
+/** 通过签名 LAN 通道删除草稿任务，与 PC 看板「草稿可删除」语义一致。
+ *  成功后直连刷新目标设备快照，让列表即时移除该任务；失败时沿用旧缓存等待后台同步。 */
+export function useMobileDeleteTask(deviceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: TaskDeleteInput) => {
+      if (!deviceId) throw new Error("请先选择设备");
+      return mobileDeviceSyncCommands.deleteTask(deviceId, input);
     },
     onSuccess: async () => {
       if (!deviceId) return;

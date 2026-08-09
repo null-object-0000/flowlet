@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   submitTask: vi.fn(),
   setTaskStatus: vi.fn(),
   editTask: vi.fn(),
+  deleteTask: vi.fn(),
   refreshLan: vi.fn(),
 }));
 
@@ -15,7 +16,7 @@ vi.mock("../../domains/device-sync/commands", () => ({
 }));
 
 import { queryKeys } from "../../shared/query-keys";
-import { useMobileEditTask, useMobileSetTaskStatus, useMobileSubmitTask } from "./useMobileDeviceSync";
+import { useMobileDeleteTask, useMobileEditTask, useMobileSetTaskStatus, useMobileSubmitTask } from "./useMobileDeviceSync";
 
 function createWrapper() {
   const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
@@ -97,6 +98,42 @@ describe("useMobileEditTask", () => {
     });
 
     expect(mocks.editTask).toHaveBeenCalledWith("device-1", { taskId: "task-1", title: "新标题" });
+    expect(mocks.refreshLan).toHaveBeenCalledWith("device-1");
+    expect(queryClient.getQueryState(queryKeys.mobileDeviceSync.projects(null))?.isInvalidated).toBe(true);
+  });
+});
+
+describe("useMobileDeleteTask", () => {
+  it("refreshes the target device snapshot after deleting a draft task", async () => {
+    mocks.deleteTask.mockReset().mockResolvedValue({ taskId: "task-1", status: "deleted" });
+    mocks.refreshLan.mockReset().mockResolvedValue({ attemptedDevices: 1, refreshedDevices: 1, failedDevices: 0 });
+    const { queryClient, Wrapper } = createWrapper();
+    queryClient.setQueryData(queryKeys.mobileDeviceSync.projects(null), []);
+
+    const { result } = renderHook(() => useMobileDeleteTask("device-1"), { wrapper: Wrapper });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ taskId: "task-1" }))
+        .resolves.toEqual({ taskId: "task-1", status: "deleted" });
+    });
+
+    expect(mocks.deleteTask).toHaveBeenCalledWith("device-1", { taskId: "task-1" });
+    expect(mocks.refreshLan).toHaveBeenCalledWith("device-1");
+    expect(queryClient.getQueryState(queryKeys.mobileDeviceSync.projects(null))?.isInvalidated).toBe(true);
+  });
+
+  it("keeps the delete successful when the follow-up LAN refresh fails", async () => {
+    mocks.deleteTask.mockReset().mockResolvedValue({ taskId: "task-1", status: "deleted" });
+    mocks.refreshLan.mockReset().mockRejectedValue(new Error("lan gone"));
+    const { queryClient, Wrapper } = createWrapper();
+    queryClient.setQueryData(queryKeys.mobileDeviceSync.projects(null), []);
+
+    const { result } = renderHook(() => useMobileDeleteTask("device-1"), { wrapper: Wrapper });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ taskId: "task-1" }))
+        .resolves.toEqual({ taskId: "task-1", status: "deleted" });
+    });
+
+    expect(mocks.deleteTask).toHaveBeenCalledWith("device-1", { taskId: "task-1" });
     expect(mocks.refreshLan).toHaveBeenCalledWith("device-1");
     expect(queryClient.getQueryState(queryKeys.mobileDeviceSync.projects(null))?.isInvalidated).toBe(true);
   });

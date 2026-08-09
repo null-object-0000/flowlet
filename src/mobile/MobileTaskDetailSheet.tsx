@@ -1,12 +1,12 @@
 import { IconClose, IconCopy } from "@douyinfe/semi-icons";
-import { Button, Toast } from "@douyinfe/semi-ui-19";
+import { Button, Modal, Toast } from "@douyinfe/semi-ui-19";
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
 import type { SharedDeviceProject, SyncedProjectTask } from "../domains/device-sync/types";
 import { executionRoundFromCount, type ProjectTaskStatus } from "../domains/project/types";
-import { useMobileSetTaskStatus } from "../features/device-sync/useMobileDeviceSync";
+import { useMobileDeleteTask, useMobileSetTaskStatus } from "../features/device-sync/useMobileDeviceSync";
 import { errorMessage } from "../shared/errors/AppError";
 import { formatFullTimestamp } from "../shared/formatters/datetime";
 import { APP_OVERLAY_Z_INDEX } from "../shared/ui/overlayLayers";
@@ -32,6 +32,7 @@ export function MobileTaskDetailSheet({
   onClose,
   onStatusChanged,
   onEditDraft,
+  onDeleted,
 }: {
   task: SyncedProjectTask | null;
   project: SharedDeviceProject | null;
@@ -40,11 +41,15 @@ export function MobileTaskDetailSheet({
   onStatusChanged?: (taskId: string, status: string) => void;
   /** 草稿任务「编辑」：由页面打开编辑表单（复用添加任务抽屉的编辑模式）。 */
   onEditDraft?: (task: SyncedProjectTask) => void;
+  /** 草稿任务删除成功：由页面关闭详情并等待查询失效刷新列表。 */
+  onDeleted?: (taskId: string) => void;
 }) {
   const { language, t } = useAppPreferences();
   const setStatus = useMobileSetTaskStatus(deviceId);
+  const deleteTask = useMobileDeleteTask(deviceId);
   const [closing, setClosing] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const closeTimer = useRef<number | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -128,6 +133,18 @@ export function MobileTaskDetailSheet({
       onStatusChanged?.(result.taskId, result.status);
     } catch (error) {
       Toast.error(t("操作失败：{message}", { message: errorMessage(error) }));
+    }
+  };
+
+  const removeTask = async () => {
+    try {
+      await deleteTask.mutateAsync({ taskId: task.id });
+      Toast.success(t("任务已删除"));
+      setDeleting(false);
+      onDeleted?.(task.id);
+    } catch (error) {
+      Toast.error(t("操作失败：{message}", { message: errorMessage(error) }));
+      setDeleting(false);
     }
   };
 
@@ -244,21 +261,30 @@ export function MobileTaskDetailSheet({
           <footer className={styles.footer}>
             <span className={styles.lanHint}>{t("局域网直连")} · {t("状态变更仅允许通过局域网直连操作")}</span>
             {task.status === "draft" ? (
-              <div className={styles.footerActions}>
+              <div className={`${styles.footerActions} ${styles.footerActionsWide}`}>
                 <Button
                   theme="light"
                   block
-                  disabled={setStatus.isPending}
+                  disabled={setStatus.isPending || deleteTask.isPending}
                   onClick={() => onEditDraft?.(task)}
                 >
                   {t("编辑")}
+                </Button>
+                <Button
+                  type="danger"
+                  theme="light"
+                  block
+                  disabled={setStatus.isPending || deleteTask.isPending}
+                  onClick={() => setDeleting(true)}
+                >
+                  {t("删除")}
                 </Button>
                 <Button
                   type="primary"
                   theme="solid"
                   block
                   loading={setStatus.isPending}
-                  disabled={setStatus.isPending}
+                  disabled={setStatus.isPending || deleteTask.isPending}
                   onClick={() => void mutate("submitted")}
                 >
                   {t("提交")}
@@ -279,6 +305,20 @@ export function MobileTaskDetailSheet({
           </footer>
         ) : null}
       </div>
+      <Modal
+        title={t("删除任务“{name}”？", { name: task.title })}
+        visible={deleting}
+        zIndex={APP_OVERLAY_Z_INDEX.modal + 1}
+        okType="danger"
+        okText={t("删除")}
+        cancelText={t("取消")}
+        maskClosable={false}
+        onCancel={() => setDeleting(false)}
+        onOk={() => void removeTask()}
+        okButtonProps={{ loading: deleteTask.isPending, "aria-label": t("确认删除") }}
+      >
+        <p>{t("删除后任务将从项目看板移除，此操作不可撤销。")}</p>
+      </Modal>
     </div>,
     document.body,
   );

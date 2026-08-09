@@ -293,6 +293,7 @@ pub async fn start_server(
         .route("/flowlet/v1/task/submit", post(task_submit_handler))
         .route("/flowlet/v1/task/status", post(task_status_handler))
         .route("/flowlet/v1/task/edit", post(task_edit_handler))
+        .route("/flowlet/v1/task/delete", post(task_delete_handler))
         .with_state(state);
     tokio::spawn(async move {
         if let Err(error) = axum::serve(
@@ -434,6 +435,7 @@ fn current_capabilities() -> Vec<String> {
         "task.submit".to_string(),
         "task.status".to_string(),
         "task.edit".to_string(),
+        "task.delete".to_string(),
     ]
 }
 
@@ -642,6 +644,15 @@ pub struct TaskEditInput {
     pub agent_profile: Option<String>,
 }
 
+/// 移动端通过签名 LAN 通道删除草稿任务的入参。
+/// 只允许删除草稿（draft）状态任务，与「草稿可编辑」语义一致：
+/// 一旦提交由桌面端调度，删除权就回到执行设备，移动端不能误删进行中的任务。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskDeleteInput {
+    pub task_id: String,
+}
+
 /// 移动端通过签名 LAN 通道变更任务状态（提交 / 撤回）。
 /// 与桌面端审核状态机一致：只允许「草稿 → 已提交」与「已提交 → 草稿」，
 /// 其余迁移（含把进行中撤销）由执行器内部管理，这里一律拒绝。
@@ -803,6 +814,68 @@ async fn task_edit_handler(
         &TaskSubmitResult {
             task_id,
             status: "draft".to_string(),
+        },
+    )
+}
+
+/// 移动端通过签名 LAN 通道删除草稿任务。
+/// 与桌面端 `delete_project_task` 一致使用软删除（deleted = 1，跨设备以墓碑传播），
+/// 但移动端只允许删除草稿状态任务：一旦提交就由桌面端调度，删除权回到执行设备，
+/// 避免误删进行中 / 待审核 / 已完成的任务。
+async fn task_delete_handler(
+    State(state): State<LanServerState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    const PATH: &str = "/flowlet/v1/task/delete";
+    if let Err(error) = authorize(&state, &Method::POST, PATH, &headers, &body) {
+        return (StatusCode::UNAUTHORIZED, error).into_response();
+    }
+    let input = match serde_json::from_slice::<TaskDeleteInput>(&body) {
+        Ok(input) if !input.task_id.trim().is_empty() => input,
+        _ => return (StatusCode::BAD_REQUEST, "无效的任务删除参数").into_response(),
+    };
+    record_inbound(&state, Some(&remote), PATH);
+
+    let task_id = input.task_id.trim().to_string();
+    let current = match state.storage.get_task_status(&task_id) {
+        Ok(status) => status,
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
+    };
+    match current.as_deref() {
+        None => return (StatusCode::NOT_FOUND, "任务不存在").into_response(),
+        Some("draft") => {}
+        Some(_) => {
+            return (StatusCode::CONFLICT, "只有草稿状态的任务可以删除").into_response()
+        }
+    }
+    let existing = match state.storage.get_project_task_by_id(&task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return (StatusCode::NOT_FOUND, "任务不存在").into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
+    };
+    if let Err(error) = state
+        .storage
+        .delete_project_task(&existing.project_id, &task_id)
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+    // 删除后即时推送工作区，其他设备 / 移动端尽快看到移除结果。
+    crate::core::project_workspace_sync::notify_project_changed(
+        state.storage.clone(),
+        &existing.project_id,
+    );
+    encrypted_response(
+        &state.auth_key,
+        &headers,
+        &TaskSubmitResult {
+            task_id,
+            status: "deleted".to_string(),
         },
     )
 }
@@ -1161,6 +1234,30 @@ pub async fn edit_task(
         return Err("目标设备版本过旧，不支持任务编辑".to_string());
     }
     let path = "/flowlet/v1/task/edit";
+    let body = serde_json::to_vec(input).map_err(|error| error.to_string())?;
+    let mut last_error = "没有可用的局域网端点".to_string();
+    for endpoint in &peer.endpoints {
+        match request(&peer, endpoint, Method::POST, path, body.clone()).await {
+            Ok(result) => return Ok(result),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+/// 通过签名 LAN 通道删除草稿任务（移动端 → 桌面端，仅草稿可删除）。
+/// 目标设备离线或版本过旧时返回明确错误。
+pub async fn delete_task(
+    storage: &Storage,
+    device_id: &str,
+    input: &TaskDeleteInput,
+) -> Result<TaskSubmitResult, String> {
+    let peer = peer_descriptor(storage, device_id)
+        .ok_or_else(|| "目标设备没有可用的局域网连接信息".to_string())?;
+    if !peer.capabilities.iter().any(|cap| cap == "task.delete") {
+        return Err("目标设备版本过旧，不支持任务删除".to_string());
+    }
+    let path = "/flowlet/v1/task/delete";
     let body = serde_json::to_vec(input).map_err(|error| error.to_string())?;
     let mut last_error = "没有可用的局域网端点".to_string();
     for endpoint in &peer.endpoints {
@@ -1897,6 +1994,96 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(unchanged.title, "old title");
+    }
+
+    #[tokio::test]
+    async fn task_delete_handler_deletes_draft_task() {
+        let (state, _, auth_key, _) = test_state();
+        seed_project_and_task(&state.storage, "draft");
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+
+        let body = serde_json::to_vec(&TaskDeleteInput {
+            task_id: "task-1".to_string(),
+        })
+        .unwrap();
+        let (headers, nonce) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/delete", &body);
+        let response = task_delete_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: EncryptedPayload = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let result: TaskSubmitResult = decrypt(&auth_key, nonce.as_bytes(), payload).unwrap();
+        assert_eq!(result.task_id, "task-1");
+        assert_eq!(result.status, "deleted");
+        // 软删除：状态查询按 deleted = 0 过滤，删除后任务不再可见。
+        assert!(state.storage.get_task_status("task-1").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn task_delete_handler_rejects_non_draft_task() {
+        let (state, _, auth_key, _) = test_state();
+        seed_project_and_task(&state.storage, "submitted");
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+
+        let body = serde_json::to_vec(&TaskDeleteInput {
+            task_id: "task-1".to_string(),
+        })
+        .unwrap();
+        let (headers, _) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/delete", &body);
+        let response = task_delete_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            state.storage.get_task_status("task-1").unwrap().as_deref(),
+            Some("submitted")
+        );
+        let unchanged = state
+            .storage
+            .get_project_task_by_id("task-1")
+            .unwrap()
+            .unwrap();
+        assert!(!unchanged.deleted);
+    }
+
+    #[tokio::test]
+    async fn task_delete_handler_rejects_missing_task() {
+        let (state, _, auth_key, _) = test_state();
+        state.storage.migrate().unwrap();
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+
+        let body = serde_json::to_vec(&TaskDeleteInput {
+            task_id: "missing".to_string(),
+        })
+        .unwrap();
+        let (headers, _) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/delete", &body);
+        let response = task_delete_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

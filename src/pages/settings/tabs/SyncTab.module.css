@@ -7,7 +7,7 @@
 .actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; flex: none; }
 .deviceTable { display: grid; }
 .deviceHead, .deviceRow { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(100px, .62fr) minmax(142px, .72fr) minmax(78px, .42fr) 36px; align-items: center; gap: 12px; padding: 0 14px; }
-.deviceHead { height: 34px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: 11px; }
+.deviceHead { min-height: 36px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-body-compact); line-height: var(--flowlet-line-height-body-compact); }
 .deviceRow { min-height: 72px; border-top: 1px solid var(--flowlet-color-border); }
 .deviceMain { min-width: 0; display: flex; align-items: center; gap: 11px; }
 .deviceGlyph { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-size: 13px; font-weight: 750; }
@@ -33,7 +33,7 @@
 .workspacePanel { min-height: 68px; padding: 12px 14px; display: flex; align-items: center; gap: 16px; border-top: 1px solid var(--flowlet-color-border); }
 .workspaceCopy { min-width: 0; display: grid; gap: 4px; }
 .workspaceCopy > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); line-height: 1.5; }
-.workspaceJoinHint { grid-column: 1 / -1; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.workspaceJoinHint { grid-column: 1 / -1; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .workspaceConsent { display: grid; gap: 12px; }
 .workspaceConsent p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); line-height: 1.65; }
 .workspaceOption { display: grid; gap: 4px; }
@@ -101,13 +101,13 @@
 .connectGuide h3 { margin: 0; font-size: 15px; }
 .connectGuide ol { margin: 18px 0 0; padding: 0; display: grid; gap: 12px; list-style: none; }
 .connectGuide li { display: flex; align-items: flex-start; gap: 10px; }
-.connectGuide li > span { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-size: 11px; font-weight: 700; }
+.connectGuide li > span { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); font-weight: 700; }
 .connectGuide li p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: 12.5px; line-height: 1.6; }
 .expireBox { margin-top: 22px; padding: 11px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid color-mix(in srgb, var(--semi-color-primary) 20%, var(--flowlet-color-border)); border-radius: 10px; background: var(--semi-color-primary-light-default); }
 .expireBox > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
 .secretNotice { margin: 0 0 12px; padding: 9px 10px; border-radius: 8px; color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); font-size: 12px; line-height: 1.55; }
 .connectionPanel, .importPanel { display: grid; gap: 12px; }
-.connectionCode { height: 245px; margin: 0; padding: 14px 15px; overflow: auto; border: 1px solid var(--flowlet-color-border); border-radius: 10px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font: 11.5px/1.7 var(--flowlet-font-family-mono, monospace); white-space: pre-wrap; }
+.connectionCode { height: 245px; margin: 0; padding: 14px 15px; overflow: auto; border: 1px solid var(--flowlet-color-border); border-radius: 10px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: var(--flowlet-font-family-mono); font-size: var(--flowlet-font-size-code); line-height: var(--flowlet-line-height-code); white-space: pre-wrap; }
 .connectionFoot { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .connectionFoot > span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
 .importPanel { padding: 18px; border: 1px dashed var(--flowlet-color-border); border-radius: 12px; background: var(--flowlet-color-surface-muted); }

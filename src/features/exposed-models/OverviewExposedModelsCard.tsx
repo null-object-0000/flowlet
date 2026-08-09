@@ -1,6 +1,6 @@
 import { Tag, Typography } from "@douyinfe/semi-ui-19";
 import type { ChannelAccount } from "../../domains/account/types";
-import type { ChannelPreset, ProtocolType } from "../../domains/channel/types";
+import type { ChannelPreset } from "../../domains/channel/types";
 import type { RouteCandidate } from "../../domains/model/types";
 import { ChannelBrandLogo } from "../channel-accounts/ChannelBrandLogo";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
@@ -30,9 +30,6 @@ export function OverviewExposedModelsCard({ routes, accounts, channels, onManage
       {accounts.length > 0 ? <div className={styles.list}>
         {models.map((model) => {
           const status = aggregateStatus(model);
-          const protocols = model.protocols.length > 0
-            ? model.protocols.map(protocolLabel).join(" / ")
-            : t("暂无可用协议");
           return (
             <div className={styles.row} key={model.publicModel}>
               <ChannelBrandLogo channelId="flowlet" name="Flowlet" />
@@ -47,8 +44,6 @@ export function OverviewExposedModelsCard({ routes, accounts, channels, onManage
                   <span>{model.candidateAccountCount > 0
                     ? t("{available} / {total} 个账号可用", { available: model.availableAccountCount, total: model.candidateAccountCount })
                     : t("尚无候选账号")}</span>
-                  <span className={styles.separator}>·</span>
-                  <span>{protocols}</span>
                 </div>
               </div>
               <Tag color={status.color}>{t(status.label)}</Tag>
@@ -68,10 +63,4 @@ function aggregateStatus(model: OverviewAggregateModel): { label: string; color:
   if (model.availableAccountCount === 0) return { label: "不可用", color: "grey" };
   if (model.availableAccountCount < model.candidateAccountCount) return { label: "部分可用", color: "orange" };
   return { label: "可用", color: "green" };
-}
-
-function protocolLabel(protocol: ProtocolType): string {
-  if (protocol === "openai") return "OpenAI";
-  if (protocol === "anthropic") return "Anthropic";
-  return "Responses";
 }

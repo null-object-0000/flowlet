@@ -34,7 +34,8 @@
 
 .navLabel {
   color: var(--semi-color-text-2);
-  font-size: 11px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   font-weight: 650;
   padding: 0 11px;
   margin-bottom: 6px;

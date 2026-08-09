@@ -534,7 +534,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
         )
         .unwrap();
     assert_eq!(page.total, 1);
-    assert_eq!(page.page_size, 8);
+    assert_eq!(page.page_size, 10);
     assert_eq!(page.rows[0].session_id, "ses_parent");
     assert_eq!(page.rows[0].request_count, 1);
     assert_eq!(page.rows[0].success_count, 1);

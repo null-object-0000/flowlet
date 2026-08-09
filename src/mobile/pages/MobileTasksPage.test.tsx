@@ -8,6 +8,7 @@ const useMobileProjectsMock = vi.fn();
 const useMobileSubmitTaskMock = vi.fn();
 const useMobileEditTaskMock = vi.fn();
 const useMobileSetTaskStatusMock = vi.fn();
+const useMobileDeleteTaskMock = vi.fn();
 const useMobileS3SettingsMock = vi.fn();
 const refreshDeviceMock = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
 const refreshS3Mock = vi.hoisted(() => vi.fn<() => Promise<void>>());
@@ -22,6 +23,7 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileSubmitTask: (deviceId: string | null) => useMobileSubmitTaskMock(deviceId),
   useMobileEditTask: (deviceId: string | null) => useMobileEditTaskMock(deviceId),
   useMobileSetTaskStatus: (deviceId: string | null) => useMobileSetTaskStatusMock(deviceId),
+  useMobileDeleteTask: (deviceId: string | null) => useMobileDeleteTaskMock(deviceId),
   useMobileS3Settings: () => useMobileS3SettingsMock(),
   useMobileDeviceSyncActions: () => ({
     saveS3Config: { isPending: false, mutateAsync: vi.fn() },
@@ -76,6 +78,10 @@ describe("MobileTasksPage", () => {
       mutateAsync: vi.fn(),
     });
     useMobileSetTaskStatusMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    });
+    useMobileDeleteTaskMock.mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     });
@@ -260,6 +266,34 @@ describe("MobileTasksPage", () => {
     fireEvent.change(titleInput, { target: { value: "新标题" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^保存$/ }));
     await waitFor(() => expect(editTask).toHaveBeenCalledWith({ taskId: "task-1", title: "新标题" }));
+  });
+
+  it("deletes a draft task via LAN direct after confirmation", async () => {
+    useMobileProjectsMock.mockReturnValue({
+      data: [{
+        ...PROJECT,
+        tasks: [
+          { id: "task-1", title: "草稿任务", status: "draft", priority: "p0", updatedAt: "2026-07-30T01:00:00Z" },
+        ],
+      }],
+      isLoading: false,
+      isError: false,
+    });
+    const deleteTask = vi.fn().mockResolvedValue({ taskId: "task-1", status: "deleted" });
+    useMobileDeleteTaskMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: deleteTask,
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByText("草稿任务"));
+    // 草稿任务详情提供「删除」入口（与编辑 / 提交并排）
+    fireEvent.click(screen.getByRole("button", { name: /^删除$/ }));
+
+    // 删除确认弹窗出现，确认后走局域网直连删除命令
+    const modal = screen.getByRole("dialog", { name: /删除任务/ });
+    fireEvent.click(within(modal).getByRole("button", { name: /确认删除/ }));
+    await waitFor(() => expect(deleteTask).toHaveBeenCalledWith({ taskId: "task-1" }));
   });
 
   it("keeps the compose sheet collapsed until an upward swipe or handle tap expands it", () => {

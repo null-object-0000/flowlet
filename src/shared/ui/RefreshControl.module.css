@@ -45,7 +45,8 @@
 }
 
 .timing {
-  font-size: 11px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   color: var(--flowlet-color-text-tertiary);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;

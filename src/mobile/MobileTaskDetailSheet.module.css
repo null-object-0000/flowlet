@@ -164,6 +164,9 @@
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+.footerActionsWide {
+  grid-template-columns: 1fr 1fr 1fr;
+}
 @keyframes backdropIn { from { opacity: 0; } }
 @keyframes backdropOut { to { opacity: 0; } }
 @keyframes sheetIn { from { transform: translateY(100%); } }

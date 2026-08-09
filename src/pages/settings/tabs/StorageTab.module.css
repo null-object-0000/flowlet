@@ -15,8 +15,8 @@
 .progressTrack { height: 7px; margin-top: 11px; overflow: hidden; border-radius: 999px; background: var(--semi-color-fill-1); }
 .progressFill { height: 100%; border-radius: 999px; background: var(--flowlet-color-primary); }
 .summaryActions { display: flex; align-items: flex-end; flex-direction: column; gap: 8px; }
-.recommend { padding: 4px 8px; border-radius: 6px; color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); font-size: 11px; }
-.table { width: 100%; margin-top: 14px; border-collapse: collapse; font-size: 12px; }
+.recommend { padding: 4px 8px; border-radius: 6px; color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
+.table { width: 100%; margin-top: 14px; border-collapse: collapse; font-size: var(--flowlet-font-size-body-compact); line-height: var(--flowlet-line-height-body-compact); }
 .table th { padding: 10px 9px; border-top: 1px solid var(--flowlet-color-border); border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-weight: 600; text-align: left; }
 .table td { padding: 11px 9px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); }
 .table .num { text-align: right; }

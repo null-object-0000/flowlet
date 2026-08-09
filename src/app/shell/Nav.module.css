@@ -35,7 +35,8 @@
   border-radius: 99px;
   background: var(--semi-color-primary-light-default);
   color: var(--semi-color-primary);
-  font-size: 9px;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
   font-weight: 700;
   letter-spacing: 0.4px;
 }

@@ -209,6 +209,7 @@ export function MobileTasksPage() {
           onClose={() => setSelected(null)}
           onStatusChanged={handleStatusChanged}
           onEditDraft={handleEditDraft}
+          onDeleted={() => setSelected(null)}
         />
       </section>
       </MobilePullToRefresh>

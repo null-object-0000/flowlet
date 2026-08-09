@@ -102,8 +102,9 @@
 }
 
 .step p {
-  font-size: 11px;
-  color: var(--flowlet-color-text-tertiary);
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+  color: var(--flowlet-color-text-secondary);
   margin: 4px 0 0;
 }
 

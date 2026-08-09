@@ -195,11 +195,19 @@ describe("MobileTasksPage", () => {
     renderPage();
 
     fireEvent.click(screen.getByRole("button", { name: /^添加任务$/ }));
-    // 半屏/大半屏添加任务抽屉出现
+    // 半屏/大半屏添加任务抽屉出现，默认展示核心字段（目标设备 + 任务标题）
+    // 并提示「上滑展开完整表单」，完整字段（描述/任务类型/Agent Profile）暂未渲染。
     const dialog = screen.getByRole("dialog", { name: /添加任务/ });
     expect(dialog).toBeInTheDocument();
-    // 展开后展示完整表单：任务描述 + 任务类型 + Agent Profile（默认 Claude Code）
+    expect(screen.getByText("目标设备")).toBeInTheDocument();
+    expect(within(dialog).getByText("Office PC")).toBeInTheDocument();
+    expect(screen.getByText("上滑展开完整表单")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("补充上下文与期望结果（可选）")).toBeNull();
+    expect(screen.queryByText("Agent Profile")).toBeNull();
+
+    // 展开后展示完整表单：任务描述 + 任务类型 + Agent Profile（默认 Claude Code）。
     fireEvent.click(screen.getByRole("button", { name: /展开添加任务表单/ }));
+    expect(screen.queryByText("上滑展开完整表单")).toBeNull();
     expect(screen.getByPlaceholderText("补充上下文与期望结果（可选）")).toBeInTheDocument();
     expect(screen.getByText("Agent Profile")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
@@ -213,6 +221,30 @@ describe("MobileTasksPage", () => {
       taskType: "code",
       agentProfile: "Claude Code",
     }));
+  });
+
+  it("keeps the compose sheet collapsed until an upward swipe or handle tap expands it", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /^添加任务$/ }));
+
+    const dialog = screen.getByRole("dialog", { name: /添加任务/ });
+    // 半屏状态：body 锁定滚动（touchAction: none），上滑手势才触发展开，不会先滚动内容。
+    const body = dialog.querySelector<HTMLElement>('[style*="touch-action"]')!;
+    expect(body).toBeTruthy();
+    expect(dialog).not.toHaveAttribute("data-expanded");
+    expect(body.style.touchAction).toBe("none");
+
+    // 半屏内上滑 → 展开，body 解锁滚动
+    fireEvent.touchStart(body, { touches: [{ clientX: 0, clientY: 100 }] });
+    fireEvent.touchMove(body, { touches: [{ clientX: 0, clientY: 60 }] });
+    fireEvent.touchEnd(body);
+    expect(dialog).toHaveAttribute("data-expanded");
+    expect(body.style.touchAction).toBe("pan-y");
+
+    // 点击把手可收起回到半屏
+    fireEvent.click(screen.getByRole("button", { name: /收起添加任务表单/ }));
+    expect(dialog).not.toHaveAttribute("data-expanded");
+    expect(body.style.touchAction).toBe("none");
   });
 
   it("refreshes all shared projects via pull to refresh", async () => {

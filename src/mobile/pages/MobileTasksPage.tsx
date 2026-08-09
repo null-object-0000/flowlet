@@ -44,7 +44,7 @@ export function MobileTasksPage() {
   });
   const [selected, setSelected] = useState<{ task: SyncedProjectTask; project: SharedDeviceProject } | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
-  const [composeInitialTarget, setComposeInitialTarget] = useState("");
+  const [composeInitialDevice, setComposeInitialDevice] = useState("");
 
   // 跨设备逻辑项目（同名/同 workspaceProjectId 合并），按最近更新倒序，默认选中第一个。
   const projectGroups = useMemo(() => groupMobileProjects(projects.data ?? []), [projects.data]);
@@ -62,10 +62,13 @@ export function MobileTasksPage() {
     }
   };
 
-  // 可执行项目（hasLocalBinding）：添加任务时选择「目标设备 + 项目」。
-  const executableProjects = useMemo(
-    () => (projects.data ?? []).filter((project) => project.hasLocalBinding),
-    [projects.data],
+  // 当前项目下可执行目标设备（hasLocalBinding）：添加任务时选择目标设备，
+  // 项目以页面级当前选中为准，只允许向能执行该项目的设备提交。
+  const executableDevicesForActiveProject = useMemo(
+    () => (activeProject
+      ? activeProject.devices.filter((device) => device.hasLocalBinding)
+      : []),
+    [activeProject],
   );
 
   const allTasks = useMemo(() => activeProject?.tasks ?? [], [activeProject]);
@@ -86,12 +89,8 @@ export function MobileTasksPage() {
   }, [allTasks]);
 
   const openSubmit = () => {
-    // 优先预选当前项目的可执行设备；当前项目不可执行时取第一个可执行项目。
-    const candidates = activeProject
-      ? executableProjects.filter((project) => project.projectId === activeProject.projectId)
-      : [];
-    const fallback = candidates[0] ?? executableProjects[0] ?? null;
-    setComposeInitialTarget(fallback ? `${fallback.deviceId}@${fallback.projectId}` : "");
+    // 预选当前项目下的第一个可执行设备作为默认目标。
+    setComposeInitialDevice(executableDevicesForActiveProject[0]?.deviceId ?? "");
     setComposeOpen(true);
   };
 
@@ -194,7 +193,7 @@ export function MobileTasksPage() {
 
       {/* FAB 放在下拉刷新容器外：下拉刷新时内容区带 transform，fixed 元素会相对 transform
           祖先定位导致位移。原生 button 完全掌控样式，避免 Semi Button 全局样式覆盖变形。 */}
-      {executableProjects.length > 0 ? (
+      {executableDevicesForActiveProject.length > 0 ? (
         <button
           type="button"
           className={styles.addTaskFab}
@@ -207,8 +206,9 @@ export function MobileTasksPage() {
 
       <MobileTaskComposeSheet
         visible={composeOpen}
-        executableProjects={executableProjects}
-        initialTarget={composeInitialTarget}
+        projectName={activeProject?.projectName ?? ""}
+        executableDevices={executableDevicesForActiveProject}
+        initialDeviceId={composeInitialDevice}
         onClose={() => setComposeOpen(false)}
         onSubmitted={() => setStatusTab("pending")}
       />

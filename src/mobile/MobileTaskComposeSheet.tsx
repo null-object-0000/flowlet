@@ -15,28 +15,29 @@ const COLLAPSE_GESTURE_PX = 48;
 const CLOSE_GESTURE_PX = 64;
 
 /** 与 PC 看板一致的 Agent Profile 选项（任务执行驱动目标 Agent）。 */
-const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi"];
-
-/** 同一项目可能出现在多台设备，表单选中值用「设备 + 项目」组合 key 区分目标。 */
-function targetKey(project: SharedDeviceProject) {
-  return `${project.deviceId}@${project.projectId}`;
-}
+const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex"];
 
 /**
  * 添加任务底部弹窗：与任务详情抽屉（MobileTaskDetailSheet）一致的二段展开交互。
- * 默认半屏展示核心字段（目标设备与项目、任务标题），上滑进入完整表单，
- * 下滑收回半屏，半屏状态下再下滑关闭。提交走签名 LAN 通道，任务默认以草稿创建。
+ * 任务归属项目由页面级当前选中决定，这里只需选择目标设备（该项目下已绑定本地目录、
+ * 可执行任务的设备）。默认半屏展示核心字段（目标设备、任务标题）并提示上滑展开，
+ * 上滑/点击把手进入完整表单（任务描述、任务类型、Agent Profile），下滑收回半屏，
+ * 半屏状态下再下滑关闭。提交走签名 LAN 通道，任务默认以草稿创建。
  */
 export function MobileTaskComposeSheet({
   visible,
-  executableProjects,
-  initialTarget,
+  projectName,
+  executableDevices,
+  initialDeviceId,
   onClose,
   onSubmitted,
 }: {
   visible: boolean;
-  executableProjects: SharedDeviceProject[];
-  initialTarget: string;
+  /** 页面级当前选中的项目名（任务归属，仅用于展示）。 */
+  projectName: string;
+  /** 该项目下可执行目标设备（hasLocalBinding）。 */
+  executableDevices: SharedDeviceProject[];
+  initialDeviceId: string;
   onClose: () => void;
   /** 提交成功后由页面切换状态 Tab 等后续动作。 */
   onSubmitted?: () => void;
@@ -44,7 +45,7 @@ export function MobileTaskComposeSheet({
   const { t } = useAppPreferences();
   const [closing, setClosing] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [target, setTarget] = useState(initialTarget);
+  const [deviceId, setDeviceId] = useState(initialDeviceId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [taskType, setTaskType] = useState<"code" | "readonly">("code");
@@ -53,10 +54,10 @@ export function MobileTaskComposeSheet({
   const bodyRef = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ x: number; y: number; allowDownGesture: boolean } | null>(null);
 
-  const draftTarget = executableProjects.find((project) => targetKey(project) === target) ?? null;
-  // 提交目标设备由表单选中的可执行项目决定，允许任意设备的可执行项目。
-  const submit = useMobileSubmitTask(draftTarget?.deviceId ?? null);
-  const canSubmit = target.length > 0 && title.trim().length > 0 && !submit.isPending;
+  const draftDevice = executableDevices.find((device) => device.deviceId === deviceId) ?? null;
+  // 提交目标设备由表单选中的设备决定，任务归属项目为页面级当前选中项目。
+  const submit = useMobileSubmitTask(draftDevice?.deviceId ?? null);
+  const canSubmit = deviceId.length > 0 && title.trim().length > 0 && !submit.isPending;
 
   const requestClose = () => {
     setClosing((wasClosing) => {
@@ -74,7 +75,7 @@ export function MobileTaskComposeSheet({
     if (!visible) return;
     setClosing(false);
     setExpanded(false);
-    setTarget(initialTarget);
+    setDeviceId(initialDeviceId);
     setTitle("");
     setDescription("");
     setTaskType("code");
@@ -83,7 +84,7 @@ export function MobileTaskComposeSheet({
       window.clearTimeout(closeTimer.current);
       closeTimer.current = null;
     }
-  }, [visible, initialTarget]);
+  }, [visible, initialDeviceId]);
 
   useEffect(() => () => {
     if (closeTimer.current != null) window.clearTimeout(closeTimer.current);
@@ -129,10 +130,10 @@ export function MobileTaskComposeSheet({
   if (!visible) return null;
 
   const doSubmit = async () => {
-    if (!draftTarget || !canSubmit) return;
+    if (!draftDevice || !canSubmit) return;
     try {
       await submit.mutateAsync({
-        projectId: draftTarget.projectId,
+        projectId: draftDevice.projectId,
         title: title.trim(),
         description: description.trim(),
         taskType,
@@ -171,6 +172,8 @@ export function MobileTaskComposeSheet({
             return;
           }
           const fromFixedHeader = isHandle || targetEl.closest(`.${styles.header}`) != null;
+          // 半屏时 body 锁定（touchAction: none），上滑触发展开；展开后 body 滚动，
+          // 仅当内容已滚到顶部时才允许下滑收回半屏，避免与内容滚动冲突。
           const fromBodyTop = targetEl.closest(`.${styles.body}`) != null
             && (bodyRef.current?.scrollTop ?? 0) <= 1;
           gesture.current = {
@@ -213,10 +216,10 @@ export function MobileTaskComposeSheet({
         </button>
         <header className={styles.header}>
           <div className={styles.headerTopline}>
-            <strong className={styles.title}>{draftTarget ? t("添加任务到「{name}」", { name: draftTarget.projectName }) : t("添加任务")}</strong>
+            <strong className={styles.title}>{projectName ? t("添加任务到「{name}」", { name: projectName }) : t("添加任务")}</strong>
           </div>
           <div className={styles.meta}>
-            <span>{draftTarget ? `${draftTarget.projectName} · ${draftTarget.deviceDisplayName}` : t("选择目标设备与项目")}</span>
+            <span>{draftDevice ? `${projectName} · ${draftDevice.deviceDisplayName}` : t("选择目标设备")}</span>
           </div>
         </header>
         <div className={styles.bodyFrame}>
@@ -229,12 +232,12 @@ export function MobileTaskComposeSheet({
             }}
           >
             <div className={styles.form}>
-              <label>{t("目标设备与项目")}
+              <label>{t("目标设备")}
                 <Select
-                  value={target}
-                  optionList={executableProjects.map((project) => ({ value: targetKey(project), label: `${project.projectName} · ${project.deviceDisplayName}` }))}
+                  value={deviceId}
+                  optionList={executableDevices.map((device) => ({ value: device.deviceId, label: device.deviceDisplayName }))}
                   zIndex={APP_OVERLAY_Z_INDEX.modal + 1}
-                  onChange={(value) => setTarget(String(value))}
+                  onChange={(value) => setDeviceId(String(value))}
                 />
               </label>
               <label>{t("任务标题")}<Input value={title} placeholder={t("例如：修复登录页样式")} onChange={(value) => setTitle(value)} /></label>

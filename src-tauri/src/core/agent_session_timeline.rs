@@ -62,6 +62,93 @@ pub fn get_native_agent_session_timeline(
     }
 }
 
+/// 按任务执行时间窗裁剪累积的 Agent 原生会话。
+/// 退回重跑会复用同一个 session id，因此以 user-message 为边界整组保留本轮的输入、
+/// 思考、工具调用和回复，避免每个执行轮次都返回、渲染完整历史。
+pub fn slice_native_agent_session_timeline(
+    mut timeline: AgentSessionTimeline,
+    started_at: Option<&str>,
+    ended_at: Option<&str>,
+) -> Result<AgentSessionTimeline, String> {
+    let started_ms = parse_timeline_bound(started_at, "开始时间")?;
+    let ended_ms = parse_timeline_bound(ended_at, "结束时间")?;
+    if let (Some(started), Some(ended)) = (started_ms, ended_ms) {
+        if ended < started {
+            return Err("会话时间线结束时间早于开始时间".to_string());
+        }
+    }
+    if started_ms.is_none() && ended_ms.is_none() {
+        return Ok(timeline);
+    }
+
+    let mut interactions: Vec<Vec<AgentSessionTimelineEvent>> = Vec::new();
+    let mut current: Vec<AgentSessionTimelineEvent> = Vec::new();
+    for event in std::mem::take(&mut timeline.events) {
+        if event.kind == "user-message"
+            && current.iter().any(|item| item.kind == "user-message")
+        {
+            interactions.push(std::mem::take(&mut current));
+        }
+        current.push(event);
+    }
+    if !current.is_empty() {
+        interactions.push(current);
+    }
+
+    timeline.events = interactions
+        .into_iter()
+        .filter(|interaction| {
+            let timestamp = interaction
+                .iter()
+                .find(|event| event.kind == "user-message")
+                .and_then(|event| event.timestamp.as_deref())
+                .or_else(|| interaction.iter().find_map(|event| event.timestamp.as_deref()))
+                .and_then(parse_timeline_timestamp);
+            timestamp.is_some_and(|timestamp| {
+                started_ms.map_or(true, |started| timestamp >= started)
+                    && ended_ms.map_or(true, |ended| timestamp < ended)
+            })
+        })
+        .flatten()
+        .collect();
+
+    timeline.turn_count = timeline
+        .events
+        .iter()
+        .filter(|event| event.kind == "user-message")
+        .count() as i64;
+    timeline.models.clear();
+    timeline.usage = None;
+    for event in &timeline.events {
+        if let Some(model) = event.model.as_deref() {
+            if !model.is_empty() && !timeline.models.iter().any(|value| value == model) {
+                timeline.models.push(model.to_string());
+            }
+        }
+        if let Some(usage) = event.usage.as_ref() {
+            add_usage(&mut timeline.usage, usage);
+        }
+    }
+    Ok(timeline)
+}
+
+fn parse_timeline_bound(value: Option<&str>, label: &str) -> Result<Option<i64>, String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            parse_timeline_timestamp(value)
+                .ok_or_else(|| format!("无效的会话时间线{label}：{value}"))
+        })
+        .transpose()
+}
+
+fn parse_timeline_timestamp(value: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|timestamp| timestamp.timestamp_millis())
+}
+
 /// 流式读取会话原生数据，只保留最后一个真实用户输入、所属轮次状态及其后的全部事件。
 /// 该路径不应用历史浏览的事件数和正文长度上限，供详情页和设备同步完整读取最后一轮。
 pub fn get_native_agent_session_last_interaction(
@@ -1963,6 +2050,48 @@ fn find_codex_session_file(root: &Path, agent_type: &str, session_id: &str) -> O
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn slices_reused_session_into_execution_windows() {
+        let root = std::env::temp_dir().join(format!("flowlet-round-window-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("session.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2026-08-08T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"First task\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2026-08-08T10:00:02Z\",\"message\":{\"id\":\"msg-a1\",\"role\":\"assistant\",\"model\":\"claude-first\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"content\":\"First result\"}}\n",
+                "{\"type\":\"user\",\"uuid\":\"u2\",\"timestamp\":\"2026-08-08T10:10:01Z\",\"message\":{\"role\":\"user\",\"content\":\"Second task\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a2\",\"timestamp\":\"2026-08-08T10:10:02Z\",\"message\":{\"id\":\"msg-a2\",\"role\":\"assistant\",\"model\":\"claude-second\",\"usage\":{\"input_tokens\":20,\"output_tokens\":7},\"content\":\"Second result\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let timeline = read_jsonl_timeline(&path, parse_claude_line).unwrap();
+        let first = slice_native_agent_session_timeline(
+            timeline.clone(),
+            Some("2026-08-08T10:00:00Z"),
+            Some("2026-08-08T10:05:00Z"),
+        )
+        .unwrap();
+        assert_eq!(first.events.len(), 2);
+        assert_eq!(first.events[0].content.as_deref(), Some("First task"));
+        assert_eq!(first.events[1].content.as_deref(), Some("First result"));
+        assert_eq!(first.turn_count, 1);
+        assert_eq!(first.models, vec!["claude-first"]);
+        assert_eq!(first.usage.as_ref().unwrap().total_tokens, 15);
+
+        let second =
+            slice_native_agent_session_timeline(timeline, Some("2026-08-08T10:10:00Z"), None)
+                .unwrap();
+        assert_eq!(second.events.len(), 2);
+        assert_eq!(second.events[0].content.as_deref(), Some("Second task"));
+        assert_eq!(second.events[1].content.as_deref(), Some("Second result"));
+        assert_eq!(second.turn_count, 1);
+        assert_eq!(second.models, vec!["claude-second"]);
+        assert_eq!(second.usage.as_ref().unwrap().total_tokens, 27);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn last_interaction_keeps_complete_input_and_all_following_outputs() {

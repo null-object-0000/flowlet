@@ -16,7 +16,6 @@ import {
   inspectPiGlobalConfig,
   listCachedCodexAccounts,
   queryCodexAccount,
-  queryCodexAccounts,
   restoreClaudeCodeGlobalConfig,
   restoreCodexGlobalConfig,
   restoreOpenCodeGlobalConfig,
@@ -75,7 +74,7 @@ export function useAgentLatestVersions(enabled = true) {
 
 // Codex 账号与用量现在由 CodexAccountAutoSync 周期性后台同步刷新本地快照，
 // 因此打开 Agent 弹窗时只读取缓存快照，不再主动发起网络请求；只有用户手动点
-// "刷新用量"时，才通过 useCodexAccountRefresh 触发实时网络刷新。
+// "刷新用量"时，才通过 useCodexAccountRefreshOne 触发当前账号的实时网络刷新。
 export function useCodexAccounts(enabled = true) {
   const queryKey = queryKeys.agent.codexAccount();
   return useQuery({
@@ -87,15 +86,6 @@ export function useCodexAccounts(enabled = true) {
     // 概览页把 Codex 伪装为渠道账号展示，需要定期从缓存快照中读取最新数据。
     // CodexAccountAutoSync 每 5 分钟写一次新快照，这里每 30 秒读一次。
     refetchInterval: 30_000,
-  });
-}
-
-export function useCodexAccountRefresh() {
-  const queryClient = useQueryClient();
-  const queryKey = queryKeys.agent.codexAccount();
-  return useMutation({
-    mutationFn: queryCodexAccounts,
-    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
   });
 }
 

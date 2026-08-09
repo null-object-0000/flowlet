@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentSessionCommands } from "../../domains/agent-session/commands";
+import type { AgentSessionTimelineRange } from "../../domains/agent-session/commands";
 import type { AgentSessionFilter, AgentSessionRow } from "../../domains/agent-session/types";
 import type { OpenCodePermissionDecision } from "../../domains/agent-session/types";
 import { queryKeys } from "../../shared/query-keys";
@@ -78,10 +79,11 @@ export function useAgentSessionTimeline(
   agentType: AgentSessionRow["agentType"] | null,
   sessionId: string | null,
   enabled = true,
+  range?: AgentSessionTimelineRange,
 ) {
   return useQuery({
-    queryKey: queryKeys.agentSession.timeline(agentType ?? "", sessionId ?? ""),
-    queryFn: () => agentSessionCommands.timeline(agentType!, sessionId!),
+    queryKey: queryKeys.agentSession.timeline(agentType ?? "", sessionId ?? "", range),
+    queryFn: () => agentSessionCommands.timeline(agentType!, sessionId!, range),
     enabled: enabled && Boolean(agentType) && Boolean(sessionId),
     staleTime: 30_000,
     retry: 1,

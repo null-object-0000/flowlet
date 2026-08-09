@@ -11,7 +11,7 @@ const FIRST_SYNC_DELAY = 30_000;
  * 串行执行并写任务日志；后台 WebView 轮次不会弹出登录窗口。
  *
  * CHANNEL_RESOURCE_SYNC_INTERVAL_MS 同时用于概览页账号数据过期提示：
- * 自动同步账号超过一轮该周期仍未更新成功时，渠道 Logo 展示黄色 Badge dot。
+ * 自动同步账号超过两轮该周期仍未更新成功时，渠道 Logo 展示黄色 Badge dot。
  */
 export function ChannelResourceAutoSync() {
   const client = useQueryClient();

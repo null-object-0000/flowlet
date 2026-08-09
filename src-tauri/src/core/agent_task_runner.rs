@@ -193,12 +193,6 @@ pub(crate) async fn run_project_task(
     storage
         .set_task_status(&task_id, "in_progress")
         .map_err(|error| format!("标记任务执行中失败：{error}"))?;
-    // 记录最近一次执行的 job + 追加执行历史，供只读详情展示 Agent 执行情况。
-    storage
-        .set_task_last_job(&task_id, &job_id)
-        .map_err(|error| format!("记录任务执行日志失败：{error}"))?;
-    let _ = storage.append_task_execution(&task_id, &job_id, &task.updated_at);
-
     // 6. 记录当前运行信息供前端查询（覆盖步骤 1 的占位；锁失败只跳过展示，不影响执行）。
     if let Ok(mut running) = agent_task_running().lock() {
         running.insert(
@@ -480,13 +474,23 @@ fn required_project_dir(storage: &Storage, project_id: &str) -> Result<std::path
         .get_project(project_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "项目不存在".to_string())?;
-    // 只有绑定本机目录的项目能被调度器领取执行；兜底拦截未绑定项目。
-    Ok(std::path::PathBuf::from(
-        project
-            .directory_path
-            .as_deref()
-            .ok_or_else(|| "项目未绑定本机目录，无法执行".to_string())?,
-    ))
+    // 只有绑定有效本机目录的项目能被调度器领取执行。便携目录迁移、系统重装或盘符变化后，
+    // SQLite 中可能仍保留旧路径；必须在 CreateProcess 前单独校验，否则 Windows 会把无效 cwd
+    // 和无效 executable 统一报告为 os error 267，误导用户排查 Agent 安装路径。
+    let configured = project
+        .directory_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "项目未绑定本机目录，无法执行；请先编辑项目并选择本机目录".to_string())?;
+    let directory = std::path::PathBuf::from(configured);
+    if !directory.is_dir() {
+        return Err(format!(
+            "项目绑定的本机目录不存在或不是文件夹：{}；请编辑项目并重新绑定目录",
+            directory.display()
+        ));
+    }
+    Ok(directory)
 }
 
 /// 已启动的 Agent 子进程及其输出流。
@@ -521,9 +525,12 @@ fn spawn_agent(
         .kill_on_drop(true);
     #[cfg(windows)]
     crate::core::agent_environment::configure_hidden_console(&mut command);
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("无法启动 {display_name}（{executable}）：{error}"))?;
+    let mut child = command.spawn().map_err(|error| {
+        format!(
+            "无法启动 {display_name}；可执行文件：{executable}；工作目录：{}；{error}",
+            project_dir.display()
+        )
+    })?;
     let stdout = child
         .stdout
         .take()
@@ -538,6 +545,22 @@ fn spawn_agent(
         stdout,
         stderr,
     })
+}
+
+/// 只有 Agent 子进程及其输出管道都成功创建后，才把本次 job 记为一个执行轮次。
+/// 启动前校验或 CreateProcess 失败仍保留 background job 日志，但不占用轮次编号。
+fn record_started_execution(
+    storage: &Storage,
+    task: &ProjectTask,
+    job_id: &str,
+) -> Result<(), String> {
+    let recorded = storage
+        .append_task_execution(&task.id, job_id, &task.updated_at)
+        .map_err(|error| format!("记录任务执行轮次失败：{error}"))?;
+    if !recorded {
+        return Err("记录任务执行轮次失败：任务不存在".to_string());
+    }
+    Ok(())
 }
 
 /// Agent 进程输出读取结果。
@@ -743,6 +766,7 @@ async fn execute_claude_code(
             command.arg("--resume").arg(session);
         }
     })?;
+    record_started_execution(storage, task, job_id)?;
 
     let (outcome, mut child) = read_agent_output(
         storage,
@@ -841,6 +865,7 @@ async fn execute_opencode(
             command.arg("--session").arg(session);
         }
     })?;
+    record_started_execution(storage, task, job_id)?;
 
     let (outcome, mut child) = read_agent_output(
         storage,
@@ -1000,6 +1025,7 @@ async fn execute_pi(
             .arg("--session-id")
             .arg(&session_uuid);
     })?;
+    record_started_execution(storage, task, job_id)?;
     // Pi 会把 stdin 与首个位置参数合并为初始消息。正文通过 stdin 传递，避免 Windows
     // Windows npm shim 对带换行命令行参数的截断，并规避超长任务的命令行长度上限。
     {
@@ -1267,6 +1293,31 @@ mod tests {
         let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
         storage
+    }
+
+    #[test]
+    fn project_directory_error_identifies_stale_local_binding() {
+        use crate::core::storage::Project;
+
+        let storage = test_storage();
+        let missing =
+            std::env::temp_dir().join(format!("flowlet-missing-project-{}", uuid::Uuid::new_v4()));
+        storage
+            .save_project(&Project {
+                id: "stale-project".to_string(),
+                name: "旧路径项目".to_string(),
+                directory_path: Some(missing.to_string_lossy().into_owned()),
+                workspace_project_id: None,
+                workspace_archived: false,
+                created_at: "2026-08-08T00:00:00Z".to_string(),
+                updated_at: "2026-08-08T00:00:00Z".to_string(),
+            })
+            .unwrap();
+
+        let error = required_project_dir(&storage, "stale-project").unwrap_err();
+        assert!(error.contains("项目绑定的本机目录不存在或不是文件夹"));
+        assert!(error.contains(missing.to_string_lossy().as_ref()));
+        assert!(error.contains("重新绑定目录"));
     }
 
     /// 在 storage 中造一条带 sessionId 摘要的 project-task-run job。

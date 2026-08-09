@@ -41,9 +41,9 @@
 .readonlyHeader { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-right: 8px; }
 .readonlyHeaderTitle { font-size: 15px; font-weight: 600; color: var(--flowlet-color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.drawerToolbar { flex: none; display: flex; justify-content: flex-end; padding: 8px 20px; border-bottom: 1px solid var(--flowlet-color-border); }
 .taskReadonlyTabs { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .taskReadonlyTabs > :global(.semi-tabs-bar) { flex: none; height: 44px; margin: 0; padding: 0 20px; border-bottom: 1px solid var(--flowlet-color-border); }
+.taskTabsRefresh { height: 44px; display: flex; align-items: center; margin-left: auto; }
 .taskReadonlyTabs > :global(.semi-tabs-content) { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .taskReadonlyTabs :global(.semi-tabs-pane) { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .taskReadonlyTabs :global(.semi-tabs-pane-inactive) { display: none; }

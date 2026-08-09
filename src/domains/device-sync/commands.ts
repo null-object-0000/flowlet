@@ -57,6 +57,9 @@ export const deviceSyncCommands = {
   syncS3: (): Promise<S3DeviceSyncResult> =>
     invokeCommand<S3DeviceSyncResult>("sync_device_usage_s3", undefined, Number.POSITIVE_INFINITY)
       .catch(toDeviceSyncError("s3_device_sync_failed")),
+  recoverCurrentDeviceSync: (): Promise<S3ConnectionTestResult> =>
+    invokeCommand<S3ConnectionTestResult>("recover_current_device_sync", undefined, Number.POSITIVE_INFINITY)
+      .catch(toDeviceSyncError("s3_device_sync_recovery_failed")),
   exportBundle: (path: string): Promise<void> =>
     invokeCommand<void>("export_device_usage_bundle", { path })
       .catch(toDeviceSyncError("device_usage_export_failed")),

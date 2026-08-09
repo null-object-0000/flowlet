@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(12);
@@ -238,31 +238,29 @@ pub async fn query_codex_account(
             write_private_json(&snapshot_path, &report)?;
             report
         }
-        Err(oauth_error) => {
-            match query_codex_account_via_app_server(Some(&profile_dir)).await {
-                Ok(report) if report.signed_in => {
-                    write_private_json(&snapshot_path, &report)?;
-                    report
-                }
-                app_server_result => {
-                    if let Some(mut snapshot) = read_snapshot(&snapshot_path) {
-                        snapshot.stale = true;
-                        snapshot.error = Some(match app_server_result {
+        Err(oauth_error) => match query_codex_account_via_app_server(Some(&profile_dir)).await {
+            Ok(report) if report.signed_in => {
+                write_private_json(&snapshot_path, &report)?;
+                report
+            }
+            app_server_result => {
+                if let Some(mut snapshot) = read_snapshot(&snapshot_path) {
+                    snapshot.stale = true;
+                    snapshot.error = Some(match app_server_result {
                             Ok(_) => "登录凭据已失效，请在 Codex 中重新登录该账号后刷新".to_string(),
                             Err(app_server_error) => format!(
                                 "Codex 账号刷新失败。OAuth 会话：{oauth_error}；app-server：{app_server_error}"
                             ),
                         });
-                        write_private_json(&snapshot_path, &snapshot)?;
-                        snapshot
-                    } else {
-                        return Err(format!(
-                            "Codex 账号 {account_id} 刷新失败。OAuth 会话：{oauth_error}"
-                        ));
-                    }
+                    write_private_json(&snapshot_path, &snapshot)?;
+                    snapshot
+                } else {
+                    return Err(format!(
+                        "Codex 账号 {account_id} 刷新失败。OAuth 会话：{oauth_error}"
+                    ));
                 }
             }
-        }
+        },
     };
     Ok(report)
 }
@@ -426,7 +424,7 @@ where
     let result = async {
         initialize_codex_rpc(&mut rpc).await?;
         let login = rpc
-            .call(2, "account/login/start", Some(json!({ "type": "chatgpt" })))
+            .call(2, "account/login/start", Some(chatgpt_login_params()))
             .await?;
         let (login_id, auth_url) = parse_login_start(&login)?;
         open_auth_url(&auth_url)?;
@@ -652,7 +650,7 @@ async fn query_codex_account_via_app_server(
 }
 
 async fn start_codex_rpc(home_override: Option<&Path>) -> Result<CodexRpc, String> {
-    let executable = resolve_codex_executable().await;
+    let executable = resolve_codex_executable().await?;
     let mut command = codex_command(&executable);
     if let Some(home) = home_override {
         command.env("CODEX_HOME", home);
@@ -660,7 +658,7 @@ async fn start_codex_rpc(home_override: Option<&Path>) -> Result<CodexRpc, Strin
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .map_err(|error| {
@@ -678,7 +676,16 @@ async fn start_codex_rpc(home_override: Option<&Path>) -> Result<CodexRpc, Strin
         .stdout
         .take()
         .ok_or_else(|| "无法连接 Codex app-server 标准输出".to_string())?;
-    Ok(CodexRpc::new(child, stdin, stdout))
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "无法连接 Codex app-server 错误输出".to_string())?;
+    let stderr_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut output = String::new();
+        reader.read_to_string(&mut output).await.map(|_| output)
+    });
+    Ok(CodexRpc::new(child, stdin, stdout, stderr_task))
 }
 
 async fn initialize_codex_rpc(rpc: &mut CodexRpc) -> Result<(), String> {
@@ -800,6 +807,14 @@ async fn read_codex_account_report(
 
 fn account_read_params() -> Value {
     json!({ "refreshToken": true })
+}
+
+fn chatgpt_login_params() -> Value {
+    json!({
+        "type": "chatgpt",
+        "useHostedLoginSuccessPage": true,
+        "appBrand": "chatgpt"
+    })
 }
 
 fn parse_login_start(value: &Value) -> Result<(String, String), String> {
@@ -1033,47 +1048,53 @@ fn parse_credits(value: &Value) -> Option<CodexCredits> {
     })
 }
 
-async fn resolve_codex_executable() -> PathBuf {
-    let environment =
-        crate::core::agent_environment::detect_agent_environment("chatgpt-desktop").await;
-    if let Ok(report) = environment {
-        if let Some(installation) = report.primary {
-            if installation.surface == crate::core::agent_environment::AgentSurface::Cli {
-                return PathBuf::from(installation.executable_path);
-            }
-            #[cfg(any(windows, target_os = "macos"))]
-            let install_dir = PathBuf::from(installation.install_dir);
-            #[cfg(windows)]
-            {
-                let bundled = install_dir.join("app").join("resources").join("codex.exe");
-                if bundled.is_file() {
-                    return bundled;
-                }
-            }
-            #[cfg(target_os = "macos")]
-            {
-                let bundled = install_dir.join("Contents").join("Resources").join("codex");
-                if bundled.is_file() {
-                    return bundled;
-                }
-            }
-        }
+async fn resolve_codex_executable() -> Result<PathBuf, String> {
+    let report = crate::core::agent_environment::detect_agent_environment("chatgpt-desktop")
+        .await
+        .map_err(|error| format!("检测 Codex CLI 失败：{error}"))?;
+    if let Some(installation) = report
+        .installations
+        .iter()
+        .find(|installation| is_runnable_codex_cli(installation))
+    {
+        return Ok(PathBuf::from(&installation.executable_path));
     }
-    PathBuf::from(if cfg!(windows) { "codex.exe" } else { "codex" })
+    let desktop_detected = report.installations.iter().any(|installation| {
+        installation.surface == crate::core::agent_environment::AgentSurface::Desktop
+    });
+    Err(if desktop_detected {
+        "已检测到 ChatGPT/Codex Desktop，但账号授权需要独立安装且可运行的 Codex CLI。请先安装 Codex CLI，安装完成后再授权"
+            .to_string()
+    } else {
+        "未检测到可运行的 Codex CLI。请先安装 Codex CLI，安装完成后再授权".to_string()
+    })
+}
+
+fn is_runnable_codex_cli(installation: &crate::core::agent_environment::AgentInstallation) -> bool {
+    installation.surface == crate::core::agent_environment::AgentSurface::Cli
+        && installation.version_output.is_some()
+        && installation.error.is_none()
 }
 
 struct CodexRpc {
     child: Child,
     stdin: ChildStdin,
     stdout: tokio::io::Lines<BufReader<ChildStdout>>,
+    stderr_task: Option<tokio::task::JoinHandle<std::io::Result<String>>>,
 }
 
 impl CodexRpc {
-    fn new(child: Child, stdin: ChildStdin, stdout: ChildStdout) -> Self {
+    fn new(
+        child: Child,
+        stdin: ChildStdin,
+        stdout: ChildStdout,
+        stderr_task: tokio::task::JoinHandle<std::io::Result<String>>,
+    ) -> Self {
         Self {
             child,
             stdin,
             stdout: BufReader::new(stdout).lines(),
+            stderr_task: Some(stderr_task),
         }
     }
 
@@ -1093,8 +1114,10 @@ impl CodexRpc {
             let line = tokio::time::timeout(RPC_TIMEOUT, self.stdout.next_line())
                 .await
                 .map_err(|_| format!("Codex app-server 调用 {method} 超时"))?
-                .map_err(|error| format!("读取 Codex app-server 响应失败：{error}"))?
-                .ok_or_else(|| "Codex app-server 意外退出".to_string())?;
+                .map_err(|error| format!("读取 Codex app-server 响应失败：{error}"))?;
+            let Some(line) = line else {
+                return Err(self.exit_error("意外退出").await);
+            };
             let message: Value = serde_json::from_str(&line)
                 .map_err(|error| format!("Codex app-server 返回了无效数据：{error}"))?;
             if message.get("id").and_then(Value::as_i64) != Some(id) {
@@ -1128,8 +1151,10 @@ impl CodexRpc {
             let line = tokio::time::timeout_at(deadline, self.stdout.next_line())
                 .await
                 .map_err(|_| "等待 Codex 账号授权超时，请重试".to_string())?
-                .map_err(|error| format!("读取 Codex 登录结果失败：{error}"))?
-                .ok_or_else(|| "Codex app-server 在登录完成前意外退出".to_string())?;
+                .map_err(|error| format!("读取 Codex 登录结果失败：{error}"))?;
+            let Some(line) = line else {
+                return Err(self.exit_error("在登录完成前意外退出").await);
+            };
             let message: Value = serde_json::from_str(&line)
                 .map_err(|error| format!("Codex app-server 返回了无效登录结果：{error}"))?;
             let Some(result) = parse_login_completed(&message, login_id) else {
@@ -1156,6 +1181,52 @@ impl CodexRpc {
     async fn stop(&mut self) {
         let _ = self.child.kill().await;
         let _ = self.child.wait().await;
+        let _ = self.take_stderr().await;
+    }
+
+    async fn exit_error(&mut self, context: &str) -> String {
+        let status = self.child.wait().await.ok();
+        let stderr = self.take_stderr().await;
+        let status_detail = status
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "退出状态未知".to_string());
+        match stderr
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some(stderr) => format!(
+                "Codex app-server {context}（{status_detail}）：{}",
+                compact_process_output(stderr)
+            ),
+            None => format!("Codex app-server {context}（{status_detail}）"),
+        }
+    }
+
+    async fn take_stderr(&mut self) -> Option<String> {
+        let mut task = self.stderr_task.take()?;
+        match tokio::time::timeout(Duration::from_secs(1), &mut task).await {
+            Ok(result) => result.ok()?.ok(),
+            Err(_) => {
+                task.abort();
+                None
+            }
+        }
+    }
+}
+
+fn compact_process_output(output: &str) -> String {
+    const MAX_CHARS: usize = 600;
+    let compact = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    if compact.chars().count() <= MAX_CHARS {
+        compact
+    } else {
+        format!("{}…", compact.chars().take(MAX_CHARS).collect::<String>())
     }
 }
 
@@ -1209,6 +1280,53 @@ mod tests {
     }
 
     #[test]
+    fn browser_login_uses_hosted_chatgpt_success_page() {
+        assert_eq!(
+            chatgpt_login_params(),
+            json!({
+                "type": "chatgpt",
+                "useHostedLoginSuccessPage": true,
+                "appBrand": "chatgpt"
+            })
+        );
+    }
+
+    #[test]
+    fn authorization_requires_a_successfully_probed_cli() {
+        let runnable = crate::core::agent_environment::AgentInstallation {
+            surface: crate::core::agent_environment::AgentSurface::Cli,
+            executable_path: "codex.exe".to_string(),
+            install_dir: "bin".to_string(),
+            install_method: crate::core::agent_environment::AgentInstallMethod::Npm,
+            version: Some("1.0.0".to_string()),
+            version_output: Some("codex-cli 1.0.0".to_string()),
+            available_on_path: true,
+            error: None,
+        };
+        assert!(is_runnable_codex_cli(&runnable));
+
+        let mut unlaunchable = runnable.clone();
+        unlaunchable.version_output = None;
+        assert!(!is_runnable_codex_cli(&unlaunchable));
+
+        let mut desktop = runnable;
+        desktop.surface = crate::core::agent_environment::AgentSurface::Desktop;
+        assert!(!is_runnable_codex_cli(&desktop));
+    }
+
+    #[test]
+    fn compacts_and_limits_app_server_error_output() {
+        assert_eq!(
+            compact_process_output(" first line\r\n\r\n second line "),
+            "first line | second line"
+        );
+        let long = "x".repeat(700);
+        let compact = compact_process_output(&long);
+        assert_eq!(compact.chars().count(), 601);
+        assert!(compact.ends_with('…'));
+    }
+
+    #[test]
     fn parses_browser_login_start_and_completion() {
         assert_eq!(
             parse_login_start(&json!({
@@ -1231,16 +1349,14 @@ mod tests {
             ),
             Some(Ok(()))
         );
-        assert!(
-            parse_login_completed(
-                &json!({
-                    "method": "account/login/completed",
-                    "params": { "loginId": "another-login", "success": true }
-                }),
-                "login-1"
-            )
-            .is_none()
-        );
+        assert!(parse_login_completed(
+            &json!({
+                "method": "account/login/completed",
+                "params": { "loginId": "another-login", "success": true }
+            }),
+            "login-1"
+        )
+        .is_none());
     }
 
     #[test]

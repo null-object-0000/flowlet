@@ -483,7 +483,11 @@ fn codex_cli_candidates() -> Vec<Candidate> {
     if let Some(path) = std::env::var_os("PATH") {
         for directory in std::env::split_paths(&path) {
             for file_name in executable_names("codex") {
-                push_candidate(&mut candidates, &mut seen, directory.join(file_name), true);
+                let candidate = directory.join(file_name);
+                if !is_external_codex_cli_candidate(&candidate) {
+                    continue;
+                }
+                push_candidate(&mut candidates, &mut seen, candidate, true);
             }
         }
     }
@@ -514,6 +518,16 @@ fn codex_cli_candidates() -> Vec<Candidate> {
         );
     }
     candidates
+}
+
+#[cfg(windows)]
+fn is_external_codex_cli_candidate(path: &Path) -> bool {
+    !is_windows_store_codex_executable(path)
+}
+
+#[cfg(not(windows))]
+fn is_external_codex_cli_candidate(_path: &Path) -> bool {
+    true
 }
 
 fn opencode_desktop_candidates() -> Vec<Candidate> {
@@ -824,6 +838,9 @@ fn classify_codex_cli_method(path: &Path) -> AgentInstallMethod {
     } else if normalized.ends_with("/.local/bin/codex")
         || normalized.ends_with("/.local/bin/codex.exe")
         || normalized.contains("/programs/openai/codex/bin/")
+        || (normalized.contains("/.codex/packages/standalone/releases/")
+            && (normalized.ends_with("/bin/codex")
+                || normalized.ends_with("/bin/codex.exe")))
     {
         AgentInstallMethod::Native
     } else if normalized.starts_with("/usr/bin/") || normalized.starts_with("/usr/local/bin/") {
@@ -1233,6 +1250,12 @@ mod tests {
             AgentInstallMethod::Native
         );
         assert_eq!(
+            classify_codex_cli_method(Path::new(
+                "C:/Users/test/.codex/packages/standalone/releases/0.147.0-x86_64-pc-windows-msvc/bin/codex.exe"
+            )),
+            AgentInstallMethod::Native
+        );
+        assert_eq!(
             classify_pi_cli_method(Path::new("C:/Users/test/AppData/Roaming/npm/pi.cmd")),
             AgentInstallMethod::Npm
         );
@@ -1255,6 +1278,7 @@ mod tests {
             "C:/Program Files/WindowsApps/OpenAI.Codex_26.715.4045.0_x64__2p2nqsd0c76g0/app/resources/codex.exe",
         );
         assert!(is_windows_store_codex_executable(path));
+        assert!(!is_external_codex_cli_candidate(path));
     }
 
     #[cfg(windows)]

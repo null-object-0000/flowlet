@@ -234,7 +234,6 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - kimi-k3
 - kimi-k2.7-code
 - qwen3.8-max
-- qwen3.8-max-preview
 - qwen3.7-max
 - qwen3.7-plus
 - qwen3.7-flash

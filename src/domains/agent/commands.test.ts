@@ -77,6 +77,17 @@ describe("agent commands", () => {
     expect(invoke).toHaveBeenCalledWith(command, { agentId: "claude-code" });
   });
 
+  it("passes independent Claude Code context options through the typed boundary", async () => {
+    vi.mocked(invoke).mockResolvedValue({});
+
+    await applyClaudeCodeGlobalConfig({ primaryLongContext: true, fastLongContext: false });
+
+    expect(invoke).toHaveBeenCalledWith("apply_agent_global_config", {
+      agentId: "claude-code",
+      options: { primaryLongContext: true, fastLongContext: false },
+    });
+  });
+
   it.each([
     [inspectPiGlobalConfig, "inspect_agent_global_config"],
     [applyPiGlobalConfig, "apply_agent_global_config"],

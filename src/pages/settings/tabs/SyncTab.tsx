@@ -208,6 +208,27 @@ export function SyncTab() {
     }
   };
 
+  const recoverCurrentDeviceSync = () => Modal.confirm({
+    title: t("恢复本机云端同步？"),
+    content: t("仅当旧系统或持有同一便携目录的其它副本已经停止运行时继续。Flowlet 会核对远端快照的设备 ID 和身份创建时间，然后由本机接管后续同步。"),
+    okText: t("确认恢复"),
+    cancelText: t("取消"),
+    zIndex: APP_OVERLAY_Z_INDEX.modal,
+    onOk: async () => {
+      try {
+        await transfer.recoverCurrentDeviceSync.mutateAsync();
+        const result = await transfer.syncS3.mutateAsync();
+        Toast.success(t("同步已恢复：发现 {devices} 台设备，导入 {days} 天", {
+          devices: result.remoteDevices,
+          days: result.importedDays,
+        }));
+      } catch (error) {
+        Toast.error(t("恢复失败：{message}", { message: errorMessage(error) }));
+        throw error;
+      }
+    },
+  });
+
   const generateShare = async (tab: Extract<ConnectionTab, "qr" | "text">, withWorkspace: boolean) => {
     setConnectionTab(tab);
     try {
@@ -319,6 +340,15 @@ export function SyncTab() {
             <span>{t("将本地数据同步至 S3 兼容存储")}</span>
           </div>
           <div className={styles.actions}>
+            {settings.data?.status.message.includes("重复设备 ID") ? (
+              <Button
+                theme="outline"
+                loading={transfer.recoverCurrentDeviceSync.isPending}
+                onClick={recoverCurrentDeviceSync}
+              >
+                {t("恢复本机同步")}
+              </Button>
+            ) : null}
             <Button theme="outline" onClick={openS3Config}>{settings.data?.config ? t("修改配置") : t("配置 S3")}</Button>
             <Button
               type="primary"

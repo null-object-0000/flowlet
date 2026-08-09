@@ -40,6 +40,7 @@ import {
   truncateAccountName,
 } from "./accountName";
 import { ScrapeSyncFeedback } from "./ScrapeSyncFeedback";
+import { errorMessage } from "../../shared/errors/AppError";
 
 const { Text } = Typography;
 
@@ -105,7 +106,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       Toast.success(t("ChatGPT 账号授权成功"));
       onClose();
     } catch (error) {
-      Toast.error(t("ChatGPT 账号授权失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("ChatGPT 账号授权失败：{message}", { message: errorMessage(error) }));
     }
   };
   const autoSyncBalance = channel?.supports_balance_query === true;

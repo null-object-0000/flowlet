@@ -3,7 +3,7 @@ use super::{Storage, StorageError};
 use crate::core::agent_session_timeline::{
     AgentSessionSummaryCheckpoint, AgentSessionSummaryParseResult,
 };
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 #[cfg(desktop)]
 use sha2::Digest;
@@ -219,7 +219,9 @@ impl Storage {
             let mut session = session_json
                 .as_deref()
                 .and_then(|json| serde_json::from_str::<AgentSessionRow>(json).ok())
-                .unwrap_or_else(|| archived_agent_session_row(&agent_type, &session_id, &synced_at));
+                .unwrap_or_else(|| {
+                    archived_agent_session_row(&agent_type, &session_id, &synced_at)
+                });
             session.runtime_status = "unknown".to_string();
             session.native_summary = Some(summary);
             session.native_synced_at = Some(synced_at);
@@ -550,8 +552,9 @@ impl Storage {
                 .map(|session| (session.agent_type.clone(), session.session_id.clone()))
                 .collect::<std::collections::HashSet<_>>();
             let stored_keys = {
-                let mut statement = connection
-                    .prepare("SELECT agent_type, session_id, summary_json FROM agent_session_snapshots")?;
+                let mut statement = connection.prepare(
+                    "SELECT agent_type, session_id, summary_json FROM agent_session_snapshots",
+                )?;
                 let rows = statement
                     .query_map([], |row| {
                         Ok((
@@ -566,9 +569,10 @@ impl Storage {
             let deleted = stored_keys
                 .into_iter()
                 .filter(|(agent_type, session_id, summary_json)| {
-                    let source_available = serde_json::from_str::<AgentSessionNativeSummary>(summary_json)
-                        .map(|summary| summary.source_available)
-                        .unwrap_or(true);
+                    let source_available =
+                        serde_json::from_str::<AgentSessionNativeSummary>(summary_json)
+                            .map(|summary| summary.source_available)
+                            .unwrap_or(true);
                     available_sources.contains(agent_type)
                         && !current_keys.contains(&(agent_type.clone(), session_id.clone()))
                         && source_available
@@ -591,12 +595,14 @@ impl Storage {
                     params![session.agent_type, session.session_id, session_json],
                 )?;
                 let existing: Option<(String, i64, String)> = connection.query_row("SELECT fingerprint, parser_version, summary_json FROM agent_session_snapshots WHERE agent_type = ?1 AND session_id = ?2", params![session.agent_type, session.session_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
-                let active_existing = existing.and_then(|(fingerprint, parser_version, summary_json)| {
-                    let source_available = serde_json::from_str::<AgentSessionNativeSummary>(&summary_json)
-                        .map(|summary| summary.source_available)
-                        .unwrap_or(true);
-                    source_available.then_some((fingerprint, parser_version))
-                });
+                let active_existing =
+                    existing.and_then(|(fingerprint, parser_version, summary_json)| {
+                        let source_available =
+                            serde_json::from_str::<AgentSessionNativeSummary>(&summary_json)
+                                .map(|summary| summary.source_available)
+                                .unwrap_or(true);
+                        source_available.then_some((fingerprint, parser_version))
+                    });
                 if needs_agent_snapshot_refresh(force, &fingerprint, active_existing.as_ref()) {
                     changed.push((session.clone(), fingerprint));
                 }
@@ -786,19 +792,12 @@ impl Storage {
                         full_sessions += 1;
                     }
                     let write_started = Instant::now();
-                    self.save_agent_snapshot(
-                        session,
-                        fingerprint,
-                        &parsed,
-                    )?;
+                    self.save_agent_snapshot(session, fingerprint, &parsed)?;
                     // 被代理覆盖的会话（自身观测，或子会话且父被观测）不记原生账本，
                     // 并清掉可能残留的旧事件；其余会话（含父未观测的原生子会话）照常记账。
                     if subsumed.contains(&(session.agent_type.clone(), session.session_id.clone()))
                     {
-                        self.delete_agent_usage_events(
-                            &session.agent_type,
-                            &session.session_id,
-                        )?;
+                        self.delete_agent_usage_events(&session.agent_type, &session.session_id)?;
                     } else {
                         self.save_agent_usage_events(
                             &session.agent_type,
@@ -2199,8 +2198,8 @@ mod tests {
         let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
 
-        let make_event = |event_id: &str, event_time: &str, total: i64| {
-            crate::core::config::AgentUsageEvent {
+        let make_event =
+            |event_id: &str, event_time: &str, total: i64| crate::core::config::AgentUsageEvent {
                 event_id: event_id.to_string(),
                 event_time: event_time.to_string(),
                 model: Some("model-a".to_string()),
@@ -2210,8 +2209,7 @@ mod tests {
                 output_tokens: total / 2,
                 reasoning_tokens: 0,
                 total_tokens: total,
-            }
-        };
+            };
         let make_parsed = |incremental: bool, usage_events| AgentSessionSummaryParseResult {
             summary: AgentSessionNativeSummary {
                 source_available: true,
@@ -2275,7 +2273,10 @@ mod tests {
         let hours = storage.agent_native_hourly_usage_totals().unwrap();
         assert_eq!(hours.len(), 3);
         assert_eq!(
-            hours.iter().map(|hour| hour.native_total_tokens).sum::<i64>(),
+            hours
+                .iter()
+                .map(|hour| hour.native_total_tokens)
+                .sum::<i64>(),
             200
         );
 
@@ -2284,7 +2285,10 @@ mod tests {
             .save_agent_usage_events(
                 "claude-code",
                 "session-1",
-                &make_parsed(false, vec![make_event("e9", "2026-07-31T12:00:00+00:00", 5)]),
+                &make_parsed(
+                    false,
+                    vec![make_event("e9", "2026-07-31T12:00:00+00:00", 5)],
+                ),
             )
             .unwrap();
         let days = storage.agent_native_daily_usage_totals().unwrap();
@@ -2324,11 +2328,13 @@ mod tests {
         let archived = storage.enrich_native_agent_sessions(Vec::new());
         assert_eq!(archived.len(), 1);
         assert_eq!(archived[0].title.as_deref(), Some("Task"));
-        assert!(!archived[0]
-            .native_summary
-            .as_ref()
-            .unwrap()
-            .source_available);
+        assert!(
+            !archived[0]
+                .native_summary
+                .as_ref()
+                .unwrap()
+                .source_available
+        );
     }
 
     #[test]
@@ -2549,12 +2555,10 @@ mod tests {
         let cleaned = storage.cleanup_background_jobs(90).unwrap();
         assert_eq!(cleaned.deleted_jobs, 1);
         assert_eq!(cleaned.deleted_events, 2);
-        assert!(
-            storage
-                .get_background_job_detail("finished")
-                .unwrap()
-                .is_none()
-        );
+        assert!(storage
+            .get_background_job_detail("finished")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -2617,12 +2621,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(detail.job.status, "succeeded_with_warnings");
-        assert!(
-            detail
-                .events
-                .iter()
-                .any(|event| event.stage.as_deref() == Some("账号刷新失败"))
-        );
+        assert!(detail
+            .events
+            .iter()
+            .any(|event| event.stage.as_deref() == Some("账号刷新失败")));
     }
 
     #[test]
@@ -2843,11 +2845,9 @@ mod tests {
         assert_eq!(mid.input_cache_write_price, None);
 
         // 无 cost 的模型跳过；未映射的 provider 整体跳过。
-        assert!(
-            !prices
-                .iter()
-                .any(|p| p.upstream_model == "gpt-free-no-cost")
-        );
+        assert!(!prices
+            .iter()
+            .any(|p| p.upstream_model == "gpt-free-no-cost"));
         assert!(!prices.iter().any(|p| p.upstream_model == "claude-x"));
     }
 
@@ -2911,7 +2911,7 @@ mod tests {
                      "input": {"standard": 6, "cacheHit": 1.2, "explicitCacheCreation": 7.5, "explicitCacheHit": 0.6},
                      "output": 18, "sourceUrl": "https://example.com/qwen3.7-max"}
                 ]},
-                {"id": "qwen3.8-max-preview", "prices": []}
+                {"id": "qwen3.8-max", "prices": []}
             ]
         }]
     }"#;
@@ -2946,12 +2946,10 @@ mod tests {
         assert!((plus.input_uncached_price - 1.6).abs() < 1e-9);
         assert!((plus.output_price - 6.4).abs() < 1e-9);
 
-        // qwen3.8-max-preview：暂无公开单价，不生成价格条目。
-        assert!(
-            !prices
-                .iter()
-                .any(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.8-max-preview")
-        );
+        // qwen3.8-max：暂无公开单价，不生成价格条目。
+        assert!(!prices
+            .iter()
+            .any(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.8-max"));
     }
 
     #[test]

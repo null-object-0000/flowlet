@@ -1,7 +1,7 @@
 use super::{Storage, StorageError};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -283,7 +283,10 @@ impl Storage {
     }
 
     /// 跨项目读取任务完整信息（仅按任务 id），供 mutation command 做跨设备权限校验。
-    pub fn get_project_task_by_id(&self, task_id: &str) -> Result<Option<ProjectTask>, StorageError> {
+    pub fn get_project_task_by_id(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<ProjectTask>, StorageError> {
         let connection = self
             .connection
             .lock()
@@ -419,8 +422,8 @@ impl Storage {
                  FROM project_tasks WHERE id IN ({placeholders})"
             );
             let mut parent_statement = connection.prepare(&sql)?;
-            let parent_rows =
-                parent_statement.query_map(rusqlite::params_from_iter(base_ids.iter()), |row| {
+            let parent_rows = parent_statement
+                .query_map(rusqlite::params_from_iter(base_ids.iter()), |row| {
                     map_project_task_row(row)
                 })?;
             for row in parent_rows {
@@ -451,11 +454,7 @@ impl Storage {
     /// 任务一旦被某台设备执行过或正在执行（`claimed_by` 指向其他设备），就永久归属
     /// 该设备，其他设备不可再领取——不再有租约过期重领的窗口。基于其他设备任务的
     /// 子任务同样不可领取。
-    pub fn claim_task(
-        &self,
-        task_id: &str,
-        current_device_id: &str,
-    ) -> Result<bool, StorageError> {
+    pub fn claim_task(&self, task_id: &str, current_device_id: &str) -> Result<bool, StorageError> {
         let connection = self
             .connection
             .lock()
@@ -681,7 +680,7 @@ impl Storage {
             .map_err(StorageError::from)
     }
 
-    /// 在执行开始时追加一条执行历史。
+    /// Agent 子进程成功创建后，原子记录最近一次 job 并追加一条执行历史。
     /// `submitted_at` 是本轮进入待处理（提交 / 退回）的时刻，由调用方在任务被标记
     /// `in_progress` **之前**读取（即 `task.updated_at`），用于计算本轮等待耗时。
     /// 记录结构：`{jobId, startedAt, submittedAt, finishedAt, waitingMs, executionMs, ...}`。
@@ -727,8 +726,8 @@ impl Storage {
         let serialized = serde_json::to_string(&entries)
             .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
         Ok(connection.execute(
-            "UPDATE project_tasks SET execution_history = ?2 WHERE id = ?1",
-            params![task_id, serialized],
+            "UPDATE project_tasks SET execution_history = ?2, last_job_id = ?3 WHERE id = ?1",
+            params![task_id, serialized, job_id],
         )? > 0)
     }
 
@@ -752,8 +751,7 @@ impl Storage {
         let Some(current) = current else {
             return Ok(false);
         };
-        let mut entries: Vec<Value> =
-            serde_json::from_str(&current).unwrap_or_default();
+        let mut entries: Vec<Value> = serde_json::from_str(&current).unwrap_or_default();
         let mut found = false;
         let finished_at = chrono::Utc::now();
         let finished_at_str = finished_at.to_rfc3339();
@@ -808,8 +806,7 @@ impl Storage {
         let Some(current) = current else {
             return Ok(false);
         };
-        let mut entries: Vec<Value> =
-            serde_json::from_str(&current).unwrap_or_default();
+        let mut entries: Vec<Value> = serde_json::from_str(&current).unwrap_or_default();
         let mut found = false;
         for entry in &mut entries {
             if entry.get("jobId").and_then(Value::as_str) == Some(job_id) {
@@ -1087,10 +1084,20 @@ mod tests {
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
         storage.save_project(&project).unwrap();
-        storage.save_project_task(&sample_task("task-1", "submitted", "p1", "2026-08-03T00:00:00Z")).unwrap();
+        storage
+            .save_project_task(&sample_task(
+                "task-1",
+                "submitted",
+                "p1",
+                "2026-08-03T00:00:00Z",
+            ))
+            .unwrap();
 
         assert!(storage.set_task_status("task-1", "in_progress").unwrap());
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(task.status, "in_progress");
         assert!(task.updated_at.as_str() > "2026-08-03T00:00:00Z");
 
@@ -1112,11 +1119,21 @@ mod tests {
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
         storage.save_project(&project).unwrap();
-        storage.save_project_task(&sample_task("task-1", "submitted", "p1", "2026-08-03T00:00:00Z")).unwrap();
+        storage
+            .save_project_task(&sample_task(
+                "task-1",
+                "submitted",
+                "p1",
+                "2026-08-03T00:00:00Z",
+            ))
+            .unwrap();
 
         // 撤回：已提交 → 草稿。撤回到草稿后任务不再出现在待执行队列（只查 submitted）。
         assert!(storage.set_task_status("task-1", "draft").unwrap());
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(task.status, "draft");
         assert!(task.updated_at.as_str() > "2026-08-03T00:00:00Z");
         assert!(storage
@@ -1145,13 +1162,19 @@ mod tests {
         storage.save_project_task(&task).unwrap();
 
         // 基于已完成任务创建时记录的 base_task_id 持久化并可回读。
-        let loaded = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let loaded = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.base_task_id.as_deref(), Some("base-1"));
         // 编辑保存不丢 base_task_id（按值回写）。
         let mut edited = loaded.clone();
         edited.title = "改标题".to_string();
         storage.save_project_task(&edited).unwrap();
-        let reloaded = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let reloaded = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(reloaded.title, "改标题");
         assert_eq!(reloaded.base_task_id.as_deref(), Some("base-1"));
     }
@@ -1200,9 +1223,11 @@ mod tests {
         };
         storage.save_project(&project).unwrap();
         // created_at 早（先创建）但提交晚（updated_at 晚）的任务，应排在提交早的后面。
-        let mut created_early = sample_task("created-early", "submitted", "p1", "2026-08-03T00:00:00Z");
+        let mut created_early =
+            sample_task("created-early", "submitted", "p1", "2026-08-03T00:00:00Z");
         created_early.updated_at = "2026-08-03T05:00:00Z".to_string();
-        let mut submitted_early = sample_task("submitted-early", "submitted", "p1", "2026-08-03T04:00:00Z");
+        let mut submitted_early =
+            sample_task("submitted-early", "submitted", "p1", "2026-08-03T04:00:00Z");
         submitted_early.updated_at = "2026-08-03T01:00:00Z".to_string();
         storage.save_project_task(&created_early).unwrap();
         storage.save_project_task(&submitted_early).unwrap();
@@ -1272,11 +1297,17 @@ mod tests {
         submitted.project_id = "project-1".into();
         storage.save_project_task(&submitted).unwrap();
         assert!(storage.boost_project_task("submitted").unwrap());
-        let boosted = storage.get_project_task("project-1", "submitted").unwrap().unwrap();
+        let boosted = storage
+            .get_project_task("project-1", "submitted")
+            .unwrap()
+            .unwrap();
         assert!(boosted.queue_boosted_at.is_some());
         // 领取执行后置顶清空：执行开始后置顶只对「当前这一轮排队」有效。
         assert!(storage.claim_task("submitted", "device-a").unwrap());
-        let claimed = storage.get_project_task("project-1", "submitted").unwrap().unwrap();
+        let claimed = storage
+            .get_project_task("project-1", "submitted")
+            .unwrap()
+            .unwrap();
         assert!(claimed.queue_boosted_at.is_none());
         assert_eq!(claimed.claimed_by.as_deref(), Some("device-a"));
     }
@@ -1349,11 +1380,16 @@ mod tests {
         // 已执行但未标注领取：工作区同步来的其他设备已执行任务，本机只读。
         let mut executed = sample_task("executed", "submitted", "p1", "2026-08-03T01:00:00Z");
         executed.project_id = "project-1".into();
-        executed.execution_history = Some(r#"[{"jobId":"job-1","startedAt":"2026-08-03T02:00:00Z","finishedAt":null}]"#.into());
+        executed.execution_history = Some(
+            r#"[{"jobId":"job-1","startedAt":"2026-08-03T02:00:00Z","finishedAt":null}]"#.into(),
+        );
         // 本机执行过（claimed_by = 本机）：可重新排队执行（退回重跑）。
-        let mut own_executed = sample_task("own-executed", "submitted", "p1", "2026-08-03T02:00:00Z");
+        let mut own_executed =
+            sample_task("own-executed", "submitted", "p1", "2026-08-03T02:00:00Z");
         own_executed.project_id = "project-1".into();
-        own_executed.execution_history = Some(r#"[{"jobId":"job-2","startedAt":"2026-08-03T03:00:00Z","finishedAt":null}]"#.into());
+        own_executed.execution_history = Some(
+            r#"[{"jobId":"job-2","startedAt":"2026-08-03T03:00:00Z","finishedAt":null}]"#.into(),
+        );
         own_executed.claimed_by = Some("device-a".into());
         for task in [fresh, executed, own_executed] {
             storage.save_project_task(&task).unwrap();
@@ -1382,10 +1418,14 @@ mod tests {
             .unwrap();
         // 本机创建并执行过，但执行归属标记丢失（claimed_by 为空，设备身份变化 / 数据库迁移）：
         // 只要 last_job_id 非空（本机执行时写入的本地字段），就不应被误判为其他设备任务。
-        let mut own_executed = sample_task("own-executed", "submitted", "p1", "2026-08-03T00:00:00Z");
+        let mut own_executed =
+            sample_task("own-executed", "submitted", "p1", "2026-08-03T00:00:00Z");
         own_executed.project_id = "project-1".into();
         own_executed.last_job_id = Some("job-local".into());
-        own_executed.execution_history = Some(r#"[{"jobId":"job-local","startedAt":"2026-08-03T02:00:00Z","finishedAt":null}]"#.into());
+        own_executed.execution_history = Some(
+            r#"[{"jobId":"job-local","startedAt":"2026-08-03T02:00:00Z","finishedAt":null}]"#
+                .into(),
+        );
         storage.save_project_task(&own_executed).unwrap();
 
         let queued = storage.list_queued_project_tasks("device-a").unwrap();
@@ -1411,7 +1451,9 @@ mod tests {
         // 父任务被其他设备执行过（执行历史非空，工作区同步到本机后 claimed_by 为空）。
         let mut parent = sample_task("parent", "done", "p1", "2026-08-03T00:00:00Z");
         parent.project_id = "project-1".into();
-        parent.execution_history = Some(r#"[{"jobId":"job-1","startedAt":"2026-08-03T02:00:00Z","finishedAt":null}]"#.into());
+        parent.execution_history = Some(
+            r#"[{"jobId":"job-1","startedAt":"2026-08-03T02:00:00Z","finishedAt":null}]"#.into(),
+        );
         storage.save_project_task(&parent).unwrap();
         // 基于该父任务的子任务：归属父任务所在设备，本机不可执行。
         let mut child = sample_task("child", "submitted", "p1", "2026-08-03T03:00:00Z");
@@ -1421,7 +1463,9 @@ mod tests {
         // 父任务属于本机的子任务：可执行。
         let mut own_parent = sample_task("own-parent", "done", "p1", "2026-08-03T00:00:00Z");
         own_parent.project_id = "project-1".into();
-        own_parent.execution_history = Some(r#"[{"jobId":"job-2","startedAt":"2026-08-03T02:00:00Z","finishedAt":null}]"#.into());
+        own_parent.execution_history = Some(
+            r#"[{"jobId":"job-2","startedAt":"2026-08-03T02:00:00Z","finishedAt":null}]"#.into(),
+        );
         own_parent.claimed_by = Some("device-a".into());
         storage.save_project_task(&own_parent).unwrap();
         let mut own_child = sample_task("own-child", "submitted", "p1", "2026-08-03T04:00:00Z");
@@ -1448,13 +1492,27 @@ mod tests {
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
         storage.save_project(&project).unwrap();
-        storage.save_project_task(&sample_task("task-1", "submitted", "p1", "2026-08-03T00:00:00Z")).unwrap();
+        storage
+            .save_project_task(&sample_task(
+                "task-1",
+                "submitted",
+                "p1",
+                "2026-08-03T00:00:00Z",
+            ))
+            .unwrap();
 
         // 修复回归：execution_history 为 NULL 时不能再因 InvalidColumnType 报错。
-        assert!(storage.append_task_execution("task-1", "job-1", "2026-08-03T00:00:00Z").unwrap());
-        assert!(storage.append_task_execution("task-1", "job-2", "2026-08-03T00:00:00Z").unwrap());
+        assert!(storage
+            .append_task_execution("task-1", "job-1", "2026-08-03T00:00:00Z")
+            .unwrap());
+        assert!(storage
+            .append_task_execution("task-1", "job-2", "2026-08-03T00:00:00Z")
+            .unwrap());
 
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         let history: Vec<Value> =
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
         assert_eq!(history.len(), 2);
@@ -1462,9 +1520,14 @@ mod tests {
         assert_eq!(history[1]["jobId"].as_str(), Some("job-2"));
         assert_eq!(history[0]["rejected"].as_bool(), Some(false));
         // 新一轮执行记录进入待处理时刻与等待耗时；执行结束前 executionMs 为空。
-        assert_eq!(history[0]["submittedAt"].as_str(), Some("2026-08-03T00:00:00Z"));
+        assert_eq!(
+            history[0]["submittedAt"].as_str(),
+            Some("2026-08-03T00:00:00Z")
+        );
         assert!(history[0]["waitingMs"].as_u64().is_some());
         assert_eq!(history[0]["executionMs"], Value::Null);
+        // 最近执行指针与历史追加同一条 SQL 原子更新，不能指向未入历史的 job。
+        assert_eq!(task.last_job_id.as_deref(), Some("job-2"));
     }
 
     #[test]
@@ -1481,13 +1544,25 @@ mod tests {
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
         storage.save_project(&project).unwrap();
-        storage.save_project_task(&sample_task("task-1", "submitted", "p1", "2026-08-03T00:00:00Z")).unwrap();
-        storage.append_task_execution("task-1", "job-1", "2026-08-03T00:00:00Z").unwrap();
+        storage
+            .save_project_task(&sample_task(
+                "task-1",
+                "submitted",
+                "p1",
+                "2026-08-03T00:00:00Z",
+            ))
+            .unwrap();
+        storage
+            .append_task_execution("task-1", "job-1", "2026-08-03T00:00:00Z")
+            .unwrap();
 
         assert!(storage
             .mark_task_execution_rejected("task-1", "job-1", "不符合预期")
             .unwrap());
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         let history: Vec<Value> =
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
         assert_eq!(history[0]["rejected"].as_bool(), Some(true));
@@ -1508,12 +1583,24 @@ mod tests {
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
         storage.save_project(&project).unwrap();
-        storage.save_project_task(&sample_task("task-1", "review", "p1", "2026-08-03T00:00:00Z")).unwrap();
-        storage.append_task_execution("task-1", "job-1", "2026-08-03T00:00:00Z").unwrap();
+        storage
+            .save_project_task(&sample_task(
+                "task-1",
+                "review",
+                "p1",
+                "2026-08-03T00:00:00Z",
+            ))
+            .unwrap();
+        storage
+            .append_task_execution("task-1", "job-1", "2026-08-03T00:00:00Z")
+            .unwrap();
 
         // 第一次写入结束时间：执行耗时为真实结束时刻 - 本轮开始时刻。
         assert!(storage.finish_task_execution("task-1", "job-1").unwrap());
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         let history: Vec<Value> =
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
         let finished = history[0]["finishedAt"].as_str().unwrap().to_string();
@@ -1521,14 +1608,21 @@ mod tests {
 
         // 幂等：再次调用不覆盖真实结束时刻。
         assert!(storage.finish_task_execution("task-1", "job-1").unwrap());
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         let history: Vec<Value> =
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
         assert_eq!(history[0]["finishedAt"].as_str().unwrap(), finished);
 
         // 未知 job / 未知任务返回 false，不报错。
-        assert!(!storage.finish_task_execution("task-1", "missing-job").unwrap());
-        assert!(!storage.finish_task_execution("missing-task", "job-1").unwrap());
+        assert!(!storage
+            .finish_task_execution("task-1", "missing-job")
+            .unwrap());
+        assert!(!storage
+            .finish_task_execution("missing-task", "job-1")
+            .unwrap());
     }
 
     #[test]
@@ -1550,8 +1644,13 @@ mod tests {
         storage.save_project_task(&task).unwrap();
 
         // 待审核的只读任务可以转换：类型变 code、描述替换、状态回到 submitted 重新排队。
-        assert!(storage.convert_task_to_code("task-1", "修复缓存过期问题").unwrap());
-        let converted = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        assert!(storage
+            .convert_task_to_code("task-1", "修复缓存过期问题")
+            .unwrap());
+        let converted = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(converted.task_type, "code");
         assert_eq!(converted.description, "修复缓存过期问题");
         assert_eq!(converted.status, "submitted");
@@ -1575,7 +1674,14 @@ mod tests {
         };
         storage.save_project(&project).unwrap();
         // 待审核但类型是 code（已是代码修改任务），不允许转换。
-        storage.save_project_task(&sample_task("code-task", "review", "p1", "2026-08-03T00:00:00Z")).unwrap();
+        storage
+            .save_project_task(&sample_task(
+                "code-task",
+                "review",
+                "p1",
+                "2026-08-03T00:00:00Z",
+            ))
+            .unwrap();
         assert!(!storage.convert_task_to_code("code-task", "说明").unwrap());
         // 只读分析但状态是 done（已完成），不允许转换。
         let mut done_task = sample_task("done-task", "done", "p1", "2026-08-03T00:00:00Z");
@@ -1632,12 +1738,138 @@ mod tests {
 
         // 重新 migrate 触发幂等 backfill。
         storage.migrate().unwrap();
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         let history: Vec<Value> =
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0]["jobId"].as_str(), Some("job-1"));
         assert_eq!(history[1]["jobId"].as_str(), Some("job-2"));
+    }
+
+    #[test]
+    fn migrate_prunes_pre_spawn_failures_without_deleting_job_logs() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let project = Project {
+            id: "project-1".into(),
+            name: "Flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
+            created_at: "2026-08-03T00:00:00Z".into(),
+            updated_at: "2026-08-03T00:00:00Z".into(),
+        };
+        storage.save_project(&project).unwrap();
+        storage
+            .save_project_task(&sample_task(
+                "task-1",
+                "review",
+                "p1",
+                "2026-08-03T00:00:00Z",
+            ))
+            .unwrap();
+
+        for job_id in ["failed-start-1", "failed-start-2", "started-1"] {
+            storage
+                .create_job(
+                    job_id,
+                    "project-task-run",
+                    "任务执行：Task task-1",
+                    "正在启动",
+                    "manual",
+                    1,
+                    "开始执行",
+                )
+                .unwrap();
+            storage
+                .append_task_execution("task-1", job_id, "2026-08-03T00:00:00Z")
+                .unwrap();
+        }
+        storage
+            .fail_job(
+                "failed-start-1",
+                "无法启动 Claude Code (C:\\Users\\test\\claude.exe)：目录名称无效。(os error 267)",
+            )
+            .unwrap();
+        storage
+            .fail_job(
+                "failed-start-2",
+                "项目绑定的本机目录不存在或不是文件夹：D:\\old\\flowlet；请编辑项目并重新绑定目录",
+            )
+            .unwrap();
+        storage
+            .finish_job("started-1", "succeeded", "{}", "任务执行完成")
+            .unwrap();
+
+        storage.migrate().unwrap();
+
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
+        let history: Vec<Value> =
+            serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0]["jobId"].as_str(), Some("started-1"));
+        assert_eq!(task.last_job_id.as_deref(), Some("started-1"));
+        // 启动失败仍可在任务日志中查看诊断，不删除 background job。
+        assert!(storage
+            .get_background_job_detail("failed-start-1")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn migrate_does_not_backfill_a_pre_spawn_failure_as_the_first_round() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let project = Project {
+            id: "project-1".into(),
+            name: "Flowlet".into(),
+            directory_path: Some("D:\\work\\flowlet".into()),
+            workspace_project_id: None,
+            workspace_archived: false,
+            created_at: "2026-08-03T00:00:00Z".into(),
+            updated_at: "2026-08-03T00:00:00Z".into(),
+        };
+        storage.save_project(&project).unwrap();
+        let mut task = sample_task("task-1", "submitted", "p1", "2026-08-03T00:00:00Z");
+        task.last_job_id = Some("failed-start".into());
+        task.execution_history = None;
+        storage.save_project_task(&task).unwrap();
+        storage
+            .create_job(
+                "failed-start",
+                "project-task-run",
+                "任务执行：Task task-1",
+                "正在启动",
+                "manual",
+                1,
+                "开始执行",
+            )
+            .unwrap();
+        storage
+            .fail_job(
+                "failed-start",
+                "无法启动 Claude Code；可执行文件：claude.exe；工作目录：D:\\old；目录名称无效。",
+            )
+            .unwrap();
+
+        storage.migrate().unwrap();
+
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
+        assert!(task.execution_history.is_none());
+        assert!(task.last_job_id.is_none());
+        assert!(storage
+            .get_background_job_detail("failed-start")
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -1674,7 +1906,15 @@ mod tests {
 
         // background_jobs 中该 job 已结束（finish_job 写入真实 finished_at）。
         storage
-            .create_job("job-1", "project-task-run", "任务执行：Task task-1", "完成", "manual", 1, "开始执行")
+            .create_job(
+                "job-1",
+                "project-task-run",
+                "任务执行：Task task-1",
+                "完成",
+                "manual",
+                1,
+                "开始执行",
+            )
             .unwrap();
         storage
             .finish_job("job-1", "succeeded", "{}", "任务执行完成")
@@ -1682,7 +1922,10 @@ mod tests {
 
         // 重新 migrate 触发幂等 backfill：从 background_jobs 补 finishedAt 与 executionMs。
         storage.migrate().unwrap();
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         let history: Vec<Value> =
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
         assert!(history[0]["finishedAt"].as_str().is_some());
@@ -1738,8 +1981,16 @@ mod tests {
         );
 
         // 本机领取的执行中任务：恢复为 submitted，并在执行历史打中断标记。
-        assert_eq!(storage.recover_interrupted_project_tasks("device-a").unwrap(), 1);
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        assert_eq!(
+            storage
+                .recover_interrupted_project_tasks("device-a")
+                .unwrap(),
+            1
+        );
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(task.status, "submitted");
         let history: Vec<Value> =
             serde_json::from_str(task.execution_history.as_deref().unwrap()).unwrap();
@@ -1770,8 +2021,16 @@ mod tests {
             Some(&chrono::Utc::now().to_rfc3339()),
         );
 
-        assert_eq!(storage.recover_interrupted_project_tasks("device-a").unwrap(), 0);
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        assert_eq!(
+            storage
+                .recover_interrupted_project_tasks("device-a")
+                .unwrap(),
+            0
+        );
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(task.status, "in_progress");
     }
 
@@ -1798,8 +2057,16 @@ mod tests {
             Some(&expired.to_rfc3339()),
         );
 
-        assert_eq!(storage.recover_interrupted_project_tasks("device-a").unwrap(), 0);
-        let task = storage.get_project_task("project-1", "task-1").unwrap().unwrap();
+        assert_eq!(
+            storage
+                .recover_interrupted_project_tasks("device-a")
+                .unwrap(),
+            0
+        );
+        let task = storage
+            .get_project_task("project-1", "task-1")
+            .unwrap()
+            .unwrap();
         assert_eq!(task.status, "in_progress");
     }
 
@@ -1817,11 +2084,25 @@ mod tests {
             updated_at: "2026-08-03T00:00:00Z".into(),
         };
         storage.save_project(&project).unwrap();
-        storage.save_project_task(&sample_task("draft", "draft", "p1", "2026-08-03T00:00:00Z")).unwrap();
-        storage.save_project_task(&sample_task("submitted", "submitted", "p1", "2026-08-03T00:00:00Z")).unwrap();
+        storage
+            .save_project_task(&sample_task("draft", "draft", "p1", "2026-08-03T00:00:00Z"))
+            .unwrap();
+        storage
+            .save_project_task(&sample_task(
+                "submitted",
+                "submitted",
+                "p1",
+                "2026-08-03T00:00:00Z",
+            ))
+            .unwrap();
 
         // 草稿与已提交任务不参与恢复。
-        assert_eq!(storage.recover_interrupted_project_tasks("device-a").unwrap(), 0);
+        assert_eq!(
+            storage
+                .recover_interrupted_project_tasks("device-a")
+                .unwrap(),
+            0
+        );
         assert_eq!(
             storage.get_task_status("draft").unwrap().as_deref(),
             Some("draft")
@@ -1836,10 +2117,7 @@ mod tests {
     fn get_project_by_directory_finds_same_directory() {
         let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
-        let dir = std::env::temp_dir().join(format!(
-            "flowlet-dir-unique-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("flowlet-dir-unique-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         storage
             .save_project(&Project {
@@ -1981,10 +2259,16 @@ mod tests {
         assert_eq!(rebound.workspace_project_id.as_deref(), Some("ws-legacy"));
 
         // 任务数据保留，新列（claimed/deleted）存在并可写。
-        let task = storage.get_project_task("legacy-p", "legacy-t").unwrap().unwrap();
+        let task = storage
+            .get_project_task("legacy-p", "legacy-t")
+            .unwrap()
+            .unwrap();
         assert_eq!(task.title, "旧任务");
         assert!(storage.claim_task("legacy-t", "device-a").unwrap());
-        let claimed = storage.get_project_task("legacy-p", "legacy-t").unwrap().unwrap();
+        let claimed = storage
+            .get_project_task("legacy-p", "legacy-t")
+            .unwrap()
+            .unwrap();
         assert_eq!(claimed.claimed_by.as_deref(), Some("device-a"));
 
         // 外键级联仍生效：删除项目会级联删除任务。

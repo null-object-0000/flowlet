@@ -1,6 +1,11 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import type { AgentSessionClient, AgentSessionFilter, AgentSessionFlowletUsage, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionRow, AgentSessionsPage, AgentSessionTimeline, OpenCodePermissionDecision, OpenCodePermissionReport } from "./types";
 
+export type AgentSessionTimelineRange = {
+  startedAt: string;
+  endedAt: string | null;
+};
+
 export const agentSessionCommands = {
   list: (filter: AgentSessionFilter): Promise<AgentSessionsPage> =>
     invokeCommand<AgentSessionsPage>("list_agent_sessions", {
@@ -27,8 +32,13 @@ export const agentSessionCommands = {
     invokeCommand<AgentSessionLastInteraction | null>("get_agent_session_last_interaction", { agentType, sessionId }).catch((error: unknown) => {
       throw toAppError(error, "agent_session_last_interaction_failed");
     }),
-  timeline: (agentType: AgentSessionRow["agentType"], sessionId: string): Promise<AgentSessionTimeline> =>
-    invokeCommand<AgentSessionTimeline>("get_agent_session_timeline", { agentType, sessionId }).catch((error: unknown) => {
+  timeline: (agentType: AgentSessionRow["agentType"], sessionId: string, range?: AgentSessionTimelineRange): Promise<AgentSessionTimeline> =>
+    invokeCommand<AgentSessionTimeline>("get_agent_session_timeline", {
+      agentType,
+      sessionId,
+      startedAt: range?.startedAt ?? null,
+      endedAt: range?.endedAt ?? null,
+    }).catch((error: unknown) => {
       throw toAppError(error, "agent_session_timeline_failed");
     }),
   flowletUsage: (agentType: AgentSessionRow["agentType"], sessionId: string): Promise<AgentSessionFlowletUsage | null> =>

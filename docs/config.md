@@ -367,7 +367,7 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
 
 - 该字段是各渠道「默认提供哪些模型」的描述性列表，**不再直接作为开放模型的白名单**。
   真正的白名单是 `supported_models()`：所有渠道列表的并集，加上代码级常量
-  `QWEN_TOKEN_PLAN_DEFAULT_MODELS`（`["qwen3.8-max", "qwen3.8-max-preview", "qwen3.6-flash"]`）。
+  `QWEN_TOKEN_PLAN_DEFAULT_MODELS`（`["qwen3.8-max", "qwen3.6-flash"]`）。
   前端对应常量 `FLOWLET_SUPPORTED_MODELS`（`src/domains/channel/types.ts`），两者必须一致。
 - 白名单**不按渠道区分**：任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放。
   例如千问套餐端点也会返回 `deepseek-v4-pro`，该模型在全局白名单内，故可勾选。

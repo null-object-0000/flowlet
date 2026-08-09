@@ -52,6 +52,31 @@ describe("agentSessionCommands contract", () => {
     });
   });
 
+  it("loads one execution round with an explicit timeline window", async () => {
+    invokeMock.mockResolvedValueOnce({ sourceAvailable: true, truncated: false, events: [] });
+    await agentSessionCommands.timeline("claude-code", "session-1", {
+      startedAt: "2026-08-08T10:00:00Z",
+      endedAt: "2026-08-08T10:05:00Z",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("get_agent_session_timeline", {
+      agentType: "claude-code",
+      sessionId: "session-1",
+      startedAt: "2026-08-08T10:00:00Z",
+      endedAt: "2026-08-08T10:05:00Z",
+    });
+  });
+
+  it("keeps the full timeline command backward compatible with null bounds", async () => {
+    invokeMock.mockResolvedValueOnce({ sourceAvailable: true, truncated: false, events: [] });
+    await agentSessionCommands.timeline("pi", "session-full");
+    expect(invokeMock).toHaveBeenCalledWith("get_agent_session_timeline", {
+      agentType: "pi",
+      sessionId: "session-full",
+      startedAt: null,
+      endedAt: null,
+    });
+  });
+
   it("uses typed OpenCode permission commands", async () => {
     invokeMock.mockResolvedValueOnce({ available: true, permissions: [] });
     await agentSessionCommands.openCodePermissions("ses_open");

@@ -198,9 +198,11 @@ describe("MobileTasksPage", () => {
     // 半屏/大半屏添加任务抽屉出现
     const dialog = screen.getByRole("dialog", { name: /添加任务/ });
     expect(dialog).toBeInTheDocument();
-    // 展开后展示完整表单
+    // 展开后展示完整表单：任务描述 + 任务类型 + Agent Profile（默认 Claude Code）
     fireEvent.click(screen.getByRole("button", { name: /展开添加任务表单/ }));
     expect(screen.getByPlaceholderText("补充上下文与期望结果（可选）")).toBeInTheDocument();
+    expect(screen.getByText("Agent Profile")).toBeInTheDocument();
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText(/修复登录页样式/), { target: { value: "新任务标题" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^添加任务$/ }));
@@ -209,6 +211,7 @@ describe("MobileTasksPage", () => {
       title: "新任务标题",
       description: "",
       taskType: "code",
+      agentProfile: "Claude Code",
     }));
   });
 

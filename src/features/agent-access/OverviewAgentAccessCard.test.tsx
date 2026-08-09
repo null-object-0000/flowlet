@@ -191,6 +191,9 @@ vi.mock("./useAgentEnvironment", () => ({
         primary_model: "flowlet-pro",
         fast_model: "flowlet-flash",
         subagent_model: "flowlet-flash",
+        primary_long_context: false,
+        fast_long_context: false,
+        long_context: false,
         backup_available: true,
         external_environment_overrides: [],
       },
@@ -290,6 +293,28 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.queryByText("接入参数")).not.toBeInTheDocument();
     expect(screen.queryByText("token")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看 Client Token" })).not.toBeInTheDocument();
+  });
+
+  it("controls Claude Code 1M context independently for pro and flash models", () => {
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 Claude Code" }));
+    const primarySwitch = screen.getByRole("switch", { name: "flowlet-pro 1M 长上下文" });
+    const fastSwitch = screen.getByRole("switch", { name: "flowlet-flash 1M 长上下文" });
+    expect(primarySwitch).not.toBeChecked();
+    expect(fastSwitch).not.toBeChecked();
+
+    fireEvent.click(primarySwitch);
+    expect(mutateAsync).toHaveBeenLastCalledWith({
+      primaryLongContext: true,
+      fastLongContext: false,
+    });
+
+    fireEvent.click(fastSwitch);
+    expect(mutateAsync).toHaveBeenLastCalledWith({
+      primaryLongContext: false,
+      fastLongContext: true,
+    });
   });
 
   it("opens the standard Codex agent sheet with CLI and Desktop surfaces", () => {
@@ -431,5 +456,52 @@ describe("OverviewAgentAccessCard", () => {
     // CLI 0.146.0 与 npm latest 0.146.0 一致 → 无新版本提示（title 为空）。
     const codexButton = screen.getByRole("button", { name: "配置 Codex" });
     expect(codexButton.title).toBe("");
+  });
+
+  it("shows the official install guide on the Codex CLI tab when only ChatGPT Desktop is installed", () => {
+    // 回归场景：环境整体 installed 为 true（探测到 ChatGPT Desktop），但 CLI 标签页
+    // 没有任何 CLI 安装。此时必须照常展示"前往官网安装"引导，不能只显示纯文本。
+    // 用 mockImplementation 而非 mockReturnValueOnce：点击打开抽屉会触发第二次渲染，
+    // 组件会再次调用该 hook；一次性的 Once 只覆盖首次调用，重渲染会回落默认 mock。
+    vi.mocked(useChatGptDesktopEnvironment).mockImplementation(() => ({
+      data: {
+        agent_id: "chatgpt-desktop",
+        agent_name: "ChatGPT (Codex)",
+        installed: true,
+        primary: {
+          surface: "desktop",
+          executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+          install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0",
+          install_method: "desktop",
+          version: "26.707.12708.0",
+          available_on_path: false,
+        },
+        installations: [{
+          surface: "desktop",
+          executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+          install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0",
+          install_method: "desktop",
+          version: "26.707.12708.0",
+          available_on_path: false,
+        }],
+      },
+      error: null,
+      isError: false,
+      isFetching: false,
+      isLoading: false,
+      refetch,
+    } as unknown as ReturnType<typeof useChatGptDesktopEnvironment>));
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 Codex" }));
+    // 默认 CLI 标签页：无 CLI 安装 → 显示引导文案与官网安装入口。
+    expect(screen.getByText("未检测到 CLI 安装。")).toBeInTheDocument();
+    const installLink = screen.getByRole("link", { name: "前往官网安装" });
+    expect(installLink).toHaveAttribute("href", "https://learn.chatgpt.com/docs/codex/cli");
+
+    // Desktop 标签页：探测到了 ChatGPT Desktop，不再展示安装引导。
+    fireEvent.click(screen.getByRole("tab", { name: "Codex Desktop 接入" }));
+    expect(screen.getByText("ChatGPT Desktop 26.707.12708.0")).toBeInTheDocument();
+    expect(screen.queryByText("前往官网安装")).not.toBeInTheDocument();
   });
 });

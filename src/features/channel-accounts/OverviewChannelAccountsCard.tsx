@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Badge, Button, Dropdown, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
-import { IconDelete, IconEdit, IconMore, IconPlus } from "@douyinfe/semi-icons";
+import { IconDelete, IconEdit, IconMore, IconPlay, IconPlus, IconStop } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { CHATGPT_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { ChannelPreset } from "../../domains/channel/types";
@@ -42,7 +42,7 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
   const presetByChannelId = new Map(channels.map((preset) => [preset.id, preset]));
   const enabledCount = accounts.filter((a) => a.enabled).length;
   // 自动同步失败时不刷新快照查询，过期提示需要按当前时间周期性重算，
-  // 否则应用空闲时 Logo 上的状态点不会在超出一轮同步周期后转为黄色。
+  // 否则应用空闲时 Logo 上的状态点不会在超出两轮同步周期后转为黄色。
   const [, setSyncTick] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => setSyncTick((value) => value + 1), 30_000);
@@ -170,7 +170,11 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
                   render={(
                     <Dropdown.Menu>
                       <Dropdown.Item icon={<IconEdit />} onClick={() => onEdit(account.id)}>{t("编辑账号")}</Dropdown.Item>
-                      <Dropdown.Item disabled={busy} onClick={() => onToggle(account.id, !account.enabled)}>
+                      <Dropdown.Item
+                        disabled={busy}
+                        icon={account.enabled ? <IconStop /> : <IconPlay />}
+                        onClick={() => onToggle(account.id, !account.enabled)}
+                      >
                         {t(account.enabled ? "停用账号" : "启用账号")}
                       </Dropdown.Item>
                       <Dropdown.Divider />
@@ -216,7 +220,7 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
 }
 
 /** 渠道 Logo。参与自动同步的账号在 Logo 右上角展示 Badge dot：
- *  数据正常（一轮同步周期内更新成功）为绿色，过期为黄色。
+ *  数据正常（两轮同步周期内更新成功）为绿色，过期为黄色。
  *  `tooltip` 可覆盖悬浮文案（如 Codex 刷新失败的详细错误）。 */
 function AccountLogo({ channelId, name, syncStatus, tooltip }: { channelId: string; name: string; syncStatus: AccountSyncStatus | null; tooltip?: string }) {
   const { t } = useAppPreferences();

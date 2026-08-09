@@ -124,6 +124,8 @@ pub(crate) async fn get_agent_session_timeline(
     state: tauri::State<'_, AppState>,
     agent_type: String,
     session_id: String,
+    started_at: Option<String>,
+    ended_at: Option<String>,
 ) -> Result<crate::core::config::AgentSessionTimeline, String> {
     let prices = state.storage.prices();
     tauri::async_runtime::spawn_blocking(move || {
@@ -132,6 +134,11 @@ pub(crate) async fn get_agent_session_timeline(
                 &agent_type,
                 &session_id,
             )?;
+        timeline = crate::core::agent_session_timeline::slice_native_agent_session_timeline(
+            timeline,
+            started_at.as_deref(),
+            ended_at.as_deref(),
+        )?;
         crate::core::agent_session_timeline::apply_native_cost_estimate_to_timeline(
             &agent_type,
             &mut timeline,

@@ -143,8 +143,13 @@ describe("accountSyncStatus", () => {
     expect(accountSyncStatus(makeAccount(), freshSnapshot, makePreset(), NOW)).toBe("fresh");
   });
 
-  it("is stale when the last sync exceeds one sync cycle", () => {
-    const staleSnapshot = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS - 1_000).toISOString() });
+  it("is still fresh when the last sync is between one and two sync cycles", () => {
+    const betweenRounds = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS - 1_000).toISOString() });
+    expect(accountSyncStatus(makeAccount(), betweenRounds, makePreset(), NOW)).toBe("fresh");
+  });
+
+  it("is stale when the last sync exceeds two sync cycles", () => {
+    const staleSnapshot = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS * 2 - 1_000).toISOString() });
     expect(accountSyncStatus(makeAccount(), staleSnapshot, makePreset(), NOW)).toBe("stale");
   });
 
@@ -156,10 +161,10 @@ describe("accountSyncStatus", () => {
     expect(accountSyncStatus(makeAccount(), makeSnapshot({ synced_at: "not-a-date" }), makePreset(), NOW)).toBe("stale");
   });
 
-  it("marks DeepSeek official-balance-api accounts stale when sync is overdue", () => {
+  it("marks DeepSeek official-balance-api accounts stale when sync is overdue by more than two cycles", () => {
     const deepseek = makePreset({ id: "deepseek", supports_balance_query: true, supports_scrape_balance: false });
     const account = makeAccount({ channel_id: "deepseek", resource_sync_mode: "manual" });
-    const stale = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS - 1_000).toISOString() });
+    const stale = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS * 2 - 1_000).toISOString() });
     expect(accountSyncStatus(account, stale, deepseek, NOW)).toBe("stale");
   });
 });
@@ -189,8 +194,13 @@ describe("codexSyncStatus", () => {
     expect(codexSyncStatus(makeCodexReport(), NOW)).toBe("fresh");
   });
 
-  it("is stale when the last successful update exceeds one sync cycle", () => {
+  it("is still fresh when the last successful update is between one and two sync cycles", () => {
     const report = makeCodexReport({ updated_at: new Date(NOW - CODEX_ACCOUNT_SYNC_INTERVAL_MS - 1_000).toISOString() });
+    expect(codexSyncStatus(report, NOW)).toBe("fresh");
+  });
+
+  it("is stale when the last successful update exceeds two sync cycles", () => {
+    const report = makeCodexReport({ updated_at: new Date(NOW - CODEX_ACCOUNT_SYNC_INTERVAL_MS * 2 - 1_000).toISOString() });
     expect(codexSyncStatus(report, NOW)).toBe("stale");
   });
 

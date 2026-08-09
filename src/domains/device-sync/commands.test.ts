@@ -70,6 +70,10 @@ describe("deviceSyncCommands contract", () => {
     invokeMock.mockResolvedValueOnce(undefined);
     await deviceSyncCommands.syncS3();
     expect(invokeMock).toHaveBeenLastCalledWith("sync_device_usage_s3", undefined);
+
+    invokeMock.mockResolvedValueOnce({ message: "ok" });
+    await deviceSyncCommands.recoverCurrentDeviceSync();
+    expect(invokeMock).toHaveBeenLastCalledWith("recover_current_device_sync", undefined);
   });
 
   it("keeps cloud sync read-only while allowing authenticated LAN permission replies", async () => {

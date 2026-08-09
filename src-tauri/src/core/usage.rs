@@ -48,8 +48,7 @@ impl StreamUsageAccumulator {
         }
         StreamUsageResult {
             usage: self.usage,
-            has_completion_evidence: self.saw_terminal_marker
-                || self.saw_positive_output_usage,
+            has_completion_evidence: self.saw_terminal_marker || self.saw_positive_output_usage,
         }
     }
 
@@ -668,7 +667,7 @@ data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial
     fn extracts_stream_usage_falls_back_to_plain_json_message() {
         // 上游以 text/event-stream 返回、但实际是单条 JSON 消息（无 data: 前缀）：
         // SSE 解析无结果，extract_stream_usage 回退按普通 JSON 消息解析。
-        let body = br#"{"id":"msg_1","type":"message","role":"assistant","model":"qwen3.8-max-preview","stop_reason":"end_turn","usage":{"input_tokens":6,"output_tokens":249,"cache_creation_input_tokens":11351,"cache_read_input_tokens":23746}}"#;
+        let body = br#"{"id":"msg_1","type":"message","role":"assistant","model":"qwen3.8-max","stop_reason":"end_turn","usage":{"input_tokens":6,"output_tokens":249,"cache_creation_input_tokens":11351,"cache_read_input_tokens":23746}}"#;
 
         // 纯 SSE 解析对无 data: 前缀的正文无结果
         assert_eq!(extract_sse_response_usage(body, false), None);

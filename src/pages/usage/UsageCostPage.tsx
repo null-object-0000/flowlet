@@ -234,9 +234,25 @@ export function UsageCostPage() {
   const openTokenDetailsLabel = tokenDetailsScope === "selected" && selectedPeriodTitle
     ? selectedPeriodTitle
     : rangeLabel;
+  const confidenceCard = (
+    <TokenConfidenceCard
+      periodTitle={selectedPeriodTitle}
+      score={tokenConfidence.score}
+      proxyShare={tokenConfidence.proxyShare}
+      nativeShare={tokenConfidence.nativeShare}
+      unknownShare={tokenConfidence.unknownShare}
+      unknownCount={tokenConfidence.unknownCount}
+      language={language}
+      t={t}
+      onShowUnknownRequests={() => {
+        setUnknownRequestsPage(1);
+        setUnknownRequestsOpen(true);
+      }}
+    />
+  );
 
   return (
-    <main className={[styles.page, period === "week" ? styles.pageFill : ""].join(" ")}>
+    <main className={styles.page}>
       <PageHeader
         title={(
           <DeviceUsageTitlePicker
@@ -502,22 +518,9 @@ export function UsageCostPage() {
         </article>
 
         <aside className={[styles.insightColumn, period === "week" ? styles.insightWeek : ""].join(" ")}>
-          <TokenConfidenceCard
-            periodTitle={selectedPeriodTitle}
-            score={tokenConfidence.score}
-            proxyShare={tokenConfidence.proxyShare}
-            nativeShare={tokenConfidence.nativeShare}
-            unknownShare={tokenConfidence.unknownShare}
-            unknownCount={tokenConfidence.unknownCount}
-            language={language}
-            t={t}
-            onShowUnknownRequests={() => {
-              setUnknownRequestsPage(1);
-              setUnknownRequestsOpen(true);
-            }}
-          />
+          {period !== "week" ? confidenceCard : null}
 
-          {period === "day" && selectedHourlyCell ? (
+          {(period === "day" || period === "week") && selectedHourlyCell ? (
             <SelectedPeriodCard
               title={selectedPeriodTitle ?? selectedHourlyCell.date}
               inputTokens={selectedHourlyCell.inputTokens}
@@ -564,27 +567,8 @@ export function UsageCostPage() {
       </section>
 
       {period === "week" ? (
-        <section className={styles.weekSelectedStrip}>
-          {selectedHourlyCell ? (
-            <SelectedPeriodCard
-              title={selectedPeriodTitle ?? selectedHourlyCell.date}
-              inputTokens={selectedHourlyCell.inputTokens}
-              outputTokens={selectedHourlyCell.outputTokens}
-              requests={selectedHourlyCell.requests}
-              proxyRequests={selectedHourlyCell.requests - selectedHourlyCell.nativeEvents}
-              nativeEvents={selectedHourlyCell.nativeEvents}
-              cachedInputTokens={selectedHourlyCell.cachedInputTokens}
-              cacheMeasuredInputTokens={selectedHourlyCell.cacheMeasuredInputTokens}
-              estimatedCost={selectedHourlyCell.estimatedCost}
-              tokenDetails={selectedTokenDetails!}
-              onExpandTokenDetails={() => setTokenDetailsScope("selected")}
-              language={language}
-              t={t}
-              horizontal
-            />
-          ) : (
-            <SelectedPeriodEmpty t={t} />
-          )}
+        <section className={styles.weekConfidenceStrip}>
+          {confidenceCard}
         </section>
       ) : null}
 
@@ -707,7 +691,6 @@ function SelectedPeriodCard({
   onExpandTokenDetails,
   language,
   t,
-  horizontal,
 }: {
   title: string;
   inputTokens: number;
@@ -722,8 +705,6 @@ function SelectedPeriodCard({
   onExpandTokenDetails: () => void;
   language: NumberLanguage;
   t: ReturnType<typeof useAppPreferences>["t"];
-  /** 全宽单行布局（周视图底部卡片）：四项指标一行排开，不再两行两列。 */
-  horizontal?: boolean;
 }) {
   return (
     <article className={styles.selectedPeriod}>
@@ -731,7 +712,7 @@ function SelectedPeriodCard({
         <strong>{title}</strong>
         <span>{t("指定时间点")}</span>
       </header>
-      <div className={[styles.selectedPeriodStats, horizontal ? styles.selectedPeriodStatsHorizontal : ""].join(" ")}>
+      <div className={styles.selectedPeriodStats}>
         <SelectedPeriodMetric
           label="Tokens"
           value={formatCompactNumber(tokenDetails.total.total, language)}

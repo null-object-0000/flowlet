@@ -1,8 +1,8 @@
-use crate::AppState;
 use crate::core::device_identity::{
     DailyUsageTotal, DeviceUsageBundle, DeviceUsageImportPreview, DeviceUsageImportResult,
     DeviceUsageSnapshot, HourlyUsageTotal, KnownDevice, SharedDeviceProject,
 };
+use crate::AppState;
 
 #[tauri::command]
 pub(crate) async fn device_usage_snapshot(
@@ -280,6 +280,19 @@ pub(crate) async fn sync_device_usage_s3(
 }
 
 #[tauri::command]
+pub(crate) async fn recover_current_device_sync(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::device_sync::S3ConnectionTestResult, String> {
+    let storage = state.storage.clone();
+    let identity = state
+        .device_identity
+        .lock()
+        .map_err(|_| "读取当前设备身份失败".to_string())?
+        .clone();
+    crate::core::device_sync::recover_current_device_sync(storage, identity).await
+}
+
+#[tauri::command]
 pub(crate) async fn refresh_shared_device_usage_s3(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::device_sync::S3DevicePullResult, String> {
@@ -478,7 +491,11 @@ pub(crate) async fn import_device_usage_bundle(
             )
             .map_err(|error| error.to_string())?;
         storage
-            .import_device_projects(&snapshot.device_id, &snapshot.generated_at, &snapshot.projects)
+            .import_device_projects(
+                &snapshot.device_id,
+                &snapshot.generated_at,
+                &snapshot.projects,
+            )
             .map_err(|error| error.to_string())?;
         Ok(DeviceUsageImportResult {
             device_id: snapshot.device_id,

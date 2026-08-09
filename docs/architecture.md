@@ -378,6 +378,22 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 专属会话目录中找到指定 session id，并确认 JSONL 的 user message 含完整 prompt；校验失败
 按执行失败处理，不得仅凭退出码 0 进入待审核。
 
+任务执行时，Agent 可执行文件由安装探测的当前首选路径解析；项目工作目录来自本机
+`projects.directory_path` 绑定。启动任何 Agent 前必须确认该路径仍是现存文件夹。系统重装、
+盘符变化或目录迁移导致绑定失效时，应明确提示用户重新绑定项目目录，不得把 Windows
+`CreateProcess` 的无效工作目录错误误报为 Agent 可执行文件不可用。
+
+任务的“第 N 次执行”只统计 Agent 子进程及 stdout/stderr 管道均已成功创建的轮次。
+项目目录校验失败、CLI 进程创建失败等启动前错误仍写入 `background_jobs` 供排查，但不写入
+`project_tasks.execution_history`，也不更新 `last_job_id`。数据库迁移会从存量执行历史中
+移除这类误记条目并重算最近执行指针，保留原始 job 与事件日志。
+
+任务详情的会话视图按 `execution_history` 的每次执行时间窗隔离。退回重跑会复用 Claude
+Code / OpenCode / Pi 的原生 session id，而原生时间线是累积数据；前端只挂载当前轮次，
+并把该轮 `submittedAt`（旧数据回退 `startedAt`）与 `finishedAt`（旧数据缺失时使用下一轮
+`startedAt`）传给时间线 command，Rust 按 user-message 交互边界裁剪后再返回。这样每个轮次 Tab 只包含本轮内容，
+未访问轮次不读取 job / 时间线，也不会提前构造长会话 DOM。
+
 多设备同步（2026-08）把项目与任务升级为「工作区实体」：`projects.directory_path`
 改为可空（远端项目落到新设备后需先「绑定本机目录」才能执行），并新增服务端托管的
 `workspace_project_id` / `workspace_archived`；`project_tasks` 新增 `claimed_by` /
@@ -519,6 +535,12 @@ ChaCha20-Poly1305 端到端加密；密钥保存在桌面系统凭据库，并�
 ID。阿里云 OSS 的 PutObject 不支持 `If-Match`，因此在 ETag 比较通过后执行普通覆盖写入；
 该兼容路径保留同步前冲突检测，但不提供请求级原子条件写入。连接测试会在配置前缀下写入、
 读取并删除一个临时小对象，以同时验证列举、读、写和删除权限。
+
+重装系统或从备份还原便携目录后，如果本地保存的 ETag 落后于远端，用户可在冲突提示中
+明确选择“恢复本机同步”。恢复操作会先下载远端当前设备快照，并严格核对快照中的
+`deviceId` 与 `deviceCreatedAt` 是否同时匹配本地 `flowlet-device.json`；只有匹配时才采纳
+远端 ETag 并重新同步。该动作不自动执行，用户必须先确认旧系统或同一便携目录的其它副本
+已经停止，避免绕过重复设备 ID 保护。
 
 配置存在时，应用启动 5 秒后执行第一次 S3 设备用量后台同步，以尽快发布当前启动实例的
 局域网端点；之后每 15 分钟执行一次；

@@ -1079,9 +1079,7 @@ pub async fn pull_device_usage(
 }
 
 fn synced_agent_session_from_row(row: crate::core::config::AgentSessionRow) -> SyncedAgentSession {
-    let native_summary = row
-        .native_summary
-        .as_ref();
+    let native_summary = row.native_summary.as_ref();
     SyncedAgentSession {
         agent_type: row.agent_type,
         session_id: row.session_id,
@@ -1150,7 +1148,11 @@ async fn pull_device_usage_for_device(
             )
             .map_err(|error| error.to_string())?;
         import_storage
-            .import_device_projects(&snapshot.device_id, &snapshot.generated_at, &snapshot.projects)
+            .import_device_projects(
+                &snapshot.device_id,
+                &snapshot.generated_at,
+                &snapshot.projects,
+            )
             .map_err(|error| error.to_string())?;
         Ok::<_, String>(result)
     })
@@ -1387,7 +1389,11 @@ pub async fn sync_device_usage(
             }
             // 轻量项目目录：让移动端 / 其他桌面看到该设备可执行的项目与任务状态。
             if import_storage
-                .import_device_projects(&snapshot.device_id, &snapshot.generated_at, &snapshot.projects)
+                .import_device_projects(
+                    &snapshot.device_id,
+                    &snapshot.generated_at,
+                    &snapshot.projects,
+                )
                 .is_err()
             {
                 import_failures += 1;
@@ -1454,6 +1460,57 @@ pub async fn sync_device_usage(
         failed_objects: failed_objects + import_result.3,
         uploaded_key: current_key,
     })
+}
+
+/// 恢复重装系统或还原便携目录后的当前设备同步所有权。
+///
+/// 这一步必须由用户明确确认。远端对象只有在设备 ID 与身份创建时间都和
+/// `flowlet-device.json` 一致时才允许认领，避免误把其它设备的对象覆盖掉。
+pub async fn recover_current_device_sync(
+    storage: Storage,
+    identity: DeviceIdentity,
+) -> Result<S3ConnectionTestResult, String> {
+    let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
+    let secret = read_secret(&config)?;
+    let store = S3Store::new(&config, &secret)?;
+    let current_key = config.snapshot_key(&identity.device_id);
+    let remote = store
+        .list(&config.object_prefix())
+        .await?
+        .into_iter()
+        .find(|object| object.key == current_key)
+        .ok_or_else(|| "远端不存在当前设备快照，请直接执行同步".to_string())?;
+    let bundle = DeviceUsageBundle::from_bytes(&store.get(&current_key).await?)?;
+    validate_recoverable_current_snapshot(&identity, &bundle)?;
+
+    let state = CurrentEtagState {
+        endpoint: config.endpoint,
+        bucket: config.bucket,
+        key: current_key,
+        etag: remote.etag,
+    };
+    let raw =
+        serde_json::to_string(&state).map_err(|_| "序列化当前设备同步状态失败".to_string())?;
+    storage
+        .set_app_meta(CURRENT_ETAG_KEY, &raw)
+        .map_err(|error| error.to_string())?;
+    Ok(S3ConnectionTestResult {
+        message: "已恢复当前设备的云端同步所有权".to_string(),
+    })
+}
+
+fn validate_recoverable_current_snapshot(
+    identity: &DeviceIdentity,
+    bundle: &DeviceUsageBundle,
+) -> Result<(), String> {
+    if bundle.snapshot.device_id != identity.device_id
+        || bundle.snapshot.device_created_at != identity.created_at
+    {
+        return Err(
+            "远端快照与本机身份文件不一致，拒绝恢复；请保留现有数据并检查设备 ID".to_string(),
+        );
+    }
+    Ok(())
 }
 
 async fn prefer_lan_bundle(storage: &Storage, fallback: DeviceUsageBundle) -> DeviceUsageBundle {
@@ -1758,11 +1815,9 @@ mod tests {
         valid.path_style = false;
         let config = S3SyncConfig::from_input(&valid).unwrap();
         assert!(!config.supports_conditional_put());
-        assert!(
-            S3SyncConfig::from_input(&input("https://example.com"))
-                .unwrap()
-                .supports_conditional_put()
-        );
+        assert!(S3SyncConfig::from_input(&input("https://example.com"))
+            .unwrap()
+            .supports_conditional_put());
     }
 
     #[test]
@@ -1829,6 +1884,33 @@ mod tests {
     }
 
     #[test]
+    fn recovers_only_snapshot_from_the_same_device_identity() {
+        let identity = DeviceIdentity {
+            schema_version: 1,
+            device_id: "8d58734f-0b71-49ea-b5a4-115b389a9ae7".to_string(),
+            created_at: "2026-07-28T00:00:00Z".to_string(),
+            display_name: "工作电脑".to_string(),
+            platform: "windows".to_string(),
+        };
+        let matching = DeviceUsageBundle::new(DeviceUsageSnapshot::new(
+            &identity,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        assert!(validate_recoverable_current_snapshot(&identity, &matching).is_ok());
+
+        let mut other_install = matching.clone();
+        other_install.snapshot.device_created_at = "2026-08-08T00:00:00Z".to_string();
+        assert!(validate_recoverable_current_snapshot(&identity, &other_install).is_err());
+
+        let mut other_device = matching;
+        other_device.snapshot.device_id = "7f482379-ed34-46e7-9da7-7a0c05d447be".to_string();
+        assert!(validate_recoverable_current_snapshot(&identity, &other_device).is_err());
+    }
+
+    #[test]
     fn session_snapshot_keeps_all_active_when_more_than_ten() {
         let sessions = (0..12)
             .map(|index| {
@@ -1845,11 +1927,9 @@ mod tests {
             .collect();
         let selected = select_sessions_for_sync(sessions);
         assert_eq!(selected.len(), 12);
-        assert!(
-            selected
-                .iter()
-                .all(|row| matches!(row.runtime_status.as_str(), "running" | "waiting_user"))
-        );
+        assert!(selected
+            .iter()
+            .all(|row| matches!(row.runtime_status.as_str(), "running" | "waiting_user")));
     }
 
     #[test]

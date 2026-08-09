@@ -1,5 +1,4 @@
-import { Button, Input, Progress, Tag, Typography } from "@douyinfe/semi-ui-19";
-import { IconRefresh } from "@douyinfe/semi-icons";
+import { Input, Progress, Tag, Typography } from "@douyinfe/semi-ui-19";
 import type { CodexAccountReport, CodexUsageWindow } from "../../domains/agent/types";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
@@ -11,9 +10,6 @@ const { Text } = Typography;
 type Props = {
   account: CodexAccountReport;
   language: "zh-CN" | "en-US";
-  refreshing: boolean;
-  error?: string | null;
-  onRefresh: () => void;
 };
 
 /**
@@ -21,8 +17,9 @@ type Props = {
  * 无 API Key、无开放模型、无高级设置；账号名称只读。
  * 结构：基础信息 → 资源模式（订阅额度自动同步）→ 账号信息（套餐/登录方式/Credits/重置机会）。
  */
-export function CodexAccountEditor({ account, language, refreshing, error, onRefresh }: Props) {
+export function CodexAccountEditor({ account, language }: Props) {
   const { t } = useAppPreferences();
+  const authorizationExpired = isCodexAuthorizationExpired(account);
   const fiveHour = pickWindow(account, (window) => window.window_duration_mins <= 360);
   const sevenDay = pickWindow(account, (window) => window.window_duration_mins >= 7 * 24 * 60);
   const hasFive = Boolean(fiveHour);
@@ -30,6 +27,22 @@ export function CodexAccountEditor({ account, language, refreshing, error, onRef
 
   return (
     <div className={styles.editor}>
+      {authorizationExpired ? (
+        <div className={styles.authorizationAlert} role="alert">
+          <div className={styles.authorizationAlertHeading}>
+            <strong>{t("账号授权已过期")}</strong>
+            <Tag color="red">{t("需要重新授权")}</Tag>
+          </div>
+          <Text>{t("当前登录凭据已失效，无法继续同步用量。请重新授权此账号。")}</Text>
+          {account.error ? <Text type="tertiary">{account.error}</Text> : null}
+        </div>
+      ) : account.error ? (
+        <div className={styles.syncAlert} role="status">
+          <strong>{t("用量同步失败")}</strong>
+          <Text type="tertiary">{account.error}</Text>
+        </div>
+      ) : null}
+
       <section className={styles.editorSection}>
         <h3>{t("基础信息")}</h3>
         <div className={styles.basicFields}>
@@ -38,8 +51,10 @@ export function CodexAccountEditor({ account, language, refreshing, error, onRef
             <Input aria-label={t("账号名称")} value={account.email || ""} disabled />
           </div>
           <div className={styles.field}>
-            <span>{t("启用状态")}</span>
-            <Text>{t("已启用")}</Text>
+            <span>{t("授权状态")}</span>
+            {authorizationExpired
+              ? <Tag color="red">{t("已过期")}</Tag>
+              : <Tag color="green">{t("有效")}</Tag>}
           </div>
         </div>
       </section>
@@ -66,12 +81,6 @@ export function CodexAccountEditor({ account, language, refreshing, error, onRef
           </div>
         </div>
 
-        <div className={styles.syncSection}>
-          <div className={styles.syncControls}>
-            <Button icon={<IconRefresh />} loading={refreshing} onClick={onRefresh}>{t("立即刷新")}</Button>
-          </div>
-          {error ? <Text className={styles.syncError} type="danger">{t("刷新失败：{message}", { message: error })}</Text> : null}
-        </div>
       </section>
 
       <section className={styles.editorSection}>
@@ -97,6 +106,18 @@ export function CodexAccountEditor({ account, language, refreshing, error, onRef
         ) : null}
       </section>
     </div>
+  );
+}
+
+export function isCodexAuthorizationExpired(account: CodexAccountReport): boolean {
+  if (!account.signed_in) return true;
+  const error = account.error?.toLowerCase() ?? "";
+  return (
+    error.includes("unauthorized") ||
+    /(?:^|\D)401(?:\D|$)/.test(error) ||
+    error.includes("token expired") ||
+    error.includes("expired token") ||
+    error.includes("invalid token")
   );
 }
 

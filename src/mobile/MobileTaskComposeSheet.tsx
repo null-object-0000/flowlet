@@ -14,6 +14,9 @@ const EXPAND_GESTURE_PX = 28;
 const COLLAPSE_GESTURE_PX = 48;
 const CLOSE_GESTURE_PX = 64;
 
+/** 与 PC 看板一致的 Agent Profile 选项（任务执行驱动目标 Agent）。 */
+const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi"];
+
 /** 同一项目可能出现在多台设备，表单选中值用「设备 + 项目」组合 key 区分目标。 */
 function targetKey(project: SharedDeviceProject) {
   return `${project.deviceId}@${project.projectId}`;
@@ -45,6 +48,7 @@ export function MobileTaskComposeSheet({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [taskType, setTaskType] = useState<"code" | "readonly">("code");
+  const [agentProfile, setAgentProfile] = useState("Claude Code");
   const closeTimer = useRef<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ x: number; y: number; allowDownGesture: boolean } | null>(null);
@@ -74,6 +78,7 @@ export function MobileTaskComposeSheet({
     setTitle("");
     setDescription("");
     setTaskType("code");
+    setAgentProfile("Claude Code");
     if (closeTimer.current != null) {
       window.clearTimeout(closeTimer.current);
       closeTimer.current = null;
@@ -131,6 +136,7 @@ export function MobileTaskComposeSheet({
         title: title.trim(),
         description: description.trim(),
         taskType,
+        agentProfile,
       });
       Toast.success(t("任务已创建为草稿"));
       onClose();
@@ -227,6 +233,7 @@ export function MobileTaskComposeSheet({
                 <Select
                   value={target}
                   optionList={executableProjects.map((project) => ({ value: targetKey(project), label: `${project.projectName} · ${project.deviceDisplayName}` }))}
+                  zIndex={APP_OVERLAY_Z_INDEX.modal + 1}
                   onChange={(value) => setTarget(String(value))}
                 />
               </label>
@@ -235,7 +242,8 @@ export function MobileTaskComposeSheet({
                 <>
                   <label>{t("任务描述")}<TextArea value={description} placeholder={t("补充上下文与期望结果（可选）")} autosize onChange={(value) => setDescription(value)} /></label>
                   <div className={styles.formGrid}>
-                    <label>{t("任务类型")}<Select value={taskType} optionList={[{ value: "code", label: t("代码修改") }, { value: "readonly", label: t("只读分析") }]} onChange={(value) => setTaskType(String(value) as "code" | "readonly")} /></label>
+                    <label>{t("任务类型")}<Select value={taskType} optionList={[{ value: "code", label: t("代码修改") }, { value: "readonly", label: t("只读分析") }]} zIndex={APP_OVERLAY_Z_INDEX.modal + 1} onChange={(value) => setTaskType(String(value) as "code" | "readonly")} /></label>
+                    <label>{t("Agent Profile")}<Select value={agentProfile} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} zIndex={APP_OVERLAY_Z_INDEX.modal + 1} onChange={(value) => setAgentProfile(String(value))} /></label>
                   </div>
                   <div className={styles.permissions}>
                     <strong>{t("执行说明")}</strong>

@@ -106,6 +106,12 @@ pub struct AgentGlobalConfigReport {
     pub model_catalog_configured: bool,
     /// Claude Code 主模型是否写入 `[1m]` 长上下文后缀；其他 Agent 恒为 false。
     #[serde(default)]
+    pub primary_long_context: bool,
+    /// Claude Code 快速模型与子 Agent 模型是否写入 `[1m]` 后缀；其他 Agent 恒为 false。
+    #[serde(default)]
+    pub fast_long_context: bool,
+    /// 兼容旧版前端的汇总状态；仅当主模型和快速模型都启用 1M 时为 true。
+    #[serde(default)]
     pub long_context: bool,
     pub backup_available: bool,
     pub external_environment_overrides: Vec<String>,
@@ -123,9 +129,15 @@ pub struct AgentGlobalConfigReport {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentGlobalConfigOptions {
-    /// 仅 Claude Code：为主模型环境变量附加 `[1m]` 后缀，启用百万级上下文窗口预算。
+    /// 兼容旧版前端：未提供独立选项时，同时控制主模型与快速模型。
     #[serde(default)]
-    pub long_context: bool,
+    pub long_context: Option<bool>,
+    /// 仅 Claude Code：为主模型环境变量附加 `[1m]` 后缀。
+    #[serde(default)]
+    pub primary_long_context: Option<bool>,
+    /// 仅 Claude Code：为快速模型和子 Agent 模型附加 `[1m]` 后缀。
+    #[serde(default)]
+    pub fast_long_context: Option<bool>,
     /// 仅 Pi：是否为 Pi 安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。
     /// 安装后可为发往 Flowlet 渠道的请求注入 x-flowlet-session 头，使 Flowlet 能按会话
     /// 归并请求；关闭则不安装（Pi 仍可作为 Flowlet 客户端使用，但无法做会话维度串联）。
@@ -136,6 +148,19 @@ pub struct AgentGlobalConfigOptions {
 
 fn true_bool() -> bool {
     true
+}
+
+impl AgentGlobalConfigOptions {
+    fn claude_long_context(&self) -> (bool, bool) {
+        (
+            self.primary_long_context
+                .or(self.long_context)
+                .unwrap_or(false),
+            self.fast_long_context
+                .or(self.long_context)
+                .unwrap_or(false),
+        )
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -251,12 +276,18 @@ pub fn apply_agent_global_config(
         .lock()
         .map_err(|_| "Agent 全局配置锁已损坏".to_string())?;
     match agent_id {
-        "claude-code" => apply_claude_code(
-            &claude_settings_path()?,
-            expected_base_url,
-            client_token,
-            options.is_some_and(|options| options.long_context),
-        ),
+        "claude-code" => {
+            let (primary_long_context, fast_long_context) = options
+                .map(AgentGlobalConfigOptions::claude_long_context)
+                .unwrap_or((false, false));
+            apply_claude_code(
+                &claude_settings_path()?,
+                expected_base_url,
+                client_token,
+                primary_long_context,
+                fast_long_context,
+            )
+        }
         "opencode" => apply_opencode(
             &opencode_settings_path()?,
             &opencode_auth_path()?,
@@ -563,6 +594,8 @@ fn inspect_claude_code(
             subagent_model: None,
             model_catalog_path: None,
             model_catalog_configured: false,
+            primary_long_context: false,
+            fast_long_context: false,
             long_context: false,
             backup_available,
             external_environment_overrides,
@@ -589,6 +622,8 @@ fn inspect_claude_code(
                 subagent_model: None,
                 model_catalog_path: None,
                 model_catalog_configured: false,
+                primary_long_context: false,
+                fast_long_context: false,
                 long_context: false,
                 backup_available,
                 external_environment_overrides,
@@ -643,8 +678,12 @@ fn report_from_settings(
     let primary_model = string_value("ANTHROPIC_MODEL");
     let fast_model = string_value("ANTHROPIC_DEFAULT_HAIKU_MODEL");
     let subagent_model = string_value("CLAUDE_CODE_SUBAGENT_MODEL");
-    // 主模型允许携带 `[1m]` 长上下文后缀，比较收敛状态前先剥离。
-    let aliases_match = [
+    let primary_long_context = primary_model
+        .as_deref()
+        .is_some_and(has_long_context_suffix);
+    // 每个模型组允许独立携带 `[1m]`，但同组变量必须保持一致，避免 Claude Code
+    // 在主会话、模型切换、后台任务和子 Agent 之间使用不同的上下文预算。
+    let primary_aliases_match = [
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_FABLE_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -652,17 +691,26 @@ fn report_from_settings(
     ]
     .iter()
     .all(|name| {
-        string_value(name).as_deref().map(strip_long_context_suffix) == Some(PRIMARY_MODEL)
-    }) && fast_model.as_deref() == Some(FAST_MODEL);
-    // 写入时四个主模型变量同时带后缀；检测只看 ANTHROPIC_MODEL 即可反映开关状态。
-    let long_context = primary_model
+        string_value(name).as_deref().is_some_and(|value| {
+            strip_long_context_suffix(value) == PRIMARY_MODEL
+                && has_long_context_suffix(value) == primary_long_context
+        })
+    });
+    let fast_long_context = fast_model
         .as_deref()
         .is_some_and(has_long_context_suffix);
-    // 遗留的 ANTHROPIC_SMALL_FAST_MODEL 在会话标题生成等后台任务中仍优先于
-    // ANTHROPIC_DEFAULT_HAIKU_MODEL 生效，必须一并收敛到 FAST_MODEL。
-    let small_fast_matches =
-        string_value("ANTHROPIC_SMALL_FAST_MODEL").as_deref() == Some(FAST_MODEL);
-    let subagent_matches = subagent_model.as_deref() == Some(FAST_MODEL);
+    let fast_aliases_match = [
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ]
+    .iter()
+    .all(|name| {
+        string_value(name).as_deref().is_some_and(|value| {
+            strip_long_context_suffix(value) == FAST_MODEL
+                && has_long_context_suffix(value) == fast_long_context
+        })
+    });
     let cloud_conflict = [
         "CLAUDE_CODE_USE_BEDROCK",
         "CLAUDE_CODE_USE_VERTEX",
@@ -680,9 +728,8 @@ fn report_from_settings(
         && auth_token_configured
         && !api_key_configured
         && !cloud_conflict
-        && aliases_match
-        && small_fast_matches
-        && subagent_matches
+        && primary_aliases_match
+        && fast_aliases_match
     {
         AgentGlobalConfigState::Flowlet
     } else if base_url
@@ -710,7 +757,9 @@ fn report_from_settings(
         subagent_model,
         model_catalog_path: None,
         model_catalog_configured: false,
-        long_context,
+        primary_long_context,
+        fast_long_context,
+        long_context: primary_long_context && fast_long_context,
         backup_available,
         external_environment_overrides,
         error: None,
@@ -723,7 +772,8 @@ fn apply_claude_code(
     settings_path: &Path,
     expected_base_url: &str,
     client_token: &str,
-    long_context: bool,
+    primary_long_context: bool,
+    fast_long_context: bool,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
         return Err("Flowlet 默认 Client Token 未配置，无法写入 Claude Code".to_string());
@@ -780,12 +830,17 @@ fn apply_claude_code(
     ] {
         env.remove(name);
     }
-    // `[1m]` 后缀只附加到主模型别名：Claude Code 据此启用百万级上下文窗口预算，
-    // 并在发送请求前剥离后缀。快速模型用于会话标题等后台任务，无需长上下文。
-    let primary_value = if long_context {
+    // 主模型和快速模型分别控制 `[1m]`。Claude Code 据此为主会话、后台任务和
+    // 子 Agent 使用对应的上下文预算，并在发送请求前剥离后缀。
+    let primary_value = if primary_long_context {
         format!("{PRIMARY_MODEL}{LONG_CONTEXT_SUFFIX}")
     } else {
         PRIMARY_MODEL.to_string()
+    };
+    let fast_value = if fast_long_context {
+        format!("{FAST_MODEL}{LONG_CONTEXT_SUFFIX}")
+    } else {
+        FAST_MODEL.to_string()
     };
     for (name, value) in [
         ("ANTHROPIC_BASE_URL", expected_base_url),
@@ -794,9 +849,9 @@ fn apply_claude_code(
         ("ANTHROPIC_DEFAULT_FABLE_MODEL", primary_value.as_str()),
         ("ANTHROPIC_DEFAULT_OPUS_MODEL", primary_value.as_str()),
         ("ANTHROPIC_DEFAULT_SONNET_MODEL", primary_value.as_str()),
-        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", FAST_MODEL),
-        ("ANTHROPIC_SMALL_FAST_MODEL", FAST_MODEL),
-        ("CLAUDE_CODE_SUBAGENT_MODEL", FAST_MODEL),
+        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", fast_value.as_str()),
+        ("ANTHROPIC_SMALL_FAST_MODEL", fast_value.as_str()),
+        ("CLAUDE_CODE_SUBAGENT_MODEL", fast_value.as_str()),
     ] {
         env.insert(name.to_string(), Value::String(value.to_string()));
     }
@@ -888,6 +943,8 @@ fn inspect_opencode(
             subagent_model: None,
             model_catalog_path: None,
             model_catalog_configured: false,
+            primary_long_context: false,
+            fast_long_context: false,
             long_context: false,
             backup_available,
             external_environment_overrides,
@@ -914,6 +971,8 @@ fn inspect_opencode(
                 subagent_model: None,
                 model_catalog_path: None,
                 model_catalog_configured: false,
+                primary_long_context: false,
+                fast_long_context: false,
                 long_context: false,
                 backup_available,
                 external_environment_overrides,
@@ -940,6 +999,8 @@ fn inspect_opencode(
                 subagent_model: None,
                 model_catalog_path: None,
                 model_catalog_configured: false,
+                primary_long_context: false,
+                fast_long_context: false,
                 long_context: false,
                 backup_available,
                 external_environment_overrides,
@@ -1024,6 +1085,8 @@ fn inspect_opencode(
         subagent_model: None,
         model_catalog_path: None,
         model_catalog_configured: false,
+        primary_long_context: false,
+        fast_long_context: false,
         long_context: false,
         backup_available,
         external_environment_overrides,
@@ -1348,6 +1411,8 @@ fn inspect_pi(
             subagent_model: None,
             model_catalog_path: None,
             model_catalog_configured: false,
+            primary_long_context: false,
+            fast_long_context: false,
             long_context: false,
             backup_available,
             external_environment_overrides: Vec::new(),
@@ -1919,6 +1984,8 @@ fn inspect_codex(
         subagent_model: None,
         model_catalog_path: None,
         model_catalog_configured: false,
+        primary_long_context: false,
+        fast_long_context: false,
         long_context: false,
         backup_available,
         external_environment_overrides: Vec::new(),
@@ -2628,6 +2695,23 @@ mod tests {
     }
 
     #[test]
+    fn legacy_long_context_option_enables_both_model_groups() {
+        let legacy: AgentGlobalConfigOptions = serde_json::from_value(serde_json::json!({
+            "longContext": true
+        }))
+        .unwrap();
+        assert_eq!(legacy.claude_long_context(), (true, true));
+
+        let split: AgentGlobalConfigOptions = serde_json::from_value(serde_json::json!({
+            "longContext": true,
+            "primaryLongContext": false,
+            "fastLongContext": true
+        }))
+        .unwrap();
+        assert_eq!(split.claude_long_context(), (false, true));
+    }
+
+    #[test]
     fn applies_and_restores_only_managed_fields() {
         let path = test_settings_path();
         std::fs::write(
@@ -2640,6 +2724,7 @@ mod tests {
             &path,
             "http://127.0.0.1:18640/anthropic",
             "flowlet-token",
+            false,
             false,
         )
         .unwrap();
@@ -2676,16 +2761,19 @@ mod tests {
     }
 
     #[test]
-    fn long_context_option_writes_and_removes_suffix() {
+    fn independent_long_context_options_write_and_remove_suffixes() {
         let path = test_settings_path();
         let applied = apply_claude_code(
             &path,
             "http://127.0.0.1:18640/anthropic",
             "flowlet-token",
             true,
+            true,
         )
         .unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+        assert!(applied.primary_long_context);
+        assert!(applied.fast_long_context);
         assert!(applied.long_context);
         assert_eq!(applied.primary_model.as_deref(), Some("flowlet-pro[1m]"));
         let current = read_settings(&path).unwrap();
@@ -2697,10 +2785,13 @@ mod tests {
         ] {
             assert_eq!(current["env"][name], "flowlet-pro[1m]", "{name}");
         }
-        // 快速模型与子 Agent 模型不参与长上下文。
-        assert_eq!(current["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], FAST_MODEL);
-        assert_eq!(current["env"]["ANTHROPIC_SMALL_FAST_MODEL"], FAST_MODEL);
-        assert_eq!(current["env"]["CLAUDE_CODE_SUBAGENT_MODEL"], FAST_MODEL);
+        for name in [
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_SMALL_FAST_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ] {
+            assert_eq!(current["env"][name], "flowlet-flash[1m]", "{name}");
+        }
 
         // 关闭开关后重新写入应剥离后缀并收敛。
         let reapplied = apply_claude_code(
@@ -2708,15 +2799,22 @@ mod tests {
             "http://127.0.0.1:18640/anthropic",
             "flowlet-token",
             false,
+            true,
         )
         .unwrap();
         assert_eq!(reapplied.state, AgentGlobalConfigState::Flowlet);
+        assert!(!reapplied.primary_long_context);
+        assert!(reapplied.fast_long_context);
         assert!(!reapplied.long_context);
         let current = read_settings(&path).unwrap();
         assert_eq!(current["env"]["ANTHROPIC_MODEL"], PRIMARY_MODEL);
         assert_eq!(
             current["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"],
             PRIMARY_MODEL
+        );
+        assert_eq!(
+            current["env"]["CLAUDE_CODE_SUBAGENT_MODEL"],
+            "flowlet-flash[1m]"
         );
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -2725,7 +2823,7 @@ mod tests {
     #[test]
     fn manually_suffixed_config_still_converges_to_flowlet() {
         // 用户手动添加 [1m]（或旧版本写入）时，inspect 应剥离后缀比较，
-        // 状态仍为 Flowlet，并如实回报 long_context。
+        // 状态仍为 Flowlet，并分别回报两个模型组的上下文设置。
         let path = test_settings_path();
         std::fs::write(
             &path,
@@ -2747,7 +2845,9 @@ mod tests {
 
         let inspected = inspect_claude_code(&path, "http://127.0.0.1:18640/anthropic").unwrap();
         assert_eq!(inspected.state, AgentGlobalConfigState::Flowlet);
-        assert!(inspected.long_context);
+        assert!(inspected.primary_long_context);
+        assert!(!inspected.fast_long_context);
+        assert!(!inspected.long_context);
         assert_eq!(inspected.primary_model.as_deref(), Some("flowlet-pro[1m]"));
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -2783,6 +2883,7 @@ mod tests {
             &path,
             "http://127.0.0.1:18640/anthropic",
             "flowlet-token",
+            false,
             false,
         )
         .unwrap();
@@ -2833,6 +2934,7 @@ mod tests {
             "http://127.0.0.1:18640/anthropic",
             "flowlet-token",
             false,
+            false,
         )
         .unwrap();
         assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
@@ -2855,6 +2957,7 @@ mod tests {
             "http://127.0.0.1:18640/anthropic",
             "flowlet-token",
             false,
+            false,
         )
         .unwrap();
         assert!(path.is_file());
@@ -2875,6 +2978,7 @@ mod tests {
             &path,
             "http://127.0.0.1:18640/anthropic",
             "flowlet-token",
+            false,
             false,
         )
         .unwrap();
@@ -2901,7 +3005,14 @@ mod tests {
         assert_eq!(report.state, AgentGlobalConfigState::Invalid);
         assert!(report.error.is_some());
         assert!(
-            apply_claude_code(&path, "http://127.0.0.1:18640/anthropic", "token", false).is_err()
+            apply_claude_code(
+                &path,
+                "http://127.0.0.1:18640/anthropic",
+                "token",
+                false,
+                false,
+            )
+            .is_err()
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{invalid");
 

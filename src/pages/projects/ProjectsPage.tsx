@@ -1067,27 +1067,26 @@ function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJ
     >
       {task ? (
         <div className={styles.drawer}>
-          {/* 抽屉顶部固定行：任务执行中展示页面公共的自动刷新控件 */}
-          {isRunning ? (
-            <div className={styles.drawerToolbar}>
-              <RefreshControl
-                autoRefresh={refreshControl.autoRefresh}
-                onToggleAutoRefresh={refreshControl.toggleAutoRefresh}
-                isFetching={refreshing || jobDetail.isFetching}
-                lastUpdatedAt={lastUpdatedAt}
-                intervalMs={refreshControl.intervalMs}
-                onRefresh={() => void refreshActiveTab()}
-                language={language}
-                t={t}
-              />
-            </div>
-          ) : null}
           <Tabs
             type="line"
             activeKey={activeTab}
             tabPaneMotion={false}
             onChange={(key) => setActiveTab(key as "overview" | "session" | "related")}
             className={styles.taskReadonlyTabs}
+            tabBarExtraContent={isRunning ? (
+              <div className={styles.taskTabsRefresh}>
+                <RefreshControl
+                  autoRefresh={refreshControl.autoRefresh}
+                  onToggleAutoRefresh={refreshControl.toggleAutoRefresh}
+                  isFetching={refreshing || jobDetail.isFetching}
+                  lastUpdatedAt={lastUpdatedAt}
+                  intervalMs={refreshControl.intervalMs}
+                  onRefresh={() => void refreshActiveTab()}
+                  language={language}
+                  t={t}
+                />
+              </div>
+            ) : null}
           >
             <Tabs.TabPane tab={t("概览")} itemKey="overview">
               <div className={styles.tabFrame}>
@@ -1229,10 +1228,11 @@ function TaskExecutionRun({ record, index, runningJobId, now }: { record: TaskEx
   );
 }
 
-/** 任务「会话」Tab：按执行轮次分 Tab 隔离展示每一轮产生的 Agent 会话（完整对话），
+/** 任务「会话」Tab：按执行轮次分 Tab 隔离展示每一轮产生的 Agent 会话，
  *  并且是懒加载——visible 为 false（外层「会话」Tab 未激活）时整块不渲染，不拉取任何
- *  轮次的 job/时间线；visible 后也只挂载当前激活轮次（keepDOM=false，切换轮次即卸载
- *  旧轮次并挂载新轮次）。这样大会话只在该轮被查看时才真正加载与渲染，解决性能问题。
+ *  轮次的 job/时间线；visible 后使用 tabList 只挂载当前轮次内容，切换时直接卸载旧轮次。
+ *  每轮查询还携带执行开始 / 结束时间窗，后端只返回该轮交互，不再把复用 session id 的
+ *  累积会话重复渲染到每个 Tab。这样大会话只在该轮被查看时才加载和进入 DOM。
  *  默认激活最后一轮（最新一轮）；autoRefresh 由外层公共刷新控件控制，仅作用于最新
  *  一轮（任务执行中只有它的对话在增长）；onRefreshed 在自动刷新成功后触发，供外层
  *  抽屉更新「最后刷新」指示。 */
@@ -1264,6 +1264,8 @@ function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: Pr
     );
   }
   const activeIndex = Math.min(Math.max(activeRound, 0), history.length - 1);
+  const activeRecord = history[activeIndex];
+  const activeEndedAt = activeRecord.finishedAt ?? history[activeIndex + 1]?.startedAt ?? null;
 
   return (
     <div className={styles.roundTabs}>
@@ -1271,37 +1273,36 @@ function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: Pr
         type="line"
         activeKey={String(activeIndex)}
         tabPaneMotion={false}
-        keepDOM={false}
+        tabList={history.map((_, index) => ({
+          itemKey: String(index),
+          tab: t("第 {n} 轮", { n: index + 1 }),
+        }))}
         onChange={(key) => setActiveRound(Number(key))}
       >
-        {history.map((record, index) => (
-          <Tabs.TabPane key={record.jobId} tab={t("第 {n} 轮", { n: index + 1 })} itemKey={String(index)}>
-            <div className={styles.tabFrame}>
-              <TaskSessionRound
-                record={record}
-                agentType={agentType}
-                roundIndex={index}
-                active={index === activeIndex}
-                autoRefresh={autoRefresh && isRunning && index === history.length - 1}
-                onRefreshed={() => onRefreshedRef.current?.()}
-              />
-            </div>
-          </Tabs.TabPane>
-        ))}
+        <div key={activeRecord.jobId} className={styles.tabFrame}>
+          <TaskSessionRound
+            record={activeRecord}
+            endedAt={activeEndedAt}
+            agentType={agentType}
+            roundIndex={activeIndex}
+            autoRefresh={autoRefresh && isRunning && activeIndex === history.length - 1}
+            onRefreshed={() => onRefreshedRef.current?.()}
+          />
+        </div>
       </Tabs>
     </div>
   );
 }
 
 /** 单轮执行的会话展示：读取该轮 job 产生的 Agent 会话时间线并渲染完整对话。
- *  懒加载下该组件只在「会话」Tab 可见且本轮为激活轮次时挂载（keepDOM=false），
+ *  懒加载下该组件只在「会话」Tab 可见且本轮为激活轮次时挂载，
  *  挂载即激活：测量真实滚动位置并聚焦滚动容器，让 PgUp/PgDn/End 等键盘操作立即可用；
  *  autoRefresh 仅对最新一轮开启（任务执行中对话仍在增长）。 */
-function TaskSessionRound({ record, agentType, roundIndex, active, autoRefresh, onRefreshed }: {
+function TaskSessionRound({ record, endedAt, agentType, roundIndex, autoRefresh, onRefreshed }: {
   record: TaskExecutionRecord;
+  endedAt: string | null;
   agentType: "claude-code" | "opencode" | "pi" | null;
   roundIndex: number;
-  active: boolean;
   autoRefresh: boolean;
   onRefreshed?: () => void;
 }) {
@@ -1310,7 +1311,13 @@ function TaskSessionRound({ record, agentType, roundIndex, active, autoRefresh, 
   // 运行中的任务 summary_json 尚无 sessionId（完成后才写入），回退从 job 的「会话」事件解析。
   const sessionId = parseJobSessionId(jobDetail.data?.job.summaryJson ?? null)
     ?? parseSessionIdFromEvents(jobDetail.data?.events ?? []);
-  const timeline = useAgentSessionTimeline(agentType, sessionId, Boolean(sessionId));
+  // 下界优先使用进入待处理的时刻：它早于子进程创建，可覆盖进程刚启动便写入首条用户消息的竞态；
+  // 旧记录没有 submittedAt 时再回退到实际开始时刻。
+  const timelineRange = useMemo(
+    () => ({ startedAt: record.submittedAt ?? record.startedAt, endedAt }),
+    [record.submittedAt, record.startedAt, endedAt],
+  );
+  const timeline = useAgentSessionTimeline(agentType, sessionId, Boolean(sessionId), timelineRange);
   // 完整对话的滚动跟随：在底部时新内容自动滚到底，离开底部时右下角出现滚动按钮
   // 并用红点提示新内容（与移动端会话弹窗一致）。
   const sessionScroll = useSessionScrollFollow<HTMLDivElement>();
@@ -1321,12 +1328,11 @@ function TaskSessionRound({ record, agentType, roundIndex, active, autoRefresh, 
   useLayoutEffect(() => {
     sessionScroll.observeContent(conversationVersion);
   }, [sessionScroll.observeContent, conversationVersion]);
-  // 挂载即激活（keepDOM=false）：重新测量滚动位置并聚焦滚动容器，标准键盘滚动立即可用。
+  // 挂载即为当前轮次：重新测量滚动位置并聚焦滚动容器，标准键盘滚动立即可用。
   useLayoutEffect(() => {
-    if (!active) return;
     sessionScroll.handleScroll();
     sessionScroll.containerRef.current?.focus({ preventScroll: true });
-  }, [active, sessionScroll.handleScroll, sessionScroll.containerRef]);
+  }, [sessionScroll.handleScroll, sessionScroll.containerRef]);
   // 任务执行中对话仍在增长：自动刷新开启时每 5 秒刷新完整对话；页面不可见时跳过。
   const onRefreshedRef = useRef(onRefreshed);
   onRefreshedRef.current = onRefreshed;
@@ -1500,4 +1506,3 @@ function JobStatusTag({ status, t }: { status: string; t: (key: string) => strin
   const [label, color] = map[status] ?? [status, "grey"];
   return <Tag size="small" color={color}>{t(label)}</Tag>;
 }
-

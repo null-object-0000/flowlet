@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, Toast } from "@douyinfe/semi-ui-19";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
 import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
-import { useCodexAccounts, useCodexAccountRefresh, useCodexAccountRefreshOne, useCodexAccountAuthorization } from "../../features/agent-access/useAgentEnvironment";
+import { useCodexAccounts, useCodexAccountRefreshOne, useCodexAccountAuthorization } from "../../features/agent-access/useAgentEnvironment";
 import { AccountActionOverlay, type AccountActionRequest } from "../../features/channel-accounts/AccountActionOverlay";
 import { CodexAccountSideSheet } from "../../features/channel-accounts/CodexAccountSideSheet";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
@@ -15,6 +15,7 @@ import { OverviewGrid } from "./OverviewGrid";
 import { OverviewServiceStrip } from "./OverviewServiceStrip";
 import styles from "./OverviewPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { errorMessage } from "../../shared/errors/AppError";
 
 export function OverviewPage() {
   const { t } = useAppPreferences();
@@ -31,7 +32,6 @@ export function OverviewPage() {
   const hasAccounts = (accounts.data?.length ?? 0) > 0;
   const balanceSnapshots = useLatestBalanceSnapshots(hasAccounts);
   const codexAccounts = useCodexAccounts(hasAccounts);
-  const codexAccountRefresh = useCodexAccountRefresh();
   const codexAccountRefreshOne = useCodexAccountRefreshOne();
   const codexAccountAuthorization = useCodexAccountAuthorization();
   const [codexSheetVisible, setCodexSheetVisible] = useState(false);
@@ -54,11 +54,12 @@ export function OverviewPage() {
 
   const authorizeCodexAccount = async () => {
     try {
-      await codexAccountAuthorization.mutateAsync();
+      const report = await codexAccountAuthorization.mutateAsync();
       await codexAccounts.refetch();
+      setFocusedCodexAccount(report.account_id);
       Toast.success(t("Codex 账号授权成功"));
     } catch (error) {
-      Toast.error(t("Codex 账号授权失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("Codex 账号授权失败：{message}", { message: errorMessage(error) }));
     }
   };
 
@@ -148,27 +149,22 @@ export function OverviewPage() {
         authorizationBusy={codexAccountAuthorization.isPending}
       />
 
-      <CodexAccountSideSheet
-        visible={codexSheetVisible}
-        accounts={codexAccounts.data}
-        accountId={focusedCodexAccount}
-        accountLoading={codexAccountRefresh.isPending || codexAccountRefreshOne.isPending}
-        accountError={codexAccountRefresh.error?.message ?? codexAccountRefreshOne.error?.message}
-        onRefreshAccount={() => void codexAccountRefresh.mutate()}
-        onRefreshAccountOne={() => void codexAccountRefreshOne.mutate(focusedCodexAccount ?? "")}
-        onShowAll={() => setFocusedCodexAccount(undefined)}
-        accountAuthorizationBusy={codexAccountAuthorization.isPending}
-        onAuthorizeAccount={() => void authorizeCodexAccount()}
-        onClose={() => setCodexSheetVisible(false)}
-        onCopy={async (value, message) => {
-          try {
-            await navigator.clipboard.writeText(value);
-            Toast.success(message);
-          } catch {
-            Toast.success(t("已复制到剪贴板"));
-          }
-        }}
-      />
+      {focusedCodexAccount ? (
+        <CodexAccountSideSheet
+          visible={codexSheetVisible}
+          accounts={codexAccounts.data}
+          accountId={focusedCodexAccount}
+          accountLoading={codexAccountRefreshOne.isPending}
+          accountError={codexAccountRefreshOne.error?.message}
+          onRefreshAccount={() => void codexAccountRefreshOne.mutate(focusedCodexAccount)}
+          accountAuthorizationBusy={codexAccountAuthorization.isPending}
+          onAuthorizeAccount={() => void authorizeCodexAccount()}
+          onClose={() => {
+            setCodexSheetVisible(false);
+            setFocusedCodexAccount(undefined);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

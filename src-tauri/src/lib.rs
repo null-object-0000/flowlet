@@ -621,12 +621,10 @@ mod app_config_tests {
         let _ = std::fs::remove_file(path);
 
         assert!(config.presets.iter().any(|channel| channel.id == "longcat"));
-        assert!(
-            config
-                .presets
-                .iter()
-                .any(|channel| channel.id == "deepseek")
-        );
+        assert!(config
+            .presets
+            .iter()
+            .any(|channel| channel.id == "deepseek"));
         assert!(config.presets.iter().any(|channel| channel.id == "kimi"));
         assert!(config.presets.iter().any(|channel| channel.id == "qwen"));
     }
@@ -1275,6 +1273,7 @@ fn run_desktop() {
             commands::test_s3_sync_connection,
             commands::test_s3_read_connection,
             commands::sync_device_usage_s3,
+            commands::recover_current_device_sync,
             commands::refresh_shared_device_usage_s3,
             commands::list_remote_opencode_permissions,
             commands::reply_remote_opencode_permission,
@@ -1441,7 +1440,9 @@ fn run_mobile() {
 
                     // Step 2: LAN probe 缓存。
                     let lan_probe_count =
-                        crate::core::lan_sync::probe_and_cache_lan_peers(&storage).await.len();
+                        crate::core::lan_sync::probe_and_cache_lan_peers(&storage)
+                            .await
+                            .len();
 
                     let update = MobileSyncUpdate {
                         completed_at: chrono::Utc::now().to_rfc3339(),
@@ -1489,9 +1490,8 @@ fn toggle_window_to_front(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
             // 托盘「显示/隐藏」隐藏主窗口时同样先落盘当前尺寸/位置。
-            let _ = app.save_window_state(
-                StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED,
-            );
+            let _ = app
+                .save_window_state(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED);
             let _ = window.hide();
             return;
         }

@@ -101,7 +101,11 @@ export type AgentGlobalConfigReport = {
   model_catalog_path?: string | null;
   /** 仅 Codex：`model_catalog_json` 指向 Flowlet 生成的模型目录且文件在位。 */
   model_catalog_configured?: boolean;
-  /** Claude Code 主模型是否已写入 `[1m]` 长上下文后缀；其他 Agent 恒为 false。 */
+  /** 仅 Claude Code：主模型组是否已写入 `[1m]` 长上下文后缀。 */
+  primary_long_context?: boolean;
+  /** 仅 Claude Code：快速模型与子 Agent 模型组是否已写入 `[1m]` 后缀。 */
+  fast_long_context?: boolean;
+  /** @deprecated 兼容旧版；仅当两个模型组都开启 1M 时为 true。 */
   long_context?: boolean;
   backup_available: boolean;
   external_environment_overrides: string[];
@@ -114,8 +118,12 @@ export type AgentGlobalConfigReport = {
 
 /** 一键写入 Agent 全局配置的可选参数；某 Agent 不支持的选项会被忽略。 */
 export type AgentGlobalConfigOptions = {
-  /** 仅 Claude Code：主模型环境变量附加 `[1m]` 后缀，启用百万级上下文窗口预算。 */
+  /** @deprecated 兼容旧版；未提供独立选项时同时控制两个模型组。 */
   longContext?: boolean;
+  /** 仅 Claude Code：主模型环境变量附加 `[1m]` 后缀。 */
+  primaryLongContext?: boolean;
+  /** 仅 Claude Code：快速模型和子 Agent 模型环境变量附加 `[1m]` 后缀。 */
+  fastLongContext?: boolean;
   /** 仅 Pi：是否安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。安装后可按会话归并请求。 */
   sessionExtension?: boolean;
 };

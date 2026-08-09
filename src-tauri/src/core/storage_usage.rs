@@ -5,9 +5,9 @@ use crate::core::channels_config::{canonical_model_key, official_channel_id_for_
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionFlowletUsage,
     AgentSessionRepairResult, AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult,
-    AgentUsageEvent, DeviceUsageBreakdownRow, LogFilterClient, LogsFilter, LogsPageResult, LogsSummary,
-    ModelPrice, RequestLogInput, RequestLogModelOptions, RequestLogRow, UsageRecordInput,
-    UsageSummaryRow, UsageTodaySummary,
+    AgentUsageEvent, DeviceUsageBreakdownRow, LogFilterClient, LogsFilter, LogsPageResult,
+    LogsSummary, ModelPrice, RequestLogInput, RequestLogModelOptions, RequestLogRow,
+    UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
 };
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_captured_stream_usage, extract_response_usage};
@@ -1296,7 +1296,13 @@ impl Storage {
                     AS estimated_cost
             "#,
             params![agent_type, session_id],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, f64>(2)?)),
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, f64>(2)?,
+                ))
+            },
         )?;
         let (matched, total_tokens, estimated_cost) = row;
         if matched == 0 {
@@ -2552,7 +2558,8 @@ impl Storage {
             [],
         )?;
         let inserted = transaction.execute(
-            &format!(r#"
+            &format!(
+                r#"
             INSERT INTO usage_records (
                 id, request_id, client_id, client_name, channel_id, channel_name,
                 account_id, account_name, client_protocol, upstream_protocol,
@@ -2585,7 +2592,9 @@ impl Storage {
                   SELECT 1 FROM usage_records
                   WHERE usage_records.request_id = request_logs.request_id
               )
-            "#, repair_time_clause("request_logs.created_at", time_range)),
+            "#,
+                repair_time_clause("request_logs.created_at", time_range)
+            ),
             [],
         )?;
         transaction.commit()?;
@@ -3131,10 +3140,8 @@ impl Storage {
                 end_at.as_deref().unwrap_or_default(),
             ])?
         };
-        let mut native_aggregates: HashMap<
-            (String, String, String),
-            NativeUsageAnalysisAggregate,
-        > = HashMap::new();
+        let mut native_aggregates: HashMap<(String, String, String), NativeUsageAnalysisAggregate> =
+            HashMap::new();
         while let Some(row) = native_rows.next()? {
             let date = row
                 .get::<_, Option<String>>(0)?
@@ -3171,9 +3178,7 @@ impl Storage {
             aggregate.output_tokens = aggregate
                 .output_tokens
                 .saturating_add(row.get::<_, i64>(8)?);
-            aggregate.total_tokens = aggregate
-                .total_tokens
-                .saturating_add(row.get::<_, i64>(9)?);
+            aggregate.total_tokens = aggregate.total_tokens.saturating_add(row.get::<_, i64>(9)?);
         }
         drop(native_rows);
         drop(native_stmt);
@@ -3243,7 +3248,9 @@ impl Storage {
     fn map_usage_summary_row(row: &rusqlite::Row<'_>) -> Result<UsageSummaryRow, rusqlite::Error> {
         Ok(UsageSummaryRow {
             device_id: row.get(0)?,
-            date: row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "未知日期".to_string()),
+            date: row
+                .get::<_, Option<String>>(1)?
+                .unwrap_or_else(|| "未知日期".to_string()),
             client_id: row.get(2)?,
             client_name: row.get(3)?,
             channel_id: row.get(4)?,
@@ -3349,9 +3356,7 @@ impl Storage {
             if is_flowlet_aggregate_model(&model) {
                 continue;
             }
-            let aggregate = aggregates
-                .entry((date, agent_type, model))
-                .or_default();
+            let aggregate = aggregates.entry((date, agent_type, model)).or_default();
             aggregate.native_event_count = aggregate
                 .native_event_count
                 .saturating_add(row.get::<_, i64>(4)?);
@@ -3367,9 +3372,7 @@ impl Storage {
             aggregate.output_tokens = aggregate
                 .output_tokens
                 .saturating_add(row.get::<_, i64>(8)?);
-            aggregate.total_tokens = aggregate
-                .total_tokens
-                .saturating_add(row.get::<_, i64>(9)?);
+            aggregate.total_tokens = aggregate.total_tokens.saturating_add(row.get::<_, i64>(9)?);
         }
         drop(rows);
         drop(statement);
@@ -4118,10 +4121,10 @@ mod estimate_cost_tests {
         }
     }
 
-    fn max_preview_price() -> ModelPrice {
+    fn qwen38_max_price() -> ModelPrice {
         ModelPrice {
             channel_id: "qwen".to_string(),
-            upstream_model: "qwen3.8-max-preview".to_string(),
+            upstream_model: "qwen3.8-max".to_string(),
             input_uncached_price: 6.0,
             input_cached_price: 1.2,
             output_price: 24.0,
@@ -4210,12 +4213,12 @@ mod estimate_cost_tests {
     }
 
     #[test]
-    fn prices_qwen38_max_preview() {
-        let prices = vec![max_preview_price()];
+    fn prices_qwen38_max() {
+        let prices = vec![qwen38_max_price()];
         let cost = estimate_cost(
             &prices,
             Some("qwen"),
-            Some("qwen3.8-max-preview"),
+            Some("qwen3.8-max"),
             Some(1_000_000),
             Some(400_000),
             Some(600_000),
@@ -4254,32 +4257,28 @@ mod estimate_cost_tests {
     #[test]
     fn returns_none_without_matching_price() {
         let prices = vec![flat_price()];
-        assert!(
-            estimate_cost(
-                &prices,
-                Some("qwen"),
-                Some("qwen3.8-max-preview"),
-                Some(10),
-                None,
-                Some(10),
-                None,
-                Some(0)
-            )
-            .is_none()
-        );
-        assert!(
-            estimate_cost(
-                &prices,
-                None,
-                Some("qwen3.6-flash"),
-                Some(10),
-                None,
-                Some(10),
-                None,
-                Some(0)
-            )
-            .is_none()
-        );
+        assert!(estimate_cost(
+            &prices,
+            Some("qwen"),
+            Some("qwen3.8-max"),
+            Some(10),
+            None,
+            Some(10),
+            None,
+            Some(0)
+        )
+        .is_none());
+        assert!(estimate_cost(
+            &prices,
+            None,
+            Some("qwen3.6-flash"),
+            Some(10),
+            None,
+            Some(10),
+            None,
+            Some(0)
+        )
+        .is_none());
     }
 
     #[test]
@@ -4379,7 +4378,8 @@ mod estimate_cost_tests {
 
     #[test]
     fn get_agent_session_flowlet_usage_aggregates_tokens_and_cost() {
-        let storage = Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
+        let storage =
+            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
         storage.migrate().unwrap();
         let connection = storage.connection.lock().unwrap();
         // 造两条同一会话的请求日志（is_last_attempt = 1）与对应用量记录。

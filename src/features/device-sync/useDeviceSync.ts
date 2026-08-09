@@ -104,6 +104,12 @@ export function useDeviceUsageTransfer() {
       ]);
     },
   });
+  const recoverCurrentDeviceSync = useMutation({
+    mutationFn: deviceSyncCommands.recoverCurrentDeviceSync,
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.deviceSync.s3Settings() });
+    },
+  });
   return {
     renameCurrentDevice,
     exportBundle,
@@ -113,5 +119,6 @@ export function useDeviceUsageTransfer() {
     saveS3Config,
     testS3Connection,
     syncS3,
+    recoverCurrentDeviceSync,
   };
 }

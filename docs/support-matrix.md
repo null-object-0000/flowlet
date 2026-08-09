@@ -111,7 +111,6 @@ Flowlet 当前总共支持 13 个规范化模型。这个列表是全局白名�
 | Kimi | `kimi-k3` | — 上游暂不支持 |
 | Kimi | `kimi-k2.7-code` | — 上游暂不支持 |
 | Qwen | `qwen3.8-max` | ✅ 上游确认 |
-| Qwen | `qwen3.8-max-preview` | ✅，仅 Token Plan |
 | Qwen | `qwen3.7-max` | ✅ 上游确认 |
 | Qwen | `qwen3.7-plus` | ✅ 上游确认 |
 | Qwen | `qwen3.7-flash` | ✅ 上游确认 |
@@ -162,6 +161,10 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 | OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置 |
 | Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可部署原生扩展注入 `x-flowlet-session` |
 | Codex | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | 账号发现/授权/套餐用量/credits 查询（承载于渠道账号卡片伪账号行的只读详情抽屉） |
+
+Codex 账号的新增/重新授权通过独立 Codex CLI 的 `codex app-server` 完成。Desktop 仍参与
+安装探测、全局配置和原生会话读取，但 Microsoft Store 应用包内部的 `codex.exe` 不视为
+可供 Flowlet 外部启动的 CLI；只有 Desktop、没有通过可执行探测的 CLI 时，Flowlet 会先提示安装 CLI。
 
 “一键写入/恢复”包括：
 

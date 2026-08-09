@@ -1,18 +1,10 @@
 .page {
-  /* 固定高度布局：模块高度不再随窗口高度拉伸。
-     workspace 行高度由 .workspace 的固定高度决定；窗口更高时页面保持该
-     高度并顶端对齐，剩余空间留白。宽度仍保持响应式。
-     周维度使用 .pageFill：热力图+数据可信度一行固定高度，
-     下方「指定时间点」卡片行随窗口高度伸缩。 */
+  /* 内容按模块自身高度排布，不用剩余视口高度拉伸信息卡片。 */
   height: auto;
   min-height: 0;
   display: grid;
   grid-template-rows: auto auto auto;
   gap: 12px;
-}
-.pageFill {
-  height: calc(100vh - var(--flowlet-shell-top) - var(--flowlet-shell-bottom));
-  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -42,22 +34,29 @@ button.stat { color: var(--flowlet-color-text); font: inherit; text-align: left;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-/* 周维度：左侧「星期 × 小时」热力图模块宽度固定（横向长方形，1:1 方格），
-   右侧「数据可信度」模块高度与之相同、宽度占剩余空间。 */
+/* 周维度：左侧热力图保持固定几何尺寸，右侧展示与当前选中格直接对应的时段详情。 */
 .workspaceWeek {
   height: 280px;
   grid-template-columns: 586px minmax(0, 1fr);
   grid-template-rows: 280px;
 }
 .workspaceWeek .state { min-height: 0; }
-/* 周维度：指定时间点的 Token / 费用拆解卡片移到热力图与数据可信度下方，
-   模块高度随应用窗口高度伸缩。 */
-.weekSelectedStrip {
+/* 数据可信度是辅助信息，周视图中收敛为热力图下方的全宽信息条。 */
+.weekConfidenceStrip {
   min-width: 0;
   min-height: 0;
   display: grid;
 }
-.weekSelectedStrip .selectedPeriod { min-height: 0; }
+.weekConfidenceStrip .confidenceCard {
+  grid-template-columns: minmax(150px, .56fr) minmax(360px, 1.44fr) minmax(220px, .9fr);
+  grid-template-rows: auto;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 16px;
+}
+.weekConfidenceStrip .confidenceBody { margin-top: 0; gap: 14px; }
+.weekConfidenceStrip .confidenceCard > p,
+.weekConfidenceStrip .confidenceNotice { margin-top: 0; }
 .card, .selectedPeriod, .confidenceCard {
   min-width: 0;
   min-height: 0;
@@ -326,7 +325,7 @@ button.heatmapCell.outside, .hourCell.outside { cursor: pointer; }
   grid-template-rows: minmax(178px, .84fr) minmax(214px, 1.16fr);
   gap: 10px;
 }
-/* 周维度右侧：只放「数据可信度」一个模块，高度与左侧热力图一致。 */
+/* 周维度右侧只放选中时段详情，让点击热力图后的反馈保持在同一视觉行。 */
 .insightWeek {
   grid-template-rows: minmax(0, 1fr);
 }
@@ -348,12 +347,6 @@ button.selectedPeriodMetric { border: 0; background: transparent; font: inherit;
 .selectedPeriodMetric:nth-child(odd) { padding-left: 0; border-right: 1px solid var(--flowlet-color-border); }
 .selectedPeriodMetric:nth-child(even) { padding-right: 0; }
 .selectedPeriodMetric:nth-child(n + 3) { border-top: 1px solid var(--flowlet-color-border); }
-/* 周视图底部全宽卡片：四项指标单行排开（一行四列），不再两行两列。 */
-.selectedPeriodStatsHorizontal { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.selectedPeriodStatsHorizontal .selectedPeriodMetric { padding-right: 12px; }
-.selectedPeriodStatsHorizontal .selectedPeriodMetric:nth-child(n + 3) { border-top: 0; }
-.selectedPeriodStatsHorizontal .selectedPeriodMetric:not(:last-child) { border-right: 1px solid var(--flowlet-color-border); }
-.selectedPeriodStatsHorizontal .selectedPeriodMetric:last-child { border-right: 0; }
 .selectedPeriodMetric > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
 .selectedPeriodMetric > strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
 .selectedPeriodMetric > small, .selectedPeriodEmpty > small { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
@@ -444,7 +437,6 @@ button.selectedPeriodMetric { border: 0; background: transparent; font: inherit;
 @media (max-width: 980px) {
   .page { height: auto; min-height: 100%; }
   /* 周维度布局不随窗口收窄改变：热力图宽度固定，仅数据可信度宽度变化。 */
-  .pageFill { height: calc(100vh - var(--flowlet-shell-top) - var(--flowlet-shell-bottom)); grid-template-rows: auto auto auto minmax(0, 1fr); }
   .toolbar { flex-wrap: wrap; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace { grid-template-columns: 1fr; }
@@ -452,7 +444,11 @@ button.selectedPeriodMetric { border: 0; background: transparent; font: inherit;
   .workspaceWeek { grid-template-columns: 586px minmax(0, 1fr); grid-template-rows: 280px; height: 280px; }
   .insightColumn { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
   .insightWeek { grid-template-rows: minmax(0, 1fr); }
-  .weekSelectedStrip .selectedPeriod { min-height: 0; }
+  .weekConfidenceStrip .confidenceCard {
+    grid-template-columns: minmax(140px, .5fr) minmax(340px, 1.5fr);
+  }
+  .weekConfidenceStrip .confidenceCard > p,
+  .weekConfidenceStrip .confidenceNotice { grid-column: 1 / -1; }
   .selectedPeriod { min-height: 214px; }
 }
 

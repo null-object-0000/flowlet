@@ -181,7 +181,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     name: "Codex",
     endpointSuffix: "/v1",
     hasDesktop: true,
-    officialUrl: "https://developers.openai.com/codex/cli",
+    officialUrl: "https://learn.chatgpt.com/docs/codex/cli",
     showsCredentialsFile: true,
     showsFastModel: false,
     showsSubagentModel: false,
@@ -248,11 +248,12 @@ export function AgentAccessSideSheet({
   const endpoint = `${baseUrl}${meta.endpointSuffix}`;
   const token = clientToken || "<Client Token>";
   const displayedToken = clientToken ? MASKED_TOKEN : token;
-  // 1M 长上下文是 Claude Code 专属配置：主模型环境变量是否带 [1m] 后缀。
-  const longContext = agent === "claude-code" && (globalConfig?.long_context ?? false);
+  // Claude Code 的主模型与快速/子 Agent 模型各自拥有独立上下文预算。
+  const primaryLongContext = agent === "claude-code" && (globalConfig?.primary_long_context ?? false);
+  const fastLongContext = agent === "claude-code" && (globalConfig?.fast_long_context ?? false);
   const manualSnippets = useMemo(
-    () => buildManualSnippets(agent, endpoint, token, displayedToken, longContext, t),
-    [agent, displayedToken, endpoint, longContext, t, token],
+    () => buildManualSnippets(agent, endpoint, token, displayedToken, primaryLongContext, fastLongContext, t),
+    [agent, displayedToken, endpoint, fastLongContext, primaryLongContext, t, token],
   );
 
   useEffect(() => {
@@ -312,9 +313,16 @@ export function AgentAccessSideSheet({
             </div>
 
             {environmentError ? <Text className={styles.environmentMessage} type="danger">{t("检测失败：{message}", { message: environmentError })}</Text> : null}
-            {!environmentError && !environmentLoading && !environment?.installed ? (
+            {/* 未安装引导：只要当前标签页（CLI/Desktop）没有任何安装就展示，含官网安装入口。
+                不能只用 environment.installed 判断——Codex 探测到 ChatGPT Desktop 时整体
+                installed 为 true，但 CLI 标签页仍可能没有 CLI，必须照常给出安装引导。 */}
+            {!environmentError && !environmentLoading && !surfaceInstallations?.length ? (
               <div className={styles.installGuide}>
-                <Text type="tertiary" size="small">{t(meta.notInstalledText)}</Text>
+                <Text type="tertiary" size="small">
+                  {environment?.installed
+                    ? t("未检测到 {surface} 安装。", { surface: t(surface === "desktop" ? "Desktop" : "CLI") })
+                    : t(meta.notInstalledText)}
+                </Text>
                 <a className={styles.officialLink} href={meta.officialUrl} target="_blank" rel="noreferrer">
                   {t("前往官网安装")}
                 </a>
@@ -350,11 +358,6 @@ export function AgentAccessSideSheet({
                   </Text>
                 ) : null}
               </div>
-            ) : null}
-            {!environmentError && !environmentLoading && environment?.installed && !surfaceInstallations?.length ? (
-              <Text className={styles.environmentMessage} type="tertiary">
-                {t("未检测到 {surface} 安装。", { surface: t(surface === "desktop" ? "Desktop" : "CLI") })}
-              </Text>
             ) : null}
             {surfaceInstallations?.map((installation, index) => {
               const duplicateSurface = surfaceInstallations
@@ -436,19 +439,41 @@ export function AgentAccessSideSheet({
                   />
                 ) : null}
                 {agent === "claude-code" ? (
-                  <div className={styles.longContextRow}>
-                    <div>
-                      <strong>{t("1M 长上下文")}</strong>
-                      <small>{t("为主模型写入 [1m] 后缀，Claude Code 长会话按百万级上下文窗口管理。")}</small>
-                      <small>{t("Flowlet 实际可用上下文取决于当前路由模型；仅当路由模型支持 1M 时，此配置才能完整生效。")}</small>
+                  <div className={styles.longContextGroup}>
+                    <div className={styles.longContextRow}>
+                      <div>
+                        <strong>{t("flowlet-pro 1M 长上下文")}</strong>
+                        <small>{t("用于 Claude Code 主会话及 Opus、Sonnet、Fable 模型映射。")}</small>
+                        <small>{t("仅当 flowlet-pro 的所有启用路由都支持 1M 时开启。")}</small>
+                      </div>
+                      <Switch
+                        checked={primaryLongContext}
+                        disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
+                        loading={globalConfigBusy}
+                        aria-label={t("flowlet-pro 1M 长上下文")}
+                        onChange={(checked) => void onApplyGlobalConfig({
+                          primaryLongContext: checked,
+                          fastLongContext,
+                        })}
+                      />
                     </div>
-                    <Switch
-                      checked={globalConfig.long_context ?? false}
-                      disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
-                      loading={globalConfigBusy}
-                      aria-label={t("1M 长上下文")}
-                      onChange={(checked) => void onApplyGlobalConfig({ longContext: checked })}
-                    />
+                    <div className={styles.longContextRow}>
+                      <div>
+                        <strong>{t("flowlet-flash 1M 长上下文")}</strong>
+                        <small>{t("用于 Haiku、快速后台任务和子 Agent 模型映射。")}</small>
+                        <small>{t("仅当 flowlet-flash 的所有启用路由都支持 1M 时开启。")}</small>
+                      </div>
+                      <Switch
+                        checked={fastLongContext}
+                        disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
+                        loading={globalConfigBusy}
+                        aria-label={t("flowlet-flash 1M 长上下文")}
+                        onChange={(checked) => void onApplyGlobalConfig({
+                          primaryLongContext,
+                          fastLongContext: checked,
+                        })}
+                      />
+                    </div>
                   </div>
                 ) : null}
                 {agent === "pi" ? (
@@ -488,7 +513,7 @@ export function AgentAccessSideSheet({
                     disabled={globalConfig.state === "invalid" || !clientToken}
                     onClick={() => void onApplyGlobalConfig(
                       agent === "claude-code"
-                        ? { longContext: globalConfig.long_context ?? false }
+                        ? { primaryLongContext, fastLongContext }
                         : agent === "pi"
                           ? { sessionExtension: globalConfig.session_extension ?? true }
                           : undefined,
@@ -580,12 +605,14 @@ function buildManualSnippets(
   endpoint: string,
   token: string,
   displayedToken: string,
-  longContext: boolean,
+  primaryLongContext: boolean,
+  fastLongContext: boolean,
   t: (source: string) => string,
 ) {
   if (agent === "claude-code") {
-    // 与一键写入保持一致：开启 1M 长上下文时主模型带 [1m] 后缀。
-    const primaryModel = longContext ? "flowlet-pro[1m]" : "flowlet-pro";
+    // 与一键写入保持一致：两个模型组分别决定是否附加 [1m] 后缀。
+    const primaryModel = primaryLongContext ? "flowlet-pro[1m]" : "flowlet-pro";
+    const fastModel = fastLongContext ? "flowlet-flash[1m]" : "flowlet-flash";
     const value = (authToken: string) => JSON.stringify({
       env: {
         ANTHROPIC_BASE_URL: endpoint,
@@ -594,9 +621,9 @@ function buildManualSnippets(
         ANTHROPIC_DEFAULT_FABLE_MODEL: primaryModel,
         ANTHROPIC_DEFAULT_OPUS_MODEL: primaryModel,
         ANTHROPIC_DEFAULT_SONNET_MODEL: primaryModel,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: "flowlet-flash",
-        ANTHROPIC_SMALL_FAST_MODEL: "flowlet-flash",
-        CLAUDE_CODE_SUBAGENT_MODEL: "flowlet-flash",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: fastModel,
+        ANTHROPIC_SMALL_FAST_MODEL: fastModel,
+        CLAUDE_CODE_SUBAGENT_MODEL: fastModel,
       },
     }, null, 2);
     return [{

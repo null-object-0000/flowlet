@@ -1663,10 +1663,8 @@ impl Storage {
         )?;
         add_column_if_missing(&connection, "usage_records", "output_tokens", "INTEGER")?;
         add_column_if_missing(&connection, "usage_records", "total_tokens", "INTEGER")?;
-        let migrate_usage_status =
-            !table_has_column(&connection, "usage_records", "usage_status")?;
-        let migrate_usage_source =
-            !table_has_column(&connection, "usage_records", "usage_source")?;
+        let migrate_usage_status = !table_has_column(&connection, "usage_records", "usage_status")?;
+        let migrate_usage_source = !table_has_column(&connection, "usage_records", "usage_source")?;
         add_column_if_missing(
             &connection,
             "usage_records",
@@ -1776,6 +1774,9 @@ impl Storage {
         // 项目任务表新增任务类型 / Agent Profile / 优先级（2026-08-04）。
         // 旧库用 ADD COLUMN 补齐；status 的 CHECK 约束需要包含 review，必须重建表。
         migrate_project_tasks_schema(&connection)?;
+        // 早期版本会把启动前校验 / CreateProcess 失败误记为执行轮次；保留 job 日志，
+        // 但从任务执行历史与最近执行指针中移除，避免占用轮次编号。
+        prune_unstarted_task_executions(&connection)?;
         // 修复早期版本执行历史从未落库的任务（见 backfill_task_execution_history 注释）。
         backfill_task_execution_history(&connection)?;
         // 为已有执行历史补执行耗时（无需重建任务，从 background_jobs 回填 finishedAt / executionMs）。
@@ -1989,6 +1990,80 @@ fn migrate_projects_workspace_schema(connection: &Connection) -> Result<(), Stor
     Ok(())
 }
 
+/// 判断历史 job 是否在 Agent 子进程成功创建前失败。
+///
+/// 这些错误都发生在 `spawn_agent` 返回成功之前，属于启动诊断而非执行轮次。
+/// 只匹配 Flowlet 自己生成的明确错误前缀，避免误删 Agent 进程启动后的普通失败。
+fn is_unstarted_agent_job_error(error: &str) -> bool {
+    let error = error.trim();
+    error.starts_with("无法启动 ")
+        || error.starts_with("项目未绑定本机目录")
+        || error.starts_with("项目绑定的本机目录不存在或不是文件夹")
+        || error.starts_with("无法确定 Pi 原生会话目录")
+        || error.starts_with("无法生成 Pi 会话 id")
+}
+
+/// 清理旧版本误记的“未启动轮次”。background_jobs 与事件日志完整保留，只修正任务上的
+/// `execution_history` / `last_job_id` 派生索引。幂等：再次运行时已没有对应条目。
+fn prune_unstarted_task_executions(connection: &Connection) -> Result<(), StorageError> {
+    let mut task_stmt = connection.prepare(
+        "SELECT id, execution_history FROM project_tasks
+         WHERE execution_history IS NOT NULL AND trim(execution_history) != ''",
+    )?;
+    let tasks: Vec<(String, String)> = task_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    drop(task_stmt);
+
+    for (task_id, history) in tasks {
+        let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&history) else {
+            continue;
+        };
+        let original_len = entries.len();
+        let mut retained = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let remove = if let Some(job_id) = entry.get("jobId").and_then(Value::as_str) {
+                let error: Option<String> = connection
+                    .query_row(
+                        "SELECT error_message FROM background_jobs WHERE id = ?1",
+                        [job_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .flatten();
+                error.as_deref().is_some_and(is_unstarted_agent_job_error)
+            } else {
+                false
+            };
+            if !remove {
+                retained.push(entry);
+            }
+        }
+        let entries = retained;
+        if entries.len() == original_len {
+            continue;
+        }
+
+        let last_job_id = entries
+            .last()
+            .and_then(|entry| entry.get("jobId"))
+            .and_then(Value::as_str);
+        let serialized = if entries.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::to_string(&entries)
+                    .map_err(|error| StorageError::InvalidImport(error.to_string()))?,
+            )
+        };
+        connection.execute(
+            "UPDATE project_tasks SET execution_history = ?1, last_job_id = ?2 WHERE id = ?3",
+            rusqlite::params![serialized, last_job_id, task_id],
+        )?;
+    }
+    Ok(())
+}
+
 /// 任务执行历史修复（2026-08-05）：早期版本 `append_task_execution` 对 NULL 的
 /// `execution_history` 用 `row.get::<_, String>()` 读取会报 `InvalidColumnType`，
 /// 导致执行历史从未落库（只有 last_job_id 被记录）。这里对「有 last_job_id 但
@@ -1997,34 +2072,64 @@ fn migrate_projects_workspace_schema(connection: &Connection) -> Result<(), Stor
 /// 由前端 `lastJobId` 兜底展示最近一次。
 fn backfill_task_execution_history(connection: &Connection) -> Result<(), StorageError> {
     let mut task_stmt = connection.prepare(
-        "SELECT id, title FROM project_tasks
+        "SELECT id, title, last_job_id FROM project_tasks
          WHERE last_job_id IS NOT NULL
            AND (execution_history IS NULL OR trim(execution_history) = '')",
     )?;
-    let tasks: Vec<(String, String)> = task_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+    let tasks: Vec<(String, String, String)> = task_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
         .collect::<Result<_, _>>()?;
     drop(task_stmt);
 
-    for (task_id, title) in tasks {
+    for (task_id, title, current_last_job_id) in tasks {
         let job_title = format!("任务执行：{title}");
         let mut job_stmt = connection.prepare(
-            "SELECT id, COALESCE(started_at, created_at), finished_at FROM background_jobs
+            "SELECT id, COALESCE(started_at, created_at), finished_at, error_message FROM background_jobs
              WHERE job_type = 'project-task-run' AND title = ?1
              ORDER BY created_at ASC, rowid ASC",
         )?;
-        let jobs: Vec<(String, String, Option<String>)> = job_stmt
+        let jobs: Vec<(String, String, Option<String>, Option<String>)> = job_stmt
             .query_map(rusqlite::params![job_title], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
             })?
+            .filter_map(|row| match row {
+                Ok(job) if !job.3.as_deref().is_some_and(is_unstarted_agent_job_error) => {
+                    Some(Ok(job))
+                }
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
             .collect::<Result<_, _>>()?;
         drop(job_stmt);
         if jobs.is_empty() {
+            let last_error: Option<String> = connection
+                .query_row(
+                    "SELECT error_message FROM background_jobs WHERE id = ?1",
+                    [&current_last_job_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            if last_error
+                .as_deref()
+                .is_some_and(is_unstarted_agent_job_error)
+            {
+                connection.execute(
+                    "UPDATE project_tasks SET last_job_id = NULL WHERE id = ?1",
+                    [&task_id],
+                )?;
+            }
             continue;
         }
+        let last_job_id = jobs.last().map(|job| job.0.clone());
         let entries: Vec<serde_json::Value> = jobs
             .into_iter()
-            .map(|(job_id, started_at, finished_at)| {
+            .map(|(job_id, started_at, finished_at, _)| {
                 // 历史任务无法恢复每轮进入待处理的时刻 → submittedAt 空、waitingMs 0；
                 // 执行耗时从 background_jobs 的真实结束时刻推算。
                 let execution_ms = finished_at
@@ -2048,8 +2153,8 @@ fn backfill_task_execution_history(connection: &Connection) -> Result<(), Storag
         let serialized = serde_json::to_string(&entries)
             .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
         connection.execute(
-            "UPDATE project_tasks SET execution_history = ?1 WHERE id = ?2",
-            rusqlite::params![serialized, task_id],
+            "UPDATE project_tasks SET execution_history = ?1, last_job_id = ?2 WHERE id = ?3",
+            rusqlite::params![serialized, last_job_id, task_id],
         )?;
     }
     Ok(())
@@ -2097,7 +2202,9 @@ fn backfill_task_execution_durations(connection: &Connection) -> Result<(), Stor
                     |row| row.get(0),
                 )
                 .optional()?;
-            let Some(finished_at) = finished_at else { continue };
+            let Some(finished_at) = finished_at else {
+                continue;
+            };
             let Some(finished_ms) = parse_epoch_millis(&finished_at) else {
                 continue;
             };

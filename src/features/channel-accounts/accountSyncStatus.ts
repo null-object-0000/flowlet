@@ -35,7 +35,7 @@ export function hasChannelAutoSync(
   );
 }
 
-/** 判断账号数据是否过期：自动同步账号超过一轮同步周期（最后同步时间 + 调度周期）
+/** 判断账号数据是否过期：自动同步账号超过两轮同步周期（最后同步时间 + 调度周期 × 2）
  *  仍未更新成功即视为过期。从未同步过的账号没有快照，直接视为过期。 */
 export function accountSyncStatus(
   account: ChannelAccount,
@@ -48,12 +48,12 @@ export function accountSyncStatus(
 
   const syncedAtMs = new Date(snapshot.synced_at).getTime();
   if (Number.isNaN(syncedAtMs)) return "stale";
-  return syncedAtMs + CHANNEL_RESOURCE_SYNC_INTERVAL_MS < now ? "stale" : "fresh";
+  return syncedAtMs + CHANNEL_RESOURCE_SYNC_INTERVAL_MS * 2 < now ? "stale" : "fresh";
 }
 
 /** Codex 账号同样有资源用量自动同步（见 CodexAccountAutoSync）。过期判断：
  *  - `report.stale` 表示最近一轮刷新失败（Rust 保留旧快照并标记），直接视为过期；
- *  - 否则按「最后成功更新时间 + 一轮同步周期」对比，超出一轮未更新成功即过期。 */
+ *  - 否则按「最后成功更新时间 + 两轮同步周期」对比，超过两轮未更新成功即过期。 */
 export function codexSyncStatus(
   report: CodexAccountReport,
   now: number = Date.now(),
@@ -62,5 +62,5 @@ export function codexSyncStatus(
 
   const updatedAtMs = new Date(report.updated_at).getTime();
   if (Number.isNaN(updatedAtMs)) return "stale";
-  return updatedAtMs + CODEX_ACCOUNT_SYNC_INTERVAL_MS < now ? "stale" : "fresh";
+  return updatedAtMs + CODEX_ACCOUNT_SYNC_INTERVAL_MS * 2 < now ? "stale" : "fresh";
 }

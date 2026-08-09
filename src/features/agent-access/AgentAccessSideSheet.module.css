@@ -361,8 +361,13 @@
   white-space: nowrap;
 }
 
-.longContextRow {
+.longContextGroup {
   margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.longContextRow {
   padding: 10px 12px;
   display: flex;
   align-items: flex-start;

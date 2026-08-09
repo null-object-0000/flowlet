@@ -1,9 +1,9 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import {
   FLOWLET_SUPPORTED_MODELS,
-  canonicalModelKey,
+  canonicalModelId,
   isCustomChannel,
-  pickUpstreamModelForCanonical,
+  resolveSelectedUpstreamModelIds,
 } from "../channel/types";
 import { effectiveAnthropicBaseUrl, effectiveOpenAiBaseUrl, type ChannelAccount } from "../account/types";
 import type { ChannelPreset, ProtocolType } from "../channel/types";
@@ -93,11 +93,13 @@ export function buildDefaultRoutes(
  *  with the latest `/models` result and the global supported-models set. The
  *  whitelist is NOT per-channel — any account may expose any model Flowlet
  *  supports, as long as that account's `/models` returned it (directly, or as
- *  an aliased variant such as `deepseek-v4-flash-0731` for `deepseek-v4-flash`).
+ *  an aliased upstream resource such as `deepseek-v4-flash-0731` for
+ *  `deepseek-v4-flash`). Multiple raw upstream IDs may resolve to the same
+ *  canonical model and must remain separate route candidates.
  *  Returns `{ canonical, upstream }` pairs: `canonical` is the whitelist name
  *  used as `virtual_model_id`; `upstream` is the name to send upstream (the raw
- *  `/models` entry — the canonical name for exact matches, the variant's
- *  original name for alias matches).
+ *  selected `/models` entry). Legacy canonical selections still fall back to
+ *  the first matching alias when the exact canonical ID is absent.
  *  `exposed_models = null` (not yet configured) or empty → no models exposed.
  *  Mirrors the Rust-side selection in channels_config.merge_default_routes. */
 function defaultModelsForAccount(
@@ -106,18 +108,10 @@ function defaultModelsForAccount(
 ): Array<{ canonical: string; upstream: string }> {
   const exposed = account.exposed_models ?? null;
   if (!exposed || exposed.length === 0) return [];
-  const exposedSet = new Set(exposed.map((m) => m.trim().toLowerCase()).filter(Boolean));
-  const syncedRaw = (account.synced_models ?? []).map((m) => m.trim()).filter(Boolean);
-  const syncedKeys = new Set(syncedRaw.map((m) => canonicalModelKey(m)));
-  return FLOWLET_SUPPORTED_MODELS
-    .filter((m) => {
-      const key = m.trim().toLowerCase();
-      return exposedSet.has(key) && syncedKeys.has(key);
-    })
-    .flatMap((m) => {
-      const upstream = pickUpstreamModelForCanonical(m, syncedRaw);
-      return upstream ? [{ canonical: m, upstream }] : [];
-    });
+  return resolveSelectedUpstreamModelIds(exposed, account.synced_models).flatMap((upstream) => {
+    const canonical = canonicalModelId(upstream);
+    return canonical ? [{ canonical, upstream }] : [];
+  });
 }
 
 /** Add only missing direct-model routes for each account's
@@ -163,19 +157,12 @@ export function reconcileAccountRoutes(
 ): RouteCandidate[] {
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const presetById = new Map(presets.map((preset) => [preset.id, preset]));
-  const supportedModels = new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase()));
   const pruned = existing.filter((route) => {
     const account = accountById.get(route.account_id);
+    if (!account) return true;
     const exposed = account?.exposed_models ?? null;
     if (exposed == null) return true; // 未配置的账号保持现状
-    // 路由的 upstream_model 可能是白名单规范名，也可能是别名映射保留的上游变体
-    // 原名（如 deepseek-v4-flash-0731）；统一按规范键参与白名单 / synced / 勾选校验。
-    const canonicalKey = canonicalModelKey(route.upstream_model);
-    if (!supportedModels.has(canonicalKey)) return false;
-    const syncedKeys = new Set(
-      (account?.synced_models ?? []).map((m) => canonicalModelKey(m)).filter(Boolean),
-    );
-    if (!syncedKeys.has(canonicalKey)) return false;
+    if (!account.enabled || !account.api_key.trim()) return false;
     if (account && isCustomChannel(presetById.get(account.channel_id))) {
       const hasEndpoint =
         route.client_protocol === "openai" || route.client_protocol === "responses"
@@ -183,8 +170,11 @@ export function reconcileAccountRoutes(
           : Boolean(effectiveAnthropicBaseUrl(account));
       if (!hasEndpoint) return false;
     }
-    const exposedSet = new Set(exposed.map((m) => m.trim().toLowerCase()));
-    return exposedSet.has(canonicalKey);
+    const expectedUpstream = new Set(
+      defaultModelsForAccount(account.channel_id, account)
+        .map(({ upstream }) => upstream.toLowerCase()),
+    );
+    return expectedUpstream.has(route.upstream_model.trim().toLowerCase());
   });
   return mergeDefaultRoutes(pruned, accounts, presets);
 }

@@ -11,7 +11,7 @@ import { agentSessionCommands } from "../../domains/agent-session/commands";
 import type { AgentSessionFlowletUsage, AgentSessionNativeUsage } from "../../domains/agent-session/types";
 import { deviceSyncCommands } from "../../domains/device-sync/commands";
 import { MIN_TITLE_GENERATION_DESCRIPTION_LENGTH, canAutoGenerateTaskTitle, generateTaskTitle } from "../../domains/project/generateTaskTitle";
-import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
+import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskQueueBlocker, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
 import { proxyCommands } from "../../domains/proxy/commands";
 import { taskExecutionHistory, taskExecutionRound, taskHasExecution, taskIsRevisionDraft, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "../../domains/project/types";
 import { SessionConversation } from "../../features/agent-sessions/SessionConversation";
@@ -165,16 +165,16 @@ function LoadedProjectDetail({ project }: { project: Project }) {
       <RefreshControl
         autoRefresh={refresh.autoRefresh}
         onToggleAutoRefresh={refresh.toggleAutoRefresh}
-        isFetching={tasks.isFetching || sharedProjects.isFetching || scheduler.runnerState.isFetching}
-        lastUpdatedAt={Math.max(tasks.dataUpdatedAt, sharedProjects.dataUpdatedAt, scheduler.runnerState.dataUpdatedAt)}
+        isFetching={tasks.isFetching || sharedProjects.isFetching || scheduler.runnerState.isFetching || scheduler.queued.isFetching}
+        lastUpdatedAt={Math.max(tasks.dataUpdatedAt, sharedProjects.dataUpdatedAt, scheduler.runnerState.dataUpdatedAt, scheduler.queued.dataUpdatedAt)}
         intervalMs={refresh.intervalMs}
-        onRefresh={() => void Promise.all([tasks.refetch(), sharedProjects.refetch()])}
+        onRefresh={() => void Promise.all([tasks.refetch(), sharedProjects.refetch(), scheduler.runnerState.refetch(), scheduler.queued.refetch()])}
         language={language}
         t={t}
       />
     </PageHeader>
     <section className={styles.detailContent}>
-      <TaskBoard project={project} tasks={tasks} sharedProjects={sharedProjects.data ?? []} sharedProjectsError={sharedProjects.isError ? sharedProjects.error.message : null} runnerState={scheduler.runnerState.data} queued={scheduler.queued.data ?? []} search={search} />
+      <TaskBoard project={project} tasks={tasks} sharedProjects={sharedProjects.data ?? []} sharedProjectsError={sharedProjects.isError ? sharedProjects.error.message : null} runnerState={scheduler.runnerState.data} queued={scheduler.queued.data?.tasks ?? []} queueBlockers={scheduler.queued.data?.blockers ?? []} search={search} />
     </section>
   </main>;
 }
@@ -242,9 +242,9 @@ const TASK_TYPES: Array<{ value: ProjectTaskType; label: string }> = [
   { value: "readonly", label: "只读分析" },
 ];
 
-const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi"];
+const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex"];
 
-function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runnerState, queued, search }: { project: Project; tasks: ReturnType<typeof useProjectTasks>; sharedProjects: Awaited<ReturnType<typeof deviceSyncCommands.projects>>; sharedProjectsError: string | null; runnerState?: ProjectTaskRunnerState; queued: ProjectTask[]; search: string }) {
+function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runnerState, queued, queueBlockers, search }: { project: Project; tasks: ReturnType<typeof useProjectTasks>; sharedProjects: Awaited<ReturnType<typeof deviceSyncCommands.projects>>; sharedProjectsError: string | null; runnerState?: ProjectTaskRunnerState; queued: ProjectTask[]; queueBlockers: ProjectTaskQueueBlocker[]; search: string }) {
   const { language, t } = useAppPreferences();
   const actions = useProjectTaskActions(project.id);
   const runnerActions = useProjectTaskRunnerActions();
@@ -255,6 +255,10 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
     refetchOnWindowFocus: false,
   });
   const currentDeviceId = knownDevices.data?.find((device) => device.isCurrent)?.deviceId ?? null;
+  const queueBlockerByTaskId = useMemo(
+    () => new Map(queueBlockers.map((blocker) => [blocker.taskId, blocker])),
+    [queueBlockers],
+  );
   const deviceNameById = useMemo(
     () => new Map((knownDevices.data ?? []).map((device) => [device.deviceId, device.displayName])),
     [knownDevices.data],
@@ -630,7 +634,7 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
       {noSearchMatch ? <div className={styles.searchEmpty}><Empty title={t("没有匹配的任务")} description={t("试试搜索标题、任务 ID 或描述关键词")} /></div> : visibleColumns.map((column) => <section className={styles.column} key={column.id}><header><span className={styles.colTitle}><span>{t(column.label)}</span><span className={`${styles.colCount} ${columnCountClass(column.id)}`}>{grouped[column.id].length}</span></span>{column.addable ? <button className={styles.addColButton} aria-label={t("添加任务")} title={t("添加任务")} onClick={() => openEditor("new")}><IconPlus /></button> : null}</header><div className={styles.columnBody}>
         {column.id === "done"
           ? doneTree.roots.map((task) => renderDoneTask(task))
-          : grouped[column.id].map((task) => <TaskBoardCard key={task.id} task={task} taskById={taskById} onOpen={openAnyTask} actions={renderCardActions(task)} meta={renderCardMeta(task, now)} sourceLabel={taskSourceLabel(task)} />)}
+          : grouped[column.id].map((task) => <TaskBoardCard key={task.id} task={task} taskById={taskById} onOpen={openAnyTask} actions={renderCardActions(task)} meta={renderCardMeta(task, now)} blocker={queueBlockerByTaskId.get(task.id)} sourceLabel={taskSourceLabel(task)} />)}
         {column.addable ? <button className={styles.addCard} onClick={() => openEditor("new")}><IconPlus />{t("添加任务")}</button> : null}
       </div></section>)}
     </div>}
@@ -755,7 +759,7 @@ function statusTagClass(status: ProjectTaskStatus) {
  *  - 其他状态（待处理 / 进行中 / 待审核）：保持原有行结构——第一行合并元信息
  *    （执行轮次 代码修改 · Claude Code，执行轮次为唯一彩色标签），第二行标题，第三行「基于」（可选），第四行时间。
  *  待审核卡片左侧橙色强调线提示。depth > 0 表示作为已完成树内子任务渲染。 */
-export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing, sourceLabel, depth = 0, expandable = false, expanded = false, childCount = 0, onToggleExpand, children }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions?: CardAction[]; meta: ReactNode; trailing?: ReactNode; sourceLabel?: string; depth?: number; expandable?: boolean; expanded?: boolean; childCount?: number; onToggleExpand?: () => void; children?: ReactNode }) {
+export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing, blocker, sourceLabel, depth = 0, expandable = false, expanded = false, childCount = 0, onToggleExpand, children }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions?: CardAction[]; meta: ReactNode; trailing?: ReactNode; blocker?: ProjectTaskQueueBlocker; sourceLabel?: string; depth?: number; expandable?: boolean; expanded?: boolean; childCount?: number; onToggleExpand?: () => void; children?: ReactNode }) {
   const { t } = useAppPreferences();
   const isReview = task.status === "review";
   const isDone = task.status === "done";
@@ -874,6 +878,7 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
         </button>
       </div>
       {baseRow}
+      {blocker ? <div className={styles.taskBlocker}><Tag color="red" size="small">{t("无法执行")}</Tag><span>{blocker.message}</span></div> : null}
       {meta || directActions || trailing ? <div className={styles.taskCardMetaActions}><span className={styles.taskCardMetaRight}>{meta}</span>{directActions ?? trailing}</div> : null}
       {children}
     </article>
@@ -882,12 +887,12 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
 
 /** 看板列中的普通任务卡片：在 TaskCard 之上按需挂载本轮 Token 消耗与预估费用
  *  （进行中 / 待审核展示在执行耗时行右侧，无 Token 数据时显示「消耗统计中」）。 */
-function TaskBoardCard({ task, taskById, onOpen, actions, meta, sourceLabel }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions: CardAction[]; meta: ReactNode; sourceLabel?: string }) {
+function TaskBoardCard({ task, taskById, onOpen, actions, meta, blocker, sourceLabel }: { task: ProjectTask; taskById: Map<string, ProjectTask>; onOpen: (task: ProjectTask) => void; actions: CardAction[]; meta: ReactNode; blocker?: ProjectTaskQueueBlocker; sourceLabel?: string }) {
   const usage = useTaskTokenUsage(task);
   const trailing = !sourceLabel && (task.status === "in_progress" || task.status === "review")
     ? <TaskTokenSummary usage={usage.usage} flowletUsage={usage.flowletUsage} hasData={usage.hasData} />
     : undefined;
-  return <TaskCard task={task} taskById={taskById} onOpen={onOpen} actions={actions} meta={meta} trailing={trailing} sourceLabel={sourceLabel} />;
+  return <TaskCard task={task} taskById={taskById} onOpen={onOpen} actions={actions} meta={meta} trailing={trailing} blocker={blocker} sourceLabel={sourceLabel} />;
 }
 
 /** 进行中 / 待审核任务的本轮 Token 消耗与预估费用：经最近一次执行的 background job
@@ -1301,7 +1306,7 @@ function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: Pr
 function TaskSessionRound({ record, endedAt, agentType, roundIndex, autoRefresh, onRefreshed }: {
   record: TaskExecutionRecord;
   endedAt: string | null;
-  agentType: "claude-code" | "opencode" | "pi" | null;
+  agentType: "claude-code" | "opencode" | "pi" | "codex-cli" | null;
   roundIndex: number;
   autoRefresh: boolean;
   onRefreshed?: () => void;
@@ -1453,8 +1458,9 @@ function parseSessionIdFromEvents(events: BackgroundJobEvent[]): string | null {
 }
 
 /** 任务 Agent Profile → 会话读取用的 agent_type。 */
-function projectAgentType(agentProfile: string): "claude-code" | "opencode" | "pi" | null {
+function projectAgentType(agentProfile: string): "claude-code" | "opencode" | "pi" | "codex-cli" | null {
   if (agentProfile === "Claude Code") return "claude-code";
+  if (agentProfile === "Codex") return "codex-cli";
   if (agentProfile === "OpenCode") return "opencode";
   if (agentProfile === "Pi") return "pi";
   return null;

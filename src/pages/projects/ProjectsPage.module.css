@@ -38,6 +38,8 @@
 .readonlyItemWide { grid-column: 1 / -1; }
 .readonlyEmpty { padding: 28px 16px; border: 1px dashed var(--flowlet-color-border); border-radius: 8px; color: var(--flowlet-color-text-tertiary); font-size: 13px; text-align: center; }
 .readonlyJobError { padding: 8px 10px; border-radius: 6px; background: var(--semi-color-danger-light-default); color: var(--semi-color-danger); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.taskBlocker { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; padding: 7px 8px; border-radius: 6px; background: var(--semi-color-danger-light-default); color: var(--semi-color-danger); font-size: 12px; line-height: 16px; word-break: break-word; }
+.taskBlocker > span:last-child { min-width: 0; flex: 1; }
 .readonlyHeader { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-right: 8px; }
 .readonlyHeaderTitle { font-size: 15px; font-weight: 600; color: var(--flowlet-color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }

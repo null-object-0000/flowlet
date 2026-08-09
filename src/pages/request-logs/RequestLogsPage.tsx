@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Pagination, Select, Toast, Tooltip, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Input, Pagination, Select, Toast, Tooltip } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconSearch } from "@douyinfe/semi-icons";
 import { useLocation, useNavigate } from "react-router-dom";
 import { DEFAULT_REQUEST_LOG_FILTER, type RequestLogFilter, type RequestLogStatusFilter, type RequestLogTimeRange } from "../../domains/request-log/types";
@@ -15,8 +15,6 @@ import styles from "./RequestLogsPage.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { TimePresetSelect, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
-
-const { Text } = Typography;
 
 const TIME_OPTIONS: Array<{ value: RequestLogTimeRange; label: string }> = [
   { value: "1h", label: "最近 1 小时" },
@@ -101,7 +99,6 @@ export function RequestLogsPage() {
       </PageHeader>
 
       <section className={styles.stats} aria-label={t("日志统计")}>
-        <StatCard label={t("请求数")} value={formatInteger(summary?.requestCount, language)} hint={t("失败 {count} 条", { count: formatInteger(summary?.errorCount, language) })} />
         <StatCard label={t("成功率")} value={formatRate(summary?.successCount, summary?.requestCount)} hint={t("当前筛选范围")} success />
         <StatCard label={t("平均总耗时")} value={formatDuration(summary?.averageDurationMs ?? null)} hint={`TTFT ${formatDuration(summary?.averageTtftMs ?? null)}`} />
         <StatCard label={t("平均输出速率")} value={formatTokenRate(summary?.averageOutputTokensPerSecond)} hint={t("从首 Token 到完成")} />
@@ -193,7 +190,11 @@ export function RequestLogsPage() {
         {logs.isError ? <div className={styles.error}><span><strong>{t("请求日志加载失败")}</strong>{safeLogText(logs.error.message)}</span><Button onClick={() => void logs.refetch()}>{t("重试")}</Button></div> : null}
         {!logs.isError ? <RequestLogTable rows={page?.rows ?? []} loading={logs.isLoading} onOpenDetail={setSelectedRequestId} /> : null}
         <footer className={styles.tableFooter}>
-          <Text type="tertiary" size="small">{t("共 {total} 条记录 · 当前显示 {count} 条", { total: page?.total ?? 0, count: page?.rows.length ?? 0 })}</Text>
+          <div className={styles.footerStats}>
+            <span>{t("请求 {count} 条", { count: formatInteger(page?.total ?? 0, language) })}</span>
+            <span className={(summary?.errorCount ?? 0) > 0 ? styles.footerErrorCount : undefined}>{t("失败 {count} 条", { count: formatInteger(summary?.errorCount ?? 0, language) })}</span>
+            <span>{t("当前显示 {count} 条", { count: page?.rows.length ?? 0 })}</span>
+          </div>
           <Pagination total={page?.total ?? 0} currentPage={filter.page} pageSize={filter.pageSize} onPageChange={(pageNumber) => apply({ page: pageNumber })} />
         </footer>
       </section>

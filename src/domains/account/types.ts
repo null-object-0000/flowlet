@@ -30,7 +30,8 @@ export type ChannelAccount = {
   synced_models: string[] | null;
   /** 最近一次 /models 拉取成功的时间（ISO），与 synced_models 配套。 */
   models_synced_at: string | null;
-  /** 用户显式勾选要开放的上游模型 ID 列表（已收敛到渠道白名单内）。
+  /** 用户显式勾选要开放的上游原始模型 ID 列表（按规范模型映射受全局白名单约束）。
+   *  同一规范模型的多个上游 ID 可同时存在，分别生成 Route Candidate。
    *  null = 尚未用新流程配置（路由保持现状）；数组（可为空）= 按此列表严格对账路由。 */
   exposed_models: string[] | null;
   created_at: string;

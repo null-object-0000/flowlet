@@ -19,8 +19,8 @@ import { TimePeriodSwitch, TimeRangeNavigator, TimeScopeControl } from "../../sh
 import { UsageTokenDetailSheet } from "../../features/usage/UsageTokenDetailSheet";
 import type { DailyUsageTotal } from "../../domains/device-sync/types";
 import {
-  buildDesktopDailyContextHeatmap,
   buildMobileUsageHeatmap,
+  buildMobileDailyHourlyHeatmap,
   buildUsageTokenDetails,
   buildWeekdayHourHeatmap,
   filterMobileUsage,
@@ -43,6 +43,7 @@ export function UsageCostPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const [unknownRequestsOpen, setUnknownRequestsOpen] = useState(false);
+  const [unknownRequestsScope, setUnknownRequestsScope] = useState<"period" | "selected">("selected");
   const [unknownRequestsPage, setUnknownRequestsPage] = useState(1);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [tokenDetailsScope, setTokenDetailsScope] = useState<"period" | "selected" | null>(null);
@@ -63,6 +64,10 @@ export function UsageCostPage() {
     [now, period, periodOffset, usage.data],
   );
   const summary = useMemo(() => summarizeMobileUsage(days), [days]);
+  const periodUnknownRequests = useMemo(
+    () => days.reduce((total, day) => total + day.unknownCount, 0),
+    [days],
+  );
   const summaryTokenDetails = buildUsageTokenDetails({
     proxyTotal: summary.tokens,
     proxyInput: summary.inputTokens,
@@ -71,7 +76,7 @@ export function UsageCostPage() {
     proxyCacheMeasuredInput: summary.cacheMeasuredInputTokens,
     proxyOutput: summary.outputTokens,
     proxyRequests: summary.requests,
-    proxyUnknownUsageCount: days.reduce((total, day) => total + day.unknownCount, 0),
+    proxyUnknownUsageCount: periodUnknownRequests,
     nativeTotal: summary.nativeTokens,
     nativeInput: summary.nativeInputTokens,
     nativeCachedInput: summary.nativeCachedInputTokens,
@@ -88,19 +93,17 @@ export function UsageCostPage() {
     () => buildWeekdayHourHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
     [heatmapMetric, hourlyUsage.data, now, periodOffset],
   );
-  const dailyContextHeatmap = useMemo(
-    () => buildDesktopDailyContextHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
+  const dailyHourlyChart = useMemo(
+    () => buildMobileDailyHourlyHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
     [heatmapMetric, hourlyUsage.data, now, periodOffset],
   );
-  const activeHourlyHeatmap = period === "day" ? dailyContextHeatmap : weekHourlyHeatmap;
-  const dailyContextRows = useMemo(() => [
-    { date: dailyContextHeatmap.cells[0]?.date ?? "", start: 18, cells: dailyContextHeatmap.cells.slice(0, 6), context: true, showDate: true, span: 1 },
-    { date: dailyContextHeatmap.cells[6]?.date ?? "", start: 0, cells: dailyContextHeatmap.cells.slice(6, 12), context: false, showDate: true, span: 4 },
-    { date: dailyContextHeatmap.cells[12]?.date ?? "", start: 6, cells: dailyContextHeatmap.cells.slice(12, 18), context: false, showDate: false, span: 1 },
-    { date: dailyContextHeatmap.cells[18]?.date ?? "", start: 12, cells: dailyContextHeatmap.cells.slice(18, 24), context: false, showDate: false, span: 1 },
-    { date: dailyContextHeatmap.cells[24]?.date ?? "", start: 18, cells: dailyContextHeatmap.cells.slice(24, 30), context: false, showDate: false, span: 1 },
-    { date: dailyContextHeatmap.cells[30]?.date ?? "", start: 0, cells: dailyContextHeatmap.cells.slice(30, 36), context: true, showDate: true, span: 1 },
-  ], [dailyContextHeatmap.cells]);
+  const activeHourlyHeatmap = period === "day" ? dailyHourlyChart : weekHourlyHeatmap;
+  const dailyChartMax = useMemo(
+    () => Math.max(0, ...dailyHourlyChart.cells
+      .filter((cell) => !cell.future)
+      .map((cell) => heatmapMetric === "tokens" ? cell.tokens : cell.estimatedCost)),
+    [dailyHourlyChart.cells, heatmapMetric],
+  );
   const selectedDay = useMemo(() => {
     if (selectedDate) {
       return (usage.data ?? []).find((day) => day.date === selectedDate) ?? emptyDailyUsage(selectedDate);
@@ -181,47 +184,68 @@ export function UsageCostPage() {
     ),
     [period, selectedDay?.date, selectedHourlyCell?.hour, selectedHourlyCell?.hourEnd],
   );
+  const periodLogRange = useMemo(() => {
+    const start = new Date(`${range.startDate}T00:00:00`);
+    const end = new Date(`${range.endDate}T00:00:00`);
+    end.setDate(end.getDate() + 1);
+    return { startAt: start.toISOString(), endAt: end.toISOString() };
+  }, [range.endDate, range.startDate]);
+  const unknownRequestLogRange = unknownRequestsScope === "period"
+    ? periodLogRange
+    : selectedLogRange;
   const currentDevice = devices.data?.find((device) => device.isCurrent) ?? null;
   const canReadRequestDetails = deviceId == null || currentDevice?.deviceId === deviceId;
   const unknownRequestFilter = useMemo(() => ({
     ...DEFAULT_REQUEST_LOG_FILTER,
     page: unknownRequestsPage,
     pageSize: 8,
-    startAt: selectedLogRange?.startAt ?? "",
-    endAt: selectedLogRange?.endAt ?? "",
+    startAt: unknownRequestLogRange?.startAt ?? "",
+    endAt: unknownRequestLogRange?.endAt ?? "",
     tokenStatus: "unknown" as const,
-  }), [selectedLogRange, unknownRequestsPage]);
+  }), [unknownRequestLogRange, unknownRequestsPage]);
   const unknownRequestLogs = useRequestLogs(
     unknownRequestFilter,
     false,
-    unknownRequestsOpen && canReadRequestDetails && selectedLogRange != null,
+    unknownRequestsOpen && canReadRequestDetails && unknownRequestLogRange != null,
   );
-  // 周视图热力图主体依赖逐小时用量；月视图（日历热力图）依赖每日汇总。
+  // 日柱状图与周热力图依赖逐小时用量；月视图（日历热力图）依赖每日汇总。
   const activeQuery = period === "month" ? usage : hourlyUsage;
-  const tokenConfidence = useMemo(() => {
-    const proxyRequests = period !== "month"
-      ? Math.max(0, (selectedHourlyCell?.requests ?? 0) - (selectedHourlyCell?.nativeEvents ?? 0))
-      : selectedDay?.requestCount ?? 0;
-    const nativeEvents = period !== "month"
-      ? selectedHourlyCell?.nativeEvents ?? 0
-      : selectedDay?.nativeEventCount ?? 0;
-    const unknownRequests = Math.min(
-      proxyRequests,
-      period !== "month"
-        ? selectedHourlyCell?.unknownRequests ?? 0
-        : selectedDay?.unknownCount ?? 0,
-    );
-    const proxyRecognized = Math.max(0, proxyRequests - unknownRequests);
-    const recognized = proxyRecognized + nativeEvents;
-    const total = proxyRequests + nativeEvents;
-    return {
-      score: total > 0 ? recognized / total : null,
-      proxyShare: total > 0 ? proxyRecognized / total : 0,
-      nativeShare: total > 0 ? nativeEvents / total : 0,
-      unknownShare: total > 0 ? unknownRequests / total : 0,
-      unknownCount: unknownRequests,
-    };
+  const selectedTokenConfidence = useMemo(() => {
+    const proxyRequests = period === "month"
+      ? selectedDay?.requestCount ?? 0
+      : Math.max(0, (selectedHourlyCell?.requests ?? 0) - (selectedHourlyCell?.nativeEvents ?? 0));
+    const nativeEvents = period === "month"
+      ? selectedDay?.nativeEventCount ?? 0
+      : selectedHourlyCell?.nativeEvents ?? 0;
+    const unknownRequests = period === "month"
+      ? selectedDay?.unknownCount ?? 0
+      : selectedHourlyCell?.unknownRequests ?? 0;
+    return calculateTokenConfidence(proxyRequests, nativeEvents, unknownRequests);
   }, [period, selectedDay, selectedHourlyCell]);
+  const periodTokenConfidence = useMemo(
+    () => calculateTokenConfidence(
+      summary.requests,
+      summary.nativeEvents,
+      periodUnknownRequests,
+    ),
+    [periodUnknownRequests, summary.nativeEvents, summary.requests],
+  );
+
+  const openUnknownRequests = (scope: "period" | "selected") => {
+    setUnknownRequestsScope(scope);
+    setUnknownRequestsPage(1);
+    setUnknownRequestsOpen(true);
+  };
+
+  const periodConfidenceCard = (
+    <TokenConfidenceCard
+      periodTitle={rangeLabel}
+      confidence={periodTokenConfidence}
+      language={language}
+      t={t}
+      onShowUnknownRequests={() => openUnknownRequests("period")}
+    />
+  );
 
   const resetSelection = () => {
     setSelectedDate(null);
@@ -234,25 +258,12 @@ export function UsageCostPage() {
   const openTokenDetailsLabel = tokenDetailsScope === "selected" && selectedPeriodTitle
     ? selectedPeriodTitle
     : rangeLabel;
-  const confidenceCard = (
-    <TokenConfidenceCard
-      periodTitle={selectedPeriodTitle}
-      score={tokenConfidence.score}
-      proxyShare={tokenConfidence.proxyShare}
-      nativeShare={tokenConfidence.nativeShare}
-      unknownShare={tokenConfidence.unknownShare}
-      unknownCount={tokenConfidence.unknownCount}
-      language={language}
-      t={t}
-      onShowUnknownRequests={() => {
-        setUnknownRequestsPage(1);
-        setUnknownRequestsOpen(true);
-      }}
-    />
-  );
+  const unknownRequestsTitle = unknownRequestsScope === "period"
+    ? rangeLabel
+    : selectedPeriodTitle;
 
   return (
-    <main className={styles.page}>
+    <main className={[styles.page, styles.pageTimeline].join(" ")}>
       <PageHeader
         title={(
           <DeviceUsageTitlePicker
@@ -340,17 +351,21 @@ export function UsageCostPage() {
         </article>
       </section>
 
-      <section className={[styles.workspace, period === "week" ? styles.workspaceWeek : ""].join(" ")}>
+      <section className={styles.periodConfidenceModule}>
+        {periodConfidenceCard}
+      </section>
+
+      <section className={[styles.workspace, styles.workspaceTimeline].join(" ")}>
         <article className={[styles.card, styles.heatmapCard].join(" ")}>
           <div className={styles.cardHeader}>
             <div>
               <strong>{t(period === "day"
-                ? heatmapMetric === "tokens" ? "36 小时 Token 热力图" : "36 小时预估费用热力图"
+                ? heatmapMetric === "tokens" ? "24 小时 Token 柱状图" : "24 小时预估费用柱状图"
                 : period === "week"
                   ? heatmapMetric === "tokens" ? "星期 × 小时 Token 热力图" : "星期 × 小时预估费用热力图"
                   : heatmapMetric === "tokens" ? "每日 Token 热力图" : "每日预估费用热力图")}</strong>
               <span>{t(period === "day"
-                ? "选中日期前后各延伸 6 小时，点击查看时段汇总"
+                ? "横轴为小时，点击柱查看对应时段"
                 : period === "week" ? "纵轴为星期、横轴为小时（24 小时制），点击查看对应时段"
                   : "点击日期查看当天汇总")}</span>
             </div>
@@ -369,57 +384,50 @@ export function UsageCostPage() {
           ) : null}
 
           {period === "day" && !activeQuery.isPending && !activeQuery.isError ? (
-            <div className={styles.dailyHeatmapFrame}>
-              <div className={styles.dailyHeatmap}>
-                {dailyContextRows.map((row, rowIndex) => {
-                  const boundary = rowIndex === 1 || rowIndex === 5;
-                  return [
-                    row.showDate ? (
+            <div className={styles.dailyBarFrame}>
+              <div className={styles.dailyBarChart}>
+                <div className={styles.dailyBarScale} aria-hidden="true">
+                  <span>{heatmapMetric === "tokens"
+                    ? formatCompactNumber(dailyChartMax, language)
+                    : formatCostCny(dailyChartMax)}</span>
+                  <span>0</span>
+                </div>
+                <div className={styles.dailyBarPlot}>
+                  {dailyHourlyChart.cells.map((cell) => {
+                    const hourLabel = String(cell.hourOfDay).padStart(2, "0");
+                    const title = cell.date + " " + hourLabel + ":00–" + hourLabel + ":59 · "
+                      + formatHeatmapValues(heatmapMetric, cell.tokens, cell.estimatedCost, language, t) + " · "
+                      + t("{count} 次请求", { count: formatInteger(cell.requests, language) })
+                      + formatNativeSplit(cell.tokens, cell.nativeTokens, language, t);
+                    const value = heatmapMetric === "tokens" ? cell.tokens : cell.estimatedCost;
+                    const ratio = dailyChartMax > 0 ? value / dailyChartMax : 0;
+                    return (
                       <span
-                        className={[
-                          styles.dailyDateLabel,
-                          row.context ? styles.contextDateLabel : styles.currentDateLabel,
-                          row.span === 4 ? styles.fourRowDateLabel : "",
-                          boundary ? styles.dayBoundary : "",
-                        ].join(" ")}
-                        key={"date-" + row.date}
+                        key={cell.hour}
+                        className={styles.dailyBarSlot}
                       >
-                        {formatUsageDateLabel(row.date, language)}
-                      </span>
-                    ) : null,
-                    <span className={[styles.dailyRangeLabel, boundary ? styles.dayBoundary : ""].join(" ")} key={"range-" + row.date + "-" + row.start}>
-                      {String(row.start).padStart(2, "0")}–{String(row.start + 5).padStart(2, "0")}
-                    </span>,
-                    ...row.cells.map((cell) => {
-                      const hourLabel = String(cell.hourOfDay).padStart(2, "0");
-                      const title = cell.date + " " + hourLabel + ":00–" + hourLabel + ":59 · "
-                        + formatHeatmapValues(heatmapMetric, cell.tokens, cell.estimatedCost, language, t) + " · "
-                        + t("{count} 次请求", { count: formatInteger(cell.requests, language) })
-                        + formatNativeSplit(cell.tokens, cell.nativeTokens, language, t);
-                      return (
                         <button
-                          key={cell.hour}
                           type="button"
-                          className={[
-                            styles.hourCell,
-                            styles.dailyHourCell,
-                            styles["heatLevel" + cell.level],
-                            cell.outside ? styles.outside : "",
-                            boundary ? styles.dayBoundary : "",
-                          ].join(" ")}
+                          className={styles.dailyBar}
+                          style={{ "--daily-bar-height": `${ratio * 100}%` } as React.CSSProperties}
                           disabled={cell.future}
+                          data-has-data={cell.hasData}
                           aria-label={title}
                           aria-pressed={selectedHourlyCell?.hour === cell.hour}
                           title={title}
                           onClick={() => setSelectedHour(cell.hour)}
                         />
-                      );
-                    }),
-                  ];
-                })}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div className={styles.dailyBarHours} aria-hidden="true">
+                  {dailyHourlyChart.cells.map((cell) => (
+                    <span key={cell.hour}>{cell.hourOfDay % 2 === 0 ? String(cell.hourOfDay).padStart(2, "0") : ""}</span>
+                  ))}
+                </div>
               </div>
-              <HeatmapLegend t={t} />
-              {!dailyContextHeatmap.cells.some((cell) => cell.hasData) ? (
+              {!dailyHourlyChart.cells.some((cell) => cell.hasData) ? (
                 <div className={styles.emptyHint}>{t("当前周期暂无数据")}</div>
               ) : null}
             </div>
@@ -517,8 +525,7 @@ export function UsageCostPage() {
           ) : null}
         </article>
 
-        <aside className={[styles.insightColumn, period === "week" ? styles.insightWeek : ""].join(" ")}>
-          {period !== "week" ? confidenceCard : null}
+        <aside className={[styles.insightColumn, styles.insightTimeline].join(" ")}>
 
           {(period === "day" || period === "week") && selectedHourlyCell ? (
             <SelectedPeriodCard
@@ -535,6 +542,8 @@ export function UsageCostPage() {
               onExpandTokenDetails={() => setTokenDetailsScope("selected")}
               language={language}
               t={t}
+              confidence={selectedTokenConfidence}
+              onShowUnknownRequests={() => openUnknownRequests("selected")}
             />
           ) : null}
 
@@ -559,18 +568,14 @@ export function UsageCostPage() {
               onExpandTokenDetails={() => setTokenDetailsScope("selected")}
               language={language}
               t={t}
+              confidence={selectedTokenConfidence}
+              onShowUnknownRequests={() => openUnknownRequests("selected")}
             />
           ) : null}
 
           {!selectedPeriod ? <SelectedPeriodEmpty t={t} /> : null}
         </aside>
       </section>
-
-      {period === "week" ? (
-        <section className={styles.weekConfidenceStrip}>
-          {confidenceCard}
-        </section>
-      ) : null}
 
       <UsageTokenDetailSheet
         visible={tokenDetailsScope != null}
@@ -592,7 +597,7 @@ export function UsageCostPage() {
       >
         <div className={styles.unknownRequestsSheet}>
           <div className={styles.unknownRequestsIntro}>
-            <strong>{selectedPeriodTitle ?? t("指定时间点")}</strong>
+            <strong>{unknownRequestsTitle ?? t("指定时间点")}</strong>
             <span>{deviceId == null
               ? t("全部设备的聚合用量中，仅本机保存了可展开的原始请求日志。")
               : canReadRequestDetails
@@ -691,6 +696,8 @@ function SelectedPeriodCard({
   onExpandTokenDetails,
   language,
   t,
+  confidence,
+  onShowUnknownRequests,
 }: {
   title: string;
   inputTokens: number;
@@ -705,9 +712,11 @@ function SelectedPeriodCard({
   onExpandTokenDetails: () => void;
   language: NumberLanguage;
   t: ReturnType<typeof useAppPreferences>["t"];
+  confidence?: TokenConfidence;
+  onShowUnknownRequests?: () => void;
 }) {
   return (
-    <article className={styles.selectedPeriod}>
+    <article className={[styles.selectedPeriod, confidence ? styles.selectedPeriodWithConfidence : ""].join(" ")}>
       <header className={styles.selectedPeriodHeader}>
         <strong>{title}</strong>
         <span>{t("指定时间点")}</span>
@@ -746,7 +755,74 @@ function SelectedPeriodCard({
           detail={t("Flowlet 可统计用量")}
         />
       </div>
+      {confidence && onShowUnknownRequests ? (
+        <section className={styles.selectedConfidence}>
+          <header>
+            <strong>{t("数据可信度")}</strong>
+            <span>{confidence.score == null ? "—" : formatConfidence(confidence.score)}</span>
+          </header>
+          <SelectedTokenConfidenceDetails
+            confidence={confidence}
+            language={language}
+            t={t}
+            onShowUnknownRequests={onShowUnknownRequests}
+          />
+        </section>
+      ) : null}
     </article>
+  );
+}
+
+function SelectedTokenConfidenceDetails({
+  confidence,
+  language,
+  t,
+  onShowUnknownRequests,
+}: {
+  confidence: TokenConfidence;
+  language: NumberLanguage;
+  t: ReturnType<typeof useAppPreferences>["t"];
+  onShowUnknownRequests: () => void;
+}) {
+  const { score, proxyShare, nativeShare, unknownShare, unknownCount } = confidence;
+  const scoreLabel = score == null ? "—" : formatConfidence(score);
+  const scoreDegrees = score == null ? 0 : Math.max(0, Math.min(360, score * 360));
+
+  return (
+    <>
+      <div className={styles.selectedConfidenceOverview}>
+        <div className={styles.confidenceSummary}>
+          <div
+            className={styles.confidenceRing}
+            style={{ "--confidence-degrees": `${scoreDegrees}deg` } as React.CSSProperties}
+            aria-label={t("Token 已识别 {score}", { score: scoreLabel })}
+          >
+            <strong>{scoreLabel}</strong>
+          </div>
+          <div>
+            <strong>{t("Token 已识别")}</strong>
+            <span>{score == null
+              ? t("当前筛选范围暂无数据")
+              : t("当前按可统计请求覆盖计算")}</span>
+          </div>
+        </div>
+        <div className={styles.selectedConfidenceBreakdown}>
+          <ConfidenceRow className={styles.proxyDot} label={t("Flowlet 可统计用量")} value={formatConfidence(proxyShare)} />
+          <ConfidenceRow className={styles.nativeDot} label={t("Agent 原生用量")} value={formatConfidence(nativeShare)} />
+          <ConfidenceRow className={styles.unknownDot} label={t("未知 / 待识别")} value={formatConfidence(unknownShare)} />
+        </div>
+      </div>
+      {unknownCount > 0 ? (
+        <button type="button" className={styles.confidenceNotice} onClick={onShowUnknownRequests}>
+          <span>{t("{count} 次请求暂未识别 Token，可在数据完整性检查中尝试修复。", {
+            count: formatInteger(unknownCount, language),
+          })}</span>
+          <IconChevronRight />
+        </button>
+      ) : (
+        <p>{t("当前范围内所有请求均包含可统计 Token；来源级评分将在同步数据支持后进一步细分。")}</p>
+      )}
+    </>
   );
 }
 
@@ -811,33 +887,49 @@ function SelectedPeriodEmpty({ t }: { t: ReturnType<typeof useAppPreferences>["t
 
 function TokenConfidenceCard({
   periodTitle,
-  score,
-  proxyShare,
-  nativeShare,
-  unknownShare,
-  unknownCount,
+  confidence,
   language,
   t,
   onShowUnknownRequests,
 }: {
   periodTitle: string | null;
-  score: number | null;
-  proxyShare: number;
-  nativeShare: number;
-  unknownShare: number;
-  unknownCount: number;
+  confidence: TokenConfidence;
   language: NumberLanguage;
   t: ReturnType<typeof useAppPreferences>["t"];
   onShowUnknownRequests: () => void;
 }) {
-  const scoreLabel = score == null ? "—" : formatConfidence(score);
-  const scoreDegrees = score == null ? 0 : Math.max(0, Math.min(360, score * 360));
   return (
     <article className={styles.confidenceCard}>
       <header>
         <strong>{t("数据可信度")}</strong>
         <span>{periodTitle ?? t("暂无选定时间数据")}</span>
       </header>
+      <TokenConfidenceDetails
+        confidence={confidence}
+        language={language}
+        t={t}
+        onShowUnknownRequests={onShowUnknownRequests}
+      />
+    </article>
+  );
+}
+
+function TokenConfidenceDetails({
+  confidence,
+  language,
+  t,
+  onShowUnknownRequests,
+}: {
+  confidence: TokenConfidence;
+  language: NumberLanguage;
+  t: ReturnType<typeof useAppPreferences>["t"];
+  onShowUnknownRequests: () => void;
+}) {
+  const { score, proxyShare, nativeShare, unknownShare, unknownCount } = confidence;
+  const scoreLabel = score == null ? "—" : formatConfidence(score);
+  const scoreDegrees = score == null ? 0 : Math.max(0, Math.min(360, score * 360));
+  return (
+    <>
       <div className={styles.confidenceBody}>
         <div className={styles.confidenceSummary}>
           <div
@@ -870,8 +962,26 @@ function TokenConfidenceCard({
       ) : (
         <p>{t("当前范围内所有请求均包含可统计 Token；来源级评分将在同步数据支持后进一步细分。")}</p>
       )}
-    </article>
+    </>
   );
+}
+
+type TokenConfidence = ReturnType<typeof calculateTokenConfidence>;
+
+function calculateTokenConfidence(proxyRequests: number, nativeEvents: number, unknownRequests: number) {
+  const safeProxyRequests = Math.max(0, proxyRequests);
+  const safeNativeEvents = Math.max(0, nativeEvents);
+  const safeUnknownRequests = Math.min(safeProxyRequests, Math.max(0, unknownRequests));
+  const proxyRecognized = Math.max(0, safeProxyRequests - safeUnknownRequests);
+  const recognized = proxyRecognized + safeNativeEvents;
+  const total = safeProxyRequests + safeNativeEvents;
+  return {
+    score: total > 0 ? recognized / total : null,
+    proxyShare: total > 0 ? proxyRecognized / total : 0,
+    nativeShare: total > 0 ? safeNativeEvents / total : 0,
+    unknownShare: total > 0 ? safeUnknownRequests / total : 0,
+    unknownCount: safeUnknownRequests,
+  };
 }
 
 function getSelectedLogRange(
@@ -906,14 +1016,6 @@ function emptyDailyUsage(date: string): DailyUsageTotal {
     unknownCount: 0,
     estimatedCost: 0,
   };
-}
-
-function formatUsageDateLabel(date: string, language: NumberLanguage) {
-  if (!date) return "—";
-  return new Date(`${date}T00:00:00`).toLocaleDateString(language, {
-    month: "numeric",
-    day: "numeric",
-  });
 }
 
 function ConfidenceRow({ className, label, value }: { className: string; label: string; value: string }) {

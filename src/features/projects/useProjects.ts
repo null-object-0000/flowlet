@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { projectCommands } from "../../domains/project/commands";
-import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskRunnerState } from "../../domains/project/types";
+import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskQueueReport, ProjectTaskRunnerState } from "../../domains/project/types";
 import { queryKeys } from "../../shared/query-keys";
 
 export function useProjects() {
@@ -61,7 +61,7 @@ export function useProjectTaskRunnerState(autoRefresh = false, intervalMs = 5_00
 }
 
 /** 跨项目聚合的「已提交、待执行」任务（按优先级 + 创建时间排序）。 */
-export function useQueuedProjectTasks(autoRefresh = false, intervalMs = 10_000): ReturnType<typeof useQuery<ProjectTask[]>> {
+export function useQueuedProjectTasks(autoRefresh = false, intervalMs = 10_000): ReturnType<typeof useQuery<ProjectTaskQueueReport>> {
   return useQuery({
     queryKey: queryKeys.projectTaskRunner.queued(),
     queryFn: () => projectCommands.listQueuedTasks(),
@@ -166,7 +166,7 @@ export function useProjectTaskScheduler(
     // 按项目隔离领取：跳过已有任务在执行的项目的所有任务，从其余项目取队首任务。
     // 不同项目可并行执行，每个项目至多一个任务在跑。
     const runningProjectIds = new Set((runnerState.data?.current ?? []).map((info) => info.projectId));
-    const next = pickNextClaimableTask(queued.data ?? [], runningProjectIds);
+    const next = pickNextClaimableTask(queued.data?.tasks ?? [], runningProjectIds);
     if (!next) return;
     // 后悔窗口：任务刚提交（updatedAt 太新）时不领取，避免用户没有撤回机会。
     if (isTaskWithinSubmitGrace(next.updatedAt)) return;

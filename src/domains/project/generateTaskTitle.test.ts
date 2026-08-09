@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MIN_TITLE_GENERATION_DESCRIPTION_LENGTH, canAutoGenerateTaskTitle, generateTaskTitle, type TitleGenerationProgress } from "./generateTaskTitle";
+import { MIN_TITLE_GENERATION_DESCRIPTION_LENGTH, TASK_TITLE_GENERATION_TIMEOUT_MS, canAutoGenerateTaskTitle, generateTaskTitle, type TitleGenerationProgress } from "./generateTaskTitle";
 
 describe("canAutoGenerateTaskTitle", () => {
   it("rejects empty or whitespace-only descriptions", () => {
@@ -156,5 +156,32 @@ describe("generateTaskTitle", () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, body: null } as unknown as Response);
     await expect(generateTaskTitle({ baseUrl: "http://127.0.0.1:18640", clientToken: null, description: "整理当前项目的目录结构说明", taskType: "readonly" }))
       .rejects.toThrow("未返回流式响应");
+  });
+
+  it("aborts a title generation request after the total timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      }));
+
+      const result = generateTaskTitle({
+        baseUrl: "http://127.0.0.1:18640",
+        clientToken: null,
+        description: "生成任务标题时限制总等待时间并在超时后中断请求",
+        taskType: "code",
+      }).catch((error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(TASK_TITLE_GENERATION_TIMEOUT_MS);
+      const error = await result;
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("标题生成超时（30 秒）");
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(init.signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

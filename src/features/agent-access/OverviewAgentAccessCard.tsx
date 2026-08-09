@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { IconChevronRight } from "@douyinfe/semi-icons";
 import { Badge, Toast } from "@douyinfe/semi-ui-19";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
 import styles from "./OverviewAgentAccessCard.module.css";
@@ -186,7 +187,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                     ) : null}
                   </span>
                 </span>
-                <span className={`${styles.support} ${styles.supported}`}>{t("查看详情")}</span>
+                <IconChevronRight size="small" className={styles.agentChevron} aria-hidden="true" />
               </button>
             );
           })}

@@ -292,6 +292,18 @@ export type ProjectTaskRunnerState = {
   }>;
 };
 
+export type ProjectTaskQueueBlocker = {
+  taskId: string;
+  code: "project_directory_unavailable";
+  message: string;
+};
+
+/** submitted 任务的本机调度快照：tasks 可执行，blockers 保留但不会被调度器重复领取。 */
+export type ProjectTaskQueueReport = {
+  tasks: ProjectTask[];
+  blockers: ProjectTaskQueueBlocker[];
+};
+
 /** run_project_task 领取结果。 */
 export type RunProjectTaskResult = {
   started: boolean;

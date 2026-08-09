@@ -138,11 +138,13 @@
   font-weight: 600;
 }
 
-.support { padding: 3px 8px; border-radius: 6px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
+.agentChevron {
+  color: var(--flowlet-color-text-tertiary);
+  transition: color 120ms ease;
+}
 
-.supported {
+.agentCard:not(:disabled):hover .agentChevron {
   color: var(--flowlet-color-primary);
-  background: var(--semi-color-primary-light-default);
 }
 @media (max-width: 760px) {
   .grid {

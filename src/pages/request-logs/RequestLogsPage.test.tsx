@@ -62,7 +62,11 @@ describe("RequestLogsPage", () => {
     expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({ timeRange: "all" }), true);
     const logRow = screen.getByRole("button", { name: `查看请求 ${row.request_id}` });
     expect(logRow).toHaveTextContent("/anthropic/v1/messages");
-    expect(screen.getByText("请求数")).toBeInTheDocument();
+    // 请求数/失败统计卡片已融合到表格左下角 footer，不再作为顶部独立卡片展示。
+    expect(screen.queryByText("请求数")).not.toBeInTheDocument();
+    expect(screen.getByText("请求 1 条")).toBeInTheDocument();
+    expect(screen.getByText("失败 0 条")).toBeInTheDocument();
+    expect(screen.getByText("当前显示 1 条")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新数据" })).not.toHaveTextContent("刷新数据");
     expect(screen.getAllByText("150")).toHaveLength(2);
     expect(screen.getByText("缓存命中率 60.0%")).toBeInTheDocument();

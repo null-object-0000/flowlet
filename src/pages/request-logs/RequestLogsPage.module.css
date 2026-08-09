@@ -1,5 +1,5 @@
 .page { width: 100%; height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 10px; overflow: hidden; }
-.stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
 .statCard { min-width: 0; height: 68px; padding: 8px 13px; display: grid; align-content: center; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); box-shadow: 0 5px 16px rgba(43,57,83,.035); }
 .statCard > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .statCard > div { min-width: 0; margin-top: 3px; display: grid; gap: 2px; }
@@ -16,6 +16,8 @@
 .toolbarSpacer { flex: 1; }
 .tableCard { min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) 38px; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
 .tableFooter { min-height: 38px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--flowlet-color-border); }
+.footerStats { min-width: 0; display: flex; align-items: center; gap: 12px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-body-compact); line-height: var(--flowlet-line-height-body-compact); }
+.footerErrorCount { color: var(--semi-color-danger); font-weight: 650; }
 .tableFooter :global(.semi-page-item) { min-width: 25px; height: 25px; line-height: 25px; border-radius: 6px; font-size: var(--flowlet-font-size-caption); }
 .error { margin: 14px; padding: 14px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); }
 .error > span { display: grid; gap: 4px; }

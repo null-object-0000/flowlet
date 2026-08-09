@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAccount } from "../account/types";
 import type { ChannelPreset } from "../channel/types";
+import { resolveSelectedUpstreamModelIds } from "../channel/types";
 import type { RouteCandidate } from "./types";
 
 const invokeMock = vi.fn((_command: string, _args?: Record<string, unknown>): Promise<unknown> => Promise.resolve(undefined));
@@ -13,6 +14,29 @@ vi.mock("../../platform/tauri/client", () => ({
 import { mergeDefaultRoutes, modelCommands, reconcileAccountRoutes, routesDiffer } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
+
+describe("upstream resource selection", () => {
+  it("keeps independently selected raw IDs for one canonical model", () => {
+    expect(resolveSelectedUpstreamModelIds(
+      ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+      ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+    )).toEqual(["deepseek-v4-flash", "deepseek-v4-flash-0731"]);
+  });
+
+  it("maps a legacy canonical-only selection to the alias when it is the only synced resource", () => {
+    expect(resolveSelectedUpstreamModelIds(
+      ["deepseek-v4-flash"],
+      ["deepseek-v4-flash-0731"],
+    )).toEqual(["deepseek-v4-flash-0731"]);
+  });
+
+  it("does not implicitly select the alias when the exact canonical resource exists", () => {
+    expect(resolveSelectedUpstreamModelIds(
+      ["deepseek-v4-flash"],
+      ["deepseek-v4-flash-0731", "deepseek-v4-flash"],
+    )).toEqual(["deepseek-v4-flash"]);
+  });
+});
 
 describe("modelCommands contract", () => {
   it("saves the complete candidate list through save_route_candidates", async () => {
@@ -277,7 +301,7 @@ describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)",
     expect(new Set(routes.map((route) => route.id))).toHaveLength(1);
   });
 
-  it("prefers the exact model name over the alias variant when /models returns both", () => {
+  it("selects only the exact upstream resource when only the canonical ID is checked", () => {
     const account = {
       ...tokenPlanAccount,
       synced_models: ["deepseek-v4-flash-0731", "deepseek-v4-flash"],
@@ -285,6 +309,32 @@ describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)",
     const routes = mergeDefaultRoutes([], [account], [qwenPreset]);
     expect(routes.every((route) => route.upstream_model === "deepseek-v4-flash")).toBe(true);
     expect(routes).toHaveLength(1);
+  });
+
+  it("selects only the alias upstream resource when its raw ID is checked", () => {
+    const account = {
+      ...tokenPlanAccount,
+      exposed_models: ["deepseek-v4-flash-0731"],
+      synced_models: ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+    } as ChannelAccount;
+    const routes = mergeDefaultRoutes([], [account], [qwenPreset]);
+    expect(routes.map((route) => [route.virtual_model_id, route.upstream_model])).toEqual([
+      ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+    ]);
+  });
+
+  it("keeps canonical and alias IDs as two independent candidates when both are checked", () => {
+    const account = {
+      ...tokenPlanAccount,
+      exposed_models: ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+      synced_models: ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+    } as ChannelAccount;
+    const routes = mergeDefaultRoutes([], [account], [qwenPreset]);
+    expect(routes.map((route) => [route.virtual_model_id, route.upstream_model])).toEqual([
+      ["deepseek-v4-flash", "deepseek-v4-flash"],
+      ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+    ]);
+    expect(new Set(routes.map((route) => route.id))).toHaveLength(2);
   });
 
   it("does not build a route when the canonical model is not selected", () => {
@@ -338,6 +388,47 @@ describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)",
     };
     const next = reconcileAccountRoutes([existing], [account], [qwenPreset]);
     expect(next.some((route) => route.upstream_model === "deepseek-v4-flash-0731")).toBe(false);
+  });
+
+  it("removes only the unchecked upstream resource while keeping its sibling candidate", () => {
+    const account = {
+      ...tokenPlanAccount,
+      exposed_models: ["deepseek-v4-flash-0731"],
+      synced_models: ["deepseek-v4-flash", "deepseek-v4-flash-0731"],
+    } as ChannelAccount;
+    const existing = [
+      {
+        id: "route-canonical",
+        virtual_model_id: "deepseek-v4-flash",
+        channel_id: "qwen",
+        account_id: account.id,
+        upstream_model: "deepseek-v4-flash",
+        client_protocol: "openai",
+        priority: 3,
+        enabled: true,
+        created_at: "old",
+        updated_at: "old",
+      },
+      {
+        id: "route-alias",
+        virtual_model_id: "deepseek-v4-flash",
+        channel_id: "qwen",
+        account_id: account.id,
+        upstream_model: "deepseek-v4-flash-0731",
+        client_protocol: "openai",
+        priority: 4,
+        enabled: false,
+        created_at: "old",
+        updated_at: "old",
+      },
+    ] as RouteCandidate[];
+
+    const next = reconcileAccountRoutes(existing, [account], [qwenPreset]);
+    expect(next.some((route) => route.id === "route-canonical")).toBe(false);
+    expect(next.find((route) => route.id === "route-alias")).toMatchObject({
+      enabled: false,
+      priority: 4,
+    });
   });
 });
 

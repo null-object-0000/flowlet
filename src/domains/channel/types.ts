@@ -71,7 +71,7 @@ export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
   deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
   kimi: ["kimi-k3", "kimi-k2.7-code"],
   qwen: ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
-  zhipu: ["glm-5.2"],
+  zhipu: ["glm-5.2", "glm-4.7", "glm-4.5-air"],
 };
 
 /** Token Plan 个人版账号的默认开放模型。
@@ -90,11 +90,10 @@ export const FLOWLET_SUPPORTED_MODELS: string[] = Array.from(new Set([
 ]));
 
 /** 上游模型变体 → 白名单规范模型 ID 的映射（键值均按小写匹配）。
- *  部分渠道端点的 /models 会返回与规范名不同、但实际是同一模型的日期快照或别名
- *  （如千问 Token Plan 套餐端点的 deepseek-v4-flash-0731 即 deepseek-v4-flash）。
- *  变体按规范 ID 参与白名单求交、编辑器勾选、用量合并与品牌/档位/价格解析；
- *  生成路由时 virtual_model_id 用规范 ID，upstream_model 保留 /models 返回的
- *  上游原名，转发时按上游实际支持的名字发起请求。
+ *  部分渠道端点的 /models 会返回属于同一规范模型身份、但独立计费或独立额度的
+ *  日期快照/别名（如 deepseek-v4-flash-0731 → deepseek-v4-flash）。变体按规范 ID
+ *  参与白名单、用量、品牌、档位和价格解析；编辑器选择与路由 upstream_model 保留
+ *  上游原始 ID，因此同一规范模型的多个上游资源可分别成为 Route Candidate。
  *  必须与 src-tauri/src/core/channels_config.rs 的 MODEL_ALIASES 保持一致。 */
 export const MODEL_ALIASES: Record<string, string> = {
   "deepseek-v4-flash-0731": "deepseek-v4-flash",
@@ -155,10 +154,9 @@ export function canonicalModelId(modelId: string | null | undefined): string | n
   return CANONICAL_MODEL_BY_ID.get(canonicalModelKey(modelId)) ?? null;
 }
 
-/** 在账号最近一次 /models 结果（synced_models）中，为规范模型挑选实际转发用的
- *  上游模型名：/models 精确返回了同名模型（大小写不敏感）时返回白名单规范名
- *  （保持历史路由签名稳定），否则取第一个映射到该规范的变体条目并保留上游原名
- *  （保持 /models 返回顺序）。找不到返回 null。 */
+/** 兼容旧版只保存规范 ID 的 exposed_models：在 synced_models 中优先找精确规范 ID，
+ *  否则取首个映射到该规范模型的上游原始 ID。新选择直接保存原始 ID，不使用此
+ *  函数合并多个独立上游资源。 */
 export function pickUpstreamModelForCanonical(
   canonicalId: string,
   syncedModels: readonly string[] | null | undefined,
@@ -167,6 +165,36 @@ export function pickUpstreamModelForCanonical(
   const synced = (syncedModels ?? []).map((model) => model.trim()).filter(Boolean);
   if (synced.some((model) => model.toLowerCase() === key)) return canonicalId.trim();
   return synced.find((model) => canonicalModelKey(model) === key) ?? null;
+}
+
+/** 将 exposed_models 解析为当前 synced_models 中实际选中的上游原始 ID。
+ *  新数据按原始 ID 精确匹配；旧版只保存规范 ID 且规范 ID 未精确返回时，回退到
+ *  同规范模型的首个上游 ID。返回值按选择顺序去重。 */
+export function resolveSelectedUpstreamModelIds(
+  selectedModels: readonly string[] | null | undefined,
+  syncedModels: readonly string[] | null | undefined,
+): string[] {
+  const synced = (syncedModels ?? []).map((model) => model.trim()).filter(Boolean);
+  const syncedById = new Map(synced.map((model) => [model.toLowerCase(), model] as const));
+  const seen = new Set<string>();
+  const resolved: string[] = [];
+
+  for (const selected of selectedModels ?? []) {
+    const selectedRaw = selected.trim();
+    if (!selectedRaw) continue;
+    const selectedKey = selectedRaw.toLowerCase();
+    const canonicalKey = canonicalModelKey(selectedRaw);
+    const upstream = syncedById.get(selectedKey)
+      ?? (selectedKey === canonicalKey && canonicalModelId(selectedRaw)
+        ? pickUpstreamModelForCanonical(selectedRaw, synced)
+        : null);
+    const upstreamKey = upstream?.toLowerCase();
+    if (!upstream || !upstreamKey || seen.has(upstreamKey)) continue;
+    seen.add(upstreamKey);
+    resolved.push(upstream);
+  }
+
+  return resolved;
 }
 
 /** 判断账号是否为千问 Token Plan 模式。 */

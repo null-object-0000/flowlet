@@ -9,6 +9,9 @@ import type { ProjectTaskType } from "./types";
 /** 自动生成任务标题所需的最小任务描述字数（去除首尾空白后）。 */
 export const MIN_TITLE_GENERATION_DESCRIPTION_LENGTH = 10;
 
+/** 标题生成的总时限；超时后主动中断流式请求，避免推理模型持续消耗 Token。 */
+export const TASK_TITLE_GENERATION_TIMEOUT_MS = 30_000;
+
 /** 任务描述为空或过短时，不支持自动生成任务标题。 */
 export function canAutoGenerateTaskTitle(description: string): boolean {
   return description.trim().length >= MIN_TITLE_GENERATION_DESCRIPTION_LENGTH;
@@ -44,8 +47,9 @@ type GenerateTaskTitleInput = {
  * 其它 LLM 调用共用同一套请求/流式解析逻辑。
  *
  * 采用**流式调用**（`stream: true`）并**不设 max_tokens**，避免推理类模型（如
- * LongCat-2.0）在输出完成前被 token 上限截断（`finish_reason: "length"`）。流式
- * 过程中通过 `onProgress` 回调把已累计输出文本、token 估算与耗时实时回报给 UI。
+ * LongCat-2.0）在输出完成前被 token 上限截断（`finish_reason: "length"`）。整次调用
+ * 受 30 秒总时限约束，超时会主动中断请求；流式过程中通过 `onProgress` 回调把已累计
+ * 输出文本、token 估算与耗时实时回报给 UI。
  *
  * 用 `response_format: { type: "json_object" }` 约束模型结构化输出 `{"title": "…"}`；
  * 解析时同时兼容普通 `content` 与推理类模型的 `reasoning_content`（推理模型可能把
@@ -65,12 +69,20 @@ export async function generateTaskTitle(
     baseUrl,
     apiKey: clientToken,
   });
+  const abortController = new AbortController();
+  const timeoutId = globalThis.setTimeout(
+    () => abortController.abort(),
+    TASK_TITLE_GENERATION_TIMEOUT_MS,
+  );
 
   // SDK 抛出的真实错误（HTTP / 网络 / 缺失流式响应体）统一转换为用户可读文案。
   let text: string;
   try {
-    text = await streamAccumulate(ai, request, onProgress);
+    text = await streamAccumulate(ai, request, abortController.signal, onProgress);
   } catch (error) {
+    if (abortController.signal.aborted) {
+      throw new Error(`标题生成超时（${TASK_TITLE_GENERATION_TIMEOUT_MS / 1000} 秒），请重试`);
+    }
     if (error instanceof FlowletAiError) {
       if (error.status != null && error.status >= 400) {
         throw new Error(`标题生成失败（HTTP ${error.status}）`);
@@ -78,6 +90,8 @@ export async function generateTaskTitle(
       throw new Error(`标题生成失败：${error.message}`);
     }
     throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
   }
 
   const title = extractTitle(text);
@@ -114,6 +128,7 @@ function buildChatRequest(taskTypeLabel: string, description: string): FlowletAi
 async function streamAccumulate(
   ai: ReturnType<typeof createFlowletAi>,
   request: FlowletAiChatCompletionRequest,
+  signal: AbortSignal,
   onProgress?: TitleGenerationProgressHandler,
 ): Promise<string> {
   const startedAt = Date.now();
@@ -129,7 +144,7 @@ async function streamAccumulate(
     });
   };
 
-  for await (const chunk of ai.chatCompletionsStream(request)) {
+  for await (const chunk of ai.chatCompletionsStream(request, { signal })) {
     const choice = chunk.choices?.[0];
     if (!choice) continue;
     const delta = choice.delta ?? choice.message;

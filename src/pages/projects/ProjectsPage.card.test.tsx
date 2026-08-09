@@ -139,6 +139,21 @@ describe("TaskCard 其他状态：保持原有行结构，仅合并元信息", (
     expect(screen.getByText("只读分析 · OpenCode")).toBeTruthy();
   });
 
+  it("本机目录失效时持续展示阻塞原因", () => {
+    const task = makeTask({ status: "submitted" });
+    const { container } = renderCard(task, {
+      blocker: {
+        taskId: task.id,
+        code: "project_directory_unavailable",
+        message: "项目绑定的本机目录不存在，请重新绑定目录",
+      },
+    });
+
+    expect(screen.getByText("无法执行")).toBeTruthy();
+    expect(screen.getByText("项目绑定的本机目录不存在，请重新绑定目录")).toBeTruthy();
+    expect(container.querySelector(`.${styles.taskBlocker}`)).toBeTruthy();
+  });
+
   it("待审核卡片使用左侧橙色强调线样式（taskCardReview），非待审核不应用", () => {
     const review = makeTask({ status: "review" });
     const { container } = renderCard(review);

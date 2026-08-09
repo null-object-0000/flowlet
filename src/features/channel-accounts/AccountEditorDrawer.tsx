@@ -16,6 +16,7 @@ import {
   canonicalModelId,
   canonicalModelKey,
   isCustomChannel,
+  resolveSelectedUpstreamModelIds,
 } from "../../domains/channel/types";
 import {
   parseStoredLongCatPacks,
@@ -242,20 +243,18 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         base_url_override: effectiveOpenAiBaseUrl(currentDraft),
       });
       const models = result.models.filter((item) => item.model.trim());
-      // /models 返回的模型按规范键归一（别名变体如 deepseek-v4-flash-0731 →
-      // deepseek-v4-flash），用于清理已不再返回或全局不支持的旧勾选。
-      const returnedKeys = new Set(models.map((item) => canonicalModelKey(item.model)));
+      // 白名单仍按规范模型判断，但勾选值保留上游原始 ID：同一规范模型可能对应
+      // 多个独立额度资源（如 deepseek-v4-flash 与 deepseek-v4-flash-0731）。
+      const syncedModelIds = models.map((item) => item.model);
       setCandidates(models);
       setModelPage(1);
       update({
-        synced_models: models.map((item) => item.model),
+        synced_models: syncedModelIds,
         models_synced_at: new Date().toISOString(),
         exposed_models: currentDraft.exposed_models == null
           ? null
-          : currentDraft.exposed_models.filter((model) => {
-            const key = canonicalModelKey(model);
-            return returnedKeys.has(key) && whitelistSet.has(key);
-          }),
+          : resolveSelectedUpstreamModelIds(currentDraft.exposed_models, syncedModelIds)
+            .filter((model) => whitelistSet.has(canonicalModelKey(model))),
       });
       if (result.errors.length > 0) {
         Toast.warning(t("模型列表已获取，但部分请求失败：{message}", { message: result.errors[0] }));
@@ -270,20 +269,30 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   }
 
   const selectedModels = currentDraft.exposed_models ?? [];
+  const candidateModelIds = useMemo(
+    () => (candidates ?? []).map((candidate) => candidate.model),
+    [candidates],
+  );
   const selectedSet = useMemo(
-    () => new Set((currentDraft.exposed_models ?? []).map((model) => model.trim().toLowerCase())),
-    [currentDraft.exposed_models],
+    () => new Set(
+      resolveSelectedUpstreamModelIds(currentDraft.exposed_models, candidateModelIds)
+        .map((model) => model.toLowerCase()),
+    ),
+    [candidateModelIds, currentDraft.exposed_models],
   );
 
-  /** 勾选写入白名单规范 ID（别名变体如 deepseek-v4-flash-0731 归一为
-   *  deepseek-v4-flash），保证 exposed_models 始终以规范名为键。 */
+  /** 勾选保留 /models 返回的上游原始 ID。别名变体与规范名可能是独立额度资源，
+   *  必须允许分别选择；是否受支持仍通过 canonicalModelId 按规范模型判断。 */
   function toggleExposedModel(model: string, checked: boolean) {
-    const canonical = canonicalModelId(model);
-    if (!canonical) return;
-    const key = canonical.trim().toLowerCase();
+    if (!canonicalModelId(model)) return;
+    const upstreamModel = model.trim();
+    const key = upstreamModel.toLowerCase();
     const next = checked
-      ? [...selectedModels.filter((item) => item.trim().toLowerCase() !== key), canonical]
-      : selectedModels.filter((item) => item.trim().toLowerCase() !== key);
+      ? [...selectedModels.filter((item) => item.trim().toLowerCase() !== key), upstreamModel]
+      : selectedModels.filter((item) => (
+        !resolveSelectedUpstreamModelIds([item], candidateModelIds)
+          .some((resolved) => resolved.toLowerCase() === key)
+      ));
     update({ exposed_models: next });
   }
 
@@ -558,11 +567,11 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                     <>
                       <div className={styles.modelList}>
                         {paged.map((candidate) => {
-                          // 支持与否、勾选状态都按规范键判定：别名变体
-                          // （如 deepseek-v4-flash-0731）与规范模型共享同一勾选项。
+                          // 支持与否按规范键判定；勾选状态按上游原始 ID 判定，允许
+                          // 同一规范模型下的独立额度资源分别开启。
                           const key = canonicalModelKey(candidate.model);
                           const supported = whitelistSet.has(key);
-                          const checked = selectedSet.has(key);
+                          const checked = selectedSet.has(candidate.model.trim().toLowerCase());
                           const canonical = canonicalModelId(candidate.model);
                           const isAliasVariant = supported
                             && canonical != null

@@ -31,12 +31,15 @@ export function MobileTaskDetailSheet({
   deviceId,
   onClose,
   onStatusChanged,
+  onEditDraft,
 }: {
   task: SyncedProjectTask | null;
   project: SharedDeviceProject | null;
   deviceId: string | null;
   onClose: () => void;
   onStatusChanged?: (taskId: string, status: string) => void;
+  /** 草稿任务「编辑」：由页面打开编辑表单（复用添加任务抽屉的编辑模式）。 */
+  onEditDraft?: (task: SyncedProjectTask) => void;
 }) {
   const { language, t } = useAppPreferences();
   const setStatus = useMobileSetTaskStatus(deviceId);
@@ -241,16 +244,26 @@ export function MobileTaskDetailSheet({
           <footer className={styles.footer}>
             <span className={styles.lanHint}>{t("局域网直连")} · {t("状态变更仅允许通过局域网直连操作")}</span>
             {task.status === "draft" ? (
-              <Button
-                type="primary"
-                theme="solid"
-                block
-                loading={setStatus.isPending}
-                disabled={setStatus.isPending}
-                onClick={() => void mutate("submitted")}
-              >
-                {t("提交")}
-              </Button>
+              <div className={styles.footerActions}>
+                <Button
+                  theme="light"
+                  block
+                  disabled={setStatus.isPending}
+                  onClick={() => onEditDraft?.(task)}
+                >
+                  {t("编辑")}
+                </Button>
+                <Button
+                  type="primary"
+                  theme="solid"
+                  block
+                  loading={setStatus.isPending}
+                  disabled={setStatus.isPending}
+                  onClick={() => void mutate("submitted")}
+                >
+                  {t("提交")}
+                </Button>
+              </div>
             ) : (
               <Button
                 type="primary"

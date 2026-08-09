@@ -299,3 +299,14 @@ export type TaskStatusInput = {
   taskId: string;
   status: "draft" | "submitted";
 };
+
+/** 移动端 LAN 直连编辑草稿任务内容入参。
+ *  设备快照不携带描述 / 任务类型 / Agent Profile，因此这些字段可选：不传时
+ *  目标设备保留数据库原值；移动端目前只编辑标题。 */
+export type TaskEditInput = {
+  taskId: string;
+  title: string;
+  description?: string;
+  taskType?: "code" | "readonly";
+  agentProfile?: string;
+};

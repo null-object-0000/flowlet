@@ -1477,6 +1477,7 @@ fn run_mobile() {
             mobile_commands::list_shared_device_projects,
             mobile_commands::submit_task_lan,
             mobile_commands::set_task_status_lan,
+            mobile_commands::edit_task_lan,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet Mobile 失败");

@@ -159,6 +159,11 @@
   backdrop-filter: blur(16px);
 }
 .lanHint { color: var(--flowlet-color-text-tertiary); font-size: 11px; text-align: center; }
+.footerActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 @keyframes backdropIn { from { opacity: 0; } }
 @keyframes backdropOut { to { opacity: 0; } }
 @keyframes sheetIn { from { transform: translateY(100%); } }

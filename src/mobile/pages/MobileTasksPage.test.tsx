@@ -6,6 +6,7 @@ import { MobileDeviceSelectionProvider } from "../MobileDeviceSelection";
 const useMobileDevicesMock = vi.fn();
 const useMobileProjectsMock = vi.fn();
 const useMobileSubmitTaskMock = vi.fn();
+const useMobileEditTaskMock = vi.fn();
 const useMobileSetTaskStatusMock = vi.fn();
 const useMobileS3SettingsMock = vi.fn();
 const refreshDeviceMock = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
@@ -19,6 +20,7 @@ vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileDevices: () => useMobileDevicesMock(),
   useMobileProjects: (deviceId: string | null) => useMobileProjectsMock(deviceId),
   useMobileSubmitTask: (deviceId: string | null) => useMobileSubmitTaskMock(deviceId),
+  useMobileEditTask: (deviceId: string | null) => useMobileEditTaskMock(deviceId),
   useMobileSetTaskStatus: (deviceId: string | null) => useMobileSetTaskStatusMock(deviceId),
   useMobileS3Settings: () => useMobileS3SettingsMock(),
   useMobileDeviceSyncActions: () => ({
@@ -66,6 +68,10 @@ describe("MobileTasksPage", () => {
       isError: false,
     });
     useMobileSubmitTaskMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    });
+    useMobileEditTaskMock.mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
     });
@@ -221,6 +227,39 @@ describe("MobileTasksPage", () => {
       taskType: "code",
       agentProfile: "Claude Code",
     }));
+  });
+
+  it("edits a draft task title via LAN direct from the detail sheet", async () => {
+    useMobileProjectsMock.mockReturnValue({
+      data: [{
+        ...PROJECT,
+        tasks: [
+          { id: "task-1", title: "草稿任务", status: "draft", priority: "p0", updatedAt: "2026-07-30T01:00:00Z" },
+        ],
+      }],
+      isLoading: false,
+      isError: false,
+    });
+    const editTask = vi.fn().mockResolvedValue({ taskId: "task-1", status: "draft" });
+    useMobileEditTaskMock.mockReturnValue({
+      isPending: false,
+      mutateAsync: editTask,
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByText("草稿任务"));
+    // 草稿任务详情提供「编辑」按钮
+    expect(screen.getByRole("button", { name: /^编辑$/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^编辑$/ }));
+
+    // 编辑模式：标题预填、设备锁定，保存走编辑命令
+    const dialog = screen.getByRole("dialog", { name: /编辑任务/ });
+    const titleInput = screen.getByPlaceholderText("例如：修复登录页样式");
+    expect((titleInput as HTMLInputElement).value).toBe("草稿任务");
+    expect(screen.queryByText("上滑展开完整表单")).toBeNull();
+    fireEvent.change(titleInput, { target: { value: "新标题" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^保存$/ }));
+    await waitFor(() => expect(editTask).toHaveBeenCalledWith({ taskId: "task-1", title: "新标题" }));
   });
 
   it("keeps the compose sheet collapsed until an upward swipe or handle tap expands it", () => {

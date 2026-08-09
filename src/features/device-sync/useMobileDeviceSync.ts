@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mobileDeviceSyncCommands } from "../../domains/device-sync/commands";
 import { queryKeys } from "../../shared/query-keys";
 import type { OpenCodePermissionDecision } from "../../domains/agent-session/types";
-import type { TaskStatusInput, TaskSubmitInput } from "../../domains/device-sync/types";
+import type { TaskEditInput, TaskStatusInput, TaskSubmitInput } from "../../domains/device-sync/types";
 
 export function useMobileDevices() {
   return useQuery({
@@ -133,6 +133,11 @@ export function useMobileSubmitTask(deviceId: string | null) {
       return mobileDeviceSyncCommands.submitTask(deviceId, input);
     },
     onSuccess: async () => {
+      // LAN 提交只写入目标桌面端本地存储，本机共享项目快照不会自动包含新任务。
+      // 成功后先直连拉取目标设备最新快照并导入本地，再失效查询，让列表即时展示新任务；
+      // 直连刷新失败（如局域网抖动）时静默沿用旧缓存，由后台 S3 同步兜底。
+      if (!deviceId) return;
+      await mobileDeviceSyncCommands.refreshLan(deviceId).catch(() => undefined);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
@@ -150,6 +155,30 @@ export function useMobileSetTaskStatus(deviceId: string | null) {
       return mobileDeviceSyncCommands.setTaskStatus(deviceId, input);
     },
     onSuccess: async () => {
+      // 状态变更同样只落在目标桌面端本地存储，先直连刷新目标设备快照，
+      // 让任务列表的最新状态与折叠 Tab 计数即时同步；失败时沿用旧缓存等待后台同步。
+      if (!deviceId) return;
+      await mobileDeviceSyncCommands.refreshLan(deviceId).catch(() => undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
+      ]);
+    },
+  });
+}
+
+/** 通过签名 LAN 通道编辑草稿任务内容，与 PC 看板「草稿可编辑」语义一致。
+ *  成功后直连刷新目标设备快照，让列表即时展示新内容；失败时沿用旧缓存等待后台同步。 */
+export function useMobileEditTask(deviceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: TaskEditInput) => {
+      if (!deviceId) throw new Error("请先选择设备");
+      return mobileDeviceSyncCommands.editTask(deviceId, input);
+    },
+    onSuccess: async () => {
+      if (!deviceId) return;
+      await mobileDeviceSyncCommands.refreshLan(deviceId).catch(() => undefined);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),

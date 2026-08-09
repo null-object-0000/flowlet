@@ -292,6 +292,7 @@ pub async fn start_server(
         )
         .route("/flowlet/v1/task/submit", post(task_submit_handler))
         .route("/flowlet/v1/task/status", post(task_status_handler))
+        .route("/flowlet/v1/task/edit", post(task_edit_handler))
         .with_state(state);
     tokio::spawn(async move {
         if let Err(error) = axum::serve(
@@ -432,6 +433,7 @@ fn current_capabilities() -> Vec<String> {
         "opencode.permission.reply".to_string(),
         "task.submit".to_string(),
         "task.status".to_string(),
+        "task.edit".to_string(),
     ]
 }
 
@@ -623,6 +625,23 @@ pub struct TaskStatusInput {
     pub status: String,
 }
 
+/// 移动端通过签名 LAN 通道编辑草稿任务内容的入参。
+/// 只允许编辑草稿（draft）状态任务，与桌面端 `save_project_task` 语义一致。
+/// 设备快照刻意不携带描述 / 任务类型 / Agent Profile（避免扩散任务正文），
+/// 因此除 `title` 外的字段可选：不传时保留目标设备数据库中的原值，不会误清空。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskEditInput {
+    pub task_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub task_type: Option<String>,
+    #[serde(default)]
+    pub agent_profile: Option<String>,
+}
+
 /// 移动端通过签名 LAN 通道变更任务状态（提交 / 撤回）。
 /// 与桌面端审核状态机一致：只允许「草稿 → 已提交」与「已提交 → 草稿」，
 /// 其余迁移（含把进行中撤销）由执行器内部管理，这里一律拒绝。
@@ -677,6 +696,113 @@ async fn task_status_handler(
         &TaskSubmitResult {
             task_id,
             status: input.status,
+        },
+    )
+}
+
+/// 移动端通过签名 LAN 通道编辑草稿任务内容（标题等）。
+/// 与桌面端 `save_project_task` 语义一致：只有草稿状态任务可编辑，
+/// 已提交 / 执行中 / 待审核 / 已完成任务一律拒绝；`title` 必填，
+/// 其余字段缺省时保留数据库原值（快照不携带描述等正文，避免移动端误清空）。
+async fn task_edit_handler(
+    State(state): State<LanServerState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    const PATH: &str = "/flowlet/v1/task/edit";
+    if let Err(error) = authorize(&state, &Method::POST, PATH, &headers, &body) {
+        return (StatusCode::UNAUTHORIZED, error).into_response();
+    }
+    let input = match serde_json::from_slice::<TaskEditInput>(&body) {
+        Ok(input)
+            if !input.task_id.trim().is_empty()
+                && !input.title.trim().is_empty()
+                && input
+                    .task_type
+                    .as_deref()
+                    .map(|task_type| matches!(task_type, "code" | "readonly"))
+                    .unwrap_or(true) =>
+        {
+            input
+        }
+        _ => return (StatusCode::BAD_REQUEST, "无效的任务编辑参数").into_response(),
+    };
+    record_inbound(&state, Some(&remote), PATH);
+
+    let task_id = input.task_id.trim().to_string();
+    let current = match state.storage.get_task_status(&task_id) {
+        Ok(status) => status,
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
+    };
+    match current.as_deref() {
+        None => return (StatusCode::NOT_FOUND, "任务不存在").into_response(),
+        Some("draft") => {}
+        Some(_) => {
+            return (StatusCode::CONFLICT, "只有草稿状态的任务可以编辑").into_response()
+        }
+    }
+    let existing = match state.storage.get_project_task_by_id(&task_id) {
+        Ok(Some(task)) => task,
+        Ok(None) => return (StatusCode::NOT_FOUND, "任务不存在").into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
+    };
+    // 显式传空 Agent Profile 与非法值一样拒绝，避免清空任务驱动目标。
+    if let Some(profile) = input.agent_profile.as_deref() {
+        if profile.trim().is_empty() {
+            return (StatusCode::BAD_REQUEST, "Agent Profile 不能为空").into_response();
+        }
+    }
+    let updated = ProjectTask {
+        id: existing.id.clone(),
+        project_id: existing.project_id.clone(),
+        title: input.title.trim().to_string(),
+        description: input
+            .description
+            .as_deref()
+            .map(|value| value.trim().to_string())
+            .unwrap_or_else(|| existing.description.clone()),
+        status: existing.status.clone(),
+        task_type: input
+            .task_type
+            .clone()
+            .unwrap_or_else(|| existing.task_type.clone()),
+        agent_profile: input
+            .agent_profile
+            .as_deref()
+            .map(|value| value.trim().to_string())
+            .unwrap_or_else(|| existing.agent_profile.clone()),
+        // 优先级能力已从前端移除，后端继续保留字段但默认写死 P2（LAN 编辑不采信输入值）。
+        priority: "p2".to_string(),
+        base_task_id: existing.base_task_id,
+        last_job_id: existing.last_job_id,
+        rejection_reason: existing.rejection_reason,
+        execution_history: existing.execution_history,
+        created_at: existing.created_at,
+        updated_at: Utc::now().to_rfc3339(),
+        claimed_by: existing.claimed_by,
+        claimed_at: existing.claimed_at,
+        queue_boosted_at: existing.queue_boosted_at,
+        deleted: false,
+    };
+    if let Err(error) = state.storage.save_project_task(&updated) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+    // 编辑后即时推送工作区，其他设备 / 移动端尽快看到新内容。
+    crate::core::project_workspace_sync::notify_project_changed(
+        state.storage.clone(),
+        &updated.project_id,
+    );
+    encrypted_response(
+        &state.auth_key,
+        &headers,
+        &TaskSubmitResult {
+            task_id,
+            status: "draft".to_string(),
         },
     )
 }
@@ -1012,6 +1138,30 @@ pub async fn set_task_status(
         status: status.to_string(),
     })
     .map_err(|error| error.to_string())?;
+    let mut last_error = "没有可用的局域网端点".to_string();
+    for endpoint in &peer.endpoints {
+        match request(&peer, endpoint, Method::POST, path, body.clone()).await {
+            Ok(result) => return Ok(result),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+/// 通过签名 LAN 通道编辑草稿任务内容（移动端 → 桌面端，仅草稿可编辑）。
+/// 目标设备离线或版本过旧时返回明确错误。
+pub async fn edit_task(
+    storage: &Storage,
+    device_id: &str,
+    input: &TaskEditInput,
+) -> Result<TaskSubmitResult, String> {
+    let peer = peer_descriptor(storage, device_id)
+        .ok_or_else(|| "目标设备没有可用的局域网连接信息".to_string())?;
+    if !peer.capabilities.iter().any(|cap| cap == "task.edit") {
+        return Err("目标设备版本过旧，不支持任务编辑".to_string());
+    }
+    let path = "/flowlet/v1/task/edit";
+    let body = serde_json::to_vec(input).map_err(|error| error.to_string())?;
     let mut last_error = "没有可用的局域网端点".to_string();
     for endpoint in &peer.endpoints {
         match request(&peer, endpoint, Method::POST, path, body.clone()).await {
@@ -1593,6 +1743,160 @@ mod tests {
             state.storage.get_task_status("task-1").unwrap().as_deref(),
             Some("in_progress")
         );
+    }
+
+    fn seed_draft_task_with_description(storage: &Storage, description: &str) {
+        storage.migrate().unwrap();
+        let now = Utc::now().to_rfc3339();
+        storage
+            .save_project(&crate::core::storage::Project {
+                id: "project-1".to_string(),
+                name: "demo".to_string(),
+                directory_path: Some("C:\\demo".to_string()),
+                workspace_project_id: Some("ws-1".to_string()),
+                workspace_archived: false,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        storage
+            .save_project_task(&ProjectTask {
+                id: "task-1".to_string(),
+                project_id: "project-1".to_string(),
+                title: "old title".to_string(),
+                description: description.to_string(),
+                status: "draft".to_string(),
+                task_type: "code".to_string(),
+                agent_profile: "Claude Code".to_string(),
+                priority: "p2".to_string(),
+                base_task_id: None,
+                last_job_id: None,
+                rejection_reason: None,
+                execution_history: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+                claimed_by: None,
+                claimed_at: None,
+                queue_boosted_at: None,
+                deleted: false,
+            })
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn task_edit_handler_updates_draft_title_and_keeps_omitted_fields() {
+        let (state, _, auth_key, _) = test_state();
+        seed_draft_task_with_description(&state.storage, "existing description");
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+
+        // 只传 task_id + title：缺省字段保留数据库原值，不误清空。
+        let body = serde_json::to_vec(&TaskEditInput {
+            task_id: "task-1".to_string(),
+            title: "  new title  ".to_string(),
+            description: None,
+            task_type: None,
+            agent_profile: None,
+        })
+        .unwrap();
+        let (headers, nonce) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/edit", &body);
+        let response = task_edit_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: EncryptedPayload = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let result: TaskSubmitResult = decrypt(&auth_key, nonce.as_bytes(), payload).unwrap();
+        assert_eq!(result.task_id, "task-1");
+        assert_eq!(result.status, "draft");
+
+        let edited = state
+            .storage
+            .get_project_task_by_id("task-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(edited.title, "new title");
+        assert_eq!(edited.description, "existing description");
+        assert_eq!(edited.status, "draft");
+    }
+
+    #[tokio::test]
+    async fn task_edit_handler_rejects_non_draft_task() {
+        let (state, _, auth_key, _) = test_state();
+        seed_project_and_task(&state.storage, "in_progress");
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+
+        let body = serde_json::to_vec(&TaskEditInput {
+            task_id: "task-1".to_string(),
+            title: "should not apply".to_string(),
+            description: None,
+            task_type: None,
+            agent_profile: None,
+        })
+        .unwrap();
+        let (headers, _) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/edit", &body);
+        let response = task_edit_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            state.storage.get_task_status("task-1").unwrap().as_deref(),
+            Some("in_progress")
+        );
+        let unchanged = state
+            .storage
+            .get_project_task_by_id("task-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.title, "demo task");
+    }
+
+    #[tokio::test]
+    async fn task_edit_handler_rejects_empty_title() {
+        let (state, _, auth_key, _) = test_state();
+        seed_draft_task_with_description(&state.storage, "existing description");
+        let remote = SocketAddr::from(([192, 168, 1, 23], 9100));
+
+        let body = serde_json::to_vec(&TaskEditInput {
+            task_id: "task-1".to_string(),
+            title: "   ".to_string(),
+            description: None,
+            task_type: None,
+            agent_profile: None,
+        })
+        .unwrap();
+        let (headers, _) =
+            signed_headers_with_body(&auth_key, "POST", "/flowlet/v1/task/edit", &body);
+        let response = task_edit_handler(
+            State(state.clone()),
+            ConnectInfo(remote),
+            headers,
+            body.into(),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let unchanged = state
+            .storage
+            .get_project_task_by_id("task-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.title, "old title");
     }
 
     #[tokio::test]

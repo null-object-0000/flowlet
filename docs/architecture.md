@@ -449,6 +449,10 @@ Agent 会话、工作区文件被并发读写冲突。
 状态创建到目标设备，与 PC 看板交互一致；移动端再通过 `POST /flowlet/v1/task/status`
 （新增 `task.status` 能力）提交（`draft → submitted`）或撤回（`submitted → draft`），
 状态机与桌面端审核通道一致，目标设备离线、版本过旧或未绑定目录时返回明确错误。
+移动端也可通过 `POST /flowlet/v1/task/edit`（新增 `task.edit` 能力）编辑草稿任务内容，
+语义与桌面端 `save_project_task` 一致：只有草稿状态任务可编辑，`title` 必填，
+描述 / 任务类型 / Agent Profile 缺省时保留目标设备数据库原值（快照不携带正文，
+避免移动端误清空），当前移动端只修改标题。
 离线排队（S3 收件箱）为后续可选增强。移动端 S3 权限保持只读，不接触工作区加密对象。
 
 安装实例身份独立保存在 SQLite 同目录的 `flowlet-device.json`。首次启动生成 UUID，

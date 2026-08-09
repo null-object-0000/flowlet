@@ -71,6 +71,17 @@ pub(super) async fn set_task_status_lan(
     crate::core::lan_sync::set_task_status(&state.storage, &device_id, &task_id, &status).await
 }
 
+/// 移动端通过签名 LAN 通道编辑草稿任务内容。
+/// 与 PC 看板「草稿可编辑」语义一致，只允许编辑草稿状态任务；仅允许局域网直连方式变更。
+#[tauri::command]
+pub(super) async fn edit_task_lan(
+    state: tauri::State<'_, MobileAppState>,
+    device_id: String,
+    input: crate::core::lan_sync::TaskEditInput,
+) -> Result<crate::core::lan_sync::TaskSubmitResult, String> {
+    crate::core::lan_sync::edit_task(&state.storage, &device_id, &input).await
+}
+
 #[tauri::command]
 pub(super) async fn shared_device_daily_usage(
     state: tauri::State<'_, MobileAppState>,

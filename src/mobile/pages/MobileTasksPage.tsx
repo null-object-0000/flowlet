@@ -45,6 +45,8 @@ export function MobileTasksPage() {
   const [selected, setSelected] = useState<{ task: SyncedProjectTask; project: SharedDeviceProject } | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeInitialDevice, setComposeInitialDevice] = useState("");
+  // 编辑草稿任务：与添加任务共用抽屉，非空时进入编辑模式（设备锁定、标题预填）。
+  const [editingTask, setEditingTask] = useState<{ task: SyncedProjectTask; project: SharedDeviceProject } | null>(null);
 
   // 跨设备逻辑项目（同名/同 workspaceProjectId 合并），按最近更新倒序，默认选中第一个。
   const projectGroups = useMemo(() => groupMobileProjects(projects.data ?? []), [projects.data]);
@@ -99,6 +101,25 @@ export function MobileTasksPage() {
     const nextTab = STATUS_TABS.find((tab) => tab.statuses.includes(status as TaskStatus));
     if (nextTab) setStatusTab(nextTab.id);
     setSelected((current) => (current && current.task.id === taskId ? { ...current, task: { ...current.task, status } } : current));
+  };
+
+  // 草稿任务「编辑」：关闭详情抽屉，打开添加任务抽屉的编辑模式（复用同一表单布局）。
+  const handleEditDraft = () => {
+    if (!selected) return;
+    setEditingTask({ task: selected.task, project: selected.project });
+    setSelected(null);
+    setComposeOpen(true);
+  };
+
+  const closeCompose = () => {
+    setComposeOpen(false);
+    setEditingTask(null);
+  };
+
+  const handleEdited = () => {
+    // 编辑仍为草稿，保存后切回待处理 Tab；查询失效由 Hook 内的 LAN 刷新兜底。
+    setStatusTab("pending");
+    setEditingTask(null);
   };
 
   return (
@@ -187,6 +208,7 @@ export function MobileTasksPage() {
           deviceId={selected?.project?.deviceId ?? null}
           onClose={() => setSelected(null)}
           onStatusChanged={handleStatusChanged}
+          onEditDraft={handleEditDraft}
         />
       </section>
       </MobilePullToRefresh>
@@ -206,11 +228,13 @@ export function MobileTasksPage() {
 
       <MobileTaskComposeSheet
         visible={composeOpen}
-        projectName={activeProject?.projectName ?? ""}
-        executableDevices={executableDevicesForActiveProject}
-        initialDeviceId={composeInitialDevice}
-        onClose={() => setComposeOpen(false)}
+        projectName={editingTask?.project.projectName ?? activeProject?.projectName ?? ""}
+        executableDevices={editingTask ? [editingTask.project] : executableDevicesForActiveProject}
+        initialDeviceId={editingTask ? editingTask.project.deviceId : composeInitialDevice}
+        editingTask={editingTask}
+        onClose={closeCompose}
         onSubmitted={() => setStatusTab("pending")}
+        onEdited={handleEdited}
       />
     </>
   );

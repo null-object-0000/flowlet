@@ -3,7 +3,7 @@
 .page { display: grid; gap: 14px; align-content: start; }
 .heading { display: flex; align-items: flex-start; gap: 12px; }
 .heading > div { min-width: 0; flex: 1; }
-.heading h2 { margin: 0; font-size: 23px; letter-spacing: -.03em; }
+.heading h2 { margin: 0; font-size: 23px; line-height: 1.3; letter-spacing: -.03em; }
 .heading p { margin: 4px 0 0; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.45; }
 .heading button { flex: none; }
 .headingWithPicker { display: grid; gap: 0; align-content: start; }

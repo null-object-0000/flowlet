@@ -1,0 +1,118 @@
+.page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.card {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 14px;
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+}
+.cardHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--flowlet-color-border);
+}
+.cardTitle { min-width: 0; display: grid; gap: 2px; }
+.cardTitle strong { color: var(--flowlet-color-text); font-size: 15px; }
+.cardTitle span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(340px, 1.08fr);
+}
+
+/* ─── 左侧排行面板 ─────────────────────────────────────────────── */
+.rankPane { min-height: 0; overflow-y: auto; padding-bottom: 8px; border-right: 1px solid var(--flowlet-color-border); }
+.rankHead, .rankRow { display: grid; grid-template-columns: minmax(140px, 1.5fr) minmax(84px, 0.8fr) minmax(92px, 0.9fr) 20px; gap: 12px; align-items: center; padding: 0 16px; text-align: left; }
+.rankHead { position: sticky; top: 0; z-index: 1; height: 34px; color: var(--flowlet-color-text-tertiary); font-size: 11px; background: var(--flowlet-color-surface-strong, var(--flowlet-color-surface)); box-shadow: 0 1px 0 var(--flowlet-color-border); }
+.rankRow { width: 100%; min-height: 60px; border: 0; border-top: 1px solid var(--flowlet-color-border); background: transparent; font: inherit; cursor: pointer; transition: background-color 140ms ease, box-shadow 140ms ease; }
+.rankRow:hover { background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.rankRowSelected, .rankRowSelected:hover {
+  background: color-mix(in srgb, var(--flowlet-color-primary) 7%, var(--flowlet-color-surface-strong, var(--flowlet-color-surface)));
+  box-shadow: inset 3px 0 0 var(--flowlet-color-primary);
+}
+.rankName { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.badge { flex: none; width: 28px; height: 28px; display: grid; place-items: center; }
+.badge > img { max-width: 28px; max-height: 28px; }
+.badgeLetter {
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft));
+  box-shadow: inset 0 0 0 1px var(--flowlet-color-border);
+  font-size: 13px;
+  font-weight: 750;
+}
+.rankNameText { min-width: 0; }
+.rankNameText strong { display: block; overflow: hidden; color: var(--flowlet-color-text); font-size: 13px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
+.rankNameText small { display: block; margin-top: 3px; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.metricCell { min-width: 0; display: block; }
+.metricCell strong { display: block; overflow: hidden; color: var(--flowlet-color-text); font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
+.metricCell small { display: block; margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.rankArrow { display: grid; place-items: center; color: var(--flowlet-color-text-tertiary); }
+
+/* ─── 右侧矩阵面板 ─────────────────────────────────────────────── */
+.matrixPane { min-height: 0; display: flex; flex-direction: column; background: color-mix(in srgb, var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)) 55%, var(--flowlet-color-surface)); }
+.matrixHead { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 13px 16px 10px; }
+.matrixTitle { min-width: 0; }
+.matrixTitle strong { display: block; color: var(--flowlet-color-text); font-size: 13px; }
+.matrixTitle span { display: block; margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.4; }
+.metricSeg { flex: none; display: flex; padding: 2px; border-radius: 8px; background: var(--flowlet-color-surface-strong, var(--flowlet-color-surface)); border: 1px solid var(--flowlet-color-border); }
+.metricSeg button { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--flowlet-color-text-secondary); font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; transition: color 140ms ease, background-color 140ms ease; }
+.metricSeg button[aria-pressed="true"] { color: var(--flowlet-color-primary); background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); font-weight: 700; }
+
+.matrixScroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 16px 6px; }
+.matrixGrid { display: grid; gap: 5px; min-width: 0; grid-auto-rows: 38px; }
+.matrixCorner { background: transparent; }
+.matrixColHead { display: flex; align-items: center; justify-content: center; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.25; text-align: center; padding: 0 4px; white-space: nowrap; text-overflow: ellipsis; }
+.matrixRowHead { min-width: 0; padding: 0 4px 0 0; border: 0; background: transparent; color: var(--flowlet-color-text-secondary); font: inherit; font-size: 12px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: color 140ms ease; }
+.matrixRowHead:hover { color: var(--flowlet-color-text); }
+.matrixRowHead[aria-pressed="true"] { color: var(--flowlet-color-primary); font-weight: 650; }
+.matrixCell { min-width: 0; border: 0; border-radius: 7px; display: grid; place-items: center; overflow: hidden; font: inherit; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-strong, var(--flowlet-color-surface)); box-shadow: inset 0 0 0 1px var(--flowlet-color-border); }
+.matrixCellEmpty { color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.heatLevel0 { background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.heatLevel1 { background: color-mix(in srgb, var(--flowlet-color-primary) 18%, var(--flowlet-color-surface-strong, var(--flowlet-color-surface))); }
+.heatLevel2 { background: color-mix(in srgb, var(--flowlet-color-primary) 38%, var(--flowlet-color-surface-strong, var(--flowlet-color-surface))); }
+.heatLevel3 { color: #fff; background: color-mix(in srgb, var(--flowlet-color-primary) 64%, var(--flowlet-color-surface-strong, var(--flowlet-color-surface))); }
+.heatLevel4 { color: #fff; background: var(--flowlet-color-primary); }
+
+.matrixFoot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 16px 2px; }
+.heatLegend { display: flex; align-items: center; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.heatSwatch { width: 11px; height: 11px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--flowlet-color-border); }
+
+.detail { flex: none; margin: 9px 16px 14px; padding: 12px; border: 1px solid var(--flowlet-color-border); border-radius: 12px; background: var(--flowlet-color-surface-strong, var(--flowlet-color-surface)); box-shadow: var(--flowlet-shadow-card); }
+.detailHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.detailHead strong { min-width: 0; overflow: hidden; color: var(--flowlet-color-text); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.detailPill { flex: none; padding: 2px 8px; border-radius: 99px; color: var(--flowlet-color-primary); background: var(--semi-color-primary-light-default, rgba(23, 105, 255, 0.09)); font-size: 11px; }
+.detailGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.detailGrid > div { min-width: 0; padding: 9px 10px; border-radius: 9px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.detailGrid span { display: block; color: var(--flowlet-color-text-tertiary); font-size: 11px; white-space: nowrap; }
+.detailGrid strong { display: block; margin-top: 4px; overflow: hidden; color: var(--flowlet-color-text); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
+.detailMeta { margin-top: 9px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+
+.compact .rankHead, .compact .rankRow { grid-template-columns: minmax(120px, 1.5fr) minmax(72px, 0.8fr) minmax(80px, 0.9fr) 16px; gap: 10px; padding: 0 12px; }
+.compact .rankRow { min-height: 50px; }
+
+@media (max-width: 900px) {
+  .page { overflow: auto; }
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .rankPane { border-right: 0; border-bottom: 1px solid var(--flowlet-color-border); }
+  .rankHead, .rankRow { grid-template-columns: minmax(130px, 1.5fr) minmax(78px, 0.8fr) minmax(86px, 0.9fr) 16px; gap: 10px; }
+}

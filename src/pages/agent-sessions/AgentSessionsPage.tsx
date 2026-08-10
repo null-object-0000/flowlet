@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Pagination, Select, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Input, Pagination, Select, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconRefresh, IconSearch } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionNativeUsage, type AgentSessionRow } from "../../domains/agent-session/types";
 import { useAgentSessionNativeSummary, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
 import { useAgentDataSync, useAgentSyncStatus } from "../../features/background-tasks/useBackgroundTasks";
+import { AgentSessionsView, type AgentSessionRowModel, type AgentSessionStatusTone } from "@flowlet/product-ui";
+import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
+import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
+import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
-import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
-import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { formatCostAmount, formatCostCny, formatNativeCost } from "../../shared/formatters/cost";
 import { formatTimestamp } from "../../shared/formatters/datetime";
-import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSessionDetailSideSheet";
 import styles from "./AgentSessionsPage.module.css";
 
@@ -68,61 +69,89 @@ export function AgentSessionsPage() {
         />
       </PageHeader>
 
-      <section className={styles.toolbar} aria-label={t("会话筛选")}>
-        <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索会话标题、ID 或项目目录")} showClear onChange={setSearchDraft} />
-        <Select
-          insetLabel={t("客户端")}
-          value={filter.agentType || "__all__"}
-          optionList={[
-            { value: "__all__", label: t("全部客户端") },
-            { value: "codex-desktop", label: "Codex Desktop" },
-            { value: "codex-cli", label: "Codex CLI" },
-            { value: "claude-code", label: "Claude Code" },
-            { value: "opencode", label: "OpenCode" },
-            { value: "pi", label: "Pi" },
-          ]}
-          onChange={(value) => setFilter((current) => ({ ...current, agentType: value === "__all__" ? "" : String(value) as AgentSessionFilter["agentType"], page: 1 }))}
+      {sessions.isError ? <div className={styles.state}><strong>{t("会话加载失败")}</strong><span>{sessions.error.message}</span><Button onClick={() => void sessions.refetch()}>{t("重试")}</Button></div> : null}
+      {!sessions.isError ? (
+        <AgentSessionsView
+          rows={toAgentSessionRowModels(page?.rows ?? [], language, t)}
+          loading={sessions.isLoading}
+          renderRequests={(row, index) => {
+            const raw = (page?.rows ?? [])[index];
+            if (!raw) return <span>—</span>;
+            return <SessionRequestsCell row={raw} language={language} />;
+          }}
+          renderToken={(row, index) => {
+            const raw = (page?.rows ?? [])[index];
+            if (!raw) return <span>—</span>;
+            return <SessionTokenCell row={raw} language={language} />;
+          }}
+          renderCost={(row, index) => {
+            const raw = (page?.rows ?? [])[index];
+            if (!raw) return <span>—</span>;
+            return <SessionCostCell row={raw} />;
+          }}
+          labels={{
+            activity: t("最近活动"),
+            session: t("主会话"),
+            client: t("客户端"),
+            requests: t("请求"),
+            token: "Token",
+            cost: t("费用"),
+            status: t("状态"),
+            total: t("共 {total} 个主会话", { total: page?.total ?? 0 }),
+          }}
+          toolbar={(
+            <section className={styles.toolbar} aria-label={t("会话筛选")}>
+              <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索会话标题、ID 或项目目录")} showClear onChange={setSearchDraft} />
+              <Select
+                insetLabel={t("客户端")}
+                value={filter.agentType || "__all__"}
+                optionList={[
+                  { value: "__all__", label: t("全部客户端") },
+                  { value: "codex-desktop", label: "Codex Desktop" },
+                  { value: "codex-cli", label: "Codex CLI" },
+                  { value: "claude-code", label: "Claude Code" },
+                  { value: "opencode", label: "OpenCode" },
+                  { value: "pi", label: "Pi" },
+                ]}
+                onChange={(value) => setFilter((current) => ({ ...current, agentType: value === "__all__" ? "" : String(value) as AgentSessionFilter["agentType"], page: 1 }))}
+              />
+              <Select
+                insetLabel={t("运行状态")}
+                value={filter.runtimeStatus || "__all__"}
+                optionList={[
+                  { value: "__all__", label: t("全部状态") },
+                  { value: "running", label: t("自动运行中") },
+                  { value: "waiting_user", label: t("等待用户确认") },
+                  { value: "idle", label: t("空闲") },
+                  { value: "unknown", label: t("无法判断") },
+                ]}
+                onChange={(value) => setFilter((current) => ({ ...current, runtimeStatus: value === "__all__" ? "" : String(value) as AgentSessionFilter["runtimeStatus"], page: 1 }))}
+              />
+              <span className={styles.toolbarSpacer} />
+              <div className={styles.syncActions}>{lastJobId ? <Button type="tertiary" onClick={() => navigate(`/tasks?jobId=${encodeURIComponent(lastJobId)}`)}>{t("查看任务")}</Button> : null}<Button
+                className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
+                icon={<IconRefresh />}
+                type="tertiary"
+                theme="outline"
+                loading={sessions.isFetching || syncAgentData.isPending}
+                onClick={() => void syncAgentData.mutateAsync({ force: true, triggerSource: "manual" }).then((result) => { setLastJobId(result.jobId); Toast.success(result.message); }).catch((error: Error) => Toast.error(error.message))}
+              >
+                {t("同步数据")}
+              </Button></div>
+            </section>
+          )}
+          footer={(
+            <>
+              <Text type="tertiary" size="small">{t("共 {total} 个主会话", { total: page?.total ?? 0 })}</Text>
+              <Pagination total={page?.total ?? 0} currentPage={filter.page} pageSize={filter.pageSize} onPageChange={(pageNumber) => setFilter((current) => ({ ...current, page: pageNumber }))} />
+            </>
+          )}
+          onOpenRow={(id) => {
+            const row = page?.rows.find((item) => `${item.agentType}:${item.sessionId}` === id);
+            if (row) setSelectedSession(row);
+          }}
         />
-        <Select
-          insetLabel={t("运行状态")}
-          value={filter.runtimeStatus || "__all__"}
-          optionList={[
-            { value: "__all__", label: t("全部状态") },
-            { value: "running", label: t("自动运行中") },
-            { value: "waiting_user", label: t("等待用户确认") },
-            { value: "idle", label: t("空闲") },
-            { value: "unknown", label: t("无法判断") },
-          ]}
-          onChange={(value) => setFilter((current) => ({ ...current, runtimeStatus: value === "__all__" ? "" : String(value) as AgentSessionFilter["runtimeStatus"], page: 1 }))}
-        />
-        <span className={styles.toolbarSpacer} />
-        <div className={styles.syncActions}>{lastJobId ? <Button type="tertiary" onClick={() => navigate(`/tasks?jobId=${encodeURIComponent(lastJobId)}`)}>{t("查看任务")}</Button> : null}<Button
-          className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
-          icon={<IconRefresh />}
-          type="tertiary"
-          theme="outline"
-          loading={sessions.isFetching || syncAgentData.isPending}
-          onClick={() => void syncAgentData.mutateAsync({ force: true, triggerSource: "manual" }).then((result) => { setLastJobId(result.jobId); Toast.success(result.message); }).catch((error: Error) => Toast.error(error.message))}
-        >
-          {t("同步数据")}
-        </Button></div>
-      </section>
-
-      <section className={styles.tableCard}>
-        <div className={`${styles.grid} ${styles.head}`} role="row">
-          <span>{t("最近活动")}</span><span>{t("主会话")}</span><span>{t("客户端")}</span><span>{t("请求")}</span><span>Token</span><span>{t("费用")}</span><span>{t("状态")}</span>
-        </div>
-        <div className={styles.body}>
-          {sessions.isLoading ? Array.from({ length: 7 }, (_, index) => <SkeletonRow key={index} />) : null}
-          {sessions.isError ? <div className={styles.state}><strong>{t("会话加载失败")}</strong><span>{sessions.error.message}</span><Button onClick={() => void sessions.refetch()}>{t("重试")}</Button></div> : null}
-          {!sessions.isLoading && !sessions.isError && (page?.rows.length ?? 0) === 0 ? <div className={styles.state}><strong>{t("暂无 Agent 会话")}</strong><span>{t("安装并使用 ChatGPT（Codex）、Claude Code、OpenCode 或 Pi 后，本地会话会自动出现在这里。")}</span></div> : null}
-          {!sessions.isLoading && !sessions.isError ? page?.rows.map((row) => <SessionRow key={`${row.agentType}:${row.sessionId}`} row={row} language={language} onOpen={() => setSelectedSession(row)} />) : null}
-        </div>
-        <footer className={styles.footer}>
-          <Text type="tertiary" size="small">{t("共 {total} 个主会话", { total: page?.total ?? 0 })}</Text>
-          <Pagination total={page?.total ?? 0} currentPage={filter.page} pageSize={filter.pageSize} onPageChange={(pageNumber) => setFilter((current) => ({ ...current, page: pageNumber }))} />
-        </footer>
-      </section>
+      ) : null}
       {selectedSession ? (
         <AgentSessionDetailSideSheet
           session={selectedSession}
@@ -135,100 +164,6 @@ export function AgentSessionsPage() {
   );
 }
 
-function SessionRow({ row, language, onOpen }: { row: AgentSessionRow; language: "zh-CN" | "en-US"; onOpen: () => void }) {
-  const { t } = useAppPreferences();
-  const nativeSummary = useAgentSessionNativeSummary(row);
-  const resolvedNativeSummary = row.nativeSummary ?? nativeSummary.data;
-  const nativeUsage = !row.flowletObserved ? resolvedNativeSummary?.usage ?? null : null;
-  const tokenBreakdown = row.flowletObserved
-    ? flowletTokenBreakdown(row)
-    : nativeUsage
-      ? nativeTokenBreakdown(row.agentType, nativeUsage)
-      : null;
-  const nativeTruncated = resolvedNativeSummary?.truncated === true;
-  const nativeTokenTruncated = nativeTruncated && row.agentType !== "opencode";
-  const requestCount = row.flowletObserved ? row.requestCount : resolvedNativeSummary?.turnCount ?? null;
-  return (
-    <button type="button" className={`${styles.grid} ${styles.row}`} onClick={onOpen}>
-      <span>{formatTimestamp(row.activityAt, language)}</span>
-      <span className={styles.session}><strong title={row.title ?? row.sessionId}>{sessionDisplayTitle(row)}</strong><small title={row.projectPath ?? row.sessionId}>{row.projectPath ? `${agentLabel(row.agentType)} · ${projectName(row.projectPath)}` : agentLabel(row.agentType)}{row.nativeSyncedAt && !row.flowletObserved ? ` · ${t("已同步")}` : ""}</small></span>
-      <span className={styles.client}><strong title={row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet")}>{row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet")}</strong>{row.clientId ? <small title={row.clientId}>{row.clientId}</small> : <small>{t("仅本地会话")}</small>}</span>
-      <CompactNumber
-        value={requestCount}
-        language={language}
-        prefix={!row.flowletObserved && nativeTruncated ? "≥" : undefined}
-        title={!row.flowletObserved && requestCount != null
-          ? t("Agent 原生 turn 数：{count}", { count: formatInteger(requestCount, language) })
-          : requestCount == null ? undefined : formatInteger(requestCount, language)}
-      />
-      {tokenBreakdown ? (
-        <TokenBreakdownTooltip
-          language={language}
-          t={t}
-          tokens={{
-            ...tokenBreakdown,
-            unknownUsageCount: row.flowletObserved ? row.unknownUsageCount : undefined,
-          }}
-        >
-          <CompactNumber
-            className={styles.tokenTotal}
-            value={tokenBreakdown.total}
-            language={language}
-            prefix={!row.flowletObserved && nativeTokenTruncated ? "≥" : undefined}
-            aria-label={t("Token 明细：总计 {total}，缓存命中率 {rate}", {
-              total: `${!row.flowletObserved && nativeTokenTruncated ? "≥" : ""}${formatCompactNumber(tokenBreakdown.total, language)}`,
-              rate: tokenBreakdown.cacheHitRate == null ? "—" : `${(tokenBreakdown.cacheHitRate * 100).toFixed(1)}%`,
-            })}
-          />
-        </TokenBreakdownTooltip>
-      ) : <span>—</span>}
-      <CostBreakdownTooltip
-        t={t}
-        total={row.flowletObserved ? row.estimatedCost : nativeUsage?.cost ?? nativeUsage?.apiEquivalent?.amount ?? null}
-        currency="CNY"
-        inputUncached={row.flowletObserved ? row.estimatedInputUncachedCost : undefined}
-        inputCached={row.flowletObserved ? row.estimatedInputCachedCost : undefined}
-        inputCacheWrite={row.flowletObserved ? row.estimatedInputCacheWriteCost : undefined}
-        output={row.flowletObserved ? row.estimatedOutputCost : undefined}
-        apiEquivalent={nativeUsage?.apiEquivalent ?? null}
-        planConsumption={nativeUsage?.planConsumption ?? null}
-      >
-        <span
-          className={styles.tokenTotal}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {row.flowletObserved ? formatCostCny(row.estimatedCost) : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}
-        </span>
-      </CostBreakdownTooltip>
-      <SessionStatus row={row} />
-    </button>
-  );
-}
-
-function SessionStatus({ row }: { row: AgentSessionRow }) {
-  const { t } = useAppPreferences();
-  const sourceDeleted = !row.flowletObserved && row.nativeSummary?.sourceAvailable === false;
-  const presentation = {
-    running: { label: t("自动运行中"), color: "green" as const, className: styles.runtimeActive },
-    waiting_user: { label: t("等待用户确认"), color: "orange" as const, className: styles.runtimeWaiting },
-    idle: { label: t("空闲"), color: "grey" as const, className: styles.runtimeIdle },
-    unknown: { label: t("无法判断"), color: "grey" as const, className: styles.runtimeUnknown },
-  }[row.runtimeStatus];
-  const health = !row.flowletObserved
-    ? sourceDeleted ? t("源文件已删除") : t("本地会话")
-    : row.errorCount > 0
-      ? t("{count} 次失败", { count: row.errorCount })
-      : t("请求正常");
-
-  return (
-    <span className={styles.statusCell}>
-      <Tag size="small" color={presentation.color} className={presentation.className}>
-        {presentation.label}
-      </Tag>
-      <small className={row.flowletObserved && row.errorCount > 0 ? styles.warning : styles.statusHint}>{health}</small>
-    </span>
-  );
-}
 
 function agentLabel(agentType: AgentSessionRow["agentType"]) {
   if (agentType === "claude-code") return "Claude Code";
@@ -284,6 +219,121 @@ function projectName(path: string) {
   return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 }
 
-function SkeletonRow() {
-  return <div className={`${styles.grid} ${styles.row} ${styles.skeleton}`} aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <span key={index} />)}</div>;
+function SessionRequestsCell({ row, language }: { row: AgentSessionRow; language: "zh-CN" | "en-US" }) {
+  const { t } = useAppPreferences();
+  const nativeSummary = useAgentSessionNativeSummary(row);
+  const resolvedNativeSummary = row.nativeSummary ?? nativeSummary.data;
+  const requestCount = row.flowletObserved ? row.requestCount : resolvedNativeSummary?.turnCount ?? null;
+  const nativeTruncated = resolvedNativeSummary?.truncated === true;
+  return (
+    <CompactNumber
+      value={requestCount}
+      language={language}
+      prefix={!row.flowletObserved && nativeTruncated ? "≥" : undefined}
+      title={!row.flowletObserved && requestCount != null
+        ? t("Agent 原生 turn 数：{count}", { count: formatInteger(requestCount, language) })
+        : requestCount == null ? undefined : formatInteger(requestCount, language)}
+    />
+  );
+}
+
+function SessionTokenCell({ row, language }: { row: AgentSessionRow; language: "zh-CN" | "en-US" }) {
+  const { t } = useAppPreferences();
+  const nativeSummary = useAgentSessionNativeSummary(row);
+  const resolvedNativeSummary = row.nativeSummary ?? nativeSummary.data;
+  const nativeUsage = !row.flowletObserved ? resolvedNativeSummary?.usage ?? null : null;
+  const tokenBreakdown = row.flowletObserved ? flowletTokenBreakdown(row) : nativeUsage ? nativeTokenBreakdown(row.agentType, nativeUsage) : null;
+  const nativeTruncated = resolvedNativeSummary?.truncated === true;
+  const nativeTokenTruncated = nativeTruncated && row.agentType !== "opencode";
+  if (!tokenBreakdown) return <span>—</span>;
+  return (
+    <TokenBreakdownTooltip
+      language={language}
+      t={t}
+      tokens={{
+        ...tokenBreakdown,
+        unknownUsageCount: row.flowletObserved ? row.unknownUsageCount : undefined,
+      }}
+    >
+      <CompactNumber
+        className={styles.tokenTotal}
+        value={tokenBreakdown.total}
+        language={language}
+        prefix={!row.flowletObserved && nativeTokenTruncated ? "≥" : undefined}
+        aria-label={t("Token 明细：总计 {total}，缓存命中率 {rate}", {
+          total: `${!row.flowletObserved && nativeTokenTruncated ? "≥" : ""}${formatCompactNumber(tokenBreakdown.total, language)}`,
+          rate: tokenBreakdown.cacheHitRate == null ? "—" : `${(tokenBreakdown.cacheHitRate * 100).toFixed(1)}%`,
+        })}
+      />
+    </TokenBreakdownTooltip>
+  );
+}
+
+function SessionCostCell({ row }: { row: AgentSessionRow }) {
+  const { t } = useAppPreferences();
+  const nativeSummary = useAgentSessionNativeSummary(row);
+  const resolvedNativeSummary = row.nativeSummary ?? nativeSummary.data;
+  const nativeUsage = !row.flowletObserved ? resolvedNativeSummary?.usage ?? null : null;
+  return (
+    <CostBreakdownTooltip
+      t={t}
+      total={row.flowletObserved ? row.estimatedCost : nativeUsage?.cost ?? nativeUsage?.apiEquivalent?.amount ?? null}
+      currency="CNY"
+      inputUncached={row.flowletObserved ? row.estimatedInputUncachedCost : undefined}
+      inputCached={row.flowletObserved ? row.estimatedInputCachedCost : undefined}
+      inputCacheWrite={row.flowletObserved ? row.estimatedInputCacheWriteCost : undefined}
+      output={row.flowletObserved ? row.estimatedOutputCost : undefined}
+      apiEquivalent={nativeUsage?.apiEquivalent ?? null}
+      planConsumption={nativeUsage?.planConsumption ?? null}
+    >
+      <span className={styles.tokenTotal} onClick={(e) => e.stopPropagation()}>
+        {row.flowletObserved ? formatCostCny(row.estimatedCost) : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}
+      </span>
+    </CostBreakdownTooltip>
+  );
+}
+
+/** 把领域行映射为共享展示模型：状态、Token、费用等文案已在此完成本地化。 */
+function toAgentSessionRowModels(rows: AgentSessionRow[], language: "zh-CN" | "en-US", t: (key: string, values?: Record<string, string | number>) => string): AgentSessionRowModel[] {
+  return rows.map((row) => {
+    const nativeSummary = row.nativeSummary ?? null;
+    const nativeUsage = !row.flowletObserved ? nativeSummary?.usage ?? null : null;
+    const tokenBreakdown = row.flowletObserved ? flowletTokenBreakdown(row) : nativeUsage ? nativeTokenBreakdown(row.agentType, nativeUsage) : null;
+    const requestCount = row.flowletObserved ? row.requestCount : nativeSummary?.turnCount ?? null;
+    const sourceDeleted = !row.flowletObserved && row.nativeSummary?.sourceAvailable === false;
+    const status = row.runtimeStatus;
+    const health = !row.flowletObserved
+      ? sourceDeleted ? t("源文件已删除") : t("本地会话")
+      : row.errorCount > 0 ? t("{count} 次失败", { count: row.errorCount }) : t("请求正常");
+    const nativeTruncated = nativeSummary?.truncated === true;
+    const nativeTokenTruncated = nativeTruncated && row.agentType !== "opencode";
+    return {
+      id: `${row.agentType}:${row.sessionId}`,
+      ariaLabel: `${row.title ?? row.sessionId} · ${t("会话")}`,
+      activityAt: formatTimestamp(row.activityAt, language),
+      title: sessionDisplayTitle(row),
+      subtitle: row.projectPath ? `${agentLabel(row.agentType)} · ${projectName(row.projectPath)}` : agentLabel(row.agentType),
+      client: row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet"),
+      clientSub: row.clientId && row.flowletObserved ? row.clientId : undefined,
+      requests: requestCount == null ? undefined : formatInteger(requestCount, language),
+      requestsPrefix: !row.flowletObserved && nativeTruncated ? "≥" : undefined,
+      requestsTitle: !row.flowletObserved && requestCount != null
+        ? t("Agent 原生 turn 数：{count}", { count: formatInteger(requestCount, language) })
+        : requestCount == null ? undefined : formatInteger(requestCount, language),
+      tokens: tokenBreakdown ? formatCompactNumber(tokenBreakdown.total, language) : undefined,
+      tokenHint: tokenBreakdown ? [
+        `${t("缓存命中率")} ${tokenBreakdown.cacheHitRate == null ? "—" : `${(tokenBreakdown.cacheHitRate * 100).toFixed(1)}%`}`,
+        `${t("输入")} ${formatCompactNumber(tokenBreakdown.input, language)} · ${t("输出")} ${formatCompactNumber(tokenBreakdown.output, language)}`,
+      ].join(" · ") : undefined,
+      cost: row.flowletObserved ? formatCostCny(row.estimatedCost) : nativeUsage ? nativeCostDisplay(nativeUsage) : undefined,
+      status: {
+        running: t("自动运行中"),
+        waiting_user: t("等待用户确认"),
+        idle: t("空闲"),
+        unknown: t("无法判断"),
+      }[status],
+      statusTone: (status === "running" ? "running" : status === "waiting_user" ? "waiting" : "idle") as AgentSessionStatusTone,
+      statusHint: health,
+    };
+  });
 }

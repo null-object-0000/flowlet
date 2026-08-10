@@ -1,77 +1,85 @@
+import { useState } from "react";
+import {
+  AgentSessionsDemoView,
+  DesktopAppFrameView,
+  DesktopOverviewDemoView,
+  DesktopSidebarView,
+  ModelsServiceDemoView,
+  ProjectsBoardDemoView,
+  RequestLogsDemoView,
+  UsageAnalysisDemoView,
+  type DesktopNavGroup,
+} from "@flowlet/product-ui";
+import {
+  IconComment,
+  IconHistogram,
+  IconHome,
+  IconKanban,
+  IconList,
+  IconPieChart2Stroked,
+  IconServer,
+  IconSetting,
+} from "@douyinfe/semi-icons";
+import { useI18n } from "../i18n/I18nContext";
 import styles from "./AppMockup.module.css";
 
-/** 纯 CSS 绘制的概览页风格化示意图,不伪装真实截图。 */
+type DemoPage = "overview" | "models" | "projects" | "requests" | "sessions" | "insights";
+
 export function AppMockup() {
+  const { lang } = useI18n();
+  const zh = lang === "zh";
+  const [activePage, setActivePage] = useState<DemoPage>("overview");
+
+  const navGroups: DesktopNavGroup[] = [
+    { id: "workspace", label: zh ? "工作台" : "Workspace", items: [
+      { id: "overview", label: zh ? "运行概览" : "Overview", icon: <IconHome /> },
+      { id: "models", label: zh ? "模型服务" : "Models", icon: <IconServer /> },
+      { id: "projects", label: zh ? "项目管理" : "Projects", icon: <IconKanban /> },
+    ] },
+    { id: "records", label: zh ? "运行记录" : "Activity", items: [
+      { id: "requests", label: zh ? "请求日志" : "Requests", icon: <IconList /> },
+      { id: "sessions", label: zh ? "会话管理" : "Sessions", icon: <IconComment /> },
+    ] },
+    { id: "analysis", label: zh ? "分析" : "Analysis", items: [
+      { id: "insights", label: zh ? "用量洞察" : "Insights", icon: <IconPieChart2Stroked /> },
+    ] },
+  ];
+
+  const pageMeta: Record<DemoPage, { title: string; subtitle: string }> = {
+    overview: { title: zh ? "运行概览" : "Overview", subtitle: zh ? "本地模型服务状态" : "Local model service" },
+    models: { title: zh ? "模型服务" : "Model services", subtitle: zh ? "开放模型与路由候选" : "Exposed models and routes" },
+    projects: { title: zh ? "项目管理" : "Projects", subtitle: zh ? "交给 Agent 执行的任务" : "Tasks delegated to agents" },
+    requests: { title: zh ? "请求日志" : "Request log", subtitle: zh ? "真实上游请求与响应" : "Actual upstream requests" },
+    sessions: { title: zh ? "会话管理" : "Sessions", subtitle: zh ? "Agent 原生会话与活动" : "Native agent sessions" },
+    insights: { title: zh ? "用量洞察" : "Usage insights", subtitle: zh ? "Token、性能与费用" : "Tokens, performance and cost" },
+  };
+
+  let content: React.ReactNode;
+  switch (activePage) {
+    case "models": content = <ModelsServiceDemoView zh={zh} />; break;
+    case "projects": content = <ProjectsBoardDemoView zh={zh} />; break;
+    case "requests": content = <RequestLogsDemoView zh={zh} />; break;
+    case "sessions": content = <AgentSessionsDemoView zh={zh} />; break;
+    case "insights": content = <UsageAnalysisDemoView zh={zh} />; break;
+    default: content = <DesktopOverviewDemoView zh={zh} onOpenUsage={() => setActivePage("insights")} />;
+  }
+
   return (
-    <div className={styles.window}>
-      <div className={styles.chrome}>
-        <div className={styles.dots}>
-          <span />
-          <span />
-          <span />
-        </div>
-        <div className={styles.title}>Flowlet Overview</div>
-      </div>
-      <div className={styles.body}>
-        <aside className={styles.sidebar}>
-          <div className={styles.brand}>
-            <span className={styles.brandDot} />
-            <span>Flowlet</span>
-          </div>
-          <div className={styles.navItems}>
-            <div className={`${styles.navItem} ${styles.active}`}>Overview</div>
-            <div className={styles.navItem}>Channels</div>
-            <div className={styles.navItem}>Models</div>
-            <div className={styles.navItem}>Agents</div>
-            <div className={styles.navItem}>Logs</div>
-            <div className={styles.navItem}>Settings</div>
-          </div>
-        </aside>
-        <div className={styles.main}>
-          <div className={styles.serviceStrip}>
-            <div className={styles.status}>
-              <span className={styles.statusDot} />
-              Running
-            </div>
-            <div className={styles.pill}><span className={styles.muted}>Token today:</span> 1.2M</div>
-            <div className={styles.pill}>127.0.0.1:18640</div>
-          </div>
-          <div className={styles.grid}>
-            <div className={`${styles.card} ${styles.channels}`}>
-              <div className={styles.cardTitle}>Channel Accounts</div>
-              <div className={styles.accountRow}>
-                <span className={styles.dotGreen} />
-                LongCat · enabled
-              </div>
-              <div className={styles.accountRow}>
-                <span className={styles.dotGreen} />
-                DeepSeek · enabled
-              </div>
-              <div className={styles.accountRow}>
-                <span className={styles.dotGray} />
-                Kimi · disabled
-              </div>
-            </div>
-            <div className={styles.card}>
-              <div className={styles.cardTitle}>Exposed Models</div>
-              <div className={styles.modelPills}>
-                <span>longcat-2.0</span>
-                <span>deepseek-v4-pro</span>
-                <span>qwen3.7-max</span>
-              </div>
-            </div>
-            <div className={`${styles.card} ${styles.agent}`}>
-              <div className={styles.cardTitle}>AI Agent Access</div>
-              <div className={styles.agentIcons}>
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <DesktopAppFrameView
+      embedded
+      sidebar={<DesktopSidebarView
+        logo={<img src="/flowlet-logo.png" alt="" />}
+        productName="Flowlet"
+        version="v0.1.0"
+        groups={navGroups}
+        activeId={activePage}
+        settings={{ id: "settings", label: zh ? "应用设置" : "Settings", icon: <IconSetting /> }}
+        onNavigate={(id) => {
+          if (["overview", "models", "projects", "requests", "sessions", "insights"].includes(id)) setActivePage(id as DemoPage);
+        }}
+      />}
+    >
+      <div className={styles.sharedPage} aria-label={`${pageMeta[activePage].title} · ${pageMeta[activePage].subtitle}`}>{content}</div>
+    </DesktopAppFrameView>
   );
 }

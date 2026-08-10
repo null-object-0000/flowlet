@@ -1,0 +1,49 @@
+.strip { height: 84px; flex: 0 0 auto; padding: 0 14px; display: grid; grid-template-columns: 190px 146px minmax(300px, 1fr) 260px; align-items: center; border: 1px solid var(--flowlet-color-border); border-radius: 13px; background: var(--flowlet-color-surface-strong, var(--flowlet-color-surface)); box-shadow: 0 6px 20px rgba(24, 39, 75, .055); }
+.cell { min-width: 0; height: 56px; display: flex; flex-direction: column; justify-content: center; }
+.cell + .cell { padding-left: 16px; border-left: 1px solid var(--flowlet-color-border); }
+.statusCompact { min-width: 0; height: 56px; display: flex; align-items: center; gap: 10px; }
+.statusDot { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--flowlet-color-success, #28a954); box-shadow: 0 0 0 5px rgba(40, 169, 84, .12); }
+.statusDotStopped { background: var(--flowlet-color-text-tertiary); box-shadow: none; }
+.statusCopy { min-width: 0; }
+.statusTitle { font-size: var(--flowlet-font-size-body-strong, 14px); font-weight: 720; line-height: var(--flowlet-line-height-body-strong, 20px); }
+.statusSub { margin-top: 5px; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); text-overflow: ellipsis; white-space: nowrap; }
+.tokenMetric { appearance: none; border-top: 0; border-right: 0; border-bottom: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; border-radius: 8px; }
+.tokenMetric:hover, .tokenMetric:focus-visible { background: var(--semi-color-primary-light-default); }
+.tokenMetric:focus-visible { outline: 2px solid var(--flowlet-color-primary); outline-offset: 2px; }
+.tokenLabel, .tokenCellLabel, .accessLabel { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); }
+.tokenLabel { margin-bottom: 5px; }
+.tokenValue { font-size: var(--flowlet-font-size-body-strong, 14px); font-weight: 740; line-height: var(--flowlet-line-height-body-strong, 20px); white-space: nowrap; }
+.tokenUnit { margin-left: 3px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption, 12px); font-weight: 580; }
+.accessHead { min-width: 0; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.accessLabel { white-space: nowrap; }
+.protocolSwitch { height: 25px; padding: 3px; display: flex; gap: 2px; border-radius: 7px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.protocolBtn { height: 19px; padding: 0 8px; border: 0; border-radius: 5px; color: var(--flowlet-color-text-tertiary); background: transparent; font-size: var(--flowlet-font-size-caption, 12px); font-weight: 650; cursor: pointer; }
+.protocolBtnActive { color: var(--flowlet-color-text); background: var(--flowlet-color-surface-strong, var(--flowlet-color-surface)); box-shadow: 0 1px 4px rgba(25, 37, 62, .1); }
+.accessDetail { padding: 3px 0; display: inline-flex; align-items: center; border: 0; color: var(--flowlet-color-primary); background: transparent; font-size: var(--flowlet-font-size-caption, 12px); font-weight: 680; white-space: nowrap; cursor: pointer; }
+.inlineEndpoint, .tokenRow { min-width: 0; display: flex; align-items: center; gap: 5px; }
+.inlineCode { min-width: 0; height: 29px; padding: 0 9px; flex: 1; display: flex; align-items: center; overflow: hidden; border: 1px solid var(--flowlet-color-border-strong); border-radius: 7px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); font-family: var(--flowlet-font-family-mono, ui-monospace, monospace); font-size: var(--flowlet-font-size-code, 12px); text-overflow: ellipsis; white-space: nowrap; }
+.iconBtn { width: 29px !important; height: 29px !important; min-width: 29px !important; padding: 0 !important; flex: none; display: grid !important; place-items: center; border: 0; border-radius: 7px; color: var(--flowlet-color-text-tertiary); background: transparent; cursor: pointer; }
+.iconBtn:hover { color: var(--flowlet-color-primary); background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.tokenCellLabel { margin-bottom: 8px; }
+.tokenRow { gap: 3px; }
+.tokenValueMasked { min-width: 0; flex: 1; overflow: hidden; color: var(--flowlet-color-text-secondary); font-family: var(--flowlet-font-family-mono, ui-monospace, monospace); font-size: var(--flowlet-font-size-code, 12px); text-overflow: ellipsis; white-space: nowrap; }
+
+.compact { height: 54px; padding: 0 10px; grid-template-columns: 112px 76px minmax(150px, 1fr); border-radius: 9px; }
+.compact .cell { height: 40px; }
+.compact .cell + .cell { padding-left: 10px; }
+.compact .cell:last-child { display: none; }
+.compact .statusCompact { height: 40px; gap: 7px; }
+.compact .statusDot { width: 7px; height: 7px; box-shadow: 0 0 0 3px rgba(40, 169, 84, .12); }
+.compact .statusTitle, .compact .tokenValue { font-size: 10px; line-height: 13px; }
+.compact .statusSub, .compact .tokenLabel, .compact .accessLabel, .compact .tokenUnit { font-size: 7px; line-height: 10px; }
+.compact .statusSub, .compact .tokenLabel { margin-top: 2px; margin-bottom: 2px; }
+.compact .accessHead { margin-bottom: 3px; gap: 4px; }
+.compact .protocolSwitch { height: 17px; padding: 2px; }
+.compact .protocolBtn { height: 13px; padding: 0 4px; font-size: 6px; }
+.compact .accessDetail { display: none; }
+.compact .inlineCode { height: 20px; padding: 0 6px; font-size: 7px; }
+.compact .iconBtn { width: 20px !important; min-width: 20px !important; height: 20px !important; font-size: 9px !important; }
+
+@media (max-width: 1050px) {
+  .strip:not(.compact) { grid-template-columns: 170px 130px minmax(260px, 1fr) 210px; }
+}

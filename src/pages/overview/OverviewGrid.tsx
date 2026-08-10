@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { OverviewGridView } from "@flowlet/product-ui";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
@@ -8,7 +9,6 @@ import { OverviewAgentAccessCard } from "../../features/agent-access/OverviewAge
 import { OverviewChannelAccountsCard } from "../../features/channel-accounts/OverviewChannelAccountsCard";
 import type { AccountActionRequest } from "../../features/channel-accounts/AccountActionOverlay";
 import { OverviewExposedModelsCard } from "../../features/exposed-models/OverviewExposedModelsCard";
-import styles from "./OverviewGrid.module.css";
 
 type Props = {
   accounts: ChannelAccount[];
@@ -40,9 +40,8 @@ export function OverviewGrid({
   const navigate = useNavigate();
 
   return (
-    <div className={styles.grid}>
-      <div className={styles.accountCard}>
-        <OverviewChannelAccountsCard
+    <OverviewGridView
+      accounts={<OverviewChannelAccountsCard
           accounts={accounts}
           channels={channels}
           snapshots={balanceSnapshots}
@@ -53,19 +52,14 @@ export function OverviewGrid({
           onDelete={(accountId) => onAccountRequest({ kind: "delete", accountId })}
           onOpenCodexAgent={onOpenCodexAgent}
           busy={accountActionBusy}
-        />
-      </div>
-      <div className={styles.modelsCard}>
-        <OverviewExposedModelsCard
+        />}
+      models={<OverviewExposedModelsCard
           routes={routes}
           accounts={accounts}
           channels={channels}
           onManage={() => navigate("/models")}
-        />
-      </div>
-      <div className={styles.agentCard}>
-        <OverviewAgentAccessCard baseUrl={baseUrl} clientToken={bindConfig?.default_client_token} />
-      </div>
-    </div>
+        />}
+      agents={<OverviewAgentAccessCard baseUrl={baseUrl} clientToken={bindConfig?.default_client_token} />}
+    />
   );
 }

@@ -1,12 +1,12 @@
-import { Agents } from "./components/Agents";
-import { Boundaries } from "./components/Boundaries";
-import { Channels } from "./components/Channels";
-import { Features } from "./components/Features";
+import { EcosystemSection } from "./components/EcosystemSection";
 import { Footer } from "./components/Footer";
 import { Hero } from "./components/Hero";
+import { LocalFirstSection } from "./components/LocalFirstSection";
 import { Nav } from "./components/Nav";
-import { Quickstart } from "./components/Quickstart";
-import { Security } from "./components/Security";
+import { ProductDemoSection } from "./components/ProductDemoSection";
+import { StartSection } from "./components/StartSection";
+import { TraceSection } from "./components/TraceSection";
+import { ValueSection } from "./components/ValueSection";
 import styles from "./LandingPage.module.css";
 
 export function LandingPage() {
@@ -15,12 +15,12 @@ export function LandingPage() {
       <Nav />
       <main>
         <Hero />
-        <Features />
-        <Channels />
-        <Agents />
-        <Quickstart />
-        <Security />
-        <Boundaries />
+        <ProductDemoSection />
+        <ValueSection />
+        <TraceSection />
+        <EcosystemSection />
+        <LocalFirstSection />
+        <StartSection />
       </main>
       <Footer />
     </div>

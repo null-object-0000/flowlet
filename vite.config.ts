@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -11,6 +12,12 @@ const appVersion = JSON.parse(
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@flowlet/product-ui": fileURLToPath(new URL("./packages/product-ui/src/index.ts", import.meta.url)),
+    },
+    dedupe: ["react", "react-dom", "@douyinfe/semi-ui-19", "@douyinfe/semi-icons"],
+  },
   clearScreen: false,
   define: {
     __FLOWLET_APP_VERSION__: JSON.stringify(appVersion),

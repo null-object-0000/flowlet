@@ -66,7 +66,7 @@ describe("OverviewExposedModelsCard", () => {
     expect(screen.queryByText("deepseek-v4-pro")).not.toBeInTheDocument();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("link", { name: "管理模型" }));
+    await user.click(screen.getByRole("button", { name: "管理模型" }));
     expect(onManage).toHaveBeenCalledOnce();
   });
 });

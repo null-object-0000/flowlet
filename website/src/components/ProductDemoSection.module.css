@@ -1,0 +1,16 @@
+.section { padding: 82px 24px 112px; background: var(--flowlet-color-surface); }
+.inner { width: min(1200px, 100%); margin: 0 auto; }
+.heading { max-width: 800px; margin: 0 auto 42px; text-align: center; }
+.heading > span { display: block; margin-bottom: 12px; color: var(--flowlet-color-primary); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.heading h2 { margin: 0 0 15px; font-size: clamp(32px, 3.8vw, 48px); line-height: 1.16; letter-spacing: -.04em; }
+.heading p { max-width: 720px; margin: 0 auto; color: var(--flowlet-color-text-secondary); font-size: 16px; line-height: 1.75; }
+.demoFrame { position: relative; }
+.hint { width: fit-content; margin: 0 0 12px auto; display: flex; align-items: center; gap: 7px; color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.hint i { width: 7px; height: 7px; border-radius: 50%; background: var(--flowlet-color-primary); box-shadow: 0 0 0 4px var(--semi-color-primary-light-default); }
+
+@media (max-width: 700px) {
+  .section { padding: 70px 16px 82px; }
+  .heading { margin-bottom: 30px; }
+  .heading p { font-size: 14px; }
+  .hint { margin-right: auto; }
+}

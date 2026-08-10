@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:frontend": "vite --mode demo",
     "dev:mobile": "vite --mode mobile",
     "build": "tsc && vite build",
     "build:mobile": "tsc && vite build --mode mobile --outDir dist-mobile",

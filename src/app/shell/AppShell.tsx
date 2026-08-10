@@ -1,6 +1,6 @@
-import { Layout, Toast } from "@douyinfe/semi-ui-19";
+import { Toast } from "@douyinfe/semi-ui-19";
+import { DesktopAppFrameView } from "@flowlet/product-ui";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import styles from "./AppShell.module.css";
 import { Sidebar } from "./Sidebar";
 import { WindowControls } from "./WindowControls";
 import { useAppPreferences } from "../preferences/AppPreferences";
@@ -9,8 +9,6 @@ import { errorMessage } from "../../shared/errors/AppError";
 import { AgentDataAutoSync } from "../../features/background-tasks/AgentDataAutoSync";
 import { CodexAccountAutoSync } from "../../features/background-tasks/CodexAccountAutoSync";
 import { ChannelResourceAutoSync } from "../../features/background-tasks/ChannelResourceAutoSync";
-
-const { Sider, Content } = Layout;
 
 export function AppShell() {
   const location = useLocation();
@@ -37,14 +35,7 @@ export function AppShell() {
       <AgentDataAutoSync />
       <CodexAccountAutoSync />
       <ChannelResourceAutoSync />
-      <Layout className={styles.shell}>
-        <Sider className={styles.sidebar}>
-          <Sidebar />
-        </Sider>
-        <Content className={styles.content}>
-          <Outlet />
-        </Content>
-      </Layout>
+      <DesktopAppFrameView sidebar={<Sidebar />}><Outlet /></DesktopAppFrameView>
     </>
   );
 }

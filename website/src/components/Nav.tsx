@@ -1,5 +1,5 @@
 import { Button, Layout } from "@douyinfe/semi-ui-19";
-import { IconGithubLogo, IconLanguage } from "@douyinfe/semi-icons";
+import { IconDownload, IconGithubLogo, IconLanguage } from "@douyinfe/semi-icons";
 import { useLocation, useNavigate } from "react-router-dom";
 import { LANGS, useI18n } from "../i18n/I18nContext";
 import styles from "./Nav.module.css";
@@ -12,10 +12,10 @@ export function Nav() {
   const otherLang = LANGS.find((l) => l !== lang) ?? "en";
 
   const anchors = [
-    { href: "#features", label: t.nav.features },
-    { href: "#channels", label: t.nav.channels },
-    { href: "#agents", label: t.nav.agents },
-    { href: "#quickstart", label: t.nav.quickstart },
+    { href: "#demo", label: t.nav.demo },
+    { href: "#trace", label: t.nav.trace },
+    { href: "#ecosystem", label: t.nav.ecosystem },
+    { href: "#start", label: t.nav.start },
   ];
 
   function switchLang() {
@@ -49,9 +49,18 @@ export function Nav() {
           <Button
             icon={<IconGithubLogo />}
             theme="borderless"
+            className={styles.githubButton}
             onClick={() => window.open("https://github.com/null-object-0000/flowlet", "_blank", "noopener,noreferrer")}
           >
             {t.nav.github}
+          </Button>
+          <Button
+            icon={<IconDownload />}
+            theme="solid"
+            type="primary"
+            onClick={() => window.open("https://github.com/null-object-0000/flowlet/releases", "_blank", "noopener,noreferrer")}
+          >
+            {t.nav.download}
           </Button>
         </div>
       </div>

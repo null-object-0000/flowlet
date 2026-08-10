@@ -18,6 +18,7 @@ const mobileTarget = import.meta.env.MODE === "mobile"
   || import.meta.env.TAURI_ENV_PLATFORM === "android"
   || import.meta.env.TAURI_ENV_PLATFORM === "ios"
   || /\b(?:Android|iPhone|iPad|iPod)\b/i.test(navigator.userAgent);
+const demoTarget = import.meta.env.MODE === "demo" || import.meta.env.VITE_FLOWLET_DEMO === "true";
 
 if (mobileTarget) {
   document
@@ -30,16 +31,18 @@ if (mobileTarget) {
 
 applyInitialPreferences();
 configureAppOverlayLayers({ mobile: mobileTarget });
-if (!mobileTarget) {
+if (!mobileTarget && !demoTarget) {
   void import("./platform/tauri/window").then(({ windowCommands }) => {
     configureSideSheetWindowDragging(windowCommands.startDragging, windowCommands.toggleMaximize);
   });
 }
 
 async function renderApp() {
-  const RootApp = mobileTarget
-    ? (await import("./mobile/MobileApp")).MobileApp
-    : (await import("./app/App")).default;
+  const RootApp = demoTarget
+    ? (await import("./demo/DesktopDemoApp")).DesktopDemoApp
+    : mobileTarget
+      ? (await import("./mobile/MobileApp")).MobileApp
+      : (await import("./app/App")).default;
   ReactDOM.createRoot(appRoot).render(
     <React.StrictMode>
       <RootApp />

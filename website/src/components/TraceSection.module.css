@@ -1,0 +1,35 @@
+.section { padding: 104px 24px; background: #0f1724; color: #f4f7fb; }
+.inner { width: min(var(--flowlet-max-width), 100%); margin: 0 auto; }
+.heading { max-width: 780px; margin: 0 auto 50px; text-align: center; }
+.eyebrow { display: block; margin-bottom: 12px; color: #76a8ff; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.heading h2 { margin: 0 0 16px; font-size: clamp(32px, 3.8vw, 48px); line-height: 1.16; letter-spacing: -.04em; }
+.heading p { margin: 0 auto; max-width: 680px; color: #aab6c7; font-size: 16px; line-height: 1.75; }
+.stage { display: grid; grid-template-columns: 1.12fr .88fr; gap: 20px; align-items: stretch; }
+.flow, .logCard { border: 1px solid rgba(222, 231, 245, .1); border-radius: var(--flowlet-radius-md); background: rgba(255, 255, 255, .045); }
+.flow { padding: 20px; display: flex; flex-direction: column; }
+.flowItem { position: relative; min-height: 53px; display: grid; grid-template-columns: 42px 1fr; align-items: center; gap: 12px; }
+.stepNumber { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid rgba(118, 168, 255, .35); border-radius: 10px; color: #8bb5ff; background: rgba(72, 132, 235, .12); font: 600 10px ui-monospace, monospace; }
+.flowItem strong { font-size: 14px; }
+.arrow { position: absolute; left: 10px; bottom: -4px; transform: rotate(90deg); color: #607089; font-size: 12px; }
+.result { margin-top: 13px; padding: 18px; display: flex; gap: 13px; border: 1px solid rgba(81, 190, 111, .18); border-radius: 13px; background: rgba(53, 153, 80, .09); }
+.result > svg { flex: none; margin-top: 2px; color: #62ca7e; font-size: 20px; }
+.result strong { font-size: 14px; }
+.result p { margin: 5px 0 0; color: #aab6c7; font-size: 12px; line-height: 1.65; }
+.logCard { overflow: hidden; padding-bottom: 17px; background: #151e2c; box-shadow: 0 22px 60px rgba(0, 0, 0, .28); }
+.logHeader { height: 57px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(222, 231, 245, .08); }
+.logHeader strong { font-size: 13px; }
+.logHeader span { display: flex; align-items: center; gap: 6px; color: #8fcf9f; font-size: 10px; }
+.logHeader i { width: 6px; height: 6px; border-radius: 50%; background: #55bd6e; }
+.logBody { padding: 12px 18px; }
+.logRow { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(222, 231, 245, .065); font-size: 11px; }
+.logRow span { color: #8592a5; }
+.logRow strong { max-width: 62%; text-align: right; font-weight: 580; }
+.timeline { height: 18px; margin: 6px 18px 0; display: flex; align-items: center; }
+.timeline span { position: relative; flex: 1; height: 2px; background: #2b67cc; }
+.timeline span::before { position: absolute; left: 0; top: -3px; width: 8px; height: 8px; border: 2px solid #151e2c; border-radius: 50%; background: #6ea2ff; content: ""; }
+.timeline span:last-child { flex: 0; }
+
+@media (max-width: 800px) {
+  .section { padding: 76px 16px; }
+  .stage { grid-template-columns: 1fr; }
+}

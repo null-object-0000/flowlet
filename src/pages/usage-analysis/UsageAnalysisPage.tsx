@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
 import { Button, SideSheet, Tooltip } from "@douyinfe/semi-ui-19";
-import { IconChevronRight, IconExternalOpen } from "@douyinfe/semi-icons";
+import { IconExternalOpen } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { UsageSummaryRow } from "../../domains/usage/types";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
@@ -15,7 +15,6 @@ import { PageHeader } from "../../shared/ui/PageHeader";
 import { dominantCostCurrency, formatAggregateCost, formatCostAmount } from "../../shared/formatters/cost";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
-import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
@@ -35,6 +34,7 @@ import {
   type CrossMatrix,
   type CrossMatrixAxisEntry,
 } from "./consumptionAnalysisPresentation";
+import { UsageAnalysisView, type UsageAnalysisMatrixRowModel } from "@flowlet/product-ui";
 import styles from "./UsageAnalysisPage.module.css";
 
 const EMPTY_ROWS: UsageSummaryRow[] = [];
@@ -192,119 +192,73 @@ export function UsageAnalysisPage() {
         ) : null}
 
         {!loading && !query.isError && entries.length > 0 ? (
-          <div className={styles.body}>
-            <div className={styles.rankPane}>
-              <div className={styles.rankHead}>
-                <span>{t("对象")}</span>
-                <span>{t("Token / 占比")}</span>
-                <span>{t("预估费用")}</span>
-                <span aria-hidden="true" />
-              </div>
-              {entries.map((entry) => (
-                <RankRow
-                  key={entry.key}
-                  entry={entry}
-                  dimension={dimension}
-                  selected={entry.key === (selectedKey ?? entries[0]?.key)}
-                  onSelect={() => setSelectedKey(entry.key)}
-                  language={language}
-                  t={t}
-                />
-              ))}
-            </div>
-
-            <aside className={styles.matrixPane}>
-              <div className={styles.matrixHead}>
-                <div className={styles.matrixTitle}>
-                  <strong>{t("交叉归因矩阵")}</strong>
-                  <span>{matrixSubtitle}</span>
-                </div>
-                <div className={styles.metricSeg} aria-label={t("矩阵指标")}>
-                  {(["tokens", "cost"] as const).map((metric) => (
-                    <button
-                      key={metric}
-                      type="button"
-                      aria-pressed={matrixMetric === metric}
-                      onClick={() => setMatrixMetric(metric)}
-                    >
-                      {metric === "tokens" ? "Token" : t("预估费用")}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className={styles.matrixScroll}>
-                <CrossMatrixGrid
-                  entries={entries}
-                  columns={compactMatrixColumns}
-                  matrix={matrix}
-                  metric={matrixMetric}
-                  selectedKey={selectedKey ?? entries[0]?.key ?? null}
-                  onSelect={setSelectedKey}
-                  language={language}
-                  t={t}
-                />
-              </div>
-
-              <div className={styles.matrixFoot}>
-                <HeatLegend t={t} />
-                {/* 矩阵列数未超过紧凑视图上限时，全部数据已完全呈现，无需展开入口。 */}
-                {matrix.columns.length > COMPACT_MATRIX_COLUMN_COUNT ? (
-                  <Button
-                    className={styles.expandMatrixButton}
-                    theme="borderless"
-                    size="small"
-                    icon={<IconExternalOpen />}
-                    onClick={() => setMatrixExpanded(true)}
-                  >
-                    {t("展开全部 {count} 项", { count: matrix.columns.length })}
-                  </Button>
-                ) : null}
-              </div>
-
-              {selected ? (
-                <article className={styles.detail} key={selected.key}>
-                  <header className={styles.detailHead}>
-                    <strong title={selected.label}>{selected.label}</strong>
-                    <span className={styles.detailPill}>{t("已选中")}</span>
-                  </header>
-                  <div className={styles.detailGrid}>
-                    <div>
-                      <span>{t("输入 / 输出")}</span>
-                      <strong>
-                        {formatCompactNumber(selected.inputTokens, language)} / {formatCompactNumber(selected.outputTokens, language)}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>{t("输出速度")}</span>
-                      <Tooltip content={t("输出 Token ÷ 生成耗时（总耗时 − 首 Token），与请求日志同口径")}>
-                        <strong className={styles.detailSpeed}>
-                          {formatTokenRate(outputTokensPerSecondOf(selected))}
-                        </strong>
-                      </Tooltip>
-                    </div>
-                    <div>
-                      <span>{t("缓存命中率")}</span>
-                      <strong>{formatPercent(cacheHitRateOf(selected))}</strong>
-                    </div>
-                  </div>
-                  <div className={styles.detailMeta}>
-                    {selected.requests > 0
-                      ? t("{count} 次请求", { count: formatInteger(selected.requests, language) })
-                      : t("无 Flowlet 请求")}
-                    {selected.nativeEvents > 0
-                      ? ` · ${t("{count} 条 Agent 原生事件", { count: formatInteger(selected.nativeEvents, language) })}`
-                      : ""}
-                    {" · "}
-                    {t("平均耗时 {elapsed}", { elapsed: formatDuration(averageElapsedMsOf(selected)) })}
-                    {" · "}
-                    {t("预估费用")} {formatAggregateCost(selected.costByCurrency, selected.cost)}
-                  </div>
-                </article>
-              ) : null}
-            </aside>
-          </div>
+          <UsageAnalysisView
+            entries={entries.map((entry) => ({
+              key: entry.key,
+              label: entry.label,
+              sublabel: entry.sublabel ?? undefined,
+              badge: { node: <DimensionBadge dimension={dimension} entry={entry} /> },
+              tokenValue: formatCompactNumber(entry.tokens, language),
+              tokenShare: formatPercent(entry.tokenShare),
+              costValue: formatAggregateCost(entry.costByCurrency, entry.cost),
+              costShare: formatPercent(entry.costShare),
+            }))}
+            columns={matrix.columns.map((column) => ({
+              key: column.key,
+              label: column.label,
+              shortLabel: column.shortLabel,
+            }))}
+            rows={toUsageAnalysisMatrixRows(entries, matrix, matrixMetric, language, t)}
+            selectedKey={selectedKey ?? entries[0]?.key ?? null}
+            detail={selected ? {
+              label: selected.label,
+              inputOutput: `${formatCompactNumber(selected.inputTokens, language)} / ${formatCompactNumber(selected.outputTokens, language)}`,
+              outputSpeed: formatTokenRate(outputTokensPerSecondOf(selected)),
+              cacheHitRate: formatPercent(cacheHitRateOf(selected)),
+              meta: [
+                selected.requests > 0 ? t("{count} 次请求", { count: formatInteger(selected.requests, language) }) : t("无 Flowlet 请求"),
+                selected.nativeEvents > 0 ? t("{count} 条 Agent 原生事件", { count: formatInteger(selected.nativeEvents, language) }) : "",
+                t("平均耗时 {elapsed}", { elapsed: formatDuration(averageElapsedMsOf(selected)) }),
+                `${t("预估费用")} ${formatAggregateCost(selected.costByCurrency, selected.cost)}`,
+              ].filter(Boolean).join(" · "),
+            } : null}
+            labels={{
+              dimensionTitle: t("多维归因"),
+              dimensionSubtitle: t("切换主维度，再交叉查看 Token 与费用归因"),
+              rankObject: t("对象"),
+              rankToken: t("Token / 占比"),
+              rankCost: t("预估费用"),
+              matrixTitle: t("交叉归因矩阵"),
+              matrixSubtitle: matrixSubtitle,
+              metricTokens: "Token",
+              metricCost: t("预估费用"),
+              selected: t("已选中"),
+              inputOutput: t("输入 / 输出"),
+              outputSpeed: t("输出速度"),
+              cacheHitRate: t("缓存命中率"),
+              heatLow: t("少"),
+              heatHigh: t("多"),
+              emptyCell: t("该组合暂无数据"),
+            }}
+            metric={matrixMetric}
+            onSelect={setSelectedKey}
+            onMetricChange={setMatrixMetric}
+          />
         ) : null}
+
+        <div className={styles.matrixFoot}>
+          {matrix.columns.length > COMPACT_MATRIX_COLUMN_COUNT ? (
+            <Button
+              className={styles.expandMatrixButton}
+              theme="borderless"
+              size="small"
+              icon={<IconExternalOpen />}
+              onClick={() => setMatrixExpanded(true)}
+            >
+              {t("展开全部 {count} 项", { count: matrix.columns.length })}
+            </Button>
+          ) : null}
+        </div>
       </section>
 
       <SideSheet
@@ -434,59 +388,6 @@ function CrossMatrixGrid({ entries, columns, matrix, metric, selectedKey, onSele
   );
 }
 
-function RankRow({ entry, dimension, selected, onSelect, language, t }: {
-  entry: ConsumptionEntry;
-  dimension: ConsumptionDimension;
-  selected: boolean;
-  onSelect: () => void;
-  language: Language;
-  t: Translate;
-}) {
-  const cacheRate = cacheHitRateOf(entry);
-  return (
-    <button
-      type="button"
-      className={[styles.rankRow, selected ? styles.rankRowSelected : ""].join(" ")}
-      aria-pressed={selected}
-      onClick={onSelect}
-    >
-      <span className={styles.rankName}>
-        <DimensionBadge dimension={dimension} entry={entry} />
-        <span className={styles.rankNameText}>
-          <strong>{entry.label}</strong>
-          {entry.sublabel ? <small>{entry.sublabel}</small> : null}
-        </span>
-      </span>
-      <TokenBreakdownTooltip
-        language={language}
-        t={t}
-        label={entry.label}
-        tokens={{
-          total: entry.tokens,
-          input: entry.inputTokens,
-          cachedInput: entry.cachedInputTokens,
-          uncachedInput: entry.uncachedInputTokens,
-          output: entry.outputTokens,
-          cacheHitRate: cacheRate,
-          requests: entry.requests,
-          nativeEvents: entry.nativeEvents,
-          unknownUsageCount: entry.unknown,
-        }}
-      >
-        <span className={styles.metricCell}>
-          <strong><CompactNumber value={entry.tokens} language={language} showExactTitle={false} /></strong>
-          <small>{formatPercent(entry.tokenShare)}</small>
-        </span>
-      </TokenBreakdownTooltip>
-      <span className={styles.metricCell}>
-        <strong>{formatAggregateCost(entry.costByCurrency, entry.cost)}</strong>
-        <small>{formatPercent(entry.costShare)}</small>
-      </span>
-      <span className={styles.rankArrow} aria-hidden="true"><IconChevronRight size="small" /></span>
-    </button>
-  );
-}
-
 function DimensionBadge({ dimension, entry }: { dimension: ConsumptionDimension; entry: ConsumptionEntry }) {
   if (dimension === "client") {
     const agentId = entry.brandId ?? "";
@@ -518,4 +419,30 @@ function formatCellCost(cost: number, costByCurrency: Record<string, number>) {
 
 function formatPercent(rate: number | null) {
   return rate == null || !Number.isFinite(rate) ? "—" : `${(rate * 100).toFixed(1)}%`;
+}
+
+/** 把真实交叉矩阵映射为共享展示模型的行；空组合与热力等级原样保留。 */
+function toUsageAnalysisMatrixRows(
+  entries: ConsumptionEntry[],
+  matrix: CrossMatrix,
+  metric: ConsumptionMetric,
+  language: "zh-CN" | "en-US",
+  t: (key: string, values?: Record<string, string | number>) => string,
+): UsageAnalysisMatrixRowModel[] {
+  return entries.map((entry) => ({
+    key: entry.key,
+    label: entry.label,
+    cells: matrix.columns.map((column) => {
+      const cell = matrix.cells.get(cellId(entry.key, column.key));
+      if (!cell) {
+        return { value: "", level: 0 as const, empty: true };
+      }
+      return {
+        value: metric === "tokens"
+          ? formatCompactNumber(cell.tokens, language)
+          : formatCellCost(cell.cost, cell.costByCurrency),
+        level: cell.level as 0 | 1 | 2 | 3 | 4,
+      };
+    }),
+  }));
 }

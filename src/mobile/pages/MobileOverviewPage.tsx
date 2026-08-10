@@ -1,5 +1,6 @@
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { Button } from "@douyinfe/semi-ui-19";
+import { UsageSummaryGridView } from "@flowlet/product-ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useMobileDailyUsage, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
@@ -272,12 +273,40 @@ export function MobileOverviewPage() {
         </div>
       </div>
 
-      <div className={styles.stats}>
-        <button type="button" className={`${styles.stat} ${styles.expandableStat}`} onClick={() => setTokenDetailsScope("period")} title={t("点击查看完整 Token 明细")}><span>Tokens</span><strong>{formatCompactNumber(summaryTokenDetails.total.total, language)}</strong><small>{t("输入 {input} · 输出 {output}", { input: formatCompactNumber(summaryTokenDetails.total.input, language), output: formatCompactNumber(summaryTokenDetails.total.output, language) })}</small></button>
-        <article className={styles.stat}><span>{t("请求量")}</span><strong>{formatInteger(summary.requests + summary.nativeEvents, language)}</strong><small>{summary.nativeEvents > 0 ? t("代理 {proxy} · 原生 {native}", { proxy: formatInteger(summary.requests, language), native: formatInteger(summary.nativeEvents, language) }) : t("{count} 天数据", { count: days.length })}</small></article>
-        <button type="button" className={`${styles.stat} ${styles.expandableStat}`} onClick={() => setTokenDetailsScope("period")} title={t("点击查看完整 Token 明细")}><span>{t("缓存输入")}</span><strong>{formatCompactNumber(summaryTokenDetails.total.cachedInput, language)}</strong><small>{t("缓存命中率")} {formatCacheHitRate(summaryTokenDetails.total.cacheHitRate)}</small></button>
-        <article className={styles.stat}><span>{t("预估费用")}</span><strong>{formatCostCny(summary.estimatedCost)}</strong><small>{t("Flowlet 可统计用量")}</small></article>
-      </div>
+      <UsageSummaryGridView
+        items={[
+          {
+            id: "tokens",
+            label: "Tokens",
+            value: formatCompactNumber(summaryTokenDetails.total.total, language),
+            detail: t("输入 {input} · 输出 {output}", { input: formatCompactNumber(summaryTokenDetails.total.input, language), output: formatCompactNumber(summaryTokenDetails.total.output, language) }),
+            actionLabel: t("点击查看完整 Token 明细"),
+            onClick: () => setTokenDetailsScope("period"),
+          },
+          {
+            id: "requests",
+            label: t("请求量"),
+            value: formatInteger(summary.requests + summary.nativeEvents, language),
+            detail: summary.nativeEvents > 0
+              ? t("代理 {proxy} · 原生 {native}", { proxy: formatInteger(summary.requests, language), native: formatInteger(summary.nativeEvents, language) })
+              : t("{count} 天数据", { count: days.length }),
+          },
+          {
+            id: "cache",
+            label: t("缓存输入"),
+            value: formatCompactNumber(summaryTokenDetails.total.cachedInput, language),
+            detail: `${t("缓存命中率")} ${formatCacheHitRate(summaryTokenDetails.total.cacheHitRate)}`,
+            actionLabel: t("点击查看完整 Token 明细"),
+            onClick: () => setTokenDetailsScope("period"),
+          },
+          {
+            id: "cost",
+            label: t("预估费用"),
+            value: formatCostCny(summary.estimatedCost),
+            detail: t("Flowlet 可统计用量"),
+          },
+        ]}
+      />
 
       <article className={styles.card}>
         <div className={styles.cardHeader}>

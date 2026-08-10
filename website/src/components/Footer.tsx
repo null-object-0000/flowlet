@@ -1,4 +1,3 @@
-import { Typography } from "@douyinfe/semi-ui-19";
 import { useI18n } from "../i18n/I18nContext";
 import styles from "./Footer.module.css";
 
@@ -9,24 +8,20 @@ export function Footer() {
 
   const linkGroups = [
     {
-      title: t.footer.links,
+      title: t.footer.product,
       links: [
-        { label: "GitHub", href: GITHUB },
-        { label: "Issues", href: `${GITHUB}/issues` },
         { label: "Releases", href: `${GITHUB}/releases` },
-      ],
-    },
-    {
-      title: t.footer.docs,
-      links: [
-        { label: "Support Matrix", href: `${GITHUB}/blob/main/docs/support-matrix.md` },
-        { label: "Architecture", href: `${GITHUB}/blob/main/docs/architecture.md` },
+        { label: "README", href: GITHUB },
         { label: "Roadmap", href: `${GITHUB}/blob/main/docs/roadmap.md` },
       ],
     },
     {
-      title: t.footer.license,
-      links: [{ label: "MIT License", href: `${GITHUB}/blob/main/LICENSE` }],
+      title: t.footer.project,
+      links: [
+        { label: "GitHub", href: GITHUB },
+        { label: "Issues", href: `${GITHUB}/issues` },
+        { label: "MIT License", href: `${GITHUB}/blob/main/LICENSE` },
+      ],
     },
   ];
 
@@ -38,16 +33,12 @@ export function Footer() {
             <img src="/flowlet-logo.png" alt="Flowlet" className={styles.logo} />
             <span className={styles.brandName}>Flowlet</span>
           </a>
-          <Typography.Paragraph type="secondary" size="small" className={styles.tagline}>
-            {t.footer.tagline}
-          </Typography.Paragraph>
+          <p className={styles.tagline}>{t.footer.tagline}</p>
         </div>
         <div className={styles.linkCols}>
           {linkGroups.map((group) => (
             <div key={group.title} className={styles.linkGroup}>
-              <Typography.Text strong className={styles.groupTitle}>
-                {group.title}
-              </Typography.Text>
+              <strong className={styles.groupTitle}>{group.title}</strong>
               {group.links.map((link) => (
                 <a
                   key={link.href}
@@ -64,9 +55,7 @@ export function Footer() {
         </div>
       </div>
       <div className={styles.bottom}>
-        <Typography.Text type="tertiary" size="small">
-          {t.footer.copyright.replace("{year}", String(new Date().getFullYear()))}
-        </Typography.Text>
+        <span>{t.footer.copyright.replace("{year}", String(new Date().getFullYear()))}</span>
       </div>
     </footer>
   );

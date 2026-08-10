@@ -1,0 +1,89 @@
+.page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  overflow: hidden;
+}
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.statCard {
+  min-width: 0;
+  height: 68px;
+  padding: 8px 13px;
+  display: grid;
+  align-content: center;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 10px;
+  background: var(--flowlet-color-surface);
+  box-shadow: 0 5px 16px rgba(43, 57, 83, 0.035);
+}
+.statCard > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); }
+.statCard > div { min-width: 0; margin-top: 3px; display: grid; gap: 2px; }
+.statCard strong { min-width: 0; overflow: hidden; font-size: 19px; font-variant-numeric: tabular-nums; line-height: 1; font-weight: 730; letter-spacing: -0.02em; text-overflow: ellipsis; white-space: nowrap; }
+.statCard small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); text-overflow: ellipsis; white-space: nowrap; }
+.statCard .successHint { color: var(--flowlet-color-success); }
+
+.toolbarSlot { min-width: 0; }
+.tableCard {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 11px;
+  background: var(--flowlet-color-surface);
+  box-shadow: var(--flowlet-shadow-card);
+}
+.tableFooter { min-height: 38px; padding: 0 12px; display: flex; align-items: center; justify-content: flex-end; border-top: 1px solid var(--flowlet-color-border); }
+.tableFooter :global(.semi-page-item) { min-width: 25px; height: 25px; line-height: 25px; border-radius: 6px; font-size: var(--flowlet-font-size-caption, 12px); }
+.grid { display: grid; grid-template-columns: 110px minmax(88px, 0.65fr) minmax(135px, 1.05fr) minmax(96px, 0.76fr) 64px 142px 76px 66px; align-items: center; column-gap: 8px; }
+.head { min-height: 36px; padding: 0 13px; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); font-weight: 600; }
+.body { min-height: 0; overflow: auto; }
+.row {
+  width: 100%;
+  min-height: 45px;
+  padding: 0 13px;
+  border: 0;
+  border-bottom: 1px solid var(--flowlet-color-border);
+  color: var(--flowlet-color-text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row:last-child { border-bottom: 0; }
+.row:hover, .row:focus-visible { background: var(--semi-color-fill-0, #f1f3f7); outline: none; }
+.row:focus-visible { box-shadow: inset 3px 0 var(--semi-color-primary, var(--flowlet-color-primary)); }
+.time, .number { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body-compact, 13px); line-height: var(--flowlet-line-height-body-compact, 18px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.metricCell { min-width: 0; display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+.metricCell strong, .metricCell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metricCell strong { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-compact, 13px); line-height: var(--flowlet-line-height-body-compact, 18px); font-weight: 650; }
+.metricCell small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); }
+.clientCell { min-width: 0; display: grid; gap: 2px; }
+.clientCell strong { overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-compact, 13px); line-height: var(--flowlet-line-height-body-compact, 18px); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.primaryCell { min-width: 0; display: grid; gap: 2px; }
+.primaryCell strong, .primaryCell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.primaryCell strong { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-compact, 13px); line-height: var(--flowlet-line-height-body-compact, 18px); font-weight: 650; }
+.primaryCell small { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); }
+.primaryCell small b { color: var(--semi-color-primary, var(--flowlet-color-primary)); font-size: inherit; font-weight: 700; }
+.streamBadge { display: inline-block; margin-left: 5px; padding: 0 4px; border-radius: 4px; background: var(--semi-color-fill-1, #e9edf3); color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption, 12px); font-weight: 500; line-height: var(--flowlet-line-height-caption, 16px); vertical-align: middle; white-space: nowrap; }
+.status { width: fit-content; min-width: 40px; padding: 3px 7px; border-radius: 5px; font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); font-weight: 650; text-align: center; }
+.success { color: var(--flowlet-color-success); background: rgba(47, 166, 74, 0.1); }
+.failure { color: var(--semi-color-danger, #e33a3a); background: var(--semi-color-danger-light-default, rgba(227, 58, 58, 0.1)); }
+.empty { min-height: 220px; display: grid; place-content: center; gap: 6px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); text-align: center; }
+.empty strong { color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong, 14px); line-height: var(--flowlet-line-height-body-strong, 20px); }
+.skeleton { cursor: default; }
+.skeleton:hover { background: transparent; }
+.skeleton > span { height: 8px; border-radius: 4px; background: var(--semi-color-fill-0, #f1f3f7); }
+
+.compact .statCard { height: 58px; }
+.compact .grid { grid-template-columns: 90px minmax(76px, 0.6fr) minmax(120px, 1fr) minmax(84px, 0.7fr) 56px 120px 64px 56px; }
+.compact .statCard strong { font-size: 15px; }
+
+@media (max-width: 900px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .page { overflow: auto; }
+  .tableCard { min-width: 860px; }
+}

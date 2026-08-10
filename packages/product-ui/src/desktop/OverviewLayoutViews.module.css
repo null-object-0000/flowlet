@@ -1,0 +1,26 @@
+.page { width: 100%; height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; overflow: hidden; }
+.grid { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(360px, .8fr); grid-template-rows: 202px minmax(0, 1fr); gap: 12px; }
+.accounts { grid-row: 1 / span 2; }
+.grid > div { min-width: 0; min-height: 0; }
+.card { min-width: 0; min-height: 0; height: 100%; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: var(--flowlet-radius-card, 12px); background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
+.card :global(.semi-card-body) { min-height: 0; height: 100%; padding: var(--flowlet-card-padding, 16px); }
+.cardBody { min-height: 0; height: 100%; display: flex; flex-direction: column; gap: 10px; }
+.header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.title { min-width: 0; display: inline-flex; align-items: center; gap: 10px; overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-section-title, 16px); font-weight: 700; line-height: var(--flowlet-line-height-section-title, 22px); white-space: nowrap; }
+.meta { padding: 3px 9px; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 12px; line-height: 16px; font-weight: 500; }
+.action { padding: 3px 0; display: inline-flex; align-items: center; gap: 2px; border: 0; color: var(--flowlet-color-primary); background: transparent; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+.description { margin-top: -2px; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 18px; }
+.cardContent { min-height: 0; width: 100%; flex: 1; }
+.list { width: 100%; height: 100%; overflow-y: auto; border: 1px solid var(--flowlet-color-border); border-radius: var(--flowlet-radius-control, 7px); }
+.row { width: 100%; min-height: 61px; padding: 8px 12px; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 0; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: var(--flowlet-color-surface); font: inherit; text-align: left; }
+button.row { cursor: pointer; }
+.row:last-child { border-bottom: 0; }
+.row:hover { background: var(--flowlet-color-surface-muted); }
+.rowLogo { width: 36px; height: 36px; display: grid; place-items: center; }
+.rowLogo > img, .rowLogo > svg { max-width: 32px; max-height: 32px; }
+.rowCopy { min-width: 0; display: grid; gap: 4px; }
+.rowCopy strong, .rowCopy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rowCopy strong { font-size: 14px; line-height: 20px; }
+.rowCopy small { color: var(--flowlet-color-text-secondary); font-size: 12px; line-height: 16px; }
+.trailing { color: var(--flowlet-color-text-secondary); font-size: 12px; white-space: nowrap; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; grid-template-rows: auto; overflow-y: auto; } .accounts { grid-row: auto; } .grid > div { min-height: 220px; } }

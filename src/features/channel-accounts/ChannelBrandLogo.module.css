@@ -65,6 +65,24 @@
   transform: scale(0.7);
 }
 
+.openrouter {
+  /* OpenRouter Brand v2：浅色主题用紫色 glyph，深色主题用荧光绿。
+     单色 Lobe SVG 作为 mask，避免把深色版荧光绿硬塞进黑色圆底。 */
+  color: #7624f4;
+  background: var(--flowlet-color-surface-muted);
+  border: 1px solid var(--flowlet-color-border);
+}
+
+.openrouter i {
+  width: 22px;
+  height: 22px;
+  background: currentColor;
+  -webkit-mask: url("/icons/lobe/openrouter.svg") center / contain no-repeat;
+  mask: url("/icons/lobe/openrouter.svg") center / contain no-repeat;
+}
+
+:global(body[theme-mode="dark"]) .openrouter { color: #c8ff00; }
+
 .chatgpt {
   color: var(--flowlet-color-text);
   background: var(--flowlet-color-surface-muted);

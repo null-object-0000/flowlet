@@ -14,6 +14,7 @@ Vendored files:
 - `kimi-color.svg`
 - `qwen-color.svg`
 - `zhipu-color.svg`
+- `openrouter.svg`
 - `claudecode.svg`
 - `opencode.svg`
 - `openai.svg`

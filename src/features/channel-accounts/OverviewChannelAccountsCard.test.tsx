@@ -55,6 +55,7 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByRole("button", { name: "添加 Kimi" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 Qwen" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 Z.AI" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 OpenRouter" })).toBeInTheDocument();
     expect(screen.queryByText("管理账号")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "添加 Qwen" }));
@@ -606,5 +607,35 @@ describe("OverviewChannelAccountsCard", () => {
 
     expect(container.querySelector(".semi-badge-dot.semi-badge-warning")).toBeTruthy();
     vi.useRealTimers();
+  });
+
+  it("shows an explicit unlimited-key state for OpenRouter after a successful sync", () => {
+    const openRouterAccount: ChannelAccount = {
+      ...account,
+      id: "account-openrouter",
+      channel_id: "openrouter",
+      name: "OpenRouter 主账号",
+      resource_mode: "pay_as_you_go",
+      management_key: null,
+    };
+    const syncedAt = "2026-08-10T04:55:17Z";
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[openRouterAccount]}
+        channels={[...channels, { id: "openrouter", name: "OpenRouter", supports_balance_query: true } as ChannelPreset]}
+        snapshots={[{
+          account_id: openRouterAccount.id,
+          balance: null,
+          currency: "USD",
+          synced_at: syncedAt,
+        } as AccountBalanceSnapshot]}
+        onCreate={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("未设置 Key 限额")).toBeInTheDocument();
+    expect(screen.queryByText("尚未同步")).not.toBeInTheDocument();
   });
 });

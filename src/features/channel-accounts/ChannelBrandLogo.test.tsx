@@ -12,4 +12,10 @@ describe("ChannelBrandLogo", () => {
     const { container } = render(<ChannelBrandLogo channelId="qwen" name="Qwen" />);
     expect(container.querySelector('img[src="/icons/lobe/qwen-color.svg"]')).toBeInTheDocument();
   });
+
+  it("uses the vendored themeable OpenRouter mark", () => {
+    const { container } = render(<ChannelBrandLogo channelId="openrouter" name="OpenRouter" />);
+    expect(container.querySelector("span > i")).toBeInTheDocument();
+    expect(container.querySelector("img")).not.toBeInTheDocument();
+  });
 });

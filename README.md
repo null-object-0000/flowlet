@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://github.com/null-object-0000/flowlet/stargazers"><img src="https://img.shields.io/github/stars/null-object-0000/flowlet?style=flat-square" alt="GitHub Stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563eb?style=flat-square" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/status-early%20preview-f59e0b?style=flat-square" alt="Early Preview" />
+  <a href="https://github.com/null-object-0000/flowlet/releases"><img src="https://img.shields.io/badge/release-v0.1.0-2563eb?style=flat-square" alt="Flowlet v0.1.0" /></a>
   <img src="https://img.shields.io/badge/desktop-Tauri%202-24c8db?style=flat-square" alt="Tauri 2" />
 </p>
 
@@ -16,9 +16,10 @@
   <strong>官网：<a href="https://flowlet.snewbie.site">flowlet.snewbie.site</a></strong>
 </p>
 
-> [!IMPORTANT]
-> Flowlet 仍处于早期预览阶段，功能迭代较快，暂未发布正式 GitHub Release。
-> 当前推荐从源码运行或自行构建。欢迎 Star、试用并通过
+> [!NOTE]
+> Flowlet v0.1.0 是首个正式公开版本。可以从
+> [GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载桌面安装包或
+> Windows 便携版。当前产物尚未签名，系统可能提示“未知发布者”；也欢迎通过
 > [Issues](https://github.com/null-object-0000/flowlet/issues) 提交反馈。
 
 ## 为什么是 Flowlet
@@ -83,6 +84,8 @@ Flowlet 支持把最小化的每日用量快照同步到兼容 S3 的对象存�
 | DeepSeek | ✅ | ✅ | ✅ | 官方余额 |
 | Kimi / Moonshot | ✅ | ✅ | ✅ | 官方余额 |
 | 千问 Qwen | ✅ | ✅ | ✅ | Token Plan 套餐余量 |
+| Z.AI | ✅ | ✅ | ✅ | — |
+| OpenRouter | ✅ | ✅ | ✅ | API Key 用量与 Credits |
 | 自定义渠道 | 取决于上游 | 取决于上游 | 标准 OpenAI `/models` | — |
 
 ### Agent
@@ -92,10 +95,11 @@ Flowlet 支持把最小化的每日用量快照同步到兼容 S3 的对象存�
 | Claude Code | ✅ | ✅ | ✅ |
 | OpenCode CLI / Desktop | ✅ | ✅ | ✅ |
 | Pi | ✅ | ✅ | ✅ |
-| ChatGPT（Codex）/ Codex CLI | ✅ | 暂未开放 | ✅ |
+| ChatGPT（Codex）/ Codex CLI | ✅ | ✅ | ✅ |
 
-Flowlet 当前正式支持 Chat Completions 与 Anthropic Messages 透明转发。完整的渠道、
-11 个模型、协议和 Agent 能力边界见 [当前支持矩阵](docs/support-matrix.md)。
+Flowlet 当前正式支持 Chat Completions、Anthropic Messages 与无状态 Responses API
+透明转发。完整的渠道、14 个模型、协议和 Agent 能力边界见
+[当前支持矩阵](docs/support-matrix.md)。
 
 ## 3 分钟启动
 

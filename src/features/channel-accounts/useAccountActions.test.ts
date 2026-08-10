@@ -138,6 +138,42 @@ describe("refreshSavedAccounts", () => {
     expect(result).toEqual({ balanceRequested: false, routesUpdated: false, failures: [] });
   });
 
+  it("auto-syncs balance for an OpenRouter account (supports_balance_query)", async () => {
+    const openrouterAccount = {
+      ...account,
+      id: "account-openrouter",
+      channel_id: "openrouter",
+      name: "OpenRouter 主账号",
+      api_key: "sk-or-v1-test",
+      exposed_models: ["deepseek/deepseek-v4-flash", "qwen/qwen3.7-max"],
+      synced_models: ["deepseek/deepseek-v4-flash", "qwen/qwen3.7-max"],
+    } as ChannelAccount;
+    const openrouterPreset = {
+      id: "openrouter",
+      vendor: "openrouter",
+      supports_balance_query: true,
+      supports_model_list: true,
+      supported_protocols: ["openai", "anthropic", "responses"],
+    } as ChannelPreset;
+    const queryBalance = vi.spyOn(accountCommands, "queryBalance").mockResolvedValue({
+      balance: 87.5,
+      currency: "USD",
+      is_available: true,
+      error: null,
+    });
+    const listRoutes = vi.spyOn(modelCommands, "listRouteCandidates").mockResolvedValue([]);
+    const saveRoutes = vi.spyOn(modelCommands, "saveRouteCandidates").mockResolvedValue();
+
+    const result = await refreshSavedAccounts([openrouterAccount], [openrouterPreset]);
+
+    expect(queryBalance).toHaveBeenCalledWith(openrouterAccount.id);
+    expect(result).toEqual({ balanceRequested: true, routesUpdated: true, failures: [] });
+    // 未设账号级 OpenAI Base URL 覆盖，不跳过官方余额同步。
+    expect(queryBalance).toHaveBeenCalledOnce();
+    expect(listRoutes).toHaveBeenCalledOnce();
+    expect(saveRoutes).toHaveBeenCalled();
+  });
+
   it("keeps the save successful and reports upstream refresh failures", async () => {
     vi.spyOn(accountCommands, "queryBalance").mockRejectedValue(new Error("余额接口超时"));
     vi.spyOn(modelCommands, "listRouteCandidates").mockResolvedValue([]);

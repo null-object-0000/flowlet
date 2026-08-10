@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Button, Modal, Space, Toast, Typography } from "@douyinfe/semi-ui-19";
-import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
+import type { AccountBalanceResult, AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import { CHATGPT_CHANNEL_ID } from "../../domains/channel/types";
 import type { ScrapeBalanceResult } from "../../domains/account/commands";
@@ -26,7 +26,7 @@ type Props = {
   onSaveAccounts: (accounts: ChannelAccount[]) => Promise<void>;
   onTestConnection: (input: TestInput) => Promise<void>;
   onSaveBalanceSnapshot: (snapshot: AccountBalanceSnapshot) => Promise<void>;
-  onSyncBalance: (accountId: string) => Promise<void>;
+  onSyncBalance: (accountId: string) => Promise<AccountBalanceResult | void>;
   onScrape: (accountId: string) => Promise<ScrapeBalanceResult>;
   onAuthorizeChatGpt?: () => Promise<void>;
   authorizationBusy?: boolean;

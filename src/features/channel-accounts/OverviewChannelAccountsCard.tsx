@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Dropdown, Switch, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconMore, IconPlay, IconPlus, IconStop } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
-import { CHATGPT_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
+import { CHATGPT_CHANNEL_ID, OPENROUTER_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
@@ -263,6 +263,7 @@ const EMPTY_CHANNEL_OPTIONS = [
   { id: "kimi", name: "Kimi", actionLabel: "添加 Kimi" },
   { id: "qwen", name: "Qwen", actionLabel: "添加 Qwen" },
   { id: "zhipu", name: "Z.AI", actionLabel: "添加 Z.AI" },
+  { id: "openrouter", name: "OpenRouter", actionLabel: "添加 OpenRouter" },
   { id: CHATGPT_CHANNEL_ID, name: "ChatGPT", actionLabel: "ChatGPT 授权登录" },
 ];
 
@@ -291,6 +292,14 @@ function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
     const balanceText = snapshot?.balance == null ? "" : `${formatBalance(snapshot.balance, snapshot.currency, language)}${snapshot.currency ? ` ${snapshot.currency}` : ""}`;
     const packs = snapshot?.token_pack_remaining == null ? "" : t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
     return { label: t("余额"), value: balanceText, secondary: packs };
+  }
+  if (
+    account.channel_id === OPENROUTER_CHANNEL_ID
+    && !account.management_key?.trim()
+    && snapshot?.synced_at
+    && snapshot.balance == null
+  ) {
+    return { label: "", value: t("未设置 Key 限额"), secondary: "" };
   }
   const tokenPack = (account.resource_mode ?? "pay_as_you_go") === "token_pack";
   if (tokenPack) {

@@ -204,6 +204,31 @@
         "endpoints": {
           "models": "https://open.bigmodel.cn/api/paas/v4/models"
         }
+      },
+      {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "vendor": "openrouter",
+        "platform_url": "https://openrouter.ai/settings/keys",
+        "supported_protocols": ["openai", "anthropic", "responses"],
+        "openai_base_url": "https://openrouter.ai/api/v1",
+        "anthropic_base_url": "https://openrouter.ai/api",
+        "openai_auth": "bearer",
+        "anthropic_auth": "bearer",
+        "default_model": "deepseek-v4-flash",
+        "small_model": null,
+        "supports_model_list": true,
+        "supports_model_detail": false,
+        "supports_price_sync": false,
+        "supports_balance_query": true,
+        "supports_quota_query": false,
+        "supports_usage_query": false,
+        "supports_scrape_balance": false,
+        "endpoints": {
+          "models": "https://openrouter.ai/api/v1/models",
+          "balance": "https://openrouter.ai/api/v1/key",
+          "credits": "https://openrouter.ai/api/v1/credits"
+        }
       }
     ],
     "default_exposed_models": {

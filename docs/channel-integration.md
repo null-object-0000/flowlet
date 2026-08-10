@@ -37,17 +37,18 @@
 
 ## 2. 已接入渠道对照
 
-| 能力 | LongCat | DeepSeek | Kimi | Qwen | Z.AI | 自定义渠道 |
-|------|---------|----------|------|-----------|------------|------------|
-| 渠道 ID | `longcat` | `deepseek` | `kimi` | `qwen` | `zhipu` | `custom` |
-| OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `https://open.bigmodel.cn/api/paas/v4` | 账号级填写 |
-| Anthropic Base URL | `https://api.longcat.chat/anthropic` | `https://api.deepseek.com/anthropic` | `https://api.moonshot.cn/anthropic` | `https://dashscope.aliyuncs.com/apps/anthropic` | `https://open.bigmodel.cn/api/anthropic` | 账号级填写 |
-| Responses | ✅ 从 OpenAI Base URL 派生（无状态） | ✅ 从 OpenAI Base URL 派生（无状态，暂仅 v4-flash） | — 不支持 | ✅ 从 OpenAI Base URL 派生（仅透传无状态子集） | — 上游未确认 | 填写 OpenAI Base URL 即启用 |
-| 鉴权 | Bearer | Bearer | Bearer | Bearer | OpenAI Bearer / Anthropic x-api-key | OpenAI Bearer / Anthropic x-api-key |
-| 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 | 标准模型列表（无上下文详情） | 标准 OpenAI `/models`（端点不以 `/v1` 结尾，必须 `endpoints.models` 覆盖） | 标准 OpenAI `/models` |
-| 自动余额 | 否 | 是 | 是 | 否 | 否 | 否 |
-| 资源模式 | Token 资源包 UI | 否 | 否 | API 按量付费 + Token Plan 订阅双模式（API 手动维护余额；Token Plan 额度仅官方控制台可见） | 手动维护（按量付费） | 手动维护 |
-| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.6-flash → flash` | `glm-5.2 → pro`、`glm-4.7 → pro`、`glm-4.5-air → flash` | 无 |
+| 能力 | LongCat | DeepSeek | Kimi | Qwen | Z.AI | OpenRouter | 自定义渠道 |
+|------|---------|----------|------|-----------|------------|------------|------------|
+| 渠道 ID | `longcat` | `deepseek` | `kimi` | `qwen` | `zhipu` | `openrouter` | `custom` |
+| OpenAI Base URL | `https://api.longcat.chat/openai` | `https://api.deepseek.com` | `https://api.moonshot.cn/v1` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `https://open.bigmodel.cn/api/paas/v4` | `https://openrouter.ai/api/v1` | 账号级填写 |
+| Anthropic Base URL | `https://api.longcat.chat/anthropic` | `https://api.deepseek.com/anthropic` | `https://api.moonshot.cn/anthropic` | `https://dashscope.aliyuncs.com/apps/anthropic` | `https://open.bigmodel.cn/api/anthropic` | `https://openrouter.ai/api` | 账号级填写 |
+| Responses | ✅ 从 OpenAI Base URL 派生（无状态） | ✅ 从 OpenAI Base URL 派生（无状态，暂仅 v4-flash） | — 不支持 | ✅ 从 OpenAI Base URL 派生（仅透传无状态子集） | — 上游未确认 | ✅ 从 OpenAI Base URL 派生（`/api/v1/responses`，仅无状态透传） | 填写 OpenAI Base URL 即启用 |
+| 鉴权 | Bearer | Bearer | Bearer | Bearer | OpenAI Bearer / Anthropic x-api-key | Bearer | OpenAI Bearer / Anthropic x-api-key |
+| 模型同步 | 列表后逐模型查详情 | 标准模型列表 | 模型列表直接携带部分详情 | 标准模型列表（无上下文详情） | 标准 OpenAI `/models`（端点不以 `/v1` 结尾，必须 `endpoints.models` 覆盖） | 标准 OpenAI `/models`（模型 ID 带 `vendor/` 前缀，按规范模型剥前缀映射白名单） | 标准 OpenAI `/models` |
+| 余额端点 | — | `GET /user/balance` | `GET /v1/users/me/balance` | — | — | 普通 Key：`GET /api/v1/key`；Management Key：`GET /api/v1/credits` | — |
+| 自动余额 | 否 | 是 | 是 | 否 | 否 | 是 | 否 |
+| 资源模式 | Token 资源包 UI | 否 | 否 | API 按量付费 + Token Plan 订阅双模式（API 手动维护余额；Token Plan 额度仅官方控制台可见） | 手动维护（按量付费） | 手动维护（按量付费） | 手动维护 |
+| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.6-flash → flash` | `glm-5.2 → pro`、`glm-4.7 → pro`、`glm-4.5-air → flash` | 天然支持全部白名单模型（`/models` 返回全部主流模型，用户显式勾选） | 无 |
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
 
@@ -64,6 +65,29 @@ Z.AI（`zhipu`）是首个「OpenAI 兼容但路径不带 `/v1`」的官方渠�
 OpenAI-compatible `/models` 的实际返回结果，并统一受 Flowlet 全局白名单约束：
 白名单外模型照常展示，但标记为“不支持”且不可勾选。最终候选必须同时存在于
 最近一次 `/models` 结果、用户勾选列表和全局白名单中。
+
+OpenRouter（`openrouter`）是聚合渠道：OpenAI-compatible 端点为
+`https://openrouter.ai/api/v1`，Anthropic 兼容端点（Anthropic Skin）为
+`https://openrouter.ai/api`，均使用 Bearer 鉴权；Responses 端点从 OpenAI Base
+URL 派生为 `https://openrouter.ai/api/v1/responses`，官方仅支持**无状态**透传
+（`store: true` 或 `previous_response_id` 非空会返回 400），与 Flowlet 的
+responses 语义一致。模型列表走标准 OpenAI `/models`（`/api/v1/models`），返回
+的模型 ID 带 `vendor/` 命名空间前缀（如 `deepseek/deepseek-v4-flash`）；白名单
+判断和规范模型映射会先剥离该前缀（`canonical_model_key` / `canonicalModelKey`），
+路由 `upstream_model` 仍保留上游原始 ID 用于转发。由于 OpenRouter `/models`
+返回全部主流模型，其账号天然**可以**勾选开放任意 Flowlet 白名单模型——未来白
+名单新增模型时，只要 `/models` 返回即可由用户勾选开放；开放哪些模型由用户在
+账号编辑器中显式勾选，不默认全勾选（`config.json` 不为 `openrouter` 声明
+`default_exposed_models`）。
+
+OpenRouter 支持两级资源查询（`supports_balance_query=true`）：普通模型调用 API Key
+走 `GET /api/v1/key`，展示该 Key 的 `limit_remaining`；没有配置 Key 消费上限时该字段
+为 null，同步仍成功，UI 展示“未设置 Key 限额”。用户可在账号编辑器额外维护可选的
+Management Key；配置后改走 `GET /api/v1/credits`，以 `total_credits - total_usage`
+展示真实账户 Credits 余额。Management Key 不参与模型请求、连接测试和路由，认证失败
+也不得把普通 API Key 标记为 `invalid_key`。实现仍由
+`sync.rs::query_openrouter_balance` + `commands::scrape.rs::query_balance` 分发，保存后
+前端 `refreshSavedAccounts` 自动触发同步，快照落库并在概览页展示。
 
 Qwen 是双资源模式渠道：默认 **API 按量付费**（通用 `sk-` 前缀 Key + 渠道级
 dashscope 端点，`resource_mode = "pay_as_you_go"`），并支持 **Token Plan** 订阅

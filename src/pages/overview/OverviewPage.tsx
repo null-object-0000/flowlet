@@ -139,7 +139,7 @@ export function OverviewPage() {
         onSaveAccounts={(next) => accountActions.saveAll.mutateAsync(next).then(() => undefined)}
         onTestConnection={(input) => accountActions.testConnection.mutateAsync(input)}
         onSaveBalanceSnapshot={(snapshot) => accountActions.saveBalanceSnapshot.mutateAsync(snapshot)}
-        onSyncBalance={(accountId) => accountActions.queryBalance.mutateAsync(accountId).then(() => undefined)}
+        onSyncBalance={(accountId) => accountActions.queryBalance.mutateAsync(accountId)}
         onScrape={(accountId) => accountActions.scrapeBalance.mutateAsync(accountId)}
         onAuthorizeChatGpt={authorizeChatGptFromDrawer}
         authorizationBusy={codexAccountAuthorization.isPending}

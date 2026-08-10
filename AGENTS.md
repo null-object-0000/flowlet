@@ -188,7 +188,7 @@ Flowlet 当前支持：
 * Responses 仅保证无状态透传：不支持存储响应管理接口
   （retrieve / delete / input_items，非 POST 请求返回 405），
   不保证 `previous_response_id` / `store` 的多账号粘性；
-  当前由 LongCat、DeepSeek、Qwen 渠道承载，Kimi 不支持该协议；
+  当前由 LongCat、DeepSeek、Qwen、OpenRouter 渠道承载，Kimi 不支持该协议；
 * 对外模型名使用 `virtual_model_id`；
 * `upstream_model` 只用于向上游发起请求前替换模型名；
 * 直接模型请求必须匹配 `virtual_model_id`；
@@ -330,7 +330,7 @@ Flowlet 维护「上游变体 → 规范模型 ID」映射表（前端
 
 * 顶部 service-strip 完整展示代理状态、今日 Token、客户端接入和 Client Token；
 * 主体仍展示渠道账号、开放模型和 AI Agent 接入三个模块；
-* 渠道账号模块在空状态中展示简短引导，以及 LongCat、DeepSeek、Kimi、Qwen 和 Z.AI 添加入口；
+* 渠道账号模块在空状态中展示简短引导，以及 LongCat、DeepSeek、Kimi、Qwen、Z.AI 和 OpenRouter 添加入口；
 * 开放模型模块展示与当前配置相符的空状态，引导用户添加账号并明确选择开放模型；
 * AI Agent 接入保持可用，允许用户提前查看或写入客户端配置；
 * 不展示独立的“开始接入”页面或大段三步说明。

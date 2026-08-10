@@ -104,13 +104,17 @@ describe("hasChannelAutoSync", () => {
     ).toBe(false);
   });
 
-  it("auto-syncs DeepSeek / Kimi official-balance-api accounts regardless of sync mode", () => {
+  it("auto-syncs DeepSeek / Kimi / OpenRouter official-balance-api accounts regardless of sync mode", () => {
     const deepseek = makePreset({ id: "deepseek", supports_balance_query: true, supports_scrape_balance: false });
     expect(
       hasChannelAutoSync(makeAccount({ channel_id: "deepseek", resource_sync_mode: "manual" }), deepseek),
     ).toBe(true);
     const kimi = makePreset({ id: "kimi", supports_balance_query: true, supports_scrape_balance: false });
     expect(hasChannelAutoSync(makeAccount({ channel_id: "kimi", resource_sync_mode: "manual" }), kimi)).toBe(true);
+    const openrouter = makePreset({ id: "openrouter", supports_balance_query: true, supports_scrape_balance: false });
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "openrouter", resource_sync_mode: "manual" }), openrouter),
+    ).toBe(true);
   });
 
   it("skips official-balance-api accounts with a custom OpenAI endpoint override", () => {

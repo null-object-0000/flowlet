@@ -261,6 +261,80 @@ describe("AccountActionOverlay", () => {
     expect(await screen.findByText("余额已同步")).toBeInTheDocument();
   });
 
+  it("distinguishes an unlimited OpenRouter API key from an unsynchronized account balance", async () => {
+    const user = userEvent.setup();
+    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
+    const onSyncBalance = vi.fn().mockResolvedValue({
+      balance: null,
+      currency: "USD",
+      is_available: true,
+      error: null,
+    });
+    const openRouterAccount: ChannelAccount = {
+      ...account,
+      id: "account-openrouter",
+      channel_id: "openrouter",
+      name: "OpenRouter 主账号",
+      resource_mode: "pay_as_you_go",
+      management_key: null,
+    };
+    const openRouterPreset: ChannelPreset = {
+      ...preset,
+      id: "openrouter",
+      name: "OpenRouter",
+      supports_balance_query: true,
+    };
+    const syncedAt = "2026-08-10T04:55:17Z";
+
+    render(
+      <AccountActionOverlay
+        request={{ kind: "edit", accountId: openRouterAccount.id }}
+        accounts={[openRouterAccount]}
+        snapshots={[{
+          id: "snapshot-openrouter",
+          account_id: openRouterAccount.id,
+          balance: null,
+          currency: "USD",
+          token_pack_total: null,
+          token_pack_used: null,
+          token_pack_remaining: null,
+          token_pack_expire_at: null,
+          source: "sync",
+          synced_at: syncedAt,
+          remark: "OpenRouter API Key 限额同步",
+          created_at: syncedAt,
+          updated_at: syncedAt,
+        }]}
+        presets={[openRouterPreset]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={onSaveAccounts}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSyncBalance={onSyncBalance}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByLabelText("Management Key")).toHaveAttribute("type", "password");
+    expect(screen.getAllByRole("link", { name: /前往查看/ })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ href: "https://openrouter.ai/settings/management-keys" }),
+    ]));
+    expect(screen.getByText("API Key 限额")).toBeInTheDocument();
+    expect(screen.getByText("未设置 Key 限额")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /刷新/ }));
+    expect(await screen.findByText("Key 限额状态已同步")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Management Key"), "sk-or-management");
+    expect(screen.getByText("账户 Credits")).toBeInTheDocument();
+    expect(screen.getByText("保存后自动同步")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /刷新/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    expect(onSaveAccounts).toHaveBeenCalledWith([
+      expect.objectContaining({ management_key: "sk-or-management" }),
+    ]);
+  });
+
   it("fills Token Plan endpoints when selecting the Qwen subscription mode", async () => {
     const user = userEvent.setup();
     const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();

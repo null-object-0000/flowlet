@@ -12,6 +12,8 @@ export type ChannelAccount = {
   channel_id: string;
   name: string;
   api_key: string;
+  /** OpenRouter Management Key，仅用于读取账户 Credits，不参与模型请求或路由。 */
+  management_key?: string | null;
   enabled: boolean;
   priority: number;
   remark: string | null;
@@ -91,6 +93,7 @@ export function newAccount(channelId: string, index: number): ChannelAccount {
     channel_id: channelId,
     name: `账号 ${index + 1}`,
     api_key: "",
+    management_key: null,
     enabled: true,
     priority: index,
     remark: "",

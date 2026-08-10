@@ -103,7 +103,7 @@ LongCat + DeepSeek first 阶段使用三层概念：
 ```
 
 - Channel 是服务商模板，当前首发渠道是 LongCat 和 DeepSeek。
-- Account 是用户在某个渠道下配置的一组访问身份，当前版本明确一个账号只对应一个 API Key。
+- Account 是用户在某个渠道下配置的一组访问身份；每个账号只有一个参与模型请求和路由的 API Key。OpenRouter 可额外保存一个只读账户 Credits 的 Management Key，该辅助凭证不参与代理请求。
 - Model 归属于渠道，不归属于账号，例如 LongCat-2.0。
 
 路由候选使用：
@@ -238,12 +238,12 @@ Channel Account 是用户在某个渠道下配置的一组访问身份：
 
 - 关联 `channel_id`。
 - 保存账号名称。
-- 保存 API Key。
+- 保存一个参与模型请求的 API Key；OpenRouter 可选保存仅用于账户 Credits 查询的 Management Key。
 - 保存优先级。
 - 保存是否启用。
 - 保存最近使用时间、最近错误和备注。
 
-当前版本明确一个账号只对应一个 API Key，不引入 Credential 概念。普通用户不需要理解 `base_url`、`auth_type`、`headers_json` 等技术字段。UI 默认展示“选择渠道、填写账号 API Key、选择模型、测试连接、保存并启用”，高级设置再暴露底层字段。
+当前版本明确一个账号只对应一个路由 API Key，不引入通用 Credential 概念。OpenRouter 的 Management Key 是渠道专用辅助字段，只调用官方 `/credits`，不会进入请求转发。普通用户不需要理解 `base_url`、`auth_type`、`headers_json` 等技术字段。UI 默认展示“选择渠道、填写账号 API Key、选择模型、测试连接、保存并启用”，高级设置再暴露底层字段。
 
 ## ChannelAdapter
 

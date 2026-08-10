@@ -432,6 +432,73 @@ describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)",
   });
 });
 
+describe("OpenRouter aggregate channel (vendor/model IDs)", () => {
+  const openrouterPreset = {
+    id: "openrouter",
+    vendor: "openrouter",
+    supported_protocols: ["openai", "anthropic", "responses"],
+  } as ChannelPreset;
+  const account = {
+    id: "account-openrouter",
+    channel_id: "openrouter",
+    api_key: "sk-or-test",
+    enabled: true,
+    exposed_models: ["deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "z-ai/glm-5.2"],
+    synced_models: ["deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "z-ai/glm-5.2"],
+  } as ChannelAccount;
+
+  it("maps vendor-prefixed upstream IDs to canonical whitelist models", () => {
+    const routes = mergeDefaultRoutes([], [account], [openrouterPreset]);
+    const pairs = routes.map((route) => [route.virtual_model_id, route.upstream_model] as const);
+    // 每个声明的协议（openai / anthropic / responses）各生成三个直连路由，按勾选顺序排列。
+    expect(pairs).toEqual([
+      ["deepseek-v4-flash", "deepseek/deepseek-v4-flash"],
+      ["qwen3.7-max", "qwen/qwen3.7-max"],
+      ["glm-5.2", "z-ai/glm-5.2"],
+      ["deepseek-v4-flash", "deepseek/deepseek-v4-flash"],
+      ["qwen3.7-max", "qwen/qwen3.7-max"],
+      ["glm-5.2", "z-ai/glm-5.2"],
+      ["deepseek-v4-flash", "deepseek/deepseek-v4-flash"],
+      ["qwen3.7-max", "qwen/qwen3.7-max"],
+      ["glm-5.2", "z-ai/glm-5.2"],
+    ]);
+    expect(routes.every((route) => route.channel_id === "openrouter")).toBe(true);
+    // responses 协议确实生成路由。
+    expect(new Set(routes.map((route) => route.client_protocol))).toEqual(
+      new Set(["openai", "anthropic", "responses"]),
+    );
+  });
+
+  it("filters vendor-prefixed models outside the Flowlet whitelist", () => {
+    const withStranger = {
+      ...account,
+      exposed_models: ["deepseek/deepseek-v4-flash", "openai/gpt-5.5"],
+      synced_models: ["deepseek/deepseek-v4-flash", "openai/gpt-5.5"],
+    } as ChannelAccount;
+    const routes = mergeDefaultRoutes([], [withStranger], [openrouterPreset]);
+    const upstreams = new Set(routes.map((route) => route.upstream_model));
+    expect(upstreams).toEqual(new Set(["deepseek/deepseek-v4-flash"]));
+  });
+
+  it("keeps vendor-prefixed routes through reconciliation while selected and synced", () => {
+    const existing: RouteCandidate = {
+      id: "route-account-openrouter-deepseek/deepseek-v4-flash-openai-0-0",
+      virtual_model_id: "deepseek-v4-flash",
+      channel_id: "openrouter",
+      account_id: "account-openrouter",
+      upstream_model: "deepseek/deepseek-v4-flash",
+      client_protocol: "openai",
+      priority: 0,
+      enabled: false,
+      created_at: "old",
+      updated_at: "old",
+    };
+    const next = reconcileAccountRoutes([existing], [account], [openrouterPreset]);
+    expect(next.find((route) => route.id === existing.id)?.enabled).toBe(false);
+    expect(next.some((route) => route.upstream_model === "deepseek/deepseek-v4-flash")).toBe(true);
+  });
+});
+
 describe("reconcileAccountRoutes", () => {
   const preset = {
     id: "deepseek",

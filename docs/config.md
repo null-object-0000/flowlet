@@ -35,7 +35,13 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 |------|------|
 | `config.json`（仓库根目录） | 运行时外部文件 + 编译时 `include_str!` 默认值 |
 | `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL` | 前端创建默认开放模型时的兜底常量 |
-| `src-tauri/src/core/config.rs` 中的 `ChannelPreset::longcat()` / `ChannelPreset::deepseek()` / `ChannelPreset::kimi()` / `ChannelPreset::qwen()` | Rust 侧的工厂默认值 |
+| `src-tauri/src/core/config.rs` 中的 `ChannelPreset::longcat()` / `ChannelPreset::deepseek()` / `ChannelPreset::kimi()` / `ChannelPreset::qwen()` / `ChannelPreset::zhipu()` / `ChannelPreset::openrouter()` | Rust 侧的工厂默认值 |
+
+> OpenRouter（`openrouter`）是聚合渠道：其 `/models` 返回全部主流模型（带
+> `vendor/` 前缀），因此天然可以勾选开放任意 Flowlet 白名单模型；开放哪些模型
+> 由用户在账号编辑器中**显式勾选**，与普通渠道一致，**不进入**
+> `default_exposed_models` / `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`（不维护静态默认
+> 开放列表，也不默认全勾选）。
 
 新增渠道或修改默认开放模型时，务必同步更新对应位置，否则可能出现「外部配置 → SQLite → 前端展示」链条不一致的问题。
 
@@ -193,7 +199,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 ### 6.1 `channels` — 渠道模板
 
-每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、Qwen、Z.AI）。
+每个元素定义一个上游渠道（如 LongCat、DeepSeek、Kimi、Qwen、Z.AI、OpenRouter）。
 
 ```jsonc
 {
@@ -255,7 +261,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `supports_quota_query` | `bool` | 否 | `false` | 是否支持查询额度 |
 | `supports_usage_query` | `bool` | 否 | `false` | 是否支持查询用量 |
 | `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
-| `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"` |
+| `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"`；OpenRouter 额外使用 `"credits"` |
 | `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"`），value 可包含 `console_url`、可选的 `console_url_secondary`、可选的 `console_url_tertiary`（第三阶段导航 URL，用于 LongCat 加载 `/platform/fuel_pack` 补全已用尽/已过期的历史资源包）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组（活跃包来自第一阶段 `token-packs/summary`，历史包来自第三阶段 `token-packs/list`，按 `lotId=resourceId` 去重合并，历史包以 `_fromList: true` 标记），原始接口 payload 单独写入 `raw_scraped_json`。Qwen `token_plan` 模式额外拦截 `/tokenplan/personal/api/v2/reset-card/list`（页面加载时自动请求的可选槽位：有重置卡时进入 `raw_scraped_json` bundle，无卡不阻断同步，不进入 `required_slots`）。页面始终自行生成 Cookie、签名和 Header；Windows/Linux 优先从原生 WebView 网络层读取精确匹配的目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。 |
 
 内置 `custom` 模板用于中转站等完全自定义账号。渠道级 Base URL 保持为空，
@@ -263,6 +269,28 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 一个协议地址，Flowlet 只为实际填写地址的协议生成路由。OpenAI-compatible 使用
 Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI `/models`
 拉取，并统一受全局白名单约束；不提供手工添加、余额、额度、价格或控制台抓取能力。
+
+`openrouter` 是聚合渠道：OpenAI-compatible 端点为 `https://openrouter.ai/api/v1`，
+Anthropic 兼容端点（Anthropic Skin）为 `https://openrouter.ai/api`，均使用 Bearer
+鉴权；**Responses 协议**（`"responses"`）从 OpenAI Base URL 派生为
+`https://openrouter.ai/api/v1/responses`，官方仅支持**无状态**透传（`store: true`
+或 `previous_response_id` 非空会返回 400），与 Flowlet 的 responses 语义一致。
+**资源查询**（`supports_balance_query=true`）根据账号凭证分两级处理：未配置
+`channel_accounts.management_key` 时走 `GET /api/v1/key`（`endpoints.balance`），以
+普通模型调用 API Key 查询该 Key 的 `limit_remaining`；未设置消费限额时返回 null，
+前端展示“未设置 Key 限额”，不再误报“尚未同步”。配置 Management Key 后改走
+`GET /api/v1/credits`（`endpoints.credits`），使用 `total_credits - total_usage` 展示真实
+账户 Credits 余额。Management Key 只用于 Credits 查询，不参与模型请求、连接测试或
+路由鉴权；保存后立即生效并触发同步，无需重启代理。账号工作区启用时，该字段与 API
+Key 一样包含在端到端加密的账号目录中。
+模型列表走标准 OpenAI `/models`（`/api/v1/models`，模板已用 `endpoints.models`
+显式覆盖）。OpenRouter `/models` 返回的模型 ID 带 `vendor/` 命名空间前缀（如
+`deepseek/deepseek-v4-flash`）：白名单判断和规范模型映射会先剥离该前缀（Rust
+`canonical_model_key` / 前端 `canonicalModelKey`），路由 `upstream_model` 仍保留
+上游原始 ID 用于转发。由于 OpenRouter `/models` 返回全部主流模型，其账号天然
+**可以**勾选开放任意 Flowlet 白名单模型——未来白名单新增模型时，只要 `/models`
+返回即可由用户勾选开放；开放哪些模型由用户在账号编辑器中显式勾选，不默认全勾选
+（`config.json` 不为 `openrouter` 声明 `default_exposed_models`）。
 
 **Responses 协议端点解析**：
 
@@ -272,7 +300,9 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
   LongCat → `https://api.longcat.chat/openai/v1/responses`；
   Qwen → `https://dashscope.aliyuncs.com/compatible-mode/v1/responses`；
   DeepSeek → `https://api.deepseek.com/v1/responses`（裸根入口
-  `/responses` 则拼出官方规范端点 `https://api.deepseek.com/responses`）。
+  `/responses` 则拼出官方规范端点 `https://api.deepseek.com/responses`）；
+  OpenRouter → `https://openrouter.ai/api/v1/responses`（官方仅无状态透传，
+  `store: true` / `previous_response_id` 非空会返回 400，与 Flowlet 语义一致）。
 - 鉴权复用 `openai_auth`；账号级覆盖复用 `base_url_override`。
 - 自定义渠道只有在填写了 OpenAI Base URL 时才生成 responses 路由。
 - 仅无状态透传 `POST /v1/responses`：存储响应管理接口
@@ -395,6 +425,13 @@ Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI 
   不覆盖用户已有的启停状态、优先级和时间戳；删除动作由前端 `reconcileAccountRoutes` 在保存时执行）。
 - `custom` 渠道不例外：模型必须来自该账号 `/models` 返回结果，并与全局白名单取交集；
   白名单外模型展示为“不支持”且禁用勾选，不能进入 `exposed_models` 或生成路由。
+- `openrouter` 是聚合渠道：`/models` 返回全部主流模型（带 `vendor/` 前缀，按
+  `canonicalModelKey` 剥前缀映射白名单），因此其账号**可以**勾选开放任意白名单
+  模型——未来白名单新增模型时，只要 OpenRouter `/models` 返回即可由用户勾选开放。
+  开放哪些模型由用户在账号编辑器中显式勾选（与其他渠道一致），不默认全勾选，也
+  不进入 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`（避免官方归属映射
+  `official_channel_id_for_model` 被聚合渠道污染），无需在 `config.json` /
+  `DEFAULT_EXPOSED_MODELS_BY_CHANNEL` 同步维护静态列表。
 
 `flowlet-pro` 与 `flowlet-flash` 的候选关系不属于 `config.json`。用户在模型服务页从已有
 渠道模型中显式添加；添加时复用该渠道模型已经存在的协议路由，保存后立即热更新。

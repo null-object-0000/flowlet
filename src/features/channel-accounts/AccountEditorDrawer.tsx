@@ -3,13 +3,14 @@ import { Button, Checkbox, Input, Pagination, Progress, Select, SideSheet, Space
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { toAppError } from "../../platform/tauri/client";
 import { accountCommands } from "../../domains/account/commands";
-import { effectiveOpenAiBaseUrl, type AccountBalanceSnapshot, type AccountResourceMode, type AccountResourceSyncMode, type ChannelAccount, type ModelSyncResult } from "../../domains/account/types";
+import { effectiveOpenAiBaseUrl, type AccountBalanceResult, type AccountBalanceSnapshot, type AccountResourceMode, type AccountResourceSyncMode, type ChannelAccount, type ModelSyncResult } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import {
   CHATGPT_CHANNEL_ID,
   CHATGPT_PSEUDO_PRESET,
   CUSTOM_CHANNEL_ID,
   FLOWLET_SUPPORTED_MODELS,
+  OPENROUTER_CHANNEL_ID,
   QWEN_CHANNEL_ID,
   QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL,
   QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
@@ -60,7 +61,7 @@ type Props = {
   onClose: () => void;
   onSave: (account: ChannelAccount, snapshot: AccountResourceSnapshotDraft | null) => Promise<void>;
   onTestConnection: (input: TestInput) => Promise<void>;
-  onSyncBalance: (accountId: string) => Promise<void>;
+  onSyncBalance: (accountId: string) => Promise<AccountBalanceResult | void>;
   onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
   /** ChatGPT 伪渠道的授权登录（浏览器 OAuth，仅新增模式）。 */
   onAuthorizeChatGpt?: () => Promise<void>;
@@ -100,6 +101,11 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const customChannel = isCustomChannel(channel);
   const isEdit = mode.kind === "edit";
   const isChatGptCreate = !isEdit && draft?.channel_id === CHATGPT_CHANNEL_ID;
+  const isOpenRouter = draft?.channel_id === OPENROUTER_CHANNEL_ID;
+  const hasManagementKey = Boolean(draft?.management_key?.trim());
+  const managementKeyChanged = isOpenRouter
+    && isEdit
+    && (draft.management_key?.trim() ?? "") !== (mode.account.management_key?.trim() ?? "");
 
   const handleAuthorizeChatGpt = async () => {
     try {
@@ -149,6 +155,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       resource_sync_mode: channelId === "longcat" || nextIsQwenTokenPlan ? "auto" : "manual",
       base_url_override: nextIsQwenTokenPlan ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
       anthropic_base_url_override: nextIsQwenTokenPlan ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
+      management_key: channelId === OPENROUTER_CHANNEL_ID ? currentDraft.management_key ?? null : null,
     });
     if (channelId === CUSTOM_CHANNEL_ID) setAdvancedOpen(true);
     setResource(resourceDraft());
@@ -206,8 +213,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   async function handleSync() {
     setSyncing(true);
     try {
-      await onSyncBalance(currentDraft.id);
-      Toast.success(t("余额已同步"));
+      const result = await onSyncBalance(currentDraft.id);
+      if (result?.error) throw new Error(result.error);
+      Toast.success(t(isOpenRouter && !hasManagementKey ? "Key 限额状态已同步" : "余额已同步"));
     } catch (error) {
       Toast.error(t("余额同步失败：{message}", { message: toAppError(error, "account_balance_failed").message }));
     } finally {
@@ -245,6 +253,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       const models = result.models.filter((item) => item.model.trim());
       // 白名单仍按规范模型判断，但勾选值保留上游原始 ID：同一规范模型可能对应
       // 多个独立额度资源（如 deepseek-v4-flash 与 deepseek-v4-flash-0731）。
+      // 开放哪些模型一律由用户显式勾选（含 OpenRouter），不默认勾选。
       const syncedModelIds = models.map((item) => item.model);
       setCandidates(models);
       setModelPage(1);
@@ -321,6 +330,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           ...currentDraft,
           name: normalizedName,
           api_key: currentDraft.api_key.trim(),
+          management_key: currentDraft.management_key?.trim() || null,
           resource_sync_mode: isQwenTokenPlan || isLongCatHybrid ? "auto" : currentDraft.resource_sync_mode,
           base_url_override: currentDraft.base_url_override?.trim() || null,
           anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
@@ -380,6 +390,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                           <img src="/icons/lobe/openai.svg" alt="" className={styles.logoIcon} />
                         ) : item.id === "kimi" ? (
                           <span className={styles.kimiSwatch}><img src={`/icons/lobe/${item.id}-color.svg`} alt="" className={styles.logoIcon} /></span>
+                        ) : item.id === "openrouter" ? (
+                          <span className={styles.openrouterSwatch} aria-hidden="true"><i /></span>
                         ) : (
                           <img src={`/icons/lobe/${item.id}-color.svg`} alt="" className={styles.logoIcon} />
                         )}
@@ -424,6 +436,32 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
               )}>
                 <Input aria-label="API Key" mode="password" value={draft.api_key} placeholder={t("请输入渠道 API Key")} onChange={(value) => update({ api_key: value })} />
               </Field>
+
+              {isOpenRouter ? (
+                <div className={styles.managementKeyField}>
+                  <Field label={(
+                    <span className={styles.labelRow}>
+                      {t("Management Key（可选）")}
+                      <Text
+                        link={{ href: "https://openrouter.ai/settings/management-keys", target: "_blank", rel: "noreferrer" }}
+                        icon={<IconExternalOpen />}
+                        size="small"
+                      >
+                        {t("前往查看")}
+                      </Text>
+                    </span>
+                  )}>
+                    <Input
+                      aria-label="Management Key"
+                      mode="password"
+                      value={draft.management_key ?? ""}
+                      placeholder={t("用于同步账户 Credits，不参与模型请求")}
+                      onChange={(value) => update({ management_key: value })}
+                    />
+                    <small>{t("配置后查询真实账户余额；未配置时仅同步当前 API Key 的消费限额。Management Key 将随账号加密同步。")}</small>
+                  </Field>
+                </div>
+              ) : null}
             </div>
           )}
         </section>
@@ -431,7 +469,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         {!isChatGptCreate ? (
         <section className={styles.section}>
           <div className={`${styles.sectionHeading} ${styles.resourceModeHeading}`}>
-            <span><h3>{t("资源模式")}</h3><small>{t(autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
+            <span><h3>{t("资源模式")}</h3><small>{t(isOpenRouter ? (hasManagementKey ? "按量付费，自动同步账户 Credits" : "按量付费，自动同步 API Key 消费限额") : autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
             {isEdit && (resourceOptions.length || isLongCatHybrid) ? (
               <div className={styles.resourceModeMeta}>
                 <span>{t("计费模式")}</span>
@@ -442,16 +480,20 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           </div>
           {autoSyncBalance ? (
             <div className={styles.resourcePanel}>
-              <div className={styles.resourceHeading}><strong>{t("按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
+              <div className={styles.resourceHeading}><strong>{t(isOpenRouter ? (hasManagementKey ? "账户 Credits" : "API Key 限额") : "按量付费信息")}</strong><span className={styles.autoBadge}>{t("自动同步")}</span></div>
               <div className={styles.balanceRow}>
                 <span>
-                  <small>{t("账户余额")}</small>
-                  <strong>{snapshot?.balance == null ? t("尚未同步") : `${snapshot.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`}</strong>
+                  <small>{t(isOpenRouter && !hasManagementKey ? "Key 剩余额度" : "账户余额")}</small>
+                  <strong>{managementKeyChanged
+                    ? t("保存后自动同步")
+                    : snapshot?.balance == null
+                      ? t(isOpenRouter && !hasManagementKey && snapshot?.synced_at ? "未设置 Key 限额" : "尚未同步")
+                      : `${snapshot.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${snapshot.currency ?? ""}`}</strong>
                 </span>
                 {isEdit ? (
                   <div className={styles.balanceActions}>
                     <Text type="tertiary" size="small">{t("最近同步：{time}", { time: snapshot?.synced_at ? formatFullTimestamp(snapshot.synced_at, language) : "-" })}</Text>
-                    <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} onClick={() => void handleSync()}>{t("刷新")}</Button>
+                    <Button size="small" theme="borderless" icon={<IconRefresh />} loading={syncing} disabled={managementKeyChanged} onClick={() => void handleSync()}>{t("刷新")}</Button>
                   </div>
                 ) : null}
               </div>
@@ -755,6 +797,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     channel_id: mode.channelId,
     name: language === "en-US" ? (count === 0 ? `${channel?.name ?? "Channel"} primary account` : `${channel?.name ?? "Channel"} account ${count + 1}`) : (count === 0 ? `${channel?.name ?? "渠道"} 主账号` : `${channel?.name ?? "渠道"} 账号 ${count + 1}`),
     api_key: "",
+    management_key: null,
     enabled: true,
     priority: accounts.length,
     remark: "",

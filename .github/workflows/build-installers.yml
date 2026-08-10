@@ -87,7 +87,7 @@ jobs:
 
       - name: Build Windows portable ZIP
         if: runner.os == 'Windows'
-        run: npm run tauri:portable
+        run: node scripts/build-portable.mjs
 
       - name: Upload Windows portable workflow artifact
         if: runner.os == 'Windows'

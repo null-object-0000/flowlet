@@ -60,9 +60,7 @@ export function useAccountActions(presets: ChannelPreset[]) {
 
   const queryBalance = useMutation({
     mutationFn: (accountId: string) => accountCommands.queryBalance(accountId),
-    onSuccess: () => {
-      void qc.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
-    },
+    onSuccess: () => qc.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true }),
   });
 
   const saveBalanceSnapshot = useMutation({

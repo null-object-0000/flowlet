@@ -11,8 +11,9 @@ export type AccountSyncStatus = "fresh" | "stale";
 
 /** 账号是否参与渠道资源自动同步。必须与 Rust 侧
  *  `sync_scrape_balances` 的 `channel_resource_sync_method` 保持一致：
- *  - DeepSeek / Kimi 官方余额 API 账号默认周期同步（不受 resource_sync_mode 控制），
- *    自定义 OpenAI 端点覆盖的账号不保证官方余额接口语义，跳过；
+ *  - 官方余额 API 渠道（`supports_balance_query === true`，当前 DeepSeek / Kimi /
+ *    OpenRouter）默认周期同步（不受 resource_sync_mode 控制），自定义 OpenAI
+ *    端点覆盖的账号不保证官方余额接口语义，跳过；
  *  - LongCat 控制台抓取账号仅 `resource_sync_mode === "auto"` 时自动同步；
  *  - Qwen 仅 Token Plan 订阅账号参与控制台抓取（API 按量付费账号没有官方余额接口，
  *    也没有可用的控制台抓取模式，走手动维护）；
@@ -24,7 +25,6 @@ export function hasChannelAutoSync(
   if (!account.enabled) return false;
 
   const isOfficialBalanceApi =
-    (account.channel_id === "deepseek" || account.channel_id === "kimi") &&
     preset?.supports_balance_query === true &&
     !effectiveOpenAiBaseUrl(account);
   if (isOfficialBalanceApi) return true;

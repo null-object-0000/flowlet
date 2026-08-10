@@ -8,6 +8,13 @@ export type AuthStrategy = "bearer" | "x_api_key";
 
 export const CUSTOM_CHANNEL_ID = "custom";
 
+/** OpenRouter 聚合渠道 ID。OpenRouter 的 `/models` 返回全部主流模型（带
+ *  `vendor/` 前缀），因此其账号天然可以勾选开放任意 Flowlet 白名单模型——
+ *  未来白名单新增模型时，只要 OpenRouter `/models` 返回即可由用户勾选开放，
+ *  无需在 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL` 中维护静态列表。开放哪些模型
+ *  与其他渠道一致，由用户在账号编辑器中显式勾选。 */
+export const OPENROUTER_CHANNEL_ID = "openrouter";
+
 /** ChatGPT (Codex) 伪装渠道 ID。Codex 账号由 Rust 端自动发现和同步，
  *  不需要用户手动创建。前端在概览页渠道账号卡片中作为只读伪账号行呈现
  *  （行点击打开只读详情抽屉），不参与路由，不在账号管理弹窗中出现。 */
@@ -89,6 +96,16 @@ export const FLOWLET_SUPPORTED_MODELS: string[] = Array.from(new Set([
   ...QWEN_TOKEN_PLAN_DEFAULT_MODELS,
 ]));
 
+/** OpenRouter 等聚合渠道在 `/models` 返回的模型 ID 带 `vendor/` 命名空间前缀
+ *  （如 `deepseek/deepseek-v4-flash`）。白名单判断和规范模型映射时先剥离该前缀，
+ *  再按简名匹配。没有 `/` 前缀的普通模型名（如 `deepseek-v4-flash`）不受影响。
+ *  仅用于映射判定；路由 `upstream_model` 仍保留上游原始 ID 用于转发。 */
+export function stripAggregateVendorPrefix(modelId: string): string {
+  const raw = (modelId ?? "").trim();
+  const index = raw.lastIndexOf("/");
+  return index >= 0 ? raw.slice(index + 1) : raw;
+}
+
 /** 上游模型变体 → 白名单规范模型 ID 的映射（键值均按小写匹配）。
  *  部分渠道端点的 /models 会返回属于同一规范模型身份、但独立计费或独立额度的
  *  日期快照/别名（如 deepseek-v4-flash-0731 → deepseek-v4-flash）。变体按规范 ID
@@ -137,10 +154,11 @@ const ALIAS_TARGET_BY_ID = new Map<string, string>(
   ]),
 );
 
-/** 把任意模型名解析为规范键（小写）：命中别名表返回映射目标，否则原样小写。
- *  规范键可直接与 FLOWLET_SUPPORTED_MODELS 的小写形式比较。 */
+/** 把任意模型名解析为规范键（小写）：先剥离聚合渠道的 `vendor/` 前缀，命中
+ *  别名表返回映射目标，否则原样小写。规范键可直接与 FLOWLET_SUPPORTED_MODELS
+ *  的小写形式比较。 */
 export function canonicalModelKey(modelId: string | null | undefined): string {
-  const key = (modelId ?? "").trim().toLowerCase();
+  const key = stripAggregateVendorPrefix(modelId ?? "").trim().toLowerCase();
   return ALIAS_TARGET_BY_ID.get(key) ?? key;
 }
 

@@ -1,6 +1,6 @@
 # Flowlet 当前支持矩阵
 
-> 状态日期：2026-08-01  
+> 状态日期：2026-08-10
 > 本文描述当前工作区已经实现或已经确认的能力，不把路线图能力写成已支持。
 
 本文统一说明 Flowlet 当前对渠道、模型和 AI Agent 的支持情况。判断某项能力时，
@@ -44,7 +44,7 @@ Responses 是独立协议（`ProtocolType::Responses`），不是 OpenAI 通配�
 
 ## 3. 渠道支持
 
-Flowlet 当前有六种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI 和自定义渠道。
+Flowlet 当前有七种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI、OpenRouter 和自定义渠道。
 千问按量付费与 Token Plan 共用 `qwen` 渠道模板，但使用不同的 API Key 和 Base URL，
 因此在矩阵中分开列出。
 
@@ -53,11 +53,12 @@ Flowlet 当前有六种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI �
 | 渠道 | OpenAI Chat | Anthropic Messages | 模型列表 | 模型详情 | 余额/资源 | 上游 Responses API | Flowlet Responses 转发 |
 |------|-------------|--------------------|----------|----------|-----------|----------------------|------------------------|
 | LongCat | ✅ | ✅ | ✅ | ✅ | 控制台抓取资源包与按量余额 | ✅ 官方 Codex 文档确认（无状态） | ✅ |
-| DeepSeek | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | ✅ 官方文档确认（无状态；当前仅 `deepseek-v4-flash`，`v4-pro` 上游将于 2026-08 初开放） | ✅ |
+| DeepSeek | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | ✅ 官方文档确认无状态；模型级可用范围由上游决定 | ✅ |
 | Kimi / Moonshot | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | — 官方确认暂不支持 | —（不生成 responses 路由） |
 | Qwen 按量付费 | ✅ | ✅ | ✅ | — | — | ✅ 官方明确支持（含有状态 store/retrieve） | ✅（仅无状态透传） |
 | Qwen Token Plan | ✅ | ✅ | ✅ | — | ✅ 控制台抓取套餐额度 | ✅ 官方明确支持 | ✅（仅无状态透传） |
 | Z.AI | ✅（路径无 `/v1`：`/api/paas/v4/chat/completions`） | ✅ | ✅（端点 `/api/paas/v4/models`） | — | — 官方暂无公开余额接口，先只支持 API 模式 | — 官方文档未确认 | —（不生成 responses 路由） |
+| OpenRouter | ✅ | ✅（Anthropic Skin） | ✅ | — | ✅ API Key 用量与 Credits | ✅ 官方 `/api/v1/responses`（无状态） | ✅ |
 | 自定义渠道 | 取决于已填写的 OpenAI Base URL | 取决于已填写的 Anthropic Base URL | ✅ 使用标准 OpenAI `/models` | — | — | 取决于上游，当前无自动检测 | ✅（填写 OpenAI Base URL 即生成路由，上游是否支持由用户保证） |
 
 上游 Responses API 的当前结论：
@@ -66,12 +67,14 @@ Flowlet 当前有六种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI �
   `https://api.longcat.chat/openai/v1/responses`，`disable_response_storage = true`，
   支持 reasoning summaries），确认无状态支持；
 - DeepSeek 官方 Responses API 文档确认端点 `https://api.deepseek.com/responses`，
-  完全无状态（`store` / `previous_response_id` / `conversation` 不支持），
-  当前仅 `deepseek-v4-flash`，`deepseek-v4-pro` 预计 2026 年 8 月初开放；
+  完全无状态（`store` / `previous_response_id` / `conversation` 不支持）；具体模型的
+  Responses 可用性由上游决定，Flowlet 不做模型级能力推断；
 - 千问按量付费与 Token Plan 提供 OpenAI-compatible `/compatible-mode/v1/responses`，
   并额外支持 `store` / `previous_response_id` 与 retrieve/delete/input_items
   管理接口（Flowlet 当前不透传这些有状态能力）；
 - Kimi 已确认暂不支持 Responses API，`supported_protocols` 不声明 `"responses"`；
+- OpenRouter 官方提供 `/api/v1/responses` 和 Anthropic Messages Skin；Flowlet 只开放
+  映射到全局白名单的上游模型，不把 OpenRouter 当作新的模型品牌；
 - 自定义渠道代表中转站或自建服务，必须由具体账号的上游能力决定。
 
 官方参考：
@@ -84,6 +87,8 @@ Flowlet 当前有六种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI �
 - [LongCat API 概述](https://longcat.chat/platform/docs/APIDocs.html)
 - [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion)
 - [Kimi API 概述](https://platform.kimi.com/docs/api/overview)
+- [OpenRouter Responses API](https://openrouter.ai/docs/api/api-reference/responses/create-responses)
+- [OpenRouter Claude Code / Anthropic Skin](https://openrouter.ai/docs/guides/coding-agents/claude-code-integration)
 
 ### 3.2 账号与路由规则
 
@@ -107,7 +112,7 @@ Flowlet 当前总共支持 14 个规范化模型。这个列表是全局白名�
 | 官方归属 | 规范化模型 ID | Responses 说明 |
 |----------|---------------|----------------|
 | LongCat | `LongCat-2.0` | ✅ 上游确认 |
-| DeepSeek | `deepseek-v4-pro` | ◐ 上游 Responses 将于 2026-08 初开放该模型 |
+| DeepSeek | `deepseek-v4-pro` | ◐ Flowlet 会生成候选；上游模型级可用性需实测 |
 | DeepSeek | `deepseek-v4-flash` | ✅ 上游确认 |
 | Kimi | `kimi-k3` | — 上游暂不支持 |
 | Kimi | `kimi-k2.7-code` | — 上游暂不支持 |
@@ -217,7 +222,7 @@ Cline、Continue、Open WebUI、Gemini CLI、Hermes Agent 等目前没有完整�
 
 1. Qwen 有状态 Responses 能力（`store` / `previous_response_id` 的账号粘性路由、
    retrieve/delete/input_items 透传）；
-2. DeepSeek `deepseek-v4-pro` 的上游 Responses 开放（预计 2026-08 初，无需 Flowlet 改动）；
+2. 各渠道 Responses 的模型级可用范围仍由上游决定，Flowlet 当前不做能力探测；
 3. 扩展更多 Agent 的安装探测、配置管理、归属标记和原生会话解析；
 4. Gemini-compatible 入口仍未实现。
 

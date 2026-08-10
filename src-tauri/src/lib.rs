@@ -812,8 +812,10 @@ fn run_desktop() {
                 core::webview_profile::WINDOWS_CACHE_LIMIT_BROWSER_ARGS,
             );
             // 插件 on_window_ready 会自动恢复上次的尺寸/位置/最大化
-            // （无历史状态时保持 tauri.conf.json 的 1200x720）。
-            main_webview_builder.build()?;
+            // （无历史状态时保持 tauri.conf.json 的 1200x720）。Windows 无边框窗口的
+            // 配置下限实际约束外框，需补偿不可见 resize frame，保证客户区不小于基线。
+            let main_window = main_webview_builder.build()?;
+            core::window_size::enforce_minimum_content_size(&main_window)?;
             tracing::info!(
                 data_dir = %main_webview_data_dir.display(),
                 t_ms = main_webview_t0.elapsed().as_millis() as u64,
@@ -831,6 +833,11 @@ fn run_desktop() {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                     if let Some(window) = app_handle_restore.get_webview_window("main") {
+                        if let Err(error) =
+                            crate::core::window_size::enforce_minimum_content_size(&window)
+                        {
+                            tracing::warn!(%error, "校正主窗口最小客户区失败");
+                        }
                         crate::core::window_visibility::ensure_window_on_screen(&window);
                     }
                     for project_id in state_restore.detail_windows.snapshot() {

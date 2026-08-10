@@ -340,7 +340,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       width={DETAIL_SHEET_WIDTH}
       title={(
         <div className={styles.title}>
-          <strong>{t(isEdit ? "编辑渠道账号" : "新增渠道账号")}</strong>
+          <strong>{isEdit
+            ? t("编辑 {name} 渠道账号", { name: channel?.name ?? t("渠道") })
+            : t("新增渠道账号")}</strong>
           <span>{isEdit ? t("更新 {name} 的连接与资源信息", { name: draft.name }) : t("添加 {name} 账号，用于上游模型转发", { name: channel?.name ?? t("渠道") })}</span>
         </div>
       )}

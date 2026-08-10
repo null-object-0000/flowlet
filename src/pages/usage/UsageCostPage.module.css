@@ -424,10 +424,63 @@ button.selectedPeriodMetric { border: 0; background: transparent; font: inherit;
 .selectedPeriodMetric:nth-child(n + 3) { border-top: 1px solid var(--flowlet-color-border); }
 .selectedPeriodMetric > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
 .selectedPeriodMetric > strong { overflow: hidden; color: var(--flowlet-color-text); font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
-.selectedPeriodMetric > small, .selectedPeriodEmpty > small { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
+.selectedPeriodMetric > small { overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
 .selectedLabel { color: var(--flowlet-color-text-secondary); font-size: 13px; }
-.selectedPeriodEmpty { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
-.selectedPeriodEmpty > strong { margin-top: 8px; color: var(--flowlet-color-text); font-size: 14px; }
+.selectedPeriodEmpty {
+  padding: 28px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  text-align: center;
+}
+.selectedEmptyVisual {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--flowlet-color-primary) 13%, var(--flowlet-color-border));
+  border-radius: 20px;
+  color: var(--flowlet-color-primary);
+  background:
+    radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--flowlet-color-primary) 13%, transparent), transparent 58%),
+    var(--flowlet-color-surface-muted);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 58%, transparent);
+}
+.selectedEmptyVisual::after {
+  position: absolute;
+  right: -9px;
+  bottom: -7px;
+  width: 24px;
+  height: 24px;
+  border: 4px solid var(--flowlet-color-surface);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--flowlet-color-primary) 16%, var(--flowlet-color-surface));
+  content: "";
+}
+.selectedEmptyCopy { display: grid; justify-items: center; gap: 5px; }
+.selectedEmptyCopy .selectedLabel {
+  margin-bottom: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--flowlet-color-primary);
+  background: var(--semi-color-primary-light-default);
+  font-size: var(--flowlet-font-size-caption);
+  font-weight: 650;
+  line-height: var(--flowlet-line-height-caption);
+}
+.selectedEmptyCopy > strong {
+  color: var(--flowlet-color-text);
+  font-size: var(--flowlet-font-size-body-strong);
+  line-height: var(--flowlet-line-height-body-strong);
+}
+.selectedEmptyCopy > small {
+  max-width: 280px;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+}
 
 .selectedConfidence {
   min-width: 0;

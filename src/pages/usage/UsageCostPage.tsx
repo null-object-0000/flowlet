@@ -1,4 +1,4 @@
-import { IconChevronRight } from "@douyinfe/semi-icons";
+import { IconBarChartVStroked, IconChevronRight } from "@douyinfe/semi-icons";
 import { Button, Pagination, SideSheet } from "@douyinfe/semi-ui-19";
 import { useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -878,9 +878,14 @@ function SelectedPeriodMetric({ label, value, detail, onClick, title }: {
 function SelectedPeriodEmpty({ t }: { t: ReturnType<typeof useAppPreferences>["t"] }) {
   return (
     <article className={[styles.selectedPeriod, styles.selectedPeriodEmpty].join(" ")}>
-      <span className={styles.selectedLabel}>Token</span>
-      <strong>{t("暂无选定时间数据")}</strong>
-      <small>{t("选择有数据的日期或时段后查看详情")}</small>
+      <div className={styles.selectedEmptyVisual} aria-hidden="true">
+        <IconBarChartVStroked size="extra-large" />
+      </div>
+      <div className={styles.selectedEmptyCopy}>
+        <span className={styles.selectedLabel}>Token</span>
+        <strong>{t("暂无选定时间数据")}</strong>
+        <small>{t("选择有数据的日期或时段后查看详情")}</small>
+      </div>
     </article>
   );
 }

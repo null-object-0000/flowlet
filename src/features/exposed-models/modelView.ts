@@ -6,6 +6,8 @@ const AGGREGATE_MODEL_IDS = ["flowlet-pro", "flowlet-flash"] as const;
 
 export type OverviewAggregateModel = {
   publicModel: (typeof AGGREGATE_MODEL_IDS)[number];
+  availableModelCount: number;
+  candidateModelCount: number;
   availableAccountCount: number;
   candidateAccountCount: number;
 };
@@ -29,16 +31,21 @@ export function buildOverviewAggregateModels(
   return AGGREGATE_MODEL_IDS.map((publicModel) => {
     const modelRoutes = routes.filter((route) => route.virtual_model_id === publicModel);
     const candidateAccounts = new Set(modelRoutes.map((route) => route.account_id));
+    const candidateModels = new Set(modelRoutes.map((route) => route.upstream_model));
     const availableAccounts = new Set<string>();
+    const availableModels = new Set<string>();
 
     for (const route of modelRoutes) {
       const account = accountById.get(route.account_id);
       if (!route.enabled || !account || !isAccountHealthy(account) || !aggregateChannelIds.has(route.channel_id)) continue;
       availableAccounts.add(account.id);
+      availableModels.add(route.upstream_model);
     }
 
     return {
       publicModel,
+      availableModelCount: availableModels.size,
+      candidateModelCount: candidateModels.size,
       availableAccountCount: availableAccounts.size,
       candidateAccountCount: candidateAccounts.size,
     };

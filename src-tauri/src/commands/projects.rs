@@ -581,8 +581,14 @@ pub(crate) async fn open_detail_window(
     let url = tauri::WebviewUrl::App(route.into());
     let builder = tauri::WebviewWindowBuilder::new(app, label.clone(), url)
         .title(format!("Flowlet · {}", project.name))
-        .inner_size(1200.0, 720.0)
-        .min_inner_size(1200.0, 720.0)
+        .inner_size(
+            crate::core::window_size::MIN_CONTENT_WIDTH,
+            crate::core::window_size::MIN_CONTENT_HEIGHT,
+        )
+        .min_inner_size(
+            crate::core::window_size::MIN_CONTENT_WIDTH,
+            crate::core::window_size::MIN_CONTENT_HEIGHT,
+        )
         .decorations(false)
         .resizable(true)
         .maximizable(true)
@@ -594,6 +600,9 @@ pub(crate) async fn open_detail_window(
     let window = builder
         .build()
         .map_err(|error| format!("创建项目详情独立窗口失败：{error}"))?;
+
+    crate::core::window_size::enforce_minimum_content_size(&window)
+        .map_err(|error| format!("设置项目详情窗口最小客户区失败：{error}"))?;
 
     // 启动时的恢复窗口也可能落在已变化/消失的屏幕外，先兜底拉回可见区域。
     crate::core::window_visibility::ensure_window_on_screen(&window);

@@ -3,7 +3,9 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
-  grid-template-rows: minmax(190px, 0.72fr) minmax(0, 1.28fr);
+  /* 1200×720 客户区下主体高 558px：聚合模型固定 202px，列表的
+     128px 两行内容区之外再留出上下边框 2px；剩余 344px 给 Agent 接入。 */
+  grid-template-rows: 202px minmax(0, 1fr);
   gap: 12px;
 }
 

@@ -16,6 +16,16 @@ import { canonicalModelId, officialChannelIdForModel } from "../../domains/chann
 import type { UsageSummaryRow } from "../../domains/usage/types";
 import { createHeatLevelScale, type HeatLevel, type HeatLevelScale } from "../../shared/visualization/heatmapLevels";
 
+/**
+ * agent-native 是后端固定的伪渠道，承载未经过 Flowlet 的 Agent 原生会话用量。
+ * 后端 `channel_name` 为「Agent 原生（未经过 Flowlet）」，若直接按
+ * `${channel} · ${account}` 拼接，会得到「Agent 原生（未经过 Flowlet） · Codex Desktop」：
+ * 渠道名前置且主副标题重复。这里把渠道简写与补充说明拆开，label 让账号名在前。
+ */
+const AGENT_NATIVE_CHANNEL_ID = "agent-native";
+const AGENT_NATIVE_CHANNEL_LABEL = "Agent 原生";
+const AGENT_NATIVE_CHANNEL_NOTE = "未经过 Flowlet";
+
 export type ConsumptionDimension = "model" | "account" | "client" | "device";
 export type ConsumptionMetric = "tokens" | "cost";
 export type CostCurrencyLookup = (row: UsageSummaryRow) => string | null;
@@ -250,10 +260,19 @@ function dimensionSelectors(
       labelOf: (row) => {
         const channel = row.channel_name ?? row.channel_id ?? "未知渠道";
         const account = row.account_name?.trim() || row.account_id?.trim() || null;
+        // Agent 原生渠道：账号（如 Codex Desktop）在前、渠道简写在后，
+        // 避免多个原生账号都以「Agent 原生（未经过 Flowlet）」前缀开头而难以区分。
+        if (row.channel_id === AGENT_NATIVE_CHANNEL_ID) {
+          return account ? `${account} · ${AGENT_NATIVE_CHANNEL_LABEL}` : AGENT_NATIVE_CHANNEL_LABEL;
+        }
         return account ? `${channel} · ${account}` : channel;
       },
       shortLabelOf: (row) => row.account_name?.trim() || row.account_id?.trim() || row.channel_name || row.channel_id || "未知账号",
-      sublabelOf: (row) => (row.account_name?.trim() || row.account_id?.trim() ? row.channel_name ?? row.channel_id ?? null : null),
+      sublabelOf: (row) => {
+        // Agent 原生渠道：主标题已含「Agent 原生」，副标题只补充说明，不与主标题重复。
+        if (row.channel_id === AGENT_NATIVE_CHANNEL_ID) return AGENT_NATIVE_CHANNEL_NOTE;
+        return (row.account_name?.trim() || row.account_id?.trim() ? row.channel_name ?? row.channel_id ?? null : null);
+      },
       brandIdOf: (row) => row.channel_id ?? null,
     };
   }

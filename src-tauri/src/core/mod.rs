@@ -33,6 +33,7 @@ pub mod sync;
 pub mod usage;
 pub mod web;
 pub mod webview_profile;
+pub(crate) mod window_size;
 pub(crate) mod window_visibility;
 
 // Re-export commonly used types for headless binary

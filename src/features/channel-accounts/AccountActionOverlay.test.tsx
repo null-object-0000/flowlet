@@ -48,7 +48,7 @@ describe("AccountActionOverlay", () => {
       />,
     );
 
-    expect(await screen.findByText("编辑渠道账号")).toBeInTheDocument();
+    expect(await screen.findByText("编辑 LongCat 渠道账号")).toBeInTheDocument();
     expect(screen.queryByText(/渠道账号管理/)).not.toBeInTheDocument();
     expect(screen.queryByText("选择渠道")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^LongCat$/ })).not.toBeInTheDocument();

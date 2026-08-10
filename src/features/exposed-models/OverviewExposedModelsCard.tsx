@@ -41,9 +41,14 @@ export function OverviewExposedModelsCard({ routes, accounts, channels, onManage
                   </Text>
                 </div>
                 <div className={styles.metaLine}>
-                  <span>{model.candidateAccountCount > 0
-                    ? t("{available} / {total} 个账号可用", { available: model.availableAccountCount, total: model.candidateAccountCount })
-                    : t("尚无候选账号")}</span>
+                  <span>{model.candidateModelCount > 0
+                    ? t("{availableModels} / {totalModels} 个模型可用 · {availableAccounts} / {totalAccounts} 个账号可用", {
+                        availableModels: model.availableModelCount,
+                        totalModels: model.candidateModelCount,
+                        availableAccounts: model.availableAccountCount,
+                        totalAccounts: model.candidateAccountCount,
+                      })
+                    : t("尚无候选模型")}</span>
                 </div>
               </div>
               <Tag color={status.color}>{t(status.label)}</Tag>

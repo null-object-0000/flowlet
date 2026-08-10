@@ -487,25 +487,25 @@ fn codex_cli_candidates() -> Vec<Candidate> {
                 if !is_external_codex_cli_candidate(&candidate) {
                     continue;
                 }
-                push_candidate(&mut candidates, &mut seen, candidate, true);
+                push_codex_cli_candidate(&mut candidates, &mut seen, candidate, true);
             }
         }
     }
     if let Some(home) = dirs::home_dir() {
         for relative in known_codex_cli_locations() {
-            push_candidate(&mut candidates, &mut seen, home.join(relative), false);
+            push_codex_cli_candidate(&mut candidates, &mut seen, home.join(relative), false);
         }
     }
     #[cfg(windows)]
     if let Some(app_data) = std::env::var_os("APPDATA") {
         let directory = PathBuf::from(app_data).join("npm");
         for file_name in executable_names("codex") {
-            push_candidate(&mut candidates, &mut seen, directory.join(file_name), false);
+            push_codex_cli_candidate(&mut candidates, &mut seen, directory.join(file_name), false);
         }
     }
     #[cfg(windows)]
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        push_candidate(
+        push_codex_cli_candidate(
             &mut candidates,
             &mut seen,
             PathBuf::from(local_app_data)
@@ -518,6 +518,62 @@ fn codex_cli_candidates() -> Vec<Candidate> {
         );
     }
     candidates
+}
+
+fn push_codex_cli_candidate(
+    candidates: &mut Vec<Candidate>,
+    seen: &mut HashSet<String>,
+    path: PathBuf,
+    available_on_path: bool,
+) {
+    #[cfg(windows)]
+    let path = resolve_windows_codex_executable(path);
+    push_candidate(candidates, seen, path, available_on_path);
+}
+
+#[cfg(windows)]
+fn resolve_windows_codex_executable(path: PathBuf) -> PathBuf {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension != "cmd" && extension != "ps1" {
+        return path;
+    }
+
+    let Some(npm_bin) = path.parent() else {
+        return path;
+    };
+    if !normalized_path_key(npm_bin).ends_with("/npm") {
+        return path;
+    }
+
+    let (platform_package, target_triple) = match std::env::consts::ARCH {
+        "x86_64" => ("codex-win32-x64", "x86_64-pc-windows-msvc"),
+        "aarch64" => ("codex-win32-arm64", "aarch64-pc-windows-msvc"),
+        _ => return path,
+    };
+    let package_root = npm_bin.join("node_modules").join("@openai").join("codex");
+    let candidates = [
+        package_root
+            .join("node_modules")
+            .join("@openai")
+            .join(platform_package)
+            .join("vendor")
+            .join(target_triple)
+            .join("bin")
+            .join("codex.exe"),
+        package_root
+            .join("vendor")
+            .join(target_triple)
+            .join("bin")
+            .join("codex.exe"),
+    ];
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .unwrap_or(path)
 }
 
 #[cfg(windows)]
@@ -1331,6 +1387,38 @@ mod tests {
             resolve_windows_opencode_executable(npm.join("opencode")),
             None
         );
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolves_npm_codex_shim_to_packaged_native_executable() {
+        let directory =
+            std::env::temp_dir().join(format!("flowlet-codex-shim-{}", uuid::Uuid::new_v4()));
+        let npm = directory.join("npm");
+        let (platform_package, target_triple) = match std::env::consts::ARCH {
+            "x86_64" => ("codex-win32-x64", "x86_64-pc-windows-msvc"),
+            "aarch64" => ("codex-win32-arm64", "aarch64-pc-windows-msvc"),
+            unsupported => panic!("unsupported Windows test architecture: {unsupported}"),
+        };
+        let executable = npm
+            .join("node_modules")
+            .join("@openai")
+            .join("codex")
+            .join("node_modules")
+            .join("@openai")
+            .join(platform_package)
+            .join("vendor")
+            .join(target_triple)
+            .join("bin")
+            .join("codex.exe");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, []).unwrap();
+        let shim = npm.join("codex.cmd");
+        std::fs::write(&shim, "@echo off").unwrap();
+
+        assert_eq!(resolve_windows_codex_executable(shim), executable);
 
         let _ = std::fs::remove_dir_all(directory);
     }

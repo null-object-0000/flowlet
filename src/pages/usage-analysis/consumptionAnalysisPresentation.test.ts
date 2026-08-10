@@ -148,7 +148,8 @@ describe("groupConsumption", () => {
       costByCurrency: { USD: 0.12 },
     });
     const byAccount = groupConsumption([native], "account", currencyOf);
-    expect(byAccount[0].label).toBe("Agent 原生（未经过 Flowlet） · Codex Desktop");
+    expect(byAccount[0].label).toBe("Codex Desktop · Agent 原生");
+    expect(byAccount[0].sublabel).toBe("未经过 Flowlet");
     const matrix = buildCrossMatrix([native], "client", "cost", currencyOf);
     expect(matrix.cells.get(cellId("codex", "gpt-5.6-sol"))?.costByCurrency)
       .toEqual({ USD: 0.12 });

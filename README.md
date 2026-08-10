@@ -1,8 +1,8 @@
 <div align="center">
   <img src="public/flowlet-logo.png" width="112" alt="Flowlet Logo" />
   <h1>Flowlet</h1>
-  <p><strong>给 AI Agent 一个本地、可观测、可切换的模型入口。</strong></p>
-  <p>一个桌面应用，统一管理模型账号、接入常用 Agent，并看清每一次调用。</p>
+  <p><strong>让多个 AI Agent 共用一个可控、可追溯的本地模型入口。</strong></p>
+  <p>一次接入，统一切换；请求失败知道原因，Token 和费用知道花在哪。</p>
 </div>
 
 <p align="center">
@@ -44,6 +44,17 @@ Flowlet 可以检测本机安装，并为以下 Agent 写入和恢复全局配�
 请求失败时可以看到实际路由、上游响应和错误；日常使用时可以按 Agent、模型、渠道与会话
 核对 Token、缓存命中、预估费用、套餐余量和 Codex Credits。
 
+### 让 Agent 在项目中完成任务
+
+绑定本机项目目录，用看板把代码修改或只读分析任务交给 Claude Code、Codex、OpenCode 或 Pi。
+Flowlet 负责排队执行、人工审核、退回续跑和执行记录，请求、会话与用量会自动留下证据。
+
+### 从手机查看并轻量操作
+
+代码内包含实验性 Android 查看器，可通过自有 S3 与局域网查看多设备用量、会话和 Agent 状态，
+也可提交项目任务或远程处理 Agent 的交互确认（当前已支持 OpenCode 权限请求）。移动端当前
+需自行构建，不替代桌面端代理和账号管理。
+
 ## 开始使用
 
 1. 从 [GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载 Windows、macOS 或 Linux 版本；
@@ -52,7 +63,9 @@ Flowlet 可以检测本机安装，并为以下 Agent 写入和恢复全局配�
 4. 回到 Agent 正常工作，在 Flowlet 中查看请求、会话和用量。
 
 > [!NOTE]
-> 当前桌面产物尚未签名，Windows 或 macOS 可能显示“未知发布者”提示。
+> 当前主要开发与回归环境是 **Windows 11 原生环境（未启用 WSL）**。macOS 与 Linux
+> 版本由 GitHub Actions 自动构建，但尚未完成作者真机回归验证；后续完成对应环境测试后
+> 会更新支持状态。当前桌面产物尚未签名，系统也可能显示“未知发布者”提示。
 
 ## 本地优先
 

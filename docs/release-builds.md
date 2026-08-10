@@ -9,14 +9,22 @@
 
 Release 应指向需要构建的版本提交。发布前请同步更新 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本号。
 
+## 平台验证状态
+
+当前主要开发与完整回归环境是 **Windows 11 原生环境**，开发流程未启用或依赖 WSL。
+
+GitHub Actions 会为 Windows、Linux 和 macOS 生成产物，但“自动构建成功”不等同于已经完成
+对应系统的真机功能回归。Linux 与 macOS 当前尚未完成作者真机回归验证；后续在对应环境完成
+安装、启动、代理、托盘、Agent 接入与核心数据链路测试后，再更新支持状态。
+
 ## 构建产物
 
-| 平台 | 架构 | 产物 |
-| --- | --- | --- |
-| Windows | x64 | NSIS `.exe`、MSI `.msi`、便携版 `.zip` |
-| Linux | x64 | AppImage、Debian `.deb` |
-| macOS | Apple Silicon | `.dmg` |
-| macOS | Intel | `.dmg` |
+| 平台 | 架构 | 产物 | 当前验证状态 |
+| --- | --- | --- | --- |
+| Windows 11 | x64 | NSIS `.exe`、MSI `.msi`、便携版 `.zip` | 主要开发与完整回归环境（原生、无 WSL） |
+| Linux | x64 | AppImage、Debian `.deb` | CI 自动构建，尚未完成作者真机回归 |
+| macOS | Apple Silicon | `.dmg` | CI 自动构建，尚未完成作者真机回归 |
+| macOS | Intel | `.dmg` | CI 自动构建，尚未完成作者真机回归 |
 
 四个平台任务彼此独立；单个平台失败不会取消其他平台正在执行的构建。
 

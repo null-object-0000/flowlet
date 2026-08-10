@@ -8,18 +8,18 @@ Flowlet 的首个正式公开版本。
 
 ### 主要功能
 
-- 提供 OpenAI Chat Completions、Anthropic Messages 与无状态 OpenAI Responses 本地代理入口；
-- 管理 LongCat、DeepSeek、Kimi、Qwen、Z.AI、OpenRouter 与自定义渠道账号；
-- 从上游同步模型并显式选择开放模型，支持多账号候选、优先级与失败降级；
-- 提供 `flowlet-pro` / `flowlet-flash` 聚合模型和 14 个规范化模型；
-- 一键接入 Claude Code、OpenCode、Pi 与 Codex CLI / Desktop / VS Code 插件；
-- 查看请求日志、Agent 原生会话、Token 用量、预估费用、余额与套餐资源；
-- 支持本地请求捕获、历史数据维护、可选 S3 多设备用量同步和 Windows 便携模式。
+- 提供 OpenAI Chat Completions、Anthropic Messages 与无状态 OpenAI Responses 本地代理入口，保持协议与响应原貌；
+- 统一管理多个模型渠道与账号，按需开放模型，并支持虚拟模型、多候选路由和失败降级；
+- 一键接入 Claude Code、Codex、OpenCode 与 Pi，支持配置检查、备份、写入和恢复；
+- 将 Agent 会话、实际请求、路由结果、Token 与费用关联起来，便于定位失败和核对消耗；
+- 可把代码修改或分析任务交给本机 Agent 执行，并进行排队、审核、退回续跑和历史追踪；
+- 提供按模型、账号、客户端和设备统计的用量与性能洞察；
+- 支持自有 S3 多设备同步与局域网直连，并包含需自行构建的实验性 Android 查看器。
 
 ### 分发说明
 
-- GitHub Actions 构建 Windows x64、Linux x64、macOS Apple Silicon 与 macOS Intel 产物；
-- Windows 同时提供 NSIS、MSI 和便携版 ZIP；
+- 提供 Windows x64 安装包与便携版，并由 GitHub Actions 构建 Linux x64、macOS Apple Silicon 与 Intel 产物；
+- 当前主要开发与完整回归环境为 Windows 11 原生环境（未启用 WSL）；Linux 与 macOS 尚未完成作者真机回归验证；
 - 当前桌面产物尚未签名，操作系统可能显示未知发布者提示。
 
 [0.1.0]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.0

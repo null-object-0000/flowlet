@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { formatCompactNumber, formatInteger, formatTokenCapacity } from "./number";
+import { afterEach, describe, expect, it } from "vitest";
+import { formatCompactNumber, formatInteger, formatTokenCapacity, setActiveTokenUnit } from "./number";
+
+afterEach(() => {
+  setActiveTokenUnit("auto");
+});
 
 describe("shared number formatters", () => {
   it("uses Chinese 万、亿 and 万亿 units with 2 decimals", () => {
@@ -19,6 +23,22 @@ describe("shared number formatters", () => {
     expect(formatCompactNumber(9_999, "zh-CN")).toBe("9,999");
     expect(formatInteger(12_345, "zh-CN")).toBe("12,345");
     expect(formatCompactNumber(null, "zh-CN")).toBe("—");
+  });
+
+  it("overrides the unit explicitly regardless of the interface language", () => {
+    expect(formatCompactNumber(12_345, "en-US", { unit: "zh" })).toBe("1.23万");
+    expect(formatCompactNumber(1_200_000, "zh-CN", { unit: "en" })).toBe("1.20M");
+    expect(formatCompactNumber(1_200_000_000, "zh-CN", { unit: "en" })).toBe("1.20B");
+  });
+
+  it("respects the active token unit set by preferences", () => {
+    setActiveTokenUnit("en");
+    expect(formatCompactNumber(1_200_000, "zh-CN")).toBe("1.20M");
+    expect(formatCompactNumber(120_000_000, "zh-CN")).toBe("120.00M");
+
+    setActiveTokenUnit("zh");
+    expect(formatCompactNumber(1_200_000, "en-US")).toBe("120.00万");
+    expect(formatCompactNumber(1_234_567, "en-US")).toBe("123.46万");
   });
 
   it("formats model token capacities with conventional K and M units", () => {

@@ -1,0 +1,69 @@
+.page { width: 100%; height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; overflow: hidden; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.stat { min-width: 0; padding: 11px 13px; border: 1px solid var(--flowlet-color-border); border-radius: 12px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
+.stat span, .stat small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.stat span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
+.stat strong { display: block; margin-top: 5px; color: var(--flowlet-color-text); font-size: 20px; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat small { margin-top: 5px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(250px, .95fr); gap: 10px; }
+.leftColumn { min-height: 0; display: grid; grid-template-rows: 104px minmax(0, 1fr); gap: 10px; }
+.confidenceCard, .chartCard, .detailCard { min-width: 0; min-height: 0; border: 1px solid var(--flowlet-color-border); border-radius: 13px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); overflow: hidden; }
+.confidenceCard { padding: 12px 14px; }
+.confidenceCard header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.confidenceCard header strong { color: var(--flowlet-color-text); font-size: 13px; }
+.confidenceCard header b { color: var(--flowlet-color-success, #16a34a); font-size: 14px; }
+.confidenceTrack { height: 7px; margin-top: 10px; overflow: hidden; border-radius: 99px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.confidenceTrack i { display: block; width: 94%; height: 100%; border-radius: inherit; background: var(--flowlet-color-success, #22c55e); }
+.confidenceCard p { margin: 8px 0 0; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.chartCard { padding: 12px 14px 10px; display: flex; flex-direction: column; }
+.chartHeader { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.chartHeader > div:first-child { min-width: 0; }
+.chartHeader strong, .chartHeader span { display: block; }
+.chartHeader strong { color: var(--flowlet-color-text); font-size: 13px; }
+.chartHeader span { margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.metricSwitch { flex: none; display: flex; padding: 2px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.metricSwitch button { height: 25px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--flowlet-color-text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.metricSwitch button[aria-pressed="true"] { color: var(--flowlet-color-primary); background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); font-weight: 700; }
+.barFrame { flex: 1; min-height: 0; margin-top: 12px; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 7px; }
+.barScale { padding-bottom: 19px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.barPlot { min-height: 0; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 3px; border-bottom: 1px solid var(--flowlet-color-border-strong); background: repeating-linear-gradient(to bottom, transparent, transparent calc(33.333% - 1px), var(--flowlet-color-border) 33.333%); }
+.barSlot { min-width: 0; height: 100%; padding: 0; border: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; background: transparent; cursor: pointer; }
+.barSlot i { min-height: 3px; border-radius: 4px 4px 1px 1px; background: var(--flowlet-color-primary); transition: filter 120ms ease; }
+.barSlot span { height: 18px; padding-top: 5px; color: var(--flowlet-color-text-tertiary); font-size: 9px; text-align: center; }
+.barSlot[aria-pressed="true"] i { outline: 2px solid var(--flowlet-color-primary); outline-offset: 1px; filter: saturate(1.2); }
+.heatmap { flex: 1; min-height: 0; margin-top: 12px; display: grid; gap: 4px; }
+.week { grid-template-columns: repeat(24, minmax(0, 1fr)); grid-template-rows: repeat(7, minmax(0, 1fr)); }
+.month { grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(0, 1fr)); gap: 5px; }
+.heatCell { min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 5px; color: var(--flowlet-color-text-secondary); font: inherit; font-size: 10px; cursor: pointer; box-shadow: inset 0 0 0 1px var(--flowlet-color-border); }
+.month .heatCell { border-radius: 7px; }
+.heatCell[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--flowlet-color-primary); }
+.heatLevel0 { background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.heatLevel1 { background: color-mix(in srgb, var(--flowlet-color-primary) 18%, var(--flowlet-color-surface)); }
+.heatLevel2 { background: color-mix(in srgb, var(--flowlet-color-primary) 38%, var(--flowlet-color-surface)); }
+.heatLevel3 { color: #fff; background: color-mix(in srgb, var(--flowlet-color-primary) 66%, var(--flowlet-color-surface)); }
+.heatLevel4 { color: #fff; background: var(--flowlet-color-primary); }
+.legend { flex: none; margin-top: 7px; display: flex; justify-content: flex-end; align-items: center; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.legend i { width: 9px; height: 9px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--flowlet-color-border); }
+.detailCard { padding: 14px; display: flex; flex-direction: column; }
+.detailCard > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.detailCard header strong, .detailCard header span { display: block; }
+.detailCard header strong { color: var(--flowlet-color-text); font-size: 13px; }
+.detailCard header span { margin-top: 3px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.detailCard header em { flex: none; padding: 2px 8px; border-radius: 99px; color: var(--flowlet-color-primary); background: var(--semi-color-primary-light-default, rgba(23,105,255,.09)); font-size: 10px; font-style: normal; }
+.detailHero { margin-top: 18px; padding: 15px; border-radius: 11px; background: color-mix(in srgb, var(--flowlet-color-primary) 8%, var(--flowlet-color-surface)); }
+.detailHero span { color: var(--flowlet-color-text-secondary); font-size: 11px; }
+.detailHero strong { display: block; margin-top: 5px; color: var(--flowlet-color-text); font-size: 23px; }
+.detailGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.detailGrid div { min-width: 0; padding: 9px; border-radius: 9px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.detailGrid span, .detailGrid strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.detailGrid span { color: var(--flowlet-color-text-tertiary); font-size: 10px; }
+.detailGrid strong { margin-top: 4px; color: var(--flowlet-color-text); font-size: 11px; }
+.sourceRows { margin-top: auto; padding-top: 18px; display: grid; gap: 12px; }
+.sourceRows > div { display: grid; grid-template-columns: 82px minmax(0, 1fr) 30px; align-items: center; gap: 8px; color: var(--flowlet-color-text-secondary); font-size: 10px; }
+.sourceRows i { height: 6px; overflow: hidden; border-radius: 99px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.sourceRows b { display: block; height: 100%; border-radius: inherit; background: var(--flowlet-color-primary); }
+.sourceRows strong { font-size: 10px; text-align: right; }
+.emptyDetail { flex: 1; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--flowlet-color-text-tertiary); text-align: center; }
+.emptyDetail span { font-size: 28px; }
+.emptyDetail strong { font-size: 12px; font-weight: 500; }
+@media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } .workspace { grid-template-columns: 1fr; overflow-y: auto; } .leftColumn { min-height: 440px; } .detailCard { min-height: 240px; } }

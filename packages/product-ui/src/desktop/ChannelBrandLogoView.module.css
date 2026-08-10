@@ -1,0 +1,16 @@
+.logo { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; overflow: hidden; border-radius: 50%; }
+.flowlet { border: 1px solid var(--flowlet-color-border); background: color-mix(in srgb, var(--semi-color-primary-light-default) 72%, var(--flowlet-color-surface-strong)); }
+.flowlet img { width: 100%; height: 100%; object-fit: contain; }
+.longcat, .qwen, .zhipu { border: 1px solid var(--flowlet-color-border); background: var(--flowlet-color-surface); }
+.longcat img, .kimi img, .zhipu img { width: 32px; height: 32px; transform: scale(.7); }
+.qwen img { width: 32px; height: 32px; transform: scale(.72); }
+.kimi { border: 1px solid var(--flowlet-color-border); background: #1a1a1a; }
+.deepseek { color: #fff; background: #4d6bfe; }
+.deepseek i, .openrouter i, .chatgpt i { width: 22px; height: 22px; background: currentColor; }
+.deepseek i { -webkit-mask: url("/icons/lobe/deepseek.svg") center / contain no-repeat; mask: url("/icons/lobe/deepseek.svg") center / contain no-repeat; }
+.openrouter { color: #7624f4; border: 1px solid var(--flowlet-color-border); background: var(--flowlet-color-surface-muted); }
+.openrouter i { -webkit-mask: url("/icons/lobe/openrouter.svg") center / contain no-repeat; mask: url("/icons/lobe/openrouter.svg") center / contain no-repeat; }
+:global(body[theme-mode="dark"]) .openrouter { color: #c8ff00; }
+.chatgpt { color: var(--flowlet-color-text); border: 1px solid var(--flowlet-color-border); background: var(--flowlet-color-surface-muted); }
+.chatgpt i { width: 21px; height: 21px; -webkit-mask: url("/icons/lobe/openai.svg") center / contain no-repeat; mask: url("/icons/lobe/openai.svg") center / contain no-repeat; }
+.fallback { color: var(--flowlet-color-text-secondary); background: #eef1f5; font-size: 13px; font-weight: 700; }

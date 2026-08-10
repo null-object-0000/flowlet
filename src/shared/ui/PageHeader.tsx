@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import styles from "./PageHeader.module.css";
+import { DesktopPageHeaderView } from "@flowlet/product-ui";
 
 type PageHeaderProps = {
   title: ReactNode;
@@ -15,13 +15,5 @@ type PageHeaderProps = {
  * 对齐、间距和字号上的细微差异。
  */
 export function PageHeader({ title, subtitle, children }: PageHeaderProps) {
-  return (
-    <header className={styles.header}>
-      <div className={styles.titleBlock}>
-        <h2 className={styles.title}>{title}</h2>
-        {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
-      </div>
-      {children ? <div className={styles.controls}>{children}</div> : null}
-    </header>
-  );
+  return <DesktopPageHeaderView title={title} subtitle={subtitle}>{children}</DesktopPageHeaderView>;
 }

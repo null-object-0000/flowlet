@@ -1,0 +1,13 @@
+.controls { display: flex; align-items: center; gap: 6px; }
+.controls button { border: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font: inherit; font-size: 11px; cursor: pointer; }
+.device { height: 30px; padding: 0 9px; border-radius: 8px; }
+.device span { margin-left: 7px; color: var(--flowlet-color-text-tertiary); }
+.periods { display: flex; padding: 2px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.periods button { height: 25px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; }
+.periods button[aria-pressed="true"] { color: var(--flowlet-color-primary); background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); font-weight: 700; }
+.range { width: 28px; height: 30px; border-radius: 8px; font-size: 16px !important; }
+.range:disabled { opacity: .45; cursor: default; }
+.rangeLabel { min-width: 86px; color: var(--flowlet-color-text-secondary); font-size: 11px; text-align: center; white-space: nowrap; }
+.live { height: 30px; padding: 0 9px; display: flex; align-items: center; gap: 6px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-size: 11px; white-space: nowrap; }
+.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--flowlet-color-success, #22b85a); box-shadow: 0 0 0 3px color-mix(in srgb, var(--flowlet-color-success, #22b85a) 12%, transparent); }
+.refresh { width: 30px; height: 30px; border-radius: 8px; font-size: 15px !important; }

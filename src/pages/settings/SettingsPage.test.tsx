@@ -214,6 +214,7 @@ describe("SettingsPage", () => {
     renderWithQueryClient(<SettingsPage />);
     expect(screen.getByText("显示语言")).toBeInTheDocument();
     expect(screen.getByText("界面主题")).toBeInTheDocument();
+    expect(screen.getByText("Token 展示单位")).toBeInTheDocument();
   });
 
   it("switches content when a different tab is selected", async () => {

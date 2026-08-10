@@ -29,6 +29,35 @@
 .cardTitle { min-width: 0; display: grid; gap: 2px; }
 .cardTitle strong { color: var(--flowlet-color-text); font-size: 15px; }
 .cardTitle span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.dimensionTabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 10px;
+  background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft));
+}
+.dimensionTabs button {
+  height: 30px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--flowlet-color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+.dimensionTabs button:hover[aria-selected="false"] { color: var(--flowlet-color-text); }
+.dimensionTabs button[aria-selected="true"] {
+  color: var(--flowlet-color-surface-strong, #fff);
+  background: var(--flowlet-color-text);
+  box-shadow: 0 4px 10px rgba(20, 24, 33, 0.18);
+  font-weight: 650;
+}
 
 .body {
   flex: 1;
@@ -109,10 +138,14 @@
 
 .compact .rankHead, .compact .rankRow { grid-template-columns: minmax(120px, 1.5fr) minmax(72px, 0.8fr) minmax(80px, 0.9fr) 16px; gap: 10px; padding: 0 12px; }
 .compact .rankRow { min-height: 50px; }
+.compact .cardHeader { padding: 10px 12px; }
+.compact .dimensionTabs button { height: 26px; padding: 0 9px; font-size: 11px; }
 
 @media (max-width: 900px) {
   .page { overflow: auto; }
   .body { grid-template-columns: minmax(0, 1fr); }
   .rankPane { border-right: 0; border-bottom: 1px solid var(--flowlet-color-border); }
   .rankHead, .rankRow { grid-template-columns: minmax(130px, 1.5fr) minmax(78px, 0.8fr) minmax(86px, 0.9fr) 16px; gap: 10px; }
+  .cardHeader { align-items: flex-start; flex-direction: column; }
+  .dimensionTabs { width: 100%; overflow-x: auto; }
 }

@@ -1,18 +1,19 @@
 import { Select, Switch } from "@douyinfe/semi-ui-19";
 import type { AppLanguage } from "../../../app/preferences/translations";
 import { useAppPreferences, type ThemePreference } from "../../../app/preferences/AppPreferences";
+import type { TokenUnit } from "../../../shared/formatters/number";
 import { useAutostartSetting } from "../../../features/settings/useAutostartSetting";
 import { useTaskReviewNotification } from "../../../features/settings/useTaskReviewNotification";
 import { SettingRow, SettingSection } from "../SettingRow";
 
 export function GeneralTab() {
-  const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
+  const { language, setLanguage, theme, setTheme, tokenUnit, setTokenUnit, t } = useAppPreferences();
   const autostart = useAutostartSetting();
   const taskReviewNotification = useTaskReviewNotification();
 
   return (
     <div>
-      <SettingSection title={t("外观")} keywords="外观 显示语言 简体中文 主题 跟随系统 深色 浅色">
+      <SettingSection title={t("外观")} keywords="外观 显示语言 简体中文 主题 跟随系统 深色 浅色 Token 展示单位 万 亿 K M">
         <SettingRow
           name={t("显示语言")}
           help={t("选择应用界面的显示语言")}
@@ -39,6 +40,21 @@ export function GeneralTab() {
                 { value: "dark", label: t("深色模式") },
               ]}
               onChange={(value) => setTheme(value as ThemePreference)}
+            />
+          )}
+        />
+        <SettingRow
+          name={t("Token 展示单位")}
+          help={t("选择 Token 数量以哪种单位展示；默认跟随界面语言，简体中文用「万 / 亿」，英文用「K / M」")}
+          control={(
+            <Select
+              value={tokenUnit}
+              optionList={[
+                { value: "auto", label: t("跟随语言") },
+                { value: "zh", label: t("万 / 亿（中文习惯）") },
+                { value: "en", label: t("K / M（英文习惯）") },
+              ]}
+              onChange={(value) => setTokenUnit(value as TokenUnit)}
             />
           )}
         />

@@ -31,6 +31,13 @@ if (mobileTarget) {
 
 applyInitialPreferences();
 configureAppOverlayLayers({ mobile: mobileTarget });
+// 正式版 PC 桌面应用禁用 WebView 默认的浏览器右键菜单（刷新、返回、检查元素等
+// 浏览器能力）。只在真实桌面应用的生产构建生效：开发调试（tauri dev）、官网 Demo
+// 与移动端保留默认行为。preventDefault 只抑制默认菜单，不阻断 DOM 事件本身，
+// 应用后续如需自定义右键菜单仍可正常触发。
+if (!mobileTarget && !demoTarget && import.meta.env.PROD) {
+  document.addEventListener("contextmenu", (event) => event.preventDefault());
+}
 if (!mobileTarget && !demoTarget) {
   void import("./platform/tauri/window").then(({ windowCommands }) => {
     configureSideSheetWindowDragging(windowCommands.startDragging, windowCommands.toggleMaximize);

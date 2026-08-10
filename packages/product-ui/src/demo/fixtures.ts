@@ -10,15 +10,15 @@ export function createOverviewServiceFixture(zh: boolean): { model: OverviewServ
   return {
     model: {
       running: true,
-      statusTitle: zh ? "服务运行中" : "Service running",
-      statusSubtitle: zh ? "已运行 2 小时 18 分" : "Up for 2h 18m",
-      usageLabel: zh ? "今日 Token" : "Tokens today",
-      usageValue: "1.28",
-      usageUnit: "M",
+      statusTitle: zh ? "运行中" : "Running",
+      statusSubtitle: zh ? "本地代理 · 已运行 5 分钟" : "Local proxy · up for 5m",
+      usageLabel: zh ? "今日消耗" : "Usage today",
+      usageValue: zh ? "1.92亿" : "192M",
+      usageUnit: "Tokens",
       accessLabel: zh ? "客户端接入" : "Client access",
       detailLabel: zh ? "接入详情" : "Details",
-      endpoints: { openai: "http://127.0.0.1:18640/v1", anthropic: "http://127.0.0.1:18640" },
-      tokenLabel: "Client Token",
+      endpoints: { openai: "http://127.0.0.1:18640/v1", anthropic: "http://127.0.0.1:18640/anthropic" },
+      tokenLabel: zh ? "客户端 Token" : "Client Token",
       clientToken: "flw_demo_local_token",
     },
     labels: {
@@ -206,14 +206,20 @@ export function createAgentSessionsFixture(zh: boolean): {
   };
 }
 
-export function createUsageAnalysisFixture(zh: boolean): {
+export type UsageAnalysisDemoDimension = "model" | "account" | "client" | "device";
+
+export function createUsageAnalysisFixture(
+  zh: boolean,
+  dimension: UsageAnalysisDemoDimension = "model",
+  metric: "tokens" | "cost" = "tokens",
+): {
   entries: UsageAnalysisRankEntryModel[];
   columns: UsageAnalysisMatrixColumnModel[];
   rows: UsageAnalysisMatrixRowModel[];
   detail: UsageAnalysisDetailModel;
   labels: UsageAnalysisLabels;
 } {
-  return {
+  const fixture = {
     entries: [
       { key: "flowlet-pro", label: "flowlet-pro", sublabel: "DeepSeek · 工作账号", badge: { letter: "F" }, tokenValue: "6.42M", tokenShare: "46%", costValue: "$8.21", costShare: "51%" },
       { key: "qwen3.8-max", label: "qwen3.8-max", sublabel: "Qwen · Token 计划", badge: { letter: "Q" }, tokenValue: "3.11M", tokenShare: "22%", costValue: "$3.44", costShare: "21%" },
@@ -278,6 +284,95 @@ export function createUsageAnalysisFixture(zh: boolean): {
       emptyCell: zh ? "该组合暂无数据" : "No data",
     },
   };
+
+  const variants: Record<UsageAnalysisDemoDimension, {
+    entries: Array<[string, string, string]>;
+    columns: Array<[string, string, string]>;
+    subtitle: string;
+  }> = {
+    model: {
+      entries: fixture.entries.map((entry) => [entry.key, entry.label, entry.sublabel ?? ""]),
+      columns: fixture.columns.map((column) => [column.key, column.label, column.shortLabel]),
+      subtitle: zh ? "模型 × 渠道账号，颜色越深消耗越高" : "Model × account, darker = higher",
+    },
+    account: {
+      entries: [
+        ["work-account", zh ? "DeepSeek · 工作账号" : "DeepSeek · Work", "DeepSeek"],
+        ["token-plan", zh ? "Qwen · Token 计划" : "Qwen · Token plan", "Qwen"],
+        ["standard-account", zh ? "LongCat · 标准账号" : "LongCat · Standard", "LongCat"],
+        ["personal-account", zh ? "DeepSeek · 个人账号" : "DeepSeek · Personal", "DeepSeek"],
+      ],
+      columns: [
+        ["flowlet-pro", "flowlet-pro", "pro"],
+        ["qwen3.8-max", "qwen3.8-max", "qwen"],
+        ["longcat-2.0", "longcat-2.0", "LC"],
+        ["deepseek-v4-pro", "deepseek-v4-pro", "DS"],
+      ],
+      subtitle: zh ? "渠道账号 × 模型，颜色越深消耗越高" : "Account × model, darker = higher",
+    },
+    client: {
+      entries: [
+        ["codex-desktop", "Codex Desktop", zh ? "桌面端" : "Desktop"],
+        ["claude-code", "Claude Code", "CLI"],
+        ["opencode", "OpenCode", "CLI"],
+        ["pi", "Pi", "CLI"],
+      ],
+      columns: [
+        ["flowlet-pro", "flowlet-pro", "pro"],
+        ["qwen3.8-max", "qwen3.8-max", "qwen"],
+        ["longcat-2.0", "longcat-2.0", "LC"],
+        ["deepseek-v4-pro", "deepseek-v4-pro", "DS"],
+      ],
+      subtitle: zh ? "客户端 × 模型，颜色越深消耗越高" : "Client × model, darker = higher",
+    },
+    device: {
+      entries: [
+        ["local", zh ? "本机" : "This device", "Windows 11"],
+        ["studio", zh ? "工作室电脑" : "Studio PC", "Windows 11"],
+        ["laptop", zh ? "移动工作站" : "Laptop", "macOS"],
+        ["server", zh ? "家庭服务器" : "Home server", "Linux"],
+      ],
+      columns: [
+        ["flowlet-pro", "flowlet-pro", "pro"],
+        ["qwen3.8-max", "qwen3.8-max", "qwen"],
+        ["longcat-2.0", "longcat-2.0", "LC"],
+        ["deepseek-v4-pro", "deepseek-v4-pro", "DS"],
+      ],
+      subtitle: zh ? "设备 × 模型，颜色越深消耗越高" : "Device × model, darker = higher",
+    },
+  };
+  const variant = variants[dimension];
+  const costValues = [
+    ["$5.12", "$1.42", "$0.96", "$0.71"],
+    ["$0.74", "$2.18", "$0.41", "—"],
+    ["$0.22", "$0.18", "$1.78", "—"],
+    ["$1.36", "$0.11", "—", "—"],
+  ];
+  const entries = fixture.entries.map((entry, index) => ({
+    ...entry,
+    key: variant.entries[index][0],
+    label: variant.entries[index][1],
+    sublabel: variant.entries[index][2],
+  }));
+  const rows = fixture.rows.map((row, rowIndex) => ({
+    ...row,
+    key: entries[rowIndex].key,
+    label: entries[rowIndex].label,
+    cells: row.cells.map((cell, columnIndex) => ({
+      ...cell,
+      level: cell.level as 0 | 1 | 2 | 3 | 4,
+      value: metric === "cost" ? costValues[rowIndex][columnIndex] : cell.value,
+    })),
+  }));
+
+  return {
+    ...fixture,
+    entries,
+    columns: variant.columns.map(([key, label, shortLabel]) => ({ key, label, shortLabel })),
+    rows,
+    detail: { ...fixture.detail, label: entries[0].label },
+    labels: { ...fixture.labels, matrixSubtitle: variant.subtitle },
+  };
 }
 
 export function createModelsServiceFixture(zh: boolean): {
@@ -287,29 +382,41 @@ export function createModelsServiceFixture(zh: boolean): {
 } {
   return {
     stats: [
-      { key: "models", label: zh ? "对外模型" : "Models", value: "4" },
-      { key: "enabled", label: zh ? "已启用" : "Enabled", value: "4", tone: "success" },
-      { key: "channels", label: zh ? "已接入渠道" : "Channels", value: "3" },
+      { key: "models", label: zh ? "对外模型" : "Models", value: "15" },
+      { key: "enabled", label: zh ? "已启用" : "Enabled", value: "2", tone: "success" },
+      { key: "channels", label: zh ? "已接入渠道" : "Channels", value: "7" },
     ],
     groups: {
       aggregate: [
-        { id: "flowlet-pro", kind: "aggregate", name: "flowlet-pro", typeLabel: zh ? "Flowlet · 聚合模型" : "Flowlet · Aggregate", summary: zh ? "4 个可用账号" : "4 accounts", enabled: true, logo: "/flowlet-logo.png" },
+        { id: "flowlet-pro", kind: "aggregate", name: "flowlet-pro", typeLabel: zh ? "Flowlet · 聚合模型" : "Flowlet · Aggregate", summary: zh ? "2 个可用账号" : "2 accounts", enabled: true, logo: "/flowlet-logo.png" },
         { id: "flowlet-flash", kind: "aggregate", name: "flowlet-flash", typeLabel: zh ? "Flowlet · 聚合模型" : "Flowlet · Aggregate", summary: zh ? "3 个可用账号" : "3 accounts", enabled: true, logo: "/flowlet-logo.png" },
       ],
       direct: [
-        { id: "deepseek-v4", kind: "direct", name: "deepseek-v4-pro", typeLabel: "DeepSeek · 渠道模型", summary: zh ? "已加入 2 个聚合模型" : "In 2 aggregates", enabled: true, logo: "/icons/lobe/deepseek-color.svg" },
-        { id: "qwen3.8", kind: "direct", name: "qwen3.8-max", typeLabel: "Qwen · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: true, logo: "/icons/lobe/qwen-color.svg" },
-        { id: "longcat-2", kind: "direct", name: "longcat-2.0", typeLabel: "LongCat · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: true, logo: "/icons/lobe/longcat-color.svg" },
+        { id: "deepseek-v4-flash", kind: "direct", name: "deepseek-v4-flash", typeLabel: "DeepSeek · 渠道模型", summary: zh ? "已加入 2 个聚合模型" : "In 2 aggregates", enabled: false, logo: "/icons/lobe/deepseek-color.svg" },
+        { id: "deepseek-v4-pro", kind: "direct", name: "deepseek-v4-pro", typeLabel: "DeepSeek · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/deepseek-color.svg" },
+        { id: "glm-4.5-air", kind: "direct", name: "glm-4.5-air", typeLabel: "Z.AI · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
+        { id: "glm-4.7", kind: "direct", name: "glm-4.7", typeLabel: "Z.AI · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
+        { id: "glm-5.2", kind: "direct", name: "glm-5.2", typeLabel: "Z.AI · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
+        { id: "longcat-2.0", kind: "direct", name: "longcat-2.0", typeLabel: "LongCat · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/longcat-color.svg" },
+        { id: "kimi-k3", kind: "direct", name: "kimi-k3", typeLabel: "Kimi · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/kimi-color.svg" },
+        { id: "kimi-k2.7-code", kind: "direct", name: "kimi-k2.7-code", typeLabel: "Kimi · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/kimi-color.svg" },
+        { id: "qwen3.8-max", kind: "direct", name: "qwen3.8-max", typeLabel: "Qwen · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+        { id: "qwen3.7-max", kind: "direct", name: "qwen3.7-max", typeLabel: "Qwen · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+        { id: "qwen3.7-plus", kind: "direct", name: "qwen3.7-plus", typeLabel: "Qwen · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+        { id: "qwen3.7-flash", kind: "direct", name: "qwen3.7-flash", typeLabel: "Qwen · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+        { id: "qwen3.6-plus", kind: "direct", name: "qwen3.6-plus", typeLabel: "Qwen · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
       ],
     },
     labels: {
       stats: {},
       aggregateGroup: zh ? "聚合模型" : "Aggregate",
       directGroup: zh ? "渠道模型" : "Direct",
-      currentVisible: zh ? "当前显示 5 / 共 5 个模型" : "Showing 5 of 5 models",
+      statsAria: zh ? "模型服务统计" : "Model service summary",
+      currentVisible: zh ? "当前显示 15 / 共 15 个模型" : "Showing 15 of 15 models",
       hint: zh ? "选择模型后在右侧查看详情" : "Select a model to view details",
       ready: zh ? "可用" : "Ready",
       off: zh ? "关闭" : "Off",
+      empty: zh ? "没有匹配的模型" : "No matching models",
     },
   };
 }
@@ -324,25 +431,29 @@ export function createProjectsBoardFixture(zh: boolean): {
         id: "queued",
         title: zh ? "待处理" : "Queued",
         count: 2,
+        tone: "primary",
         tasks: [
-          { id: "t-1", project: "Flowlet", title: zh ? "完善发布说明" : "Polish release notes", agentLabel: "Codex", agentIcon: "/icons/lobe/codex.svg", meta: zh ? "队列第 1 位" : "Queue #1" },
-          { id: "t-2", project: "Website", title: zh ? "检查移动端布局" : "Check mobile layout", agentLabel: "Claude", agentIcon: "/icons/lobe/claudecode.svg", meta: zh ? "队列第 2 位" : "Queue #2" },
+          { id: "t-1", title: zh ? "补齐官网产品演示的共享组件" : "Complete shared website demo components", roundLabel: zh ? "第 1 轮" : "Round 1", contextLabel: zh ? "代码修改 · Codex" : "Code · Codex", status: "queued", meta: zh ? "等待 1 min" : "Waiting 1 min" },
+          { id: "t-2", title: zh ? "检查桌面端 1200×720 布局" : "Check the 1200×720 desktop layout", roundLabel: zh ? "第 1 轮" : "Round 1", contextLabel: zh ? "只读分析 · Claude Code" : "Analysis · Claude Code", status: "queued", meta: zh ? "等待 2 min" : "Waiting 2 min" },
         ],
       },
       {
         id: "running",
         title: zh ? "进行中" : "Running",
         count: 1,
+        tone: "primary",
         tasks: [
-          { id: "t-3", project: "Flowlet", title: zh ? "修复会话归属" : "Fix session attribution", agentLabel: "OpenCode", agentIcon: "/icons/lobe/opencode.svg", running: true, progress: 62, meta: zh ? "执行 3m 24s" : "Running 3m 24s" },
+          { id: "t-3", title: zh ? "统一任务看板与官网 Demo" : "Unify the task board and website demo", roundLabel: zh ? "第 1 轮" : "Round 1", contextLabel: zh ? "代码修改 · OpenCode" : "Code · OpenCode", status: "running", meta: zh ? "执行 3m 24s" : "Running 3m 24s", trailing: zh ? "4.28M tokens ≈¥0.22" : "4.28M tokens ≈¥0.22" },
         ],
       },
       {
         id: "review",
         title: zh ? "待审核" : "Review",
-        count: 1,
+        count: 2,
+        tone: "warning",
         tasks: [
-          { id: "t-4", project: "Desktop", title: zh ? "优化账号编辑器" : "Refine account editor", agentLabel: "Pi", agentIcon: "/icons/lobe/pi.svg", meta: zh ? "提交于 5 分钟前" : "Submitted 5m ago" },
+          { id: "t-4", title: zh ? "修复请求日志底部分页布局" : "Fix request log footer pagination", roundLabel: zh ? "第 1 轮" : "Round 1", contextLabel: zh ? "代码修改 · Claude Code" : "Code · Claude Code", status: "review", meta: zh ? "执行 8 min" : "Ran 8 min", trailing: zh ? "7.90M tokens ≈¥0.39" : "7.90M tokens ≈¥0.39" },
+          { id: "t-5", title: zh ? "完善多维归因矩阵折叠规则" : "Refine attribution matrix collapsing", roundLabel: zh ? "第 2 轮" : "Round 2", contextLabel: zh ? "代码修改 · Pi" : "Code · Pi", status: "review", meta: zh ? "执行 5.4 min" : "Ran 5.4 min", trailing: zh ? "3.16M tokens ≈¥0.18" : "3.16M tokens ≈¥0.18" },
         ],
       },
     ],

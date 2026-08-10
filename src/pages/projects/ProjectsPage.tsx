@@ -5,6 +5,7 @@ import { IconAIEditLevel1, IconChevronRight, IconCopy, IconDelete, IconEdit, Ico
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ProjectsBoardTaskCardView, ProjectsBoardView } from "@flowlet/product-ui";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { BackgroundJobEvent } from "../../domains/background-task/types";
 import { agentSessionCommands } from "../../domains/agent-session/commands";
@@ -630,14 +631,25 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
 
   return <div className={styles.boardView}>
     {sharedProjectsError ? <div className={styles.remoteLoadWarning}>{t("其他设备任务读取失败：{message}", { message: sharedProjectsError })}</div> : null}
-    {tasks.isError ? <div className={styles.state}>{tasks.error.message}</div> : <div ref={boardRef} className={`${styles.board} ${styles.taskBoard}`} style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(${TASK_COLUMN_MIN_WIDTH}px, 1fr))` }}>
-      {noSearchMatch ? <div className={styles.searchEmpty}><Empty title={t("没有匹配的任务")} description={t("试试搜索标题、任务 ID 或描述关键词")} /></div> : visibleColumns.map((column) => <section className={styles.column} key={column.id}><header><span className={styles.colTitle}><span>{t(column.label)}</span><span className={`${styles.colCount} ${columnCountClass(column.id)}`}>{grouped[column.id].length}</span></span>{column.addable ? <button className={styles.addColButton} aria-label={t("添加任务")} title={t("添加任务")} onClick={() => openEditor("new")}><IconPlus /></button> : null}</header><div className={styles.columnBody}>
-        {column.id === "done"
-          ? doneTree.roots.map((task) => renderDoneTask(task))
-          : grouped[column.id].map((task) => <TaskBoardCard key={task.id} task={task} taskById={taskById} onOpen={openAnyTask} actions={renderCardActions(task)} meta={renderCardMeta(task, now)} blocker={queueBlockerByTaskId.get(task.id)} sourceLabel={taskSourceLabel(task)} />)}
-        {column.addable ? <button className={styles.addCard} onClick={() => openEditor("new")}><IconPlus />{t("添加任务")}</button> : null}
-      </div></section>)}
-    </div>}
+    {tasks.isError ? <div className={styles.state}>{tasks.error.message}</div> : (
+      <ProjectsBoardView
+        boardRef={boardRef}
+        columnCount={columnCount}
+        columnMinWidth={TASK_COLUMN_MIN_WIDTH}
+        labels={{ emptyHint: t("暂无任务"), running: t("运行中") }}
+        emptyState={noSearchMatch ? <Empty title={t("没有匹配的任务")} description={t("试试搜索标题、任务 ID 或描述关键词")} /> : undefined}
+        columns={visibleColumns.map((column) => ({
+          id: column.id,
+          title: t(column.label),
+          count: grouped[column.id].length,
+          tone: column.id === "review" ? "warning" : column.id === "done" ? "success" : "primary",
+          addAction: column.addable ? { label: t("添加任务"), icon: <IconPlus />, onClick: () => openEditor("new") } : undefined,
+          content: column.id === "done"
+            ? doneTree.roots.map((task) => renderDoneTask(task))
+            : grouped[column.id].map((task) => <TaskBoardCard key={task.id} task={task} taskById={taskById} onOpen={openAnyTask} actions={renderCardActions(task)} meta={renderCardMeta(task, now)} blocker={queueBlockerByTaskId.get(task.id)} sourceLabel={taskSourceLabel(task)} />),
+        }))}
+      />
+    )}
     {!tasks.isError && showDoneDrawerEntry ? <button className={styles.doneDrawerEntry} onClick={() => setDoneDrawerOpen(true)} title={t("查看已完成任务")}><IconChevronRight size="small" /><span>{t("已完成")}</span></button> : null}
     <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建任务") : editing && taskIsRevisionDraft(editing) ? t("编辑第 {n} 轮草稿", { n: taskExecutionRound(editing) }) : t("编辑任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span>{editing !== "new" && editing ? <Button type="danger" theme="borderless" icon={<IconDelete />} onClick={() => setDeleting(editing)}>{t("删除")}</Button> : null}</span><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button type="primary" theme="solid" loading={actions.saveTask.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
       <div className={styles.form}>{editing !== "new" && editing && taskIsRevisionDraft(editing) ? <div className={`${styles.formNote} ${styles.revisionDraftNote}`}><span>{t("之前各轮的执行历史和最近退回原因已保留。")}</span><Button size="small" theme="borderless" onClick={() => openTaskHistory(editing, true)}>{t("查看历史")}</Button></div> : null}<label><span className={styles.titleFieldLabel}>{t("任务标题")}{generatingTitle && titleGenStatus ? <small className={styles.titleGenStatus}>{titleGenStatus}</small> : null}</span><div className={styles.titleInputRow}><Input autoFocus composition value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /><Button icon={<IconAIEditLevel1 />} aria-label={t("自动生成标题")} title={canAutoGenerateTaskTitle(draft.description) ? t("根据任务描述自动生成标题") : t("任务描述至少 {n} 字后可自动生成", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })} loading={generatingTitle} disabled={!canAutoGenerateTaskTitle(draft.description)} onClick={() => void autoGenerateTitle()} /></div>{!canAutoGenerateTaskTitle(draft.description) ? <small className={styles.titleGenerateHint}>{t("任务描述至少 {n} 字后可自动生成标题", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })}</small> : null}</label><label><span>{t("任务描述（可选）")}</span><TextArea composition value={draft.description} autosize={{ minRows: 9, maxRows: 12 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div>{draft.baseTaskId ? <div className={styles.formNote}>{t("基于父任务：{id}（{title}）", { id: shortTaskId(draft.baseTaskId), title: taskById.get(draft.baseTaskId)?.title ?? t("已完成任务") })}</div> : null}</div>
@@ -728,18 +740,6 @@ function statusTagLabel(status: ProjectTaskStatus) {
     case "in_progress": return "执行中";
     case "review": return "待审核";
     case "done": return "已完成";
-  }
-}
-
-/** 列头数量徽标的背景色：待处理/进行中为主色，待审核为警示色，已完成为成功色。 */
-function columnCountClass(columnId: string): string {
-  switch (columnId) {
-    case "review": return styles.colCountWarning;
-    case "done": return styles.colCountSuccess;
-    case "in_progress":
-    case "backlog":
-    default:
-      return styles.colCountPrimary;
   }
 }
 
@@ -864,24 +864,37 @@ export function TaskCard({ task, taskById, onOpen, actions = [], meta, trailing,
 
   // 其他状态布局：第一行合并元信息，第二行标题，第三行「基于」（可选），第四行时间。
   return (
-    <article className={`${styles.taskCard} ${isReview ? styles.taskCardReview : ""} ${depth > 0 ? styles.taskCardChild : ""}`}>
-      <div className={styles.taskCardHead}>
-        <div className={styles.taskTags}>
+    <ProjectsBoardTaskCardView
+      review={isReview}
+      classNames={{
+        card: `${styles.taskCard} ${depth > 0 ? styles.taskCardChild : ""}`,
+        review: styles.taskCardReview,
+        head: styles.taskCardHead,
+        tags: styles.taskTags,
+        title: styles.taskTitle,
+        titleStandalone: styles.taskTitleStandalone,
+        footer: styles.taskCardMetaActions,
+        meta: styles.taskCardMetaRight,
+      }}
+      tags={(
+        <>
           <span className={`${styles.taskTag} ${styles.taskTagRound}`}>{taskIsRevisionDraft(task) ? t("第 {n} 轮草稿", { n: taskExecutionRound(task) }) : t("第 {n} 轮", { n: taskExecutionRound(task) })}</span>
           {sourceLabel ? <span className={styles.remoteTaskTag}>{t("其他设备")} · {sourceLabel}</span> : <span className={styles.taskCardTypeAgent}>{t(taskTypeLabel(task.taskType))} · {task.agentProfile}</span>}
-        </div>
-        {moreMenu}
-      </div>
-      <div className={`${styles.taskTitle} ${styles.taskTitleStandalone}`}>
+        </>
+      )}
+      menu={moreMenu}
+      title={(
         <button className={styles.taskTitleLink} title={isReview ? t("审核任务") : task.status === "draft" ? t("编辑任务") : t("查看任务详情")} onClick={() => onOpen(task)}>
           <strong>{task.title}</strong>
         </button>
-      </div>
-      {baseRow}
-      {blocker ? <div className={styles.taskBlocker}><Tag color="red" size="small">{t("无法执行")}</Tag><span>{blocker.message}</span></div> : null}
-      {meta || directActions || trailing ? <div className={styles.taskCardMetaActions}><span className={styles.taskCardMetaRight}>{meta}</span>{directActions ?? trailing}</div> : null}
+      )}
+      base={baseRow}
+      blocker={blocker ? <div className={styles.taskBlocker}><Tag color="red" size="small">{t("无法执行")}</Tag><span>{blocker.message}</span></div> : null}
+      meta={meta}
+      trailing={directActions ?? trailing}
+    >
       {children}
-    </article>
+    </ProjectsBoardTaskCardView>
   );
 }
 

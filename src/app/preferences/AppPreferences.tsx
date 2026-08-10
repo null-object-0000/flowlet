@@ -2,6 +2,7 @@ import { LocaleProvider } from "@douyinfe/semi-ui-19";
 import enUS from "@douyinfe/semi-ui-19/lib/es/locale/source/en_US";
 import zhCN from "@douyinfe/semi-ui-19/lib/es/locale/source/zh_CN";
 import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
+import { setActiveTokenUnit, type TokenUnit } from "../../shared/formatters/number";
 import { translate, type AppLanguage, type TranslationVariables } from "./translations";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -9,6 +10,7 @@ export type ResolvedTheme = "light" | "dark";
 
 const LANGUAGE_KEY = "flowlet.language";
 const THEME_KEY = "flowlet.theme";
+const TOKEN_UNIT_KEY = "flowlet.tokenUnit";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 type PreferencesValue = {
@@ -16,6 +18,8 @@ type PreferencesValue = {
   setLanguage: (language: AppLanguage) => void;
   theme: ThemePreference;
   setTheme: (theme: ThemePreference) => void;
+  tokenUnit: TokenUnit;
+  setTokenUnit: (unit: TokenUnit) => void;
   resolvedTheme: ResolvedTheme;
   t: (source: string, variables?: TranslationVariables) => string;
 };
@@ -25,6 +29,8 @@ const fallback: PreferencesValue = {
   setLanguage: () => undefined,
   theme: "system",
   setTheme: () => undefined,
+  tokenUnit: "auto",
+  setTokenUnit: () => undefined,
   resolvedTheme: "light",
   t: (source, variables) => translate("zh-CN", source, variables),
 };
@@ -40,6 +46,7 @@ export function applyInitialPreferences() {
 export function AppPreferencesProvider({ children }: PropsWithChildren) {
   const [language, setLanguageState] = useState<AppLanguage>(readLanguage);
   const [theme, setThemeState] = useState<ThemePreference>(readTheme);
+  const [tokenUnit, setTokenUnitState] = useState<TokenUnit>(readTokenUnit);
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(readSystemTheme);
   const resolvedTheme = theme === "system" ? systemTheme : theme;
 
@@ -65,9 +72,15 @@ export function AppPreferencesProvider({ children }: PropsWithChildren) {
       setThemeState(next);
       writePreference(THEME_KEY, next);
     },
+    tokenUnit,
+    setTokenUnit(next) {
+      setTokenUnitState(next);
+      setActiveTokenUnit(next);
+      writePreference(TOKEN_UNIT_KEY, next);
+    },
     resolvedTheme,
     t: (source, variables) => translate(language, source, variables),
-  }), [language, resolvedTheme, theme]);
+  }), [language, resolvedTheme, theme, tokenUnit]);
 
   return (
     <PreferencesContext.Provider value={value}>
@@ -92,6 +105,14 @@ export function resolveSystemLanguage(systemLanguage = typeof navigator === "und
 function readTheme(): ThemePreference {
   const value = readPreference(THEME_KEY);
   return value === "light" || value === "dark" ? value : "system";
+}
+
+function readTokenUnit(): TokenUnit {
+  const saved = readPreference(TOKEN_UNIT_KEY);
+  const unit: TokenUnit = saved === "zh" || saved === "en" ? saved : "auto";
+  // 在首次渲染前同步到格式化模块，保证首帧即使用已保存的展示单位。
+  setActiveTokenUnit(unit);
+  return unit;
 }
 
 function readSystemTheme(): ResolvedTheme {

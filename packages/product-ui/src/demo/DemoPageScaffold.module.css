@@ -1,0 +1,24 @@
+.headerControls { display: flex; align-items: center; gap: 8px; }
+.controlButton, .refreshButton, .filterButton {
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface);
+  font: inherit;
+  font-size: var(--flowlet-font-size-caption, 12px);
+  cursor: pointer;
+}
+.controlButton { display: inline-flex; align-items: center; gap: 8px; }
+.refreshButton { width: 32px; padding: 0; font-size: 18px; }
+.liveStatus { height: 32px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); font-size: var(--flowlet-font-size-caption, 12px); }
+.liveStatus i { width: 7px; height: 7px; border-radius: 50%; background: var(--flowlet-color-success); }
+.filterToolbar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.search { height: 32px; min-width: 190px; flex: 1; display: flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface); }
+.search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--flowlet-color-text); background: transparent; font: inherit; font-size: var(--flowlet-font-size-caption, 12px); }
+.search input::placeholder { color: var(--flowlet-color-text-tertiary); }
+.filterButton { min-width: 96px; display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; }
+.segmented { flex: none; display: flex; gap: 2px; padding: 3px; border: 1px solid var(--flowlet-color-border); border-radius: 9px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
+.segmented button { height: 25px; padding: 0 10px; border: 0; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: transparent; font: inherit; font-size: var(--flowlet-font-size-caption, 12px); cursor: pointer; }
+.segmented button[aria-pressed="true"] { color: var(--flowlet-color-text); background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); font-weight: 650; }

@@ -84,10 +84,14 @@ README、CHANGELOG 和官网统一说明：
 产品演示移动到第二屏，并改为完整的交互区域：
 
 - PC Demo 使用 `1200 × 720` 的产品设计基准；
-- 可以切换运行概览、模型服务、项目管理、请求日志、会话管理和用量洞察；
+- 可以切换运行概览、模型服务、项目管理、请求日志、会话管理、用量统计和用量洞察；
 - 不再使用静态截图或官网独立仿画的 UI；
 - 官网通过固定 fixtures 向共享展示组件注入 Demo 数据；
 - 手机宽度下侧栏切换为横向菜单，以便继续浏览演示页面。
+
+官网 fixtures 只用于展示功能状态和交互可能性，不得读取或复制用户的真实账号、邮箱、手机号、
+余额、Client Token、API Key、请求日志或设备信息。渠道账号名称使用明确的虚构标识；品牌 Logo
+与真实应用共同使用 `ChannelBrandLogoView`，离线图标来自仓库已登记版本和许可证的 Lobe Icons 资源。
 
 ### 3.3 后续内容层级
 
@@ -170,6 +174,10 @@ README、CHANGELOG 和官网统一说明：
 - 渠道资源同步；
 - Router 的真实导航。
 
+真实应用与 Demo 页面现在还共用 `DesktopPageHeaderView`，统一页面标题、副标题和右侧控件区的
+排版。真实应用的 `PageHeader` 只是这一共享 View 的薄封装；官网和独立 Demo 通过本地展示状态
+注入时间范围、刷新、搜索等控件，避免再次复制页面头部样式。
+
 ### 6.2 运行概览
 
 已共享：
@@ -181,24 +189,48 @@ README、CHANGELOG 和官网统一说明：
 
 真实应用继续使用真实代理状态、真实账号、路由、余额、Agent 环境检测和相关操作回调。
 
-### 6.3 请求日志
+账号、聚合模型和 AI Agent 三类列表行也已收敛到 `product-ui`：真实应用负责账号启停、
+余额与套餐、环境检测及抽屉动作，官网 Demo 注入覆盖启用/停用账号、Codex 观测账号、
+CLI/Desktop 安装状态的 fixtures。渠道品牌统一由 `ChannelBrandLogoView` 按 `channelId` 解析，
+真实应用和 Demo 不再分别维护 Logo 映射。官网侧边栏同步保留真实应用的任务日志和用量统计入口；
+尚未共享的页面继续显示明确占位说明。
+
+### 6.3 模型服务
+
+真实 `ModelServicesPage` 已接入 `ModelsServiceView` 与 `ModelsServiceDetailView`。统计条、
+模型分组列表、启停开关、左右工作区、详情标题、基础信息/价格信息/渠道路由 Tab 和底部状态栏
+由真实应用与 Demo 共用。详情 Tab 的提示条、参数网格、能力列表、内容分组和路由概览也由
+`ModelsService*View` 共享展示组件统一渲染，不再在 Demo 中维护另一套 CSS。真实页面继续负责查询、同步、价格目录、路由增删排序和 mutation；
+Demo 使用 15 个模型、2 个启用模型和 7 个渠道的本地 fixtures 驱动相同展示结构。
+
+### 6.4 请求日志
 
 真实 `RequestLogsPage` 保留筛选、统计查询、分页、详情抽屉和重试动作，将结果映射为 `RequestLogsView` 所需的行模型。官网和独立 Demo 使用 `RequestLogsDemoView` 与固定日志数据。
 
-### 6.4 Agent 会话
+`RequestLogsView` 为统计卡、筛选工具栏和表格显式预留三行 Grid；有工具栏时不得让隐式 Grid 行
+把表格推到容器底部。真实页和 Demo 均由表格主体占用筛选栏之后的剩余高度。
+
+### 6.5 Agent 会话
 
 真实 `AgentSessionsPage` 保留会话查询、原生摘要补充、Token/费用 Tooltip、同步任务、分页和详情抽屉，将结果映射为 `AgentSessionsView`。官网使用相同 View 的 Demo 版本。
 
-### 6.5 用量洞察
+`AgentSessionsView` 在存在筛选工具栏时使用 `auto minmax(0, 1fr)` 两行布局，表格紧跟工具栏并
+占满剩余空间；无工具栏时仍保持单行表格布局。
+
+### 6.6 用量洞察
 
 真实 `UsageAnalysisPage` 保留统计查询、维度切换、矩阵计算、全量展开 SideSheet 和费用语义，把排行、矩阵和详情映射为 `UsageAnalysisView`。官网使用固定数据生成同一种排行与交叉矩阵。
 
-### 6.6 已有共享 Demo、尚未迁移真实页面
+“多维归因”标题、说明和按模型/渠道账号/客户端/设备 Tab 属于共享 View，只渲染一次；真实页
+通过回调切换真实聚合维度，Demo 则切换对应 fixture。Token / 预估费用切换同样由共享 View 暴露，
+Demo 会同步替换矩阵数值，不再只有静态选中样式。
+
+### 6.7 已有共享 Demo、尚未迁移真实页面
 
 以下页面已经具备共享 View 和 Demo fixtures，但真实应用页面还没有切换到这些 View：
 
-- 模型服务：`ModelsServiceView` / `ModelsServiceDemoView`；
 - 项目管理：`ProjectsBoardView` / `ProjectsBoardDemoView`。
+- 用量统计：`UsageStatisticsView` / `UsageStatisticsDemoView`。
 
 它们当前用于官网和 `dev:frontend`，不能据此声称真实页面已经完成共享化。
 
@@ -239,9 +271,16 @@ npm run dev:frontend
 - 项目管理 Demo；
 - 请求日志 Demo；
 - Agent 会话 Demo；
+- 用量统计 Demo；
 - 用量洞察 Demo。
 
-任务日志、用量统计和设置暂时显示明确的未接入提示，不伪装成已经完成的 Demo 页面。
+除运行概览外，已接入的桌面 Demo 都展示与真实页面一致的共享页头。模型服务、项目管理、请求
+日志和会话管理提供本地搜索/筛选展示状态；用量统计支持日/周/月、Token/费用和时段详情切换；
+用量洞察支持主维度与 Token/费用切换。这些交互只
+处理 fixtures，不读取真实配置，也不会进入真实数据链路。
+
+任务日志和设置暂时显示明确的未接入提示，不伪装成已经完成的 Demo 页面。用量统计 Demo 已按
+真实页面的信息架构建立共享展示模型，但真实 `UsageCostPage` 仍保留现有查询与业务容器，尚未迁移到共享 View。
 
 真实桌面模式继续使用：
 
@@ -314,19 +353,39 @@ npm test
 git diff --check
 ```
 
+2026-08-10 完成官网 Demo 页头、用量洞察交互和运行概览结构收敛后再次验证：
+
+```text
+npm run check                         通过
+npm --prefix website run check        通过
+npm run build                         通过
+npm run build:mobile                  通过
+npm run website:build                 通过
+npm test                              95 个测试文件、727 个测试通过
+git diff --check                      通过
+```
+
+另使用 `1200 × 720` 浏览器视口逐页检查官网六个已接入 Demo：嵌入内容区没有横向或纵向
+溢出，控制台无错误；用量洞察四个主维度 Tab 与 Token/费用切换均完成实际点击验证。
+运行概览的嵌入内容区实测为 `920 × 654`，无内部溢出；停用账号开关、四个 Agent 行、
+CLI/Desktop 状态和完整侧边栏枚举均完成实际验证。
+模型服务的嵌入内容区同样实测为 `920 × 654`，无内部溢出；15/2/7 统计、模型选择与启停、
+价格 Tab 和右侧详情均完成实际点击验证。
+请求日志与会话管理修正显式 Grid 行后再次实测：请求日志的统计、筛选、表格间距均为 `10px`，
+会话筛选与表格间距为 `10px`；两页共享 View 的 `clientHeight` 与 `scrollHeight` 一致，控制台无错误。
+
 构建过程中 `lottie-web` 的 direct `eval` 警告是现有第三方依赖警告，不应误报为本次共享化引入的新错误；但最终验收必须记录其真实输出。
 
 ## 12. 后续建议
 
 建议按以下顺序继续迁移：
 
-1. 将真实模型服务页面接入 `ModelsServiceView`；
-2. 将真实项目看板接入 `ProjectsBoardView`；
-3. 为任务日志、用量统计和设置建立共享展示模型；
-4. 抽取完整移动端应用壳和主要页面；
-5. 增加 `dev:frontend:mobile`；
-6. 为 `packages/product-ui` 增加独立的组件与 fixture 测试；
-7. 在官网自动化检查中固定验证 `1200 × 720` PC Demo、移动宽度菜单和中英文切换；
-8. 共享 Design Tokens 的单一来源，减少官网和应用各自维护相似 Token 的漂移风险。
+1. 将真实项目看板接入 `ProjectsBoardView`；
+2. 将真实用量统计页接入共享 `UsageStatisticsView`，并为任务日志和设置建立共享展示模型；
+3. 抽取完整移动端应用壳和主要页面；
+4. 增加 `dev:frontend:mobile`；
+5. 为 `packages/product-ui` 增加独立的组件与 fixture 测试；
+6. 在官网自动化检查中固定验证 `1200 × 720` PC Demo、移动宽度菜单和中英文切换；
+7. 共享 Design Tokens 的单一来源，减少官网和应用各自维护相似 Token 的漂移风险。
 
 迁移过程中应继续坚持：业务容器负责真实状态与动作，共享层负责展示；不要为了让官网可运行而把真实 command 替换成全局 mock，也不要让 Demo fixtures 进入真实数据链路。

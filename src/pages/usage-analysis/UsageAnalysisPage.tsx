@@ -38,8 +38,6 @@ import { UsageAnalysisView, type UsageAnalysisMatrixRowModel } from "@flowlet/pr
 import styles from "./UsageAnalysisPage.module.css";
 
 const EMPTY_ROWS: UsageSummaryRow[] = [];
-const COMPACT_MATRIX_COLUMN_COUNT = 4;
-
 const DIMENSION_OPTIONS: Array<{ value: ConsumptionDimension; label: string }> = [
   { value: "model", label: "按模型" },
   { value: "account", label: "按渠道账号" },
@@ -94,7 +92,6 @@ export function UsageAnalysisPage() {
     () => buildCrossMatrix(rows, dimension, matrixMetric, modelCurrencyOf),
     [rows, dimension, matrixMetric, modelCurrencyOf],
   );
-  const compactMatrixColumns = matrix.columns.slice(0, COMPACT_MATRIX_COLUMN_COUNT);
   const selected = entries.find((entry) => entry.key === selectedKey) ?? entries[0] ?? null;
 
   const changeDimension = (next: ConsumptionDimension) => {
@@ -155,26 +152,6 @@ export function UsageAnalysisPage() {
       </PageHeader>
 
       <section className={styles.card}>
-        <div className={styles.cardHeader}>
-          <div className={styles.cardTitle}>
-            <strong>{t("多维归因")}</strong>
-            <span>{t("切换主维度，再交叉查看 Token 与费用归因")}</span>
-          </div>
-          <div className={styles.dimensionTabs} role="tablist" aria-label={t("分析维度")}>
-            {DIMENSION_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="tab"
-                aria-selected={dimension === option.value}
-                onClick={() => changeDimension(option.value)}
-              >
-                {t(option.label)}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {loading ? (
           <div className={styles.state}><span>{t("正在加载用量…")}</span></div>
         ) : null}
@@ -241,24 +218,25 @@ export function UsageAnalysisPage() {
               emptyCell: t("该组合暂无数据"),
             }}
             metric={matrixMetric}
+            dimensions={DIMENSION_OPTIONS.map((option) => ({ key: option.value, label: t(option.label) }))}
+            selectedDimension={dimension}
+            matrixFooterAction={(
+              <Button
+                className={styles.expandMatrixButton}
+                theme="borderless"
+                size="small"
+                icon={<IconExternalOpen />}
+                onClick={() => setMatrixExpanded(true)}
+              >
+                {t("展开全部 {count} 项", { count: matrix.columns.length })}
+              </Button>
+            )}
             onSelect={setSelectedKey}
             onMetricChange={setMatrixMetric}
+            onDimensionChange={(next) => changeDimension(next as ConsumptionDimension)}
           />
         ) : null}
 
-        <div className={styles.matrixFoot}>
-          {matrix.columns.length > COMPACT_MATRIX_COLUMN_COUNT ? (
-            <Button
-              className={styles.expandMatrixButton}
-              theme="borderless"
-              size="small"
-              icon={<IconExternalOpen />}
-              onClick={() => setMatrixExpanded(true)}
-            >
-              {t("展开全部 {count} 项", { count: matrix.columns.length })}
-            </Button>
-          ) : null}
-        </div>
       </section>
 
       <SideSheet

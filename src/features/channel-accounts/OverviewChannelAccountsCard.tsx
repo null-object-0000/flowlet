@@ -20,6 +20,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import { formatFullTimestamp, formatTime, parseTimestamp } from "../../shared/formatters/datetime";
 import { accountSyncStatus, codexSyncStatus, type AccountSyncStatus } from "./accountSyncStatus";
+import { OverviewListRowView, OverviewListView } from "@flowlet/product-ui";
 
 const { Text } = Typography;
 
@@ -80,7 +81,7 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
         </div>
       ) : undefined}
     >
-      {allAccounts.length > 0 ? visibleAccounts.length > 0 ? <div className={styles.list}>
+      {allAccounts.length > 0 ? visibleAccounts.length > 0 ? <OverviewListView>
         {visibleAccounts.map((account) => {
           const snapshot = snapshotByAccount.get(account.id);
           const isCodex = isChatGptAccount(account);
@@ -99,87 +100,40 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
             ? getCodexNameSummary(codexReport)
             : nameLineSummary(account, snapshot, t, language);
           const accountName = account.name || account.channel_id;
+          const usageParts = isCodex
+            ? codexReport
+              ? getCodexUsageDisplay(codexReport, t, language)
+              : { value: "", secondary: "", resetAt: null }
+            : null;
+          const resourceParts = usageParts
+            ? { label: "", value: usageParts.value, secondary: [usageParts.secondary, usageParts.resetAt].filter(Boolean).join(" · ") }
+            : resourceSummary(account, snapshot, t, language);
+          const hasSecondary = Boolean(resourceParts.secondary);
           return (
-            <div className={styles.row} key={account.id}>
-              {isCodex ? (
-                <button
-                  className={styles.rowMain}
-                  type="button"
-                  onClick={() => onOpenCodexAgent?.(codexReport?.account_id ?? "")}
-                >
-                  <AccountLogo
-                    channelId={account.channel_id}
-                    name={account.name}
-                    syncStatus={syncStatus}
-                    tooltip={syncStatus === "stale" && codexReport?.error ? codexReport.error : undefined}
-                  />
-                  <span className={styles.accountText}>
-                    <span className={styles.nameRow}>
-                      <span className={styles.codexNameWrapper}>
-                        <Text strong title={accountName}>{accountName}</Text>
-                        {nameSummary && <span className={styles.resourceSeparator}>·</span>}
-                        {nameSummary && <span className={styles.nameSecondary}>{nameSummary}</span>}
-                      </span>
-                    </span>
-                    <span className={styles.resourceSummary}>
-                      {(() => {
-                        const usageParts = codexReport
-                          ? getCodexUsageDisplay(codexReport, t, language)
-                          : { value: "", secondary: "", resetAt: null };
-                        const parts = {
-                          label: "",
-                          value: usageParts.value,
-                          secondary: [usageParts.secondary, usageParts.resetAt].filter(Boolean).join(" · "),
-                        };
-                        const hasSecondary = Boolean(parts.secondary);
-                        return (
-                          <>
-                            <span className={styles.resourcePrimary}>
-                              {parts.label && <span className={styles.resourceLabel}>{parts.label}</span>}
-                              {parts.value && <span className={styles.resourceValue} title={parts.value}>{parts.value}</span>}
-                            </span>
-                            {hasSecondary && <span className={styles.resourceSeparator}>·</span>}
-                            {hasSecondary && <span className={styles.resourceSecondary} title={parts.secondary}>{parts.secondary}</span>}
-                          </>
-                        );
-                      })()}
-                    </span>
-                  </span>
-                </button>
-              ) : (
-                <button className={styles.rowMain} type="button" onClick={() => onEdit(account.id)}>
-                  <AccountLogo channelId={account.channel_id} name={account.name} syncStatus={syncStatus} />
-                  <span className={styles.accountText}>
-                    <span className={styles.nameRow}>
-                      <Text strong className={nameSummary ? styles.namePrimary : styles.nameText} title={accountName}>
-                        {accountName}
-                      </Text>
-                      {nameSummary && <span className={styles.resourceSeparator}>·</span>}
-                      {nameSummary && <span className={styles.nameSecondary} title={nameSummary}>{nameSummary}</span>}
-                    </span>
-                    <span className={styles.resourceSummary}>
-                      {(() => {
-                        const parts = resourceSummary(account, snapshot, t, language);
-                        const hasSecondary = Boolean(parts.secondary);
-                        return (
-                          <>
-                            <span className={styles.resourcePrimary}>
-                              {parts.label && <span className={styles.resourceLabel}>{parts.label}</span>}
-                              {parts.value && <span className={styles.resourceValue} title={parts.value}>{parts.value}</span>}
-                            </span>
-                            {hasSecondary && <span className={styles.resourceSeparator}>·</span>}
-                            {hasSecondary && <span className={styles.resourceSecondary} title={parts.secondary}>{parts.secondary}</span>}
-                          </>
-                        );
-                      })()}
-                    </span>
-                  </span>
-                </button>
-              )}
-              {status.label ? <Tag color={status.color}>{status.label}</Tag> : <span className={styles.rowSpacer} aria-hidden="true" />}
-              {isCodex ? (
-                <span className={styles.rowSpacer} aria-hidden="true" />
-              ) : (
+            <OverviewListRowView
+              key={account.id}
+              logo={<AccountLogo
+                channelId={account.channel_id}
+                name={account.name}
+                syncStatus={syncStatus}
+                tooltip={syncStatus === "stale" && codexReport?.error ? codexReport.error : undefined}
+              />}
+              title={<span className={isCodex ? styles.codexNameWrapper : styles.nameRow}>
+                <Text strong className={nameSummary ? styles.namePrimary : styles.nameText} title={accountName}>{accountName}</Text>
+                {nameSummary && <span className={styles.resourceSeparator}>·</span>}
+                {nameSummary && <span className={styles.nameSecondary} title={nameSummary}>{nameSummary}</span>}
+              </span>}
+              subtitle={<span className={styles.resourceSummary}>
+                <span className={styles.resourcePrimary}>
+                  {resourceParts.label && <span className={styles.resourceLabel}>{resourceParts.label}</span>}
+                  {resourceParts.value && <span className={styles.resourceValue} title={resourceParts.value}>{resourceParts.value}</span>}
+                </span>
+                {hasSecondary && <span className={styles.resourceSeparator}>·</span>}
+                {hasSecondary && <span className={styles.resourceSecondary} title={resourceParts.secondary}>{resourceParts.secondary}</span>}
+              </span>}
+              onClick={() => isCodex ? onOpenCodexAgent?.(codexReport?.account_id ?? "") : onEdit(account.id)}
+              trailing={status.label ? <Tag color={status.color}>{status.label}</Tag> : null}
+              actions={!isCodex ? (
                 <Dropdown
                   trigger="click"
                   position="bottomRight"
@@ -204,11 +158,11 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
                     aria-label={t("账号操作：{name}", { name: accountName })}
                   />
                 </Dropdown>
-              )}
-            </div>
+              ) : null}
+            />
           );
         })}
-      </div> : (
+      </OverviewListView> : (
         <div className={styles.filteredEmpty}>
           <strong>{t("暂无启用账号")}</strong>
           <span>{t("开启“显示停用账号”即可查看全部账号。")}</span>

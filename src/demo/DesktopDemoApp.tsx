@@ -8,6 +8,7 @@ import {
   ProjectsBoardDemoView,
   RequestLogsDemoView,
   UsageAnalysisDemoView,
+  UsageStatisticsDemoView,
   type DesktopNavGroup,
 } from "@flowlet/product-ui";
 import {
@@ -63,8 +64,8 @@ export function DesktopDemoApp() {
     case "logs": content = <RequestLogsDemoView zh={zh} />; break;
     case "sessions": content = <AgentSessionsDemoView zh={zh} />; break;
     case "usage-analysis": content = <UsageAnalysisDemoView zh={zh} />; break;
+    case "usage": content = <UsageStatisticsDemoView zh={zh} />; break;
     case "tasks":
-    case "usage":
     case "settings":
       content = (
         <div className={styles.placeholderBody}>

@@ -59,6 +59,11 @@ export type UsageAnalysisLabels = {
   emptyCell: string;
 };
 
+export type UsageAnalysisDimensionModel = {
+  key: string;
+  label: string;
+};
+
 type Props = {
   entries: UsageAnalysisRankEntryModel[];
   columns: UsageAnalysisMatrixColumnModel[];
@@ -67,9 +72,14 @@ type Props = {
   detail: UsageAnalysisDetailModel | null;
   labels: UsageAnalysisLabels;
   metric: "tokens" | "cost";
+  dimensions?: UsageAnalysisDimensionModel[];
+  selectedDimension?: string;
   density?: "default" | "compact";
+  matrixColumnLimit?: number;
+  matrixFooterAction?: ReactNode;
   onSelect?: (key: string) => void;
   onMetricChange?: (metric: "tokens" | "cost") => void;
+  onDimensionChange?: (dimension: string) => void;
 };
 
 export function UsageAnalysisView({
@@ -80,10 +90,19 @@ export function UsageAnalysisView({
   detail,
   labels,
   metric,
+  dimensions = [],
+  selectedDimension,
   density = "default",
+  matrixColumnLimit = 4,
+  matrixFooterAction,
   onSelect,
   onMetricChange,
+  onDimensionChange,
 }: Props) {
+  const visibleColumnCount = Math.min(columns.length, Math.max(1, Math.floor(matrixColumnLimit)));
+  const visibleColumns = columns.slice(0, visibleColumnCount);
+  const hasHiddenColumns = visibleColumnCount < columns.length;
+
   return (
     <div className={`${styles.page} ${density === "compact" ? styles.compact : ""}`}>
       <div className={styles.card}>
@@ -92,6 +111,21 @@ export function UsageAnalysisView({
             <strong>{labels.dimensionTitle}</strong>
             <span>{labels.dimensionSubtitle}</span>
           </div>
+          {dimensions.length > 0 ? (
+            <div className={styles.dimensionTabs} role="tablist" aria-label={labels.dimensionTitle}>
+              {dimensions.map((dimension) => (
+                <button
+                  key={dimension.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={dimension.key === selectedDimension}
+                  onClick={() => onDimensionChange?.(dimension.key)}
+                >
+                  {dimension.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </header>
 
         <div className={styles.body}>
@@ -148,16 +182,22 @@ export function UsageAnalysisView({
             <div className={styles.matrixScroll}>
               <div
                 className={styles.matrixGrid}
-                style={{ gridTemplateColumns: `minmax(96px, 1.15fr) repeat(${columns.length}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `minmax(96px, 1.15fr) repeat(${visibleColumns.length}, minmax(0, 1fr))` }}
               >
                 <span className={styles.matrixCorner} aria-hidden="true" />
-                {columns.map((column) => (
+                {visibleColumns.map((column) => (
                   <span key={column.key} className={styles.matrixColHead} title={column.label}>
                     {column.shortLabel}
                   </span>
                 ))}
                 {rows.map((row) => (
-                  <FragmentRow key={row.key} row={row} selected={row.key === selectedKey} emptyLabel={labels.emptyCell} onSelect={() => onSelect?.(row.key)} />
+                  <FragmentRow
+                    key={row.key}
+                    row={{ ...row, cells: row.cells.slice(0, visibleColumnCount) }}
+                    selected={row.key === selectedKey}
+                    emptyLabel={labels.emptyCell}
+                    onSelect={() => onSelect?.(row.key)}
+                  />
                 ))}
               </div>
             </div>
@@ -170,6 +210,7 @@ export function UsageAnalysisView({
                 ))}
                 <span>{labels.heatHigh}</span>
               </span>
+              {hasHiddenColumns ? matrixFooterAction : null}
             </div>
 
             {detail ? (

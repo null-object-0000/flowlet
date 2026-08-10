@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Input, Modal, Select, Switch, Tabs, Typography } from "@douyinfe/semi-ui-19";
+import { Button, Input, Modal, Select, Switch } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconHandle, IconInfoCircle, IconPlus, IconRefresh, IconSearch } from "@douyinfe/semi-icons";
+import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceView, type ModelsServiceItemModel } from "@flowlet/product-ui";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useAccounts, useChannelPresets } from "../../features/channel-accounts";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
@@ -49,8 +50,6 @@ import type { ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } 
 import { useModelCatalogsSync } from "../../features/background-tasks/useBackgroundTasks";
 import { channelCommands, type PresetSyncPreview } from "../../domains/channel/commands";
 import styles from "./ModelServicesPage.module.css";
-
-const { Text } = Typography;
 
 /** 把聚合模型 helper 产出的 ResolvedPrice（扁平 input* 字段）转回 ModelsCnPrice 形态，
  *  方便 UI 统一按 input.standard / input.cacheHit 访问。sourceUrl 仅作兜底。 */
@@ -274,7 +273,7 @@ export function ModelServicesPage() {
     });
   };
 
-  const renderModelRow = (model: ModelServiceItem) => {
+  const toViewModel = (model: ModelServiceItem): ModelsServiceItemModel => {
     const modelRelations = relations.get(model.publicModel.toLowerCase()) ?? [];
     const relatedAggregateCount = new Set(modelRelations.map((relation) => relation.aggregateModel)).size;
     const summary = model.kind === "aggregate"
@@ -284,32 +283,21 @@ export function ModelServicesPage() {
     const typeLabel = model.kind === "aggregate"
       ? t("Flowlet · 聚合模型")
       : t("{channel} · 渠道模型", { channel: model.channelName ?? model.channelId ?? "—" });
-    return (
-      <div
-        key={model.publicModel}
-        className={`${styles.modelRow} ${selectedModel === model.publicModel ? styles.selected : ""}`}
-      >
-        <button
-          type="button"
-          className={styles.modelRowMain}
-          aria-pressed={selectedModel === model.publicModel}
-          onClick={() => setSelectedModel(model.publicModel)}
-        >
-          <span className={styles.modelName}><ModelLogo model={model} /><span><strong>{model.publicModel}</strong><small>{typeLabel}</small></span></span>
-          <span className={`${styles.routeSummary} ${summaryMuted ? styles.routeSummaryMuted : ""}`}>{summary}</span>
-        </button>
-        <span className={styles.rowEnable}>
-          <Switch
-            checked={model.enabled}
-            loading={busyModel === model.publicModel}
-            disabled={busyModel != null || model.routeIds.length === 0}
-            aria-label={t("{model} 对外开放", { model: model.publicModel })}
-            onChange={(checked) => toggleModel(model, checked)}
-          />
-        </span>
-      </div>
-    );
+    return {
+      id: model.publicModel,
+      kind: model.kind,
+      name: model.publicModel,
+      typeLabel,
+      summary,
+      summaryMuted,
+      enabled: model.enabled,
+      logo: <ModelLogo model={model} />,
+      toggleLabel: t("{model} 对外开放", { model: model.publicModel }),
+      toggleLoading: busyModel === model.publicModel,
+      toggleDisabled: busyModel != null || model.routeIds.length === 0,
+    };
   };
+  const viewGroups = { aggregate: aggregateModels.map(toViewModel), direct: directModels.map(toViewModel) };
 
   return (
     <main className={styles.page}>
@@ -317,17 +305,34 @@ export function ModelServicesPage() {
         <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconRefresh />} onClick={openSyncPresets} loading={syncPending}>{t("刷新模型")}</Button>
       </PageHeader>
 
-      <section className={styles.statsBar} aria-label={t("模型服务统计")}>
-        <Stat label={t("对外模型")} value={models.length} />
-        <Stat label={t("已启用")} value={enabledCount} tone="success" />
-        <Stat label={t("已接入渠道")} value={connectedChannelCount} />
-        <span className={styles.statsKindPill}>{t("聚合模型 {aggregate} · 渠道模型 {direct}", { aggregate: aggregateCount, direct: models.length - aggregateCount })}</span>
-      </section>
-
       {error ? <div className={styles.state}><strong>{t("模型服务加载失败")}</strong><span>{error.message}</span><Button onClick={refresh}>{t("重试")}</Button></div> : null}
-      {!error ? <div className={styles.workspace}>
-        <section className={styles.listCard}>
-          <div className={styles.toolbar}>
+      {!error ? <ModelsServiceView
+        stats={[
+          { key: "models", label: t("对外模型"), value: String(models.length) },
+          { key: "enabled", label: t("已启用"), value: String(enabledCount), tone: "success" },
+          { key: "channels", label: t("已接入渠道"), value: String(connectedChannelCount) },
+        ]}
+        groups={viewGroups}
+        labels={{
+          stats: {},
+          statsAria: t("模型服务统计"),
+          aggregateGroup: t("聚合模型"),
+          directGroup: t("渠道模型"),
+          currentVisible: t("当前显示 {visible} / 共 {total} 个模型", { visible: filtered.length, total: models.length }),
+          hint: t("选择模型后在右侧查看详情"),
+          ready: t("可用"),
+          off: t("关闭"),
+          empty: loading ? t("正在加载模型…") : (models.length ? t("没有匹配的模型") : t("暂无模型，请先添加渠道账号")),
+        }}
+        kindSummary={t("聚合模型 {aggregate} · 渠道模型 {direct}", { aggregate: aggregateCount, direct: models.length - aggregateCount })}
+        loading={loading}
+        selectedId={selectedModel}
+        onSelect={setSelectedModel}
+        onToggle={(id, checked) => {
+          const model = filtered.find((item) => item.publicModel === id);
+          if (model) toggleModel(model, checked);
+        }}
+        toolbar={<div className={styles.toolbar}>
             <Input prefix={<IconSearch />} value={search} onChange={setSearch} placeholder={t("搜索模型名称或映射模型")} aria-label={t("搜索模型")} />
             <Select
               value={channelFilter}
@@ -338,30 +343,8 @@ export function ModelServicesPage() {
               ]}
               onChange={(value) => setChannelFilter(String(value))}
             />
-          </div>
-          <div className={styles.modelList}>
-            {loading ? <div className={styles.empty}>{t("正在加载模型…")}</div> : null}
-            {!loading && filtered.length === 0 ? <div className={styles.empty}>{models.length ? t("没有匹配的模型") : t("暂无模型，请先添加渠道账号")}</div> : null}
-            {aggregateModels.length > 0 ? (
-              <>
-                <div className={styles.groupTitle}>{t("聚合模型")}<span className={styles.groupCount}>{aggregateModels.length}</span></div>
-                {aggregateModels.map(renderModelRow)}
-              </>
-            ) : null}
-            {directModels.length > 0 ? (
-              <>
-                <div className={styles.groupTitle}>{t("渠道模型")}<span className={styles.groupCount}>{directModels.length}</span></div>
-                {directModels.map(renderModelRow)}
-              </>
-            ) : null}
-          </div>
-          <footer className={styles.listFooter}>
-            <span>{t("当前显示 {visible} / 共 {total} 个模型", { visible: filtered.length, total: models.length })}</span>
-            <span>{t("选择模型后在右侧查看详情")}</span>
-          </footer>
-        </section>
-
-        <ModelDetail
+          </div>}
+        detail={<ModelDetail
           model={selected}
           relations={relations}
           accounts={accounts.data ?? []}
@@ -380,8 +363,8 @@ export function ModelServicesPage() {
           onAddAggregateRoute={addAggregateRoute}
           onRemoveAggregateRoute={removeAggregateRoute}
           t={t}
-        />
-      </div> : null}
+        />}
+      /> : null}
 
       {syncPreview ? (
         <PresetSyncModal
@@ -492,10 +475,6 @@ function PresetSyncModal({ t, preview, applying, onCancel, onConfirm }: {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: number; tone?: "success" }) {
-  return <div className={styles.stat}><span>{label}</span><strong className={tone === "success" ? styles.successValue : ""}>{value}</strong></div>;
-}
-
 function ModelLogo({ model }: { model: ModelServiceItem }) {
   if (model.kind === "direct") return <ChannelBrandLogo channelId={model.channelId ?? "flowlet"} name={model.channelName ?? model.publicModel} />;
   return <FlowletLogo variant="model" />;
@@ -590,7 +569,7 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
     [model, channelModels, prices],
   );
 
-  if (!model) return <section className={`${styles.detailCard} ${styles.detailEmpty}`}><Text type="tertiary">{t("选择一个模型查看路由配置")}</Text></section>;
+  if (!model) return <ModelsServiceDetailView empty={t("选择一个模型查看路由配置")} />;
 
   const busy = pendingModel != null;
   const modelRelations = relations.get(model.publicModel.toLowerCase()) ?? [];
@@ -609,17 +588,17 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
   // 聚合模型（flowlet-pro/flowlet-flash）没有厂商官方价格，不展示"立即同步"。
   const showPricingSync = model.kind === "direct";
 
-  return <section className={styles.detailCard}>
-    <header className={styles.detailHeader}>
-      <ModelLogo model={model} />
-      <span className={styles.detailTitle}><strong>{model.publicModel}</strong><small>{`${kindLabel} · ${accountLabel}`}</small></span>
-    </header>
-    <div className={styles.detailBody}>
-      <Tabs className={styles.detailTabs} type="line" activeKey={activeTab} onChange={(key) => setActiveTab(String(key))} tabPaneMotion={false}>
-        <Tabs.TabPane tab={t("基础信息")} itemKey="basic">
+  return <ModelsServiceDetailView
+    logo={<ModelLogo model={model} />}
+    title={model.publicModel}
+    subtitle={`${kindLabel} · ${accountLabel}`}
+    activeKey={activeTab}
+    onTabChange={setActiveTab}
+    tabs={[
+      { key: "basic", label: t("基础信息"), content: <>
           <ModelBasicInfoTab basicInfo={basicInfo} resolved={resolved} isAggregate={model.kind === "aggregate"} channelName={model.channelName} language={language} t={t} />
-        </Tabs.TabPane>
-        <Tabs.TabPane tab={t("价格信息")} itemKey="pricing">
+        </> },
+      { key: "pricing", label: t("价格信息"), content: <>
           <ModelPricingTab
             resolved={resolved}
             standardPrice={model.kind === "direct" ? undefined : aggregateStandardPrice}
@@ -632,10 +611,10 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
             language={language}
             t={t}
           />
-        </Tabs.TabPane>
-        <Tabs.TabPane tab={t("渠道路由")} itemKey="routing" className={styles.routingTab}>
+        </> },
+      { key: "routing", label: t("渠道路由"), content: <>
           {model.kind === "aggregate" ? (
-            <div className={styles.tabContent}>
+            <ModelsServiceTabContentView>
               <div className={styles.routeOverview}>
                 <div className={styles.routeOverviewHeader}>
                   <strong>{t("渠道路由")}</strong>
@@ -691,9 +670,9 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
                   <small>{t("同一渠道模型支持的协议会一起加入；之后仍可单独停用或移除。")}</small>
                 </div>
               </Modal>
-            </div>
+            </ModelsServiceTabContentView>
           ) : (
-            <div className={styles.tabContent}>
+            <ModelsServiceTabContentView>
               <div className={styles.routeOverview}>
                 <div className={styles.routeOverviewHeader}>
                   <strong>{t("路由关系")}</strong>
@@ -722,13 +701,12 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
                   <RouteList model={model} accounts={accounts} channels={channels} busy={busy} onToggleRoute={onToggleRoute} onReorderRoute={onReorderRoute} t={t} />
                 </DetailSection>
               ) : null}
-            </div>
+            </ModelsServiceTabContentView>
           )}
-        </Tabs.TabPane>
-      </Tabs>
-    </div>
-    <footer className={styles.detailFooter}><span>{t("配置变更会立即保存并热更新到本地代理")}</span><span>{t("本地配置")}</span></footer>
-  </section>;
+        </> },
+    ]}
+    footer={<><span>{t("配置变更会立即保存并热更新到本地代理")}</span><span>{t("本地配置")}</span></>}
+  />;
 }
 
 /** 路由组列表：拖拽排序 + 单条启停。聚合模型与多渠道模型的「直连路由」共用。 */
@@ -854,27 +832,24 @@ function ModelBasicInfoTab({ basicInfo, resolved, isAggregate, channelName, lang
   const maxOutputTokens = resolved?.limits.maxOutputTokens ?? (isAggregate ? null : basicInfo?.maxOutputTokens) ?? null;
   const caps = resolved?.capabilities;
   return (
-    <div className={styles.tabContent}>
-      <div className={styles.infoBanner}>
-        <IconInfoCircle className={styles.infoBannerIcon} />
-        <span>{isAggregate
+    <ModelsServiceTabContentView>
+      <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>
+        {isAggregate
           ? t("聚合模型参数与能力按当前已启用路由中的最低能力计算。")
-          : t("渠道模型参数来自供应商公开信息与最近一次同步结果。")}</span>
-      </div>
-      <DetailSection title={t("模型参数")}>
-        <div className={styles.parameterGrid}>
-          <div className={styles.parameterItem}><span>{t("上下文窗口")}</span><strong>{formatTokenCapacity(contextTokens, language)}</strong></div>
-          <div className={styles.parameterItem}><span>{t("最大输出")}</span><strong>{formatTokenCapacity(maxOutputTokens, language)}</strong></div>
-          <div className={styles.parameterItem}><span>{t("模型类型")}</span><strong>{isAggregate ? t("Flowlet 聚合") : t("渠道原始模型")}</strong></div>
-          <div className={styles.parameterItem}><span>{t("官方归属")}</span><strong>{isAggregate ? t("多渠道聚合") : channelName ?? "—"}</strong></div>
-        </div>
-      </DetailSection>
+          : t("渠道模型参数来自供应商公开信息与最近一次同步结果。")}
+      </ModelsServiceInfoBannerView>
+      <ModelsServiceSectionView title={t("模型参数")}><ModelsServiceMetricGridView items={[
+        { key: "context", label: t("上下文窗口"), value: formatTokenCapacity(contextTokens, language) },
+        { key: "output", label: t("最大输出"), value: formatTokenCapacity(maxOutputTokens, language) },
+        { key: "type", label: t("模型类型"), value: isAggregate ? t("Flowlet 聚合") : t("渠道原始模型") },
+        { key: "owner", label: t("官方归属"), value: isAggregate ? t("多渠道聚合") : channelName ?? "—" },
+      ]} /></ModelsServiceSectionView>
       {caps ? (
-        <DetailSection title={t("模型能力")}>
-          <div className={styles.configRow}><span>{t("推理")}</span><strong className={caps.thinking ? styles.capYes : styles.capNo}>{caps.thinking ? t("支持") : t("不支持")}</strong></div>
-          <div className={styles.configRow}><span>{t("工具调用")}</span><strong className={caps.toolCalls ? styles.capYes : styles.capNo}>{caps.toolCalls ? t("支持") : t("不支持")}</strong></div>
-          <div className={styles.configRow}><span>{t("JSON 输出")}</span><strong className={caps.jsonOutput ? styles.capYes : styles.capNo}>{caps.jsonOutput ? t("支持") : t("不支持")}</strong></div>
-        </DetailSection>
+        <ModelsServiceSectionView title={t("模型能力")}><ModelsServiceCapabilityListView items={[
+          { key: "thinking", label: t("推理"), value: caps.thinking ? t("支持") : t("不支持"), supported: caps.thinking },
+          { key: "tools", label: t("工具调用"), value: caps.toolCalls ? t("支持") : t("不支持"), supported: caps.toolCalls },
+          { key: "json", label: t("JSON 输出"), value: caps.jsonOutput ? t("支持") : t("不支持"), supported: caps.jsonOutput },
+        ]} /></ModelsServiceSectionView>
       ) : null}
       {resolved?.aliases?.length ? (
         <DetailSection title={t("模型别名")}>
@@ -889,7 +864,7 @@ function ModelBasicInfoTab({ basicInfo, resolved, isAggregate, channelName, lang
           {resolved.modelsDevReferenceUrl ? <a href={resolved.modelsDevReferenceUrl} target="_blank" rel="noreferrer">{t("参考链接")}</a> : null}
         </div>
       ) : null}
-    </div>
+    </ModelsServiceTabContentView>
   );
 }
 
@@ -915,7 +890,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
 
   if (!price) {
     return (
-      <div className={styles.tabContent}>
+      <ModelsServiceTabContentView>
         {hasCatalog || !showSyncButton ? (
           <div className={styles.empty}>{t("暂无官方价格数据")}</div>
         ) : (
@@ -924,7 +899,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
             <Button theme="borderless" type="tertiary" size="small" onClick={onSync} loading={syncPending}>{t("立即同步")}</Button>
           </div>
         )}
-      </div>
+      </ModelsServiceTabContentView>
     );
   }
 
@@ -960,14 +935,11 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
     && isPromotionalDiscount(price.rateType, standardPrice.output, price.output);
 
   return (
-    <div className={styles.tabContent}>
+    <ModelsServiceTabContentView>
       {isAggregate ? (
-        <div className={styles.infoBanner}>
-          <IconInfoCircle className={styles.infoBannerIcon} />
-          <span>{t("聚合模型按当前已启用路由中的最高成本展示，避免低估调用成本。")}</span>
-        </div>
+        <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>{t("聚合模型按当前已启用路由中的最高成本展示，避免低估调用成本。")}</ModelsServiceInfoBannerView>
       ) : null}
-      <DetailSection title={t("官方价格")}>
+      <ModelsServiceSectionView title={t("官方价格")}>
         {showDetailedStrategy ? (
           <>
             <div className={styles.pricingStrategyMeta}>
@@ -1027,7 +999,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
         </div>
           </>
         )}
-      </DetailSection>
+      </ModelsServiceSectionView>
       <div className={styles.priceSourceRow}>
         <span>{price.retrievedAt ? t("更新于 {time}", { time: formatFullTimestamp(price.retrievedAt, language) }) : null}</span>
         {price.sourceUrl ? <a href={price.sourceUrl} target="_blank" rel="noreferrer">{t("价格来源")}</a> : null}
@@ -1038,6 +1010,6 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
           {resolved.modelsDevReferenceUrl ? <a href={resolved.modelsDevReferenceUrl} target="_blank" rel="noreferrer">{t("参考链接")}</a> : null}
         </div>
       ) : null}
-    </div>
+    </ModelsServiceTabContentView>
   );
 }

@@ -1,56 +1,35 @@
-.page {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  overflow: hidden;
-}
-
-.board {
-  min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  overflow: auto;
-}
-.boardColumn {
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: 32px minmax(0, 1fr);
-  padding: 8px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)) 78%, transparent);
-}
-.columnHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 6px 6px; }
-.columnTitle { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); font-weight: 650; white-space: nowrap; }
-.columnCount { min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; border-radius: 99px; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface); font-size: 10px; }
-.columnBody { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-
-.taskCard {
-  padding: 11px;
-  border: 1px solid var(--flowlet-color-border);
-  border-radius: 9px;
-  background: var(--flowlet-color-surface);
-  box-shadow: 0 4px 12px rgba(31, 50, 81, 0.04);
-}
+.page { width: 100%; height: 100%; min-height: 0; display: flex; overflow: hidden; }
+.board { min-height: 0; flex: 1; display: grid; gap: 12px; overflow: auto; padding-bottom: 6px; }
+.boardColumn { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: var(--flowlet-radius-card, 12px); background: color-mix(in srgb, var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)) 88%, transparent); }
+.columnHeader { height: 44px; flex: 0 0 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--flowlet-color-border); }
+.columnTitle { display: inline-flex; align-items: center; gap: 8px; color: var(--flowlet-color-text); font-size: 14px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.columnCount { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: var(--flowlet-color-text-tertiary); background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); font-size: 12px; font-weight: 500; }
+.columnCount_primary { color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); }
+.columnCount_warning { color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); }
+.columnCount_success { color: var(--semi-color-success); background: var(--semi-color-success-light-default); }
+.columnAdd { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--flowlet-color-text-tertiary); background: transparent; font: inherit; font-size: 20px; cursor: pointer; }
+.columnAdd:hover { color: var(--flowlet-color-primary); background: var(--flowlet-color-surface-strong, var(--flowlet-color-surface)); }
+.columnBody { min-height: 0; flex: 1; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 9px; }
+.taskCard { position: relative; width: 100%; padding: 10px 11px 9px; border: 1px solid var(--flowlet-color-border); border-radius: 9px; color: var(--flowlet-color-text); background: var(--flowlet-color-surface-strong, var(--flowlet-color-surface)); text-align: left; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.taskCardReview { padding-left: 9px; border-left: 3px solid var(--semi-color-warning); }
+.taskCardReview:hover { background: var(--semi-color-warning-light-default); }
 [role="button"].taskCard { cursor: pointer; }
-.taskProject { display: block; margin-bottom: 4px; color: var(--flowlet-color-primary); font-size: 10px; line-height: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.taskTitle { display: block; min-height: 20px; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-compact, 13px); line-height: 1.5; font-weight: 600; }
-.taskMeta { margin-top: 8px; display: flex; align-items: center; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: 11px; line-height: 15px; }
-.taskAgent { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.taskAgent img { width: 14px; height: 14px; flex: none; }
-.runningDot { margin-left: auto; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--flowlet-color-success); }
-.taskTime { display: block; margin-top: 6px; color: var(--flowlet-color-text-tertiary); font-size: 10px; line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.progress { height: 3px; margin-top: 8px; overflow: hidden; border-radius: 99px; background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); }
-.progress span { height: 100%; display: block; border-radius: inherit; background: var(--flowlet-color-primary); }
+[role="button"].taskCard:focus-visible { outline: 2px solid var(--flowlet-color-primary); outline-offset: 2px; }
+.taskHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+.taskTags { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.roundTag { height: 22px; padding: 0 8px; display: inline-flex; align-items: center; flex: none; border-radius: 6px; color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); font-size: 12px; font-weight: 500; line-height: 1; }
+.contextLabel { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: 12px; line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
+.taskTitle { min-width: 0; margin-top: 8px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--flowlet-color-text); font-size: 14px; font-weight: 600; line-height: 1.45; word-break: break-word; }
+.taskTitle > strong { font: inherit; }
+.taskFooter { margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--flowlet-color-text-tertiary); font-size: 12px; line-height: 1.4; }
+.taskMeta { min-width: 0; display: inline-flex; align-items: center; gap: 6px; }
+.taskTrailing { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.addCard { width: 100%; padding: 10px; border: 1px dashed var(--flowlet-color-border); border-radius: 9px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--flowlet-color-text-tertiary); background: transparent; font: inherit; cursor: pointer; }
+.addCard:hover { color: var(--flowlet-color-primary); border-color: var(--flowlet-color-primary); }
 .emptyHint { padding: 18px 8px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); text-align: center; }
-
-.compact .taskCard { padding: 8px; }
-.compact .taskTitle { font-size: 12px; }
-
-@media (max-width: 900px) {
-  .page { overflow: auto; }
-  .board { min-width: 720px; }
-}
+.boardEmpty { grid-column: 1 / -1; min-height: 220px; display: flex; align-items: center; justify-content: center; }
+.compact .columnHeader { height: 38px; flex-basis: 38px; padding: 0 9px; }
+.compact .columnBody { padding: 8px; gap: 7px; }
+.compact .taskCard { padding: 8px 9px; }
+.compact .taskTitle { font-size: 13px; }
+@media (max-width: 900px) { .page { overflow: auto; } .board { min-width: 756px; } }

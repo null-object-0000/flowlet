@@ -1,3 +1,12 @@
+.page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
 .header {
   min-height: 46px;
   display: flex;
@@ -5,11 +14,7 @@
   justify-content: space-between;
   gap: 16px;
 }
-
-.titleBlock {
-  min-width: 0;
-}
-
+.titleBlock { min-width: 0; }
 .title {
   margin: 0;
   color: var(--flowlet-color-text);
@@ -18,14 +23,12 @@
   line-height: var(--flowlet-line-height-page-title);
   letter-spacing: -.025em;
 }
-
 .subtitle {
   margin: 3px 0 0;
   color: var(--flowlet-color-text-secondary);
   font-size: var(--flowlet-font-size-caption);
   line-height: var(--flowlet-line-height-caption);
 }
-
 .controls {
   flex: none;
   min-width: 0;

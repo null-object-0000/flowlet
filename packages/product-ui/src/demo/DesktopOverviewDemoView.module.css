@@ -1,0 +1,13 @@
+.accountActions { min-height: 28px; display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.accountActions label { display: inline-flex; align-items: center; gap: 7px; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption, 12px); }
+.linkAction { padding: 3px 0; display: inline-flex; align-items: center; gap: 3px; border: 0; color: var(--flowlet-color-primary); background: transparent; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+.linkAction svg { width: 14px; height: 14px; }
+.logoWrap { position: relative; width: 32px; height: 32px; display: grid; place-items: center; }
+.logoWrap img { max-width: 30px; max-height: 30px; }
+.logoWrap > i { position: absolute; top: -1px; right: -1px; width: 7px; height: 7px; border: 2px solid var(--flowlet-color-surface); border-radius: 50%; background: var(--flowlet-color-success); }
+.titleLine, .summaryLine { min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; white-space: nowrap; }
+.titleLine > span, .titleLine > small, .summaryLine > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.titleLine > span { flex: 0 1 auto; font-weight: 650; }
+.titleLine > small { flex: 0 1 auto; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption, 12px); font-weight: 400; }
+.titleLine > i, .summaryLine > i { flex: none; color: var(--flowlet-color-text-tertiary); font-style: normal; }
+.summaryLine { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption, 12px); font-weight: 400; }

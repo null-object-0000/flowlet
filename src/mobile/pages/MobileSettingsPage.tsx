@@ -12,6 +12,7 @@ import type { S3SyncConfigInput } from "../../domains/device-sync/types";
 import { useMobileDeviceSyncActions, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { errorMessage } from "../../shared/errors/AppError";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
+import type { TokenUnit } from "../../shared/formatters/number";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import styles from "./MobilePage.module.css";
@@ -27,7 +28,7 @@ const emptyConfig: S3SyncConfigInput = {
 };
 
 export function MobileSettingsPage() {
-  const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
+  const { language, setLanguage, theme, setTheme, tokenUnit, setTokenUnit, t } = useAppPreferences();
   const settings = useMobileS3Settings();
   const actions = useMobileDeviceSyncActions();
   const [draft, setDraft] = useState<S3SyncConfigInput>(emptyConfig);
@@ -232,10 +233,11 @@ export function MobileSettingsPage() {
       </article>
 
       <article className={styles.card}>
-        <div className={styles.cardHeader}><div><strong>{t("外观")}</strong><span>{t("语言和主题修改后立即生效")}</span></div></div>
+        <div className={styles.cardHeader}><div><strong>{t("外观")}</strong><span>{t("语言、主题和 Token 展示单位修改后立即生效")}</span></div></div>
         <div className={styles.preferenceRows}>
           <label><span>{t("显示语言")}</span><Select value={language} optionList={[{ value: "zh-CN", label: t("简体中文") }, { value: "en-US", label: "English" }]} onChange={(value) => setLanguage(value as AppLanguage)} /></label>
           <label><span>{t("界面主题")}</span><Select value={theme} optionList={[{ value: "system", label: t("跟随系统") }, { value: "light", label: t("浅色模式") }, { value: "dark", label: t("深色模式") }]} onChange={(value) => setTheme(value as ThemePreference)} /></label>
+          <label><span>{t("Token 展示单位")}</span><Select value={tokenUnit} optionList={[{ value: "auto", label: t("跟随语言") }, { value: "zh", label: t("万 / 亿（中文习惯）") }, { value: "en", label: t("K / M（英文习惯）") }]} onChange={(value) => setTokenUnit(value as TokenUnit)} /></label>
         </div>
       </article>
 

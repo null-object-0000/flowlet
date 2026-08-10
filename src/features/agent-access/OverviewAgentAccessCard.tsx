@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { IconChevronRight } from "@douyinfe/semi-icons";
-import { Badge, Toast } from "@douyinfe/semi-ui-19";
+import { Toast } from "@douyinfe/semi-ui-19";
 import { OverviewModuleCard } from "../../shared/ui/OverviewModuleCard";
-import styles from "./OverviewAgentAccessCard.module.css";
+import { OverviewAgentListView, OverviewAgentRowView } from "@flowlet/product-ui";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
 import { cliInstalledVersion, isNewerVersion } from "../../domains/agent/versions";
@@ -21,36 +20,33 @@ import {
 
 const AGENTS: Array<{
   name: string;
-  icon: React.ReactNode;
-  iconClassName: string;
+  iconSrc: string;
+  tone?: "claude" | "neutral";
   kind: AgentKind;
   hasDesktop: boolean;
 }> = [
   {
     name: "Claude Code",
-    icon: <span className={`${styles.brandIcon} ${styles.claudeCodeMark}`} aria-hidden="true" />,
-    iconClassName: styles.claudeIcon,
+    iconSrc: "/icons/lobe/claudecode.svg",
+    tone: "claude",
     kind: "claude-code",
     hasDesktop: false,
   },
   {
     name: "OpenCode",
-    icon: <span className={`${styles.brandIcon} ${styles.openCodeMark}`} aria-hidden="true" />,
-    iconClassName: styles.openCodeIcon,
+    iconSrc: "/icons/lobe/opencode.svg",
     kind: "opencode",
     hasDesktop: true,
   },
   {
     name: "Pi",
-    icon: <span className={`${styles.brandIcon} ${styles.piMark}`} aria-hidden="true" />,
-    iconClassName: styles.piIcon,
+    iconSrc: "/icons/lobe/pi.svg",
     kind: "pi",
     hasDesktop: false,
   },
   {
     name: "Codex",
-    icon: <span className={`${styles.brandIcon} ${styles.chatgptMark}`} aria-hidden="true" />,
-    iconClassName: styles.chatgptIcon,
+    iconSrc: "/icons/lobe/openai.svg",
     kind: "codex",
     hasDesktop: true,
   },
@@ -141,8 +137,8 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   return (
     <>
       <OverviewModuleCard title={t("AI Agent 接入")}>
-        <div className={styles.grid}>
-          {AGENTS.map(({ name, icon, iconClassName, kind, hasDesktop }) => {
+        <OverviewAgentListView>
+          {AGENTS.map(({ name, iconSrc, tone, kind, hasDesktop }) => {
             const environmentQuery = kind === "claude-code"
               ? claudeEnvironment
               : kind === "opencode"
@@ -155,43 +151,23 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
             const installedVersion = cliInstalledVersion(environmentQuery.data);
             const hasNewer = isNewerVersion(latestByAgent.get(kind)?.latest_version, installedVersion);
             return (
-              <button
+              <OverviewAgentRowView
                 key={name}
-                type="button"
-                className={styles.agentCard}
-                aria-label={t("配置 {name}", { name })}
+                name={name}
+                iconSrc={iconSrc}
+                tone={tone}
+                updateAvailable={hasNewer}
+                surfaces={[
+                  { label: t("CLI"), value: surfaceStatusValue("cli", environmentQuery.data, environmentQuery.isLoading, environmentQuery.isError, t) },
+                  ...(hasDesktop ? [{ label: t("Desktop"), value: surfaceStatusValue("desktop", environmentQuery.data, environmentQuery.isLoading, environmentQuery.isError, t) }] : []),
+                ]}
+                ariaLabel={t("配置 {name}", { name })}
                 title={hasNewer ? t("检测到新版本，点击查看详情") : undefined}
                 onClick={() => setSelectedAgent(kind)}
-              >
-                <Badge dot={hasNewer} type="danger">
-                  <span className={`${styles.icon} ${iconClassName}`}>{icon}</span>
-                </Badge>
-                <span className={styles.agentText}>
-                  <strong>{name}</strong>
-                  <span className={styles.surfaceStatuses}>
-                    <SurfaceStatus
-                      label="CLI"
-                      surface="cli"
-                      environment={environmentQuery.data}
-                      loading={environmentQuery.isLoading}
-                      error={environmentQuery.isError}
-                    />
-                    {hasDesktop ? (
-                      <SurfaceStatus
-                        label="Desktop"
-                        surface="desktop"
-                        environment={environmentQuery.data}
-                        loading={environmentQuery.isLoading}
-                        error={environmentQuery.isError}
-                      />
-                    ) : null}
-                  </span>
-                </span>
-                <IconChevronRight size="small" className={styles.agentChevron} aria-hidden="true" />
-              </button>
+              />
             );
           })}
-        </div>
+        </OverviewAgentListView>
       </OverviewModuleCard>
 
       <AgentAccessSideSheet
@@ -226,22 +202,15 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   );
 }
 
-function SurfaceStatus({
-  label,
-  surface,
-  environment,
-  loading,
-  error,
-}: {
-  label: string;
-  surface: AgentSurface;
-  environment?: AgentEnvironmentReport;
-  loading: boolean;
-  error: boolean;
-}) {
-  const { t } = useAppPreferences();
+function surfaceStatusValue(
+  surface: AgentSurface,
+  environment: AgentEnvironmentReport | undefined,
+  loading: boolean,
+  error: boolean,
+  t: (source: string) => string,
+) {
   const installation = environment?.installations.find((candidate) => (candidate.surface || "cli") === surface);
-  const status = loading
+  return loading
     ? t("正在检测…")
     : error
       ? t("检测失败")
@@ -250,6 +219,4 @@ function SurfaceStatus({
           ? installation.version
           : t("已安装")
         : t("未安装");
-
-  return <small><span>{t(label)}</span><span>{status}</span></small>;
 }

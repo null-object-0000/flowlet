@@ -19,49 +19,6 @@
   background: var(--flowlet-color-surface);
   box-shadow: var(--flowlet-shadow-card);
 }
-.cardHeader {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--flowlet-color-border);
-}
-.cardTitle { min-width: 0; display: grid; gap: 2px; }
-.cardTitle strong { color: var(--flowlet-color-text); font-size: 15px; }
-.cardTitle span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
-
-.dimensionTabs {
-  flex: none;
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--flowlet-color-surface-muted);
-  border: 1px solid var(--flowlet-color-border);
-}
-.dimensionTabs button {
-  height: 30px;
-  padding: 0 13px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--flowlet-color-text-secondary);
-  font: inherit;
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
-}
-.dimensionTabs button:hover[aria-selected="false"] { color: var(--flowlet-color-text); }
-.dimensionTabs button[aria-selected="true"] {
-  background: var(--flowlet-color-text);
-  color: var(--flowlet-color-surface-strong);
-  font-weight: 650;
-  box-shadow: 0 4px 10px rgba(20, 24, 33, 0.18);
-}
-
 .state { min-height: 260px; padding: 24px 18px; display: grid; place-items: center; align-content: center; gap: 8px; text-align: center; }
 .state span { max-width: 580px; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.5; }
 
@@ -290,7 +247,6 @@ button.matrixCell:hover {
 .heatLevel3 { color: #fff; background: color-mix(in srgb, var(--flowlet-color-primary) 64%, var(--flowlet-color-surface-strong)); }
 .heatLevel4 { color: #fff; background: var(--flowlet-color-primary); }
 
-.matrixFoot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 16px 2px; }
 .heatLegend { display: flex; align-items: center; gap: 4px; color: var(--flowlet-color-text-tertiary); font-size: 11px; }
 .heatSwatch { width: 11px; height: 11px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--flowlet-color-border); }
 .expandMatrixButton { min-height: 26px; padding: 0 4px; color: var(--flowlet-color-primary); font-size: 11px; }

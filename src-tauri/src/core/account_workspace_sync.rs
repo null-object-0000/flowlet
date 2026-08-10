@@ -24,6 +24,8 @@ pub struct WorkspaceChannelAccount {
     pub channel_id: String,
     pub name: String,
     pub api_key: String,
+    #[serde(default)]
+    pub management_key: Option<String>,
     pub default_openai_base_url: Option<String>,
     pub default_anthropic_base_url: Option<String>,
     pub credential_fingerprint: String,
@@ -140,6 +142,7 @@ fn same_global_fields(left: &ChannelAccount, right: &ChannelAccount) -> bool {
         && left.channel_id == right.channel_id
         && left.name == right.name
         && left.api_key == right.api_key
+        && left.management_key == right.management_key
         && left.workspace_default_base_url == right.workspace_default_base_url
         && left.workspace_default_anthropic_base_url == right.workspace_default_anthropic_base_url
 }
@@ -275,6 +278,7 @@ fn workspace_record(
         channel_id: account.channel_id.clone(),
         name: account.name.clone(),
         api_key: account.api_key.clone(),
+        management_key: account.management_key.clone(),
         // 首次迁移保守地把现有地址留作本设备 override；用户之后可主动设为工作区默认。
         default_openai_base_url: account.workspace_default_base_url.clone(),
         default_anthropic_base_url: account.workspace_default_anthropic_base_url.clone(),
@@ -319,6 +323,7 @@ fn apply_catalog(
             account.workspace_account_id = Some(record.id.clone());
             account.name = record.name.clone();
             account.api_key = record.api_key.clone();
+            account.management_key = record.management_key.clone();
             account.workspace_default_base_url = record.default_openai_base_url.clone();
             account.workspace_default_anthropic_base_url =
                 record.default_anthropic_base_url.clone();
@@ -366,6 +371,7 @@ fn apply_catalog(
             channel_id: record.channel_id.clone(),
             name: record.name.clone(),
             api_key: record.api_key.clone(),
+            management_key: record.management_key.clone(),
             enabled: false,
             priority: next_priority,
             remark: None,
@@ -670,6 +676,7 @@ pub async fn push_accounts(
         record.channel_id = account.channel_id.clone();
         record.name = account.name.clone();
         record.api_key = account.api_key.clone();
+        record.management_key = account.management_key.clone();
         record.default_openai_base_url = account.workspace_default_base_url.clone();
         record.default_anthropic_base_url = account.workspace_default_anthropic_base_url.clone();
         record.credential_fingerprint = fingerprint;
@@ -730,6 +737,7 @@ mod tests {
                 channel_id: "custom".to_string(),
                 name: "Friday".to_string(),
                 api_key: "secret-key".to_string(),
+                management_key: Some("management-secret".to_string()),
                 default_openai_base_url: Some("https://public.example/v1".to_string()),
                 default_anthropic_base_url: None,
                 credential_fingerprint: credential_fingerprint(&key, "custom", "secret-key"),
@@ -742,6 +750,7 @@ mod tests {
         assert_eq!(decrypt_catalog(&encrypted, &key).unwrap(), catalog);
         assert!(decrypt_catalog(&encrypted, &[8_u8; 32]).is_err());
         assert!(!String::from_utf8_lossy(&encrypted).contains("secret-key"));
+        assert!(!String::from_utf8_lossy(&encrypted).contains("management-secret"));
     }
 
     #[test]
@@ -770,7 +779,17 @@ mod tests {
 
         let mut global_change = original.clone();
         global_change.workspace_default_base_url = Some("https://friday.example/v1".to_string());
-        assert!(global_accounts_changed(&[original], &[global_change]));
+        assert!(global_accounts_changed(
+            &[original.clone()],
+            &[global_change]
+        ));
+
+        let mut management_key_change = original.clone();
+        management_key_change.management_key = Some("sk-or-management".to_string());
+        assert!(global_accounts_changed(
+            &[original],
+            &[management_key_change]
+        ));
     }
 
     #[test]
@@ -786,6 +805,7 @@ mod tests {
                 channel_id: "custom".to_string(),
                 name: "Friday".to_string(),
                 api_key: "sk-friday".to_string(),
+                management_key: None,
                 ..Default::default()
             }])
             .expect("save account");
@@ -799,6 +819,7 @@ mod tests {
                 channel_id: "custom".to_string(),
                 name: "Friday".to_string(),
                 api_key: "sk-friday".to_string(),
+                management_key: None,
                 default_openai_base_url: None,
                 default_anthropic_base_url: None,
                 credential_fingerprint: credential_fingerprint(&key, "custom", "sk-friday"),

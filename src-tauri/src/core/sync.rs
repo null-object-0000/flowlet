@@ -527,6 +527,190 @@ pub async fn query_kimi_balance(
     }
 }
 
+/// OpenRouter 官方余额/Key 状态响应：`GET /api/v1/key`。
+/// 普通 API Key 以 Bearer 调用即可返回该 Key 的用量与剩余配额（credits，USD）。
+/// `limit_remaining` 为 null 表示该 Key 未设额度上限。
+#[derive(Debug, Deserialize)]
+struct OpenRouterKeyResponse {
+    data: Option<OpenRouterKeyData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterKeyData {
+    /// 该 Key 的 credits 额度上限，null 表示不限。
+    #[serde(default)]
+    #[allow(dead_code)]
+    limit: Option<f64>,
+    /// 已消耗 credits（全时段）。
+    #[serde(default)]
+    #[allow(dead_code)]
+    usage: Option<f64>,
+    /// 剩余 credits，null 表示该 Key 未设额度上限。
+    #[serde(default)]
+    limit_remaining: Option<f64>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    is_free_tier: Option<bool>,
+}
+
+/// OpenRouter 账户 Credits 响应：`GET /api/v1/credits`。
+/// 该接口要求 Management Key，余额为累计购买 Credits 减去累计用量。
+#[derive(Debug, Deserialize)]
+struct OpenRouterCreditsResponse {
+    data: Option<OpenRouterCreditsData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterCreditsData {
+    total_credits: f64,
+    total_usage: f64,
+}
+
+/// 查询 OpenRouter Credits / Key 限额（USD）。
+/// 配置 Management Key 时调用 `/credits` 返回真实账户余额；否则调用 `/key`
+/// 返回普通 API Key 的剩余消费限额。Key 未设限额时余额为 null，但同步成功。
+pub async fn query_openrouter_balance(
+    account: &ChannelAccount,
+    config: &ChannelsConfig,
+) -> BalanceQueryResult {
+    if account.api_key.trim().is_empty() {
+        return BalanceQueryResult {
+            balance: None,
+            currency: None,
+            is_available: false,
+            error: Some("API Key 未配置".to_string()),
+        };
+    }
+
+    let client = match Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(err) => {
+            return BalanceQueryResult {
+                balance: None,
+                currency: None,
+                is_available: false,
+                error: Some(format!("创建 HTTP 客户端失败: {err}")),
+            };
+        }
+    };
+
+    let management_key = account
+        .management_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let (endpoint, credential, queries_account_credits) = match management_key {
+        Some(key) => (config.openrouter_credits_endpoint(), key, true),
+        None => (
+            config.openrouter_balance_endpoint(),
+            account.api_key.trim(),
+            false,
+        ),
+    };
+
+    let response = client
+        .get(&endpoint)
+        .header("Authorization", format!("Bearer {credential}"))
+        .header("Accept", "application/json")
+        .send()
+        .await;
+
+    let response = match response {
+        Ok(r) => r,
+        Err(err) => {
+            return BalanceQueryResult {
+                balance: None,
+                currency: None,
+                is_available: false,
+                error: Some(format!("请求失败: {err}")),
+            };
+        }
+    };
+
+    let status = response.status();
+    let body = match response.text().await {
+        Ok(b) => b,
+        Err(err) => {
+            return BalanceQueryResult {
+                balance: None,
+                currency: None,
+                is_available: false,
+                error: Some(format!("读取响应失败: {err}")),
+            };
+        }
+    };
+
+    if !status.is_success() {
+        let credential_name = if queries_account_credits {
+            "Management Key"
+        } else {
+            "API Key"
+        };
+        return BalanceQueryResult {
+            balance: None,
+            currency: None,
+            is_available: false,
+            error: Some(format!(
+                "{credential_name} 查询失败，HTTP {}: {}",
+                status.as_u16(),
+                body
+            )),
+        };
+    }
+
+    if queries_account_credits {
+        match serde_json::from_str::<OpenRouterCreditsResponse>(&body) {
+            Ok(data) => match data.data {
+                Some(info) => BalanceQueryResult {
+                    balance: Some(info.total_credits - info.total_usage),
+                    currency: Some("USD".to_string()),
+                    is_available: true,
+                    error: None,
+                },
+                None => BalanceQueryResult {
+                    balance: None,
+                    currency: None,
+                    is_available: false,
+                    error: Some("未找到 OpenRouter 账户 Credits 信息".to_string()),
+                },
+            },
+            Err(err) => BalanceQueryResult {
+                balance: None,
+                currency: None,
+                is_available: false,
+                error: Some(format!("解析账户 Credits 响应失败: {err}")),
+            },
+        }
+    } else {
+        match serde_json::from_str::<OpenRouterKeyResponse>(&body) {
+            Ok(data) => match data.data {
+                Some(info) => BalanceQueryResult {
+                    // 未配置 Management Key 时只展示普通 Key 的剩余消费限额。
+                    balance: info.limit_remaining,
+                    currency: Some("USD".to_string()),
+                    is_available: true,
+                    error: None,
+                },
+                None => BalanceQueryResult {
+                    balance: None,
+                    currency: None,
+                    is_available: false,
+                    error: Some("未找到 Key 状态信息".to_string()),
+                },
+            },
+            Err(err) => BalanceQueryResult {
+                balance: None,
+                currency: None,
+                is_available: false,
+                error: Some(format!("解析 Key 状态响应失败: {err}")),
+            },
+        }
+    }
+}
+
 /// 同步 DeepSeek 模型列表
 pub async fn sync_deepseek_models(
     account: &ChannelAccount,
@@ -1489,6 +1673,57 @@ mod tests {
             dates.get("kimi-k2.7-code").unwrap().rfc3339,
             "2026-06-12T00:00:00+00:00"
         );
+    }
+
+    #[test]
+    fn parse_openrouter_balance_response() {
+        let json = r#"{
+            "data": {
+                "label": "sk-or-v1-xxxx",
+                "limit": 100.0,
+                "usage": 12.5,
+                "limit_remaining": 87.5,
+                "is_free_tier": false,
+                "rate_limit": {"requests": 200, "interval": "10s"}
+            }
+        }"#;
+        let data: OpenRouterKeyResponse = serde_json::from_str(json).unwrap();
+        let info = data.data.unwrap();
+        assert_eq!(info.limit, Some(100.0));
+        assert_eq!(info.usage, Some(12.5));
+        assert_eq!(info.limit_remaining, Some(87.5));
+        assert_eq!(info.is_free_tier, Some(false));
+    }
+
+    #[test]
+    fn parse_openrouter_balance_response_unlimited_key() {
+        // limit_remaining 为 null 表示该 Key 未设额度上限，解析不应报错。
+        let json = r#"{
+            "data": {
+                "label": "sk-or-v1-unlimited",
+                "limit": null,
+                "usage": 3.25,
+                "limit_remaining": null,
+                "is_free_tier": true
+            }
+        }"#;
+        let data: OpenRouterKeyResponse = serde_json::from_str(json).unwrap();
+        let info = data.data.unwrap();
+        assert_eq!(info.limit, None);
+        assert_eq!(info.limit_remaining, None);
+    }
+
+    #[test]
+    fn parse_openrouter_credits_response_and_calculate_balance() {
+        let json = r#"{
+            "data": {
+                "total_credits": 100.5,
+                "total_usage": 25.75
+            }
+        }"#;
+        let data: OpenRouterCreditsResponse = serde_json::from_str(json).unwrap();
+        let info = data.data.unwrap();
+        assert_eq!(info.total_credits - info.total_usage, 74.75);
     }
 
     #[test]

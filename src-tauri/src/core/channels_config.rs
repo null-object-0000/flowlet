@@ -19,10 +19,15 @@ pub const DEFAULT_CONFIG_JSON: &str =
 /// 必须与 src/domains/channel/types.ts 的 MODEL_ALIASES 保持一致。
 const MODEL_ALIASES: [(&str, &str); 1] = [("deepseek-v4-flash-0731", "deepseek-v4-flash")];
 
-/// 把任意模型名解析为规范键（小写）：命中别名表返回映射目标，否则原样小写。
-/// 规范键可直接与 supported_models() 的小写形式比较。
+/// 把任意模型名解析为规范键（小写）：先剥离聚合渠道的 `vendor/` 前缀（如
+/// OpenRouter 返回 `deepseek/deepseek-v4-flash`），命中别名表返回映射目标，
+/// 否则原样小写。规范键可直接与 supported_models() 的小写形式比较。
 pub(crate) fn canonical_model_key(model_id: &str) -> String {
-    let key = model_id.trim().to_lowercase();
+    let raw = model_id.trim();
+    // 只取最后一个 `/` 之后的部分：普通模型名不含 `/`，原样保留；`vendor/model`
+    // 命名空间去掉 vendor 前缀后按简名匹配白名单（路由 upstream_model 仍保留
+    // 上游原始 ID 用于转发，这里只做映射判定）。
+    let key = raw.rsplit('/').next().unwrap_or(raw).trim().to_lowercase();
     MODEL_ALIASES
         .iter()
         .find(|(alias, _)| *alias == key)
@@ -370,6 +375,23 @@ impl ChannelsConfig {
         })
     }
 
+    /// 获取 OpenRouter 余额端点（官方 `GET /api/v1/key`，返回该 API Key 的
+    /// 剩余 credits）。优先使用配置中 endpoints["balance"] 覆盖，缺失时基于
+    /// openai_base_url 拼接。
+    pub fn openrouter_balance_endpoint(&self) -> String {
+        self.endpoint_or("openrouter", "balance", |c| {
+            format!("{}/key", c.openai_base_url.trim_end_matches('/'))
+        })
+    }
+
+    /// 获取 OpenRouter 账户 Credits 端点（官方 `GET /api/v1/credits`）。
+    /// 该接口必须使用 Management Key；普通模型调用 Key 会返回 403。
+    pub fn openrouter_credits_endpoint(&self) -> String {
+        self.endpoint_or("openrouter", "credits", |c| {
+            format!("{}/credits", c.openai_base_url.trim_end_matches('/'))
+        })
+    }
+
     /// 获取 DeepSeek 模型列表端点
     pub fn deepseek_models_endpoint(&self) -> String {
         self.endpoint_or("deepseek", "models", |c| {
@@ -387,6 +409,9 @@ impl ChannelsConfig {
     /// 获取默认开放模型列表（按渠道）。
     /// 仅用于渠道预设的配置漂移检测（preset-sync），不再作为开放模型的白名单。
     /// 白名单请使用 supported_models()（所有渠道的并集）。
+    /// 开放哪些模型由用户在账号编辑器中显式勾选，不在此维护默认勾选；
+    /// OpenRouter 聚合渠道不写静态默认列表（config.json 的 default_exposed_models
+    /// 不含 openrouter），未来白名单新增模型时由用户按需勾选。
     pub fn default_exposed_models(&self, channel_id: &str) -> Vec<String> {
         self.default_exposed_models
             .get(channel_id)
@@ -585,6 +610,10 @@ impl ChannelsConfig {
             } else if c.id == "zhipu" {
                 // 智谱 models 端点在 /api/paas/v4 下，不以 /v1 结尾；模板已显式
                 // endpoints.models 覆盖，这里兜底保证外部配置缺失覆盖时仍正确。
+                format!("{}/models", c.openai_base_url.trim_end_matches('/'))
+            } else if c.id == "openrouter" {
+                // OpenRouter openai_base_url 以 /api/v1 结尾，直接拼 /models；
+                // 模板已显式 endpoints.models 覆盖，这里兜底防止外部配置缺失覆盖。
                 format!("{}/models", c.openai_base_url.trim_end_matches('/'))
             } else {
                 format!("{}/v1/models", c.openai_base_url)
@@ -1489,6 +1518,170 @@ mod tests {
         assert!(custom.supports_model_list);
         assert_eq!(custom.openai_auth, AuthStrategy::Bearer);
         assert_eq!(custom.anthropic_auth, AuthStrategy::XApiKey);
+    }
+
+    #[test]
+    fn embedded_config_contains_openrouter_channel_template() {
+        let json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let openrouter = config
+            .presets
+            .iter()
+            .find(|preset| preset.id == "openrouter")
+            .expect("missing openrouter channel");
+        assert_eq!(openrouter.vendor, "openrouter");
+        assert_eq!(openrouter.openai_base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(openrouter.anthropic_base_url, "https://openrouter.ai/api");
+        assert_eq!(openrouter.openai_auth, AuthStrategy::Bearer);
+        assert_eq!(openrouter.anthropic_auth, AuthStrategy::Bearer);
+        assert!(openrouter.supports_model_list);
+        assert!(openrouter.supports_balance_query);
+        assert_eq!(
+            config.models_endpoint_url("openrouter").as_deref(),
+            Some("https://openrouter.ai/api/v1/models")
+        );
+        assert_eq!(
+            config.openrouter_balance_endpoint(),
+            "https://openrouter.ai/api/v1/key"
+        );
+        assert_eq!(
+            config.openrouter_credits_endpoint(),
+            "https://openrouter.ai/api/v1/credits"
+        );
+    }
+
+    #[test]
+    fn openrouter_models_endpoint_falls_back_to_v1_models_without_override() {
+        let json = serde_json::json!({
+            "channels_config": {
+                "channels": [{
+                    "id": "openrouter",
+                    "name": "OpenRouter",
+                    "vendor": "openrouter",
+                    "supported_protocols": ["openai", "anthropic"],
+                    "openai_base_url": "https://openrouter.ai/api/v1",
+                    "anthropic_base_url": "https://openrouter.ai/api"
+                }]
+            }
+        });
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        // openai_base_url 以 /api/v1 结尾，无显式覆盖时拼 /models 而非 /v1/models。
+        assert_eq!(
+            config.models_endpoint_url("openrouter").as_deref(),
+            Some("https://openrouter.ai/api/v1/models")
+        );
+        // 无 endpoints.balance 覆盖时，余额端点基于 openai_base_url 拼接为 /key。
+        assert_eq!(
+            config.openrouter_balance_endpoint(),
+            "https://openrouter.ai/api/v1/key"
+        );
+        assert_eq!(
+            config.openrouter_credits_endpoint(),
+            "https://openrouter.ai/api/v1/credits"
+        );
+    }
+
+    #[test]
+    fn canonical_model_key_strips_aggregate_vendor_prefix() {
+        assert_eq!(
+            canonical_model_key("deepseek/deepseek-v4-flash"),
+            "deepseek-v4-flash"
+        );
+        assert_eq!(canonical_model_key("qwen/qwen3.7-max"), "qwen3.7-max");
+        assert_eq!(canonical_model_key("z-ai/glm-5.2"), "glm-5.2");
+        // 别名变体在剥离 vendor 前缀后仍按规范映射
+        assert_eq!(
+            canonical_model_key("deepseek/deepseek-v4-flash-0731"),
+            "deepseek-v4-flash"
+        );
+        // 普通模型名不含 vendor 前缀，不受影响
+        assert_eq!(
+            canonical_model_key("deepseek-v4-flash"),
+            "deepseek-v4-flash"
+        );
+    }
+
+    #[test]
+    fn openrouter_has_no_static_default_exposed_models() {
+        // OpenRouter 不写静态默认开放模型：config.json 的 default_exposed_models
+        // 不含 openrouter，开放哪些模型由用户显式勾选。
+        let json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        assert!(config.default_exposed_models("openrouter").is_empty());
+        assert!(!config.default_exposed_models.contains_key("openrouter"));
+    }
+
+    #[test]
+    fn merge_default_routes_maps_openrouter_vendor_prefixed_models() {
+        let json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let account = ChannelAccount {
+            id: "openrouter-account".to_string(),
+            channel_id: "openrouter".to_string(),
+            api_key: "sk-or-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec![
+                "deepseek/deepseek-v4-flash".to_string(),
+                "qwen/qwen3.7-max".to_string(),
+            ]),
+            synced_models: Some(vec![
+                "deepseek/deepseek-v4-flash".to_string(),
+                "qwen/qwen3.7-max".to_string(),
+            ]),
+            ..Default::default()
+        };
+        let routes = config.merge_default_routes(&[], &[account.clone()], &config.presets);
+        // 每个模型按声明的协议（openai / anthropic / responses）各生成一条直连路由。
+        let pairs: Vec<(&str, &str)> = routes
+            .iter()
+            .filter(|route| route.channel_id == "openrouter")
+            .map(|route| {
+                (
+                    route.virtual_model_id.as_str(),
+                    route.upstream_model.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
+                ("qwen3.7-max", "qwen/qwen3.7-max"),
+                ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
+                ("qwen3.7-max", "qwen/qwen3.7-max"),
+                ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
+                ("qwen3.7-max", "qwen/qwen3.7-max"),
+            ]
+        );
+        // responses 协议确实生成路由，且协议集合覆盖三个声明的协议。
+        let protocols: std::collections::BTreeSet<&str> = routes
+            .iter()
+            .filter(|route| route.channel_id == "openrouter")
+            .map(|route| route.client_protocol.as_str())
+            .collect();
+        assert_eq!(
+            protocols,
+            std::collections::BTreeSet::from(["openai", "anthropic", "responses"])
+        );
+        // 白名单外的 vendor 前缀模型（openai/gpt-5.5）被过滤。
+        let with_stranger = ChannelAccount {
+            exposed_models: Some(vec![
+                "deepseek/deepseek-v4-flash".to_string(),
+                "openai/gpt-5.5".to_string(),
+            ]),
+            synced_models: Some(vec![
+                "deepseek/deepseek-v4-flash".to_string(),
+                "openai/gpt-5.5".to_string(),
+            ]),
+            ..account
+        };
+        let routes = config.merge_default_routes(&[], &[with_stranger], &config.presets);
+        assert!(routes
+            .iter()
+            .all(|route| route.upstream_model != "openai/gpt-5.5"));
+        assert!(routes
+            .iter()
+            .any(|route| route.upstream_model == "deepseek/deepseek-v4-flash"));
     }
 
     #[test]

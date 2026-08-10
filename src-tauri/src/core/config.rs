@@ -453,6 +453,40 @@ impl ChannelPreset {
         }
     }
 
+    /// OpenRouter 聚合渠道。OpenAI-compatible 端点为 `/api/v1`，Anthropic
+    /// 兼容端点（Anthropic Skin）为 `/api`，均使用 Bearer 鉴权。Responses 协议
+    /// 从 OpenAI Base URL 派生（`/api/v1/responses`，仅无状态透传）。模型列表走
+    /// 标准 OpenAI `/models`；余额查询走官方 `/api/v1/key`（剩余 credits，USD），
+    /// 与 DeepSeek / Kimi 一样支持自动同步。默认开放模型为全部 Flowlet 白名单
+    ///（见 channels_config::ChannelsConfig::default_exposed_models）。
+    pub fn openrouter() -> Self {
+        Self {
+            id: "openrouter".to_string(),
+            name: "OpenRouter".to_string(),
+            vendor: "openrouter".to_string(),
+            platform_url: Some("https://openrouter.ai/settings/keys".to_string()),
+            enabled: true,
+            supported_protocols: vec![
+                ProtocolType::OpenAi,
+                ProtocolType::Anthropic,
+                ProtocolType::Responses,
+            ],
+            openai_base_url: "https://openrouter.ai/api/v1".to_string(),
+            anthropic_base_url: "https://openrouter.ai/api".to_string(),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::Bearer,
+            default_model: "deepseek-v4-flash".to_string(),
+            small_model: None,
+            supports_model_list: true,
+            supports_model_detail: false,
+            supports_balance_query: true,
+            supports_quota_query: false,
+            supports_usage_query: false,
+            supports_scrape_balance: false,
+            ..Default::default()
+        }
+    }
+
     pub fn base_url_for(&self, protocol: &ProtocolType) -> &str {
         match protocol {
             // Responses API 端点统一从 OpenAI Base URL 派生（`{base}/responses`，
@@ -497,6 +531,9 @@ pub struct ChannelAccount {
     pub channel_id: String,
     pub name: String,
     pub api_key: String,
+    /// OpenRouter Management Key，仅用于查询账户 Credits，不参与代理鉴权与路由。
+    #[serde(default)]
+    pub management_key: Option<String>,
     pub enabled: bool,
     pub priority: i64,
     pub remark: Option<String>,
@@ -543,6 +580,7 @@ impl Default for ChannelAccount {
             channel_id: String::new(),
             name: String::new(),
             api_key: String::new(),
+            management_key: None,
             enabled: true,
             priority: 0,
             remark: None,

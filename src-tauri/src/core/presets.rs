@@ -9,6 +9,7 @@ pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
         ChannelPreset::qwen(),
         ChannelPreset::custom(),
         ChannelPreset::zhipu(),
+        ChannelPreset::openrouter(),
     ]
 }
 

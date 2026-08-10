@@ -900,6 +900,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 channel_id: "longcat".to_string(),
                 name: "主账号".to_string(),
                 api_key: "upstream-secret".to_string(),
+                management_key: None,
                 enabled: true,
                 priority: 0,
                 remark: None,

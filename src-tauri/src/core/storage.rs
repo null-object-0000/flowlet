@@ -744,6 +744,7 @@ impl Storage {
                 channel_id        TEXT NOT NULL,
                 name              TEXT NOT NULL,
                 api_key           TEXT NOT NULL,
+                management_key    TEXT,
                 enabled           INTEGER NOT NULL DEFAULT 1,
                 priority          INTEGER NOT NULL DEFAULT 0,
                 remark            TEXT,
@@ -1377,6 +1378,8 @@ impl Storage {
             "credential_status",
             "TEXT NOT NULL DEFAULT 'healthy'",
         )?;
+        // OpenRouter Management Key：只用于账户 Credits 查询，不参与代理路由。
+        add_column_if_missing(&connection, "channel_accounts", "management_key", "TEXT")?;
         add_column_if_missing(
             &connection,
             "virtual_model_routes",

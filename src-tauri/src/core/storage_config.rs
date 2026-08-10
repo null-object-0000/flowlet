@@ -309,18 +309,19 @@ impl Storage {
             tx.execute(
                 r#"
                 INSERT INTO channel_accounts (
-                    id, channel_id, name, api_key, enabled, priority,
+                    id, channel_id, name, api_key, management_key, enabled, priority,
                     remark, resource_mode, resource_sync_mode, base_url_override,
                     anthropic_base_url_override, last_used_at, last_error,
                     credential_status, synced_models, models_synced_at, exposed_models,
                     created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
                 "#,
                 params![
                     account.id,
                     account.channel_id,
                     account.name,
                     account.api_key,
+                    account.management_key,
                     account.enabled as i64,
                     account.priority,
                     account.remark,
@@ -380,7 +381,7 @@ impl Storage {
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
-            "SELECT ca.id, links.workspace_account_id, ca.channel_id, ca.name, ca.api_key, ca.enabled, ca.priority,
+            "SELECT ca.id, links.workspace_account_id, ca.channel_id, ca.name, ca.api_key, ca.management_key, ca.enabled, ca.priority,
                     ca.remark, ca.resource_mode, ca.resource_sync_mode, ca.base_url_override, ca.anthropic_base_url_override,
                     defaults.openai_base_url, defaults.anthropic_base_url,
                     ca.last_used_at, ca.last_error, ca.credential_status, ca.synced_models, ca.models_synced_at, ca.exposed_models,
@@ -392,10 +393,10 @@ impl Storage {
         )?;
         let rows = stmt.query_map([], |row| {
             let synced_models: Option<Vec<String>> = row
-                .get::<_, Option<String>>(17)?
+                .get::<_, Option<String>>(18)?
                 .and_then(|json| serde_json::from_str(&json).ok());
             let exposed_models: Option<Vec<String>> = row
-                .get::<_, Option<String>>(19)?
+                .get::<_, Option<String>>(20)?
                 .and_then(|json| serde_json::from_str(&json).ok());
             Ok(ChannelAccount {
                 id: row.get(0)?,
@@ -403,25 +404,26 @@ impl Storage {
                 channel_id: row.get(2)?,
                 name: row.get(3)?,
                 api_key: row.get(4)?,
-                enabled: row.get::<_, i64>(5)? != 0,
-                priority: row.get(6)?,
-                remark: row.get(7)?,
-                resource_mode: row.get(8)?,
-                resource_sync_mode: row.get(9)?,
-                base_url_override: row.get(10)?,
-                anthropic_base_url_override: row.get(11)?,
-                workspace_default_base_url: row.get(12)?,
-                workspace_default_anthropic_base_url: row.get(13)?,
-                last_used_at: row.get(14)?,
-                last_error: row.get(15)?,
+                management_key: row.get(5)?,
+                enabled: row.get::<_, i64>(6)? != 0,
+                priority: row.get(7)?,
+                remark: row.get(8)?,
+                resource_mode: row.get(9)?,
+                resource_sync_mode: row.get(10)?,
+                base_url_override: row.get(11)?,
+                anthropic_base_url_override: row.get(12)?,
+                workspace_default_base_url: row.get(13)?,
+                workspace_default_anthropic_base_url: row.get(14)?,
+                last_used_at: row.get(15)?,
+                last_error: row.get(16)?,
                 credential_status: row
-                    .get::<_, String>(16)
+                    .get::<_, String>(17)
                     .unwrap_or_else(|_| "healthy".to_string()),
                 synced_models,
-                models_synced_at: row.get(18)?,
+                models_synced_at: row.get(19)?,
                 exposed_models,
-                created_at: row.get(20)?,
-                updated_at: row.get(21)?,
+                created_at: row.get(21)?,
+                updated_at: row.get(22)?,
             })
         })?;
         let mut accounts = Vec::new();

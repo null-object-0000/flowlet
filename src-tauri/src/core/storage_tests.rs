@@ -34,6 +34,29 @@ fn channel_account_resource_sync_mode_round_trips() {
 }
 
 #[test]
+fn openrouter_management_key_round_trips() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate account schema");
+    storage
+        .save_channel_accounts(&[ChannelAccount {
+            id: "account-openrouter".to_string(),
+            channel_id: "openrouter".to_string(),
+            name: "OpenRouter".to_string(),
+            api_key: "sk-or-model".to_string(),
+            management_key: Some("sk-or-management".to_string()),
+            ..Default::default()
+        }])
+        .expect("save OpenRouter account");
+
+    let accounts = storage.list_channel_accounts().expect("list accounts");
+    assert_eq!(
+        accounts[0].management_key.as_deref(),
+        Some("sk-or-management")
+    );
+}
+
+#[test]
 fn channel_account_workspace_identity_and_defaults_round_trip_and_survive_local_removal() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
@@ -158,6 +181,7 @@ fn migration_forces_qwen_token_plan_resource_sync_to_auto() {
 
     let accounts = storage.list_channel_accounts().expect("list accounts");
     assert_eq!(accounts[0].resource_sync_mode, "auto");
+    assert_eq!(accounts[0].management_key, None);
 }
 
 #[test]
@@ -1456,6 +1480,63 @@ fn appends_qwen_preset_to_existing_database_without_touching_legacy_presets() {
     );
     assert!(qwen.supports_model_list);
     assert!(!qwen.supports_balance_query);
+    // 已有预设不被修改
+    let longcat = presets
+        .iter()
+        .find(|preset| preset.id == "longcat")
+        .expect("longcat preset kept");
+    assert_eq!(longcat.openai_base_url, "https://api.longcat.chat/openai");
+
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
+}
+
+#[test]
+fn appends_openrouter_preset_to_existing_database_without_touching_legacy_presets() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet-openrouter-preset-migration-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let storage = Storage::open(&path).expect("open storage");
+    let json: serde_json::Value =
+        serde_json::from_str(DEFAULT_CONFIG_JSON).expect("parse embedded config");
+    let config = ChannelsConfig::from_config_json(&json).expect("load channel defaults");
+
+    // 模拟旧版本数据库：尚无 openrouter 预设
+    let legacy_presets: Vec<_> = config
+        .presets
+        .iter()
+        .filter(|preset| preset.id != "openrouter")
+        .cloned()
+        .collect();
+    assert!(!legacy_presets.is_empty());
+    assert!(!legacy_presets
+        .iter()
+        .any(|preset| preset.id == "openrouter"));
+    storage
+        .save_channel_presets(&legacy_presets)
+        .expect("save legacy presets");
+
+    storage
+        .ensure_missing_presets(&config.presets)
+        .expect("append missing openrouter preset");
+    // 迁移幂等：再次执行结果一致
+    storage
+        .ensure_missing_presets(&config.presets)
+        .expect("ensure_missing_presets is idempotent");
+
+    let presets = storage.list_channel_presets().expect("read presets");
+    assert_eq!(presets.len(), legacy_presets.len() + 1);
+    let openrouter = presets
+        .iter()
+        .find(|preset| preset.id == "openrouter")
+        .expect("openrouter preset appended");
+    assert_eq!(openrouter.openai_base_url, "https://openrouter.ai/api/v1");
+    assert_eq!(openrouter.anthropic_base_url, "https://openrouter.ai/api");
+    assert!(openrouter.supports_model_list);
+    assert!(openrouter.supports_balance_query);
     // 已有预设不被修改
     let longcat = presets
         .iter()

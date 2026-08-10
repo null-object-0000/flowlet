@@ -5,8 +5,8 @@ use crate::core::config::{
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::core::sync::{
-    query_deepseek_balance, query_kimi_balance, sync_deepseek_models, sync_kimi_models,
-    sync_longcat_models, sync_openai_compatible_models, sync_qwen_models,
+    query_deepseek_balance, query_kimi_balance, query_openrouter_balance, sync_deepseek_models,
+    sync_kimi_models, sync_longcat_models, sync_openai_compatible_models, sync_qwen_models,
 };
 use crate::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -384,13 +384,16 @@ pub(crate) async fn query_balance(
             .clone()
     };
 
-    // 目前支持 DeepSeek 和 Kimi 余额查询
-    if account.channel_id != "deepseek" && account.channel_id != "kimi" {
+    // 目前支持 DeepSeek、Kimi 和 OpenRouter 余额查询
+    if account.channel_id != "deepseek"
+        && account.channel_id != "kimi"
+        && account.channel_id != "openrouter"
+    {
         return Ok(BalanceQueryResult {
             balance: None,
             currency: None,
             is_available: false,
-            error: Some("当前仅 DeepSeek 和 Kimi 支持余额查询".to_string()),
+            error: Some("当前仅 DeepSeek、Kimi 和 OpenRouter 支持余额查询".to_string()),
         });
     }
 
@@ -408,6 +411,12 @@ pub(crate) async fn query_balance(
         .lock()
         .map_err(|_| "锁定渠道运行时配置失败".to_string())?
         .clone();
+    let is_openrouter = account.channel_id == "openrouter";
+    let uses_management_key = is_openrouter
+        && account
+            .management_key
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
 
     // 在 spawn_blocking 中执行 HTTP 调用，避免 Send 问题
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -417,6 +426,8 @@ pub(crate) async fn query_balance(
             .unwrap_or_else(|_| panic!("创建运行时失败"));
         if account.channel_id == "kimi" {
             rt.block_on(query_kimi_balance(&account, &config))
+        } else if account.channel_id == "openrouter" {
+            rt.block_on(query_openrouter_balance(&account, &config))
         } else {
             rt.block_on(query_deepseek_balance(&account, &config))
         }
@@ -426,20 +437,25 @@ pub(crate) async fn query_balance(
 
     // 更新账号凭证状态与最后错误信息。
     // 测试连接成功 → 重置为 healthy；若返回 401 则标记为 invalid_key。
+    // Management Key 与模型调用 API Key 相互独立，其查询结果不得改变路由凭证状态。
     // 同时更新共享内存，保证 SQLite / 共享内存 / 前端状态一致，下一次路由立即生效。
     if result.error.is_none() {
-        let _ = state.storage.mark_account_credential_healthy(&account_id);
+        if !uses_management_key {
+            let _ = state.storage.mark_account_credential_healthy(&account_id);
+        }
         if let Ok(mut shared) = state.accounts.lock() {
             if let Some(shared_account) = shared.iter_mut().find(|item| item.id == account_id) {
-                shared_account.credential_status =
-                    crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+                if !uses_management_key {
+                    shared_account.credential_status =
+                        crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+                }
                 shared_account.last_error = None;
             }
         }
     }
     if let Some(ref err) = result.error {
         let _ = state.storage.update_account_last_error(&account_id, err);
-        if err.contains("HTTP 401") || err.contains("401") {
+        if !uses_management_key && (err.contains("HTTP 401") || err.contains("401")) {
             let _ = state.storage.mark_account_credential_invalid(&account_id);
             if let Ok(mut shared) = state.accounts.lock() {
                 if let Some(shared_account) = shared.iter_mut().find(|item| item.id == account_id) {
@@ -464,7 +480,13 @@ pub(crate) async fn query_balance(
             raw_scraped_json: None,
             source: "sync".to_string(),
             synced_at: Some(now.clone()),
-            remark: Some("官方余额接口同步".to_string()),
+            remark: Some(if uses_management_key {
+                "OpenRouter Management Key 账户 Credits 同步".to_string()
+            } else if is_openrouter {
+                "OpenRouter API Key 限额同步".to_string()
+            } else {
+                "官方余额接口同步".to_string()
+            }),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -567,6 +589,22 @@ pub(crate) async fn fetch_channel_models(
             // 显式传入配置的 endpoints.models 覆盖，避免 openai_models_url 拼出
             // 非标准 /v1/models 变体；与 test_channel_connection 保持一致。
             let models_url = config.models_endpoint_url("zhipu");
+            tauri::async_runtime::spawn_blocking(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap_or_else(|_| panic!("创建运行时失败"));
+                rt.block_on(sync_openai_compatible_models(&account, &preset, models_url))
+            })
+            .await
+            .map_err(|e| format!("任务执行失败: {e}"))?
+        }
+        "openrouter" => {
+            let preset = preset.ok_or_else(|| "OpenRouter 渠道模板不存在".to_string())?;
+            // OpenRouter 使用标准 OpenAI /models（/api/v1/models）。显式传入
+            // 配置的 endpoints.models 覆盖，与 test_channel_connection 一致；
+            // 未覆盖时 models_endpoint_url 也按 /api/v1 结尾正确拼接。
+            let models_url = config.models_endpoint_url("openrouter");
             tauri::async_runtime::spawn_blocking(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -1048,7 +1086,7 @@ mod scrape_capture_tests {
     #[test]
     fn official_balance_accounts_sync_even_with_legacy_manual_mode() {
         let config = default_channels_config();
-        for channel_id in ["deepseek", "kimi"] {
+        for channel_id in ["deepseek", "kimi", "openrouter"] {
             let account = ChannelAccount {
                 channel_id: channel_id.to_string(),
                 resource_mode: Some("pay_as_you_go".to_string()),
@@ -2153,12 +2191,11 @@ fn channel_resource_sync_method(
         return None;
     }
 
-    let supports_official_balance = matches!(account.channel_id.as_str(), "deepseek" | "kimi")
-        && config
-            .presets
-            .iter()
-            .find(|preset| preset.id == account.channel_id)
-            .is_some_and(|preset| preset.supports_balance_query)
+    let supports_official_balance = config
+        .presets
+        .iter()
+        .find(|preset| preset.id == account.channel_id)
+        .is_some_and(|preset| preset.supports_balance_query)
         && account.effective_openai_base_url().is_none();
     if supports_official_balance {
         return Some(ChannelResourceSyncMethod::OfficialApi);

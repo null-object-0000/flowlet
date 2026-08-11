@@ -23,8 +23,8 @@ GitHub Actions 会为 Windows、Linux 和 macOS 生成产物，但“自动构�
 | --- | --- | --- | --- |
 | Windows 11 | x64 | NSIS `.exe`、MSI `.msi`、便携版 `.zip` | 主要开发与完整回归环境（原生、无 WSL） |
 | Linux | x64 | AppImage、Debian `.deb` | CI 自动构建，尚未完成作者真机回归 |
-| macOS | Apple Silicon | `.dmg` | CI 自动构建，尚未完成作者真机回归 |
-| macOS | Intel | `.dmg` | CI 自动构建，尚未完成作者真机回归 |
+| macOS | Apple Silicon | `.dmg` | CI 自动构建并使用 ad-hoc 签名，尚未完成作者完整真机回归，未经过 Apple 公证 |
+| macOS | Intel | `.dmg` | CI 自动构建并使用 ad-hoc 签名，尚未完成作者完整真机回归，未经过 Apple 公证 |
 | Android | arm64 | 正式签名 `.apk` | 实验性移动辅助端 |
 
 各平台任务彼此独立；单个平台失败不会取消其他平台正在执行的构建。
@@ -44,5 +44,24 @@ Android Release job 需要配置以下 GitHub Actions Secrets：
 
 ## 桌面签名说明
 
-当前流程生成未签名桌面安装包。正式对外分发前，建议补充 Windows 代码签名以及
-macOS Developer ID 签名和公证，否则系统可能显示未知发布者或阻止直接打开。
+Windows 安装包当前未签名。macOS 构建通过 `APPLE_SIGNING_IDENTITY=-` 使用 ad-hoc
+签名，满足 Apple Silicon 对应用签名结构的要求；流水线会在构建后、上传 Release 前运行
+`codesign --verify` 并确认签名类型为 `adhoc`，验证失败的 DMG 不会上传。ad-hoc 签名
+不代表开发者身份，也不等同于 Apple 公证。
+
+从浏览器下载未公证的 DMG 后，Gatekeeper 仍可能阻止首次启动。只应对从本仓库官方
+Release 下载并已核对 SHA-256 的文件执行以下操作：
+
+1. 打开 DMG，将 Flowlet 拖入 `Applications`；
+2. 在终端中执行 `xattr -dr com.apple.quarantine /Applications/Flowlet.app`；
+3. 再从“应用程序”或终端打开 Flowlet。
+
+正式签名后应移除上述手动放行说明，并将流水线切换为 `Developer ID Application`
+证书签名、Apple notarization 和 stapling。Windows 正式对外分发前也仍需补充代码签名。
+
+## macOS 图标
+
+macOS 使用 `src-tauri/icons/macos-icon.svg` 作为专用图标源，并将生成的
+`macos-icon.icns` 配置到 Tauri bundle。该版本使用接近满画布的背景层承载 Flowlet 标记，
+避免新版 macOS 为大面积透明的旧式图标自动添加灰色兼容底板。其它平台继续使用
+`src-tauri/icon-manifest.json` 中的通用透明 logo，不受此次调整影响。

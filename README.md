@@ -65,7 +65,8 @@ Release 同时提供实验性 Android 移动辅助端，可通过自有 S3 与�
 > [!NOTE]
 > 当前主要开发与回归环境是 **Windows 11 原生环境（未启用 WSL）**。macOS 与 Linux
 > 版本由 GitHub Actions 自动构建，但尚未完成作者真机回归验证；后续完成对应环境测试后
-> 会更新支持状态。当前桌面产物尚未签名，系统也可能显示“未知发布者”提示。
+> 会更新支持状态。Windows 桌面产物尚未签名；macOS DMG 使用 ad-hoc 签名但尚未经过
+> Apple 公证，首次启动可能需要按[发布构建说明](docs/release-builds.md#桌面签名说明)手动放行。
 
 ## 本地优先
 

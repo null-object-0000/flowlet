@@ -72,6 +72,20 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Fetch bundled model catalogs
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            npm run fetch:catalogs
+            if [ -s src-tauri/models-cn.json ] && [ -s src-tauri/models-dev.json ]; then
+              exit 0
+            fi
+            echo "Model catalogs are incomplete after attempt ${attempt}; retrying..." >&2
+            sleep $((attempt * 5))
+          done
+          echo "Failed to fetch the bundled model catalogs" >&2
+          exit 1
+
       - name: Build installers
         uses: tauri-apps/tauri-action@v1
         env:
@@ -138,6 +152,20 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Fetch bundled model catalogs
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            npm run fetch:catalogs
+            if [ -s src-tauri/models-cn.json ] && [ -s src-tauri/models-dev.json ]; then
+              exit 0
+            fi
+            echo "Model catalogs are incomplete after attempt ${attempt}; retrying..." >&2
+            sleep $((attempt * 5))
+          done
+          echo "Failed to fetch the bundled model catalogs" >&2
+          exit 1
 
       - name: Configure Android release signing
         shell: bash

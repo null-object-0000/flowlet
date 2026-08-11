@@ -200,8 +200,10 @@ CLI/Desktop 安装状态的 fixtures。渠道品牌统一由 `ChannelBrandLogoVi
 真实 `ModelServicesPage` 已接入 `ModelsServiceView` 与 `ModelsServiceDetailView`。统计条、
 模型分组列表、启停开关、左右工作区、详情标题、基础信息/价格信息/渠道路由 Tab 和底部状态栏
 由真实应用与 Demo 共用。详情 Tab 的提示条、参数网格、能力列表、内容分组和路由概览也由
-`ModelsService*View` 共享展示组件统一渲染，不再在 Demo 中维护另一套 CSS。真实页面继续负责查询、同步、价格目录、路由增删排序和 mutation；
-Demo 使用 15 个模型、2 个启用模型和 7 个渠道的本地 fixtures 驱动相同展示结构。
+`ModelsService*View` 共享展示组件统一渲染，不再在 Demo 中维护另一套 CSS。刷新操作、搜索和渠道
+筛选工具栏、路由可用状态、启停开关、删除、拖拽/键盘排序，以及渠道模型被聚合模型引用的关系行
+也已经迁入类型化共享组件。真实页面继续负责查询、同步、价格目录、路由增删排序 mutation 和添加
+路由 Modal；Demo 使用 15 个模型、2 个启用模型和 7 个渠道的本地 fixtures 驱动相同组件树。
 
 ### 6.4 请求日志
 
@@ -225,12 +227,21 @@ Demo 使用 15 个模型、2 个启用模型和 7 个渠道的本地 fixtures �
 通过回调切换真实聚合维度，Demo 则切换对应 fixture。Token / 预估费用切换同样由共享 View 暴露，
 Demo 会同步替换矩阵数值，不再只有静态选中样式。
 
-### 6.7 已有共享 Demo、尚未迁移真实页面
+### 6.7 用量统计
+
+真实 `UsageCostPage` 已接入 `UsageStatisticsView`，继续负责设备筛选、日/周/月范围、真实日/小时
+聚合查询、Token 明细抽屉、未识别请求抽屉及刷新行为。统计卡、当前周期可信度、可信度环图与来源
+拆分、日柱状图、7×24 周热力图、月热力图、Token/费用切换、右侧选中时段四项指标和选中时段
+可信度均由真实应用与官网 Demo 共用。
+
+官网 `UsageStatisticsDemoView` 只生成确定性的用量 cells、可信度和明细 View Model，并通过共享回调
+处理周期、指标、时段选择；不再硬编码另一套横向可信度进度条或固定的 78% / 22% 来源条。
+
+### 6.8 已有共享 Demo、尚未迁移真实页面
 
 以下页面已经具备共享 View 和 Demo fixtures，但真实应用页面还没有切换到这些 View：
 
 - 项目管理：`ProjectsBoardView` / `ProjectsBoardDemoView`。
-- 用量统计：`UsageStatisticsView` / `UsageStatisticsDemoView`。
 
 它们当前用于官网和 `dev:frontend`，不能据此声称真实页面已经完成共享化。
 
@@ -279,8 +290,8 @@ npm run dev:frontend
 用量洞察支持主维度与 Token/费用切换。这些交互只
 处理 fixtures，不读取真实配置，也不会进入真实数据链路。
 
-任务日志和设置暂时显示明确的未接入提示，不伪装成已经完成的 Demo 页面。用量统计 Demo 已按
-真实页面的信息架构建立共享展示模型，但真实 `UsageCostPage` 仍保留现有查询与业务容器，尚未迁移到共享 View。
+任务日志和设置暂时显示明确的未接入提示，不伪装成已经完成的 Demo 页面。用量统计 Demo 与真实
+`UsageCostPage` 已接入相同共享 View；真实页面只保留查询、业务编排和弹层，Demo 只注入 fixtures。
 
 真实桌面模式继续使用：
 
@@ -371,6 +382,9 @@ git diff --check                      通过
 CLI/Desktop 状态和完整侧边栏枚举均完成实际验证。
 模型服务的嵌入内容区同样实测为 `920 × 654`，无内部溢出；15/2/7 统计、模型选择与启停、
 价格 Tab 和右侧详情均完成实际点击验证。
+本轮再次以官网 `1200 × 720` PC Demo 固定画布验收：侧栏外的页面内容区实测为 `1010 × 720`，
+`clientHeight` 与 `scrollHeight` 一致。模型服务渠道路由 Tab 已验证添加入口、可用状态、启停、删除
+和顺序手柄；用量统计日视图、168 格周热力图、可信度环图与右侧时段详情均完成实际点击验证。
 请求日志与会话管理修正显式 Grid 行后再次实测：请求日志的统计、筛选、表格间距均为 `10px`，
 会话筛选与表格间距为 `10px`；两页共享 View 的 `clientHeight` 与 `scrollHeight` 一致，控制台无错误。
 
@@ -381,7 +395,7 @@ CLI/Desktop 状态和完整侧边栏枚举均完成实际验证。
 建议按以下顺序继续迁移：
 
 1. 将真实项目看板接入 `ProjectsBoardView`；
-2. 将真实用量统计页接入共享 `UsageStatisticsView`，并为任务日志和设置建立共享展示模型；
+2. 为任务日志和设置建立共享展示模型；
 3. 抽取完整移动端应用壳和主要页面；
 4. 增加 `dev:frontend:mobile`；
 5. 为 `packages/product-ui` 增加独立的组件与 fixture 测试；

@@ -24,9 +24,9 @@ export type {
   UsageAnalysisRankEntryModel,
 } from "./desktop/UsageAnalysisView";
 export { UsageStatisticsView } from "./desktop/UsageStatisticsView";
-export type { UsageStatisticsCellModel, UsageStatisticsDetailModel, UsageStatisticsLabels, UsageStatisticsMetric, UsageStatisticsPeriod, UsageStatisticsStatModel } from "./desktop/UsageStatisticsView";
-export { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceView } from "./desktop/ModelsServiceView";
-export type { ModelsServiceCapabilityModel, ModelsServiceDetailTabModel, ModelsServiceItemModel, ModelsServiceLabels, ModelsServiceMetricModel, ModelsServiceRouteModel, ModelsServiceStatModel } from "./desktop/ModelsServiceView";
+export type { UsageStatisticsCellModel, UsageStatisticsConfidenceModel, UsageStatisticsDetailMetricModel, UsageStatisticsDetailModel, UsageStatisticsLabels, UsageStatisticsMetric, UsageStatisticsPeriod, UsageStatisticsStatModel } from "./desktop/UsageStatisticsView";
+export { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView } from "./desktop/ModelsServiceView";
+export type { ModelsServiceCapabilityModel, ModelsServiceDetailTabModel, ModelsServiceFilterOption, ModelsServiceItemModel, ModelsServiceLabels, ModelsServiceMetricModel, ModelsServiceRelationModel, ModelsServiceRouteModel, ModelsServiceStatModel } from "./desktop/ModelsServiceView";
 export { ProjectsBoardTaskCardView, ProjectsBoardView } from "./desktop/ProjectsBoardView";
 export type { ProjectsBoardColumnModel, ProjectsBoardLabels, ProjectsBoardTaskCardClassNames, ProjectsBoardTaskModel } from "./desktop/ProjectsBoardView";
 export { DesktopOverviewDemoView } from "./demo/DesktopOverviewDemoView";

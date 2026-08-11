@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { IconInfoCircle } from "@douyinfe/semi-icons";
-import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceView, type ModelsServiceItemModel } from "../desktop/ModelsServiceView";
+import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView, type ModelsServiceItemModel, type ModelsServiceRouteModel } from "../desktop/ModelsServiceView";
 import { createModelsServiceFixture } from "./fixtures";
-import { DemoFilterToolbar, DemoPageScaffold, DemoRefreshControl } from "./DemoPageScaffold";
+import { DemoPageScaffold } from "./DemoPageScaffold";
 import styles from "./ModelsServiceDemoView.module.css";
 
 export function ModelsServiceDemoView({ zh, density = "default" }: { zh: boolean; density?: "default" | "compact" }) {
@@ -10,6 +10,7 @@ export function ModelsServiceDemoView({ zh, density = "default" }: { zh: boolean
   const [selected, setSelected] = useState("flowlet-pro");
   const [activeTab, setActiveTab] = useState("basic");
   const [search, setSearch] = useState("");
+  const [channel, setChannel] = useState("all");
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() => Object.fromEntries([...fixture.groups.aggregate, ...fixture.groups.direct].map((model) => [model.id, model.enabled])));
   const allModels = useMemo(() => [...fixture.groups.aggregate, ...fixture.groups.direct].map((model) => ({
     ...model,
@@ -41,7 +42,7 @@ export function ModelsServiceDemoView({ zh, density = "default" }: { zh: boolean
   return <DemoPageScaffold
     title={zh ? "模型服务" : "Model services"}
     subtitle={zh ? "管理对外模型、渠道能力与请求路由" : "Manage exposed models, channel capabilities and routes"}
-    controls={<DemoRefreshControl zh={zh} action={zh ? "刷新模型" : "Refresh models"} />}
+    controls={<ModelsServiceRefreshActionView label={zh ? "刷新模型" : "Refresh models"} />}
   >
     <ModelsServiceView
       stats={stats}
@@ -49,7 +50,16 @@ export function ModelsServiceDemoView({ zh, density = "default" }: { zh: boolean
       labels={{ ...fixture.labels, currentVisible: zh ? `当前显示 ${groups.aggregate.length + groups.direct.length} / 共 ${allModels.length} 个模型` : `Showing ${groups.aggregate.length + groups.direct.length} of ${allModels.length} models` }}
       density={density}
       kindSummary={zh ? "聚合模型 2 · 渠道模型 13" : "2 aggregate · 13 direct"}
-      toolbar={<DemoFilterToolbar value={search} placeholder={zh ? "搜索模型名称或映射模型" : "Search model or mapping"} filters={[zh ? "全部渠道" : "All channels"]} onChange={setSearch} />}
+      toolbar={<ModelsServiceToolbarView
+        search={search}
+        searchPlaceholder={zh ? "搜索模型名称或映射模型" : "Search model or mapping"}
+        searchLabel={zh ? "搜索模型" : "Search models"}
+        channel={channel}
+        channelLabel={zh ? "渠道类型" : "Channel"}
+        options={[{ value: "all", label: zh ? "全部渠道" : "All channels" }, { value: "deepseek", label: "DeepSeek" }, { value: "qwen", label: "Qwen" }]}
+        onSearchChange={setSearch}
+        onChannelChange={setChannel}
+      />}
       selectedId={selected}
       onSelect={(id) => { setSelected(id); setActiveTab("basic"); }}
       onToggle={(id, value) => setEnabled((current) => ({ ...current, [id]: value }))}
@@ -83,8 +93,50 @@ function PricingDetail({ zh }: { zh: boolean }) {
 }
 
 function RoutingDetail({ zh, model }: { zh: boolean; model: ModelsServiceItemModel }) {
-  return <ModelsServiceTabContentView><ModelsServiceRouteOverviewView title={zh ? "渠道路由" : "Routes"} summary={model.kind === "aggregate" ? (zh ? "2 / 2 条已启用" : "2 / 2 enabled") : (zh ? "1 个聚合模型" : "1 aggregate")} description={zh ? "按顺序选择可用账号，并在失败时自动尝试下一候选。" : "Use accounts in order and fall back to the next candidate on failure."} routes={[
-    { key: "deepseek", order: 1, title: zh ? "DeepSeek · 工作账号" : "DeepSeek · Work account", subtitle: "deepseek-v4-flash" },
-    { key: "qwen", order: 2, title: "Qwen · Token Plan", subtitle: "deepseek-v4-flash" },
-  ]} /></ModelsServiceTabContentView>;
+  const makeRoute = (key: string, title: string, subtitle: string): ModelsServiceRouteModel => ({
+    key,
+    title,
+    subtitle,
+    usable: true,
+    enabled: true,
+    reorderLabel: zh ? `拖动调整路由 ${subtitle} 的优先级` : `Reorder route ${subtitle}`,
+    reorderTitle: zh ? "拖动调整优先级" : "Drag to reorder",
+    onlyRouteTitle: zh ? "当前只有一条路由，无需排序" : "Only one route",
+    toggleLabel: zh ? `启用路由 ${subtitle}` : `Enable route ${subtitle}`,
+    usableLabel: zh ? "可用" : "Available",
+    unavailableLabel: zh ? "不可用" : "Unavailable",
+    removeLabel: zh ? `从 ${model.name} 移除 ${subtitle}` : `Remove ${subtitle} from ${model.name}`,
+    removeTitle: zh ? "删除路由" : "Remove route",
+  });
+  const [routes, setRoutes] = useState<ModelsServiceRouteModel[]>(() => [
+    makeRoute("deepseek", zh ? "DeepSeek · 工作账号" : "DeepSeek · Work account", "deepseek-v4-flash"),
+    makeRoute("qwen", "Qwen · Token Plan", "deepseek-v4-flash-0731"),
+  ]);
+  const reorder = (sourceKey: string, targetKey: string) => setRoutes((current) => {
+    const sourceIndex = current.findIndex((route) => route.key === sourceKey);
+    const targetIndex = current.findIndex((route) => route.key === targetKey);
+    if (sourceIndex < 0 || targetIndex < 0) return current;
+    const next = [...current];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    return next;
+  });
+  if (model.kind !== "aggregate") return <ModelsServiceTabContentView>
+    <ModelsServiceRouteOverviewView title={zh ? "路由关系" : "Route relationships"} summary={zh ? "1 个聚合模型" : "1 aggregate"} description={zh ? "展示当前渠道模型被哪些聚合模型引用。" : "Shows which aggregate models reference this channel model."} />
+    <ModelsServiceRelationListView relations={[{ key: "flowlet-pro", title: "flowlet-pro", subtitle: zh ? "优先级 1" : "Priority 1", enabled: true, activeLabel: zh ? "正在参与路由" : "Active", idleLabel: zh ? "已配置 · 未启用" : "Configured · disabled" }]} />
+  </ModelsServiceTabContentView>;
+  return <ModelsServiceTabContentView><ModelsServiceRouteOverviewView
+    title={zh ? "渠道路由" : "Routes"}
+    summary={zh ? `${routes.filter((route) => route.enabled).length} / ${routes.length} 条已启用` : `${routes.filter((route) => route.enabled).length} / ${routes.length} enabled`}
+    description={zh ? "从已有渠道模型中自由添加候选，并拖动调整请求优先级。" : "Add candidates from existing channel models and drag to reorder request priority."}
+    addLabel={zh ? "添加渠道模型" : "Add channel model"}
+    addDisabled={routes.some((route) => route.key === "zai")}
+    onAdd={() => setRoutes((current) => [...current, makeRoute("zai", zh ? "Z.AI · 资源包" : "Z.AI · Resource plan", "glm-4.7")])}
+    routes={routes}
+    removable
+    onToggle={(key, value) => setRoutes((current) => current.map((route) => route.key === key ? { ...route, enabled: value } : route))}
+    onReorder={reorder}
+    onRemove={(key) => setRoutes((current) => current.filter((route) => route.key !== key))}
+    empty={zh ? "尚未添加渠道模型。" : "No channel models added."}
+  /></ModelsServiceTabContentView>;
 }

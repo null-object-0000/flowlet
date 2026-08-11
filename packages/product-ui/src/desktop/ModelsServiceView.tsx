@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
-import { Switch, Tabs } from "@douyinfe/semi-ui-19";
+import { useEffect, useState, type ReactNode } from "react";
+import { Button, Input, Select, Switch, Tabs } from "@douyinfe/semi-ui-19";
+import { IconDelete, IconHandle, IconPlus, IconRefresh, IconSearch } from "@douyinfe/semi-icons";
 import styles from "./ModelsServiceView.module.css";
 
 export type ModelsServiceStatModel = {
@@ -43,7 +44,31 @@ export type ModelsServiceDetailTabModel = {
 
 export type ModelsServiceMetricModel = { key: string; label: ReactNode; value: ReactNode };
 export type ModelsServiceCapabilityModel = { key: string; label: ReactNode; value: ReactNode; supported?: boolean };
-export type ModelsServiceRouteModel = { key: string; order: ReactNode; title: ReactNode; subtitle: ReactNode; trailing?: ReactNode };
+export type ModelsServiceFilterOption = { value: string; label: ReactNode };
+export type ModelsServiceRouteModel = {
+  key: string;
+  title: ReactNode;
+  subtitle: ReactNode;
+  usable: boolean;
+  enabled: boolean;
+  reorderLabel: string;
+  reorderTitle: string;
+  onlyRouteTitle: string;
+  toggleLabel: string;
+  usableLabel: ReactNode;
+  unavailableLabel: ReactNode;
+  removeLabel?: string;
+  removeTitle?: string;
+};
+export type ModelsServiceRelationModel = {
+  key: string;
+  logo?: ReactNode;
+  title: ReactNode;
+  subtitle: ReactNode;
+  enabled: boolean;
+  activeLabel: ReactNode;
+  idleLabel: ReactNode;
+};
 
 type Props = {
   stats: ModelsServiceStatModel[];
@@ -152,9 +177,129 @@ export function ModelsServiceCapabilityListView({ items }: { items: ModelsServic
   return <>{items.map((item) => <div className={styles.configRow} key={item.key}><span>{item.label}</span><strong className={item.supported === true ? styles.capYes : item.supported === false ? styles.capNo : ""}>{item.value}</strong></div>)}</>;
 }
 
-export function ModelsServiceRouteOverviewView({ title, summary, description, action, routes }: { title: ReactNode; summary?: ReactNode; description: ReactNode; action?: ReactNode; routes: ModelsServiceRouteModel[] }) {
+export function ModelsServiceRefreshActionView({ label, loading, onClick }: { label: ReactNode; loading?: boolean; onClick?: () => void }) {
+  return <Button className={styles.refreshAction} type="tertiary" theme="outline" icon={<IconRefresh />} loading={loading} onClick={onClick}>{label}</Button>;
+}
+
+export function ModelsServiceToolbarView({ search, searchPlaceholder, searchLabel, channel, channelLabel, options, onSearchChange, onChannelChange }: {
+  search: string;
+  searchPlaceholder: string;
+  searchLabel: string;
+  channel: string;
+  channelLabel: string;
+  options: ModelsServiceFilterOption[];
+  onSearchChange: (value: string) => void;
+  onChannelChange: (value: string) => void;
+}) {
+  return <div className={styles.toolbar}>
+    <Input prefix={<IconSearch />} value={search} onChange={onSearchChange} placeholder={searchPlaceholder} aria-label={searchLabel} />
+    <Select value={channel} aria-label={channelLabel} optionList={options} onChange={(value) => onChannelChange(String(value))} />
+  </div>;
+}
+
+export function ModelsServiceRouteOverviewView({ title, summary, description, addLabel, addDisabled, onAdd, routes, busy = false, removable = false, empty, onToggle, onReorder, onRemove }: {
+  title: ReactNode;
+  summary?: ReactNode;
+  description: ReactNode;
+  addLabel?: ReactNode;
+  addDisabled?: boolean;
+  onAdd?: () => void;
+  routes?: ModelsServiceRouteModel[];
+  busy?: boolean;
+  removable?: boolean;
+  empty?: ReactNode;
+  onToggle?: (key: string, enabled: boolean) => void;
+  onReorder?: (sourceKey: string, targetKey: string) => void;
+  onRemove?: (key: string) => void;
+}) {
   return <>
-    <div className={styles.routeOverview}><div className={styles.routeOverviewHeader}><strong>{title}</strong><span className={styles.routeOverviewActions}>{summary ? <span className={styles.routeCountPill}>{summary}</span> : null}{action}</span></div><span className={styles.routeOverviewDesc}>{description}</span></div>
-    <div className={styles.configBox}>{routes.map((route) => <div className={styles.demoRouteRow} key={route.key}><b>{route.order}</b><span><strong>{route.title}</strong><small>{route.subtitle}</small></span>{route.trailing}</div>)}</div>
+    <div className={styles.routeOverview}>
+      <div className={styles.routeOverviewHeader}>
+        <strong>{title}</strong>
+        <span className={styles.routeOverviewActions}>
+          {summary ? <span className={styles.routeCountPill}>{summary}</span> : null}
+          {addLabel ? <Button theme="borderless" type="primary" size="small" icon={<IconPlus />} disabled={busy || addDisabled} onClick={onAdd}>{addLabel}</Button> : null}
+        </span>
+      </div>
+      <span className={styles.routeOverviewDesc}>{description}</span>
+    </div>
+    {routes ? <ModelsServiceRouteListView routes={routes} busy={busy} removable={removable} empty={empty} onToggle={onToggle} onReorder={onReorder} onRemove={onRemove} /> : null}
   </>;
+}
+
+export function ModelsServiceRouteListView({ routes, busy = false, removable = false, framed = true, empty, onToggle, onReorder, onRemove }: {
+  routes: ModelsServiceRouteModel[];
+  busy?: boolean;
+  removable?: boolean;
+  framed?: boolean;
+  empty?: ReactNode;
+  onToggle?: (key: string, enabled: boolean) => void;
+  onReorder?: (sourceKey: string, targetKey: string) => void;
+  onRemove?: (key: string) => void;
+}) {
+  const [draggedRouteKey, setDraggedRouteKey] = useState<string | null>(null);
+  const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
+  useEffect(() => {
+    const cancelPointerDrag = () => { setDraggedRouteKey(null); setDragTargetKey(null); };
+    window.addEventListener("pointercancel", cancelPointerDrag);
+    window.addEventListener("pointerup", cancelPointerDrag);
+    return () => {
+      window.removeEventListener("pointercancel", cancelPointerDrag);
+      window.removeEventListener("pointerup", cancelPointerDrag);
+    };
+  }, []);
+  const canReorder = !busy && routes.length > 1 && Boolean(onReorder);
+  const content = routes.length === 0 ? <div className={styles.emptyRouteState}>{empty}</div> : routes.map((route, index) => {
+        const moveByKeyboard = (direction: -1 | 1) => {
+          const target = routes[index + direction];
+          if (target) onReorder?.(route.key, target.key);
+        };
+        return <div
+          className={`${styles.routeRow} ${draggedRouteKey === route.key ? styles.dragging : ""} ${dragTargetKey === route.key ? styles.dragTarget : ""}`}
+          key={route.key}
+          onPointerEnter={() => { if (canReorder && draggedRouteKey && draggedRouteKey !== route.key) setDragTargetKey(route.key); }}
+          onPointerUp={() => {
+            const sourceKey = draggedRouteKey;
+            setDraggedRouteKey(null);
+            setDragTargetKey(null);
+            if (canReorder && sourceKey && sourceKey !== route.key) onReorder?.(sourceKey, route.key);
+          }}
+        >
+          <button
+            type="button"
+            className={`${styles.dragHandle} ${!canReorder ? styles.dragHandleInactive : ""}`}
+            disabled={busy}
+            aria-disabled={!canReorder}
+            aria-label={route.reorderLabel}
+            title={routes.length > 1 ? route.reorderTitle : route.onlyRouteTitle}
+            onPointerDown={(event) => {
+              if (!canReorder || event.button !== 0) return;
+              event.preventDefault();
+              setDraggedRouteKey(route.key);
+              setDragTargetKey(null);
+            }}
+            onKeyDown={(event) => {
+              if (!canReorder) return;
+              if (event.key === "ArrowUp") { event.preventDefault(); moveByKeyboard(-1); }
+              else if (event.key === "ArrowDown") { event.preventDefault(); moveByKeyboard(1); }
+            }}
+          ><IconHandle /></button>
+          <span className={styles.priority}>{index + 1}</span>
+          <span className={styles.routeCopy}><strong>{route.title}</strong><small>{route.subtitle}</small></span>
+          <span className={styles.routeActions}>
+            <span className={route.usable ? styles.healthy : styles.unavailable}>{route.usable ? route.usableLabel : route.unavailableLabel}</span>
+            <Switch checked={route.enabled} disabled={busy} aria-label={route.toggleLabel} onChange={(checked) => onToggle?.(route.key, checked)} />
+            {removable ? <Button className={styles.routeDelete} theme="borderless" type="danger" size="small" icon={<IconDelete />} disabled={busy} aria-label={route.removeLabel} title={route.removeTitle} onClick={() => onRemove?.(route.key)} /> : null}
+          </span>
+        </div>;
+    });
+  return framed ? <div className={styles.configBox}>{content}</div> : <>{content}</>;
+}
+
+export function ModelsServiceRelationListView({ relations }: { relations: ModelsServiceRelationModel[] }) {
+  return <div className={styles.configBox}>{relations.map((relation) => <div className={styles.relationRow} key={relation.key}>
+    {relation.logo}
+    <span className={styles.routeCopy}><strong>{relation.title}</strong><small>{relation.subtitle}</small></span>
+    <span className={relation.enabled ? styles.relationActive : styles.relationIdle}>{relation.enabled ? relation.activeLabel : relation.idleLabel}</span>
+  </div>)}</div>;
 }

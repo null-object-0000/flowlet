@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Input, Modal, Select, Switch } from "@douyinfe/semi-ui-19";
-import { IconDelete, IconHandle, IconInfoCircle, IconPlus, IconRefresh, IconSearch } from "@douyinfe/semi-icons";
-import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceView, type ModelsServiceItemModel } from "@flowlet/product-ui";
+import { Button, Modal, Select } from "@douyinfe/semi-ui-19";
+import { IconInfoCircle } from "@douyinfe/semi-icons";
+import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView, type ModelsServiceItemModel, type ModelsServiceRouteModel } from "@flowlet/product-ui";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useAccounts, useChannelPresets } from "../../features/channel-accounts";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
@@ -32,7 +32,6 @@ import type { ModelPriceInfo } from "../../domains/settings/types";
 import { formatTokenCapacity, type NumberLanguage } from "../../shared/formatters/number";
 import { formatCostAmount } from "../../shared/formatters/cost";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
-import secondaryButtonStyles from "../../shared/ui/SecondaryButton.module.css";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import {
   useLocalModelsCnCatalog,
@@ -302,7 +301,7 @@ export function ModelServicesPage() {
   return (
     <main className={styles.page}>
       <PageHeader title={t("模型服务")} subtitle={t("管理对外模型、渠道能力与请求路由")}>
-        <Button className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`} type="tertiary" theme="outline" icon={<IconRefresh />} onClick={openSyncPresets} loading={syncPending}>{t("刷新模型")}</Button>
+        <ModelsServiceRefreshActionView label={t("刷新模型")} onClick={openSyncPresets} loading={syncPending} />
       </PageHeader>
 
       {error ? <div className={styles.state}><strong>{t("模型服务加载失败")}</strong><span>{error.message}</span><Button onClick={refresh}>{t("重试")}</Button></div> : null}
@@ -332,18 +331,16 @@ export function ModelServicesPage() {
           const model = filtered.find((item) => item.publicModel === id);
           if (model) toggleModel(model, checked);
         }}
-        toolbar={<div className={styles.toolbar}>
-            <Input prefix={<IconSearch />} value={search} onChange={setSearch} placeholder={t("搜索模型名称或映射模型")} aria-label={t("搜索模型")} />
-            <Select
-              value={channelFilter}
-              aria-label={t("渠道类型")}
-              optionList={[
-                { value: "all", label: t("全部渠道") },
-                ...buildChannelFilterOptions(models, channels.data ?? []),
-              ]}
-              onChange={(value) => setChannelFilter(String(value))}
-            />
-          </div>}
+        toolbar={<ModelsServiceToolbarView
+          search={search}
+          searchPlaceholder={t("搜索模型名称或映射模型")}
+          searchLabel={t("搜索模型")}
+          channel={channelFilter}
+          channelLabel={t("渠道类型")}
+          options={[{ value: "all", label: t("全部渠道") }, ...buildChannelFilterOptions(models, channels.data ?? [])]}
+          onSearchChange={setSearch}
+          onChannelChange={setChannelFilter}
+        />}
         detail={<ModelDetail
           model={selected}
           relations={relations}
@@ -584,6 +581,33 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
     : [];
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
+  const routeViewModels: ModelsServiceRouteModel[] = model.routeGroups.map((routeGroup) => {
+    const account = accountById.get(routeGroup.accountId);
+    const usable = Boolean(account?.enabled && account.api_key.trim() && account.credential_status !== "invalid_key");
+    return {
+      key: routeGroup.key,
+      title: <>{channelById.get(routeGroup.channelId)?.name ?? routeGroup.channelId} · {account?.name ?? routeGroup.accountId}</>,
+      subtitle: <>{routeGroup.upstreamModel} · {t(routeGroup.enabled ? "参与当前路由" : "当前未启用")}</>,
+      usable,
+      enabled: routeGroup.enabled,
+      reorderLabel: t("拖动调整路由 {name} 的优先级", { name: routeGroup.upstreamModel }),
+      reorderTitle: t("拖动调整优先级"),
+      onlyRouteTitle: t("当前只有一条路由，无需排序"),
+      toggleLabel: t("启用路由 {name}", { name: routeGroup.upstreamModel }),
+      usableLabel: t("可用"),
+      unavailableLabel: t("不可用"),
+      removeLabel: t("从 {model} 移除 {name}", { model: model.publicModel, name: routeGroup.upstreamModel }),
+      removeTitle: t("删除路由"),
+    };
+  });
+  const toggleViewRoute = (key: string, enabled: boolean) => {
+    const routeGroup = model.routeGroups.find((route) => route.key === key);
+    if (routeGroup) onToggleRoute(model.publicModel, routeGroup, enabled);
+  };
+  const removeViewRoute = (key: string) => {
+    const routeGroup = model.routeGroups.find((route) => route.key === key);
+    if (routeGroup) onRemoveAggregateRoute(model.publicModel, routeGroup);
+  };
 
   // 聚合模型（flowlet-pro/flowlet-flash）没有厂商官方价格，不展示"立即同步"。
   const showPricingSync = model.kind === "direct";
@@ -615,30 +639,21 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
       { key: "routing", label: t("渠道路由"), content: <>
           {model.kind === "aggregate" ? (
             <ModelsServiceTabContentView>
-              <div className={styles.routeOverview}>
-                <div className={styles.routeOverviewHeader}>
-                  <strong>{t("渠道路由")}</strong>
-                  <span className={styles.routeOverviewActions}>
-                    <span className={styles.routeCountPill}>{t("{enabled} / {total} 条已启用", { enabled: enabledRouteCount, total: model.routeGroups.length })}</span>
-                    <Button
-                      theme="borderless"
-                      type="primary"
-                      size="small"
-                      icon={<IconPlus />}
-                      disabled={busy || aggregateRouteOptions.length === 0}
-                      onClick={() => setAddRouteVisible(true)}
-                    >{t("添加渠道模型")}</Button>
-                  </span>
-                </div>
-                <span className={styles.routeOverviewDesc}>{t("从已有渠道模型中自由添加候选，并拖动调整请求优先级。")}</span>
-              </div>
-              <div className={styles.configBox}>
-                {model.routeGroups.length > 0 ? (
-                  <RouteList model={model} accounts={accounts} channels={channels} busy={busy} removable onToggleRoute={onToggleRoute} onReorderRoute={onReorderRoute} onRemoveRoute={onRemoveAggregateRoute} t={t} />
-                ) : (
-                  <div className={styles.emptyRouteState}>{t("尚未添加渠道模型。添加后，Flowlet 会按这里的顺序选择候选。")}</div>
-                )}
-              </div>
+              <ModelsServiceRouteOverviewView
+                title={t("渠道路由")}
+                summary={t("{enabled} / {total} 条已启用", { enabled: enabledRouteCount, total: model.routeGroups.length })}
+                description={t("从已有渠道模型中自由添加候选，并拖动调整请求优先级。")}
+                addLabel={t("添加渠道模型")}
+                addDisabled={aggregateRouteOptions.length === 0}
+                onAdd={() => setAddRouteVisible(true)}
+                routes={routeViewModels}
+                busy={busy}
+                removable
+                empty={t("尚未添加渠道模型。添加后，Flowlet 会按这里的顺序选择候选。")}
+                onToggle={toggleViewRoute}
+                onReorder={(sourceKey, targetKey) => onReorderRoute(model.publicModel, sourceKey, targetKey)}
+                onRemove={removeViewRoute}
+              />
               <Modal
                 title={t("添加渠道模型到 {model}", { model: model.publicModel })}
                 visible={addRouteVisible}
@@ -673,33 +688,30 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
             </ModelsServiceTabContentView>
           ) : (
             <ModelsServiceTabContentView>
-              <div className={styles.routeOverview}>
-                <div className={styles.routeOverviewHeader}>
-                  <strong>{t("路由关系")}</strong>
-                  <span className={styles.routeCountPill}>{t("{count} 个聚合模型", { count: relatedAggregateCount })}</span>
-                </div>
-                <span className={styles.routeOverviewDesc}>{t("展示当前渠道模型被哪些聚合模型引用。")}</span>
-              </div>
+              <ModelsServiceRouteOverviewView
+                title={t("路由关系")}
+                summary={t("{count} 个聚合模型", { count: relatedAggregateCount })}
+                description={t("展示当前渠道模型被哪些聚合模型引用。")}
+              />
               {modelRelations.length > 0 ? (
-                <div className={styles.configBox}>
-                  {modelRelations.map((relation) => (
-                    <div className={styles.relationRow} key={`${relation.aggregateModel}-${relation.routeGroupKey}`}>
-                      <FlowletLogo variant="model" />
-                      <span className={styles.routeCopy}><strong>{relation.aggregateModel}</strong><small>{t("优先级 {priority}", { priority: relation.priority })}</small></span>
-                      <span className={relation.enabled ? styles.relationActive : styles.relationIdle}>{t(relation.enabled ? "正在参与路由" : "已配置 · 未启用")}</span>
-                    </div>
-                  ))}
-                </div>
+                <ModelsServiceRelationListView relations={modelRelations.map((relation) => ({
+                  key: `${relation.aggregateModel}-${relation.routeGroupKey}`,
+                  logo: <FlowletLogo variant="model" />,
+                  title: relation.aggregateModel,
+                  subtitle: t("优先级 {priority}", { priority: relation.priority }),
+                  enabled: relation.enabled,
+                  activeLabel: t("正在参与路由"),
+                  idleLabel: t("已配置 · 未启用"),
+                }))} />
               ) : (
-                <div className={styles.infoBanner}>
-                  <IconInfoCircle className={styles.infoBannerIcon} />
-                  <span>{t("该渠道模型尚未加入任何聚合模型。可在聚合模型的「渠道路由」中添加。")}</span>
-                </div>
+                <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>
+                  {t("该渠道模型尚未加入任何聚合模型。可在聚合模型的「渠道路由」中添加。")}
+                </ModelsServiceInfoBannerView>
               )}
               {model.routeGroups.length > 1 ? (
-                <DetailSection title={t("直连路由")} note={t("按账号启停或拖动调整优先级")}>
-                  <RouteList model={model} accounts={accounts} channels={channels} busy={busy} onToggleRoute={onToggleRoute} onReorderRoute={onReorderRoute} t={t} />
-                </DetailSection>
+                <ModelsServiceSectionView title={t("直连路由")} note={t("按账号启停或拖动调整优先级")}>
+                  <ModelsServiceRouteListView routes={routeViewModels} busy={busy} framed={false} onToggle={toggleViewRoute} onReorder={(sourceKey, targetKey) => onReorderRoute(model.publicModel, sourceKey, targetKey)} />
+                </ModelsServiceSectionView>
               ) : null}
             </ModelsServiceTabContentView>
           )}
@@ -707,109 +719,6 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
     ]}
     footer={<><span>{t("配置变更会立即保存并热更新到本地代理")}</span><span>{t("本地配置")}</span></>}
   />;
-}
-
-/** 路由组列表：拖拽排序 + 单条启停。聚合模型与多渠道模型的「直连路由」共用。 */
-function RouteList({ model, accounts, channels, busy, removable = false, onToggleRoute, onReorderRoute, onRemoveRoute, t }: {
-  model: ModelServiceItem;
-  accounts: ChannelAccount[];
-  channels: ChannelPreset[];
-  busy: boolean;
-  removable?: boolean;
-  onToggleRoute: (modelId: string, routeGroup: ModelRouteGroup, enabled: boolean) => void;
-  onReorderRoute: (modelId: string, sourceKey: string, targetKey: string) => void;
-  onRemoveRoute?: (modelId: string, routeGroup: ModelRouteGroup) => void;
-  t: (source: string, values?: Record<string, string | number>) => string;
-}) {
-  const [draggedRouteKey, setDraggedRouteKey] = useState<string | null>(null);
-  const [dragTargetKey, setDragTargetKey] = useState<string | null>(null);
-  useEffect(() => {
-    const cancelPointerDrag = () => {
-      setDraggedRouteKey(null);
-      setDragTargetKey(null);
-    };
-    window.addEventListener("pointercancel", cancelPointerDrag);
-    window.addEventListener("pointerup", cancelPointerDrag);
-    return () => {
-      window.removeEventListener("pointercancel", cancelPointerDrag);
-      window.removeEventListener("pointerup", cancelPointerDrag);
-    };
-  }, []);
-
-  const accountById = new Map(accounts.map((account) => [account.id, account]));
-  const channelById = new Map(channels.map((channel) => [channel.id, channel]));
-  const canReorder = !busy && model.routeGroups.length > 1;
-
-  return <>{model.routeGroups.map((routeGroup, index) => {
-    const account = accountById.get(routeGroup.accountId);
-    const usable = Boolean(account?.enabled && account.api_key.trim() && account.credential_status !== "invalid_key");
-    const moveByKeyboard = (direction: -1 | 1) => {
-      const target = model.routeGroups[index + direction];
-      if (target) onReorderRoute(model.publicModel, routeGroup.key, target.key);
-    };
-    return <div
-      className={`${styles.routeRow} ${draggedRouteKey === routeGroup.key ? styles.dragging : ""} ${dragTargetKey === routeGroup.key ? styles.dragTarget : ""}`}
-      key={routeGroup.key}
-      onPointerEnter={() => {
-        if (canReorder && draggedRouteKey && draggedRouteKey !== routeGroup.key) setDragTargetKey(routeGroup.key);
-      }}
-      onPointerUp={() => {
-        const sourceKey = draggedRouteKey;
-        setDraggedRouteKey(null);
-        setDragTargetKey(null);
-        if (canReorder && sourceKey && sourceKey !== routeGroup.key) {
-          onReorderRoute(model.publicModel, sourceKey, routeGroup.key);
-        }
-      }}
-    >
-      <button
-        type="button"
-        className={`${styles.dragHandle} ${!canReorder ? styles.dragHandleInactive : ""}`}
-        disabled={busy}
-        aria-disabled={!canReorder}
-        aria-label={t("拖动调整路由 {name} 的优先级", { name: routeGroup.upstreamModel })}
-        title={model.routeGroups.length > 1 ? t("拖动调整优先级") : t("当前只有一条路由，无需排序")}
-        onPointerDown={(event) => {
-          if (!canReorder || event.button !== 0) return;
-          event.preventDefault();
-          setDraggedRouteKey(routeGroup.key);
-          setDragTargetKey(null);
-        }}
-        onKeyDown={(event) => {
-          if (!canReorder) return;
-          if (event.key === "ArrowUp") {
-            event.preventDefault();
-            moveByKeyboard(-1);
-          } else if (event.key === "ArrowDown") {
-            event.preventDefault();
-            moveByKeyboard(1);
-          }
-        }}
-      ><IconHandle /></button>
-      <span className={styles.priority}>{index + 1}</span>
-      <span className={styles.routeCopy}>
-        <strong>{channelById.get(routeGroup.channelId)?.name ?? routeGroup.channelId} · {account?.name ?? routeGroup.accountId}</strong>
-        <small>{routeGroup.upstreamModel} · {t(routeGroup.enabled ? "参与当前路由" : "当前未启用")}</small>
-      </span>
-      <span className={styles.routeActions}>
-        <span className={usable ? styles.healthy : styles.unavailable}>{t(usable ? "可用" : "不可用")}</span>
-        <Switch checked={routeGroup.enabled} disabled={busy} aria-label={t("启用路由 {name}", { name: routeGroup.upstreamModel })} onChange={(checked) => onToggleRoute(model.publicModel, routeGroup, checked)} />
-        {removable ? (
-          <Button
-            className={styles.routeDelete}
-            theme="borderless"
-            type="danger"
-            size="small"
-            icon={<IconDelete />}
-            disabled={busy}
-            aria-label={t("从 {model} 移除 {name}", { model: model.publicModel, name: routeGroup.upstreamModel })}
-            title={t("删除路由")}
-            onClick={() => onRemoveRoute?.(model.publicModel, routeGroup)}
-          />
-        ) : null}
-      </span>
-    </div>;
-  })}</>;
 }
 
 function DetailSection({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {

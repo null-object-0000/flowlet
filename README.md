@@ -51,13 +51,13 @@ Flowlet 负责排队执行、人工审核、退回续跑和执行记录，请求
 
 ### 从手机查看并轻量操作
 
-代码内包含实验性 Android 查看器，可通过自有 S3 与局域网查看多设备用量、会话和 Agent 状态，
+Release 同时提供实验性 Android 移动辅助端，可通过自有 S3 与局域网查看多设备用量、会话和 Agent 状态，
 也可提交项目任务或远程处理 Agent 的交互确认（当前已支持 OpenCode 权限请求）。移动端当前
-需自行构建，不替代桌面端代理和账号管理。
+仍是实验性能力，不替代桌面端代理和账号管理。
 
 ## 开始使用
 
-1. 从 [GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载 Windows、macOS 或 Linux 版本；
+1. 从 [GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载桌面端或 Android 移动辅助端；
 2. 添加一个渠道账号，拉取并选择需要开放的模型；
 3. 在概览页选择你的 Agent，一键接入 Flowlet；
 4. 回到 Agent 正常工作，在 Flowlet 中查看请求、会话和用量。

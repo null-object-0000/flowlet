@@ -2,7 +2,7 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [0.1.0] - 2026-08-10
+## [0.1.0] - 2026-08-11
 
 Flowlet 的首个正式公开版本。
 
@@ -14,11 +14,11 @@ Flowlet 的首个正式公开版本。
 - 将 Agent 会话、实际请求、路由结果、Token 与费用关联起来，便于定位失败和核对消耗；
 - 可把代码修改或分析任务交给本机 Agent 执行，并进行排队、审核、退回续跑和历史追踪；
 - 提供按模型、账号、客户端和设备统计的用量与性能洞察；
-- 支持自有 S3 多设备同步与局域网直连，并包含需自行构建的实验性 Android 查看器。
+- 支持自有 S3 多设备同步与局域网直连，并提供实验性 Android 移动辅助端。
 
 ### 分发说明
 
-- 提供 Windows x64 安装包与便携版，并由 GitHub Actions 构建 Linux x64、macOS Apple Silicon 与 Intel 产物；
+- 提供 Windows x64 安装包与便携版、Android arm64 APK，并由 GitHub Actions 构建 Linux x64、macOS Apple Silicon 与 Intel 产物；
 - 当前主要开发与完整回归环境为 Windows 11 原生环境（未启用 WSL）；Linux 与 macOS 尚未完成作者真机回归验证；
 - 当前桌面产物尚未签名，操作系统可能显示未知发布者提示。
 

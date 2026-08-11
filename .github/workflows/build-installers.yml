@@ -103,3 +103,92 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.event.release.tag_name }}" src-tauri/target/release/bundle/portable/*.zip --clobber
+
+  android:
+    name: Android arm64
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.15729638"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Configure Android release signing
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "Required GitHub Actions secret is missing: ${name}" >&2
+              exit 1
+            fi
+          done
+
+          keystore_path="$GITHUB_WORKSPACE/src-tauri/gen/android/flowlet-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          cat > src-tauri/gen/android/keystore.properties <<EOF
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          storeFile=$keystore_path
+          EOF
+
+      - name: Build signed Android APK
+        run: npm run tauri:android:build
+
+      - name: Verify and stage Android APK
+        shell: bash
+        run: |
+          source_apk="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk"
+          version="$(node -p "require('./package.json').version")"
+          output_dir="src-tauri/target/release/bundle/android"
+          output_apk="$output_dir/Flowlet_${version}_arm64.apk"
+
+          test -f "$source_apk"
+          mkdir -p "$output_dir"
+          cp "$source_apk" "$output_apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$output_apk"
+
+      - name: Upload Android APK workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowlet-android-arm64-apk
+          path: src-tauri/target/release/bundle/android/*.apk
+          if-no-files-found: error
+
+      - name: Upload Android APK to the GitHub Release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" src-tauri/target/release/bundle/android/*.apk --clobber

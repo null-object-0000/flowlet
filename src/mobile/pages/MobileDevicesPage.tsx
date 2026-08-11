@@ -1,4 +1,4 @@
-import { IconChevronDown, IconChevronRight, IconChevronUp, IconComment, IconDesktop } from "@douyinfe/semi-icons";
+import { IconChevronRight, IconComment, IconDesktop } from "@douyinfe/semi-icons";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -9,7 +9,7 @@ import { formatCompactNumber, formatInteger } from "../../shared/formatters/numb
 import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
 import { useMobileRefreshController } from "../useMobileRefreshController";
 import { MobilePullToRefresh } from "../MobilePullToRefresh";
-import styles from "./MobilePage.module.css";
+import { MobileDeviceListView, MobilePageHeaderView, MobilePageView, mobilePageStyles as styles, type MobileDeviceRowModel } from "@flowlet/product-ui";
 
 export function MobileDevicesPage() {
   const { language, t } = useAppPreferences();
@@ -25,14 +25,8 @@ export function MobileDevicesPage() {
       refreshing={refreshController.loading}
       onRefresh={refreshController.refresh}
     >
-    <section className={styles.page}>
-      <header className={`${styles.heading} ${styles.headingWithPicker}`}>
-        <div className={styles.headingTitleRow}>
-          <h2>{t("设备")}</h2>
-          <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
-        </div>
-        <p>{t("查看同步设备、已安装 Agent 及其 Flowlet 接入状态")}</p>
-      </header>
+    <MobilePageView>
+      <MobilePageHeaderView picker title={t("设备")} meta={<MobileLastRefreshTime value={refreshController.lastSuccessAt} />} subtitle={t("查看同步设备、已安装 Agent 及其 Flowlet 接入状态")} />
 
       {devices.isLoading ? (
         <div className={`${styles.card} ${styles.state}`}><span>{t("正在加载设备…")}</span></div>
@@ -50,65 +44,32 @@ export function MobileDevicesPage() {
         </div>
       ) : null}
 
-      <div className={styles.deviceList}>
-        {(devices.data ?? []).map((device) => {
-          const expanded = expandedDeviceId === device.deviceId;
-          const probe = probeByDevice.get(device.deviceId);
-          return (
-            <article className={styles.deviceCard} key={device.deviceId}>
-              <button
-                type="button"
-                className={styles.deviceToggle}
-                aria-expanded={expanded}
-                aria-controls={`device-agents-${device.deviceId}`}
-                onClick={() => setExpandedDeviceId(expanded ? null : device.deviceId)}
-              >
-                <span className={styles.deviceIcon} aria-hidden="true"><IconDesktop /></span>
-                <span className={styles.deviceIdentity}>
-                  <strong>{device.displayName}</strong>
-                  <small>{platformLabel(device.platform)} · Flowlet {device.appVersion}</small>
-                </span>
-                <LanStateBadge probe={probe} loading={lanProbes.isLoading} t={t} />
-                <span className={styles.deviceChevron} aria-hidden="true">
-                  {expanded ? <IconChevronUp /> : <IconChevronDown />}
-                </span>
-                <span className={styles.deviceMetrics}>
-                  <span>{formatCompactNumber(device.knownTokens, language)} Tokens</span>
-                  <span>{t("{count} 次请求", { count: formatInteger(device.requestCount, language) })}</span>
-                </span>
-                <time>{t("最近快照：{time}", { time: formatFullTimestamp(device.lastSeenAt, language) })}</time>
-              </button>
-              {expanded ? <DeviceEntryCards deviceId={device.deviceId} /> : null}
-            </article>
-          );
+      <MobileDeviceListView
+        rows={(devices.data ?? []).map((device): MobileDeviceRowModel => {
+          const status = lanState(probeByDevice.get(device.deviceId), lanProbes.isLoading, t);
+          return { id: device.deviceId, name: device.displayName, platform: platformLabel(device.platform), appVersion: device.appVersion, status: status.label, statusTone: status.tone, statusTitle: status.title, metrics: [`${formatCompactNumber(device.knownTokens, language)} Tokens`, t("{count} 次请求", { count: formatInteger(device.requestCount, language) })], lastSeen: t("最近快照：{time}", { time: formatFullTimestamp(device.lastSeenAt, language) }), details: <DeviceEntryCards deviceId={device.deviceId} /> };
         })}
-      </div>
-    </section>
+        expandedId={expandedDeviceId}
+        onToggle={(id) => setExpandedDeviceId((current) => current === id ? null : id)}
+      />
+    </MobilePageView>
     </MobilePullToRefresh>
   );
 }
 
 type Translate = (source: string, variables?: Record<string, string | number>) => string;
 
-function LanStateBadge({ probe, loading, t }: { probe: LanPeerProbe | undefined; loading: boolean; t: Translate }) {
+function lanState(probe: LanPeerProbe | undefined, loading: boolean, t: Translate): { label: string; tone: MobileDeviceRowModel["statusTone"]; title?: string } {
   if (loading && !probe) {
-    return <span className={styles.lanState} data-state="muted"><i />{t("探测中…")}</span>;
+    return { label: t("探测中…"), tone: "muted" };
   }
   if (!probe || !probe.lanPublished) {
-    return <span className={styles.lanState} data-state="muted"><i />{t("仅云端")}</span>;
+    return { label: t("仅云端"), tone: "muted" };
   }
   if (probe.reachable) {
-    return (
-      <span className={styles.lanState} data-state="ok">
-        <i />{probe.latencyMs != null ? t("直连 {ms}ms", { ms: probe.latencyMs }) : t("可直连")}
-      </span>
-    );
+    return { label: probe.latencyMs != null ? t("直连 {ms}ms", { ms: probe.latencyMs }) : t("可直连"), tone: "ok" };
   }
-  return (
-    <span className={styles.lanState} data-state="fail" title={probe.error ?? undefined}>
-      <i />{t("不可直连")}
-    </span>
-  );
+  return { label: t("不可直连"), tone: "fail", title: probe.error ?? undefined };
 }
 
 /**

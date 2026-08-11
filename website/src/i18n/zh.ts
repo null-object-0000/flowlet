@@ -13,6 +13,8 @@ export const zh = {
     start: "开始使用",
     github: "GitHub",
     download: "下载",
+    themeDark: "切换到深色模式",
+    themeLight: "切换到浅色模式",
   },
   hero: {
     badge: "开源 · 本地优先 · 为 AI Agent 而生",
@@ -38,8 +40,12 @@ export const zh = {
   },
   demo: {
     eyebrow: "交互式产品预览",
+    desktopTab: "桌面控制台",
+    mobileTab: "移动辅助端",
     title: "直接操作完整的 Flowlet 桌面界面。",
     subtitle: "从模型接入到 Agent 工作追踪，亲自体验 Flowlet 如何把运行状态、请求链路和用量成本收进一个本地控制台。",
+    mobileTitle: "从手机查看多台设备，也能把任务送回电脑。",
+    mobileSubtitle: "切换下方菜单，体验移动端如何汇总用量、设备、会话与项目，并在局域网内处理 Agent 工作。",
   },
   value: {
     eyebrow: "为什么 Flowlet",
@@ -77,6 +83,7 @@ export const zh = {
     title: "每次 Agent 工作，都有一条证据链。",
     subtitle: "从会话、请求和实际路由，一直看到上游结果、Token 与费用，而不是只看到成功或失败。",
     steps: ["Agent 会话", "本地请求", "路由账号与模型", "上游结果", "Token 与费用"],
+    stepDetails: ["Claude Code · session_8F12", "/v1/messages · flowlet-pro", "deepseek-v4-flash · DeepSeek 工作账号", "200 · completed", "18,420 tokens · 预估 ¥0.14"],
     resultTitle: "一条完整证据链",
     resultDesc: "知道谁发起、用了哪个模型、走了哪个账号、上游如何响应，以及最终消耗了多少。",
     logTitle: "请求 #A8F3",
@@ -84,9 +91,12 @@ export const zh = {
     logRows: [
       ["客户端", "Claude Code"],
       ["虚拟模型", "flowlet-pro"],
-      ["实际路由", "DeepSeek · 工作账号"],
+      ["实际模型", "deepseek-v4-flash"],
+      ["路由账号", "DeepSeek · 工作账号"],
+      ["上游结果", "200 · completed"],
       ["首 Token", "842 ms"],
-      ["总消耗", "18,420 tokens"],
+      ["Token 消耗", "18,420 tokens"],
+      ["预估费用", "¥0.14"],
     ],
   },
   ecosystem: {
@@ -101,8 +111,6 @@ export const zh = {
     ],
     channelsTitle: "连接多个模型渠道",
     channels: ["LongCat", "DeepSeek", "Kimi", "Qwen", "Z.AI", "OpenRouter", "自定义渠道"],
-    mobileTitle: "实验性 Android 辅助端",
-    mobileDesc: "从手机查看多设备用量、会话和项目，局域网内提交任务或处理 Agent 交互确认。当前需自行构建。",
   },
   local: {
     eyebrow: "本地优先",

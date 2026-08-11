@@ -1,11 +1,13 @@
 import { Button, Layout } from "@douyinfe/semi-ui-19";
-import { IconDownload, IconGithubLogo, IconLanguage } from "@douyinfe/semi-icons";
+import { IconDownload, IconGithubLogo, IconLanguage, IconMoon, IconSun } from "@douyinfe/semi-icons";
 import { useLocation, useNavigate } from "react-router-dom";
 import { LANGS, useI18n } from "../i18n/I18nContext";
+import { useTheme } from "../styles/ThemeContext";
 import styles from "./Nav.module.css";
 
 export function Nav() {
   const { lang, t } = useI18n();
+  const { effective, toggle } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -40,8 +42,17 @@ export function Nav() {
         </nav>
         <div className={styles.actions}>
           <Button
+            icon={effective === "dark" ? <IconSun /> : <IconMoon />}
+            theme="borderless"
+            className={styles.themeButton}
+            onClick={toggle}
+            aria-label={effective === "dark" ? t.nav.themeLight : t.nav.themeDark}
+            aria-pressed={effective === "dark"}
+          />
+          <Button
             icon={<IconLanguage />}
             theme="borderless"
+            className={styles.languageButton}
             onClick={switchLang}
             aria-label={otherLang === "zh" ? "Switch to Chinese" : "Switch to English"}
           >
@@ -59,9 +70,10 @@ export function Nav() {
             icon={<IconDownload />}
             theme="solid"
             type="primary"
+            className={styles.downloadButton}
             onClick={() => window.open("https://github.com/null-object-0000/flowlet/releases", "_blank", "noopener,noreferrer")}
           >
-            {t.nav.download}
+            <span className={styles.downloadLabel}>{t.nav.download}</span>
           </Button>
         </div>
       </div>

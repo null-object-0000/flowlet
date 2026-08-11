@@ -15,6 +15,8 @@ export const en: Messages = {
     start: "Get started",
     github: "GitHub",
     download: "Download",
+    themeDark: "Switch to dark mode",
+    themeLight: "Switch to light mode",
   },
   hero: {
     badge: "Open source · Local first · Built for AI agents",
@@ -40,8 +42,12 @@ export const en: Messages = {
   },
   demo: {
     eyebrow: "Interactive product preview",
+    desktopTab: "Desktop console",
+    mobileTab: "Mobile companion",
     title: "Use the complete Flowlet desktop interface.",
     subtitle: "Explore how Flowlet brings model access, agent activity, request traces, and usage costs together in one local control console.",
+    mobileTitle: "Check every device from your phone—and send work back to your computer.",
+    mobileSubtitle: "Switch between the views below to explore usage, devices, sessions, and projects, including LAN-based agent workflows.",
   },
   value: {
     eyebrow: "Why Flowlet",
@@ -67,6 +73,7 @@ export const en: Messages = {
     title: "Every agent task leaves an evidence trail.",
     subtitle: "Follow the session, request, actual route, upstream result, tokens, and cost—not just a success or failure badge.",
     steps: ["Agent session", "Local request", "Route & model", "Upstream result", "Tokens & cost"],
+    stepDetails: ["Claude Code · session_8F12", "/v1/messages · flowlet-pro", "deepseek-v4-flash · DeepSeek work account", "200 · completed", "18,420 tokens · est. $0.14"],
     resultTitle: "One complete evidence trail",
     resultDesc: "See who initiated the call, which model and account handled it, how upstream responded, and what it ultimately consumed.",
     logTitle: "Request #A8F3",
@@ -74,9 +81,12 @@ export const en: Messages = {
     logRows: [
       ["Client", "Claude Code"],
       ["Virtual model", "flowlet-pro"],
-      ["Actual route", "DeepSeek · Work"],
+      ["Actual model", "deepseek-v4-flash"],
+      ["Route account", "DeepSeek · Work"],
+      ["Upstream result", "200 · completed"],
       ["First token", "842 ms"],
-      ["Total usage", "18,420 tokens"],
+      ["Token usage", "18,420 tokens"],
+      ["Estimated cost", "$0.14"],
     ],
   },
   ecosystem: {
@@ -91,8 +101,6 @@ export const en: Messages = {
     ],
     channelsTitle: "Connect multiple model providers",
     channels: ["LongCat", "DeepSeek", "Kimi", "Qwen", "Z.AI", "OpenRouter", "Custom"],
-    mobileTitle: "Experimental Android companion",
-    mobileDesc: "Check multi-device usage, sessions, and projects from your phone. Submit tasks or handle agent confirmations over LAN. Source build required.",
   },
   local: {
     eyebrow: "Local first",

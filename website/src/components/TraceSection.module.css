@@ -2,18 +2,19 @@
 .section::before { position: absolute; width: 620px; height: 620px; right: -240px; top: -260px; border-radius: 50%; content: ""; background: radial-gradient(circle,rgba(57,116,238,.2),transparent 65%); }
 .inner { position: relative; width: min(1180px,100%); margin: auto; }
 .inner > header { max-width: 780px; margin-bottom: 38px; }
-.inner header > span { color: #6fa4ff; font-size: 12px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+.inner header > span { color: #82b1ff; font-size: 13px; line-height: 18px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
 .inner h2 { margin: 10px 0 14px; font-size: clamp(36px,4vw,48px); line-height: 1.13; letter-spacing: -.04em; }
 .inner header p { margin: 0; color: #9eb0c8; font-size: 16px; line-height: 1.75; }
 .grid { display: grid; grid-template-columns: .92fr 1.08fr; gap: 18px; }
-.steps,.request { padding: 23px; border: 1px solid #24334a; border-radius: 21px; background: #111d2d; }
-.step { position: relative; padding-bottom: 17px; display: flex; gap: 13px; }
+.steps,.request { padding: 26px; border: 1px solid #2b3c55; border-radius: 21px; background: #111d2d; }
+.steps { display: grid; align-content: center; }
+.step { position: relative; padding-bottom: 20px; display: flex; gap: 14px; }
 .step:last-child { padding-bottom: 0; }.step:not(:last-child)::before { position: absolute; left: 15px; top: 31px; bottom: 0; width: 1px; content: ""; background: #31445f; }
-.step > span { width: 31px; height: 31px; flex: 0 0 31px; display: grid; place-items: center; border: 1px solid #3a5680; border-radius: 9px; color: #9fc2ff; background: #16243a; font-size: 12px; line-height: 16px; font-weight: 750; }
-.step div { min-width: 0; display: grid; gap: 3px; }.step strong { font-size: 13px; line-height: 18px; }.step small { overflow: hidden; min-width: 0; color: #9eb0c8; font-size: 12px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.step > span { width: 33px; height: 33px; flex: 0 0 33px; display: grid; place-items: center; border: 1px solid #46658f; border-radius: 9px; color: #b4d0ff; background: #16243a; font-size: 13px; line-height: 18px; font-weight: 750; }
+.step div { min-width: 0; display: grid; gap: 3px; }.step strong { font-size: 15px; line-height: 21px; }.step small { overflow: hidden; min-width: 0; color: #b5c4d8; font-size: 14px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
 .request { box-shadow: 0 22px 60px rgba(0,0,0,.25); }
 .requestHead { padding-bottom: 15px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #24334a; }
-.requestHead strong { font-size: 13px; }.requestHead span { display: flex; align-items: center; gap: 7px; color: #82e8bd; font-size: 12px; line-height: 17px; }.requestHead i { width: 7px; height: 7px; border-radius: 50%; background: #48cf9c; }
-.rows { margin-top: 7px; }.rows > div { padding: 12px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; border-bottom: 1px solid #223148; font-size: 12px; line-height: 17px; }.rows > div > span { color: #9aacc3; }.rows strong { overflow: hidden; min-width: 0; color: #edf4ff; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.requestHead strong { font-size: 15px; line-height: 21px; }.requestHead span { display: flex; align-items: center; gap: 7px; color: #82e8bd; font-size: 14px; line-height: 20px; }.requestHead i { width: 7px; height: 7px; border-radius: 50%; background: #48cf9c; }
+.rows { margin-top: 7px; }.rows > div { min-height: 44px; padding: 11px 0; display: grid; grid-template-columns: 1fr 1.35fr; align-items: center; gap: 16px; border-bottom: 1px solid #2a3a51; font-size: 14px; line-height: 20px; }.rows > div > span { color: #b1c0d3; }.rows strong { overflow: hidden; min-width: 0; color: #f4f8ff; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .timeline { margin-top: 18px; display: flex; align-items: center; }.timeline span { position: relative; height: 2px; flex: 1; background: #33527e; }.timeline span::before { position: absolute; left: 0; top: -4px; width: 10px; height: 10px; border-radius: 50%; content: ""; background: #65a1ff; box-shadow: 0 0 0 4px rgba(101,161,255,.08); }.timeline span:last-child { flex: 0; }
 @media (max-width: 760px) { .section { padding: 74px 16px; }.grid { grid-template-columns: 1fr; } }

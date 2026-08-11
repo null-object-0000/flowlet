@@ -1,6 +1,6 @@
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { Button } from "@douyinfe/semi-ui-19";
-import { UsageSummaryGridView } from "@flowlet/product-ui";
+import { MobileCardView, MobilePageHeaderView, MobilePageView, UsageSummaryGridView, mobilePageStyles as styles } from "@flowlet/product-ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useMobileDailyUsage, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
@@ -25,13 +25,12 @@ import {
   type MobileUsageHeatmapMetric,
   type MobileUsagePeriod,
 } from "../../features/usage/deviceUsagePresentation";
-import styles from "./MobilePage.module.css";
 
 export function MobileOverviewPage() {
   const { language, t } = useAppPreferences();
   const devicePicker = useMobileDevicePickerState();
   const deviceId = devicePicker.deviceId;
-  const [period, setPeriod] = useState<MobileUsagePeriod>("day");
+  const [period, setPeriod] = useState<MobileUsagePeriod>("week");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [heatmapMetric, setHeatmapMetric] = useState<MobileUsageHeatmapMetric>("tokens");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -200,20 +199,13 @@ export function MobileOverviewPage() {
       refreshing={refreshController.loading}
       onRefresh={refreshController.refresh}
     >
-    <section className={styles.page}>
-      <header className={`${styles.heading} ${styles.headingWithPicker}`}>
-        <div className={styles.headingTitleRow}>
-          <h2>
-            <MobileDeviceTitlePicker
-              state={devicePicker}
-              allowAll
-              formatTitle={(name) => (name == null ? t("全部概览") : `${name} ${t("概览")}`)}
-            />
-          </h2>
-          <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
-        </div>
-        <p>{t("按设备和时间查看 Token 使用规模与活跃节奏")}</p>
-      </header>
+    <MobilePageView>
+      <MobilePageHeaderView
+        picker
+        title={<MobileDeviceTitlePicker state={devicePicker} allowAll formatTitle={(name) => (name == null ? t("全部概览") : `${name} ${t("概览")}`)} />}
+        meta={<MobileLastRefreshTime value={refreshController.lastSuccessAt} />}
+        subtitle={t("按设备和时间查看 Token 使用规模与活跃节奏")}
+      />
 
       {!settings.isLoading && !settings.data?.config ? (
         <div className={`${styles.card} ${styles.state}`}>
@@ -308,7 +300,7 @@ export function MobileOverviewPage() {
         ]}
       />
 
-      <article className={styles.card}>
+      <MobileCardView>
         <div className={styles.cardHeader}>
           <div>
             <strong>{t(period === "day"
@@ -439,7 +431,7 @@ export function MobileOverviewPage() {
             {days.length === 0 ? <div className={styles.emptyHint}>{t("当前周期暂无数据")}</div> : null}
           </>
         ) : null}
-      </article>
+      </MobileCardView>
 
       {period !== "month" && selectedHourlyCell ? (
         <article ref={selectedDetailRef} className={styles.selectedDay}>
@@ -493,7 +485,7 @@ export function MobileOverviewPage() {
         t={t}
         mobile
       />
-    </section>
+    </MobilePageView>
     </MobilePullToRefresh>
   );
 }

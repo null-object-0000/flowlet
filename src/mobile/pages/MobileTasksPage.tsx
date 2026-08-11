@@ -1,5 +1,4 @@
 import { IconPlus } from "@douyinfe/semi-icons";
-import { Tag } from "@douyinfe/semi-ui-19";
 import { useMemo, useState } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { SharedDeviceProject, SyncedProjectTask } from "../../domains/device-sync/types";
@@ -13,7 +12,7 @@ import { groupMobileProjects } from "../groupMobileProjects";
 import { useMobileRefreshController } from "../useMobileRefreshController";
 import { MobilePullToRefresh } from "../MobilePullToRefresh";
 import { MobileTaskDetailSheet } from "../MobileTaskDetailSheet";
-import styles from "./MobilePage.module.css";
+import { MobilePageHeaderView, MobilePageView, MobileTaskBoardView, mobilePageStyles as styles, type MobileTaskRowModel } from "@flowlet/product-ui";
 
 type TaskStatus = "draft" | "submitted" | "in_progress" | "review" | "done";
 
@@ -129,21 +128,13 @@ export function MobileTasksPage() {
         refreshing={refreshController.loading}
         onRefresh={refreshController.refresh}
       >
-      <section className={styles.page}>
-        <header className={`${styles.heading} ${styles.headingWithPicker}`}>
-          <div className={styles.headingTitleRow}>
-            <h2>
-              <MobileProjectTitlePicker
-                groups={projectGroups}
-                selectedKey={activeProject?.key ?? null}
-                onChange={changeActiveProjectKey}
-                formatTitle={(name) => t("项目 · {project}", { project: name ?? "…" })}
-              />
-            </h2>
-            <MobileLastRefreshTime value={refreshController.lastSuccessAt} />
-          </div>
-          <p>{t("查看所有设备上单个项目的任务，并提交新任务到指定设备")}</p>
-        </header>
+      <MobilePageView>
+        <MobilePageHeaderView
+          picker
+          title={<MobileProjectTitlePicker groups={projectGroups} selectedKey={activeProject?.key ?? null} onChange={changeActiveProjectKey} formatTitle={(name) => t("项目 · {project}", { project: name ?? "…" })} />}
+          meta={<MobileLastRefreshTime value={refreshController.lastSuccessAt} />}
+          subtitle={t("查看所有设备上单个项目的任务，并提交新任务到指定设备")}
+        />
 
         {projects.isLoading ? (
           <div className={`${styles.card} ${styles.state}`}><span>{t("正在加载项目…")}</span></div>
@@ -163,42 +154,17 @@ export function MobileTasksPage() {
 
         {!projects.isLoading && !projects.isError && (projects.data?.length ?? 0) > 0 ? (
           <>
-            <div className={styles.taskTabs} role="group" aria-label={t("任务状态")}>
-              {STATUS_TABS.map((tab) => {
-                const count = tab.statuses.reduce((total, status) => total + (statusCounts[status] ?? 0), 0);
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    aria-pressed={statusTab === tab.id}
-                    onClick={() => setStatusTab(tab.id)}
-                  >
-                    {t(tab.labelKey)}
-                    <span>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {filteredTasks.length === 0 ? (
-              <div className={`${styles.card} ${styles.state}`}>
-                <strong>{t("暂无任务")}</strong>
-                <span>{t("当前状态下没有任务，点击右下角「添加任务」创建。")}</span>
-              </div>
-            ) : (
-              <div className={styles.taskList}>
-                {filteredTasks.map(({ task, project }) => (
-                  <TaskCard
-                    key={`${project.deviceId}-${project.projectId}-${task.id}`}
-                    task={task}
-                    project={project}
-                    language={language}
-                    t={t}
-                    onOpen={() => setSelected({ task, project })}
-                  />
-                ))}
-              </div>
-            )}
+            <MobileTaskBoardView
+              tabs={STATUS_TABS.map((tab) => ({ id: tab.id, label: t(tab.labelKey), count: tab.statuses.reduce((total, status) => total + (statusCounts[status] ?? 0), 0) }))}
+              activeTab={statusTab}
+              rows={filteredTasks.map(({ task, project }) => taskRowModel(task, project, language, t))}
+              empty={<div className={`${styles.card} ${styles.state}`}><strong>{t("暂无任务")}</strong><span>{t("当前状态下没有任务，点击右下角「添加任务」创建。")}</span></div>}
+              onTabChange={setStatusTab}
+              onTaskOpen={(id) => {
+                const item = filteredTasks.find(({ task, project }) => `${project.deviceId}-${project.projectId}-${task.id}` === id);
+                if (item) setSelected(item);
+              }}
+            />
           </>
         ) : null}
 
@@ -211,7 +177,7 @@ export function MobileTasksPage() {
           onEditDraft={handleEditDraft}
           onDeleted={() => setSelected(null)}
         />
-      </section>
+      </MobilePageView>
       </MobilePullToRefresh>
 
       {/* FAB 放在下拉刷新容器外：下拉刷新时内容区带 transform，fixed 元素会相对 transform
@@ -241,51 +207,8 @@ export function MobileTasksPage() {
   );
 }
 
-function TaskCard({
-  task,
-  project,
-  language,
-  t,
-  onOpen,
-}: {
-  task: SyncedProjectTask;
-  project: SharedDeviceProject;
-  language: TimestampLanguage;
-  t: (source: string, variables?: Record<string, string | number>) => string;
-  onOpen: () => void;
-}) {
-  return (
-    <article
-      className={styles.taskCard}
-      role="button"
-      tabIndex={0}
-      aria-label={`${task.title}，${t("任务详情")}`}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-    >
-      <div className={styles.taskTopline}>
-        <span className={styles.taskProject}>{project.projectName}</span>
-        <TaskStatusTag status={task.status} t={t} />
-      </div>
-      <strong className={styles.taskTitle}>{task.title}</strong>
-      <div className={styles.taskMeta}>
-        <span className={styles.roundBadge}>{t("第 {n} 轮", { n: executionRoundFromCount(task.executionCount ?? 0, task.status as ProjectTaskStatus) })}</span>
-        <span>{project.deviceDisplayName}</span>
-        <time>{t("更新于 {time}", { time: formatFullTimestamp(task.updatedAt, language) })}</time>
-      </div>
-    </article>
-  );
-}
-
-function TaskStatusTag({ status, t }: { status: string; t: (source: string) => string }) {
-  const label = taskStatusLabel(status as TaskStatus, t);
-  const tone = taskStatusTone(status as TaskStatus);
-  return <Tag color={tone} size="small">{label}</Tag>;
+function taskRowModel(task: SyncedProjectTask, project: SharedDeviceProject, language: TimestampLanguage, t: (source: string, variables?: Record<string, string | number>) => string): MobileTaskRowModel {
+  return { id: `${project.deviceId}-${project.projectId}-${task.id}`, project: project.projectName, status: taskStatusLabel(task.status as TaskStatus, t), statusColor: taskStatusTone(task.status as TaskStatus), title: task.title, round: t("第 {n} 轮", { n: executionRoundFromCount(task.executionCount ?? 0, task.status as ProjectTaskStatus) }), device: project.deviceDisplayName, updated: t("更新于 {time}", { time: formatFullTimestamp(task.updatedAt, language) }) };
 }
 
 function taskStatusLabel(status: TaskStatus, t: (source: string) => string) {

@@ -2,7 +2,7 @@ import { useAppPreferences } from "../app/preferences/AppPreferences";
 import type { SyncedAgentProfile } from "../domains/device-sync/types";
 import { useMobileDeviceAgents } from "../features/device-sync/useMobileDeviceSync";
 import { AgentBrandMark } from "../shared/ui/AgentBrandMark";
-import styles from "./pages/MobilePage.module.css";
+import { mobilePageStyles as styles } from "@flowlet/product-ui";
 
 /** 指定设备的已安装 Agent 列表正文，设备二级页复用。下拉刷新与页头由外层壳承载。 */
 export function MobileAgentList({ deviceId }: { deviceId: string }) {

@@ -1,0 +1,4 @@
+.icon { object-fit: contain; }
+
+/* OpenCode 与 Pi 在 Lobe Icons 中只有官方单色资产；暗色背景使用白色单色版本。 */
+:global(html[theme-mode="dark"]) .monochrome { filter: invert(1); }

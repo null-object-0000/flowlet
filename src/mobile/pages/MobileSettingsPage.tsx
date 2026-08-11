@@ -15,7 +15,7 @@ import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import type { TokenUnit } from "../../shared/formatters/number";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
-import styles from "./MobilePage.module.css";
+import { MobileCardView, MobilePageHeaderView, MobilePageView, mobilePageStyles as styles } from "@flowlet/product-ui";
 
 const emptyConfig: S3SyncConfigInput = {
   endpoint: "",
@@ -194,18 +194,18 @@ export function MobileSettingsPage() {
       : syncStatus?.message ?? t("正在读取设置…");
 
   return (
-    <section className={styles.page}>
-      <header className={styles.heading}><div><h2>{t("设置")}</h2><p>{t("管理外观、连接方式和应用信息")}</p></div></header>
+    <MobilePageView>
+      <MobilePageHeaderView title={t("设置")} subtitle={t("管理外观、连接方式和应用信息")} />
 
-      <article className={styles.card}>
+      <MobileCardView>
         <div className={styles.cardHeader}><div><strong>{t("快速连接")}</strong><span>{t("扫描桌面端二维码，或粘贴完整连接文本")}</span></div></div>
         <div className={styles.actions}>
           <Button type="primary" theme="solid" loading={scanning} onClick={() => void scanConnection()}>{t("扫描二维码")}</Button>
           <Button onClick={() => setConnectionText("")}>{t("粘贴连接文本")}</Button>
         </div>
-      </article>
+      </MobileCardView>
 
-      <article className={styles.card}>
+      <MobileCardView>
         <div className={styles.cardHeader}>
           <div><strong>{t("同步状态")}</strong><span>{t("从云端刷新设备、用量和会话摘要")}</span></div>
           <Button
@@ -230,18 +230,18 @@ export function MobileSettingsPage() {
             ))}
           </div>
         ) : null}
-      </article>
+      </MobileCardView>
 
-      <article className={styles.card}>
+      <MobileCardView>
         <div className={styles.cardHeader}><div><strong>{t("外观")}</strong><span>{t("语言、主题和 Token 展示单位修改后立即生效")}</span></div></div>
         <div className={styles.preferenceRows}>
           <label><span>{t("显示语言")}</span><Select value={language} optionList={[{ value: "zh-CN", label: t("简体中文") }, { value: "en-US", label: "English" }]} onChange={(value) => setLanguage(value as AppLanguage)} /></label>
           <label><span>{t("界面主题")}</span><Select value={theme} optionList={[{ value: "system", label: t("跟随系统") }, { value: "light", label: t("浅色模式") }, { value: "dark", label: t("深色模式") }]} onChange={(value) => setTheme(value as ThemePreference)} /></label>
           <label><span>{t("Token 展示单位")}</span><Select value={tokenUnit} optionList={[{ value: "auto", label: t("跟随语言") }, { value: "zh", label: t("万 / 亿（中文习惯）") }, { value: "en", label: t("K / M（英文习惯）") }]} onChange={(value) => setTokenUnit(value as TokenUnit)} /></label>
         </div>
-      </article>
+      </MobileCardView>
 
-      <article className={styles.card}>
+      <MobileCardView>
         <div className={styles.collapsibleHeader}>
           <div><strong>{t("手动配置 S3")}</strong><span>{settings.data?.config ? t("已配置，可在需要时展开修改") : t("仅在无法扫码或粘贴连接文本时使用")}</span></div>
           <Button theme="borderless" onClick={() => setManualConfigOpen((open) => !open)}>{manualConfigOpen ? t("收起") : t("展开")}</Button>
@@ -267,12 +267,12 @@ export function MobileSettingsPage() {
             </div>
           </div>
         ) : null}
-      </article>
+      </MobileCardView>
 
-      <article className={`${styles.card} ${styles.aboutCard}`}>
+      <MobileCardView className={styles.aboutCard}>
         <FlowletLogo variant="brand" />
         <div><strong>Flowlet</strong><span>{t("移动数据查看器")}</span><small>v{packageJson.version}</small></div>
-      </article>
+      </MobileCardView>
 
       <SideSheet
         title={t("导入 S3 连接")}
@@ -326,7 +326,7 @@ export function MobileSettingsPage() {
         </div>,
         document.body,
       ) : null}
-    </section>
+    </MobilePageView>
   );
 }
 

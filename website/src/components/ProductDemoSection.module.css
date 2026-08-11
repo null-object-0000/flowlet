@@ -4,10 +4,19 @@
 .heading > span { display: block; margin-bottom: 12px; color: var(--flowlet-color-primary); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .heading h2 { margin: 0 0 15px; font-size: clamp(36px, 4vw, 48px); line-height: 1.13; letter-spacing: -.04em; }
 .heading p { max-width: 720px; margin: 0 auto; color: var(--flowlet-color-text-secondary); font-size: 16px; line-height: 1.75; }
-.demoFrame { position: relative; }
+.demoFrame { position: relative; container-type: inline-size; }
+.mobileFrame { overflow: hidden; border: 1px solid var(--flowlet-color-border-strong); border-radius: 14px; box-shadow: var(--flowlet-shadow-window, 0 36px 90px rgba(27,53,94,.2)); }
+.surfaceSwitch { width: max-content; margin: 24px auto 0; padding: 4px; display: grid; grid-template-columns: repeat(2, minmax(112px, 1fr)); gap: 3px; border: 1px solid var(--flowlet-color-border); border-radius: 12px; background: var(--flowlet-color-surface-muted); }
+.surfaceSwitch button { min-height: 36px; padding: 0 18px; border: 0; border-radius: 8px; color: var(--flowlet-color-text-secondary); background: transparent; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.surfaceSwitch button[aria-selected="true"] { color: var(--flowlet-color-primary); background: var(--flowlet-color-surface); box-shadow: 0 2px 9px rgba(31, 48, 76, .1); }
+.surfaceSwitch button:focus-visible { outline: 2px solid var(--flowlet-color-primary); outline-offset: 2px; }
 
 @media (max-width: 700px) {
   .section { padding: 70px 16px 82px; }
   .heading { margin-bottom: 30px; }
   .heading p { font-size: 14px; }
+  .surfaceSwitch { width: 100%; grid-template-columns: repeat(2, 1fr); }
+  .surfaceSwitch button { padding: 0 10px; }
 }
+
+@media (prefers-reduced-motion: reduce) { .surfaceSwitch button { transition: none; } }

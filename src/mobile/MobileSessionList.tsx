@@ -10,7 +10,7 @@ import { formatFullTimestamp } from "../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../shared/formatters/number";
 import { MobileSessionSheet, agentLabel, runtimeLabel } from "./MobileSessionSheet";
 import { mobileSessionMetrics } from "./sessionMetrics";
-import styles from "./pages/MobilePage.module.css";
+import { mobilePageStyles as styles } from "@flowlet/product-ui";
 
 type SessionStatusFilter = "all" | "active" | "waiting_user" | "idle";
 

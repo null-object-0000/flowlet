@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestLogRow } from "../../domains/request-log/types";
@@ -75,6 +75,26 @@ describe("RequestLogsPage", () => {
     expect(screen.getByText("未缓存输入 Token")).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("搜索请求 ID、模型、账号或会话"), "messages");
     await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({ search: "messages", page: 1 }), true));
+  });
+
+  it("renders grouped model options and applies the selected model filter", async () => {
+    const user = userEvent.setup();
+    render(<RequestLogsPage />);
+
+    const filterToolbar = screen.getByRole("region", { name: "日志筛选" });
+    const modelSelect = within(filterToolbar).getAllByRole("combobox")[1];
+    expect(modelSelect).toHaveTextContent("全部模型");
+    await user.click(modelSelect);
+    expect(await screen.findByText("路由模型 · LongCat-2.0")).toBeInTheDocument();
+    const publicModelOption = (await screen.findByText("对外模型 · flowlet-pro")).closest(".semi-select-option");
+    expect(publicModelOption).not.toBeNull();
+    fireEvent.click(publicModelOption as HTMLElement);
+
+    await waitFor(() => expect(mocks.useLogs).toHaveBeenCalledWith(expect.objectContaining({
+      model: "flowlet-pro",
+      modelKind: "public",
+      page: 1,
+    }), true));
   });
 
   it("loads details on demand and preserves captured credentials", async () => {

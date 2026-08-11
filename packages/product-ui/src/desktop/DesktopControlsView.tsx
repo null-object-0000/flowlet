@@ -61,6 +61,27 @@ export function DesktopSearchFieldView({ value, placeholder, ariaLabel, width, o
   return <Input className={styles.searchField} style={width ? { width } : undefined} prefix={<IconSearch />} value={value} placeholder={placeholder} aria-label={ariaLabel} showClear onChange={onChange} />;
 }
 
+function DesktopFilterSelectView({ select, onChange }: { select: DesktopFilterSelectModel; onChange?: (key: string, value: string) => void }) {
+  const labelId = useId();
+  return <>
+    {!select.insetLabel ? <span id={labelId} className={styles.srLabel}>{select.ariaLabel}</span> : null}
+    <Select
+      style={{ width: select.width ?? 142 }}
+      insetLabel={select.insetLabel}
+      value={select.value}
+      loading={select.loading}
+      aria-labelledby={!select.insetLabel ? labelId : undefined}
+      insetLabelId={select.insetLabel ? labelId : undefined}
+      optionList={select.options.map((option) => ({
+        value: option.value,
+        label: option.internalLabel ?? option.label,
+        disabled: option.disabled,
+      }))}
+      onChange={(value) => onChange?.(select.key, String(Array.isArray(value) ? value[0] : value))}
+    />
+  </>;
+}
+
 export function DesktopFilterToolbarView({ ariaLabel, search, selects = [], segments, actions, onSearchChange, onSelectChange, onSegmentChange }: {
   ariaLabel: string;
   search?: { value: string; placeholder: string; ariaLabel?: string; width?: number };
@@ -73,15 +94,7 @@ export function DesktopFilterToolbarView({ ariaLabel, search, selects = [], segm
 }) {
   return <section className={styles.filterToolbar} aria-label={ariaLabel}>
     {search ? <DesktopSearchFieldView {...search} onChange={(value) => onSearchChange?.(value)} /> : null}
-    {selects.map((select) => {
-      const groups = [...new Set(select.options.map((option) => option.group).filter(Boolean))] as string[];
-      return <Select key={select.key} style={{ width: select.width ?? 142 }} insetLabel={select.insetLabel} value={select.value} loading={select.loading} aria-label={select.ariaLabel} onChange={(value) => onSelectChange?.(select.key, String(Array.isArray(value) ? value[0] : value))}>
-        {groups.length === 0 ? select.options.map((option) => <Select.Option key={option.value} value={option.value} disabled={option.disabled} label={option.internalLabel ?? option.label} renderOptionItem={option.internalLabel ? () => option.label : undefined}>{option.label}</Select.Option>) : <>
-          {select.options.filter((option) => !option.group).map((option) => <Select.Option key={option.value} value={option.value} disabled={option.disabled} label={option.internalLabel ?? option.label} renderOptionItem={option.internalLabel ? () => option.label : undefined}>{option.label}</Select.Option>)}
-          {groups.map((group) => <Select.OptGroup key={group} label={group}>{select.options.filter((option) => option.group === group).map((option) => <Select.Option key={option.value} value={option.value} disabled={option.disabled} label={option.internalLabel ?? option.label} renderOptionItem={option.internalLabel ? () => option.label : undefined}>{option.label}</Select.Option>)}</Select.OptGroup>)}
-        </>}
-      </Select>;
-    })}
+    {selects.map((select) => <DesktopFilterSelectView key={select.key} select={select} onChange={onSelectChange} />)}
     {segments ? <div className={styles.segmented} aria-label={segments.ariaLabel}>{segments.options.map((option) => <button key={option.value} type="button" aria-pressed={segments.value === option.value} onClick={() => onSegmentChange?.(option.value)}>{option.label}</button>)}</div> : null}
     {actions ? <><span className={styles.toolbarSpacer} /><div className={styles.toolbarActions}>{actions}</div></> : null}
   </section>;

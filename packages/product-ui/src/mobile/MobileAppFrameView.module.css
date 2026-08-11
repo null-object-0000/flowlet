@@ -52,9 +52,55 @@
 
 .navigation a :global(.semi-icon) { font-size: 19px; }
 .navigation a.active { color: var(--semi-color-primary); background: var(--flowlet-color-primary-soft); }
+.navigation a:focus-visible,
+.navigation button:focus-visible { outline: 2px solid var(--flowlet-color-primary); outline-offset: -2px; }
+
+.embedded {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+.embedded .content {
+  width: 100%;
+  height: calc(100% - 64px);
+  min-height: 0;
+  padding: 14px 14px 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.embedded .content::-webkit-scrollbar { display: none; }
+
+.embedded .navigation {
+  position: absolute;
+  min-height: 64px;
+  padding: 6px 10px;
+}
+
+.navigation button {
+  min-width: 0;
+  min-height: 48px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--flowlet-color-text-tertiary);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.navigation button :global(.semi-icon) { font-size: 19px; }
+.navigation button.active { color: var(--semi-color-primary); background: var(--flowlet-color-primary-soft); }
 
 @media (min-width: 760px) {
-  .navigation {
+  .shell:not(.embedded) .navigation {
     right: 50%;
     left: auto;
     width: 520px;

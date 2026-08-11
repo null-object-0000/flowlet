@@ -1,4 +1,4 @@
-/* align-content: start：页面根 grid 被外层撑满时，行按自然高度贴顶，
+/* Shared mobile page surfaces: align-content: start keeps short pages pinned to the top.
    避免内容不足一屏时每行被 stretch 拉高、元素间出现空隙。 */
 .page { display: grid; gap: 14px; align-content: start; }
 .heading { display: flex; align-items: flex-start; gap: 12px; }

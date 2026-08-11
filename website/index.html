@@ -18,14 +18,22 @@
     />
     <meta property="og:url" content="https://flowlet.snewbie.site/" />
     <meta property="og:image" content="https://flowlet.snewbie.site/flowlet-logo.png" />
-  </head>
-  <body>
     <script>
-      // 在首帧渲染前同步系统暗色偏好,避免闪烁(与主应用 theme-mode 机制一致)
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-        document.body.setAttribute("theme-mode", "dark");
+      // 在样式加载前恢复显式选择；没有显式选择时跟随系统，避免首屏主题闪烁。
+      try {
+        const storedTheme = localStorage.getItem("flowlet-website-theme");
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (storedTheme === "dark" || (storedTheme !== "light" && prefersDark)) {
+          document.documentElement.setAttribute("theme-mode", "dark");
+        }
+      } catch {
+        if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+          document.documentElement.setAttribute("theme-mode", "dark");
+        }
       }
     </script>
+  </head>
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

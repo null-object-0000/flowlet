@@ -46,8 +46,6 @@ export function RequestLogsPage() {
   const actions = useRequestLogActions();
   const page = logs.data;
   const summary = page?.summary;
-  // 分组只在「有数据」时才作为 Select 的顶层子节点出现：Semi 仅按顶层子节点 key 判断
-  // 选项是否变化，若分组始终存在（空→填充），key 不变就不会重新收集，下拉会一直为空。
   const publicModels = models.data?.publicModels ?? [];
   const upstreamModels = models.data?.upstreamModels ?? [];
 

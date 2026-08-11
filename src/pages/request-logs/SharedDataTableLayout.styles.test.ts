@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const readSharedCss = (name: string) => readFileSync(resolve(process.cwd(), `packages/product-ui/src/desktop/${name}.module.css`), "utf8");
+const readPageCss = (name: string) => readFileSync(resolve(process.cwd(), `src/pages/${name}/${name === "request-logs" ? "RequestLogsPage" : "AgentSessionsPage"}.module.css`), "utf8");
 
 describe("shared request and session table layouts", () => {
   it("reserves an explicit grid row for the request-log toolbar", () => {
@@ -18,5 +19,10 @@ describe("shared request and session table layouts", () => {
 
   it("reserves an explicit grid row for the session toolbar", () => {
     expect(readSharedCss("AgentSessionsView")).toContain(".page:has(.toolbarSlot) { grid-template-rows: auto minmax(0, 1fr); }");
+  });
+
+  it("lets both actual PC pages give the shared table all remaining height", () => {
+    expect(readPageCss("request-logs")).toContain("grid-template-rows: auto minmax(0, 1fr)");
+    expect(readPageCss("agent-sessions")).toContain("grid-template-rows: auto minmax(0, 1fr)");
   });
 });

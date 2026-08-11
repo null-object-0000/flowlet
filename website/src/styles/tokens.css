@@ -12,7 +12,7 @@
   --flowlet-font-size-code: 12px;
   --flowlet-line-height-code: 18px;
   --flowlet-color-app-bg: #f6f8fb;
-  --flowlet-color-page: #f5f7fb;
+  --flowlet-color-page: #eef1f5;
   --flowlet-color-main-bg: rgba(245, 247, 250, 0.9);
   --flowlet-color-sidebar-bg: rgba(243, 245, 248, 0.96);
   --flowlet-color-surface: #ffffff;
@@ -32,6 +32,7 @@
   --flowlet-color-success: #24a148;
   --flowlet-color-glow: rgba(64, 132, 255, 0.18);
   --flowlet-color-shell-glow: rgba(220, 228, 240, 0.3);
+  --flowlet-color-mobile-shell-glow: transparent;
   --flowlet-radius-sm: 10px;
   --flowlet-radius-md: 18px;
   --flowlet-radius-lg: 28px;
@@ -85,6 +86,7 @@ body[theme-mode="dark"] {
   --flowlet-color-success: #55bd6e;
   --flowlet-color-glow: rgba(45, 111, 221, 0.22);
   --flowlet-color-shell-glow: rgba(5, 9, 15, 0.44);
+  --flowlet-color-mobile-shell-glow: var(--flowlet-color-shell-glow);
   --flowlet-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.14), 0 18px 46px rgba(0, 0, 0, 0.2);
   --flowlet-shadow-window: 0 40px 100px rgba(0, 0, 0, 0.48), 0 8px 28px rgba(0, 0, 0, 0.32);
   --semi-color-primary: var(--flowlet-color-primary);

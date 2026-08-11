@@ -2,7 +2,7 @@
 .columns2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .columns3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .columns4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.item { min-width: 0; padding: 14px; border: 1px solid transparent; border-radius: 13px; color: var(--flowlet-color-text); background: var(--flowlet-color-surface-muted, var(--flowlet-color-surface-soft)); font: inherit; text-align: left; }
+.item { min-width: 0; padding: 14px; border: 1px solid var(--flowlet-color-border); border-radius: 13px; color: var(--flowlet-color-text); background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); font: inherit; text-align: left; }
 button.item { padding-right: 28px; position: relative; cursor: pointer; transition: border-color 120ms ease, transform 120ms ease; }
 button.item::after { position: absolute; right: 11px; top: 50%; color: var(--flowlet-color-text-tertiary); font-size: 18px; content: "›"; transform: translateY(-50%); }
 button.item:active { transform: scale(.985); }

@@ -5,7 +5,7 @@
   touch-action: pan-x pan-y;
   color: var(--flowlet-color-text);
   background:
-    radial-gradient(circle at 100% 0, var(--flowlet-color-shell-glow), transparent 34%),
+    radial-gradient(circle at 100% 0, var(--flowlet-color-mobile-shell-glow, transparent), transparent 34%),
     var(--flowlet-color-page);
   display: flex;
   justify-content: center;

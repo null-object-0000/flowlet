@@ -122,8 +122,10 @@ type AgentMeta = {
   name: string;
   endpointSuffix: "/anthropic" | "/v1";
   hasDesktop: boolean;
-  /** 官方安装 / 更新说明地址：未安装时引导安装，有新版本时查看更新。 */
+  /** 官方安装说明地址：未安装时引导安装。 */
   officialUrl: string;
+  /** 官方更新说明地址：有新版本时查看更新。 */
+  updateUrl: string;
   showsCredentialsFile: boolean;
   showsFastModel: boolean;
   showsSubagentModel: boolean;
@@ -140,6 +142,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     endpointSuffix: "/anthropic",
     hasDesktop: false,
     officialUrl: "https://code.claude.com/docs/en/setup",
+    updateUrl: "https://code.claude.com/docs/en/whats-new",
     showsCredentialsFile: false,
     showsFastModel: true,
     showsSubagentModel: true,
@@ -154,6 +157,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     endpointSuffix: "/v1",
     hasDesktop: true,
     officialUrl: "https://opencode.ai/docs",
+    updateUrl: "https://github.com/anomalyco/opencode/releases",
     showsCredentialsFile: true,
     showsFastModel: true,
     showsSubagentModel: false,
@@ -168,6 +172,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     endpointSuffix: "/v1",
     hasDesktop: false,
     officialUrl: "https://pi.dev",
+    updateUrl: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md",
     showsCredentialsFile: true,
     showsFastModel: false,
     showsSubagentModel: false,
@@ -182,6 +187,7 @@ const AGENT_META: Record<AgentKind, AgentMeta> = {
     endpointSuffix: "/v1",
     hasDesktop: true,
     officialUrl: "https://learn.chatgpt.com/docs/codex/cli",
+    updateUrl: "https://learn.chatgpt.com/docs/changelog?type=codex-cli",
     showsCredentialsFile: true,
     showsFastModel: false,
     showsSubagentModel: false,
@@ -339,7 +345,7 @@ export function AgentAccessSideSheet({
                         latest: latestVersion || "-",
                       })}
                     </span>
-                    <a className={styles.officialLink} href={meta.officialUrl} target="_blank" rel="noreferrer">
+                    <a className={styles.officialLink} href={meta.updateUrl} target="_blank" rel="noreferrer">
                       {t("前往官网查看更新说明")}
                     </a>
                   </div>

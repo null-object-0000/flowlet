@@ -61,7 +61,7 @@ Release 下载并已核对 SHA-256 的文件执行以下操作：
 
 ## macOS 图标
 
-macOS 使用 `src-tauri/icons/macos-icon.svg` 作为专用图标源，并将生成的
+macOS 使用 `src-tauri/icons/macos-icon.png` 作为专用图标源，并将生成的
 `macos-icon.icns` 配置到 Tauri bundle。该版本使用接近满画布的背景层承载 Flowlet 标记，
 避免新版 macOS 为大面积透明的旧式图标自动添加灰色兼容底板。其它平台继续使用
 `src-tauri/icon-manifest.json` 中的通用透明 logo，不受此次调整影响。

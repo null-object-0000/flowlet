@@ -19,6 +19,18 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563eb?style=flat-square" alt="MIT License" /></a>
 </p>
 
+## 下载
+
+| 系统 | 下载 |
+| --- | --- |
+| Windows | [![安装版 EXE x64](https://img.shields.io/badge/安装版-EXE_x64-2563eb?style=flat-square&logo=windows11&logoColor=white)](https://github.com/null-object-0000/flowlet/releases/download/v0.1.0/Flowlet_0.1.0_windows_x64-setup.exe) [![安装版 MSI x64](https://img.shields.io/badge/安装版-MSI_x64-2563eb?style=flat-square&logo=windows11&logoColor=white)](https://github.com/null-object-0000/flowlet/releases/download/v0.1.0/Flowlet_0.1.0_windows_x64.msi) [![便携版 ZIP x64](https://img.shields.io/badge/便携版-ZIP_x64-0891b2?style=flat-square&logo=windows11&logoColor=white)](https://github.com/null-object-0000/flowlet/releases/download/v0.1.0/Flowlet_0.1.0_x64_portable.zip) |
+| Android | [![APK arm64](https://img.shields.io/badge/移动辅助端-APK_arm64-22a559?style=flat-square&logo=android&logoColor=white)](https://github.com/null-object-0000/flowlet/releases/download/v0.1.0/Flowlet_0.1.0_arm64.apk) |
+| macOS | [![DMG Apple Silicon](https://img.shields.io/badge/DMG-Apple_Silicon-111111?style=flat-square&logo=apple&logoColor=white)](https://github.com/null-object-0000/flowlet/releases/download/v0.1.0/Flowlet_0.1.0_darwin_aarch64.dmg) [![DMG Intel x64](https://img.shields.io/badge/DMG-Intel_x64-555555?style=flat-square&logo=apple&logoColor=white)](https://github.com/null-object-0000/flowlet/releases/download/v0.1.0/Flowlet_0.1.0_darwin_x64.dmg) |
+| Linux | [![AppImage x64](https://img.shields.io/badge/AppImage-x64-e95420?style=flat-square&logo=linux&logoColor=white)](https://github.com/null-object-0000/flowlet/releases/download/v0.1.0/Flowlet_0.1.0_linux_amd64.AppImage) [![DEB x64](https://img.shields.io/badge/DEB-x64-dc3545?style=flat-square&logo=debian&logoColor=white)](https://github.com/null-object-0000/flowlet/releases/download/v0.1.0/Flowlet_0.1.0_linux_amd64.deb) |
+
+> Android 版是实验性移动辅助端；本地代理、渠道账号与模型管理仍需使用桌面版。macOS、Linux
+> 与桌面安装包当前尚未完成代码签名，系统可能显示未知开发者或未知发布者提示。
+
 ## 为什么使用 Flowlet
 
 - **告别反复改配置**：Claude Code、OpenCode、Pi 和 Codex 共用一个本地入口，切换渠道或账号不再逐个修改 Agent。

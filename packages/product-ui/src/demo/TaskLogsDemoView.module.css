@@ -1,0 +1,32 @@
+.page { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
+.toolbar { min-height: 42px; padding: 5px; display: grid; grid-template-columns: 150px 150px 160px 1fr auto; align-items: center; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 10px; background: var(--flowlet-color-surface); }
+.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(270px, .75fr); gap: 10px; }
+.tableCard, .detail { min-height: 0; overflow: hidden; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); box-shadow: var(--flowlet-shadow-card); }
+.tableCard { display: grid; grid-template-rows: 38px minmax(0, 1fr) 38px; }
+.grid { display: grid; grid-template-columns: 105px minmax(170px, 1fr) 75px 55px 65px 72px; align-items: center; gap: 8px; padding: 0 11px; text-align: left; }
+.head { color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); border-bottom: 1px solid var(--flowlet-color-border); font-size: 12px; font-weight: 650; }
+.body { min-height: 0; overflow: auto; }
+.row { width: 100%; min-height: 61px; border: 0; border-bottom: 1px solid var(--flowlet-color-border); color: var(--flowlet-color-text); background: transparent; cursor: pointer; font: inherit; font-size: 12px; }
+.row:hover, .selected { background: var(--flowlet-color-surface-blue); }
+.selected { box-shadow: inset 3px 0 var(--flowlet-color-primary); }
+.row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task { display: grid; gap: 3px; }
+.task strong, .task small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task small { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.tableCard footer { padding: 0 12px; display: flex; align-items: center; justify-content: space-between; color: var(--flowlet-color-text-tertiary); border-top: 1px solid var(--flowlet-color-border); font-size: 12px; }
+.detail { display: grid; align-content: start; overflow-y: auto; }
+.detailHead { min-height: 64px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--flowlet-color-border); }
+.detailHead > div { min-width: 0; display: grid; gap: 4px; }
+.detailHead strong, .detailHead span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detailHead span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.detail section { margin: 10px 12px 0; padding: 13px; border: 1px solid var(--flowlet-color-border); border-radius: 9px; }
+.detail h3 { margin: 0 0 10px; font-size: 13px; }
+.progressTitle { margin-bottom: 9px; display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.metrics span { min-width: 0; padding: 9px; display: grid; gap: 3px; border-radius: 8px; background: var(--flowlet-color-surface-muted); }
+.metrics small { color: var(--flowlet-color-text-tertiary); font-size: 11px; }
+.metrics strong { font-size: 13px; }
+.timeline { display: grid; gap: 10px; }
+.timeline p { margin: 0; display: grid; grid-template-columns: 8px 1fr; align-items: center; gap: 8px; color: var(--flowlet-color-text-secondary); font-size: 12px; }
+.timeline i { width: 7px; height: 7px; border-radius: 50%; background: var(--flowlet-color-success); }
+.timeline .activeDot { background: var(--flowlet-color-primary); box-shadow: 0 0 0 3px var(--semi-color-primary-light-default); }

@@ -7,6 +7,8 @@ import {
   ModelsServiceDemoView,
   ProjectsBoardDemoView,
   RequestLogsDemoView,
+  SettingsDemoView,
+  TaskLogsDemoView,
   UsageAnalysisDemoView,
   UsageStatisticsDemoView,
   type DesktopNavGroup,
@@ -65,15 +67,8 @@ export function DesktopDemoApp() {
     case "sessions": content = <AgentSessionsDemoView zh={zh} />; break;
     case "usage-analysis": content = <UsageAnalysisDemoView zh={zh} />; break;
     case "usage": content = <UsageStatisticsDemoView zh={zh} />; break;
-    case "tasks":
-    case "settings":
-      content = (
-        <div className={styles.placeholderBody}>
-          <strong>{zh ? "当前页面尚未接入 Demo 数据" : "Demo data is not wired for this page yet"}</strong>
-          <span>{zh ? "共享展示层会按页面逐步迁移；真实模式不受影响。" : "The shared view layer will be migrated page by page. Live mode is unchanged."}</span>
-        </div>
-      );
-      break;
+    case "tasks": content = <TaskLogsDemoView zh={zh} />; break;
+    case "settings": content = <SettingsDemoView zh={zh} />; break;
     default: content = <DesktopOverviewDemoView zh={zh} />;
   }
 

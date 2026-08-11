@@ -36,6 +36,8 @@ export { UsageAnalysisDemoView } from "./demo/UsageAnalysisDemoView";
 export { UsageStatisticsDemoView } from "./demo/UsageStatisticsDemoView";
 export { ModelsServiceDemoView } from "./demo/ModelsServiceDemoView";
 export { ProjectsBoardDemoView } from "./demo/ProjectsBoardDemoView";
+export { TaskLogsDemoView } from "./demo/TaskLogsDemoView";
+export { SettingsDemoView } from "./demo/SettingsDemoView";
 export {
   createAgentSessionsFixture,
   createModelsServiceFixture,

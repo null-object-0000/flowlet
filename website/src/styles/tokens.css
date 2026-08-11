@@ -11,7 +11,7 @@
   --flowlet-line-height-caption: 16px;
   --flowlet-font-size-code: 12px;
   --flowlet-line-height-code: 18px;
-  --flowlet-color-app-bg: #f7f8fb;
+  --flowlet-color-app-bg: #f6f8fb;
   --flowlet-color-main-bg: rgba(245, 247, 250, 0.9);
   --flowlet-color-sidebar-bg: rgba(243, 245, 248, 0.96);
   --flowlet-color-surface: #ffffff;
@@ -36,7 +36,7 @@
   --flowlet-radius-card: 12px;
   --flowlet-shadow-card: 0 1px 2px rgba(17, 24, 39, 0.03), 0 14px 40px rgba(31, 50, 81, 0.07);
   --flowlet-shadow-window: 0 36px 90px rgba(27, 53, 94, 0.2), 0 8px 24px rgba(27, 53, 94, 0.1);
-  --flowlet-max-width: 1160px;
+  --flowlet-max-width: 1180px;
   --flowlet-card-padding: 16px;
   --flowlet-sidebar-width: 188px;
   --flowlet-shell-top: 52px;

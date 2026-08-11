@@ -12,10 +12,7 @@ export function ProductDemoSection() {
           <h2 id="product-demo-title">{t.demo.title}</h2>
           <p>{t.demo.subtitle}</p>
         </div>
-        <div className={styles.demoFrame}>
-          <div className={styles.hint}><i />{t.demo.hint}</div>
-          <AppMockup />
-        </div>
+        <div className={styles.demoFrame}><AppMockup /></div>
       </div>
     </section>
   );

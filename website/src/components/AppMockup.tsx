@@ -7,6 +7,8 @@ import {
   ModelsServiceDemoView,
   ProjectsBoardDemoView,
   RequestLogsDemoView,
+  SettingsDemoView,
+  TaskLogsDemoView,
   UsageAnalysisDemoView,
   UsageStatisticsDemoView,
   type DesktopNavGroup,
@@ -67,10 +69,8 @@ export function AppMockup() {
     case "projects": content = <ProjectsBoardDemoView zh={zh} />; break;
     case "requests": content = <RequestLogsDemoView zh={zh} />; break;
     case "sessions": content = <AgentSessionsDemoView zh={zh} />; break;
-    case "tasks":
-    case "settings":
-      content = <div className={styles.placeholder}><strong>{zh ? "该页面 Demo 正在接入共享展示层" : "This demo is being migrated to the shared view layer"}</strong><span>{zh ? "真实应用功能不受影响。" : "The live application is unaffected."}</span></div>;
-      break;
+    case "tasks": content = <TaskLogsDemoView zh={zh} />; break;
+    case "settings": content = <SettingsDemoView zh={zh} />; break;
     case "usage": content = <UsageStatisticsDemoView zh={zh} />; break;
     case "insights": content = <UsageAnalysisDemoView zh={zh} />; break;
     default: content = <DesktopOverviewDemoView zh={zh} onOpenUsage={() => setActivePage("usage")} />;

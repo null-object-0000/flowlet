@@ -12,9 +12,10 @@ export function Nav() {
   const otherLang = LANGS.find((l) => l !== lang) ?? "en";
 
   const anchors = [
+    { href: "#why", label: t.nav.why },
+    { href: "#how", label: t.nav.how },
     { href: "#demo", label: t.nav.demo },
     { href: "#trace", label: t.nav.trace },
-    { href: "#ecosystem", label: t.nav.ecosystem },
     { href: "#start", label: t.nav.start },
   ];
 

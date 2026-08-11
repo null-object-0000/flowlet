@@ -15,9 +15,12 @@ Vendored files:
 - `qwen-color.svg`
 - `zhipu-color.svg`
 - `openrouter.svg`
+- `claudecode-color.svg`
 - `claudecode.svg`
 - `opencode.svg`
 - `openai.svg`
 - `codex.svg`
 - `codex-color.svg`
 - `pi.svg`
+
+`OpenCode` and `Pi` do not provide `*-color.svg` variants in the pinned upstream package, so Flowlet keeps their official monochrome assets instead of applying invented brand colors.

@@ -1,57 +1,17 @@
-import { IconArrowRight, IconBolt, IconCoinMoneyStroked, IconEyeOpened, IconServer, IconTickCircle } from "@douyinfe/semi-icons";
 import { useI18n } from "../i18n/I18nContext";
 import styles from "./TraceSection.module.css";
 
 export function TraceSection() {
   const { t } = useI18n();
-  const outcomeIcons = [IconServer, IconEyeOpened, IconCoinMoneyStroked, IconBolt];
+  return <section id="trace" className={styles.section}><div className={styles.inner}>
+    <header><span>{t.trace.eyebrow}</span><h2>{t.trace.title}</h2><p>{t.trace.subtitle}</p></header>
+    <div className={styles.grid}>
+      <div className={styles.steps}>{t.trace.steps.map((step,index) => <div key={step} className={styles.step}><span>{String(index + 1).padStart(2,"0")}</span><div><strong>{step}</strong><small>{traceDetail(index)}</small></div></div>)}</div>
+      <div className={styles.request}><div className={styles.requestHead}><strong>{t.trace.logTitle}</strong><span><i />{t.trace.logStatus}</span></div><div className={styles.rows}>{t.trace.logRows.map(([label,value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div><div className={styles.timeline}>{Array.from({length:5},(_,index) => <span key={index} />)}</div></div>
+    </div>
+  </div></section>;
+}
 
-  return (
-    <section id="trace" className={styles.section}>
-      <div className={styles.inner}>
-        <div className={styles.heading}>
-          <span className={styles.eyebrow}>{t.value.eyebrow}</span>
-          <h2>{t.value.title}</h2>
-          <p>{t.value.subtitle}</p>
-        </div>
-        <div className={styles.outcomes}>
-          {t.value.items.map((item, index) => {
-            const Icon = outcomeIcons[index] ?? IconServer;
-            return <article key={item.title} className={styles.outcome}>
-              <span className={styles.outcomeIcon}><Icon /></span>
-              <div><span>{item.kicker}</span><h3>{item.title}</h3><p>{item.desc}</p></div>
-            </article>;
-          })}
-        </div>
-        <div className={styles.traceIntro}>
-          <span className={styles.eyebrow}>{t.trace.eyebrow}</span>
-          <div><h2>{t.trace.title}</h2><p>{t.trace.subtitle}</p></div>
-        </div>
-        <div className={styles.stage}>
-          <div className={styles.flow}>
-            {t.trace.steps.map((step, index) => (
-              <div className={styles.flowItem} key={step}>
-                <span className={styles.stepNumber}>{String(index + 1).padStart(2, "0")}</span>
-                <strong>{step}</strong>
-                {index < t.trace.steps.length - 1 && <IconArrowRight className={styles.arrow} />}
-              </div>
-            ))}
-            <div className={styles.result}>
-              <IconTickCircle />
-              <div><strong>{t.trace.resultTitle}</strong><p>{t.trace.resultDesc}</p></div>
-            </div>
-          </div>
-          <div className={styles.logCard}>
-            <div className={styles.logHeader}><strong>{t.trace.logTitle}</strong><span><i />{t.trace.logStatus}</span></div>
-            <div className={styles.logBody}>
-              {t.trace.logRows.map(([label, value]) => (
-                <div className={styles.logRow} key={label}><span>{label}</span><strong>{value}</strong></div>
-              ))}
-            </div>
-            <div className={styles.timeline}><span /><span /><span /><span /><span /></div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
+function traceDetail(index: number) {
+  return ["Claude Code · session_8F12", "/v1/messages · flowlet-pro", "DeepSeek · Work account", "200 · completed", "18,420 tokens · $0.14"][index];
 }

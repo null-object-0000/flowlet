@@ -10,7 +10,7 @@ export function StartSection() {
   return (
     <section id="start" className={styles.section}>
       <div className={styles.inner}>
-        <div className={styles.heading}><span>{t.start.eyebrow}</span><h2>{t.start.title}</h2></div>
+        <div className={styles.heading}><span>{t.start.eyebrow}</span><h2>{t.start.title}</h2><p>{t.start.subtitle}</p></div>
         <div className={styles.steps}>
           {t.start.steps.map((step) => (
             <article key={step.number}><strong>{step.number}</strong><h3>{step.title}</h3><p>{step.desc}</p></article>
@@ -23,7 +23,6 @@ export function StartSection() {
             <Button size="large" icon={<IconGithubLogo />} onClick={() => window.open(GITHUB, "_blank", "noopener,noreferrer")}>{t.start.secondary}</Button>
           </div>
         </div>
-        <div className={styles.notice}><strong>{t.start.noticeTitle}</strong><p>{t.start.notice}</p></div>
       </div>
     </section>
   );

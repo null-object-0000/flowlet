@@ -25,7 +25,7 @@ import {
 import { useI18n } from "../i18n/I18nContext";
 import styles from "./AppMockup.module.css";
 
-type DemoPage = "overview" | "models" | "projects" | "requests" | "sessions" | "tasks" | "usage" | "insights";
+type DemoPage = "overview" | "models" | "projects" | "requests" | "sessions" | "tasks" | "usage" | "insights" | "settings";
 
 export function AppMockup() {
   const { lang } = useI18n();
@@ -58,6 +58,7 @@ export function AppMockup() {
     tasks: { title: zh ? "任务日志" : "Tasks", subtitle: zh ? "后台任务执行记录" : "Background task activity" },
     usage: { title: zh ? "用量统计" : "Usage", subtitle: zh ? "Token 与费用统计" : "Token and cost totals" },
     insights: { title: zh ? "用量洞察" : "Usage insights", subtitle: zh ? "Token、性能与费用" : "Tokens, performance and cost" },
+    settings: { title: zh ? "应用设置" : "Settings", subtitle: zh ? "应用偏好与本地数据" : "Preferences and local data" },
   };
 
   let content: React.ReactNode;
@@ -66,7 +67,10 @@ export function AppMockup() {
     case "projects": content = <ProjectsBoardDemoView zh={zh} />; break;
     case "requests": content = <RequestLogsDemoView zh={zh} />; break;
     case "sessions": content = <AgentSessionsDemoView zh={zh} />; break;
-    case "tasks": content = <div className={styles.placeholder}><strong>{zh ? "该页面 Demo 正在接入共享展示层" : "This demo is being migrated to the shared view layer"}</strong><span>{zh ? "真实应用功能不受影响。" : "The live application is unaffected."}</span></div>; break;
+    case "tasks":
+    case "settings":
+      content = <div className={styles.placeholder}><strong>{zh ? "该页面 Demo 正在接入共享展示层" : "This demo is being migrated to the shared view layer"}</strong><span>{zh ? "真实应用功能不受影响。" : "The live application is unaffected."}</span></div>;
+      break;
     case "usage": content = <UsageStatisticsDemoView zh={zh} />; break;
     case "insights": content = <UsageAnalysisDemoView zh={zh} />; break;
     default: content = <DesktopOverviewDemoView zh={zh} onOpenUsage={() => setActivePage("usage")} />;
@@ -83,7 +87,7 @@ export function AppMockup() {
         activeId={activePage}
         settings={{ id: "settings", label: zh ? "应用设置" : "Settings", icon: <IconSetting /> }}
         onNavigate={(id) => {
-          if (["overview", "models", "projects", "requests", "sessions", "tasks", "usage", "insights"].includes(id)) setActivePage(id as DemoPage);
+          if (["overview", "models", "projects", "requests", "sessions", "tasks", "usage", "insights", "settings"].includes(id)) setActivePage(id as DemoPage);
         }}
       />}
     >

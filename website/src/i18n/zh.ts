@@ -30,36 +30,36 @@ export const zh = {
     hint: "点击菜单切换页面",
   },
   value: {
-    eyebrow: "真正解决什么",
-    title: "Agent 可以越来越多，模型入口不必越来越乱。",
-    subtitle: "Flowlet 把分散在客户端、模型平台和日志里的日常操作，收进一个本地桌面控制台。",
+    eyebrow: "你实际得到什么",
+    title: "一个本地入口，接住 Agent 工作的完整链路。",
+    subtitle: "模型接入、故障排查、成本归因和本机任务不再分散在不同客户端与平台里。",
     items: [
       {
         kicker: "统一",
-        title: "一次接入，随时切换",
-        desc: "Agent 只连接固定的本地地址。新增账号、更换模型或调整候选，不必逐个重配客户端。",
+        title: "模型变化，Agent 不用跟着改",
+        desc: "Agent 始终连接同一个本地地址。新增账号、切换模型或调整候选，不必逐个重配客户端。",
       },
       {
         kicker: "排查",
-        title: "失败不再靠猜",
-        desc: "从 Agent 会话追到真实上游请求、路由账号、响应和错误，快速判断问题发生在哪一层。",
+        title: "失败能定位到具体一层",
+        desc: "从 Agent 会话追到真实上游请求、路由账号、响应和错误，直接判断问题发生在哪里。",
       },
       {
         kicker: "核算",
-        title: "消耗有明确出处",
-        desc: "按 Agent、模型、账号和设备查看 Token、缓存、延迟与预估费用，不把不同成本语义混成一个数字。",
+        title: "每笔消耗都有出处",
+        desc: "按 Agent、模型、账号和设备查看 Token、缓存、延迟与预估费用，并保留不同成本语义。",
       },
       {
         kicker: "执行",
-        title: "任务交给本机 Agent",
-        desc: "把代码修改或分析任务加入项目看板，排队执行、人工审核、退回续跑，并保留完整历史。",
+        title: "本机 Agent 可以持续执行",
+        desc: "把代码修改或分析任务加入项目看板，排队执行、人工审核、退回续跑，并保留过程。",
       },
     ],
   },
   trace: {
     eyebrow: "Flowlet 的差异",
-    title: "从一句提示词，一路追到真实成本。",
-    subtitle: "不是只告诉你请求成功或失败，而是把一次 Agent 工作背后的关键证据串在一起。",
+    title: "每次 Agent 工作，都有一条证据链。",
+    subtitle: "从会话、请求和实际路由，一直看到上游结果、Token 与费用，而不是只看到成功或失败。",
     steps: ["Agent 会话", "本地请求", "路由账号与模型", "上游结果", "Token 与费用"],
     resultTitle: "一条完整证据链",
     resultDesc: "知道谁发起、用了哪个模型、走了哪个账号、上游如何响应，以及最终消耗了多少。",
@@ -75,8 +75,8 @@ export const zh = {
   },
   ecosystem: {
     eyebrow: "接入你已经在用的工具",
-    title: "Agent、模型账号和项目，统一从这里出发。",
-    subtitle: "检测本机安装，一键检查、备份、写入或恢复全局配置；无需改变原本的工作方式。",
+    title: "接入现有 Agent 和模型账号，不改变工作方式。",
+    subtitle: "检测本机安装，检查、备份、写入或恢复全局配置；接管入口，但不接管你的工具选择。",
     agents: [
       { name: "Claude Code", detail: "接入 · 会话 · 任务" },
       { name: "Codex", detail: "CLI / Desktop / VS Code" },
@@ -90,7 +90,7 @@ export const zh = {
   },
   local: {
     eyebrow: "本地优先",
-    title: "模型密钥、请求证据和控制权，默认留在你的电脑上。",
+    title: "密钥、请求证据和控制权，默认留在本机。",
     items: [
       { title: "本地代理", desc: "代理、配置和 SQLite 数据默认保存在本机，关闭窗口后也可继续在托盘运行。" },
       { title: "响应零改写", desc: "原生转发 OpenAI Chat、Anthropic Messages 与无状态 Responses，不做跨协议转换。" },
@@ -99,7 +99,7 @@ export const zh = {
   },
   start: {
     eyebrow: "三步开始",
-    title: "装好以后，几分钟就能接管第一个 Agent。",
+    title: "三步接入第一个 Agent。",
     steps: [
       { number: "01", title: "添加模型账号", desc: "填写上游 API Key，连接真实模型服务。" },
       { number: "02", title: "选择开放模型", desc: "从上游列表明确选择要提供给 Agent 的模型。" },

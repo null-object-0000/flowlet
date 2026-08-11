@@ -8,8 +8,15 @@ describe("ModelsServiceDemoView", () => {
 
     expect(screen.getByText("15")).toBeTruthy();
     expect(screen.getByText("2 aggregate · 13 direct")).toBeTruthy();
+    const kimiLogo = document.querySelector('img[src="/icons/lobe/kimi-color.svg"]');
+    expect(kimiLogo?.parentElement?.tagName).toBe("SPAN");
     expect(screen.getByRole("tab", { name: "Basics" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("Context window")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /kimi-k3/i }));
+    expect(screen.getByRole("tabpanel").textContent).toContain("Kimi");
+
+    fireEvent.click(screen.getByRole("button", { name: /flowlet-pro/i }));
 
     fireEvent.click(screen.getByRole("tab", { name: "Pricing" }));
     expect(screen.getByText("$0.28")).toBeTruthy();

@@ -1,4 +1,4 @@
-import { IconPhoneStroked } from "@douyinfe/semi-icons";
+import { IconPhoneStroked, IconSafeStroked } from "@douyinfe/semi-icons";
 import { useI18n } from "../i18n/I18nContext";
 import styles from "./EcosystemSection.module.css";
 
@@ -47,6 +47,15 @@ export function EcosystemSection() {
           <div className={styles.mobile}>
             <span className={styles.mobileIcon}><IconPhoneStroked /></span>
             <div><h3>{t.ecosystem.mobileTitle}</h3><p>{t.ecosystem.mobileDesc}</p></div>
+          </div>
+        </div>
+        <div className={styles.localFirst}>
+          <div className={styles.localHeading}>
+            <span className={styles.localIcon}><IconSafeStroked /></span>
+            <div><span>{t.local.eyebrow}</span><h2>{t.local.title}</h2></div>
+          </div>
+          <div className={styles.localItems}>
+            {t.local.items.map((item) => <article key={item.title}><h3>{item.title}</h3><p>{item.desc}</p></article>)}
           </div>
         </div>
       </div>

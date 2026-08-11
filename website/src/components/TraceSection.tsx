@@ -1,17 +1,31 @@
-import { IconArrowRight, IconTickCircle } from "@douyinfe/semi-icons";
+import { IconArrowRight, IconBolt, IconCoinMoneyStroked, IconEyeOpened, IconServer, IconTickCircle } from "@douyinfe/semi-icons";
 import { useI18n } from "../i18n/I18nContext";
 import styles from "./TraceSection.module.css";
 
 export function TraceSection() {
   const { t } = useI18n();
+  const outcomeIcons = [IconServer, IconEyeOpened, IconCoinMoneyStroked, IconBolt];
 
   return (
     <section id="trace" className={styles.section}>
       <div className={styles.inner}>
         <div className={styles.heading}>
+          <span className={styles.eyebrow}>{t.value.eyebrow}</span>
+          <h2>{t.value.title}</h2>
+          <p>{t.value.subtitle}</p>
+        </div>
+        <div className={styles.outcomes}>
+          {t.value.items.map((item, index) => {
+            const Icon = outcomeIcons[index] ?? IconServer;
+            return <article key={item.title} className={styles.outcome}>
+              <span className={styles.outcomeIcon}><Icon /></span>
+              <div><span>{item.kicker}</span><h3>{item.title}</h3><p>{item.desc}</p></div>
+            </article>;
+          })}
+        </div>
+        <div className={styles.traceIntro}>
           <span className={styles.eyebrow}>{t.trace.eyebrow}</span>
-          <h2>{t.trace.title}</h2>
-          <p>{t.trace.subtitle}</p>
+          <div><h2>{t.trace.title}</h2><p>{t.trace.subtitle}</p></div>
         </div>
         <div className={styles.stage}>
           <div className={styles.flow}>

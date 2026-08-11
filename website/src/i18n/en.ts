@@ -32,20 +32,20 @@ export const en: Messages = {
     hint: "Select a page from the sidebar",
   },
   value: {
-    eyebrow: "What it solves",
-    title: "More agents should not mean more model configuration.",
-    subtitle: "Flowlet brings the work scattered across clients, model providers, and logs into one local desktop console.",
+    eyebrow: "What you get",
+    title: "One local endpoint for the complete agent workflow.",
+    subtitle: "Model access, debugging, cost attribution, and local tasks no longer live in separate clients and provider consoles.",
     items: [
-      { kicker: "Unify", title: "Connect once, switch anytime", desc: "Agents use one stable local endpoint. Add accounts, change models, or reorder candidates without reconfiguring every client." },
-      { kicker: "Debug", title: "Stop guessing at failures", desc: "Trace an agent session to the real upstream request, route, response, and error to see exactly which layer failed." },
-      { kicker: "Audit", title: "Every cost has a source", desc: "Break down tokens, cache, latency, and estimated cost by agent, model, account, and device—without mixing incompatible cost semantics." },
-      { kicker: "Execute", title: "Put local agents to work", desc: "Queue coding or analysis tasks on project boards, review results, send work back with context, and keep the full history." },
+      { kicker: "Unify", title: "Models change; agents do not", desc: "Agents keep one stable local endpoint while you add accounts, switch models, or reorder candidates." },
+      { kicker: "Debug", title: "Find the exact layer that failed", desc: "Trace a session to the upstream request, route, response, and error instead of guessing from the client." },
+      { kicker: "Audit", title: "Every cost has a source", desc: "Break down tokens, cache, latency, and estimated cost by agent, model, account, and device." },
+      { kicker: "Execute", title: "Keep local agents working", desc: "Queue coding or analysis tasks, review results, send work back with context, and preserve the process." },
     ],
   },
   trace: {
     eyebrow: "The Flowlet difference",
-    title: "Trace one prompt all the way to its real cost.",
-    subtitle: "Flowlet does more than report success or failure. It connects the evidence behind every agent interaction.",
+    title: "Every agent task leaves an evidence trail.",
+    subtitle: "Follow the session, request, actual route, upstream result, tokens, and cost—not just a success or failure badge.",
     steps: ["Agent session", "Local request", "Route & model", "Upstream result", "Tokens & cost"],
     resultTitle: "One complete evidence trail",
     resultDesc: "See who initiated the call, which model and account handled it, how upstream responded, and what it ultimately consumed.",
@@ -61,8 +61,8 @@ export const en: Messages = {
   },
   ecosystem: {
     eyebrow: "Works with your existing tools",
-    title: "Agents, model accounts, and projects—all start here.",
-    subtitle: "Detect local installations and inspect, back up, write, or restore global configuration without changing how you work.",
+    title: "Connect existing agents and model accounts without changing how you work.",
+    subtitle: "Detect local installations and inspect, back up, write, or restore global configuration. Flowlet owns the endpoint, not your tool choices.",
     agents: [
       { name: "Claude Code", detail: "Connect · sessions · tasks" },
       { name: "Codex", detail: "CLI / Desktop / VS Code" },
@@ -76,7 +76,7 @@ export const en: Messages = {
   },
   local: {
     eyebrow: "Local first",
-    title: "Your keys, request evidence, and control stay on your computer by default.",
+    title: "Keys, request evidence, and control stay local by default.",
     items: [
       { title: "Local proxy", desc: "Proxy, configuration, and SQLite data stay local by default, and the service can keep running in the tray." },
       { title: "Zero response rewriting", desc: "Native forwarding for OpenAI Chat, Anthropic Messages, and stateless Responses—without cross-protocol conversion." },
@@ -85,7 +85,7 @@ export const en: Messages = {
   },
   start: {
     eyebrow: "Three steps",
-    title: "Take control of your first agent in minutes.",
+    title: "Connect your first agent in three steps.",
     steps: [
       { number: "01", title: "Add a model account", desc: "Enter an upstream API key and connect the real model service." },
       { number: "02", title: "Expose selected models", desc: "Explicitly choose which upstream models your agents can use." },

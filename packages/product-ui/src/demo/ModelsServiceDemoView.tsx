@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { IconInfoCircle } from "@douyinfe/semi-icons";
+import { ChannelBrandLogoView } from "../desktop/ChannelBrandLogoView";
 import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView, type ModelsServiceItemModel, type ModelsServiceRouteModel } from "../desktop/ModelsServiceView";
 import { createModelsServiceFixture } from "./fixtures";
 import { DemoPageScaffold } from "./DemoPageScaffold";
@@ -14,6 +15,7 @@ export function ModelsServiceDemoView({ zh, density = "default" }: { zh: boolean
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() => Object.fromEntries([...fixture.groups.aggregate, ...fixture.groups.direct].map((model) => [model.id, model.enabled])));
   const allModels = useMemo(() => [...fixture.groups.aggregate, ...fixture.groups.direct].map((model) => ({
     ...model,
+    logo: <ChannelBrandLogoView channelId={modelChannelId(model)} name={model.name} />,
     enabled: enabled[model.id],
     toggleLabel: zh ? `${model.name} 对外开放` : `Expose ${model.name}`,
   })), [enabled, fixture.groups.aggregate, fixture.groups.direct, zh]);
@@ -32,7 +34,7 @@ export function ModelsServiceDemoView({ zh, density = "default" }: { zh: boolean
     activeKey={activeTab}
     onTabChange={setActiveTab}
     tabs={[
-      { key: "basic", label: zh ? "基础信息" : "Basics", content: <BasicDetail zh={zh} aggregate={selectedModel.kind === "aggregate"} /> },
+      { key: "basic", label: zh ? "基础信息" : "Basics", content: <BasicDetail zh={zh} model={selectedModel} /> },
       { key: "pricing", label: zh ? "价格信息" : "Pricing", content: <PricingDetail zh={zh} /> },
       { key: "routing", label: zh ? "渠道路由" : "Routes", content: <RoutingDetail zh={zh} model={selectedModel} /> },
     ]}
@@ -72,14 +74,25 @@ function modelLogo(model: ModelsServiceItemModel) {
   return typeof model.logo === "string" ? <img className={styles.detailLogo} src={model.logo} alt="" /> : model.logo;
 }
 
-function BasicDetail({ zh, aggregate }: { zh: boolean; aggregate: boolean }) {
+function modelChannelId(model: ModelsServiceItemModel) {
+  if (model.kind === "aggregate") return "flowlet";
+  if (model.id.startsWith("deepseek-")) return "deepseek";
+  if (model.id.startsWith("glm-")) return "zhipu";
+  if (model.id.startsWith("longcat-")) return "longcat";
+  if (model.id.startsWith("kimi-")) return "kimi";
+  if (model.id.startsWith("qwen")) return "qwen";
+  return "unknown";
+}
+
+function BasicDetail({ zh, model }: { zh: boolean; model: ModelsServiceItemModel }) {
+  const aggregate = model.kind === "aggregate";
   return <ModelsServiceTabContentView>
     {aggregate ? <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>{zh ? "聚合模型参数与能力按当前已启用路由中的最低能力计算。" : "Aggregate limits and capabilities use the lowest enabled route capability."}</ModelsServiceInfoBannerView> : null}
     <ModelsServiceSectionView title={zh ? "模型参数" : "Model parameters"}><ModelsServiceMetricGridView items={[
       { key: "context", label: zh ? "上下文窗口" : "Context window", value: aggregate ? "1M" : "128K" },
       { key: "output", label: zh ? "最大输出" : "Max output", value: "128K" },
       { key: "type", label: zh ? "模型类型" : "Model type", value: aggregate ? (zh ? "Flowlet 聚合" : "Flowlet aggregate") : (zh ? "渠道模型" : "Direct model") },
-      { key: "owner", label: zh ? "官方归属" : "Owner", value: aggregate ? (zh ? "多渠道聚合" : "Multi-channel") : "DeepSeek" },
+      { key: "owner", label: zh ? "官方归属" : "Owner", value: aggregate ? (zh ? "多渠道聚合" : "Multi-channel") : modelOwner(model) },
     ]} /></ModelsServiceSectionView>
     <ModelsServiceSectionView title={zh ? "模型能力" : "Capabilities"}><ModelsServiceCapabilityListView items={[
       { key: "reasoning", label: zh ? "推理" : "Reasoning", value: zh ? "支持" : "Yes", supported: true },
@@ -139,4 +152,14 @@ function RoutingDetail({ zh, model }: { zh: boolean; model: ModelsServiceItemMod
     onRemove={(key) => setRoutes((current) => current.filter((route) => route.key !== key))}
     empty={zh ? "尚未添加渠道模型。" : "No channel models added."}
   /></ModelsServiceTabContentView>;
+}
+
+function modelOwner(model: ModelsServiceItemModel) {
+  const channelId = modelChannelId(model);
+  if (channelId === "zhipu") return "Z.AI";
+  if (channelId === "longcat") return "LongCat";
+  if (channelId === "deepseek") return "DeepSeek";
+  if (channelId === "kimi") return "Kimi";
+  if (channelId === "qwen") return "Qwen";
+  return model.typeLabel.split(" · ")[0];
 }

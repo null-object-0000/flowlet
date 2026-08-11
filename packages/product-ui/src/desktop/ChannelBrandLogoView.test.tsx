@@ -7,6 +7,9 @@ describe("ChannelBrandLogoView", () => {
     const { container, rerender } = render(<ChannelBrandLogoView channelId="qwen" name="Qwen" />);
     expect(container.querySelector('img[src="/icons/lobe/qwen-color.svg"]')).toBeTruthy();
 
+    rerender(<ChannelBrandLogoView channelId="kimi" name="Kimi" />);
+    expect(container.querySelector('span > img[src="/icons/lobe/kimi-color.svg"]')).toBeTruthy();
+
     rerender(<ChannelBrandLogoView channelId="deepseek" name="DeepSeek" />);
     expect(container.querySelector("span > i")).toBeTruthy();
     expect(container.querySelector("img")).toBeNull();

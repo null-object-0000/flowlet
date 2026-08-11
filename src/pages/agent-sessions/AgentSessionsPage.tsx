@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Pagination, Select, Toast, Typography } from "@douyinfe/semi-ui-19";
-import { IconRefresh, IconSearch } from "@douyinfe/semi-icons";
+import { Button, Pagination, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { IconRefresh } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionNativeUsage, type AgentSessionRow } from "../../domains/agent-session/types";
 import { useAgentSessionNativeSummary, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
 import { useAgentDataSync, useAgentSyncStatus } from "../../features/background-tasks/useBackgroundTasks";
-import { AgentSessionsView, type AgentSessionRowModel, type AgentSessionStatusTone } from "@flowlet/product-ui";
+import { AgentSessionsView, DesktopFilterToolbarView, type AgentSessionRowModel, type AgentSessionStatusTone } from "@flowlet/product-ui";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
@@ -100,35 +100,31 @@ export function AgentSessionsPage() {
             total: t("共 {total} 个主会话", { total: page?.total ?? 0 }),
           }}
           toolbar={(
-            <section className={styles.toolbar} aria-label={t("会话筛选")}>
-              <Input prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索会话标题、ID 或项目目录")} showClear onChange={setSearchDraft} />
-              <Select
-                insetLabel={t("客户端")}
-                value={filter.agentType || "__all__"}
-                optionList={[
+            <DesktopFilterToolbarView
+              ariaLabel={t("会话筛选")}
+              search={{ value: searchDraft, placeholder: t("搜索会话标题、ID 或项目目录"), width: 280 }}
+              selects={[
+                { key: "client", insetLabel: t("客户端"), value: filter.agentType || "__all__", ariaLabel: t("客户端"), width: 210, options: [
                   { value: "__all__", label: t("全部客户端") },
                   { value: "codex-desktop", label: "Codex Desktop" },
                   { value: "codex-cli", label: "Codex CLI" },
                   { value: "claude-code", label: "Claude Code" },
                   { value: "opencode", label: "OpenCode" },
                   { value: "pi", label: "Pi" },
-                ]}
-                onChange={(value) => setFilter((current) => ({ ...current, agentType: value === "__all__" ? "" : String(value) as AgentSessionFilter["agentType"], page: 1 }))}
-              />
-              <Select
-                insetLabel={t("运行状态")}
-                value={filter.runtimeStatus || "__all__"}
-                optionList={[
+                ] },
+                { key: "runtime", insetLabel: t("运行状态"), value: filter.runtimeStatus || "__all__", ariaLabel: t("运行状态"), width: 210, options: [
                   { value: "__all__", label: t("全部状态") },
                   { value: "running", label: t("自动运行中") },
                   { value: "waiting_user", label: t("等待用户确认") },
                   { value: "idle", label: t("空闲") },
                   { value: "unknown", label: t("无法判断") },
-                ]}
-                onChange={(value) => setFilter((current) => ({ ...current, runtimeStatus: value === "__all__" ? "" : String(value) as AgentSessionFilter["runtimeStatus"], page: 1 }))}
-              />
-              <span className={styles.toolbarSpacer} />
-              <div className={styles.syncActions}>{lastJobId ? <Button type="tertiary" onClick={() => navigate(`/tasks?jobId=${encodeURIComponent(lastJobId)}`)}>{t("查看任务")}</Button> : null}<Button
+                ] },
+              ]}
+              onSearchChange={setSearchDraft}
+              onSelectChange={(key, value) => setFilter((current) => key === "client"
+                ? { ...current, agentType: value === "__all__" ? "" : value as AgentSessionFilter["agentType"], page: 1 }
+                : { ...current, runtimeStatus: value === "__all__" ? "" : value as AgentSessionFilter["runtimeStatus"], page: 1 })}
+              actions={<div className={styles.syncActions}>{lastJobId ? <Button type="tertiary" onClick={() => navigate(`/tasks?jobId=${encodeURIComponent(lastJobId)}`)}>{t("查看任务")}</Button> : null}<Button
                 className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
                 icon={<IconRefresh />}
                 type="tertiary"
@@ -137,8 +133,8 @@ export function AgentSessionsPage() {
                 onClick={() => void syncAgentData.mutateAsync({ force: true, triggerSource: "manual" }).then((result) => { setLastJobId(result.jobId); Toast.success(result.message); }).catch((error: Error) => Toast.error(error.message))}
               >
                 {t("同步数据")}
-              </Button></div>
-            </section>
+              </Button></div>}
+            />
           )}
           footer={(
             <>

@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { Button } from "@douyinfe/semi-ui-19";
+import { DesktopFilterToolbarView, DesktopRefreshControlView, DesktopTimePresetSelectView, DesktopTimeScopeView } from "../desktop/DesktopControlsView";
 import { DesktopPageHeaderView, DesktopPageLayoutView } from "../desktop/DesktopPageLayoutView";
-import styles from "./DemoPageScaffold.module.css";
 
 export function DemoPageScaffold({ title, subtitle, controls, children }: {
-  title: string;
+  title: ReactNode;
   subtitle: string;
   controls?: ReactNode;
   children: ReactNode;
@@ -16,14 +17,13 @@ export function DemoPageScaffold({ title, subtitle, controls, children }: {
 }
 
 export function DemoRefreshControl({ zh, range, action }: { zh: boolean; range?: string; action?: string }) {
-  return (
-    <div className={styles.headerControls}>
-      {range ? <button type="button" className={styles.controlButton}>{range}<span aria-hidden="true">⌄</span></button> : null}
-      {action ? <button type="button" className={styles.controlButton}>{action}</button> : null}
-      <span className={styles.liveStatus}><i />{zh ? "实时更新中" : "Live"}</span>
-      <button type="button" className={styles.refreshButton} aria-label={zh ? "刷新" : "Refresh"}>↻</button>
-    </div>
-  );
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [rangeValue, setRangeValue] = useState("range");
+  return <DesktopTimeScopeView>
+    {range ? <DesktopTimePresetSelectView value={rangeValue} options={[{ value: "range", label: range }]} ariaLabel={zh ? "时间范围" : "Time range"} onChange={setRangeValue} /> : null}
+    {action ? <Button type="tertiary" theme="outline">{action}</Button> : null}
+    <DesktopRefreshControlView autoRefresh={autoRefresh} liveLabel={zh ? "实时更新中" : "Live"} pausedLabel={zh ? "已暂停" : "Paused"} refreshLabel={zh ? "刷新" : "Refresh"} onToggleAutoRefresh={() => setAutoRefresh((value) => !value)} onRefresh={() => undefined} />
+  </DesktopTimeScopeView>;
 }
 
 export function DemoFilterToolbar({ value, placeholder, filters = [], statuses, activeStatus, onChange, onStatusChange }: {
@@ -35,15 +35,12 @@ export function DemoFilterToolbar({ value, placeholder, filters = [], statuses, 
   onChange: (value: string) => void;
   onStatusChange?: (index: number) => void;
 }) {
-  return (
-    <div className={styles.filterToolbar}>
-      <label className={styles.search}><span aria-hidden="true">⌕</span><input value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} /></label>
-      {filters.map((filter) => <button key={filter} type="button" className={styles.filterButton}>{filter}<span aria-hidden="true">⌄</span></button>)}
-      {statuses ? (
-        <div className={styles.segmented}>
-          {statuses.map((status, index) => <button key={status} type="button" aria-pressed={index === activeStatus} onClick={() => onStatusChange?.(index)}>{status}</button>)}
-        </div>
-      ) : null}
-    </div>
-  );
+  return <DesktopFilterToolbarView
+    ariaLabel={placeholder}
+    search={{ value, placeholder, width: 280 }}
+    selects={filters.map((filter, index) => ({ key: String(index), value: "all", ariaLabel: filter, options: [{ value: "all", label: filter }] }))}
+    segments={statuses ? { value: String(activeStatus ?? 0), ariaLabel: "status", options: statuses.map((status, index) => ({ value: String(index), label: status })) } : undefined}
+    onSearchChange={onChange}
+    onSegmentChange={(next) => onStatusChange?.(Number(next))}
+  />;
 }

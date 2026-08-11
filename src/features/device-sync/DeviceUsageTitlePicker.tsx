@@ -1,7 +1,5 @@
-import { IconChevronDown } from "@douyinfe/semi-icons";
-import { Dropdown } from "@douyinfe/semi-ui-19";
+import { DesktopDeviceTitlePickerView } from "@flowlet/product-ui";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import styles from "./DeviceUsageTitlePicker.module.css";
 
 type DeviceOption = {
   deviceId: string;
@@ -19,36 +17,5 @@ export function DeviceUsageTitlePicker({ devices, deviceId, title, onChange }: {
   const selectedName = selectedDevice?.displayName ?? t("全部设备");
   const localizedTitle = t(title);
 
-  return (
-    <Dropdown
-      position="bottomLeft"
-      trigger="click"
-      clickToHide
-      render={(
-        <Dropdown.Menu>
-          <Dropdown.Item active={deviceId == null} onClick={() => onChange(null)}>
-            {t("全部设备")}
-          </Dropdown.Item>
-          {devices.map((device) => (
-            <Dropdown.Item
-              key={device.deviceId}
-              active={device.deviceId === deviceId}
-              onClick={() => onChange(device.deviceId)}
-            >
-              {device.displayName}
-            </Dropdown.Item>
-          ))}
-        </Dropdown.Menu>
-      )}
-    >
-      <button
-        type="button"
-        className={styles.trigger}
-        aria-label={t("切换设备，当前：{name}", { name: selectedName })}
-      >
-        <span>{selectedDevice ? `${selectedDevice.displayName} · ${localizedTitle}` : localizedTitle}</span>
-        <IconChevronDown />
-      </button>
-    </Dropdown>
-  );
+  return <DesktopDeviceTitlePickerView title={localizedTitle} selectedValue={deviceId} selectedLabel={selectedDevice?.displayName} allLabel={t("全部设备")} options={devices.map((device) => ({ value: device.deviceId, label: device.displayName }))} ariaLabel={t("切换设备，当前：{name}", { name: selectedName })} onChange={onChange} />;
 }

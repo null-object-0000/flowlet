@@ -1,6 +1,6 @@
-import { useId, useState, type ReactNode } from "react";
-import { Button, DatePicker, Popover, Select } from "@douyinfe/semi-ui-19";
-import { IconCalendar, IconChevronDown, IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
+import { useState, type ReactNode } from "react";
+import { DatePicker } from "@douyinfe/semi-ui-19";
+import { DesktopCalendarRangeControlView, DesktopCalendarRangePanelView, DesktopCustomRangeActionView, DesktopTimePeriodSwitchView, DesktopTimePresetSelectView, DesktopTimeRangeNavigatorView, DesktopTimeScopeView } from "@flowlet/product-ui";
 import {
   dayRange,
   formatTimeRangeLabel,
@@ -13,12 +13,11 @@ import {
   weekRange,
   type TimeRangeValue,
 } from "../timeRange";
-import styles from "./TimeScopeControl.module.css";
 
 type Translate = (source: string, variables?: Record<string, string | number>) => string;
 
 export function TimeScopeControl({ children }: { children: ReactNode }) {
-  return <div className={styles.scope}>{children}</div>;
+  return <DesktopTimeScopeView>{children}</DesktopTimeScopeView>;
 }
 
 export function TimePresetSelect<T extends string>({ value, options, onChange, ariaLabel }: {
@@ -27,20 +26,7 @@ export function TimePresetSelect<T extends string>({ value, options, onChange, a
   onChange: (value: T) => void;
   ariaLabel: string;
 }) {
-  const labelId = useId();
-  return (
-    <span className={styles.presetSelectWrap}>
-      <span id={labelId} className={styles.srLabel}>{ariaLabel}</span>
-      <Select
-        className={styles.presetSelect}
-        size="small"
-        value={value}
-        optionList={options}
-        onChange={(next) => onChange(next as T)}
-        aria-labelledby={labelId}
-      />
-    </span>
-  );
+  return <DesktopTimePresetSelectView value={value} options={options} ariaLabel={ariaLabel} onChange={(next) => onChange(next as T)} />;
 }
 
 export function CalendarTimeRangeControl({ value, onChange, language, t, now = new Date() }: {
@@ -67,34 +53,15 @@ export function CalendarTimeRangeControl({ value, onChange, language, t, now = n
     setPanelOpen(false);
   };
 
-  const panel = (
-    <div className={styles.rangePanel}>
-      <header className={styles.rangePanelHeader}>
-        <strong>{t("时间范围")}</strong>
-        <button
-          type="button"
-          aria-pressed={!selectedDates}
-          onClick={() => applyRange({ startAt: null, endAt: null })}
-        >
-          {t("全部时间")}
-        </button>
-      </header>
-      <div className={styles.quickRangeSection}>
-        <span>{t("快捷选择")}</span>
-        <div className={styles.quickRangeGrid}>
-          {presets.map((item) => (
-            <button
-              key={item.label}
-              type="button"
-              aria-pressed={sameRange(item.range, value)}
-              onClick={() => applyRange(item.range)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className={styles.customRangeSection}>
+  const panel = <DesktopCalendarRangePanelView
+    title={t("时间范围")}
+    allLabel={t("全部时间")}
+    allSelected={!selectedDates}
+    quickLabel={t("快捷选择")}
+    presets={presets.map((item) => ({ key: item.label, label: item.label, selected: sameRange(item.range, value) }))}
+    onSelectAll={() => applyRange({ startAt: null, endAt: null })}
+    onSelect={(key) => { const preset = presets.find((item) => item.label === key); if (preset) applyRange(preset.range); }}
+    customAction={
         <DatePicker
           type="dateRange"
           density="compact"
@@ -109,61 +76,13 @@ export function CalendarTimeRangeControl({ value, onChange, language, t, now = n
             applyRange(rangeFromLocalDates(nextDates[0], nextDates[1]));
           }}
           triggerRender={() => (
-            <button type="button" className={styles.customRangeButton}>
-              <IconCalendar />
-              <span>{t("自定义日期")}</span>
-              <IconChevronRight />
-            </button>
+            <DesktopCustomRangeActionView label={t("自定义日期")} />
           )}
         />
-      </div>
-    </div>
-  );
+    }
+  />;
 
-  return (
-    <div className={styles.calendarRange}>
-      <Button
-        className={styles.navButton}
-        theme="borderless"
-        size="small"
-        icon={<IconChevronLeft />}
-        aria-label={t("上一个时间范围")}
-        disabled={!selectedDates}
-        onClick={() => onChange(shiftCalendarRange(value, -1))}
-      />
-      <Popover
-        trigger="custom"
-        visible={panelOpen}
-        onVisibleChange={setPanelOpen}
-        onClickOutSide={() => setPanelOpen(false)}
-        position="bottomRight"
-        showArrow={false}
-        content={panel}
-        contentClassName={styles.rangePopover}
-      >
-        <button
-          type="button"
-          className={styles.rangeTrigger}
-          aria-label={t("选择时间范围")}
-          aria-expanded={panelOpen}
-          onClick={() => setPanelOpen((open) => !open)}
-        >
-          <IconCalendar />
-          <span>{formatTimeRangeLabel(value, language, now)}</span>
-          <IconChevronDown />
-        </button>
-      </Popover>
-      <Button
-        className={styles.navButton}
-        theme="borderless"
-        size="small"
-        icon={<IconChevronRight />}
-        aria-label={t("下一个时间范围")}
-        disabled={!selectedDates || isRangeAfterToday(value, now)}
-        onClick={() => onChange(shiftCalendarRange(value, 1))}
-      />
-    </div>
-  );
+  return <DesktopCalendarRangeControlView label={formatTimeRangeLabel(value, language, now)} panel={panel} open={panelOpen} previousLabel={t("上一个时间范围")} nextLabel={t("下一个时间范围")} triggerLabel={t("选择时间范围")} previousDisabled={!selectedDates} nextDisabled={!selectedDates || isRangeAfterToday(value, now)} onOpenChange={setPanelOpen} onPrevious={() => onChange(shiftCalendarRange(value, -1))} onNext={() => onChange(shiftCalendarRange(value, 1))} />;
 }
 
 export function TimePeriodSwitch<T extends string>({ value, options, onChange, ariaLabel }: {
@@ -172,20 +91,7 @@ export function TimePeriodSwitch<T extends string>({ value, options, onChange, a
   onChange: (value: T) => void;
   ariaLabel: string;
 }) {
-  return (
-    <div className={styles.periodSwitch} aria-label={ariaLabel}>
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          aria-pressed={value === option.value}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
+  return <DesktopTimePeriodSwitchView value={value} options={options} ariaLabel={ariaLabel} onChange={(next) => onChange(next as T)} />;
 }
 
 export function TimeRangeNavigator({ label, previousLabel, nextLabel, onPrevious, onNext, nextDisabled = false }: {
@@ -196,13 +102,7 @@ export function TimeRangeNavigator({ label, previousLabel, nextLabel, onPrevious
   onNext: () => void;
   nextDisabled?: boolean;
 }) {
-  return (
-    <div className={styles.navigator}>
-      <Button theme="borderless" size="small" icon={<IconChevronLeft />} aria-label={previousLabel} onClick={onPrevious} />
-      <strong>{label}</strong>
-      <Button theme="borderless" size="small" icon={<IconChevronRight />} aria-label={nextLabel} disabled={nextDisabled} onClick={onNext} />
-    </div>
-  );
+  return <DesktopTimeRangeNavigatorView label={label} previousLabel={previousLabel} nextLabel={nextLabel} nextDisabled={nextDisabled} onPrevious={onPrevious} onNext={onNext} />;
 }
 
 function endOfToday(now: Date) {

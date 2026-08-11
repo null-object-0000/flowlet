@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { ProjectsBoardView } from "../desktop/ProjectsBoardView";
+import { DesktopSearchFieldView, DesktopTimeScopeView } from "../desktop/DesktopControlsView";
 import { createProjectsBoardFixture } from "./fixtures";
-import { DemoFilterToolbar, DemoPageScaffold, DemoRefreshControl } from "./DemoPageScaffold";
+import { DemoPageScaffold, DemoRefreshControl } from "./DemoPageScaffold";
 
 export function ProjectsBoardDemoView({ zh, density = "default" }: { zh: boolean; density?: "default" | "compact" }) {
   const fixture = createProjectsBoardFixture(zh);
@@ -18,7 +19,7 @@ export function ProjectsBoardDemoView({ zh, density = "default" }: { zh: boolean
   return <DemoPageScaffold
     title="flowlet"
     subtitle="D:\\flowlet"
-    controls={<><DemoFilterToolbar value={search} placeholder={zh ? "搜索任务标题、ID 或描述" : "Search tasks, IDs or descriptions"} onChange={setSearch} /><DemoRefreshControl zh={zh} /></>}
+    controls={<DesktopTimeScopeView><DesktopSearchFieldView value={search} width={220} placeholder={zh ? "搜索任务标题、ID 或描述" : "Search tasks, IDs or descriptions"} onChange={setSearch} /><DemoRefreshControl zh={zh} /></DesktopTimeScopeView>}
   >
     <ProjectsBoardView columns={columns} labels={fixture.labels} density={density} />
   </DemoPageScaffold>;

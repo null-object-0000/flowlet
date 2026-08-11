@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { UsageStatisticsView, type UsageStatisticsCellModel, type UsageStatisticsMetric, type UsageStatisticsPeriod } from "../desktop/UsageStatisticsView";
-import { DemoPageScaffold } from "./DemoPageScaffold";
-import styles from "./UsageStatisticsDemoView.module.css";
+import { DesktopDeviceTitlePickerView, DesktopTimePeriodSwitchView, DesktopTimeRangeNavigatorView, DesktopTimeScopeView } from "../desktop/DesktopControlsView";
+import { DemoPageScaffold, DemoRefreshControl } from "./DemoPageScaffold";
 
 const PERIODS: UsageStatisticsPeriod[] = ["day", "week", "month"];
 
 export function UsageStatisticsDemoView({ zh }: { zh: boolean }) {
   const [period, setPeriod] = useState<UsageStatisticsPeriod>("day");
+  const [deviceId, setDeviceId] = useState<string | null>(null);
   const [metric, setMetric] = useState<UsageStatisticsMetric>("tokens");
   const cells = useMemo(() => createCells(period, metric), [period, metric]);
   const [selectedKey, setSelectedKey] = useState<string | null>("day-14");
@@ -22,17 +23,13 @@ export function UsageStatisticsDemoView({ zh }: { zh: boolean }) {
   const confidence = createConfidence(zh, 0.994, 0.551, 0.443, 0.006);
   return (
     <DemoPageScaffold
-      title={zh ? "用量统计" : "Usage"}
+      title={<DesktopDeviceTitlePickerView title={zh ? "用量统计" : "Usage"} selectedValue={deviceId} selectedLabel={deviceId === "office" ? (zh ? "办公室电脑" : "Office PC") : undefined} allLabel={zh ? "全部设备" : "All devices"} options={[{ value: "office", label: zh ? "办公室电脑" : "Office PC" }, { value: "laptop", label: zh ? "随身电脑" : "Laptop" }]} ariaLabel={zh ? "切换设备" : "Switch device"} onChange={setDeviceId} />}
       subtitle={zh ? "按设备和时间查看 Token 使用规模与活跃节奏" : "Review token volume and activity by device and time"}
-      controls={<div className={styles.controls}>
-        <button type="button" className={styles.device}>{zh ? "全部设备" : "All devices"}<span>⌄</span></button>
-        <div className={styles.periods} aria-label={zh ? "统计周期" : "Usage period"}>
-          {PERIODS.map((item) => <button key={item} type="button" aria-pressed={period === item} onClick={() => { setPeriod(item); setSelectedKey(`${item}-${item === "month" ? 4 : 14}`); }}>{item === "day" ? (zh ? "日" : "Day") : item === "week" ? (zh ? "周" : "Week") : (zh ? "月" : "Month")}</button>)}
-        </div>
-        <button type="button" className={styles.range}>‹</button><span className={styles.rangeLabel}>{labels.range}</span><button type="button" className={styles.range} disabled>›</button>
-        <span className={styles.live}><i />{zh ? "实时更新中" : "Live"}</span>
-        <button type="button" className={styles.refresh} aria-label={zh ? "刷新" : "Refresh"}>↻</button>
-      </div>}
+      controls={<DesktopTimeScopeView>
+        <DesktopTimePeriodSwitchView value={period} options={PERIODS.map((item) => ({ value: item, label: item === "day" ? (zh ? "日" : "Day") : item === "week" ? (zh ? "周" : "Week") : (zh ? "月" : "Month") }))} ariaLabel={zh ? "统计周期" : "Usage period"} onChange={(next) => { const item = next as UsageStatisticsPeriod; setPeriod(item); setSelectedKey(`${item}-${item === "month" ? 4 : 14}`); }} />
+        <DesktopTimeRangeNavigatorView label={labels.range} previousLabel={zh ? "上一个时间范围" : "Previous range"} nextLabel={zh ? "下一个时间范围" : "Next range"} nextDisabled onPrevious={() => undefined} onNext={() => undefined} />
+        <DemoRefreshControl zh={zh} />
+      </DesktopTimeScopeView>}
     >
       <UsageStatisticsView
         stats={[

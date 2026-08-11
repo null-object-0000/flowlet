@@ -5,7 +5,7 @@ import { IconAIEditLevel1, IconChevronRight, IconCopy, IconDelete, IconEdit, Ico
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ProjectsBoardTaskCardView, ProjectsBoardView } from "@flowlet/product-ui";
+import { DesktopSearchFieldView, ProjectsBoardTaskCardView, ProjectsBoardView } from "@flowlet/product-ui";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { BackgroundJobEvent } from "../../domains/background-task/types";
 import { agentSessionCommands } from "../../domains/agent-session/commands";
@@ -155,12 +155,10 @@ function LoadedProjectDetail({ project }: { project: Project }) {
   // 「在独立窗口打开」能力已移至右上角窗口控制区（AppShell → WindowControls 注入）。
   return <main className={styles.page}>
     <PageHeader title={project.name} subtitle={project.directoryPath ?? t("未绑定目录")}>
-      <Input
-        className={styles.taskSearch}
-        prefix={<IconSearch />}
+      <DesktopSearchFieldView
         value={search}
         placeholder={t("搜索任务标题、ID 或描述")}
-        showClear
+        width={220}
         onChange={setSearch}
       />
       <RefreshControl

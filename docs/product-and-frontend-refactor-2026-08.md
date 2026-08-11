@@ -175,8 +175,10 @@ README、CHANGELOG 和官网统一说明：
 - Router 的真实导航。
 
 真实应用与 Demo 页面现在还共用 `DesktopPageHeaderView`，统一页面标题、副标题和右侧控件区的
-排版。真实应用的 `PageHeader` 只是这一共享 View 的薄封装；官网和独立 Demo 通过本地展示状态
-注入时间范围、刷新、搜索等控件，避免再次复制页面头部样式。
+排版。`DesktopControlsView` 进一步统一搜索、下拉筛选、分段状态、设备标题选择、时间预设、
+日/周/月周期、时间范围导航、日历范围弹层和自动/手动刷新。真实应用的 `PageHeader`、
+`RefreshControl`、`TimeScopeControl` 与 `DeviceUsageTitlePicker` 都只是共享 View 的薄封装；官网和
+独立 Demo 只注入本地状态与 fixtures，不再维护另一套按钮和 CSS。
 
 ### 6.2 运行概览
 
@@ -209,12 +211,18 @@ CLI/Desktop 安装状态的 fixtures。渠道品牌统一由 `ChannelBrandLogoVi
 
 真实 `RequestLogsPage` 保留筛选、统计查询、分页、详情抽屉和重试动作，将结果映射为 `RequestLogsView` 所需的行模型。官网和独立 Demo 使用 `RequestLogsDemoView` 与固定日志数据。
 
+搜索框、客户端/模型下拉、全部/成功/失败分段状态以及刷新控件由 `DesktopFilterToolbarView` 和
+`DesktopRefreshControlView` 共享；真实页仍负责查询参数、防抖和清理日志动作。
+
 `RequestLogsView` 为统计卡、筛选工具栏和表格显式预留三行 Grid；有工具栏时不得让隐式 Grid 行
 把表格推到容器底部。真实页和 Demo 均由表格主体占用筛选栏之后的剩余高度。
 
 ### 6.5 Agent 会话
 
 真实 `AgentSessionsPage` 保留会话查询、原生摘要补充、Token/费用 Tooltip、同步任务、分页和详情抽屉，将结果映射为 `AgentSessionsView`。官网使用相同 View 的 Demo 版本。
+
+会话搜索、客户端与运行状态筛选和刷新控件使用同一套共享展示组件；真实页保留同步数据、查看任务
+和筛选查询编排，Demo 只维护本地选择状态。
 
 `AgentSessionsView` 在存在筛选工具栏时使用 `auto minmax(0, 1fr)` 两行布局，表格紧跟工具栏并
 占满剩余空间；无工具栏时仍保持单行表格布局。
@@ -227,6 +235,9 @@ CLI/Desktop 安装状态的 fixtures。渠道品牌统一由 `ChannelBrandLogoVi
 通过回调切换真实聚合维度，Demo 则切换对应 fixture。Token / 预估费用切换同样由共享 View 暴露，
 Demo 会同步替换矩阵数值，不再只有静态选中样式。
 
+设备标题选择、日历时间范围弹层和刷新控件也已共享。真实页负责把时间范围映射为聚合查询，Demo
+只切换确定性的展示范围。
+
 ### 6.7 用量统计
 
 真实 `UsageCostPage` 已接入 `UsageStatisticsView`，继续负责设备筛选、日/周/月范围、真实日/小时
@@ -237,13 +248,14 @@ Demo 会同步替换矩阵数值，不再只有静态选中样式。
 官网 `UsageStatisticsDemoView` 只生成确定性的用量 cells、可信度和明细 View Model，并通过共享回调
 处理周期、指标、时段选择；不再硬编码另一套横向可信度进度条或固定的 78% / 22% 来源条。
 
-### 6.8 已有共享 Demo、尚未迁移真实页面
+设备标题下拉、日/周/月周期、上一/下一时间范围和刷新控件与真实 `UsageCostPage` 完全复用
+`DesktopControlsView`，周期与设备状态仍分别由真实查询容器和 Demo 本地状态持有。
 
-以下页面已经具备共享 View 和 Demo fixtures，但真实应用页面还没有切换到这些 View：
+### 6.8 项目管理
 
-- 项目管理：`ProjectsBoardView` / `ProjectsBoardDemoView`。
-
-它们当前用于官网和 `dev:frontend`，不能据此声称真实页面已经完成共享化。
+真实项目页和官网 Demo 都使用 `ProjectsBoardView` / `ProjectsBoardTaskCardView`；项目搜索和刷新也
+分别由 `DesktopSearchFieldView` 与 `DesktopRefreshControlView` 共享。真实页仍负责项目查询、任务
+调度、领取执行、审核和 SideSheet，Demo 只提供确定性的看板数据。
 
 ## 7. 移动端当前状态
 
@@ -388,18 +400,23 @@ CLI/Desktop 状态和完整侧边栏枚举均完成实际验证。
 请求日志与会话管理修正显式 Grid 行后再次实测：请求日志的统计、筛选、表格间距均为 `10px`，
 会话筛选与表格间距为 `10px`；两页共享 View 的 `clientHeight` 与 `scrollHeight` 一致，控制台无错误。
 
+2026-08-11 完成筛选、设备、时间范围和刷新控件共享化后，`npm run check` 通过；会话筛选、时间
+范围和用量设备选择的 3 个定向测试文件共 16 项通过。官网在 `1200 × 720` 下复查项目、请求日志、
+会话、用量统计和用量洞察：内嵌主内容 `clientWidth/scrollWidth`、`clientHeight/scrollHeight`
+一致；已实际点击日历范围切换到“本周”、设备切换到“办公室电脑”，会话页显示两个筛选下拉，
+浏览器控制台无 warning/error。最终全量测试与构建结果以本轮交付说明为准。
+
 构建过程中 `lottie-web` 的 direct `eval` 警告是现有第三方依赖警告，不应误报为本次共享化引入的新错误；但最终验收必须记录其真实输出。
 
 ## 12. 后续建议
 
 建议按以下顺序继续迁移：
 
-1. 将真实项目看板接入 `ProjectsBoardView`；
-2. 为任务日志和设置建立共享展示模型；
-3. 抽取完整移动端应用壳和主要页面；
-4. 增加 `dev:frontend:mobile`；
-5. 为 `packages/product-ui` 增加独立的组件与 fixture 测试；
-6. 在官网自动化检查中固定验证 `1200 × 720` PC Demo、移动宽度菜单和中英文切换；
-7. 共享 Design Tokens 的单一来源，减少官网和应用各自维护相似 Token 的漂移风险。
+1. 为任务日志和设置建立共享展示模型；
+2. 抽取完整移动端应用壳和主要页面；
+3. 增加 `dev:frontend:mobile`；
+4. 为 `packages/product-ui` 增加独立的组件与 fixture 测试；
+5. 在官网自动化检查中固定验证 `1200 × 720` PC Demo、移动宽度菜单和中英文切换；
+6. 共享 Design Tokens 的单一来源，减少官网和应用各自维护相似 Token 的漂移风险。
 
 迁移过程中应继续坚持：业务容器负责真实状态与动作，共享层负责展示；不要为了让官网可运行而把真实 command 替换成全局 mock，也不要让 Demo fixtures 进入真实数据链路。

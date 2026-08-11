@@ -45,3 +45,5 @@ export {
   createUsageAnalysisFixture,
   createUsageSummaryFixture,
 } from "./demo/fixtures";
+export { DesktopCalendarRangeControlView, DesktopCalendarRangePanelView, DesktopCustomRangeActionView, DesktopDeviceTitlePickerView, DesktopFilterToolbarView, DesktopRefreshControlView, DesktopSearchFieldView, DesktopTimePeriodSwitchView, DesktopTimePresetSelectView, DesktopTimeRangeNavigatorView, DesktopTimeScopeView } from "./desktop/DesktopControlsView";
+export type { DesktopDeviceOption, DesktopFilterSelectModel, DesktopSegmentOption, DesktopSelectOption } from "./desktop/DesktopControlsView";

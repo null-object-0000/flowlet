@@ -16,7 +16,7 @@ export function AgentSessionsDemoView({ zh, density = "default" }: { zh: boolean
       rows={rows}
       labels={{ ...fixture.labels, total: zh ? `共 ${rows.length} 个主会话` : `${rows.length} sessions total` }}
       density={density}
-      toolbar={<DemoFilterToolbar value={search} placeholder={zh ? "搜索会话标题、客户端或项目" : "Search sessions, clients or projects"} filters={[zh ? "全部 Agent" : "All agents"]} onChange={setSearch} />}
+      toolbar={<DemoFilterToolbar value={search} placeholder={zh ? "搜索会话标题、ID 或项目目录" : "Search session titles, IDs or project paths"} filters={zh ? ["全部客户端", "全部状态"] : ["All clients", "All statuses"]} onChange={setSearch} />}
     />
   </DemoPageScaffold>;
 }

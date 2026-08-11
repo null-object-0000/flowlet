@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Pagination, Select, Toast, Tooltip } from "@douyinfe/semi-ui-19";
-import { IconDelete, IconSearch } from "@douyinfe/semi-icons";
+import { Button, Pagination, Toast, Tooltip } from "@douyinfe/semi-ui-19";
+import { IconDelete } from "@douyinfe/semi-icons";
 import { useLocation, useNavigate } from "react-router-dom";
 import { DEFAULT_REQUEST_LOG_FILTER, type RequestLogFilter, type RequestLogRow, type RequestLogStatusFilter, type RequestLogTimeRange } from "../../domains/request-log/types";
 import { ClearRequestLogsModal } from "../../features/request-logs/ClearRequestLogsModal";
 import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLogDetailSideSheet";
 import { calculateCacheHitRate, calculateOutputTokenRate, formatDuration, formatPercentage, formatTokenRate, isSuccessfulLog, safeLogText } from "../../features/request-logs/logPresentation";
 import { useRequestLogActions, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
-import { RequestLogsView, type RequestLogsRowModel } from "@flowlet/product-ui";
+import { DesktopFilterToolbarView, RequestLogsView, type RequestLogsRowModel } from "@flowlet/product-ui";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
@@ -165,86 +165,44 @@ export function RequestLogsPage() {
           emptyDesc: t("发起一次模型请求，或调整当前筛选条件后再试。"),
         }}
         toolbar={(
-          <section className={styles.toolbar} aria-label={t("日志筛选")}>
-            <Input className={styles.search} prefix={<IconSearch />} value={searchDraft} placeholder={t("搜索请求 ID、模型、账号或会话")} showClear onChange={setSearchDraft} />
-            <Select
-              value={clientSelectValue}
-              loading={clients.isLoading}
-              optionList={[
+          <DesktopFilterToolbarView
+            ariaLabel={t("日志筛选")}
+            search={{ value: searchDraft, placeholder: t("搜索请求 ID、模型、账号或会话"), width: 280 }}
+            selects={[
+              { key: "client", value: clientSelectValue, ariaLabel: t("客户端"), loading: clients.isLoading, options: [
                 { value: "__all__", label: t("全部客户端") },
-                ...(clients.data ?? []).map((client) => ({
-                  value: client.id || "__unknown__",
-                  label: client.name || client.id || t("未知客户端"),
-                })),
-              ]}
-              onChange={(value) => {
-                const selected = Array.isArray(value) ? value[0] ?? "__all__" : value ?? "__all__";
+                ...(clients.data ?? []).map((client) => ({ value: client.id || "__unknown__", label: client.name || client.id || t("未知客户端") })),
+              ] },
+              { key: "model", value: filter.model && filter.modelKind ? `${filter.modelKind}:${filter.model}` : "__all__", ariaLabel: t("模型筛选"), loading: models.isLoading, options: [
+                { value: "__all__", label: t("全部模型") },
+                ...publicModels.map((model) => ({ value: `public:${model}`, label: model, group: t("对外模型"), internalLabel: `${t("对外模型")} · ${model}` })),
+                ...upstreamModels.map((model) => ({ value: `upstream:${model}`, label: model, group: t("路由模型"), internalLabel: `${t("路由模型")} · ${model}` })),
+              ] },
+            ]}
+            segments={{ value: filter.status, ariaLabel: t("状态"), options: (["all", "success", "error"] as RequestLogStatusFilter[]).map((status) => ({ value: status, label: t(status === "all" ? "全部" : status === "success" ? "成功" : "失败") })) }}
+            onSearchChange={setSearchDraft}
+            onSelectChange={(key, selected) => {
+              if (key === "client") {
                 setClientSelectValue(selected);
                 setFilter((current) => ({
                   ...current,
                   clientId: selected === "__all__" ? "" : selected,
                   page: 1,
                 }));
-              }}
-              aria-label={t("客户端")}
-            />
-            <Select
-              value={filter.model && filter.modelKind ? `${filter.modelKind}:${filter.model}` : "__all__"}
-              loading={models.isLoading}
-              onChange={(value) => {
-                const raw = String(value);
-                if (raw === "__all__") {
+                return;
+              }
+              if (selected === "__all__") {
                   apply({ model: "", modelKind: "" });
                   return;
-                }
-                // 选项值编码为 "<kind>:<model>"，仅按第一个冒号切分，避免模型名含冒号时误判。
-                const separator = raw.indexOf(":");
-                const kind = raw.slice(0, separator);
-                const model = raw.slice(separator + 1);
+              }
+                const separator = selected.indexOf(":");
+                const kind = selected.slice(0, separator);
+                const model = selected.slice(separator + 1);
                 apply({ model, modelKind: kind === "upstream" ? "upstream" : "public" });
-              }}
-              // Semi UI Select 单选内部用 Map<label,option> 判定选中，要求 label 全局唯一。
-              // 同名模型在两个 OptGroup 下 label 会冲突，导致两个分组都被画勾。
-              // 这里 label 携带维度前缀仅供 Semi 内部区分；显示文本由 renderOptionItem
-              // 自定义为纯模型名，避免前缀污染下拉列表和触发器。
-              aria-label="模型筛选"
-            >
-              <Select.Option value="__all__">{t("全部模型")}</Select.Option>
-              {publicModels.length > 0 ? (
-                <Select.OptGroup key="public" label={t("对外模型")}>
-                  {publicModels.map((model) => (
-                    <Select.Option
-                      key={`public-${model}`}
-                      value={`public:${model}`}
-                      label={t("对外模型") + " · " + model}
-                      renderOptionItem={() => model}
-                    />
-                  ))}
-                </Select.OptGroup>
-              ) : null}
-              {upstreamModels.length > 0 ? (
-                <Select.OptGroup key="upstream" label={t("路由模型")}>
-                  {upstreamModels.map((model) => (
-                    <Select.Option
-                      key={`upstream-${model}`}
-                      value={`upstream:${model}`}
-                      label={t("路由模型") + " · " + model}
-                      renderOptionItem={() => model}
-                    />
-                  ))}
-                </Select.OptGroup>
-              ) : null}
-            </Select>
-            <div className={styles.statusFilter}>
-              {(["all", "success", "error"] as RequestLogStatusFilter[]).map((status) => (
-                <button key={status} type="button" className={filter.status === status ? styles.activeStatus : ""} onClick={() => apply({ status })}>
-                  {t(status === "all" ? "全部" : status === "success" ? "成功" : "失败")}
-                </button>
-              ))}
-            </div>
-            <span className={styles.toolbarSpacer} />
-            <Tooltip content={t("清理历史日志")}><Button aria-label={t("清理历史日志")} icon={<IconDelete />} type="danger" theme="borderless" onClick={() => setClearOpen(true)} /></Tooltip>
-          </section>
+            }}
+            onSegmentChange={(status) => apply({ status: status as RequestLogStatusFilter })}
+            actions={<Tooltip content={t("清理历史日志")}><Button aria-label={t("清理历史日志")} icon={<IconDelete />} type="danger" theme="borderless" onClick={() => setClearOpen(true)} /></Tooltip>}
+          />
         )}
         footer={(
           <>

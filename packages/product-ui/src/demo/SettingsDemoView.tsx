@@ -7,7 +7,7 @@ import styles from "./SettingsDemoView.module.css";
 const TABS = ["general", "capture", "sync", "storage", "maintenance", "about"] as const;
 type Tab = typeof TABS[number];
 
-export function SettingsDemoView({ zh }: { zh: boolean }) {
+export function SettingsDemoView({ zh, appVersion }: { zh: boolean; appVersion: string }) {
   const [tab, setTab] = useState<Tab>("general");
   const [autostart, setAutostart] = useState(true);
   const [notifications, setNotifications] = useState(true);
@@ -40,7 +40,7 @@ export function SettingsDemoView({ zh }: { zh: boolean }) {
             <SettingRow title={zh ? "记录请求与响应 Body" : "Capture request and response bodies"} desc={zh ? "用于问题排查；关闭后仍记录状态、耗时与用量。" : "Useful for debugging; status, timing and usage remain available."}><Switch checked={capture} onChange={setCapture} /></SettingRow>
             <SettingRow title={zh ? "敏感 Header 脱敏" : "Redact sensitive headers"} desc={zh ? "落库前将 Authorization、API Key 等替换为 [redacted]。" : "Replace authorization and API key values before storage."}><Switch /></SettingRow>
           </SettingsGroup>
-        </> : <FeaturePanel tab={tab} zh={zh} />}</div>
+        </> : <FeaturePanel tab={tab} zh={zh} appVersion={appVersion} />}</div>
       </section>
     </div>
   </DemoPageScaffold>;
@@ -48,12 +48,12 @@ export function SettingsDemoView({ zh }: { zh: boolean }) {
 
 function SettingsGroup({ title, children }: { title: string; children: React.ReactNode }) { return <section className={styles.group}><h3>{title}</h3><div>{children}</div></section>; }
 function SettingRow({ title, desc, children }: { title: string; desc: string; children: React.ReactNode }) { return <div className={styles.row}><span><strong>{title}</strong><small>{desc}</small></span><div>{children}</div></div>; }
-function FeaturePanel({ tab, zh }: { tab: Tab; zh: boolean }) {
+function FeaturePanel({ tab, zh, appVersion }: { tab: Tab; zh: boolean; appVersion: string }) {
   const copy: Record<Exclude<Tab, "general" | "capture">, [string, string, string]> = {
     sync: [zh ? "多设备同步" : "Multi-device sync", zh ? "使用你自己的 S3-compatible 存储同步用量、会话和项目数据。" : "Use your own S3-compatible storage for usage, sessions and projects.", zh ? "配置 S3" : "Configure S3"],
     storage: [zh ? "本地数据占用" : "Local storage", zh ? "SQLite 数据库 48.6 MB · 请求日志 31.2 MB · Agent 会话 9.4 MB" : "SQLite 48.6 MB · Requests 31.2 MB · Agent sessions 9.4 MB", zh ? "导出数据" : "Export data"],
     maintenance: [zh ? "数据完整性检查" : "Data integrity", zh ? "检查历史日志归属、会话关联和用量统计完整性。" : "Check historical attribution, session links and usage integrity.", zh ? "开始检查" : "Start check"],
-    about: ["Flowlet v0.1.0", zh ? "本地模型服务控制台 · Windows 11 原生环境" : "Local model service console · Native Windows 11", zh ? "复制诊断信息" : "Copy diagnostics"],
+    about: [`Flowlet v${appVersion}`, zh ? "本地模型服务控制台 · Windows 11 原生环境" : "Local model service console · Native Windows 11", zh ? "复制诊断信息" : "Copy diagnostics"],
   };
   const [title, desc, action] = copy[tab as keyof typeof copy];
   return <section className={styles.feature}><span className={styles.featureMark}><IconSetting /></span><h3>{title}</h3><p>{desc}</p><Button type="primary" theme="solid">{action}</Button></section>;

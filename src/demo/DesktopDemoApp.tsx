@@ -68,7 +68,7 @@ export function DesktopDemoApp() {
     case "usage-analysis": content = <UsageAnalysisDemoView zh={zh} />; break;
     case "usage": content = <UsageStatisticsDemoView zh={zh} />; break;
     case "tasks": content = <TaskLogsDemoView zh={zh} />; break;
-    case "settings": content = <SettingsDemoView zh={zh} />; break;
+    case "settings": content = <SettingsDemoView zh={zh} appVersion={__FLOWLET_APP_VERSION__} />; break;
     default: content = <DesktopOverviewDemoView zh={zh} />;
   }
 
@@ -76,7 +76,7 @@ export function DesktopDemoApp() {
     <DesktopAppFrameView sidebar={<DesktopSidebarView
       logo={<img src="/flowlet-logo.png" alt="" />}
       productName="Flowlet"
-      version="v0.1.0 · Demo"
+      version={`v${__FLOWLET_APP_VERSION__} · Demo`}
       groups={groups}
       activeId={active}
       settings={{ id: "settings", label: labels.settings, icon: <IconSetting /> }}

@@ -4,7 +4,7 @@
 //   npm run tauri:update:portable
 //
 // 也可以显式指定目录：
-//   npm run tauri:update:portable -- --target C:\path\to\Flowlet_0.1.0_x64_portable
+//   npm run tauri:update:portable -- --target C:\path\to\Flowlet_<version>_x64_portable
 //
 // 默认保留目标目录中现有的 config.json 和所有运行数据。如需同步仓库配置：
 //   npm run tauri:update:portable -- --replace-config

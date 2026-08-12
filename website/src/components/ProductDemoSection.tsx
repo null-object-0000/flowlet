@@ -2,6 +2,7 @@ import { useState } from "react";
 import { MobileCompanionDemoView } from "@flowlet/product-ui";
 import { useI18n } from "../i18n/I18nContext";
 import { AppMockup } from "./AppMockup";
+import { appVersion } from "../appVersion";
 import styles from "./ProductDemoSection.module.css";
 
 export function ProductDemoSection() {
@@ -23,7 +24,7 @@ export function ProductDemoSection() {
           </div>
         </div>
         <div className={`${styles.demoFrame} ${mobile ? styles.mobileFrame : ""}`}>
-          {mobile ? <MobileCompanionDemoView zh={lang === "zh"} /> : <AppMockup />}
+          {mobile ? <MobileCompanionDemoView zh={lang === "zh"} appVersion={appVersion} /> : <AppMockup />}
         </div>
       </div>
     </section>

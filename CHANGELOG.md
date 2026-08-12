@@ -2,6 +2,10 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - Unreleased
+
+当前开发迭代统一计入 0.1.1。
+
 ## [0.1.0] - 2026-08-11
 
 Flowlet 的首个正式公开版本。
@@ -23,4 +27,5 @@ Flowlet 的首个正式公开版本。
 - Windows 桌面产物尚未签名；macOS DMG 使用 ad-hoc 签名但尚未经过 Apple 公证，
   首次启动可能需要手动放行。
 
+[0.1.1]: https://github.com/null-object-0000/flowlet/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.0

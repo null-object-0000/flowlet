@@ -53,7 +53,7 @@ const copy: Record<"zh" | "en", Copy> = {
 
 const pageIcons: Record<MobilePage, ReactNode> = { overview: <IconHome />, projects: <IconList />, devices: <IconDesktop />, settings: <IconSetting /> };
 
-export function MobileCompanionDemoView({ zh = true }: { zh?: boolean; logoSrc?: string }) {
+export function MobileCompanionDemoView({ zh = true, appVersion }: { zh?: boolean; appVersion: string; logoSrc?: string }) {
   const text = copy[zh ? "zh" : "en"];
   const [activePage, setActivePage] = useState<MobilePage>("overview");
   const navItems: MobileNavItem[] = (Object.keys(text.nav) as MobilePage[]).map((id) => ({ id, href: `#mobile-${id}`, label: text.nav[id], icon: pageIcons[id] }));
@@ -67,7 +67,7 @@ export function MobileCompanionDemoView({ zh = true }: { zh?: boolean; logoSrc?:
       <MobileAppFrameView embedded items={navItems} activeId={activePage} navigationLabel={zh ? "主导航" : "Main navigation"} onNavigate={(id) => setActivePage(id as MobilePage)}>
         {activePage === "overview" ? <OverviewDemoPage zh={zh} /> : null}
         {activePage === "projects" ? <ProjectsDemoPage zh={zh} /> : null}
-        {activePage === "devices" ? <DevicesDemoPage zh={zh} /> : null}
+        {activePage === "devices" ? <DevicesDemoPage zh={zh} appVersion={appVersion} /> : null}
         {activePage === "settings" ? <SettingsDemoPage zh={zh} /> : null}
       </MobileAppFrameView>
     </div></div>
@@ -103,10 +103,10 @@ function ProjectsDemoPage({ zh }: { zh: boolean }) {
   return <MobilePageView><MobilePageHeaderView picker title={zh ? "项目 · Flowlet" : "Project · Flowlet"} meta={<small className={styles.lastRefresh}>{zh ? "刚刚刷新" : "Just refreshed"}</small>} subtitle={zh ? "查看所有设备上单个项目的任务，并提交新任务到指定设备" : "Review tasks across devices and submit new work"} /><MobileTaskBoardView tabs={[{ id: "pending", label: zh ? "待处理" : "Pending", count: 3 },{ id: "running", label: zh ? "进行中" : "Running", count: 1 },{ id: "review", label: zh ? "待审核" : "Review", count: 1 },{ id: "done", label: zh ? "已完成" : "Done", count: 8 }]} activeTab="pending" rows={rows} /><button type="button" className={pageStyles.addTaskFab}>+</button></MobilePageView>;
 }
 
-function DevicesDemoPage({ zh }: { zh: boolean }) {
+function DevicesDemoPage({ zh, appVersion }: { zh: boolean; appVersion: string }) {
   const [expandedId, setExpandedId] = useState<string | null>("desktop-1");
   const entryDetails = <div className={pageStyles.deviceDetails}><div className={pageStyles.deviceDetailsHeader}><strong>{zh ? "设备入口" : "Device entries"}</strong></div><EntryCard icon={<IconComment />} title={zh ? "会话" : "Sessions"} detail={zh ? "12 个会话，2.54亿 Tokens" : "12 sessions · 254M tokens"} meta={zh ? "1 个运行中 · 1 个等待确认" : "1 running · 1 waiting"} /><EntryCard icon={<IconDesktop />} title="Agent" detail={zh ? "4 个已安装 Agent" : "4 installed agents"} meta={zh ? "4 个已接入 Flowlet" : "4 connected to Flowlet"} /></div>;
-  const rows: MobileDeviceRowModel[] = [{ id: "desktop-1", name: zh ? "Windows 工作站" : "Windows workstation", platform: "Windows", appVersion: "0.1.0", status: zh ? "直连 18ms" : "Direct · 18ms", statusTone: "ok", metrics: ["2.54亿 Tokens", zh ? "1,855 次请求" : "1,855 requests"], lastSeen: zh ? "最近快照：刚刚" : "Latest snapshot: just now", details: entryDetails },{ id: "desktop-2", name: zh ? "开发主机" : "Development machine", platform: "Windows", appVersion: "0.1.0", status: zh ? "仅云端" : "Cloud only", statusTone: "muted", metrics: ["6.28M Tokens", zh ? "428 次请求" : "428 requests"], lastSeen: zh ? "最近快照：2 分钟前" : "Latest snapshot: 2 min ago" }];
+  const rows: MobileDeviceRowModel[] = [{ id: "desktop-1", name: zh ? "Windows 工作站" : "Windows workstation", platform: "Windows", appVersion, status: zh ? "直连 18ms" : "Direct · 18ms", statusTone: "ok", metrics: ["2.54亿 Tokens", zh ? "1,855 次请求" : "1,855 requests"], lastSeen: zh ? "最近快照：刚刚" : "Latest snapshot: just now", details: entryDetails },{ id: "desktop-2", name: zh ? "开发主机" : "Development machine", platform: "Windows", appVersion, status: zh ? "仅云端" : "Cloud only", statusTone: "muted", metrics: ["6.28M Tokens", zh ? "428 次请求" : "428 requests"], lastSeen: zh ? "最近快照：2 分钟前" : "Latest snapshot: 2 min ago" }];
   return <MobilePageView><MobilePageHeaderView picker title={zh ? "设备" : "Devices"} meta={<small className={styles.lastRefresh}>{zh ? "刚刚刷新" : "Just refreshed"}</small>} subtitle={zh ? "查看同步设备、已安装 Agent 及其 Flowlet 接入状态" : "Inspect synced devices, agents, and Flowlet status"} /><MobileDeviceListView rows={rows} expandedId={expandedId} onToggle={(id) => setExpandedId((current) => current === id ? null : id)} /></MobilePageView>;
 }
 

@@ -25,6 +25,7 @@ import {
   IconSetting,
 } from "@douyinfe/semi-icons";
 import { useI18n } from "../i18n/I18nContext";
+import { appVersion } from "../appVersion";
 import styles from "./AppMockup.module.css";
 
 type DemoPage = "overview" | "models" | "projects" | "requests" | "sessions" | "tasks" | "usage" | "insights" | "settings";
@@ -70,7 +71,7 @@ export function AppMockup() {
     case "requests": content = <RequestLogsDemoView zh={zh} />; break;
     case "sessions": content = <AgentSessionsDemoView zh={zh} />; break;
     case "tasks": content = <TaskLogsDemoView zh={zh} />; break;
-    case "settings": content = <SettingsDemoView zh={zh} />; break;
+    case "settings": content = <SettingsDemoView zh={zh} appVersion={appVersion} />; break;
     case "usage": content = <UsageStatisticsDemoView zh={zh} />; break;
     case "insights": content = <UsageAnalysisDemoView zh={zh} />; break;
     default: content = <DesktopOverviewDemoView zh={zh} onOpenUsage={() => setActivePage("usage")} />;
@@ -82,7 +83,7 @@ export function AppMockup() {
       sidebar={<DesktopSidebarView
         logo={<img src="/flowlet-logo.png" alt="" />}
         productName="Flowlet"
-        version="v0.1.0"
+        version={`v${appVersion}`}
         groups={navGroups}
         activeId={activePage}
         settings={{ id: "settings", label: zh ? "应用设置" : "Settings", icon: <IconSetting /> }}

@@ -56,7 +56,7 @@ export function Sidebar() {
         <FlowletLogo variant="brand" />
         <div className={styles.brandCopy}>
           <Title heading={5} style={{ margin: 0 }}>Flowlet</Title>
-          <Text type="tertiary" size="small">v0.1.0</Text>
+          <Text type="tertiary" size="small">v{__FLOWLET_APP_VERSION__}</Text>
         </div>
       </div>
 

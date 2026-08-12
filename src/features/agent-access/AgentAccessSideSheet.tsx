@@ -14,108 +14,10 @@ import type {
   AgentInstallMethod,
 } from "../../domains/agent/types";
 import { agentPlugin, type AgentPluginId } from "../../domains/pluginRegistry";
+import { agentAccessAdapter, type AgentConfigControl } from "./agentAccessAdapters";
 
 const { Text, Title } = Typography;
 const MASKED_TOKEN = "••••••••••••••••••••";
-const OPENCODE_PERMISSION_PLUGIN_SNIPPET = `// 保存为 ~/.config/opencode/plugins/flowlet.ts
-import path from "node:path"
-import { createHash } from "node:crypto"
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
-
-export const FlowletPermissionBridge = async ({ client, serverUrl, directory, worktree }) => {
-  const home = process.env.USERPROFILE || process.env.HOME
-  if (!home) return {}
-  const root = path.join(home, ".flowlet", "opencode-control")
-  const instanceKey = createHash("sha256")
-    .update(String(directory || worktree || serverUrl))
-    .digest("hex")
-    .slice(0, 12)
-  const statePath = path.join(root, \`state-\${process.pid}-\${instanceKey}.json\`)
-  const stateTempPath = \`\${statePath}.tmp\`
-  const permissions = new Map()
-  const normalizePermission = (value) => ({
-    id: value.id,
-    sessionID: value.sessionID,
-    permission: value.permission || value.type || "unknown",
-    patterns: value.patterns || (Array.isArray(value.pattern) ? value.pattern : value.pattern ? [value.pattern] : []),
-    metadata: value.metadata || {},
-    always: value.always || [],
-    tool: value.tool || (value.messageID ? { messageID: value.messageID, callID: value.callID || "" } : undefined),
-  })
-  await mkdir(root, { recursive: true })
-  try {
-    const response = await client.permission?.list?.()
-    const pending = Array.isArray(response) ? response : response?.data
-    if (Array.isArray(pending)) {
-      for (const value of pending) permissions.set(value.id, normalizePermission(value))
-    }
-  } catch {}
-  let persistQueue = Promise.resolve()
-  const persist = () => {
-    const snapshot = JSON.stringify({
-      pid: process.pid,
-      serverUrl: String(serverUrl),
-      updatedAt: Date.now(),
-      permissions: [...permissions.values()],
-    })
-    persistQueue = persistQueue.catch(() => {}).then(async () => {
-      await writeFile(stateTempPath, snapshot, "utf8")
-      await rename(stateTempPath, statePath)
-    })
-    return persistQueue
-  }
-  await persist()
-  const consumeReplies = async () => {
-    for (const name of await readdir(root)) {
-      if (!name.startsWith("reply-") || !name.endsWith(".json")) continue
-      const replyPath = path.join(root, name)
-      try {
-        const command = JSON.parse(await readFile(replyPath, "utf8"))
-        const permission = permissions.get(command.permissionId)
-        if (!permission) continue
-        if (client.permission?.reply) {
-          await client.permission.reply({ requestID: command.permissionId, reply: command.reply })
-        } else if (client.postSessionIdPermissionsPermissionId) {
-          await client.postSessionIdPermissionsPermissionId({
-            path: { id: permission.sessionID, permissionID: command.permissionId },
-            body: { response: command.reply },
-          })
-        } else {
-          throw new Error("当前 OpenCode SDK 不支持 permission.reply")
-        }
-        await unlink(replyPath)
-      } catch {}
-    }
-  }
-  const heartbeat = setInterval(() => {
-    void persist()
-    void consumeReplies()
-  }, 500)
-  return {
-    event: async ({ event }) => {
-      if (event.type === "permission.asked" || event.type === "permission.updated") {
-        permissions.set(event.properties.id, normalizePermission(event.properties))
-        await persist()
-      } else if (event.type === "permission.replied") {
-        permissions.delete(event.properties.requestID || event.properties.permissionID)
-        await persist()
-      }
-    },
-    dispose: async () => {
-      clearInterval(heartbeat)
-      await persistQueue.catch(() => {})
-      try { await unlink(statePath) } catch {}
-      try { await unlink(stateTempPath) } catch {}
-    },
-  }
-}
-`;
-
-// Codex 模型目录内容，与仓库根目录 codex-models.json（Rust include_str! 内置）保持一致。
-// 声明 flowlet-pro / flowlet-flash 的上下文窗口与推理档位，供 config.toml 的
-// model_catalog_json 指向生成到 ~/.codex/model-catalog.flowlet.json。
-const CODEX_MODEL_CATALOG_JSON = "{\n  \"models\": [\n    {\n      \"slug\": \"flowlet-pro\",\n      \"display_name\": \"Flowlet Pro\",\n      \"description\": \"Flowlet aggregated coding model routed to available accounts.\",\n      \"default_reasoning_level\": \"high\",\n      \"supported_reasoning_levels\": [\n        {\n          \"effort\": \"low\",\n          \"description\": \"Fast responses with lighter reasoning\"\n        },\n        {\n          \"effort\": \"medium\",\n          \"description\": \"Greater reasoning depth for complex problems\"\n        },\n        {\n          \"effort\": \"high\",\n          \"description\": \"Extra high reasoning depth for complex problems\"\n        },\n        {\n          \"effort\": \"xhigh\",\n          \"description\": \"Maximum reasoning depth for the hardest problems\"\n        }\n      ],\n      \"shell_type\": \"shell_command\",\n      \"visibility\": \"list\",\n      \"supported_in_api\": true,\n      \"priority\": 1,\n      \"base_instructions\": \"\",\n      \"supports_reasoning_summaries\": false,\n      \"default_reasoning_summary\": \"none\",\n      \"support_verbosity\": false,\n      \"default_verbosity\": null,\n      \"apply_patch_tool_type\": \"freeform\",\n      \"web_search_tool_type\": \"text\",\n      \"truncation_policy\": {\n        \"mode\": \"tokens\",\n        \"limit\": 10000\n      },\n      \"supports_parallel_tool_calls\": true,\n      \"supports_image_detail_original\": false,\n      \"context_window\": 1048576,\n      \"max_context_window\": 1048576,\n      \"auto_compact_token_limit\": null,\n      \"effective_context_window_percent\": 95,\n      \"experimental_supported_tools\": [],\n      \"input_modalities\": [\n        \"text\"\n      ],\n      \"availability_nux\": null,\n      \"upgrade\": null\n    },\n    {\n      \"slug\": \"flowlet-flash\",\n      \"display_name\": \"Flowlet Flash\",\n      \"description\": \"Flowlet aggregated fast model routed to available accounts.\",\n      \"default_reasoning_level\": \"low\",\n      \"supported_reasoning_levels\": [\n        {\n          \"effort\": \"low\",\n          \"description\": \"Fast responses with lighter reasoning\"\n        },\n        {\n          \"effort\": \"medium\",\n          \"description\": \"Greater reasoning depth for complex problems\"\n        },\n        {\n          \"effort\": \"high\",\n          \"description\": \"Extra high reasoning depth for complex problems\"\n        }\n      ],\n      \"shell_type\": \"shell_command\",\n      \"visibility\": \"list\",\n      \"supported_in_api\": true,\n      \"priority\": 2,\n      \"base_instructions\": \"\",\n      \"supports_reasoning_summaries\": false,\n      \"default_reasoning_summary\": \"none\",\n      \"support_verbosity\": false,\n      \"default_verbosity\": null,\n      \"apply_patch_tool_type\": \"freeform\",\n      \"web_search_tool_type\": \"text\",\n      \"truncation_policy\": {\n        \"mode\": \"tokens\",\n        \"limit\": 10000\n      },\n      \"supports_parallel_tool_calls\": true,\n      \"supports_image_detail_original\": false,\n      \"context_window\": 1048576,\n      \"max_context_window\": 1048576,\n      \"auto_compact_token_limit\": null,\n      \"effective_context_window_percent\": 95,\n      \"experimental_supported_tools\": [],\n      \"input_modalities\": [\n        \"text\"\n      ],\n      \"availability_nux\": null,\n      \"upgrade\": null\n    }\n  ]\n}";
-
 export type AgentKind = AgentPluginId;
 type Copy = (value: string, message: string) => Promise<void>;
 
@@ -170,17 +72,18 @@ export function AgentAccessSideSheet({
   const [surface, setSurface] = useState<"cli" | "desktop">("cli");
 
   const meta = agentPlugin(agent);
+  const adapter = agentAccessAdapter(meta.globalConfigAdapterId);
   const name = meta.name;
   const endpoint = `${baseUrl}${meta.endpointSuffix}`;
   const token = clientToken || "<Client Token>";
   const displayedToken = clientToken ? MASKED_TOKEN : token;
-  // Claude Code 的主模型与快速/子 Agent 模型各自拥有独立上下文预算。
-  const primaryLongContext = agent === "claude-code" && (globalConfig?.primary_long_context ?? false);
-  const fastLongContext = agent === "claude-code" && (globalConfig?.fast_long_context ?? false);
+  const adapterContext = useMemo(() => ({ endpoint, token, displayedToken, globalConfig, t }), [displayedToken, endpoint, globalConfig, t, token]);
   const manualSnippets = useMemo(
-    () => buildManualSnippets(agent, endpoint, token, displayedToken, primaryLongContext, fastLongContext, t),
-    [agent, displayedToken, endpoint, fastLongContext, primaryLongContext, t, token],
+    () => adapter.manualSnippets(adapterContext),
+    [adapter, adapterContext],
   );
+  const configStatuses = adapter.configStatuses(adapterContext);
+  const configControls = adapter.configControls(adapterContext);
 
   useEffect(() => {
     setSurface("cli");
@@ -292,7 +195,7 @@ export function AgentAccessSideSheet({
               return (
               <div className={styles.installation} key={installation.executable_path}>
                 <div className={styles.installationHeader}>
-                  <strong>{installationTitle(agent, installation.surface, installation.version, t)}</strong>
+                  <strong>{installationTitle(adapter.installationName(installation.surface), installation.version, t)}</strong>
                   <span className={styles.installationTags}>
                     {environment?.primary?.executable_path === installation.executable_path && installation.surface !== "desktop" && !installation.error ? <Tag color="blue">{t("当前使用")}</Tag> : null}
                     <Tag>{installMethodLabel(installation.install_method, t)}</Tag>
@@ -350,74 +253,15 @@ export function AgentAccessSideSheet({
                 {globalConfig.base_url ? <StatusRow label="Base URL" value={globalConfig.base_url} /> : null}
                 <StatusRow label="Client Token" value={t(globalConfig.auth_token_configured ? "已配置（内容已隐藏）" : "未配置")} />
                 <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
-                {agent === "codex" ? (
-                  <StatusRow
-                    label={t("模型目录")}
-                    value={t(globalConfig.model_catalog_configured ? "已配置" : "未配置")}
-                  />
-                ) : null}
+                {configStatuses.map((status) => <StatusRow key={status.label} label={status.label} value={status.value} />)}
                 {meta.showsFastModel ? <StatusRow label={t("快速模型")} value={globalConfig.fast_model || "-"} /> : null}
                 {meta.showsSubagentModel ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}
-                {agent === "opencode" ? (
-                  <StatusRow
-                    label={t("权限插件")}
-                    value={t(globalConfig.opencode_permission_bridge ? "已安装" : "需安装或更新")}
-                  />
-                ) : null}
-                {agent === "claude-code" ? (
-                  <div className={styles.longContextGroup}>
-                    <div className={styles.longContextRow}>
-                      <div>
-                        <strong>{t("flowlet-pro 1M 长上下文")}</strong>
-                        <small>{t("用于 Claude Code 主会话及 Opus、Sonnet、Fable 模型映射。")}</small>
-                        <small>{t("仅当 flowlet-pro 的所有启用路由都支持 1M 时开启。")}</small>
-                      </div>
-                      <Switch
-                        checked={primaryLongContext}
-                        disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
-                        loading={globalConfigBusy}
-                        aria-label={t("flowlet-pro 1M 长上下文")}
-                        onChange={(checked) => void onApplyGlobalConfig({
-                          primaryLongContext: checked,
-                          fastLongContext,
-                        })}
-                      />
-                    </div>
-                    <div className={styles.longContextRow}>
-                      <div>
-                        <strong>{t("flowlet-flash 1M 长上下文")}</strong>
-                        <small>{t("用于 Haiku、快速后台任务和子 Agent 模型映射。")}</small>
-                        <small>{t("仅当 flowlet-flash 的所有启用路由都支持 1M 时开启。")}</small>
-                      </div>
-                      <Switch
-                        checked={fastLongContext}
-                        disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
-                        loading={globalConfigBusy}
-                        aria-label={t("flowlet-flash 1M 长上下文")}
-                        onChange={(checked) => void onApplyGlobalConfig({
-                          primaryLongContext,
-                          fastLongContext: checked,
-                        })}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-                {agent === "pi" ? (
-                  <div className={styles.longContextRow}>
-                    <div>
-                      <strong>{t("会话扩展")}</strong>
-                      <small>{t("安装后可为请求注入会话标识，Flowlet 按会话归并请求；未安装则无法做会话维度串联。")}</small>
-                      <small>{t("Pi 仍可作为 Flowlet 客户端使用，仅会话维度数据不可用。")}</small>
-                    </div>
-                    <Switch
-                      checked={globalConfig.session_extension ?? true}
-                      disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
-                      loading={globalConfigBusy}
-                      aria-label={t("会话扩展")}
-                      onChange={(checked) => void onApplyGlobalConfig({ sessionExtension: checked })}
-                    />
-                  </div>
-                ) : null}
+                <AgentConfigControls
+                  controls={configControls}
+                  busy={globalConfigBusy}
+                  disabled={globalConfig.state === "invalid" || !clientToken}
+                  onApplyGlobalConfig={onApplyGlobalConfig}
+                />
                 {globalConfig.error ? <Text type="danger">{globalConfig.error}</Text> : null}
                 {globalConfig.external_environment_overrides.length ? (
                   <div className={styles.configWarning}>
@@ -437,13 +281,7 @@ export function AgentAccessSideSheet({
                     theme="solid"
                     loading={globalConfigBusy}
                     disabled={globalConfig.state === "invalid" || !clientToken}
-                    onClick={() => void onApplyGlobalConfig(
-                      agent === "claude-code"
-                        ? { primaryLongContext, fastLongContext }
-                        : agent === "pi"
-                          ? { sessionExtension: globalConfig.session_extension ?? true }
-                          : undefined,
-                    )}
+                    onClick={() => void onApplyGlobalConfig(adapter.applyOptions(adapterContext))}
                   >
                     {t(globalConfig.state === "flowlet" ? "重新写入 Flowlet 配置" : globalConfig.state === "other_gateway" ? "覆盖并接入 Flowlet" : "全局接入 Flowlet")}
                   </Button>
@@ -492,7 +330,6 @@ export function AgentAccessSideSheet({
     </SideSheet>
   );
 }
-
 function installMethodLabel(method: AgentInstallMethod, t: (source: string) => string) {
   const labels: Record<AgentInstallMethod, string> = {
     native: "原生安装",
@@ -507,194 +344,41 @@ function installMethodLabel(method: AgentInstallMethod, t: (source: string) => s
   };
   return t(labels[method]);
 }
-
 function installationTitle(
-  agent: AgentKind,
-  surface: "cli" | "desktop" | undefined,
+  name: string,
   version: string | null | undefined,
   t: (source: string) => string,
 ) {
-  const base = agentPlugin(agent).name;
-  // Codex 桌面端探测到的是 ChatGPT 桌面应用，保留真实应用名便于识别。
-  const name = agent === "claude-code"
-    ? "Claude Code"
-    : agent === "codex" && surface === "desktop"
-      ? "ChatGPT Desktop"
-      : surface === "desktop"
-        ? `${base} Desktop`
-        : `${base} CLI`;
   return version ? `${name} ${version}` : t(`${name} 安装`);
 }
 
-function buildManualSnippets(
-  agent: AgentKind,
-  endpoint: string,
-  token: string,
-  displayedToken: string,
-  primaryLongContext: boolean,
-  fastLongContext: boolean,
-  t: (source: string) => string,
-) {
-  if (agent === "claude-code") {
-    // 与一键写入保持一致：两个模型组分别决定是否附加 [1m] 后缀。
-    const primaryModel = primaryLongContext ? "flowlet-pro[1m]" : "flowlet-pro";
-    const fastModel = fastLongContext ? "flowlet-flash[1m]" : "flowlet-flash";
-    const value = (authToken: string) => JSON.stringify({
-      env: {
-        ANTHROPIC_BASE_URL: endpoint,
-        ANTHROPIC_AUTH_TOKEN: authToken,
-        ANTHROPIC_MODEL: primaryModel,
-        ANTHROPIC_DEFAULT_FABLE_MODEL: primaryModel,
-        ANTHROPIC_DEFAULT_OPUS_MODEL: primaryModel,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: primaryModel,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: fastModel,
-        ANTHROPIC_SMALL_FAST_MODEL: fastModel,
-        CLAUDE_CODE_SUBAGENT_MODEL: fastModel,
-      },
-    }, null, 2);
-    return [{
-      label: t("settings.json 配置片段"),
-      displayValue: value(displayedToken),
-      copyValue: value(token),
-    }];
-  }
-  if (agent === "pi") {
-    const modelsConfig = JSON.stringify({
-      providers: {
-        flowlet: {
-          baseUrl: endpoint,
-          api: "openai-completions",
-          headers: { "x-flowlet-client": "pi" },
-          models: [
-            { id: "flowlet-pro", name: "flowlet-pro" },
-            { id: "flowlet-flash", name: "flowlet-flash" },
-          ],
-        },
-      },
-    }, null, 2);
-    const credentials = (apiKey: string) => JSON.stringify({
-      flowlet: { type: "api_key", key: apiKey },
-    }, null, 2);
-    const defaults = JSON.stringify({
-      defaultProvider: "flowlet",
-      defaultModel: "flowlet-pro",
-    }, null, 2);
-    // 会话扩展：Pi 走 OpenAI 兼容 SDK，原生请求不带会话标识，需额外部署该扩展
-    // 才能让 Flowlet 把 Pi 请求按会话归并（与一键写入功能写入的扩展相同）。
-    const sessionExtension = [
-      "// 保存为 ~/.pi/agent/extensions/flowlet.ts，Pi 启动时自动加载（无需编译）。",
-      "// 作用：为发往 Flowlet 渠道的请求注入 x-flowlet-session 头（值为当前会话 UUID），",
-      "// 使 Flowlet 能按会话归并请求；该头仅用于本地归属，Flowlet 转发上游前会将其剥离。",
-      'export default function (pi) {',
-      '  pi.on("before_provider_headers", (event, ctx) => {',
-      '    if (event.headers?.["x-flowlet-client"] !== "pi") return;',
-      "    try {",
-      '      const sessionId = ctx?.sessionManager?.getSessionId?.();',
-      '      if (typeof sessionId === "string" && sessionId.length > 0) {',
-      '        event.headers["x-flowlet-session"] = sessionId;',
-      "      }",
-      "    } catch {}",
-      "  });",
-      "}",
-      "",
-    ].join("\n");
-    return [
-      {
-        label: t("models.json Provider 片段"),
-        displayValue: modelsConfig,
-        copyValue: modelsConfig,
-      },
-      {
-        label: t("auth.json 凭据片段"),
-        displayValue: credentials(displayedToken),
-        copyValue: credentials(token),
-      },
-      {
-        label: t("settings.json 默认模型片段"),
-        displayValue: defaults,
-        copyValue: defaults,
-      },
-      {
-        label: t("会话扩展片段（flowlet.ts）"),
-        displayValue: sessionExtension,
-        copyValue: sessionExtension,
-      },
-    ];
-  }
-  const providerConfig = JSON.stringify({
-    $schema: "https://opencode.ai/config.json",
-    model: "flowlet/flowlet-pro",
-    small_model: "flowlet/flowlet-flash",
-    provider: {
-      flowlet: {
-        name: "Flowlet",
-        npm: "@ai-sdk/openai-compatible",
-        options: { baseURL: endpoint },
-        models: {
-          "flowlet-pro": { name: "flowlet-pro" },
-          "flowlet-flash": { name: "flowlet-flash" },
-        },
-      },
-    },
-  }, null, 2);
-  if (agent === "codex") {
-    // 与 Rust apply_codex 受管字段完全一致：Responses 协议、本地 Base URL、
-    // 强制关闭响应存储（避免 store/previous_response_id 破坏无状态多账号路由），
-    // 以及指向 Flowlet 生成的模型目录（flowlet-pro / flowlet-flash 的上下文与推理档位声明）。
-    const configToml = [
-      'model = "flowlet-pro"',
-      'model_provider = "flowlet"',
-      "disable_response_storage = true",
-      'preferred_auth_method = "apikey"',
-      'model_catalog_json = "~/.codex/model-catalog.flowlet.json"',
-      "",
-      "[model_providers.flowlet]",
-      'name = "flowlet"',
-      `base_url = "${endpoint}"`,
-      'wire_api = "responses"',
-      "requires_openai_auth = true",
-    ].join("\n");
-    const credentials = (apiKey: string) => JSON.stringify({
-      OPENAI_API_KEY: apiKey,
-    }, null, 2);
-    return [
-      {
-        label: t("config.toml 配置片段"),
-        displayValue: configToml,
-        copyValue: configToml,
-      },
-      {
-        label: t("auth.json 凭据片段"),
-        displayValue: credentials(displayedToken),
-        copyValue: credentials(token),
-      },
-      {
-        label: t("模型目录片段（保存为 ~/.codex/model-catalog.flowlet.json）"),
-        displayValue: CODEX_MODEL_CATALOG_JSON,
-        copyValue: CODEX_MODEL_CATALOG_JSON,
-      },
-    ];
-  }
-  const credentials = (apiKey: string) => JSON.stringify({
-    flowlet: { type: "api", key: apiKey },
-  }, null, 2);
-  return [
-    {
-      label: t("opencode.jsonc 配置片段"),
-      displayValue: providerConfig,
-      copyValue: providerConfig,
-    },
-    {
-      label: t("auth.json 凭据片段"),
-      displayValue: credentials(displayedToken),
-      copyValue: credentials(token),
-    },
-    {
-      label: t("权限事件插件片段（flowlet.ts）"),
-      displayValue: OPENCODE_PERMISSION_PLUGIN_SNIPPET,
-      copyValue: OPENCODE_PERMISSION_PLUGIN_SNIPPET,
-    },
-  ];
+function AgentConfigControls({
+  controls,
+  busy,
+  disabled,
+  onApplyGlobalConfig,
+}: {
+  controls: AgentConfigControl[];
+  busy: boolean;
+  disabled: boolean;
+  onApplyGlobalConfig: (options?: AgentGlobalConfigOptions) => Promise<void>;
+}) {
+  const rows = controls.map((control) => (
+    <div className={styles.longContextRow} key={control.id}>
+      <div>
+        <strong>{control.label}</strong>
+        {control.descriptions.map((description) => <small key={description}>{description}</small>)}
+      </div>
+      <Switch
+        checked={control.checked}
+        disabled={busy || disabled}
+        loading={busy}
+        aria-label={control.label}
+        onChange={(checked) => void onApplyGlobalConfig(control.applyOptions(checked))}
+      />
+    </div>
+  ));
+  return controls.length > 1 ? <div className={styles.longContextGroup}>{rows}</div> : rows;
 }
 
 function InstallationPathRow({

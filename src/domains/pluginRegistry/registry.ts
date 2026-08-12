@@ -2,13 +2,14 @@ import registryJson from "../../../plugin-registry.json";
 
 export type PluginKind = "channel" | "model-catalog" | "agent";
 export type AgentPluginId = "claude-code" | "opencode" | "pi" | "codex";
+export type AgentGlobalConfigAdapterId = "claude-code" | "opencode" | "pi" | "codex";
 export type AgentPluginSurface = "cli" | "desktop";
 
 export type AgentPluginDescriptor = {
   id: AgentPluginId;
   name: string;
   environmentAdapterId: string;
-  globalConfigAdapterId: string;
+  globalConfigAdapterId: AgentGlobalConfigAdapterId;
   endpointSuffix: "/anthropic" | "/v1";
   npmPackage: string;
   surfaces: AgentPluginSurface[];

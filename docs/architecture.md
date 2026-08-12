@@ -129,7 +129,10 @@ SQLite 或运行时配置快照直接修改代理状态。修改内置注册表�
 前端 Agent 概览使用 `useQueries` 按注册表一次性创建环境探测 Query，并通过统一的
 `useAgentGlobalConfig(agentId)` 处理配置检查、写入和恢复；领域 command 只保留带 `agentId`
 的通用边界。新增已注册 Agent 不再复制专用 Query/Mutation Hook，但仍必须提供注册表声明的
-Rust 编译期环境与全局配置适配器。
+Rust 编译期环境与全局配置适配器。接入抽屉同样通过 `globalConfigAdapterId` 选择前端
+`AgentAccessAdapter`，由适配器提供安装名称、额外状态、配置开关、写入选项和手动配置片段；
+通用 SideSheet 不再按 Agent ID 维护条件分支。Codex 手动配置中的模型目录直接读取仓库根目录
+`codex-models.json`，避免前端常量与 Rust 内置目录漂移。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 

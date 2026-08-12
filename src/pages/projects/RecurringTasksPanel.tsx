@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Empty, Input, Modal, Select, SideSheet, Switch, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
+import { Button, Empty, Input, Modal, Select, SideSheet, Switch, Tag, Toast } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconPlus, IconPlay } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { Project, RecurringTask, RecurringTaskRun } from "../../domains/project/types";
@@ -9,9 +9,8 @@ import { errorMessage } from "../../shared/errors/AppError";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { ProjectTaskEditorFields } from "./ProjectTaskEditorFields";
 import styles from "./ProjectsPage.module.css";
-
-const AGENTS = ["Claude Code", "Codex", "OpenCode", "Pi"];
 
 export function RecurringTasksPanel({ project, autoRefresh }: { project: Project; autoRefresh: boolean }) {
   const { language, t } = useAppPreferences();
@@ -48,7 +47,14 @@ export function RecurringTasksPanel({ project, autoRefresh }: { project: Project
     )}
 
     <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建重复任务") : t("编辑重复任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span/><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button onClick={() => void runNow(draft, true)} disabled={editing === "new"}>{t("测试运行")}</Button><Button type="primary" theme="solid" loading={actions.save.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
-      <div className={styles.form}><label><span>{t("任务名称")}</span><Input value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))}/></label><label><span>{t("任务描述")}</span><TextArea value={draft.description} autosize={{ minRows: 8, maxRows: 12 }} onChange={(description) => setDraft((current) => ({ ...current, description }))}/></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} optionList={[{value:"readonly",label:t("只读分析")},{value:"code",label:t("代码修改")}]} onChange={(value) => setDraft((current) => ({...current,taskType:String(value) as "readonly"|"code"}))}/></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} optionList={AGENTS.map((value) => ({value,label:value}))} onChange={(value) => setDraft((current) => ({...current,agentProfile:String(value)}))}/></label></div><div className={styles.formGrid}><label><span>{t("运行方式")}</span><Select value={draft.scheduleKind} optionList={[{value:"manual",label:t("手动多次运行")},{value:"daily",label:t("每天定时运行")}]} onChange={(value) => setDraft((current) => ({...current,scheduleKind:String(value) as "manual"|"daily",enabled:value === "daily" ? current.enabled : false}))}/></label>{draft.scheduleKind === "daily" ? <label><span>{t("每日时间")}</span><Input value={draft.dailyTime ?? "09:00"} placeholder="09:00" onChange={(dailyTime) => setDraft((current) => ({...current,dailyTime}))}/></label> : <span/>}</div>{draft.scheduleKind === "daily" ? <label className={styles.switchRow}><span><strong>{t("启用自动运行")}</strong><small>{t("Flowlet 在托盘运行且电脑处于唤醒状态时生效。")}</small></span><Switch checked={draft.enabled} onChange={(enabled) => setDraft((current) => ({...current,enabled}))}/></label> : null}<label><span>{t("会话策略")}</span><Select value={draft.sessionPolicy} optionList={[{value:"fresh",label:t("每次新建会话（推荐）")},{value:"continue",label:t("延续上次成功会话")}]} onChange={(value) => setDraft((current) => ({...current,sessionPolicy:String(value) as "fresh"|"continue"}))}/><small>{t("中断恢复始终继续同一次运行的会话。")}</small></label></div>
+      <div className={styles.form}>
+        <ProjectTaskEditorFields value={draft} onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))} descriptionOptional={false} />
+        <div className={styles.formGrid}>
+          <label><span>{t("运行方式")}</span><Select value={draft.scheduleKind} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={[{value:"manual",label:t("手动多次运行")},{value:"daily",label:t("每天定时运行")}]} onChange={(value) => setDraft((current) => ({...current,scheduleKind:String(value) as "manual"|"daily",enabled:value === "daily" ? current.enabled : false}))}/></label>
+          <label><span>{t("会话策略")}</span><Select value={draft.sessionPolicy} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={[{value:"fresh",label:t("每次新建会话（推荐）")},{value:"continue",label:t("延续上次成功会话")}]} onChange={(value) => setDraft((current) => ({...current,sessionPolicy:String(value) as "fresh"|"continue"}))}/><small>{t("中断恢复始终继续同一次运行的会话。")}</small></label>
+        </div>
+        {draft.scheduleKind === "daily" ? <><div className={styles.formGrid}><label><span>{t("每日时间")}</span><Input value={draft.dailyTime ?? "09:00"} placeholder="09:00" onChange={(dailyTime) => setDraft((current) => ({...current,dailyTime}))}/></label><span/></div><label className={styles.switchRow}><span><strong>{t("启用自动运行")}</strong><small>{t("Flowlet 在托盘运行且电脑处于唤醒状态时生效。")}</small></span><Switch checked={draft.enabled} onChange={(enabled) => setDraft((current) => ({...current,enabled}))}/></label></> : null}
+      </div>
     </SideSheet>
 
     <SideSheet visible={viewing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={viewing?.title ?? t("运行结果")} onCancel={() => { setViewing(null); setSelectedRun(null); }} zIndex={APP_OVERLAY_Z_INDEX.sideSheet}><div className={styles.runRecordList}>{runs.data?.length ? runs.data.map((run) => <button key={run.id} className={styles.recurringRun} onClick={() => setSelectedRun(run)}><span><strong>{run.triggerSource === "scheduled" ? t("自动运行") : run.triggerSource === "test" ? t("测试运行") : t("手动运行")}</strong><small>{formatTimestamp(run.createdAt, language)}</small></span><Tag color={run.status === "succeeded" ? "green" : run.status === "failed" ? "red" : "blue"}>{run.status}</Tag></button>) : <Empty title={t("暂无运行结果")}/>}</div></SideSheet>

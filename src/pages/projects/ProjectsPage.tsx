@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Dropdown, Empty, Input, Modal, Select, SideSheet, Tabs, Tag, TextArea, Toast, Tooltip } from "@douyinfe/semi-ui-19";
-import { IconAIEditLevel1, IconChevronRight, IconCopy, IconDelete, IconEdit, IconFolder, IconMore, IconPlus, IconRefresh, IconSearch, IconStop, IconTickCircle, IconTop, IconUndo } from "@douyinfe/semi-icons";
+import { Button, Dropdown, Empty, Input, Modal, SideSheet, Tabs, Tag, TextArea, Toast, Tooltip } from "@douyinfe/semi-ui-19";
+import { IconChevronRight, IconCopy, IconDelete, IconEdit, IconFolder, IconMore, IconPlus, IconRefresh, IconSearch, IconStop, IconTickCircle, IconTop, IconUndo } from "@douyinfe/semi-icons";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -11,17 +11,15 @@ import type { BackgroundJobEvent } from "../../domains/background-task/types";
 import { agentSessionCommands } from "../../domains/agent-session/commands";
 import type { AgentSessionFlowletUsage, AgentSessionNativeUsage } from "../../domains/agent-session/types";
 import { deviceSyncCommands } from "../../domains/device-sync/commands";
-import { MIN_TITLE_GENERATION_DESCRIPTION_LENGTH, canAutoGenerateTaskTitle, generateTaskTitle } from "../../domains/project/generateTaskTitle";
 import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskQueueBlocker, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
-import { proxyCommands } from "../../domains/proxy/commands";
 import { taskExecutionHistory, taskExecutionRound, taskHasExecution, taskIsRevisionDraft, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "../../domains/project/types";
 import { SessionConversation } from "../../features/agent-sessions/SessionConversation";
 import { interactionEventsVersion, useSessionScrollFollow } from "../../features/agent-sessions/useSessionScrollFollow";
 import { useAgentSessionTimeline } from "../../features/agent-sessions/useAgentSessions";
 import { useBackgroundTaskDetail } from "../../features/background-tasks/useBackgroundTasks";
 import { newProject, newProjectTask, useProject, useProjectActions, useProjects, useProjectTaskActions, useProjectTaskRunnerActions, useProjectTaskScheduler, useProjectTasks, useRecurringTaskActions } from "../../features/projects/useProjects";
+import { ProjectTaskEditorFields } from "./ProjectTaskEditorFields";
 import { RecurringTasksPanel } from "./RecurringTasksPanel";
-import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
 import { errorMessage } from "../../shared/errors/AppError";
 import { formatCostAmount } from "../../shared/formatters/cost";
 import { formatFullTimestamp, formatTimestamp } from "../../shared/formatters/datetime";
@@ -242,13 +240,6 @@ export function buildDoneTaskTree(doneTasks: ProjectTask[]): { childrenMap: Map<
   return { childrenMap, roots };
 }
 
-const TASK_TYPES: Array<{ value: ProjectTaskType; label: string }> = [
-  { value: "code", label: "代码修改" },
-  { value: "readonly", label: "只读分析" },
-];
-
-const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex"];
-
 function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runnerState, queued, queueBlockers, search }: { project: Project; tasks: ReturnType<typeof useProjectTasks>; sharedProjects: Awaited<ReturnType<typeof deviceSyncCommands.projects>>; sharedProjectsError: string | null; runnerState?: ProjectTaskRunnerState; queued: ProjectTask[]; queueBlockers: ProjectTaskQueueBlocker[]; search: string }) {
   const { language, t } = useAppPreferences();
   const actions = useProjectTaskActions(project.id);
@@ -281,14 +272,9 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
   const [converting, setConverting] = useState<ProjectTask | null>(null);
   const [convertDescription, setConvertDescription] = useState("");
   const [draft, setDraft] = useState({ title: "", description: "", taskType: "code" as ProjectTaskType, agentProfile: "Claude Code", baseTaskId: null as string | null });
-  const [generatingTitle, setGeneratingTitle] = useState(false);
-  // 标题流式生成过程中的实时进度（展示在「任务标题」名称右侧，缓解等待焦虑）。
-  const [titleGenStatus, setTitleGenStatus] = useState<string | null>(null);
   const [doneDrawerOpen, setDoneDrawerOpen] = useState(false);
   // 已完成列中父任务卡片收缩/展开状态：子任务收缩到父任务卡片内展示，默认展开。
   const [collapsedDoneParents, setCollapsedDoneParents] = useState<Set<string>>(() => new Set());
-  // 自动生成标题需要本地代理（Base URL）与客户端 Token。
-  const proxyBindConfig = useProxyBindConfig();
   // 看板卡片左下角的时间标签（等待 / 执行时长）需要持续前进的时钟：
   // 看板卡片左下角的时间标签（等待 / 执行时长）需要持续前进的时钟：
   // 与看板数据刷新保持同一节奏（每秒推进一次），让进行中任务的执行时间
@@ -389,35 +375,6 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
     if (!editing || !draft.title.trim()) return;
     const task = editing === "new" ? { ...newProjectTask(project.id, draft.title, draft.baseTaskId), description: draft.description.trim(), taskType: draft.taskType, agentProfile: draft.agentProfile } : { ...editing, ...draft, title: draft.title.trim(), description: draft.description.trim(), updatedAt: new Date().toISOString() };
     try { await actions.saveTask.mutateAsync(task); Toast.success(t("任务已保存")); setEditing(null); } catch (error) { Toast.error(errorMessage(error)); }
-  };
-  // 自动生成标题：调用本地代理的 flowlet-flash 生成 -> 写入标题输入框。
-  const autoGenerateTitle = async () => {
-    if (!canAutoGenerateTaskTitle(draft.description)) return;
-    const port = proxyBindConfig.data?.port ?? 18640;
-    const baseUrl = `http://127.0.0.1:${port}`;
-    const clientToken = proxyBindConfig.data?.default_client_token;
-    setGeneratingTitle(true);
-    setTitleGenStatus(t("AI 正在生成标题…"));
-    try {
-      const status = await proxyCommands.status();
-      if (!status.running) {
-        Toast.warning(t("本地代理未运行，无法自动生成标题"));
-        return;
-      }
-      const title = await generateTaskTitle(
-        { baseUrl, clientToken, description: draft.description, taskType: draft.taskType },
-        (progress) => {
-          setTitleGenStatus(t("AI 生成中… 已输出 {tokens} tokens，{seconds} 秒", { tokens: progress.tokenEstimate, seconds: Math.max(1, Math.round(progress.elapsedMs / 1000)) }));
-        },
-      );
-      setDraft((current) => ({ ...current, title }));
-      Toast.success(t("标题已生成"));
-    } catch (error) {
-      Toast.error(errorMessage(error));
-    } finally {
-      setGeneratingTitle(false);
-      setTitleGenStatus(null);
-    }
   };
   // 提交 / 撤回仅在草稿与已提交之间流转（in_progress 由执行器管理，review 由审核管理）。
   // 提交后立即尝试执行一次：领取成功直接进入执行中并刷新看板；领取失败（执行槽忙）
@@ -656,7 +613,7 @@ function TaskBoard({ project, tasks, sharedProjects, sharedProjectsError, runner
     )}
     {!tasks.isError && showDoneDrawerEntry ? <button className={styles.doneDrawerEntry} onClick={() => setDoneDrawerOpen(true)} title={t("查看已完成任务")}><IconChevronRight size="small" /><span>{t("已完成")}</span></button> : null}
     <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建任务") : editing && taskIsRevisionDraft(editing) ? t("编辑第 {n} 轮草稿", { n: taskExecutionRound(editing) }) : t("编辑任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span>{editing !== "new" && editing ? <Button type="danger" theme="borderless" icon={<IconDelete />} onClick={() => setDeleting(editing)}>{t("删除")}</Button> : null}</span><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button type="primary" theme="solid" loading={actions.saveTask.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
-      <div className={styles.form}>{editing !== "new" && editing && taskIsRevisionDraft(editing) ? <div className={`${styles.formNote} ${styles.revisionDraftNote}`}><span>{t("之前各轮的执行历史和最近退回原因已保留。")}</span><Button size="small" theme="borderless" onClick={() => openTaskHistory(editing, true)}>{t("查看历史")}</Button></div> : null}<label><span className={styles.titleFieldLabel}>{t("任务标题")}{generatingTitle && titleGenStatus ? <small className={styles.titleGenStatus}>{titleGenStatus}</small> : null}</span><div className={styles.titleInputRow}><Input autoFocus composition value={draft.title} maxLength={120} onChange={(title) => setDraft((current) => ({ ...current, title }))} /><Button icon={<IconAIEditLevel1 />} aria-label={t("自动生成标题")} title={canAutoGenerateTaskTitle(draft.description) ? t("根据任务描述自动生成标题") : t("任务描述至少 {n} 字后可自动生成", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })} loading={generatingTitle} disabled={!canAutoGenerateTaskTitle(draft.description)} onClick={() => void autoGenerateTitle()} /></div>{!canAutoGenerateTaskTitle(draft.description) ? <small className={styles.titleGenerateHint}>{t("任务描述至少 {n} 字后可自动生成标题", { n: MIN_TITLE_GENERATION_DESCRIPTION_LENGTH })}</small> : null}</label><label><span>{t("任务描述（可选）")}</span><TextArea composition value={draft.description} autosize={{ minRows: 9, maxRows: 12 }} onChange={(description) => setDraft((current) => ({ ...current, description }))} /></label><div className={styles.formGrid}><label><span>{t("任务类型")}</span><Select value={draft.taskType} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={TASK_TYPES.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value) => setDraft((current) => ({ ...current, taskType: String(value) as ProjectTaskType }))} /></label><label><span>{t("Agent Profile")}</span><Select value={draft.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} onChange={(value) => setDraft((current) => ({ ...current, agentProfile: String(value) }))} /></label></div>{draft.baseTaskId ? <div className={styles.formNote}>{t("基于父任务：{id}（{title}）", { id: shortTaskId(draft.baseTaskId), title: taskById.get(draft.baseTaskId)?.title ?? t("已完成任务") })}</div> : null}</div>
+      <div className={styles.form}>{editing !== "new" && editing && taskIsRevisionDraft(editing) ? <div className={`${styles.formNote} ${styles.revisionDraftNote}`}><span>{t("之前各轮的执行历史和最近退回原因已保留。")}</span><Button size="small" theme="borderless" onClick={() => openTaskHistory(editing, true)}>{t("查看历史")}</Button></div> : null}<ProjectTaskEditorFields value={draft} onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))} />{draft.baseTaskId ? <div className={styles.formNote}>{t("基于父任务：{id}（{title}）", { id: shortTaskId(draft.baseTaskId), title: taskById.get(draft.baseTaskId)?.title ?? t("已完成任务") })}</div> : null}</div>
     </SideSheet>
     <Modal title={t("删除任务“{name}”？", { name: deleting?.title ?? "" })} visible={deleting != null} zIndex={APP_OVERLAY_Z_INDEX.modal} okType="danger" okText={t("删除")} cancelText={t("取消")} maskClosable={false} onCancel={() => setDeleting(null)} onOk={() => void removeEditingTask()} okButtonProps={{ loading: actions.deleteTask.isPending }}>
       <div className={styles.form}><p>{t("删除后任务将从项目看板移除，此操作不可撤销。")}</p></div>

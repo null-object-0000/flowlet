@@ -294,6 +294,12 @@ pub(crate) fn apply_sync_channel_presets(state: tauri::State<'_, AppState>) -> R
         );
     }
 
+    state.runtime_config.update(|snapshot| {
+        snapshot.channels = presets;
+        snapshot.accounts = accounts;
+        snapshot.routes = merged;
+    });
+
     Ok(())
 }
 
@@ -373,11 +379,9 @@ pub(crate) async fn query_balance(
     account_id: String,
 ) -> Result<BalanceQueryResult, String> {
     let account = {
-        let accounts = state
+        let snapshot = state.runtime_config.snapshot();
+        snapshot
             .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        accounts
             .iter()
             .find(|a| a.id == account_id)
             .ok_or("账号不存在")?
@@ -443,27 +447,35 @@ pub(crate) async fn query_balance(
         if !uses_management_key {
             let _ = state.storage.mark_account_credential_healthy(&account_id);
         }
-        if let Ok(mut shared) = state.accounts.lock() {
-            if let Some(shared_account) = shared.iter_mut().find(|item| item.id == account_id) {
+        state.runtime_config.update(|snapshot| {
+            if let Some(shared_account) = snapshot
+                .accounts
+                .iter_mut()
+                .find(|item| item.id == account_id)
+            {
                 if !uses_management_key {
                     shared_account.credential_status =
                         crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
                 }
                 shared_account.last_error = None;
             }
-        }
+        });
     }
     if let Some(ref err) = result.error {
         let _ = state.storage.update_account_last_error(&account_id, err);
         if !uses_management_key && (err.contains("HTTP 401") || err.contains("401")) {
             let _ = state.storage.mark_account_credential_invalid(&account_id);
-            if let Ok(mut shared) = state.accounts.lock() {
-                if let Some(shared_account) = shared.iter_mut().find(|item| item.id == account_id) {
+            state.runtime_config.update(|snapshot| {
+                if let Some(shared_account) = snapshot
+                    .accounts
+                    .iter_mut()
+                    .find(|item| item.id == account_id)
+                {
                     shared_account.credential_status =
                         crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
                     shared_account.last_error = Some(err.clone());
                 }
-            }
+            });
         }
     } else {
         let now = chrono::Utc::now().to_rfc3339();
@@ -527,9 +539,9 @@ pub(crate) async fn fetch_channel_models(
         .map_err(|_| "锁定渠道运行时配置失败".to_string())?
         .clone();
     let preset = state
+        .runtime_config
+        .snapshot()
         .channels
-        .lock()
-        .map_err(|_| "读取渠道模板失败".to_string())?
         .iter()
         .find(|preset| preset.id == channel_id)
         .cloned();
@@ -692,11 +704,7 @@ pub(crate) fn account_stats(
 pub(crate) fn list_route_rules(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<RouteRule>, String> {
-    state
-        .rules
-        .lock()
-        .map(|rules| rules.clone())
-        .map_err(|_| "读取路由规则失败".to_string())
+    Ok(state.runtime_config.snapshot().rules.clone())
 }
 
 #[tauri::command]
@@ -705,15 +713,17 @@ pub(crate) fn save_route_rules(
     rules: Vec<RouteRule>,
 ) -> Result<(), String> {
     state
-        .storage
-        .save_route_rules(&rules)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .rules
-        .lock()
-        .map_err(|_| "保存路由规则失败".to_string())?;
-    *current = rules;
+        .runtime_config
+        .update_after(
+            || {
+                state
+                    .storage
+                    .save_route_rules(&rules)
+                    .map_err(|err| err.to_string())?;
+                Ok::<_, String>(rules)
+            },
+            |snapshot, persisted| snapshot.rules = persisted.clone(),
+        )?;
     Ok(())
 }
 
@@ -785,11 +795,9 @@ pub(crate) async fn open_scrape_console(
     }
 
     let mode = {
-        let accounts = state
+        let snapshot = state.runtime_config.snapshot();
+        let account = snapshot
             .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        let account = accounts
             .iter()
             .find(|a| a.id == account_id)
             .ok_or("账号不存在")?;
@@ -806,11 +814,9 @@ pub(crate) async fn open_scrape_console(
     };
 
     let channel_id = {
-        let accounts = state
+        let snapshot = state.runtime_config.snapshot();
+        snapshot
             .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        accounts
             .iter()
             .find(|account| account.id == account_id)
             .map(|account| account.channel_id.clone())
@@ -920,11 +926,9 @@ pub(crate) async fn handle_scrape_interceptor_ready(
         return Err("抓取监听状态参数过长".to_string());
     }
     {
-        let accounts = state
+        let snapshot = state.runtime_config.snapshot();
+        let account = snapshot
             .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        let account = accounts
             .iter()
             .find(|account| account.id == account_id)
             .ok_or("抓取窗口对应账号不存在")?;
@@ -973,11 +977,9 @@ pub(crate) async fn handle_intercepted_response(
         return Err("抓取响应超过 8 MB，已拒绝写入缓冲".to_string());
     }
     {
-        let accounts = state
+        let snapshot = state.runtime_config.snapshot();
+        let account = snapshot
             .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        let account = accounts
             .iter()
             .find(|account| account.id == account_id)
             .ok_or("抓取窗口对应账号不存在")?;
@@ -1582,11 +1584,9 @@ pub(crate) async fn probe_scrape_login(
     // 1. 先解析账号与抓取模式。交互式刷新从这里开始占用该账号，直到完整抓取成功；
     //    后台轮次看到这个标记后必须跳过，不能重新导航用户正在登录的 WebView。
     let (channel_id, mode) = {
-        let accounts = state
+        let snapshot = state.runtime_config.snapshot();
+        let account = snapshot
             .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        let account = accounts
             .iter()
             .find(|a| a.id == account_id)
             .ok_or("账号不存在")?;
@@ -1948,11 +1948,9 @@ pub(crate) async fn scrape_balance(
     }
     // 1. 解析模式配置。
     let mode = {
-        let accounts = state
+        let snapshot = state.runtime_config.snapshot();
+        let account = snapshot
             .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
-        let account = accounts
             .iter()
             .find(|a| a.id == account_id)
             .ok_or("账号不存在")?;
@@ -2229,15 +2227,13 @@ pub(crate) async fn sync_scrape_balances(
     trigger_source: String,
 ) -> Result<ScrapeBalanceSyncResult, String> {
     let accounts = {
-        let accounts = state
-            .accounts
-            .lock()
-            .map_err(|_| "读取账号失败".to_string())?;
+        let snapshot = state.runtime_config.snapshot();
         let config = state
             .channels_config
             .lock()
             .map_err(|_| "锁定渠道配置失败".to_string())?;
-        accounts
+        snapshot
+            .accounts
             .iter()
             .filter_map(|account| {
                 let method = channel_resource_sync_method(&config, account)?;

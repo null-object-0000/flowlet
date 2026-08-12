@@ -191,6 +191,21 @@ Anthropic-compatible Channel Account
 - 不补 `usage`。
 - 不解析或重组 SSE。
 
+## 运行时配置快照
+
+渠道模板、渠道账号、路由候选、路由规则和虚拟模型由 Rust 端
+`RuntimeConfigStore` 统一发布为带单调递增 `revision` 的不可变
+`RuntimeConfigSnapshot`。SQLite 仍是持久化事实源；配置 mutation 只有在持久化成功后
+才发布下一版内存快照。
+
+代理处理单个请求时只读取一次当前快照，并在该请求的完整路由过程中持有同一个
+`Arc<RuntimeConfigSnapshot>`。因此同一请求使用的渠道、账号、路由和规则必定属于同一
+revision，不会观察到多个配置集合依次更新时的中间状态。旧请求可以继续安全使用旧快照，
+新请求自动读取最新 revision，无需重启代理。
+
+路由性能分数和轮询游标属于易变运行态，不进入配置快照；Client Token、监听地址和日志捕获
+配置也保持各自现有的生命周期。该快照机制没有改变 SQLite 表结构或 `config.json` 字段。
+
 ## Agent 本机环境探测
 
 Agent 接入向导通过只读 Tauri command 探测本机 CLI 环境，前端不直接读取文件系统或执行 Shell。调用链为：

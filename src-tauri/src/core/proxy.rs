@@ -1,11 +1,16 @@
 use super::agent_session_identity::{from_http_headers, AgentSessionIdentity};
 use super::channels_config::openai_path_strips_v1;
 use super::config::{
-    classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType,
-    ProxyBindConfig, RequestLogInput, RouteCandidate, RouteRule, UsageRecordInput,
+    classify_request, ChannelAccount, LogCaptureConfig, ProtocolType, ProxyBindConfig,
+    RequestLogInput, UsageRecordInput,
 };
+#[cfg(test)]
+use super::config::{ChannelPreset, RouteCandidate};
 use super::power::{ActivityPermit, ActivityTracker};
 use super::rate_limiter::RateLimiter;
+#[cfg(test)]
+use super::runtime_config::RuntimeConfigSnapshot;
+use super::runtime_config::RuntimeConfigStore;
 use super::storage::Storage;
 use super::usage::{
     contains_sse_output_token, extract_response_usage, extract_stream_usage, ResponseUsage,
@@ -38,10 +43,7 @@ use tokio::sync::oneshot;
 
 #[derive(Clone)]
 pub struct ProxySharedConfig {
-    pub channels: Arc<Mutex<Vec<ChannelPreset>>>,
-    pub accounts: Arc<Mutex<Vec<ChannelAccount>>>,
-    pub routes: Arc<Mutex<Vec<RouteCandidate>>>,
-    pub rules: Arc<Mutex<Vec<RouteRule>>>,
+    pub runtime_config: RuntimeConfigStore,
     pub scores: Arc<Mutex<Vec<(String, String, f64, f64, f64)>>>,
     pub round_robin: Arc<Mutex<HashMap<String, usize>>>,
 }
@@ -54,16 +56,27 @@ fn mark_account_credential_invalid(
 ) {
     let _ = storage.update_account_last_error(account_id, message);
     let _ = storage.mark_account_credential_invalid(account_id);
-    if let Ok(mut shared_accounts) = shared.accounts.lock() {
-        if let Some(account) = shared_accounts
-            .iter_mut()
-            .find(|item| item.id == account_id)
-        {
-            account.last_error = Some(message.to_string());
-            account.credential_status =
-                crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
-        }
-    }
+    shared.runtime_config.update_if(
+        |snapshot| {
+            snapshot.accounts.iter().any(|account| {
+                account.id == account_id
+                    && (account.last_error.as_deref() != Some(message)
+                        || account.credential_status
+                            != crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY)
+            })
+        },
+        |snapshot| {
+            if let Some(account) = snapshot
+                .accounts
+                .iter_mut()
+                .find(|item| item.id == account_id)
+            {
+                account.last_error = Some(message.to_string());
+                account.credential_status =
+                    crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
+            }
+        },
+    );
 }
 
 fn is_transient_deactivated_account(account: &ChannelAccount) -> bool {
@@ -81,15 +94,27 @@ fn mark_account_credential_recovered(
 ) {
     let _ = storage.mark_account_credential_healthy(account_id);
     let _ = storage.update_account_last_used(account_id);
-    if let Ok(mut shared_accounts) = shared.accounts.lock() {
-        if let Some(account) = shared_accounts
-            .iter_mut()
-            .find(|item| item.id == account_id)
-        {
-            account.last_error = None;
-            account.credential_status = crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
-        }
-    }
+    shared.runtime_config.update_if(
+        |snapshot| {
+            snapshot.accounts.iter().any(|account| {
+                account.id == account_id
+                    && (account.last_error.is_some()
+                        || account.credential_status
+                            != crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY)
+            })
+        },
+        |snapshot| {
+            if let Some(account) = snapshot
+                .accounts
+                .iter_mut()
+                .find(|item| item.id == account_id)
+            {
+                account.last_error = None;
+                account.credential_status =
+                    crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+            }
+        },
+    );
 }
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18640";
@@ -522,9 +547,10 @@ async fn forward_request(
 
     let agent_session = extract_agent_session(&parts.headers);
 
-    // 热更新：从共享锁读取最新配置
-    let routes = state.shared.routes.lock().unwrap().clone();
-    let mut accounts = state.shared.accounts.lock().unwrap().clone();
+    // 热更新：一次请求只读取一个 revision，避免渠道、账号、路由和规则跨版本混用。
+    let config_snapshot = state.shared.runtime_config.snapshot();
+    let routes = &config_snapshot.routes;
+    let mut accounts = config_snapshot.accounts.clone();
     // account_deactivated 可能由上游后台临时停用造成。该状态仍允许每次新请求探测；
     // 一旦成功即恢复 healthy。真正的 401 invalid_key 仍然会被路由层排除。
     for account in &mut accounts {
@@ -532,20 +558,20 @@ async fn forward_request(
             account.credential_status = crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
         }
     }
-    let channels = state.shared.channels.lock().unwrap().clone();
+    let channels = &config_snapshot.channels;
     let default_client_token = state
         .bind_config
         .lock()
         .map(|c| c.default_client_token.clone())
         .unwrap_or_default();
-    let rules = state.shared.rules.lock().unwrap().clone();
+    let rules = &config_snapshot.rules;
     let scores = state.shared.scores.lock().unwrap().clone();
 
     if is_model_list_request(&parts.method, &path) {
         return Ok(build_model_list_response(
-            &routes,
+            routes,
             &accounts,
-            &channels,
+            channels,
             &detected_protocol,
         ));
     }

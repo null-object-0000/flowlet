@@ -201,14 +201,15 @@ pub(crate) fn import_config(state: tauri::State<'_, AppState>, json: String) -> 
         .list_virtual_models()
         .map_err(|error| error.to_string())?;
 
-    *state.channels.lock().map_err(|_| "锁失败".to_string())? = channels;
-    *state.accounts.lock().map_err(|_| "锁失败".to_string())? = accounts;
-    *state.routes.lock().map_err(|_| "锁失败".to_string())? = routes;
-    *state.rules.lock().map_err(|_| "锁失败".to_string())? = rules;
-    *state
-        .virtual_models
-        .lock()
-        .map_err(|_| "锁失败".to_string())? = virtual_models;
+    state
+        .runtime_config
+        .replace(crate::core::runtime_config::RuntimeConfigSnapshot::new(
+            channels,
+            accounts,
+            routes,
+            rules,
+            virtual_models,
+        ));
     Ok(())
 }
 

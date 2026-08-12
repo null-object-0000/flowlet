@@ -27,6 +27,7 @@ pub mod presets;
 pub(crate) mod project_workspace_sync;
 pub mod proxy;
 pub mod rate_limiter;
+pub mod runtime_config;
 pub mod scrape_console;
 pub mod storage;
 pub mod sync;

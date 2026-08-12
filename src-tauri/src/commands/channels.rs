@@ -7,11 +7,7 @@ use crate::AppState;
 pub(crate) fn list_channel_presets(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ChannelPreset>, String> {
-    state
-        .channels
-        .lock()
-        .map(|channels| channels.clone())
-        .map_err(|_| "读取渠道模板失败".to_string())
+    Ok(state.runtime_config.snapshot().channels.clone())
 }
 
 #[tauri::command]
@@ -20,15 +16,17 @@ pub(crate) fn save_channel_presets(
     presets: Vec<ChannelPreset>,
 ) -> Result<(), String> {
     state
-        .storage
-        .save_channel_presets(&presets)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .channels
-        .lock()
-        .map_err(|_| "保存渠道模板失败".to_string())?;
-    *current = presets;
+        .runtime_config
+        .update_after(
+            || {
+                state
+                    .storage
+                    .save_channel_presets(&presets)
+                    .map_err(|err| err.to_string())?;
+                Ok::<_, String>(presets)
+            },
+            |snapshot, persisted| snapshot.channels = persisted.clone(),
+        )?;
     Ok(())
 }
 
@@ -36,11 +34,7 @@ pub(crate) fn save_channel_presets(
 pub(crate) fn list_channel_accounts(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ChannelAccount>, String> {
-    state
-        .accounts
-        .lock()
-        .map(|accounts| accounts.clone())
-        .map_err(|_| "读取账号配置失败".to_string())
+    Ok(state.runtime_config.snapshot().accounts.clone())
 }
 
 #[tauri::command]
@@ -57,22 +51,23 @@ pub(crate) async fn save_channel_accounts(
     {
         crate::core::account_workspace_sync::push_accounts(&state.storage, &mut accounts).await?;
     }
-    state
-        .storage
-        .save_channel_accounts(&accounts)
-        .map_err(|err| err.to_string())?;
-
-    // 从数据库重新读取规范化后的账号列表（API Key 变化时 credential_status 已被重置）。
+    // 保存后从数据库重新读取规范化账号（API Key 变化时 credential_status 已重置）；
+    // 保存或重读任一步失败都不会发布新的运行时 revision。
     let normalized = state
-        .storage
-        .list_channel_accounts()
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .accounts
-        .lock()
-        .map_err(|_| "保存账号配置失败".to_string())?;
-    *current = normalized.clone();
+        .runtime_config
+        .update_after(
+            || {
+                state
+                    .storage
+                    .save_channel_accounts(&accounts)
+                    .map_err(|err| err.to_string())?;
+                state
+                    .storage
+                    .list_channel_accounts()
+                    .map_err(|err| err.to_string())
+            },
+            |snapshot, normalized| snapshot.accounts = normalized.clone(),
+        )?;
     Ok(normalized)
 }
 
@@ -80,11 +75,7 @@ pub(crate) async fn save_channel_accounts(
 pub(crate) fn list_route_candidates(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<RouteCandidate>, String> {
-    state
-        .routes
-        .lock()
-        .map(|routes| routes.clone())
-        .map_err(|_| "读取路由配置失败".to_string())
+    Ok(state.runtime_config.snapshot().routes.clone())
 }
 
 #[tauri::command]
@@ -93,20 +84,18 @@ pub(crate) fn save_route_candidates(
     routes: Vec<RouteCandidate>,
 ) -> Result<(), String> {
     state
-        .storage
-        .save_route_candidates(&routes)
-        .map_err(|err| {
-            let msg = err.to_string();
-            tracing::error!(error = %msg, "保存路由候选失败");
-            msg
-        })?;
-
-    let mut current = state.routes.lock().map_err(|_| {
-        let msg = "保存路由配置失败".to_string();
-        tracing::error!("{}", msg);
-        msg
-    })?;
-    *current = routes;
+        .runtime_config
+        .update_after(
+            || {
+                state.storage.save_route_candidates(&routes).map_err(|err| {
+                    let msg = err.to_string();
+                    tracing::error!(error = %msg, "保存路由候选失败");
+                    msg
+                })?;
+                Ok::<_, String>(routes)
+            },
+            |snapshot, persisted| snapshot.routes = persisted.clone(),
+        )?;
     Ok(())
 }
 
@@ -124,11 +113,7 @@ pub(crate) fn list_channel_models(
 pub(crate) fn list_virtual_models(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<VirtualModel>, String> {
-    state
-        .virtual_models
-        .lock()
-        .map(|models| models.clone())
-        .map_err(|_| "读取虚拟模型失败".to_string())
+    Ok(state.runtime_config.snapshot().virtual_models.clone())
 }
 
 #[tauri::command]
@@ -137,14 +122,16 @@ pub(crate) fn save_virtual_models(
     models: Vec<VirtualModel>,
 ) -> Result<(), String> {
     state
-        .storage
-        .save_virtual_models(&models)
-        .map_err(|err| err.to_string())?;
-
-    let mut current = state
-        .virtual_models
-        .lock()
-        .map_err(|_| "保存虚拟模型失败".to_string())?;
-    *current = models;
+        .runtime_config
+        .update_after(
+            || {
+                state
+                    .storage
+                    .save_virtual_models(&models)
+                    .map_err(|err| err.to_string())?;
+                Ok::<_, String>(models)
+            },
+            |snapshot, persisted| snapshot.virtual_models = persisted.clone(),
+        )?;
     Ok(())
 }

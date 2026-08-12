@@ -49,9 +49,8 @@ fn refresh_accounts(state: &tauri::State<'_, AppState>) -> Result<(), String> {
         .storage
         .list_channel_accounts()
         .map_err(|error| error.to_string())?;
-    *state
-        .accounts
-        .lock()
-        .map_err(|_| "刷新账号工作区缓存失败".to_string())? = accounts;
+    state
+        .runtime_config
+        .update(|snapshot| snapshot.accounts = accounts);
     Ok(())
 }

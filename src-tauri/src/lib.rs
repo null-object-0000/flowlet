@@ -8,8 +8,7 @@ mod mobile_commands;
 use core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 #[cfg(desktop)]
 use core::config::{
-    ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig, RouteCandidate,
-    RouteRule, VirtualModel,
+    ChannelAccount, LogCaptureConfig, ProtocolType, ProxyBindConfig, RouteCandidate, VirtualModel,
 };
 #[cfg(desktop)]
 use core::device_identity::DeviceIdentity;
@@ -17,6 +16,8 @@ use core::device_identity::DeviceIdentity;
 use core::presets::builtin_channel_presets;
 #[cfg(desktop)]
 use core::proxy::ProxyController;
+#[cfg(desktop)]
+use core::runtime_config::{RuntimeConfigSnapshot, RuntimeConfigStore};
 use core::storage::Storage;
 #[cfg(desktop)]
 use std::path::PathBuf;
@@ -35,11 +36,7 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 #[cfg(desktop)]
 struct AppState {
     proxy: ProxyController,
-    channels: Arc<Mutex<Vec<ChannelPreset>>>,
-    accounts: Arc<Mutex<Vec<ChannelAccount>>>,
-    routes: Arc<Mutex<Vec<RouteCandidate>>>,
-    virtual_models: Arc<Mutex<Vec<VirtualModel>>>,
-    rules: Arc<Mutex<Vec<RouteRule>>>,
+    runtime_config: RuntimeConfigStore,
     storage: Storage,
     device_identity: Arc<Mutex<DeviceIdentity>>,
     device_identity_dir: std::path::PathBuf,
@@ -119,10 +116,7 @@ impl AppState {
             .unwrap_or_else(|_| ProxyBindConfig::default().bind_addr());
         Ok(ProxyStartupConfig {
             shared: core::proxy::ProxySharedConfig {
-                channels: Arc::clone(&self.channels),
-                accounts: Arc::clone(&self.accounts),
-                routes: Arc::clone(&self.routes),
-                rules: Arc::clone(&self.rules),
+                runtime_config: self.runtime_config.clone(),
                 scores: Arc::new(Mutex::new(Vec::new())),
                 round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
             },
@@ -465,11 +459,13 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
             inner: Arc::new(Mutex::new(core::proxy::ProxyRuntime::default())),
             bind_config: Arc::new(Mutex::new(bind_config.clone())),
         },
-        channels: Arc::new(Mutex::new(channels)),
-        accounts: Arc::new(Mutex::new(accounts)),
-        routes: Arc::new(Mutex::new(routes)),
-        virtual_models: Arc::new(Mutex::new(virtual_models)),
-        rules: Arc::new(Mutex::new(rules)),
+        runtime_config: RuntimeConfigStore::new(RuntimeConfigSnapshot::new(
+            channels,
+            accounts,
+            routes,
+            rules,
+            virtual_models,
+        )),
         storage,
         device_identity: Arc::new(Mutex::new(device_identity)),
         device_identity_dir,
@@ -1011,7 +1007,7 @@ fn run_desktop() {
             // Tauri runtime 仍然存活，因此定时同步会继续运行，退出 Flowlet 时停止。
             let s3_timer_storage = state.storage.clone();
             let s3_timer_identity = state.device_identity.clone();
-            let s3_timer_accounts = state.accounts.clone();
+            let s3_timer_runtime_config = state.runtime_config.clone();
             tauri::async_runtime::spawn(async move {
                 let period = crate::core::device_sync::AUTO_SYNC_INTERVAL;
                 let mut interval = tokio::time::interval_at(
@@ -1083,9 +1079,8 @@ fn run_desktop() {
                         {
                             Ok(result) => {
                                 if let Ok(accounts) = s3_timer_storage.list_channel_accounts() {
-                                    if let Ok(mut current) = s3_timer_accounts.lock() {
-                                        *current = accounts;
-                                    }
+                                    s3_timer_runtime_config
+                                        .update(|snapshot| snapshot.accounts = accounts);
                                 }
                                 tracing::info!(
                                     revision = result.revision,

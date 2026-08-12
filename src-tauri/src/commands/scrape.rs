@@ -1,13 +1,12 @@
+use crate::core::channel_capability_adapter::{
+    query_channel_balance, supports_official_balance, sync_channel_models,
+};
 use crate::core::channels_config::ChannelsConfig;
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelPreset, RouteCandidate,
     RouteRule,
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
-use crate::core::sync::{
-    query_deepseek_balance, query_kimi_balance, query_openrouter_balance, sync_deepseek_models,
-    sync_kimi_models, sync_longcat_models, sync_openai_compatible_models, sync_qwen_models,
-};
 use crate::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
@@ -388,16 +387,19 @@ pub(crate) async fn query_balance(
             .clone()
     };
 
-    // 目前支持 DeepSeek、Kimi 和 OpenRouter 余额查询
-    if account.channel_id != "deepseek"
-        && account.channel_id != "kimi"
-        && account.channel_id != "openrouter"
-    {
+    let preset_supports_balance = state
+        .runtime_config
+        .snapshot()
+        .channels
+        .iter()
+        .find(|preset| preset.id == account.channel_id)
+        .is_some_and(|preset| preset.supports_balance_query);
+    if !preset_supports_balance || !supports_official_balance(&account.channel_id) {
         return Ok(BalanceQueryResult {
             balance: None,
             currency: None,
             is_available: false,
-            error: Some("当前仅 DeepSeek、Kimi 和 OpenRouter 支持余额查询".to_string()),
+            error: Some("当前渠道不支持官方余额查询".to_string()),
         });
     }
 
@@ -428,16 +430,10 @@ pub(crate) async fn query_balance(
             .enable_all()
             .build()
             .unwrap_or_else(|_| panic!("创建运行时失败"));
-        if account.channel_id == "kimi" {
-            rt.block_on(query_kimi_balance(&account, &config))
-        } else if account.channel_id == "openrouter" {
-            rt.block_on(query_openrouter_balance(&account, &config))
-        } else {
-            rt.block_on(query_deepseek_balance(&account, &config))
-        }
+        rt.block_on(query_channel_balance(&account, &config))
     })
     .await
-    .map_err(|e| format!("任务执行失败: {e}"))?;
+    .map_err(|e| format!("任务执行失败: {e}"))??;
 
     // 更新账号凭证状态与最后错误信息。
     // 测试连接成功 → 重置为 healthy；若返回 401 则标记为 invalid_key。
@@ -546,95 +542,15 @@ pub(crate) async fn fetch_channel_models(
         .find(|preset| preset.id == channel_id)
         .cloned();
 
-    let result = match channel_id.as_str() {
-        "deepseek" => tauri::async_runtime::spawn_blocking(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap_or_else(|_| panic!("创建运行时失败"));
-            rt.block_on(sync_deepseek_models(&account, &config))
-        })
-        .await
-        .map_err(|e| format!("任务执行失败: {e}"))?,
-        "longcat" => tauri::async_runtime::spawn_blocking(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap_or_else(|_| panic!("创建运行时失败"));
-            rt.block_on(sync_longcat_models(&account, &config))
-        })
-        .await
-        .map_err(|e| format!("任务执行失败: {e}"))?,
-        "kimi" => tauri::async_runtime::spawn_blocking(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap_or_else(|_| panic!("创建运行时失败"));
-            rt.block_on(sync_kimi_models(&account, &config))
-        })
-        .await
-        .map_err(|e| format!("任务执行失败: {e}"))?,
-        "qwen" => tauri::async_runtime::spawn_blocking(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap_or_else(|_| panic!("创建运行时失败"));
-            rt.block_on(sync_qwen_models(&account, &config))
-        })
-        .await
-        .map_err(|e| format!("任务执行失败: {e}"))?,
-        "custom" => {
-            let preset = preset.ok_or_else(|| "自定义渠道模板不存在".to_string())?;
-            tauri::async_runtime::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap_or_else(|_| panic!("创建运行时失败"));
-                rt.block_on(sync_openai_compatible_models(&account, &preset, None))
-            })
-            .await
-            .map_err(|e| format!("任务执行失败: {e}"))?
-        }
-        "zhipu" => {
-            let preset = preset.ok_or_else(|| "Z.AI 渠道模板不存在".to_string())?;
-            // 智谱 models 端点是 /api/paas/v4/models（不以 /v1 结尾），
-            // 显式传入配置的 endpoints.models 覆盖，避免 openai_models_url 拼出
-            // 非标准 /v1/models 变体；与 test_channel_connection 保持一致。
-            let models_url = config.models_endpoint_url("zhipu");
-            tauri::async_runtime::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap_or_else(|_| panic!("创建运行时失败"));
-                rt.block_on(sync_openai_compatible_models(&account, &preset, models_url))
-            })
-            .await
-            .map_err(|e| format!("任务执行失败: {e}"))?
-        }
-        "openrouter" => {
-            let preset = preset.ok_or_else(|| "OpenRouter 渠道模板不存在".to_string())?;
-            // OpenRouter 使用标准 OpenAI /models（/api/v1/models）。显式传入
-            // 配置的 endpoints.models 覆盖，与 test_channel_connection 一致；
-            // 未覆盖时 models_endpoint_url 也按 /api/v1 结尾正确拼接。
-            let models_url = config.models_endpoint_url("openrouter");
-            tauri::async_runtime::spawn_blocking(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap_or_else(|_| panic!("创建运行时失败"));
-                rt.block_on(sync_openai_compatible_models(&account, &preset, models_url))
-            })
-            .await
-            .map_err(|e| format!("任务执行失败: {e}"))?
-        }
-        _ => {
-            return Ok(ModelSyncResult {
-                models_synced: 0,
-                models: Vec::new(),
-                errors: vec!["当前渠道不支持拉取模型列表".to_string()],
-            });
-        }
-    };
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|_| panic!("创建运行时失败"));
+        rt.block_on(sync_channel_models(&account, preset.as_ref(), &config))
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {e}"))??;
 
     // 更新渠道模型目录（按 channel_id 替换），供模型服务页展示该渠道上游实际提供的模型。
     if result.errors.is_empty() {
@@ -2192,6 +2108,7 @@ fn channel_resource_sync_method(
         .iter()
         .find(|preset| preset.id == account.channel_id)
         .is_some_and(|preset| preset.supports_balance_query)
+        && supports_official_balance(&account.channel_id)
         && account.effective_openai_base_url().is_none();
     if supports_official_balance {
         return Some(ChannelResourceSyncMethod::OfficialApi);

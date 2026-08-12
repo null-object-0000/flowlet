@@ -325,22 +325,27 @@ Channel Account 是用户在某个渠道下配置的一组访问身份：
 
 当前版本明确一个账号只对应一个路由 API Key，不引入通用 Credential 概念。OpenRouter 的 Management Key 是渠道专用辅助字段，只调用官方 `/credits`，不会进入请求转发。普通用户不需要理解 `base_url`、`auth_type`、`headers_json` 等技术字段。UI 默认展示“选择渠道、填写账号 API Key、选择模型、测试连接、保存并启用”，高级设置再暴露底层字段。
 
-## ChannelAdapter
+## Channel Capability Adapter
 
-ChannelAdapter 为后续模型列表、价格、余额、额度和用量查询预留统一接口：
+渠道插件通过根目录 `plugin-registry.json` 的 `channelId -> adapterId` 绑定编译进 Rust 的
+Capability Adapter。`ChannelPreset.supports_*` 继续声明产品上是否开放某项能力，Adapter
+负责选择模型同步、官方余额查询和非标准上游路径的具体实现；能力只有在声明与实现同时存在时
+才可调用。同一 Adapter 可以被多个行为兼容的渠道贡献复用，command 不再按 `channel_id`
+维护分支。
+
+当前统一入口位于 `src-tauri/src/core/channel_capability_adapter.rs`：
 
 ```text
-ChannelAdapter
-  - list_models()
-  - get_model_detail()
-  - sync_prices()
-  - query_balance()
-  - query_quota()
-  - query_usage()
-  - test_connection()
+Channel contribution (plugin-registry.json)
+  -> adapterId
+    -> model sync strategy
+    -> balance query strategy (optional)
+    -> OpenAI path policy
 ```
 
-ChannelAdapter 只用于异步同步和配置辅助，不参与主请求转发。主请求转发仍然走 `proxy`，响应仍然零改写。
+认证方式与端点地址仍由 `ChannelPreset` / `config.json` 提供，Adapter 不复制 API Key、Base URL
+或 `supports_*` 配置。路径策略会在代理构建最终上游 URL 时读取，但不改变协议和报文；模型同步与
+余额查询只用于异步同步和配置辅助。主请求转发仍然走 `proxy`，响应仍然零改写。
 
 同步任务失败不能影响 AI 请求转发。失败信息只写入本地同步状态、快照表或 UI 提示。
 

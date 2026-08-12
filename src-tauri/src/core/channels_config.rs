@@ -18,7 +18,8 @@ pub const DEFAULT_CONFIG_JSON: &str =
 /// `/api/paas/v4/v1/chat/completions` 这类错误地址，因此须单独走无 `/v1` 拼接。
 /// 其余渠道（LongCat / DeepSeek / Kimi / Qwen / custom）均保留 `/v1`。
 pub(crate) fn openai_path_strips_v1(channel_id: &str) -> bool {
-    channel_id == "zhipu"
+    crate::core::channel_capability_adapter::channel_adapter(channel_id)
+        .is_some_and(|adapter| adapter.strips_openai_v1_path)
 }
 
 // ─── JSON 反序列化结构 ─────────────────────────────────────────────────────

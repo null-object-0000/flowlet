@@ -114,15 +114,8 @@ impl PluginRegistry {
                     if channel_id.trim().is_empty() || adapter_id.trim().is_empty() {
                         return Err(format!("渠道插件声明不完整：{channel_id}"));
                     }
-                    if !matches!(
-                        adapter_id.as_str(),
-                        "longcat"
-                            | "deepseek"
-                            | "kimi"
-                            | "qwen"
-                            | "custom"
-                            | "zhipu"
-                            | "openrouter"
+                    if !crate::core::channel_capability_adapter::has_channel_capability_adapter(
+                        &adapter_id,
                     ) {
                         return Err(format!(
                             "渠道插件 {channel_id} 引用了未知适配器：{adapter_id}"
@@ -204,6 +197,11 @@ impl PluginRegistry {
     }
     pub fn channels(&self) -> &[ChannelPluginDescriptor] {
         &self.channels
+    }
+    pub fn channel(&self, channel_id: &str) -> Option<&ChannelPluginDescriptor> {
+        self.channels
+            .iter()
+            .find(|channel| channel.id == channel_id)
     }
     pub fn model_catalog_source(&self) -> &str {
         &self.model_catalog_source

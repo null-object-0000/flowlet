@@ -211,9 +211,22 @@ LongCat 的模型详情请求是渠道特例；DeepSeek、Kimi 的列表结构�
 
 Token 资源包、配额、用量等能力同理。UI 应依赖渠道能力或明确的渠道特例，不应假定所有渠道都有资源包。
 
-### 5.4 Tauri command 分发
+### 5.4 Capability Adapter 与 Tauri command 分发
 
-当前 `src-tauri/src/commands.rs` 中的模型同步和余额查询仍按 `channel_id` 分发。新增实现后必须把渠道加入对应分支，并同步不支持渠道时的错误文案。
+渠道贡献必须在根目录 `plugin-registry.json` 声明 `channelId` 和 `adapterId`。编译实现集中在
+`src-tauri/src/core/channel_capability_adapter.rs`：
+
+1. 行为与既有渠道完全兼容时，复用既有 `adapterId`；
+2. 模型响应、余额响应或路径规则不兼容时，新增一个小型 Adapter，并登记模型同步策略、可选的
+   官方余额策略与路径策略；
+3. `plugin_registry` 会在启动时校验 `adapterId` 是否存在，未知 Adapter 不允许静默回退；
+4. `ChannelPreset.supports_*` 是能力声明，Adapter 是能力实现。两者必须同时存在，不能只靠
+   Adapter 绕过配置声明；
+5. 认证方式和端点继续来自 `config.json` / `ChannelPreset`，不要在 Adapter 中复制 URL、鉴权或
+   API Key。
+
+模型同步与余额 Tauri command 已通过统一入口分发，不再添加 `channel_id` 大分支。不支持的能力
+返回明确错误文案。
 
 command 只执行细粒度底层操作。账号保存后的余额、模型、路由刷新仍由 React 编排。
 

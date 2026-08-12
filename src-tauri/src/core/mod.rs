@@ -9,6 +9,7 @@ pub mod agent_session_timeline;
 pub mod agent_source_watcher;
 pub(crate) mod agent_task_runner;
 pub mod agent_version;
+pub(crate) mod channel_capability_adapter;
 pub mod channels_config;
 pub mod codex_account;
 pub mod codex_model_catalog;

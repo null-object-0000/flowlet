@@ -1,6 +1,6 @@
 use crate::core::config::{
-    AuthStrategy, ChannelAccount, ChannelPreset, ProtocolType, RouteCandidate, UaClientRule,
-    ACCOUNT_CREDENTIAL_HEALTHY,
+    AuthStrategy, ChannelAccount, ChannelModel, ChannelPreset, ProtocolType, RouteCandidate,
+    UaClientRule, ACCOUNT_CREDENTIAL_HEALTHY,
 };
 use axum::{
     body::Body,
@@ -59,6 +59,344 @@ pub(super) fn is_model_list_request(method: &Method, path: &str) -> bool {
         path_without_query,
         "/v1/models" | "/openai/v1/models" | "/anthropic/v1/models"
     )
+}
+
+pub(super) fn model_detail_request_id(method: &Method, path: &str) -> Option<String> {
+    if method != Method::GET {
+        return None;
+    }
+    let path = path.split('?').next().unwrap_or(path);
+    let id = path
+        .strip_prefix("/v1/models/")
+        .or_else(|| path.strip_prefix("/openai/v1/models/"))?;
+    (!id.is_empty() && !id.contains('/')).then(|| id.to_string())
+}
+
+pub(super) fn build_model_detail_response(
+    requested_id: &str,
+    routes: &[RouteCandidate],
+    accounts: &[ChannelAccount],
+    channels: &[ChannelPreset],
+    channel_models: &[ChannelModel],
+    models_cn_json: Option<&str>,
+) -> Response {
+    let entries = collect_model_entries(routes, accounts, channels, &ProtocolType::OpenAi);
+    let Some(entry) = entries.iter().find(|entry| entry.id == requested_id) else {
+        return model_not_found_response(requested_id);
+    };
+
+    let usable_routes = usable_model_routes(requested_id, routes, accounts, channels);
+    let catalog =
+        models_cn_json.and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+    let mut candidates = Vec::new();
+    for route in usable_routes {
+        let upstream = channel_models.iter().find(|model| {
+            model.channel_id == route.channel_id
+                && crate::core::model_catalog::canonical_model_key(&model.model)
+                    == crate::core::model_catalog::canonical_model_key(&route.upstream_model)
+        });
+        let catalog_model = catalog
+            .as_ref()
+            .and_then(|value| find_models_cn_model(value, &route.upstream_model));
+        candidates.push(resolve_candidate_detail(route, upstream, catalog_model));
+    }
+
+    let context_window = min_present(candidates.iter().map(|item| item.context_window));
+    let max_output_tokens = min_present(candidates.iter().map(|item| item.max_output_tokens));
+    let max_input_tokens = match (context_window, max_output_tokens) {
+        (Some(context), Some(output)) if context > output => Some(context - output),
+        (Some(context), _) => Some(context),
+        _ => None,
+    };
+    let pricing = aggregate_pricing(&candidates);
+    let sources = candidates
+        .iter()
+        .map(|item| item.specification_source.as_str())
+        .filter(|source| *source != "unavailable")
+        .collect::<BTreeSet<_>>();
+    let specification_source = match sources.len() {
+        0 => "unavailable",
+        1 => sources.iter().next().copied().unwrap_or("unavailable"),
+        _ => "mixed",
+    };
+
+    json_response(serde_json::json!({
+        "id": entry.id,
+        "object": "model",
+        "created": parse_unix_seconds(&entry.created_at),
+        "owned_by": entry.owned_by,
+        "context_window": context_window,
+        "max_input_tokens": max_input_tokens,
+        "max_output_tokens": max_output_tokens,
+        "specification_source": specification_source,
+        "pricing": pricing,
+    }))
+}
+
+struct CandidateDetail {
+    context_window: Option<i64>,
+    max_output_tokens: Option<i64>,
+    specification_source: String,
+    pricing: Option<serde_json::Value>,
+}
+
+fn usable_model_routes<'a>(
+    model_id: &str,
+    routes: &'a [RouteCandidate],
+    accounts: &[ChannelAccount],
+    channels: &[ChannelPreset],
+) -> Vec<&'a RouteCandidate> {
+    let healthy_accounts = accounts
+        .iter()
+        .filter(|account| {
+            account.enabled
+                && !account.api_key.trim().is_empty()
+                && account.credential_status == ACCOUNT_CREDENTIAL_HEALTHY
+        })
+        .map(|account| account.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let enabled_channels = channels
+        .iter()
+        .filter(|channel| channel.enabled)
+        .map(|channel| channel.id.as_str())
+        .collect::<BTreeSet<_>>();
+    routes
+        .iter()
+        .filter(|route| {
+            route.enabled
+                && route.client_protocol == ProtocolType::OpenAi
+                && route.virtual_model_id == model_id
+                && healthy_accounts.contains(route.account_id.as_str())
+                && enabled_channels.contains(route.channel_id.as_str())
+        })
+        .collect()
+}
+
+struct ModelsCnMatch<'a> {
+    model: &'a serde_json::Value,
+    retrieved_at: Option<&'a str>,
+}
+
+fn find_models_cn_model<'a>(
+    catalog: &'a serde_json::Value,
+    model_id: &str,
+) -> Option<ModelsCnMatch<'a>> {
+    let identity = crate::core::model_catalog::model_catalog().find(model_id)?;
+    let canonical = identity.id.as_str();
+    catalog
+        .get("providers")?
+        .as_array()?
+        .iter()
+        .find_map(|provider| {
+            (provider.get("id")?.as_str()? == identity.models_cn_provider_id)
+                .then_some(provider)?
+                .get("models")?
+                .as_array()?
+                .iter()
+                .find(|model| model.get("id").and_then(|value| value.as_str()) == Some(canonical))
+                .map(|model| {
+                    let retrieved_at = provider
+                        .get("sources")
+                        .and_then(|sources| sources.as_array())
+                        .and_then(|sources| {
+                            sources
+                                .iter()
+                                .filter(|source| {
+                                    source.get("kind").and_then(|value| value.as_str())
+                                        == Some("pricing")
+                                })
+                                .filter_map(|source| {
+                                    source.get("retrievedAt").and_then(|value| value.as_str())
+                                })
+                                .min()
+                        });
+                    ModelsCnMatch {
+                        model,
+                        retrieved_at,
+                    }
+                })
+        })
+}
+
+fn resolve_candidate_detail(
+    route: &RouteCandidate,
+    upstream: Option<&ChannelModel>,
+    catalog_match: Option<ModelsCnMatch<'_>>,
+) -> CandidateDetail {
+    let catalog_model = catalog_match.as_ref().map(|found| found.model);
+    let catalog_context = catalog_model
+        .and_then(|model| model.pointer("/limits/contextTokens"))
+        .and_then(|value| value.as_i64());
+    let catalog_output = catalog_model
+        .and_then(|model| model.pointer("/limits/maxOutputTokens"))
+        .and_then(|value| value.as_i64());
+    let upstream_context = upstream.and_then(|model| model.context_window);
+    let upstream_output = upstream.and_then(|model| model.max_output_tokens);
+    let specification_source = if upstream_context.is_some() || upstream_output.is_some() {
+        if (upstream_context.is_none() && catalog_context.is_some())
+            || (upstream_output.is_none() && catalog_output.is_some())
+        {
+            "upstream+models-cn"
+        } else {
+            "upstream"
+        }
+    } else if catalog_context.is_some() || catalog_output.is_some() {
+        "models-cn"
+    } else {
+        "unavailable"
+    };
+    CandidateDetail {
+        context_window: upstream_context.or(catalog_context),
+        max_output_tokens: upstream_output.or(catalog_output),
+        specification_source: specification_source.to_string(),
+        pricing: upstream
+            .and_then(|model| model.pricing.as_ref())
+            .map(|price| upstream_pricing_json(route, price))
+            .or_else(|| {
+                catalog_model.and_then(select_models_cn_price).map(|price| {
+                    pricing_json(
+                        route,
+                        price,
+                        catalog_match.and_then(|found| found.retrieved_at),
+                    )
+                })
+            }),
+    }
+}
+
+fn upstream_pricing_json(route: &RouteCandidate, pricing: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "channel_id": route.channel_id,
+        "upstream_model": route.upstream_model,
+        "source": "upstream",
+        "raw": pricing
+    })
+}
+
+fn select_models_cn_price(model: &serde_json::Value) -> Option<&serde_json::Value> {
+    model.get("prices")?.as_array()?.iter().max_by_key(|price| {
+        let market = price
+            .get("market")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let currency = price
+            .get("currency")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let rate_type = price
+            .get("rateType")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        i32::from(market == "china") * 4
+            + i32::from(currency == "CNY") * 2
+            + i32::from(rate_type == "promotional")
+    })
+}
+
+fn pricing_json(
+    route: &RouteCandidate,
+    price: &serde_json::Value,
+    retrieved_at: Option<&str>,
+) -> serde_json::Value {
+    let input = price
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    serde_json::json!({
+        "channel_id": route.channel_id,
+        "upstream_model": route.upstream_model,
+        "market": price.get("market"),
+        "currency": price.get("currency"),
+        "unit": price.get("unit"),
+        "rate_type": price.get("rateType"),
+        "input": {
+            "standard": input.get("standard"),
+            "cache_hit": input.get("cacheHit"),
+            "explicit_cache_creation": input.get("explicitCacheCreation"),
+            "explicit_cache_hit": input.get("explicitCacheHit"),
+        },
+        "output": price.get("output"),
+        "source_url": price.get("sourceUrl"),
+        "retrieved_at": retrieved_at,
+        "source": "models-cn"
+    })
+}
+
+fn aggregate_pricing(candidates: &[CandidateDetail]) -> Vec<serde_json::Value> {
+    let mut by_currency = std::collections::BTreeMap::<String, serde_json::Value>::new();
+    for price in candidates
+        .iter()
+        .filter_map(|candidate| candidate.pricing.as_ref())
+    {
+        let currency = price
+            .get("currency")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                format!(
+                    "upstream:{}:{}",
+                    price
+                        .get("channel_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    price
+                        .get("upstream_model")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                )
+            });
+        let replace = by_currency.get(&currency).is_none_or(|current| {
+            let current_total = current
+                .pointer("/input/standard")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+                + current
+                    .get("output")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+            let next_total = price
+                .pointer("/input/standard")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+                + price.get("output").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            next_total > current_total
+        });
+        if replace {
+            by_currency.insert(currency, price.clone());
+        }
+    }
+    by_currency.into_values().collect()
+}
+
+fn min_present(values: impl Iterator<Item = Option<i64>>) -> Option<i64> {
+    values.flatten().min()
+}
+
+fn parse_unix_seconds(raw: &str) -> i64 {
+    if raw.is_empty() {
+        return 0;
+    }
+    raw.parse::<i64>()
+        .ok()
+        .or_else(|| {
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .ok()
+                .map(|dt| dt.timestamp())
+        })
+        .unwrap_or(0)
+}
+
+fn model_not_found_response(model_id: &str) -> Response {
+    let mut response = json_response(serde_json::json!({
+        "error": {
+            "message": format!("The model '{}' does not exist or is not exposed", model_id),
+            "type": "invalid_request_error",
+            "param": "model",
+            "code": "model_not_found"
+        }
+    }));
+    *response.status_mut() = StatusCode::NOT_FOUND;
+    response
 }
 
 pub(super) fn build_model_list_response(
@@ -182,18 +520,6 @@ fn rank_model(id: &str) -> u8 {
 
 fn build_openai_model_list(entries: &[ModelEntry]) -> Response {
     // Flowlet 聚合模型的 owned_by 固定为 "flowlet"；直接模型使用其所属渠道 vendor。
-    let parse_unix_seconds = |raw: &str| -> i64 {
-        if raw.is_empty() {
-            return 0;
-        }
-        if let Ok(ts) = raw.parse::<i64>() {
-            return ts;
-        }
-        chrono::DateTime::parse_from_rfc3339(raw)
-            .map(|dt| dt.timestamp())
-            .unwrap_or(0)
-    };
-
     let data: Vec<serde_json::Value> = entries
         .iter()
         .map(|entry| {

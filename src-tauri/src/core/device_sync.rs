@@ -19,6 +19,7 @@ use url::Url;
 const CONFIG_KEY: &str = "device_sync_s3_config_v1";
 const STATUS_KEY: &str = "device_sync_s3_status_v1";
 const CURRENT_ETAG_KEY: &str = "device_sync_s3_current_etag_v1";
+const REMOTE_ETAGS_KEY: &str = "device_sync_s3_remote_etags_v1";
 const KEYRING_SERVICE: &str = "Flowlet Device Sync";
 const MAX_REMOTE_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
 const SIGNED_URL_TTL: Duration = Duration::from_secs(60);
@@ -119,6 +120,14 @@ pub struct S3DeviceSyncResult {
     pub unchanged_days: usize,
     pub failed_objects: usize,
     pub uploaded_key: String,
+    pub uploaded_bytes: usize,
+    pub downloaded_bytes: u64,
+    pub skipped_objects: usize,
+    pub list_ms: u64,
+    pub download_ms: u64,
+    pub import_ms: u64,
+    pub snapshot_ms: u64,
+    pub upload_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -471,6 +480,34 @@ struct CurrentEtagState {
     bucket: String,
     key: String,
     etag: String,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteEtagsState {
+    endpoint: String,
+    bucket: String,
+    etags: std::collections::HashMap<String, String>,
+}
+
+fn load_remote_etags(storage: &Storage, config: &S3SyncConfig) -> RemoteEtagsState {
+    storage
+        .get_app_meta(REMOTE_ETAGS_KEY)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<RemoteEtagsState>(&raw).ok())
+        .filter(|state| state.endpoint == config.endpoint && state.bucket == config.bucket)
+        .unwrap_or_else(|| RemoteEtagsState {
+            endpoint: config.endpoint.clone(),
+            bucket: config.bucket.clone(),
+            etags: std::collections::HashMap::new(),
+        })
+}
+
+fn save_remote_etags(storage: &Storage, state: &RemoteEtagsState) {
+    if let Ok(raw) = serde_json::to_string(state) {
+        let _ = storage.set_app_meta(REMOTE_ETAGS_KEY, &raw);
+    }
 }
 
 impl Default for S3SyncStatus {
@@ -1305,7 +1342,9 @@ pub async fn sync_device_usage(
     let store = S3Store::new(&config, &secret)?;
     let prefix = config.object_prefix();
     let current_key = config.snapshot_key(&identity.device_id);
+    let list_started_at = Instant::now();
     let objects = store.list(&prefix).await?;
+    let list_ms = list_started_at.elapsed().as_millis() as u64;
     let _ = storage.add_job_event(
         job_id,
         "info",
@@ -1335,45 +1374,72 @@ pub async fn sync_device_usage(
         .into_iter()
         .filter(|object| object.key != current_key && object.key.ends_with("/snapshot.json"))
         .collect::<Vec<_>>();
+    let mut remote_etags = load_remote_etags(&storage, &config);
+    remote_etags
+        .etags
+        .retain(|key, _| remote_objects.iter().any(|object| object.key == *key));
+    let skipped_objects = remote_objects
+        .iter()
+        .filter(|object| remote_etags.etags.get(&object.key) == Some(&object.etag))
+        .count();
     let _ = storage.add_job_event(
         job_id,
         "info",
         "读取远端设备",
-        &format!("发现 {} 台远端设备快照（不含本机）", remote_objects.len()),
+        &format!(
+            "发现 {} 台远端设备快照（不含本机），其中 {} 个未变化，跳过下载",
+            remote_objects.len(),
+            skipped_objects
+        ),
     );
 
     let mut bundles = Vec::new();
     let mut failed_objects = 0usize;
+    let mut downloaded_bytes = 0u64;
+    let download_started_at = Instant::now();
     for object in &remote_objects {
+        if remote_etags.etags.get(&object.key) == Some(&object.etag) {
+            continue;
+        }
         if object.size > MAX_REMOTE_BUNDLE_BYTES {
             failed_objects += 1;
             continue;
         }
-        match store
-            .get(&object.key)
-            .await
-            .and_then(|bytes| DeviceUsageBundle::from_bytes(&bytes))
-        {
-            Ok(bundle)
-                if bundle.snapshot.device_id != identity.device_id
-                    && config.snapshot_key(&bundle.snapshot.device_id) == object.key =>
-            {
-                crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
-                bundles.push(prefer_lan_bundle(&storage, bundle).await)
+        match store.get(&object.key).await {
+            Ok(bytes) => {
+                downloaded_bytes += bytes.len() as u64;
+                match DeviceUsageBundle::from_bytes(&bytes) {
+                    Ok(bundle)
+                        if bundle.snapshot.device_id != identity.device_id
+                            && config.snapshot_key(&bundle.snapshot.device_id) == object.key =>
+                    {
+                        crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
+                        bundles.push((
+                            object.key.clone(),
+                            object.etag.clone(),
+                            prefer_lan_bundle(&storage, bundle).await,
+                        ))
+                    }
+                    Ok(_) => failed_objects += 1,
+                    Err(_) => failed_objects += 1,
+                }
             }
-            Ok(_) => failed_objects += 1,
             Err(_) => failed_objects += 1,
         }
     }
+    let download_ms = download_started_at.elapsed().as_millis() as u64;
 
     let import_storage = storage.clone();
+    let import_started_at = Instant::now();
     let import_result = tauri::async_runtime::spawn_blocking(move || {
         let mut imported_devices = 0usize;
         let mut imported_days = 0usize;
         let mut unchanged_days = 0usize;
         let mut import_failures = 0usize;
-        for bundle in bundles {
+        let mut imported_etags = Vec::new();
+        for (object_key, object_etag, bundle) in bundles {
             let snapshot = bundle.snapshot;
+            let failures_before = import_failures;
             let result = match import_storage.import_device_usage(
                 snapshot.schema_version,
                 &snapshot.device_id,
@@ -1418,16 +1484,25 @@ pub async fn sync_device_usage(
             imported_devices += 1;
             imported_days += result.imported_days;
             unchanged_days += result.unchanged_days;
+            if import_failures == failures_before {
+                imported_etags.push((object_key, object_etag));
+            }
         }
         Ok::<_, String>((
             imported_devices,
             imported_days,
             unchanged_days,
             import_failures,
+            imported_etags,
         ))
     })
     .await
     .map_err(|_| "导入远端设备快照任务失败".to_string())??;
+    let import_ms = import_started_at.elapsed().as_millis() as u64;
+    for (key, etag) in &import_result.4 {
+        remote_etags.etags.insert(key.clone(), etag.clone());
+    }
+    save_remote_etags(&storage, &remote_etags);
     let _ = storage.add_job_event(
         job_id,
         "info",
@@ -1438,25 +1513,28 @@ pub async fn sync_device_usage(
         ),
     );
 
+    let snapshot_started_at = Instant::now();
     let snapshot = build_device_snapshot(storage.clone(), identity.clone()).await?;
     let bundle = DeviceUsageBundle::new(snapshot);
-    let bytes =
-        serde_json::to_vec_pretty(&bundle).map_err(|_| "序列化当前设备快照失败".to_string())?;
+    let bytes = serde_json::to_vec(&bundle).map_err(|_| "序列化当前设备快照失败".to_string())?;
     let uploaded_bytes = bytes.len();
+    let snapshot_ms = snapshot_started_at.elapsed().as_millis() as u64;
+    let expected_etag = saved_etag
+        .as_ref()
+        .map(|state| state.etag.as_str())
+        .or(current_etag.as_deref());
+    let upload_started_at = Instant::now();
+    let uploaded_etag = match store.put(&current_key, bytes, expected_etag).await? {
+        Some(etag) => Some(etag),
+        None => store.head_etag(&current_key).await?,
+    };
+    let upload_ms = upload_started_at.elapsed().as_millis() as u64;
     let _ = storage.add_job_event(
         job_id,
         "info",
         "上传本机快照",
         &format!("已上传当前设备快照 {current_key}（{uploaded_bytes} 字节）"),
     );
-    let expected_etag = saved_etag
-        .as_ref()
-        .map(|state| state.etag.as_str())
-        .or(current_etag.as_deref());
-    let uploaded_etag = match store.put(&current_key, bytes, expected_etag).await? {
-        Some(etag) => Some(etag),
-        None => store.head_etag(&current_key).await?,
-    };
     if let Some(etag) = uploaded_etag {
         let etag_state = CurrentEtagState {
             endpoint: config.endpoint.clone(),
@@ -1476,6 +1554,14 @@ pub async fn sync_device_usage(
         unchanged_days: import_result.2,
         failed_objects: failed_objects + import_result.3,
         uploaded_key: current_key,
+        uploaded_bytes,
+        downloaded_bytes,
+        skipped_objects,
+        list_ms,
+        download_ms,
+        import_ms,
+        snapshot_ms,
+        upload_ms,
     })
 }
 
@@ -1630,6 +1716,14 @@ pub async fn run_configured_sync(
                 "unchangedDays": result.unchanged_days,
                 "failedObjects": result.failed_objects,
                 "uploadedKey": result.uploaded_key,
+                "uploadedBytes": result.uploaded_bytes,
+                "downloadedBytes": result.downloaded_bytes,
+                "skippedObjects": result.skipped_objects,
+                "listMs": result.list_ms,
+                "downloadMs": result.download_ms,
+                "importMs": result.import_ms,
+                "snapshotMs": result.snapshot_ms,
+                "uploadMs": result.upload_ms,
                 "durationMs": duration_ms,
             })
             .to_string();
@@ -1898,6 +1992,27 @@ mod tests {
             snapshot_object_label("users/demo/flowlet/v1/devices/device-1/snapshot.json"),
             "设备 device-1"
         );
+    }
+
+    #[test]
+    fn remote_etag_cache_is_scoped_to_endpoint_and_bucket() {
+        let storage =
+            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let config = S3SyncConfig::from_input(&input("https://example.com")).unwrap();
+        let mut state = load_remote_etags(&storage, &config);
+        state.etags.insert(
+            "flowlet/v1/devices/device-1/snapshot.json".to_string(),
+            "etag-1".to_string(),
+        );
+        save_remote_etags(&storage, &state);
+
+        assert_eq!(load_remote_etags(&storage, &config).etags.len(), 1);
+
+        let mut other_input = input("https://example.com");
+        other_input.bucket = "other-bucket".to_string();
+        let other_config = S3SyncConfig::from_input(&other_input).unwrap();
+        assert!(load_remote_etags(&storage, &other_config).etags.is_empty());
     }
 
     #[test]

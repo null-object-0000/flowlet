@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { HourlyUsageTotal } from "../../domains/device-sync/types";
-import { buildWeekdayHourHeatmap } from "./deviceUsagePresentation";
+import { buildWeekdayHourHeatmap, DEFAULT_USAGE_PERIOD } from "./deviceUsagePresentation";
+
+describe("usage period defaults", () => {
+  it("defaults PC usage statistics and the mobile overview to week", () => {
+    expect(DEFAULT_USAGE_PERIOD).toBe("week");
+  });
+});
 
 const hour = (date: string, hourOfDay: number, tokens: number, requests = 1): HourlyUsageTotal => ({
   hour: `${date}T${String(hourOfDay).padStart(2, "0")}:00:00`,

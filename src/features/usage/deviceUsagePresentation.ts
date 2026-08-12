@@ -2,6 +2,9 @@ import type { DailyUsageTotal, HourlyUsageTotal } from "../../domains/device-syn
 import { createHeatLevelScale, type HeatLevel } from "../../shared/visualization/heatmapLevels";
 
 export type MobileUsagePeriod = "day" | "week" | "month";
+
+/** PC 用量统计与移动端概览共享的默认统计维度。 */
+export const DEFAULT_USAGE_PERIOD: MobileUsagePeriod = "week";
 export type MobileUsageHeatmapMetric = "tokens" | "cost";
 
 export type MobileUsageRange = {

@@ -1,6 +1,6 @@
 use super::proxy_routing::rank_candidates_by_score;
 use super::*;
-use crate::core::config::{AuthStrategy, UaClientRule};
+use crate::core::config::{AuthStrategy, ChannelModel, UaClientRule};
 use axum::{
     http::{header, HeaderValue, Uri},
     routing::post,
@@ -30,6 +30,188 @@ fn protocol_type_from_path_identifies_openai() {
         ProtocolType::from_path("/openai/v1/chat/completions"),
         Some(ProtocolType::OpenAi)
     );
+}
+
+#[test]
+fn recognizes_openai_model_detail_paths_only() {
+    assert_eq!(
+        model_detail_request_id(&Method::GET, "/v1/models/flowlet-pro?locale=zh"),
+        Some("flowlet-pro".to_string())
+    );
+    assert_eq!(
+        model_detail_request_id(&Method::GET, "/openai/v1/models/deepseek-v4-pro"),
+        Some("deepseek-v4-pro".to_string())
+    );
+    assert_eq!(
+        model_detail_request_id(&Method::POST, "/v1/models/flowlet-pro"),
+        None
+    );
+    assert_eq!(
+        model_detail_request_id(&Method::GET, "/anthropic/v1/models/flowlet-pro"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn model_detail_prefers_upstream_limits_and_falls_back_to_models_cn() {
+    let routes = vec![RouteCandidate {
+        id: "route-detail".to_string(),
+        virtual_model_id: "flowlet-pro".to_string(),
+        channel_id: "deepseek".to_string(),
+        account_id: "account-detail".to_string(),
+        upstream_model: "deepseek-v4-pro".to_string(),
+        client_protocol: ProtocolType::OpenAi,
+        enabled: true,
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+        ..Default::default()
+    }];
+    let accounts = vec![ChannelAccount {
+        id: "account-detail".to_string(),
+        channel_id: "deepseek".to_string(),
+        api_key: "key".to_string(),
+        enabled: true,
+        ..Default::default()
+    }];
+    let channels = vec![ChannelPreset {
+        id: "deepseek".to_string(),
+        vendor: "deepseek".to_string(),
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        enabled: true,
+        ..Default::default()
+    }];
+    let channel_models = vec![ChannelModel {
+        id: "deepseek-deepseek-v4-pro".to_string(),
+        channel_id: "deepseek".to_string(),
+        model: "deepseek-v4-pro".to_string(),
+        display_name: None,
+        supported_protocols: vec![ProtocolType::OpenAi],
+        context_window: Some(900_000),
+        max_output_tokens: None,
+        pricing: None,
+        supports_stream: true,
+        enabled: true,
+        source: "synced".to_string(),
+        synced_at: None,
+        created_at: String::new(),
+        updated_at: String::new(),
+    }];
+    let catalog = serde_json::json!({
+        "providers": [{
+            "id": "deepseek",
+            "sources": [{"kind":"pricing", "retrievedAt":"2026-08-12T01:02:03Z"}],
+            "models": [{
+                "id": "deepseek-v4-pro",
+                "limits": {"contextTokens": 1000000, "maxOutputTokens": 384000},
+                "prices": [{
+                    "market":"china", "currency":"CNY", "unit":"1M_tokens",
+                    "rateType":"promotional", "input":{"standard":2.0}, "output":8.0,
+                    "sourceUrl":"https://example.test/pricing"
+                }]
+            }]
+        }]
+    })
+    .to_string();
+
+    let response = build_model_detail_response(
+        "flowlet-pro",
+        &routes,
+        &accounts,
+        &channels,
+        &channel_models,
+        Some(&catalog),
+    );
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["context_window"], 900_000);
+    assert_eq!(value["max_output_tokens"], 384_000);
+    assert_eq!(value["max_input_tokens"], 516_000);
+    assert_eq!(value["specification_source"], "upstream+models-cn");
+    assert_eq!(value["pricing"][0]["currency"], "CNY");
+    assert_eq!(
+        value["pricing"][0]["input"]["cache_hit"],
+        serde_json::Value::Null
+    );
+    assert_eq!(value["pricing"][0]["retrieved_at"], "2026-08-12T01:02:03Z");
+}
+
+#[tokio::test]
+async fn model_detail_returns_openai_not_found_for_unexposed_model() {
+    let response = build_model_detail_response("flowlet-pro", &[], &[], &[], &[], None);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["error"]["code"], "model_not_found");
+}
+
+#[tokio::test]
+async fn model_detail_prefers_raw_upstream_pricing() {
+    let routes = vec![RouteCandidate {
+        virtual_model_id: "LongCat-2.0".to_string(),
+        channel_id: "longcat".to_string(),
+        account_id: "account-longcat".to_string(),
+        upstream_model: "LongCat-2.0".to_string(),
+        client_protocol: ProtocolType::OpenAi,
+        enabled: true,
+        ..Default::default()
+    }];
+    let accounts = vec![ChannelAccount {
+        id: "account-longcat".to_string(),
+        channel_id: "longcat".to_string(),
+        api_key: "key".to_string(),
+        enabled: true,
+        ..Default::default()
+    }];
+    let channels = vec![ChannelPreset {
+        id: "longcat".to_string(),
+        vendor: "longcat".to_string(),
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        enabled: true,
+        ..Default::default()
+    }];
+    let channel_models = vec![ChannelModel {
+        id: "longcat-LongCat-2.0".to_string(),
+        channel_id: "longcat".to_string(),
+        model: "LongCat-2.0".to_string(),
+        display_name: None,
+        supported_protocols: vec![ProtocolType::OpenAi],
+        context_window: Some(1_048_576),
+        max_output_tokens: None,
+        pricing: Some(serde_json::json!({"prompt":"2", "completion":"8"})),
+        supports_stream: true,
+        enabled: true,
+        source: "synced".to_string(),
+        synced_at: None,
+        created_at: String::new(),
+        updated_at: String::new(),
+    }];
+    let catalog = serde_json::json!({
+        "providers": [{"id":"longcat", "models":[{
+            "id":"LongCat-2.0",
+            "limits":{"maxOutputTokens":131072},
+            "prices":[{"market":"china", "currency":"CNY", "unit":"1M_tokens", "rateType":"standard", "input":{"standard":99}, "output":99}]
+        }]}]
+    }).to_string();
+
+    let response = build_model_detail_response(
+        "LongCat-2.0",
+        &routes,
+        &accounts,
+        &channels,
+        &channel_models,
+        Some(&catalog),
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["pricing"][0]["source"], "upstream");
+    assert_eq!(value["pricing"][0]["raw"]["prompt"], "2");
+    assert!(value["pricing"][0].get("currency").is_none());
 }
 
 #[test]

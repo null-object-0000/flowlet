@@ -637,6 +637,9 @@ pub struct ChannelModel {
     pub supported_protocols: Vec<ProtocolType>,
     pub context_window: Option<i64>,
     pub max_output_tokens: Option<i64>,
+    /// 上游模型详情接口返回的原始价格对象；仅在上游明确提供时保存。
+    #[serde(default)]
+    pub pricing: Option<serde_json::Value>,
     pub supports_stream: bool,
     pub enabled: bool,
     pub source: String,

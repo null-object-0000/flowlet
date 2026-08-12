@@ -919,6 +919,7 @@ pub async fn sync_openai_compatible_models(
                     supported_protocols: protocols.clone(),
                     context_window: None,
                     max_output_tokens: None,
+                    pricing: None,
                     supports_stream: true,
                     enabled: true,
                     source: "synced".to_string(),
@@ -1385,6 +1386,7 @@ fn longcat_channel_model(
         supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
         context_window: detail.context_length,
         max_output_tokens: None,
+        pricing: detail.pricing,
         supports_stream: detail
             .supported_parameters
             .as_ref()
@@ -1407,6 +1409,7 @@ fn longcat_channel_model_from_id(model: String, synced_at: &str) -> ChannelModel
         supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
         context_window: None,
         max_output_tokens: None,
+        pricing: None,
         supports_stream: true,
         enabled: true,
         source: "synced".to_string(),
@@ -1425,6 +1428,7 @@ fn deepseek_channel_model(model: String, synced_at: &str) -> ChannelModel {
         supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
         context_window: Some(1_000_000),
         max_output_tokens: Some(384_000),
+        pricing: None,
         supports_stream: true,
         enabled: true,
         source: "synced".to_string(),
@@ -1448,6 +1452,7 @@ fn kimi_channel_model(
         supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
         context_window: context_length,
         max_output_tokens: None,
+        pricing: None,
         supports_stream: true,
         enabled: true,
         source: "synced".to_string(),
@@ -1466,6 +1471,7 @@ fn qwen_channel_model(model: String, synced_at: &str) -> ChannelModel {
         supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
         context_window: None,
         max_output_tokens: None,
+        pricing: None,
         supports_stream: true,
         enabled: true,
         source: "synced".to_string(),
@@ -1841,6 +1847,8 @@ mod tests {
         assert_eq!(data.id, "LongCat-2.0");
         assert_eq!(data.context_length, Some(1_048_576));
         assert_eq!(data.name, Some("LongCat-2.0".to_string()));
+        assert_eq!(data.pricing.as_ref().unwrap()["prompt"], "2");
+        assert_eq!(data.pricing.as_ref().unwrap()["completion"], "8");
         let params = data.supported_parameters.unwrap();
         assert!(params.contains(&"stream".to_string()));
         assert!(params.contains(&"tools".to_string()));

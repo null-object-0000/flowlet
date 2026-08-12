@@ -27,6 +27,7 @@
 | 客户端入口 | 当前状态 | 说明 |
 |------------|----------|------|
 | `GET /v1/models` | ✅ | 返回当前 OpenAI 协议下可用的开放模型；空配置返回合法空列表 |
+| `GET /v1/models/{model}` | ✅ | 返回已开放模型的上下文、最大输入/输出与价格；底层详情同步数据优先，缺失字段回退本地 models-cn；聚合模型规格取可用候选下限，已知币种价格按币种返回候选成本上界 |
 | `POST /v1/chat/completions` | ✅ | OpenAI Chat Completions 透明转发 |
 | `GET /anthropic/v1/models` | ✅ | 返回当前 Anthropic 协议下可用的开放模型 |
 | `POST /anthropic/v1/messages` | ✅ | Anthropic Messages 透明转发 |

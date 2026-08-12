@@ -786,6 +786,7 @@ impl Storage {
                 supported_protocols  TEXT NOT NULL,
                 context_window       INTEGER,
                 max_output_tokens    INTEGER,
+                pricing_json         TEXT,
                 supports_stream      INTEGER NOT NULL DEFAULT 1,
                 enabled              INTEGER NOT NULL DEFAULT 1,
                 source               TEXT NOT NULL DEFAULT 'preset',
@@ -1343,6 +1344,7 @@ impl Storage {
             "openai_auth",
             "TEXT NOT NULL DEFAULT 'bearer'",
         )?;
+        add_column_if_missing(&connection, "channel_models", "pricing_json", "TEXT")?;
         add_column_if_missing(
             &connection,
             "channel_presets",

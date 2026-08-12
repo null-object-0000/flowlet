@@ -529,9 +529,9 @@ impl Storage {
                 r#"
                 INSERT INTO channel_models (
                     id, channel_id, model, display_name, supported_protocols,
-                    context_window, max_output_tokens, supports_stream, enabled,
+                    context_window, max_output_tokens, pricing_json, supports_stream, enabled,
                     source, synced_at, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                 "#,
                 params![
                     model.id,
@@ -541,6 +541,7 @@ impl Storage {
                     protocols,
                     model.context_window,
                     model.max_output_tokens,
+                    model.pricing.as_ref().map(|value| value.to_string()),
                     model.supports_stream as i64,
                     model.enabled as i64,
                     model.source,
@@ -561,7 +562,7 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut stmt = connection.prepare(
             "SELECT id, channel_id, model, display_name, supported_protocols,
-                    context_window, max_output_tokens, supports_stream, enabled,
+                    context_window, max_output_tokens, pricing_json, supports_stream, enabled,
                     source, synced_at, created_at, updated_at
              FROM channel_models ORDER BY channel_id ASC, model ASC",
         )?;
@@ -577,12 +578,15 @@ impl Storage {
                 supported_protocols: protocols,
                 context_window: row.get(5)?,
                 max_output_tokens: row.get(6)?,
-                supports_stream: row.get::<_, i64>(7)? != 0,
-                enabled: row.get::<_, i64>(8)? != 0,
-                source: row.get(9)?,
-                synced_at: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                pricing: row
+                    .get::<_, Option<String>>(7)?
+                    .and_then(|raw| serde_json::from_str(&raw).ok()),
+                supports_stream: row.get::<_, i64>(8)? != 0,
+                enabled: row.get::<_, i64>(9)? != 0,
+                source: row.get(10)?,
+                synced_at: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })?;
         let mut models = Vec::new();

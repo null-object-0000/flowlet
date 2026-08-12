@@ -199,6 +199,14 @@ export type S3DeviceSyncResult = {
   unchangedDays: number;
   failedObjects: number;
   uploadedKey: string;
+  uploadedBytes: number;
+  downloadedBytes: number;
+  skippedObjects: number;
+  listMs: number;
+  downloadMs: number;
+  importMs: number;
+  snapshotMs: number;
+  uploadMs: number;
 };
 
 export type S3DevicePullResult = {

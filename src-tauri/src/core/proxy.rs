@@ -165,10 +165,11 @@ pub(crate) use proxy_http::load_config_ua_rules;
 mod proxy_routing;
 
 use proxy_http::{
-    add_cors_headers, apply_request_headers, build_model_list_response, build_upstream_url,
-    build_upstream_url_without_openai_v1, copy_response_headers, cors_preflight_response,
-    encode_body_base64, ensure_config_file, extract_model, identify_client, identify_client_agent,
-    is_model_list_request, is_streaming_response, load_ua_rules, rewrite_model, sanitize_headers,
+    add_cors_headers, apply_request_headers, build_model_detail_response,
+    build_model_list_response, build_upstream_url, build_upstream_url_without_openai_v1,
+    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
+    extract_model, identify_client, identify_client_agent, is_model_list_request,
+    is_streaming_response, load_ua_rules, model_detail_request_id, rewrite_model, sanitize_headers,
 };
 // 仅测试（proxy_tests）需要直接调用 UA 子串匹配；非测试构建不应引入以免告警。
 #[cfg(test)]
@@ -573,6 +574,19 @@ async fn forward_request(
             &accounts,
             channels,
             &detected_protocol,
+        ));
+    }
+
+    if let Some(model_id) = model_detail_request_id(&parts.method, &path) {
+        let channel_models = state.storage.list_channel_models().unwrap_or_default();
+        let models_cn = crate::core::storage::storage_tasks::read_models_cn_file();
+        return Ok(build_model_detail_response(
+            &model_id,
+            routes,
+            &accounts,
+            channels,
+            &channel_models,
+            models_cn.as_deref(),
         ));
     }
 

@@ -66,7 +66,7 @@ pub struct AgentEnvironmentReport {
 pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironmentReport, String> {
     let plugin = super::plugin_registry::plugin_registry().agent(agent_id);
     let environment_id = plugin
-        .map(|descriptor| descriptor.environment_id.as_str())
+        .map(|descriptor| descriptor.environment_adapter_id.as_str())
         .unwrap_or(agent_id);
     let mut report = match environment_id {
         "claude-code" => Ok(detect_claude_code().await),

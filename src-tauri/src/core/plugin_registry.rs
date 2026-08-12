@@ -21,6 +21,8 @@ enum PluginDescriptor {
         id: String,
         #[serde(rename = "channelId")]
         channel_id: String,
+        #[serde(rename = "adapterId")]
+        adapter_id: String,
     },
     ModelCatalog {
         id: String,
@@ -52,7 +54,8 @@ impl PluginDescriptor {
 pub struct AgentPluginDescriptor {
     pub id: String,
     pub name: String,
-    pub environment_id: String,
+    pub environment_adapter_id: String,
+    pub global_config_adapter_id: String,
     pub endpoint_suffix: String,
     pub npm_package: String,
     pub surfaces: Vec<String>,
@@ -60,16 +63,22 @@ pub struct AgentPluginDescriptor {
 
 #[derive(Debug)]
 pub struct PluginRegistry {
-    channel_ids: Vec<String>,
+    channels: Vec<ChannelPluginDescriptor>,
     model_catalog_source: String,
     agents: Vec<AgentPluginDescriptor>,
+}
+
+#[derive(Debug)]
+pub struct ChannelPluginDescriptor {
+    pub id: String,
+    pub adapter_id: String,
 }
 
 impl PluginRegistry {
     fn from_json(json: &str) -> Result<Self, String> {
         let parsed: PluginRegistryJson = serde_json::from_str(json)
             .map_err(|error| format!("解析 plugin-registry.json 失败：{error}"))?;
-        if parsed.schema_version != 1 {
+        if parsed.schema_version != 2 {
             return Err(format!(
                 "不支持的 plugin-registry.json schemaVersion：{}",
                 parsed.schema_version
@@ -77,7 +86,7 @@ impl PluginRegistry {
         }
         let mut plugin_ids = HashSet::new();
         let mut contributions = HashSet::new();
-        let mut channel_ids = Vec::new();
+        let mut channels = Vec::new();
         let mut agents = Vec::new();
         let mut model_catalogs = 0;
         let mut model_catalog_source = String::new();
@@ -95,7 +104,33 @@ impl PluginRegistry {
                 return Err(format!("plugin-registry.json 存在重复贡献：{contribution}"));
             }
             match plugin {
-                PluginDescriptor::Channel { channel_id, .. } => channel_ids.push(channel_id),
+                PluginDescriptor::Channel {
+                    channel_id,
+                    adapter_id,
+                    ..
+                } => {
+                    if channel_id.trim().is_empty() || adapter_id.trim().is_empty() {
+                        return Err(format!("渠道插件声明不完整：{channel_id}"));
+                    }
+                    if !matches!(
+                        adapter_id.as_str(),
+                        "longcat"
+                            | "deepseek"
+                            | "kimi"
+                            | "qwen"
+                            | "custom"
+                            | "zhipu"
+                            | "openrouter"
+                    ) {
+                        return Err(format!(
+                            "渠道插件 {channel_id} 引用了未知适配器：{adapter_id}"
+                        ));
+                    }
+                    channels.push(ChannelPluginDescriptor {
+                        id: channel_id,
+                        adapter_id,
+                    });
+                }
                 PluginDescriptor::ModelCatalog { source, .. } => {
                     if source != "model-catalog.json" {
                         return Err(format!("暂不支持的模型目录插件来源：{source}"));
@@ -107,11 +142,30 @@ impl PluginRegistry {
                     if !matches!(agent.endpoint_suffix.as_str(), "/v1" | "/anthropic")
                         || agent.id.trim().is_empty()
                         || agent.name.trim().is_empty()
-                        || agent.environment_id.trim().is_empty()
+                        || agent.environment_adapter_id.trim().is_empty()
+                        || agent.global_config_adapter_id.trim().is_empty()
                         || agent.npm_package.trim().is_empty()
                         || agent.surfaces.is_empty()
                     {
                         return Err(format!("Agent 插件声明不完整：{}", agent.id));
+                    }
+                    if !matches!(
+                        agent.environment_adapter_id.as_str(),
+                        "claude-code" | "opencode" | "pi" | "chatgpt-desktop"
+                    ) {
+                        return Err(format!(
+                            "Agent 插件 {} 引用了未知环境适配器：{}",
+                            agent.id, agent.environment_adapter_id
+                        ));
+                    }
+                    if !matches!(
+                        agent.global_config_adapter_id.as_str(),
+                        "claude-code" | "opencode" | "pi" | "codex"
+                    ) {
+                        return Err(format!(
+                            "Agent 插件 {} 引用了未知全局配置适配器：{}",
+                            agent.id, agent.global_config_adapter_id
+                        ));
                     }
                     agents.push(agent);
                 }
@@ -121,14 +175,17 @@ impl PluginRegistry {
             return Err("plugin-registry.json 必须注册且只能注册一个内置模型目录".to_string());
         }
         Ok(Self {
-            channel_ids,
+            channels,
             model_catalog_source,
             agents,
         })
     }
 
     pub fn channel_ids(&self) -> impl Iterator<Item = &str> {
-        self.channel_ids.iter().map(String::as_str)
+        self.channels.iter().map(|channel| channel.id.as_str())
+    }
+    pub fn channels(&self) -> &[ChannelPluginDescriptor] {
+        &self.channels
     }
     pub fn model_catalog_source(&self) -> &str {
         &self.model_catalog_source
@@ -181,16 +238,28 @@ mod tests {
             "/anthropic"
         );
         assert_eq!(
-            registry.agent("codex").unwrap().environment_id,
+            registry.agent("codex").unwrap().environment_adapter_id,
             "chatgpt-desktop"
+        );
+        assert_eq!(
+            registry.agent("codex").unwrap().global_config_adapter_id,
+            "codex"
         );
     }
 
     #[test]
     fn duplicate_contributions_are_rejected() {
-        let duplicate = r#"{"schemaVersion":1,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"a","kind":"channel","channelId":"same"},{"id":"b","kind":"channel","channelId":"same"}]}"#;
+        let duplicate = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"a","kind":"channel","channelId":"same","adapterId":"longcat"},{"id":"b","kind":"channel","channelId":"same","adapterId":"deepseek"}]}"#;
         assert!(PluginRegistry::from_json(duplicate)
             .unwrap_err()
             .contains("重复贡献"));
+    }
+
+    #[test]
+    fn unknown_compiled_adapters_are_rejected() {
+        let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"a","kind":"channel","channelId":"demo","adapterId":"missing"}]}"#;
+        assert!(PluginRegistry::from_json(unknown)
+            .unwrap_err()
+            .contains("未知适配器"));
     }
 }

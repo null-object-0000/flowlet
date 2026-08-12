@@ -3,8 +3,9 @@ use super::config::{ChannelModel, ChannelPreset};
 /// 返回所有内置渠道模板
 pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
     super::plugin_registry::plugin_registry()
-        .channel_ids()
-        .map(|channel_id| match channel_id {
+        .channels()
+        .iter()
+        .map(|channel| match channel.adapter_id.as_str() {
             "longcat" => ChannelPreset::longcat(),
             "deepseek" => ChannelPreset::deepseek(),
             "kimi" => ChannelPreset::kimi(),
@@ -12,7 +13,7 @@ pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
             "custom" => ChannelPreset::custom(),
             "zhipu" => ChannelPreset::zhipu(),
             "openrouter" => ChannelPreset::openrouter(),
-            unknown => panic!("渠道插件缺少内置适配器：{unknown}"),
+            unknown => panic!("渠道插件 {} 缺少内置适配器：{unknown}", channel.id),
         })
         .collect()
 }

@@ -20,6 +20,13 @@ fn agent_endpoint_suffix(agent_id: &str) -> Result<&'static str, String> {
         .ok_or_else(|| format!("未注册的 Agent 插件：{agent_id}"))
 }
 
+fn agent_global_config_adapter(agent_id: &str) -> Result<&'static str, String> {
+    crate::core::plugin_registry::plugin_registry()
+        .agent(agent_id)
+        .map(|agent| agent.global_config_adapter_id.as_str())
+        .ok_or_else(|| format!("未注册的 Agent 插件：{agent_id}"))
+}
+
 #[tauri::command]
 pub(crate) async fn detect_agent_environment(
     agent_id: String,
@@ -109,10 +116,13 @@ pub(crate) fn inspect_agent_global_config(
         .clone()
         .normalized();
     let suffix = agent_endpoint_suffix(&agent_id)?;
-    crate::core::agent_global_config::inspect_agent_global_config(
-        &agent_id,
+    let adapter_id = agent_global_config_adapter(&agent_id)?;
+    let mut report = crate::core::agent_global_config::inspect_agent_global_config(
+        adapter_id,
         &format!("http://127.0.0.1:{}{suffix}", bind.port),
-    )
+    )?;
+    report.agent_id = agent_id;
+    Ok(report)
 }
 
 #[tauri::command]
@@ -128,12 +138,15 @@ pub(crate) fn apply_agent_global_config(
         .clone()
         .normalized();
     let suffix = agent_endpoint_suffix(&agent_id)?;
-    crate::core::agent_global_config::apply_agent_global_config(
-        &agent_id,
+    let adapter_id = agent_global_config_adapter(&agent_id)?;
+    let mut report = crate::core::agent_global_config::apply_agent_global_config(
+        adapter_id,
         &format!("http://127.0.0.1:{}{suffix}", bind.port),
         &bind.default_client_token,
         options.as_ref(),
-    )
+    )?;
+    report.agent_id = agent_id;
+    Ok(report)
 }
 
 #[tauri::command]
@@ -149,8 +162,11 @@ pub(crate) fn restore_agent_global_config(
         .normalized()
         .port;
     let suffix = agent_endpoint_suffix(&agent_id)?;
-    crate::core::agent_global_config::restore_agent_global_config(
-        &agent_id,
+    let adapter_id = agent_global_config_adapter(&agent_id)?;
+    let mut report = crate::core::agent_global_config::restore_agent_global_config(
+        adapter_id,
         &format!("http://127.0.0.1:{port}{suffix}"),
-    )
+    )?;
+    report.agent_id = agent_id;
+    Ok(report)
 }

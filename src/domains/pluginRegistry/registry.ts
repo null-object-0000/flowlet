@@ -7,7 +7,8 @@ export type AgentPluginSurface = "cli" | "desktop";
 export type AgentPluginDescriptor = {
   id: AgentPluginId;
   name: string;
-  environmentId: string;
+  environmentAdapterId: string;
+  globalConfigAdapterId: string;
   endpointSuffix: "/anthropic" | "/v1";
   npmPackage: string;
   surfaces: AgentPluginSurface[];
@@ -25,7 +26,7 @@ export type AgentPluginDescriptor = {
   restartTip: string;
 };
 
-type ChannelPlugin = { id: string; kind: "channel"; channelId: string };
+type ChannelPlugin = { id: string; kind: "channel"; channelId: string; adapterId: string };
 type ModelCatalogPlugin = { id: string; kind: "model-catalog"; source: string };
 type AgentPlugin = { id: string; kind: "agent"; agent: AgentPluginDescriptor };
 type PluginDescriptor = ChannelPlugin | ModelCatalogPlugin | AgentPlugin;
@@ -34,7 +35,7 @@ type PluginRegistry = { schemaVersion: number; plugins: PluginDescriptor[] };
 const registry = registryJson as PluginRegistry;
 
 function validateRegistry(value: PluginRegistry): void {
-  if (value.schemaVersion !== 1) throw new Error(`Unsupported plugin registry schema: ${value.schemaVersion}`);
+  if (value.schemaVersion !== 2) throw new Error(`Unsupported plugin registry schema: ${value.schemaVersion}`);
   const pluginIds = new Set<string>();
   const contributionIds = new Set<string>();
   for (const plugin of value.plugins) {
@@ -47,6 +48,12 @@ function validateRegistry(value: PluginRegistry): void {
         : `model-catalog:${plugin.source}`;
     if (contributionIds.has(contributionId)) throw new Error(`Duplicate plugin contribution: ${contributionId}`);
     contributionIds.add(contributionId);
+    if (plugin.kind === "channel" && !plugin.adapterId.trim()) {
+      throw new Error(`Channel plugin adapter is blank: ${plugin.channelId}`);
+    }
+    if (plugin.kind === "agent" && (!plugin.agent.environmentAdapterId.trim() || !plugin.agent.globalConfigAdapterId.trim())) {
+      throw new Error(`Agent plugin adapter is blank: ${plugin.agent.id}`);
+    }
   }
 }
 

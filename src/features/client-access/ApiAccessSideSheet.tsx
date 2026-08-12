@@ -31,6 +31,7 @@ export function ApiAccessSideSheet({ visible, onClose, baseUrl, bindConfig, runn
   const openAiRows: DetailRow[] = [
     { label: "Base URL", copyLabel: "OpenAI Base URL", value: `${baseUrl}/v1`, copyValue: `${baseUrl}/v1`, copyMessage: t("{label} 已复制", { label: "OpenAI Base URL" }) },
     { label: t("模型列表"), copyLabel: `OpenAI ${t("模型列表")}`, value: `${baseUrl}/v1/models`, copyValue: `${baseUrl}/v1/models` },
+    { label: t("模型详情"), copyLabel: `OpenAI ${t("模型详情")}`, value: `${baseUrl}/v1/models/flowlet-pro`, copyValue: `${baseUrl}/v1/models/flowlet-pro` },
     { label: t("对话接口"), copyLabel: `OpenAI ${t("对话接口")}`, value: `${baseUrl}/v1/chat/completions`, copyValue: `${baseUrl}/v1/chat/completions` },
     { label: t("鉴权 Header"), value: "Authorization: Bearer <Client Token>", copyValue: "Authorization: Bearer <Client Token>" },
   ];
@@ -57,7 +58,14 @@ export function ApiAccessSideSheet({ visible, onClose, baseUrl, bindConfig, runn
     >
       <div className={styles.body}>
         <DetailSection icon="▣" title={t("服务信息")} rows={serviceRows} onCopy={onCopy} />
-        <DetailSection icon="▤" title="OpenAI-compatible" rows={openAiRows} onCopy={onCopy} />
+        <DetailSection icon="▤" title="OpenAI-compatible" rows={openAiRows} onCopy={onCopy}>
+          <div className={styles.multiRow}>
+            <span>{t("说明")}</span>
+            <div className={styles.headerStack}>
+              <span className={styles.noteLine}>{t("模型详情地址末尾可替换为任意已开放模型 ID。")}</span>
+            </div>
+          </div>
+        </DetailSection>
         <DetailSection icon="▤" title="Anthropic-compatible" rows={anthropicRows} onCopy={onCopy}>
           <div className={styles.multiRow}>
             <span>{t("鉴权 Header")}</span>

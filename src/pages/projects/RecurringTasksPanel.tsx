@@ -8,6 +8,7 @@ import { useRecurringTaskActions, useRecurringTaskRuns, useRecurringTasks } from
 import { errorMessage } from "../../shared/errors/AppError";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
+import { Markdown } from "../../shared/ui/Markdown";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { ProjectTaskEditorFields } from "./ProjectTaskEditorFields";
 import styles from "./ProjectsPage.module.css";
@@ -58,7 +59,7 @@ export function RecurringTasksPanel({ project, autoRefresh }: { project: Project
     </SideSheet>
 
     <SideSheet visible={viewing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={viewing?.title ?? t("运行结果")} onCancel={() => { setViewing(null); setSelectedRun(null); }} zIndex={APP_OVERLAY_Z_INDEX.sideSheet}><div className={styles.runRecordList}>{runs.data?.length ? runs.data.map((run) => <button key={run.id} className={styles.recurringRun} onClick={() => setSelectedRun(run)}><span><strong>{run.triggerSource === "scheduled" ? t("自动运行") : run.triggerSource === "test" ? t("测试运行") : t("手动运行")}</strong><small>{formatTimestamp(run.createdAt, language)}</small></span><Tag color={run.status === "succeeded" ? "green" : run.status === "failed" ? "red" : "blue"}>{run.status}</Tag></button>) : <Empty title={t("暂无运行结果")}/>}</div></SideSheet>
-    <SideSheet visible={selectedRun != null} width={DETAIL_SHEET_WIDTH} motion={false} title={t("运行输出")} onCancel={() => setSelectedRun(null)} zIndex={APP_OVERLAY_Z_INDEX.modal}><div className={styles.runOutput}>{selectedRun?.sessionId ? <div className={styles.formNote}>{t("Agent 会话：{id}", { id: selectedRun.sessionId })}</div> : null}{selectedRun?.errorMessage ? <div className={styles.readonlyJobError}>{selectedRun.errorMessage}</div> : null}{detail.data?.events.map((event) => <section key={event.id}><small>{event.stage ?? event.level} · {formatTimestamp(event.createdAt, language)}</small><p>{event.message}</p></section>) ?? <div className={styles.state}>{t("正在读取输出…")}</div>}</div></SideSheet>
+    <SideSheet visible={selectedRun != null} width={DETAIL_SHEET_WIDTH} motion={false} title={t("运行输出")} onCancel={() => setSelectedRun(null)} zIndex={APP_OVERLAY_Z_INDEX.modal}><div className={styles.runOutput}>{selectedRun?.sessionId ? <div className={styles.formNote}>{t("Agent 会话：{id}", { id: selectedRun.sessionId })}</div> : null}{selectedRun?.errorMessage ? <div className={styles.readonlyJobError}>{selectedRun.errorMessage}</div> : null}{detail.data?.events.map((event) => <section key={event.id}><small>{event.stage ?? event.level} · {formatTimestamp(event.createdAt, language)}</small><Markdown content={event.message} /></section>) ?? <div className={styles.state}>{t("正在读取输出…")}</div>}</div></SideSheet>
   </div>;
 }
 

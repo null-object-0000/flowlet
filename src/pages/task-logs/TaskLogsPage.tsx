@@ -14,6 +14,7 @@ import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import styles from "./TaskLogsPage.module.css";
 import { formatJobDuration } from "./taskDuration";
+import { useResponsiveTablePageSize } from "../../shared/ui/useResponsiveTablePageSize";
 
 const { Text } = Typography;
 type Translate = (key: string, variables?: Record<string, string | number>) => string;
@@ -27,6 +28,15 @@ export function TaskLogsPage() {
   const cleanup = useCleanupBackgroundTasks();
   const [searchParams] = useSearchParams();
   const [selected, setSelected] = useState<string | null>(() => searchParams.get("jobId"));
+  const { bodyRef, pageSize } = useResponsiveTablePageSize({ rowHeight: 54, initialPageSize: DEFAULT_BACKGROUND_JOBS_FILTER.pageSize });
+
+  useEffect(() => {
+    setFilter((current) => current.pageSize === pageSize ? current : {
+      ...current,
+      page: Math.floor(((current.page - 1) * current.pageSize) / pageSize) + 1,
+      pageSize,
+    });
+  }, [pageSize]);
 
   const confirmCleanup = () => Modal.confirm({
     title: t("清理任务日志"),
@@ -67,8 +77,8 @@ export function TaskLogsPage() {
     </section>
     <section className={styles.tableCard}>
       <div className={`${styles.grid} ${styles.head}`}><span>{t("创建时间")}</span><span>{t("任务")}</span><span>{t("触发方式")}</span><span>{t("进度")}</span><span>{t("总耗时")}</span><span>{t("状态")}</span></div>
-      <div className={styles.body}>
-        {tasks.isLoading ? Array.from({ length: DEFAULT_BACKGROUND_JOBS_FILTER.pageSize }, (_, index) => <SkeletonRow key={index} />) : null}
+      <div ref={bodyRef} className={styles.body}>
+        {tasks.isLoading ? Array.from({ length: filter.pageSize }, (_, index) => <SkeletonRow key={index} />) : null}
         {tasks.isError ? <div className={styles.state}><strong>{t("任务日志加载失败")}</strong><span>{tasks.error.message}</span><Button type="tertiary" theme="outline" onClick={() => void tasks.refetch()}>{t("重试")}</Button></div> : null}
         {!tasks.isLoading && !tasks.isError && !tasks.data?.rows.length ? <div className={styles.state}><strong>{t("暂无任务日志")}</strong><span>{t("后台任务运行后，处理进度和结果会出现在这里。")}</span></div> : null}
         {tasks.data?.rows.map((job) => <button type="button" key={job.id} className={`${styles.grid} ${styles.row}`} onClick={() => setSelected(job.id)}><span>{formatTimestamp(job.createdAt, language)}</span><span className={styles.task}><strong>{job.title}</strong><small>{taskSubtitle(job, t)}</small></span><span>{triggerLabel(job.triggerSource, t)}</span><span>{job.progressTotal > 0 ? `${job.progressCurrent}/${job.progressTotal}` : "—"}</span><span className={styles.duration}>{formatJobDuration(job, now, language)}</span><span><StatusTag job={job} t={t} /></span></button>)}

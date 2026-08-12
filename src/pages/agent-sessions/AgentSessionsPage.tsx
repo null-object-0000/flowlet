@@ -18,6 +18,7 @@ import { formatCompactNumber, formatInteger } from "../../shared/formatters/numb
 import { formatCostAmount, formatCostCny, formatNativeCost } from "../../shared/formatters/cost";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import { AgentSessionDetailSideSheet, sessionDisplayTitle } from "./AgentSessionDetailSideSheet";
+import { useResponsiveTablePageSize } from "../../shared/ui/useResponsiveTablePageSize";
 import styles from "./AgentSessionsPage.module.css";
 
 const { Text } = Typography;
@@ -33,6 +34,7 @@ export function AgentSessionsPage() {
   const syncAgentData = useAgentDataSync();
   const syncStatus = useAgentSyncStatus();
   const [lastJobId, setLastJobId] = useState<string | null>(null);
+  const { bodyRef, pageSize } = useResponsiveTablePageSize({ rowHeight: 54, initialPageSize: DEFAULT_AGENT_SESSION_FILTER.pageSize });
   const page = sessions.data;
   const checkedTimes = syncStatus.data?.sources.map((source) => source.lastCheckedAt).filter((value): value is string => Boolean(value)).sort() ?? [];
   const latestCheckedAt = checkedTimes.length ? checkedTimes[checkedTimes.length - 1] : null;
@@ -54,6 +56,14 @@ export function AgentSessionsPage() {
     return () => window.clearTimeout(timer);
   }, [searchDraft]);
 
+  useEffect(() => {
+    setFilter((current) => current.pageSize === pageSize ? current : {
+      ...current,
+      page: Math.floor(((current.page - 1) * current.pageSize) / pageSize) + 1,
+      pageSize,
+    });
+  }, [pageSize]);
+
   return (
     <main className={styles.page}>
       <PageHeader title={t("会话管理")} subtitle={t("统一查看 Agent 本地会话与 Flowlet 请求观测")}>
@@ -74,6 +84,8 @@ export function AgentSessionsPage() {
         <AgentSessionsView
           rows={toAgentSessionRowModels(page?.rows ?? [], language, t)}
           loading={sessions.isLoading}
+          loadingRowCount={filter.pageSize}
+          bodyRef={bodyRef}
           renderRequests={(row, index) => {
             const raw = (page?.rows ?? [])[index];
             if (!raw) return <span>—</span>;

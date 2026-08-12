@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import styles from "./AgentSessionsView.module.css";
 
 export type AgentSessionStatusTone = "running" | "waiting" | "idle" | "unknown";
@@ -39,6 +39,8 @@ type Props = {
   labels: AgentSessionsLabels;
   density?: "default" | "compact";
   loading?: boolean;
+  loadingRowCount?: number;
+  bodyRef?: Ref<HTMLDivElement>;
   toolbar?: ReactNode;
   footer?: ReactNode;
   onOpenRow?: (id: string) => void;
@@ -48,7 +50,7 @@ type Props = {
   renderCost?: (row: AgentSessionRowModel, index: number) => ReactNode;
 };
 
-export function AgentSessionsView({ rows, labels, density = "default", loading = false, toolbar, footer, onOpenRow, renderRequests, renderToken, renderCost }: Props) {
+export function AgentSessionsView({ rows, labels, density = "default", loading = false, loadingRowCount = 5, bodyRef, toolbar, footer, onOpenRow, renderRequests, renderToken, renderCost }: Props) {
   return (
     <div className={`${styles.page} ${density === "compact" ? styles.compact : ""}`}>
       {toolbar ? <div className={styles.toolbarSlot}>{toolbar}</div> : null}
@@ -62,8 +64,8 @@ export function AgentSessionsView({ rows, labels, density = "default", loading =
           <span>{labels.cost}</span>
           <span>{labels.status}</span>
         </div>
-        <div className={styles.body}>
-          {loading ? Array.from({ length: 5 }, (_, index) => <SkeletonRow key={index} index={index} />) : null}
+        <div ref={bodyRef} className={styles.body}>
+          {loading ? Array.from({ length: loadingRowCount }, (_, index) => <SkeletonRow key={index} index={index} />) : null}
           {!loading ? rows.map((row, index) => (
             <button key={row.id} type="button" className={`${styles.grid} ${styles.row}`} aria-label={row.ariaLabel} onClick={() => onOpenRow?.(row.id)}>
               <span className={styles.activityAt}>{row.activityAt}</span>

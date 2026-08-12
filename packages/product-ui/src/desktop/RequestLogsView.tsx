@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import styles from "./RequestLogsView.module.css";
 
 export type RequestLogsStatItem = {
@@ -50,6 +50,8 @@ type Props = {
   labels: RequestLogsLabels;
   density?: "default" | "compact";
   loading?: boolean;
+  loadingRowCount?: number;
+  bodyRef?: Ref<HTMLDivElement>;
   toolbar?: ReactNode;
   footer?: ReactNode;
   onOpenRow?: (id: string) => void;
@@ -58,7 +60,7 @@ type Props = {
   renderCost?: (row: RequestLogsRowModel, index: number) => ReactNode;
 };
 
-export function RequestLogsView({ stats, rows, labels, density = "default", loading = false, toolbar, footer, onOpenRow, renderToken, renderCost }: Props) {
+export function RequestLogsView({ stats, rows, labels, density = "default", loading = false, loadingRowCount = 5, bodyRef, toolbar, footer, onOpenRow, renderToken, renderCost }: Props) {
   return (
     <div className={`${styles.page} ${density === "compact" ? styles.compact : ""}`}>
       <section className={styles.stats} aria-label={labels.status}>
@@ -87,8 +89,8 @@ export function RequestLogsView({ stats, rows, labels, density = "default", load
           <span role="columnheader">{labels.cost}</span>
         </div>
 
-        <div className={styles.body}>
-          {loading ? Array.from({ length: 5 }, (_, index) => <SkeletonRow key={index} index={index} />) : null}
+        <div ref={bodyRef} className={styles.body}>
+          {loading ? Array.from({ length: loadingRowCount }, (_, index) => <SkeletonRow key={index} index={index} />) : null}
           {!loading && rows.length === 0 ? (
             <div className={styles.empty}>
               <strong>{labels.emptyTitle ?? "—"}</strong>

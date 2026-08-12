@@ -20,6 +20,7 @@ import { formatCostCny } from "../../shared/formatters/cost";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { TimePresetSelect, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
+import { useResponsiveTablePageSize } from "../../shared/ui/useResponsiveTablePageSize";
 
 const TIME_OPTIONS: Array<{ value: RequestLogTimeRange; label: string }> = [
   { value: "1h", label: "最近 1 小时" },
@@ -40,6 +41,7 @@ export function RequestLogsPage() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [clientSelectValue, setClientSelectValue] = useState("__all__");
+  const { bodyRef, pageSize } = useResponsiveTablePageSize({ rowHeight: 45, initialPageSize: DEFAULT_REQUEST_LOG_FILTER.pageSize });
   const logs = useRequestLogs(filter, refresh.autoRefresh);
   const models = useRequestLogModels();
   const clients = useRequestLogClients();
@@ -65,6 +67,14 @@ export function RequestLogsPage() {
     setSearchDraft((current) => current === search ? current : search);
     setFilter((current) => current.search === search ? current : { ...current, search, page: 1 });
   }, [location]);
+
+  useEffect(() => {
+    setFilter((current) => current.pageSize === pageSize ? current : {
+      ...current,
+      page: Math.floor(((current.page - 1) * current.pageSize) / pageSize) + 1,
+      pageSize,
+    });
+  }, [pageSize]);
 
   const apply = (patch: Partial<RequestLogFilter>) => setFilter((current) => ({ ...current, ...patch, page: patch.page ?? 1 }));
 
@@ -112,6 +122,8 @@ export function RequestLogsPage() {
         ]}
         rows={toRequestLogRowModels(page?.rows ?? [], language, t)}
         loading={!logs.isError && logs.isLoading}
+        loadingRowCount={filter.pageSize}
+        bodyRef={bodyRef}
         renderToken={(_, index) => {
           const row = (page?.rows ?? [])[index];
           if (!row) return <span>—</span>;

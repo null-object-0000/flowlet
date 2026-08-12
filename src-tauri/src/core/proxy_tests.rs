@@ -127,7 +127,7 @@ async fn model_detail_prefers_upstream_limits_and_falls_back_to_models_cn() {
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(value["context_window"], 900_000);
     assert_eq!(value["max_output_tokens"], 384_000);
-    assert_eq!(value["max_input_tokens"], 516_000);
+    assert_eq!(value["max_input_tokens"], serde_json::Value::Null);
     assert_eq!(value["specification_source"], "upstream+models-cn");
     assert_eq!(value["pricing"][0]["currency"], "CNY");
     assert_eq!(

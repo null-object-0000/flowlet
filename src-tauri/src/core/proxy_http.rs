@@ -103,11 +103,6 @@ pub(super) fn build_model_detail_response(
 
     let context_window = min_present(candidates.iter().map(|item| item.context_window));
     let max_output_tokens = min_present(candidates.iter().map(|item| item.max_output_tokens));
-    let max_input_tokens = match (context_window, max_output_tokens) {
-        (Some(context), Some(output)) if context > output => Some(context - output),
-        (Some(context), _) => Some(context),
-        _ => None,
-    };
     let pricing = aggregate_pricing(&candidates);
     let sources = candidates
         .iter()
@@ -126,7 +121,9 @@ pub(super) fn build_model_detail_response(
         "created": parse_unix_seconds(&entry.created_at),
         "owned_by": entry.owned_by,
         "context_window": context_window,
-        "max_input_tokens": max_input_tokens,
+        // 当前上游详情与 models-cn 均未提供独立的最大输入字段。
+        // context_window 的预算语义不明确，不能通过减去最大输出进行猜测。
+        "max_input_tokens": serde_json::Value::Null,
         "max_output_tokens": max_output_tokens,
         "specification_source": specification_source,
         "pricing": pricing,

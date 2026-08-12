@@ -134,6 +134,12 @@ Rust 编译期环境与全局配置适配器。接入抽屉同样通过 `globalC
 通用 SideSheet 不再按 Agent ID 维护条件分支。Codex 手动配置中的模型目录直接读取仓库根目录
 `codex-models.json`，避免前端常量与 Rust 内置目录漂移。
 
+Rust 全局配置入口通过统一 `AgentGlobalConfigAdapter` 的 `inspect / apply / restore` 接口工作，
+Claude Code、OpenCode、Pi、Codex 分别由独立编译期 Adapter 模块承载路径解析和现有配置实现调用。
+插件注册表校验直接查询该 Adapter registry，不再维护另一份全局配置适配器白名单；设备同步也先
+按 Agent 插件声明解析 `globalConfigAdapterId`，不假设公开 Agent ID 与实现 ID 相同。Adapter 不存在时
+在注册表加载或调用入口明确失败，不做静默回退。
+
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 
 SQLite 迁移由 `Storage::migrate` 负责。除非需求明确允许且已评估用户数据影响，不得直接删除或重建现有表；新增或调整持久化结构必须提供迁移并补充存储测试。

@@ -158,9 +158,8 @@ impl PluginRegistry {
                             agent.id, agent.environment_adapter_id
                         ));
                     }
-                    if !matches!(
-                        agent.global_config_adapter_id.as_str(),
-                        "claude-code" | "opencode" | "pi" | "codex"
+                    if !crate::core::agent_global_config::has_global_config_adapter(
+                        &agent.global_config_adapter_id,
                     ) {
                         return Err(format!(
                             "Agent 插件 {} 引用了未知全局配置适配器：{}",
@@ -261,5 +260,13 @@ mod tests {
         assert!(PluginRegistry::from_json(unknown)
             .unwrap_err()
             .contains("未知适配器"));
+    }
+
+    #[test]
+    fn unknown_agent_global_config_adapter_is_rejected() {
+        let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"missing","endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let error = PluginRegistry::from_json(unknown).unwrap_err();
+        assert!(error.contains("未知全局配置适配器"));
+        assert!(error.contains("missing"));
     }
 }

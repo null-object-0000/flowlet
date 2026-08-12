@@ -11,6 +11,8 @@ use super::agent_environment::display_path;
 use super::codex_account::codex_home;
 use super::codex_model_catalog;
 
+mod adapters;
+
 const BACKUP_VERSION: u32 = 1;
 const PRIMARY_MODEL: &str = "flowlet-pro";
 const FAST_MODEL: &str = "flowlet-flash";
@@ -235,39 +237,17 @@ fn config_lock() -> &'static Mutex<()> {
 }
 
 pub fn inspect_agent_global_config(
-    agent_id: &str,
+    adapter_id: &str,
     expected_base_url: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     let _guard = config_lock()
         .lock()
         .map_err(|_| "Agent 全局配置锁已损坏".to_string())?;
-    match agent_id {
-        "claude-code" => inspect_claude_code(&claude_settings_path()?, expected_base_url),
-        "opencode" => inspect_opencode(
-            &opencode_settings_path()?,
-            &opencode_auth_path()?,
-            &opencode_permission_plugin_path()?,
-            expected_base_url,
-        ),
-        "pi" => inspect_pi(
-            &pi_settings_path()?,
-            &pi_models_path()?,
-            &pi_auth_path()?,
-            &pi_extension_path()?,
-            expected_base_url,
-        ),
-        "codex" => inspect_codex(
-            &codex_config_path(),
-            &codex_auth_path(),
-            &codex_models_path(),
-            expected_base_url,
-        ),
-        _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
-    }
+    adapters::adapter(adapter_id)?.inspect(expected_base_url)
 }
 
 pub fn apply_agent_global_config(
-    agent_id: &str,
+    adapter_id: &str,
     expected_base_url: &str,
     client_token: &str,
     options: Option<&AgentGlobalConfigOptions>,
@@ -275,79 +255,21 @@ pub fn apply_agent_global_config(
     let _guard = config_lock()
         .lock()
         .map_err(|_| "Agent 全局配置锁已损坏".to_string())?;
-    match agent_id {
-        "claude-code" => {
-            let (primary_long_context, fast_long_context) = options
-                .map(AgentGlobalConfigOptions::claude_long_context)
-                .unwrap_or((false, false));
-            apply_claude_code(
-                &claude_settings_path()?,
-                expected_base_url,
-                client_token,
-                primary_long_context,
-                fast_long_context,
-            )
-        }
-        "opencode" => apply_opencode(
-            &opencode_settings_path()?,
-            &opencode_auth_path()?,
-            &opencode_permission_plugin_path()?,
-            expected_base_url,
-            client_token,
-        ),
-        "pi" => apply_pi(
-            &pi_settings_path()?,
-            &pi_models_path()?,
-            &pi_auth_path()?,
-            &pi_extension_path()?,
-            expected_base_url,
-            client_token,
-            // 会话扩展默认安装；仅当用户明确关闭开关时才不安装。
-            options
-                .as_ref()
-                .map_or(true, |options| options.session_extension),
-        ),
-        "codex" => apply_codex(
-            &codex_config_path(),
-            &codex_auth_path(),
-            &codex_models_path(),
-            expected_base_url,
-            client_token,
-        ),
-        _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
-    }
+    adapters::adapter(adapter_id)?.apply(expected_base_url, client_token, options)
 }
 
 pub fn restore_agent_global_config(
-    agent_id: &str,
+    adapter_id: &str,
     expected_base_url: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     let _guard = config_lock()
         .lock()
         .map_err(|_| "Agent 全局配置锁已损坏".to_string())?;
-    match agent_id {
-        "claude-code" => restore_claude_code(&claude_settings_path()?, expected_base_url),
-        "opencode" => restore_opencode(
-            &opencode_settings_path()?,
-            &opencode_auth_path()?,
-            &opencode_permission_plugin_path()?,
-            expected_base_url,
-        ),
-        "pi" => restore_pi(
-            &pi_settings_path()?,
-            &pi_models_path()?,
-            &pi_auth_path()?,
-            &pi_extension_path()?,
-            expected_base_url,
-        ),
-        "codex" => restore_codex(
-            &codex_config_path(),
-            &codex_auth_path(),
-            &codex_models_path(),
-            expected_base_url,
-        ),
-        _ => Err(format!("暂不支持管理 Agent 全局配置：{agent_id}")),
-    }
+    adapters::adapter(adapter_id)?.restore(expected_base_url)
+}
+
+pub(crate) fn has_global_config_adapter(adapter_id: &str) -> bool {
+    adapters::has_adapter(adapter_id)
 }
 
 fn claude_config_dir() -> Result<PathBuf, String> {

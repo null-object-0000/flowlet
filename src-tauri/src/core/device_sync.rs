@@ -335,10 +335,16 @@ async fn build_synced_agent_profiles(
         ]
         .into_iter()
         .map(|(agent_id, base_url)| {
-            let state =
-                crate::core::agent_global_config::inspect_agent_global_config(agent_id, &base_url)
+            let state = crate::core::plugin_registry::plugin_registry()
+                .agent(agent_id)
+                .and_then(|plugin| {
+                    crate::core::agent_global_config::inspect_agent_global_config(
+                        &plugin.global_config_adapter_id,
+                        &base_url,
+                    )
                     .ok()
-                    .map(|report| global_config_state_name(&report.state).to_string());
+                })
+                .map(|report| global_config_state_name(&report.state).to_string());
             (agent_id.to_string(), state)
         })
         .collect::<std::collections::HashMap<_, _>>()

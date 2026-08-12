@@ -37,6 +37,8 @@ mod storage_device_usage;
 mod storage_maintenance;
 #[path = "storage_projects.rs"]
 mod storage_projects;
+#[path = "storage_recurring_tasks.rs"]
+mod storage_recurring_tasks;
 #[path = "storage_stats.rs"]
 mod storage_stats;
 #[path = "storage_tasks.rs"]
@@ -45,6 +47,7 @@ pub(crate) mod storage_tasks;
 mod storage_usage;
 pub use storage_maintenance::{DatabaseCompactionResult, DatabaseMaintenanceStats};
 pub use storage_projects::{Project, ProjectTask};
+pub use storage_recurring_tasks::{RecurringTask, RecurringTaskRun};
 pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
 pub use storage_tasks::{
     AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
@@ -1786,10 +1789,67 @@ impl Storage {
         backfill_task_execution_durations(&connection)?;
         // 多设备同步（2026-08）：目录可空化 + 工作区归属 + 任务领取租约字段。
         migrate_projects_workspace_schema(&connection)?;
+        migrate_recurring_tasks_schema(&connection)?;
 
         tracing::info!("migrate: 完成");
         Ok(())
     }
+}
+
+fn migrate_recurring_tasks_schema(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS recurring_tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            task_type TEXT NOT NULL CHECK (task_type IN ('code', 'readonly')),
+            agent_profile TEXT NOT NULL,
+            schedule_kind TEXT NOT NULL DEFAULT 'manual' CHECK (schedule_kind IN ('manual', 'daily')),
+            daily_time TEXT,
+            timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+            enabled INTEGER NOT NULL DEFAULT 0,
+            session_policy TEXT NOT NULL DEFAULT 'fresh' CHECK (session_policy IN ('fresh', 'continue')),
+            source_task_id TEXT,
+            next_run_at TEXT,
+            last_scheduled_for TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_recurring_tasks_due
+            ON recurring_tasks(enabled, schedule_kind, next_run_at);
+        CREATE TABLE IF NOT EXISTS recurring_task_runs (
+            id TEXT PRIMARY KEY,
+            recurring_task_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            trigger_source TEXT NOT NULL CHECK (trigger_source IN ('manual', 'scheduled', 'test', 'retry')),
+            status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted')),
+            scheduled_for TEXT,
+            title_snapshot TEXT NOT NULL,
+            description_snapshot TEXT NOT NULL DEFAULT '',
+            task_type_snapshot TEXT NOT NULL,
+            agent_profile_snapshot TEXT NOT NULL,
+            session_policy_snapshot TEXT NOT NULL,
+            job_id TEXT,
+            session_id TEXT,
+            error_message TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (recurring_task_id) REFERENCES recurring_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_recurring_task_runs_task_created
+            ON recurring_task_runs(recurring_task_id, created_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_recurring_task_runs_scheduled_once
+            ON recurring_task_runs(recurring_task_id, scheduled_for)
+            WHERE trigger_source = 'scheduled' AND scheduled_for IS NOT NULL;
+        "#,
+    )?;
+    Ok(())
 }
 
 fn add_column_if_missing(

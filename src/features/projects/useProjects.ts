@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { projectCommands } from "../../domains/project/commands";
-import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskQueueReport, ProjectTaskRunnerState } from "../../domains/project/types";
+import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskQueueReport, ProjectTaskRunnerState, RecurringTask } from "../../domains/project/types";
 import { queryKeys } from "../../shared/query-keys";
 
 export function useProjects() {
@@ -24,6 +24,23 @@ export function useProjectTasks(projectId: string | undefined, autoRefresh = fal
     refetchInterval: autoRefresh ? intervalMs : false,
     refetchOnWindowFocus: false,
   });
+}
+
+export function useRecurringTasks(projectId: string, autoRefresh = false, intervalMs = 15_000) {
+  return useQuery({ queryKey: queryKeys.project.recurringTasks(projectId), queryFn: () => projectCommands.listRecurringTasks(projectId), refetchInterval: autoRefresh ? intervalMs : false, refetchOnWindowFocus: false });
+}
+
+export function useRecurringTaskRuns(taskId: string | null, autoRefresh = false) {
+  return useQuery({ queryKey: queryKeys.project.recurringRuns(taskId ?? ""), queryFn: () => projectCommands.listRecurringTaskRuns(taskId!), enabled: Boolean(taskId), refetchInterval: autoRefresh ? 5_000 : false });
+}
+
+export function useRecurringTaskActions(projectId: string) {
+  const client = useQueryClient();
+  const refresh = () => client.invalidateQueries({ queryKey: queryKeys.project.recurringTasks(projectId) });
+  const save = useMutation({ mutationFn: (task: RecurringTask) => projectCommands.saveRecurringTask(task), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (taskId: string) => projectCommands.deleteRecurringTask(projectId, taskId), onSuccess: refresh });
+  const run = useMutation({ mutationFn: ({ taskId, test }: { taskId: string; test?: boolean }) => projectCommands.runRecurringTaskNow(taskId, test), onSuccess: async (_, input) => { await Promise.all([refresh(), client.invalidateQueries({ queryKey: queryKeys.project.recurringRuns(input.taskId) })]); } });
+  return { save, remove, run };
 }
 
 export function useProjectActions() {

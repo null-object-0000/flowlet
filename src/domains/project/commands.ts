@@ -7,6 +7,8 @@ import type {
   ProjectTaskRunnerState,
   ProjectWorkspaceStatus,
   ProjectWorkspaceSyncResult,
+  RecurringTask,
+  RecurringTaskRun,
   RunProjectTaskResult,
 } from "./types";
 
@@ -18,6 +20,11 @@ export const projectCommands = {
   save: (project: Project): Promise<void> => invokeCommand<void>("save_project", { project }).catch(wrap),
   delete: (projectId: string): Promise<boolean> => invokeCommand<boolean>("delete_project", { projectId }).catch(wrap),
   listTasks: (projectId: string): Promise<ProjectTask[]> => invokeCommand<ProjectTask[]>("list_project_tasks", { projectId }).catch(wrap),
+  listRecurringTasks: (projectId: string): Promise<RecurringTask[]> => invokeCommand<RecurringTask[]>("list_recurring_tasks", { projectId }).catch(wrap),
+  saveRecurringTask: (task: RecurringTask): Promise<void> => invokeCommand<void>("save_recurring_task", { task }).catch(wrap),
+  deleteRecurringTask: (projectId: string, taskId: string): Promise<boolean> => invokeCommand<boolean>("delete_recurring_task", { projectId, taskId }).catch(wrap),
+  listRecurringTaskRuns: (taskId: string): Promise<RecurringTaskRun[]> => invokeCommand<RecurringTaskRun[]>("list_recurring_task_runs", { taskId }).catch(wrap),
+  runRecurringTaskNow: (taskId: string, test = false): Promise<RunProjectTaskResult> => invokeCommand<RunProjectTaskResult>("run_recurring_task_now", { taskId, test }).catch(wrap),
   saveTask: (task: ProjectTask): Promise<void> => invokeCommand<void>("save_project_task", { task }).catch(wrap),
   deleteTask: (projectId: string, taskId: string): Promise<boolean> => invokeCommand<boolean>("delete_project_task", { projectId, taskId }).catch(wrap),
   runTask: (projectId: string, taskId: string): Promise<RunProjectTaskResult> => invokeCommand<RunProjectTaskResult>("run_project_task", { projectId, taskId }).catch(wrap),

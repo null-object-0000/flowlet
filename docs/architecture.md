@@ -427,6 +427,22 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 删除这些本地任务，不删除目录、Agent 原始会话或 Flowlet 请求观测记录。项目与任务 CRUD
 写入 SQLite 后立即生效，无需重启。
 
+重复任务（2026-08）与上述一次性审核任务分离：`recurring_tasks` 保存稳定定义（项目、名称、
+描述、只读/代码类型、Agent Profile、手动/每日计划、IANA 时区、启停与会话策略），
+`recurring_task_runs` 为每次手动、测试或定时触发保存独立配置快照、状态、background job、
+Agent 会话和错误。每日计划在保存时解析为 UTC `next_run_at`；Rust 常驻调度器在主窗口隐藏到
+托盘后仍每 30 秒检查一次，到期时以 `(recurring_task_id, scheduled_for)` 唯一约束创建 Run，
+避免 StrictMode、重复 tick 或重启产生双份结果。Flowlet 退出或电脑休眠时不执行；恢复后只按
+当前 `next_run_at` 补一条最近错过的运行并推进到下一天，不连续补齐所有历史周期。
+
+重复任务 Run 与普通项目任务共用 `agent_task_runner` 的项目级执行槽和 Claude Code / Codex /
+OpenCode / Pi 进程、输出解析及 background job；普通任务保持 `draft → review` 审核状态机，
+重复 Run 只更新自身 `queued/running/succeeded/failed/cancelled/interrupted`。默认每个新 Run
+建立新 Agent 会话；`continue` 策略显式延续最近一次成功 Run 的会话；应用重启恢复同一条
+`interrupted` Run 时始终尝试从原 job 恢复会话。所有任务定义修改只影响未来 Run，历史 Run
+保留运行当时的标题、描述、任务类型、Agent 和会话策略快照。相关表和计划保存后热生效，
+无需重启；只有退出 Flowlet 才会停止常驻调度。
+
 任务执行器按 `agent_profile` 分派 Claude Code、OpenCode 或 Pi。Pi 在 Windows npm 安装下
 通常通过 cmd / PowerShell shim 启动；为避免多行任务正文被命令行转义截断，Flowlet 使用 stdin
 传递完整 prompt，CLI 参数只承载权限、会话名与会话目录。Pi 正常返回后还必须在 Flowlet

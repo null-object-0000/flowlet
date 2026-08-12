@@ -74,6 +74,8 @@ export const queryKeys = {
     list: () => [...queryKeys.project.all, "list"] as const,
     detail: (projectId: string) => [...queryKeys.project.all, "detail", projectId] as const,
     tasks: (projectId: string) => [...queryKeys.project.all, "tasks", projectId] as const,
+    recurringTasks: (projectId: string) => [...queryKeys.project.all, "recurring-tasks", projectId] as const,
+    recurringRuns: (taskId: string) => [...queryKeys.project.all, "recurring-runs", taskId] as const,
   },
   projectTaskRunner: {
     all: ["project", "task-runner"] as const,

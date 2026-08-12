@@ -19,7 +19,8 @@ import { SessionConversation } from "../../features/agent-sessions/SessionConver
 import { interactionEventsVersion, useSessionScrollFollow } from "../../features/agent-sessions/useSessionScrollFollow";
 import { useAgentSessionTimeline } from "../../features/agent-sessions/useAgentSessions";
 import { useBackgroundTaskDetail } from "../../features/background-tasks/useBackgroundTasks";
-import { newProject, newProjectTask, useProject, useProjectActions, useProjects, useProjectTaskActions, useProjectTaskRunnerActions, useProjectTaskScheduler, useProjectTasks } from "../../features/projects/useProjects";
+import { newProject, newProjectTask, useProject, useProjectActions, useProjects, useProjectTaskActions, useProjectTaskRunnerActions, useProjectTaskScheduler, useProjectTasks, useRecurringTaskActions } from "../../features/projects/useProjects";
+import { RecurringTasksPanel } from "./RecurringTasksPanel";
 import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
 import { errorMessage } from "../../shared/errors/AppError";
 import { formatCostAmount } from "../../shared/formatters/cost";
@@ -139,6 +140,7 @@ function LoadedProjectDetail({ project }: { project: Project }) {
   });
   // 看板任务搜索词：标题 / ID / 描述等关键词过滤，只影响当前看板展示。
   const [search, setSearch] = useState("");
+  const [projectView, setProjectView] = useState<"tasks" | "recurring">("tasks");
   // 前端调度器：进入项目详情页即自动轮询「槽空闲 && 有待处理任务」，有空闲就领取执行。
   // 领取失败（Agent 未安装 / 进程启动失败等）时提示原因，避免任务静默卡在待处理。
   const scheduler = useProjectTaskScheduler(
@@ -155,12 +157,12 @@ function LoadedProjectDetail({ project }: { project: Project }) {
   // 「在独立窗口打开」能力已移至右上角窗口控制区（AppShell → WindowControls 注入）。
   return <main className={styles.page}>
     <PageHeader title={project.name} subtitle={project.directoryPath ?? t("未绑定目录")}>
-      <DesktopSearchFieldView
+      {projectView === "tasks" ? <DesktopSearchFieldView
         value={search}
         placeholder={t("搜索任务标题、ID 或描述")}
         width={220}
         onChange={setSearch}
-      />
+      /> : null}
       <RefreshControl
         autoRefresh={refresh.autoRefresh}
         onToggleAutoRefresh={refresh.toggleAutoRefresh}
@@ -172,8 +174,12 @@ function LoadedProjectDetail({ project }: { project: Project }) {
         t={t}
       />
     </PageHeader>
+    <Tabs type="button" activeKey={projectView} onChange={(key) => setProjectView(key as "tasks" | "recurring")}>
+      <Tabs.TabPane tab={t("工作任务")} itemKey="tasks" />
+      <Tabs.TabPane tab={t("重复任务")} itemKey="recurring" />
+    </Tabs>
     <section className={styles.detailContent}>
-      <TaskBoard project={project} tasks={tasks} sharedProjects={sharedProjects.data ?? []} sharedProjectsError={sharedProjects.isError ? sharedProjects.error.message : null} runnerState={scheduler.runnerState.data} queued={scheduler.queued.data?.tasks ?? []} queueBlockers={scheduler.queued.data?.blockers ?? []} search={search} />
+      {projectView === "tasks" ? <TaskBoard project={project} tasks={tasks} sharedProjects={sharedProjects.data ?? []} sharedProjectsError={sharedProjects.isError ? sharedProjects.error.message : null} runnerState={scheduler.runnerState.data} queued={scheduler.queued.data?.tasks ?? []} queueBlockers={scheduler.queued.data?.blockers ?? []} search={search} /> : <RecurringTasksPanel project={project} autoRefresh={refresh.autoRefresh} />}
     </section>
   </main>;
 }
@@ -988,11 +994,23 @@ function trimScale(value: string): string {
   return value.replace(/\.0+$/, "");
 }
 
+function recurringTaskFromCompletedTask(task: ProjectTask) {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(), projectId: task.projectId, title: task.title, description: task.description,
+    taskType: task.taskType, agentProfile: task.agentProfile, scheduleKind: "manual" as const,
+    dailyTime: "09:00", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai",
+    enabled: false, sessionPolicy: "fresh" as const, sourceTaskId: task.id, nextRunAt: null,
+    lastScheduledFor: null, createdAt: now, updatedAt: now,
+  };
+}
+
 /** 提交后任务的只读详情抽屉：概览（任务信息 + 运行/调度记录）+ 会话（完整对话）
  *  + 相关任务（基于本任务创建的子任务）。 */
 function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJobId, baseTask, relatedTasks, onOpenTask, onClose, onEditDraft, onApprove, onReject, onConvert, onCreateChildTask }: { task: ProjectTask | null; remoteOrigin: RemoteTaskOrigin | null; ownedByOther: boolean; now: number; runningJobId: string | null; baseTask: ProjectTask | null; relatedTasks: ProjectTask[]; onOpenTask: (task: ProjectTask) => void; onClose: () => void; onEditDraft: (task: ProjectTask) => void; onApprove: (task: ProjectTask) => void; onReject: (task: ProjectTask) => void; onConvert: (task: ProjectTask) => void; onCreateChildTask: (task: ProjectTask) => void }) {
   const { language, t } = useAppPreferences();
   const queryClient = useQueryClient();
+  const recurringActions = useRecurringTaskActions(task?.projectId ?? "");
   const [activeTab, setActiveTab] = useState<"overview" | "session" | "related">("overview");
   const [refreshing, setRefreshing] = useState(false);
   // 任务执行中在 Tabs 右上角使用页面公共的自动刷新控件：开关控制会话 Tab 的 5 秒自动刷新。
@@ -1051,7 +1069,7 @@ function TaskReadonlySideSheet({ task, remoteOrigin, ownedByOther, now, runningJ
   };
   const footer = (
     <div className={styles.taskSheetFooter}><span></span><span className={styles.taskSheetFooterActions}>
-      {isDone && task && !remoteOrigin && !ownedByOther ? <Button type="primary" theme="solid" onClick={() => onCreateChildTask(task)}>{t("基于此任务创建子任务")}</Button> : null}
+      {isDone && task && !remoteOrigin && !ownedByOther ? <><Button onClick={() => void recurringActions.save.mutateAsync(recurringTaskFromCompletedTask(task)).then(() => Toast.success(t("已保存为重复任务，可在“重复任务”中继续配置计划"))).catch((error) => Toast.error(errorMessage(error)))}>{t("保存为重复任务")}</Button><Button type="primary" theme="solid" onClick={() => onCreateChildTask(task)}>{t("基于此任务创建子任务")}</Button></> : null}
       {isReview && task && !remoteOrigin && !ownedByOther ? (
         <>
           {task.taskType === "readonly" ? <Button onClick={() => onConvert(task)}>{t("转为代码修改")}</Button> : null}

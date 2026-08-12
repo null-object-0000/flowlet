@@ -263,6 +263,7 @@ pub(crate) async fn run_project_task(
             &spawned_job_id,
             &prompt,
             resume_session.as_deref(),
+            true,
         )
         .await;
         match result {
@@ -295,6 +296,162 @@ pub(crate) async fn run_project_task(
         started: true,
         job_id: Some(job_id),
         message: "任务已开始执行".to_string(),
+    })
+}
+
+#[cfg(desktop)]
+pub(crate) async fn run_recurring_task_run(
+    storage: Storage,
+    run_id: String,
+) -> Result<RunProjectTaskResult, String> {
+    let run = storage
+        .get_recurring_task_run(&run_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "重复任务运行不存在".to_string())?;
+    if !matches!(run.status.as_str(), "queued" | "interrupted") {
+        return Ok(RunProjectTaskResult {
+            started: false,
+            job_id: run.job_id,
+            message: "该运行不是待执行状态".to_string(),
+        });
+    }
+    {
+        let mut running = agent_task_running()
+            .lock()
+            .map_err(|_| "读取执行槽状态失败".to_string())?;
+        if running.contains_key(&run.project_id) {
+            return Ok(RunProjectTaskResult {
+                started: false,
+                job_id: None,
+                message: "该项目已有任务执行中，重复任务运行已排队".to_string(),
+            });
+        }
+        running.insert(
+            run.project_id.clone(),
+            RunningTaskInfo {
+                project_id: run.project_id.clone(),
+                task_id: run.id.clone(),
+                task_title: run.title_snapshot.clone(),
+                agent_profile: run.agent_profile_snapshot.clone(),
+                job_id: String::new(),
+                started_at: String::new(),
+            },
+        );
+    }
+    let guard = AgentTaskRunningGuard {
+        project_id: run.project_id.clone(),
+    };
+    required_project_dir(&storage, &run.project_id)?;
+    let task = ProjectTask {
+        id: run.id.clone(),
+        project_id: run.project_id.clone(),
+        title: run.title_snapshot.clone(),
+        description: run.description_snapshot.clone(),
+        status: "in_progress".to_string(),
+        task_type: run.task_type_snapshot.clone(),
+        agent_profile: run.agent_profile_snapshot.clone(),
+        priority: "p2".to_string(),
+        base_task_id: None,
+        last_job_id: run.job_id.clone(),
+        rejection_reason: None,
+        execution_history: None,
+        created_at: run.created_at.clone(),
+        updated_at: run.updated_at.clone(),
+        claimed_by: None,
+        claimed_at: None,
+        queue_boosted_at: None,
+        deleted: false,
+    };
+    let executable = resolve_agent_executable(&task.agent_profile).await?;
+    let job_id = uuid::Uuid::new_v4().to_string();
+    storage
+        .create_job(
+            &job_id,
+            "recurring-task-run",
+            &format!("重复任务：{}", task.title),
+            "正在启动",
+            &run.trigger_source,
+            1,
+            &format!("开始运行「{}」", task.title),
+        )
+        .map_err(|error| error.to_string())?;
+    if !storage
+        .start_recurring_run(&run.id, &job_id)
+        .map_err(|error| error.to_string())?
+    {
+        return Err("重复任务运行已被其他调度器领取".to_string());
+    }
+    if let Ok(mut running) = agent_task_running().lock() {
+        running.insert(
+            run.project_id.clone(),
+            RunningTaskInfo {
+                project_id: run.project_id.clone(),
+                task_id: run.id.clone(),
+                task_title: task.title.clone(),
+                agent_profile: task.agent_profile.clone(),
+                job_id: job_id.clone(),
+                started_at: chrono::Utc::now().to_rfc3339(),
+            },
+        );
+    }
+    let resume_session = if run.status == "interrupted" {
+        session_from_job(&storage, run.job_id.as_deref())?
+    } else if run.session_policy_snapshot == "continue" {
+        storage
+            .latest_recurring_task_session(&run.recurring_task_id, &run.id)
+            .map_err(|error| error.to_string())?
+    } else {
+        None
+    };
+    let prompt = build_task_prompt(&task, None, None);
+    let spawned_job_id = job_id.clone();
+    tauri::async_runtime::spawn(async move {
+        let _guard = guard;
+        match execute_agent(
+            &storage,
+            &executable,
+            &task,
+            &task.project_id,
+            &spawned_job_id,
+            &prompt,
+            resume_session.as_deref(),
+            false,
+        )
+        .await
+        {
+            Ok(outcome) => {
+                let session_id = serde_json::from_str::<serde_json::Value>(&outcome.summary_json)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("sessionId")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string)
+                    });
+                let _ = storage.finish_job(
+                    &spawned_job_id,
+                    outcome.job_status,
+                    &outcome.summary_json,
+                    &outcome.done_message,
+                );
+                let run_status = match outcome.job_status {
+                    "succeeded" => "succeeded",
+                    "cancelled" => "cancelled",
+                    _ => "failed",
+                };
+                let _ =
+                    storage.finish_recurring_run(&run_id, run_status, session_id.as_deref(), None);
+            }
+            Err(error) => {
+                let _ = storage.fail_job(&spawned_job_id, &error);
+                let _ = storage.finish_recurring_run(&run_id, "failed", None, Some(&error));
+            }
+        }
+    });
+    Ok(RunProjectTaskResult {
+        started: true,
+        job_id: Some(job_id),
+        message: "重复任务已开始运行".to_string(),
     })
 }
 
@@ -499,6 +656,7 @@ async fn execute_agent(
     job_id: &str,
     prompt: &str,
     resume_session: Option<&str>,
+    manage_task_state: bool,
 ) -> Result<ExecutionOutcome, String> {
     match task.agent_profile.as_str() {
         "Codex" => {
@@ -510,6 +668,7 @@ async fn execute_agent(
                 job_id,
                 prompt,
                 resume_session,
+                manage_task_state,
             )
             .await
         }
@@ -522,6 +681,7 @@ async fn execute_agent(
                 job_id,
                 prompt,
                 resume_session,
+                manage_task_state,
             )
             .await
         }
@@ -534,6 +694,7 @@ async fn execute_agent(
                 job_id,
                 prompt,
                 resume_session,
+                manage_task_state,
             )
             .await
         }
@@ -546,6 +707,7 @@ async fn execute_agent(
                 job_id,
                 prompt,
                 resume_session,
+                manage_task_state,
             )
             .await
         }
@@ -658,7 +820,11 @@ fn record_started_execution(
     storage: &Storage,
     task: &ProjectTask,
     job_id: &str,
+    manage_task_state: bool,
 ) -> Result<(), String> {
+    if !manage_task_state {
+        return Ok(());
+    }
     let recorded = storage
         .append_task_execution(&task.id, job_id, &task.updated_at)
         .map_err(|error| format!("记录任务执行轮次失败：{error}"))?;
@@ -689,6 +855,7 @@ async fn read_agent_output(
     task_id: &str,
     agent: SpawnedAgent,
     display_name: &str,
+    manage_task_state: bool,
     mut on_stdout_line: impl FnMut(
         &Storage,
         &str,
@@ -733,7 +900,7 @@ async fn read_agent_output(
                     let _ = child.kill().await;
                     let _ = child.wait().await;
                     // 取消后回到草稿：不会被调度器自动重新领取，用户确认后再手动提交。
-                    let _ = storage.set_task_status(task_id, "draft");
+                    if manage_task_state { let _ = storage.set_task_status(task_id, "draft"); }
                     return Ok((AgentProcessOutcome {
                         session_id,
                         cancelled: true,
@@ -786,6 +953,7 @@ async fn finish_agent_outcome(
     display_name: &str,
     child: &mut tokio::process::Child,
     outcome: AgentProcessOutcome,
+    manage_task_state: bool,
 ) -> Result<ExecutionOutcome, String> {
     if outcome.cancelled {
         let summary = serde_json::json!({
@@ -808,9 +976,11 @@ async fn finish_agent_outcome(
     let exit_code = status.code().unwrap_or(-1);
 
     // Agent 退出后自动回写待审核：无论成功或失败，都交由人类在待审核阶段判断。
-    storage
-        .set_task_status(&task.id, "review")
-        .map_err(|error| format!("标记任务待审核失败：{error}"))?;
+    if manage_task_state {
+        storage
+            .set_task_status(&task.id, "review")
+            .map_err(|error| format!("标记任务待审核失败：{error}"))?;
+    }
 
     let error_snippet = if success {
         String::new()
@@ -823,7 +993,11 @@ async fn finish_agent_outcome(
         }
     };
     let done_message = if success {
-        "任务执行完成，等待审核".to_string()
+        if manage_task_state {
+            "任务执行完成，等待审核".to_string()
+        } else {
+            "重复任务运行完成".to_string()
+        }
     } else {
         format!("任务执行结束（退出码 {exit_code}），等待审核{error_snippet}")
     };
@@ -850,6 +1024,7 @@ async fn execute_claude_code(
     job_id: &str,
     prompt: &str,
     resume_session: Option<&str>,
+    manage_task_state: bool,
 ) -> Result<ExecutionOutcome, String> {
     let project_dir = required_project_dir(storage, project_id)?;
     // 会话显示名：`-p` 非交互模式不会自动生成 ai-title，必须显式传 --name，
@@ -871,17 +1046,26 @@ async fn execute_claude_code(
             command.arg("--resume").arg(session);
         }
     })?;
-    record_started_execution(storage, task, job_id)?;
+    record_started_execution(storage, task, job_id, manage_task_state)?;
     let (outcome, mut child) = read_agent_output(
         storage,
         job_id,
         &task.id,
         agent,
         "Claude Code",
+        manage_task_state,
         process_claude_line,
     )
     .await?;
-    finish_agent_outcome(storage, task, "Claude Code", &mut child, outcome).await
+    finish_agent_outcome(
+        storage,
+        task,
+        "Claude Code",
+        &mut child,
+        outcome,
+        manage_task_state,
+    )
+    .await
 }
 
 /// 解析 Claude Code stream-json 的单个事件行，把有用的文本累积并定时落 job event
@@ -956,6 +1140,7 @@ async fn execute_codex(
     job_id: &str,
     prompt: &str,
     resume_session: Option<&str>,
+    manage_task_state: bool,
 ) -> Result<ExecutionOutcome, String> {
     let project_dir = required_project_dir(storage, project_id)?;
     let agent = spawn_agent(executable, &project_dir, "Codex", false, |command| {
@@ -971,7 +1156,7 @@ async fn execute_codex(
             .arg("--skip-git-repo-check")
             .arg(prompt);
     })?;
-    record_started_execution(storage, task, job_id)?;
+    record_started_execution(storage, task, job_id, manage_task_state)?;
 
     let (outcome, mut child) = read_agent_output(
         storage,
@@ -979,12 +1164,21 @@ async fn execute_codex(
         &task.id,
         agent,
         "Codex",
+        manage_task_state,
         |storage, job_id, line, text_buffer, session_id| {
             process_codex_line(storage, job_id, line, text_buffer, session_id)
         },
     )
     .await?;
-    finish_agent_outcome(storage, task, "Codex", &mut child, outcome).await
+    finish_agent_outcome(
+        storage,
+        task,
+        "Codex",
+        &mut child,
+        outcome,
+        manage_task_state,
+    )
+    .await
 }
 
 /// 解析 Codex `exec --json` 的单行事件：从 `thread.started` 捕获会话 id
@@ -1043,6 +1237,7 @@ async fn execute_opencode(
     job_id: &str,
     prompt: &str,
     resume_session: Option<&str>,
+    manage_task_state: bool,
 ) -> Result<ExecutionOutcome, String> {
     let project_dir = required_project_dir(storage, project_id)?;
     // 会话显示名：`run` 默认用截断后的 prompt 当标题，任务场景显式传 --title。
@@ -1063,7 +1258,7 @@ async fn execute_opencode(
             command.arg("--session").arg(session);
         }
     })?;
-    record_started_execution(storage, task, job_id)?;
+    record_started_execution(storage, task, job_id, manage_task_state)?;
 
     let (outcome, mut child) = read_agent_output(
         storage,
@@ -1071,12 +1266,21 @@ async fn execute_opencode(
         &task.id,
         agent,
         "OpenCode",
+        manage_task_state,
         |storage, job_id, line, text_buffer, session_id| {
             process_opencode_line(storage, job_id, line, text_buffer, session_id)
         },
     )
     .await?;
-    finish_agent_outcome(storage, task, "OpenCode", &mut child, outcome).await
+    finish_agent_outcome(
+        storage,
+        task,
+        "OpenCode",
+        &mut child,
+        outcome,
+        manage_task_state,
+    )
+    .await
 }
 
 /// 解析 OpenCode `--format json` 的单行事件：累积 `text` 事件的文本，
@@ -1205,6 +1409,7 @@ async fn execute_pi(
     job_id: &str,
     prompt: &str,
     resume_session: Option<&str>,
+    manage_task_state: bool,
 ) -> Result<ExecutionOutcome, String> {
     let project_dir = required_project_dir(storage, project_id)?;
     let session_dir = pi_native_session_dir()?;
@@ -1223,7 +1428,7 @@ async fn execute_pi(
             .arg("--session-id")
             .arg(&session_uuid);
     })?;
-    record_started_execution(storage, task, job_id)?;
+    record_started_execution(storage, task, job_id, manage_task_state)?;
     // Pi 的 session id 在进程启动前就已确定，立即落事件。这样应用重启导致进程中断时，
     // 恢复调度仍能取回同一个 id，而不必等待正常收尾写 summary_json。
     storage
@@ -1261,6 +1466,7 @@ async fn execute_pi(
         &task.id,
         agent,
         "Pi",
+        manage_task_state,
         |_storage, _job_id, line, text_buffer, _session_id| {
             // Pi -p 模式抑制中间输出，stdout 是最终结果文本，逐行累积。
             text_buffer.push_str(line);
@@ -1283,7 +1489,7 @@ async fn execute_pi(
         stderr_lines: outcome.stderr_lines,
         output_lines: outcome.output_lines,
     };
-    finish_agent_outcome(storage, task, "Pi", &mut child, outcome).await
+    finish_agent_outcome(storage, task, "Pi", &mut child, outcome, manage_task_state).await
 }
 
 /// 把累积文本写入一条 job event（供只读详情 / 任务日志页展示）。
@@ -2037,6 +2243,7 @@ mod tests {
             "job-integ",
             &prompt,
             None,
+            true,
         )
         .await
         .expect("execute_pi 应成功执行");
@@ -2131,6 +2338,7 @@ mod tests {
             "job-opening",
             "reply with exactly: OPENCODE_EXECUTED_OK",
             None,
+            true,
         )
         .await
         .expect("execute_opencode 应成功执行");
@@ -2191,7 +2399,9 @@ mod tests {
         task.status = "submitted".to_string();
         storage.save_project_task(&task).unwrap();
 
-        let executable = resolve_agent_executable("Codex").await.expect("Codex 应已安装");
+        let executable = resolve_agent_executable("Codex")
+            .await
+            .expect("Codex 应已安装");
         let outcome = execute_codex(
             &storage,
             &executable,
@@ -2200,6 +2410,7 @@ mod tests {
             "job-codex",
             "reply with exactly: CODEX_EXECUTED_OK",
             None,
+            true,
         )
         .await
         .expect("execute_codex 应成功执行");

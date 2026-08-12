@@ -142,6 +142,13 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
             tracing::warn!(error = %error, "恢复中断的项目任务失败");
         }
     }
+    match storage.recover_interrupted_recurring_runs() {
+        Ok(recovered) if recovered > 0 => {
+            tracing::info!(recovered, "已恢复应用重启中断的重复任务运行")
+        }
+        Ok(_) => {}
+        Err(error) => tracing::warn!(error = %error, "恢复中断的重复任务运行失败"),
+    }
 
     storage
         .cleanup_orphan_balance_snapshots()
@@ -590,6 +597,33 @@ fn run_desktop() {
                 *tray_guard = Some(tray);
             }
 
+            // 重复任务常驻调度：窗口隐藏到托盘后仍继续运行。每轮先把到期定义转换成
+            // 独立 Run（唯一索引防重复），再尝试领取排队 Run；同项目槽被普通任务或
+            // 另一条 Run 占用时保留排队，下轮继续。错过多个周期只生成最近一次到期 Run。
+            let recurring_storage = state.storage.clone();
+            tauri::async_runtime::spawn(async move {
+                let period = std::time::Duration::from_secs(30);
+                let mut interval = tokio::time::interval(period);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    interval.tick().await;
+                    if let Err(error) = recurring_storage.claim_due_recurring_runs() {
+                        tracing::warn!(error = %error, "创建到期重复任务运行失败");
+                    }
+                    let queued = match recurring_storage.list_queued_recurring_runs() {
+                        Ok(queued) => queued,
+                        Err(error) => { tracing::warn!(error = %error, "读取重复任务运行队列失败"); continue; }
+                    };
+                    for run in queued {
+                        match crate::core::agent_task_runner::run_recurring_task_run(recurring_storage.clone(), run.id.clone()).await {
+                            Ok(result) if result.started => {}
+                            Ok(_) => {}
+                            Err(error) => tracing::warn!(run_id = %run.id, error = %error, "领取重复任务运行失败"),
+                        }
+                    }
+                }
+            });
+
             // S3 设备用量后台同步：启动后 5 秒首次检查，以尽快发布 LAN 端点；
             // 之后每 15 分钟执行一次。
             // 未配置时静默跳过；与手动同步重叠时由共享 guard 去重。窗口隐藏到托盘后
@@ -881,6 +915,11 @@ fn run_desktop() {
             commands::save_project,
             commands::delete_project,
             commands::list_project_tasks,
+            commands::list_recurring_tasks,
+            commands::save_recurring_task,
+            commands::delete_recurring_task,
+            commands::list_recurring_task_runs,
+            commands::run_recurring_task_now,
             commands::save_project_task,
             commands::delete_project_task,
             commands::open_project_detail_window,

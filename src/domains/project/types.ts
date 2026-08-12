@@ -18,6 +18,24 @@ export type ProjectTaskMutableStatus = "draft" | "submitted" | "review" | "done"
 
 export type ProjectTaskType = "code" | "readonly";
 
+export type RecurringTask = {
+  id: string; projectId: string; title: string; description: string; taskType: ProjectTaskType;
+  agentProfile: string; scheduleKind: "manual" | "daily"; dailyTime: string | null;
+  timezone: string; enabled: boolean; sessionPolicy: "fresh" | "continue";
+  sourceTaskId: string | null; nextRunAt: string | null; lastScheduledFor: string | null;
+  createdAt: string; updatedAt: string;
+};
+
+export type RecurringTaskRun = {
+  id: string; recurringTaskId: string; projectId: string;
+  triggerSource: "manual" | "scheduled" | "test" | "retry";
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+  scheduledFor: string | null; titleSnapshot: string; descriptionSnapshot: string;
+  taskTypeSnapshot: ProjectTaskType; agentProfileSnapshot: string; sessionPolicySnapshot: "fresh" | "continue";
+  jobId: string | null; sessionId: string | null; errorMessage: string | null;
+  startedAt: string | null; finishedAt: string | null; createdAt: string; updatedAt: string;
+};
+
 export type ProjectTaskPriority = "p0" | "p1" | "p2";
 
 export type ProjectTask = {

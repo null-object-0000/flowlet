@@ -129,6 +129,95 @@ pub(crate) fn list_project_tasks(
 }
 
 #[tauri::command]
+pub(crate) fn list_recurring_tasks(
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+) -> Result<Vec<crate::core::storage::RecurringTask>, String> {
+    state
+        .storage
+        .list_recurring_tasks(&project_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn save_recurring_task(
+    state: tauri::State<'_, AppState>,
+    task: crate::core::storage::RecurringTask,
+) -> Result<(), String> {
+    if task.id.trim().is_empty()
+        || task.project_id.trim().is_empty()
+        || task.title.trim().is_empty()
+    {
+        return Err("重复任务 ID、项目和名称不能为空".to_string());
+    }
+    if !matches!(task.task_type.as_str(), "code" | "readonly") {
+        return Err("任务类型无效".to_string());
+    }
+    if !matches!(task.schedule_kind.as_str(), "manual" | "daily") {
+        return Err("运行计划无效".to_string());
+    }
+    if !matches!(task.session_policy.as_str(), "fresh" | "continue") {
+        return Err("会话策略无效".to_string());
+    }
+    if task.agent_profile.trim().is_empty() {
+        return Err("Agent Profile 不能为空".to_string());
+    }
+    if state
+        .storage
+        .get_project(&task.project_id)
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        return Err("项目不存在".to_string());
+    }
+    state
+        .storage
+        .save_recurring_task(&task)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn delete_recurring_task(
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> Result<bool, String> {
+    state
+        .storage
+        .delete_recurring_task(&project_id, &task_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn list_recurring_task_runs(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<Vec<crate::core::storage::RecurringTaskRun>, String> {
+    state
+        .storage
+        .list_recurring_task_runs(&task_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn run_recurring_task_now(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    test: bool,
+) -> Result<crate::core::agent_task_runner::RunProjectTaskResult, String> {
+    let task = state
+        .storage
+        .get_recurring_task(&task_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "重复任务不存在".to_string())?;
+    let run = state
+        .storage
+        .create_recurring_task_run(&task, if test { "test" } else { "manual" }, None)
+        .map_err(|error| error.to_string())?;
+    crate::core::agent_task_runner::run_recurring_task_run(state.storage.clone(), run.id).await
+}
+
+#[tauri::command]
 pub(crate) fn save_project_task(
     state: tauri::State<'_, AppState>,
     task: ProjectTask,

@@ -32,6 +32,7 @@ pub(crate) enum BalanceQueryAdapter {
 #[derive(Debug)]
 pub(crate) struct ChannelCapabilityAdapter {
     pub id: &'static str,
+    preset_factory: fn() -> ChannelPreset,
     pub model_sync: ModelSyncAdapter,
     pub balance_query: Option<BalanceQueryAdapter>,
     pub strips_openai_v1_path: bool,
@@ -40,30 +41,35 @@ pub(crate) struct ChannelCapabilityAdapter {
 const ADAPTERS: &[ChannelCapabilityAdapter] = &[
     ChannelCapabilityAdapter {
         id: "longcat",
+        preset_factory: ChannelPreset::longcat,
         model_sync: ModelSyncAdapter::LongCat,
         balance_query: None,
         strips_openai_v1_path: false,
     },
     ChannelCapabilityAdapter {
         id: "deepseek",
+        preset_factory: ChannelPreset::deepseek,
         model_sync: ModelSyncAdapter::DeepSeek,
         balance_query: Some(BalanceQueryAdapter::DeepSeek),
         strips_openai_v1_path: false,
     },
     ChannelCapabilityAdapter {
         id: "kimi",
+        preset_factory: ChannelPreset::kimi,
         model_sync: ModelSyncAdapter::Kimi,
         balance_query: Some(BalanceQueryAdapter::Kimi),
         strips_openai_v1_path: false,
     },
     ChannelCapabilityAdapter {
         id: "qwen",
+        preset_factory: ChannelPreset::qwen,
         model_sync: ModelSyncAdapter::Qwen,
         balance_query: None,
         strips_openai_v1_path: false,
     },
     ChannelCapabilityAdapter {
         id: "custom",
+        preset_factory: ChannelPreset::custom,
         model_sync: ModelSyncAdapter::OpenAiCompatible {
             use_configured_models_endpoint: false,
         },
@@ -72,6 +78,7 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
     },
     ChannelCapabilityAdapter {
         id: "zhipu",
+        preset_factory: ChannelPreset::zhipu,
         model_sync: ModelSyncAdapter::OpenAiCompatible {
             use_configured_models_endpoint: true,
         },
@@ -80,6 +87,7 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
     },
     ChannelCapabilityAdapter {
         id: "openrouter",
+        preset_factory: ChannelPreset::openrouter,
         model_sync: ModelSyncAdapter::OpenAiCompatible {
             use_configured_models_endpoint: true,
         },
@@ -105,6 +113,30 @@ pub(crate) fn channel_adapter(channel_id: &str) -> Option<&'static ChannelCapabi
 
 pub(crate) fn supports_official_balance(channel_id: &str) -> bool {
     channel_adapter(channel_id).is_some_and(|adapter| adapter.balance_query.is_some())
+}
+
+pub(crate) fn builtin_channel_presets() -> Result<Vec<ChannelPreset>, String> {
+    plugin_registry()
+        .channels()
+        .iter()
+        .map(|contribution| {
+            let adapter =
+                channel_capability_adapter(&contribution.adapter_id).ok_or_else(|| {
+                    format!(
+                        "渠道插件 {} 缺少内置 Capability Adapter：{}",
+                        contribution.id, contribution.adapter_id
+                    )
+                })?;
+            let preset = (adapter.preset_factory)();
+            if preset.id != contribution.id {
+                return Err(format!(
+                    "渠道插件 {} 的预设工厂返回了不匹配的渠道 ID：{}",
+                    contribution.id, preset.id
+                ));
+            }
+            Ok(preset)
+        })
+        .collect()
 }
 
 pub(crate) async fn sync_channel_models(
@@ -201,6 +233,18 @@ mod tests {
         for channel_id in ["longcat", "qwen", "custom", "zhipu", "missing"] {
             assert!(!supports_official_balance(channel_id), "{channel_id}");
         }
+    }
+
+    #[test]
+    fn every_registered_channel_builds_a_matching_preset() {
+        let presets = builtin_channel_presets().expect("内置渠道贡献都应能创建预设");
+        let contribution_ids = plugin_registry().channel_ids().collect::<Vec<_>>();
+        let preset_ids = presets
+            .iter()
+            .map(|preset| preset.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(preset_ids, contribution_ids);
     }
 
     #[tokio::test]

@@ -218,12 +218,15 @@ Token 资源包、配额、用量等能力同理。UI 应依赖渠道能力或�
 
 1. 行为与既有渠道完全兼容时，复用既有 `adapterId`；
 2. 模型响应、余额响应或路径规则不兼容时，新增一个小型 Adapter，并登记模型同步策略、可选的
-   官方余额策略与路径策略；
+   官方余额策略、路径策略与内置预设工厂；
 3. `plugin_registry` 会在启动时校验 `adapterId` 是否存在，未知 Adapter 不允许静默回退；
 4. `ChannelPreset.supports_*` 是能力声明，Adapter 是能力实现。两者必须同时存在，不能只靠
    Adapter 绕过配置声明；
 5. 认证方式和端点继续来自 `config.json` / `ChannelPreset`，不要在 Adapter 中复制 URL、鉴权或
    API Key。
+
+预设工厂返回的 `ChannelPreset.id` 必须与 `plugin-registry.json` 的 `channelId` 相同；统一契约
+测试会遍历所有渠道贡献验证这一点。新增渠道不再修改 `presets.rs` 的分发分支。
 
 模型同步与余额 Tauri command 已通过统一入口分发，不再添加 `channel_id` 大分支。不支持的能力
 返回明确错误文案。

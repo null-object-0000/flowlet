@@ -2,20 +2,8 @@ use super::config::{ChannelModel, ChannelPreset};
 
 /// 返回所有内置渠道模板
 pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
-    super::plugin_registry::plugin_registry()
-        .channels()
-        .iter()
-        .map(|channel| match channel.adapter_id.as_str() {
-            "longcat" => ChannelPreset::longcat(),
-            "deepseek" => ChannelPreset::deepseek(),
-            "kimi" => ChannelPreset::kimi(),
-            "qwen" => ChannelPreset::qwen(),
-            "custom" => ChannelPreset::custom(),
-            "zhipu" => ChannelPreset::zhipu(),
-            "openrouter" => ChannelPreset::openrouter(),
-            unknown => panic!("渠道插件 {} 缺少内置适配器：{unknown}", channel.id),
-        })
-        .collect()
+    super::channel_capability_adapter::builtin_channel_presets()
+        .expect("内置渠道插件必须能通过 Capability Adapter 创建匹配的预设")
 }
 
 /// 模型列表同步结果

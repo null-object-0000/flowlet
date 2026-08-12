@@ -5,19 +5,9 @@ pub mod core;
 mod mobile_commands;
 
 #[cfg(desktop)]
-use core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
-#[cfg(desktop)]
-use core::config::{
-    ChannelAccount, LogCaptureConfig, ProtocolType, ProxyBindConfig, RouteCandidate, VirtualModel,
-};
-#[cfg(desktop)]
 use core::device_identity::DeviceIdentity;
 #[cfg(desktop)]
-use core::presets::builtin_channel_presets;
-#[cfg(desktop)]
-use core::proxy::ProxyController;
-#[cfg(desktop)]
-use core::runtime_config::{RuntimeConfigSnapshot, RuntimeConfigStore};
+use core::services::FlowletServices;
 use core::storage::Storage;
 #[cfg(desktop)]
 use std::path::PathBuf;
@@ -35,18 +25,11 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 #[derive(Clone)]
 #[cfg(desktop)]
 struct AppState {
-    proxy: ProxyController,
-    runtime_config: RuntimeConfigStore,
-    storage: Storage,
+    services: FlowletServices,
     device_identity: Arc<Mutex<DeviceIdentity>>,
     device_identity_dir: std::path::PathBuf,
-    upstream_timeout_seconds: u64,
-    capture: Arc<Mutex<LogCaptureConfig>>,
-    bind_config: Arc<Mutex<ProxyBindConfig>>,
     tray: Arc<Mutex<Option<TrayIcon>>>,
-    config_path: std::path::PathBuf,
     codex_accounts_dir: std::path::PathBuf,
-    channels_config: Arc<Mutex<ChannelsConfig>>,
     agent_source_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     /// LAN 直连服务的运行状态与最近入站请求，供「局域网直连」卡片展示。
     lan_status: Arc<Mutex<core::lan_sync::LanServerStatus>>,
@@ -70,6 +53,14 @@ struct AppState {
     /// 应用是否正在退出。退出时窗口销毁事件不应再清空上面的独立窗口记录。
     app_exiting: Arc<Mutex<bool>>,
 }
+#[cfg(desktop)]
+impl std::ops::Deref for AppState {
+    type Target = FlowletServices;
+
+    fn deref(&self) -> &Self::Target {
+        &self.services
+    }
+}
 
 #[derive(Clone)]
 #[cfg(mobile)]
@@ -91,45 +82,9 @@ struct MobileSyncUpdate {
 }
 
 #[cfg(desktop)]
-struct ProxyStartupConfig {
-    shared: core::proxy::ProxySharedConfig,
-    storage: Storage,
-    timeout: u64,
-    capture: LogCaptureConfig,
-    bind_addr: String,
-    config_path: std::path::PathBuf,
-}
-
-#[cfg(desktop)]
 impl AppState {
-    fn proxy_startup_config(&self) -> Result<ProxyStartupConfig, String> {
-        // 启动时传入 Arc 引用，而非 clone 数据副本 — 代理运行中与 UI 共享同一份配置
-        let capture = self
-            .capture
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
-        let bind_addr = self
-            .bind_config
-            .lock()
-            .map(|guard| guard.clone().normalized().bind_addr())
-            .unwrap_or_else(|_| ProxyBindConfig::default().bind_addr());
-        Ok(ProxyStartupConfig {
-            shared: core::proxy::ProxySharedConfig {
-                runtime_config: self.runtime_config.clone(),
-                scores: Arc::new(Mutex::new(Vec::new())),
-                round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            },
-            storage: self.storage.clone(),
-            timeout: self.upstream_timeout_seconds,
-            capture,
-            bind_addr,
-            config_path: self.config_path.clone(),
-        })
-    }
-
     async fn start_configured_proxy(&self) -> Result<(), String> {
-        start_proxy_internal(self.proxy.clone(), self.proxy_startup_config()?).await
+        self.services.start_proxy().await
     }
 }
 
@@ -151,30 +106,9 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
 
     tracing::info!(db_path = %db_path.display(), t_ms = _t0.elapsed().as_millis() as u64, "初始化 Storage");
 
-    // 从 config.json 顶层 channels_config 字段解析渠道配置
-    let channels_config = match load_channels_config_from(&config_path) {
-        Ok(cfg) => {
-            tracing::info!(
-                channels = cfg.presets.len(),
-                prices = cfg.prices.len(),
-                "从 config.json 加载渠道配置"
-            );
-            let merged = merge_builtin_config(cfg);
-            Arc::new(merged)
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "加载渠道配置失败");
-            panic!("无法加载渠道配置: {e}");
-        }
-    };
-
-    let storage = match Storage::open(&db_path) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %e, "Storage::open 失败");
-            panic!("初始化 SQLite 存储失败: {e}");
-        }
-    };
+    let services = FlowletServices::open(&db_path, &config_path)
+        .unwrap_or_else(|error| panic!("初始化 Flowlet 服务失败: {error}"));
+    let storage = services.storage.clone();
 
     // 旧版项目任务曾通过 --session-dir 把 Pi 会话写到 ~/.flowlet。先迁入 Pi 原生
     // sessions 目录，再启动会话扫描与文件监听；失败只记日志，不阻断应用启动。
@@ -193,35 +127,6 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         );
     }
 
-    storage
-        .ensure_preset_platform_urls(&channels_config.presets)
-        .expect("补全渠道模板平台地址失败");
-
-    // 将内置默认渠道中外部配置可能缺失的渠道补入 SQLite（升级迁移）。
-    let mut migration_presets = channels_config.presets.clone();
-    let builtin = builtin_channel_presets();
-    for bp in &builtin {
-        if !migration_presets.iter().any(|p| p.id == bp.id) {
-            migration_presets.push(bp.clone());
-        }
-    }
-
-    storage
-        .ensure_missing_presets(&migration_presets)
-        .expect("追加新增渠道模板失败");
-
-    storage
-        .sync_preset_maintained_config(&migration_presets)
-        .expect("同步渠道模板配置失败");
-
-    storage
-        .ensure_preset_balance_query(&migration_presets)
-        .expect("同步渠道余额查询标志失败");
-
-    storage
-        .ensure_preset_scrape_balance(&migration_presets)
-        .expect("同步渠道控制台抓取标志失败");
-
     // 应用重启恢复：上次退出时仍处于执行中（in_progress）的项目任务会被恢复为
     // submitted（待处理），调度器会自动重新领取执行（--resume 复用上次会话）；
     // 被中断的那轮执行记录打上 interrupted 标记，供看板 / 执行历史标注异常。
@@ -238,126 +143,12 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         }
     }
 
-    tracing::info!(
-        t_ms = _t0.elapsed().as_millis() as u64,
-        "Storage 初始化完成, 开始加载渠道模板"
-    );
-
-    // 初始化渠道模板：优先从 config.json 加载，SQLite 为空时写入
-    let channels = storage.list_channel_presets().expect("读取渠道模板失败");
-    tracing::trace!(
-        t_ms = _t0.elapsed().as_millis() as u64,
-        count = channels.len(),
-        "渠道模板加载完成"
-    );
-    let channels = if channels.is_empty() {
-        let presets = channels_config.presets.clone();
-        storage
-            .save_channel_presets(presets.as_slice())
-            .expect("保存默认渠道模板失败");
-        presets
-    } else {
-        channels
-    };
-
-    // 账号必须由用户自行创建。清理早期版本生成的空默认账号。
-    let mut accounts = storage.list_channel_accounts().expect("读取账号配置失败");
-    let cleaned_accounts: Vec<ChannelAccount> = accounts
-        .iter()
-        .filter(|account| !(account.id == "account-default" && account.api_key.trim().is_empty()))
-        .cloned()
-        .collect();
-    if cleaned_accounts.len() != accounts.len() {
-        storage
-            .save_channel_accounts(cleaned_accounts.as_slice())
-            .expect("清理默认账号失败");
-        accounts = cleaned_accounts;
-    }
-
-    // 固定 Flowlet 对外模型；旧自定义模型保留供高级模式使用。
-    let mut virtual_models = storage.list_virtual_models().expect("读取虚拟模型失败");
-    let now = chrono::Utc::now().to_rfc3339();
-    for (id, name) in [
-        ("flowlet-pro", "Flowlet Pro"),
-        ("flowlet-flash", "Flowlet Flash"),
-    ] {
-        if !virtual_models.iter().any(|model| model.id == id) {
-            virtual_models.push(VirtualModel {
-                id: id.to_string(),
-                name: name.to_string(),
-                protocol_type: ProtocolType::OpenAi,
-                routing_strategy: "model_order_then_round_robin".to_string(),
-                enabled: true,
-                created_at: now.clone(),
-                updated_at: now.clone(),
-            });
-        }
-    }
-    storage
-        .save_virtual_models(virtual_models.as_slice())
-        .expect("保存固定 Flowlet 模型失败");
-    // 清理旧版本遗留的默认路由和已经无法服务的孤儿路由。
-    let mut routes = storage.list_route_candidates().expect("读取路由配置失败");
-    let cleaned_routes: Vec<RouteCandidate> = routes
-        .iter()
-        .filter(|route| {
-            if route.id == "route-auto-default" || route.account_id == "account-default" {
-                return false;
-            }
-            if !route.enabled {
-                return true;
-            }
-            if route.upstream_model.trim().is_empty()
-                || route.channel_id.trim().is_empty()
-                || route.account_id.trim().is_empty()
-            {
-                return false;
-            }
-            if !channels
-                .iter()
-                .any(|channel| channel.id == route.channel_id)
-            {
-                return false;
-            }
-            accounts.iter().any(|account| {
-                account.id == route.account_id
-                    && account.channel_id == route.channel_id
-                    && account.enabled
-                    && !account.api_key.trim().is_empty()
-            })
-        })
-        .cloned()
-        .collect();
-    if cleaned_routes.len() != routes.len() {
-        storage
-            .save_route_candidates(cleaned_routes.as_slice())
-            .expect("清理默认路由失败");
-        routes = cleaned_routes;
-    }
-    let merged_routes = channels_config.merge_default_routes(&routes, &accounts, &channels);
-    if merged_routes.len() != routes.len() {
-        storage
-            .save_route_candidates(merged_routes.as_slice())
-            .expect("补齐默认路由失败");
-        routes = merged_routes;
-    }
     storage
         .cleanup_orphan_balance_snapshots()
         .expect("清理孤儿余额快照失败");
     tracing::trace!(
         t_ms = _t0.elapsed().as_millis() as u64,
         "step: routes + balance cleanup"
-    );
-
-    // 初始化价格表：以本地 models-cn / models.dev 目录为主，config.json 的
-    // model_prices 仅补充目录未覆盖的 (channel_id, upstream_model)。
-    // 每次目录同步成功后也会用同样逻辑重建。
-    let price_count =
-        crate::core::storage::storage_tasks::rebuild_price_table(&storage, &config_path);
-    tracing::trace!(
-        t_ms = _t0.elapsed().as_millis() as u64,
-        count = price_count,
-        "step: prices rebuilt from catalogs + config"
     );
 
     // 模型身份与路由渠道拆分后的单次历史费用修复：过去自定义渠道上的官方模型
@@ -390,92 +181,12 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         tracing::warn!(error = %error, "费用分类明细回填失败");
     }
 
-    // 初始化路由规则
-    tracing::trace!(
-        t_ms = _t0.elapsed().as_millis() as u64,
-        "step: loading rules"
-    );
-    let rules = storage.list_route_rules().expect("读取路由规则失败");
-    tracing::trace!(
-        t_ms = _t0.elapsed().as_millis() as u64,
-        count = rules.len(),
-        "step: rules loaded"
-    );
-
-    // 从 config.json 顶层 log_capture 读取
-    let capture = if let Some(json_str) = core::proxy::read_config_raw(&config_path) {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
-            core::proxy::extract_log_capture(&value)
-        } else {
-            LogCaptureConfig::default()
-        }
-    } else {
-        LogCaptureConfig::default()
-    };
-
-    // Body 清理全部交给 setup 里的定时任务（启动后 15 分钟触发第一次）。
-    // 启动时不做任何清理动作，避免阻塞主界面。
-    let _ = capture;
-
-    // 优先从 config.json 顶层 bind 读取；缺失时回退到 SQLite app_meta 旧配置
-    let bind_config = if let Some(json_str) = core::proxy::read_config_raw(&config_path) {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
-            if let Some(obj) = value.as_object() {
-                if let Some(bind) = obj.get("bind").and_then(|v| v.as_object()) {
-                    let host = bind
-                        .get("host")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("127.0.0.1")
-                        .to_string();
-                    let port = bind.get("port").and_then(|v| v.as_u64()).unwrap_or(18640) as u16;
-                    let allow_lan = host == "0.0.0.0";
-                    let default_client_token = bind
-                        .get("default_client_token")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("flowlet-local-token")
-                        .to_string();
-                    ProxyBindConfig {
-                        host,
-                        port,
-                        allow_lan,
-                        default_client_token,
-                    }
-                    .normalized()
-                } else {
-                    load_bind_config_from_sqlite(&storage)
-                }
-            } else {
-                load_bind_config_from_sqlite(&storage)
-            }
-        } else {
-            load_bind_config_from_sqlite(&storage)
-        }
-    } else {
-        load_bind_config_from_sqlite(&storage)
-    };
-
     let state = AppState {
-        proxy: ProxyController {
-            inner: Arc::new(Mutex::new(core::proxy::ProxyRuntime::default())),
-            bind_config: Arc::new(Mutex::new(bind_config.clone())),
-        },
-        runtime_config: RuntimeConfigStore::new(RuntimeConfigSnapshot::new(
-            channels,
-            accounts,
-            routes,
-            rules,
-            virtual_models,
-        )),
-        storage,
+        services,
         device_identity: Arc::new(Mutex::new(device_identity)),
         device_identity_dir,
-        upstream_timeout_seconds: 120,
-        capture: Arc::new(Mutex::new(capture)),
-        bind_config: Arc::new(Mutex::new(bind_config)),
         tray: Arc::new(Mutex::new(None)),
-        config_path,
         codex_accounts_dir,
-        channels_config: Arc::new(Mutex::new((*channels_config).clone())),
         agent_source_watcher: Arc::new(Mutex::new(None)),
         lan_status: Arc::new(Mutex::new(core::lan_sync::LanServerStatus::default())),
         lan_inbound: Arc::new(Mutex::new(std::collections::VecDeque::new())),
@@ -499,16 +210,6 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
     state
 }
 
-#[cfg(desktop)]
-pub(crate) fn load_bind_config_from_sqlite(storage: &Storage) -> ProxyBindConfig {
-    storage
-        .get_app_meta("proxy_bind_config")
-        .unwrap_or_default()
-        .and_then(|json| serde_json::from_str::<ProxyBindConfig>(&json).ok())
-        .unwrap_or_default()
-        .normalized()
-}
-
 /// 数据库路径：始终放在 exe 同级目录下，与程序完全自包含。
 /// 不再区分「安装/便携」模式 — SQLite 和日志都在 exe 旁。
 #[cfg(desktop)]
@@ -524,118 +225,6 @@ fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
     let db_path = app_data_dir.join("flowlet.sqlite");
     migrate_legacy_database(&db_path);
     db_path
-}
-
-/// 从指定 config.json 文件解析其中的 channels_config 字段
-#[cfg(desktop)]
-pub fn load_channels_config_from(config_path: &std::path::Path) -> Result<ChannelsConfig, String> {
-    let external_result = std::fs::read_to_string(config_path)
-        .map_err(|e| format!("读取 config.json 失败 ({}): {}", config_path.display(), e))
-        .and_then(|content| parse_channels_config(&content, &config_path.display().to_string()));
-
-    match external_result {
-        Ok(config) => Ok(config),
-        Err(external_error) => {
-            tracing::warn!(
-                path = %config_path.display(),
-                error = %external_error,
-                "外部 config.json 无法提供渠道配置，回退到应用内置默认配置"
-            );
-            parse_channels_config(DEFAULT_CONFIG_JSON, "应用内置 config.json").map_err(
-                |fallback_error| {
-                    format!(
-                        "外部渠道配置不可用: {external_error}; 内置渠道配置也不可用: {fallback_error}"
-                    )
-                },
-            )
-        }
-    }
-}
-
-/// 将内置 config.json 中外部配置可能缺失的渠道、价格、端点合并进运行时配置。
-#[cfg(desktop)]
-pub(crate) fn merge_builtin_config(mut external: ChannelsConfig) -> ChannelsConfig {
-    let builtin = match parse_channels_config(DEFAULT_CONFIG_JSON, "应用内置 config.json") {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            tracing::warn!(error = %e, "解析内置渠道配置失败，跳过合并");
-            return external;
-        }
-    };
-
-    for bp in &builtin.presets {
-        if !external.presets.iter().any(|p| p.id == bp.id) {
-            external.presets.push(bp.clone());
-        }
-    }
-
-    for bp in &builtin.prices {
-        if !external
-            .prices
-            .iter()
-            .any(|p| p.channel_id == bp.channel_id && p.upstream_model == bp.upstream_model)
-        {
-            external.prices.push(bp.clone());
-        }
-    }
-
-    for (channel_id, channel_endpoints) in &builtin.endpoints {
-        external
-            .endpoints
-            .entry(channel_id.clone())
-            .or_insert_with(|| channel_endpoints.clone());
-    }
-
-    for (channel_id, models) in &builtin.default_exposed_models {
-        external
-            .default_exposed_models
-            .entry(channel_id.clone())
-            .or_insert_with(|| models.clone());
-    }
-
-    external
-}
-
-#[cfg(desktop)]
-fn parse_channels_config(content: &str, source: &str) -> Result<ChannelsConfig, String> {
-    let json: serde_json::Value =
-        serde_json::from_str(content).map_err(|e| format!("解析 {source} 失败: {e}"))?;
-    ChannelsConfig::from_config_json(&json)
-}
-
-#[cfg(all(test, desktop))]
-mod app_config_tests {
-    use super::*;
-
-    #[test]
-    fn old_config_without_channels_uses_embedded_defaults() {
-        let path =
-            std::env::temp_dir().join(format!("flowlet-old-config-{}.json", uuid::Uuid::new_v4()));
-        std::fs::write(&path, r#"{"ua_rules": []}"#).unwrap();
-
-        let config = load_channels_config_from(&path).unwrap();
-        let _ = std::fs::remove_file(path);
-
-        assert!(config.presets.iter().any(|channel| channel.id == "longcat"));
-        assert!(config
-            .presets
-            .iter()
-            .any(|channel| channel.id == "deepseek"));
-        assert!(config.presets.iter().any(|channel| channel.id == "kimi"));
-        assert!(config.presets.iter().any(|channel| channel.id == "qwen"));
-    }
-
-    #[test]
-    fn missing_external_config_uses_embedded_defaults() {
-        let path = std::env::temp_dir().join(format!(
-            "flowlet-missing-config-{}.json",
-            uuid::Uuid::new_v4()
-        ));
-
-        let config = load_channels_config_from(&path).unwrap();
-
-        assert!(!config.presets.is_empty());
-    }
 }
 
 #[cfg(desktop)]
@@ -1592,34 +1181,4 @@ fn migrate_channel_presets_from_config(
         "渠道预设同步完成"
     );
     Ok(())
-}
-
-/// 内部启动代理逻辑（供托盘菜单调用）
-#[cfg(desktop)]
-async fn start_proxy_internal(
-    proxy: ProxyController,
-    config: ProxyStartupConfig,
-) -> Result<(), String> {
-    let ProxyStartupConfig {
-        shared,
-        storage,
-        timeout,
-        capture,
-        bind_addr,
-        config_path,
-    } = config;
-
-    // 传入 shared（持有 Arc 引用），代理运行中会锁定读取最新配置
-    proxy
-        .start_with_bind(
-            shared,
-            storage,
-            timeout,
-            capture,
-            &bind_addr,
-            core::rate_limiter::RateLimiter::new(600),
-            config_path,
-        )
-        .await
-        .map_err(|err| err.to_string())
 }

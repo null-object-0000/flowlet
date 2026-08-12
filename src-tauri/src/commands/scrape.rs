@@ -712,18 +712,16 @@ pub(crate) fn save_route_rules(
     state: tauri::State<'_, AppState>,
     rules: Vec<RouteRule>,
 ) -> Result<(), String> {
-    state
-        .runtime_config
-        .update_after(
-            || {
-                state
-                    .storage
-                    .save_route_rules(&rules)
-                    .map_err(|err| err.to_string())?;
-                Ok::<_, String>(rules)
-            },
-            |snapshot, persisted| snapshot.rules = persisted.clone(),
-        )?;
+    state.runtime_config.update_after(
+        || {
+            state
+                .storage
+                .save_route_rules(&rules)
+                .map_err(|err| err.to_string())?;
+            Ok::<_, String>(rules)
+        },
+        |snapshot, persisted| snapshot.rules = persisted.clone(),
+    )?;
     Ok(())
 }
 

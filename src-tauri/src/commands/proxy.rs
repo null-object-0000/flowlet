@@ -28,7 +28,7 @@ pub(crate) async fn stop_proxy(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state.proxy.stop().await.map_err(|err| err.to_string())?;
+    state.services.stop_proxy().await?;
     update_tray_tooltip(&app, false);
     Ok(())
 }
@@ -97,11 +97,5 @@ pub(crate) fn set_proxy_bind_config(
         .storage
         .set_app_meta("proxy_bind_config", &json)
         .map_err(|err| err.to_string())?;
-    if let Ok(mut guard) = state.bind_config.lock() {
-        *guard = config.clone();
-    }
-    if let Ok(mut guard) = state.proxy.bind_config.lock() {
-        *guard = config;
-    }
-    Ok(())
+    state.services.set_bind_config(config)
 }

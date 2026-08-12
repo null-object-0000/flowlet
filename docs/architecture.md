@@ -86,6 +86,17 @@ Flowlet Desktop
 
 应用无条件加载 `src` 中的 Semi Design 前端。旧 Mantine 前端、`ui.version` 入口选择和 legacy fallback 已删除。前端分层与依赖方向见 `AGENTS.md` 第 10 节「前端开发原则」。
 
+### Core 与 Host 边界
+
+`core::services::FlowletServices` 是不依赖 Tauri 的应用服务容器，统一拥有 SQLite
+`Storage`、渠道配置、运行时配置快照和代理生命周期。Desktop 与 headless Host 使用同一个
+`FlowletServices::open` 完成渠道配置回退、内置配置合并、默认预设初始化、旧空账号清理、
+固定虚拟模型补齐和默认路由合并，并通过同一组 `start_proxy` / `stop_proxy` 方法管理代理。
+
+Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、WebView、设备身份、文件监听和
+平台事件等 Host 能力。headless 不再复制 Storage、快照和代理启动装配，也不再因没有账号或路由
+而拒绝监听；空配置下的代理启动语义与桌面端一致。
+
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 
 SQLite 迁移由 `Storage::migrate` 负责。除非需求明确允许且已评估用户数据影响，不得直接删除或重建现有表；新增或调整持久化结构必须提供迁移并补充存储测试。

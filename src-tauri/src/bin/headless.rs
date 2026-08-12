@@ -1,14 +1,11 @@
 //! Flowlet headless proxy server
 //! Run without Tauri GUI: `cargo run --bin headless`
 
-use flowlet_lib::core::config::LogCaptureConfig;
+use flowlet_lib::core::config::ProxyBindConfig;
 use flowlet_lib::core::metrics::Metrics;
-use flowlet_lib::core::proxy::{ProxyController, ProxySharedConfig};
-use flowlet_lib::core::rate_limiter::RateLimiter;
-use flowlet_lib::core::runtime_config::{RuntimeConfigSnapshot, RuntimeConfigStore};
-use flowlet_lib::core::storage::Storage;
+use flowlet_lib::core::services::FlowletServices;
 use flowlet_lib::core::web::{create_web_router, WebState};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[tokio::main]
@@ -26,81 +23,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("Web console authentication enabled");
     }
 
-    tracing::info!("Opening database: {db_path}");
-    let storage = Storage::open(&db_path)?;
-
-    // 价格不再入库：启动时从 config.json 载入到内存，作为唯一真实来源。
     let config_path = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("config.json");
-    let channels_config = flowlet_lib::load_channels_config_from(&config_path).ok();
-    if let Some(config) = &channels_config {
-        storage.set_prices(config.prices.clone());
-    }
-
-    let channels = storage.list_channel_presets()?;
-    let accounts = storage.list_channel_accounts()?;
-    let mut routes = storage.list_route_candidates()?;
-    if let Some(config) = &channels_config {
-        let merged = config.merge_default_routes(&routes, &accounts, &channels);
-        if merged.len() != routes.len() {
-            storage.save_route_candidates(&merged)?;
-            routes = merged;
-        }
-    }
-    let rules = storage.list_route_rules()?;
-    let scores = storage.account_routing_scores()?;
-
-    if channels.is_empty() {
-        tracing::error!(
-            "No channels configured. Please set up channels via the desktop app first."
-        );
-        std::process::exit(1);
-    }
-    if accounts.is_empty() {
-        tracing::error!(
-            "No accounts configured. Please set up accounts via the desktop app first."
-        );
-        std::process::exit(1);
-    }
+    tracing::info!("Opening Flowlet services: {db_path}");
+    let services = FlowletServices::open(&db_path, &config_path)?;
+    let snapshot = services.runtime_config.snapshot();
 
     tracing::info!(
         "Starting headless proxy: {} channels, {} accounts, {} routes, {} rules",
-        channels.len(),
-        accounts.len(),
-        routes.len(),
-        rules.len()
+        snapshot.channels.len(),
+        snapshot.accounts.len(),
+        snapshot.routes.len(),
+        snapshot.rules.len()
     );
 
     let proxy_running = Arc::new(RwLock::new(true));
-    let proxy = ProxyController::default();
-    let rate_limiter = RateLimiter::new(600); // 600 请求/分钟/客户端
-    let shared = ProxySharedConfig {
-        runtime_config: RuntimeConfigStore::new(RuntimeConfigSnapshot::new(
-            channels,
-            accounts,
-            routes,
-            rules,
-            storage.list_virtual_models()?,
-        )),
-        scores: Arc::new(Mutex::new(scores)),
-        round_robin: Arc::new(Mutex::new(std::collections::HashMap::new())),
-    };
-    proxy
-        .start_with_bind(
-            shared,
-            storage.clone(),
-            120,
-            LogCaptureConfig::default(),
-            &bind_addr,
-            rate_limiter,
-            config_path,
-        )
-        .await?;
+    let socket: std::net::SocketAddr = bind_addr.parse()?;
+    let current_token = services
+        .bind_config
+        .lock()
+        .map(|config| config.default_client_token.clone())
+        .unwrap_or_else(|_| "flowlet-local-token".to_string());
+    services.set_bind_config(ProxyBindConfig {
+        host: socket.ip().to_string(),
+        port: socket.port(),
+        allow_lan: !socket.ip().is_loopback(),
+        default_client_token: current_token,
+    })?;
+    services.start_proxy().await?;
 
     // Start web console
     let web_state = WebState {
-        storage,
+        storage: services.storage.clone(),
         proxy_running,
         bind_addr: web_addr.clone(),
         proxy_bind_addr: bind_addr.clone(),
@@ -117,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ = axum::serve(web_listener, web_app) => {},
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Shutting down...");
-            proxy.stop().await?;
+            services.stop_proxy().await?;
         }
     }
 

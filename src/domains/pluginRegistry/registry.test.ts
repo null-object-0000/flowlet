@@ -14,6 +14,7 @@ describe("plugin registry", () => {
     expect(agentPlugin("codex").environmentAdapterId).toBe("chatgpt-desktop");
     expect(agentPlugin("codex").globalConfigAdapterId).toBe("codex");
     expect(agentPlugin("codex").sessionAdapterId).toBe("codex");
+    expect(agentPlugin("codex").runnerAdapterId).toBe("codex");
     expect(agentPlugin("opencode").surfaces).toEqual(["cli", "desktop"]);
   });
 });

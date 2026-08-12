@@ -44,7 +44,7 @@ Flowlet 不以通用企业级 LLM 网关为核心定位。
 内置渠道、模型目录和 Agent 的扩展声明统一登记在仓库根目录
 `plugin-registry.json`。注册表只声明受控贡献，具体适配器仍由前端/Rust 编译期代码实现；
 渠道贡献必须声明 `adapterId`，Agent 贡献必须声明 `environmentAdapterId`、
-`globalConfigAdapterId` 与 `sessionAdapterId`；新增适配器时必须同步注册表校验和对应编译期实现，禁止静默回退；
+`globalConfigAdapterId`、`sessionAdapterId` 与 `runnerAdapterId`；新增适配器时必须同步注册表校验和对应编译期实现，禁止静默回退；
 不得通过插件清单引入任意脚本执行、动态库加载或绕过类型化边界的直接状态修改。
 
 当前不追求：

@@ -4,6 +4,7 @@ export type PluginKind = "channel" | "model-catalog" | "agent";
 export type AgentPluginId = "claude-code" | "opencode" | "pi" | "codex";
 export type AgentGlobalConfigAdapterId = "claude-code" | "opencode" | "pi" | "codex";
 export type AgentSessionAdapterId = "claude-code" | "opencode" | "pi" | "codex";
+export type AgentRunnerAdapterId = "claude-code" | "opencode" | "pi" | "codex";
 export type AgentPluginSurface = "cli" | "desktop";
 
 export type AgentPluginDescriptor = {
@@ -12,6 +13,7 @@ export type AgentPluginDescriptor = {
   environmentAdapterId: string;
   globalConfigAdapterId: AgentGlobalConfigAdapterId;
   sessionAdapterId: AgentSessionAdapterId;
+  runnerAdapterId: AgentRunnerAdapterId;
   endpointSuffix: "/anthropic" | "/v1";
   npmPackage: string;
   surfaces: AgentPluginSurface[];
@@ -54,7 +56,7 @@ function validateRegistry(value: PluginRegistry): void {
     if (plugin.kind === "channel" && !plugin.adapterId.trim()) {
       throw new Error(`Channel plugin adapter is blank: ${plugin.channelId}`);
     }
-    if (plugin.kind === "agent" && (!plugin.agent.environmentAdapterId.trim() || !plugin.agent.globalConfigAdapterId.trim() || !plugin.agent.sessionAdapterId.trim())) {
+    if (plugin.kind === "agent" && (!plugin.agent.environmentAdapterId.trim() || !plugin.agent.globalConfigAdapterId.trim() || !plugin.agent.sessionAdapterId.trim() || !plugin.agent.runnerAdapterId.trim())) {
       throw new Error(`Agent plugin adapter is blank: ${plugin.agent.id}`);
     }
   }

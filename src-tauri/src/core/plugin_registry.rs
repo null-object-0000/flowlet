@@ -57,6 +57,7 @@ pub struct AgentPluginDescriptor {
     pub environment_adapter_id: String,
     pub global_config_adapter_id: String,
     pub session_adapter_id: String,
+    pub runner_adapter_id: String,
     pub endpoint_suffix: String,
     pub npm_package: String,
     pub surfaces: Vec<String>,
@@ -146,6 +147,7 @@ impl PluginRegistry {
                         || agent.environment_adapter_id.trim().is_empty()
                         || agent.global_config_adapter_id.trim().is_empty()
                         || agent.session_adapter_id.trim().is_empty()
+                        || agent.runner_adapter_id.trim().is_empty()
                         || agent.npm_package.trim().is_empty()
                         || agent.surfaces.is_empty()
                     {
@@ -174,6 +176,13 @@ impl PluginRegistry {
                         return Err(format!(
                             "Agent 插件 {} 引用了未知会话适配器：{}",
                             agent.id, agent.session_adapter_id
+                        ));
+                    }
+                    if !crate::core::agent_task_runner::has_runner_adapter(&agent.runner_adapter_id)
+                    {
+                        return Err(format!(
+                            "Agent 插件 {} 引用了未知任务执行适配器：{}",
+                            agent.id, agent.runner_adapter_id
                         ));
                     }
                     agents.push(agent);
@@ -255,6 +264,7 @@ mod tests {
             "codex"
         );
         assert_eq!(registry.agent("codex").unwrap().session_adapter_id, "codex");
+        assert_eq!(registry.agent("codex").unwrap().runner_adapter_id, "codex");
     }
 
     #[test]
@@ -275,7 +285,7 @@ mod tests {
 
     #[test]
     fn unknown_agent_global_config_adapter_is_rejected() {
-        let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"missing","sessionAdapterId":"pi","endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"missing","sessionAdapterId":"pi","runnerAdapterId":"pi","endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
         let error = PluginRegistry::from_json(unknown).unwrap_err();
         assert!(error.contains("未知全局配置适配器"));
         assert!(error.contains("missing"));
@@ -283,9 +293,17 @@ mod tests {
 
     #[test]
     fn unknown_agent_session_adapter_is_rejected() {
-        let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"pi","sessionAdapterId":"missing","endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"pi","sessionAdapterId":"missing","runnerAdapterId":"pi","endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
         let error = PluginRegistry::from_json(unknown).unwrap_err();
         assert!(error.contains("未知会话适配器"));
+        assert!(error.contains("missing"));
+    }
+
+    #[test]
+    fn unknown_agent_runner_adapter_is_rejected() {
+        let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"pi","sessionAdapterId":"pi","runnerAdapterId":"missing","endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let error = PluginRegistry::from_json(unknown).unwrap_err();
+        assert!(error.contains("未知任务执行适配器"));
         assert!(error.contains("missing"));
     }
 }

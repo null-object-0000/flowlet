@@ -14,6 +14,8 @@ use crate::core::agent_environment::AgentSurface;
 use crate::core::storage::{ProjectTask, Storage};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 #[cfg(desktop)]
@@ -87,6 +89,106 @@ struct ExecutionOutcome {
     summary_json: String,
     done_message: String,
 }
+
+type RunnerFuture<'a> = Pin<Box<dyn Future<Output = Result<ExecutionOutcome, String>> + Send + 'a>>;
+type ExecuteRunner = for<'a> fn(
+    &'a Storage,
+    &'a str,
+    &'a ProjectTask,
+    &'a str,
+    &'a str,
+    &'a str,
+    Option<&'a str>,
+    bool,
+) -> RunnerFuture<'a>;
+
+struct AgentTaskRunnerAdapter {
+    id: &'static str,
+    profile: &'static str,
+    environment_adapter_id: &'static str,
+    display_name: &'static str,
+    execute: ExecuteRunner,
+}
+
+static RUNNER_ADAPTERS: [AgentTaskRunnerAdapter; 4] = [
+    AgentTaskRunnerAdapter {
+        id: "claude-code",
+        profile: "Claude Code",
+        environment_adapter_id: "claude-code",
+        display_name: "Claude Code",
+        execute: execute_claude_code_boxed,
+    },
+    AgentTaskRunnerAdapter {
+        id: "opencode",
+        profile: "OpenCode",
+        environment_adapter_id: "opencode",
+        display_name: "OpenCode",
+        execute: execute_opencode_boxed,
+    },
+    AgentTaskRunnerAdapter {
+        id: "pi",
+        profile: "Pi",
+        environment_adapter_id: "pi",
+        display_name: "Pi",
+        execute: execute_pi_boxed,
+    },
+    AgentTaskRunnerAdapter {
+        id: "codex",
+        profile: "Codex",
+        environment_adapter_id: "chatgpt-desktop",
+        display_name: "Codex",
+        execute: execute_codex_boxed,
+    },
+];
+
+fn runner_adapter_for_profile(profile: &str) -> Option<&'static AgentTaskRunnerAdapter> {
+    let normalized = profile.trim();
+    if normalized.is_empty() {
+        return RUNNER_ADAPTERS
+            .iter()
+            .find(|adapter| adapter.id == "claude-code");
+    }
+    RUNNER_ADAPTERS
+        .iter()
+        .find(|adapter| adapter.profile == normalized)
+}
+
+pub(crate) fn has_runner_adapter(adapter_id: &str) -> bool {
+    RUNNER_ADAPTERS
+        .iter()
+        .any(|adapter| adapter.id == adapter_id)
+}
+
+macro_rules! boxed_runner {
+    ($name:ident, $execute:ident) => {
+        fn $name<'a>(
+            storage: &'a Storage,
+            executable: &'a str,
+            task: &'a ProjectTask,
+            project_id: &'a str,
+            job_id: &'a str,
+            prompt: &'a str,
+            resume_session: Option<&'a str>,
+            manage_task_state: bool,
+        ) -> RunnerFuture<'a> {
+            Box::pin($execute(
+                storage,
+                executable,
+                task,
+                project_id,
+                job_id,
+                prompt,
+                resume_session,
+                manage_task_state,
+            ))
+        }
+    };
+}
+
+boxed_runner!(execute_claude_code_boxed, execute_claude_code);
+boxed_runner!(execute_opencode_boxed, execute_opencode);
+boxed_runner!(execute_pi_boxed, execute_pi);
+boxed_runner!(execute_codex_boxed, execute_codex);
 
 /// 按项目粒度的执行槽守卫：持有期间占用该项目的槽位，Drop 时释放。
 /// 领取即占位（在运行集合中插入占位信息），执行失败提前返回时随函数结束释放。
@@ -607,13 +709,8 @@ fn session_from_job(storage: &Storage, job_id: Option<&str>) -> Result<Option<St
 /// （历史任务在 `agent_profile` 列引入前的默认值），未知 Profile 返回 None，
 /// 由调用方给出明确错误。
 fn agent_profile_meta(agent_profile: &str) -> Option<(&'static str, &'static str)> {
-    match agent_profile.trim() {
-        "" | "Claude Code" => Some(("claude-code", "Claude Code")),
-        "Codex" => Some(("chatgpt-desktop", "Codex")),
-        "OpenCode" => Some(("opencode", "OpenCode")),
-        "Pi" => Some(("pi", "Pi")),
-        _ => None,
-    }
+    runner_adapter_for_profile(agent_profile)
+        .map(|adapter| (adapter.environment_adapter_id, adapter.display_name))
 }
 
 /// 解析任务指定 Agent 的可执行路径。未安装或 Profile 未知返回明确错误。
@@ -658,60 +755,19 @@ async fn execute_agent(
     resume_session: Option<&str>,
     manage_task_state: bool,
 ) -> Result<ExecutionOutcome, String> {
-    match task.agent_profile.as_str() {
-        "Codex" => {
-            execute_codex(
-                storage,
-                executable,
-                task,
-                project_id,
-                job_id,
-                prompt,
-                resume_session,
-                manage_task_state,
-            )
-            .await
-        }
-        "OpenCode" => {
-            execute_opencode(
-                storage,
-                executable,
-                task,
-                project_id,
-                job_id,
-                prompt,
-                resume_session,
-                manage_task_state,
-            )
-            .await
-        }
-        "Pi" => {
-            execute_pi(
-                storage,
-                executable,
-                task,
-                project_id,
-                job_id,
-                prompt,
-                resume_session,
-                manage_task_state,
-            )
-            .await
-        }
-        _ => {
-            execute_claude_code(
-                storage,
-                executable,
-                task,
-                project_id,
-                job_id,
-                prompt,
-                resume_session,
-                manage_task_state,
-            )
-            .await
-        }
-    }
+    let adapter = runner_adapter_for_profile(&task.agent_profile)
+        .ok_or_else(|| format!("不支持的 Agent Profile：{}", task.agent_profile))?;
+    (adapter.execute)(
+        storage,
+        executable,
+        task,
+        project_id,
+        job_id,
+        prompt,
+        resume_session,
+        manage_task_state,
+    )
+    .await
 }
 
 /// 读取项目并校验本机目录绑定，返回项目目录（所有执行器共用的前置校验）。
@@ -1937,6 +1993,18 @@ mod tests {
             agent_profile_meta("   "),
             Some(("claude-code", "Claude Code"))
         );
+        assert_eq!(
+            RUNNER_ADAPTERS
+                .iter()
+                .map(|adapter| adapter.id)
+                .collect::<Vec<_>>(),
+            vec!["claude-code", "opencode", "pi", "codex"]
+        );
+        assert_eq!(
+            runner_adapter_for_profile("Codex").map(|adapter| adapter.id),
+            Some("codex")
+        );
+        assert!(runner_adapter_for_profile("Unknown Agent").is_none());
     }
 
     #[test]

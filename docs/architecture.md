@@ -146,6 +146,11 @@ Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显�
 `codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。现有原生解析器、
 会话合并与用量账本语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。
 
+Agent 插件还声明 `runnerAdapterId`。Rust 任务调度通过编译期 Runner Adapter registry 统一解析
+任务 `agent_profile`、环境探测适配器、展示名和异步执行函数；Claude Code、OpenCode、Pi、Codex
+既有执行器继续负责各自的命令参数、输出事件和会话恢复，项目队列与任务状态机不感知具体 Agent。
+历史空 Profile 仍显式映射 Claude Code，未知 Profile 与未知 Runner Adapter 均明确失败，不回退执行。
+
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 
 SQLite 迁移由 `Storage::migrate` 负责。除非需求明确允许且已评估用户数据影响，不得直接删除或重建现有表；新增或调整持久化结构必须提供迁移并补充存储测试。

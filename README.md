@@ -78,6 +78,7 @@ Flowlet 默认只在本机保存渠道 API Key、Client Token、配置和使用�
 
 ## 了解更多
 
+- [安装与首次使用](docs/installation.md)
 - [支持的渠道、模型、协议与 Agent](docs/support-matrix.md)
 - [配置与数据保留策略](docs/config.md)
 - [更新日志](CHANGELOG.md)

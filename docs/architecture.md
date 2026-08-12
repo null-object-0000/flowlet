@@ -329,7 +329,7 @@ Channel Account 是用户在某个渠道下配置的一组访问身份：
 
 渠道插件通过根目录 `plugin-registry.json` 的 `channelId -> adapterId` 绑定编译进 Rust 的
 Capability Adapter。`ChannelPreset.supports_*` 继续声明产品上是否开放某项能力，Adapter
-负责创建内置预设，并选择模型同步、官方余额查询和非标准上游路径的具体实现；能力只有在声明与实现同时存在时
+负责创建内置预设，并选择模型同步、官方余额查询、控制台抓取策略和非标准上游路径的具体实现；能力只有在声明与实现同时存在时
 才可调用。同一 Adapter 可以被多个行为兼容的渠道贡献复用，command 不再按 `channel_id`
 维护分支。
 
@@ -342,6 +342,7 @@ Channel contribution (plugin-registry.json)
     -> balance query strategy (optional)
     -> OpenAI path policy
     -> builtin preset factory
+    -> console scrape and login-page policy (optional)
 ```
 
 认证方式与端点地址仍由 `ChannelPreset` / `config.json` 提供，Adapter 不复制 API Key、Base URL
@@ -350,6 +351,9 @@ Channel contribution (plugin-registry.json)
 
 `presets::builtin_channel_presets()` 只保留兼容入口，实际按注册顺序调用 Adapter 的预设工厂；
 启动契约会校验工厂返回的 `ChannelPreset.id` 必须与渠道贡献 ID 一致，防止错误预设写入 SQLite。
+控制台抓取脚本、端点和必需响应槽位仍由 `config.json` 提供；Adapter 只解析账号资源模式对应的
+抓取模式 key，并声明可判定为登录页的 URL 规则。`supports_scrape_balance` 未开启时，即使 Adapter
+存在策略也不会启动抓取。
 
 同步任务失败不能影响 AI 请求转发。失败信息只写入本地同步状态、快照表或 UI 提示。
 
@@ -418,7 +422,7 @@ API Key 字段保留独立类型，方便后续接入系统密钥链或本地加
 - `/health` 返回本地服务健康状态。
 - `/v1/*`、`/openai/v1/*` 透明转发到 OpenAI-compatible 渠道端点。
 - `/anthropic/v1/messages`、`/anthropic/v1/models` 透明转发到 Anthropic-compatible 渠道端点。
-- `GET /v1/models/{model}` 由本地代理直接返回开放模型详情，不转发单一上游。规格和价格优先读取渠道详情同步所得 `channel_models`，字段缺失时回退本地 `models-cn.json`；聚合模型按当前可用路由取规格下限，已知币种的目录价格按币种给出候选上界；上游未声明币种的原始价格按候选独立返回，避免猜测币种或汇率。
+- `GET /v1/models/{model}` 由本地代理直接返回开放模型详情，不转发单一上游。规格和价格优先读取渠道详情同步所得 `channel_models`，字段缺失时回退本地 `models-cn.json`；聚合模型按当前可用路由取规格下限，已知币种的目录价格按币种给出候选上界；上游未声明币种的原始价格按候选独立返回，避免猜测币种或汇率。`max_input_tokens` 仅在数据源明确提供独立输入上限时返回；不得用上下文窗口减最大输出推导，当前数据源未提供时返回 `null`。
 - `/v1/responses`（及裸根 `/responses`）作为独立的 Responses 协议转发到声明
   `"responses"` 的渠道端点（上游 URL 从 OpenAI Base URL 派生，仅无状态透传，
   非 POST 管理接口返回 405）。
@@ -598,6 +602,15 @@ Flowlet 的会话使用这些原生指标；原生轮次不冒充 HTTP 请求数
 导入的小时汇总写入只读共享表 `device_hourly_usage`。历史用量修复后重新生成快照即可按
 `(device_id, date)` 更新日汇总，并用较新的版本 2 快照整体替换该设备的小时窗口，无需重启代理。
 
+快照版本 13 增加可选 `accountResources`，用于移动端只读查看工作区级账号资源。普通渠道账号
+只有同时具备稳定 `workspace_account_id`、已启用、符合渠道资源自动同步条件且存在成功资源快照时
+才会发布；Codex 只发布存在订阅窗口或 Credits 的已登录账号。字段仅包含账号展示身份、套餐、
+余额/资源包聚合值、额度窗口、重置/到期时间、观测时间与过期标记，不包含 API Key、Management
+Key、Base URL、Cookie、原始抓取 JSON 或错误全文。接收端写入独立只读表
+`device_account_resources`，按稳定账号 ID 选择 `observed_at` 最新的设备观测，因此同一账号不会按
+多台桌面重复出现。账号资源属于工作区，不进入设备页；移动端概览提供摘要入口，完整列表使用独立
+二级页。移动端仍不持有账号工作区密钥，也不直接请求渠道上游。
+
 设置页可把当前设备快照导出为版本化 `flowlet-device-usage` JSON 文件，并在另一设备先
 预览再导入。导入数据写入独立的 `known_devices` / `device_daily_usage` /
 `device_hourly_usage` /
@@ -701,7 +714,7 @@ Flowlet 返回 404，前端将其归类为“对端版本过旧”，并继续�
 
 移动查看器与桌面端保持在同一仓库和同一个 Rust crate 中，但使用独立的 React Router、
 Shell 与精简的 Tauri 启动入口。`#[cfg(desktop)]` 注册代理、托盘、Agent 与完整数据命令，
-`#[cfg(mobile)]` 注册 S3 配置、只读连接测试、共享设备目录、日/小时汇总、会话摘要、
+`#[cfg(mobile)]` 注册 S3 配置、只读连接测试、共享设备目录、工作区账号资源摘要、日/小时汇总、会话摘要、
 设备 Agent 安装与接入摘要、远端刷新，以及经过认证的 LAN 快照读取和 OpenCode 单次权限回复命令。
 移动端复用 `DeviceUsageBundle`、S3 适配器、SQLite 导入与聚合逻辑，不启动本地代理，也不
 扫描本机 Agent 数据。移动设备页按设备懒加载同步的 Agent 摘要，展示安装面与版本，并区分

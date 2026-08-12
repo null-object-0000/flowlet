@@ -25,6 +25,23 @@ pub(crate) enum BalanceQueryAdapter {
     OpenRouter,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConsoleScrapeAdapter {
+    None,
+    Fixed(&'static str),
+    ResourceMode {
+        resource_mode: &'static str,
+        mode_key: &'static str,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoginPageAdapter {
+    None,
+    Generic,
+    GenericOrHost(&'static str),
+}
+
 /// 编译进 Flowlet 的渠道行为适配器。
 ///
 /// `plugin-registry.json` 只负责把渠道贡献绑定到 adapter id；这里负责描述该 adapter
@@ -36,6 +53,8 @@ pub(crate) struct ChannelCapabilityAdapter {
     pub model_sync: ModelSyncAdapter,
     pub balance_query: Option<BalanceQueryAdapter>,
     pub strips_openai_v1_path: bool,
+    console_scrape: ConsoleScrapeAdapter,
+    login_page: LoginPageAdapter,
 }
 
 const ADAPTERS: &[ChannelCapabilityAdapter] = &[
@@ -45,6 +64,8 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
         model_sync: ModelSyncAdapter::LongCat,
         balance_query: None,
         strips_openai_v1_path: false,
+        console_scrape: ConsoleScrapeAdapter::Fixed("hybrid"),
+        login_page: LoginPageAdapter::Generic,
     },
     ChannelCapabilityAdapter {
         id: "deepseek",
@@ -52,6 +73,8 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
         model_sync: ModelSyncAdapter::DeepSeek,
         balance_query: Some(BalanceQueryAdapter::DeepSeek),
         strips_openai_v1_path: false,
+        console_scrape: ConsoleScrapeAdapter::None,
+        login_page: LoginPageAdapter::None,
     },
     ChannelCapabilityAdapter {
         id: "kimi",
@@ -59,6 +82,8 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
         model_sync: ModelSyncAdapter::Kimi,
         balance_query: Some(BalanceQueryAdapter::Kimi),
         strips_openai_v1_path: false,
+        console_scrape: ConsoleScrapeAdapter::None,
+        login_page: LoginPageAdapter::None,
     },
     ChannelCapabilityAdapter {
         id: "qwen",
@@ -66,6 +91,11 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
         model_sync: ModelSyncAdapter::Qwen,
         balance_query: None,
         strips_openai_v1_path: false,
+        console_scrape: ConsoleScrapeAdapter::ResourceMode {
+            resource_mode: "token_plan",
+            mode_key: "token_plan",
+        },
+        login_page: LoginPageAdapter::GenericOrHost("account.aliyun.com"),
     },
     ChannelCapabilityAdapter {
         id: "custom",
@@ -75,6 +105,8 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
         },
         balance_query: None,
         strips_openai_v1_path: false,
+        console_scrape: ConsoleScrapeAdapter::None,
+        login_page: LoginPageAdapter::None,
     },
     ChannelCapabilityAdapter {
         id: "zhipu",
@@ -84,6 +116,8 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
         },
         balance_query: None,
         strips_openai_v1_path: true,
+        console_scrape: ConsoleScrapeAdapter::None,
+        login_page: LoginPageAdapter::None,
     },
     ChannelCapabilityAdapter {
         id: "openrouter",
@@ -93,6 +127,8 @@ const ADAPTERS: &[ChannelCapabilityAdapter] = &[
         },
         balance_query: Some(BalanceQueryAdapter::OpenRouter),
         strips_openai_v1_path: false,
+        console_scrape: ConsoleScrapeAdapter::None,
+        login_page: LoginPageAdapter::None,
     },
 ];
 
@@ -137,6 +173,39 @@ pub(crate) fn builtin_channel_presets() -> Result<Vec<ChannelPreset>, String> {
             Ok(preset)
         })
         .collect()
+}
+
+pub(crate) fn console_scrape_mode_key(
+    channel_id: &str,
+    resource_mode: Option<&str>,
+) -> Option<&'static str> {
+    match channel_adapter(channel_id)?.console_scrape {
+        ConsoleScrapeAdapter::None => None,
+        ConsoleScrapeAdapter::Fixed(mode_key) => Some(mode_key),
+        ConsoleScrapeAdapter::ResourceMode {
+            resource_mode: required,
+            mode_key,
+        } => (resource_mode == Some(required)).then_some(mode_key),
+    }
+}
+
+/// 只识别 Adapter 明确声明的登录页面。目标响应未出现、页面加载慢或拦截器异常
+/// 都不能据此判定未登录。
+pub(crate) fn is_explicit_login_url(channel_id: &str, page_url: &str) -> bool {
+    let Some(adapter) = channel_adapter(channel_id) else {
+        return false;
+    };
+    let url = page_url.to_ascii_lowercase();
+    let has_login_path = url.contains("/login")
+        || url.contains("/signin")
+        || url.contains("/sign-in")
+        || url.contains("passport")
+        || url.contains("oauth");
+    match adapter.login_page {
+        LoginPageAdapter::None => false,
+        LoginPageAdapter::Generic => has_login_path,
+        LoginPageAdapter::GenericOrHost(host) => has_login_path || url.contains(host),
+    }
 }
 
 pub(crate) async fn sync_channel_models(
@@ -245,6 +314,40 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(preset_ids, contribution_ids);
+    }
+
+    #[test]
+    fn console_scrape_policy_is_adapter_driven() {
+        assert_eq!(
+            console_scrape_mode_key("longcat", Some("pay_as_you_go")),
+            Some("hybrid")
+        );
+        assert_eq!(
+            console_scrape_mode_key("qwen", Some("token_plan")),
+            Some("token_plan")
+        );
+        assert_eq!(console_scrape_mode_key("qwen", Some("pay_as_you_go")), None);
+        assert_eq!(console_scrape_mode_key("deepseek", None), None);
+    }
+
+    #[test]
+    fn login_page_policy_is_adapter_driven() {
+        assert!(is_explicit_login_url(
+            "longcat",
+            "https://longcat.chat/login"
+        ));
+        assert!(is_explicit_login_url(
+            "qwen",
+            "https://account.aliyun.com/login/login.htm"
+        ));
+        assert!(!is_explicit_login_url(
+            "qwen",
+            "https://platform.qianwenai.com/home/billing"
+        ));
+        assert!(!is_explicit_login_url(
+            "deepseek",
+            "https://example.com/login"
+        ));
     }
 
     #[tokio::test]

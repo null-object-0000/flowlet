@@ -8,6 +8,7 @@
 //!   command 必须等 ready 后再计算业务响应超时，避免把页面尚未初始化误判成未登录。
 //! - 收齐后 Rust 侧 eval_with_callback 执行 extractor_js,拿到结构化结果。
 
+use crate::core::channel_capability_adapter::console_scrape_mode_key;
 use crate::core::channels_config::ChannelsConfig;
 use std::collections::HashMap;
 #[cfg(any(windows, target_os = "linux"))]
@@ -45,11 +46,15 @@ pub fn resolve_scrape_mode(
     channel_id: &str,
     resource_mode: Option<&str>,
 ) -> Option<ScrapeModeRuntime> {
-    let mode_key = match channel_id {
-        "longcat" => "hybrid",
-        "qwen" if resource_mode == Some("token_plan") => "token_plan",
-        _ => return None,
-    };
+    let supports_scrape = channels_config
+        .presets
+        .iter()
+        .find(|preset| preset.id == channel_id)
+        .is_some_and(|preset| preset.supports_scrape_balance);
+    if !supports_scrape {
+        return None;
+    }
+    let mode_key = console_scrape_mode_key(channel_id, resource_mode)?;
     let cfg = channels_config.scrape_config(channel_id, mode_key)?;
     Some(ScrapeModeRuntime {
         console_url: cfg.console_url.clone(),

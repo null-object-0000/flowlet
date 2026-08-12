@@ -1,5 +1,5 @@
 use crate::core::channel_capability_adapter::{
-    query_channel_balance, supports_official_balance, sync_channel_models,
+    is_explicit_login_url, query_channel_balance, supports_official_balance, sync_channel_models,
 };
 use crate::core::channels_config::ChannelsConfig;
 use crate::core::config::{
@@ -1467,21 +1467,6 @@ fn current_scrape_page_url(
         .get(account_id)
         .and_then(|window| window.url().ok())
         .map(|url| url.to_string()))
-}
-
-/// 只识别明确的登录页面。目标响应未出现、页面加载慢或拦截器异常都不能据此判定未登录。
-fn is_explicit_login_url(channel_id: &str, page_url: &str) -> bool {
-    let url = page_url.to_ascii_lowercase();
-    let has_login_path = url.contains("/login")
-        || url.contains("/signin")
-        || url.contains("/sign-in")
-        || url.contains("passport")
-        || url.contains("oauth");
-    match channel_id {
-        "qwen" => has_login_path || url.contains("account.aliyun.com"),
-        "longcat" => has_login_path,
-        _ => false,
-    }
 }
 
 /// 刷新控制台并通过页面自身发起的业务请求判断是否已登录。

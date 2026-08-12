@@ -17,6 +17,7 @@ import {
   buildUsageTokenDetails,
   buildMobileWeeklyHourlyHeatmap,
   buildMobileUsageHeatmap,
+  DEFAULT_USAGE_PERIOD,
   filterMobileUsage,
   formatMobileUsageRange,
   getMobileUsageRange,
@@ -30,7 +31,7 @@ export function MobileOverviewPage() {
   const { language, t } = useAppPreferences();
   const devicePicker = useMobileDevicePickerState();
   const deviceId = devicePicker.deviceId;
-  const [period, setPeriod] = useState<MobileUsagePeriod>("week");
+  const [period, setPeriod] = useState<MobileUsagePeriod>(DEFAULT_USAGE_PERIOD);
   const [periodOffset, setPeriodOffset] = useState(0);
   const [heatmapMetric, setHeatmapMetric] = useState<MobileUsageHeatmapMetric>("tokens");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);

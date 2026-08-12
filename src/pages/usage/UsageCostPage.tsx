@@ -24,6 +24,7 @@ import {
   buildMobileDailyHourlyHeatmap,
   buildUsageTokenDetails,
   buildWeekdayHourHeatmap,
+  DEFAULT_USAGE_PERIOD,
   filterMobileUsage,
   formatMobileUsageRange,
   getMobileUsageRange,
@@ -37,7 +38,7 @@ export function UsageCostPage() {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 30_000 });
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const [period, setPeriod] = useState<MobileUsagePeriod>("day");
+  const [period, setPeriod] = useState<MobileUsagePeriod>(DEFAULT_USAGE_PERIOD);
   const [periodOffset, setPeriodOffset] = useState(0);
   const [heatmapMetric, setHeatmapMetric] = useState<MobileUsageHeatmapMetric>("tokens");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);

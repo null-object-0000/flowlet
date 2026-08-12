@@ -12,11 +12,13 @@
 .surfaceSwitch button:focus-visible { outline: 2px solid var(--flowlet-color-primary); outline-offset: 2px; }
 
 @media (max-width: 700px) {
-  .section { padding: 70px 16px 82px; }
+  .section { padding: 68px 16px 78px; }
   .heading { margin-bottom: 30px; }
+  .heading h2 { font-size: 32px; line-height: 1.16; }
   .heading p { font-size: 14px; }
   .surfaceSwitch { width: 100%; grid-template-columns: repeat(2, 1fr); }
   .surfaceSwitch button { padding: 0 10px; }
+  .demoFrame { border-radius: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) { .surfaceSwitch button { transition: none; } }

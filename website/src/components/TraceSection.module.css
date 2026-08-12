@@ -17,4 +17,20 @@
 .requestHead strong { font-size: 15px; line-height: 21px; }.requestHead span { display: flex; align-items: center; gap: 7px; color: #82e8bd; font-size: 14px; line-height: 20px; }.requestHead i { width: 7px; height: 7px; border-radius: 50%; background: #48cf9c; }
 .rows { margin-top: 7px; }.rows > div { min-height: 44px; padding: 11px 0; display: grid; grid-template-columns: 1fr 1.35fr; align-items: center; gap: 16px; border-bottom: 1px solid #2a3a51; font-size: 14px; line-height: 20px; }.rows > div > span { color: #b1c0d3; }.rows strong { overflow: hidden; min-width: 0; color: #f4f8ff; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .timeline { margin-top: 18px; display: flex; align-items: center; }.timeline span { position: relative; height: 2px; flex: 1; background: #33527e; }.timeline span::before { position: absolute; left: 0; top: -4px; width: 10px; height: 10px; border-radius: 50%; content: ""; background: #65a1ff; box-shadow: 0 0 0 4px rgba(101,161,255,.08); }.timeline span:last-child { flex: 0; }
-@media (max-width: 760px) { .section { padding: 74px 16px; }.grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .section { padding: 68px 16px; }
+  .inner > header { margin-bottom: 30px; }
+  .inner h2 { font-size: 32px; line-height: 1.16; }
+  .inner header p { font-size: 14px; line-height: 1.7; }
+  .grid { grid-template-columns: 1fr; gap: 12px; }
+  .steps,.request { padding: 20px; border-radius: 18px; }
+  .step { gap: 12px; }
+  .step small { white-space: normal; }
+  .rows > div { grid-template-columns: minmax(88px,.75fr) minmax(0,1.25fr); gap: 10px; }
+}
+@media (max-width: 360px) {
+  .steps,.request { padding: 16px; }
+  .requestHead { align-items: flex-start; gap: 8px; }
+  .rows > div { grid-template-columns: 1fr; gap: 2px; }
+  .rows strong { text-align: left; }
+}

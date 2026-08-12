@@ -28,7 +28,8 @@
 .embedded .content { padding-top: var(--flowlet-shell-top, 52px); }
 @media (max-width: 720px) {
   .embedded { height: 620px; grid-template-columns: 1fr; }
-  .embedded .sidebar { width: 100%; height: auto; padding: 8px; border-right: 0; border-bottom: 1px solid var(--flowlet-color-border); overflow-x: auto; }
+  .embedded .sidebar { width: 100%; height: auto; padding: 8px; border-right: 0; border-bottom: 1px solid var(--flowlet-color-border); overflow-x: auto; scrollbar-width: none; }
+  .embedded .sidebar::-webkit-scrollbar { display: none; }
   .embedded .sidebarInner { height: auto; display: block; }
   .embedded .brand, .embedded .navLabel, .embedded .footer { display: none; }
   .embedded .nav { margin: 0; display: flex; flex-direction: row; gap: 5px; }

@@ -19,5 +19,22 @@
 .arrow::after { position: absolute; right: 0; top: -4px; border-left: 7px solid var(--flowlet-color-border-strong); border-top: 5px solid transparent; border-bottom: 5px solid transparent; content: ""; }
 .evidence { margin-top: 17px; display: grid; grid-template-columns: repeat(5,1fr); gap: 8px; }
 .evidence span { padding: 10px; border: 1px solid var(--flowlet-color-border-strong); border-radius: 11px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-soft); text-align: center; font-size: 12px; line-height: 16px; font-weight: 650; }
-@media (max-width: 900px) { .pipeline { grid-template-columns: 1fr; }.arrow { width: 70px; margin: auto; transform: rotate(90deg); }.evidence { grid-template-columns: repeat(2,1fr); } }
-@media (max-width: 680px) { .section { padding: 72px 16px; }.evidence { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+  .pipeline { grid-template-columns: 1fr; }
+  .arrow { min-height: 68px; display: grid; place-items: center; }
+  .arrow > span { position: relative; z-index: 1; padding: 4px 10px; border-radius: 999px; background: var(--flowlet-color-surface-strong); }
+  .arrow::before { position: absolute; inset: 0 auto 0 50%; width: 2px; height: auto; margin: 0; background: var(--flowlet-color-border-strong); transform: translateX(-50%); }
+  .arrow::after { left: 50%; right: auto; top: auto; bottom: 0; border-top: 7px solid var(--flowlet-color-border-strong); border-right: 5px solid transparent; border-bottom: 0; border-left: 5px solid transparent; transform: translateX(-50%); }
+  .evidence { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width: 680px) {
+  .section { padding: 68px 16px; }
+  .inner > header { margin-bottom: 30px; }
+  .inner h2 { font-size: 32px; line-height: 1.16; }
+  .inner header p { font-size: 14px; line-height: 1.7; }
+  .pipeline { padding: 16px; gap: 0; border-radius: 20px; }
+  .group { gap: 8px; }
+  .group > div { padding: 10px 12px; }
+  .center { min-height: 172px; padding: 20px; }
+  .evidence { grid-template-columns: 1fr; }
+}

@@ -6,7 +6,9 @@ import styles from "./ProductDemoSection.module.css";
 
 export function ProductDemoSection() {
   const { lang, t } = useI18n();
-  const [surface, setSurface] = useState<"desktop" | "mobile">("desktop");
+  const [surface, setSurface] = useState<"desktop" | "mobile">(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 700px)").matches ? "mobile" : "desktop"
+  );
   const mobile = surface === "mobile";
   return (
     <section id="demo" className={styles.section} aria-labelledby="product-demo-title">

@@ -11,4 +11,12 @@
 .chips > span { min-height: 42px; padding: 5px 10px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 11px; background: var(--flowlet-color-surface); }
 .chips img { width: 25px; height: 25px; }.chips > span > span { width: 27px; height: 27px; flex-basis: 27px; }.chips strong { color: var(--flowlet-color-text-secondary); font-size: 12px; line-height: 17px; }
 .customMark { display: grid; place-items: center; border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: 15px; }
-@media (max-width: 760px) { .section { padding: 72px 16px; }.grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .section { padding: 68px 16px; }
+  .inner > header { margin-bottom: 30px; }
+  .inner h2 { font-size: 32px; line-height: 1.16; }
+  .inner header p { font-size: 14px; line-height: 1.7; }
+  .grid { grid-template-columns: 1fr; gap: 12px; }
+  .card { padding: 20px; }
+  .chips > span { min-width: 0; }
+}

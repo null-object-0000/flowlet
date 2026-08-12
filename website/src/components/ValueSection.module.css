@@ -9,4 +9,12 @@
 .icon { width: 42px; height: 42px; margin-bottom: 21px; display: grid; place-items: center; border-radius: 12px; color: var(--flowlet-color-primary); background: var(--flowlet-color-surface-blue); font-size: 19px; }
 .grid h3 { margin: 0 0 9px; font-size: 19px; }
 .grid p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: 13px; line-height: 1.72; }
-@media (max-width: 760px) { .section { padding: 72px 16px; }.grid { grid-template-columns: 1fr; }.grid article { padding: 22px; } }
+@media (max-width: 760px) {
+  .section { padding: 68px 16px; }
+  .inner > header { margin-bottom: 30px; }
+  .inner h2 { font-size: 32px; line-height: 1.16; }
+  .inner header p { font-size: 14px; line-height: 1.7; }
+  .grid { grid-template-columns: 1fr; gap: 12px; }
+  .grid article { padding: 20px; }
+  .icon { margin-bottom: 16px; }
+}

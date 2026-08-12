@@ -20,6 +20,7 @@ Flowlet 的首个正式公开版本。
 
 - 提供 Windows x64 安装包与便携版、Android arm64 APK，并由 GitHub Actions 构建 Linux x64、macOS Apple Silicon 与 Intel 产物；
 - 当前主要开发与完整回归环境为 Windows 11 原生环境（未启用 WSL）；Linux 与 macOS 尚未完成作者真机回归验证；
-- 当前桌面产物尚未签名，操作系统可能显示未知发布者提示。
+- Windows 桌面产物尚未签名；macOS DMG 使用 ad-hoc 签名但尚未经过 Apple 公证，
+  首次启动可能需要手动放行。
 
 [0.1.0]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.0

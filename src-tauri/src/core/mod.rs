@@ -19,6 +19,7 @@ pub mod device_sync;
 pub mod lan_sync;
 pub mod logging;
 pub mod metrics;
+pub mod model_catalog;
 pub(crate) mod notification_registry;
 pub mod opencode_control;
 pub(crate) mod pi_session_migration;

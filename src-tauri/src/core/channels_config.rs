@@ -2,6 +2,7 @@ use super::config::{
     AuthStrategy, ChannelAccount, ChannelPreset, ModelPrice, ModelPriceTier, ProtocolType,
     RouteCandidate,
 };
+pub(crate) use super::model_catalog::{canonical_model_key, official_channel_id_for_model};
 use serde::Deserialize;
 
 /// 编译时随应用固化的默认配置。
@@ -10,45 +11,6 @@ use serde::Deserialize;
 /// `channels_config` 或打包资源路径异常时，避免桌面进程在创建窗口和托盘前退出。
 pub const DEFAULT_CONFIG_JSON: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config.json"));
-
-/// 上游模型变体 → 白名单规范模型 ID 的映射（键值均按小写匹配）。
-/// 部分渠道端点的 /models 会返回与规范名不同、但实际是同一模型的日期快照或别名
-/// （如千问 Token Plan 套餐端点的 deepseek-v4-flash-0731 即 deepseek-v4-flash）。
-/// 变体按规范 ID 参与白名单求交、用量合并与品牌/档位/价格解析；生成路由时
-/// virtual_model_id 用规范 ID，upstream_model 保留 /models 返回的上游原名。
-/// 必须与 src/domains/channel/types.ts 的 MODEL_ALIASES 保持一致。
-const MODEL_ALIASES: [(&str, &str); 1] = [("deepseek-v4-flash-0731", "deepseek-v4-flash")];
-
-/// 把任意模型名解析为规范键（小写）：先剥离聚合渠道的 `vendor/` 前缀（如
-/// OpenRouter 返回 `deepseek/deepseek-v4-flash`），命中别名表返回映射目标，
-/// 否则原样小写。规范键可直接与 supported_models() 的小写形式比较。
-pub(crate) fn canonical_model_key(model_id: &str) -> String {
-    let raw = model_id.trim();
-    // 只取最后一个 `/` 之后的部分：普通模型名不含 `/`，原样保留；`vendor/model`
-    // 命名空间去掉 vendor 前缀后按简名匹配白名单（路由 upstream_model 仍保留
-    // 上游原始 ID 用于转发，这里只做映射判定）。
-    let key = raw.rsplit('/').next().unwrap_or(raw).trim().to_lowercase();
-    MODEL_ALIASES
-        .iter()
-        .find(|(alias, _)| *alias == key)
-        .map(|(_, canonical)| canonical.to_string())
-        .unwrap_or(key)
-}
-
-/// Flowlet 支持模型的官方归属。实际请求可以经任意渠道账号转发，但模型品牌、
-/// 官方规格和基准价格始终由模型 ID 决定，不由路由渠道决定。
-/// 别名变体（如 deepseek-v4-flash-0731）按规范模型解析归属。
-pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static str> {
-    match canonical_model_key(model_id).as_str() {
-        "longcat-2.0" => Some("longcat"),
-        "deepseek-v4-flash" | "deepseek-v4-pro" => Some("deepseek"),
-        "kimi-k3" | "kimi-k2.7-code" => Some("kimi"),
-        "qwen3.8-max" | "qwen3.7-max" | "qwen3.7-plus" | "qwen3.7-flash" | "qwen3.6-plus"
-        | "qwen3.6-flash" => Some("qwen"),
-        "glm-5.2" | "glm-4.7" | "glm-4.5-air" => Some("zhipu"),
-        _ => None,
-    }
-}
 
 /// 该渠道的 OpenAI-compatible 端点是否使用不带 `/v1` 前缀的路径。
 /// 智谱官方 OpenAI 端点为 `/api/paas/v4/chat/completions`（无 `/v1`），
@@ -419,21 +381,10 @@ impl ChannelsConfig {
             .unwrap_or_default()
     }
 
-    /// Flowlet 支持开放的上游模型全集（所有渠道的并集，含 Token Plan 专属模型）。
+    /// Flowlet 支持开放的上游模型全集，来自内置 model-catalog.json。
     /// 任意渠道账号只要底层 /models 返回了其中的模型，就可勾选开放——不再按渠道区分。
-    /// 必须与 src/domains/channel/types.ts 的 FLOWLET_SUPPORTED_MODELS 保持一致。
     pub fn supported_models(&self) -> Vec<String> {
-        let mut models: Vec<String> = self
-            .default_exposed_models
-            .values()
-            .flatten()
-            .cloned()
-            .chain(QWEN_TOKEN_PLAN_DEFAULT_MODELS.iter().map(|m| m.to_string()))
-            .collect();
-        // 去重（保持首次出现顺序）
-        let mut seen = std::collections::HashSet::new();
-        models.retain(|m| seen.insert(m.clone()));
-        models
+        super::model_catalog::model_catalog().supported_models()
     }
 
     /// 为现有账号补齐「用户已勾选开放」的直连模型路由。
@@ -632,11 +583,6 @@ fn route_signature(route: &RouteCandidate) -> String {
     ]
     .join("\0")
 }
-
-/// 千问 Token Plan 账号的默认开放模型。
-/// qwen3.8-max 为正式版（Token Plan 与按量付费均可用）。
-/// 必须与 src/domains/channel/types.ts 的 QWEN_TOKEN_PLAN_DEFAULT_MODELS 保持一致。
-const QWEN_TOKEN_PLAN_DEFAULT_MODELS: [&str; 2] = ["qwen3.8-max", "qwen3.6-flash"];
 
 /// 判断账号是否为千问 Token Plan 订阅模式（sk-sp 专属 Key + 套餐端点，
 /// 通过账号级 Base URL 覆盖接入）。
@@ -1267,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn supported_models_is_union_of_all_channels_plus_token_plan() {
+    fn supported_models_comes_from_embedded_model_catalog() {
         let json = serde_json::json!({
             "channels_config": {
                 "channels": [{
@@ -1286,11 +1232,11 @@ mod tests {
         let config = ChannelsConfig::from_config_json(&json).unwrap();
         let supported: std::collections::HashSet<String> =
             config.supported_models().into_iter().collect();
-        // 渠道列表 + Token Plan 专属模型(qwen3.8-max) 的并集。
+        // 即使传入配置只声明部分 Qwen 模型，内置目录仍提供完整白名单。
         for expected in ["qwen3.7-max", "qwen3.6-flash", "qwen3.8-max"] {
             assert!(supported.contains(expected), "缺少支持的模型: {expected}");
         }
-        // 去重：qwen3.6-flash 同时出现在渠道列表与 Token Plan 列表，只出现一次。
+        // 目录校验保证规范模型 ID 唯一。
         assert_eq!(
             config
                 .supported_models()

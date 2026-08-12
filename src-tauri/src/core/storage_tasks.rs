@@ -1628,14 +1628,7 @@ fn merge_price_tables(
 /// models-cn providerId → Flowlet channel_id 映射（仅覆盖有官方价格的国内厂商）。
 #[cfg(desktop)]
 fn provider_id_to_channel_id(provider_id: &str) -> Option<&'static str> {
-    match provider_id {
-        "longcat" => Some("longcat"),
-        "deepseek" => Some("deepseek"),
-        "moonshot-cn" => Some("kimi"),
-        "qwen-cn" => Some("qwen"),
-        "zhipu-cn" => Some("zhipu"),
-        _ => None,
-    }
+    crate::core::model_catalog::model_catalog().owner_channel_for_models_cn_provider(provider_id)
 }
 
 /// 从 models-cn 目录 JSON 解析出 ModelPrice 列表，用于成本估算。

@@ -33,6 +33,7 @@ Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议
 ```text
 Flowlet Desktop
   ├─ src/                              React 19 + Semi Design 正式前端
+  ├─ model-catalog.json                内置模型身份目录（白名单 / 归属 / 别名）
   ├─ src-tauri/                        Tauri 2 桌面壳
   │  └─ src/
   │     ├─ lib.rs                      Tauri 应用入口和 command 注册
@@ -71,6 +72,7 @@ Flowlet Desktop
   │        ├─ usage.rs                 Token 提取与成本估算
   │        ├─ logging.rs               日志捕获与脱敏
   │        ├─ metrics.rs               运行时指标
+  │        ├─ model_catalog.rs         模型身份目录加载、校验与查询
   │        ├─ agent_environment.rs     Agent 本机安装探测
   │        ├─ agent_global_config.rs   Claude Code / OpenCode 全局配置写入与恢复
   │        ├─ agent_session_identity.rs 请求头中的 Agent / Session 统一识别
@@ -96,6 +98,17 @@ Flowlet Desktop
 Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、WebView、设备身份、文件监听和
 平台事件等 Host 能力。headless 不再复制 Storage、快照和代理启动装配，也不再因没有账号或路由
 而拒绝监听；空配置下的代理启动语义与桌面端一致。
+
+### 模型目录边界
+
+仓库根目录 `model-catalog.json` 是 Flowlet 支持模型身份的单一事实源，固化规范模型 ID、
+官方渠道归属、上游别名与 `models-cn` provider 映射。Rust 通过编译时 `include_str!` 加载并
+校验目录，前端通过 TypeScript JSON module 读取同一文件；模型白名单、规范化、品牌归属和
+动态规格目录查找不再分别维护硬编码映射。
+
+`config.json.channels_config.default_exposed_models` 仍用于渠道预设漂移检测，不决定全局
+白名单。运行时同步的 `models-cn.json` / `models-dev.json` 只补充规格与价格，不能动态扩大
+可开放模型范围。修改内置模型目录需要重新构建应用；同步规格和价格无需重启。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 

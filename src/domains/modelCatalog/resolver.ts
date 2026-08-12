@@ -3,7 +3,7 @@
 
 import type { ModelsCnCatalog } from "./types";
 import { findModelInCatalog, resolveModel } from "./pricing";
-import { canonicalModelId, officialChannelIdForModel } from "../channel/types";
+import { canonicalModelId, modelsCnProviderIdForModel } from "./identity";
 
 /** 解析本地存储的 JSON 字符串为 ModelsCnCatalog。解析失败返回 null。 */
 export function parseCatalogJson(json: string): ModelsCnCatalog | null {
@@ -17,14 +17,6 @@ export function parseCatalogJson(json: string): ModelsCnCatalog | null {
 /** Flowlet channel_id → models-cn providerId 映射。
  *  kimi → moonshot-cn（中国大陆官方价优先），qwen → qwen-cn，
  *  zhipu → zhipu-cn（中国大陆官方价优先）。 */
-export const PROVIDER_BY_CHANNEL: Record<string, string> = {
-  longcat: "longcat",
-  deepseek: "deepseek",
-  kimi: "moonshot-cn",
-  qwen: "qwen-cn",
-  zhipu: "zhipu-cn",
-};
-
 /** 尝试在 calibration.modelsDev 中查找参考链接（用于补全标记）。 */
 function findModelsDevReference(catalog: ModelsCnCatalog, providerId: string, modelId: string): string | null {
   for (const entry of catalog.calibration?.modelsDev?.models ?? []) {
@@ -38,14 +30,13 @@ function findModelsDevReference(catalog: ModelsCnCatalog, providerId: string, mo
  *  `supplemented` 标记：当官方 limits/capabilities 字段缺失但 models.dev 有时为 true。 */
 export function resolveChannelModel(
   catalog: ModelsCnCatalog,
-  channelId: string,
+  _channelId: string,
   upstreamModel: string,
 ): ReturnType<typeof resolveModel> | null {
   // 路由的 upstream_model 可能是别名变体原名（如 deepseek-v4-flash-0731），
   // 官方归属与目录查找统一按规范模型 ID 解析。
   const canonicalModel = canonicalModelId(upstreamModel) ?? upstreamModel;
-  const ownerChannelId = officialChannelIdForModel(upstreamModel) ?? channelId;
-  const providerId = PROVIDER_BY_CHANNEL[ownerChannelId];
+  const providerId = modelsCnProviderIdForModel(upstreamModel);
   if (!providerId) return null;
   const found = findModelInCatalog(catalog, providerId, canonicalModel);
   if (!found) return null;

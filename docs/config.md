@@ -29,12 +29,12 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 ### 默认值同步（重要）
 
-`channels_config` 的部分默认值在代码库中重复出现，目前没有共享 schema 生成器，必须手动保持一致：
+`channels_config` 的渠道模板仍有 Rust 工厂兜底；模型身份已集中到共享目录：
 
 | 位置 | 作用 |
 |------|------|
 | `config.json`（仓库根目录） | 运行时外部文件 + 编译时 `include_str!` 默认值 |
-| `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL` | 前端创建默认开放模型时的兜底常量 |
+| `model-catalog.json` | 模型白名单、官方渠道归属、别名和 models-cn provider 映射的单一事实源 |
 | `src-tauri/src/core/config.rs` 中的 `ChannelPreset::longcat()` / `ChannelPreset::deepseek()` / `ChannelPreset::kimi()` / `ChannelPreset::qwen()` / `ChannelPreset::zhipu()` / `ChannelPreset::openrouter()` | Rust 侧的工厂默认值 |
 
 > OpenRouter（`openrouter`）是聚合渠道：其 `/models` 返回全部主流模型（带
@@ -43,7 +43,8 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 > `default_exposed_models` / `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`（不维护静态默认
 > 开放列表，也不默认全勾选）。
 
-新增渠道或修改默认开放模型时，务必同步更新对应位置，否则可能出现「外部配置 → SQLite → 前端展示」链条不一致的问题。
+新增渠道或修改模型支持范围时，务必同步更新对应位置；前端和 Rust 均从
+`model-catalog.json` 读取模型身份，不再维护两份白名单或别名表。
 
 ---
 
@@ -396,9 +397,8 @@ Key 一样包含在端到端加密的账号目录中。
 **行为**：
 
 - 该字段是各渠道「默认提供哪些模型」的描述性列表，**不再直接作为开放模型的白名单**。
-  真正的白名单是 `supported_models()`：所有渠道列表的并集，加上代码级常量
-  `QWEN_TOKEN_PLAN_DEFAULT_MODELS`（`["qwen3.8-max", "qwen3.6-flash"]`）。
-  前端对应常量 `FLOWLET_SUPPORTED_MODELS`（`src/domains/channel/types.ts`），两者必须一致。
+  真正的白名单来自仓库根目录 `model-catalog.json`；Rust `supported_models()` 与前端
+  `FLOWLET_SUPPORTED_MODELS` 均读取该目录，不需要双写同步。
 - 白名单**不按渠道区分**：任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放。
   例如千问套餐端点也会返回 `deepseek-v4-pro`，该模型在全局白名单内，故可勾选。
 - 一个账号开放哪些模型由**用户显式选择**：在账号编辑器里手动「拉取模型列表」

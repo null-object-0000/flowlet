@@ -1,5 +1,24 @@
 /** Channel-domain types (ChannelPreset template). No UI / React imports. */
 
+import {
+  DEFAULT_EXPOSED_MODELS_BY_CHANNEL,
+  FLOWLET_SUPPORTED_MODELS,
+  canonicalModelId,
+  canonicalModelKey,
+  officialChannelIdForModel,
+  stripAggregateVendorPrefix,
+} from "../modelCatalog/identity";
+
+export {
+  DEFAULT_EXPOSED_MODELS_BY_CHANNEL,
+  FLOWLET_SUPPORTED_MODELS,
+  MODEL_ALIASES,
+  canonicalModelId,
+  canonicalModelKey,
+  officialChannelIdForModel,
+  stripAggregateVendorPrefix,
+} from "../modelCatalog/identity";
+
 /** 客户端协议。`responses`（OpenAI Responses API）复用渠道的 OpenAI Base URL
  *  与鉴权，仅路由归属独立；当前仅无状态透传（POST /v1/responses）。 */
 export type ProtocolType = "openai" | "anthropic" | "responses";
@@ -69,53 +88,13 @@ export type ChannelPreset = {
   updated_at: string;
 };
 
-/** Per-channel default exposed upstream models. Must stay in sync with
- *  config.json channels_config.default_exposed_models。
- *  仅用于渠道预设的配置漂移检测（preset-sync），不再作为开放模型的白名单。
- *  白名单请使用 FLOWLET_SUPPORTED_MODELS（所有渠道的并集）。 */
-export const DEFAULT_EXPOSED_MODELS_BY_CHANNEL: Record<string, string[]> = {
-  longcat: ["LongCat-2.0"],
-  deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
-  kimi: ["kimi-k3", "kimi-k2.7-code"],
-  qwen: ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
-  zhipu: ["glm-5.2", "glm-4.7", "glm-4.5-air"],
-};
-
 /** Token Plan 个人版账号的默认开放模型。
  *  qwen3.8-max 为正式版（Token Plan 与按量付费均可用）。
  *  按量付费账号使用 DEFAULT_EXPOSED_MODELS_BY_CHANNEL.qwen。
- *  必须与 src-tauri/src/core/channels_config.rs 的
- *  QWEN_TOKEN_PLAN_DEFAULT_MODELS 保持一致。 */
+ *  该列表表达套餐推荐值；模型身份仍以 model-catalog.json 为准。 */
 export const QWEN_TOKEN_PLAN_DEFAULT_MODELS = ["qwen3.8-max", "qwen3.6-flash"];
 
-/** Flowlet 支持开放的上游模型全集（所有渠道的并集）。
- *  任意渠道账号只要底层 /models 返回了其中的模型，就可勾选开放——不再按渠道区分。
- *  必须与 src-tauri/src/core/channels_config.rs 的 supported_models() 保持一致。 */
-export const FLOWLET_SUPPORTED_MODELS: string[] = Array.from(new Set([
-  ...Object.values(DEFAULT_EXPOSED_MODELS_BY_CHANNEL).flat(),
-  ...QWEN_TOKEN_PLAN_DEFAULT_MODELS,
-]));
-
-/** OpenRouter 等聚合渠道在 `/models` 返回的模型 ID 带 `vendor/` 命名空间前缀
- *  （如 `deepseek/deepseek-v4-flash`）。白名单判断和规范模型映射时先剥离该前缀，
- *  再按简名匹配。没有 `/` 前缀的普通模型名（如 `deepseek-v4-flash`）不受影响。
- *  仅用于映射判定；路由 `upstream_model` 仍保留上游原始 ID 用于转发。 */
-export function stripAggregateVendorPrefix(modelId: string): string {
-  const raw = (modelId ?? "").trim();
-  const index = raw.lastIndexOf("/");
-  return index >= 0 ? raw.slice(index + 1) : raw;
-}
-
-/** 上游模型变体 → 白名单规范模型 ID 的映射（键值均按小写匹配）。
- *  部分渠道端点的 /models 会返回属于同一规范模型身份、但独立计费或独立额度的
- *  日期快照/别名（如 deepseek-v4-flash-0731 → deepseek-v4-flash）。变体按规范 ID
- *  参与白名单、用量、品牌、档位和价格解析；编辑器选择与路由 upstream_model 保留
- *  上游原始 ID，因此同一规范模型的多个上游资源可分别成为 Route Candidate。
- *  必须与 src-tauri/src/core/channels_config.rs 的 MODEL_ALIASES 保持一致。 */
-export const MODEL_ALIASES: Record<string, string> = {
-  "deepseek-v4-flash-0731": "deepseek-v4-flash",
-};
-
+/** 渠道预设模型从 model-catalog.json 按官方归属派生；未知渠道回退到预设默认模型。 */
 export function defaultExposedModels(channel: ChannelPreset): string[] {
   return DEFAULT_EXPOSED_MODELS_BY_CHANNEL[channel.id] ?? [channel.default_model].filter(Boolean);
 }
@@ -133,44 +112,6 @@ export function isCustomChannel(channel: Pick<ChannelPreset, "id" | "vendor"> | 
 export const QWEN_CHANNEL_ID = "qwen";
 export const QWEN_TOKEN_PLAN_OPENAI_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1";
 export const QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic";
-
-/** 模型身份与实际承载请求的渠道相互独立。
- *  自定义渠道只提供路由，不改变模型品牌、官方规格或基准价格归属。 */
-const OFFICIAL_CHANNEL_BY_MODEL = new Map<string, string>([
-  ...Object.entries(DEFAULT_EXPOSED_MODELS_BY_CHANNEL).flatMap(([channelId, models]) =>
-    models.map((model) => [model.trim().toLowerCase(), channelId] as const)),
-  ...QWEN_TOKEN_PLAN_DEFAULT_MODELS.map((model) =>
-    [model.trim().toLowerCase(), QWEN_CHANNEL_ID] as const),
-]);
-
-const CANONICAL_MODEL_BY_ID = new Map<string, string>(
-  FLOWLET_SUPPORTED_MODELS.map((model) => [model.trim().toLowerCase(), model]),
-);
-
-const ALIAS_TARGET_BY_ID = new Map<string, string>(
-  Object.entries(MODEL_ALIASES).map(([alias, canonical]) => [
-    alias.trim().toLowerCase(),
-    canonical.trim().toLowerCase(),
-  ]),
-);
-
-/** 把任意模型名解析为规范键（小写）：先剥离聚合渠道的 `vendor/` 前缀，命中
- *  别名表返回映射目标，否则原样小写。规范键可直接与 FLOWLET_SUPPORTED_MODELS
- *  的小写形式比较。 */
-export function canonicalModelKey(modelId: string | null | undefined): string {
-  const key = stripAggregateVendorPrefix(modelId ?? "").trim().toLowerCase();
-  return ALIAS_TARGET_BY_ID.get(key) ?? key;
-}
-
-export function officialChannelIdForModel(modelId: string | null | undefined): string | null {
-  if (!modelId?.trim()) return null;
-  return OFFICIAL_CHANNEL_BY_MODEL.get(canonicalModelKey(modelId)) ?? null;
-}
-
-export function canonicalModelId(modelId: string | null | undefined): string | null {
-  if (!modelId?.trim()) return null;
-  return CANONICAL_MODEL_BY_ID.get(canonicalModelKey(modelId)) ?? null;
-}
 
 /** 兼容旧版只保存规范 ID 的 exposed_models：在 synced_models 中优先找精确规范 ID，
  *  否则取首个映射到该规范模型的上游原始 ID。新选择直接保存原始 ID，不使用此

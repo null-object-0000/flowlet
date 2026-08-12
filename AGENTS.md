@@ -244,8 +244,9 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - glm-4.5-air
 ```
 
-这是 Flowlet **总共支持哪些模型**（前端 `FLOWLET_SUPPORTED_MODELS` 与 Rust
-`ChannelsConfig::supported_models()` 的并集），不是按渠道切分的列表。
+这是 Flowlet **总共支持哪些模型**，单一事实源为仓库根目录 `model-catalog.json`；
+前端 `FLOWLET_SUPPORTED_MODELS` 与 Rust `ChannelsConfig::supported_models()` 均读取该目录，
+不是按渠道切分的列表。
 任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放——**不再按渠道区分**。
 
 一个账号开放哪些模型由**用户显式选择**，流程为：
@@ -290,9 +291,8 @@ DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即�
 部分渠道端点的 `/models` 会返回与白名单规范名不同、但属于同一规范模型身份的日期
 快照或别名。它们可能是独立计费、独立额度或不同有效期的上游资源；例如千问端点可同时
 返回 `deepseek-v4-flash` 与 `deepseek-v4-flash-0731`，两者必须允许分别选择和路由。
-Flowlet 维护「上游变体 → 规范模型 ID」映射表（前端
-`src/domains/channel/types.ts` 的 `MODEL_ALIASES` 与 Rust `channels_config.rs`
-的 `MODEL_ALIASES`，两侧必须保持一致）。变体按规范 ID 命中白名单、参与用量合并与
+Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映射，前端和 Rust
+读取同一目录，不得重新引入两份别名表。变体按规范 ID 命中白名单、参与用量合并与
 品牌/档位/基准价格解析；编辑器勾选、`synced_models`、`exposed_models` 与路由的
 `upstream_model` 均保留 `/models` 返回的上游原名，路由 `virtual_model_id` 使用规范 ID。
 同一规范模型的多个上游 ID 不新增对外模型身份，但会生成多个可独立启停、排序和失败
@@ -635,7 +635,7 @@ src/
 2. 新增渠道时，按 `docs/config.md` 第 8 节的步骤操作；
 3. 若运行时行为（热更新 / 需重启）发生变化，同步更新第 7 节；
 4. 若源码中反序列化结构（`channels_config.rs` / `config.rs`）发生变化，同步更新第 9 节；
-5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `src/domains/channel/types.ts` 中的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`；修改 `channels_config.flowlet_tiers` 时，必须同步同文件中的 `FLOWLET_TIERS_BY_CHANNEL_MODEL`；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
+5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `model-catalog.json` 中对应渠道的模型身份，或明确说明该预设为何不属于支持白名单；修改 `channels_config.flowlet_tiers` 时，必须同步 `src/domains/channel/types.ts` 中的 `FLOWLET_TIERS_BY_CHANNEL_MODEL`；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
 
 ### 加载优先级
 

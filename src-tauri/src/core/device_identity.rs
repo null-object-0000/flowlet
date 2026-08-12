@@ -9,7 +9,7 @@ use thiserror::Error;
 
 const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
 const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
-pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 12;
+pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 13;
 
 #[derive(Debug, Error)]
 pub enum DeviceIdentityError {
@@ -455,6 +455,40 @@ pub struct SyncedProject {
     pub tasks: Vec<SyncedProjectTask>,
 }
 
+/// 可安全共享到移动端的账号资源窗口。只保留展示额度所需的聚合值，
+/// 不携带上游响应、Cookie、请求头或任何凭据。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedAccountQuotaWindow {
+    pub label: String,
+    pub used_percent: f64,
+    pub resets_at: Option<String>,
+}
+
+/// 工作区级账号资源只读摘要。普通渠道账号必须使用 workspace_account_id，
+/// 从而让接收端能将多台桌面对同一账号的观测合并为最新一条。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedAccountResource {
+    pub account_id: String,
+    pub channel_id: String,
+    pub channel_name: String,
+    pub account_name: String,
+    pub plan: Option<String>,
+    pub balance: Option<f64>,
+    pub balance_text: Option<String>,
+    pub currency: Option<String>,
+    pub token_total: Option<i64>,
+    pub token_used: Option<i64>,
+    pub token_remaining: Option<i64>,
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub quota_windows: Vec<SyncedAccountQuotaWindow>,
+    pub observed_at: String,
+    #[serde(default)]
+    pub stale: bool,
+}
+
 /// 供本地导出和未来同步传输共同使用的最小快照契约。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -487,6 +521,10 @@ pub struct DeviceUsageSnapshot {
     /// 只读观测数据：接收端写入 `device_projects` 只读共享表，不进入本机事实表。
     #[serde(default)]
     pub projects: Vec<SyncedProject>,
+    /// 去敏后的工作区账号资源观测。接收端按 account_id 选择 observed_at 最新值，
+    /// 来源设备仅参与冲突处理，不进入常规移动端界面。
+    #[serde(default)]
+    pub account_resources: Vec<SyncedAccountResource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -566,6 +604,7 @@ impl DeviceUsageSnapshot {
             lan_peer: None,
             usage_breakdowns: Vec::new(),
             projects: Vec::new(),
+            account_resources: Vec::new(),
         }
     }
 }

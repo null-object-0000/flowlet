@@ -116,6 +116,7 @@ export const queryKeys = {
   mobileDeviceSync: {
     all: ["mobile-device-sync"] as const,
     devices: () => [...queryKeys.mobileDeviceSync.all, "devices"] as const,
+    accountResources: () => [...queryKeys.mobileDeviceSync.all, "account-resources"] as const,
     agents: (deviceId: string) => [...queryKeys.mobileDeviceSync.all, "agents", deviceId] as const,
     dailyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "daily-usage", deviceId ?? "all"] as const,
     hourlyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "hourly-usage", deviceId ?? "all"] as const,

@@ -116,6 +116,32 @@ export type DeviceUsageSnapshot = {
     startedAt: string;
     expiresAt: string;
   } | null;
+  accountResources?: SyncedAccountResource[];
+};
+
+export type SyncedAccountQuotaWindow = {
+  label: string;
+  usedPercent: number;
+  resetsAt: string | null;
+};
+
+/** 桌面设备发布的去敏账号资源摘要；移动端按 accountId 聚合，不按设备展示。 */
+export type SyncedAccountResource = {
+  accountId: string;
+  channelId: string;
+  channelName: string;
+  accountName: string;
+  plan: string | null;
+  balance: number | null;
+  balanceText: string | null;
+  currency: string | null;
+  tokenTotal: number | null;
+  tokenUsed: number | null;
+  tokenRemaining: number | null;
+  expiresAt: string | null;
+  quotaWindows: SyncedAccountQuotaWindow[];
+  observedAt: string;
+  stale: boolean;
 };
 
 export type KnownDevice = {

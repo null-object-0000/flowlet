@@ -262,6 +262,8 @@ pub async fn build_device_snapshot(
     // 轻量项目目录：让其他设备 / 移动端知道本机能执行哪些项目、任务状态如何。
     // 刻意只带标题 / 状态 / 优先级，不带描述与执行历史（敏感任务正文不外泄）。
     snapshot.projects = build_synced_projects(&storage)?;
+    snapshot.account_resources =
+        crate::core::account_resource_sync::build_synced_account_resources(&storage)?;
     Ok(snapshot)
 }
 
@@ -1107,6 +1109,14 @@ pub async fn pull_device_usage(
                 tracing::warn!(device_id = %snapshot.device_id, %error, "failed to import S3 device projects");
                 import_failures.push(format!("{device_label}：项目目录导入失败：{error}"));
             }
+            if let Err(error) = import_storage.import_device_account_resources(
+                &snapshot.device_id,
+                &snapshot.generated_at,
+                &snapshot.account_resources,
+            ) {
+                tracing::warn!(device_id = %snapshot.device_id, %error, "failed to import S3 account resources");
+                import_failures.push(format!("{device_label}：账号资源导入失败：{error}"));
+            }
             imported_devices += 1;
             imported_days += result.imported_days;
             unchanged_days += result.unchanged_days;
@@ -1206,6 +1216,13 @@ async fn pull_device_usage_for_device(
                 &snapshot.device_id,
                 &snapshot.generated_at,
                 &snapshot.projects,
+            )
+            .map_err(|error| error.to_string())?;
+        import_storage
+            .import_device_account_resources(
+                &snapshot.device_id,
+                &snapshot.generated_at,
+                &snapshot.account_resources,
             )
             .map_err(|error| error.to_string())?;
         Ok::<_, String>(result)
@@ -1476,6 +1493,16 @@ pub async fn sync_device_usage(
                     &snapshot.device_id,
                     &snapshot.generated_at,
                     &snapshot.projects,
+                )
+                .is_err()
+            {
+                import_failures += 1;
+            }
+            if import_storage
+                .import_device_account_resources(
+                    &snapshot.device_id,
+                    &snapshot.generated_at,
+                    &snapshot.account_resources,
                 )
                 .is_err()
             {
@@ -2176,5 +2203,76 @@ mod tests {
             .unwrap();
         let shared = storage.imported_device_projects(None).unwrap();
         assert_eq!(shared[0].tasks[0].id, "task-new");
+    }
+
+    #[test]
+    fn imported_account_resources_merge_devices_by_latest_observation() {
+        use crate::core::device_identity::SyncedAccountResource;
+
+        let storage =
+            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let resource = |balance: f64, observed_at: &str| SyncedAccountResource {
+            account_id: "workspace-account-1".to_string(),
+            channel_id: "deepseek".to_string(),
+            channel_name: "DeepSeek".to_string(),
+            account_name: "共享账号".to_string(),
+            plan: Some("pay_as_you_go".to_string()),
+            balance: Some(balance),
+            balance_text: None,
+            currency: Some("CNY".to_string()),
+            token_total: None,
+            token_used: None,
+            token_remaining: None,
+            expires_at: None,
+            quota_windows: vec![],
+            observed_at: observed_at.to_string(),
+            stale: false,
+        };
+        for (device_id, generated_at) in [
+            (
+                "8d58734f-0b71-49ea-b5a4-115b389a9ae7",
+                "2026-08-12T10:00:00Z",
+            ),
+            (
+                "bc1a66f9-7281-4cf8-b64c-20a449394a2b",
+                "2026-08-12T10:05:00Z",
+            ),
+        ] {
+            storage
+                .import_device_usage(
+                    13,
+                    device_id,
+                    "2026-08-01T00:00:00Z",
+                    device_id,
+                    "windows",
+                    "0.1.0",
+                    generated_at,
+                    480,
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                )
+                .unwrap();
+        }
+        storage
+            .import_device_account_resources(
+                "8d58734f-0b71-49ea-b5a4-115b389a9ae7",
+                "2026-08-12T10:00:00Z",
+                &[resource(10.0, "2026-08-12T09:00:00Z")],
+            )
+            .unwrap();
+        storage
+            .import_device_account_resources(
+                "bc1a66f9-7281-4cf8-b64c-20a449394a2b",
+                "2026-08-12T10:05:00Z",
+                &[resource(20.0, "2026-08-12T09:30:00Z")],
+            )
+            .unwrap();
+
+        let merged = storage.imported_account_resources().unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].balance, Some(20.0));
     }
 }

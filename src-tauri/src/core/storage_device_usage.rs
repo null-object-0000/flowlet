@@ -3,7 +3,8 @@ use crate::core::config::DeviceUsageBreakdownRow;
 use crate::core::device_identity::{
     resolve_device_display_name, DailyUsageTotal, DeviceUsageImportPreview,
     DeviceUsageImportResult, HourlyUsageTotal, KnownDevice, SharedAgentSession,
-    SharedDeviceProject, SyncedAgentProfile, SyncedAgentSession, SyncedProject,
+    SharedDeviceProject, SyncedAccountResource, SyncedAgentProfile, SyncedAgentSession,
+    SyncedProject,
 };
 use rusqlite::{params, OptionalExtension};
 
@@ -764,6 +765,99 @@ impl Storage {
         })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
+    }
+
+    /// 整体替换单台设备发布的账号资源观测。旧快照不能覆盖新快照；空数组表示
+    /// 发送端当前没有符合自动同步条件且已加入工作区的账号，需要清理该设备旧观测。
+    pub fn import_device_account_resources(
+        &self,
+        device_id: &str,
+        generated_at: &str,
+        resources: &[SyncedAccountResource],
+    ) -> Result<usize, StorageError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let transaction = connection.transaction()?;
+        let newest_profile_at = transaction
+            .query_row(
+                "SELECT profile_generated_at FROM known_devices WHERE device_id = ?1",
+                [device_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if newest_profile_at
+            .as_deref()
+            .is_some_and(|newest| newest > generated_at)
+        {
+            return Ok(0);
+        }
+        transaction.execute(
+            "DELETE FROM device_account_resources WHERE device_id = ?1",
+            [device_id],
+        )?;
+        let mut imported = 0;
+        for resource in resources {
+            if resource.account_id.trim().is_empty() || resource.channel_id.trim().is_empty() {
+                continue;
+            }
+            let resource_json = serde_json::to_string(resource)
+                .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
+            imported += transaction.execute(
+                "INSERT INTO device_account_resources (
+                    device_id, account_id, resource_json, observed_at,
+                    snapshot_generated_at, imported_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+                params![
+                    device_id,
+                    resource.account_id,
+                    resource_json,
+                    resource.observed_at,
+                    generated_at
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(imported)
+    }
+
+    /// 工作区级移动视图：同一账号可能由多台桌面发布，只返回 observed_at 最新的
+    /// 一条；时间相同时用较新的设备快照稳定决胜。
+    pub fn imported_account_resources(&self) -> Result<Vec<SyncedAccountResource>, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+        let mut statement = connection.prepare(
+            "SELECT resource_json FROM (
+                SELECT resource_json,
+                       row_number() OVER (
+                           PARTITION BY account_id
+                           ORDER BY observed_at DESC, snapshot_generated_at DESC, device_id ASC
+                       ) AS rank
+                FROM device_account_resources
+             ) WHERE rank = 1",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let json: String = row.get(0)?;
+            serde_json::from_str::<SyncedAccountResource>(&json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })?;
+        let mut resources = rows.collect::<Result<Vec<_>, _>>()?;
+        resources.sort_by(|left, right| {
+            right
+                .stale
+                .cmp(&left.stale)
+                .then_with(|| left.channel_name.cmp(&right.channel_name))
+                .then_with(|| left.account_name.cmp(&right.account_name))
+        });
+        Ok(resources)
     }
 
     pub fn imported_known_devices(&self) -> Result<Vec<KnownDevice>, StorageError> {

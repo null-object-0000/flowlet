@@ -1089,6 +1089,7 @@ fn run_mobile() {
         })
         .invoke_handler(tauri::generate_handler![
             mobile_commands::list_shared_devices,
+            mobile_commands::list_shared_account_resources,
             mobile_commands::list_shared_device_agents,
             mobile_commands::shared_device_daily_usage,
             mobile_commands::shared_device_hourly_usage,

@@ -1477,6 +1477,13 @@ pub async fn refresh_known_peers(
                     &snapshot.projects,
                 )
                 .map_err(|error| error.to_string())?;
+            import_storage
+                .import_device_account_resources(
+                    &snapshot.device_id,
+                    &snapshot.generated_at,
+                    &snapshot.account_resources,
+                )
+                .map_err(|error| error.to_string())?;
         }
         Ok::<_, String>(())
     })

@@ -91,6 +91,10 @@ describe("deviceSyncCommands contract", () => {
     expect(invokeMock).toHaveBeenLastCalledWith("list_shared_devices", undefined);
 
     invokeMock.mockResolvedValueOnce([]);
+    await mobileDeviceSyncCommands.accountResources();
+    expect(invokeMock).toHaveBeenLastCalledWith("list_shared_account_resources", undefined);
+
+    invokeMock.mockResolvedValueOnce([]);
     await mobileDeviceSyncCommands.agents("device-1");
     expect(invokeMock).toHaveBeenLastCalledWith("list_shared_device_agents", { deviceId: "device-1" });
 

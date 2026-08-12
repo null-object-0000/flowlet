@@ -63,6 +63,10 @@ pub struct Storage {
 }
 
 impl Storage {
+    pub(crate) fn database_path(&self) -> &Path {
+        self.db_path.as_path()
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let is_new_database = std::fs::metadata(path.as_ref())
             .map(|metadata| metadata.len() == 0)
@@ -1058,6 +1062,21 @@ impl Storage {
                 PRIMARY KEY (device_id, project_id),
                 FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
             );
+
+            -- 各桌面设备发布的去敏账号资源观测。查询时按稳定账号 ID 选取
+            -- observed_at 最新的一条，避免同一工作区账号按设备重复展示。
+            CREATE TABLE IF NOT EXISTS device_account_resources (
+                device_id             TEXT NOT NULL,
+                account_id            TEXT NOT NULL,
+                resource_json         TEXT NOT NULL,
+                observed_at           TEXT NOT NULL,
+                snapshot_generated_at TEXT NOT NULL,
+                imported_at           TEXT NOT NULL,
+                PRIMARY KEY (device_id, account_id),
+                FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_device_account_resources_latest
+                ON device_account_resources(account_id, observed_at DESC);
 
             -- 跨设备同步来的维度用量聚合：每台设备在快照中附带自身按
             -- (日期, 客户端, 渠道, 账号, 模型) 聚合的用量，导入后落库，供用量分析页

@@ -1,7 +1,7 @@
 use super::MobileAppState;
 use crate::core::device_identity::{
     DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession, SharedDeviceProject,
-    SyncedAgentProfile, SyncedAgentSession,
+    SyncedAccountResource, SyncedAgentProfile, SyncedAgentSession,
 };
 
 #[tauri::command]
@@ -16,6 +16,20 @@ pub(super) async fn list_shared_devices(
     })
     .await
     .map_err(|error| format!("读取共享设备目录任务失败：{error}"))?
+}
+
+#[tauri::command]
+pub(super) async fn list_shared_account_resources(
+    state: tauri::State<'_, MobileAppState>,
+) -> Result<Vec<SyncedAccountResource>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_account_resources()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享账号资源任务失败：{error}"))?
 }
 
 #[tauri::command]

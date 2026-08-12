@@ -17,12 +17,16 @@ export function MobileSubpageShell({
   description,
   refreshController,
   refreshDisabled = false,
+  backTo = "/devices",
+  backLabel = "返回设备页",
   children,
 }: {
   title: ReactNode;
   description?: ReactNode;
   refreshController?: MobileRefreshController;
   refreshDisabled?: boolean;
+  backTo?: string;
+  backLabel?: string;
   children: ReactNode;
 }) {
   const { t } = useAppPreferences();
@@ -41,8 +45,8 @@ export function MobileSubpageShell({
               <button
                 type="button"
                 className={styles.back}
-                aria-label={t("返回设备页")}
-                onClick={() => navigate("/devices")}
+                aria-label={t(backLabel)}
+                onClick={() => navigate(backTo)}
               >
                 <IconChevronLeft />
               </button>

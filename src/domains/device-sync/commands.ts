@@ -16,6 +16,7 @@ import type {
   S3SyncSettings,
   SharedAgentSession,
   SharedDeviceProject,
+  SyncedAccountResource,
   SyncedAgentSession,
   SyncedAgentProfile,
   TaskDeleteInput,
@@ -86,6 +87,9 @@ export const mobileDeviceSyncCommands = {
   devices: (): Promise<KnownDevice[]> =>
     invokeCommand<KnownDevice[]>("list_shared_devices")
       .catch(toDeviceSyncError("shared_device_list_failed")),
+  accountResources: (): Promise<SyncedAccountResource[]> =>
+    invokeCommand<SyncedAccountResource[]>("list_shared_account_resources")
+      .catch(toDeviceSyncError("shared_account_resources_failed")),
   agents: (deviceId: string): Promise<SyncedAgentProfile[]> =>
     invokeCommand<SyncedAgentProfile[]>("list_shared_device_agents", { deviceId })
       .catch(toDeviceSyncError("shared_device_agents_failed")),

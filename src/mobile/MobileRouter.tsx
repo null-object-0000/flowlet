@@ -6,6 +6,7 @@ import { MobileSettingsPage } from "./pages/MobileSettingsPage";
 import { MobileTasksPage } from "./pages/MobileTasksPage";
 import { MobileDeviceSessionsPage } from "./pages/MobileDeviceSessionsPage";
 import { MobileDeviceAgentsPage } from "./pages/MobileDeviceAgentsPage";
+import { MobileAccountResourcesPage } from "./pages/MobileAccountResourcesPage";
 
 export function MobileRouter() {
   return (
@@ -14,6 +15,7 @@ export function MobileRouter() {
         {/* 设备二级页：独立页面，无底部 Tab，返回回到设备页。 */}
         <Route path="devices/:deviceId/sessions" element={<MobileDeviceSessionsPage />} />
         <Route path="devices/:deviceId/agents" element={<MobileDeviceAgentsPage />} />
+        <Route path="account-resources" element={<MobileAccountResourcesPage />} />
 
         <Route element={<MobileShell />}>
           <Route index element={<MobileOverviewPage />} />

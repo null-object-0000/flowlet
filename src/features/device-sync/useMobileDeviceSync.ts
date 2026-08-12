@@ -14,6 +14,14 @@ export function useMobileDevices() {
   });
 }
 
+export function useMobileAccountResources() {
+  return useQuery({
+    queryKey: queryKeys.mobileDeviceSync.accountResources(),
+    queryFn: mobileDeviceSyncCommands.accountResources,
+    staleTime: 15_000,
+  });
+}
+
 export function useMobileLanProbes(enabled = true) {
   return useQuery({
     queryKey: queryKeys.mobileDeviceSync.lanProbes(),

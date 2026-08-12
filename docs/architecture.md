@@ -140,6 +140,12 @@ Claude Code、OpenCode、Pi、Codex 分别由独立编译期 Adapter 模块承�
 按 Agent 插件声明解析 `globalConfigAdapterId`，不假设公开 Agent ID 与实现 ID 相同。Adapter 不存在时
 在注册表加载或调用入口明确失败，不做静默回退。
 
+Agent 插件同时声明 `sessionAdapterId`。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
+可用运行时会话类型、会话目录枚举、Timeline、最后交互和增量解析来源；Claude Code、OpenCode、
+Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显式承载 `codex-cli` 与
+`codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。现有原生解析器、
+会话合并与用量账本语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。
+
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 
 SQLite 迁移由 `Storage::migrate` 负责。除非需求明确允许且已评估用户数据影响，不得直接删除或重建现有表；新增或调整持久化结构必须提供迁移并补充存储测试。

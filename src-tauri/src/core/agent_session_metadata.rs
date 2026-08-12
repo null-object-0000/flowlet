@@ -49,6 +49,13 @@ pub struct NativeAgentSourceWatch {
 }
 
 pub fn native_agent_source_watches() -> Vec<NativeAgentSourceWatch> {
+    super::agent_session_adapter::session_adapters()
+        .iter()
+        .flat_map(|adapter| adapter.source_watches())
+        .collect()
+}
+
+fn raw_native_agent_source_watches() -> Vec<NativeAgentSourceWatch> {
     let mut watches = Vec::new();
     if let Some(home) = dirs::home_dir() {
         let claude_home = home.join(".claude");
@@ -118,38 +125,50 @@ pub fn native_agent_source_watches() -> Vec<NativeAgentSourceWatch> {
     watches
 }
 
-pub fn available_native_agent_types() -> HashSet<String> {
-    native_agent_source_watches()
+fn source_watches_for(adapter_id: &str) -> Vec<NativeAgentSourceWatch> {
+    raw_native_agent_source_watches()
         .into_iter()
-        .flat_map(|watch| {
-            if watch.agent_type == "codex" {
-                vec!["codex-desktop".to_string(), "codex-cli".to_string()]
-            } else {
-                vec![watch.agent_type]
-            }
+        .filter(|watch| match adapter_id {
+            "codex" => watch.agent_type == "codex",
+            other => watch.agent_type == other,
+        })
+        .collect()
+}
+
+pub(crate) fn claude_source_watches() -> Vec<NativeAgentSourceWatch> {
+    source_watches_for("claude-code")
+}
+pub(crate) fn opencode_source_watches() -> Vec<NativeAgentSourceWatch> {
+    source_watches_for("opencode")
+}
+pub(crate) fn pi_source_watches() -> Vec<NativeAgentSourceWatch> {
+    source_watches_for("pi")
+}
+pub(crate) fn codex_source_watches() -> Vec<NativeAgentSourceWatch> {
+    source_watches_for("codex")
+}
+
+pub fn available_native_agent_types() -> HashSet<String> {
+    super::agent_session_adapter::session_adapters()
+        .iter()
+        .filter(|adapter| !adapter.source_watches().is_empty())
+        .flat_map(|adapter| {
+            adapter
+                .agent_types()
+                .iter()
+                .map(|value| (*value).to_string())
         })
         .collect()
 }
 
 pub fn list_native_agent_sessions() -> Vec<AgentSessionRow> {
-    let mut rows = list_claude_native_sessions();
-    let mut seen = rows
-        .iter()
-        .map(session_key)
-        .collect::<HashSet<(String, String)>>();
-    for row in list_opencode_native_sessions() {
-        if seen.insert(session_key(&row)) {
-            rows.push(row);
-        }
-    }
-    for row in list_codex_native_sessions() {
-        if seen.insert(session_key(&row)) {
-            rows.push(row);
-        }
-    }
-    for row in list_pi_native_sessions() {
-        if seen.insert(session_key(&row)) {
-            rows.push(row);
+    let mut rows = Vec::new();
+    let mut seen = HashSet::new();
+    for adapter in super::agent_session_adapter::session_adapters() {
+        for row in adapter.list_sessions() {
+            if seen.insert(session_key(&row)) {
+                rows.push(row);
+            }
         }
     }
     rows
@@ -257,7 +276,7 @@ fn runtime_status_priority(status: &str) -> u8 {
     }
 }
 
-fn list_claude_native_sessions() -> Vec<AgentSessionRow> {
+pub(crate) fn list_claude_native_sessions() -> Vec<AgentSessionRow> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
@@ -557,7 +576,7 @@ struct CodexSessionIndexEntry {
     updated_at: Option<String>,
 }
 
-fn list_codex_native_sessions() -> Vec<AgentSessionRow> {
+pub(crate) fn list_codex_native_sessions() -> Vec<AgentSessionRow> {
     list_codex_native_sessions_from(&crate::core::codex_account::codex_home())
 }
 
@@ -745,7 +764,7 @@ fn apply_codex_runtime_freshness(
     }
 }
 
-fn list_opencode_native_sessions() -> Vec<AgentSessionRow> {
+pub(crate) fn list_opencode_native_sessions() -> Vec<AgentSessionRow> {
     let mut rows = HashMap::new();
     for path in opencode_database_candidates() {
         for row in list_opencode_native_sessions_from(&path) {
@@ -852,7 +871,7 @@ fn infer_opencode_runtime_status(
     .to_string()
 }
 
-fn list_pi_native_sessions() -> Vec<AgentSessionRow> {
+pub(crate) fn list_pi_native_sessions() -> Vec<AgentSessionRow> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
@@ -1687,10 +1706,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let exec = &rows[0];
         assert_eq!(exec.agent_type, "codex-cli");
-        assert_eq!(
-            exec.session_id,
-            "019fe5f6-eb7c-72d3-8ebc-f1be1d251993"
-        );
+        assert_eq!(exec.session_id, "019fe5f6-eb7c-72d3-8ebc-f1be1d251993");
         assert_eq!(exec.project_path.as_deref(), Some("D:\\flowlet"));
         fs::remove_dir_all(root).unwrap();
     }

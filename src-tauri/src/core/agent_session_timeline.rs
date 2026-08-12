@@ -53,13 +53,9 @@ pub fn get_native_agent_session_timeline(
     if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_BYTES {
         return Err("无效的 Agent 会话 ID".to_string());
     }
-    match agent_type {
-        "opencode" => read_opencode_timeline(session_id),
-        "claude-code" => read_claude_timeline(session_id),
-        "codex-desktop" | "codex-cli" => read_codex_timeline(agent_type, session_id),
-        "pi" => read_pi_timeline(session_id),
-        _ => Err(format!("暂不支持读取 Agent 会话时间线：{agent_type}")),
-    }
+    super::agent_session_adapter::adapter_for_agent_type(agent_type)
+        .ok_or_else(|| format!("暂不支持读取 Agent 会话时间线：{agent_type}"))?
+        .timeline(agent_type, session_id)
 }
 
 /// 按任务执行时间窗裁剪累积的 Agent 原生会话。
@@ -162,42 +158,15 @@ pub fn get_native_agent_session_last_interaction(
     if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_BYTES {
         return Err("无效的 Agent 会话 ID".to_string());
     }
-    let timeline = match agent_type {
-        "opencode" => read_opencode_last_interaction(session_id)?,
-        "claude-code" => {
-            let Some(home) = dirs::home_dir() else {
-                return Ok(None);
-            };
-            let Some(path) = find_jsonl_by_stem(&home.join(".claude").join("projects"), session_id)
-            else {
-                return Ok(None);
-            };
-            read_jsonl_last_interaction(&path, parse_claude_line)?
-        }
-        "codex-desktop" | "codex-cli" => {
-            let root = crate::core::codex_account::codex_home().join("sessions");
-            let Some(path) = find_codex_session_file(&root, agent_type, session_id) else {
-                return Ok(None);
-            };
-            read_jsonl_last_interaction(&path, parse_codex_line)?
-        }
-        "pi" => {
-            let Some(home) = dirs::home_dir() else {
-                return Ok(None);
-            };
-            let root = home.join(".pi").join("agent").join("sessions");
-            let Some(path) = find_pi_session_file(&root, session_id) else {
-                return Ok(None);
-            };
-            read_pi_timeline_from_mode(&path, None, true, None)?
-        }
-        _ => return Err(format!("暂不支持读取 Agent 会话最后交互：{agent_type}")),
-    };
-    Ok(timeline
-        .events
-        .iter()
-        .any(|event| event.kind == "user-message")
-        .then_some(timeline))
+    let timeline = super::agent_session_adapter::adapter_for_agent_type(agent_type)
+        .ok_or_else(|| format!("暂不支持读取 Agent 会话最后交互：{agent_type}"))?
+        .last_interaction(agent_type, session_id)?;
+    Ok(timeline.filter(|timeline| {
+        timeline
+            .events
+            .iter()
+            .any(|event| event.kind == "user-message")
+    }))
 }
 
 pub fn get_native_agent_session_summary(
@@ -373,17 +342,9 @@ pub fn get_native_agent_session_summary_incremental(
     session_id: &str,
     checkpoint: Option<AgentSessionSummaryCheckpoint>,
 ) -> Result<AgentSessionSummaryParseResult, String> {
-    let path = match agent_type {
-        "claude-code" => dirs::home_dir().and_then(|home| {
-            find_jsonl_by_stem(&home.join(".claude").join("projects"), session_id)
-        }),
-        "codex-desktop" | "codex-cli" => find_codex_session_file(
-            &crate::core::codex_account::codex_home().join("sessions"),
-            agent_type,
-            session_id,
-        ),
-        _ => None,
-    };
+    let adapter = super::agent_session_adapter::adapter_for_agent_type(agent_type)
+        .ok_or_else(|| format!("暂不支持读取 Agent 会话时间线：{agent_type}"))?;
+    let path = adapter.incremental_source(agent_type, session_id);
     let Some(path) = path else {
         let (summary, usage_events) =
             get_native_agent_session_summary_with_events(agent_type, session_id)?;
@@ -466,11 +427,9 @@ fn get_native_agent_session_summary_with_events(
     String,
 > {
     let mut usage_events = Vec::new();
-    let timeline = match agent_type {
-        "opencode" => read_opencode_timeline_with_events(session_id, &mut usage_events)?,
-        "pi" => read_pi_timeline_with_events(session_id, &mut usage_events)?,
-        _ => get_native_agent_session_timeline(agent_type, session_id)?,
-    };
+    let timeline = super::agent_session_adapter::adapter_for_agent_type(agent_type)
+        .ok_or_else(|| format!("暂不支持读取 Agent 会话时间线：{agent_type}"))?
+        .timeline_with_usage_events(agent_type, session_id, &mut usage_events)?;
     Ok((summarize_timeline(timeline), usage_events))
 }
 
@@ -592,11 +551,11 @@ fn timeline_with_limits(
     }
 }
 
-fn read_opencode_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
+pub(crate) fn read_opencode_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
     read_opencode_timeline_impl(session_id, None)
 }
 
-fn read_opencode_timeline_with_events(
+pub(crate) fn read_opencode_timeline_with_events(
     session_id: &str,
     usage_events: &mut Vec<super::config::AgentUsageEvent>,
 ) -> Result<AgentSessionTimeline, String> {
@@ -642,7 +601,9 @@ fn read_opencode_timeline_from(
     read_opencode_timeline_from_mode(connection, session_id, false, usage_sink)
 }
 
-fn read_opencode_last_interaction(session_id: &str) -> Result<AgentSessionTimeline, String> {
+pub(crate) fn read_opencode_last_interaction(
+    session_id: &str,
+) -> Result<AgentSessionTimeline, String> {
     for database_path in opencode_database_candidates() {
         if !database_path.is_file() {
             continue;
@@ -898,7 +859,7 @@ fn push_opencode_tool_events(
     }
 }
 
-fn read_claude_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
+pub(crate) fn read_claude_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
     let Some(home) = dirs::home_dir() else {
         return Ok(empty_timeline());
     };
@@ -907,6 +868,20 @@ fn read_claude_timeline(session_id: &str) -> Result<AgentSessionTimeline, String
         return Ok(empty_timeline());
     };
     read_jsonl_timeline(&path, parse_claude_line)
+}
+
+pub(crate) fn claude_session_file(session_id: &str) -> Option<PathBuf> {
+    dirs::home_dir()
+        .and_then(|home| find_jsonl_by_stem(&home.join(".claude").join("projects"), session_id))
+}
+
+pub(crate) fn read_claude_last_interaction(
+    session_id: &str,
+) -> Result<Option<AgentSessionTimeline>, String> {
+    let Some(path) = claude_session_file(session_id) else {
+        return Ok(None);
+    };
+    read_jsonl_last_interaction(&path, parse_claude_line).map(Some)
 }
 
 fn parse_claude_line(
@@ -1017,12 +992,33 @@ fn parse_claude_line(
     }
 }
 
-fn read_codex_timeline(agent_type: &str, session_id: &str) -> Result<AgentSessionTimeline, String> {
+pub(crate) fn read_codex_timeline(
+    agent_type: &str,
+    session_id: &str,
+) -> Result<AgentSessionTimeline, String> {
     let root = crate::core::codex_account::codex_home().join("sessions");
     let Some(path) = find_codex_session_file(&root, agent_type, session_id) else {
         return Ok(empty_timeline());
     };
     read_jsonl_timeline(&path, parse_codex_line)
+}
+
+pub(crate) fn codex_session_file(agent_type: &str, session_id: &str) -> Option<PathBuf> {
+    find_codex_session_file(
+        &crate::core::codex_account::codex_home().join("sessions"),
+        agent_type,
+        session_id,
+    )
+}
+
+pub(crate) fn read_codex_last_interaction(
+    agent_type: &str,
+    session_id: &str,
+) -> Result<Option<AgentSessionTimeline>, String> {
+    let Some(path) = codex_session_file(agent_type, session_id) else {
+        return Ok(None);
+    };
+    read_jsonl_last_interaction(&path, parse_codex_line).map(Some)
 }
 
 fn parse_codex_line(
@@ -1192,15 +1188,28 @@ fn parse_codex_line(
     }
 }
 
-fn read_pi_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
+pub(crate) fn read_pi_timeline(session_id: &str) -> Result<AgentSessionTimeline, String> {
     read_pi_timeline_impl(session_id, None)
 }
 
-fn read_pi_timeline_with_events(
+pub(crate) fn read_pi_timeline_with_events(
     session_id: &str,
     usage_events: &mut Vec<super::config::AgentUsageEvent>,
 ) -> Result<AgentSessionTimeline, String> {
     read_pi_timeline_impl(session_id, Some(usage_events))
+}
+
+pub(crate) fn read_pi_last_interaction(
+    session_id: &str,
+) -> Result<Option<AgentSessionTimeline>, String> {
+    let Some(home) = dirs::home_dir() else {
+        return Ok(None);
+    };
+    let root = home.join(".pi").join("agent").join("sessions");
+    let Some(path) = find_pi_session_file(&root, session_id) else {
+        return Ok(None);
+    };
+    read_pi_timeline_from_mode(&path, None, true, None).map(Some)
 }
 
 fn read_pi_timeline_impl(
@@ -2277,7 +2286,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("flowlet-codex-exec-tl-{}", Uuid::new_v4()));
         let sessions = root.join("sessions").join("2026").join("08").join("09");
         fs::create_dir_all(&sessions).unwrap();
-        let path = sessions.join("rollout-2026-08-09T17-59-52-019fe5f6-eb7c-72d3-8ebc-f1be1d251993.jsonl");
+        let path =
+            sessions.join("rollout-2026-08-09T17-59-52-019fe5f6-eb7c-72d3-8ebc-f1be1d251993.jsonl");
         fs::write(
             &path,
             concat!(
@@ -2290,7 +2300,11 @@ mod tests {
         )
         .unwrap();
 
-        let found = find_codex_session_file(&sessions, "codex-cli", "019fe5f6-eb7c-72d3-8ebc-f1be1d251993");
+        let found = find_codex_session_file(
+            &sessions,
+            "codex-cli",
+            "019fe5f6-eb7c-72d3-8ebc-f1be1d251993",
+        );
         assert_eq!(found.as_deref(), Some(path.as_path()));
         // 直接对临时文件跑解析器（read_codex_timeline 固定读 codex_home，不做端到端依赖）。
         let timeline = read_jsonl_timeline(&path, parse_codex_line).unwrap();

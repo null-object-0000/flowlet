@@ -13,6 +13,7 @@ import type {
   AgentGlobalConfigReport,
   AgentInstallMethod,
 } from "../../domains/agent/types";
+import { agentPlugin, type AgentPluginId } from "../../domains/pluginRegistry";
 
 const { Text, Title } = Typography;
 const MASKED_TOKEN = "••••••••••••••••••••";
@@ -115,89 +116,8 @@ export const FlowletPermissionBridge = async ({ client, serverUrl, directory, wo
 // model_catalog_json 指向生成到 ~/.codex/model-catalog.flowlet.json。
 const CODEX_MODEL_CATALOG_JSON = "{\n  \"models\": [\n    {\n      \"slug\": \"flowlet-pro\",\n      \"display_name\": \"Flowlet Pro\",\n      \"description\": \"Flowlet aggregated coding model routed to available accounts.\",\n      \"default_reasoning_level\": \"high\",\n      \"supported_reasoning_levels\": [\n        {\n          \"effort\": \"low\",\n          \"description\": \"Fast responses with lighter reasoning\"\n        },\n        {\n          \"effort\": \"medium\",\n          \"description\": \"Greater reasoning depth for complex problems\"\n        },\n        {\n          \"effort\": \"high\",\n          \"description\": \"Extra high reasoning depth for complex problems\"\n        },\n        {\n          \"effort\": \"xhigh\",\n          \"description\": \"Maximum reasoning depth for the hardest problems\"\n        }\n      ],\n      \"shell_type\": \"shell_command\",\n      \"visibility\": \"list\",\n      \"supported_in_api\": true,\n      \"priority\": 1,\n      \"base_instructions\": \"\",\n      \"supports_reasoning_summaries\": false,\n      \"default_reasoning_summary\": \"none\",\n      \"support_verbosity\": false,\n      \"default_verbosity\": null,\n      \"apply_patch_tool_type\": \"freeform\",\n      \"web_search_tool_type\": \"text\",\n      \"truncation_policy\": {\n        \"mode\": \"tokens\",\n        \"limit\": 10000\n      },\n      \"supports_parallel_tool_calls\": true,\n      \"supports_image_detail_original\": false,\n      \"context_window\": 1048576,\n      \"max_context_window\": 1048576,\n      \"auto_compact_token_limit\": null,\n      \"effective_context_window_percent\": 95,\n      \"experimental_supported_tools\": [],\n      \"input_modalities\": [\n        \"text\"\n      ],\n      \"availability_nux\": null,\n      \"upgrade\": null\n    },\n    {\n      \"slug\": \"flowlet-flash\",\n      \"display_name\": \"Flowlet Flash\",\n      \"description\": \"Flowlet aggregated fast model routed to available accounts.\",\n      \"default_reasoning_level\": \"low\",\n      \"supported_reasoning_levels\": [\n        {\n          \"effort\": \"low\",\n          \"description\": \"Fast responses with lighter reasoning\"\n        },\n        {\n          \"effort\": \"medium\",\n          \"description\": \"Greater reasoning depth for complex problems\"\n        },\n        {\n          \"effort\": \"high\",\n          \"description\": \"Extra high reasoning depth for complex problems\"\n        }\n      ],\n      \"shell_type\": \"shell_command\",\n      \"visibility\": \"list\",\n      \"supported_in_api\": true,\n      \"priority\": 2,\n      \"base_instructions\": \"\",\n      \"supports_reasoning_summaries\": false,\n      \"default_reasoning_summary\": \"none\",\n      \"support_verbosity\": false,\n      \"default_verbosity\": null,\n      \"apply_patch_tool_type\": \"freeform\",\n      \"web_search_tool_type\": \"text\",\n      \"truncation_policy\": {\n        \"mode\": \"tokens\",\n        \"limit\": 10000\n      },\n      \"supports_parallel_tool_calls\": true,\n      \"supports_image_detail_original\": false,\n      \"context_window\": 1048576,\n      \"max_context_window\": 1048576,\n      \"auto_compact_token_limit\": null,\n      \"effective_context_window_percent\": 95,\n      \"experimental_supported_tools\": [],\n      \"input_modalities\": [\n        \"text\"\n      ],\n      \"availability_nux\": null,\n      \"upgrade\": null\n    }\n  ]\n}";
 
-export type AgentKind = "claude-code" | "opencode" | "pi" | "codex";
+export type AgentKind = AgentPluginId;
 type Copy = (value: string, message: string) => Promise<void>;
-
-type AgentMeta = {
-  name: string;
-  endpointSuffix: "/anthropic" | "/v1";
-  hasDesktop: boolean;
-  /** 官方安装说明地址：未安装时引导安装。 */
-  officialUrl: string;
-  /** 官方更新说明地址：有新版本时查看更新。 */
-  updateUrl: string;
-  showsCredentialsFile: boolean;
-  showsFastModel: boolean;
-  showsSubagentModel: boolean;
-  environmentDescription: string;
-  notInstalledText: string;
-  globalConfigDescription: string;
-  manualDescription: string;
-  restartTip: string;
-};
-
-const AGENT_META: Record<AgentKind, AgentMeta> = {
-  "claude-code": {
-    name: "Claude Code",
-    endpointSuffix: "/anthropic",
-    hasDesktop: false,
-    officialUrl: "https://code.claude.com/docs/en/setup",
-    updateUrl: "https://code.claude.com/docs/en/whats-new",
-    showsCredentialsFile: false,
-    showsFastModel: true,
-    showsSubagentModel: true,
-    environmentDescription: "识别 Claude Code 的安装位置、版本和安装方式",
-    notInstalledText: "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。",
-    globalConfigDescription: "配置后可从任意终端或 IDE 启动 Claude Code",
-    manualDescription: "以下内容与一键写入的 Claude Code 全局配置一致",
-    restartTip: "修改全局配置后请重新启动 Claude Code。",
-  },
-  opencode: {
-    name: "OpenCode",
-    endpointSuffix: "/v1",
-    hasDesktop: true,
-    officialUrl: "https://opencode.ai/docs",
-    updateUrl: "https://github.com/anomalyco/opencode/releases",
-    showsCredentialsFile: true,
-    showsFastModel: true,
-    showsSubagentModel: false,
-    environmentDescription: "识别 OpenCode CLI 与 Desktop 的安装位置和版本",
-    notInstalledText: "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。",
-    globalConfigDescription: "OpenCode CLI 与 Desktop 共用此全局配置",
-    manualDescription: "OpenCode 的 Provider 配置与凭据文件需要分别设置",
-    restartTip: "修改全局配置后请重新启动 OpenCode CLI 与 Desktop。",
-  },
-  pi: {
-    name: "Pi",
-    endpointSuffix: "/v1",
-    hasDesktop: false,
-    officialUrl: "https://pi.dev",
-    updateUrl: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md",
-    showsCredentialsFile: true,
-    showsFastModel: false,
-    showsSubagentModel: false,
-    environmentDescription: "识别 Pi CLI 的安装位置和版本",
-    notInstalledText: "未检测到 Pi。Flowlet 会检查 PATH 和常见安装位置。",
-    globalConfigDescription: "Pi 的 Provider 定义在 models.json，凭据在 auth.json，默认模型在 settings.json",
-    manualDescription: "Pi 的 models.json、auth.json 与 settings.json 需要分别设置",
-    restartTip: "修改全局配置后请重新启动 Pi。",
-  },
-  codex: {
-    name: "Codex",
-    endpointSuffix: "/v1",
-    hasDesktop: true,
-    officialUrl: "https://learn.chatgpt.com/docs/codex/cli",
-    updateUrl: "https://learn.chatgpt.com/docs/changelog?type=codex-cli",
-    showsCredentialsFile: true,
-    showsFastModel: false,
-    showsSubagentModel: false,
-    environmentDescription: "识别 Codex CLI 与 ChatGPT Desktop 的安装位置和版本",
-    notInstalledText: "未检测到 Codex CLI 或 ChatGPT Desktop。Flowlet 会检查 PATH 与常见安装位置。",
-    globalConfigDescription: "Codex CLI、ChatGPT 桌面端与 VS Code 插件共用此全局配置",
-    manualDescription: "以下内容与一键写入的 Codex 全局配置一致",
-    restartTip: "修改全局配置后请重新启动 Codex CLI 与 ChatGPT Desktop。",
-  },
-};
 
 type Props = {
   visible: boolean;
@@ -249,7 +169,7 @@ export function AgentAccessSideSheet({
   const { t } = useAppPreferences();
   const [surface, setSurface] = useState<"cli" | "desktop">("cli");
 
-  const meta = AGENT_META[agent];
+  const meta = agentPlugin(agent);
   const name = meta.name;
   const endpoint = `${baseUrl}${meta.endpointSuffix}`;
   const token = clientToken || "<Client Token>";
@@ -288,7 +208,7 @@ export function AgentAccessSideSheet({
           onChange={(key) => setSurface(key as "cli" | "desktop")}
         >
           <Tabs.TabPane tab={t("{name} CLI 接入", { name })} itemKey="cli" />
-          {meta.hasDesktop ? (
+          {meta.surfaces.includes("desktop") ? (
             <Tabs.TabPane tab={t("{name} Desktop 接入", { name })} itemKey="desktop" />
           ) : null}
         </Tabs>
@@ -594,7 +514,7 @@ function installationTitle(
   version: string | null | undefined,
   t: (source: string) => string,
 ) {
-  const base = AGENT_META[agent].name;
+  const base = agentPlugin(agent).name;
   // Codex 桌面端探测到的是 ChatGPT 桌面应用，保留真实应用名便于识别。
   const name = agent === "claude-code"
     ? "Claude Code"

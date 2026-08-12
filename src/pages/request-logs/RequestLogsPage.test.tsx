@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestLogRow } from "../../domains/request-log/types";
@@ -48,6 +48,7 @@ const row: RequestLogRow = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mocks.useLogs.mockReturnValue({ data: { rows: [row], total: 1, page: 1, pageSize: 8, summary: { requestCount: 1, successCount: 1, errorCount: 0, averageDurationMs: 860, averageTtftMs: 200, averageOutputTokensPerSecond: 75.76, knownTokens: 150, inputTokens: 100, inputCachedTokens: 60, inputUncachedTokens: 40, cacheHitRate: 0.6, estimatedCost: 0.0012 } }, isLoading: false, isFetching: false, isError: false, dataUpdatedAt: 1, refetch: mocks.refetch });
   mocks.useDetail.mockReturnValue({ data: [row], isLoading: false, isError: false, isSuccess: true, refetch: mocks.refetch });
   mocks.cleanup.mockResolvedValue([1, 0]);
@@ -86,11 +87,10 @@ describe("RequestLogsPage", () => {
     expect(modelSelect).toHaveTextContent("全部模型");
     await user.click(modelSelect);
     expect(await screen.findByText("路由模型 · LongCat-2.0")).toBeInTheDocument();
-    const publicModelOption = (await screen.findByText("对外模型 · flowlet-pro")).closest(".semi-select-option");
-    expect(publicModelOption).not.toBeNull();
-    fireEvent.click(publicModelOption as HTMLElement);
+    const publicModelOption = await screen.findByText("对外模型 · flowlet-pro");
+    await user.click(publicModelOption);
 
-    await waitFor(() => expect(mocks.useLogs).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({
       model: "flowlet-pro",
       modelKind: "public",
       page: 1,

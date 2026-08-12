@@ -27,7 +27,7 @@ export function detectPiEnvironment(): Promise<AgentEnvironmentReport> {
 }
 
 export function detectChatGptDesktopEnvironment(): Promise<AgentEnvironmentReport> {
-  return detectAgentEnvironment("chatgpt-desktop");
+  return detectAgentEnvironment("codex");
 }
 
 /** 检查所有受支持 Agent 的最新发布版本（npm registry），用于版本更新提示。 */

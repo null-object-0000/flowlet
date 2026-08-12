@@ -120,6 +120,11 @@ impl ModelCatalog {
 pub fn model_catalog() -> &'static ModelCatalog {
     static CATALOG: OnceLock<ModelCatalog> = OnceLock::new();
     CATALOG.get_or_init(|| {
+        assert_eq!(
+            super::plugin_registry::plugin_registry().model_catalog_source(),
+            "model-catalog.json",
+            "模型目录必须由内置插件注册表声明"
+        );
         ModelCatalog::from_json(MODEL_CATALOG_JSON)
             .expect("内置 model-catalog.json 必须通过结构与唯一性校验")
     })

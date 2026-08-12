@@ -1,4 +1,5 @@
 import catalogJson from "../../../model-catalog.json";
+import { MODEL_CATALOG_PLUGIN_SOURCE } from "../pluginRegistry";
 
 export type ModelIdentity = {
   id: string;
@@ -13,6 +14,10 @@ export type ModelIdentityCatalog = {
 };
 
 const catalog = catalogJson as ModelIdentityCatalog;
+
+if (MODEL_CATALOG_PLUGIN_SOURCE !== "model-catalog.json") {
+  throw new Error(`Unexpected model catalog plugin source: ${MODEL_CATALOG_PLUGIN_SOURCE}`);
+}
 
 if (catalog.schemaVersion !== 1) {
   throw new Error(`Unsupported model catalog schema: ${catalog.schemaVersion}`);

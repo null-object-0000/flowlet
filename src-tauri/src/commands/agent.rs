@@ -13,11 +13,11 @@ impl Drop for CodexAccountSyncGuard {
 
 // Claude Code 走 Anthropic-compatible 端点，其余已支持一键接入的 Agent
 // （OpenCode、Pi）走 OpenAI-compatible 端点。
-fn agent_endpoint_suffix(agent_id: &str) -> &'static str {
-    match agent_id {
-        "claude-code" => "/anthropic",
-        _ => "/v1",
-    }
+fn agent_endpoint_suffix(agent_id: &str) -> Result<&'static str, String> {
+    crate::core::plugin_registry::plugin_registry()
+        .agent(agent_id)
+        .map(|agent| agent.endpoint_suffix.as_str())
+        .ok_or_else(|| format!("未注册的 Agent 插件：{agent_id}"))
 }
 
 #[tauri::command]
@@ -108,7 +108,7 @@ pub(crate) fn inspect_agent_global_config(
         .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
         .clone()
         .normalized();
-    let suffix = agent_endpoint_suffix(&agent_id);
+    let suffix = agent_endpoint_suffix(&agent_id)?;
     crate::core::agent_global_config::inspect_agent_global_config(
         &agent_id,
         &format!("http://127.0.0.1:{}{suffix}", bind.port),
@@ -127,7 +127,7 @@ pub(crate) fn apply_agent_global_config(
         .map_err(|_| "读取 Flowlet 客户端配置失败".to_string())?
         .clone()
         .normalized();
-    let suffix = agent_endpoint_suffix(&agent_id);
+    let suffix = agent_endpoint_suffix(&agent_id)?;
     crate::core::agent_global_config::apply_agent_global_config(
         &agent_id,
         &format!("http://127.0.0.1:{}{suffix}", bind.port),
@@ -148,7 +148,7 @@ pub(crate) fn restore_agent_global_config(
         .clone()
         .normalized()
         .port;
-    let suffix = agent_endpoint_suffix(&agent_id);
+    let suffix = agent_endpoint_suffix(&agent_id)?;
     crate::core::agent_global_config::restore_agent_global_config(
         &agent_id,
         &format!("http://127.0.0.1:{port}{suffix}"),

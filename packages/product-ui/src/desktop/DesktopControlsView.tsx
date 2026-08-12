@@ -77,7 +77,7 @@ function DesktopFilterSelectView({ select, onChange }: { select: DesktopFilterSe
         label: option.internalLabel ?? option.label,
         disabled: option.disabled,
       }))}
-      onChange={(value) => onChange?.(select.key, String(Array.isArray(value) ? value[0] : value))}
+      onSelect={(value) => onChange?.(select.key, String(value))}
     />
   </>;
 }

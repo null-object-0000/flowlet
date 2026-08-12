@@ -2,15 +2,19 @@ use super::config::{ChannelModel, ChannelPreset};
 
 /// 返回所有内置渠道模板
 pub fn builtin_channel_presets() -> Vec<ChannelPreset> {
-    vec![
-        ChannelPreset::longcat(),
-        ChannelPreset::deepseek(),
-        ChannelPreset::kimi(),
-        ChannelPreset::qwen(),
-        ChannelPreset::custom(),
-        ChannelPreset::zhipu(),
-        ChannelPreset::openrouter(),
-    ]
+    super::plugin_registry::plugin_registry()
+        .channel_ids()
+        .map(|channel_id| match channel_id {
+            "longcat" => ChannelPreset::longcat(),
+            "deepseek" => ChannelPreset::deepseek(),
+            "kimi" => ChannelPreset::kimi(),
+            "qwen" => ChannelPreset::qwen(),
+            "custom" => ChannelPreset::custom(),
+            "zhipu" => ChannelPreset::zhipu(),
+            "openrouter" => ChannelPreset::openrouter(),
+            unknown => panic!("渠道插件缺少内置适配器：{unknown}"),
+        })
+        .collect()
 }
 
 /// 模型列表同步结果

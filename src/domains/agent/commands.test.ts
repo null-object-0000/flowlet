@@ -28,7 +28,7 @@ describe("agent commands", () => {
     [detectClaudeCodeEnvironment, "claude-code"],
     [detectOpenCodeEnvironment, "opencode"],
     [detectPiEnvironment, "pi"],
-    [detectChatGptDesktopEnvironment, "chatgpt-desktop"],
+    [detectChatGptDesktopEnvironment, "codex"],
   ] as const)("uses the typed environment boundary for %s", async (call, agentId) => {
     vi.mocked(invoke).mockResolvedValue({
       agent_id: agentId,

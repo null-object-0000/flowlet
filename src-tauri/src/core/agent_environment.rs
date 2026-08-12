@@ -64,13 +64,22 @@ pub struct AgentEnvironmentReport {
 }
 
 pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironmentReport, String> {
-    match agent_id {
+    let plugin = super::plugin_registry::plugin_registry().agent(agent_id);
+    let environment_id = plugin
+        .map(|descriptor| descriptor.environment_id.as_str())
+        .unwrap_or(agent_id);
+    let mut report = match environment_id {
         "claude-code" => Ok(detect_claude_code().await),
         "opencode" => Ok(detect_opencode().await),
         "pi" => Ok(detect_pi().await),
         "chatgpt-desktop" => Ok(detect_chatgpt_codex().await),
         _ => Err(format!("暂不支持检测 Agent：{agent_id}")),
+    }?;
+    if let Some(plugin) = plugin {
+        report.agent_id = plugin.id.clone();
+        report.agent_name = plugin.name.clone();
     }
+    Ok(report)
 }
 
 async fn detect_chatgpt_codex() -> AgentEnvironmentReport {

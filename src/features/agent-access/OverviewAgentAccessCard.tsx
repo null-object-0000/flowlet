@@ -6,6 +6,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
 import { cliInstalledVersion, isNewerVersion } from "../../domains/agent/versions";
 import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentLatestVersionReport, AgentSurface } from "../../domains/agent/types";
+import { AGENT_PLUGINS } from "../../domains/pluginRegistry";
 import {
   useChatGptDesktopEnvironment,
   useClaudeCodeEnvironment,
@@ -17,40 +18,6 @@ import {
   usePiEnvironment,
   usePiGlobalConfig,
 } from "./useAgentEnvironment";
-
-const AGENTS: Array<{
-  name: string;
-  iconSrc: string;
-  tone?: "claude" | "neutral";
-  kind: AgentKind;
-  hasDesktop: boolean;
-}> = [
-  {
-    name: "Claude Code",
-    iconSrc: "/icons/lobe/claudecode.svg",
-    tone: "claude",
-    kind: "claude-code",
-    hasDesktop: false,
-  },
-  {
-    name: "OpenCode",
-    iconSrc: "/icons/lobe/opencode.svg",
-    kind: "opencode",
-    hasDesktop: true,
-  },
-  {
-    name: "Pi",
-    iconSrc: "/icons/lobe/pi.svg",
-    kind: "pi",
-    hasDesktop: false,
-  },
-  {
-    name: "Codex",
-    iconSrc: "/icons/lobe/openai.svg",
-    kind: "codex",
-    hasDesktop: true,
-  },
-];
 
 type Props = {
   baseUrl: string;
@@ -138,7 +105,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
     <>
       <OverviewModuleCard title={t("AI Agent 接入")}>
         <OverviewAgentListView>
-          {AGENTS.map(({ name, iconSrc, tone, kind, hasDesktop }) => {
+          {AGENT_PLUGINS.map(({ name, iconSrc, tone, id: kind, surfaces }) => {
             const environmentQuery = kind === "claude-code"
               ? claudeEnvironment
               : kind === "opencode"
@@ -159,7 +126,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                 updateAvailable={hasNewer}
                 surfaces={[
                   { label: t("CLI"), value: surfaceStatusValue("cli", environmentQuery.data, environmentQuery.isLoading, environmentQuery.isError, t) },
-                  ...(hasDesktop ? [{ label: t("Desktop"), value: surfaceStatusValue("desktop", environmentQuery.data, environmentQuery.isLoading, environmentQuery.isError, t) }] : []),
+                  ...(surfaces.includes("desktop") ? [{ label: t("Desktop"), value: surfaceStatusValue("desktop", environmentQuery.data, environmentQuery.isLoading, environmentQuery.isError, t) }] : []),
                 ]}
                 ariaLabel={t("配置 {name}", { name })}
                 title={hasNewer ? t("检测到新版本，点击查看详情") : undefined}

@@ -34,6 +34,7 @@ Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议
 Flowlet Desktop
   ├─ src/                              React 19 + Semi Design 正式前端
   ├─ model-catalog.json                内置模型身份目录（白名单 / 归属 / 别名）
+  ├─ plugin-registry.json              内置渠道、模型目录和 Agent 贡献注册表
   ├─ src-tauri/                        Tauri 2 桌面壳
   │  └─ src/
   │     ├─ lib.rs                      Tauri 应用入口和 command 注册
@@ -73,6 +74,7 @@ Flowlet Desktop
   │        ├─ logging.rs               日志捕获与脱敏
   │        ├─ metrics.rs               运行时指标
   │        ├─ model_catalog.rs         模型身份目录加载、校验与查询
+  │        ├─ plugin_registry.rs       插件清单加载、冲突校验与贡献查询
   │        ├─ agent_environment.rs     Agent 本机安装探测
   │        ├─ agent_global_config.rs   Claude Code / OpenCode 全局配置写入与恢复
   │        ├─ agent_session_identity.rs 请求头中的 Agent / Session 统一识别
@@ -109,6 +111,17 @@ Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、Web
 `config.json.channels_config.default_exposed_models` 仍用于渠道预设漂移检测，不决定全局
 白名单。运行时同步的 `models-cn.json` / `models-dev.json` 只补充规格与价格，不能动态扩大
 可开放模型范围。修改内置模型目录需要重新构建应用；同步规格和价格无需重启。
+
+### 插件注册边界
+
+`plugin-registry.json` 是内置扩展贡献的声明式入口，目前注册三种贡献：`channel`、
+`model-catalog` 和 `agent`。它统一控制内置渠道顺序、模型目录来源，以及 Agent 的身份、
+展示元数据、环境检测适配器 ID、协议端点和 npm 版本来源。Rust 与前端分别加载同一清单，
+启动时校验插件 ID 和贡献 ID 不重复。
+
+注册表只声明能力，具体渠道同步、余额查询、Agent 安装检测和全局配置写入仍由编译进应用的
+受控适配器实现。当前不加载第三方动态库、不执行插件脚本，也不允许插件绕过类型化 command、
+SQLite 或运行时配置快照直接修改代理状态。修改内置注册表需要重新构建应用。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 

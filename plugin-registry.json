@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    { "id": "flowlet.models.builtin", "kind": "model-catalog", "source": "model-catalog.json" },
+    { "id": "flowlet.channel.longcat", "kind": "channel", "channelId": "longcat" },
+    { "id": "flowlet.channel.deepseek", "kind": "channel", "channelId": "deepseek" },
+    { "id": "flowlet.channel.kimi", "kind": "channel", "channelId": "kimi" },
+    { "id": "flowlet.channel.qwen", "kind": "channel", "channelId": "qwen" },
+    { "id": "flowlet.channel.custom", "kind": "channel", "channelId": "custom" },
+    { "id": "flowlet.channel.zhipu", "kind": "channel", "channelId": "zhipu" },
+    { "id": "flowlet.channel.openrouter", "kind": "channel", "channelId": "openrouter" },
+    {
+      "id": "flowlet.agent.claude-code",
+      "kind": "agent",
+      "agent": {
+        "id": "claude-code",
+        "name": "Claude Code",
+        "environmentId": "claude-code",
+        "endpointSuffix": "/anthropic",
+        "npmPackage": "@anthropic-ai/claude-code",
+        "surfaces": ["cli"],
+        "iconSrc": "/icons/lobe/claudecode.svg",
+        "tone": "claude",
+        "officialUrl": "https://code.claude.com/docs/en/setup",
+        "updateUrl": "https://code.claude.com/docs/en/whats-new",
+        "showsCredentialsFile": false,
+        "showsFastModel": true,
+        "showsSubagentModel": true,
+        "environmentDescription": "识别 Claude Code 的安装位置、版本和安装方式",
+        "notInstalledText": "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。",
+        "globalConfigDescription": "配置后可从任意终端或 IDE 启动 Claude Code",
+        "manualDescription": "以下内容与一键写入的 Claude Code 全局配置一致",
+        "restartTip": "修改全局配置后请重新启动 Claude Code。"
+      }
+    },
+    {
+      "id": "flowlet.agent.opencode",
+      "kind": "agent",
+      "agent": {
+        "id": "opencode",
+        "name": "OpenCode",
+        "environmentId": "opencode",
+        "endpointSuffix": "/v1",
+        "npmPackage": "opencode-ai",
+        "surfaces": ["cli", "desktop"],
+        "iconSrc": "/icons/lobe/opencode.svg",
+        "officialUrl": "https://opencode.ai/docs",
+        "updateUrl": "https://github.com/anomalyco/opencode/releases",
+        "showsCredentialsFile": true,
+        "showsFastModel": true,
+        "showsSubagentModel": false,
+        "environmentDescription": "识别 OpenCode CLI 与 Desktop 的安装位置和版本",
+        "notInstalledText": "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。",
+        "globalConfigDescription": "OpenCode CLI 与 Desktop 共用此全局配置",
+        "manualDescription": "OpenCode 的 Provider 配置与凭据文件需要分别设置",
+        "restartTip": "修改全局配置后请重新启动 OpenCode CLI 与 Desktop。"
+      }
+    },
+    {
+      "id": "flowlet.agent.pi",
+      "kind": "agent",
+      "agent": {
+        "id": "pi",
+        "name": "Pi",
+        "environmentId": "pi",
+        "endpointSuffix": "/v1",
+        "npmPackage": "@earendil-works/pi-coding-agent",
+        "surfaces": ["cli"],
+        "iconSrc": "/icons/lobe/pi.svg",
+        "officialUrl": "https://pi.dev",
+        "updateUrl": "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md",
+        "showsCredentialsFile": true,
+        "showsFastModel": false,
+        "showsSubagentModel": false,
+        "environmentDescription": "识别 Pi CLI 的安装位置和版本",
+        "notInstalledText": "未检测到 Pi。Flowlet 会检查 PATH 和常见安装位置。",
+        "globalConfigDescription": "Pi 的 Provider 定义在 models.json，凭据在 auth.json，默认模型在 settings.json",
+        "manualDescription": "Pi 的 models.json、auth.json 与 settings.json 需要分别设置",
+        "restartTip": "修改全局配置后请重新启动 Pi。"
+      }
+    },
+    {
+      "id": "flowlet.agent.codex",
+      "kind": "agent",
+      "agent": {
+        "id": "codex",
+        "name": "Codex",
+        "environmentId": "chatgpt-desktop",
+        "endpointSuffix": "/v1",
+        "npmPackage": "@openai/codex",
+        "surfaces": ["cli", "desktop"],
+        "iconSrc": "/icons/lobe/openai.svg",
+        "officialUrl": "https://learn.chatgpt.com/docs/codex/cli",
+        "updateUrl": "https://learn.chatgpt.com/docs/changelog?type=codex-cli",
+        "showsCredentialsFile": true,
+        "showsFastModel": false,
+        "showsSubagentModel": false,
+        "environmentDescription": "识别 Codex CLI 与 ChatGPT Desktop 的安装位置和版本",
+        "notInstalledText": "未检测到 Codex CLI 或 ChatGPT Desktop。Flowlet 会检查 PATH 与常见安装位置。",
+        "globalConfigDescription": "Codex CLI、ChatGPT 桌面端与 VS Code 插件共用此全局配置",
+        "manualDescription": "以下内容与一键写入的 Codex 全局配置一致",
+        "restartTip": "修改全局配置后请重新启动 Codex CLI 与 ChatGPT Desktop。"
+      }
+    }
+  ]
+}

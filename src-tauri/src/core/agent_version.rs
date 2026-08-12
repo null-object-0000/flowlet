@@ -19,13 +19,9 @@ const CACHE_TTL_SECS: u64 = 15 * 60;
 
 /// agent_id → npm 包名（与 `detect_agent_environment` 支持的 Agent 保持一致）。
 pub fn npm_package_for(agent_id: &str) -> Option<&'static str> {
-    match agent_id {
-        "claude-code" => Some("@anthropic-ai/claude-code"),
-        "opencode" => Some("opencode-ai"),
-        "pi" => Some("@earendil-works/pi-coding-agent"),
-        "codex" => Some("@openai/codex"),
-        _ => None,
-    }
+    super::plugin_registry::plugin_registry()
+        .agent(agent_id)
+        .map(|agent| agent.npm_package.as_str())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -69,15 +65,14 @@ fn unix_now() -> u64 {
 
 /// 并行检查所有受支持 Agent 的最新版本（带进程内 TTL 缓存）。
 pub async fn check_agent_latest_versions() -> Result<AgentLatestVersionsReport, String> {
-    let (claude_code, opencode, pi, codex) = tokio::join!(
-        check_one("claude-code"),
-        check_one("opencode"),
-        check_one("pi"),
-        check_one("codex"),
-    );
-    Ok(AgentLatestVersionsReport {
-        agents: vec![claude_code, opencode, pi, codex],
-    })
+    let agents = futures_util::future::join_all(
+        super::plugin_registry::plugin_registry()
+            .agents()
+            .iter()
+            .map(|agent| check_one(&agent.id)),
+    )
+    .await;
+    Ok(AgentLatestVersionsReport { agents })
 }
 
 async fn check_one(agent_id: &str) -> AgentLatestVersionReport {

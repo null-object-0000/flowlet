@@ -14,22 +14,6 @@ export function detectAgentEnvironment(agentId: string): Promise<AgentEnvironmen
   });
 }
 
-export function detectClaudeCodeEnvironment(): Promise<AgentEnvironmentReport> {
-  return detectAgentEnvironment("claude-code");
-}
-
-export function detectOpenCodeEnvironment(): Promise<AgentEnvironmentReport> {
-  return detectAgentEnvironment("opencode");
-}
-
-export function detectPiEnvironment(): Promise<AgentEnvironmentReport> {
-  return detectAgentEnvironment("pi");
-}
-
-export function detectChatGptDesktopEnvironment(): Promise<AgentEnvironmentReport> {
-  return detectAgentEnvironment("codex");
-}
-
 /** 检查所有受支持 Agent 的最新发布版本（npm registry），用于版本更新提示。 */
 export function checkAgentLatestVersions(): Promise<AgentLatestVersionsReport> {
   return invokeCommand<AgentLatestVersionsReport>("check_agent_latest_versions", undefined, 30_000).catch((error) => {
@@ -77,52 +61,4 @@ export function restoreAgentGlobalConfig(agentId: string): Promise<AgentGlobalCo
   return invokeCommand<AgentGlobalConfigReport>("restore_agent_global_config", { agentId }).catch((error) => {
     throw toAppError(error, "agent_global_config_restore_failed");
   });
-}
-
-export function inspectClaudeCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return inspectAgentGlobalConfig("claude-code");
-}
-
-export function applyClaudeCodeGlobalConfig(options?: AgentGlobalConfigOptions): Promise<AgentGlobalConfigReport> {
-  return applyAgentGlobalConfig("claude-code", options);
-}
-
-export function restoreClaudeCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return restoreAgentGlobalConfig("claude-code");
-}
-
-export function inspectOpenCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return inspectAgentGlobalConfig("opencode");
-}
-
-export function applyOpenCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return applyAgentGlobalConfig("opencode");
-}
-
-export function restoreOpenCodeGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return restoreAgentGlobalConfig("opencode");
-}
-
-export function inspectPiGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return inspectAgentGlobalConfig("pi");
-}
-
-export function applyPiGlobalConfig(options?: AgentGlobalConfigOptions): Promise<AgentGlobalConfigReport> {
-  return applyAgentGlobalConfig("pi", options);
-}
-
-export function restorePiGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return restoreAgentGlobalConfig("pi");
-}
-
-export function inspectCodexGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return inspectAgentGlobalConfig("codex");
-}
-
-export function applyCodexGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return applyAgentGlobalConfig("codex");
-}
-
-export function restoreCodexGlobalConfig(): Promise<AgentGlobalConfigReport> {
-  return restoreAgentGlobalConfig("codex");
 }

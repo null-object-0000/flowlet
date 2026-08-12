@@ -1,63 +1,28 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  applyClaudeCodeGlobalConfig,
-  applyCodexGlobalConfig,
-  applyOpenCodeGlobalConfig,
-  applyPiGlobalConfig,
+  applyAgentGlobalConfig,
   authorizeCodexAccount,
   checkAgentLatestVersions,
-  detectChatGptDesktopEnvironment,
-  detectClaudeCodeEnvironment,
-  detectOpenCodeEnvironment,
-  detectPiEnvironment,
-  inspectClaudeCodeGlobalConfig,
-  inspectCodexGlobalConfig,
-  inspectOpenCodeGlobalConfig,
-  inspectPiGlobalConfig,
+  detectAgentEnvironment,
+  inspectAgentGlobalConfig,
   listCachedCodexAccounts,
   queryCodexAccount,
-  restoreClaudeCodeGlobalConfig,
-  restoreCodexGlobalConfig,
-  restoreOpenCodeGlobalConfig,
-  restorePiGlobalConfig,
+  restoreAgentGlobalConfig,
 } from "../../domains/agent/commands";
-import type { CodexAccountsReport } from "../../domains/agent/types";
+import type { AgentGlobalConfigOptions, CodexAccountsReport } from "../../domains/agent/types";
+import { AGENT_PLUGINS, type AgentPluginId } from "../../domains/pluginRegistry";
 import { queryKeys } from "../../shared/query-keys";
 
-export function useClaudeCodeEnvironment() {
-  return useQuery({
-    queryKey: queryKeys.agent.environment("claude-code"),
-    queryFn: detectClaudeCodeEnvironment,
-    staleTime: 60_000,
-    retry: 1,
+export function useAgentEnvironments() {
+  const queries = useQueries({
+    queries: AGENT_PLUGINS.map((agent) => ({
+      queryKey: queryKeys.agent.environment(agent.id),
+      queryFn: () => detectAgentEnvironment(agent.id),
+      staleTime: 60_000,
+      retry: 1,
+    })),
   });
-}
-
-export function useOpenCodeEnvironment() {
-  return useQuery({
-    queryKey: queryKeys.agent.environment("opencode"),
-    queryFn: detectOpenCodeEnvironment,
-    staleTime: 60_000,
-    retry: 1,
-  });
-}
-
-export function usePiEnvironment() {
-  return useQuery({
-    queryKey: queryKeys.agent.environment("pi"),
-    queryFn: detectPiEnvironment,
-    staleTime: 60_000,
-    retry: 1,
-  });
-}
-
-export function useChatGptDesktopEnvironment() {
-  return useQuery({
-    queryKey: queryKeys.agent.environment("chatgpt-desktop"),
-    queryFn: detectChatGptDesktopEnvironment,
-    staleTime: 60_000,
-    retry: 1,
-  });
+  return new Map(AGENT_PLUGINS.map((agent, index) => [agent.id, queries[index]]));
 }
 
 // Agent 最新版本提示：概览页卡片 Badge dot 与接入抽屉共用。npm 版本不会高频变化，
@@ -112,90 +77,31 @@ export function useCodexAccountAuthorization() {
   });
 }
 
-export function useOpenCodeGlobalConfig(enabled = true) {
+export function useAgentGlobalConfig(agentId: AgentPluginId | null) {
   const queryClient = useQueryClient();
-  const queryKey = queryKeys.agent.globalConfig("opencode");
+  const queryKey = queryKeys.agent.globalConfig(agentId ?? "inactive");
   const query = useQuery({
     queryKey,
-    queryFn: inspectOpenCodeGlobalConfig,
-    enabled,
+    queryFn: () => {
+      if (!agentId) return Promise.reject(new Error("未选择 Agent"));
+      return inspectAgentGlobalConfig(agentId);
+    },
+    enabled: agentId != null,
     staleTime: 30_000,
     retry: 1,
   });
   const apply = useMutation({
-    mutationFn: applyOpenCodeGlobalConfig,
+    mutationFn: (options?: AgentGlobalConfigOptions) => {
+      if (!agentId) return Promise.reject(new Error("未选择 Agent"));
+      return applyAgentGlobalConfig(agentId, options);
+    },
     onSuccess: (report) => queryClient.setQueryData(queryKey, report),
   });
   const restore = useMutation({
-    mutationFn: restoreOpenCodeGlobalConfig,
-    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
-  });
-
-  return { query, apply, restore };
-}
-
-export function usePiGlobalConfig(enabled = true) {
-  const queryClient = useQueryClient();
-  const queryKey = queryKeys.agent.globalConfig("pi");
-  const query = useQuery({
-    queryKey,
-    queryFn: inspectPiGlobalConfig,
-    enabled,
-    staleTime: 30_000,
-    retry: 1,
-  });
-  const apply = useMutation({
-    mutationFn: applyPiGlobalConfig,
-    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
-  });
-  const restore = useMutation({
-    mutationFn: restorePiGlobalConfig,
-    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
-  });
-
-  return { query, apply, restore };
-}
-
-export function useClaudeCodeGlobalConfig(enabled = true) {
-  const queryClient = useQueryClient();
-  const queryKey = queryKeys.agent.globalConfig("claude-code");
-  const query = useQuery({
-    queryKey,
-    queryFn: inspectClaudeCodeGlobalConfig,
-    enabled,
-    staleTime: 30_000,
-    retry: 1,
-  });
-  const apply = useMutation({
-    mutationFn: applyClaudeCodeGlobalConfig,
-    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
-  });
-  const restore = useMutation({
-    mutationFn: restoreClaudeCodeGlobalConfig,
-    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
-  });
-
-  return { query, apply, restore };
-}
-
-// Codex 全系（CLI / ChatGPT Desktop / VS Code 插件）共享 ~/.codex/config.toml，
-// 一键写入只管理 config.toml + auth.json，无额外可选项。
-export function useCodexGlobalConfig(enabled = true) {
-  const queryClient = useQueryClient();
-  const queryKey = queryKeys.agent.globalConfig("codex");
-  const query = useQuery({
-    queryKey,
-    queryFn: inspectCodexGlobalConfig,
-    enabled,
-    staleTime: 30_000,
-    retry: 1,
-  });
-  const apply = useMutation({
-    mutationFn: applyCodexGlobalConfig,
-    onSuccess: (report) => queryClient.setQueryData(queryKey, report),
-  });
-  const restore = useMutation({
-    mutationFn: restoreCodexGlobalConfig,
+    mutationFn: () => {
+      if (!agentId) return Promise.reject(new Error("未选择 Agent"));
+      return restoreAgentGlobalConfig(agentId);
+    },
     onSuccess: (report) => queryClient.setQueryData(queryKey, report),
   });
 

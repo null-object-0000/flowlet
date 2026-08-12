@@ -14,27 +14,16 @@ vi.mock("lottie-web", () => ({
 }));
 
 vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
-  useClaudeCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
-  useOpenCodeEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
-  usePiEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
-  useChatGptDesktopEnvironment: () => ({ data: { installed: false, installations: [] }, isLoading: false, isError: false }),
+  useAgentEnvironments: () => new Map(["claude-code", "opencode", "pi", "codex"].map((id) => [id, {
+    data: { agent_id: id, agent_name: id, installed: false, installations: [] },
+    error: null,
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    refetch: vi.fn(),
+  }])),
   useAgentLatestVersions: () => ({ data: { agents: [] }, isLoading: false, isFetching: false, isError: false, error: null, refetch: vi.fn() }),
-  useCodexGlobalConfig: () => ({
-    query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
-    apply: { isPending: false, mutateAsync: vi.fn() },
-    restore: { isPending: false, mutateAsync: vi.fn() },
-  }),
-  useClaudeCodeGlobalConfig: () => ({
-    query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
-    apply: { isPending: false, mutateAsync: vi.fn() },
-    restore: { isPending: false, mutateAsync: vi.fn() },
-  }),
-  useOpenCodeGlobalConfig: () => ({
-    query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
-    apply: { isPending: false, mutateAsync: vi.fn() },
-    restore: { isPending: false, mutateAsync: vi.fn() },
-  }),
-  usePiGlobalConfig: () => ({
+  useAgentGlobalConfig: () => ({
     query: { data: undefined, error: null, isLoading: false, refetch: vi.fn() },
     apply: { isPending: false, mutateAsync: vi.fn() },
     restore: { isPending: false, mutateAsync: vi.fn() },

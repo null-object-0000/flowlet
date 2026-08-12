@@ -126,6 +126,11 @@ Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、Web
 当前不加载第三方动态库、不执行插件脚本，也不允许插件绕过类型化 command、
 SQLite 或运行时配置快照直接修改代理状态。修改内置注册表需要重新构建应用。
 
+前端 Agent 概览使用 `useQueries` 按注册表一次性创建环境探测 Query，并通过统一的
+`useAgentGlobalConfig(agentId)` 处理配置检查、写入和恢复；领域 command 只保留带 `agentId`
+的通用边界。新增已注册 Agent 不再复制专用 Query/Mutation Hook，但仍必须提供注册表声明的
+Rust 编译期环境与全局配置适配器。
+
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 
 SQLite 迁移由 `Storage::migrate` 负责。除非需求明确允许且已评估用户数据影响，不得直接删除或重建现有表；新增或调整持久化结构必须提供迁移并补充存储测试。

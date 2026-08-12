@@ -1,22 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  applyClaudeCodeGlobalConfig,
-  applyOpenCodeGlobalConfig,
-  applyPiGlobalConfig,
+  applyAgentGlobalConfig,
   authorizeCodexAccount,
-  detectChatGptDesktopEnvironment,
-  detectClaudeCodeEnvironment,
-  detectOpenCodeEnvironment,
-  detectPiEnvironment,
-  inspectClaudeCodeGlobalConfig,
-  inspectOpenCodeGlobalConfig,
-  inspectPiGlobalConfig,
+  detectAgentEnvironment,
+  inspectAgentGlobalConfig,
   listCachedCodexAccounts,
   queryCodexAccounts,
-  restoreClaudeCodeGlobalConfig,
-  restoreOpenCodeGlobalConfig,
-  restorePiGlobalConfig,
+  restoreAgentGlobalConfig,
 } from "./commands";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -24,12 +15,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 describe("agent commands", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it.each([
-    [detectClaudeCodeEnvironment, "claude-code"],
-    [detectOpenCodeEnvironment, "opencode"],
-    [detectPiEnvironment, "pi"],
-    [detectChatGptDesktopEnvironment, "codex"],
-  ] as const)("uses the typed environment boundary for %s", async (call, agentId) => {
+  it.each(["claude-code", "opencode", "pi", "codex"])("uses the typed environment boundary for %s", async (agentId) => {
     vi.mocked(invoke).mockResolvedValue({
       agent_id: agentId,
       agent_name: agentId,
@@ -38,7 +24,7 @@ describe("agent commands", () => {
       installations: [],
     });
 
-    await call();
+    await detectAgentEnvironment(agentId);
 
     expect(invoke).toHaveBeenCalledWith("detect_agent_environment", { agentId });
   });
@@ -68,10 +54,10 @@ describe("agent commands", () => {
   });
 
   it.each([
-    [inspectClaudeCodeGlobalConfig, "inspect_agent_global_config"],
-    [applyClaudeCodeGlobalConfig, "apply_agent_global_config"],
-    [restoreClaudeCodeGlobalConfig, "restore_agent_global_config"],
-  ] as const)("uses the typed Claude Code global config boundary", async (call, command) => {
+    [() => inspectAgentGlobalConfig("claude-code"), "inspect_agent_global_config"],
+    [() => applyAgentGlobalConfig("claude-code"), "apply_agent_global_config"],
+    [() => restoreAgentGlobalConfig("claude-code"), "restore_agent_global_config"],
+  ] as const)("uses the typed Agent global config boundary", async (call, command) => {
     vi.mocked(invoke).mockResolvedValue({});
     await call();
     expect(invoke).toHaveBeenCalledWith(command, { agentId: "claude-code" });
@@ -80,32 +66,12 @@ describe("agent commands", () => {
   it("passes independent Claude Code context options through the typed boundary", async () => {
     vi.mocked(invoke).mockResolvedValue({});
 
-    await applyClaudeCodeGlobalConfig({ primaryLongContext: true, fastLongContext: false });
+    await applyAgentGlobalConfig("claude-code", { primaryLongContext: true, fastLongContext: false });
 
     expect(invoke).toHaveBeenCalledWith("apply_agent_global_config", {
       agentId: "claude-code",
       options: { primaryLongContext: true, fastLongContext: false },
     });
-  });
-
-  it.each([
-    [inspectPiGlobalConfig, "inspect_agent_global_config"],
-    [applyPiGlobalConfig, "apply_agent_global_config"],
-    [restorePiGlobalConfig, "restore_agent_global_config"],
-  ] as const)("uses the typed Pi global config boundary", async (call, command) => {
-    vi.mocked(invoke).mockResolvedValue({});
-    await call();
-    expect(invoke).toHaveBeenCalledWith(command, { agentId: "pi" });
-  });
-
-  it.each([
-    [inspectOpenCodeGlobalConfig, "inspect_agent_global_config"],
-    [applyOpenCodeGlobalConfig, "apply_agent_global_config"],
-    [restoreOpenCodeGlobalConfig, "restore_agent_global_config"],
-  ] as const)("uses the typed OpenCode global config boundary", async (call, command) => {
-    vi.mocked(invoke).mockResolvedValue({});
-    await call();
-    expect(invoke).toHaveBeenCalledWith(command, { agentId: "opencode" });
   });
 
 });

@@ -1,143 +1,23 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OverviewAgentAccessCard } from "./OverviewAgentAccessCard";
-import { useChatGptDesktopEnvironment } from "./useAgentEnvironment";
 
 const refetch = vi.fn();
 const mutateAsync = vi.fn();
+const agentMocks = vi.hoisted(() => ({ codexEnvironment: null as unknown }));
 
 vi.mock("./useAgentEnvironment", () => ({
-  useClaudeCodeEnvironment: () => ({
-    data: {
-      agent_id: "claude-code",
-      agent_name: "Claude Code CLI",
-      installed: true,
-      primary: {
-        executable_path: "C:\\Users\\test\\.local\\bin\\claude.exe",
-        install_dir: "C:\\Users\\test\\.local\\bin",
-        install_method: "native",
-        version: "2.1.207",
-        version_output: "2.1.207 (Claude Code)",
-        available_on_path: true,
-      },
-      installations: [{
-        executable_path: "C:\\Users\\test\\.local\\bin\\claude.exe",
-        install_dir: "C:\\Users\\test\\.local\\bin",
-        install_method: "native",
-        version: "2.1.207",
-        version_output: "2.1.207 (Claude Code)",
-        available_on_path: true,
-      }],
-    },
-    error: null,
-    isError: false,
-    isFetching: false,
-    isLoading: false,
-    refetch,
+  useAgentEnvironments: vi.fn(() => new Map([
+    ["claude-code", { data: { agent_id: "claude-code", agent_name: "Claude Code CLI", installed: true, primary: { surface: "cli", executable_path: "C:\\Users\\test\\.local\\bin\\claude.exe", install_dir: "C:\\Users\\test\\.local\\bin", install_method: "native", version: "2.1.207", version_output: "2.1.207 (Claude Code)", available_on_path: true }, installations: [{ surface: "cli", executable_path: "C:\\Users\\test\\.local\\bin\\claude.exe", install_dir: "C:\\Users\\test\\.local\\bin", install_method: "native", version: "2.1.207", version_output: "2.1.207 (Claude Code)", available_on_path: true }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
+    ["opencode", { data: { agent_id: "opencode", agent_name: "OpenCode", installed: true, primary: { surface: "cli", executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe", install_dir: "C:\\Users\\test\\.opencode\\bin", install_method: "native", version: "1.18.2", available_on_path: true }, installations: [{ surface: "cli", executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe", install_dir: "C:\\Users\\test\\.opencode\\bin", install_method: "native", version: "1.18.2", available_on_path: true }, { surface: "desktop", executable_path: "C:\\Users\\test\\AppData\\Local\\Programs\\@opencode-aidesktop\\OpenCode.exe", install_dir: "C:\\Users\\test\\AppData\\Local\\Programs\\@opencode-aidesktop", install_method: "desktop", version: null, available_on_path: false }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
+    ["pi", { data: { agent_id: "pi", agent_name: "Pi", installed: true, primary: { surface: "cli", executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd", install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent", install_method: "npm", version: "0.42.1", available_on_path: true }, installations: [{ surface: "cli", executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd", install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent", install_method: "npm", version: "0.42.1", available_on_path: true }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
+    ["codex", { data: agentMocks.codexEnvironment ?? { agent_id: "chatgpt-desktop", agent_name: "ChatGPT (Codex)", installed: true, primary: { surface: "cli", executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\codex.cmd", install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex", install_method: "npm", version: "0.142.5", available_on_path: true }, installations: [{ surface: "cli", executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\codex.cmd", install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex", install_method: "npm", version: "0.142.5", available_on_path: true }, { surface: "desktop", executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe", install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0", install_method: "desktop", version: "26.707.12708.0", available_on_path: false }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
+  ])),
+  useAgentGlobalConfig: (agentId: string | null) => ({
+    query: { data: agentId ? { agent_id: agentId, settings_path: agentId === "claude-code" ? "C:\\Users\\test\\.claude\\settings.json" : agentId === "opencode" ? "C:\\Users\\test\\.config\\opencode\\opencode.jsonc" : agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\models.json" : "C:\\Users\\test\\.codex\\config.toml", credentials_path: agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\auth.json" : agentId === "opencode" ? "C:\\Users\\test\\.local\\share\\opencode\\auth.json" : agentId === "codex" ? "C:\\Users\\test\\.codex\\auth.json" : null, settings_exists: true, state: "flowlet", base_url: agentId === "claude-code" ? "http://127.0.0.1:18640/anthropic" : "http://127.0.0.1:18640/v1", auth_token_configured: true, api_key_configured: agentId !== "claude-code", primary_model: agentId === "opencode" ? "flowlet/flowlet-pro" : "flowlet-pro", fast_model: agentId === "claude-code" ? "flowlet-flash" : agentId === "opencode" ? "flowlet/flowlet-flash" : null, subagent_model: agentId === "claude-code" ? "flowlet-flash" : null, model_catalog_path: agentId === "codex" ? "~/.codex/model-catalog.flowlet.json" : null, model_catalog_configured: agentId === "codex", opencode_permission_bridge: agentId === "opencode", backup_available: true, external_environment_overrides: [] } : undefined, error: null, isLoading: false, refetch },
+    apply: { isPending: false, mutateAsync },
+    restore: { isPending: false, mutateAsync },
   }),
-  useOpenCodeEnvironment: () => ({
-    data: {
-      agent_id: "opencode",
-      agent_name: "OpenCode",
-      installed: true,
-      primary: {
-        surface: "cli",
-        executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe",
-        install_dir: "C:\\Users\\test\\.opencode\\bin",
-        install_method: "native",
-        version: "1.18.2",
-        version_output: "1.18.2",
-        available_on_path: true,
-      },
-      installations: [{
-        surface: "cli",
-        executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe",
-        install_dir: "C:\\Users\\test\\.opencode\\bin",
-        install_method: "native",
-        version: "1.18.2",
-        version_output: "1.18.2",
-        available_on_path: true,
-      }, {
-        surface: "desktop",
-        executable_path: "C:\\Users\\test\\AppData\\Local\\Programs\\@opencode-aidesktop\\OpenCode.exe",
-        install_dir: "C:\\Users\\test\\AppData\\Local\\Programs\\@opencode-aidesktop",
-        install_method: "desktop",
-        version: null,
-        version_output: null,
-        available_on_path: false,
-      }],
-    },
-    error: null,
-    isError: false,
-    isFetching: false,
-    isLoading: false,
-    refetch,
-  }),
-  usePiEnvironment: () => ({
-    data: {
-      agent_id: "pi",
-      agent_name: "Pi",
-      installed: true,
-      primary: {
-        surface: "cli",
-        executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd",
-        install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent",
-        install_method: "npm",
-        version: "0.42.1",
-        version_output: "0.42.1",
-        available_on_path: true,
-      },
-      installations: [{
-        surface: "cli",
-        executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd",
-        install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent",
-        install_method: "npm",
-        version: "0.42.1",
-        version_output: "0.42.1",
-        available_on_path: true,
-      }],
-    },
-    error: null,
-    isError: false,
-    isFetching: false,
-    isLoading: false,
-    refetch,
-  }),
-  useChatGptDesktopEnvironment: vi.fn(() => ({
-    data: {
-      agent_id: "chatgpt-desktop",
-      agent_name: "ChatGPT (Codex)",
-      installed: true,
-      primary: {
-        surface: "cli",
-        executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\codex.cmd",
-        install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex",
-        install_method: "npm",
-        version: "0.142.5",
-        available_on_path: true,
-      },
-      installations: [{
-        surface: "cli",
-        executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\codex.cmd",
-        install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex",
-        install_method: "npm",
-        version: "0.142.5",
-        available_on_path: true,
-      }, {
-        surface: "desktop",
-        executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
-        install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0",
-        install_method: "desktop",
-        version: "26.707.12708.0",
-        available_on_path: false,
-      }],
-    },
-    error: null,
-    isError: false,
-    isFetching: false,
-    isLoading: false,
-    refetch,
-  })),
   useAgentLatestVersions: () => ({
     data: {
       agents: [
@@ -152,105 +32,6 @@ vi.mock("./useAgentEnvironment", () => ({
     error: null,
     refetch,
   }),
-  useCodexGlobalConfig: () => ({
-    query: {
-      data: {
-        agent_id: "codex",
-        settings_path: "C:\\Users\\test\\.codex\\config.toml",
-        credentials_path: "C:\\Users\\test\\.codex\\auth.json",
-        settings_exists: true,
-        state: "flowlet",
-        base_url: "http://127.0.0.1:18640/v1",
-        auth_token_configured: true,
-        api_key_configured: true,
-        primary_model: "flowlet-pro",
-        fast_model: null,
-        subagent_model: null,
-        model_catalog_path: "~/.codex/model-catalog.flowlet.json",
-        model_catalog_configured: true,
-        backup_available: true,
-        external_environment_overrides: [],
-      },
-      error: null,
-      isLoading: false,
-      refetch,
-    },
-    apply: { isPending: false, mutateAsync },
-    restore: { isPending: false, mutateAsync },
-  }),
-  useClaudeCodeGlobalConfig: () => ({
-    query: {
-      data: {
-        agent_id: "claude-code",
-        settings_path: "C:\\Users\\test\\.claude\\settings.json",
-        settings_exists: true,
-        state: "flowlet",
-        base_url: "http://127.0.0.1:18640/anthropic",
-        auth_token_configured: true,
-        api_key_configured: false,
-        primary_model: "flowlet-pro",
-        fast_model: "flowlet-flash",
-        subagent_model: "flowlet-flash",
-        primary_long_context: false,
-        fast_long_context: false,
-        long_context: false,
-        backup_available: true,
-        external_environment_overrides: [],
-      },
-      error: null,
-      isLoading: false,
-      refetch,
-    },
-    apply: { isPending: false, mutateAsync },
-    restore: { isPending: false, mutateAsync },
-  }),
-  usePiGlobalConfig: () => ({
-    query: {
-      data: {
-        agent_id: "pi",
-        settings_path: "C:\\Users\\test\\.pi\\agent\\models.json",
-        credentials_path: "C:\\Users\\test\\.pi\\agent\\auth.json",
-        settings_exists: true,
-        state: "flowlet",
-        base_url: "http://127.0.0.1:18640/v1",
-        auth_token_configured: true,
-        api_key_configured: true,
-        primary_model: "flowlet-pro",
-        fast_model: null,
-        backup_available: true,
-        external_environment_overrides: [],
-      },
-      error: null,
-      isLoading: false,
-      refetch,
-    },
-    apply: { isPending: false, mutateAsync },
-    restore: { isPending: false, mutateAsync },
-  }),
-  useOpenCodeGlobalConfig: () => ({
-    query: {
-      data: {
-        agent_id: "opencode",
-        settings_path: "C:\\Users\\test\\.config\\opencode\\opencode.jsonc",
-        credentials_path: "C:\\Users\\test\\.local\\share\\opencode\\auth.json",
-        settings_exists: true,
-        state: "flowlet",
-        base_url: "http://127.0.0.1:18640/v1",
-        auth_token_configured: true,
-        api_key_configured: true,
-        primary_model: "flowlet/flowlet-pro",
-        fast_model: "flowlet/flowlet-flash",
-        opencode_permission_bridge: true,
-        backup_available: true,
-        external_environment_overrides: [],
-      },
-      error: null,
-      isLoading: false,
-      refetch,
-    },
-    apply: { isPending: false, mutateAsync },
-    restore: { isPending: false, mutateAsync },
-  }),
 }));
 
 vi.mock("lottie-web", () => ({
@@ -258,6 +39,9 @@ vi.mock("lottie-web", () => ({
 }));
 
 describe("OverviewAgentAccessCard", () => {
+  beforeEach(() => {
+    agentMocks.codexEnvironment = null;
+  });
   it("shows detected versions for the supported Agent surfaces", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
@@ -414,8 +198,7 @@ describe("OverviewAgentAccessCard", () => {
 
   it("bases the Codex update badge only on the CLI version, ignoring the desktop version", () => {
     // 桌面版本远小于 npm latest，但 ChatGPT Desktop 使用独立版本体系，不应触发更新提示。
-    vi.mocked(useChatGptDesktopEnvironment).mockReturnValueOnce({
-      data: {
+    agentMocks.codexEnvironment = {
         agent_id: "chatgpt-desktop",
         agent_name: "ChatGPT (Codex)",
         installed: true,
@@ -445,13 +228,7 @@ describe("OverviewAgentAccessCard", () => {
             available_on_path: true,
           },
         ],
-      },
-      error: null,
-      isError: false,
-      isFetching: false,
-      isLoading: false,
-      refetch,
-    } as unknown as ReturnType<typeof useChatGptDesktopEnvironment>);
+    };
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
     // CLI 0.146.0 与 npm latest 0.146.0 一致 → 无新版本提示（title 为空）。
@@ -464,8 +241,7 @@ describe("OverviewAgentAccessCard", () => {
     // 没有任何 CLI 安装。此时必须照常展示"前往官网安装"引导，不能只显示纯文本。
     // 用 mockImplementation 而非 mockReturnValueOnce：点击打开抽屉会触发第二次渲染，
     // 组件会再次调用该 hook；一次性的 Once 只覆盖首次调用，重渲染会回落默认 mock。
-    vi.mocked(useChatGptDesktopEnvironment).mockImplementation(() => ({
-      data: {
+    agentMocks.codexEnvironment = {
         agent_id: "chatgpt-desktop",
         agent_name: "ChatGPT (Codex)",
         installed: true,
@@ -485,13 +261,7 @@ describe("OverviewAgentAccessCard", () => {
           version: "26.707.12708.0",
           available_on_path: false,
         }],
-      },
-      error: null,
-      isError: false,
-      isFetching: false,
-      isLoading: false,
-      refetch,
-    } as unknown as ReturnType<typeof useChatGptDesktopEnvironment>));
+    };
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
     fireEvent.click(screen.getByRole("button", { name: "配置 Codex" }));

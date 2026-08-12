@@ -6,17 +6,11 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
 import { cliInstalledVersion, isNewerVersion } from "../../domains/agent/versions";
 import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentLatestVersionReport, AgentSurface } from "../../domains/agent/types";
-import { AGENT_PLUGINS } from "../../domains/pluginRegistry";
+import { AGENT_PLUGINS, agentPlugin } from "../../domains/pluginRegistry";
 import {
-  useChatGptDesktopEnvironment,
-  useClaudeCodeEnvironment,
-  useClaudeCodeGlobalConfig,
-  useCodexGlobalConfig,
+  useAgentEnvironments,
+  useAgentGlobalConfig,
   useAgentLatestVersions,
-  useOpenCodeEnvironment,
-  useOpenCodeGlobalConfig,
-  usePiEnvironment,
-  usePiGlobalConfig,
 } from "./useAgentEnvironment";
 
 type Props = {
@@ -27,15 +21,9 @@ type Props = {
 export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const { t } = useAppPreferences();
   const [selectedAgent, setSelectedAgent] = useState<AgentKind | null>(null);
-  const claudeEnvironment = useClaudeCodeEnvironment();
-  const openCodeEnvironment = useOpenCodeEnvironment();
-  const piEnvironment = usePiEnvironment();
-  const chatGptEnvironment = useChatGptDesktopEnvironment();
+  const environments = useAgentEnvironments();
   const latestVersions = useAgentLatestVersions();
-  const claudeGlobalConfig = useClaudeCodeGlobalConfig(selectedAgent === "claude-code");
-  const openCodeGlobalConfig = useOpenCodeGlobalConfig(selectedAgent === "opencode");
-  const piGlobalConfig = usePiGlobalConfig(selectedAgent === "pi");
-  const codexGlobalConfig = useCodexGlobalConfig(selectedAgent === "codex");
+  const activeGlobalConfig = useAgentGlobalConfig(selectedAgent);
 
   const latestByAgent = new Map<string, AgentLatestVersionReport>();
   for (const report of latestVersions.data?.agents ?? []) {
@@ -51,41 +39,12 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
     }
   };
 
-  const activeGlobalConfig = selectedAgent === "opencode"
-    ? openCodeGlobalConfig
-    : selectedAgent === "pi"
-      ? piGlobalConfig
-      : selectedAgent === "codex"
-        ? codexGlobalConfig
-        : claudeGlobalConfig;
-  const activeEnvironment = selectedAgent === "opencode"
-    ? openCodeEnvironment
-    : selectedAgent === "pi"
-      ? piEnvironment
-      : selectedAgent === "codex"
-        ? chatGptEnvironment
-        : claudeEnvironment;
-  const activeAgentName = selectedAgent === "opencode"
-    ? "OpenCode"
-    : selectedAgent === "pi"
-      ? "Pi"
-      : selectedAgent === "codex"
-        ? "Codex"
-        : "Claude Code";
+  const activeEnvironment = selectedAgent ? environments.get(selectedAgent) : undefined;
+  const activeAgentName = selectedAgent ? agentPlugin(selectedAgent).name : "Agent";
 
   const applyGlobalConfig = async (options?: AgentGlobalConfigOptions) => {
     try {
-      if (selectedAgent === "claude-code") {
-        await claudeGlobalConfig.apply.mutateAsync(options);
-      } else if (selectedAgent === "opencode") {
-        await openCodeGlobalConfig.apply.mutateAsync();
-      } else if (selectedAgent === "pi") {
-        await piGlobalConfig.apply.mutateAsync(options);
-      } else if (selectedAgent === "codex") {
-        await codexGlobalConfig.apply.mutateAsync();
-      } else {
-        await activeGlobalConfig.apply.mutateAsync(undefined);
-      }
+      await activeGlobalConfig.apply.mutateAsync(options);
       Toast.success(t("{name} 已全局接入 Flowlet", { name: activeAgentName }));
     } catch (error) {
       Toast.error(t("写入 {name} 全局配置失败：{message}", { name: activeAgentName, message: error instanceof Error ? error.message : String(error) }));
@@ -106,16 +65,10 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       <OverviewModuleCard title={t("AI Agent 接入")}>
         <OverviewAgentListView>
           {AGENT_PLUGINS.map(({ name, iconSrc, tone, id: kind, surfaces }) => {
-            const environmentQuery = kind === "claude-code"
-              ? claudeEnvironment
-              : kind === "opencode"
-                ? openCodeEnvironment
-                : kind === "pi"
-                  ? piEnvironment
-                  : chatGptEnvironment;
+            const environmentQuery = environments.get(kind);
             // 版本更新提示只针对 CLI 包：桌面应用（ChatGPT Desktop / OpenCode Desktop）
             // 是独立版本体系，不参与 npm latest 比较。
-            const installedVersion = cliInstalledVersion(environmentQuery.data);
+            const installedVersion = cliInstalledVersion(environmentQuery?.data);
             const hasNewer = isNewerVersion(latestByAgent.get(kind)?.latest_version, installedVersion);
             return (
               <OverviewAgentRowView
@@ -125,8 +78,8 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                 tone={tone}
                 updateAvailable={hasNewer}
                 surfaces={[
-                  { label: t("CLI"), value: surfaceStatusValue("cli", environmentQuery.data, environmentQuery.isLoading, environmentQuery.isError, t) },
-                  ...(surfaces.includes("desktop") ? [{ label: t("Desktop"), value: surfaceStatusValue("desktop", environmentQuery.data, environmentQuery.isLoading, environmentQuery.isError, t) }] : []),
+                  { label: t("CLI"), value: surfaceStatusValue("cli", environmentQuery?.data, environmentQuery?.isLoading ?? false, environmentQuery?.isError ?? false, t) },
+                  ...(surfaces.includes("desktop") ? [{ label: t("Desktop"), value: surfaceStatusValue("desktop", environmentQuery?.data, environmentQuery?.isLoading ?? false, environmentQuery?.isError ?? false, t) }] : []),
                 ]}
                 ariaLabel={t("配置 {name}", { name })}
                 title={hasNewer ? t("检测到新版本，点击查看详情") : undefined}
@@ -138,15 +91,15 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       </OverviewModuleCard>
 
       <AgentAccessSideSheet
-        visible={selectedAgent === "claude-code" || selectedAgent === "opencode" || selectedAgent === "pi" || selectedAgent === "codex"}
-        agent={selectedAgent === "opencode" ? "opencode" : selectedAgent === "pi" ? "pi" : selectedAgent === "codex" ? "codex" : "claude-code"}
+        visible={selectedAgent != null}
+        agent={selectedAgent ?? AGENT_PLUGINS[0].id}
         baseUrl={baseUrl}
         clientToken={clientToken}
-        environment={activeEnvironment.data}
-        environmentLoading={activeEnvironment.isFetching}
-        environmentError={activeEnvironment.error?.message}
+        environment={activeEnvironment?.data}
+        environmentLoading={activeEnvironment?.isFetching ?? false}
+        environmentError={activeEnvironment?.error?.message}
         onRefreshEnvironment={() => {
-          void activeEnvironment.refetch();
+          void activeEnvironment?.refetch();
           void latestVersions.refetch();
         }}
         latestVersion={selectedAgent ? latestByAgent.get(selectedAgent)?.latest_version ?? null : null}

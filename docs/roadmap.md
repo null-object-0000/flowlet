@@ -46,7 +46,18 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 
 ## 当前阻塞记录
 
-- 2026-07-02：`src-tauri/tauri.conf.json` identifier 调整后，计划再次运行 `cargo check` 复验；当前环境提升权限额度限制导致命令未能执行。下一步恢复权限后优先运行 `cargo check`、`cargo test` 和 `bun run tauri build --debug`。
+当前无已知的架构重构阻塞项。历史 `cargo check` 权限问题已经复验通过，不再作为当前状态保留。
+
+## 插件化架构收口（进行中）
+
+- [x] 建立 `plugin-registry.json`，统一声明 Channel、模型目录与 Agent 贡献
+- [x] 建立 Agent Environment / Global Config / Session / Runner 四类编译期 Adapter registry
+- [x] 完成四类 Agent 实现和前端 Agent Access Adapter 的物理拆分
+- [x] 完成 Session 时间线底层解析器按 Claude Code / Codex / OpenCode / Pi 物理拆分
+- [x] Channel Capability registry 改为直接绑定各渠道类型化异步函数，移除中央策略枚举二次分发
+- [ ] 继续把 `sync.rs` 中尚存的渠道专属响应 DTO 与转换器逐步归档到对应 Channel Adapter
+- [ ] 继续把 `scrape_console.rs` 中渠道专属控制台响应合并器归档到对应 Channel Adapter
+- [ ] 用新增 Channel 和新增 Agent 各完成一次端到端接入演练，固化脚手架与验收清单
 
 ## Milestone 0：需求校准与文档更新
 

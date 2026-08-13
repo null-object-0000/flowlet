@@ -2,32 +2,18 @@ use super::channels_config::ChannelsConfig;
 use super::config::{ChannelAccount, ChannelPreset};
 use super::plugin_registry::plugin_registry;
 use super::presets::{BalanceQueryResult, ModelSyncResult};
-use super::sync::{
-    query_deepseek_balance, query_kimi_balance, query_openrouter_balance, sync_deepseek_models,
-    sync_kimi_models, sync_longcat_models, sync_openai_compatible_models, sync_qwen_models,
-};
+use std::future::Future;
+use std::pin::Pin;
 
 mod adapters;
 
 use adapters::ADAPTERS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ModelSyncAdapter {
-    LongCat,
-    DeepSeek,
-    Kimi,
-    Qwen,
-    OpenAiCompatible {
-        use_configured_models_endpoint: bool,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BalanceQueryAdapter {
-    DeepSeek,
-    Kimi,
-    OpenRouter,
-}
+type ModelSyncFuture<'a> = Pin<Box<dyn Future<Output = ModelSyncResult> + Send + 'a>>;
+type ModelSyncFn =
+    for<'a> fn(&'a ChannelAccount, &'a ChannelPreset, &'a ChannelsConfig) -> ModelSyncFuture<'a>;
+type BalanceQueryFuture<'a> = Pin<Box<dyn Future<Output = BalanceQueryResult> + Send + 'a>>;
+type BalanceQueryFn = for<'a> fn(&'a ChannelAccount, &'a ChannelsConfig) -> BalanceQueryFuture<'a>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConsoleScrapeAdapter {
@@ -50,12 +36,11 @@ enum LoginPageAdapter {
 ///
 /// `plugin-registry.json` 只负责把渠道贡献绑定到 adapter id；这里负责描述该 adapter
 /// 复用哪套底层实现。配置中的 `supports_*` 字段仍是产品能力声明，二者不会互相覆盖。
-#[derive(Debug)]
 pub(crate) struct ChannelCapabilityAdapter {
     pub id: &'static str,
     preset_factory: fn() -> ChannelPreset,
-    pub model_sync: ModelSyncAdapter,
-    pub balance_query: Option<BalanceQueryAdapter>,
+    model_sync: ModelSyncFn,
+    balance_query: Option<BalanceQueryFn>,
     pub strips_openai_v1_path: bool,
     console_scrape: ConsoleScrapeAdapter,
     login_page: LoginPageAdapter,
@@ -170,21 +155,7 @@ pub(crate) async fn sync_channel_models(
             account.channel_id
         )
     })?;
-    let result = match adapter.model_sync {
-        ModelSyncAdapter::LongCat => sync_longcat_models(account, config).await,
-        ModelSyncAdapter::DeepSeek => sync_deepseek_models(account, config).await,
-        ModelSyncAdapter::Kimi => sync_kimi_models(account, config).await,
-        ModelSyncAdapter::Qwen => sync_qwen_models(account, config).await,
-        ModelSyncAdapter::OpenAiCompatible {
-            use_configured_models_endpoint,
-        } => {
-            let models_url = use_configured_models_endpoint
-                .then(|| config.models_endpoint_url(&account.channel_id))
-                .flatten();
-            sync_openai_compatible_models(account, preset, models_url).await
-        }
-    };
-    Ok(result)
+    Ok((adapter.model_sync)(account, preset, config).await)
 }
 
 pub(crate) async fn query_channel_balance(
@@ -198,9 +169,7 @@ pub(crate) async fn query_channel_balance(
         )
     })?;
     let result = match adapter.balance_query {
-        Some(BalanceQueryAdapter::DeepSeek) => query_deepseek_balance(account, config).await,
-        Some(BalanceQueryAdapter::Kimi) => query_kimi_balance(account, config).await,
-        Some(BalanceQueryAdapter::OpenRouter) => query_openrouter_balance(account, config).await,
+        Some(query) => query(account, config).await,
         None => BalanceQueryResult {
             balance: None,
             currency: None,
@@ -217,22 +186,9 @@ mod tests {
 
     #[test]
     fn builtin_adapters_expose_stable_capability_strategies() {
-        assert_eq!(
-            channel_adapter("longcat").unwrap().model_sync,
-            ModelSyncAdapter::LongCat
-        );
-        assert_eq!(
-            channel_adapter("custom").unwrap().model_sync,
-            ModelSyncAdapter::OpenAiCompatible {
-                use_configured_models_endpoint: false
-            }
-        );
-        assert_eq!(
-            channel_adapter("zhipu").unwrap().model_sync,
-            ModelSyncAdapter::OpenAiCompatible {
-                use_configured_models_endpoint: true
-            }
-        );
+        assert!(has_channel_capability_adapter("longcat"));
+        assert!(has_channel_capability_adapter("custom"));
+        assert!(has_channel_capability_adapter("zhipu"));
         assert!(channel_adapter("zhipu").unwrap().strips_openai_v1_path);
         assert!(!channel_adapter("openrouter").unwrap().strips_openai_v1_path);
     }

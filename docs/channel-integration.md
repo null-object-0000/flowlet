@@ -186,7 +186,9 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 
 ### 5.2 模型同步
 
-在 `src-tauri/src/core/sync.rs` 中按官方响应定义最小反序列化结构，并转换为统一 `ChannelModel`：
+在对应的 `src-tauri/src/core/channel_capability_adapter/adapters/<adapter>.rs` 中提供模型同步入口；
+可复用 `sync.rs` 的通用 OpenAI-compatible HTTP 与响应映射，响应不兼容时把渠道专属最小反序列化
+结构和转换留在该 Adapter 模块，最终统一返回 `ChannelModel`：
 
 - `channel_id`、`model`、`display_name` 正确；
 - `supported_protocols` 不超过渠道真实能力；
@@ -213,17 +215,18 @@ Token 资源包、配额、用量等能力同理。UI 应依赖渠道能力或�
 
 ### 5.4 Capability Adapter 与 Tauri command 分发
 
-渠道贡献必须在根目录 `plugin-registry.json` 声明 `channelId` 和 `adapterId`。编译实现集中在
-`src-tauri/src/core/channel_capability_adapter.rs`：
+渠道贡献必须在根目录 `plugin-registry.json` 声明 `channelId` 和 `adapterId`。统一注册与能力门控位于
+`src-tauri/src/core/channel_capability_adapter.rs`，渠道实现入口位于
+`src-tauri/src/core/channel_capability_adapter/adapters/`：
 
 1. 行为与既有渠道完全兼容时，复用既有 `adapterId`；
-2. 模型响应、余额响应或路径规则不兼容时，新增一个小型 Adapter，并登记模型同步策略、可选的
-   官方余额策略、路径策略、控制台抓取策略与内置预设工厂；
+2. 模型响应、余额响应或路径规则不兼容时，新增一个小型 Adapter，并登记模型同步函数、可选的
+   官方余额函数、路径策略、控制台抓取策略与内置预设工厂；渠道专属 DTO/解析器不得堆回统一分发层；
 3. `plugin_registry` 会在启动时校验 `adapterId` 是否存在，未知 Adapter 不允许静默回退；
 4. `ChannelPreset.supports_*` 是能力声明，Adapter 是能力实现。两者必须同时存在，不能只靠
    Adapter 绕过配置声明；
-5. 认证方式和端点继续来自 `config.json` / `ChannelPreset`，不要在 Adapter 中复制 URL、鉴权或
-   API Key。
+5. 认证方式和端点继续来自 `config.json` / `ChannelPreset`；Adapter 可以按该声明组装请求，但不得
+   硬编码另一份 Base URL、鉴权规则或 API Key。
 
 预设工厂返回的 `ChannelPreset.id` 必须与 `plugin-registry.json` 的 `channelId` 相同；统一契约
 测试会遍历所有渠道贡献验证这一点。新增渠道不再修改 `presets.rs` 的分发分支。

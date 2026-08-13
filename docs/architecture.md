@@ -69,7 +69,7 @@ Flowlet Desktop
   │        ├─ storage_stats.rs         统计查询
   │        ├─ storage_tasks.rs         后台任务持久化
   │        ├─ storage_tests.rs         存储测试
-  │        ├─ sync.rs                  模型 / 价格 / 余额异步同步任务
+  │        ├─ sync.rs                  渠道同步共享 HTTP、响应映射与排序工具
   │        ├─ usage.rs                 Token 提取与成本估算
   │        ├─ logging.rs               日志捕获与脱敏
   │        ├─ metrics.rs               运行时指标
@@ -79,8 +79,11 @@ Flowlet Desktop
   │        ├─ agent_global_config.rs   Claude Code / OpenCode 全局配置写入与恢复
   │        ├─ agent_session_identity.rs 请求头中的 Agent / Session 统一识别
   │        ├─ agent_session_sources.rs  原生会话数据源共享工具
-  │        ├─ agent_session_metadata.rs 原生会话目录与会话列表
-  │        ├─ agent_session_timeline.rs 原生摘要与最后交互内部解析
+  │        ├─ channel_capability_adapter/ 各渠道能力注册与异步入口
+  │        ├─ agent_session_adapter/   各 Agent 会话能力注册
+  │        ├─ agent_session_metadata.rs 原生会话目录、缓存与目录合并
+  │        ├─ agent_session_timeline.rs 原生摘要、游标与时间线公共算法
+  │        ├─ agent_session_timeline/adapters/ 各 Agent 底层时间线解析器
   │        ├─ agent_source_watcher.rs  Agent 数据源文件监听
   │        ├─ codex_account.rs         Codex 账号与用量
   │        ├─ cost_ledger_source_probe.rs 成本账本只读数据源探针
@@ -156,9 +159,11 @@ Claude Code、OpenCode、Pi、Codex 分别由独立编译期 Adapter 模块完�
 Agent 插件同时声明 `sessionAdapterId`。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
 可用运行时会话类型、会话目录枚举、Timeline、最后交互和增量解析来源；Claude Code、OpenCode、
 Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显式承载 `codex-cli` 与
-`codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。现有原生解析器、
-会话合并与用量账本语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。四个实现
-分别位于 `agent_session_adapter/adapters/`，父模块只保留 Trait、registry 查询和公共默认行为。
+`codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。会话合并与用量账本
+语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。四个能力实现分别位于
+`agent_session_adapter/adapters/`，父模块只保留 Trait、registry 查询和公共默认行为；Claude Code、
+Codex、OpenCode 与 Pi 的文件/SQLite 定位和时间线解析进一步下沉到
+`agent_session_timeline/adapters/`，公共时间线模块保留增量游标、摘要合并、切片、计价与事件工具。
 
 Agent 插件还声明 `runnerAdapterId`。Rust 任务调度通过编译期 Runner Adapter registry 统一解析
 任务 `agent_profile`、环境探测适配器、展示名和异步执行函数；Claude Code、OpenCode、Pi、Codex
@@ -349,15 +354,15 @@ Capability Adapter。`ChannelPreset.supports_*` 继续声明产品上是否开�
 才可调用。同一 Adapter 可以被多个行为兼容的渠道贡献复用，command 不再按 `channel_id`
 维护分支。
 
-统一入口位于 `src-tauri/src/core/channel_capability_adapter.rs`，七个内置渠道的能力声明分别位于
-`channel_capability_adapter/adapters/`；父模块保留注册表解析、能力门控以及模型同步和余额查询
-的统一执行入口：
+统一入口位于 `src-tauri/src/core/channel_capability_adapter.rs`，七个内置渠道的能力声明与异步能力
+入口分别位于 `channel_capability_adapter/adapters/`；父模块只保留注册表解析、能力门控以及模型同步
+和余额查询的统一执行入口。注册项直接持有类型化异步函数，不再由父模块通过策略枚举二次分发：
 
 ```text
 Channel contribution (plugin-registry.json)
   -> adapterId
-    -> model sync strategy
-    -> balance query strategy (optional)
+    -> model sync function
+    -> balance query function (optional)
     -> OpenAI path policy
     -> builtin preset factory
     -> console scrape and login-page policy (optional)
@@ -1016,7 +1021,9 @@ Anthropic `/messages/count_tokens` 只计算上下文长度，不执行模型推
 - 根据运行时内存中的模型价格计算成本。
 - 支持按日期、渠道、账号、模型、客户端聚合。
 
-价格以 `config.json` 为唯一真实来源；调整价格后需要重新加载应用运行时。
+价格读取当前运行时内存快照：`models-cn.json` 与 `models-dev.json` 提供主要官方价格，
+`config.json.channels_config.model_prices` 只补充目录未覆盖项。目录后台同步成功后会热重建快照；
+修改编译/磁盘配置仍按配置加载流程生效，`config.json` 不是价格的唯一真实来源。
 
 ## 桌面端 UI
 

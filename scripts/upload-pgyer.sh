@@ -17,9 +17,15 @@ if [ -z "$apk_path" ] || [ ! -f "$apk_path" ]; then
 fi
 
 token_response="$(curl --fail-with-body --silent --show-error \
+  --retry 3 \
+  --retry-delay 3 \
+  --retry-all-errors \
+  --connect-timeout 20 \
+  --max-time 60 \
   --request POST 'https://www.pgyer.com/apiv2/app/getCOSToken' \
   --data-urlencode "_api_key=$PGYER_API_KEY" \
   --data-urlencode 'buildType=apk' \
+  --data-urlencode 'oversea=2' \
   --data-urlencode 'buildInstallType=1' \
   --data-urlencode 'buildInstallDate=2' \
   --data-urlencode "buildUpdateDescription=$release_notes")"
@@ -43,6 +49,11 @@ if [ -z "$endpoint" ] || [ -z "$build_key" ] || [ -z "$signature" ] || [ -z "$se
 fi
 
 upload_status="$(curl --silent --show-error \
+  --retry 4 \
+  --retry-delay 5 \
+  --retry-all-errors \
+  --connect-timeout 30 \
+  --max-time 600 \
   --output /dev/null \
   --write-out '%{http_code}' \
   --form-string "key=$upload_key" \
@@ -59,6 +70,11 @@ fi
 
 for attempt in $(seq 1 40); do
   build_response="$(curl --fail-with-body --silent --show-error \
+    --retry 3 \
+    --retry-delay 3 \
+    --retry-all-errors \
+    --connect-timeout 20 \
+    --max-time 60 \
     --get 'https://www.pgyer.com/apiv2/app/buildInfo' \
     --data-urlencode "_api_key=$PGYER_API_KEY" \
     --data-urlencode "buildKey=$build_key")"

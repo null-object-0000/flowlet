@@ -8,6 +8,11 @@ on:
         required: true
         default: v0.1.0
         type: string
+      notes_only:
+        description: Update the existing Pgyer release notes without uploading the APK again
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -25,7 +30,17 @@ jobs:
       - name: Check out upload script
         uses: actions/checkout@v7
 
-      - name: Download APK and release notes
+      - name: Download release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --json body --jq '.body' > release-notes.md
+
+      - name: Download APK
+        if: ${{ !inputs.notes_only }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -34,7 +49,6 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           gh release download "$RELEASE_TAG" --pattern '*.apk' --dir release-assets
-          gh release view "$RELEASE_TAG" --json body --jq '.body' > release-notes.md
 
           apk_count="$(find release-assets -maxdepth 1 -type f -name '*.apk' | wc -l)"
           if [ "$apk_count" != "1" ]; then
@@ -43,9 +57,20 @@ jobs:
           fi
 
       - name: Upload APK to Pgyer
+        if: ${{ !inputs.notes_only }}
         shell: bash
         env:
           PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
         run: |
           set -euo pipefail
           RELEASE_NOTES="$(cat release-notes.md)" bash scripts/upload-pgyer.sh release-assets/*.apk
+
+      - name: Update Pgyer release notes
+        if: ${{ inputs.notes_only }}
+        shell: bash
+        env:
+          PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
+          PGYER_USER_KEY: ${{ secrets.PGYER_USER_KEY }}
+        run: |
+          set -euo pipefail
+          RELEASE_NOTES="$(cat release-notes.md)" bash scripts/update-pgyer-release-notes.sh

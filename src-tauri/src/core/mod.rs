@@ -36,6 +36,7 @@ pub mod proxy;
 pub mod rate_limiter;
 pub mod runtime_config;
 pub mod scrape_console;
+#[cfg(desktop)]
 pub mod services;
 pub mod storage;
 pub mod sync;

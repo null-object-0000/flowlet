@@ -20,12 +20,14 @@ website/*
 packages/product-ui/*
 ```
 
-`website` 会直接引用 `packages/product-ui` 的源码，因此必须从仓库根目录安装依赖，并且这两个目录中的任意变更都必须触发官网构建。Cloudflare Git 集成会负责 production 和 preview deployments；仓库无需配置 `CLOUDFLARE_API_TOKEN` 或 `CLOUDFLARE_ACCOUNT_ID`。
+`website` 会直接引用 `packages/product-ui` 的源码；两者已登记为根目录 npm workspace，统一使用根目录的 `package-lock.json` 和同一套 React / Semi Design 依赖。因此必须从仓库根目录执行 `npm ci`，不要在 `website` 目录单独安装依赖或生成 lockfile。这两个目录中的任意变更都必须触发官网构建。Cloudflare Git 集成会负责 production 和 preview deployments；仓库无需配置 `CLOUDFLARE_API_TOKEN` 或 `CLOUDFLARE_ACCOUNT_ID`。
 
 首次部署成功后，在 Pages 项目的 Custom domains 中绑定 `flowlet.snewbie.site`。
 
 ## 本地验证
 
 ```bash
+npm ci
+npm run website:check
 npm run website:build
 ```

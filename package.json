@@ -3,6 +3,10 @@
   "version": "0.1.1",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "website",
+    "packages/*"
+  ],
   "scripts": {
     "version:set": "node scripts/set-version.mjs",
     "dev": "vite",
@@ -24,8 +28,9 @@
     "check": "tsc --noEmit",
     "test": "vitest run --config src/vitest.config.ts",
     "test:watch": "vitest --config src/vitest.config.ts",
-    "website:dev": "npm --prefix website run dev",
-    "website:build": "npm --prefix website run build"
+    "website:dev": "npm run dev --workspace flowlet-website",
+    "website:check": "npm run check --workspace flowlet-website",
+    "website:build": "npm run build --workspace flowlet-website"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",

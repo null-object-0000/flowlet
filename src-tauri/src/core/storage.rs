@@ -25,6 +25,8 @@ pub enum StorageError {
     InvalidImport(String),
     #[error("数据库状态锁定失败")]
     LockFailed,
+    #[error("后台任务运行冲突: {0}")]
+    JobRuntime(String),
     #[error("请求明细存储错误: {0}")]
     RequestCapture(#[from] request_capture::RequestCaptureError),
 }

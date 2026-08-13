@@ -25,7 +25,7 @@ use chacha20poly1305::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-const PROJECT_WORKSPACE_JOB_TYPE: &str = "project-workspace-sync";
+const PROJECT_WORKSPACE_JOB_TYPE: &str = crate::core::job_runtime::PROJECT_WORKSPACE_SYNC.job_type;
 const PROJECT_ETAG_META_KEY: &str = "project_workspace_etags_v1";
 const ENVELOPE_AAD: &[u8] = b"flowlet-project-workspace-v1";
 const CATALOG_VERSION: u32 = 1;
@@ -510,7 +510,7 @@ pub async fn sync_all(
         return Err("尚未启用项目工作区同步，请先在设置页启用渠道账号工作区".to_string());
     }
     let lease = jobs
-        .try_acquire("project-workspace-sync", "project-workspace-sync")
+        .try_acquire_definition(&crate::core::job_runtime::PROJECT_WORKSPACE_SYNC)
         .map_err(|_| "项目工作区同步正在运行".to_string())?;
     let _guard = PROJECT_WORKSPACE_SYNC_GUARD.lock().await;
     let job_id = uuid::Uuid::new_v4().to_string();

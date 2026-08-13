@@ -758,6 +758,7 @@ fn run_desktop() {
             // 每次清理在 spawn_blocking 中执行（不阻塞主线程），结果写入 background_jobs。
             let timer_storage = state.storage.clone();
             let timer_config_path = state.config_path.clone();
+            let timer_jobs = state.jobs.clone();
             tauri::async_runtime::spawn(async move {
                 let period = std::time::Duration::from_secs(15 * 60);
                 let mut interval =
@@ -767,8 +768,9 @@ fn run_desktop() {
                     interval.tick().await;
                     let storage = timer_storage.clone();
                     let cfg_path = timer_config_path.clone();
+                    let jobs = timer_jobs.clone();
                     let result = tauri::async_runtime::spawn_blocking(move || {
-                        storage.run_scheduled_body_cleanup_job(&cfg_path)
+                        storage.run_scheduled_body_cleanup_job(&cfg_path, &jobs)
                     })
                     .await;
                     match result {
@@ -798,6 +800,7 @@ fn run_desktop() {
             // 之后每 1 小时跑一次。两个源相互独立，结果分别写入 background_jobs 任务日志。
             let catalog_timer_storage = state.storage.clone();
             let catalog_timer_config_path = state.config_path.clone();
+            let catalog_timer_jobs = state.jobs.clone();
             tauri::async_runtime::spawn(async move {
                 let period = std::time::Duration::from_secs(60 * 60);
                 let mut interval =
@@ -809,7 +812,7 @@ fn run_desktop() {
                     interval.tick().await;
                     let storage = catalog_timer_storage.clone();
                     let config_path = catalog_timer_config_path.clone();
-                    match crate::core::storage::storage_tasks::sync_models_cn_catalog(&storage, &config_path, models_cn_url, "scheduled").await {
+                    match crate::core::storage::storage_tasks::sync_models_cn_catalog(&storage, &catalog_timer_jobs, &config_path, models_cn_url, "scheduled").await {
                         Ok(sync_result) => {
                             tracing::info!(
                                 started = sync_result.started,
@@ -825,7 +828,7 @@ fn run_desktop() {
                     }
                     let storage = catalog_timer_storage.clone();
                     let config_path = catalog_timer_config_path.clone();
-                    match crate::core::storage::storage_tasks::sync_models_dev_catalog(&storage, &config_path, models_dev_url, "scheduled").await {
+                    match crate::core::storage::storage_tasks::sync_models_dev_catalog(&storage, &catalog_timer_jobs, &config_path, models_dev_url, "scheduled").await {
                         Ok(sync_result) => {
                             tracing::info!(
                                 started = sync_result.started,

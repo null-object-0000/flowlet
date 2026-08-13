@@ -256,9 +256,20 @@ impl Storage {
     pub fn run_scheduled_body_cleanup_job(
         &self,
         config_path: &std::path::Path,
+        jobs: &crate::core::job_runtime::JobRuntime,
     ) -> Result<(String, usize, usize, i64, i64), StorageError> {
         use crate::core::proxy::extract_log_capture;
         use crate::core::proxy::read_config_raw;
+
+        let definition = crate::core::job_runtime::BODY_CLEANUP;
+        let lease = jobs
+            .try_acquire_definition(&definition)
+            .map_err(|conflict| {
+                StorageError::JobRuntime(match conflict.job_id {
+                    Some(job_id) => format!("Body 清理已在运行（任务 {job_id}）"),
+                    None => "Body 清理已在运行".to_string(),
+                })
+            })?;
 
         let capture = read_config_raw(config_path)
             .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
@@ -268,13 +279,29 @@ impl Storage {
         let job_id = uuid::Uuid::new_v4().to_string();
         self.create_job(
             &job_id,
-            "body-cleanup",
+            definition.job_type,
             "Body 清理",
             "按保留策略自动清理过期与超限的请求/响应 Body",
             "scheduled",
             4,
             "开始按保留策略自动清理请求与响应 Body",
         )?;
+        lease.attach_job_id(job_id.clone());
+
+        let ensure_not_cancelled = || -> Result<(), StorageError> {
+            if !lease.cancel_requested() && !self.is_job_cancel_requested(&job_id).unwrap_or(false)
+            {
+                return Ok(());
+            }
+            self.finish_job(
+                &job_id,
+                "cancelled",
+                &serde_json::json!({ "cancelled": true }).to_string(),
+                "Body 清理已取消",
+            )?;
+            Err(StorageError::JobRuntime("Body 清理已取消".to_string()))
+        };
+        ensure_not_cancelled()?;
 
         let before_bytes = self.get_total_body_size_bytes().unwrap_or(0);
 
@@ -301,6 +328,7 @@ impl Storage {
             }
         };
         self.update_job_progress(&job_id, 1, 4)?;
+        ensure_not_cancelled()?;
 
         // 第二步：过期清理（超过保留天数的 Body 自动清除）
         let expired_cleared = match self.cleanup_expired_body_data(capture.body_retention_days) {
@@ -327,6 +355,7 @@ impl Storage {
             }
         };
         self.update_job_progress(&job_id, 2, 4)?;
+        ensure_not_cancelled()?;
 
         // 第三步：超限清理（体积超过上限时，只清理至少一小时前的完整记录）。
         // 最近一小时是安全窗口；若近期数据自身超过上限，允许暂时超限。
@@ -383,6 +412,7 @@ impl Storage {
             );
         }
         self.update_job_progress(&job_id, 3, 4)?;
+        ensure_not_cancelled()?;
 
         // 第四步：新库或已执行过一次完整优化的旧库，按固定上限增量归还磁盘页。
         // 旧库 auto_vacuum=NONE 时安全跳过，由设置页提示用户先执行一次完整优化。
@@ -416,6 +446,7 @@ impl Storage {
             }
         };
         self.update_job_progress(&job_id, 4, 4)?;
+        ensure_not_cancelled()?;
 
         let after_bytes = self.get_total_body_size_bytes().unwrap_or(0);
         let summary = serde_json::json!({
@@ -635,7 +666,7 @@ impl Storage {
         let total = changed.len() + deleted.len();
         self.create_job(
             &job_id,
-            "agent-data-sync",
+            crate::core::job_runtime::AGENT_DATA_SYNC.job_type,
             "Agent 数据同步",
             "扫描并整理会话",
             trigger,
@@ -1327,7 +1358,7 @@ pub struct CatalogSyncResult {
 struct CatalogSpec {
     /// 来源标识，写入同步结果与任务日志。
     source: &'static str,
-    job_type: &'static str,
+    job_definition: &'static crate::core::job_runtime::JobDefinition,
     title: &'static str,
     /// exe 同级的本地文件名。
     file_name: &'static str,
@@ -1338,7 +1369,7 @@ struct CatalogSpec {
 #[cfg(desktop)]
 const MODELS_CN_SPEC: CatalogSpec = CatalogSpec {
     source: "models-cn",
-    job_type: "models-cn-sync",
+    job_definition: &crate::core::job_runtime::MODELS_CN_SYNC,
     title: "models-cn 目录同步",
     file_name: "models-cn.json",
     count: count_models_cn_catalog,
@@ -1347,7 +1378,7 @@ const MODELS_CN_SPEC: CatalogSpec = CatalogSpec {
 #[cfg(desktop)]
 const MODELS_DEV_SPEC: CatalogSpec = CatalogSpec {
     source: "models.dev",
-    job_type: "models-dev-sync",
+    job_definition: &crate::core::job_runtime::MODELS_DEV_SYNC,
     title: "models.dev 目录同步",
     file_name: "models-dev.json",
     count: count_models_dev_catalog,
@@ -1427,11 +1458,20 @@ fn count_models_dev_catalog(json: &serde_json::Value) -> (usize, usize) {
 #[cfg(desktop)]
 pub async fn sync_models_cn_catalog(
     storage: &Storage,
+    jobs: &crate::core::job_runtime::JobRuntime,
     config_path: &std::path::Path,
     source_url: &str,
     trigger: &str,
 ) -> Result<CatalogSyncResult, String> {
-    sync_catalog_file(storage, config_path, &MODELS_CN_SPEC, source_url, trigger).await
+    sync_catalog_file(
+        storage,
+        jobs,
+        config_path,
+        &MODELS_CN_SPEC,
+        source_url,
+        trigger,
+    )
+    .await
 }
 
 /// 拉取 models.dev 目录并保存为本地 JSON 文件，成功后重建内存价格表。
@@ -1439,39 +1479,80 @@ pub async fn sync_models_cn_catalog(
 #[cfg(desktop)]
 pub async fn sync_models_dev_catalog(
     storage: &Storage,
+    jobs: &crate::core::job_runtime::JobRuntime,
     config_path: &std::path::Path,
     source_url: &str,
     trigger: &str,
 ) -> Result<CatalogSyncResult, String> {
-    sync_catalog_file(storage, config_path, &MODELS_DEV_SPEC, source_url, trigger).await
+    sync_catalog_file(
+        storage,
+        jobs,
+        config_path,
+        &MODELS_DEV_SPEC,
+        source_url,
+        trigger,
+    )
+    .await
 }
 
 #[cfg(desktop)]
 async fn sync_catalog_file(
     storage: &Storage,
+    jobs: &crate::core::job_runtime::JobRuntime,
     config_path: &std::path::Path,
     spec: &CatalogSpec,
     source_url: &str,
     trigger: &str,
 ) -> Result<CatalogSyncResult, String> {
-    // 1. 拉取远程数据（async reqwest）
+    let lease = jobs
+        .try_acquire_definition(spec.job_definition)
+        .map_err(|running| {
+            format!(
+                "{} 正在运行{}",
+                spec.title,
+                running
+                    .job_id
+                    .as_deref()
+                    .map(|id| format!("（任务 {id}）"))
+                    .unwrap_or_default()
+            )
+        })?;
+
+    // 1. 拉取远程数据。仅该无副作用网络阶段按 JobDefinition 执行超时和重试；
+    //    JSON 校验与本地原子替换失败属于终止错误，不自动重试写入。
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败：{e}"))?;
-    let response = client
-        .get(source_url)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|e| format!("请求 {} 失败：{e}", spec.source))?;
-    if !response.status().is_success() {
-        return Err(format!("{} 返回 HTTP {}", spec.source, response.status()));
-    }
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("读取 {} 响应失败：{e}", spec.source))?;
+    let body = crate::core::job_runtime::run_attempts(&lease, spec.job_definition, |_| async {
+        let response = client
+            .get(source_url)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|e| {
+                crate::core::job_runtime::JobAttemptError::retryable(format!(
+                    "请求 {} 失败：{e}",
+                    spec.source
+                ))
+            })?;
+        let status = response.status();
+        if !status.is_success() {
+            let message = format!("{} 返回 HTTP {status}", spec.source);
+            return Err(if status.as_u16() == 429 || status.is_server_error() {
+                crate::core::job_runtime::JobAttemptError::retryable(message)
+            } else {
+                crate::core::job_runtime::JobAttemptError::terminal(message)
+            });
+        }
+        response.text().await.map_err(|e| {
+            crate::core::job_runtime::JobAttemptError::retryable(format!(
+                "读取 {} 响应失败：{e}",
+                spec.source
+            ))
+        })
+    })
+    .await
+    .map_err(|error| error.message)?;
 
     // 2. 计算内容 hash，与本地文件比较
     let file_path = catalog_dir().join(spec.file_name);
@@ -1507,7 +1588,7 @@ async fn sync_catalog_file(
     storage
         .create_job(
             &job_id,
-            spec.job_type,
+            spec.job_definition.job_type,
             spec.title,
             "拉取官方价格与模型信息",
             trigger,
@@ -1515,6 +1596,7 @@ async fn sync_catalog_file(
             &format!("开始拉取 {} 目录：{source_url}", spec.source),
         )
         .map_err(|e| e.to_string())?;
+    lease.attach_job_id(&job_id);
 
     // 5. 保存为本地 JSON 文件（原子写入：先写临时文件再 rename）
     let tmp_path = file_path.with_extension("json.tmp");

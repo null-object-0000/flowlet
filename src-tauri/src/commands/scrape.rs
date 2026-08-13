@@ -10,8 +10,6 @@ use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::AppState;
 use tauri::{AppHandle, Manager};
 
-const CHANNEL_RESOURCE_SYNC_SCOPE: &str = "channel-resource-sync";
-
 /// 手动触发 models-cn 目录同步。拉取远程数据保存到本地，写入任务日志。
 #[tauri::command]
 pub(crate) async fn sync_models_cn_catalog(
@@ -23,6 +21,7 @@ pub(crate) async fn sync_models_cn_catalog(
     let config_path = state.config_path.clone();
     crate::core::storage::storage_tasks::sync_models_cn_catalog(
         &storage,
+        &state.jobs,
         &config_path,
         &source_url,
         &trigger_source,
@@ -41,6 +40,7 @@ pub(crate) async fn sync_models_dev_catalog(
     let config_path = state.config_path.clone();
     crate::core::storage::storage_tasks::sync_models_dev_catalog(
         &storage,
+        &state.jobs,
         &config_path,
         &source_url,
         &trigger_source,
@@ -2160,7 +2160,7 @@ pub(crate) async fn sync_scrape_balances(
     }
     let lease = match state
         .jobs
-        .try_acquire("channel-resource-sync", CHANNEL_RESOURCE_SYNC_SCOPE)
+        .try_acquire_definition(&crate::core::job_runtime::CHANNEL_RESOURCE_SYNC)
     {
         Ok(lease) => lease,
         Err(_) => {
@@ -2180,7 +2180,7 @@ pub(crate) async fn sync_scrape_balances(
         .storage
         .create_job(
             &job_id,
-            "channel-resource-sync",
+            crate::core::job_runtime::CHANNEL_RESOURCE_SYNC.job_type,
             "渠道资源自动同步",
             "同步账号资源",
             &trigger_source,

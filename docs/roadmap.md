@@ -65,8 +65,10 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 建立由 `FlowletServices` 持有的统一 `JobRuntime`
 - [x] 统一后台同步任务的作用域去重、活动 `job_id` 关联、RAII 释放与取消信号
 - [x] 接入 Agent 数据、Codex 账号、渠道资源、S3 设备、账号工作区和项目工作区同步
-- [ ] 将后台任务的 timeout、retry policy 与可取消等待统一为显式 `JobDefinition`
-- [ ] 评估模型目录同步、数据维护任务和项目 Agent 执行的分层接入；保留其必要的领域运行状态
+- [x] 将后台任务的作用域、timeout、retry policy 与可取消等待统一为显式 `JobDefinition`
+- [x] 模型目录下载接入安全的 attempt timeout、分类重试与指数退避
+- [x] 定时 Body 清理接入统一排他作用域，并在各清理阶段之间响应取消
+- [ ] 评估数据维护任务和项目 Agent 执行的分层接入；保留其必要的领域运行状态
 
 ## Milestone 0：需求校准与文档更新
 

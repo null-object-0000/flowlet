@@ -1,7 +1,5 @@
 use crate::AppState;
 
-const CODEX_ACCOUNT_SYNC_SCOPE: &str = "codex-account-sync";
-
 // Claude Code 走 Anthropic-compatible 端点，其余已支持一键接入的 Agent
 // （OpenCode、Pi）走 OpenAI-compatible 端点。
 fn agent_endpoint_suffix(agent_id: &str) -> Result<&'static str, String> {
@@ -53,7 +51,7 @@ pub(crate) async fn sync_codex_accounts(
 ) -> Result<crate::core::codex_account::CodexAccountSyncResult, String> {
     let lease = match state
         .jobs
-        .try_acquire("codex-account-sync", CODEX_ACCOUNT_SYNC_SCOPE)
+        .try_acquire_definition(&crate::core::job_runtime::CODEX_ACCOUNT_SYNC)
     {
         Ok(lease) => lease,
         Err(_) => {

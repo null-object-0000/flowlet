@@ -302,13 +302,17 @@ revision，不会观察到多个配置集合依次更新时的中间状态。旧
 
 `FlowletServices` 持有统一的 `JobRuntime`。`background_jobs` / `background_job_events` 继续作为
 可查询、可恢复的持久化任务历史；`JobRuntime` 只负责进程内运行状态，两者不混为同一事实源。
-运行任务通过稳定的 `scope_key` 获取 RAII lease：同一作用域拒绝重入，不同作用域仍可并行；
+每类任务通过 `JobDefinition` 集中声明稳定 `job_type`、`scope_key`、单次 attempt timeout 和
+retry policy，并通过 `scope_key` 获取 RAII lease：同一作用域拒绝重入，不同作用域仍可并行；
 持久化任务创建后把 `job_id` 关联到 lease，统一取消命令会同时写入 SQLite 并向活动任务发布
 低延迟取消信号，lease 在成功、失败或提前返回时都会自动释放。
 
-当前 Agent 数据同步、Codex 账号同步、渠道资源同步、S3 设备同步、渠道账号工作区同步和
-项目工作区同步已接入该运行时。任务的业务进度、摘要和事件 schema 保持原样，前端任务页与
-现有 command 返回结构无需调整。项目 Agent 执行仍保留按项目隔离的运行表，因为它同时承载
+当前 Agent 数据同步、Codex 账号同步、渠道资源同步、S3 设备同步、渠道账号工作区同步、
+项目工作区同步和定时 Body 清理已接入该运行时。Body 清理会在各清理阶段之间协作式响应取消。
+任务的业务进度、摘要和事件 schema 保持原样，前端任务页与
+现有 command 返回结构无需调整。模型目录下载作为首个 retryable definition：单次网络 attempt
+上限 30 秒，连接/读取错误、429 和 5xx 最多尝试 3 次并指数退避；JSON 校验和本地原子替换不重试。
+项目 Agent 执行仍保留按项目隔离的运行表，因为它同时承载
 子进程句柄、会话 ID 和看板实时状态，不属于单纯的后台同步互斥。
 
 ## Agent 本机环境探测

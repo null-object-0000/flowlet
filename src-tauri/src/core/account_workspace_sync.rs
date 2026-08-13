@@ -14,7 +14,7 @@ const WORKSPACE_KEYRING_SERVICE: &str = "Flowlet Account Workspace";
 const WORKSPACE_ETAG_META_KEY: &str = "account_workspace_etag_v1";
 const ENVELOPE_AAD: &[u8] = b"flowlet-account-workspace-v1";
 const CATALOG_VERSION: u32 = 1;
-const WORKSPACE_JOB_TYPE: &str = "account-workspace-sync";
+const WORKSPACE_JOB_TYPE: &str = crate::core::job_runtime::ACCOUNT_WORKSPACE_SYNC.job_type;
 static ACCOUNT_WORKSPACE_SYNC_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -538,7 +538,7 @@ pub async fn sync(
     trigger_source: &str,
 ) -> Result<AccountWorkspaceSyncResult, String> {
     let lease = jobs
-        .try_acquire("account-workspace-sync", "account-workspace-sync")
+        .try_acquire_definition(&crate::core::job_runtime::ACCOUNT_WORKSPACE_SYNC)
         .map_err(|_| "渠道账号工作区同步正在运行".to_string())?;
     let _guard = ACCOUNT_WORKSPACE_SYNC_GUARD.lock().await;
     let job_id = create_workspace_job(

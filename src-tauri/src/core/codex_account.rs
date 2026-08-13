@@ -354,7 +354,7 @@ pub async fn sync_codex_accounts(
     storage
         .create_job(
             &job_id,
-            "codex-account-sync",
+            crate::core::job_runtime::CODEX_ACCOUNT_SYNC.job_type,
             "Codex 账号与用量同步",
             "查询账号与用量",
             trigger,

@@ -4,8 +4,6 @@ use crate::core::config::{
 };
 use crate::AppState;
 
-const AGENT_DATA_SYNC_SCOPE: &str = "agent-data-sync";
-
 #[tauri::command]
 pub(crate) fn list_request_logs(
     state: tauri::State<'_, AppState>,
@@ -162,7 +160,7 @@ pub(crate) async fn sync_agent_data(
 ) -> Result<crate::core::storage::AgentDataSyncResult, String> {
     let lease = match state
         .jobs
-        .try_acquire("agent-data-sync", AGENT_DATA_SYNC_SCOPE)
+        .try_acquire_definition(&crate::core::job_runtime::AGENT_DATA_SYNC)
     {
         Ok(lease) => lease,
         Err(_) => {
@@ -216,7 +214,9 @@ pub(crate) fn get_agent_sync_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::storage::AgentSyncStatusReport, String> {
     Ok(crate::core::storage::AgentSyncStatusReport {
-        running: state.jobs.is_running(AGENT_DATA_SYNC_SCOPE),
+        running: state
+            .jobs
+            .is_running(crate::core::job_runtime::AGENT_DATA_SYNC.scope_key),
         sources: state
             .storage
             .list_agent_source_sync_states()

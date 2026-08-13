@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionRow } from "../../domains/agent-session/types";
@@ -81,7 +81,9 @@ const {
   lastInteractionRefetchMock,
 } = vi.hoisted(() => ({
   permissionReplyMock: vi.fn(() => Promise.resolve()),
-  sessionListRefetchMock: vi.fn(() => Promise.resolve({ data: undefined })),
+  sessionListRefetchMock: vi.fn<() => Promise<{ data: { rows: AgentSessionRow[] } }>>(
+    () => Promise.resolve({ data: { rows: [] } }),
+  ),
   childrenRefetchMock: vi.fn(() => Promise.resolve()),
   nativeSummaryRefetchMock: vi.fn(() => Promise.resolve()),
   lastInteractionRefetchMock: vi.fn(() => Promise.resolve()),
@@ -348,6 +350,30 @@ describe("AgentSessionsPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "子会话（1）" }));
     const childrenPane = screen.getByRole("tabpanel", { name: "子会话（1）" });
     expect(within(childrenPane).getByText("Child session title")).toBeInTheDocument();
+  });
+
+  it("does not reopen a closed detail drawer when an in-flight overview refresh completes", async () => {
+    let resolveRefresh: ((value: { data: { rows: AgentSessionRow[] } }) => void) | undefined;
+    sessionListRefetchMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRefresh = resolve;
+    }));
+    render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByText("Native session title").closest("button")!);
+    const drawer = screen.getByRole("dialog");
+    await waitFor(() => expect(sessionListRefetchMock).toHaveBeenCalledOnce());
+
+    const closeButton = drawer.querySelector<HTMLButtonElement>(".semi-sidesheet-close");
+    expect(closeButton).not.toBeNull();
+    fireEvent.click(closeButton!);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveRefresh?.({ data: { rows: [{ ...session, title: "Refreshed title" }] } });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("falls back to the project name when native title is unavailable", () => {

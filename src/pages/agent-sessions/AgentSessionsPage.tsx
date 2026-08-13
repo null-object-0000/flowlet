@@ -40,12 +40,19 @@ export function AgentSessionsPage() {
   const latestCheckedAt = checkedTimes.length ? checkedTimes[checkedTimes.length - 1] : null;
   const syncStatusTitle = syncStatus.data?.sources.map((source) => `${agentLabel(source.agentType as AgentSessionRow["agentType"])}：${source.failedCount > 0 ? source.lastError ?? t("同步异常") : t("已扫描 {count} 个会话", { count: source.scannedCount })}`).join("\n");
   const refreshSelectedSessionOverview = async () => {
+    const refreshingSession = selectedSession;
     const result = await sessions.refetch();
-    if (!selectedSession) return;
+    if (!refreshingSession) return;
     const refreshed = result.data?.rows.find((row) =>
-      row.agentType === selectedSession.agentType && row.sessionId === selectedSession.sessionId,
+      row.agentType === refreshingSession.agentType && row.sessionId === refreshingSession.sessionId,
     );
-    if (refreshed) setSelectedSession(refreshed);
+    if (refreshed) {
+      setSelectedSession((current) => current
+        && current.agentType === refreshingSession.agentType
+        && current.sessionId === refreshingSession.sessionId
+        ? refreshed
+        : current);
+    }
   };
 
   useEffect(() => {

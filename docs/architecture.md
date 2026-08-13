@@ -137,7 +137,8 @@ SQLite 或运行时配置快照直接修改代理状态。修改内置注册表�
 Rust 编译期环境与全局配置适配器。接入抽屉同样通过 `globalConfigAdapterId` 选择前端
 `AgentAccessAdapter`，由适配器提供安装名称、额外状态、配置开关、写入选项和手动配置片段；
 通用 SideSheet 不再按 Agent ID 维护条件分支。Codex 手动配置中的模型目录直接读取仓库根目录
-`codex-models.json`，避免前端常量与 Rust 内置目录漂移。
+`codex-models.json`，避免前端常量与 Rust 内置目录漂移。四个前端接入实现分别位于
+`features/agent-access/agent-access-adapters/`，统一 `agentAccessAdapter()` 入口保持稳定。
 
 Rust 环境检测入口通过编译期 `AgentEnvironmentAdapter` registry 按 `environmentAdapterId`
 解析实现；Claude Code、OpenCode、Pi、Codex 的检测编排分别位于
@@ -156,7 +157,8 @@ Agent 插件同时声明 `sessionAdapterId`。Rust `AgentSessionAdapter` 统一�
 可用运行时会话类型、会话目录枚举、Timeline、最后交互和增量解析来源；Claude Code、OpenCode、
 Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显式承载 `codex-cli` 与
 `codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。现有原生解析器、
-会话合并与用量账本语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。
+会话合并与用量账本语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。四个实现
+分别位于 `agent_session_adapter/adapters/`，父模块只保留 Trait、registry 查询和公共默认行为。
 
 Agent 插件还声明 `runnerAdapterId`。Rust 任务调度通过编译期 Runner Adapter registry 统一解析
 任务 `agent_profile`、环境探测适配器、展示名和异步执行函数；Claude Code、OpenCode、Pi、Codex
@@ -347,7 +349,9 @@ Capability Adapter。`ChannelPreset.supports_*` 继续声明产品上是否开�
 才可调用。同一 Adapter 可以被多个行为兼容的渠道贡献复用，command 不再按 `channel_id`
 维护分支。
 
-当前统一入口位于 `src-tauri/src/core/channel_capability_adapter.rs`：
+统一入口位于 `src-tauri/src/core/channel_capability_adapter.rs`，七个内置渠道的能力声明分别位于
+`channel_capability_adapter/adapters/`；父模块保留注册表解析、能力门控以及模型同步和余额查询
+的统一执行入口：
 
 ```text
 Channel contribution (plugin-registry.json)

@@ -7,6 +7,10 @@ use super::sync::{
     sync_kimi_models, sync_longcat_models, sync_openai_compatible_models, sync_qwen_models,
 };
 
+mod adapters;
+
+use adapters::ADAPTERS;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModelSyncAdapter {
     LongCat,
@@ -56,81 +60,6 @@ pub(crate) struct ChannelCapabilityAdapter {
     console_scrape: ConsoleScrapeAdapter,
     login_page: LoginPageAdapter,
 }
-
-const ADAPTERS: &[ChannelCapabilityAdapter] = &[
-    ChannelCapabilityAdapter {
-        id: "longcat",
-        preset_factory: ChannelPreset::longcat,
-        model_sync: ModelSyncAdapter::LongCat,
-        balance_query: None,
-        strips_openai_v1_path: false,
-        console_scrape: ConsoleScrapeAdapter::Fixed("hybrid"),
-        login_page: LoginPageAdapter::Generic,
-    },
-    ChannelCapabilityAdapter {
-        id: "deepseek",
-        preset_factory: ChannelPreset::deepseek,
-        model_sync: ModelSyncAdapter::DeepSeek,
-        balance_query: Some(BalanceQueryAdapter::DeepSeek),
-        strips_openai_v1_path: false,
-        console_scrape: ConsoleScrapeAdapter::None,
-        login_page: LoginPageAdapter::None,
-    },
-    ChannelCapabilityAdapter {
-        id: "kimi",
-        preset_factory: ChannelPreset::kimi,
-        model_sync: ModelSyncAdapter::Kimi,
-        balance_query: Some(BalanceQueryAdapter::Kimi),
-        strips_openai_v1_path: false,
-        console_scrape: ConsoleScrapeAdapter::None,
-        login_page: LoginPageAdapter::None,
-    },
-    ChannelCapabilityAdapter {
-        id: "qwen",
-        preset_factory: ChannelPreset::qwen,
-        model_sync: ModelSyncAdapter::Qwen,
-        balance_query: None,
-        strips_openai_v1_path: false,
-        console_scrape: ConsoleScrapeAdapter::ResourceMode {
-            resource_mode: "token_plan",
-            mode_key: "token_plan",
-        },
-        login_page: LoginPageAdapter::GenericOrHost("account.aliyun.com"),
-    },
-    ChannelCapabilityAdapter {
-        id: "custom",
-        preset_factory: ChannelPreset::custom,
-        model_sync: ModelSyncAdapter::OpenAiCompatible {
-            use_configured_models_endpoint: false,
-        },
-        balance_query: None,
-        strips_openai_v1_path: false,
-        console_scrape: ConsoleScrapeAdapter::None,
-        login_page: LoginPageAdapter::None,
-    },
-    ChannelCapabilityAdapter {
-        id: "zhipu",
-        preset_factory: ChannelPreset::zhipu,
-        model_sync: ModelSyncAdapter::OpenAiCompatible {
-            use_configured_models_endpoint: true,
-        },
-        balance_query: None,
-        strips_openai_v1_path: true,
-        console_scrape: ConsoleScrapeAdapter::None,
-        login_page: LoginPageAdapter::None,
-    },
-    ChannelCapabilityAdapter {
-        id: "openrouter",
-        preset_factory: ChannelPreset::openrouter,
-        model_sync: ModelSyncAdapter::OpenAiCompatible {
-            use_configured_models_endpoint: true,
-        },
-        balance_query: Some(BalanceQueryAdapter::OpenRouter),
-        strips_openai_v1_path: false,
-        console_scrape: ConsoleScrapeAdapter::None,
-        login_page: LoginPageAdapter::None,
-    },
-];
 
 pub(crate) fn has_channel_capability_adapter(adapter_id: &str) -> bool {
     channel_capability_adapter(adapter_id).is_some()

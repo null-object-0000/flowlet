@@ -68,7 +68,8 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 将后台任务的作用域、timeout、retry policy 与可取消等待统一为显式 `JobDefinition`
 - [x] 模型目录下载接入安全的 attempt timeout、分类重试与指数退避
 - [x] 定时 Body 清理接入统一排他作用域，并在各清理阶段之间响应取消
-- [ ] 评估数据维护任务和项目 Agent 执行的分层接入；保留其必要的领域运行状态
+- [x] 项目 Agent / 重复任务按动态项目作用域接入 JobRuntime，同时保留子进程与看板领域状态
+- [x] 数据诊断和修复保持前台 command + 实时进度事件，不伪装成可恢复后台任务
 
 ## Milestone 0：需求校准与文档更新
 

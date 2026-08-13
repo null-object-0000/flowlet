@@ -214,7 +214,12 @@ pub(crate) async fn run_recurring_task_now(
         .storage
         .create_recurring_task_run(&task, if test { "test" } else { "manual" }, None)
         .map_err(|error| error.to_string())?;
-    crate::core::agent_task_runner::run_recurring_task_run(state.storage.clone(), run.id).await
+    crate::core::agent_task_runner::run_recurring_task_run(
+        state.storage.clone(),
+        state.jobs.clone(),
+        run.id,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -371,6 +376,7 @@ pub(crate) async fn run_project_task(
     crate::core::agent_task_runner::run_project_task(
         app,
         storage,
+        state.jobs.clone(),
         project_id,
         task_id,
         current_device_id,

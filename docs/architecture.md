@@ -312,8 +312,9 @@ retry policy，并通过 `scope_key` 获取 RAII lease：同一作用域拒绝�
 任务的业务进度、摘要和事件 schema 保持原样，前端任务页与
 现有 command 返回结构无需调整。模型目录下载作为首个 retryable definition：单次网络 attempt
 上限 30 秒，连接/读取错误、429 和 5xx 最多尝试 3 次并指数退避；JSON 校验和本地原子替换不重试。
-项目 Agent 执行仍保留按项目隔离的运行表，因为它同时承载
-子进程句柄、会话 ID 和看板实时状态，不属于单纯的后台同步互斥。
+项目 Agent 执行与重复任务 Run 也按动态 `project-task:<project_id>` 作用域获取 JobRuntime
+lease，因此普通任务和重复任务在同一项目内统一互斥、不同项目仍可并行。领域运行表继续承载
+任务标题、Agent、会话 ID、子进程控制和看板实时状态；JobRuntime 不取代这些领域状态。
 
 ## Agent 本机环境探测
 

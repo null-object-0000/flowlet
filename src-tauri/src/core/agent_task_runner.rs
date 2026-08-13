@@ -11,6 +11,7 @@
 //! Agent 退出后由 Rust 自动把任务状态回写 `review`（等待人工审核）。
 
 use crate::core::agent_environment::AgentSurface;
+use crate::core::job_runtime::{JobLease, JobRuntime, PROJECT_TASK_RUN, RECURRING_TASK_RUN};
 use crate::core::storage::{ProjectTask, Storage};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -100,6 +101,7 @@ struct ExecutionOutcome {
 /// 领取即占位（在运行集合中插入占位信息），执行失败提前返回时随函数结束释放。
 struct AgentTaskRunningGuard {
     project_id: String,
+    _lease: JobLease,
 }
 
 impl Drop for AgentTaskRunningGuard {
@@ -136,6 +138,7 @@ pub(crate) fn task_runner_state() -> ProjectTaskRunnerState {
 pub(crate) async fn run_project_task(
     app: AppHandle,
     storage: Storage,
+    jobs: JobRuntime,
     project_id: String,
     task_id: String,
     current_device_id: String,
@@ -143,6 +146,17 @@ pub(crate) async fn run_project_task(
     // 1. 抢「按项目隔离」的执行槽：
     //    同一项目至多一个任务在跑，不同项目互不影响。领取即占位，执行失败提前返回时
     //    随函数结束 drop 释放；成功则随后台执行任务 move，Agent 结束后释放。
+    let scope_key = format!("{}:{project_id}", PROJECT_TASK_RUN.scope_key);
+    let lease = match jobs.try_acquire_in_scope(&PROJECT_TASK_RUN, scope_key) {
+        Ok(lease) => lease,
+        Err(_) => {
+            return Ok(RunProjectTaskResult {
+                started: false,
+                job_id: None,
+                message: "该项目已有任务在执行中，任务已进入队列等待".to_string(),
+            });
+        }
+    };
     {
         let mut running = agent_task_running()
             .lock()
@@ -169,6 +183,7 @@ pub(crate) async fn run_project_task(
     }
     let guard = AgentTaskRunningGuard {
         project_id: project_id.clone(),
+        _lease: lease,
     };
 
     // 2. 读取任务并校验：调度器只领取「已提交」状态的任务。
@@ -210,7 +225,7 @@ pub(crate) async fn run_project_task(
     storage
         .create_job(
             &job_id,
-            "project-task-run",
+            PROJECT_TASK_RUN.job_type,
             &format!("任务执行：{}", task.title),
             "正在启动",
             "manual",
@@ -218,6 +233,7 @@ pub(crate) async fn run_project_task(
             &format!("开始执行任务「{}」", task.title),
         )
         .map_err(|error| format!("创建任务日志失败：{error}"))?;
+    guard._lease.attach_job_id(job_id.clone());
 
     // 5. 任务进入执行中（与执行同生命周期，避免前端重复标记的竞态）。
     storage
@@ -310,6 +326,7 @@ pub(crate) async fn run_project_task(
 #[cfg(desktop)]
 pub(crate) async fn run_recurring_task_run(
     storage: Storage,
+    jobs: JobRuntime,
     run_id: String,
 ) -> Result<RunProjectTaskResult, String> {
     let run = storage
@@ -323,6 +340,17 @@ pub(crate) async fn run_recurring_task_run(
             message: "该运行不是待执行状态".to_string(),
         });
     }
+    let scope_key = format!("{}:{}", RECURRING_TASK_RUN.scope_key, run.project_id);
+    let lease = match jobs.try_acquire_in_scope(&RECURRING_TASK_RUN, scope_key) {
+        Ok(lease) => lease,
+        Err(_) => {
+            return Ok(RunProjectTaskResult {
+                started: false,
+                job_id: None,
+                message: "该项目已有任务执行中，重复任务运行已排队".to_string(),
+            });
+        }
+    };
     {
         let mut running = agent_task_running()
             .lock()
@@ -348,6 +376,7 @@ pub(crate) async fn run_recurring_task_run(
     }
     let guard = AgentTaskRunningGuard {
         project_id: run.project_id.clone(),
+        _lease: lease,
     };
     required_project_dir(&storage, &run.project_id)?;
     let task = ProjectTask {
@@ -375,7 +404,7 @@ pub(crate) async fn run_recurring_task_run(
     storage
         .create_job(
             &job_id,
-            "recurring-task-run",
+            RECURRING_TASK_RUN.job_type,
             &format!("重复任务：{}", task.title),
             "正在启动",
             &run.trigger_source,
@@ -383,6 +412,7 @@ pub(crate) async fn run_recurring_task_run(
             &format!("开始运行「{}」", task.title),
         )
         .map_err(|error| error.to_string())?;
+    guard._lease.attach_job_id(job_id.clone());
     if !storage
         .start_recurring_run(&run.id, &job_id)
         .map_err(|error| error.to_string())?

@@ -602,6 +602,7 @@ fn run_desktop() {
             // 独立 Run（唯一索引防重复），再尝试领取排队 Run；同项目槽被普通任务或
             // 另一条 Run 占用时保留排队，下轮继续。错过多个周期只生成最近一次到期 Run。
             let recurring_storage = state.storage.clone();
+            let recurring_jobs = state.jobs.clone();
             tauri::async_runtime::spawn(async move {
                 let period = std::time::Duration::from_secs(30);
                 let mut interval = tokio::time::interval(period);
@@ -616,7 +617,7 @@ fn run_desktop() {
                         Err(error) => { tracing::warn!(error = %error, "读取重复任务运行队列失败"); continue; }
                     };
                     for run in queued {
-                        match crate::core::agent_task_runner::run_recurring_task_run(recurring_storage.clone(), run.id.clone()).await {
+                        match crate::core::agent_task_runner::run_recurring_task_run(recurring_storage.clone(), recurring_jobs.clone(), run.id.clone()).await {
                             Ok(result) if result.started => {}
                             Ok(_) => {}
                             Err(error) => tracing::warn!(run_id = %run.id, error = %error, "领取重复任务运行失败"),

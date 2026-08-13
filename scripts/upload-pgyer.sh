@@ -4,6 +4,7 @@ set -euo pipefail
 
 apk_path="${1:-}"
 release_notes="${RELEASE_NOTES:-}"
+release_notes="$(printf '%s' "$release_notes" | python3 scripts/format-pgyer-release-notes.py)"
 
 if [ -z "${PGYER_API_KEY:-}" ]; then
   echo "Required environment variable is missing: PGYER_API_KEY" >&2

@@ -29,6 +29,7 @@
         "showsCredentialsFile": false,
         "showsFastModel": true,
         "showsSubagentModel": true,
+        "supportsManagedConfig": true,
         "environmentDescription": "识别 Claude Code 的安装位置、版本和安装方式",
         "notInstalledText": "未检测到 Claude Code。Flowlet 会检查 PATH 和官方常见安装位置。",
         "globalConfigDescription": "配置后可从任意终端或 IDE 启动 Claude Code",
@@ -55,6 +56,7 @@
         "showsCredentialsFile": true,
         "showsFastModel": true,
         "showsSubagentModel": false,
+        "supportsManagedConfig": true,
         "environmentDescription": "识别 OpenCode CLI 与 Desktop 的安装位置和版本",
         "notInstalledText": "未检测到 OpenCode CLI 或 Desktop。Flowlet 会检查 PATH 和常见安装位置。",
         "globalConfigDescription": "OpenCode CLI 与 Desktop 共用此全局配置",
@@ -81,6 +83,7 @@
         "showsCredentialsFile": true,
         "showsFastModel": false,
         "showsSubagentModel": false,
+        "supportsManagedConfig": true,
         "environmentDescription": "识别 Pi CLI 的安装位置和版本",
         "notInstalledText": "未检测到 Pi。Flowlet 会检查 PATH 和常见安装位置。",
         "globalConfigDescription": "Pi 的 Provider 定义在 models.json，凭据在 auth.json，默认模型在 settings.json",
@@ -107,11 +110,39 @@
         "showsCredentialsFile": true,
         "showsFastModel": false,
         "showsSubagentModel": false,
+        "supportsManagedConfig": true,
         "environmentDescription": "识别 Codex CLI 与 ChatGPT Desktop 的安装位置和版本",
         "notInstalledText": "未检测到 Codex CLI 或 ChatGPT Desktop。Flowlet 会检查 PATH 与常见安装位置。",
         "globalConfigDescription": "Codex CLI、ChatGPT 桌面端与 VS Code 插件共用此全局配置",
         "manualDescription": "以下内容与一键写入的 Codex 全局配置一致",
         "restartTip": "修改全局配置后请重新启动 Codex CLI 与 ChatGPT Desktop。"
+      }
+    },
+    {
+      "id": "flowlet.agent.deepseek-harness",
+      "kind": "agent",
+      "agent": {
+        "id": "deepseek-harness",
+        "name": "DeepSeek Harness",
+        "environmentAdapterId": "deepseek-harness",
+        "globalConfigAdapterId": "deepseek-harness",
+        "sessionAdapterId": "deepseek-harness",
+        "runnerAdapterId": "deepseek-harness",
+        "endpointSuffix": "/v1",
+        "npmPackage": "@deepseek-ai/dsh",
+        "surfaces": ["web"],
+        "iconSrc": "/icons/lobe/deepseek-color.svg",
+        "officialUrl": "https://deepseek-harness.github.io/deepseek-harness/guide/quickstart",
+        "updateUrl": "https://www.npmjs.com/package/@deepseek-ai/dsh",
+        "showsCredentialsFile": true,
+        "showsFastModel": false,
+        "showsSubagentModel": false,
+        "supportsManagedConfig": true,
+        "environmentDescription": "识别 DeepSeek Harness 的本地 Web、Harness 目录与可用启动入口",
+        "notInstalledText": "未检测到 DeepSeek Harness。Flowlet 会检查本地 Harness 目录、运行中的 Web 服务和 PATH 中的 dsh。",
+        "globalConfigDescription": "Flowlet 直接写入 Provider、默认模型与 Client Token",
+        "manualDescription": "Flowlet 会安全合并 DSH 官方 YAML 配置；下方片段与一键写入内容一致。",
+        "restartTip": "DSH 会热加载 settings.yaml 与 .credentials.yaml；配置生效无需重启 DSH Web。"
       }
     }
   ]

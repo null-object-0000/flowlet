@@ -25,6 +25,12 @@
       "enabled": true
     },
     {
+      "id": "deepseek-harness",
+      "pattern": "deepseek-harness/",
+      "name": "DeepSeek Harness",
+      "enabled": true
+    },
+    {
       "id": "flowlet",
       "pattern": "Flowlet/",
       "name": "Flowlet",

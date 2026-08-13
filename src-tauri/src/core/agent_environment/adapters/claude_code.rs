@@ -50,6 +50,7 @@ async fn detect() -> AgentEnvironmentReport {
         agent_id: "claude-code".to_string(),
         agent_name: "Claude Code CLI".to_string(),
         installed: !installations.is_empty(),
+        runtime_running: None,
         primary,
         installations,
     }

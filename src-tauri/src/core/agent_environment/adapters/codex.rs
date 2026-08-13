@@ -26,6 +26,7 @@ async fn detect() -> AgentEnvironmentReport {
         agent_id: "chatgpt-desktop".to_string(),
         agent_name: "ChatGPT (Codex)".to_string(),
         installed: !installations.is_empty(),
+        runtime_running: None,
         primary,
         installations,
     }

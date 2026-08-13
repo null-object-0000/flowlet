@@ -9,12 +9,14 @@ describe("plugin registry", () => {
   });
 
   it("registers each agent identity and integration metadata once", () => {
-    expect(AGENT_PLUGINS.map((agent) => agent.id)).toEqual(["claude-code", "opencode", "pi", "codex"]);
+    expect(AGENT_PLUGINS.map((agent) => agent.id)).toEqual(["claude-code", "opencode", "pi", "codex", "deepseek-harness"]);
     expect(agentPlugin("claude-code").endpointSuffix).toBe("/anthropic");
     expect(agentPlugin("codex").environmentAdapterId).toBe("chatgpt-desktop");
     expect(agentPlugin("codex").globalConfigAdapterId).toBe("codex");
     expect(agentPlugin("codex").sessionAdapterId).toBe("codex");
     expect(agentPlugin("codex").runnerAdapterId).toBe("codex");
     expect(agentPlugin("opencode").surfaces).toEqual(["cli", "desktop"]);
+    expect(agentPlugin("deepseek-harness").surfaces).toEqual(["web"]);
+    expect(agentPlugin("deepseek-harness").supportsManagedConfig).toBe(true);
   });
 });

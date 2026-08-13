@@ -392,6 +392,7 @@ fn agent_surface_name(surface: &AgentSurface) -> &'static str {
     match surface {
         AgentSurface::Cli => "cli",
         AgentSurface::Desktop => "desktop",
+        AgentSurface::Web => "web",
     }
 }
 

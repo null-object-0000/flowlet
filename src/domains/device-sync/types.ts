@@ -81,7 +81,7 @@ export type SharedAgentSession = SyncedAgentSession & {
 };
 
 export type SyncedAgentInstallation = {
-  surface: "cli" | "desktop";
+  surface: "cli" | "desktop" | "web";
   installMethod: string;
   version: string | null;
 };

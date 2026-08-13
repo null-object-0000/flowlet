@@ -4,6 +4,7 @@ import { claudeCodeAdapter } from "./agent-access-adapters/claudeCode";
 import { codexAdapter } from "./agent-access-adapters/codex";
 import { openCodeAdapter } from "./agent-access-adapters/openCode";
 import { piAdapter } from "./agent-access-adapters/pi";
+import { deepSeekHarnessAdapter } from "./agent-access-adapters/deepSeekHarness";
 
 export type Translate = (source: string, values?: Record<string, string | number>) => string;
 
@@ -45,6 +46,7 @@ const ADAPTERS: Record<AgentGlobalConfigAdapterId, AgentAccessAdapter> = {
   opencode: openCodeAdapter,
   pi: piAdapter,
   codex: codexAdapter,
+  "deepseek-harness": deepSeekHarnessAdapter,
 };
 
 export function agentAccessAdapter(adapterId: AgentGlobalConfigAdapterId): AgentAccessAdapter {

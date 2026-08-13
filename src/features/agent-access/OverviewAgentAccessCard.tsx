@@ -7,6 +7,7 @@ import { AgentAccessSideSheet, type AgentKind } from "./AgentAccessSideSheet";
 import { cliInstalledVersion, isNewerVersion } from "../../domains/agent/versions";
 import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentLatestVersionReport, AgentSurface } from "../../domains/agent/types";
 import { AGENT_PLUGINS, agentPlugin } from "../../domains/pluginRegistry";
+import { errorMessage } from "../../shared/errors/AppError";
 import {
   useAgentEnvironments,
   useAgentGlobalConfig,
@@ -35,7 +36,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       await navigator.clipboard.writeText(value);
       Toast.success(message);
     } catch (error) {
-      Toast.error(t("复制失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("复制失败：{message}", { message: errorMessage(error) }));
     }
   };
 
@@ -47,7 +48,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       await activeGlobalConfig.apply.mutateAsync(options);
       Toast.success(t("{name} 已全局接入 Flowlet", { name: activeAgentName }));
     } catch (error) {
-      Toast.error(t("写入 {name} 全局配置失败：{message}", { name: activeAgentName, message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("写入 {name} 全局配置失败：{message}", { name: activeAgentName, message: errorMessage(error) }));
     }
   };
 
@@ -56,7 +57,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       await activeGlobalConfig.restore.mutateAsync();
       Toast.success(t("{name} 全局配置已恢复", { name: activeAgentName }));
     } catch (error) {
-      Toast.error(t("恢复 {name} 全局配置失败：{message}", { name: activeAgentName, message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("恢复 {name} 全局配置失败：{message}", { name: activeAgentName, message: errorMessage(error) }));
     }
   };
 
@@ -66,9 +67,11 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
         <OverviewAgentListView>
           {AGENT_PLUGINS.map(({ name, iconSrc, tone, id: kind, surfaces }) => {
             const environmentQuery = environments.get(kind);
-            // 版本更新提示只针对 CLI 包：桌面应用（ChatGPT Desktop / OpenCode Desktop）
-            // 是独立版本体系，不参与 npm latest 比较。
-            const installedVersion = cliInstalledVersion(environmentQuery?.data);
+            // npm 包版本对应 CLI；DSH 没有 CLI Surface，包版本对应其 Web。
+            // Desktop 是独立版本体系，不参与 npm latest 比较。
+            const installedVersion = surfaces.includes("cli")
+              ? cliInstalledVersion(environmentQuery?.data)
+              : environmentQuery?.data?.installations.find((item) => item.surface === "web")?.version ?? null;
             const hasNewer = isNewerVersion(latestByAgent.get(kind)?.latest_version, installedVersion);
             return (
               <OverviewAgentRowView
@@ -78,8 +81,9 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
                 tone={tone}
                 updateAvailable={hasNewer}
                 surfaces={[
-                  { label: t("CLI"), value: surfaceStatusValue("cli", environmentQuery?.data, environmentQuery?.isLoading ?? false, environmentQuery?.isError ?? false, t) },
+                  ...(surfaces.includes("cli") ? [{ label: t("CLI"), value: surfaceStatusValue("cli", environmentQuery?.data, environmentQuery?.isLoading ?? false, environmentQuery?.isError ?? false, t) }] : []),
                   ...(surfaces.includes("desktop") ? [{ label: t("Desktop"), value: surfaceStatusValue("desktop", environmentQuery?.data, environmentQuery?.isLoading ?? false, environmentQuery?.isError ?? false, t) }] : []),
+                  ...(surfaces.includes("web") ? [{ label: t("Web"), value: surfaceStatusValue("web", environmentQuery?.data, environmentQuery?.isLoading ?? false, environmentQuery?.isError ?? false, t) }] : []),
                 ]}
                 ariaLabel={t("配置 {name}", { name })}
                 title={hasNewer ? t("检测到新版本，点击查看详情") : undefined}

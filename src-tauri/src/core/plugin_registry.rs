@@ -61,6 +61,12 @@ pub struct AgentPluginDescriptor {
     pub endpoint_suffix: String,
     pub npm_package: String,
     pub surfaces: Vec<String>,
+    #[serde(default = "default_true")]
+    pub supports_managed_config: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug)]
@@ -246,7 +252,7 @@ mod tests {
                 .iter()
                 .map(|agent| agent.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex"]
+            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]
         );
         assert_eq!(
             registry.agent("claude-code").unwrap().endpoint_suffix,
@@ -262,6 +268,12 @@ mod tests {
         );
         assert_eq!(registry.agent("codex").unwrap().session_adapter_id, "codex");
         assert_eq!(registry.agent("codex").unwrap().runner_adapter_id, "codex");
+        assert!(
+            registry
+                .agent("deepseek-harness")
+                .unwrap()
+                .supports_managed_config
+        );
     }
 
     #[test]

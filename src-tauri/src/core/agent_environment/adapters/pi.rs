@@ -53,6 +53,7 @@ async fn detect() -> AgentEnvironmentReport {
         agent_id: "pi".to_string(),
         agent_name: "Pi".to_string(),
         installed: !installations.is_empty(),
+        runtime_running: None,
         primary,
         installations,
     }

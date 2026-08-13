@@ -74,6 +74,6 @@ function agentConnectionStatus(agent: SyncedAgentProfile, t: Translate) {
 }
 
 function installationLabel(installation: SyncedAgentProfile["installations"][number], t: Translate) {
-  const surface = installation.surface === "desktop" ? t("桌面端") : "CLI";
+  const surface = installation.surface === "desktop" ? t("桌面端") : installation.surface === "web" ? t("Web") : "CLI";
   return installation.version ? `${surface} ${installation.version}` : surface;
 }

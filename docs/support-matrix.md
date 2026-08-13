@@ -162,7 +162,7 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 
 ### 5.1 一等接入矩阵
 
-概览页当前提供四类一等 Agent 入口。
+概览页当前提供五类一等 Agent 入口。
 
 | Agent | 安装探测 | 一键写入/恢复 | 接入协议 | 请求归属 | 原生会话与时间线 | 其他能力 |
 |-------|----------|---------------|----------|----------|------------------|----------|
@@ -170,6 +170,7 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 | OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置 |
 | Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可部署原生扩展注入 `x-flowlet-session` |
 | Codex | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | 账号发现/授权/套餐用量/credits 查询与单账号删除（承载于渠道账号卡片伪账号行的详情抽屉；删除只移除 Flowlet 本地凭据与观测快照，不影响 Codex 端登录态） |
+| DeepSeek Harness | ✅ Web + Harness 目录 + 启动入口 | ✅，直接安全合并官方 YAML，不依赖 Web 运行 | OpenAI Chat Completions | ✅ `x-flowlet-client: deepseek-harness` | ✅，DSH v0 原生会话 | `dsh --profile headless` fresh task；暂不支持 resume |
 
 Codex 账号的新增/重新授权通过独立 Codex CLI 的 `codex app-server` 完成。Desktop 仍参与
 安装探测、全局配置和原生会话读取，但 Microsoft Store 应用包内部的 `codex.exe` 不视为
@@ -181,6 +182,12 @@ Codex 账号的新增/重新授权通过独立 Codex CLI 的 `codex app-server` 
 - 修改前备份 Flowlet 管理的字段；
 - 写入本地 Base URL、Client Token 和模型映射；
 - 恢复时保留用户后来新增的非 Flowlet 字段。
+
+DeepSeek Harness 的一键写入直接安全合并 `$DSH_HOME/settings.yaml` 与
+`$DSH_HOME/.credentials.yaml`：Flowlet 复用 DSH 的相邻文件锁协议，并使用原子替换和跨文件
+失败回滚。DSH Web 无需运行；运行中可热加载，未运行时下次启动生效。恢复仅还原
+`llm-pi-ai.providers.flowlet`、`agent-default-model.provider/model` 与专用 Client Token，
+不覆盖其他设置或注释。
 
 Codex 全系（Codex CLI、ChatGPT 桌面端、VS Code Codex 插件）共享同一份
 `~/.codex/config.toml` 与 `auth.json`，Flowlet 一键写入一次即覆盖三端：受管

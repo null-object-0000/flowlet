@@ -58,7 +58,8 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 将 DeepSeek / Kimi / OpenRouter 官方余额 DTO、解析和错误处理归档到对应 Channel Adapter
 - [x] 将 LongCat / Qwen 控制台响应分类、合并和完成条件归档到对应 Channel Adapter
 - [x] 将 `sync.rs` 中 Kimi / LongCat 的模型专属 DTO、发布时间校准与详情转换器归档到对应 Channel Adapter
-- [ ] 用新增 Channel 和新增 Agent 各完成一次端到端接入演练，固化脚手架与验收清单
+- [x] 用 DeepSeek Harness 完成新增 Agent 端到端接入演练：新增 `web` Surface，通过直接安全合并 DSH 官方配置文件接通一键写入/恢复，并接通环境、v0 会话和 fresh headless Runner；显式保留 resume 能力边界
+- [ ] 用新增 Channel 完成一次端到端接入演练，固化脚手架与验收清单
 
 ## 后台任务运行时收口（进行中）
 

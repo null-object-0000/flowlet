@@ -111,6 +111,12 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
     "pattern": "Codex Desktop/",
     "name": "Codex Desktop",
     "enabled": true
+  },
+  {
+    "id": "deepseek-harness",
+    "pattern": "deepseek-harness/",
+    "name": "DeepSeek Harness",
+    "enabled": true
   }
 ]
 ```
@@ -121,8 +127,8 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 - 与鉴权 token 解耦：仅决定日志/用量中的客户端归属，不控制能否请求。
 - 不命中任何规则时，客户端标记为"未知"（`client_id = NULL`）。
 - 每次请求都从 `config.json` 热读，修改后立即生效，无需重启代理。
-- 内置兜底规则：Flowlet 随版本内置少量默认规则（当前为 `codex` 与
-  `codex-desktop`），加载时按 `id` 去重补入——用户配置中完全缺失该 `id` 时才补充，
+- 内置兜底规则：Flowlet 随版本内置少量默认规则（当前为 `codex`、
+  `codex-desktop` 与 `deepseek-harness`），加载时按 `id` 去重补入——用户配置中完全缺失该 `id` 时才补充，
   用户显式禁用则尊重用户。因此早于该规则的已有安装无需改 `config.json` 也能正确
   归属；该机制不改写用户文件。
 

@@ -57,7 +57,7 @@ mod tests {
                 .iter()
                 .map(|adapter| adapter.id())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex"]
+            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]
         );
         assert_eq!(
             adapter_for_agent_type("codex-cli").map(|adapter| adapter.id()),
@@ -68,5 +68,9 @@ mod tests {
             Some("codex")
         );
         assert!(adapter_for_agent_type("missing").is_none());
+        assert_eq!(
+            adapter_for_agent_type("deepseek-harness").map(|adapter| adapter.id()),
+            Some("deepseek-harness")
+        );
     }
 }

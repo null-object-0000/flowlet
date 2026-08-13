@@ -4,6 +4,7 @@ use std::pin::Pin;
 
 mod claude_code;
 pub(in crate::core::agent_environment) mod codex;
+mod deepseek_harness;
 mod opencode;
 mod pi;
 
@@ -15,7 +16,7 @@ pub(super) struct AgentEnvironmentAdapter {
     pub(super) detect: DetectEnvironment,
 }
 
-static ADAPTERS: [AgentEnvironmentAdapter; 4] = [
+static ADAPTERS: [AgentEnvironmentAdapter; 5] = [
     AgentEnvironmentAdapter {
         id: "claude-code",
         detect: claude_code::detect_boxed,
@@ -31,6 +32,10 @@ static ADAPTERS: [AgentEnvironmentAdapter; 4] = [
     AgentEnvironmentAdapter {
         id: "chatgpt-desktop",
         detect: codex::detect_boxed,
+    },
+    AgentEnvironmentAdapter {
+        id: "deepseek-harness",
+        detect: deepseek_harness::detect_boxed,
     },
 ];
 
@@ -53,7 +58,13 @@ mod tests {
                 .iter()
                 .map(|adapter| adapter.id)
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "chatgpt-desktop"]
+            vec![
+                "claude-code",
+                "opencode",
+                "pi",
+                "chatgpt-desktop",
+                "deepseek-harness"
+            ]
         );
         assert!(has("claude-code"));
         assert!(has("chatgpt-desktop"));

@@ -43,6 +43,7 @@ button.rowMain { cursor: pointer; }
 .agentCopy > strong { overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body-strong, 14px); line-height: var(--flowlet-line-height-body-strong, 20px); text-overflow: ellipsis; white-space: nowrap; }
 .agentSurfaces { display: grid; grid-template-columns: 92px 156px; column-gap: 12px; }
 .agentSurfaces small { min-width: 0; display: inline-grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 5px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption, 12px); line-height: var(--flowlet-line-height-caption, 16px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agentSurfaces small:only-child { grid-column: 1 / -1; }
 .agentSurfaces small span:first-child { color: var(--flowlet-color-text-secondary); font-weight: 600; }
 .agentSurfaces small span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .agentChevron { color: var(--flowlet-color-text-tertiary); }

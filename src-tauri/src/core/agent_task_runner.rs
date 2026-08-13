@@ -668,14 +668,21 @@ async fn resolve_agent_executable(agent_profile: &str) -> Result<String, String>
     // 应用没有 run / exec 接口，不能作为任务执行器。primary 已是 CLI 时直接使用
     // （保留探测的优先级逻辑：PATH + 有版本优先）；primary 是桌面应用时回退到
     // 列表里第一个 CLI 安装，仍无则给出明确错误。
+    let required_surface = if agent_profile == "DeepSeek Harness" {
+        AgentSurface::Web
+    } else {
+        AgentSurface::Cli
+    };
     match report.primary {
-        Some(primary) if primary.surface == AgentSurface::Cli => Ok(primary.executable_path),
+        Some(primary) if primary.surface == required_surface && primary.available_on_path && primary.error.is_none() => Ok(primary.executable_path),
         _ => report
             .installations
             .iter()
-            .find(|installation| installation.surface == AgentSurface::Cli)
+            .find(|installation| installation.surface == required_surface && installation.available_on_path && installation.error.is_none())
             .map(|installation| installation.executable_path.clone())
-            .ok_or_else(|| format!("未检测到 {agent_name} CLI 可执行文件")),
+            .ok_or_else(|| if agent_profile == "DeepSeek Harness" {
+                "检测到 DeepSeek Harness 数据目录或 Web，但 PATH 中没有稳定的 dsh 启动命令；请先全局安装 @deepseek-ai/dsh。Flowlet 不会使用 npx 临时缓存执行任务。".to_string()
+            } else { format!("未检测到 {agent_name} CLI 可执行文件") }),
     }
 }
 

@@ -15,7 +15,7 @@ const COLLAPSE_GESTURE_PX = 48;
 const CLOSE_GESTURE_PX = 64;
 
 /** 与 PC 看板一致的 Agent Profile 选项（任务执行驱动目标 Agent）。 */
-const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex"];
+const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness"];
 
 /**
  * 添加任务底部弹窗：与任务详情抽屉（MobileTaskDetailSheet）一致的二段展开交互。

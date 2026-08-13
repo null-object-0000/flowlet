@@ -1,11 +1,11 @@
 import registryJson from "../../../plugin-registry.json";
 
 export type PluginKind = "channel" | "model-catalog" | "agent";
-export type AgentPluginId = "claude-code" | "opencode" | "pi" | "codex";
-export type AgentGlobalConfigAdapterId = "claude-code" | "opencode" | "pi" | "codex";
-export type AgentSessionAdapterId = "claude-code" | "opencode" | "pi" | "codex";
-export type AgentRunnerAdapterId = "claude-code" | "opencode" | "pi" | "codex";
-export type AgentPluginSurface = "cli" | "desktop";
+export type AgentPluginId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
+export type AgentGlobalConfigAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
+export type AgentSessionAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
+export type AgentRunnerAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
+export type AgentPluginSurface = "cli" | "desktop" | "web";
 
 export type AgentPluginDescriptor = {
   id: AgentPluginId;
@@ -24,6 +24,7 @@ export type AgentPluginDescriptor = {
   showsCredentialsFile: boolean;
   showsFastModel: boolean;
   showsSubagentModel: boolean;
+  supportsManagedConfig: boolean;
   environmentDescription: string;
   notInstalledText: string;
   globalConfigDescription: string;
@@ -58,6 +59,9 @@ function validateRegistry(value: PluginRegistry): void {
     }
     if (plugin.kind === "agent" && (!plugin.agent.environmentAdapterId.trim() || !plugin.agent.globalConfigAdapterId.trim() || !plugin.agent.sessionAdapterId.trim() || !plugin.agent.runnerAdapterId.trim())) {
       throw new Error(`Agent plugin adapter is blank: ${plugin.agent.id}`);
+    }
+    if (plugin.kind === "agent" && typeof plugin.agent.supportsManagedConfig !== "boolean") {
+      throw new Error(`Agent plugin managed-config capability is missing: ${plugin.agent.id}`);
     }
   }
 }

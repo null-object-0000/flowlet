@@ -856,6 +856,7 @@ pub(super) use crate::core::agent_session_identity::{AGENT_CLIENT_HEADER, AGENT_
 fn agent_client_marker_name(value: &str) -> Option<&'static str> {
     match value {
         "pi" => Some("Pi"),
+        "deepseek-harness" => Some("DeepSeek Harness"),
         _ => None,
     }
 }
@@ -921,6 +922,12 @@ fn builtin_ua_rules() -> Vec<UaClientRule> {
             id: "codex".to_string(),
             pattern: "codex_cli_rs/".to_string(),
             name: "Codex".to_string(),
+            enabled: true,
+        },
+        UaClientRule {
+            id: "deepseek-harness".to_string(),
+            pattern: "deepseek-harness/".to_string(),
+            name: "DeepSeek Harness".to_string(),
             enabled: true,
         },
         UaClientRule {

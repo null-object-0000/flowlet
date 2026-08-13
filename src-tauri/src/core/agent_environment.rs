@@ -52,6 +52,57 @@ pub enum AgentInstallMethod {
 pub enum AgentSurface {
     Cli,
     Desktop,
+    Web,
+}
+
+fn dsh_cli_candidates() -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            for file_name in executable_names("dsh") {
+                push_candidate(&mut candidates, &mut seen, directory.join(file_name), true);
+            }
+        }
+    }
+    #[cfg(windows)]
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        let directory = PathBuf::from(app_data).join("npm");
+        for file_name in executable_names("dsh") {
+            push_candidate(&mut candidates, &mut seen, directory.join(file_name), false);
+        }
+    }
+    candidates
+}
+
+fn classify_dsh_method(path: &Path) -> AgentInstallMethod {
+    let normalized = normalized_path_key(path);
+    if normalized.contains("/node_modules/@deepseek-ai/dsh/")
+        || normalized.ends_with("/npm/dsh.cmd")
+        || normalized.ends_with("/npm/dsh.ps1")
+        || normalized.ends_with("/npm/dsh")
+    {
+        AgentInstallMethod::Npm
+    } else if normalized.starts_with("/usr/bin/") || normalized.starts_with("/usr/local/bin/") {
+        AgentInstallMethod::SystemPackage
+    } else {
+        AgentInstallMethod::Unknown
+    }
+}
+
+fn resolve_dsh_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBuf {
+    if matches!(method, AgentInstallMethod::Npm) {
+        if let Some(bin_dir) = path.parent() {
+            let package_dir = bin_dir
+                .join("node_modules")
+                .join("@deepseek-ai")
+                .join("dsh");
+            if package_dir.is_dir() {
+                return package_dir;
+            }
+        }
+    }
+    path.parent().unwrap_or(path).to_path_buf()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -71,6 +122,9 @@ pub struct AgentEnvironmentReport {
     pub agent_id: String,
     pub agent_name: String,
     pub installed: bool,
+    /// 仅适用于需要常驻本机运行时的 Surface；CLI/Desktop Agent 返回 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_running: Option<bool>,
     pub primary: Option<AgentInstallation>,
     pub installations: Vec<AgentInstallation>,
 }

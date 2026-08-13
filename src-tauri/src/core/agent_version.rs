@@ -1,6 +1,6 @@
 //! Agent 最新版本查询。
 //!
-//! 从 npm registry 拉取 Flowlet 支持的 Agent（Claude Code / OpenCode / Pi / Codex）
+//! 从 npm registry 拉取 Flowlet 注册的 Agent
 //! 的最新发布版本，供前端在概览页与接入抽屉中提示「有新版可用」。
 //!
 //! 职责边界：只做「提示」——返回最新版本号与检查时间，不执行任何下载或升级；
@@ -182,6 +182,10 @@ mod tests {
             Some("@earendil-works/pi-coding-agent")
         );
         assert_eq!(npm_package_for("codex"), Some("@openai/codex"));
+        assert_eq!(
+            npm_package_for("deepseek-harness"),
+            Some("@deepseek-ai/dsh")
+        );
         assert_eq!(npm_package_for("unknown"), None);
     }
 }

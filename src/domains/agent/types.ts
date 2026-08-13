@@ -9,7 +9,7 @@ export type AgentInstallMethod =
   | "desktop"
   | "unknown";
 
-export type AgentSurface = "cli" | "desktop";
+export type AgentSurface = "cli" | "desktop" | "web";
 
 export type AgentInstallation = {
   surface?: AgentSurface;
@@ -26,6 +26,8 @@ export type AgentEnvironmentReport = {
   agent_id: string;
   agent_name: string;
   installed: boolean;
+  /** 仅 Web 等需要常驻本机运行时的 Surface 返回；普通 CLI/Desktop 省略。 */
+  runtime_running?: boolean | null;
   primary?: AgentInstallation | null;
   installations: AgentInstallation[];
 };

@@ -4,7 +4,10 @@ import { OverviewAgentAccessCard } from "./OverviewAgentAccessCard";
 
 const refetch = vi.fn();
 const mutateAsync = vi.fn();
-const agentMocks = vi.hoisted(() => ({ codexEnvironment: null as unknown }));
+const agentMocks = vi.hoisted(() => ({
+  codexEnvironment: null as unknown,
+  deepseekRuntimeRunning: true,
+}));
 
 vi.mock("./useAgentEnvironment", () => ({
   useAgentEnvironments: vi.fn(() => new Map([
@@ -12,9 +15,10 @@ vi.mock("./useAgentEnvironment", () => ({
     ["opencode", { data: { agent_id: "opencode", agent_name: "OpenCode", installed: true, primary: { surface: "cli", executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe", install_dir: "C:\\Users\\test\\.opencode\\bin", install_method: "native", version: "1.18.2", available_on_path: true }, installations: [{ surface: "cli", executable_path: "C:\\Users\\test\\.opencode\\bin\\opencode.exe", install_dir: "C:\\Users\\test\\.opencode\\bin", install_method: "native", version: "1.18.2", available_on_path: true }, { surface: "desktop", executable_path: "C:\\Users\\test\\AppData\\Local\\Programs\\@opencode-aidesktop\\OpenCode.exe", install_dir: "C:\\Users\\test\\AppData\\Local\\Programs\\@opencode-aidesktop", install_method: "desktop", version: null, available_on_path: false }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
     ["pi", { data: { agent_id: "pi", agent_name: "Pi", installed: true, primary: { surface: "cli", executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd", install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent", install_method: "npm", version: "0.42.1", available_on_path: true }, installations: [{ surface: "cli", executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd", install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@earendil-works\\pi-coding-agent", install_method: "npm", version: "0.42.1", available_on_path: true }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
     ["codex", { data: agentMocks.codexEnvironment ?? { agent_id: "chatgpt-desktop", agent_name: "ChatGPT (Codex)", installed: true, primary: { surface: "cli", executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\codex.cmd", install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex", install_method: "npm", version: "0.142.5", available_on_path: true }, installations: [{ surface: "cli", executable_path: "C:\\Users\\test\\AppData\\Roaming\\npm\\codex.cmd", install_dir: "C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex", install_method: "npm", version: "0.142.5", available_on_path: true }, { surface: "desktop", executable_path: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe", install_dir: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.12708.0_x64__2p2nqsd0c76g0", install_method: "desktop", version: "26.707.12708.0", available_on_path: false }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
+    ["deepseek-harness", { data: { agent_id: "deepseek-harness", agent_name: "DeepSeek Harness", installed: true, runtime_running: agentMocks.deepseekRuntimeRunning, primary: { surface: "web", executable_path: null, install_dir: "C:\\Users\\test\\.dsh", install_method: "web", version: "0.1.0-rc.6", available_on_path: false }, installations: [{ surface: "web", executable_path: null, install_dir: "C:\\Users\\test\\.dsh", install_method: "web", version: "0.1.0-rc.6", available_on_path: false }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
   ])),
   useAgentGlobalConfig: (agentId: string | null) => ({
-    query: { data: agentId ? { agent_id: agentId, settings_path: agentId === "claude-code" ? "C:\\Users\\test\\.claude\\settings.json" : agentId === "opencode" ? "C:\\Users\\test\\.config\\opencode\\opencode.jsonc" : agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\models.json" : "C:\\Users\\test\\.codex\\config.toml", credentials_path: agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\auth.json" : agentId === "opencode" ? "C:\\Users\\test\\.local\\share\\opencode\\auth.json" : agentId === "codex" ? "C:\\Users\\test\\.codex\\auth.json" : null, settings_exists: true, state: "flowlet", base_url: agentId === "claude-code" ? "http://127.0.0.1:18640/anthropic" : "http://127.0.0.1:18640/v1", auth_token_configured: true, api_key_configured: agentId !== "claude-code", primary_model: agentId === "opencode" ? "flowlet/flowlet-pro" : "flowlet-pro", fast_model: agentId === "claude-code" ? "flowlet-flash" : agentId === "opencode" ? "flowlet/flowlet-flash" : null, subagent_model: agentId === "claude-code" ? "flowlet-flash" : null, model_catalog_path: agentId === "codex" ? "~/.codex/model-catalog.flowlet.json" : null, model_catalog_configured: agentId === "codex", opencode_permission_bridge: agentId === "opencode", backup_available: true, external_environment_overrides: [] } : undefined, error: null, isLoading: false, refetch },
+    query: { data: agentId ? { agent_id: agentId, settings_path: agentId === "claude-code" ? "C:\\Users\\test\\.claude\\settings.json" : agentId === "opencode" ? "C:\\Users\\test\\.config\\opencode\\opencode.jsonc" : agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\models.json" : agentId === "deepseek-harness" ? "C:\\Users\\test\\.dsh\\settings.yaml" : "C:\\Users\\test\\.codex\\config.toml", credentials_path: agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\auth.json" : agentId === "opencode" ? "C:\\Users\\test\\.local\\share\\opencode\\auth.json" : agentId === "codex" ? "C:\\Users\\test\\.codex\\auth.json" : agentId === "deepseek-harness" ? "C:\\Users\\test\\.dsh\\.credentials.yaml" : null, settings_exists: true, state: "flowlet", base_url: agentId === "claude-code" ? "http://127.0.0.1:18640/anthropic" : "http://127.0.0.1:18640/v1", auth_token_configured: true, api_key_configured: agentId !== "claude-code", primary_model: agentId === "opencode" ? "flowlet/flowlet-pro" : "flowlet-pro", fast_model: agentId === "claude-code" ? "flowlet-flash" : agentId === "opencode" ? "flowlet/flowlet-flash" : null, subagent_model: agentId === "claude-code" ? "flowlet-flash" : null, model_catalog_path: agentId === "codex" ? "~/.codex/model-catalog.flowlet.json" : null, model_catalog_configured: agentId === "codex", opencode_permission_bridge: agentId === "opencode", backup_available: true, external_environment_overrides: [] } : undefined, error: null, isLoading: false, refetch },
     apply: { isPending: false, mutateAsync },
     restore: { isPending: false, mutateAsync },
   }),
@@ -25,6 +29,7 @@ vi.mock("./useAgentEnvironment", () => ({
         { agent_id: "opencode", package: "opencode-ai", latest_version: "1.18.13", checked_at: 0, error: null },
         { agent_id: "pi", package: "@earendil-works/pi-coding-agent", latest_version: "0.83.0", checked_at: 0, error: null },
         { agent_id: "codex", package: "@openai/codex", latest_version: "0.146.0", checked_at: 0, error: null },
+        { agent_id: "deepseek-harness", package: "@deepseek-ai/dsh", latest_version: "0.1.0-rc.6", checked_at: 0, error: null },
       ],
     },
     isFetching: false,
@@ -41,6 +46,7 @@ vi.mock("lottie-web", () => ({
 describe("OverviewAgentAccessCard", () => {
   beforeEach(() => {
     agentMocks.codexEnvironment = null;
+    agentMocks.deepseekRuntimeRunning = true;
   });
   it("shows detected versions for the supported Agent surfaces", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
@@ -177,6 +183,27 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
     expect(screen.getByText("models.json Provider 片段")).toBeInTheDocument();
     expect(screen.getByText("settings.json 默认模型片段")).toBeInTheDocument();
+  });
+
+  it("offers managed DeepSeek Harness configuration through the Web surface", () => {
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 DeepSeek Harness" }));
+    expect(screen.getByRole("tab", { name: "DeepSeek Harness Web 接入" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Flowlet 直接写入 Provider、默认模型与 Client Token")).toBeInTheDocument();
+    expect(screen.getByText("C:\\Users\\test\\.dsh\\settings.yaml")).toBeInTheDocument();
+    expect(screen.getByText("C:\\Users\\test\\.dsh\\.credentials.yaml")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
+  });
+
+  it("allows managed DeepSeek Harness writes while DSH Web is stopped", () => {
+    agentMocks.deepseekRuntimeRunning = false;
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 DeepSeek Harness" }));
+    expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
   });
 
   it("shows a new-version badge on the logo and version details in the drawer", () => {

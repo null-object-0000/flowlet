@@ -178,9 +178,13 @@ fn registered_agents_resolve_every_compiled_adapter() {
         assert!(
             surfaces
                 .iter()
-                .all(|surface| matches!(*surface, "cli" | "desktop")),
+                .all(|surface| matches!(*surface, "cli" | "desktop" | "web")),
             "{} 声明了未知 Surface",
             agent.id
+        );
+        assert!(
+            agent.supports_managed_config,
+            "内置 Agent 必须实现受管配置；不允许静默降级为手动配置"
         );
     }
 }

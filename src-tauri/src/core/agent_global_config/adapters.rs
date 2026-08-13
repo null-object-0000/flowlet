@@ -2,6 +2,7 @@ use super::{AgentGlobalConfigOptions, AgentGlobalConfigReport};
 
 pub(super) mod claude_code;
 pub(super) mod codex;
+pub(super) mod deepseek_harness;
 pub(super) mod opencode;
 pub(super) mod pi;
 
@@ -21,8 +22,10 @@ static CLAUDE_CODE: claude_code::ClaudeCodeAdapter = claude_code::ClaudeCodeAdap
 static OPENCODE: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
 static PI: pi::PiAdapter = pi::PiAdapter;
 static CODEX: codex::CodexAdapter = codex::CodexAdapter;
-static ADAPTERS: [&'static dyn AgentGlobalConfigAdapter; 4] =
-    [&CLAUDE_CODE, &OPENCODE, &PI, &CODEX];
+static DEEPSEEK_HARNESS: deepseek_harness::DeepSeekHarnessAdapter =
+    deepseek_harness::DeepSeekHarnessAdapter;
+static ADAPTERS: [&'static dyn AgentGlobalConfigAdapter; 5] =
+    [&CLAUDE_CODE, &OPENCODE, &PI, &CODEX, &DEEPSEEK_HARNESS];
 
 fn find(adapter_id: &str) -> Option<&'static dyn AgentGlobalConfigAdapter> {
     ADAPTERS
@@ -50,9 +53,9 @@ mod tests {
                 .iter()
                 .map(|adapter| adapter.id())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex"]
+            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]
         );
-        for adapter_id in ["claude-code", "opencode", "pi", "codex"] {
+        for adapter_id in ["claude-code", "opencode", "pi", "codex", "deepseek-harness"] {
             assert!(has_adapter(adapter_id), "missing adapter: {adapter_id}");
             assert!(adapter(adapter_id).is_ok());
         }

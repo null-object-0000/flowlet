@@ -145,28 +145,50 @@ SQLite 或运行时配置快照直接修改代理状态。修改内置注册表�
 的通用边界。新增已注册 Agent 不再复制专用 Query/Mutation Hook，但仍必须提供注册表声明的
 Rust 编译期环境与全局配置适配器。接入抽屉同样通过 `globalConfigAdapterId` 选择前端
 `AgentAccessAdapter`，由适配器提供安装名称、额外状态、配置开关、写入选项和手动配置片段；
-通用 SideSheet 不再按 Agent ID 维护条件分支。Codex 手动配置中的模型目录直接读取仓库根目录
-`codex-models.json`，避免前端常量与 Rust 内置目录漂移。四个前端接入实现分别位于
+通用 SideSheet 不再按 Agent ID 维护条件分支。Surface 是受控能力枚举：`cli` 表示终端交互面、
+`desktop` 表示原生桌面面、`web` 表示本机 Web；分发方式（如 npm/npx）不再冒充产品 Surface。
+Codex 手动配置中的模型目录直接读取仓库根目录
+`codex-models.json`，避免前端常量与 Rust 内置目录漂移。前端接入实现分别位于
 `features/agent-access/agent-access-adapters/`，统一 `agentAccessAdapter()` 入口保持稳定。
 
 Rust 环境检测入口通过编译期 `AgentEnvironmentAdapter` registry 按 `environmentAdapterId`
-解析实现；Claude Code、OpenCode、Pi、Codex 的检测编排分别位于
+解析实现；各 Agent（含 DeepSeek Harness）的检测编排分别位于
 `agent_environment/adapters/`，公共候选路径发现与安装方式识别由父模块复用，版本子进程、
 超时、输出编码与 package 版本读取集中在 `agent_environment/process.rs`。未知环境适配器
 在注册表校验或调用入口明确失败，不回退到其它 Agent；既有候选路径顺序与 Primary 选择规则不变。
 
+DeepSeek Harness 是首个 `web` Surface 演练：环境 Adapter 分别报告 `~/.dsh` 数据目录、
+`127.0.0.1:3080` Web 运行状态与 PATH 中稳定的 `dsh` 启动入口。`runtime_running` 明确区分
+“已发现安装/数据目录”和“Web 正在运行”；无歧义时可从 `npx` 临时缓存只读识别包版本，但临时缓存不视为可调度安装；
+因此“Web 可用”和“Flowlet 可发起 headless 任务”可以是不同状态。Runner 只支持 DSH 当前公开的
+fresh headless 语义，resume 会明确失败，不退化成新会话。
+
 Rust 全局配置入口通过统一 `AgentGlobalConfigAdapter` 的 `inspect / apply / restore` 接口工作，
-Claude Code、OpenCode、Pi、Codex 分别由独立编译期 Adapter 模块完整承载配置路径、受管字段、
+各 Agent 分别由独立编译期 Adapter 模块完整承载配置路径、受管字段、
 备份结构、写入/恢复事务和 Agent 专属扩展源码；父模块只保留公共报告类型、全局互斥锁与通用文件事务。
 插件注册表校验直接查询该 Adapter registry，不再维护另一份全局配置适配器白名单；设备同步也先
 按 Agent 插件声明解析 `globalConfigAdapterId`，不假设公开 Agent ID 与实现 ID 相同。Adapter 不存在时
 在注册表加载或调用入口明确失败，不做静默回退。
 
+DeepSeek Harness 的 `settings.yaml` / `.credentials.yaml` 会热加载。Flowlet Global Config
+Adapter 解析其 Flowlet Provider、Client Token、当前默认 provider/model 与环境覆盖；一键接入
+直接安全合并 DSH 官方 YAML，不依赖 Web 进程。写入使用与 DSH 相同的相邻文件独占锁协议，
+通过临时文件替换与两文件事务回滚保证并发和原子性，并保留非受管字段与注释。写入前仅备份
+`llm-pi-ai.providers.flowlet`、`agent-default-model.provider/model` 与专用凭据；恢复只还原这些
+受管路径。复杂行内 YAML 无法定点修改时明确失败，不做整文件猜测重写。DSH 运行中会热加载，
+未运行时在下次启动读取配置。
+DSH 接入不安装插件、扩展或 Hook，不修改其包与运行时代码；环境和原生会话读取保持只读，
+任务执行仅调用官方 headless 命令。内部 Plugin Registry 只是 Flowlet 的受控能力声明，
+不代表向第三方 Agent 部署插件。
+
 Agent 插件同时声明 `sessionAdapterId`。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
 可用运行时会话类型、会话目录枚举、Timeline、最后交互和增量解析来源；Claude Code、OpenCode、
 Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显式承载 `codex-cli` 与
 `codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。会话合并与用量账本
-语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。四个能力实现分别位于
+语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。DeepSeek Harness Adapter
+读取 `~/.dsh/sessions/**/session.jsonl(.zstd)` 的预发布 v0 header、已提交消息、工具事件与原生
+usage；遇到其它格式版本明确拒绝。打包的增量 chunk 行不参与 Flowlet 时间线展示，完整的
+`assistant/message` 仍作为最终消息来源。各能力实现分别位于
 `agent_session_adapter/adapters/`，父模块只保留 Trait、registry 查询和公共默认行为；Claude Code、
 Codex、OpenCode 与 Pi 的文件/SQLite 定位和时间线解析进一步下沉到
 `agent_session_timeline/adapters/`，公共时间线模块保留增量游标、摘要合并、切片、计价与事件工具。
@@ -174,7 +196,7 @@ Codex、OpenCode 与 Pi 的文件/SQLite 定位和时间线解析进一步下沉
 Agent 插件还声明 `runnerAdapterId`。Rust 任务调度通过编译期 Runner Adapter registry 统一解析
 任务 `agent_profile`、环境探测适配器、展示名和异步执行函数；Claude Code、OpenCode、Pi、Codex
 既有执行器继续负责各自的命令参数、输出事件和会话恢复，项目队列与任务状态机不感知具体 Agent。
-四个执行器分别位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
+与 DeepSeek Harness 执行器分别位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
 位于 `agent_task_runner/process.rs`；父模块只保留项目执行槽、队列调度和任务状态流转。
 历史空 Profile 仍显式映射 Claude Code，未知 Profile 与未知 Runner Adapter 均明确失败，不回退执行。
 
@@ -337,7 +359,7 @@ OpenCode CLI 与 Desktop 共用用户级配置。Flowlet 在 `~/.config/opencode
 
 Agent 接入抽屉中的 Client Token 默认使用固定长度掩码；查看按钮只在当前抽屉会话中临时展示，关闭后恢复掩码，复制始终使用真实值。Claude Code 手动片段与一键写入字段保持一致；OpenCode 将 Provider 配置和 `auth.json` 凭据拆成两个片段。OpenCode 配置与凭据采用双文件事务写入，第二个文件失败时恢复两个文件的原始字节内容。
 
-Agent 安装引导与版本更新提示：`check_agent_latest_versions` command（`src-tauri/src/core/agent_version.rs`）从 npm registry 并行查询 Claude Code / OpenCode / Pi / Codex 四个包的最新发布版本，带进程内 TTL 缓存（15 分钟）与单 Agent 独立错误处理，只做提示、不执行升级。npm latest 对应的是各 Agent 的 **CLI 包版本**，因此更新比较只取「CLI 面」的已安装版本（`cliInstalledVersion`，`src/domains/agent/versions.ts`）——ChatGPT Desktop / OpenCode Desktop 使用独立版本体系，不参与比较，概览页 Logo 的 Badge dot 与抽屉的版本对比都只在 CLI 标签页出现。前端用纯函数 `isNewerVersion` 判断「有新版」：接入抽屉展示已安装版本与最新版本、检测到新版本时给出「x → y」与官网更新说明链接。未检测到安装时，抽屉内提供官网安装引导链接（Claude Code / OpenCode / Pi / Codex 官方地址）。版本检查数据仅存在于前端 Query 缓存，不写入 SQLite 或 `config.json`。
+Agent 安装引导与版本更新提示：`check_agent_latest_versions` command（`src-tauri/src/core/agent_version.rs`）按插件注册表从 npm registry 并行查询最新发布版本，带进程内 TTL 缓存（15 分钟）与单 Agent 独立错误处理，只做提示、不执行升级。传统 Agent 的 npm latest 对应 CLI 包版本，DeepSeek Harness 的 npm latest 对应 Web 分发包；ChatGPT Desktop / OpenCode Desktop 使用独立版本体系，不参与比较。前端用纯函数 `isNewerVersion` 判断「有新版」：接入抽屉在对应 CLI 或 Web 标签页展示已安装版本与最新版本、检测到新版本时给出「x → y」与官网更新说明链接。版本检查数据仅存在于前端 Query 缓存，不写入 SQLite 或 `config.json`。
 
 ## Channel Preset 架构
 

@@ -12,6 +12,7 @@ import type {
   AgentGlobalConfigOptions,
   AgentGlobalConfigReport,
   AgentInstallMethod,
+  AgentSurface,
 } from "../../domains/agent/types";
 import { agentPlugin, type AgentPluginId } from "../../domains/pluginRegistry";
 import { agentAccessAdapter, type AgentConfigControl } from "./agentAccessAdapters";
@@ -69,7 +70,7 @@ export function AgentAccessSideSheet({
   onCopy,
 }: Props) {
   const { t } = useAppPreferences();
-  const [surface, setSurface] = useState<"cli" | "desktop">("cli");
+  const [surface, setSurface] = useState<AgentSurface>("cli");
 
   const meta = agentPlugin(agent);
   const adapter = agentAccessAdapter(meta.globalConfigAdapterId);
@@ -86,15 +87,18 @@ export function AgentAccessSideSheet({
   const configControls = adapter.configControls(adapterContext);
 
   useEffect(() => {
-    setSurface("cli");
-  }, [visible, agent]);
+    setSurface(meta.surfaces[0]);
+  }, [visible, agent, meta.surfaces]);
 
   const surfaceInstallations = environment?.installations.filter(
     (installation) => (installation.surface || "cli") === surface,
   );
-  // 版本更新提示只针对 CLI 包（npm latest 对应 CLI 版本），桌面应用不参与比较。
-  const cliInstalled = environment?.installations.some((item) => (item.surface ?? "cli") === "cli") ?? false;
-  const installedVersion = cliInstalledVersion(environment);
+  // npm latest 对应可分发运行时：传统 Agent 取 CLI，DSH 取 Web；Desktop 不参与比较。
+  const packageSurface: AgentSurface = meta.surfaces.includes("cli") ? "cli" : "web";
+  const packageInstalled = environment?.installations.some((item) => (item.surface ?? "cli") === packageSurface) ?? false;
+  const installedVersion = packageSurface === "cli"
+    ? cliInstalledVersion(environment)
+    : environment?.installations.find((item) => item.surface === packageSurface)?.version ?? null;
   const newer = isNewerVersion(latestVersion, installedVersion);
 
   return (
@@ -108,11 +112,14 @@ export function AgentAccessSideSheet({
           type="line"
           activeKey={surface}
           tabPaneMotion={false}
-          onChange={(key) => setSurface(key as "cli" | "desktop")}
+          onChange={(key) => setSurface(key as AgentSurface)}
         >
-          <Tabs.TabPane tab={t("{name} CLI 接入", { name })} itemKey="cli" />
+          {meta.surfaces.includes("cli") ? <Tabs.TabPane tab={t("{name} CLI 接入", { name })} itemKey="cli" /> : null}
           {meta.surfaces.includes("desktop") ? (
             <Tabs.TabPane tab={t("{name} Desktop 接入", { name })} itemKey="desktop" />
+          ) : null}
+          {meta.surfaces.includes("web") ? (
+            <Tabs.TabPane tab={t("{name} Web 接入", { name })} itemKey="web" />
           ) : null}
         </Tabs>
       }
@@ -149,7 +156,7 @@ export function AgentAccessSideSheet({
               <div className={styles.installGuide}>
                 <Text type="tertiary" size="small">
                   {environment?.installed
-                    ? t("未检测到 {surface} 安装。", { surface: t(surface === "desktop" ? "Desktop" : "CLI") })
+                    ? t("未检测到 {surface} 安装。", { surface: t(surface === "desktop" ? "Desktop" : surface === "web" ? "Web" : "CLI") })
                     : t(meta.notInstalledText)}
                 </Text>
                 <a className={styles.officialLink} href={meta.officialUrl} target="_blank" rel="noreferrer">
@@ -157,8 +164,8 @@ export function AgentAccessSideSheet({
                 </a>
               </div>
             ) : null}
-            {/* 版本更新提示仅适用于 CLI：npm latest 是 CLI 包版本，桌面标签页不展示。 */}
-            {!environmentError && !environmentLoading && environment?.installed && surface === "cli" && cliInstalled ? (
+            {/* npm 包版本只在对应的 CLI / Web 标签页展示，Desktop 不参与。 */}
+            {!environmentError && !environmentLoading && environment?.installed && surface === packageSurface && packageInstalled ? (
               <div className={styles.versionBlock}>
                 {newer ? (
                   <div className={styles.updateNotice}>
@@ -203,6 +210,7 @@ export function AgentAccessSideSheet({
                   </span>
                 </div>
                 <InstallationPathRow
+                  surface={installation.surface ?? "cli"}
                   executablePath={installation.executable_path}
                   installDir={installation.install_dir}
                   onCopy={onCopy}
@@ -275,7 +283,7 @@ export function AgentAccessSideSheet({
                     {t("当前配置指向其他网关。接入 Flowlet 前会备份原值，之后可以恢复。")}
                   </Text>
                 ) : null}
-                <div className={styles.configActions}>
+                {meta.supportsManagedConfig ? <div className={styles.configActions}>
                   <Button
                     type="primary"
                     theme="solid"
@@ -288,7 +296,7 @@ export function AgentAccessSideSheet({
                   {globalConfig.backup_available ? (
                     <Button disabled={globalConfigBusy} onClick={() => void onRestoreGlobalConfig()}>{t("恢复接入前配置")}</Button>
                   ) : null}
-                </div>
+                </div> : <Text className={styles.configNotice} type="tertiary">{t("当前版本请使用下方片段手动配置；DSH 会热加载这两个 YAML 文件，无需重启 DSH Web。")}</Text>}
               </div>
             ) : null}
         </section>
@@ -382,17 +390,19 @@ function AgentConfigControls({
 }
 
 function InstallationPathRow({
+  surface,
   executablePath,
   installDir,
   onCopy,
 }: {
+  surface: AgentSurface;
   executablePath: string;
   installDir: string;
   onCopy: Copy;
 }) {
   const { t } = useAppPreferences();
   const [kind, setKind] = useState<"executable" | "directory">("executable");
-  const label = t(kind === "executable" ? "可执行文件" : "安装目录");
+  const label = t(kind === "executable" ? (surface === "web" ? "启动入口" : "可执行文件") : (surface === "web" ? "Harness 目录" : "安装目录"));
   const value = kind === "executable" ? executablePath : installDir;
   return (
     <div className={styles.configRow}>
@@ -402,8 +412,8 @@ function InstallationPathRow({
         zIndex={APP_OVERLAY_Z_INDEX.sideSheet + 1}
         value={kind}
         optionList={[
-          { label: t("可执行文件"), value: "executable" },
-          { label: t("安装目录"), value: "directory" },
+          { label: t(surface === "web" ? "启动入口" : "可执行文件"), value: "executable" },
+          { label: t(surface === "web" ? "Harness 目录" : "安装目录"), value: "directory" },
         ]}
         onChange={(nextKind) => setKind(nextKind as "executable" | "directory")}
       />

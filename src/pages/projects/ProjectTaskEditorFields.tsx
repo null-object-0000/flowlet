@@ -19,7 +19,7 @@ const TASK_TYPES: Array<{ value: ProjectTaskType; label: string }> = [
   { value: "readonly", label: "只读分析" },
 ];
 
-const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex"];
+const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness"];
 
 export interface ProjectTaskEditorValue {
   title: string;

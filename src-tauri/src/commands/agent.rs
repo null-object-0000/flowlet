@@ -129,7 +129,7 @@ pub(crate) fn inspect_agent_global_config(
 }
 
 #[tauri::command]
-pub(crate) fn apply_agent_global_config(
+pub(crate) async fn apply_agent_global_config(
     state: tauri::State<'_, AppState>,
     agent_id: String,
     options: Option<crate::core::agent_global_config::AgentGlobalConfigOptions>,
@@ -142,18 +142,24 @@ pub(crate) fn apply_agent_global_config(
         .normalized();
     let suffix = agent_endpoint_suffix(&agent_id)?;
     let adapter_id = agent_global_config_adapter(&agent_id)?;
-    let mut report = crate::core::agent_global_config::apply_agent_global_config(
-        adapter_id,
-        &format!("http://127.0.0.1:{}{suffix}", bind.port),
-        &bind.default_client_token,
-        options.as_ref(),
-    )?;
+    let expected_base_url = format!("http://127.0.0.1:{}{suffix}", bind.port);
+    let client_token = bind.default_client_token;
+    let mut report = tauri::async_runtime::spawn_blocking(move || {
+        crate::core::agent_global_config::apply_agent_global_config(
+            adapter_id,
+            &expected_base_url,
+            &client_token,
+            options.as_ref(),
+        )
+    })
+    .await
+    .map_err(|error| format!("等待 Agent 全局配置写入失败：{error}"))??;
     report.agent_id = agent_id;
     Ok(report)
 }
 
 #[tauri::command]
-pub(crate) fn restore_agent_global_config(
+pub(crate) async fn restore_agent_global_config(
     state: tauri::State<'_, AppState>,
     agent_id: String,
 ) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
@@ -166,10 +172,15 @@ pub(crate) fn restore_agent_global_config(
         .port;
     let suffix = agent_endpoint_suffix(&agent_id)?;
     let adapter_id = agent_global_config_adapter(&agent_id)?;
-    let mut report = crate::core::agent_global_config::restore_agent_global_config(
-        adapter_id,
-        &format!("http://127.0.0.1:{port}{suffix}"),
-    )?;
+    let expected_base_url = format!("http://127.0.0.1:{port}{suffix}");
+    let mut report = tauri::async_runtime::spawn_blocking(move || {
+        crate::core::agent_global_config::restore_agent_global_config(
+            adapter_id,
+            &expected_base_url,
+        )
+    })
+    .await
+    .map_err(|error| format!("等待 Agent 全局配置恢复失败：{error}"))??;
     report.agent_id = agent_id;
     Ok(report)
 }

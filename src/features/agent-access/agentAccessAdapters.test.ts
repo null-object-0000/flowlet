@@ -19,7 +19,7 @@ function context(globalConfig?: Partial<AgentGlobalConfigReport>): AgentAccessCo
 describe("agent access adapters", () => {
   it("resolves every registered global config adapter", () => {
     expect(AGENT_PLUGINS.map((plugin) => agentAccessAdapter(plugin.globalConfigAdapterId).id))
-      .toEqual(["claude-code", "opencode", "pi", "codex"]);
+      .toEqual(["claude-code", "opencode", "pi", "codex", "deepseek-harness"]);
   });
 
   it("keeps Claude long-context controls and snippets in sync", () => {
@@ -59,5 +59,17 @@ describe("agent access adapters", () => {
 
     expect(adapter.configStatuses(context({ opencode_permission_bridge: false }))[0].value).toBe("需安装或更新");
     expect(snippets[2].copyValue).toContain("FlowletPermissionBridge");
+  });
+
+  it("keeps DeepSeek Harness managed YAML snippets in sync", () => {
+    const adapter = agentAccessAdapter("deepseek-harness");
+    const snippets = adapter.manualSnippets(context());
+
+    expect(adapter.installationName("web")).toBe("DeepSeek Harness Web");
+    expect(snippets[0].copyValue).toContain("api: openai-completions");
+    expect(snippets[0].copyValue).toContain("x-flowlet-client: deepseek-harness");
+    expect(snippets[0].copyValue).toContain("agent-default-model:");
+    expect(snippets[0].copyValue).toContain("model: flowlet-pro");
+    expect(snippets[1].copyValue).toContain("FLOWLET_CLIENT_TOKEN: real-token");
   });
 });

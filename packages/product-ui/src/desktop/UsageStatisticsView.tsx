@@ -128,7 +128,13 @@ export function UsageStatisticsView({ stats, cells, confidence, detail, labels, 
     <section className={styles.stats} aria-label={labels.statsAria ?? "Usage summary"}>
       {stats.map((stat) => {
         const hint = stat.tooltip
-          ? <Tooltip content={stat.tooltip}><small tabIndex={0}>{stat.hint}</small></Tooltip>
+          ? <Tooltip
+              autoAdjustOverflow
+              position="topRight"
+              showArrow
+              style={{ width: 320, maxWidth: "calc(100vw - 24px)" }}
+              content={stat.tooltip}
+            ><small tabIndex={0}>{stat.hint}</small></Tooltip>
           : <small>{stat.hint}</small>;
         const content = <><span>{stat.label}</span><strong>{stat.value}</strong>{hint}</>;
         return stat.expandable
@@ -183,7 +189,13 @@ export function UsageStatisticsView({ stats, cells, confidence, detail, labels, 
         <header><strong>{detail.title}</strong><span>{detail.contextLabel}</span></header>
         <div className={styles.detailMetrics}>{detail.metrics.map((item) => {
           const hint = item.tooltip
-            ? <Tooltip content={item.tooltip}><small tabIndex={0}>{item.hint}</small></Tooltip>
+            ? <Tooltip
+                autoAdjustOverflow
+                position="topRight"
+                showArrow
+                style={{ width: 320, maxWidth: "calc(100vw - 24px)" }}
+                content={item.tooltip}
+              ><small tabIndex={0}>{item.hint}</small></Tooltip>
             : <small>{item.hint}</small>;
           const content = <><span>{item.label}</span><strong>{item.value}</strong>{hint}</>;
           return item.expandable

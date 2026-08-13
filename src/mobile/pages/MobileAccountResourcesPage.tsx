@@ -13,8 +13,8 @@ export function MobileAccountResourcesPage() {
     title={t("账号资源")}
     description={t("查看工作区内支持自动同步的账号用量、额度与余额")}
     refreshController={refreshController}
-    backTo="/"
-    backLabel="返回概览页"
+    backTo="/devices"
+    backLabel="返回资源页"
   >
     {resources.isLoading ? <div className={styles.empty}>{t("正在读取账号资源…")}</div> : null}
     {resources.isError ? <div className={styles.empty}>{t("账号资源加载失败：{message}", { message: resources.error.message })}</div> : null}

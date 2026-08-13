@@ -850,6 +850,17 @@ impl Storage {
             })
         })?;
         let mut resources = rows.collect::<Result<Vec<_>, _>>()?;
+        // Codex 在不同桌面设备上可能从 OAuth / app-server 得到不同 account_id，
+        // PC 端会继续按归一化邮箱识别为同一账号。同步契约已经携带去敏后的邮箱展示名，
+        // 因此移动端查询也按相同口径二次聚合，并保留 observed_at 最新的观测。
+        resources.sort_by(|left, right| {
+            right
+                .observed_at
+                .cmp(&left.observed_at)
+                .then_with(|| left.account_id.cmp(&right.account_id))
+        });
+        let mut seen = std::collections::HashSet::new();
+        resources.retain(|resource| seen.insert(account_resource_identity(resource)));
         resources.sort_by(|left, right| {
             right
                 .stale
@@ -1246,4 +1257,14 @@ impl Storage {
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
     }
+}
+
+fn account_resource_identity(resource: &SyncedAccountResource) -> String {
+    if resource.channel_id == "chatgpt" {
+        let email = resource.account_name.trim().to_ascii_lowercase();
+        if email.contains('@') {
+            return format!("chatgpt:email:{email}");
+        }
+    }
+    format!("{}:id:{}", resource.channel_id, resource.account_id)
 }

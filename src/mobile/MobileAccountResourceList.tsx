@@ -1,5 +1,4 @@
 import { IconChevronDown, IconChevronUp } from "@douyinfe/semi-icons";
-import { Tag } from "@douyinfe/semi-ui-19";
 import { useState } from "react";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
 import type { SyncedAccountResource } from "../domains/device-sync/types";
@@ -26,7 +25,7 @@ export function MobileAccountResourceList({ resources, compact = false }: {
       >
         <ChannelBrandLogo channelId={resource.channelId} name={resource.channelName} />
         <span className={styles.identity}>
-          <span className={styles.nameLine}><strong>{resource.accountName}</strong>{resource.stale ? <Tag size="small" color="orange">已过期</Tag> : null}</span>
+          <span className={styles.nameLine}><strong>{resource.accountName}</strong></span>
           <small>{resource.channelName}{resource.plan ? ` · ${formatPlan(resource.plan)}` : ""}</small>
         </span>
         <span className={styles.primary}><strong>{primary.value}</strong><small>{primary.label}</small></span>

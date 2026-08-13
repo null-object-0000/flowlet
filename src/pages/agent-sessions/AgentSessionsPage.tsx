@@ -281,16 +281,17 @@ function SessionCostCell({ row }: { row: AgentSessionRow }) {
   const nativeSummary = useAgentSessionNativeSummary(row);
   const resolvedNativeSummary = row.nativeSummary ?? nativeSummary.data;
   const nativeUsage = !row.flowletObserved ? resolvedNativeSummary?.usage ?? null : null;
+  const nativeEstimate = nativeUsage?.apiEquivalent ?? null;
   return (
     <CostBreakdownTooltip
       t={t}
-      total={row.flowletObserved ? row.estimatedCost : nativeUsage?.cost ?? nativeUsage?.apiEquivalent?.amount ?? null}
-      currency="CNY"
+      total={row.flowletObserved ? row.estimatedCost : nativeEstimate?.amount ?? nativeUsage?.cost ?? null}
+      currency={row.flowletObserved ? "CNY" : nativeEstimate?.currency ?? nativeUsage?.costCurrency ?? "USD"}
       inputUncached={row.flowletObserved ? row.estimatedInputUncachedCost : undefined}
       inputCached={row.flowletObserved ? row.estimatedInputCachedCost : undefined}
       inputCacheWrite={row.flowletObserved ? row.estimatedInputCacheWriteCost : undefined}
       output={row.flowletObserved ? row.estimatedOutputCost : undefined}
-      apiEquivalent={nativeUsage?.apiEquivalent ?? null}
+      apiEquivalent={nativeEstimate}
     >
       <span className={styles.tokenTotal} onClick={(e) => e.stopPropagation()}>
         {row.flowletObserved ? formatCostCny(row.estimatedCost) : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}

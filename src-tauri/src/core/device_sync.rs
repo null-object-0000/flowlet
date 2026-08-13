@@ -2274,4 +2274,86 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].balance, Some(20.0));
     }
+
+    #[test]
+    fn imported_codex_resources_merge_different_ids_by_normalized_email() {
+        use crate::core::device_identity::{SyncedAccountQuotaWindow, SyncedAccountResource};
+
+        let storage =
+            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+        let resource = |account_id: &str, email: &str, remaining: f64, observed_at: &str| {
+            SyncedAccountResource {
+                account_id: account_id.to_string(),
+                channel_id: "chatgpt".to_string(),
+                channel_name: "ChatGPT".to_string(),
+                account_name: email.to_string(),
+                plan: Some("plus".to_string()),
+                balance: None,
+                balance_text: None,
+                currency: None,
+                token_total: None,
+                token_used: None,
+                token_remaining: None,
+                expires_at: None,
+                quota_windows: vec![SyncedAccountQuotaWindow {
+                    label: "7 天".to_string(),
+                    used_percent: 100.0 - remaining,
+                    resets_at: None,
+                }],
+                observed_at: observed_at.to_string(),
+                stale: false,
+            }
+        };
+        for (device_id, generated_at) in [
+            ("device-a", "2026-08-12T10:00:00Z"),
+            ("device-b", "2026-08-12T10:05:00Z"),
+        ] {
+            storage
+                .import_device_usage(
+                    13,
+                    device_id,
+                    "2026-08-01T00:00:00Z",
+                    device_id,
+                    "windows",
+                    "0.1.0",
+                    generated_at,
+                    480,
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                )
+                .unwrap();
+        }
+        storage
+            .import_device_account_resources(
+                "device-a",
+                "2026-08-12T10:00:00Z",
+                &[resource(
+                    "codex:oauth-id",
+                    "User@Example.com",
+                    19.0,
+                    "2026-08-12T09:00:00Z",
+                )],
+            )
+            .unwrap();
+        storage
+            .import_device_account_resources(
+                "device-b",
+                "2026-08-12T10:05:00Z",
+                &[resource(
+                    "codex:app-server-id",
+                    " user@example.com ",
+                    37.0,
+                    "2026-08-12T09:30:00Z",
+                )],
+            )
+            .unwrap();
+
+        let merged = storage.imported_account_resources().unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].account_id, "codex:app-server-id");
+        assert_eq!(merged[0].quota_windows[0].used_percent, 63.0);
+    }
 }

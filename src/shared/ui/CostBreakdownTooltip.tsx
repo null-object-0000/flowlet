@@ -3,6 +3,13 @@ import { Tooltip } from "@douyinfe/semi-ui-19";
 import { formatCostAmount, type CostAmountValue } from "../formatters/cost";
 import styles from "./TokenBreakdownTooltip.module.css";
 
+type ApiEquivalentCost = CostAmountValue & {
+  inputUncachedAmount?: number | null;
+  inputCachedAmount?: number | null;
+  inputCacheWriteAmount?: number | null;
+  outputAmount?: number | null;
+};
+
 type Props = {
   children: ReactNode;
   /** 总费用（用于无 breakdown 兜底）。 */
@@ -13,31 +20,31 @@ type Props = {
   output?: number | null;
   currency: string;
   /** 原生会话的 API 等价价值（无 breakdown 时展示）。 */
-  apiEquivalent?: CostAmountValue | null;
+  apiEquivalent?: ApiEquivalentCost | null;
   t: (source: string, variables?: Record<string, string | number>) => string;
 };
 
 export function CostBreakdownTooltip({ children, total, inputUncached, inputCached, inputCacheWrite, output, currency, apiEquivalent, t }: Props) {
-  const fmt = (v: number | null) => formatCostAmount({ amount: v, currency }, 4);
-  const hasBreakup = inputUncached != null || inputCached != null || inputCacheWrite != null || output != null;
-  const hasNativeMeta = apiEquivalent?.amount != null;
+  const resolvedCurrency = apiEquivalent?.currency ?? currency;
+  const resolvedTotal = apiEquivalent?.amount ?? total;
+  const resolvedInputUncached = inputUncached ?? apiEquivalent?.inputUncachedAmount;
+  const resolvedInputCached = inputCached ?? apiEquivalent?.inputCachedAmount;
+  const resolvedInputCacheWrite = inputCacheWrite ?? apiEquivalent?.inputCacheWriteAmount;
+  const resolvedOutput = output ?? apiEquivalent?.outputAmount;
+  const fmt = (v: number | null | undefined) => formatCostAmount({ amount: v ?? null, currency: resolvedCurrency }, 4);
+  const hasBreakup = resolvedInputUncached != null || resolvedInputCached != null || resolvedInputCacheWrite != null || resolvedOutput != null;
   return (
     <Tooltip
       showArrow
       content={(
         <div className={styles.breakdown}>
-          <strong>{t("总费用")} {fmt(total)}</strong>
+          <strong>{apiEquivalent?.amount != null ? t("API 等价价值") : t("总费用")} {fmt(resolvedTotal)}</strong>
           {hasBreakup ? (
             <>
-              {inputUncached != null ? <span><small>{t("未缓存输入")}</small><b>{fmt(inputUncached)}</b></span> : null}
-              {inputCached != null ? <span><small>{t("缓存命中")}</small><b>{fmt(inputCached)}</b></span> : null}
-              {inputCacheWrite != null ? <span><small>{t("缓存写入")}</small><b>{fmt(inputCacheWrite)}</b></span> : null}
-              {output != null ? <span><small>{t("输出")}</small><b>{fmt(output)}</b></span> : null}
-            </>
-          ) : null}
-          {hasNativeMeta && !hasBreakup ? (
-            <>
-              {apiEquivalent?.amount != null ? <span><small>{t("API 等价价值")}</small><b>{formatCostAmount(apiEquivalent, 4)}</b></span> : null}
+              {resolvedInputUncached != null ? <span><small>{t("未缓存输入")}</small><b>{fmt(resolvedInputUncached)}</b></span> : null}
+              {resolvedInputCached != null ? <span><small>{t("缓存命中")}</small><b>{fmt(resolvedInputCached)}</b></span> : null}
+              {resolvedInputCacheWrite != null ? <span><small>{t("缓存写入")}</small><b>{fmt(resolvedInputCacheWrite)}</b></span> : null}
+              {resolvedOutput != null ? <span><small>{t("输出")}</small><b>{fmt(resolvedOutput)}</b></span> : null}
             </>
           ) : null}
         </div>

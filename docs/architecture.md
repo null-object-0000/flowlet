@@ -155,6 +155,8 @@ Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显�
 Agent 插件还声明 `runnerAdapterId`。Rust 任务调度通过编译期 Runner Adapter registry 统一解析
 任务 `agent_profile`、环境探测适配器、展示名和异步执行函数；Claude Code、OpenCode、Pi、Codex
 既有执行器继续负责各自的命令参数、输出事件和会话恢复，项目队列与任务状态机不感知具体 Agent。
+四个执行器分别位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
+位于 `agent_task_runner/process.rs`；父模块只保留项目执行槽、队列调度和任务状态流转。
 历史空 Profile 仍显式映射 Claude Code，未知 Profile 与未知 Runner Adapter 均明确失败，不回退执行。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
@@ -829,7 +831,7 @@ Token / cost 与消息级 tokens；Claude Code 对去重后的助手回复 usage
 轮次总耗时和首 Token 延迟。原生用量与
 Flowlet 请求观测始终分栏展示且不相加；OpenCode 原生提供的 cost 直接展示。Codex 在能够确定唯一模型且
 价格存在精确匹配时，只根据明确 Token 消耗展示 `openai-api` 标准基础 API 公开价计算的 API 等价价值，并保留
-USD 等原始计价币种；不根据套餐类型、自定义比例或周额度百分比派生 credits 或套餐消耗。
+USD 等原始计价币种；返回未缓存输入、缓存命中、缓存写入和输出四项费用，供列表提示逐项对账。各项由后端与总价一次计算，前端不重复套用价格。不根据套餐类型、自定义比例或周额度百分比派生 credits 或套餐消耗。
 无法从原生记录确认的长上下文、Priority processing 或 Fast mode 乘数不纳入基础估算。Claude Code 不在
 缺少可靠价格映射时伪造费用。产品界面只按需读取最后一次交互，不提供更早历史回溯；列表与详情的
 累计指标使用 `get_agent_session_native_summary`，只返回 turn 数、累计用量和模型集合。同步快照存在时

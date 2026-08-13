@@ -122,6 +122,10 @@ export type AgentSessionTimeline = {
 
 export type AgentSessionCostEstimate = {
   amount: number | null;
+  inputUncachedAmount?: number | null;
+  inputCachedAmount?: number | null;
+  inputCacheWriteAmount?: number | null;
+  outputAmount?: number | null;
   currency: string | null;
   sourceUrl: string | null;
   priceVersion: string | null;

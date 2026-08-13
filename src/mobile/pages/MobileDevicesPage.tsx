@@ -1,19 +1,24 @@
 import { IconChevronRight, IconComment, IconDesktop } from "@douyinfe/semi-icons";
+import { Button } from "@douyinfe/semi-ui-19";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { LanPeerProbe } from "../../domains/device-sync/types";
-import { useMobileDeviceAgents, useMobileDevices, useMobileLanProbes, useMobileSessions } from "../../features/device-sync/useMobileDeviceSync";
+import { useMobileAccountResources, useMobileDeviceAgents, useMobileDevices, useMobileLanProbes, useMobileSessions } from "../../features/device-sync/useMobileDeviceSync";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
 import { useMobileRefreshController } from "../useMobileRefreshController";
 import { MobilePullToRefresh } from "../MobilePullToRefresh";
-import { MobileDeviceListView, MobilePageHeaderView, MobilePageView, mobilePageStyles as styles, type MobileDeviceRowModel } from "@flowlet/product-ui";
+import { MobileCardView, MobileDeviceListView, MobilePageHeaderView, MobilePageView, mobilePageStyles as styles, type MobileDeviceRowModel } from "@flowlet/product-ui";
+import { MobileAccountResourceList } from "../MobileAccountResourceList";
+import accountStyles from "../MobileAccountResources.module.css";
 
 export function MobileDevicesPage() {
   const { language, t } = useAppPreferences();
+  const navigate = useNavigate();
   const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null);
+  const accountResources = useMobileAccountResources();
   const devices = useMobileDevices();
   const lanProbes = useMobileLanProbes();
   const refreshController = useMobileRefreshController();
@@ -26,7 +31,23 @@ export function MobileDevicesPage() {
       onRefresh={refreshController.refresh}
     >
     <MobilePageView>
-      <MobilePageHeaderView picker title={t("设备")} meta={<MobileLastRefreshTime value={refreshController.lastSuccessAt} />} subtitle={t("查看同步设备、已安装 Agent 及其 Flowlet 接入状态")} />
+      <MobilePageHeaderView picker title={t("资源")} meta={<MobileLastRefreshTime value={refreshController.lastSuccessAt} />} subtitle={t("查看账号资源与同步设备")} />
+
+      <MobileCardView>
+        <div className={accountStyles.previewHeader}>
+          <div><strong>{t("账号资源")}</strong><span>{t("跨设备共享的自动同步用量与余额")}</span></div>
+          <Button theme="borderless" size="small" onClick={() => navigate("/account-resources")}>{t("查看全部")}</Button>
+        </div>
+        {accountResources.isLoading ? <div className={accountStyles.empty}>{t("正在读取账号资源…")}</div> : null}
+        {accountResources.isError ? <div className={accountStyles.empty}>{t("账号资源加载失败")}</div> : null}
+        {!accountResources.isLoading && !accountResources.isError && (accountResources.data?.length ?? 0) === 0 ? <div className={accountStyles.empty}>{t("仅展示已加入账号工作区且支持自动同步的账号。")}</div> : null}
+        <MobileAccountResourceList resources={accountResources.data ?? []} compact />
+      </MobileCardView>
+
+      <div className={accountStyles.sectionHeader}>
+        <strong>{t("同步设备")}</strong>
+        <span>{t("查看已安装 Agent 及其 Flowlet 接入状态")}</span>
+      </div>
 
       {devices.isLoading ? (
         <div className={`${styles.card} ${styles.state}`}><span>{t("正在加载设备…")}</span></div>

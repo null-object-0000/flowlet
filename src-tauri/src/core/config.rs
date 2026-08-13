@@ -1435,6 +1435,14 @@ pub struct AgentSessionNativeSummary {
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionCostEstimate {
     pub amount: Option<f64>,
+    #[serde(default)]
+    pub input_uncached_amount: Option<f64>,
+    #[serde(default)]
+    pub input_cached_amount: Option<f64>,
+    #[serde(default)]
+    pub input_cache_write_amount: Option<f64>,
+    #[serde(default)]
+    pub output_amount: Option<f64>,
     pub currency: Option<String>,
     pub source_url: Option<String>,
     pub price_version: Option<String>,

@@ -45,6 +45,10 @@ export type UsageSummaryFilter = {
 
 export type AgentNativeCostEstimate = {
   amount: number | null;
+  inputUncachedAmount?: number | null;
+  inputCachedAmount?: number | null;
+  inputCacheWriteAmount?: number | null;
+  outputAmount?: number | null;
   currency: string | null;
   sourceUrl: string | null;
   priceVersion: string | null;

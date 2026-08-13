@@ -12,7 +12,7 @@ export function MobileRouter() {
   return (
     <HashRouter>
       <Routes>
-        {/* 设备二级页：独立页面，无底部 Tab，返回回到设备页。 */}
+        {/* 资源二级页：独立页面，无底部 Tab；设备详情与账号资源分别返回资源页。 */}
         <Route path="devices/:deviceId/sessions" element={<MobileDeviceSessionsPage />} />
         <Route path="devices/:deviceId/agents" element={<MobileDeviceAgentsPage />} />
         <Route path="account-resources" element={<MobileAccountResourcesPage />} />

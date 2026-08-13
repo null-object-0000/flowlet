@@ -45,7 +45,7 @@ describe("MobileShell", () => {
     expect(within(navigation).getAllByRole("link").map((link) => link.textContent)).toEqual([
       "概览",
       "项目",
-      "设备",
+      "资源",
       "设置",
     ]);
 

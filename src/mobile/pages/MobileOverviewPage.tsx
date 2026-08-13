@@ -2,9 +2,8 @@ import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { Button } from "@douyinfe/semi-ui-19";
 import { MobileCardView, MobilePageHeaderView, MobilePageView, UsageSummaryGridView, mobilePageStyles as styles } from "@flowlet/product-ui";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { useMobileAccountResources, useMobileDailyUsage, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
+import { useMobileDailyUsage, useMobileHourlyUsage, useMobileS3Settings } from "../../features/device-sync/useMobileDeviceSync";
 import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
 import { formatCostCny } from "../../shared/formatters/cost";
 import { MobileDeviceTitlePicker, useMobileDevicePickerState } from "../MobileDevicePicker";
@@ -13,8 +12,6 @@ import { useMobileRefreshController } from "../useMobileRefreshController";
 import { MobilePullToRefresh } from "../MobilePullToRefresh";
 import { UsageTokenDetailSheet } from "../../features/usage/UsageTokenDetailSheet";
 import type { DailyUsageTotal } from "../../domains/device-sync/types";
-import { MobileAccountResourceList } from "../MobileAccountResourceList";
-import accountStyles from "../MobileAccountResources.module.css";
 import {
   buildMobileDailyContextHeatmap,
   buildUsageTokenDetails,
@@ -33,7 +30,6 @@ import {
 export function MobileOverviewPage() {
   const { language, t } = useAppPreferences();
   const devicePicker = useMobileDevicePickerState();
-  const navigate = useNavigate();
   const deviceId = devicePicker.deviceId;
   const [period, setPeriod] = useState<MobileUsagePeriod>(DEFAULT_USAGE_PERIOD);
   const [periodOffset, setPeriodOffset] = useState(0);
@@ -44,7 +40,6 @@ export function MobileOverviewPage() {
   const [tokenDetailsScope, setTokenDetailsScope] = useState<"period" | "selected" | null>(null);
   const selectedDetailRef = useRef<HTMLElement | null>(null);
   const settings = useMobileS3Settings();
-  const accountResources = useMobileAccountResources();
   const usage = useMobileDailyUsage(deviceId);
   const hourlyUsage = useMobileHourlyUsage(deviceId);
   const refreshController = useMobileRefreshController(deviceId ?? undefined);
@@ -305,17 +300,6 @@ export function MobileOverviewPage() {
           },
         ]}
       />
-
-      <MobileCardView>
-        <div className={accountStyles.previewHeader}>
-          <div><strong>{t("账号资源")}</strong><span>{t("跨设备共享的自动同步用量与余额")}</span></div>
-          <Button theme="borderless" size="small" onClick={() => navigate("/account-resources")}>{t("查看全部")}</Button>
-        </div>
-        {accountResources.isLoading ? <div className={accountStyles.empty}>{t("正在读取账号资源…")}</div> : null}
-        {accountResources.isError ? <div className={accountStyles.empty}>{t("账号资源加载失败")}</div> : null}
-        {!accountResources.isLoading && !accountResources.isError && (accountResources.data?.length ?? 0) === 0 ? <div className={accountStyles.empty}>{t("仅展示已加入账号工作区且支持自动同步的账号。")}</div> : null}
-        <MobileAccountResourceList resources={accountResources.data ?? []} compact />
-      </MobileCardView>
 
       <MobileCardView>
         <div className={styles.cardHeader}>

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileDevicesPage } from "./MobileDevicesPage";
 
 const useMobileDevicesMock = vi.fn();
+const useMobileAccountResourcesMock = vi.fn();
 const useMobileDeviceAgentsMock = vi.fn();
 const useMobileLanProbesMock = vi.fn();
 const useMobileSessionsMock = vi.fn();
@@ -15,6 +16,7 @@ vi.mock("lottie-web", () => ({
 
 vi.mock("../../features/device-sync/useMobileDeviceSync", () => ({
   useMobileDevices: () => useMobileDevicesMock(),
+  useMobileAccountResources: () => useMobileAccountResourcesMock(),
   useMobileDeviceAgents: (deviceId: string | null) => useMobileDeviceAgentsMock(deviceId),
   useMobileLanProbes: () => useMobileLanProbesMock(),
   useMobileSessions: (deviceId: string | null) => useMobileSessionsMock(deviceId),
@@ -65,6 +67,11 @@ describe("MobileDevicesPage", () => {
       isLoading: false,
       isError: false,
     });
+    useMobileAccountResourcesMock.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+    });
     useMobileDeviceAgentsMock.mockReturnValue({
       data: [{
         agentId: "claude-code",
@@ -110,13 +117,20 @@ describe("MobileDevicesPage", () => {
     expect(screen.queryByRole("button", { name: "刷新" })).toBeNull();
     expect(screen.getByText(/最后刷新：/)).toBeInTheDocument();
 
-    const page = screen.getByText("设备").closest("section")!;
+    const page = screen.getByText("资源").closest("section")!;
     const pullSurface = page.parentElement!;
     fireEvent.touchStart(pullSurface, { touches: [{ clientY: 10 }] });
     fireEvent.touchMove(pullSurface, { touches: [{ clientY: 140 }] });
     fireEvent.touchEnd(pullSurface);
 
     expect(refreshMock).toHaveBeenCalledOnce();
+  });
+
+  it("places account resources before synchronized devices", () => {
+    renderPage();
+    const accountHeading = screen.getByText("账号资源");
+    const deviceHeading = screen.getByText("同步设备");
+    expect(accountHeading.compareDocumentPosition(deviceHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("expands a device into session and agent entry cards instead of inline agents", () => {

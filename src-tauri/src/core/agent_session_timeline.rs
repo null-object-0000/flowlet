@@ -265,14 +265,19 @@ fn estimate_usage_cost(
     let cached_input = usage.cached_input_tokens.max(0) as f64;
     let cache_write_input = usage.cache_write_input_tokens.max(0) as f64;
     let output = usage.output_tokens.max(0) as f64;
+    let input_uncached_amount = uncached_input * uncached_price / 1_000_000.0;
+    let input_cached_amount = cached_input * cached_price / 1_000_000.0;
+    let input_cache_write_amount =
+        cache_write_input * cache_write_price.unwrap_or(uncached_price) / 1_000_000.0;
+    let output_amount = output * output_price / 1_000_000.0;
     AgentSessionCostEstimate {
         amount: Some(
-            (uncached_input * uncached_price
-                + cached_input * cached_price
-                + cache_write_input * cache_write_price.unwrap_or(uncached_price)
-                + output * output_price)
-                / 1_000_000.0,
+            input_uncached_amount + input_cached_amount + input_cache_write_amount + output_amount,
         ),
+        input_uncached_amount: Some(input_uncached_amount),
+        input_cached_amount: Some(input_cached_amount),
+        input_cache_write_amount: Some(input_cache_write_amount),
+        output_amount: Some(output_amount),
         currency: Some(price.currency.clone()),
         source_url: price.source_url.clone(),
         price_version: price.price_version.clone(),
@@ -284,6 +289,10 @@ fn estimate_usage_cost(
 fn unpriced_estimate(turn_count: i64) -> AgentSessionCostEstimate {
     AgentSessionCostEstimate {
         amount: None,
+        input_uncached_amount: None,
+        input_cached_amount: None,
+        input_cache_write_amount: None,
+        output_amount: None,
         currency: None,
         source_url: None,
         price_version: None,
@@ -300,10 +309,16 @@ fn aggregate_estimates<'a>(
     let priced_turn_count = estimates.iter().map(|item| item.priced_turn_count).sum();
     let unpriced_turn_count = estimates.iter().map(|item| item.unpriced_turn_count).sum();
     let same_currency = estimates.iter().all(|item| item.currency == first.currency);
-    let amount = (unpriced_turn_count == 0 && same_currency)
-        .then(|| estimates.iter().filter_map(|item| item.amount).sum::<f64>());
+    let fully_priced = unpriced_turn_count == 0 && same_currency;
+    let sum_component = |value: fn(&AgentSessionCostEstimate) -> Option<f64>| {
+        fully_priced.then(|| estimates.iter().filter_map(|item| value(item)).sum::<f64>())
+    };
     Some(AgentSessionCostEstimate {
-        amount,
+        amount: sum_component(|item| item.amount),
+        input_uncached_amount: sum_component(|item| item.input_uncached_amount),
+        input_cached_amount: sum_component(|item| item.input_cached_amount),
+        input_cache_write_amount: sum_component(|item| item.input_cache_write_amount),
+        output_amount: sum_component(|item| item.output_amount),
         currency: same_currency.then(|| first.currency.clone()).flatten(),
         source_url: first.source_url.clone(),
         price_version: first.price_version.clone(),
@@ -2404,6 +2419,12 @@ mod tests {
         assert_eq!(api_equivalent.priced_turn_count, 1);
         assert_eq!(api_equivalent.unpriced_turn_count, 0);
         assert!((api_equivalent.amount.unwrap() - 0.0038925).abs() < f64::EPSILON);
+        assert!((api_equivalent.input_uncached_amount.unwrap() - 0.00165).abs() < f64::EPSILON);
+        assert!((api_equivalent.input_cached_amount.unwrap() - 0.00008).abs() < f64::EPSILON);
+        assert!(
+            (api_equivalent.input_cache_write_amount.unwrap() - 0.0000625).abs() < f64::EPSILON
+        );
+        assert!((api_equivalent.output_amount.unwrap() - 0.0021).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -104,6 +104,17 @@ pub(crate) async fn query_codex_account(
     crate::core::codex_account::query_codex_account(&state.codex_accounts_dir, &account_id).await
 }
 
+/// 删除单个 Codex 账号的 Flowlet 托管配置（凭据副本与观测快照）。
+/// 不触碰 Codex 客户端自身登录状态；若该账号仍是 Codex 当前登录账号，
+/// 下一次同步会自动重新发现它。
+#[tauri::command]
+pub(crate) fn delete_codex_account(
+    state: tauri::State<'_, AppState>,
+    account_id: String,
+) -> Result<crate::core::codex_account::CodexAccountDeletionResult, String> {
+    crate::core::codex_account::delete_codex_account(&state.codex_accounts_dir, &account_id)
+}
+
 #[tauri::command]
 pub(crate) fn inspect_agent_global_config(
     state: tauri::State<'_, AppState>,

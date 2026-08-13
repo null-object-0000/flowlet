@@ -3,6 +3,7 @@ import {
   applyAgentGlobalConfig,
   authorizeCodexAccount,
   checkAgentLatestVersions,
+  deleteCodexAccount,
   detectAgentEnvironment,
   inspectAgentGlobalConfig,
   listCachedCodexAccounts,
@@ -74,6 +75,25 @@ export function useCodexAccountAuthorization() {
   return useMutation({
     mutationFn: authorizeCodexAccount,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.agent.codexAccount() }),
+  });
+}
+
+// 删除 Codex 账号：先从内存缓存移除该账号快照（避免 30s 轮询间隙仍显示
+// 已删除账号），再失效查询让缓存读取与磁盘快照一致。
+export function useCodexAccountDeletion() {
+  const queryClient = useQueryClient();
+  const queryKey = queryKeys.agent.codexAccount();
+  return useMutation({
+    mutationFn: deleteCodexAccount,
+    onSuccess: (result) => {
+      const current = queryClient.getQueryData<CodexAccountsReport>(queryKey);
+      const accounts = current?.accounts ?? [];
+      queryClient.setQueryData<CodexAccountsReport>(
+        queryKey,
+        { accounts: accounts.filter((item) => item.account_id !== result.account_id) },
+      );
+      queryClient.invalidateQueries({ queryKey });
+    },
   });
 }
 

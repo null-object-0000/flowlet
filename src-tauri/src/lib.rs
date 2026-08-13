@@ -852,6 +852,7 @@ fn run_desktop() {
             commands::query_codex_accounts,
             commands::sync_codex_accounts,
             commands::authorize_codex_account,
+            commands::delete_codex_account,
             commands::inspect_agent_global_config,
             commands::apply_agent_global_config,
             commands::restore_agent_global_config,

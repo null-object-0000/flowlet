@@ -4,6 +4,7 @@ import type {
   AgentGlobalConfigOptions,
   AgentGlobalConfigReport,
   AgentLatestVersionsReport,
+  CodexAccountDeletionResult,
   CodexAccountReport,
   CodexAccountsReport,
 } from "./types";
@@ -42,6 +43,12 @@ export function listCachedCodexAccounts(): Promise<CodexAccountsReport> {
 export function authorizeCodexAccount(): Promise<CodexAccountReport> {
   return invokeCommand<CodexAccountReport>("authorize_codex_account", undefined, 6 * 60_000).catch((error) => {
     throw toAppError(error, "codex_account_authorization_failed");
+  });
+}
+
+export function deleteCodexAccount(accountId: string): Promise<CodexAccountDeletionResult> {
+  return invokeCommand<CodexAccountDeletionResult>("delete_codex_account", { accountId }).catch((error) => {
+    throw toAppError(error, "codex_account_deletion_failed");
   });
 }
 

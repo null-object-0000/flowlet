@@ -462,10 +462,13 @@ Codex 的 User-Agent（`codex_cli_rs/`）可区分，归属走 UA 规则（confi
 
 Codex 账号观测（订阅用量、套餐、Credits、重置机会、授权/刷新）承载于概览页
 渠道账号卡片：Codex 账号由 Rust 端自动发现与同步，作为伪 `ChannelAccount` 插入
-渠道账号列表（只读、不参与路由、不开放编辑、`priority: -1000` 排底），
-伪账号行点击打开只读详情抽屉（`CodexAccountSideSheet`）。观测列表只展示有可观测
-数据的账号（订阅/用量/Credits/错误）；Flowlet 代理写入的 API Key 登录态
-（`auth_mode=apiKey`）没有订阅数据，会在前端被过滤，不渲染成空壳账号行。
+渠道账号列表（不参与路由、不开放编辑、`priority: -1000` 排底），
+伪账号行点击打开详情抽屉（`CodexAccountSideSheet`）：凭据只读展示，
+支持刷新用量、重新授权与删除。删除（`delete_codex_account`）只移除 Flowlet
+保存在托管目录的本机凭据副本与用量快照，不影响 Codex 客户端自身登录状态；
+若该账号仍是 Codex 当前登录账号，下一轮同步会按 `~/.codex/auth.json` 重新发现。
+观测列表只展示有可观测数据的账号（订阅/用量/Credits/错误）；Flowlet 代理写入的
+API Key 登录态（`auth_mode=apiKey`）没有订阅数据，会在前端被过滤，不渲染成空壳账号行。
 
 ---
 

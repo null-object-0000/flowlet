@@ -78,6 +78,12 @@ export type CodexAccountsReport = {
   accounts: CodexAccountReport[];
 };
 
+/** 删除 Codex 账号的返回结果：被删除账号的身份信息（供 Toast 展示）。 */
+export type CodexAccountDeletionResult = {
+  account_id: string;
+  email?: string | null;
+};
+
 export type AgentGlobalConfigState =
   | "not_configured"
   | "flowlet"

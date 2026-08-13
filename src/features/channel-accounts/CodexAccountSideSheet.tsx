@@ -1,5 +1,6 @@
-import { Button, SideSheet, Typography } from "@douyinfe/semi-ui-19";
-import { IconRefresh } from "@douyinfe/semi-icons";
+import { useState } from "react";
+import { Button, Modal, SideSheet, Space, Typography } from "@douyinfe/semi-ui-19";
+import { IconDelete, IconRefresh } from "@douyinfe/semi-icons";
 import type { CodexAccountsReport } from "../../domains/agent/types";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
@@ -18,12 +19,14 @@ type Props = {
   onRefreshAccount: () => void;
   accountAuthorizationBusy?: boolean;
   onAuthorizeAccount: () => void;
+  onDeleteAccount: () => void;
+  accountDeletionBusy?: boolean;
   onClose: () => void;
 };
 
 /**
  * Codex 单账号详情抽屉。账号入口位于概览页渠道账号卡片，不再提供独立的账号列表页。
- * 账号凭据只读展示；刷新用量和重新授权均在此处完成。
+ * 账号凭据只读展示；刷新用量、重新授权和删除均在此处完成。
  */
 export function CodexAccountSideSheet({
   visible,
@@ -34,11 +37,15 @@ export function CodexAccountSideSheet({
   onRefreshAccount,
   accountAuthorizationBusy = false,
   onAuthorizeAccount,
+  onDeleteAccount,
+  accountDeletionBusy = false,
   onClose,
 }: Props) {
   const { language, t } = useAppPreferences();
   const account = accounts?.accounts.find((item) => item.account_id === accountId);
   const authorizationExpired = account ? isCodexAuthorizationExpired(account) : false;
+  const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
+  const busy = accountLoading || accountAuthorizationBusy || accountDeletionBusy;
 
   return (
     <SideSheet
@@ -74,6 +81,14 @@ export function CodexAccountSideSheet({
               >
                 {t("刷新用量")}
               </Button>
+              <Button
+                type="danger"
+                theme="borderless"
+                icon={<IconDelete />}
+                aria-label={t("删除账号")}
+                disabled={!account || busy}
+                onClick={() => setConfirmDeleteVisible(true)}
+              />
             </div>
           </div>
 
@@ -105,6 +120,41 @@ export function CodexAccountSideSheet({
           )}
         </section>
       </div>
+
+      <Modal
+        title={t("确认删除 Codex 账号")}
+        visible={confirmDeleteVisible}
+        motion={false}
+        zIndex={APP_OVERLAY_Z_INDEX.modal}
+        footer={null}
+        // Semi Modal 默认 body 底部内边距为 0（content 垂直 padding 也为 0），
+        // 不加这一行按钮会直接贴到弹窗底部边缘。
+        bodyStyle={{ paddingBottom: 16 }}
+        onCancel={() => setConfirmDeleteVisible(false)}
+      >
+        <Space vertical align="start" spacing="loose" style={{ width: "100%" }}>
+          <Text>
+            {t(
+              "确定要删除 Codex 账号“{name}”吗？删除后将移除 Flowlet 保存在本机的该账号凭据与用量快照，并停止用量同步。Codex 端登录状态不受影响；若该账号仍是 Codex 当前登录账号，同步后会重新出现。",
+              { name: account?.email || account?.account_id || t("Codex 账号") },
+            )}
+          </Text>
+          <Space style={{ justifyContent: "flex-end", width: "100%" }}>
+            <Button onClick={() => setConfirmDeleteVisible(false)}>{t("取消")}</Button>
+            <Button
+              type="danger"
+              theme="solid"
+              loading={accountDeletionBusy}
+              onClick={() => {
+                setConfirmDeleteVisible(false);
+                onDeleteAccount();
+              }}
+            >
+              {t("确认删除")}
+            </Button>
+          </Space>
+        </Space>
+      </Modal>
     </SideSheet>
   );
 }

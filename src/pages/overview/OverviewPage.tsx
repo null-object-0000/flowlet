@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, Toast } from "@douyinfe/semi-ui-19";
 import { ApiAccessSideSheet } from "../../features/client-access/ApiAccessSideSheet";
 import { useAccounts, useAccountActions, useChannelPresets, useLatestBalanceSnapshots } from "../../features/channel-accounts";
-import { useCodexAccounts, useCodexAccountRefreshOne, useCodexAccountAuthorization } from "../../features/agent-access/useAgentEnvironment";
+import { useCodexAccounts, useCodexAccountRefreshOne, useCodexAccountAuthorization, useCodexAccountDeletion } from "../../features/agent-access/useAgentEnvironment";
 import { AccountActionOverlay, type AccountActionRequest } from "../../features/channel-accounts/AccountActionOverlay";
 import { CodexAccountSideSheet } from "../../features/channel-accounts/CodexAccountSideSheet";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
@@ -32,6 +32,7 @@ export function OverviewPage() {
   const codexAccounts = useCodexAccounts(hasAccounts);
   const codexAccountRefreshOne = useCodexAccountRefreshOne();
   const codexAccountAuthorization = useCodexAccountAuthorization();
+  const codexAccountDeletion = useCodexAccountDeletion();
   const [codexSheetVisible, setCodexSheetVisible] = useState(false);
   const [focusedCodexAccount, setFocusedCodexAccount] = useState<string | undefined>(undefined);
   const baseUrl = `http://127.0.0.1:${bindConfig.data?.port || 18640}`;
@@ -58,6 +59,18 @@ export function OverviewPage() {
       Toast.success(t("Codex 账号授权成功"));
     } catch (error) {
       Toast.error(t("Codex 账号授权失败：{message}", { message: errorMessage(error) }));
+    }
+  };
+
+  const deleteCodexAccount = async () => {
+    if (!focusedCodexAccount) return;
+    try {
+      await codexAccountDeletion.mutateAsync(focusedCodexAccount);
+      Toast.success(t("Codex 账号已删除"));
+      setCodexSheetVisible(false);
+      setFocusedCodexAccount(undefined);
+    } catch (error) {
+      Toast.error(t("删除失败：{message}", { message: errorMessage(error) }));
     }
   };
 
@@ -155,6 +168,8 @@ export function OverviewPage() {
           onRefreshAccount={() => void codexAccountRefreshOne.mutate(focusedCodexAccount)}
           accountAuthorizationBusy={codexAccountAuthorization.isPending}
           onAuthorizeAccount={() => void authorizeCodexAccount()}
+          onDeleteAccount={() => void deleteCodexAccount()}
+          accountDeletionBusy={codexAccountDeletion.isPending}
           onClose={() => {
             setCodexSheetVisible(false);
             setFocusedCodexAccount(undefined);

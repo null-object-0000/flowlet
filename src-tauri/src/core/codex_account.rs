@@ -265,6 +265,56 @@ pub async fn query_codex_account(
     Ok(report)
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAccountDeletionResult {
+    pub account_id: String,
+    pub email: Option<String>,
+}
+
+/// 删除指定 Codex 账号的 Flowlet 托管配置（auth.json / snapshot.json / config.toml 目录）。
+/// 只移除 Flowlet 保存的本地凭据副本与观测数据，不触碰 Codex 客户端自身的登录状态；
+/// 若该账号仍是 Codex 当前登录账号，下一次同步（`query_codex_accounts`）会按
+/// `~/.codex/auth.json` 重新发现它。
+/// `account_id → 目录` 为确定性映射（`managed_root.join(profile_directory_name(id))`）；
+/// 目录名在账号规范化后可能不再匹配当前 id，因此直接查找失败时回退扫描托管目录
+/// 匹配 `snapshot.account_id`（与 `query_codex_account` 同款扫描）。
+pub fn delete_codex_account(
+    managed_root: &Path,
+    account_id: &str,
+) -> Result<CodexAccountDeletionResult, String> {
+    std::fs::create_dir_all(managed_root)
+        .map_err(|error| format!("无法创建 Codex 多账号目录：{error}"))?;
+
+    let direct = managed_root.join(profile_directory_name(account_id));
+    let profile_dir = if direct.join("auth.json").is_file() {
+        direct
+    } else {
+        std::fs::read_dir(managed_root)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|path| is_managed_profile_directory(path))
+                    .find(|path| {
+                        read_snapshot(&path.join("snapshot.json"))
+                            .is_some_and(|snapshot| snapshot.account_id == account_id)
+                    })
+            })
+            .ok_or_else(|| format!("未找到 Codex 账号 {account_id} 的托管配置"))?
+    };
+
+    let snapshot = read_snapshot(&profile_dir.join("snapshot.json"));
+    std::fs::remove_dir_all(&profile_dir)
+        .map_err(|error| format!("删除 Codex 账号 {account_id} 托管配置失败：{error}"))?;
+
+    Ok(CodexAccountDeletionResult {
+        account_id: account_id.to_string(),
+        email: snapshot.and_then(|snapshot| snapshot.email),
+    })
+}
+
 /// Cheap pre-check for scheduled sync: skip network and process work entirely
 /// when the user has never signed in to Codex on this machine.
 pub(crate) fn has_codex_account_sources(managed_root: &Path, codex_home: &Path) -> bool {
@@ -1796,6 +1846,77 @@ mod tests {
             .expect("query local Codex app-server");
         assert!(report.signed_in);
         assert!(report.auth_mode.is_some());
+    }
+
+    #[test]
+    fn deletes_managed_profile_directory_and_returns_identity() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-delete-{}", uuid::Uuid::new_v4()));
+        let profile = root.join("user-canonical");
+        std::fs::create_dir_all(&profile).expect("create profile");
+        let report = parse_oauth_usage(
+            &json!({
+                "account_id": "user-canonical",
+                "email": "delete@example.com",
+                "plan_type": "plus"
+            }),
+            None,
+        )
+        .expect("parse report");
+        write_private_json(
+            &profile.join("auth.json"),
+            &json!({ "tokens": { "account_id": "user-canonical", "access_token": "secret" } }),
+        )
+        .expect("write auth");
+        write_private_json(&profile.join("snapshot.json"), &report).expect("write snapshot");
+
+        let deleted = delete_codex_account(&root, "user-canonical").expect("delete account");
+        assert_eq!(deleted.account_id, "user-canonical");
+        assert_eq!(deleted.email.as_deref(), Some("delete@example.com"));
+        assert!(!profile.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_codex_account_resolves_renamed_profile_directory_by_snapshot_scan() {
+        // 目录名与 account_id 不一致（规范化）时按 snapshot.account_id 回退扫描定位。
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-codex-delete-scan-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let legacy_dir = root.join("legacy-named-dir");
+        std::fs::create_dir_all(&legacy_dir).expect("create legacy dir");
+        let report = parse_oauth_usage(
+            &json!({
+                "account_id": "canonical-1",
+                "email": "scan@example.com",
+                "plan_type": "plus"
+            }),
+            None,
+        )
+        .expect("parse report");
+        write_private_json(
+            &legacy_dir.join("auth.json"),
+            &json!({ "tokens": { "account_id": "canonical-1" } }),
+        )
+        .expect("write auth");
+        write_private_json(&legacy_dir.join("snapshot.json"), &report).expect("write snapshot");
+
+        delete_codex_account(&root, "canonical-1").expect("delete by snapshot scan");
+        assert!(!legacy_dir.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_codex_account_errors_when_profile_is_missing() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-codex-delete-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let error = delete_codex_account(&root, "missing-account")
+            .expect_err("unknown account must error");
+        assert!(error.contains("未找到 Codex 账号 missing-account"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

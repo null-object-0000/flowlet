@@ -42,6 +42,7 @@ function renderSheet(overrides: Partial<React.ComponentProps<typeof CodexAccount
       accountId="user-1"
       onRefreshAccount={noop}
       onAuthorizeAccount={noop}
+      onDeleteAccount={noop}
       onClose={noop}
       {...overrides}
     />,
@@ -108,5 +109,37 @@ describe("CodexAccountSideSheet single-account details", () => {
     expect(screen.queryByText("账号授权已过期")).not.toBeInTheDocument();
     expect(screen.getByText("用量同步失败")).toBeInTheDocument();
     expect(screen.getByText("network timeout")).toBeInTheDocument();
+  });
+
+  it("deletes the account after confirming the dangerous action", async () => {
+    const user = userEvent.setup();
+    const onDeleteAccount = vi.fn();
+    renderSheet({ onDeleteAccount });
+
+    // 删除按钮在账号详情头部，需要确认后才触发。
+    await user.click(screen.getByRole("button", { name: "删除账号" }));
+    expect(screen.getByText("确认删除 Codex 账号")).toBeInTheDocument();
+    expect(onDeleteAccount).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
+    expect(onDeleteAccount).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("确认删除 Codex 账号")).not.toBeInTheDocument();
+  });
+
+  it("cancels deletion without triggering the delete callback", async () => {
+    const user = userEvent.setup();
+    const onDeleteAccount = vi.fn();
+    renderSheet({ onDeleteAccount });
+
+    await user.click(screen.getByRole("button", { name: "删除账号" }));
+    await user.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(onDeleteAccount).not.toHaveBeenCalled();
+    expect(screen.queryByText("确认删除 Codex 账号")).not.toBeInTheDocument();
+  });
+
+  it("disables the delete entry while the account is missing", () => {
+    renderSheet({ accounts: { accounts: [] } });
+    expect(screen.getByRole("button", { name: "删除账号" })).toBeDisabled();
   });
 });

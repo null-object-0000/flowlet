@@ -19,6 +19,7 @@ pub mod cost_ledger_source_probe;
 pub(crate) mod detail_windows;
 pub mod device_identity;
 pub mod device_sync;
+pub mod job_runtime;
 pub mod lan_sync;
 pub mod logging;
 pub mod metrics;

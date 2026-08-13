@@ -8,16 +8,9 @@ use crate::core::config::{
 };
 use crate::core::presets::{BalanceQueryResult, ModelSyncResult};
 use crate::AppState;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
 
-static CHANNEL_RESOURCE_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
-struct ChannelResourceSyncGuard;
-impl Drop for ChannelResourceSyncGuard {
-    fn drop(&mut self) {
-        CHANNEL_RESOURCE_SYNC_RUNNING.store(false, Ordering::Release);
-    }
-}
+const CHANNEL_RESOURCE_SYNC_SCOPE: &str = "channel-resource-sync";
 
 /// 手动触发 models-cn 目录同步。拉取远程数据保存到本地，写入任务日志。
 #[tauri::command]
@@ -2165,20 +2158,22 @@ pub(crate) async fn sync_scrape_balances(
             message: "没有可自动同步的渠道资源账号".to_string(),
         });
     }
-    if CHANNEL_RESOURCE_SYNC_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
+    let lease = match state
+        .jobs
+        .try_acquire("channel-resource-sync", CHANNEL_RESOURCE_SYNC_SCOPE)
     {
-        return Ok(ScrapeBalanceSyncResult {
-            started: false,
-            job_id: None,
-            accounts: accounts.len(),
-            synced: 0,
-            failed: 0,
-            message: "已有渠道资源自动同步正在运行".to_string(),
-        });
-    }
-    let _guard = ChannelResourceSyncGuard;
+        Ok(lease) => lease,
+        Err(_) => {
+            return Ok(ScrapeBalanceSyncResult {
+                started: false,
+                job_id: None,
+                accounts: accounts.len(),
+                synced: 0,
+                failed: 0,
+                message: "已有渠道资源自动同步正在运行".to_string(),
+            });
+        }
+    };
     let started_at = std::time::Instant::now();
     let job_id = uuid::Uuid::new_v4().to_string();
     state
@@ -2193,6 +2188,7 @@ pub(crate) async fn sync_scrape_balances(
             &format!("开始同步 {} 个启用自动同步的渠道账号", accounts.len()),
         )
         .map_err(|error| format!("创建渠道资源同步任务失败：{error}"))?;
+    lease.attach_job_id(&job_id);
 
     let mut synced = 0usize;
     let mut failed = 0usize;

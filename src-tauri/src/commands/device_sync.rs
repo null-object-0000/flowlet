@@ -276,7 +276,7 @@ pub(crate) async fn sync_device_usage_s3(
         .lock()
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
-    crate::core::device_sync::run_configured_sync(storage, identity, "manual").await
+    crate::core::device_sync::run_configured_sync(storage, &state.jobs, identity, "manual").await
 }
 
 #[tauri::command]
@@ -296,7 +296,7 @@ pub(crate) async fn recover_current_device_sync(
 pub(crate) async fn refresh_shared_device_usage_s3(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::device_sync::S3DevicePullResult, String> {
-    crate::core::device_sync::run_configured_pull(state.storage.clone(), true).await
+    crate::core::device_sync::run_configured_pull(state.storage.clone(), &state.jobs, true).await
 }
 
 #[tauri::command]

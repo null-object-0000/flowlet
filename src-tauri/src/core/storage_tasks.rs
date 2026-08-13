@@ -535,6 +535,15 @@ impl Storage {
         force: bool,
         trigger: &str,
     ) -> Result<AgentDataSyncResult, StorageError> {
+        self.sync_agent_data_with_job(force, trigger, |_| {})
+    }
+
+    pub fn sync_agent_data_with_job(
+        &self,
+        force: bool,
+        trigger: &str,
+        on_job_created: impl FnOnce(&str),
+    ) -> Result<AgentDataSyncResult, StorageError> {
         let total_started = Instant::now();
         let scan_started = Instant::now();
         let sessions = crate::core::agent_session_metadata::list_native_agent_sessions();
@@ -633,6 +642,7 @@ impl Storage {
             total,
             &format!("发现 {total} 个需要整理的会话"),
         )?;
+        on_job_created(&job_id);
         let result = self.run_agent_sync_job(
             &job_id,
             &sessions,

@@ -12,7 +12,6 @@ use rusty_s3::actions::{ListObjectsV2, S3Action as _};
 use rusty_s3::{Bucket, Credentials, UrlStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use url::Url;
 
@@ -29,22 +28,14 @@ pub const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 /// 移动端不做 LAN 直连，只做云端拉取。
 pub const MOBILE_AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(5 * 60);
 pub const SYNC_ALREADY_RUNNING_ERROR: &str = "设备用量同步正在运行";
-static SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+const DEVICE_SYNC_SCOPE: &str = "device-sync";
 const MIN_SYNCED_RECENT_SESSIONS: usize = 10;
 
-#[derive(Debug)]
-pub struct DeviceSyncGuard;
-
-impl Drop for DeviceSyncGuard {
-    fn drop(&mut self) {
-        SYNC_RUNNING.store(false, Ordering::Release);
-    }
-}
-
-pub fn acquire_sync_guard() -> Result<DeviceSyncGuard, String> {
-    SYNC_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .map(|_| DeviceSyncGuard)
+fn acquire_sync_lease(
+    jobs: &crate::core::job_runtime::JobRuntime,
+    job_type: &str,
+) -> Result<crate::core::job_runtime::JobLease, String> {
+    jobs.try_acquire(job_type, DEVICE_SYNC_SCOPE)
         .map_err(|_| SYNC_ALREADY_RUNNING_ERROR.to_string())
 }
 
@@ -1243,6 +1234,7 @@ async fn pull_device_usage_for_device(
 /// 成功更新时才读取该设备唯一的 S3 对象，不列举或下载其他设备。
 pub async fn refresh_device(
     storage: Storage,
+    jobs: &crate::core::job_runtime::JobRuntime,
     device_id: &str,
 ) -> Result<DeviceRefreshResult, String> {
     let device_id = device_id.trim();
@@ -1257,7 +1249,7 @@ pub async fn refresh_device(
         });
     }
 
-    let _guard = acquire_sync_guard()?;
+    let _lease = acquire_sync_lease(jobs, "device-s3-pull")?;
     let result = pull_device_usage_for_device(storage, device_id).await?;
     Ok(DeviceRefreshResult {
         source: "s3".to_string(),
@@ -1275,9 +1267,10 @@ fn snapshot_object_label(key: &str) -> String {
 
 pub async fn run_configured_pull(
     storage: Storage,
+    jobs: &crate::core::job_runtime::JobRuntime,
     prefer_lan: bool,
 ) -> Result<S3DevicePullResult, String> {
-    let _guard = acquire_sync_guard()?;
+    let _lease = acquire_sync_lease(jobs, "device-s3-pull")?;
     let now = chrono::Utc::now().to_rfc3339();
     let previous = load_status(&storage);
     save_status(
@@ -1680,12 +1673,14 @@ fn snapshot_is_newer(candidate: &str, fallback: &str) -> bool {
 
 pub async fn run_configured_sync(
     storage: Storage,
+    jobs: &crate::core::job_runtime::JobRuntime,
     identity: DeviceIdentity,
     trigger_source: &str,
 ) -> Result<S3DeviceSyncResult, String> {
-    let _guard = acquire_sync_guard()?;
+    let lease = acquire_sync_lease(jobs, "device-s3-sync")?;
     let started_at = Instant::now();
     let job_id = create_sync_job(&storage, trigger_source)?;
+    lease.attach_job_id(&job_id);
     let now = chrono::Utc::now().to_rfc3339();
     let previous = load_status(&storage);
     save_status(
@@ -1967,14 +1962,15 @@ mod tests {
     }
 
     #[test]
-    fn sync_guard_rejects_overlap_and_recovers_after_drop() {
-        let first = acquire_sync_guard().unwrap();
+    fn sync_runtime_rejects_overlap_and_recovers_after_drop() {
+        let jobs = crate::core::job_runtime::JobRuntime::default();
+        let first = acquire_sync_lease(&jobs, "device-s3-sync").unwrap();
         assert_eq!(
-            acquire_sync_guard().unwrap_err(),
+            acquire_sync_lease(&jobs, "device-s3-pull").unwrap_err(),
             SYNC_ALREADY_RUNNING_ERROR
         );
         drop(first);
-        assert!(acquire_sync_guard().is_ok());
+        assert!(acquire_sync_lease(&jobs, "device-s3-pull").is_ok());
     }
 
     #[test]

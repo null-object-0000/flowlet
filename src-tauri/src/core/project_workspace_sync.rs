@@ -503,11 +503,15 @@ async fn sync_project_inner(storage: &Storage, ws_id: &str) -> Result<(bool, boo
 /// 全量同步：遍历本地所有未归档项目，逐个拉取合并或首次推送。
 pub async fn sync_all(
     storage: Storage,
+    jobs: &crate::core::job_runtime::JobRuntime,
     trigger_source: &str,
 ) -> Result<ProjectWorkspaceSyncResult, String> {
     if !is_enabled(&storage) {
         return Err("尚未启用项目工作区同步，请先在设置页启用渠道账号工作区".to_string());
     }
+    let lease = jobs
+        .try_acquire("project-workspace-sync", "project-workspace-sync")
+        .map_err(|_| "项目工作区同步正在运行".to_string())?;
     let _guard = PROJECT_WORKSPACE_SYNC_GUARD.lock().await;
     let job_id = uuid::Uuid::new_v4().to_string();
     let projects = storage
@@ -524,6 +528,7 @@ pub async fn sync_all(
             &format!("开始同步项目工作区，共 {} 个项目", projects.len()),
         )
         .map_err(|error| error.to_string())?;
+    lease.attach_job_id(&job_id);
 
     let mut result = ProjectWorkspaceSyncResult {
         synced_projects: 0,

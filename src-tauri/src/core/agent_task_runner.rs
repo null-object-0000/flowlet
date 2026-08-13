@@ -2,7 +2,7 @@
 //! CLI 在项目目录内执行项目任务。
 //!
 //! 按项目隔离的执行槽：每个项目同一时刻至多一个任务在执行，其余在该项目内排队；
-//! 不同项目互不影响，可并行执行。并发安全下沉 Rust（参考 AGENT_DATA_SYNC_RUNNING 模式）。
+//! 不同项目互不影响，可并行执行。并发安全由 Rust 端按项目作用域保证。
 //! 四种 Agent 都以非交互模式执行（Claude Code `-p --output-format stream-json`、
 //! OpenCode `run --format json`、Pi `-p`、Codex `exec --json`），权限走各 CLI 的非交互
 //! 放行参数（`--dangerously-skip-permissions` / `--auto` / `--approve` /
@@ -140,7 +140,7 @@ pub(crate) async fn run_project_task(
     task_id: String,
     current_device_id: String,
 ) -> Result<RunProjectTaskResult, String> {
-    // 1. 抢「按项目隔离」的执行槽（并发安全下沉 Rust，参考 AGENT_DATA_SYNC_RUNNING 模式）：
+    // 1. 抢「按项目隔离」的执行槽：
     //    同一项目至多一个任务在跑，不同项目互不影响。领取即占位，执行失败提前返回时
     //    随函数结束 drop 释放；成功则随后台执行任务 move，Agent 结束后释放。
     {

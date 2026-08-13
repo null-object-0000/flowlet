@@ -66,6 +66,7 @@ impl std::ops::Deref for AppState {
 #[cfg(mobile)]
 struct MobileAppState {
     storage: Storage,
+    jobs: core::job_runtime::JobRuntime,
 }
 
 /// 移动端后台同步完成事件负载。前端监听此事件后 invalidate 本地 query，
@@ -631,6 +632,7 @@ fn run_desktop() {
             let s3_timer_storage = state.storage.clone();
             let s3_timer_identity = state.device_identity.clone();
             let s3_timer_runtime_config = state.runtime_config.clone();
+            let s3_timer_jobs = state.jobs.clone();
             tauri::async_runtime::spawn(async move {
                 let period = crate::core::device_sync::AUTO_SYNC_INTERVAL;
                 let mut interval = tokio::time::interval_at(
@@ -669,6 +671,7 @@ fn run_desktop() {
                     };
                     match crate::core::device_sync::run_configured_sync(
                         s3_timer_storage.clone(),
+                        &s3_timer_jobs,
                         identity,
                         "background",
                     )
@@ -696,6 +699,7 @@ fn run_desktop() {
                     if crate::core::account_workspace_sync::is_enabled(&s3_timer_storage) {
                         match crate::core::account_workspace_sync::sync(
                             s3_timer_storage.clone(),
+                            &s3_timer_jobs,
                             "background",
                         )
                         .await
@@ -726,6 +730,7 @@ fn run_desktop() {
                     if crate::core::project_workspace_sync::is_enabled(&s3_timer_storage) {
                         match crate::core::project_workspace_sync::sync_all(
                             s3_timer_storage.clone(),
+                            &s3_timer_jobs,
                             "background",
                         )
                         .await
@@ -1020,8 +1025,10 @@ fn run_mobile() {
             std::fs::create_dir_all(&data_dir)?;
             let storage = Storage::open(data_dir.join("flowlet-mobile.sqlite"))
                 .map_err(|error| error.to_string())?;
+            let jobs = core::job_runtime::JobRuntime::default();
             app.manage(MobileAppState {
                 storage: storage.clone(),
+                jobs: jobs.clone(),
             });
 
             // 移动端后台定时同步：每 5 分钟执行一次 S3-only pull + LAN probe 缓存。
@@ -1049,6 +1056,7 @@ fn run_mobile() {
                             Ok(Some(_)) => {
                                 match crate::core::device_sync::run_configured_pull(
                                     storage.clone(),
+                                    &jobs,
                                     false,
                                 )
                                 .await

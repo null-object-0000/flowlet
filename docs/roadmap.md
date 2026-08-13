@@ -57,8 +57,16 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] Channel Capability registry 改为直接绑定各渠道类型化异步函数，移除中央策略枚举二次分发
 - [x] 将 DeepSeek / Kimi / OpenRouter 官方余额 DTO、解析和错误处理归档到对应 Channel Adapter
 - [x] 将 LongCat / Qwen 控制台响应分类、合并和完成条件归档到对应 Channel Adapter
-- [ ] 继续把 `sync.rs` 中 Kimi / LongCat 的模型专属 DTO、发布时间校准与详情转换器归档到对应 Channel Adapter
+- [x] 将 `sync.rs` 中 Kimi / LongCat 的模型专属 DTO、发布时间校准与详情转换器归档到对应 Channel Adapter
 - [ ] 用新增 Channel 和新增 Agent 各完成一次端到端接入演练，固化脚手架与验收清单
+
+## 后台任务运行时收口（进行中）
+
+- [x] 建立由 `FlowletServices` 持有的统一 `JobRuntime`
+- [x] 统一后台同步任务的作用域去重、活动 `job_id` 关联、RAII 释放与取消信号
+- [x] 接入 Agent 数据、Codex 账号、渠道资源、S3 设备、账号工作区和项目工作区同步
+- [ ] 将后台任务的 timeout、retry policy 与可取消等待统一为显式 `JobDefinition`
+- [ ] 评估模型目录同步、数据维护任务和项目 Agent 执行的分层接入；保留其必要的领域运行状态
 
 ## Milestone 0：需求校准与文档更新
 

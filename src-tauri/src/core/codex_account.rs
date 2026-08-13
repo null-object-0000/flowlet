@@ -337,6 +337,7 @@ pub async fn sync_codex_accounts(
     managed_root: &Path,
     codex_home: &Path,
     trigger: &str,
+    on_job_created: impl FnOnce(&str),
 ) -> Result<CodexAccountSyncResult, String> {
     if !has_codex_account_sources(managed_root, codex_home) {
         return Ok(CodexAccountSyncResult {
@@ -361,6 +362,7 @@ pub async fn sync_codex_accounts(
             "开始查询 Codex 账号与用量",
         )
         .map_err(|error| error.to_string())?;
+    on_job_created(&job_id);
     let started_at = std::time::Instant::now();
     match query_codex_accounts(managed_root).await {
         Ok(report) => {
@@ -1819,7 +1821,7 @@ mod tests {
         let managed = root.join("accounts");
         std::fs::create_dir_all(&home).expect("create codex home");
 
-        let result = sync_codex_accounts(&storage, &managed, &home, "background")
+        let result = sync_codex_accounts(&storage, &managed, &home, "background", |_| {})
             .await
             .expect("skip sync");
         assert!(!result.started);
@@ -1913,8 +1915,8 @@ mod tests {
             "flowlet-codex-delete-missing-{}",
             uuid::Uuid::new_v4()
         ));
-        let error = delete_codex_account(&root, "missing-account")
-            .expect_err("unknown account must error");
+        let error =
+            delete_codex_account(&root, "missing-account").expect_err("unknown account must error");
         assert!(error.contains("未找到 Codex 账号 missing-account"));
         let _ = std::fs::remove_dir_all(root);
     }

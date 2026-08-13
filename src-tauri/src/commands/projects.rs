@@ -437,7 +437,8 @@ pub(crate) fn get_project_workspace_status(
 pub(crate) async fn sync_project_workspace(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::project_workspace_sync::ProjectWorkspaceSyncResult, String> {
-    crate::core::project_workspace_sync::sync_all(state.storage.clone(), "manual").await
+    crate::core::project_workspace_sync::sync_all(state.storage.clone(), &state.jobs, "manual")
+        .await
 }
 
 #[tauri::command]

@@ -2,6 +2,7 @@ use super::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use super::config::{
     ChannelAccount, LogCaptureConfig, ProtocolType, ProxyBindConfig, RouteCandidate, VirtualModel,
 };
+use super::job_runtime::JobRuntime;
 use super::presets::builtin_channel_presets;
 use super::proxy::{extract_log_capture, read_config_raw, ProxyController, ProxySharedConfig};
 use super::rate_limiter::RateLimiter;
@@ -20,6 +21,7 @@ const DEFAULT_UPSTREAM_TIMEOUT_SECONDS: u64 = 120;
 pub struct FlowletServices {
     pub proxy: ProxyController,
     pub runtime_config: RuntimeConfigStore,
+    pub jobs: JobRuntime,
     pub storage: Storage,
     pub capture: Arc<Mutex<LogCaptureConfig>>,
     pub bind_config: Arc<Mutex<ProxyBindConfig>>,
@@ -55,6 +57,7 @@ impl FlowletServices {
                 bind_config: Arc::new(Mutex::new(bind_config.clone())),
             },
             runtime_config: RuntimeConfigStore::new(snapshot),
+            jobs: JobRuntime::default(),
             storage,
             capture: Arc::new(Mutex::new(capture)),
             bind_config: Arc::new(Mutex::new(bind_config)),

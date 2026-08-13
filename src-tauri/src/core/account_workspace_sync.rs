@@ -534,8 +534,12 @@ async fn initialize_inner(storage: &Storage) -> Result<AccountWorkspaceSyncResul
 
 pub async fn sync(
     storage: Storage,
+    jobs: &crate::core::job_runtime::JobRuntime,
     trigger_source: &str,
 ) -> Result<AccountWorkspaceSyncResult, String> {
+    let lease = jobs
+        .try_acquire("account-workspace-sync", "account-workspace-sync")
+        .map_err(|_| "渠道账号工作区同步正在运行".to_string())?;
     let _guard = ACCOUNT_WORKSPACE_SYNC_GUARD.lock().await;
     let job_id = create_workspace_job(
         &storage,
@@ -543,6 +547,7 @@ pub async fn sync(
         "渠道账号工作区同步",
         "开始同步渠道账号工作区目录",
     )?;
+    lease.attach_job_id(&job_id);
     match sync_inner(&storage).await {
         Ok(result) => {
             let stage_message = if result.uploaded {

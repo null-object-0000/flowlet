@@ -21,7 +21,7 @@ pub(crate) async fn initialize_account_workspace(
 pub(crate) async fn sync_account_workspace(
     state: tauri::State<'_, AppState>,
 ) -> Result<AccountWorkspaceSyncResult, String> {
-    let result = account_workspace_sync::sync(state.storage.clone(), "manual").await?;
+    let result = account_workspace_sync::sync(state.storage.clone(), &state.jobs, "manual").await?;
     refresh_accounts(&state)?;
     Ok(result)
 }
@@ -39,7 +39,7 @@ pub(crate) async fn import_desktop_account_workspace(
     package: account_workspace_sync::DesktopAccountWorkspacePackage,
 ) -> Result<AccountWorkspaceSyncResult, String> {
     account_workspace_sync::import_desktop_package(&state.storage, &package).await?;
-    let result = account_workspace_sync::sync(state.storage.clone(), "manual").await?;
+    let result = account_workspace_sync::sync(state.storage.clone(), &state.jobs, "manual").await?;
     refresh_accounts(&state)?;
     Ok(result)
 }

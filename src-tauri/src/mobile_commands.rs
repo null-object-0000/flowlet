@@ -189,7 +189,7 @@ pub(super) async fn refresh_shared_device_usage_s3(
     state: tauri::State<'_, MobileAppState>,
 ) -> Result<crate::core::device_sync::S3DevicePullResult, String> {
     // 移动端手动刷新按钮走 LAN 优先，与桌面端行为一致。
-    crate::core::device_sync::run_configured_pull(state.storage.clone(), true).await
+    crate::core::device_sync::run_configured_pull(state.storage.clone(), &state.jobs, true).await
 }
 
 #[tauri::command]
@@ -237,7 +237,7 @@ pub(super) async fn refresh_shared_device(
     state: tauri::State<'_, MobileAppState>,
     device_id: String,
 ) -> Result<crate::core::device_sync::DeviceRefreshResult, String> {
-    crate::core::device_sync::refresh_device(state.storage.clone(), &device_id).await
+    crate::core::device_sync::refresh_device(state.storage.clone(), &state.jobs, &device_id).await
 }
 
 #[tauri::command]

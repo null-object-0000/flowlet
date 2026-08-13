@@ -1,15 +1,6 @@
 use crate::AppState;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-static CODEX_ACCOUNT_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
-
-struct CodexAccountSyncGuard;
-
-impl Drop for CodexAccountSyncGuard {
-    fn drop(&mut self) {
-        CODEX_ACCOUNT_SYNC_RUNNING.store(false, Ordering::Release);
-    }
-}
+const CODEX_ACCOUNT_SYNC_SCOPE: &str = "codex-account-sync";
 
 // Claude Code 走 Anthropic-compatible 端点，其余已支持一键接入的 Agent
 // （OpenCode、Pi）走 OpenAI-compatible 端点。
@@ -60,26 +51,29 @@ pub(crate) async fn sync_codex_accounts(
     state: tauri::State<'_, AppState>,
     trigger_source: String,
 ) -> Result<crate::core::codex_account::CodexAccountSyncResult, String> {
-    if CODEX_ACCOUNT_SYNC_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
+    let lease = match state
+        .jobs
+        .try_acquire("codex-account-sync", CODEX_ACCOUNT_SYNC_SCOPE)
     {
-        return Ok(crate::core::codex_account::CodexAccountSyncResult {
-            started: false,
-            job_id: None,
-            accounts: 0,
-            stale: 0,
-            failed: 0,
-            message: "已有 Codex 账号同步正在运行".to_string(),
-        });
-    }
-    let _guard = CodexAccountSyncGuard;
+        Ok(lease) => lease,
+        Err(_) => {
+            return Ok(crate::core::codex_account::CodexAccountSyncResult {
+                started: false,
+                job_id: None,
+                accounts: 0,
+                stale: 0,
+                failed: 0,
+                message: "已有 Codex 账号同步正在运行".to_string(),
+            });
+        }
+    };
     let codex_home = crate::core::codex_account::codex_home();
     crate::core::codex_account::sync_codex_accounts(
         &state.storage,
         &state.codex_accounts_dir,
         &codex_home,
         &trigger_source,
+        |job_id| lease.attach_job_id(job_id),
     )
     .await
 }

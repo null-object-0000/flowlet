@@ -198,7 +198,9 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 - 空模型 ID 必须过滤；
 - 网络、HTTP 状态和 JSON 解析错误必须真实返回。
 
-LongCat 的模型详情请求是渠道特例；DeepSeek、Kimi 的列表结构也不同。新渠道应选择最接近的实现参考，不要机械复制。
+LongCat 的模型详情请求、详情失败回退与模型转换均归档在 LongCat Adapter；Kimi 的专属列表
+DTO、发布时间校准与模型转换均归档在 Kimi Adapter。`sync.rs` 只保留标准 OpenAI-compatible
+同步和无渠道含义的共享 URL、排序工具。新渠道应选择最接近的实现参考，不要机械复制。
 
 ### 5.3 余额和资源能力
 

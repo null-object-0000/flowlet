@@ -3,17 +3,8 @@ use crate::core::config::{
     RequestLogRow,
 };
 use crate::AppState;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-static AGENT_DATA_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
-
-struct AgentDataSyncGuard;
-
-impl Drop for AgentDataSyncGuard {
-    fn drop(&mut self) {
-        AGENT_DATA_SYNC_RUNNING.store(false, Ordering::Release);
-    }
-}
+const AGENT_DATA_SYNC_SCOPE: &str = "agent-data-sync";
 
 #[tauri::command]
 pub(crate) fn list_request_logs(
@@ -169,25 +160,32 @@ pub(crate) async fn sync_agent_data(
     force: bool,
     trigger_source: String,
 ) -> Result<crate::core::storage::AgentDataSyncResult, String> {
-    if AGENT_DATA_SYNC_RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
+    let lease = match state
+        .jobs
+        .try_acquire("agent-data-sync", AGENT_DATA_SYNC_SCOPE)
     {
-        return Ok(crate::core::storage::AgentDataSyncResult {
-            started: false,
-            job_id: None,
-            scanned: 0,
-            changed: 0,
-            failed: 0,
-            message: "已有 Agent 数据同步正在运行".to_string(),
-        });
-    }
-    let _guard = AgentDataSyncGuard;
+        Ok(lease) => lease,
+        Err(_) => {
+            return Ok(crate::core::storage::AgentDataSyncResult {
+                started: false,
+                job_id: None,
+                scanned: 0,
+                changed: 0,
+                failed: 0,
+                message: "已有 Agent 数据同步正在运行".to_string(),
+            });
+        }
+    };
     let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || storage.sync_agent_data(force, &trigger_source))
-        .await
-        .map_err(|error| format!("Agent 数据同步任务失败：{error}"))?
-        .map_err(|error| error.to_string())
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        storage.sync_agent_data_with_job(force, &trigger_source, |job_id| {
+            lease.attach_job_id(job_id);
+        })
+    })
+    .await
+    .map_err(|error| format!("Agent 数据同步任务失败：{error}"))?
+    .map_err(|error| error.to_string())?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -218,7 +216,7 @@ pub(crate) fn get_agent_sync_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::core::storage::AgentSyncStatusReport, String> {
     Ok(crate::core::storage::AgentSyncStatusReport {
-        running: AGENT_DATA_SYNC_RUNNING.load(Ordering::Acquire),
+        running: state.jobs.is_running(AGENT_DATA_SYNC_SCOPE),
         sources: state
             .storage
             .list_agent_source_sync_states()
@@ -231,10 +229,12 @@ pub(crate) fn cancel_background_job(
     state: tauri::State<'_, AppState>,
     job_id: String,
 ) -> Result<bool, String> {
-    state
+    let persisted = state
         .storage
         .request_background_job_cancel(&job_id)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let active = state.jobs.request_cancel(&job_id);
+    Ok(persisted || active)
 }
 
 #[tauri::command]

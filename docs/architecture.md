@@ -68,8 +68,9 @@ Flowlet Desktop
   │        ├─ storage_device_usage.rs  跨设备用量导入与聚合
   │        ├─ storage_stats.rs         统计查询
   │        ├─ storage_tasks.rs         后台任务持久化
+  │        ├─ job_runtime.rs           后台任务并发作用域、活动关联与取消信号
   │        ├─ storage_tests.rs         存储测试
-  │        ├─ sync.rs                  渠道同步共享 HTTP、响应映射与排序工具
+  │        ├─ sync.rs                  标准 OpenAI 模型同步与共享 URL、排序工具
   │        ├─ usage.rs                 Token 提取与成本估算
   │        ├─ logging.rs               日志捕获与脱敏
   │        ├─ metrics.rs               运行时指标
@@ -103,6 +104,11 @@ Flowlet Desktop
 Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、WebView、设备身份、文件监听和
 平台事件等 Host 能力。headless 不再复制 Storage、快照和代理启动装配，也不再因没有账号或路由
 而拒绝监听；空配置下的代理启动语义与桌面端一致。
+
+渠道能力注册表直接绑定各 Adapter 的类型化异步入口。标准 OpenAI-compatible 模型列表同步
+以及 URL、排序等无渠道含义的工具保留在 `sync.rs`；Kimi 的专属列表 DTO、发布时间校准和
+模型转换，以及 LongCat 的详情请求、详情 DTO、转换和失败回退，归档在各自 Channel Adapter，
+避免中央同步模块按渠道继续增长。
 
 ### 模型目录边界
 
@@ -291,6 +297,19 @@ revision，不会观察到多个配置集合依次更新时的中间状态。旧
 
 路由性能分数和轮询游标属于易变运行态，不进入配置快照；Client Token、监听地址和日志捕获
 配置也保持各自现有的生命周期。该快照机制没有改变 SQLite 表结构或 `config.json` 字段。
+
+## 后台任务运行时
+
+`FlowletServices` 持有统一的 `JobRuntime`。`background_jobs` / `background_job_events` 继续作为
+可查询、可恢复的持久化任务历史；`JobRuntime` 只负责进程内运行状态，两者不混为同一事实源。
+运行任务通过稳定的 `scope_key` 获取 RAII lease：同一作用域拒绝重入，不同作用域仍可并行；
+持久化任务创建后把 `job_id` 关联到 lease，统一取消命令会同时写入 SQLite 并向活动任务发布
+低延迟取消信号，lease 在成功、失败或提前返回时都会自动释放。
+
+当前 Agent 数据同步、Codex 账号同步、渠道资源同步、S3 设备同步、渠道账号工作区同步和
+项目工作区同步已接入该运行时。任务的业务进度、摘要和事件 schema 保持原样，前端任务页与
+现有 command 返回结构无需调整。项目 Agent 执行仍保留按项目隔离的运行表，因为它同时承载
+子进程句柄、会话 ID 和看板实时状态，不属于单纯的后台同步互斥。
 
 ## Agent 本机环境探测
 
@@ -699,7 +718,7 @@ ID。阿里云 OSS 的 PutObject 不支持 `If-Match`，因此在 ETag 比较通
 配置存在时，应用启动 5 秒后执行第一次 S3 设备用量后台同步，以尽快发布当前启动实例的
 局域网端点；之后每 15 分钟执行一次；
 主窗口隐藏到托盘后任务继续运行，只有退出 Flowlet 才停止。定时同步与手动同步复用同一
-执行入口、状态记录和进程内互斥 guard；发生重叠时定时任务静默跳过，不覆盖正在运行的
+执行入口、状态记录和 `JobRuntime` 作用域；发生重叠时定时任务静默跳过，不覆盖正在运行的
 同步状态。未配置 S3 时定时检查静默跳过，不写入失败状态。每次真正开始的手动或定时同步
 都以 `job_type = device-s3-sync` 写入 `background_jobs` / `background_job_events`，记录
 触发来源、完成摘要和失败原因；摘要同时记录实际上传/下载字节数与对象列举、下载、导入、
@@ -903,7 +922,7 @@ Codex 账号与用量另有独立的周期性后台同步：应用启动约 20 �
 所有托管账号的用量快照，并以 `job_type = codex-account-sync` 记入 `background_jobs` /
 `background_job_events`，单个账号刷新失败只记警告事件、不中断整轮同步。任务日志页可按「Codex 账号同步」
 类型筛选，详情展示账号数量、失效账号、失败账号与总耗时；同步成功后前端失效 Codex 账号查询缓存以刷新界面。
-同一时刻只允许一个 Codex 同步运行，与 Agent 数据同步的互斥相互独立。
+同一时刻只允许一个 Codex 同步运行；其 `JobRuntime` 作用域与 Agent 数据同步相互独立。
 Codex 账号支持单账号删除（`delete_codex_account`）：按 `account_id → 目录` 确定性映射定位，
 目录名规范化不匹配时回退扫描 `snapshot.account_id`，删除后移除托管目录中的 `auth.json` /
 `snapshot.json` / `config.toml`。删除只作用于 Flowlet 保存的本地副本，不影响 Codex 客户端
@@ -923,7 +942,7 @@ Rust 使用 `notify` 监听现有 OpenCode 数据库、Claude Code 项目目录�
 Codex 与 Claude Code 的 JSONL 摘要快照额外保存解析器版本、已读取字节位置、游标前 4 KiB 校验值和
 Claude usage ID 去重集合；后续仅解析追加内容，不把消息或工具正文写入 SQLite。文件缩短、游标校验失败或
 解析器版本升级时自动从头整理。单轮最多读取 16 MiB，未读完时使用 partial 指纹让下一轮继续推进。
-同一时刻只允许一个 Agent 同步运行。通用任务执行信息落入 `background_jobs`，阶段事件落入
+同一时刻只允许一个 Agent 同步运行，进程内状态由 `JobRuntime` 管理。通用任务执行信息落入 `background_jobs`，阶段事件落入
 `background_job_events`，任务日志页展示触发方式、进度、结果、警告和错误；应用启动时会把上次未结束的
 任务标记为 `interrupted`。任务调度属于 React 产品编排，Rust command 负责只读扫描、SQLite 一致写入和
 并发互斥；同步失败不会影响代理请求链路，配置变更也不需要重启代理。

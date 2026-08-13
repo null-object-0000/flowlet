@@ -751,9 +751,7 @@ async fn task_edit_handler(
     match current.as_deref() {
         None => return (StatusCode::NOT_FOUND, "任务不存在").into_response(),
         Some("draft") => {}
-        Some(_) => {
-            return (StatusCode::CONFLICT, "只有草稿状态的任务可以编辑").into_response()
-        }
+        Some(_) => return (StatusCode::CONFLICT, "只有草稿状态的任务可以编辑").into_response(),
     }
     let existing = match state.storage.get_project_task_by_id(&task_id) {
         Ok(Some(task)) => task,
@@ -848,9 +846,7 @@ async fn task_delete_handler(
     match current.as_deref() {
         None => return (StatusCode::NOT_FOUND, "任务不存在").into_response(),
         Some("draft") => {}
-        Some(_) => {
-            return (StatusCode::CONFLICT, "只有草稿状态的任务可以删除").into_response()
-        }
+        Some(_) => return (StatusCode::CONFLICT, "只有草稿状态的任务可以删除").into_response(),
     }
     let existing = match state.storage.get_project_task_by_id(&task_id) {
         Ok(Some(task)) => task,

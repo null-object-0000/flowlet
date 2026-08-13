@@ -1,0 +1,51 @@
+name: Sync Android release to Pgyer
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub Release tag whose APK should be uploaded
+        required: true
+        default: v0.1.0
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-pgyer-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Upload ${{ inputs.release_tag }} APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out upload script
+        uses: actions/checkout@v7
+
+      - name: Download APK and release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download "$RELEASE_TAG" --pattern '*.apk' --dir release-assets
+          gh release view "$RELEASE_TAG" --json body --jq '.body' > release-notes.md
+
+          apk_count="$(find release-assets -maxdepth 1 -type f -name '*.apk' | wc -l)"
+          if [ "$apk_count" != "1" ]; then
+            echo "Expected exactly one APK in release $RELEASE_TAG, found $apk_count" >&2
+            exit 1
+          fi
+
+      - name: Upload APK to Pgyer
+        shell: bash
+        env:
+          PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
+        run: |
+          set -euo pipefail
+          RELEASE_NOTES="$(cat release-notes.md)" bash scripts/upload-pgyer.sh release-assets/*.apk

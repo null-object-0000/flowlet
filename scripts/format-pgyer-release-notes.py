@@ -5,7 +5,11 @@ import sys
 
 
 def format_release_notes(markdown: str) -> str:
-    notes = re.split(r"(?m)^#{1,6}\s*按系统下载\s*$", markdown, maxsplit=1)[0]
+    notes = re.split(
+        r"(?m)^#{1,6}\s*(?:分发说明|按系统下载)\s*$",
+        markdown,
+        maxsplit=1,
+    )[0]
     notes = re.sub(
         r"\[([^\]]+)\]\((https?://[^)]+)\)",
         lambda match: f"{match.group(1)}：{match.group(2)}",

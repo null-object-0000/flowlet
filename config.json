@@ -46,6 +46,12 @@
     "host": "127.0.0.1",
     "port": 18640
   },
+  "usage_cost": {
+    "currency_conversion_enabled": false,
+    "display_currency": "CNY",
+    "usd_to_cny_rate": 7.2,
+    "exchange_rate_note": ""
+  },
   "channels_config": {
     "channels": [
       {

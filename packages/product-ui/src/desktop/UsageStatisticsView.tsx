@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { IconBarChartVStroked, IconChevronRight } from "@douyinfe/semi-icons";
+import { Tooltip } from "@douyinfe/semi-ui-19";
 import styles from "./UsageStatisticsView.module.css";
 
 export type UsageStatisticsPeriod = "day" | "week" | "month";
@@ -10,6 +11,7 @@ export type UsageStatisticsStatModel = {
   label: ReactNode;
   value: ReactNode;
   hint: ReactNode;
+  tooltip?: ReactNode;
   expandable?: boolean;
   title?: string;
 };
@@ -48,6 +50,7 @@ export type UsageStatisticsDetailMetricModel = {
   label: ReactNode;
   value: ReactNode;
   hint: ReactNode;
+  tooltip?: ReactNode;
   expandable?: boolean;
   title?: string;
 };
@@ -124,8 +127,13 @@ export function UsageStatisticsView({ stats, cells, confidence, detail, labels, 
   return <div className={styles.page}>
     <section className={styles.stats} aria-label={labels.statsAria ?? "Usage summary"}>
       {stats.map((stat) => {
-        const content = <><span>{stat.label}</span><strong>{stat.value}</strong><small>{stat.hint}</small></>;
-        return stat.expandable ? <button key={stat.key} type="button" className={`${styles.stat} ${styles.expandable}`} title={stat.title} onClick={() => onStatClick?.(stat.key)}>{content}</button> : <article key={stat.key} className={styles.stat}>{content}</article>;
+        const hint = stat.tooltip
+          ? <Tooltip content={stat.tooltip}><small tabIndex={0}>{stat.hint}</small></Tooltip>
+          : <small>{stat.hint}</small>;
+        const content = <><span>{stat.label}</span><strong>{stat.value}</strong>{hint}</>;
+        return stat.expandable
+          ? <button key={stat.key} type="button" className={`${styles.stat} ${styles.expandable}`} title={stat.title} onClick={() => onStatClick?.(stat.key)}>{content}</button>
+          : <article key={stat.key} className={styles.stat}>{content}</article>;
       })}
     </section>
 
@@ -174,8 +182,13 @@ export function UsageStatisticsView({ stats, cells, confidence, detail, labels, 
       {detail ? <article className={`${styles.detailCard} ${detail.confidence ? styles.detailWithConfidence : ""}`}>
         <header><strong>{detail.title}</strong><span>{detail.contextLabel}</span></header>
         <div className={styles.detailMetrics}>{detail.metrics.map((item) => {
-          const content = <><span>{item.label}</span><strong>{item.value}</strong><small>{item.hint}</small></>;
-          return item.expandable ? <button key={item.key} type="button" className={`${styles.detailMetric} ${styles.expandableMetric}`} title={item.title} onClick={() => onDetailMetricClick?.(item.key)}>{content}</button> : <div key={item.key} className={styles.detailMetric}>{content}</div>;
+          const hint = item.tooltip
+            ? <Tooltip content={item.tooltip}><small tabIndex={0}>{item.hint}</small></Tooltip>
+            : <small>{item.hint}</small>;
+          const content = <><span>{item.label}</span><strong>{item.value}</strong>{hint}</>;
+          return item.expandable
+            ? <button key={item.key} type="button" className={`${styles.detailMetric} ${styles.expandableMetric}`} title={item.title} onClick={() => onDetailMetricClick?.(item.key)}>{content}</button>
+            : <div key={item.key} className={styles.detailMetric}>{content}</div>;
         })}</div>
         {detail.confidence ? <section className={styles.selectedConfidence}>
           <header><strong>{labels.confidenceTitle}</strong><span>{detail.confidence.scoreLabel}</span></header>

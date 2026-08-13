@@ -9,7 +9,7 @@ import { PageHeader } from "../../shared/ui/PageHeader";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { formatCompactNumber, formatInteger, type NumberLanguage } from "../../shared/formatters/number";
-import { formatCostCny } from "../../shared/formatters/cost";
+import { formatCostAmount, formatMultiCurrencyCost } from "../../shared/formatters/cost";
 import { DEFAULT_REQUEST_LOG_FILTER } from "../../domains/request-log/types";
 import { useRequestLogs } from "../../features/request-logs/useRequestLogs";
 import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLogDetailSideSheet";
@@ -18,6 +18,11 @@ import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { TimePeriodSwitch, TimeRangeNavigator, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
 import { UsageTokenDetailSheet } from "../../features/usage/UsageTokenDetailSheet";
+import { useUsageSummary } from "../../features/usage/useUsageSummary";
+import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
+import { useUsageCostDisplaySetting } from "../../features/settings/useUsageCostDisplaySetting";
+import { createHeatLevelScale } from "../../shared/visualization/heatmapLevels";
+import { groupConvertedUsageCost, summarizeConvertedUsageCost } from "./usageCostConversion";
 import type { DailyUsageTotal } from "../../domains/device-sync/types";
 import {
   buildMobileUsageHeatmap,
@@ -59,6 +64,37 @@ export function UsageCostPage() {
   const rangeLabel = useMemo(
     () => formatMobileUsageRange(range, period, language),
     [language, period, range],
+  );
+  const periodLogRange = useMemo(() => {
+    const start = new Date(`${range.startDate}T00:00:00`);
+    const end = new Date(`${range.endDate}T00:00:00`);
+    end.setDate(end.getDate() + 1);
+    return { startAt: start.toISOString(), endAt: end.toISOString() };
+  }, [range.endDate, range.startDate]);
+  const costUsage = useUsageSummary({
+    startAt: periodLogRange.startAt,
+    endAt: periodLogRange.endAt,
+    groupBy: period === "month" ? "day" : "hour",
+  }, refresh.autoRefresh);
+  const usageCostSetting = useUsageCostDisplaySetting();
+  const { modelCurrencyOf } = useModelPriceCurrencyLookup();
+  const costConfig = usageCostSetting.query.data ?? {
+    currency_conversion_enabled: false,
+    display_currency: "CNY" as const,
+    usd_to_cny_rate: 7.2,
+    exchange_rate_note: "",
+  };
+  const scopedCostRows = useMemo(
+    () => (costUsage.query.data ?? []).filter((row) => deviceId == null || row.device_id === deviceId),
+    [costUsage.query.data, deviceId],
+  );
+  const convertedPeriodCost = useMemo(
+    () => summarizeConvertedUsageCost(scopedCostRows, costConfig, modelCurrencyOf),
+    [costConfig, modelCurrencyOf, scopedCostRows],
+  );
+  const convertedCostByBucket = useMemo(
+    () => groupConvertedUsageCost(scopedCostRows, costConfig, modelCurrencyOf),
+    [costConfig, modelCurrencyOf, scopedCostRows],
   );
   const days = useMemo(
     () => filterMobileUsage(usage.data ?? [], period, periodOffset, now),
@@ -185,12 +221,6 @@ export function UsageCostPage() {
     ),
     [period, selectedDay?.date, selectedHourlyCell?.hour, selectedHourlyCell?.hourEnd],
   );
-  const periodLogRange = useMemo(() => {
-    const start = new Date(`${range.startDate}T00:00:00`);
-    const end = new Date(`${range.endDate}T00:00:00`);
-    end.setDate(end.getDate() + 1);
-    return { startAt: start.toISOString(), endAt: end.toISOString() };
-  }, [range.endDate, range.startDate]);
   const unknownRequestLogRange = unknownRequestsScope === "period"
     ? periodLogRange
     : selectedLogRange;
@@ -231,6 +261,46 @@ export function UsageCostPage() {
     ),
     [periodUnknownRequests, summary.nativeEvents, summary.requests],
   );
+  const costForBucket = (bucket: string) => convertedCostByBucket.get(bucket)?.total ?? 0;
+  const rawViewCells = period === "month" ? heatmap.cells : activeHourlyHeatmap.cells;
+  const viewBucketKeys = period === "month"
+    ? heatmap.cells.map((cell) => cell.date)
+    : activeHourlyHeatmap.cells.map((cell) => cell.hour);
+  const convertedCostScale = createHeatLevelScale(
+    rawViewCells
+      .map((cell, index) => ({ cell, bucket: viewBucketKeys[index] }))
+      .filter(({ cell }) => cell.hasData)
+      .map(({ bucket }) => costForBucket(bucket)),
+  );
+  const selectedConvertedCost = selectedPeriodTitle
+    ? convertedCostByBucket.get(period === "month" ? selectedDay?.date ?? "" : selectedHourlyCell?.hour ?? "")
+    : undefined;
+  const formatConvertedCost = (amount: number) => formatCostAmount({
+    amount,
+    currency: convertedPeriodCost.currency,
+  }, 4);
+  const costPresentation = (value: typeof convertedPeriodCost) => {
+    const flowletOriginal = formatMultiCurrencyCost(value.flowletOriginalByCurrency, 4);
+    const nativeOriginal = formatMultiCurrencyCost(value.nativeOriginalByCurrency, 4);
+    const flowlet = formatConvertedCost(value.flowlet);
+    const native = formatConvertedCost(value.native);
+    const rate = costConfig.currency_conversion_enabled
+      ? t("按固定汇率 1 USD = {rate} CNY 折算", { rate: costConfig.usd_to_cny_rate })
+      : t("未启用汇率折算，仅计入目标币种");
+    return {
+      hint: t("Flowlet {flowlet} · 原生 {native}", { flowlet, native }),
+      tooltip: <div className={styles.costTooltip}>
+        <strong>{t("费用折算对账")}</strong>
+        <div className={styles.costTooltipSource}>
+          <span><b>Flowlet</b><small>{t("原币 {original}", { original: flowletOriginal })}</small><em>{flowlet}</em></span>
+          <span><b>{t("Agent 原生")}</b><small>{t("原币 {original}", { original: nativeOriginal })}</small><em>{native}</em></span>
+        </div>
+        <p>{rate}</p>
+        {value.unsupportedCurrencies.length > 0 ? <p>{t("未折算币种：{currencies}", { currencies: value.unsupportedCurrencies.join("、") })}</p> : null}
+        {costConfig.exchange_rate_note ? <p>{costConfig.exchange_rate_note}</p> : null}
+      </div>,
+    };
+  };
 
   const openUnknownRequests = (scope: "period" | "selected") => {
     setUnknownRequestsScope(scope);
@@ -272,17 +342,17 @@ export function UsageCostPage() {
       ariaLabel: t("Token 已识别 {score}", { score: scoreLabel }),
     };
   };
-  const viewCells: UsageStatisticsCellModel[] = (period === "month" ? heatmap.cells : activeHourlyHeatmap.cells).map((cell, index) => {
+  const viewCells: UsageStatisticsCellModel[] = rawViewCells.map((cell, index) => {
     const hourlyCell = period === "month" ? null : activeHourlyHeatmap.cells[index];
     const dailyCell = period === "month" ? heatmap.cells[index] : null;
     const tokens = cell.tokens;
-    const estimatedCost = cell.estimatedCost;
+    const estimatedCost = costForBucket(viewBucketKeys[index]);
     return {
       key: period === "month" ? dailyCell!.date : hourlyCell!.hour,
       label: period === "month" ? dailyCell!.date : String(hourlyCell!.hourOfDay).padStart(2, "0"),
       value: heatmapMetric === "tokens" ? tokens : estimatedCost,
-      displayValue: formatHeatmapValues(heatmapMetric, tokens, estimatedCost, language, t),
-      level: cell.level,
+      displayValue: formatHeatmapValues(heatmapMetric, tokens, estimatedCost, convertedPeriodCost.currency, language, t),
+      level: heatmapMetric === "cost" ? convertedCostScale.levelFor(estimatedCost) : cell.level,
       disabled: cell.future,
       hasData: cell.hasData,
       adjacent: dailyCell?.adjacentMonth,
@@ -320,7 +390,7 @@ export function UsageCostPage() {
         hint: `${t("缓存命中率")} ${formatCacheHitRate(selectedTokenDetails.total.cacheHitRate)}`,
         expandable: true, title: t("点击查看完整 Token 明细"),
       },
-      { key: "cost", label: t("预估费用"), value: formatCostCny(period === "month" ? selectedDay?.estimatedCost ?? 0 : selectedHourlyCell?.estimatedCost ?? 0), hint: t("Flowlet 可统计用量") },
+      { key: "cost", label: t("折算预估费用"), value: formatConvertedCost(selectedConvertedCost?.total ?? 0), ...costPresentation(selectedConvertedCost ?? { ...convertedPeriodCost, total: 0, flowlet: 0, native: 0, flowletOriginalByCurrency: {}, nativeOriginalByCurrency: {} }) },
     ],
     confidence: viewConfidence(selectedTokenConfidence),
   } : null;
@@ -374,10 +444,10 @@ export function UsageCostPage() {
         <RefreshControl
           autoRefresh={refresh.autoRefresh}
           onToggleAutoRefresh={refresh.toggleAutoRefresh}
-          isFetching={activeQuery.isFetching}
+          isFetching={activeQuery.isFetching || costUsage.query.isFetching}
           lastUpdatedAt={activeQuery.dataUpdatedAt || undefined}
           intervalMs={refresh.intervalMs}
-          onRefresh={() => void activeQuery.refetch()}
+          onRefresh={() => void Promise.all([activeQuery.refetch(), costUsage.query.refetch()])}
           language={language}
           t={t}
         />
@@ -388,7 +458,7 @@ export function UsageCostPage() {
           { key: "tokens", label: "Tokens", value: formatCompactNumber(summaryTokenDetails.total.total, language), hint: t("输入 {input} · 输出 {output}", { input: formatCompactNumber(summaryTokenDetails.total.input, language), output: formatCompactNumber(summaryTokenDetails.total.output, language) }), expandable: true, title: t("点击查看完整 Token 明细") },
           { key: "requests", label: t("请求量"), value: formatInteger(summary.requests + summary.nativeEvents, language), hint: summary.nativeEvents > 0 ? t("代理 {proxy} · 原生 {native}", { proxy: formatInteger(summary.requests, language), native: formatInteger(summary.nativeEvents, language) }) : t("{count} 天数据", { count: days.length }) },
           { key: "cache", label: t("缓存输入"), value: formatCompactNumber(summaryTokenDetails.total.cachedInput, language), hint: `${t("缓存命中率")} ${formatCacheHitRate(summaryTokenDetails.total.cacheHitRate)}`, expandable: true, title: t("点击查看完整 Token 明细") },
-          { key: "cost", label: t("预估费用"), value: formatCostCny(summary.estimatedCost), hint: t("Flowlet 可统计用量") },
+          { key: "cost", label: t("折算预估费用"), value: formatConvertedCost(convertedPeriodCost.total), ...costPresentation(convertedPeriodCost) },
         ]}
         cells={viewCells}
         confidence={viewConfidence(periodTokenConfidence)}
@@ -396,14 +466,14 @@ export function UsageCostPage() {
         period={period}
         metric={heatmapMetric}
         selectedKey={period === "month" ? selectedDay?.date ?? null : selectedHourlyCell?.hour ?? null}
-        loading={activeQuery.isPending && activeQuery.data == null ? <span>{t("正在加载用量…")}</span> : null}
-        error={activeQuery.isError ? <><strong>{t("用量数据加载失败")}</strong><span>{activeQuery.error?.message}</span><Button size="small" onClick={() => void activeQuery.refetch()}>{t("重试")}</Button></> : null}
+        loading={(activeQuery.isPending && activeQuery.data == null) || (costUsage.query.isPending && costUsage.query.data == null) ? <span>{t("正在加载用量…")}</span> : null}
+        error={activeQuery.isError || costUsage.query.isError ? <><strong>{t("用量数据加载失败")}</strong><span>{activeQuery.error?.message ?? costUsage.query.error?.message}</span><Button size="small" onClick={() => void Promise.all([activeQuery.refetch(), costUsage.query.refetch()])}>{t("重试")}</Button></> : null}
         labels={{
           statsAria: t("用量统计"), confidenceTitle: t("数据可信度"), confidencePeriod: rangeLabel,
-          chartTitle, chartHint, metricAria: t("热力图指标"), tokens: "Token", cost: t("预估费用"),
+          chartTitle, chartHint, metricAria: t("热力图指标"), tokens: "Token", cost: t("折算预估费用"),
           selectHint: t("选择有数据的日期或时段后查看详情"), emptyTitle: t("暂无选定时间数据"), emptyLabel: "Token", emptyPeriod: t("当前周期暂无数据"),
           low: t("少"), high: t("多"), weekdayLabels,
-          dailyMaxLabel: heatmapMetric === "tokens" ? formatCompactNumber(dailyChartMax, language) : formatCostCny(dailyChartMax),
+          dailyMaxLabel: heatmapMetric === "tokens" ? formatCompactNumber(dailyChartMax, language) : formatConvertedCost(Math.max(0, ...viewCells.map((cell) => cell.value))),
         }}
         onMetricChange={setHeatmapMetric}
         onSelect={(key) => period === "month" ? setSelectedDate(key) : setSelectedHour(key)}
@@ -585,10 +655,11 @@ function formatHeatmapValues(
   metric: MobileUsageHeatmapMetric,
   tokens: number,
   estimatedCost: number,
+  currency: "CNY" | "USD",
   language: NumberLanguage,
   t: ReturnType<typeof useAppPreferences>["t"],
 ) {
   const tokenLabel = `${formatInteger(tokens, language)} Tokens`;
-  const costLabel = `${t("预估费用")} ${formatCostCny(estimatedCost)}`;
+  const costLabel = `${t("折算预估费用")} ${formatCostAmount({ amount: estimatedCost, currency }, 4)}`;
   return metric === "tokens" ? `${tokenLabel} · ${costLabel}` : `${costLabel} · ${tokenLabel}`;
 }

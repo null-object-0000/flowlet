@@ -4,6 +4,15 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
+
+mod adapters;
+mod process;
+
+#[cfg(all(test, windows))]
+use process::decode_windows_acp;
+#[cfg(test)]
+use process::{decode_process_output, parse_package_version};
+use process::{parse_version, read_version};
 // CREATE_NO_WINDOW：用于 Windows 子进程。非 Windows 平台剥离 cfg 函数后该
 // import 在 `cargo check`（Linux）下会被误报未使用，故显式放行。
 #[cfg(windows)]
@@ -11,10 +20,8 @@ use tokio::process::Command;
 use std::os::windows::process::CommandExt;
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
-const ENVIRONMENT_ADAPTER_IDS: &[&str] = &["claude-code", "opencode", "pi", "chatgpt-desktop"];
-
 pub(crate) fn has_environment_adapter(adapter_id: &str) -> bool {
-    ENVIRONMENT_ADAPTER_IDS.contains(&adapter_id)
+    adapters::has(adapter_id)
 }
 
 // 让子进程在 Windows 上不弹出可见控制台窗口。概览页等场景会并发
@@ -73,13 +80,9 @@ pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironment
     let environment_id = plugin
         .map(|descriptor| descriptor.environment_adapter_id.as_str())
         .unwrap_or(agent_id);
-    let mut report = match environment_id {
-        "claude-code" => Ok(detect_claude_code().await),
-        "opencode" => Ok(detect_opencode().await),
-        "pi" => Ok(detect_pi().await),
-        "chatgpt-desktop" => Ok(detect_chatgpt_codex().await),
-        _ => Err(format!("暂不支持检测 Agent：{agent_id}")),
-    }?;
+    let adapter =
+        adapters::get(environment_id).ok_or_else(|| format!("暂不支持检测 Agent：{agent_id}"))?;
+    let mut report = (adapter.detect)().await;
     if let Some(plugin) = plugin {
         report.agent_id = plugin.id.clone();
         report.agent_name = plugin.name.clone();
@@ -87,348 +90,10 @@ pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironment
     Ok(report)
 }
 
-async fn detect_chatgpt_codex() -> AgentEnvironmentReport {
-    let mut installations = codex_cli_installations().await;
-    installations.extend(chatgpt_desktop_installations().await);
-    let primary = installations
-        .iter()
-        .find(|installation| {
-            installation.surface == AgentSurface::Cli
-                && installation.available_on_path
-                && installation.version.is_some()
-        })
-        .or_else(|| {
-            installations
-                .iter()
-                .find(|installation| installation.surface == AgentSurface::Cli)
-        })
-        .or_else(|| installations.first())
-        .cloned();
-    AgentEnvironmentReport {
-        agent_id: "chatgpt-desktop".to_string(),
-        agent_name: "ChatGPT (Codex)".to_string(),
-        installed: !installations.is_empty(),
-        primary,
-        installations,
-    }
-}
-
-async fn codex_cli_installations() -> Vec<AgentInstallation> {
-    let mut installations = Vec::new();
-    for candidate in codex_cli_candidates() {
-        let install_method = classify_codex_cli_method(&candidate.path);
-        let install_dir = resolve_codex_install_dir(&candidate.path, &install_method);
-        let package_version = read_package_version(&install_dir);
-        let version_result = read_version(&candidate.path).await;
-        let (version, version_output, error) = match version_result {
-            Ok(output) => (
-                parse_version(&output).or(package_version),
-                Some(output),
-                None,
-            ),
-            Err(_) if package_version.is_some() => (package_version, None, None),
-            Err(error) => (None, None, Some(error)),
-        };
-        installations.push(AgentInstallation {
-            surface: AgentSurface::Cli,
-            executable_path: display_path(&candidate.path),
-            install_dir: display_path(&install_dir),
-            install_method,
-            version,
-            version_output,
-            available_on_path: candidate.available_on_path,
-            error,
-        });
-    }
-    installations
-}
-
-#[cfg(windows)]
-async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
-    // The unified ChatGPT app currently retains the OpenAI.Codex Store package identity.
-    // Requiring ChatGPT.exe as the application entry keeps legacy Codex packages excluded.
-    const QUERY: &str = r#"$found = $false; $packages = @(); $packages += @(Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue); $packages += @(Get-AppxPackage -Name 'OpenAI.ChatGPT-Desktop' -ErrorAction SilentlyContinue); foreach ($p in @($packages | Sort-Object Version -Descending)) { $relative = ''; try { [xml]$manifest = Get-Content -LiteralPath (Join-Path $p.InstallLocation 'AppxManifest.xml'); $app = @($manifest.Package.Applications.Application) | Where-Object { [IO.Path]::GetFileName([string]$_.Executable) -ieq 'ChatGPT.exe' } | Select-Object -First 1; if ($null -ne $app) { $relative = [string]$app.Executable } } catch {}; if ([string]::IsNullOrWhiteSpace($relative)) { $fallback = Join-Path $p.InstallLocation 'app\ChatGPT.exe'; if (Test-Path -LiteralPath $fallback) { $relative = 'app\ChatGPT.exe' } }; if (-not [string]::IsNullOrWhiteSpace($relative)) { [Console]::Out.Write($p.Version.ToString() + [char]9 + $p.InstallLocation + [char]9 + $relative); $found = $true; break } }; if (-not $found) { $process = Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object { $_.Path -match '\\WindowsApps\\OpenAI\.(Codex|ChatGPT-Desktop)_[^\\]+\\app\\ChatGPT\.exe$' } | Select-Object -First 1; if ($null -ne $process -and $process.Path -match '^(?<install>.*\\OpenAI\.(Codex|ChatGPT-Desktop)_(?<version>[^_]+)_[^\\]+)\\app\\ChatGPT\.exe$') { [Console]::Out.Write($Matches.version + [char]9 + $Matches.install + [char]9 + 'app\ChatGPT.exe') } }"#;
-    let mut command = Command::new("powershell.exe");
-    command.args([
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        QUERY,
-    ]);
-    #[cfg(windows)]
-    configure_hidden_console(&mut command);
-    let output = tokio::time::timeout(
-        VERSION_TIMEOUT,
-        command
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output(),
-    )
-    .await;
-    let Ok(Ok(output)) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    parse_chatgpt_windows_package_output(&String::from_utf8_lossy(&output.stdout))
-        .into_iter()
-        .collect()
-}
-
-#[cfg(windows)]
-fn parse_chatgpt_windows_package_output(output: &str) -> Option<AgentInstallation> {
-    let mut fields = output.trim().splitn(3, '\t');
-    let version = fields.next()?.trim();
-    let install_dir = PathBuf::from(fields.next()?.trim());
-    if version.is_empty() || install_dir.as_os_str().is_empty() {
-        return None;
-    }
-    let relative = fields.next().unwrap_or_default().trim();
-    let executable = if relative.is_empty() {
-        install_dir.join("ChatGPT.exe")
-    } else {
-        install_dir.join(relative)
-    };
-    Some(AgentInstallation {
-        surface: AgentSurface::Desktop,
-        executable_path: display_path(&executable),
-        install_dir: display_path(&install_dir),
-        install_method: AgentInstallMethod::Desktop,
-        version: Some(version.to_string()),
-        version_output: None,
-        available_on_path: false,
-        error: None,
-    })
-}
-
-#[cfg(target_os = "macos")]
-async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
-    let mut paths = vec![PathBuf::from("/Applications/ChatGPT.app")];
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join("Applications/ChatGPT.app"));
-    }
-    paths
-        .into_iter()
-        .filter(|path| path.is_dir())
-        .map(|app_path| {
-            let plist = std::fs::read_to_string(app_path.join("Contents/Info.plist")).ok();
-            let version = plist
-                .as_deref()
-                .and_then(|value| parse_plist_string(value, "CFBundleShortVersionString"))
-                .or_else(|| {
-                    plist
-                        .as_deref()
-                        .and_then(|value| parse_plist_string(value, "CFBundleVersion"))
-                });
-            AgentInstallation {
-                surface: AgentSurface::Desktop,
-                executable_path: display_path(&app_path.join("Contents/MacOS/ChatGPT")),
-                install_dir: display_path(&app_path),
-                install_method: AgentInstallMethod::Desktop,
-                version,
-                version_output: None,
-                available_on_path: false,
-                error: None,
-            }
-        })
-        .collect()
-}
-
-#[cfg(target_os = "macos")]
-fn parse_plist_string(content: &str, key: &str) -> Option<String> {
-    let after_key = content.split_once(&format!("<key>{key}</key>"))?.1;
-    let value = after_key
-        .split_once("<string>")?
-        .1
-        .split_once("</string>")?
-        .0
-        .trim();
-    (!value.is_empty()).then(|| value.to_string())
-}
-
-#[cfg(all(not(windows), not(target_os = "macos")))]
-async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
-    Vec::new()
-}
-async fn detect_claude_code() -> AgentEnvironmentReport {
-    let candidates = claude_candidates();
-    let mut installations = Vec::with_capacity(candidates.len());
-
-    for candidate in candidates {
-        let install_method = classify_install_method(&candidate.path);
-        let install_dir = resolve_install_dir(&candidate.path, &install_method);
-        let version_result = read_version(&candidate.path).await;
-        let (version, version_output, error) = match version_result {
-            Ok(output) => (parse_version(&output), Some(output), None),
-            Err(error) => (None, None, Some(error)),
-        };
-
-        installations.push(AgentInstallation {
-            surface: AgentSurface::Cli,
-            executable_path: display_path(&candidate.path),
-            install_dir: display_path(&install_dir),
-            install_method,
-            version,
-            version_output,
-            available_on_path: candidate.available_on_path,
-            error,
-        });
-    }
-
-    let primary_index = installations
-        .iter()
-        .position(|installation| installation.available_on_path && installation.version.is_some())
-        .or_else(|| {
-            installations
-                .iter()
-                .position(|installation| installation.version.is_some())
-        })
-        .or_else(|| {
-            installations
-                .iter()
-                .position(|installation| installation.available_on_path)
-        })
-        .or_else(|| (!installations.is_empty()).then_some(0));
-    let primary = primary_index.map(|index| installations[index].clone());
-
-    AgentEnvironmentReport {
-        agent_id: "claude-code".to_string(),
-        agent_name: "Claude Code CLI".to_string(),
-        installed: !installations.is_empty(),
-        primary,
-        installations,
-    }
-}
-
-async fn detect_opencode() -> AgentEnvironmentReport {
-    let mut installations = Vec::new();
-    for candidate in opencode_cli_candidates() {
-        let install_method = classify_opencode_cli_method(&candidate.path);
-        let install_dir = resolve_opencode_install_dir(&candidate.path, &install_method);
-        let version_result = read_version(&candidate.path).await;
-        let (version, version_output, error) = match version_result {
-            Ok(output) => (parse_version(&output), Some(output), None),
-            Err(error) => (None, None, Some(error)),
-        };
-        installations.push(AgentInstallation {
-            surface: AgentSurface::Cli,
-            executable_path: display_path(&candidate.path),
-            install_dir: display_path(&install_dir),
-            install_method,
-            version,
-            version_output,
-            available_on_path: candidate.available_on_path,
-            error,
-        });
-    }
-    for candidate in opencode_desktop_candidates() {
-        installations.push(AgentInstallation {
-            surface: AgentSurface::Desktop,
-            executable_path: display_path(&candidate.path),
-            install_dir: display_path(candidate.path.parent().unwrap_or(&candidate.path)),
-            install_method: AgentInstallMethod::Desktop,
-            version: desktop_version(&candidate.path),
-            version_output: None,
-            available_on_path: false,
-            error: None,
-        });
-    }
-
-    let primary = installations
-        .iter()
-        .find(|installation| {
-            installation.surface == AgentSurface::Cli
-                && installation.available_on_path
-                && installation.version.is_some()
-        })
-        .or_else(|| {
-            installations.iter().find(|installation| {
-                installation.surface == AgentSurface::Cli && installation.version.is_some()
-            })
-        })
-        .or_else(|| {
-            installations.iter().find(|installation| {
-                installation.surface == AgentSurface::Desktop && installation.version.is_some()
-            })
-        })
-        .or_else(|| {
-            installations.iter().find(|installation| {
-                installation.surface == AgentSurface::Cli
-                    && installation.available_on_path
-                    && installation.error.is_none()
-            })
-        })
-        .or_else(|| installations.first())
-        .cloned();
-
-    AgentEnvironmentReport {
-        agent_id: "opencode".to_string(),
-        agent_name: "OpenCode".to_string(),
-        installed: !installations.is_empty(),
-        primary,
-        installations,
-    }
-}
-
-async fn detect_pi() -> AgentEnvironmentReport {
-    let mut installations = Vec::new();
-    for candidate in pi_cli_candidates() {
-        let install_method = classify_pi_cli_method(&candidate.path);
-        let install_dir = resolve_pi_install_dir(&candidate.path, &install_method);
-        let package_version = read_package_version(&install_dir);
-        let version_result = read_version(&candidate.path).await;
-        let (version, version_output, error) = match version_result {
-            Ok(output) => (
-                parse_version(&output).or(package_version),
-                Some(output),
-                None,
-            ),
-            Err(_) if package_version.is_some() => (package_version, None, None),
-            Err(error) => (None, None, Some(error)),
-        };
-        installations.push(AgentInstallation {
-            surface: AgentSurface::Cli,
-            executable_path: display_path(&candidate.path),
-            install_dir: display_path(&install_dir),
-            install_method,
-            version,
-            version_output,
-            available_on_path: candidate.available_on_path,
-            error,
-        });
-    }
-
-    let primary = installations
-        .iter()
-        .find(|installation| installation.available_on_path && installation.version.is_some())
-        .or_else(|| {
-            installations
-                .iter()
-                .find(|installation| installation.version.is_some())
-        })
-        .or_else(|| {
-            installations
-                .iter()
-                .find(|installation| installation.available_on_path)
-        })
-        .or_else(|| installations.first())
-        .cloned();
-
-    AgentEnvironmentReport {
-        agent_id: "pi".to_string(),
-        agent_name: "Pi".to_string(),
-        installed: !installations.is_empty(),
-        primary,
-        installations,
-    }
-}
-
 #[derive(Debug)]
-struct Candidate {
-    path: PathBuf,
-    available_on_path: bool,
+pub(self) struct Candidate {
+    pub(self) path: PathBuf,
+    pub(self) available_on_path: bool,
 }
 
 fn pi_cli_candidates() -> Vec<Candidate> {
@@ -1070,182 +735,18 @@ fn resolve_codex_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBu
 }
 
 fn read_package_version(install_dir: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(install_dir.join("package.json")).ok()?;
-    parse_package_version(&content)
-}
-
-fn parse_package_version(content: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(content)
-        .ok()?
-        .get("version")?
-        .as_str()
-        .filter(|version| !version.is_empty())
-        .map(str::to_owned)
-}
-
-async fn read_version(path: &Path) -> Result<String, String> {
-    let mut command = version_command(path);
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-    let output = tokio::time::timeout(VERSION_TIMEOUT, command.output())
-        .await
-        .map_err(|_| "版本检测超时".to_string())?
-        .map_err(|error| format!("无法执行版本命令：{error}"))?;
-
-    let stdout = decode_process_output(&output.stdout);
-    let stderr = decode_process_output(&output.stderr);
-    let text = if !stdout.is_empty() { stdout } else { stderr };
-    if !output.status.success() {
-        return Err(if text.is_empty() {
-            format!("版本命令退出状态：{}", output.status)
-        } else {
-            text
-        });
-    }
-    if text.is_empty() {
-        Err("版本命令未返回内容".to_string())
-    } else {
-        Ok(text)
-    }
-}
-
-#[cfg(windows)]
-fn version_command(path: &Path) -> Command {
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if is_windows_store_codex_executable(path) {
-        // Packaged executables can fail when spawned directly from a
-        // CreateProcess-based host. PowerShell preserves the package launch
-        // behavior and still gives us the real Codex CLI version output.
-        let escaped = path.to_string_lossy().replace('\'', "''");
-        let mut command = Command::new("powershell.exe");
-        command.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &format!("& '{escaped}' --version"),
-        ]);
-        #[cfg(windows)]
-        configure_hidden_console(&mut command);
-        command
-    } else if extension == "cmd" || extension == "bat" {
-        let mut command = Command::new("cmd.exe");
-        command.arg("/D").arg("/C").arg(path).arg("--version");
-        #[cfg(windows)]
-        configure_hidden_console(&mut command);
-        command
-    } else if extension == "ps1" {
-        let mut command = Command::new("powershell.exe");
-        command
-            .arg("-NoLogo")
-            .arg("-NoProfile")
-            .arg("-NonInteractive")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-File")
-            .arg(path)
-            .arg("--version");
-        #[cfg(windows)]
-        configure_hidden_console(&mut command);
-        command
-    } else {
-        let mut command = Command::new(path);
-        command.arg("--version");
-        #[cfg(windows)]
-        configure_hidden_console(&mut command);
-        command
-    }
+    process::read_package_version(install_dir)
 }
 
 #[cfg(windows)]
 fn is_windows_store_codex_executable(path: &Path) -> bool {
-    let normalized = normalized_path_key(path);
-    (normalized.contains("/windowsapps/openai.codex_")
-        || normalized.contains("/windowsapps/openai.chatgpt-desktop_"))
-        && normalized.ends_with("/app/resources/codex.exe")
-}
-
-#[cfg(not(windows))]
-fn version_command(path: &Path) -> Command {
-    let mut command = Command::new(path);
-    command.arg("--version");
-    command
-}
-
-fn parse_version(output: &str) -> Option<String> {
-    output
-        .split_whitespace()
-        .map(|part| {
-            part.trim_matches(|character: char| {
-                !character.is_ascii_alphanumeric() && character != '.'
-            })
-            .trim_start_matches(['v', 'V'])
-        })
-        .find(|part| {
-            !part.is_empty()
-                && part
-                    .chars()
-                    .next()
-                    .is_some_and(|character| character.is_ascii_digit())
-                && part.contains('.')
-                && part
-                    .chars()
-                    .all(|character| character.is_ascii_digit() || character == '.')
-        })
-        .map(ToOwned::to_owned)
-}
-
-// 子进程输出优先按 UTF-8 解释；中文 Windows 下 cmd.exe / .cmd 垫片在版本探测
-// 失败时输出的是系统 ANSI 代码页（GBK）文本，直接 lossy 解码会产生成片替换符
-// （乱码），故在 UTF-8 非法时回退到 MultiByteToWideChar(CP_ACP)。
-fn decode_process_output(bytes: &[u8]) -> String {
-    if let Ok(text) = std::str::from_utf8(bytes) {
-        return text.trim().to_string();
-    }
-    #[cfg(windows)]
-    {
-        return decode_windows_acp(bytes).trim().to_string();
-    }
-    #[cfg(not(windows))]
-    String::from_utf8_lossy(bytes).trim().to_string()
-}
-
-#[cfg(windows)]
-fn decode_windows_acp(bytes: &[u8]) -> String {
-    use windows_sys::Win32::Globalization::{MultiByteToWideChar, CP_ACP};
-    if bytes.is_empty() {
-        return String::new();
-    }
-    let byte_len = bytes.len().min(i32::MAX as usize) as i32;
-    let required = unsafe {
-        MultiByteToWideChar(CP_ACP, 0, bytes.as_ptr(), byte_len, std::ptr::null_mut(), 0)
-    };
-    if required <= 0 {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-    let mut wide = vec![0_u16; required as usize];
-    let written = unsafe {
-        MultiByteToWideChar(
-            CP_ACP,
-            0,
-            bytes.as_ptr(),
-            byte_len,
-            wide.as_mut_ptr(),
-            required,
-        )
-    };
-    if written <= 0 {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-    String::from_utf16_lossy(&wide[..written as usize])
+    process::is_windows_store_codex_executable(path)
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use super::adapters::codex::parse_chatgpt_windows_package_output;
     use super::*;
 
     #[test]

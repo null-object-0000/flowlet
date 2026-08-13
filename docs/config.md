@@ -55,6 +55,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "ua_rules": [ ... ],          // UA 客户端识别规则
   "log_capture": { ... },       // 请求日志捕获配置
   "bind": { ... },              // 代理监听地址
+  "usage_cost": { ... },        // 用量费用展示与固定汇率
   "channels_config": { ... }    // 渠道、价格、模型配置
 }
 ```
@@ -64,7 +65,30 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `ua_rules` | `UaClientRule[]` | 是 | 基于 User-Agent 子串的客户端身份识别规则 |
 | `log_capture` | `object` | 是 | 请求/响应日志的捕获与脱敏配置 |
 | `bind` | `object` | 是 | 本地代理监听的 host/port |
+| `usage_cost` | `object` | 否 | 费用统一展示币种与手工维护的固定汇率；仅影响展示，不改写原始费用 |
 | `channels_config` | `object` | 是 | 渠道模板、价格、默认开放模型、档位 |
+
+### 2.1 `usage_cost` — 费用展示与固定汇率
+
+```jsonc
+"usage_cost": {
+  "currency_conversion_enabled": false,
+  "display_currency": "CNY",
+  "usd_to_cny_rate": 7.2,
+  "exchange_rate_note": ""
+}
+```
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `currency_conversion_enabled` | `bool` | `false` | 是否在用量汇总中启用统一货币折算 |
+| `display_currency` | `"CNY" \| "USD"` | `"CNY"` | 汇总卡片和费用图表的目标展示币种 |
+| `usd_to_cny_rate` | 正数 | `7.2` | 手工维护的固定汇率，表示 1 USD 对应多少 CNY |
+| `exchange_rate_note` | `string` | `""` | 可选的来源、维护日期或内部对账备注 |
+
+该汇率仅用于 UI 展示折算：原币金额始终保留，不写回 SQLite，不改变 API 公开价，
+也不用于推导套餐 Credits、周额度或实际结算金额。设置页保存时只合并顶层
+`usage_cost`，不会覆盖渠道、账号、捕获或代理配置。
 
 ## 3. `ua_rules` — 客户端身份识别
 
@@ -446,6 +470,7 @@ Key 一样包含在端到端加密的账号目录中。
 |------|-----------|
 | `ua_rules` | **热更新**：下次请求立即生效 |
 | `log_capture` | **热更新**：下次请求立即生效 |
+| `usage_cost` | **前端热更新**：保存后费用展示查询立即使用新口径；不影响代理请求 |
 | `bind` | **需重启代理**：监听地址在启动时绑定 |
 | `channels_config` | **需重启应用**：仅在启动时解析一次；缺失渠道会追加，协议、Base URL 和鉴权字段会同步到 SQLite，模型价格只加载到运行时内存 |
 

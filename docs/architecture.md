@@ -139,6 +139,12 @@ Rust 编译期环境与全局配置适配器。接入抽屉同样通过 `globalC
 通用 SideSheet 不再按 Agent ID 维护条件分支。Codex 手动配置中的模型目录直接读取仓库根目录
 `codex-models.json`，避免前端常量与 Rust 内置目录漂移。
 
+Rust 环境检测入口通过编译期 `AgentEnvironmentAdapter` registry 按 `environmentAdapterId`
+解析实现；Claude Code、OpenCode、Pi、Codex 的检测编排分别位于
+`agent_environment/adapters/`，公共候选路径发现与安装方式识别由父模块复用，版本子进程、
+超时、输出编码与 package 版本读取集中在 `agent_environment/process.rs`。未知环境适配器
+在注册表校验或调用入口明确失败，不回退到其它 Agent；既有候选路径顺序与 Primary 选择规则不变。
+
 Rust 全局配置入口通过统一 `AgentGlobalConfigAdapter` 的 `inspect / apply / restore` 接口工作，
 Claude Code、OpenCode、Pi、Codex 分别由独立编译期 Adapter 模块完整承载配置路径、受管字段、
 备份结构、写入/恢复事务和 Agent 专属扩展源码；父模块只保留公共报告类型、全局互斥锁与通用文件事务。
@@ -832,6 +838,7 @@ Token / cost 与消息级 tokens；Claude Code 对去重后的助手回复 usage
 Flowlet 请求观测始终分栏展示且不相加；OpenCode 原生提供的 cost 直接展示。Codex 在能够确定唯一模型且
 价格存在精确匹配时，只根据明确 Token 消耗展示 `openai-api` 标准基础 API 公开价计算的 API 等价价值，并保留
 USD 等原始计价币种；返回未缓存输入、缓存命中、缓存写入和输出四项费用，供列表提示逐项对账。各项由后端与总价一次计算，前端不重复套用价格。不根据套餐类型、自定义比例或周额度百分比派生 credits 或套餐消耗。
+用量统计页通过 `usage_summary` 读取按日或小时聚合的 Flowlet 请求行与去重后的 Agent 原生行，按来源设备筛选后再应用 `usage_cost` 固定展示汇率；顶部卡片、选定时段和费用热力图共用同一折算函数。折算只发生在前端展示层，原始费用和币种保持不变，原生实际 cost 不参与合计。
 无法从原生记录确认的长上下文、Priority processing 或 Fast mode 乘数不纳入基础估算。Claude Code 不在
 缺少可靠价格映射时伪造费用。产品界面只按需读取最后一次交互，不提供更早历史回溯；列表与详情的
 累计指标使用 `get_agent_session_native_summary`，只返回 turn 数、累计用量和模型集合。同步快照存在时

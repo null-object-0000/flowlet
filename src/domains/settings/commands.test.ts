@@ -7,7 +7,7 @@ vi.mock("../../platform/tauri/client", () => ({
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
-import { compactDatabase, getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, getTaskReviewNotificationEnabled, parseModelPriceCurrencies, setAutostartEnabled, setTaskReviewNotificationEnabled } from "./commands";
+import { compactDatabase, getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, getTaskReviewNotificationEnabled, getUsageCostDisplayConfig, parseModelPriceCurrencies, parseUsageCostDisplayConfig, setAutostartEnabled, setTaskReviewNotificationEnabled, setUsageCostDisplayConfig } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
 
@@ -62,6 +62,44 @@ describe("settings command contract", () => {
     await expect(getModelPriceCurrencies()).resolves.toEqual([{ channel_id: "kimi", upstream_model: "kimi-k3", currency: "CNY" }]);
     expect(invokeMock).toHaveBeenCalledWith("read_config");
   });
+
+  it("reads and normalizes the usage cost display configuration", async () => {
+    invokeMock.mockResolvedValueOnce(JSON.stringify({
+      usage_cost: {
+        currency_conversion_enabled: true,
+        display_currency: "USD",
+        usd_to_cny_rate: 7.18,
+        exchange_rate_note: " finance rate ",
+      },
+    }));
+    await expect(getUsageCostDisplayConfig()).resolves.toEqual({
+      currency_conversion_enabled: true,
+      display_currency: "USD",
+      usd_to_cny_rate: 7.18,
+      exchange_rate_note: "finance rate",
+    });
+  });
+
+  it("updates only usage_cost while preserving the rest of config.json", async () => {
+    invokeMock.mockResolvedValueOnce(JSON.stringify({ bind: { port: 18640 }, channels_config: { channels: ["kept"] } }));
+    invokeMock.mockResolvedValueOnce(undefined);
+    await setUsageCostDisplayConfig({
+      currency_conversion_enabled: true,
+      display_currency: "CNY",
+      usd_to_cny_rate: 7.2,
+      exchange_rate_note: "manual",
+    });
+    const [, args] = invokeMock.mock.calls[1];
+    const written = JSON.parse(args?.content as string);
+    expect(written.bind.port).toBe(18640);
+    expect(written.channels_config.channels).toEqual(["kept"]);
+    expect(written.usage_cost).toEqual({
+      currency_conversion_enabled: true,
+      display_currency: "CNY",
+      usd_to_cny_rate: 7.2,
+      exchange_rate_note: "manual",
+    });
+  });
 });
 
 describe("parseModelPriceCurrencies", () => {
@@ -86,6 +124,18 @@ describe("parseModelPriceCurrencies", () => {
     expect(parseModelPriceCurrencies("{oops")).toEqual([]);
     expect(parseModelPriceCurrencies("{}")).toEqual([]);
     expect(parseModelPriceCurrencies(JSON.stringify({ model_prices: "nope" }))).toEqual([]);
+  });
+});
+
+describe("parseUsageCostDisplayConfig", () => {
+  it("falls back safely for missing or invalid values", () => {
+    expect(parseUsageCostDisplayConfig("{}")).toEqual({
+      currency_conversion_enabled: false,
+      display_currency: "CNY",
+      usd_to_cny_rate: 7.2,
+      exchange_rate_note: "",
+    });
+    expect(parseUsageCostDisplayConfig(JSON.stringify({ usage_cost: { usd_to_cny_rate: -1 } })).usd_to_cny_rate).toBe(7.2);
   });
 });
 

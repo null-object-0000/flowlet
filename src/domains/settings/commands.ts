@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { LogCaptureConfig } from "./types";
+import type { LogCaptureConfig, UsageCostDisplayConfig } from "./types";
 import type { DatabaseCompactionResult, ModelPriceCurrencyEntry, ModelPriceInfo, ModelPriceTierInfo, StorageUsageSummary } from "./types";
 
 export async function getLogCaptureConfig(): Promise<LogCaptureConfig> {
@@ -16,6 +16,71 @@ export async function setLogCaptureConfig(config: LogCaptureConfig): Promise<voi
   } catch (error) {
     throw toAppError(error, "log_capture_update_failed");
   }
+}
+
+export const DEFAULT_USAGE_COST_DISPLAY_CONFIG: UsageCostDisplayConfig = {
+  currency_conversion_enabled: false,
+  display_currency: "CNY",
+  usd_to_cny_rate: 7.2,
+  exchange_rate_note: "",
+};
+
+export async function getUsageCostDisplayConfig(): Promise<UsageCostDisplayConfig> {
+  try {
+    const raw = await invokeCommand<string>("read_config");
+    return parseUsageCostDisplayConfig(raw);
+  } catch (error) {
+    throw toAppError(error, "usage_cost_config_read_failed");
+  }
+}
+
+export async function setUsageCostDisplayConfig(config: UsageCostDisplayConfig): Promise<UsageCostDisplayConfig> {
+  const normalized = normalizeUsageCostDisplayConfig(config);
+  try {
+    const raw = await invokeCommand<string>("read_config");
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("config.json 顶层必须是对象");
+    }
+    const updated = { ...(parsed as Record<string, unknown>), usage_cost: normalized };
+    await invokeCommand<void>("write_config", { content: `${JSON.stringify(updated, null, 2)}\n` });
+    return normalized;
+  } catch (error) {
+    throw toAppError(error, "usage_cost_config_update_failed");
+  }
+}
+
+export function parseUsageCostDisplayConfig(rawConfigJson: string): UsageCostDisplayConfig {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawConfigJson);
+  } catch {
+    return { ...DEFAULT_USAGE_COST_DISPLAY_CONFIG };
+  }
+  const usageCost = (parsed as { usage_cost?: unknown } | null)?.usage_cost;
+  if (typeof usageCost !== "object" || usageCost === null || Array.isArray(usageCost)) {
+    return { ...DEFAULT_USAGE_COST_DISPLAY_CONFIG };
+  }
+  const value = usageCost as Record<string, unknown>;
+  return normalizeUsageCostDisplayConfig({
+    currency_conversion_enabled: value.currency_conversion_enabled === true,
+    display_currency: value.display_currency === "USD" ? "USD" : "CNY",
+    usd_to_cny_rate: value.usd_to_cny_rate,
+    exchange_rate_note: typeof value.exchange_rate_note === "string" ? value.exchange_rate_note : "",
+  });
+}
+
+function normalizeUsageCostDisplayConfig(config: Omit<UsageCostDisplayConfig, "usd_to_cny_rate"> & { usd_to_cny_rate: unknown }): UsageCostDisplayConfig {
+  const rate = typeof config.usd_to_cny_rate === "number" && Number.isFinite(config.usd_to_cny_rate)
+    && config.usd_to_cny_rate > 0
+    ? config.usd_to_cny_rate
+    : DEFAULT_USAGE_COST_DISPLAY_CONFIG.usd_to_cny_rate;
+  return {
+    currency_conversion_enabled: config.currency_conversion_enabled === true,
+    display_currency: config.display_currency === "USD" ? "USD" : "CNY",
+    usd_to_cny_rate: rate,
+    exchange_rate_note: config.exchange_rate_note.trim(),
+  };
 }
 
 export async function cleanupExpiredBodyData(retentionDays: number): Promise<number> {

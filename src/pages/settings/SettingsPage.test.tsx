@@ -32,6 +32,22 @@ vi.mock("../../features/settings/useTaskReviewNotification", () => ({
   }),
 }));
 
+vi.mock("../../features/settings/useUsageCostDisplaySetting", () => ({
+  useUsageCostDisplaySetting: () => ({
+    query: {
+      data: {
+        currency_conversion_enabled: false,
+        display_currency: "CNY",
+        usd_to_cny_rate: 7.2,
+        exchange_rate_note: "",
+      },
+      isLoading: false,
+      isError: false,
+    },
+    mutation: { isPending: false, mutateAsync: vi.fn().mockResolvedValue(undefined) },
+  }),
+}));
+
 vi.mock("../../features/settings/useLogCaptureSetting", () => ({
   useLogCaptureSetting: () => ({
     query: {
@@ -215,6 +231,9 @@ describe("SettingsPage", () => {
     expect(screen.getByText("显示语言")).toBeInTheDocument();
     expect(screen.getByText("界面主题")).toBeInTheDocument();
     expect(screen.getByText("Token 展示单位")).toBeInTheDocument();
+    expect(screen.getByText("费用展示")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "启用统一货币折算" })).not.toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: "USD → CNY 固定汇率" })).toHaveValue("7.200000");
   });
 
   it("switches content when a different tab is selected", async () => {

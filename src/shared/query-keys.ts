@@ -131,6 +131,7 @@ export const queryKeys = {
     autostart: () => [...queryKeys.settings.all, "autostart"] as const,
     taskReviewNotification: () => [...queryKeys.settings.all, "task-review-notification"] as const,
     logCapture: () => [...queryKeys.settings.all, "log-capture"] as const,
+    usageCostDisplay: () => [...queryKeys.settings.all, "usage-cost-display"] as const,
     dbStats: () => [...queryKeys.settings.all, "db-stats"] as const,
     storageUsage: () => [...queryKeys.settings.all, "storage-usage"] as const,
     modelPriceCurrencies: () => [...queryKeys.settings.all, "model-price-currencies"] as const,

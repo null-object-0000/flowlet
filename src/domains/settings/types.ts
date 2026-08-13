@@ -38,6 +38,14 @@ export interface StorageUsageSummary {
   categories: StorageUsageCategory[];
 }
 
+/** 用量费用的展示折算设置。汇率只参与 UI 汇总，不改写原币费用。 */
+export interface UsageCostDisplayConfig {
+  currency_conversion_enabled: boolean;
+  display_currency: "CNY" | "USD";
+  usd_to_cny_rate: number;
+  exchange_rate_note: string;
+}
+
 export interface DatabaseMaintenanceStats {
   databaseBytes: number;
   pageSize: number;

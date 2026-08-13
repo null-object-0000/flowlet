@@ -126,6 +126,11 @@ Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、Web
 当前不加载第三方动态库、不执行插件脚本，也不允许插件绕过类型化 command、
 SQLite 或运行时配置快照直接修改代理状态。修改内置注册表需要重新构建应用。
 
+`core::plugin_contract` 提供跨文件契约测试：对账注册渠道、`config.json` 预设与预设工厂，
+校验模型同步、余额和控制台抓取的声明/实现一致性，验证抓取 mode 的实际配置，并确保模型目录
+官方归属指向已注册渠道、Agent 的四类编译期 Adapter 与 Surface 全部有效。新增扩展遗漏任一环节
+会在 Rust 测试阶段失败，不延迟到运行时静默降级。
+
 前端 Agent 概览使用 `useQueries` 按注册表一次性创建环境探测 Query，并通过统一的
 `useAgentGlobalConfig(agentId)` 处理配置检查、写入和恢复；领域 command 只保留带 `agentId`
 的通用边界。新增已注册 Agent 不再复制专用 Query/Mutation Hook，但仍必须提供注册表声明的

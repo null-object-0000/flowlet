@@ -308,6 +308,8 @@ AccountEditorDrawer
 
 ### Rust
 
+- `core::plugin_contract` 统一契约测试通过，确认注册表、预设、Capability Adapter、能力声明、
+  scrape mode、默认模型与模型目录互相一致；
 - `config.json` 能解析渠道、端点、价格、默认模型和档位；
 - 全新 SQLite 能追加渠道；
 - 已有 SQLite 能迁移新增协议或端点；

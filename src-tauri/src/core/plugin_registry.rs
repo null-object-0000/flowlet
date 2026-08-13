@@ -146,9 +146,8 @@ impl PluginRegistry {
                     {
                         return Err(format!("Agent 插件声明不完整：{}", agent.id));
                     }
-                    if !matches!(
-                        agent.environment_adapter_id.as_str(),
-                        "claude-code" | "opencode" | "pi" | "chatgpt-desktop"
+                    if !crate::core::agent_environment::has_environment_adapter(
+                        &agent.environment_adapter_id,
                     ) {
                         return Err(format!(
                             "Agent 插件 {} 引用了未知环境适配器：{}",
@@ -286,6 +285,14 @@ mod tests {
         let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"missing","sessionAdapterId":"pi","runnerAdapterId":"pi","endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
         let error = PluginRegistry::from_json(unknown).unwrap_err();
         assert!(error.contains("未知全局配置适配器"));
+        assert!(error.contains("missing"));
+    }
+
+    #[test]
+    fn unknown_agent_environment_adapter_is_rejected() {
+        let unknown = r#"{"schemaVersion":2,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"missing","globalConfigAdapterId":"pi","sessionAdapterId":"pi","runnerAdapterId":"pi","endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let error = PluginRegistry::from_json(unknown).unwrap_err();
+        assert!(error.contains("未知环境适配器"));
         assert!(error.contains("missing"));
     }
 

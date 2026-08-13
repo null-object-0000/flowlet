@@ -109,6 +109,11 @@ impl ModelCatalog {
         self.models.iter().map(|model| model.id.clone()).collect()
     }
 
+    #[cfg(test)]
+    pub(crate) fn models(&self) -> &[ModelIdentity] {
+        &self.models
+    }
+
     pub fn owner_channel_for_models_cn_provider(&self, provider_id: &str) -> Option<&str> {
         self.models
             .iter()

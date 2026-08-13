@@ -11,6 +11,11 @@ use tokio::process::Command;
 use std::os::windows::process::CommandExt;
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+const ENVIRONMENT_ADAPTER_IDS: &[&str] = &["claude-code", "opencode", "pi", "chatgpt-desktop"];
+
+pub(crate) fn has_environment_adapter(adapter_id: &str) -> bool {
+    ENVIRONMENT_ADAPTER_IDS.contains(&adapter_id)
+}
 
 // 让子进程在 Windows 上不弹出可见控制台窗口。概览页等场景会并发
 // spawn 多个 powershell.exe / cmd.exe / 目标 exe 子进程去读版本，

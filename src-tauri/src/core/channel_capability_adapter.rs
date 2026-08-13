@@ -151,6 +151,20 @@ pub(crate) fn supports_official_balance(channel_id: &str) -> bool {
     channel_adapter(channel_id).is_some_and(|adapter| adapter.balance_query.is_some())
 }
 
+#[cfg(test)]
+pub(crate) fn has_model_sync(channel_id: &str) -> bool {
+    channel_adapter(channel_id).is_some()
+}
+
+#[cfg(test)]
+pub(crate) fn configured_console_scrape_mode_key(channel_id: &str) -> Option<&'static str> {
+    match channel_adapter(channel_id).map(|adapter| adapter.console_scrape) {
+        Some(ConsoleScrapeAdapter::Fixed(mode_key))
+        | Some(ConsoleScrapeAdapter::ResourceMode { mode_key, .. }) => Some(mode_key),
+        _ => None,
+    }
+}
+
 pub(crate) fn builtin_channel_presets() -> Result<Vec<ChannelPreset>, String> {
     plugin_registry()
         .channels()

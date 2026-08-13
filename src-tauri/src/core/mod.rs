@@ -26,6 +26,8 @@ pub mod model_catalog;
 pub(crate) mod notification_registry;
 pub mod opencode_control;
 pub(crate) mod pi_session_migration;
+#[cfg(test)]
+mod plugin_contract;
 pub mod plugin_registry;
 pub mod power;
 pub mod presets;

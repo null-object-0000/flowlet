@@ -132,7 +132,7 @@ export function UsageStatisticsView({ stats, cells, confidence, detail, labels, 
               autoAdjustOverflow
               position="topRight"
               showArrow
-              style={{ width: 320, maxWidth: "calc(100vw - 24px)" }}
+              style={{ width: "auto", maxWidth: "calc(100vw - 24px)" }}
               content={stat.tooltip}
             ><small tabIndex={0}>{stat.hint}</small></Tooltip>
           : <small>{stat.hint}</small>;
@@ -193,7 +193,7 @@ export function UsageStatisticsView({ stats, cells, confidence, detail, labels, 
                 autoAdjustOverflow
                 position="topRight"
                 showArrow
-                style={{ width: 320, maxWidth: "calc(100vw - 24px)" }}
+                style={{ width: "auto", maxWidth: "calc(100vw - 24px)" }}
                 content={item.tooltip}
               ><small tabIndex={0}>{item.hint}</small></Tooltip>
             : <small>{item.hint}</small>;

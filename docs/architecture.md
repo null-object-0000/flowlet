@@ -372,6 +372,11 @@ Channel contribution (plugin-registry.json)
 或 `supports_*` 配置。路径策略会在代理构建最终上游 URL 时读取，但不改变协议和报文；模型同步与
 余额查询只用于异步同步和配置辅助。主请求转发仍然走 `proxy`，响应仍然零改写。
 
+官方余额的 HTTP 请求、渠道响应 DTO 与解析错误现在由 DeepSeek、Kimi、OpenRouter 各自的 Adapter
+承载。控制台抓取的 WebView 生命周期、阶段等待和响应缓冲仍由 `scrape_console.rs` 统一维护；
+LongCat 的业务 URL 分类、资源包列表合并/完成条件，以及 Qwen Token Plan 的响应分类由对应 Adapter
+提供，公共抓取层不再识别渠道专属 URL 或响应结构。
+
 `presets::builtin_channel_presets()` 只保留兼容入口，实际按注册顺序调用 Adapter 的预设工厂；
 启动契约会校验工厂返回的 `ChannelPreset.id` 必须与渠道贡献 ID 一致，防止错误预设写入 SQLite。
 控制台抓取脚本、端点和必需响应槽位仍由 `config.json` 提供；Adapter 只解析账号资源模式对应的

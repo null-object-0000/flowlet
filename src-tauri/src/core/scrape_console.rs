@@ -8,7 +8,10 @@
 //!   command 必须等 ready 后再计算业务响应超时，避免把页面尚未初始化误判成未登录。
 //! - 收齐后 Rust 侧 eval_with_callback 执行 extractor_js,拿到结构化结果。
 
-use crate::core::channel_capability_adapter::console_scrape_mode_key;
+use crate::core::channel_capability_adapter::{
+    classify_scrape_response_url, console_scrape_mode_key, merge_scrape_response,
+    scrape_response_satisfies_slot,
+};
 use crate::core::channels_config::ChannelsConfig;
 use std::collections::HashMap;
 #[cfg(any(windows, target_os = "linux"))]
@@ -374,26 +377,7 @@ pub fn install_linux_response_capture(
 /// 规则，否则 LongCat 的控制台 document、监控埋点和用量明细都会被误认为
 /// 套餐响应，导致多阶段抓取提前结束。
 pub fn classify_response_url(url: &str) -> &'static str {
-    let normalized = url.to_ascii_lowercase().replace("%2f", "/");
-    if normalized.contains("/tokenplan/personal/api/v2/subscription") {
-        "subscription"
-    } else if normalized.contains("/tokenplan/personal/api/v2/quota-config") {
-        "quota_config"
-    } else if normalized.contains("/tokenplan/personal/api/v2/reset-card/list") {
-        "reset_card_list"
-    } else if normalized.contains("/api/pay/commercial/entitlements/token-packs/list") {
-        // 必须在 token-packs/summary 之前判断,但二者路径不同无冲突。
-        // 放在前面是为了让"token-packs"前缀的匹配更明确可读。
-        "token_packs_list"
-    } else if normalized.contains("/api/pay/quota/metering/token-packs/summary") {
-        "token_packs_summary"
-    } else if normalized.contains("/api/pay/quota/metering/api-usage/summary") {
-        "api_usage_summary"
-    } else if normalized.contains("/tokenplan/personal/api/v2/usage") {
-        "usage"
-    } else {
-        "unknown"
-    }
+    classify_scrape_response_url(url)
 }
 
 /// 把一条业务响应写入账号缓冲。
@@ -404,15 +388,13 @@ pub fn classify_response_url(url: &str) -> &'static str {
 /// 不能让较小的筛选响应覆盖完整历史列表。
 pub fn record_captured_response(entry: &mut Vec<(String, String)>, url: String, body: String) {
     let kind = classify_response_url(&url);
-    if kind == "token_packs_list" {
-        if let Some(index) = entry
-            .iter()
-            .position(|(existing_url, _)| classify_response_url(existing_url) == kind)
-        {
-            if let Some(merged) = merge_longcat_token_pack_list(&entry[index].1, &body) {
-                entry[index] = (url, merged);
-                return;
-            }
+    if let Some(index) = entry
+        .iter()
+        .position(|(existing_url, _)| classify_response_url(existing_url) == kind)
+    {
+        if let Some(merged) = merge_scrape_response(kind, &entry[index].1, &body) {
+            entry[index] = (url, merged);
+            return;
         }
     }
     entry.retain(|(existing_url, _)| classify_response_url(existing_url) != kind);
@@ -424,128 +406,7 @@ pub fn record_captured_response(entry: &mut Vec<(String, String)>, url: String, 
 /// 对 LongCat 历史列表，如果响应声明存在历史包，就必须实际包含当前页应有的历史
 /// items。这样活跃包探测请求不会抢先满足第三阶段，完整历史响应到达后才继续提取。
 pub fn captured_response_satisfies_slot(kind: &str, body: &str) -> bool {
-    let Ok(root) = serde_json::from_str::<serde_json::Value>(body) else {
-        return false;
-    };
-    if kind != "token_packs_list" {
-        return true;
-    }
-    if root
-        .get("code")
-        .and_then(serde_json::Value::as_i64)
-        .is_some_and(|code| code != 0)
-    {
-        return false;
-    }
-    let data = root.get("data").unwrap_or(&root);
-    let Some(items) = data.get("items").and_then(serde_json::Value::as_array) else {
-        return false;
-    };
-    let history_count = data
-        .get("historyCount")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    let page_size = data
-        .get("pageSize")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(history_count as u64) as usize;
-    if history_count == 0 {
-        // fuel_pack 的完整列表使用正常分页（当前为 pageSize=9）；页面还会额外发出
-        // pageSize=1 的活跃包探测。即使当前没有历史包，也要等完整列表响应，
-        // 不能让探测请求抢先结束阶段。
-        return page_size > 1;
-    }
-    let expected_history_items = history_count.min(page_size.max(1));
-    let has_status_codes = items
-        .iter()
-        .any(|item| item.get("statusCode").is_some() || item.get("displayStatusCode").is_some());
-    let captured_history_items = if has_status_codes {
-        items
-            .iter()
-            .filter(|item| {
-                item.get("statusCode")
-                    .or_else(|| item.get("displayStatusCode"))
-                    .and_then(serde_json::Value::as_i64)
-                    .is_some_and(|status| status != 1)
-            })
-            .count()
-    } else {
-        items.len()
-    };
-    captured_history_items >= expected_history_items
-}
-
-fn merge_longcat_token_pack_list(existing: &str, incoming: &str) -> Option<String> {
-    let mut existing_root = serde_json::from_str::<serde_json::Value>(existing).ok()?;
-    let incoming_root = serde_json::from_str::<serde_json::Value>(incoming).ok()?;
-    let existing_data = existing_root.get("data").unwrap_or(&existing_root);
-    let incoming_data = incoming_root.get("data").unwrap_or(&incoming_root);
-    let existing_items = existing_data
-        .get("items")
-        .and_then(serde_json::Value::as_array)?
-        .clone();
-    let incoming_items = incoming_data
-        .get("items")
-        .and_then(serde_json::Value::as_array)?
-        .clone();
-
-    let mut merged_items = Vec::new();
-    let mut item_indexes = HashMap::<String, usize>::new();
-    for item in existing_items.into_iter().chain(incoming_items) {
-        let key = longcat_pack_item_key(&item)
-            .unwrap_or_else(|| serde_json::to_string(&item).unwrap_or_default());
-        if let Some(index) = item_indexes.get(&key).copied() {
-            merged_items[index] = item;
-        } else {
-            item_indexes.insert(key, merged_items.len());
-            merged_items.push(item);
-        }
-    }
-
-    let count_fields = [
-        "activeCount",
-        "historyCount",
-        "total",
-        "pageSize",
-        "totalPage",
-    ];
-    let merged_counts = count_fields.map(|field| {
-        let existing_value = existing_data
-            .get(field)
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let incoming_value = incoming_data
-            .get(field)
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        (field, existing_value.max(incoming_value))
-    });
-    let merged_len = merged_items.len() as u64;
-    let data = if existing_root.get("data").is_some() {
-        existing_root.get_mut("data")?
-    } else {
-        &mut existing_root
-    };
-    let data = data.as_object_mut()?;
-    data.insert("items".to_string(), serde_json::Value::Array(merged_items));
-    for (field, mut value) in merged_counts {
-        if field == "total" {
-            value = value.max(merged_len);
-        }
-        data.insert(
-            field.to_string(),
-            serde_json::Value::Number(serde_json::Number::from(value)),
-        );
-    }
-    serde_json::to_string(&existing_root).ok()
-}
-
-fn longcat_pack_item_key(item: &serde_json::Value) -> Option<String> {
-    let id = item.get("resourceId").or_else(|| item.get("packageId"))?;
-    id.as_str()
-        .map(ToOwned::to_owned)
-        .or_else(|| id.as_u64().map(|value| value.to_string()))
-        .or_else(|| id.as_i64().map(|value| value.to_string()))
+    scrape_response_satisfies_slot(kind, body)
 }
 
 /// 当前导航阶段必须等到的响应槽位。

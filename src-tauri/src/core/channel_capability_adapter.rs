@@ -15,6 +15,13 @@ type ModelSyncFn =
 type BalanceQueryFuture<'a> = Pin<Box<dyn Future<Output = BalanceQueryResult> + Send + 'a>>;
 type BalanceQueryFn = for<'a> fn(&'a ChannelAccount, &'a ChannelsConfig) -> BalanceQueryFuture<'a>;
 
+#[derive(Clone, Copy)]
+struct ScrapeResponseAdapter {
+    classify: fn(&str) -> Option<&'static str>,
+    merge: fn(&str, &str, &str) -> Option<String>,
+    satisfies: fn(&str, &str) -> Option<bool>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConsoleScrapeAdapter {
     None,
@@ -44,6 +51,30 @@ pub(crate) struct ChannelCapabilityAdapter {
     pub strips_openai_v1_path: bool,
     console_scrape: ConsoleScrapeAdapter,
     login_page: LoginPageAdapter,
+    scrape_response: Option<ScrapeResponseAdapter>,
+}
+
+pub(crate) fn classify_scrape_response_url(url: &str) -> &'static str {
+    ADAPTERS
+        .iter()
+        .filter_map(|adapter| adapter.scrape_response)
+        .find_map(|adapter| (adapter.classify)(url))
+        .unwrap_or("unknown")
+}
+
+pub(crate) fn merge_scrape_response(kind: &str, existing: &str, incoming: &str) -> Option<String> {
+    ADAPTERS
+        .iter()
+        .filter_map(|adapter| adapter.scrape_response)
+        .find_map(|adapter| (adapter.merge)(kind, existing, incoming))
+}
+
+pub(crate) fn scrape_response_satisfies_slot(kind: &str, body: &str) -> bool {
+    ADAPTERS
+        .iter()
+        .filter_map(|adapter| adapter.scrape_response)
+        .find_map(|adapter| (adapter.satisfies)(kind, body))
+        .unwrap_or_else(|| serde_json::from_str::<serde_json::Value>(body).is_ok())
 }
 
 pub(crate) fn has_channel_capability_adapter(adapter_id: &str) -> bool {

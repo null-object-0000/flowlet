@@ -1,54 +1,32 @@
 use super::channels_config::ChannelsConfig;
 use super::config::{AuthStrategy, ChannelAccount, ChannelModel, ChannelPreset, ProtocolType};
-use super::presets::{BalanceQueryResult, ModelSyncResult};
+use super::presets::ModelSyncResult;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Deserialize)]
-struct DeepSeekBalanceResponse {
+pub(crate) struct OpenAiModelsResponse {
     #[serde(default)]
-    is_available: bool,
-    #[serde(default)]
-    balance_infos: Vec<DeepSeekBalanceInfo>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeepSeekBalanceInfo {
-    #[serde(default)]
-    currency: String,
-    #[serde(default)]
-    total_balance: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    granted_balance: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    topped_up_balance: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeepSeekModelsResponse {
-    #[serde(default)]
-    data: Vec<DeepSeekModelEntry>,
+    pub(crate) data: Vec<OpenAiModelEntry>,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Clone)]
-pub struct DeepSeekModelEntry {
+pub(crate) struct OpenAiModelEntry {
     pub id: String,
     #[serde(default)]
-    object: String,
+    pub(crate) object: String,
     #[serde(default)]
-    owned_by: Option<String>,
+    pub(crate) owned_by: Option<String>,
     /// 上游模型创建时间（Unix 秒）。OpenAI 兼容 /models 的标准字段；
     /// 部分渠道列表不返回时为 None。
     #[serde(default)]
-    created: Option<u64>,
+    pub(crate) created: Option<u64>,
 }
 
 /// 按上游模型创建时间倒序排列（新模型在前）；缺失 created 的排在最后，
 /// 稳定排序保证无时间戳的模型之间保持接口返回的原始顺序。
-fn sort_by_created_desc<T>(entries: &mut [T], created: impl Fn(&T) -> Option<u64>) {
+pub(crate) fn sort_by_created_desc<T>(entries: &mut [T], created: impl Fn(&T) -> Option<u64>) {
     entries.sort_by(|a, b| created(b).cmp(&created(a)));
 }
 
@@ -301,414 +279,14 @@ fn openai_models_url(base_url: &str) -> String {
 
 /// 解析账号的 /models 端点 URL：优先使用账号级 Base URL 覆盖（千问 Token Plan 等
 /// 套餐专属端点），未覆盖时使用渠道配置的端点。与 test_channel_connection 保持一致。
-fn account_models_url(account: &ChannelAccount, config: &ChannelsConfig) -> Option<String> {
+pub(crate) fn account_models_url(
+    account: &ChannelAccount,
+    config: &ChannelsConfig,
+) -> Option<String> {
     account
         .effective_openai_base_url()
         .map(openai_models_url)
         .or_else(|| config.models_endpoint_url(&account.channel_id))
-}
-
-/// 查询 DeepSeek 余额
-pub async fn query_deepseek_balance(
-    account: &ChannelAccount,
-    config: &ChannelsConfig,
-) -> BalanceQueryResult {
-    if account.api_key.trim().is_empty() {
-        return BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some("API Key 未配置".to_string()),
-        };
-    }
-
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
-        Ok(c) => c,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("创建 HTTP 客户端失败: {err}")),
-            };
-        }
-    };
-
-    let response = client
-        .get(&config.balance_endpoint())
-        .header(
-            "Authorization",
-            format!("Bearer {}", account.api_key.trim()),
-        )
-        .header("Accept", "application/json")
-        .send()
-        .await;
-
-    let response = match response {
-        Ok(r) => r,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("请求失败: {err}")),
-            };
-        }
-    };
-
-    let status = response.status();
-    let body = match response.text().await {
-        Ok(b) => b,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("读取响应失败: {err}")),
-            };
-        }
-    };
-
-    if !status.is_success() {
-        return BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some(format!("HTTP {}: {}", status.as_u16(), body)),
-        };
-    }
-
-    match serde_json::from_str::<DeepSeekBalanceResponse>(&body) {
-        Ok(data) => {
-            // 优先使用 CNY 余额，否则取第一个
-            let primary = data
-                .balance_infos
-                .iter()
-                .find(|b| b.currency == "CNY")
-                .or_else(|| data.balance_infos.first());
-
-            match primary {
-                Some(info) => BalanceQueryResult {
-                    balance: info.total_balance.parse::<f64>().ok(),
-                    currency: Some(info.currency.clone()),
-                    is_available: data.is_available,
-                    error: None,
-                },
-                None => BalanceQueryResult {
-                    balance: None,
-                    currency: None,
-                    is_available: data.is_available,
-                    error: Some("未找到余额信息".to_string()),
-                },
-            }
-        }
-        Err(err) => BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some(format!("解析响应失败: {err}")),
-        },
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct KimiBalanceResponse {
-    #[serde(default)]
-    code: i32,
-    data: Option<KimiBalanceData>,
-}
-
-#[derive(Debug, Deserialize)]
-struct KimiBalanceData {
-    #[serde(default)]
-    available_balance: f64,
-}
-
-/// 查询 Kimi 余额
-pub async fn query_kimi_balance(
-    account: &ChannelAccount,
-    config: &ChannelsConfig,
-) -> BalanceQueryResult {
-    if account.api_key.trim().is_empty() {
-        return BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some("API Key 未配置".to_string()),
-        };
-    }
-
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
-        Ok(c) => c,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("创建 HTTP 客户端失败: {err}")),
-            };
-        }
-    };
-
-    let response = client
-        .get(&config.kimi_balance_endpoint())
-        .header(
-            "Authorization",
-            format!("Bearer {}", account.api_key.trim()),
-        )
-        .header("Accept", "application/json")
-        .send()
-        .await;
-
-    let response = match response {
-        Ok(r) => r,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("请求失败: {err}")),
-            };
-        }
-    };
-
-    let status = response.status();
-    let body = match response.text().await {
-        Ok(b) => b,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("读取响应失败: {err}")),
-            };
-        }
-    };
-
-    if !status.is_success() {
-        return BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some(format!("HTTP {}: {}", status.as_u16(), body)),
-        };
-    }
-
-    match serde_json::from_str::<KimiBalanceResponse>(&body) {
-        Ok(data) => {
-            if data.code != 0 {
-                return BalanceQueryResult {
-                    balance: None,
-                    currency: None,
-                    is_available: false,
-                    error: Some(format!("余额查询失败，服务器返回 code={}", data.code)),
-                };
-            }
-            let balance = data.data.map(|d| d.available_balance);
-            BalanceQueryResult {
-                balance,
-                currency: Some("CNY".to_string()),
-                is_available: data.code == 0,
-                error: None,
-            }
-        }
-        Err(err) => BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some(format!("解析响应失败: {err}")),
-        },
-    }
-}
-
-/// OpenRouter 官方余额/Key 状态响应：`GET /api/v1/key`。
-/// 普通 API Key 以 Bearer 调用即可返回该 Key 的用量与剩余配额（credits，USD）。
-/// `limit_remaining` 为 null 表示该 Key 未设额度上限。
-#[derive(Debug, Deserialize)]
-struct OpenRouterKeyResponse {
-    data: Option<OpenRouterKeyData>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenRouterKeyData {
-    /// 该 Key 的 credits 额度上限，null 表示不限。
-    #[serde(default)]
-    #[allow(dead_code)]
-    limit: Option<f64>,
-    /// 已消耗 credits（全时段）。
-    #[serde(default)]
-    #[allow(dead_code)]
-    usage: Option<f64>,
-    /// 剩余 credits，null 表示该 Key 未设额度上限。
-    #[serde(default)]
-    limit_remaining: Option<f64>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    is_free_tier: Option<bool>,
-}
-
-/// OpenRouter 账户 Credits 响应：`GET /api/v1/credits`。
-/// 该接口要求 Management Key，余额为累计购买 Credits 减去累计用量。
-#[derive(Debug, Deserialize)]
-struct OpenRouterCreditsResponse {
-    data: Option<OpenRouterCreditsData>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenRouterCreditsData {
-    total_credits: f64,
-    total_usage: f64,
-}
-
-/// 查询 OpenRouter Credits / Key 限额（USD）。
-/// 配置 Management Key 时调用 `/credits` 返回真实账户余额；否则调用 `/key`
-/// 返回普通 API Key 的剩余消费限额。Key 未设限额时余额为 null，但同步成功。
-pub async fn query_openrouter_balance(
-    account: &ChannelAccount,
-    config: &ChannelsConfig,
-) -> BalanceQueryResult {
-    if account.api_key.trim().is_empty() {
-        return BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some("API Key 未配置".to_string()),
-        };
-    }
-
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
-        Ok(c) => c,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("创建 HTTP 客户端失败: {err}")),
-            };
-        }
-    };
-
-    let management_key = account
-        .management_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let (endpoint, credential, queries_account_credits) = match management_key {
-        Some(key) => (config.openrouter_credits_endpoint(), key, true),
-        None => (
-            config.openrouter_balance_endpoint(),
-            account.api_key.trim(),
-            false,
-        ),
-    };
-
-    let response = client
-        .get(&endpoint)
-        .header("Authorization", format!("Bearer {credential}"))
-        .header("Accept", "application/json")
-        .send()
-        .await;
-
-    let response = match response {
-        Ok(r) => r,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("请求失败: {err}")),
-            };
-        }
-    };
-
-    let status = response.status();
-    let body = match response.text().await {
-        Ok(b) => b,
-        Err(err) => {
-            return BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("读取响应失败: {err}")),
-            };
-        }
-    };
-
-    if !status.is_success() {
-        let credential_name = if queries_account_credits {
-            "Management Key"
-        } else {
-            "API Key"
-        };
-        return BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some(format!(
-                "{credential_name} 查询失败，HTTP {}: {}",
-                status.as_u16(),
-                body
-            )),
-        };
-    }
-
-    if queries_account_credits {
-        match serde_json::from_str::<OpenRouterCreditsResponse>(&body) {
-            Ok(data) => match data.data {
-                Some(info) => BalanceQueryResult {
-                    balance: Some(info.total_credits - info.total_usage),
-                    currency: Some("USD".to_string()),
-                    is_available: true,
-                    error: None,
-                },
-                None => BalanceQueryResult {
-                    balance: None,
-                    currency: None,
-                    is_available: false,
-                    error: Some("未找到 OpenRouter 账户 Credits 信息".to_string()),
-                },
-            },
-            Err(err) => BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("解析账户 Credits 响应失败: {err}")),
-            },
-        }
-    } else {
-        match serde_json::from_str::<OpenRouterKeyResponse>(&body) {
-            Ok(data) => match data.data {
-                Some(info) => BalanceQueryResult {
-                    // 未配置 Management Key 时只展示普通 Key 的剩余消费限额。
-                    balance: info.limit_remaining,
-                    currency: Some("USD".to_string()),
-                    is_available: true,
-                    error: None,
-                },
-                None => BalanceQueryResult {
-                    balance: None,
-                    currency: None,
-                    is_available: false,
-                    error: Some("未找到 Key 状态信息".to_string()),
-                },
-            },
-            Err(err) => BalanceQueryResult {
-                balance: None,
-                currency: None,
-                is_available: false,
-                error: Some(format!("解析 Key 状态响应失败: {err}")),
-            },
-        }
-    }
 }
 
 /// 同步 DeepSeek 模型列表
@@ -790,9 +368,9 @@ pub async fn sync_deepseek_models(
         };
     }
 
-    match serde_json::from_str::<DeepSeekModelsResponse>(&body) {
+    match serde_json::from_str::<OpenAiModelsResponse>(&body) {
         Ok(data) => {
-            let mut models: Vec<DeepSeekModelEntry> = data
+            let mut models: Vec<OpenAiModelEntry> = data
                 .data
                 .into_iter()
                 .filter(|m| !m.id.trim().is_empty())
@@ -899,9 +477,9 @@ pub async fn sync_openai_compatible_models(
         };
     }
 
-    match serde_json::from_str::<DeepSeekModelsResponse>(&body) {
+    match serde_json::from_str::<OpenAiModelsResponse>(&body) {
         Ok(data) => {
-            let mut entries: Vec<DeepSeekModelEntry> = data
+            let mut entries: Vec<OpenAiModelEntry> = data
                 .data
                 .into_iter()
                 .filter(|entry| !entry.id.trim().is_empty())
@@ -1139,10 +717,10 @@ pub async fn sync_qwen_models(
         };
     }
 
-    match serde_json::from_str::<DeepSeekModelsResponse>(&body) {
+    match serde_json::from_str::<OpenAiModelsResponse>(&body) {
         Ok(data) => {
             let synced_at = chrono::Utc::now().to_rfc3339();
-            let mut entries: Vec<DeepSeekModelEntry> = data
+            let mut entries: Vec<OpenAiModelEntry> = data
                 .data
                 .into_iter()
                 .filter(|m| !m.id.trim().is_empty())
@@ -1229,8 +807,8 @@ pub async fn sync_longcat_models(
     };
 
     // 2) 解析列表（按上游创建时间倒序，新模型在前）
-    let mut entries: Vec<DeepSeekModelEntry> =
-        match serde_json::from_str::<DeepSeekModelsResponse>(&list_response.body) {
+    let mut entries: Vec<OpenAiModelEntry> =
+        match serde_json::from_str::<OpenAiModelsResponse>(&list_response.body) {
             Ok(resp) => resp
                 .data
                 .into_iter()
@@ -1486,22 +1064,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_deepseek_balance_response() {
-        let json = r#"{
-            "is_available": true,
-            "balance_infos": [
-                {"currency": "CNY", "total_balance": "100.50", "granted_balance": "0", "topped_up_balance": "100.50"},
-                {"currency": "USD", "total_balance": "0.00"}
-            ]
-        }"#;
-        let data: DeepSeekBalanceResponse = serde_json::from_str(json).unwrap();
-        assert!(data.is_available);
-        assert_eq!(data.balance_infos.len(), 2);
-        assert_eq!(data.balance_infos[0].currency, "CNY");
-        assert_eq!(data.balance_infos[0].total_balance, "100.50");
-    }
-
-    #[test]
     fn parse_deepseek_models_response() {
         let json = r#"{
             "data": [
@@ -1509,7 +1071,7 @@ mod tests {
                 {"id": "deepseek-v4-pro", "object": "model", "owned_by": "deepseek"}
             ]
         }"#;
-        let data: DeepSeekModelsResponse = serde_json::from_str(json).unwrap();
+        let data: OpenAiModelsResponse = serde_json::from_str(json).unwrap();
         assert_eq!(data.data.len(), 2);
         assert_eq!(data.data[0].id, "deepseek-v4-flash");
         assert_eq!(data.data[0].created, Some(1700000000));
@@ -1520,31 +1082,31 @@ mod tests {
     #[test]
     fn sort_models_by_created_desc_with_missing_last_and_stable() {
         let mut entries = vec![
-            DeepSeekModelEntry {
+            OpenAiModelEntry {
                 id: "old".to_string(),
                 object: String::new(),
                 owned_by: None,
                 created: Some(100),
             },
-            DeepSeekModelEntry {
+            OpenAiModelEntry {
                 id: "no-time-1".to_string(),
                 object: String::new(),
                 owned_by: None,
                 created: None,
             },
-            DeepSeekModelEntry {
+            OpenAiModelEntry {
                 id: "newest".to_string(),
                 object: String::new(),
                 owned_by: None,
                 created: Some(300),
             },
-            DeepSeekModelEntry {
+            OpenAiModelEntry {
                 id: "no-time-2".to_string(),
                 object: String::new(),
                 owned_by: None,
                 created: None,
             },
-            DeepSeekModelEntry {
+            OpenAiModelEntry {
                 id: "mid".to_string(),
                 object: String::new(),
                 owned_by: None,
@@ -1682,74 +1244,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_openrouter_balance_response() {
-        let json = r#"{
-            "data": {
-                "label": "sk-or-v1-xxxx",
-                "limit": 100.0,
-                "usage": 12.5,
-                "limit_remaining": 87.5,
-                "is_free_tier": false,
-                "rate_limit": {"requests": 200, "interval": "10s"}
-            }
-        }"#;
-        let data: OpenRouterKeyResponse = serde_json::from_str(json).unwrap();
-        let info = data.data.unwrap();
-        assert_eq!(info.limit, Some(100.0));
-        assert_eq!(info.usage, Some(12.5));
-        assert_eq!(info.limit_remaining, Some(87.5));
-        assert_eq!(info.is_free_tier, Some(false));
-    }
-
-    #[test]
-    fn parse_openrouter_balance_response_unlimited_key() {
-        // limit_remaining 为 null 表示该 Key 未设额度上限，解析不应报错。
-        let json = r#"{
-            "data": {
-                "label": "sk-or-v1-unlimited",
-                "limit": null,
-                "usage": 3.25,
-                "limit_remaining": null,
-                "is_free_tier": true
-            }
-        }"#;
-        let data: OpenRouterKeyResponse = serde_json::from_str(json).unwrap();
-        let info = data.data.unwrap();
-        assert_eq!(info.limit, None);
-        assert_eq!(info.limit_remaining, None);
-    }
-
-    #[test]
-    fn parse_openrouter_credits_response_and_calculate_balance() {
-        let json = r#"{
-            "data": {
-                "total_credits": 100.5,
-                "total_usage": 25.75
-            }
-        }"#;
-        let data: OpenRouterCreditsResponse = serde_json::from_str(json).unwrap();
-        let info = data.data.unwrap();
-        assert_eq!(info.total_credits - info.total_usage, 74.75);
-    }
-
-    #[test]
-    fn parse_kimi_balance_response() {
-        let json = r#"{
-            "code": 0,
-            "data": {
-                "available_balance": 49.58894,
-                "voucher_balance": 46.58893,
-                "cash_balance": 3.00001
-            },
-            "scode": "0x0",
-            "status": true
-        }"#;
-        let data: KimiBalanceResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(data.code, 0);
-        assert_eq!(data.data.unwrap().available_balance, 49.58894);
-    }
-
-    #[test]
     fn parse_kimi_models_response_and_preserve_context() {
         let json = r#"{
             "object": "list",
@@ -1772,14 +1266,6 @@ mod tests {
         );
     }
     #[test]
-    fn parse_empty_balance_response() {
-        let json = r#"{"is_available": false, "balance_infos": []}"#;
-        let data: DeepSeekBalanceResponse = serde_json::from_str(json).unwrap();
-        assert!(!data.is_available);
-        assert!(data.balance_infos.is_empty());
-    }
-
-    #[test]
     fn parse_longcat_models_list_response() {
         // LongCat 返回 OpenAI 风格，与 DeepSeek 结构一致
         let json = r#"{
@@ -1788,7 +1274,7 @@ mod tests {
                 {"id": "LongCat-2.0", "object": "model", "owned_by": "LongCat"}
             ]
         }"#;
-        let data: DeepSeekModelsResponse = serde_json::from_str(json).unwrap();
+        let data: OpenAiModelsResponse = serde_json::from_str(json).unwrap();
         assert_eq!(data.data.len(), 1);
         assert_eq!(data.data[0].id, "LongCat-2.0");
     }
@@ -1804,7 +1290,7 @@ mod tests {
                 {"id": " ", "object": "model", "owned_by": "qwen"}
             ]
         }"#;
-        let data: DeepSeekModelsResponse = serde_json::from_str(json).unwrap();
+        let data: OpenAiModelsResponse = serde_json::from_str(json).unwrap();
         let models: Vec<_> = data
             .data
             .into_iter()

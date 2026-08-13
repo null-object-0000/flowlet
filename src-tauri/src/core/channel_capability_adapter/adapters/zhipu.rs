@@ -19,4 +19,5 @@ pub(super) const ADAPTER: ChannelCapabilityAdapter = ChannelCapabilityAdapter {
     strips_openai_v1_path: true,
     console_scrape: ConsoleScrapeAdapter::None,
     login_page: LoginPageAdapter::None,
+    scrape_response: None,
 };

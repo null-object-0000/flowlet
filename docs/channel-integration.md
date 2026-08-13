@@ -232,8 +232,9 @@ Token 资源包、配额、用量等能力同理。UI 应依赖渠道能力或�
 测试会遍历所有渠道贡献验证这一点。新增渠道不再修改 `presets.rs` 的分发分支。
 
 需要控制台抓取时，Adapter 只负责把账号 `resource_mode` 映射为 `config.json` 中的 scrape mode key，
-以及识别明确登录页；console URL、拦截器、解析器和必需响应槽位仍放在 `config.json`。必须同时开启
-`ChannelPreset.supports_scrape_balance`，避免声明与实现脱节。
+识别明确登录页，并承载渠道专属业务响应 URL 分类、同槽位合并与完成条件；console URL、拦截器、
+页面 extractor 和必需响应槽位仍放在 `config.json`，WebView 生命周期和阶段等待留在公共抓取层。
+必须同时开启 `ChannelPreset.supports_scrape_balance`，避免声明与实现脱节。
 
 模型同步与余额 Tauri command 已通过统一入口分发，不再添加 `channel_id` 大分支。不支持的能力
 返回明确错误文案。

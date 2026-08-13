@@ -188,8 +188,6 @@ pub fn apply_native_cost_estimate_to_timeline(
     for event in &mut timeline.events {
         if let (Some(model), Some(usage)) = (event.model.as_deref(), event.usage.as_mut()) {
             usage.api_equivalent = Some(estimate_usage_cost(usage, model, prices, "openai-api", 1));
-            usage.plan_consumption =
-                Some(estimate_usage_cost(usage, model, prices, "codex-native", 1));
         }
     }
     if let Some(usage) = timeline.usage.as_mut() {
@@ -202,13 +200,6 @@ pub fn apply_native_cost_estimate_to_timeline(
                 "openai-api",
                 turns,
             ));
-            usage.plan_consumption = Some(estimate_usage_cost(
-                usage,
-                &timeline.models[0],
-                prices,
-                "codex-native",
-                turns,
-            ));
         } else if !timeline.truncated {
             usage.api_equivalent =
                 aggregate_estimates(timeline.events.iter().filter_map(|event| {
@@ -217,16 +208,8 @@ pub fn apply_native_cost_estimate_to_timeline(
                         .as_ref()
                         .and_then(|usage| usage.api_equivalent.as_ref())
                 }));
-            usage.plan_consumption =
-                aggregate_estimates(timeline.events.iter().filter_map(|event| {
-                    event
-                        .usage
-                        .as_ref()
-                        .and_then(|usage| usage.plan_consumption.as_ref())
-                }));
         } else {
             usage.api_equivalent = Some(unpriced_estimate(turns));
-            usage.plan_consumption = Some(unpriced_estimate(turns));
         }
     }
 }
@@ -249,16 +232,8 @@ pub fn apply_native_cost_estimate_to_summary(
                 "openai-api",
                 turns,
             ));
-            usage.plan_consumption = Some(estimate_usage_cost(
-                usage,
-                &summary.models[0],
-                prices,
-                "codex-native",
-                turns,
-            ));
         } else {
             usage.api_equivalent = Some(unpriced_estimate(turns));
-            usage.plan_consumption = Some(unpriced_estimate(turns));
         }
     }
 }
@@ -770,7 +745,6 @@ fn read_opencode_session_usage(
                     cost: row.get(5)?,
                     cost_currency: Some("USD".to_string()),
                     api_equivalent: None,
-                    plan_consumption: None,
                 })
             },
         )
@@ -811,7 +785,6 @@ fn usage_from_opencode_message(message: &Value) -> Option<AgentSessionNativeUsag
         cost: number_field(message, "cost"),
         cost_currency: Some("USD".to_string()),
         api_equivalent: None,
-        plan_consumption: None,
     })
 }
 
@@ -1566,7 +1539,6 @@ fn usage_from_pi_message(message: &Value) -> Option<AgentSessionNativeUsage> {
         cost: cost.and_then(|cost| cost.get("total").and_then(optional_number_field)),
         cost_currency: None,
         api_equivalent: None,
-        plan_consumption: None,
     })
 }
 
@@ -1781,7 +1753,6 @@ fn subtract_native_usage(
         cost: None,
         cost_currency: None,
         api_equivalent: None,
-        plan_consumption: None,
     }
 }
 
@@ -1897,7 +1868,6 @@ fn usage_from_claude_message(message: &Value) -> Option<AgentSessionNativeUsage>
         cost: None,
         cost_currency: None,
         api_equivalent: None,
-        plan_consumption: None,
     })
 }
 
@@ -1912,7 +1882,6 @@ fn usage_from_codex_token_value(value: &Value) -> Option<AgentSessionNativeUsage
         cost: None,
         cost_currency: None,
         api_equivalent: None,
-        plan_consumption: None,
     })
 }
 
@@ -2400,18 +2369,7 @@ mod tests {
     }
 
     #[test]
-    fn estimates_codex_api_value_and_plan_consumption() {
-        let plan_price = ModelPrice {
-            channel_id: "codex-native".to_string(),
-            upstream_model: "gpt-5.6-sol".to_string(),
-            input_uncached_price: 125.0,
-            input_cached_price: 12.5,
-            output_price: 750.0,
-            currency: "CREDITS".to_string(),
-            source_url: Some("https://learn.chatgpt.com/docs/pricing".to_string()),
-            price_version: Some("2026-07-19".to_string()),
-            ..Default::default()
-        };
+    fn estimates_codex_api_equivalent_value() {
         let api_price = ModelPrice {
             channel_id: "openai-api".to_string(),
             upstream_model: "gpt-5.6-sol".to_string(),
@@ -2438,11 +2396,7 @@ mod tests {
             }),
             models: vec!["gpt-5.6-sol".to_string()],
         };
-        apply_native_cost_estimate_to_summary(
-            "codex-desktop",
-            &mut summary,
-            &[plan_price, api_price],
-        );
+        apply_native_cost_estimate_to_summary("codex-desktop", &mut summary, &[api_price]);
         let usage = summary.usage.unwrap();
         let api_equivalent = usage.api_equivalent.unwrap();
         assert_eq!(api_equivalent.currency.as_deref(), Some("USD"));
@@ -2450,12 +2404,6 @@ mod tests {
         assert_eq!(api_equivalent.priced_turn_count, 1);
         assert_eq!(api_equivalent.unpriced_turn_count, 0);
         assert!((api_equivalent.amount.unwrap() - 0.0038925).abs() < f64::EPSILON);
-
-        let plan_consumption = usage.plan_consumption.unwrap();
-        assert_eq!(plan_consumption.currency.as_deref(), Some("CREDITS"));
-        assert_eq!(plan_consumption.priced_turn_count, 1);
-        assert_eq!(plan_consumption.unpriced_turn_count, 0);
-        assert!((plan_consumption.amount.unwrap() - 0.097).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -2477,10 +2425,6 @@ mod tests {
         assert!(api_equivalent.amount.is_none());
         assert_eq!(api_equivalent.priced_turn_count, 0);
         assert_eq!(api_equivalent.unpriced_turn_count, 2);
-        let plan_consumption = usage.plan_consumption.unwrap();
-        assert!(plan_consumption.amount.is_none());
-        assert_eq!(plan_consumption.priced_turn_count, 0);
-        assert_eq!(plan_consumption.unpriced_turn_count, 2);
     }
 
     #[test]

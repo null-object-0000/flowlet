@@ -76,7 +76,6 @@ export type AgentSessionNativeUsage = {
   cost: number | null;
   costCurrency: string | null;
   apiEquivalent?: AgentSessionCostEstimate | null;
-  planConsumption?: AgentSessionCostEstimate | null;
 };
 
 export type AgentSessionInteractionEventKind =

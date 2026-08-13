@@ -7,7 +7,7 @@
 | 范围 | 数据源 | 用途 |
 |------|--------|------|
 | 国内模型 | `models-cn/api.json` 的 `providers[].models[].prices[]` | 中国大陆模型厂商官方价格与模型信息 |
-| 国际模型 | `models.dev/api.json`（本地落盘为 `models-dev.json`） | OpenAI 等国际厂商官方价格，仅 Rust 侧用于成本估算（如 Codex 会话的 `openai-api` USD 等价与 `codex-native` CREDITS 派生） |
+| 国际模型 | `models.dev/api.json`（本地落盘为 `models-dev.json`） | OpenAI 等国际厂商官方价格，仅 Rust 侧用于成本估算（如 Codex 会话的 `openai-api` USD 等价） |
 | 补全 | `models-cn/api.json` 的 `calibration.modelsDev` | models-cn 官方字段缺失时的唯一允许补全来源 |
 
 **注意**：`config.json` 的 `model_prices` 不再是主要价格来源，仅补充两份目录未覆盖的

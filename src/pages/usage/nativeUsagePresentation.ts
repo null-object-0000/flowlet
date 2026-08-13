@@ -14,7 +14,6 @@ export type AgentNativeUsageTotals = {
   truncatedSessions: number;
   apiEquivalentByCurrency: Record<string, number>;
   nativeCostByCurrency: Record<string, number>;
-  planConsumptionByCurrency: Record<string, number>;
   pricedTurns: number;
   unpricedTurns: number;
 };
@@ -69,7 +68,6 @@ function addNativeUsageRow<T extends AgentNativeUsageTotals>(total: T, row: Agen
   total.reasoningTokens += finite(usage.reasoningTokens);
   addCurrencyAmount(total.nativeCostByCurrency, usage.costCurrency, usage.cost);
   addEstimate(total.apiEquivalentByCurrency, usage.apiEquivalent);
-  addEstimate(total.planConsumptionByCurrency, usage.planConsumption);
   total.pricedTurns += finite(usage.apiEquivalent?.pricedTurnCount);
   total.unpricedTurns += finite(usage.apiEquivalent?.unpricedTurnCount);
   return total;
@@ -103,7 +101,6 @@ function emptyNativeTotals(): AgentNativeUsageTotals {
     truncatedSessions: 0,
     apiEquivalentByCurrency: {},
     nativeCostByCurrency: {},
-    planConsumptionByCurrency: {},
     pricedTurns: 0,
     unpricedTurns: 0,
   };

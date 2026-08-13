@@ -1103,7 +1103,7 @@ pub struct UsageSummaryRow {
     pub unknown_count: i64,
     pub estimated_cost: f64,
     /// 费用估算的原始币种。代理历史行仍可为空，由前端按模型价格目录回退解析；
-    /// Agent 原生行在后端计价时直接写入，避免把 USD/CNY/CREDITS 混合相加。
+    /// Agent 原生行在后端计价时直接写入，避免把 USD/CNY 混合相加。
     #[serde(default)]
     pub estimated_cost_currency: Option<String>,
     /// 未经过 Flowlet 的 Agent 原生用量事件数。代理请求行为 0；原生行的
@@ -1163,7 +1163,7 @@ pub struct DeviceUsageBreakdownRow {
 /// 未经过 Flowlet 的 Agent 原生会话用量。
 ///
 /// 这是只读的会话累计摘要，不写入网关 `usage_records`，也不把 Agent 原生费用、
-/// API 等价价值和套餐消耗合并为同一个金额。`date` 仅表示会话最近活动日，供当前
+/// API 等价价值合并为同一个金额。`date` 仅表示会话最近活动日，供当前
 /// V1 页面做保守的周期筛选；逐日精确归集留给后续 `usage_events` 账本。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1455,8 +1455,6 @@ pub struct AgentSessionNativeUsage {
     pub cost_currency: Option<String>,
     #[serde(default)]
     pub api_equivalent: Option<AgentSessionCostEstimate>,
-    #[serde(default)]
-    pub plan_consumption: Option<AgentSessionCostEstimate>,
 }
 
 /// 单个 Agent 会话的 Flowlet 观测用量与预估费用（人民币，来自 `usage_records` 聚合）。

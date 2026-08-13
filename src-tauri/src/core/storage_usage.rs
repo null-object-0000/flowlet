@@ -4081,7 +4081,6 @@ mod agent_session_filter_tests {
                 cost: None,
                 cost_currency: None,
                 api_equivalent: None,
-                plan_consumption: None,
             }),
             models: vec!["gpt-5.6-sol".to_string()],
         });

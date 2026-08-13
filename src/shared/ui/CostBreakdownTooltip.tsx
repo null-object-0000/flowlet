@@ -14,15 +14,13 @@ type Props = {
   currency: string;
   /** 原生会话的 API 等价价值（无 breakdown 时展示）。 */
   apiEquivalent?: CostAmountValue | null;
-  /** 原生会话的套餐消耗（无 breakdown 时展示）。 */
-  planConsumption?: CostAmountValue | null;
   t: (source: string, variables?: Record<string, string | number>) => string;
 };
 
-export function CostBreakdownTooltip({ children, total, inputUncached, inputCached, inputCacheWrite, output, currency, apiEquivalent, planConsumption, t }: Props) {
+export function CostBreakdownTooltip({ children, total, inputUncached, inputCached, inputCacheWrite, output, currency, apiEquivalent, t }: Props) {
   const fmt = (v: number | null) => formatCostAmount({ amount: v, currency }, 4);
   const hasBreakup = inputUncached != null || inputCached != null || inputCacheWrite != null || output != null;
-  const hasNativeMeta = apiEquivalent?.amount != null || planConsumption?.amount != null;
+  const hasNativeMeta = apiEquivalent?.amount != null;
   return (
     <Tooltip
       showArrow
@@ -40,7 +38,6 @@ export function CostBreakdownTooltip({ children, total, inputUncached, inputCach
           {hasNativeMeta && !hasBreakup ? (
             <>
               {apiEquivalent?.amount != null ? <span><small>{t("API 等价价值")}</small><b>{formatCostAmount(apiEquivalent, 4)}</b></span> : null}
-              {planConsumption?.amount != null ? <span><small>{t("套餐消耗")}</small><b>{formatCostAmount(planConsumption, 4)}</b></span> : null}
             </>
           ) : null}
         </div>

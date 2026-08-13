@@ -389,7 +389,7 @@ function NativeUsageSection({
   const { t } = useAppPreferences();
   return (
     <DetailSection title={t("Agent 原生用量")}>
-      <p className={styles.usageHint}>{agentType === "codex-desktop" || agentType === "codex-cli" ? t("优先展示官方 API 原币估值，并单独展示 Codex 套餐消耗；两者不换汇、不相加") : t("来自 Agent 本地记录，与 Flowlet 请求统计独立，不参与相加")}</p>
+      <p className={styles.usageHint}>{agentType === "codex-desktop" || agentType === "codex-cli" ? t("根据明确的 Token 消耗按官方 API 原价估算费用") : t("来自 Agent 本地记录，与 Flowlet 请求统计独立，不参与相加")}</p>
       {!loading && !error && data?.sourceAvailable === false ? <p className={styles.usageHint}>{t("源文件已删除，以下为 Flowlet 最后一次同步保存的数据")}</p> : null}
       {loading ? <div className={styles.nativeUsageLoading} aria-label={t("正在读取 Agent 原生用量")} /> : null}
       {error ? (
@@ -412,12 +412,10 @@ function NativeUsageSection({
             <Metric label={t("缓存写入")} value={formatCompactNumber(data.usage.cacheWriteInputTokens, language)} />
             <Metric label={t("推理")} value={formatCompactNumber(data.usage.reasoningTokens, language)} />
             <Metric label={t("API 等价价值")} value={data.usage.apiEquivalent ? formatCostAmount(data.usage.apiEquivalent, 4) : "—"} />
-            <Metric label={t("套餐消耗")} value={data.usage.planConsumption ? formatCostAmount(data.usage.planConsumption, 4) : "—"} />
             {data.usage.cost != null ? <Metric label={t("原生实际费用")} value={formatNativeCost(data.usage)} /> : null}
           </div>
           {(data.models ?? []).length > 0 ? <p className={styles.usageModels}>{t("模型：{models}", { models: data.models.join("、") })}</p> : null}
           {data.usage.apiEquivalent ? <EstimateMeta label={t("API 价格")} estimate={data.usage.apiEquivalent} /> : null}
-          {data.usage.planConsumption ? <EstimateMeta label={t("套餐价格")} estimate={data.usage.planConsumption} /> : null}
         </>
       ) : null}
     </DetailSection>

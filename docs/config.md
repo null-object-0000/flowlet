@@ -377,7 +377,7 @@ Key 一样包含在端到端加密的账号目录中。
   SQLite 不保存 `model_prices` 表。
 - 用于离线成本估算（`estimated_cost`），不进入主请求链路。
 - `channel_id = "openai-api"` 是标准 OpenAI API 公开价格的保留命名空间，用于计算 Codex 原生会话的 API 等价价值；数据来自 `models-dev.json` 的 `openai` provider，结果保留价格表原币种，不做汇率转换。
-- `channel_id = "codex-native"` 是 Codex 套餐消耗的保留价格命名空间，由 `openai-api` 美元价按固定比例（1 USD = 25 CREDITS）派生；两个保留命名空间都不代表新增代理渠道，也无需在 `model_prices` 中手工维护。
+- 不生成或使用 `codex-native`、套餐 credits 等派生价格；旧配置中残留的 `channel_id = "codex-native"` 会被运行时价格表忽略。Codex 套餐周额度没有公开的绝对 credits 容量，Flowlet 不作换算。
 - Codex 原生预估只在会话能够确定唯一模型且对应价格表存在精确模型匹配时生成；无法确认模型或无公开价格的模型保持未计价，不做推测。API 等价价值采用标准基础 API 价格，不叠加无法从原生记录可靠确认的长上下文、Priority processing 或 Fast mode 等乘数。
 
 ### 6.3 `default_exposed_models` — 默认开放模型

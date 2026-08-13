@@ -318,7 +318,6 @@ function InteractionEventUsage({ usage, language }: { usage: AgentSessionNativeU
       ))}
       {usage.inputTokens > 0 ? <span>{t("缓存命中率")} {formatCacheHitRate(usage, language)}</span> : null}
       {usage.apiEquivalent?.amount != null ? <span>{t("API 等价")} {formatCostAmount(usage.apiEquivalent, 4)}</span> : null}
-      {usage.planConsumption?.amount != null ? <span>{t("套餐消耗")} {formatCostAmount(usage.planConsumption, 4)}</span> : null}
       {usage.cost != null ? <span>{t("原生实际费用")} {formatNativeCost(usage)}</span> : null}
     </div>
   );

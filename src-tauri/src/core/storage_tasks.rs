@@ -1612,6 +1612,11 @@ fn merge_price_tables(
     let mut keys = std::collections::HashSet::new();
     let mut merged = Vec::new();
     for price in catalog_prices.into_iter().chain(config_prices) {
+        // 旧配置可能仍包含 Flowlet 曾派生的套餐 credits 价格。该维度没有
+        // 官方绝对额度依据，明确从运行时价格表排除。
+        if price.channel_id.eq_ignore_ascii_case("codex-native") {
+            continue;
+        }
         let key = (
             price.channel_id.to_lowercase(),
             price.upstream_model.to_lowercase(),
@@ -1901,12 +1906,6 @@ fn build_price_tiers(
 
 // ─── models.dev → ModelPrice 转换 ─────────────────────────────────────────
 
-/// Codex 套餐额度（CREDITS）与 OpenAI API 美元价的换算比例。
-/// 与价格迁移前 config.json 内嵌的 codex-native 价格保持一致
-/// （如 gpt-5.6-sol 输入 5 USD/1M ↔ 125 CREDITS/1M）。
-#[cfg(desktop)]
-const CODEX_CREDITS_PER_USD: f64 = 25.0;
-
 /// models.dev providerId → Flowlet channel_id 映射。
 /// 目前仅 OpenAI 官方 API 价用于 Codex 会话的 USD 等值估算。
 #[cfg(desktop)]
@@ -1918,8 +1917,7 @@ fn models_dev_provider_to_channel_id(provider_id: &str) -> Option<&'static str> 
 }
 
 /// 从 models.dev 目录 JSON 解析出 ModelPrice 列表，用于成本估算。
-/// 每个 openai 模型产出两条：openai-api（USD，官方 API 价）与
-/// codex-native（CREDITS，按 CODEX_CREDITS_PER_USD 派生的套餐额度消耗）。
+/// 每个 OpenAI 模型仅产出 openai-api（USD，官方 API 原价）。
 #[cfg(desktop)]
 pub fn build_prices_from_models_dev_catalog(
     catalog_json: &str,
@@ -1975,12 +1973,6 @@ pub fn build_prices_from_models_dev_catalog(
                 created_at: now.clone(),
                 updated_at: now.clone(),
             };
-            prices.push(scale_model_price(
-                &usd_price,
-                CODEX_CREDITS_PER_USD,
-                "codex-native",
-                "CREDITS",
-            ));
             prices.push(usd_price);
         }
     }
@@ -2046,32 +2038,6 @@ fn build_models_dev_tiers(
         });
     }
     tiers
-}
-
-/// 按比例缩放一条价格的全部金额字段，生成另一币种/命名空间的派生价格
-/// （如 openai-api USD → codex-native CREDITS）。
-#[cfg(desktop)]
-fn scale_model_price(
-    price: &crate::core::config::ModelPrice,
-    factor: f64,
-    channel_id: &str,
-    currency: &str,
-) -> crate::core::config::ModelPrice {
-    let mut scaled = price.clone();
-    scaled.id = format!("models-dev-{channel_id}-{}", price.upstream_model);
-    scaled.channel_id = channel_id.to_string();
-    scaled.currency = currency.to_string();
-    scaled.input_uncached_price *= factor;
-    scaled.input_cached_price *= factor;
-    scaled.input_cache_write_price = scaled.input_cache_write_price.map(|v| v * factor);
-    scaled.output_price *= factor;
-    for tier in &mut scaled.tiers {
-        tier.input_uncached_price *= factor;
-        tier.input_cached_price *= factor;
-        tier.input_cache_write_price = tier.input_cache_write_price.map(|v| v * factor);
-        tier.output_price *= factor;
-    }
-    scaled
 }
 
 #[cfg(test)]
@@ -2797,7 +2763,7 @@ mod tests {
     }"#;
 
     #[test]
-    fn builds_openai_api_and_derived_codex_native_prices_from_models_dev() {
+    fn builds_openai_api_prices_from_models_dev() {
         let prices = build_prices_from_models_dev_catalog(MODELS_DEV_FIXTURE).unwrap();
 
         // openai → openai-api（USD），含缓存与分级映射。
@@ -2818,17 +2784,6 @@ mod tests {
         assert_eq!(sol.tiers[1].input_uncached_price, 10.0);
         assert_eq!(sol.tiers[1].output_price, 45.0);
 
-        // codex-native 派生：全部金额 ×25，币种 CREDITS，分级同步缩放。
-        let sol_credits = find_price(&prices, "codex-native", "gpt-5.6-sol");
-        assert_eq!(sol_credits.currency, "CREDITS");
-        assert_eq!(sol_credits.input_uncached_price, 125.0);
-        assert_eq!(sol_credits.input_cached_price, 12.5);
-        assert_eq!(sol_credits.input_cache_write_price, Some(156.25));
-        assert_eq!(sol_credits.output_price, 750.0);
-        assert_eq!(sol_credits.tiers.len(), 2);
-        assert_eq!(sol_credits.tiers[1].input_uncached_price, 250.0);
-        assert_eq!(sol_credits.tiers[1].output_price, 1125.0);
-
         // 无 cache_read 时缓存命中价回退为未缓存价；无 cache_write 保持 None。
         let pro = find_price(&prices, "openai-api", "gpt-5-pro");
         assert_eq!(pro.input_cached_price, 15.0);
@@ -2845,7 +2800,7 @@ mod tests {
     }
 
     #[test]
-    fn models_dev_prices_cover_current_codex_models_in_both_dimensions() {
+    fn models_dev_prices_cover_current_codex_models() {
         let fixture = r#"{
             "openai": {
                 "id": "openai",
@@ -2863,14 +2818,6 @@ mod tests {
             assert_eq!(api_price.currency, "USD");
             assert!(api_price.input_uncached_price > 0.0);
             assert!(api_price.output_price > 0.0);
-
-            let plan_price = find_price(&prices, "codex-native", model);
-            assert_eq!(plan_price.currency, "CREDITS");
-            assert!(
-                (plan_price.input_uncached_price - api_price.input_uncached_price * 25.0).abs()
-                    < 1e-9
-            );
-            assert!((plan_price.output_price - api_price.output_price * 25.0).abs() < 1e-9);
         }
     }
 

@@ -62,7 +62,6 @@ export type AgentNativeUsage = {
   cost: number | null;
   costCurrency: string | null;
   apiEquivalent?: AgentNativeCostEstimate | null;
-  planConsumption?: AgentNativeCostEstimate | null;
 };
 
 export type AgentNativeUsageSummaryRow = {

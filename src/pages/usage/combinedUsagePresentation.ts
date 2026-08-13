@@ -15,8 +15,8 @@ export type CombinedUsageTotals = {
 
 /**
  * Combines Flowlet's public-price estimate with the API-equivalent value of
- * native-only Agent sessions. Native reported cost and plan consumption are
- * intentionally excluded because they use different accounting semantics.
+ * native-only Agent sessions. Native reported cost is intentionally excluded
+ * because it uses different accounting semantics.
  */
 export function summarizeCombinedUsage(
   flowlet: UsageSummaryTotals,

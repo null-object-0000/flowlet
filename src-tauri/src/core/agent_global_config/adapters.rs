@@ -1,9 +1,9 @@
 use super::{AgentGlobalConfigOptions, AgentGlobalConfigReport};
 
-mod claude_code;
-mod codex;
-mod opencode;
-mod pi;
+pub(super) mod claude_code;
+pub(super) mod codex;
+pub(super) mod opencode;
+pub(super) mod pi;
 
 pub(super) trait AgentGlobalConfigAdapter: Sync {
     fn id(&self) -> &'static str;

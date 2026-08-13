@@ -71,7 +71,6 @@ describe("parseModelPriceCurrencies", () => {
         model_prices: [
           { channel_id: "longcat", upstream_model: "LongCat-2.0", currency: "CNY" },
           { channel_id: "openai-api", upstream_model: "gpt-5.5", currency: "USD" },
-          { channel_id: "codex-native", upstream_model: "gpt-5.5" },
           { channel_id: "broken" },
           "garbage",
         ],
@@ -80,7 +79,6 @@ describe("parseModelPriceCurrencies", () => {
     expect(parseModelPriceCurrencies(raw)).toEqual([
       { channel_id: "longcat", upstream_model: "LongCat-2.0", currency: "CNY" },
       { channel_id: "openai-api", upstream_model: "gpt-5.5", currency: "USD" },
-      { channel_id: "codex-native", upstream_model: "gpt-5.5", currency: null },
     ]);
   });
 

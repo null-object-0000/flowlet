@@ -27,9 +27,8 @@ const native: AgentNativeUsageTotals = {
   outputTokens: 150,
   reasoningTokens: 30,
   truncatedSessions: 0,
-  apiEquivalentByCurrency: { USD: 0.5, CREDITS: 3 },
+  apiEquivalentByCurrency: { USD: 0.5 },
   nativeCostByCurrency: { USD: 0.1 },
-  planConsumptionByCurrency: { CREDITS: 2 },
   pricedTurns: 4,
   unpricedTurns: 1,
 };
@@ -50,14 +49,12 @@ describe("combined usage presentation", () => {
     expect(summarizeCombinedUsage(flowlet, native).apiEquivalentValueByCurrency).toEqual({
       CNY: 1,
       USD: 0.75,
-      CREDITS: 3,
     });
   });
 
-  it("does not add native reported cost or plan consumption", () => {
+  it("does not add native reported cost", () => {
     const combined = summarizeCombinedUsage(flowlet, native);
     expect(combined.apiEquivalentValueByCurrency.USD).toBe(0.75);
-    expect(combined.apiEquivalentValueByCurrency.CREDITS).toBe(3);
   });
 
   it("ignores invalid and non-positive currency amounts", () => {

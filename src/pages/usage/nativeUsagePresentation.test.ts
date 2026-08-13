@@ -28,14 +28,6 @@ const rows: AgentNativeUsageSummaryRow[] = [
         pricedTurnCount: 2,
         unpricedTurnCount: 1,
       },
-      planConsumption: {
-        amount: 3,
-        currency: "CREDITS",
-        sourceUrl: null,
-        priceVersion: "2026-07-19",
-        pricedTurnCount: 2,
-        unpricedTurnCount: 1,
-      },
     },
   },
   {
@@ -56,7 +48,6 @@ const rows: AgentNativeUsageSummaryRow[] = [
       cost: 0.03,
       costCurrency: "USD",
       apiEquivalent: null,
-      planConsumption: null,
     },
   },
   {
@@ -79,7 +70,7 @@ describe("Agent native usage presentation", () => {
     expect(filterAgentNativeUsageRows(rows, "all", now)).toHaveLength(3);
   });
 
-  it("keeps API equivalent, native reported cost, and plan consumption separate", () => {
+  it("keeps API equivalent and native reported cost separate", () => {
     const summary = summarizeAgentNativeUsage(rows);
     expect(summary).toEqual(expect.objectContaining({
       sessions: 3,
@@ -96,7 +87,6 @@ describe("Agent native usage presentation", () => {
       unpricedTurns: 1,
       apiEquivalentByCurrency: { USD: 0.12 },
       nativeCostByCurrency: { USD: 0.03 },
-      planConsumptionByCurrency: { CREDITS: 3 },
     }));
   });
 

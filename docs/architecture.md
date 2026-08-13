@@ -140,7 +140,8 @@ Rust 编译期环境与全局配置适配器。接入抽屉同样通过 `globalC
 `codex-models.json`，避免前端常量与 Rust 内置目录漂移。
 
 Rust 全局配置入口通过统一 `AgentGlobalConfigAdapter` 的 `inspect / apply / restore` 接口工作，
-Claude Code、OpenCode、Pi、Codex 分别由独立编译期 Adapter 模块承载路径解析和现有配置实现调用。
+Claude Code、OpenCode、Pi、Codex 分别由独立编译期 Adapter 模块完整承载配置路径、受管字段、
+备份结构、写入/恢复事务和 Agent 专属扩展源码；父模块只保留公共报告类型、全局互斥锁与通用文件事务。
 插件注册表校验直接查询该 Adapter registry，不再维护另一份全局配置适配器白名单；设备同步也先
 按 Agent 插件声明解析 `globalConfigAdapterId`，不假设公开 Agent ID 与实现 ID 相同。Adapter 不存在时
 在注册表加载或调用入口明确失败，不做静默回退。
@@ -827,8 +828,8 @@ Token / cost 与消息级 tokens；Claude Code 对去重后的助手回复 usage
 `task_started` 到 `task_complete` 之间累加每次 `last_token_usage`，形成可核对的轮次用量，同时记录
 轮次总耗时和首 Token 延迟。原生用量与
 Flowlet 请求观测始终分栏展示且不相加；OpenCode 原生提供的 cost 直接展示。Codex 在能够确定唯一模型且
-价格存在精确匹配时生成两个独立维度：优先展示 `openai-api` 标准基础 API 公开价计算的 API 等价价值，并保留
-USD 等原始计价币种；同时展示 `codex-native` 官方 credits 费率计算的套餐消耗。两者不做汇率换算，也不相加；
+价格存在精确匹配时，只根据明确 Token 消耗展示 `openai-api` 标准基础 API 公开价计算的 API 等价价值，并保留
+USD 等原始计价币种；不根据套餐类型、自定义比例或周额度百分比派生 credits 或套餐消耗。
 无法从原生记录确认的长上下文、Priority processing 或 Fast mode 乘数不纳入基础估算。Claude Code 不在
 缺少可靠价格映射时伪造费用。产品界面只按需读取最后一次交互，不提供更早历史回溯；列表与详情的
 累计指标使用 `get_agent_session_native_summary`，只返回 turn 数、累计用量和模型集合。同步快照存在时
@@ -862,7 +863,7 @@ PC 用量分析页的 `usage_summary` 进一步把能够确认具体模型的纯
 `client_id` 保存统一客户端归属，`request_count = 0`，并用 `native_event_count` 单独表达消息级事件数。
 该映射不新增数据库列；`estimated_cost_currency` 只存在于 command 返回结构中，用于让前端优先按
 后端实际命中的价格币种聚合。公开价匹配顺序为模型官方渠道、`openai-api` 保留命名空间、唯一非套餐
-价格；`codex-native` credits 不进入预估费用。模型无法精确计价时金额为 0、币种为空，Token 仍参与
+价格；不会从 API 金额或套餐类型换算 credits。模型无法精确计价时金额为 0、币种为空，Token 仍参与
 模型、客户端和设备维度分析。
 
 设备同步快照的 `usage_breakdowns` 同时携带最近 90 天的代理请求维度行与上述 Agent 原生模型维度行。
@@ -973,8 +974,7 @@ Anthropic `/messages/count_tokens` 只计算上下文长度，不执行模型推
 
 模型价格不写入 SQLite。运行时价格表在内存中装配，来源按优先级为：本地 `models-cn.json`
 （国内厂商官方价，CNY，含 `inputTokenRange` 分级与促销价优选）与 `models-dev.json`
-（models.dev 国际官方价，USD；`openai` provider 映射为 `openai-api` 命名空间，并按
-1 USD = 25 CREDITS 派生 `codex-native` 套餐额度价），`config.json` 的
+（models.dev 国际官方价，USD；`openai` provider 映射为 `openai-api` 命名空间），`config.json` 的
 `channels_config.model_prices` 仅补充目录未覆盖的 `(channel_id, upstream_model)`。
 两份目录文件随安装包内置到 exe 旁，后台任务每小时同步一次；价格表在启动时与每次
 目录同步成功后重建。

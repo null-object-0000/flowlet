@@ -553,7 +553,7 @@ Claude Code、OpenCode、ChatGPT（Codex）Desktop、Codex CLI 和 Pi 的会话�
 
 会话概览展示 Agent 原生累计 Token，包括输入、输出、缓存读取、缓存写入和推理 Token。该数据
 不与 Flowlet 请求统计相加，避免同一请求重复计算。
-OpenCode 直接展示原生 cost；Codex 在能够确认唯一模型时分别展示标准基础 API 公开价计算的“API 等价价值”和官方 credits 费率计算的“套餐消耗”，列表优先显示前者。金额保留各价格表原币种（例如 OpenAI API 使用 USD、人民币定价渠道使用 CNY），暂不换汇，也不把两个维度相加；详情同时展示价格版本和计价覆盖率。Claude Code 或无法可靠映射价格的 Codex 会话保持未计价，不做推测。
+OpenCode 直接展示原生 cost；Codex 在能够确认唯一模型时，仅根据明确 Token 消耗按标准基础 API 公开价计算“API 等价价值”。金额保留价格表原币种（例如 OpenAI API 使用 USD、人民币定价渠道使用 CNY），暂不换汇；详情同时展示价格版本和计价覆盖率。不得根据套餐类型或自定义比例推算 credits、周额度或套餐消耗。Claude Code 或无法可靠映射价格的 Codex 会话保持未计价，不做推测。
 
 用量分析页在请求聚合之外并入未经过 Flowlet、但逐事件能够确认具体模型的 Agent 原生用量。
 原生行按事件时间、模型、Agent 和本机设备归因，以“Agent 原生（未经过 Flowlet）”作为虚拟来源，

@@ -219,7 +219,6 @@ function nativeTokenBreakdown(agentType: AgentSessionRow["agentType"], usage: Ag
 function nativeCostDisplay(usage: AgentSessionNativeUsage) {
   if (usage.apiEquivalent?.amount != null) return formatCostAmount(usage.apiEquivalent, 4);
   if (usage.cost != null) return formatNativeCost(usage, 4);
-  if (usage.planConsumption?.amount != null) return formatCostAmount(usage.planConsumption, 4);
   return "—";
 }
 
@@ -292,7 +291,6 @@ function SessionCostCell({ row }: { row: AgentSessionRow }) {
       inputCacheWrite={row.flowletObserved ? row.estimatedInputCacheWriteCost : undefined}
       output={row.flowletObserved ? row.estimatedOutputCost : undefined}
       apiEquivalent={nativeUsage?.apiEquivalent ?? null}
-      planConsumption={nativeUsage?.planConsumption ?? null}
     >
       <span className={styles.tokenTotal} onClick={(e) => e.stopPropagation()}>
         {row.flowletObserved ? formatCostCny(row.estimatedCost) : nativeUsage ? nativeCostDisplay(nativeUsage) : "—"}

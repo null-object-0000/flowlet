@@ -1,11 +1,13 @@
 import { Button } from "@douyinfe/semi-ui-19";
-import { IconArrowDown, IconDownload } from "@douyinfe/semi-icons";
+import { IconArrowDown, IconDownload, IconPhone } from "@douyinfe/semi-icons";
 import { ChannelBrandLogoView } from "@flowlet/product-ui";
 import { useI18n } from "../i18n/I18nContext";
 import { AgentBrandIcon, type AgentBrandName } from "./AgentBrandIcon";
 import styles from "./Hero.module.css";
 
 const AGENTS: AgentBrandName[] = ["Claude Code", "Codex", "OpenCode", "Pi"];
+const RELEASES_URL = "https://github.com/null-object-0000/flowlet/releases";
+const ANDROID_URL = "https://www.pgyer.com/flowlet-android";
 
 export function Hero() {
   const { t } = useI18n();
@@ -16,7 +18,8 @@ export function Hero() {
         <h1>{t.hero.title}</h1>
         <p>{t.hero.subtitle}</p>
         <div className={styles.actions}>
-          <Button size="large" theme="solid" type="primary" icon={<IconDownload />} onClick={() => window.open("https://github.com/null-object-0000/flowlet/releases", "_blank", "noopener,noreferrer")}>{t.hero.primary}</Button>
+          <Button size="large" theme="solid" type="primary" icon={<IconDownload />} onClick={() => window.open(RELEASES_URL, "_blank", "noopener,noreferrer")}>{t.hero.primary}</Button>
+          <Button size="large" icon={<IconPhone />} onClick={() => window.open(ANDROID_URL, "_blank", "noopener,noreferrer")}>{t.hero.android}</Button>
           <Button size="large" icon={<IconArrowDown />} iconPosition="right" onClick={() => document.querySelector("#demo")?.scrollIntoView({ behavior: "smooth" })}>{t.hero.secondary}</Button>
         </div>
         <div className={styles.notes}>{t.hero.notes.map((note) => <span key={note}>{note}</span>)}</div>

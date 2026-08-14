@@ -132,7 +132,7 @@
         "npmPackage": "@deepseek-ai/dsh",
         "surfaces": ["web"],
         "iconSrc": "/icons/lobe/deepseek-color.svg",
-        "officialUrl": "https://deepseek-harness.github.io/deepseek-harness/guide/quickstart",
+        "officialUrl": "https://www.deepseek.com/harness/",
         "updateUrl": "https://www.npmjs.com/package/@deepseek-ai/dsh",
         "showsCredentialsFile": true,
         "showsFastModel": false,

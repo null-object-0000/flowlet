@@ -3,7 +3,7 @@ import { Button, Pagination, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconRefresh } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionNativeUsage, type AgentSessionRow } from "../../domains/agent-session/types";
+import { agentSessionLabel, DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionNativeUsage, type AgentSessionRow } from "../../domains/agent-session/types";
 import { useAgentSessionNativeSummary, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
 import { useAgentDataSync, useAgentSyncStatus } from "../../features/background-tasks/useBackgroundTasks";
 import { AgentSessionsView, DesktopFilterToolbarView, type AgentSessionRowModel, type AgentSessionStatusTone } from "@flowlet/product-ui";
@@ -38,7 +38,7 @@ export function AgentSessionsPage() {
   const page = sessions.data;
   const checkedTimes = syncStatus.data?.sources.map((source) => source.lastCheckedAt).filter((value): value is string => Boolean(value)).sort() ?? [];
   const latestCheckedAt = checkedTimes.length ? checkedTimes[checkedTimes.length - 1] : null;
-  const syncStatusTitle = syncStatus.data?.sources.map((source) => `${agentLabel(source.agentType as AgentSessionRow["agentType"])}：${source.failedCount > 0 ? source.lastError ?? t("同步异常") : t("已扫描 {count} 个会话", { count: source.scannedCount })}`).join("\n");
+  const syncStatusTitle = syncStatus.data?.sources.map((source) => `${agentSessionLabel(source.agentType)}：${source.failedCount > 0 ? source.lastError ?? t("同步异常") : t("已扫描 {count} 个会话", { count: source.scannedCount })}`).join("\n");
   const refreshSelectedSessionOverview = async () => {
     const refreshingSession = selectedSession;
     const result = await sessions.refetch();
@@ -130,6 +130,7 @@ export function AgentSessionsPage() {
                   { value: "claude-code", label: "Claude Code" },
                   { value: "opencode", label: "OpenCode" },
                   { value: "pi", label: "Pi" },
+                  { value: "deepseek-harness", label: "DeepSeek Harness" },
                 ] },
                 { key: "runtime", insetLabel: t("运行状态"), value: filter.runtimeStatus || "__all__", ariaLabel: t("运行状态"), width: 210, options: [
                   { value: "__all__", label: t("全部状态") },
@@ -179,14 +180,6 @@ export function AgentSessionsPage() {
   );
 }
 
-
-function agentLabel(agentType: AgentSessionRow["agentType"]) {
-  if (agentType === "claude-code") return "Claude Code";
-  if (agentType === "codex-desktop") return "Codex Desktop";
-  if (agentType === "codex-cli") return "Codex CLI";
-  if (agentType === "pi") return "Pi";
-  return "OpenCode";
-}
 
 function flowletTokenBreakdown(row: AgentSessionRow) {
   const hasKnownUsage = row.requestCount > row.unknownUsageCount;
@@ -326,7 +319,7 @@ function toAgentSessionRowModels(rows: AgentSessionRow[], language: "zh-CN" | "e
       ariaLabel: `${row.title ?? row.sessionId} · ${t("会话")}`,
       activityAt: formatTimestamp(row.activityAt, language),
       title: sessionDisplayTitle(row),
-      subtitle: row.projectPath ? `${agentLabel(row.agentType)} · ${projectName(row.projectPath)}` : agentLabel(row.agentType),
+      subtitle: row.projectPath ? `${agentSessionLabel(row.agentType)} · ${projectName(row.projectPath)}` : agentSessionLabel(row.agentType),
       client: row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet"),
       clientSub: row.clientId && row.flowletObserved ? row.clientId : undefined,
       requests: requestCount == null ? undefined : formatInteger(requestCount, language),

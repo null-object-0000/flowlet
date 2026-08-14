@@ -2,7 +2,7 @@ import { Button, SideSheet, Tabs, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-
 import { IconAlertTriangle, IconCopy, IconExternalOpen } from "@douyinfe/semi-icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import type { AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionNativeUsage, AgentSessionRow, OpenCodePermissionRequest } from "../../domains/agent-session/types";
+import { agentSessionLabel, type AgentSessionLastInteraction, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
 import { groupInteractionEvents, InteractionOutputEvent, InteractionProcessGroup } from "../../features/agent-sessions/SessionConversation";
 import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { interactionEventsVersion, useSessionScrollFollow } from "../../features/agent-sessions/useSessionScrollFollow";
@@ -205,7 +205,7 @@ export function AgentSessionDetailSideSheet({
                         label={session.flowletObserved ? t("客户端") : t("Agent 来源")}
                         value={session.flowletObserved
                           ? session.clientName ?? session.clientId ?? t("未知客户端")
-                          : agentLabel(session.agentType)}
+                          : agentSessionLabel(session.agentType)}
                       />
                       <DetailItem label={t("项目目录")} value={session.projectPath ?? "—"} />
                     </div>
@@ -572,14 +572,6 @@ function projectName(path: string | null) {
   return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || null;
 }
 
-function agentLabel(agentType: AgentSessionRow["agentType"]) {
-  if (agentType === "claude-code") return "Claude Code";
-  if (agentType === "codex-desktop") return "Codex Desktop";
-  if (agentType === "codex-cli") return "Codex CLI";
-  if (agentType === "pi") return "Pi";
-  return "OpenCode";
-}
-
 function formatDate(value: string, language: "zh-CN" | "en-US") {
   const iso = value.includes("T") || value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`;
   const date = new Date(iso);
@@ -628,7 +620,7 @@ function SessionHeader({ session, language }: { session: AgentSessionRow; langua
   return (
     <div className={styles.sessionHeader}>
       <div className={styles.sessionHeaderTopline}>
-        <span className={styles.agentBadge}>{agentLabel(session.agentType)}</span>
+        <span className={styles.agentBadge}>{agentSessionLabel(session.agentType)}</span>
         <strong className={styles.sessionTitle} title={title}>{title}</strong>
       </div>
       <div className={styles.meta}>

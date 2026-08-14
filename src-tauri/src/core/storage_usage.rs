@@ -514,6 +514,7 @@ fn native_agent_display_name(agent_type: &str) -> &str {
         "codex-cli" => "Codex CLI",
         "opencode" => "OpenCode",
         "pi" => "Pi",
+        "deepseek-harness" => "DeepSeek Harness",
         other => other,
     }
 }
@@ -4023,6 +4024,14 @@ mod agent_session_filter_tests {
         let codex = session("codex-desktop", false);
         assert!(matches_agent_session_type(&codex, "codex-desktop"));
         assert!(!matches_agent_session_type(&codex, "opencode"));
+    }
+
+    #[test]
+    fn labels_deepseek_harness_native_usage() {
+        assert_eq!(
+            native_agent_display_name("deepseek-harness"),
+            "DeepSeek Harness"
+        );
     }
 
     #[test]

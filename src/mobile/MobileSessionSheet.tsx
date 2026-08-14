@@ -4,6 +4,7 @@ import { onBackButtonPress } from "@tauri-apps/api/app";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
+import { agentSessionLabel } from "../domains/agent-session/types";
 import type { SharedAgentSession, SyncedAgentInteractionEvent } from "../domains/device-sync/types";
 import {
   useMobileRemotePermissions,
@@ -457,14 +458,7 @@ function sessionInteractionVersion(events: SyncedAgentInteractionEvent[]) {
 }
 
 export function agentLabel(agentType: string) {
-  switch (agentType) {
-    case "claude-code": return "Claude Code";
-    case "codex-desktop": return "Codex Desktop";
-    case "codex-cli": return "Codex CLI";
-    case "opencode": return "OpenCode";
-    case "pi": return "Pi";
-    default: return agentType;
-  }
+  return agentSessionLabel(agentType);
 }
 
 export function runtimeLabel(status: SharedAgentSession["runtimeStatus"], t: (key: string) => string) {

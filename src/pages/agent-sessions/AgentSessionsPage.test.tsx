@@ -193,6 +193,27 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByText("1 次失败")).toBeInTheDocument();
   });
 
+  it("identifies DeepSeek Harness sessions in the list and detail sheet", () => {
+    listedSessions = [{
+      ...session,
+      agentType: "deepseek-harness",
+      sessionId: "session-b8684683-3a1e-4bc2-a004-e2c56756eb22",
+      title: "DSH session",
+      projectPath: "E:\\dsh-test",
+      clientId: "deepseek-harness",
+      clientName: "DeepSeek Harness",
+      flowletObserved: false,
+    }];
+    render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
+
+    expect(screen.getByText("DeepSeek Harness · dsh-test")).toBeInTheDocument();
+    expect(screen.queryByText("OpenCode · dsh-test")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("DSH session").closest("button")!);
+    expect(screen.getAllByText("DeepSeek Harness").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Agent 来源")).toBeInTheDocument();
+  });
+
   it("shows native turn and token summaries for sessions not observed by Flowlet", () => {
     listedSessions = [{
       ...session,
@@ -260,6 +281,7 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByText("Codex CLI")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
     expect(screen.getAllByText("OpenCode").length).toBeGreaterThan(1);
+    expect(screen.getByText("DeepSeek Harness")).toBeInTheDocument();
     fireEvent.click(codexOption);
 
     fireEvent.click(screen.getByText("运行状态"));

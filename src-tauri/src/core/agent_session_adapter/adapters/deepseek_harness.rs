@@ -7,6 +7,9 @@ use serde_json::Value;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
+
+const RUNNING_FRESHNESS: Duration = Duration::from_secs(30 * 60);
 
 pub(super) struct DeepSeekHarnessSessionAdapter;
 
@@ -169,24 +172,19 @@ fn session_row(path: &Path) -> Result<AgentSessionRow, String> {
             .and_then(Value::as_i64)
             .unwrap_or_default(),
     );
-    let updated = std::fs::metadata(path)
+    let modified = std::fs::metadata(path)
         .ok()
-        .and_then(|meta| meta.modified().ok())
+        .and_then(|meta| meta.modified().ok());
+    let updated = modified
         .map(DateTime::<Utc>::from)
         .map(|time| time.to_rfc3339())
         .unwrap_or_else(|| created.clone());
     let timeline = read_timeline_records(&records)?;
-    let completed = records
-        .iter()
-        .rev()
-        .find(|value| value.get("type").and_then(Value::as_str) == Some("turn/end"))
-        .and_then(|value| value.pointer("/data/reason/kind"))
-        .and_then(Value::as_str)
-        == Some("completed");
+    let runtime_status = infer_runtime_status(&records, modified, SystemTime::now());
     Ok(AgentSessionRow {
         agent_type: "deepseek-harness".to_string(),
         session_id,
-        runtime_status: if completed { "completed" } else { "unknown" }.to_string(),
+        runtime_status,
         title: first_user_text(&records),
         project_path: header
             .get("cwd")
@@ -228,6 +226,34 @@ fn session_row(path: &Path) -> Result<AgentSessionRow, String> {
         }),
         native_synced_at: None,
     })
+}
+
+/// DSH 的 `turn/end` 只结束当前一轮，不能代表整个 Web 会话已经结束。
+/// 最新 `turn/start` 晚于最新 `turn/end` 且文件仍在活跃更新时，才视为运行中；
+/// 异常退出留下的未闭合 turn 在新鲜度窗口后降级为空闲。
+fn infer_runtime_status(
+    records: &[Value],
+    modified: Option<SystemTime>,
+    now: SystemTime,
+) -> String {
+    let last_turn_start = records
+        .iter()
+        .rposition(|value| value.get("type").and_then(Value::as_str) == Some("turn/start"));
+    let last_turn_end = records
+        .iter()
+        .rposition(|value| value.get("type").and_then(Value::as_str) == Some("turn/end"));
+    let has_open_turn =
+        last_turn_start.is_some_and(|start| last_turn_end.is_none_or(|end| start > end));
+    let recently_modified = modified.is_some_and(|modified| {
+        now.duration_since(modified)
+            .map_or(true, |age| age <= RUNNING_FRESHNESS)
+    });
+    if has_open_turn && recently_modified {
+        "running"
+    } else {
+        "idle"
+    }
+    .to_string()
 }
 
 fn first_user_text(records: &[Value]) -> Option<String> {
@@ -475,5 +501,43 @@ mod tests {
         assert!(read_timeline_records(&records)
             .unwrap_err()
             .contains("预发布 v0"));
+    }
+
+    #[test]
+    fn a_new_turn_after_a_completed_turn_is_running() {
+        let now = SystemTime::now();
+        let records = vec![
+            serde_json::json!({"type":"session","version":0}),
+            serde_json::json!({"type":"turn/start","seq":1}),
+            serde_json::json!({"type":"turn/end","seq":2,"data":{"reason":{"kind":"completed"}}}),
+            serde_json::json!({"type":"turn/start","seq":3}),
+            serde_json::json!({"type":"assistant/chunk","seq":4}),
+        ];
+
+        assert_eq!(infer_runtime_status(&records, Some(now), now), "running");
+    }
+
+    #[test]
+    fn the_latest_closed_turn_is_idle() {
+        let now = SystemTime::now();
+        let records = vec![
+            serde_json::json!({"type":"session","version":0}),
+            serde_json::json!({"type":"turn/start","seq":1}),
+            serde_json::json!({"type":"turn/end","seq":2,"data":{"reason":{"kind":"completed"}}}),
+        ];
+
+        assert_eq!(infer_runtime_status(&records, Some(now), now), "idle");
+    }
+
+    #[test]
+    fn a_stale_unclosed_turn_does_not_remain_running_forever() {
+        let now = SystemTime::now();
+        let stale = now - RUNNING_FRESHNESS - Duration::from_secs(1);
+        let records = vec![
+            serde_json::json!({"type":"session","version":0}),
+            serde_json::json!({"type":"turn/start","seq":1}),
+        ];
+
+        assert_eq!(infer_runtime_status(&records, Some(stale), now), "idle");
     }
 }

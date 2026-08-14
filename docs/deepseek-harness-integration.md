@@ -69,6 +69,10 @@ Session Adapter 均为只读；Headless Runner 只调用 DSH 官方命令。Prov
 因此 Flowlet 可以准确识别客户端，但不能仅凭代理请求把每次调用精确关联到 DSH 原生 session；
 原生 Session Adapter 仍可独立展示 DSH 会话。
 
+会话运行状态按最新一组 `turn/start` / `turn/end` 判断：新的 turn 已开始但尚未结束、且会话文件
+仍在活跃更新时显示为运行中；`turn/end` 只代表单轮结束，不能用历史任意一条 completed 事件
+判定整个 Web 会话已结束。异常退出遗留的未闭合 turn 会在新鲜度窗口后降级为空闲。
+
 ## 仍保留的能力边界
 
 - DSH headless 提供稳定 resume/session-id 参数后，再开放 continuation task。

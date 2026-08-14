@@ -5,11 +5,13 @@ import {
   aggregateMaxStandardPrice,
   aggregateMinLimits,
   buildPricingStrategyRows,
+  effectiveWindowPricesAt,
   estimateCost,
   findModelByAlias,
   findModelInCatalog,
   hasInputLengthTiers,
   isPromotionalDiscount,
+  nextEffectivePricesAt,
   resolveCapabilities,
   resolveLimits,
   resolveModel,
@@ -101,6 +103,20 @@ describe("selectOfficialPrice", () => {
   it("returns null for empty prices", () => {
     expect(selectOfficialPrice([])).toBeNull();
   });
+
+  it("switches old, off-peak and peak prices at the declared boundaries", () => {
+    const prices: ModelsCnPrice[] = [
+      { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 1 }, output: 2, effectiveTo: "2026-08-17T00:00:00+08:00", sourceUrl: "old" },
+      { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 1.5 }, output: 4.5, effectiveFrom: "2026-08-17T00:00:00+08:00", dailyTimeRange: { label: "空闲时段", timeZone: "Asia/Shanghai", intervals: [{ start: "00:00", end: "09:00" }, { start: "12:00", end: "14:00" }, { start: "18:00", end: "00:00" }] }, sourceUrl: "off-peak" },
+      { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 3 }, output: 9, effectiveFrom: "2026-08-17T00:00:00+08:00", dailyTimeRange: { label: "高峰时段", timeZone: "Asia/Shanghai", intervals: [{ start: "09:00", end: "12:00" }, { start: "14:00", end: "18:00" }] }, sourceUrl: "peak" },
+    ];
+    expect(selectOfficialPrice(prices, new Date("2026-08-16T15:59:59Z"))?.sourceUrl).toBe("old");
+    expect(selectOfficialPrice(prices, new Date("2026-08-17T00:59:59Z"))?.sourceUrl).toBe("off-peak");
+    expect(selectOfficialPrice(prices, new Date("2026-08-17T01:00:00Z"))?.sourceUrl).toBe("peak");
+    expect(selectOfficialPrice(prices, new Date("2026-08-17T04:00:00Z"))?.sourceUrl).toBe("off-peak");
+    expect(effectiveWindowPricesAt(prices, new Date("2026-08-16T12:00:00Z"))).toHaveLength(1);
+    expect(nextEffectivePricesAt(prices, new Date("2026-08-16T12:00:00Z"))).toHaveLength(2);
+  });
 });
 
 describe("resolvePrice", () => {
@@ -167,6 +183,15 @@ describe("buildPricingStrategyRows", () => {
     const rows = buildPricingStrategyRows(prices, "china", "CNY");
 
     expect(rows.map((row) => row.inputTokenRange?.label)).toEqual(["<=256k", "256k-1m"]);
+  });
+
+  it("keeps peak and off-peak prices as separate rows", () => {
+    const prices: ModelsCnPrice[] = [
+      { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 1.5 }, output: 4.5, dailyTimeRange: { label: "空闲时段", timeZone: "Asia/Shanghai", intervals: [{ start: "00:00", end: "09:00" }] }, sourceUrl: "u" },
+      { market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 3 }, output: 9, dailyTimeRange: { label: "高峰时段", timeZone: "Asia/Shanghai", intervals: [{ start: "09:00", end: "12:00" }] }, sourceUrl: "u" },
+    ];
+    const rows = buildPricingStrategyRows(prices, "china", "CNY");
+    expect(rows.map((row) => row.current.dailyTimeRange?.label)).toEqual(["空闲时段", "高峰时段"]);
   });
 });
 

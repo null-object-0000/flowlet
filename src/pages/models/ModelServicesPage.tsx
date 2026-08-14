@@ -42,8 +42,10 @@ import {
   aggregateMaxPrice,
   aggregateMaxStandardPrice,
   buildPricingStrategyRows,
+  effectiveWindowPricesAt,
   hasInputLengthTiers,
   isPromotionalDiscount,
+  nextEffectivePricesAt,
 } from "../../domains/modelCatalog";
 import type { ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
 import { useModelCatalogsSync } from "../../features/background-tasks/useBackgroundTasks";
@@ -58,6 +60,9 @@ function priceFromResolvedStandard(p: ResolvedPrice): ModelsCnPrice {
     currency: p.currency,
     unit: p.unit,
     rateType: "standard",
+    dailyTimeRange: p.dailyTimeRange ?? undefined,
+    effectiveFrom: p.effectiveFrom ?? undefined,
+    effectiveTo: p.effectiveTo ?? undefined,
     input: {
       standard: p.inputUncached,
       cacheHit: p.inputCached ?? undefined,
@@ -67,6 +72,16 @@ function priceFromResolvedStandard(p: ResolvedPrice): ModelsCnPrice {
     output: p.output,
     sourceUrl: p.sourceUrl,
   };
+}
+
+function formatDailyPriceRange(price: ModelsCnPrice, t: (source: string) => string): string | null {
+  const range = price.dailyTimeRange;
+  if (!range) return null;
+  const zone = range.timeZone === "Asia/Shanghai" ? t("北京时间") : range.timeZone;
+  const intervals = range.intervals
+    .map(({ start, end }) => `${start}–${end === "00:00" ? "24:00" : end}`)
+    .join("、");
+  return `${range.label} · ${zone} ${intervals}`;
 }
 
 function StrategyPriceValue({ current, standard, rateType, currency }: {
@@ -112,13 +127,14 @@ function PricingStrategyCards({ rows, t }: {
     || row.standard?.input.explicitCacheHit != null
   ));
   const currency = rows[0].current.currency;
+  const separatedByTime = rows.some((row) => row.current.dailyTimeRange != null);
 
   return (
-    <div className={styles.pricingTierList}>
+    <div className={`${styles.pricingTierList} ${separatedByTime ? styles.pricingTimeList : ""}`}>
       {rows.map((row) => (
         <section className={styles.pricingTier} key={row.key}>
           <header>
-            <strong>{row.inputTokenRange?.label ?? t("全部输入")}</strong>
+            <strong>{formatDailyPriceRange(row.current, t) ?? row.inputTokenRange?.label ?? t("全部输入")}</strong>
           </header>
           <div className={styles.strategyMetrics}>
             <StrategyPriceMetric label={t("输入")} current={row.current.input.standard} standard={row.standard?.input.standard} rateType={row.current.rateType} currency={currency} />
@@ -500,6 +516,14 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
   const [addRouteVisible, setAddRouteVisible] = useState(false);
   const [selectedRouteKey, setSelectedRouteKey] = useState<string>();
   const [activeTab, setActiveTab] = useState("basic");
+  const [pricingNow, setPricingNow] = useState(() => new Date());
+
+  useEffect(() => {
+    if (activeTab !== "pricing") return undefined;
+    setPricingNow(new Date());
+    const interval = window.setInterval(() => setPricingNow(new Date()), 30_000);
+    return () => window.clearInterval(interval);
+  }, [activeTab]);
 
   // 解析本地 models-cn.json 文件内容。必须放在所有提前返回之前，
   // 保证每次渲染 hook 调用顺序一致（Rules of Hooks）。
@@ -511,8 +535,8 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
     const channelId = model.channelId ?? model.routeGroups[0]?.channelId;
     const upstream = model.routeGroups[0]?.upstreamModel ?? model.publicModel;
     if (!channelId) return null;
-    return resolveChannelModel(catalog, channelId, upstream);
-  }, [catalog, model]);
+    return resolveChannelModel(catalog, channelId, upstream, pricingNow);
+  }, [catalog, model, pricingNow]);
 
   // 聚合模型（flowlet-pro/flowlet-flash）：只汇总已启用子路由的 limits/caps/prices。
   // limits 取最小值（木桶效应）、caps 取交集（只承诺所有子模型都支持的能力）、
@@ -522,7 +546,7 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
     const subModels: ResolvedModel[] = [];
     for (const route of model.routeGroups) {
       if (!route.enabled) continue;
-      const resolved = resolveChannelModel(catalog, route.channelId, route.upstreamModel);
+      const resolved = resolveChannelModel(catalog, route.channelId, route.upstreamModel, pricingNow);
       if (resolved) subModels.push(resolved);
     }
     if (subModels.length === 0) return null;
@@ -542,7 +566,7 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
       supplementedFromModelsDev: false,
       modelsDevReferenceUrl: null,
     };
-  }, [catalog, model]);
+  }, [catalog, model, pricingNow]);
 
   // 当前模型实际使用的 resolved 数据源。
   const resolved = model?.kind === "aggregate" ? aggregateResolved : directResolved;
@@ -553,12 +577,12 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
     const subModels: ResolvedModel[] = [];
     for (const route of model.routeGroups) {
       if (!route.enabled) continue;
-      const resolvedSub = resolveChannelModel(catalog, route.channelId, route.upstreamModel);
+      const resolvedSub = resolveChannelModel(catalog, route.channelId, route.upstreamModel, pricingNow);
       if (resolvedSub) subModels.push(resolvedSub);
     }
     if (subModels.length === 0) return null;
     return aggregateMaxStandardPrice(subModels);
-  }, [catalog, model, resolved?.officialPrice]);
+  }, [catalog, model, pricingNow, resolved?.officialPrice]);
 
   // 基础信息：优先 models-cn 官方值，缺失降级到渠道同步。
   const basicInfo: ModelBasicInfo | null = useMemo(
@@ -632,6 +656,7 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
             isAggregate={model.kind === "aggregate"}
             syncPending={syncCatalogsPending}
             onSync={onSyncCatalogs}
+            at={pricingNow}
             language={language}
             t={t}
           />
@@ -781,7 +806,7 @@ function ModelBasicInfoTab({ basicInfo, resolved, isAggregate, channelName, lang
  *  数据完全来自 models-cn，不再有 config.json 降级。
  *  聚合模型（flowlet-pro/flowlet-flash）：价格取已启用子模型的最大值（展示最坏情况
  *  下的成本上限），standard 价格也取最大值用于划价展示。 */
-function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCatalog, catalogLoading, showSyncButton, isAggregate, syncPending, onSync, language, t }: {
+function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCatalog, catalogLoading, showSyncButton, isAggregate, syncPending, onSync, at, language, t }: {
   resolved: ResolvedModel | null;
   standardPrice?: ResolvedPrice | null;
   hasCatalog: boolean;
@@ -790,6 +815,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
   isAggregate: boolean;
   syncPending: boolean;
   onSync: () => void;
+  at: Date;
   language: NumberLanguage;
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
@@ -815,15 +841,26 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
   // 划价展示用的 standard 价格：聚合模型用外部传入（子模型 standard 最大值），
   // 直接模型从 allPrices 中取同市场同币种的 standard。统一按 ModelsCnPrice 形态
   // 处理，便于直接访问 input.standard / input.cacheHit。
+  const matchingPrices = (resolved?.allPrices ?? []).filter(
+    (candidate) => candidate.market === price.market && candidate.currency === price.currency,
+  );
+  const currentWindowPrices = effectiveWindowPricesAt(matchingPrices, at);
+  const upcomingPrices = nextEffectivePricesAt(matchingPrices, at);
   const standardPrice: ModelsCnPrice | null = standardPriceOverride
     ? priceFromResolvedStandard(standardPriceOverride)
-    : (resolved?.allPrices ?? []).find((p) => p.market === price.market && p.currency === price.currency && p.rateType === "standard") ?? null;
+    : currentWindowPrices.find((candidate) => candidate.rateType === "standard") ?? null;
   const strategyRows = !isAggregate
-    ? buildPricingStrategyRows(resolved?.allPrices ?? [], price.market, price.currency)
+    ? buildPricingStrategyRows(currentWindowPrices, price.market, price.currency)
     : [];
+  const upcomingStrategyRows = !isAggregate && upcomingPrices.length > 0
+    ? buildPricingStrategyRows(upcomingPrices, price.market, price.currency)
+    : [];
+  const hasDailyTimeRanges = strategyRows.some((row) => row.current.dailyTimeRange != null);
   // 仅「按输入长度分段计价」时使用策略卡片布局（每档一行）。单档模型即使带显式
   // 缓存价格也走下方扁平 configRow 布局，与 LongCat / DeepSeek / Kimi 保持一致。
-  const showDetailedStrategy = hasInputLengthTiers(strategyRows);
+  const showDetailedStrategy = hasInputLengthTiers(strategyRows)
+    || hasDailyTimeRanges
+    || upcomingStrategyRows.length > 0;
   const showInputOriginal = standardPrice != null
     && isPromotionalDiscount(price.rateType, standardPrice.input.standard, price.inputUncached);
   const showCachedOriginal = standardPrice?.input.cacheHit != null
@@ -852,10 +889,21 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
         {showDetailedStrategy ? (
           <>
             <div className={styles.pricingStrategyMeta}>
-              <span>{t("按输入长度分段计价")}</span>
+              <span>{hasInputLengthTiers(strategyRows) ? t("按输入长度分段计价") : t("当前价格")}</span>
               <strong>{price.currency} / {unitLabel}</strong>
             </div>
             <PricingStrategyCards rows={strategyRows} t={t} />
+            {upcomingStrategyRows.length > 0 ? (
+              <div className={styles.upcomingPricing}>
+                <div className={styles.pricingStrategyMeta}>
+                  <span>{t("即将生效 · {time}", {
+                    time: formatFullTimestamp(upcomingPrices[0].effectiveFrom ?? "", language),
+                  })}</span>
+                  <strong>{price.currency} / {unitLabel}</strong>
+                </div>
+                <PricingStrategyCards rows={upcomingStrategyRows} t={t} />
+              </div>
+            ) : null}
           </>
         ) : (
           <>

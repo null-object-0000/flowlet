@@ -24,14 +24,91 @@ function priceScore(price: ModelsCnPrice): number {
   return score;
 }
 
+function parsedBound(value: string | undefined): number | null {
+  if (value == null) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+/** 厂商公告的绝对生效窗口，采用 [effectiveFrom, effectiveTo)。 */
+export function isPriceEffectiveAt(price: ModelsCnPrice, at: Date): boolean {
+  const timestamp = at.getTime();
+  const from = parsedBound(price.effectiveFrom);
+  const to = parsedBound(price.effectiveTo);
+  if (Number.isNaN(from) || Number.isNaN(to)) return false;
+  return (from == null || timestamp >= from) && (to == null || timestamp < to);
+}
+
+function parseClockMinute(value: string, allowEndOfDay: boolean): number | null {
+  if (allowEndOfDay && value === "24:00") return 24 * 60;
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour < 24 && minute < 60 ? hour * 60 + minute : null;
+}
+
+/** 将 UTC 时刻投影到价格声明的 IANA 时区，判断是否位于任一 [start, end) 区间。 */
+export function isDailyTimeRangeActiveAt(
+  range: NonNullable<ModelsCnPrice["dailyTimeRange"]>,
+  at: Date,
+): boolean {
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: range.timeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(at);
+  } catch {
+    return false;
+  }
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+  const current = hour * 60 + minute;
+  return range.intervals.some((interval) => {
+    const start = parseClockMinute(interval.start, false);
+    const end = parseClockMinute(interval.end, true);
+    if (start == null || end == null) return false;
+    return end > start
+      ? current >= start && current < end
+      : current >= start || current < end;
+  });
+}
+
+/** 当前时刻真正可用于计价的一条价格，绝对生效窗口与每日时段必须同时命中。 */
+export function isPriceActiveAt(price: ModelsCnPrice, at: Date): boolean {
+  return isPriceEffectiveAt(price, at)
+    && (price.dailyTimeRange == null || isDailyTimeRangeActiveAt(price.dailyTimeRange, at));
+}
+
+/** 当前绝对生效窗口内的全部价格；保留同一窗口下的峰/闲时段供 UI 完整展示。 */
+export function effectiveWindowPricesAt(prices: ModelsCnPrice[], at: Date): ModelsCnPrice[] {
+  return prices.filter((price) => isPriceEffectiveAt(price, at));
+}
+
+/** 下一批即将生效的价格。同一 effectiveFrom 的峰谷条目作为一组返回。 */
+export function nextEffectivePricesAt(prices: ModelsCnPrice[], at: Date): ModelsCnPrice[] {
+  const timestamp = at.getTime();
+  const starts = prices
+    .map((price) => parsedBound(price.effectiveFrom))
+    .filter((value): value is number => value != null && Number.isFinite(value) && value > timestamp);
+  if (starts.length === 0) return [];
+  const next = Math.min(...starts);
+  return prices.filter((price) => parsedBound(price.effectiveFrom) === next);
+}
+
 /** 从一组价格中按规则选取最优官方价格。
  *  纯函数：不修改输入，无副作用。
  *  规则见 docs/agent-integration-prompt.md §2。 */
-export function selectOfficialPrice(prices: ModelsCnPrice[]): ResolvedPrice | null {
-  if (prices.length === 0) return null;
+export function selectOfficialPrice(prices: ModelsCnPrice[], at = new Date()): ResolvedPrice | null {
+  const activePrices = prices.filter((price) => isPriceActiveAt(price, at));
+  if (activePrices.length === 0) return null;
   let best: ModelsCnPrice | null = null;
   let bestScore = -Infinity;
-  for (const price of prices) {
+  for (const price of activePrices) {
     const score = priceScore(price);
     if (score > bestScore) {
       bestScore = score;
@@ -50,6 +127,9 @@ export function resolvePrice(price: ModelsCnPrice): ResolvedPrice {
     currency: price.currency,
     unit: price.unit,
     rateType: price.rateType,
+    dailyTimeRange: price.dailyTimeRange ?? null,
+    effectiveFrom: price.effectiveFrom ?? null,
+    effectiveTo: price.effectiveTo ?? null,
     inputUncached: price.input.standard,
     inputCached: price.input.cacheHit ?? null,
     inputCacheWrite: price.input.explicitCacheCreation ?? null,
@@ -104,6 +184,9 @@ export function buildPricingStrategyRows(
       range?.minExclusive ?? null,
       range?.maxInclusive ?? null,
       range?.label ?? "",
+      price.effectiveFrom ?? null,
+      price.effectiveTo ?? null,
+      price.dailyTimeRange ?? null,
     ]);
     const group = groups.get(key);
     if (group) group.push(price);
@@ -171,9 +254,9 @@ export function providerRetrievedAt(provider: ModelsCnProvider): string | null {
 export function resolveModel(
   provider: ModelsCnProvider,
   model: ModelsCnModel,
-  options: { supplemented?: boolean; modelsDevReferenceUrl?: string | null } = {},
+  options: { supplemented?: boolean; modelsDevReferenceUrl?: string | null; at?: Date } = {},
 ): ResolvedModel {
-  const officialPrice = selectOfficialPrice(model.prices);
+  const officialPrice = selectOfficialPrice(model.prices, options.at);
   if (officialPrice) officialPrice.retrievedAt = providerRetrievedAt(provider);
   return {
     providerId: provider.id,
@@ -320,6 +403,9 @@ export function aggregateMaxPrice(subModels: ResolvedModel[]): ResolvedPrice | n
     currency: firstCurrency,
     unit: sample.unit,
     rateType: anyPromotional ? "promotional" : "standard",
+    dailyTimeRange: null,
+    effectiveFrom: null,
+    effectiveTo: null,
     inputUncached: maxInputUncached,
     inputCached: maxCacheHit,
     inputCacheWrite: maxCacheWrite,
@@ -349,6 +435,9 @@ export function aggregateMaxStandardPrice(subModels: ResolvedModel[]): ResolvedP
     currency: firstCurrency,
     unit: sample.unit,
     rateType: "standard",
+    dailyTimeRange: null,
+    effectiveFrom: null,
+    effectiveTo: null,
     inputUncached: maxInputUncached,
     inputCached: maxCacheHit,
     inputCacheWrite: null,

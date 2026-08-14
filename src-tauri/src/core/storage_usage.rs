@@ -379,6 +379,41 @@ fn estimate_cost(
     input_cache_write_tokens: Option<i64>,
     output_tokens: Option<i64>,
 ) -> Option<CostBreakdown> {
+    estimate_cost_at(
+        prices,
+        channel_id,
+        upstream_model,
+        input_tokens,
+        input_cached_tokens,
+        input_uncached_tokens,
+        input_cache_write_tokens,
+        output_tokens,
+        chrono::Utc::now(),
+    )
+}
+
+fn parse_cost_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|timestamp| timestamp.with_timezone(&chrono::Utc))
+        .or_else(|| {
+            chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+                .ok()
+                .map(|timestamp| timestamp.and_utc())
+        })
+}
+
+fn estimate_cost_at(
+    prices: &[ModelPrice],
+    channel_id: Option<&str>,
+    upstream_model: Option<&str>,
+    input_tokens: Option<i64>,
+    input_cached_tokens: Option<i64>,
+    input_uncached_tokens: Option<i64>,
+    input_cache_write_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    priced_at: chrono::DateTime<chrono::Utc>,
+) -> Option<CostBreakdown> {
     let channel_id = channel_id?;
     let upstream_model = upstream_model?;
     // 别名变体（如 deepseek-v4-flash-0731）按规范模型 ID 匹配价格条目。
@@ -401,7 +436,7 @@ fn estimate_cost(
 
     // 按请求总输入 Token 选档；无分级时回退扁平单价。
     let (uncached_price, cached_price, cache_write_price, output_price) =
-        price.resolve_prices(input_tokens);
+        price.resolve_prices_at(input_tokens, priced_at)?;
 
     // input_uncached_tokens 沿用旧口径（含缓存写入），计价时扣减缓存写入，
     // 避免缓存写入既按未缓存价、又按缓存写入价重复计费。
@@ -1852,12 +1887,14 @@ impl Storage {
             let mut stmt = connection.prepare(
                 r#"
                 SELECT
-                    id, channel_id, upstream_model,
+                    ur.id, ur.channel_id, ur.upstream_model,
                     input_tokens, input_cached_tokens, input_uncached_tokens,
-                    input_cache_write_tokens, output_tokens
-                FROM usage_records
-                WHERE estimated_cost IS NOT NULL
-                  AND estimated_input_uncached_cost IS NULL
+                    input_cache_write_tokens, output_tokens, rl.created_at
+                FROM usage_records ur
+                INNER JOIN request_logs rl
+                    ON rl.request_id = ur.request_id AND rl.is_last_attempt = 1
+                WHERE ur.estimated_cost IS NOT NULL
+                  AND ur.estimated_input_uncached_cost IS NULL
                 "#,
             )?;
             let rows = stmt
@@ -1871,6 +1908,7 @@ impl Storage {
                         row.get::<_, Option<i64>>(5)?,
                         row.get::<_, Option<i64>>(6)?,
                         row.get::<_, Option<i64>>(7)?,
+                        row.get::<_, String>(8)?,
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1892,9 +1930,10 @@ impl Storage {
             input_uncached_tokens,
             input_cache_write_tokens,
             output_tokens,
+            created_at,
         ) in &rows
         {
-            let breakdown = estimate_cost(
+            let breakdown = estimate_cost_at(
                 &prices,
                 channel_id.as_deref(),
                 upstream_model.as_deref(),
@@ -1903,6 +1942,7 @@ impl Storage {
                 *input_uncached_tokens,
                 *input_cache_write_tokens,
                 *output_tokens,
+                parse_cost_timestamp(created_at).unwrap_or_else(chrono::Utc::now),
             );
             let Some(breakdown) = breakdown else { continue };
             updates.push((
@@ -2069,7 +2109,7 @@ impl Storage {
                 continue;
             };
 
-            let estimated_cost = estimate_cost(
+            let estimated_cost = estimate_cost_at(
                 &prices,
                 row.channel_id.as_deref(),
                 row.upstream_model.as_deref(),
@@ -2078,6 +2118,7 @@ impl Storage {
                 usage.input_uncached_tokens,
                 usage.input_cache_write_tokens,
                 usage.output_tokens,
+                parse_cost_timestamp(&row.created_at).unwrap_or_else(chrono::Utc::now),
             );
             parsed_rows.push(ParsedUsage {
                 request_id: row.request_id,
@@ -2321,7 +2362,7 @@ impl Storage {
                     .input_tokens
                     .saturating_add(event.cache_write_input_tokens);
                 let input_tokens = input_uncached.saturating_add(event.cached_input_tokens);
-                let cost = estimate_cost(
+                let cost = estimate_cost_at(
                     &prices,
                     request.channel_id.as_deref(),
                     request.model.as_deref(),
@@ -2330,6 +2371,8 @@ impl Storage {
                     Some(input_uncached),
                     Some(event.cache_write_input_tokens),
                     Some(event.output_tokens),
+                    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(request.started_at_ms)
+                        .unwrap_or_else(chrono::Utc::now),
                 );
                 repairs.push((
                     request_id,
@@ -2774,6 +2817,7 @@ impl Storage {
             input_uncached_tokens: Option<i64>,
             input_cache_write_tokens: Option<i64>,
             output_tokens: Option<i64>,
+            created_at: String,
         }
         let rows: Vec<RecalcRow> = {
             let connection = self
@@ -2782,7 +2826,8 @@ impl Storage {
                 .map_err(|_| StorageError::LockFailed)?;
             let mut stmt = connection.prepare(&format!(
                 "SELECT ur.request_id, ur.channel_id, ur.upstream_model, ur.input_tokens,
-                        ur.input_cached_tokens, ur.input_uncached_tokens, ur.input_cache_write_tokens, ur.output_tokens
+                        ur.input_cached_tokens, ur.input_uncached_tokens, ur.input_cache_write_tokens,
+                        ur.output_tokens, rl.created_at
                  FROM usage_records ur
                  INNER JOIN request_logs rl ON rl.request_id = ur.request_id AND rl.is_last_attempt = 1
                  WHERE ur.total_tokens IS NOT NULL AND {}",
@@ -2799,6 +2844,7 @@ impl Storage {
                         input_uncached_tokens: row.get(5)?,
                         input_cache_write_tokens: row.get(6)?,
                         output_tokens: row.get(7)?,
+                        created_at: row.get(8)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -2814,7 +2860,7 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let transaction = connection.transaction()?;
         for row in rows {
-            let Some(cost) = estimate_cost(
+            let Some(cost) = estimate_cost_at(
                 &prices,
                 row.channel_id.as_deref(),
                 row.upstream_model.as_deref(),
@@ -2823,6 +2869,7 @@ impl Storage {
                 row.input_uncached_tokens,
                 row.input_cache_write_tokens,
                 row.output_tokens,
+                parse_cost_timestamp(&row.created_at).unwrap_or_else(chrono::Utc::now),
             ) else {
                 continue;
             };

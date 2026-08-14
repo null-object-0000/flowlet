@@ -250,7 +250,9 @@ fn resolve_candidate_detail(
             .and_then(|model| model.pricing.as_ref())
             .map(|price| upstream_pricing_json(route, price))
             .or_else(|| {
-                catalog_model.and_then(select_models_cn_price).map(|price| {
+                catalog_model
+                    .and_then(|model| select_models_cn_price(model, chrono::Utc::now()))
+                    .map(|price| {
                     pricing_json(
                         route,
                         price,
@@ -270,8 +272,16 @@ fn upstream_pricing_json(route: &RouteCandidate, pricing: &serde_json::Value) ->
     })
 }
 
-fn select_models_cn_price(model: &serde_json::Value) -> Option<&serde_json::Value> {
-    model.get("prices")?.as_array()?.iter().max_by_key(|price| {
+pub(super) fn select_models_cn_price(
+    model: &serde_json::Value,
+    at: chrono::DateTime<chrono::Utc>,
+) -> Option<&serde_json::Value> {
+    model
+        .get("prices")?
+        .as_array()?
+        .iter()
+        .filter(|price| models_cn_price_applies_at(price, at))
+        .max_by_key(|price| {
         let market = price
             .get("market")
             .and_then(|value| value.as_str())
@@ -290,6 +300,42 @@ fn select_models_cn_price(model: &serde_json::Value) -> Option<&serde_json::Valu
     })
 }
 
+fn models_cn_price_applies_at(
+    price: &serde_json::Value,
+    at: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    let parse_bound = |key: &str| {
+        price
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(|value| {
+                chrono::DateTime::parse_from_rfc3339(value)
+                    .ok()
+                    .map(|parsed| parsed.with_timezone(&chrono::Utc))
+            })
+    };
+    if let Some(from) = parse_bound("effectiveFrom") {
+        let Some(from) = from else { return false };
+        if at < from {
+            return false;
+        }
+    }
+    if let Some(to) = parse_bound("effectiveTo") {
+        let Some(to) = to else { return false };
+        if at >= to {
+            return false;
+        }
+    }
+    match price.get("dailyTimeRange").cloned() {
+        None => true,
+        Some(value) => serde_json::from_value::<
+            crate::core::config::ModelPriceDailyTimeRange,
+        >(value)
+        .ok()
+        .is_some_and(|range| range.contains(at)),
+    }
+}
+
 fn pricing_json(
     route: &RouteCandidate,
     price: &serde_json::Value,
@@ -306,6 +352,9 @@ fn pricing_json(
         "currency": price.get("currency"),
         "unit": price.get("unit"),
         "rate_type": price.get("rateType"),
+        "daily_time_range": price.get("dailyTimeRange"),
+        "effective_from": price.get("effectiveFrom"),
+        "effective_to": price.get("effectiveTo"),
         "input": {
             "standard": input.get("standard"),
             "cache_hit": input.get("cacheHit"),

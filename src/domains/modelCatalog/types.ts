@@ -16,12 +16,21 @@ export interface ModelsCnInputPrice {
   explicitCacheHit?: number;
 }
 
+export interface ModelsCnDailyTimeRange {
+  label: string;
+  timeZone: string;
+  intervals: Array<{ start: string; end: string }>;
+}
+
 export interface ModelsCnPrice {
   market: ModelsCnMarket;
   currency: ModelsCnCurrency;
   unit: ModelsCnUnit;
   rateType: ModelsCnRateType;
   inputTokenRange?: { label: string; maxInclusive?: number; minExclusive?: number };
+  dailyTimeRange?: ModelsCnDailyTimeRange;
+  effectiveFrom?: string;
+  effectiveTo?: string;
   input: ModelsCnInputPrice;
   output: number;
   sourceUrl: string;
@@ -120,6 +129,9 @@ export interface ResolvedPrice {
   currency: ModelsCnCurrency;
   unit: ModelsCnUnit;
   rateType: ModelsCnRateType;
+  dailyTimeRange: ModelsCnDailyTimeRange | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
   inputUncached: number;
   /** 缓存命中价。仅在官方 input.cacheHit 存在时有值。 */
   inputCached: number | null;

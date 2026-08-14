@@ -32,6 +32,7 @@ export function resolveChannelModel(
   catalog: ModelsCnCatalog,
   _channelId: string,
   upstreamModel: string,
+  at?: Date,
 ): ReturnType<typeof resolveModel> | null {
   // 路由的 upstream_model 可能是别名变体原名（如 deepseek-v4-flash-0731），
   // 官方归属与目录查找统一按规范模型 ID 解析。
@@ -54,5 +55,6 @@ export function resolveChannelModel(
   return resolveModel(found.provider, found.model, {
     supplemented,
     modelsDevReferenceUrl: referenceUrl,
+    at,
   });
 }

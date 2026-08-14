@@ -184,6 +184,28 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         }
     }
 
+    // 分时价格上线后的单次历史费用修复：按请求原始发生时间重新选择价格，
+    // 避免旧版本把已过期价格或当前峰谷时段价格套到全部历史请求。
+    const TIME_SCHEDULE_COST_REPAIR_KEY: &str = "time_schedule_cost_repair_v1";
+    let time_schedule_cost_repaired = storage
+        .get_app_meta(TIME_SCHEDULE_COST_REPAIR_KEY)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("done");
+    if !time_schedule_cost_repaired && !storage.prices().is_empty() {
+        match storage.recalculate_usage_costs("all") {
+            Ok(updated) => {
+                if let Err(error) = storage.set_app_meta(TIME_SCHEDULE_COST_REPAIR_KEY, "done") {
+                    tracing::warn!(error = %error, "记录分时价格费用修复标记失败");
+                } else {
+                    tracing::info!(updated, "已按请求发生时间重算历史费用");
+                }
+            }
+            Err(error) => tracing::warn!(error = %error, "按分时价格重算历史费用失败"),
+        }
+    }
+
     // 回填历史请求的费用分类明细（早期版本只有总数、缺分类）。幂等，仅补齐 NULL 列。
     if let Err(error) = storage.backfill_cost_breakdown() {
         tracing::warn!(error = %error, "费用分类明细回填失败");

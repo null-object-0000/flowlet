@@ -52,6 +52,37 @@ fn recognizes_openai_model_detail_paths_only() {
     );
 }
 
+#[test]
+fn model_detail_price_selection_respects_effective_and_daily_ranges() {
+    let model = serde_json::json!({
+        "prices": [
+            {"market":"china","currency":"CNY","rateType":"standard","input":{"standard":1},"output":2,"effectiveTo":"2026-08-17T00:00:00+08:00"},
+            {"market":"china","currency":"CNY","rateType":"standard","input":{"standard":1.5},"output":4.5,"effectiveFrom":"2026-08-17T00:00:00+08:00","dailyTimeRange":{"label":"空闲时段","timeZone":"Asia/Shanghai","intervals":[{"start":"00:00","end":"09:00"},{"start":"12:00","end":"14:00"},{"start":"18:00","end":"00:00"}]}},
+            {"market":"china","currency":"CNY","rateType":"standard","input":{"standard":3},"output":9,"effectiveFrom":"2026-08-17T00:00:00+08:00","dailyTimeRange":{"label":"高峰时段","timeZone":"Asia/Shanghai","intervals":[{"start":"09:00","end":"12:00"},{"start":"14:00","end":"18:00"}]}}
+        ]
+    });
+    let at = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    };
+    assert_eq!(
+        proxy_http::select_models_cn_price(&model, at("2026-08-16T15:59:59Z"))
+            .unwrap()["output"],
+        2
+    );
+    assert_eq!(
+        proxy_http::select_models_cn_price(&model, at("2026-08-17T00:59:59Z"))
+            .unwrap()["output"],
+        4.5
+    );
+    assert_eq!(
+        proxy_http::select_models_cn_price(&model, at("2026-08-17T01:00:00Z"))
+            .unwrap()["output"],
+        9
+    );
+}
+
 #[tokio::test]
 async fn model_detail_prefers_upstream_limits_and_falls_back_to_models_cn() {
     let routes = vec![RouteCandidate {

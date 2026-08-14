@@ -1761,6 +1761,7 @@ pub fn build_prices_from_models_cn_catalog(
                 continue;
             };
             let tiers = build_price_tiers(model, &price);
+            let schedules = build_price_schedules(model, &price);
             prices.push(crate::core::config::ModelPrice {
                 id: format!("models-cn-{channel_id}-{upstream_model}"),
                 channel_id: channel_id.to_string(),
@@ -1770,6 +1771,7 @@ pub fn build_prices_from_models_cn_catalog(
                 input_cache_write_price: price.input_cache_write,
                 output_price: price.output,
                 tiers,
+                schedules,
                 currency: "CNY".to_string(),
                 unit: "1M tokens".to_string(),
                 source_url: price.source_url,
@@ -1880,7 +1882,11 @@ fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPric
             best = Some(price);
         }
     }
-    let price = best?;
+    parse_model_cn_price(best?)
+}
+
+#[cfg(desktop)]
+fn parse_model_cn_price(price: &serde_json::Value) -> Option<BestModelPrice> {
     let input = price.get("input")?;
     let input_standard = input.get("standard").and_then(|v| v.as_f64())?;
     let output = price.get("output").and_then(|v| v.as_f64())?;
@@ -1918,25 +1924,88 @@ fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPric
     })
 }
 
-/// 用与最优价同 (market, currency, rateType) 的 inputTokenRange 行构建分级价格。
-/// 至少两行区间数据才视为分级；按区间下限升序，最后一档 up_to=None 兜底。
-/// 无区间数据时返回空（使用扁平单价）。
+/// 将同一个 market/currency 下的生效窗口与每日时段价格保留为运行时变体。
+/// 分组键包含 rateType、effectiveFrom/effectiveTo 与 dailyTimeRange，避免峰谷价格
+/// 或新旧价格互相覆盖；同组内仍可按 inputTokenRange 生成分级。
 #[cfg(desktop)]
-fn build_price_tiers(
+fn build_price_schedules(
     model: &serde_json::Value,
     best: &BestModelPrice,
-) -> Vec<crate::core::config::ModelPriceTier> {
+) -> Vec<crate::core::config::ModelPriceSchedule> {
     let Some(prices) = model.get("prices").and_then(|p| p.as_array()) else {
         return Vec::new();
     };
-    let mut ranged: Vec<(i64, i64, f64, f64, Option<f64>, f64)> = Vec::new();
+    let has_scheduling = prices.iter().any(|price| {
+        price.get("market").and_then(|v| v.as_str()) == Some(best.market.as_str())
+            && price.get("currency").and_then(|v| v.as_str())
+                == Some(best.currency.as_str())
+            && (price.get("effectiveFrom").is_some()
+                || price.get("effectiveTo").is_some()
+                || price.get("dailyTimeRange").is_some())
+    });
+    if !has_scheduling {
+        return Vec::new();
+    }
+
+    let mut groups = std::collections::BTreeMap::<String, Vec<&serde_json::Value>>::new();
     for price in prices {
-        let market = price.get("market").and_then(|v| v.as_str()).unwrap_or("");
-        let currency = price.get("currency").and_then(|v| v.as_str()).unwrap_or("");
-        let rate_type = price.get("rateType").and_then(|v| v.as_str()).unwrap_or("");
-        if market != best.market || currency != best.currency || rate_type != best.rate_type {
+        if price.get("market").and_then(|v| v.as_str()) != Some(best.market.as_str())
+            || price.get("currency").and_then(|v| v.as_str())
+                != Some(best.currency.as_str())
+        {
             continue;
         }
+        let key = serde_json::to_string(&serde_json::json!({
+            "rateType": price.get("rateType"),
+            "effectiveFrom": price.get("effectiveFrom"),
+            "effectiveTo": price.get("effectiveTo"),
+            "dailyTimeRange": price.get("dailyTimeRange"),
+        }))
+        .unwrap_or_default();
+        groups.entry(key).or_default().push(price);
+    }
+
+    groups
+        .into_values()
+        .filter_map(|group| {
+            let representative = group
+                .iter()
+                .copied()
+                .find(|price| price.get("inputTokenRange").is_none())
+                .or_else(|| group.first().copied())?;
+            let parsed = parse_model_cn_price(representative)?;
+            let daily_time_range = representative
+                .get("dailyTimeRange")
+                .cloned()
+                .and_then(|value| serde_json::from_value(value).ok());
+            Some(crate::core::config::ModelPriceSchedule {
+                rate_type: parsed.rate_type,
+                effective_from: representative
+                    .get("effectiveFrom")
+                    .and_then(|value| value.as_str())
+                    .map(String::from),
+                effective_to: representative
+                    .get("effectiveTo")
+                    .and_then(|value| value.as_str())
+                    .map(String::from),
+                daily_time_range,
+                input_uncached_price: parsed.input_standard,
+                input_cached_price: parsed.input_cache_hit,
+                input_cache_write_price: parsed.input_cache_write,
+                output_price: parsed.output,
+                tiers: build_price_tiers_from_rows(&group),
+                source_url: parsed.source_url,
+            })
+        })
+        .collect()
+}
+
+#[cfg(desktop)]
+fn build_price_tiers_from_rows(
+    prices: &[&serde_json::Value],
+) -> Vec<crate::core::config::ModelPriceTier> {
+    let mut ranged: Vec<(i64, i64, f64, f64, Option<f64>, f64)> = Vec::new();
+    for price in prices {
         let Some(range) = price.get("inputTokenRange") else {
             continue;
         };
@@ -1960,7 +2029,9 @@ fn build_price_tiers(
             .get("cacheHit")
             .and_then(|v| v.as_f64())
             .unwrap_or(standard);
-        let cache_write = input.get("explicitCacheCreation").and_then(|v| v.as_f64());
+        let cache_write = input
+            .get("explicitCacheCreation")
+            .and_then(|v| v.as_f64());
         ranged.push((
             min_exclusive,
             max_inclusive,
@@ -1994,6 +2065,29 @@ fn build_price_tiers(
             },
         )
         .collect()
+}
+
+/// 用与最优价同 (market, currency, rateType) 的 inputTokenRange 行构建分级价格。
+/// 至少两行区间数据才视为分级；按区间下限升序，最后一档 up_to=None 兜底。
+/// 无区间数据时返回空（使用扁平单价）。
+#[cfg(desktop)]
+fn build_price_tiers(
+    model: &serde_json::Value,
+    best: &BestModelPrice,
+) -> Vec<crate::core::config::ModelPriceTier> {
+    let Some(prices) = model.get("prices").and_then(|p| p.as_array()) else {
+        return Vec::new();
+    };
+    let matching = prices
+        .iter()
+        .filter(|price| {
+        let market = price.get("market").and_then(|v| v.as_str()).unwrap_or("");
+        let currency = price.get("currency").and_then(|v| v.as_str()).unwrap_or("");
+        let rate_type = price.get("rateType").and_then(|v| v.as_str()).unwrap_or("");
+            market == best.market && currency == best.currency && rate_type == best.rate_type
+        })
+        .collect::<Vec<_>>();
+    build_price_tiers_from_rows(&matching)
 }
 
 // ─── models.dev → ModelPrice 转换 ─────────────────────────────────────────
@@ -2058,6 +2152,7 @@ pub fn build_prices_from_models_dev_catalog(
                 input_cache_write_price: cache_write,
                 output_price: output,
                 tiers,
+                schedules: Vec::new(),
                 currency: "USD".to_string(),
                 unit: "1M tokens".to_string(),
                 source_url: source_url.clone(),
@@ -2982,6 +3077,56 @@ mod tests {
         assert!(!prices
             .iter()
             .any(|p| p.channel_id == "qwen" && p.upstream_model == "qwen3.8-max"));
+    }
+
+    #[test]
+    fn models_cn_builder_preserves_effective_and_daily_price_schedules() {
+        let fixture = r#"{
+            "providers": [{
+                "id": "deepseek",
+                "models": [{
+                    "id": "deepseek-v4-flash",
+                    "prices": [
+                        {"market":"china","currency":"CNY","unit":"1M_tokens","rateType":"standard",
+                         "input":{"standard":1,"cacheHit":0.02},"output":2,
+                         "effectiveTo":"2026-08-17T00:00:00+08:00","sourceUrl":"https://example.com"},
+                        {"market":"china","currency":"CNY","unit":"1M_tokens","rateType":"standard",
+                         "dailyTimeRange":{"label":"空闲时段","timeZone":"Asia/Shanghai","intervals":[{"start":"00:00","end":"09:00"},{"start":"12:00","end":"14:00"},{"start":"18:00","end":"00:00"}]},
+                         "input":{"standard":1.5,"cacheHit":0.05},"output":4.5,
+                         "effectiveFrom":"2026-08-17T00:00:00+08:00","sourceUrl":"https://example.com"},
+                        {"market":"china","currency":"CNY","unit":"1M_tokens","rateType":"standard",
+                         "dailyTimeRange":{"label":"高峰时段","timeZone":"Asia/Shanghai","intervals":[{"start":"09:00","end":"12:00"},{"start":"14:00","end":"18:00"}]},
+                         "input":{"standard":3,"cacheHit":0.1},"output":9,
+                         "effectiveFrom":"2026-08-17T00:00:00+08:00","sourceUrl":"https://example.com"}
+                    ]
+                }]
+            }]
+        }"#;
+        let prices = build_prices_from_models_cn_catalog(fixture).unwrap();
+        let price = find_price(&prices, "deepseek", "deepseek-v4-flash");
+        assert_eq!(price.schedules.len(), 3);
+
+        let at = |value: &str| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        };
+        let old = price
+            .resolve_prices_at(None, at("2026-08-16T15:59:59Z"))
+            .unwrap();
+        assert_eq!((old.0, old.1, old.3), (1.0, 0.02, 2.0));
+        let off_peak = price
+            .resolve_prices_at(None, at("2026-08-17T00:30:00Z"))
+            .unwrap();
+        assert_eq!((off_peak.0, off_peak.1, off_peak.3), (1.5, 0.05, 4.5));
+        let peak = price
+            .resolve_prices_at(None, at("2026-08-17T01:00:00Z"))
+            .unwrap();
+        assert_eq!((peak.0, peak.1, peak.3), (3.0, 0.1, 9.0));
+        let noon = price
+            .resolve_prices_at(None, at("2026-08-17T04:00:00Z"))
+            .unwrap();
+        assert_eq!((noon.0, noon.1, noon.3), (1.5, 0.05, 4.5));
     }
 
     #[test]

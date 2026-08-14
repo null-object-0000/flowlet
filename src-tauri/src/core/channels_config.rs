@@ -253,6 +253,7 @@ impl ChannelsConfig {
                 input_cache_write_price: p.input_cache_write_price,
                 output_price: p.output_price,
                 tiers: p.tiers,
+                schedules: Vec::new(),
                 currency: p.currency,
                 unit: p.unit,
                 source_url: p.source_url,

@@ -785,6 +785,10 @@ pub struct ModelPrice {
     /// 约定按 `up_to_input_tokens` 升序排列，最后一档可用 `None` 作为无上限兜底。
     #[serde(default)]
     pub tiers: Vec<ModelPriceTier>,
+    /// models-cn 目录提供的按生效窗口/每日时段计价变体。配置文件中的旧式扁平价格
+    /// 保持 `schedules = []`，继续走上面的价格字段。
+    #[serde(default)]
+    pub schedules: Vec<ModelPriceSchedule>,
     pub currency: String,
     pub unit: String,
     pub source_url: Option<String>,
@@ -804,6 +808,7 @@ impl Default for ModelPrice {
             input_cache_write_price: None,
             output_price: 0.0,
             tiers: Vec::new(),
+            schedules: Vec::new(),
             currency: "USD".to_string(),
             unit: "1M tokens".to_string(),
             source_url: None,
@@ -830,41 +835,200 @@ pub struct ModelPriceTier {
     pub output_price: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelPriceSchedule {
+    #[serde(default)]
+    pub rate_type: String,
+    #[serde(default)]
+    pub effective_from: Option<String>,
+    #[serde(default)]
+    pub effective_to: Option<String>,
+    #[serde(default)]
+    pub daily_time_range: Option<ModelPriceDailyTimeRange>,
+    #[serde(default)]
+    pub input_uncached_price: f64,
+    #[serde(default)]
+    pub input_cached_price: f64,
+    #[serde(default)]
+    pub input_cache_write_price: Option<f64>,
+    #[serde(default)]
+    pub output_price: f64,
+    #[serde(default)]
+    pub tiers: Vec<ModelPriceTier>,
+    #[serde(default)]
+    pub source_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPriceDailyTimeRange {
+    #[serde(default)]
+    pub label: String,
+    pub time_zone: String,
+    #[serde(default)]
+    pub intervals: Vec<ModelPriceDailyInterval>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelPriceDailyInterval {
+    pub start: String,
+    pub end: String,
+}
+
+type ResolvedModelPrice = (f64, f64, Option<f64>, f64);
+
+fn parse_price_time(value: &str, allow_end_of_day: bool) -> Option<i32> {
+    if allow_end_of_day && value == "24:00" {
+        return Some(24 * 60);
+    }
+    let (hour, minute) = value.split_once(':')?;
+    let hour = hour.parse::<i32>().ok()?;
+    let minute = minute.parse::<i32>().ok()?;
+    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
+}
+
+impl ModelPriceDailyTimeRange {
+    pub(crate) fn contains(&self, at: chrono::DateTime<chrono::Utc>) -> bool {
+        use std::str::FromStr;
+
+        let Ok(time_zone) = chrono_tz::Tz::from_str(&self.time_zone) else {
+            return false;
+        };
+        let local = at.with_timezone(&time_zone);
+        let minute = chrono::Timelike::hour(&local) as i32 * 60
+            + chrono::Timelike::minute(&local) as i32;
+        self.intervals.iter().any(|interval| {
+            let Some(start) = parse_price_time(&interval.start, false) else {
+                return false;
+            };
+            let Some(end) = parse_price_time(&interval.end, true) else {
+                return false;
+            };
+            if end > start {
+                minute >= start && minute < end
+            } else {
+                minute >= start || minute < end
+            }
+        })
+    }
+}
+
+impl ModelPriceSchedule {
+    fn applies_at(&self, at: chrono::DateTime<chrono::Utc>) -> bool {
+        let parses_bound = |value: &str| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .ok()
+                .map(|parsed| parsed.with_timezone(&chrono::Utc))
+        };
+        if let Some(value) = self.effective_from.as_deref() {
+            let Some(from) = parses_bound(value) else {
+                return false;
+            };
+            if at < from {
+                return false;
+            }
+        }
+        if let Some(value) = self.effective_to.as_deref() {
+            let Some(to) = parses_bound(value) else {
+                return false;
+            };
+            if at >= to {
+                return false;
+            }
+        }
+        self.daily_time_range
+            .as_ref()
+            .is_none_or(|range| range.contains(at))
+    }
+
+    fn resolve_prices(&self, input_tokens: Option<i64>) -> ResolvedModelPrice {
+        resolve_tiered_prices(
+            self.input_uncached_price,
+            self.input_cached_price,
+            self.input_cache_write_price,
+            self.output_price,
+            &self.tiers,
+            input_tokens,
+        )
+    }
+}
+
+fn resolve_tiered_prices(
+    input_uncached_price: f64,
+    input_cached_price: f64,
+    input_cache_write_price: Option<f64>,
+    output_price: f64,
+    tiers: &[ModelPriceTier],
+    input_tokens: Option<i64>,
+) -> ResolvedModelPrice {
+    if tiers.is_empty() {
+        return (
+            input_uncached_price,
+            input_cached_price,
+            input_cache_write_price,
+            output_price,
+        );
+    }
+    let input = input_tokens.unwrap_or(0);
+    for tier in tiers {
+        let hit = match tier.up_to_input_tokens {
+            None => true,
+            Some(limit) => input <= limit,
+        };
+        if hit {
+            return (
+                tier.input_uncached_price,
+                tier.input_cached_price,
+                tier.input_cache_write_price,
+                tier.output_price,
+            );
+        }
+    }
+    (
+        input_uncached_price,
+        input_cached_price,
+        input_cache_write_price,
+        output_price,
+    )
+}
+
 impl ModelPrice {
+    /// 按请求发生时间与输入 Token 数解析价格。存在目录时段数据时，仅返回当前
+    /// 生效且命中每日时段的变体；没有匹配项时返回 None，避免用过期价格兜底。
+    pub fn resolve_prices_at(
+        &self,
+        input_tokens: Option<i64>,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Option<ResolvedModelPrice> {
+        if self.schedules.is_empty() {
+            return Some(resolve_tiered_prices(
+                self.input_uncached_price,
+                self.input_cached_price,
+                self.input_cache_write_price,
+                self.output_price,
+                &self.tiers,
+                input_tokens,
+            ));
+        }
+        self.schedules
+            .iter()
+            .filter(|schedule| schedule.applies_at(at))
+            .max_by_key(|schedule| i32::from(schedule.rate_type == "promotional"))
+            .map(|schedule| schedule.resolve_prices(input_tokens))
+    }
+
     /// 按总输入 Token 数解析生效的每百万 Token 单价。
     /// 返回 `(未缓存输入, 缓存输入, 缓存写入, 输出)`。
     /// 无分级时回退扁平单价；有分级时取第一个 `up_to_input_tokens >= input`
     /// 的档位（`None` 上限视为兜底），均未命中则回退扁平单价。
     pub fn resolve_prices(&self, input_tokens: Option<i64>) -> (f64, f64, Option<f64>, f64) {
-        if self.tiers.is_empty() {
-            return (
-                self.input_uncached_price,
-                self.input_cached_price,
-                self.input_cache_write_price,
-                self.output_price,
-            );
-        }
-        let input = input_tokens.unwrap_or(0);
-        for tier in &self.tiers {
-            let hit = match tier.up_to_input_tokens {
-                None => true,
-                Some(limit) => input <= limit,
-            };
-            if hit {
-                return (
-                    tier.input_uncached_price,
-                    tier.input_cached_price,
-                    tier.input_cache_write_price,
-                    tier.output_price,
-                );
-            }
-        }
-        (
+        self.resolve_prices_at(input_tokens, chrono::Utc::now())
+            .unwrap_or((
             self.input_uncached_price,
             self.input_cached_price,
             self.input_cache_write_price,
             self.output_price,
-        )
+        ))
     }
 }
 

@@ -90,7 +90,9 @@ impl AgentGlobalConfigAdapter for PiAdapter {
             &pi_extension_path()?,
             expected_base_url,
             client_token,
-            options.map_or(true, |options| options.session_extension),
+            options
+                .and_then(|options| options.session_extension)
+                .unwrap_or(true),
         )
     }
 

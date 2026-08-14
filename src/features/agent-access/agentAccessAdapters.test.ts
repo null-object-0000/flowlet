@@ -73,6 +73,11 @@ describe("agent access adapters", () => {
     expect(snippets[0].copyValue).toContain("model: flowlet-pro");
     expect(snippets[1].copyValue).toContain("FLOWLET_CLIENT_TOKEN: real-token");
     expect(adapter.configStatuses(context({ session_extension: false }))[0].value)
-      .toBe("需安装或更新");
+      .toBe("未启用（可选）");
+    expect(adapter.configControls(context({ session_extension: false }))[0].checked).toBe(false);
+    expect(adapter.configControls(context({ session_extension: false }))[0].applyOptions(true))
+      .toEqual({ sessionExtension: true });
+    expect(adapter.applyOptions(context({ session_extension: false })))
+      .toEqual({ sessionExtension: false });
   });
 });

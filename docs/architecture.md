@@ -177,11 +177,13 @@ Adapter 解析其 Flowlet Provider、Client Token、当前默认 provider/model 
 `llm-pi-ai.providers.flowlet`、`agent-default-model.provider/model` 与专用凭据；恢复只还原这些
 受管路径。复杂行内 YAML 无法定点修改时明确失败，不做整文件猜测重写。DSH 运行中会热加载，
 未运行时在下次启动读取配置。
-DSH 接入不安装插件、扩展或 Hook，不修改其包与运行时代码；环境和原生会话读取保持只读，
-任务执行仅调用官方 headless 命令。内部 Plugin Registry 只是 Flowlet 的受控能力声明，
-不代表向第三方 Agent 部署插件。
+DSH 基础接入不安装插件、扩展或 Hook，不修改其包与运行时代码；环境和原生会话读取保持只读，
+任务执行仅调用官方 headless 命令。精确会话关联是默认关闭的高级选项，只有用户显式启用时才
+向已初始化 Profile 部署可恢复的受管 Cordis 桥。内部 Plugin Registry 只是 Flowlet 的受控能力声明。
 
-Agent 插件同时声明 `sessionAdapterId`。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
+Agent 插件同时声明 `sessionAdapterId`、`identityAdapterId`、`sessionTypes` 与 `taskProfile`。
+前端会话筛选、会话名称、桌面/移动任务 Agent 选项和任务 Profile → session type 映射均由
+注册表生成，不再维护页面级枚举。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
 可用运行时会话类型、会话目录枚举、Timeline、最后交互和增量解析来源；Claude Code、OpenCode、
 Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显式承载 `codex-cli` 与
 `codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。会话合并与用量账本
@@ -193,10 +195,13 @@ usage；遇到其它格式版本明确拒绝。打包的增量 chunk 行不参�
 Codex、OpenCode 与 Pi 的文件/SQLite 定位和时间线解析进一步下沉到
 `agent_session_timeline/adapters/`，公共时间线模块保留增量游标、摘要合并、切片、计价与事件工具。
 
+`AgentIdentityAdapter` 独立承载客户端 UA 规则、受管标记头身份与 Session Header 提取；实时 HTTP
+请求和历史 Header JSON 修复均委托同一 registry，代理主流程不再按 Agent ID 分支。
+
 Agent 插件还声明 `runnerAdapterId`。Rust 任务调度通过编译期 Runner Adapter registry 统一解析
-任务 `agent_profile`、环境探测适配器、展示名和异步执行函数；Claude Code、OpenCode、Pi、Codex
-既有执行器继续负责各自的命令参数、输出事件和会话恢复，项目队列与任务状态机不感知具体 Agent。
-与 DeepSeek Harness 执行器分别位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
+任务 `agent_profile`、环境探测适配器、展示名、所需 Surface、resume 能力、缺失执行入口提示和异步执行函数。
+Claude Code、OpenCode、Pi、Codex 与 DeepSeek Harness 执行器分别负责各自的命令参数、输出事件和会话恢复，
+项目队列与任务状态机不感知具体 Agent。执行器位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
 位于 `agent_task_runner/process.rs`；父模块只保留项目执行槽、队列调度和任务状态流转。
 历史空 Profile 仍显式映射 Claude Code，未知 Profile 与未知 Runner Adapter 均明确失败，不回退执行。
 

@@ -46,6 +46,13 @@ pub(crate) fn has_session_adapter(adapter_id: &str) -> bool {
     ADAPTERS.iter().any(|adapter| adapter.id() == adapter_id)
 }
 
+pub(crate) fn session_types_for_adapter(adapter_id: &str) -> Option<&'static [&'static str]> {
+    ADAPTERS
+        .iter()
+        .find(|adapter| adapter.id() == adapter_id)
+        .map(|adapter| adapter.agent_types())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

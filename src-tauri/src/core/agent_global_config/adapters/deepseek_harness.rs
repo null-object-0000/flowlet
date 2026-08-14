@@ -35,9 +35,15 @@ impl AgentGlobalConfigAdapter for DeepSeekHarnessAdapter {
         &self,
         expected_base_url: &str,
         client_token: &str,
-        _options: Option<&AgentGlobalConfigOptions>,
+        options: Option<&AgentGlobalConfigOptions>,
     ) -> Result<AgentGlobalConfigReport, String> {
-        apply_dsh(expected_base_url, client_token)
+        apply_dsh(
+            expected_base_url,
+            client_token,
+            options
+                .and_then(|options| options.session_extension)
+                .unwrap_or(false),
+        )
     }
 
     fn restore(&self, expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
@@ -207,6 +213,57 @@ fn session_bridge_block(expected_base_url: &str) -> String {
     )
 }
 
+fn prepare_patch_list_for_append(text: &str) -> Result<String, String> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let content = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let trimmed = line.trim();
+            (!trimmed.is_empty() && !trimmed.starts_with('#') && trimmed != "---")
+                .then_some((index, trimmed))
+        })
+        .collect::<Vec<_>>();
+
+    if content.len() == 1 && content[0].1 == "[]" {
+        return Ok(lines
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, line)| (index != content[0].0).then_some(line))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end_matches(['\r', '\n'])
+            .to_string());
+    }
+    if content
+        .first()
+        .is_some_and(|(_, line)| line.starts_with('['))
+        || content.iter().any(|(_, line)| *line == "...")
+    {
+        return Err(
+            "DSH cordis.patch.yml 使用了无法安全追加的行内数组或文档结束标记，请先改为块级 YAML 数组"
+                .to_string(),
+        );
+    }
+    Ok(text.trim_end_matches(['\r', '\n']).to_string())
+}
+
+fn ensure_patch_list_after_removal(text: &str) -> String {
+    let has_entry = text.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty() && !trimmed.starts_with('#') && trimmed != "---"
+    });
+    if has_entry {
+        return text.trim_end_matches(['\r', '\n']).to_string();
+    }
+    let comments = text.trim_end_matches(['\r', '\n']);
+    if comments.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("{comments}\n[]")
+    }
+}
+
 fn patch_session_bridge(text: &str, expected_base_url: &str) -> Result<Vec<u8>, String> {
     let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let normalized = text.replace("\r\n", "\n");
@@ -228,11 +285,40 @@ fn patch_session_bridge(text: &str, expected_base_url: &str) -> Result<Vec<u8>, 
             )
         }
     };
+    unmanaged = prepare_patch_list_for_append(&unmanaged)?;
     if !unmanaged.is_empty() {
         unmanaged.push_str("\n\n");
     }
     unmanaged.push_str(&session_bridge_block(expected_base_url));
     Ok(unmanaged.replace('\n', newline).into_bytes())
+}
+
+fn remove_session_bridge(text: &str) -> Result<Vec<u8>, String> {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let normalized = text.replace("\r\n", "\n");
+    let start = normalized.find(SESSION_BRIDGE_START);
+    let end = normalized.find(SESSION_BRIDGE_END);
+    let output = match (start, end) {
+        (None, None) => return Ok(text.as_bytes().to_vec()),
+        (Some(start), Some(end)) if end >= start => {
+            let end = end + SESSION_BRIDGE_END.len();
+            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
+            while value.contains("\n\n\n") {
+                value = value.replace("\n\n\n", "\n\n");
+            }
+            ensure_patch_list_after_removal(&value)
+        }
+        _ => {
+            return Err(
+                "DSH cordis.patch.yml 中的 Flowlet 会话桥接标记不完整，拒绝覆盖".to_string(),
+            )
+        }
+    };
+    Ok(if output.is_empty() {
+        Vec::new()
+    } else {
+        format!("{}{}", output.replace('\n', newline), newline).into_bytes()
+    })
 }
 
 fn profile_bridge_matches(root: &Path, expected_base_url: &str) -> bool {
@@ -332,7 +418,6 @@ fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
         && key_ref_matches
         && api_matches
         && session_header_matches
-        && session_extension
         && token
         && default_provider == Some(PROVIDER_ID)
         && model.as_deref() == Some("flowlet-pro")
@@ -748,6 +833,7 @@ fn restore_credentials_text(text: &str, snapshot: &ManagedSnapshot) -> Result<Ve
 fn apply_dsh(
     expected_base_url: &str,
     client_token: &str,
+    session_extension: bool,
 ) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
     let settings_path = home.join("settings.yaml");
@@ -761,9 +847,9 @@ fn apply_dsh(
     let settings_output = apply_settings_text(&settings_text, expected_base_url)?;
     let credentials_output = apply_credentials_text(&credentials_text, client_token)?;
     let profiles = dsh_profiles(&home)?;
-    if profiles.is_empty() {
+    if session_extension && profiles.is_empty() {
         return Err(
-            "尚未发现可安装 Flowlet 会话插件的 DSH Profile；请先启动一次 DeepSeek Harness"
+            "尚未发现可安装 Flowlet 会话插件的 DSH Profile；请先启动一次 DeepSeek Harness，或关闭可选的精确会话关联"
                 .to_string(),
         );
     }
@@ -804,16 +890,38 @@ fn apply_dsh(
         (settings_path, Some(settings_output)),
         (credentials_path, Some(credentials_output)),
     ];
-    for (_, root) in &profiles {
+    for (profile, root) in &profiles {
         let (patch, plugin) = profile_paths(root);
-        writes.push((
-            patch.clone(),
-            Some(patch_session_bridge(
-                &read_yaml_text(&patch)?,
-                expected_base_url,
-            )?),
-        ));
-        writes.push((plugin, Some(text_file_bytes(SESSION_BRIDGE_SOURCE))));
+        if session_extension {
+            writes.push((
+                patch.clone(),
+                Some(patch_session_bridge(
+                    &read_yaml_text(&patch)?,
+                    expected_base_url,
+                )?),
+            ));
+            writes.push((plugin, Some(text_file_bytes(SESSION_BRIDGE_SOURCE))));
+        } else {
+            if patch.is_file() {
+                let patch_text = read_yaml_text(&patch)?;
+                let patch_output = remove_session_bridge(&patch_text)?;
+                if patch_output != patch_text.as_bytes() {
+                    writes.push((patch.clone(), Some(patch_output)));
+                }
+            }
+            let previous_plugin = backup_value
+                .profiles
+                .iter()
+                .find(|item| item.profile == *profile)
+                .and_then(|item| {
+                    item.plugin
+                        .present
+                        .then(|| text_file_bytes(&item.plugin.content))
+                });
+            if std::fs::read_to_string(&plugin).ok().as_deref() == Some(SESSION_BRIDGE_SOURCE) {
+                writes.push((plugin, previous_plugin));
+            }
+        }
     }
     write_json_file(
         &backup,
@@ -1037,6 +1145,38 @@ mod tests {
     }
 
     #[test]
+    fn session_bridge_patch_replaces_scaffolded_empty_array_document() {
+        let before = "# user patch layer\n# keep this comment\n[]\n";
+        let output =
+            String::from_utf8(patch_session_bridge(before, "http://127.0.0.1:18640/v1").unwrap())
+                .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
+        assert!(parsed.as_sequence().is_some_and(|entries| entries.len() == 1));
+        assert!(output.contains("# keep this comment"));
+        assert!(!output.lines().any(|line| line.trim() == "[]"));
+    }
+
+    #[test]
+    fn session_bridge_patch_repairs_the_previous_empty_array_plus_managed_block() {
+        let broken = format!("# user patch layer\n[]\n\n{}", session_bridge_block("http://127.0.0.1:18640/v1"));
+        let output = String::from_utf8(
+            patch_session_bridge(&broken, "http://127.0.0.1:28640/v1").unwrap(),
+        )
+        .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
+        assert!(parsed.as_sequence().is_some_and(|entries| entries.len() == 1));
+        assert!(output.contains("baseURL: http://127.0.0.1:28640/v1"));
+        assert_eq!(output.matches(SESSION_BRIDGE_START).count(), 1);
+    }
+
+    #[test]
+    fn session_bridge_patch_refuses_nonempty_flow_style_array() {
+        let error = patch_session_bridge("[{ id: custom }]\n", "http://127.0.0.1:18640/v1")
+            .unwrap_err();
+        assert!(error.contains("行内数组"));
+    }
+
+    #[test]
     fn session_bridge_patch_refuses_broken_managed_markers() {
         let error =
             patch_session_bridge(SESSION_BRIDGE_START, "http://127.0.0.1:18640/v1").unwrap_err();
@@ -1053,6 +1193,42 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("\r\n"));
         assert!(!output.replace("\r\n", "").contains('\n'));
+    }
+
+    #[test]
+    fn session_bridge_removal_preserves_user_plugins_and_is_idempotent() {
+        let before = "# user plugin\n- insert:\n    - id: custom\n      name: custom-package\n";
+        let managed =
+            String::from_utf8(patch_session_bridge(before, "http://127.0.0.1:18640/v1").unwrap())
+                .unwrap();
+        let once = String::from_utf8(remove_session_bridge(&managed).unwrap()).unwrap();
+        assert!(once.contains("id: custom"));
+        assert!(!once.contains(SESSION_BRIDGE_START));
+        assert!(!once.contains("flowlet-session-bridge"));
+
+        let twice = String::from_utf8(remove_session_bridge(&once).unwrap()).unwrap();
+        assert_eq!(twice, once);
+    }
+
+    #[test]
+    fn session_bridge_removal_restores_an_empty_array_document() {
+        let managed =
+            String::from_utf8(patch_session_bridge("# user patch layer\n[]\n", "http://127.0.0.1:18640/v1").unwrap())
+                .unwrap();
+        let removed = String::from_utf8(remove_session_bridge(&managed).unwrap()).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&removed).unwrap();
+        assert!(
+            parsed.as_sequence().is_some_and(Vec::is_empty),
+            "removed patch was: {removed:?}"
+        );
+        assert!(removed.contains("# user patch layer"));
+        assert!(removed.lines().any(|line| line.trim() == "[]"));
+    }
+
+    #[test]
+    fn session_bridge_removal_refuses_broken_managed_markers() {
+        let error = remove_session_bridge(SESSION_BRIDGE_END).unwrap_err();
+        assert!(error.contains("标记不完整"));
     }
 
     #[test]

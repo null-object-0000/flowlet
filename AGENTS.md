@@ -44,7 +44,8 @@ Flowlet 不以通用企业级 LLM 网关为核心定位。
 内置渠道、模型目录和 Agent 的扩展声明统一登记在仓库根目录
 `plugin-registry.json`。注册表只声明受控贡献，具体适配器仍由前端/Rust 编译期代码实现；
 渠道贡献必须声明 `adapterId`，Agent 贡献必须声明 `environmentAdapterId`、
-`globalConfigAdapterId`、`sessionAdapterId` 与 `runnerAdapterId`；新增适配器时必须同步注册表校验和对应编译期实现，禁止静默回退；
+`globalConfigAdapterId`、`sessionAdapterId`、`identityAdapterId`、`runnerAdapterId`、
+`sessionTypes` 与 `taskProfile`；新增适配器时必须同步注册表校验和对应编译期实现，禁止静默回退；
 不得通过插件清单引入任意脚本执行、动态库加载或绕过类型化边界的直接状态修改。
 
 当前不追求：
@@ -435,23 +436,25 @@ Pi 官方的 `before_provider_headers` 事件），在每次 LLM 请求的 heade
 与 Pi 原生会话文件头行的 `id` 一致），并以已存在的 `x-flowlet-client: pi` 标记头为门控，
 确保只污染该 Agent 发往 Flowlet 渠道的请求。
 
-代理侧在 `proxy.rs` 的 `extract_agent_session`（及历史日志修复路径 `storage_usage.rs`
-的 `agent_session_from_json`）中，以 `x-flowlet-client: pi` 为门控读取 `x-flowlet-session`，
-识别后、转发上游前在 `apply_request_headers` 将其与 `x-flowlet-client` 一并剥离，不向上游
-泄露。注入的 session UUID 与 Pi 原生会话文件头行的 `id` 是同一个值，因此
+代理侧由 Pi 的独立 Identity Adapter 以 `x-flowlet-client: pi` 为门控读取
+`x-flowlet-session`；实时请求和历史日志修复复用同一套 Identity Adapter。识别后、转发
+上游前在 `apply_request_headers` 将其与 `x-flowlet-client` 一并剥离，不向上游泄露。
+注入的 session UUID 与 Pi 原生会话文件头行的 `id` 是同一个值，因此
 `merge_agent_session_catalog` 能按 `(agent_type, session_id)` 把经过 Flowlet 的观测会话
 与 Pi 原生会话精确合并。
 
-新增此类 Agent 时，需同步：在 `extract_agent_session` 与 `agent_session_from_json` 增加
-对应分支（以该 Agent 的标记头为门控）；在 `apply_request_headers` 剥离该头；在一键写入
-与手动配置片段中同时部署注入该头的原生扩展/配置。
+新增此类 Agent 时，需在独立 `AgentIdentityAdapter` 中声明 UA 客户端归属规则和 Session Header
+提取逻辑；实时请求与历史修复统一经过 Identity Adapter registry，不得在代理主流程继续增加
+Agent ID 分支。`apply_request_headers` 仅负责统一剥离 Flowlet 保留头；一键写入与手动配置片段
+需保持一致。
 
 DeepSeek Harness 使用其强制携带的 `deepseek-harness/` User-Agent 识别来源，不注入
-`x-flowlet-client`。一键接入通过 DSH 官方 Cordis Profile 配置部署受管
+`x-flowlet-client`。基础一键接入只写入官方 Provider、默认模型与 Token，不依赖插件。
+用户显式开启“精确会话关联”高级选项后，才通过 DSH 官方 Cordis Profile 配置部署受管
 `flowlet-session-bridge.mjs`：插件从 `llm/stream` 读取当前 `GenerateOptions.sessionId`，使用
 `AsyncLocalStorage` 只为当前 Flowlet Provider 发往本地 Base URL 的请求注入
 `x-flowlet-session`。插件必须随 Profile 配置一同备份、原子写入和恢复，不得修改 DSH npm 包或
-缓存；写入后需重启正在运行的 DSH。Provider 仍声明 `sessionIdHeader` 作为未来 DSH 原生能力的
+缓存；关闭选项会移除受管桥接，启用或关闭后需重启正在运行的 DSH。Provider 仍声明 `sessionIdHeader` 作为未来 DSH 原生能力的
 同值兜底，但当前接入不得依赖尚未发布的实现。代理以 DSH UA 为门控读取并在转发上游前剥离
 该头；静态 Provider Header、文件更新时间或最近活跃会话均不得用于猜测请求所属 session。
 

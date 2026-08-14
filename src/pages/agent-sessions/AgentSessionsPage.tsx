@@ -4,6 +4,7 @@ import { IconRefresh } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { agentSessionLabel, DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionNativeUsage, type AgentSessionRow } from "../../domains/agent-session/types";
+import { AGENT_SESSION_OPTIONS } from "../../domains/pluginRegistry";
 import { useAgentSessionNativeSummary, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
 import { useAgentDataSync, useAgentSyncStatus } from "../../features/background-tasks/useBackgroundTasks";
 import { AgentSessionsView, DesktopFilterToolbarView, type AgentSessionRowModel, type AgentSessionStatusTone } from "@flowlet/product-ui";
@@ -125,12 +126,7 @@ export function AgentSessionsPage() {
               selects={[
                 { key: "client", insetLabel: t("客户端"), value: filter.agentType || "__all__", ariaLabel: t("客户端"), width: 210, options: [
                   { value: "__all__", label: t("全部客户端") },
-                  { value: "codex-desktop", label: "Codex Desktop" },
-                  { value: "codex-cli", label: "Codex CLI" },
-                  { value: "claude-code", label: "Claude Code" },
-                  { value: "opencode", label: "OpenCode" },
-                  { value: "pi", label: "Pi" },
-                  { value: "deepseek-harness", label: "DeepSeek Harness" },
+                  ...AGENT_SESSION_OPTIONS.map((session) => ({ value: session.id, label: session.name })),
                 ] },
                 { key: "runtime", insetLabel: t("运行状态"), value: filter.runtimeStatus || "__all__", ariaLabel: t("运行状态"), width: 210, options: [
                   { value: "__all__", label: t("全部状态") },

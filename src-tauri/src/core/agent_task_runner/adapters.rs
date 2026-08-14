@@ -1,4 +1,4 @@
-use super::{ExecutionOutcome, ProjectTask, Storage};
+use super::{AgentSurface, ExecutionOutcome, ProjectTask, Storage};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -25,6 +25,10 @@ pub(super) struct AgentTaskRunnerAdapter {
     pub(super) profile: &'static str,
     pub(super) environment_adapter_id: &'static str,
     pub(super) display_name: &'static str,
+    pub(super) required_surface: AgentSurface,
+    pub(super) supports_resume: bool,
+    pub(super) missing_executable_message: &'static str,
+    pub(super) resume_unsupported_message: &'static str,
     pub(super) execute: ExecuteRunner,
 }
 
@@ -34,6 +38,10 @@ static RUNNER_ADAPTERS: [AgentTaskRunnerAdapter; 5] = [
         profile: "Claude Code",
         environment_adapter_id: "claude-code",
         display_name: "Claude Code",
+        required_surface: AgentSurface::Cli,
+        supports_resume: true,
+        missing_executable_message: "未检测到 Claude Code CLI 可执行文件（接入配置不包含 CLI），请先安装 Claude Code 后重试。",
+        resume_unsupported_message: "Claude Code 当前不支持续跑",
         execute: execute_claude_code_boxed,
     },
     AgentTaskRunnerAdapter {
@@ -41,6 +49,10 @@ static RUNNER_ADAPTERS: [AgentTaskRunnerAdapter; 5] = [
         profile: "OpenCode",
         environment_adapter_id: "opencode",
         display_name: "OpenCode",
+        required_surface: AgentSurface::Cli,
+        supports_resume: true,
+        missing_executable_message: "未检测到 OpenCode CLI 可执行文件（接入配置不包含 CLI），请先安装 OpenCode 后重试。",
+        resume_unsupported_message: "OpenCode 当前不支持续跑",
         execute: execute_opencode_boxed,
     },
     AgentTaskRunnerAdapter {
@@ -48,6 +60,10 @@ static RUNNER_ADAPTERS: [AgentTaskRunnerAdapter; 5] = [
         profile: "Pi",
         environment_adapter_id: "pi",
         display_name: "Pi",
+        required_surface: AgentSurface::Cli,
+        supports_resume: true,
+        missing_executable_message: "未检测到 Pi CLI 可执行文件（接入配置不包含 CLI），请先安装 Pi 后重试。",
+        resume_unsupported_message: "Pi 当前不支持续跑",
         execute: execute_pi_boxed,
     },
     AgentTaskRunnerAdapter {
@@ -55,6 +71,10 @@ static RUNNER_ADAPTERS: [AgentTaskRunnerAdapter; 5] = [
         profile: "Codex",
         environment_adapter_id: "chatgpt-desktop",
         display_name: "Codex",
+        required_surface: AgentSurface::Cli,
+        supports_resume: true,
+        missing_executable_message: "未检测到 Codex CLI 可执行文件（接入配置不包含 CLI），请先安装 Codex 后重试。",
+        resume_unsupported_message: "Codex 当前不支持续跑",
         execute: execute_codex_boxed,
     },
     AgentTaskRunnerAdapter {
@@ -62,6 +82,10 @@ static RUNNER_ADAPTERS: [AgentTaskRunnerAdapter; 5] = [
         profile: "DeepSeek Harness",
         environment_adapter_id: "deepseek-harness",
         display_name: "DeepSeek Harness",
+        required_surface: AgentSurface::Web,
+        supports_resume: false,
+        missing_executable_message: "检测到 DeepSeek Harness 数据目录或 Web，但 PATH 中没有稳定的 dsh 启动命令；请先全局安装 @deepseek-ai/dsh。Flowlet 不会使用 npx 临时缓存执行任务。",
+        resume_unsupported_message: "DeepSeek Harness headless 当前不提供稳定的 resume 参数；Flowlet 不会把续跑伪装成新会话。请将任务会话策略改为 fresh。",
         execute: execute_deepseek_harness_boxed,
     },
 ];
@@ -82,6 +106,12 @@ pub(super) fn has(adapter_id: &str) -> bool {
     RUNNER_ADAPTERS
         .iter()
         .any(|adapter| adapter.id == adapter_id)
+}
+
+pub(super) fn by_id(adapter_id: &str) -> Option<&'static AgentTaskRunnerAdapter> {
+    RUNNER_ADAPTERS
+        .iter()
+        .find(|adapter| adapter.id == adapter_id)
 }
 
 macro_rules! boxed_runner {

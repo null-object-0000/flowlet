@@ -1,18 +1,11 @@
+import { registeredAgentSessionLabel } from "../pluginRegistry";
+
 export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi" | "deepseek-harness";
 export type AgentSessionRuntimeStatus = "idle" | "running" | "waiting_user" | "unknown";
 
-const AGENT_SESSION_LABELS: Record<AgentSessionType, string> = {
-  "claude-code": "Claude Code",
-  "codex-desktop": "Codex Desktop",
-  "codex-cli": "Codex CLI",
-  opencode: "OpenCode",
-  pi: "Pi",
-  "deepseek-harness": "DeepSeek Harness",
-};
-
 /** 未登记的新类型显示原始 id，禁止静默回退成另一个 Agent。 */
 export function agentSessionLabel(agentType: AgentSessionType | string) {
-  return AGENT_SESSION_LABELS[agentType as AgentSessionType] ?? agentType;
+  return registeredAgentSessionLabel(agentType) ?? agentType;
 }
 
 export type AgentSessionFilter = {

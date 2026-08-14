@@ -118,7 +118,7 @@ export type AgentGlobalConfigReport = {
   backup_available: boolean;
   external_environment_overrides: string[];
   error?: string | null;
-  /** 仅 Pi：Flowlet 会话扩展（`~/.pi/agent/extensions/flowlet.ts`）是否在位。 */
+  /** Pi / DeepSeek Harness：可选的 Flowlet 会话扩展是否在位。 */
   session_extension?: boolean;
   /** 仅 OpenCode：用于发现 CLI/Desktop 进程内权限事件的全局插件是否在位。 */
   opencode_permission_bridge?: boolean;
@@ -132,7 +132,7 @@ export type AgentGlobalConfigOptions = {
   primaryLongContext?: boolean;
   /** 仅 Claude Code：快速模型和子 Agent 模型环境变量附加 `[1m]` 后缀。 */
   fastLongContext?: boolean;
-  /** 仅 Pi：是否安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。安装后可按会话归并请求。 */
+  /** Pi / DeepSeek Harness：是否安装可选会话扩展。安装后可按会话归并请求。 */
   sessionExtension?: boolean;
 };
 

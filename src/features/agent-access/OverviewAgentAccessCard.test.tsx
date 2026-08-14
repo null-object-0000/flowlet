@@ -45,6 +45,7 @@ vi.mock("lottie-web", () => ({
 
 describe("OverviewAgentAccessCard", () => {
   beforeEach(() => {
+    mutateAsync.mockClear();
     agentMocks.codexEnvironment = null;
     agentMocks.deepseekRuntimeRunning = true;
   });
@@ -193,6 +194,11 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("Flowlet 直接写入 Provider、默认模型与 Client Token")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.dsh\\settings.yaml")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.dsh\\.credentials.yaml")).toBeInTheDocument();
+    expect(screen.getByText("未启用（可选）")).toBeInTheDocument();
+    const sessionSwitch = screen.getByRole("switch", { name: "启用精确会话关联（高级）" });
+    expect(sessionSwitch).not.toBeChecked();
+    fireEvent.click(sessionSwitch);
+    expect(mutateAsync).toHaveBeenLastCalledWith({ sessionExtension: true });
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
   });

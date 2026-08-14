@@ -79,16 +79,11 @@ pub struct AgentGlobalConfigOptions {
     /// 仅 Claude Code：为快速模型和子 Agent 模型附加 `[1m]` 后缀。
     #[serde(default)]
     pub fast_long_context: Option<bool>,
-    /// 仅 Pi：是否为 Pi 安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。
-    /// 安装后可为发往 Flowlet 渠道的请求注入 x-flowlet-session 头，使 Flowlet 能按会话
-    /// 归并请求；关闭则不安装（Pi 仍可作为 Flowlet 客户端使用，但无法做会话维度串联）。
-    /// 默认开启。
-    #[serde(default = "true_bool")]
-    pub session_extension: bool,
-}
-
-fn true_bool() -> bool {
-    true
+    /// Pi / DeepSeek Harness：是否安装可选会话扩展。安装后可为发往 Flowlet 渠道的
+    /// 请求注入 x-flowlet-session，使 Flowlet 能按会话归并请求。Pi 在未传选项时默认
+    /// 开启；DeepSeek Harness 在未传选项时默认关闭，由各 Adapter 决定缺省语义。
+    #[serde(default)]
+    pub session_extension: Option<bool>,
 }
 
 impl AgentGlobalConfigOptions {

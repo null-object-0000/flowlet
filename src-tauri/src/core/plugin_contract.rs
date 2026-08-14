@@ -1,7 +1,8 @@
 use super::agent_environment::has_environment_adapter;
 use super::agent_global_config::has_global_config_adapter;
-use super::agent_session_adapter::has_session_adapter;
-use super::agent_task_runner::has_runner_adapter;
+use super::agent_identity_adapter::has_identity_adapter;
+use super::agent_session_adapter::{has_session_adapter, session_types_for_adapter};
+use super::agent_task_runner::{has_runner_adapter, runner_contract};
 use super::channel_capability_adapter::{
     builtin_channel_presets, configured_console_scrape_mode_key, has_model_sync,
     supports_official_balance,
@@ -154,10 +155,52 @@ fn registered_agents_resolve_every_compiled_adapter() {
             agent.session_adapter_id
         );
         assert!(
+            has_identity_adapter(&agent.identity_adapter_id),
+            "{} 缺少身份 Adapter {}",
+            agent.id,
+            agent.identity_adapter_id
+        );
+        assert!(
             has_runner_adapter(&agent.runner_adapter_id),
             "{} 缺少执行 Adapter {}",
             agent.id,
             agent.runner_adapter_id
+        );
+        let declared_session_types = agent
+            .session_types
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<HashSet<_>>();
+        let compiled_session_types = session_types_for_adapter(&agent.session_adapter_id)
+            .expect("已通过 Session Adapter 存在性校验")
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            declared_session_types, compiled_session_types,
+            "{} 的会话类型声明与 Adapter 实现不一致",
+            agent.id
+        );
+        let (profile, required_surface, _) =
+            runner_contract(&agent.runner_adapter_id).expect("已通过 Runner Adapter 存在性校验");
+        assert_eq!(
+            agent.task_profile.name, profile,
+            "{} 的任务 Profile 与 Runner Adapter 不一致",
+            agent.id
+        );
+        let required_surface = match required_surface {
+            super::agent_environment::AgentSurface::Cli => "cli",
+            super::agent_environment::AgentSurface::Desktop => "desktop",
+            super::agent_environment::AgentSurface::Web => "web",
+        };
+        assert!(
+            agent
+                .surfaces
+                .iter()
+                .any(|surface| surface == required_surface),
+            "{} 的 Runner 所需 Surface 未在插件中声明：{}",
+            agent.id,
+            required_surface
         );
         assert!(
             matches!(agent.endpoint_suffix.as_str(), "/v1" | "/anthropic"),

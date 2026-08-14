@@ -543,15 +543,9 @@ fn native_agent_client_id(agent_type: &str) -> &str {
 }
 
 fn native_agent_display_name(agent_type: &str) -> &str {
-    match agent_type {
-        "claude-code" => "Claude Code",
-        "codex-desktop" => "Codex Desktop",
-        "codex-cli" => "Codex CLI",
-        "opencode" => "OpenCode",
-        "pi" => "Pi",
-        "deepseek-harness" => "DeepSeek Harness",
-        other => other,
-    }
+    crate::core::plugin_registry::plugin_registry()
+        .session_type_name(agent_type)
+        .unwrap_or(agent_type)
 }
 
 #[derive(Debug, Clone, Default)]

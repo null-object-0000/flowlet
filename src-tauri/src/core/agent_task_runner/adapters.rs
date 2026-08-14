@@ -20,64 +20,67 @@ type ExecuteRunner = for<'a> fn(
     bool,
 ) -> RunnerFuture<'a>;
 
-pub(super) struct AgentTaskRunnerAdapter {
-    pub(super) id: &'static str,
-    pub(super) profile: &'static str,
-    pub(super) environment_adapter_id: &'static str,
-    pub(super) display_name: &'static str,
-    pub(super) required_surface: AgentSurface,
-    pub(super) supports_resume: bool,
-    pub(super) missing_executable_message: &'static str,
-    pub(super) resume_unsupported_message: &'static str,
+pub(crate) struct AgentTaskRunnerAdapter {
+    pub(crate) id: &'static str,
+    pub(crate) profile: &'static str,
+    pub(crate) environment_adapter_id: &'static str,
+    pub(crate) display_name: &'static str,
+    pub(crate) required_surface: AgentSurface,
+    pub(crate) supports_resume: bool,
+    pub(crate) missing_executable_message: &'static str,
+    pub(crate) resume_unsupported_message: &'static str,
     pub(super) execute: ExecuteRunner,
 }
 
-static RUNNER_ADAPTERS: [AgentTaskRunnerAdapter; 5] = [
-    AgentTaskRunnerAdapter {
-        id: "claude-code",
-        profile: "Claude Code",
-        environment_adapter_id: "claude-code",
-        display_name: "Claude Code",
-        required_surface: AgentSurface::Cli,
-        supports_resume: true,
-        missing_executable_message: "未检测到 Claude Code CLI 可执行文件（接入配置不包含 CLI），请先安装 Claude Code 后重试。",
-        resume_unsupported_message: "Claude Code 当前不支持续跑",
-        execute: execute_claude_code_boxed,
-    },
-    AgentTaskRunnerAdapter {
-        id: "opencode",
-        profile: "OpenCode",
-        environment_adapter_id: "opencode",
-        display_name: "OpenCode",
-        required_surface: AgentSurface::Cli,
-        supports_resume: true,
-        missing_executable_message: "未检测到 OpenCode CLI 可执行文件（接入配置不包含 CLI），请先安装 OpenCode 后重试。",
-        resume_unsupported_message: "OpenCode 当前不支持续跑",
-        execute: execute_opencode_boxed,
-    },
-    AgentTaskRunnerAdapter {
-        id: "pi",
-        profile: "Pi",
-        environment_adapter_id: "pi",
-        display_name: "Pi",
-        required_surface: AgentSurface::Cli,
-        supports_resume: true,
-        missing_executable_message: "未检测到 Pi CLI 可执行文件（接入配置不包含 CLI），请先安装 Pi 后重试。",
-        resume_unsupported_message: "Pi 当前不支持续跑",
-        execute: execute_pi_boxed,
-    },
-    AgentTaskRunnerAdapter {
-        id: "codex",
-        profile: "Codex",
-        environment_adapter_id: "chatgpt-desktop",
-        display_name: "Codex",
-        required_surface: AgentSurface::Cli,
-        supports_resume: true,
-        missing_executable_message: "未检测到 Codex CLI 可执行文件（接入配置不包含 CLI），请先安装 Codex 后重试。",
-        resume_unsupported_message: "Codex 当前不支持续跑",
-        execute: execute_codex_boxed,
-    },
-    AgentTaskRunnerAdapter {
+pub(crate) static CLAUDE_CODE: AgentTaskRunnerAdapter = AgentTaskRunnerAdapter {
+    id: "claude-code",
+    profile: "Claude Code",
+    environment_adapter_id: "claude-code",
+    display_name: "Claude Code",
+    required_surface: AgentSurface::Cli,
+    supports_resume: true,
+    missing_executable_message:
+        "未检测到 Claude Code CLI 可执行文件（接入配置不包含 CLI），请先安装 Claude Code 后重试。",
+    resume_unsupported_message: "Claude Code 当前不支持续跑",
+    execute: execute_claude_code_boxed,
+};
+pub(crate) static OPENCODE: AgentTaskRunnerAdapter = AgentTaskRunnerAdapter {
+    id: "opencode",
+    profile: "OpenCode",
+    environment_adapter_id: "opencode",
+    display_name: "OpenCode",
+    required_surface: AgentSurface::Cli,
+    supports_resume: true,
+    missing_executable_message:
+        "未检测到 OpenCode CLI 可执行文件（接入配置不包含 CLI），请先安装 OpenCode 后重试。",
+    resume_unsupported_message: "OpenCode 当前不支持续跑",
+    execute: execute_opencode_boxed,
+};
+pub(crate) static PI: AgentTaskRunnerAdapter = AgentTaskRunnerAdapter {
+    id: "pi",
+    profile: "Pi",
+    environment_adapter_id: "pi",
+    display_name: "Pi",
+    required_surface: AgentSurface::Cli,
+    supports_resume: true,
+    missing_executable_message:
+        "未检测到 Pi CLI 可执行文件（接入配置不包含 CLI），请先安装 Pi 后重试。",
+    resume_unsupported_message: "Pi 当前不支持续跑",
+    execute: execute_pi_boxed,
+};
+pub(crate) static CODEX: AgentTaskRunnerAdapter = AgentTaskRunnerAdapter {
+    id: "codex",
+    profile: "Codex",
+    environment_adapter_id: "chatgpt-desktop",
+    display_name: "Codex",
+    required_surface: AgentSurface::Cli,
+    supports_resume: true,
+    missing_executable_message:
+        "未检测到 Codex CLI 可执行文件（接入配置不包含 CLI），请先安装 Codex 后重试。",
+    resume_unsupported_message: "Codex 当前不支持续跑",
+    execute: execute_codex_boxed,
+};
+pub(crate) static DEEPSEEK_HARNESS: AgentTaskRunnerAdapter = AgentTaskRunnerAdapter {
         id: "deepseek-harness",
         profile: "DeepSeek Harness",
         environment_adapter_id: "deepseek-harness",
@@ -87,30 +90,33 @@ static RUNNER_ADAPTERS: [AgentTaskRunnerAdapter; 5] = [
         missing_executable_message: "检测到 DeepSeek Harness 数据目录或 Web，但 PATH 中没有稳定的 dsh 启动命令；请先全局安装 @deepseek-ai/dsh。Flowlet 不会使用 npx 临时缓存执行任务。",
         resume_unsupported_message: "DeepSeek Harness headless 当前不提供稳定的 resume 参数；Flowlet 不会把续跑伪装成新会话。请将任务会话策略改为 fresh。",
         execute: execute_deepseek_harness_boxed,
-    },
-];
+    };
 
 pub(super) fn for_profile(profile: &str) -> Option<&'static AgentTaskRunnerAdapter> {
     let normalized = profile.trim();
     if normalized.is_empty() {
-        return RUNNER_ADAPTERS
+        return crate::core::agent_plugin_bundle::bundles()
             .iter()
+            .map(|bundle| bundle.runner)
             .find(|adapter| adapter.id == "claude-code");
     }
-    RUNNER_ADAPTERS
+    crate::core::agent_plugin_bundle::bundles()
         .iter()
+        .map(|bundle| bundle.runner)
         .find(|adapter| adapter.profile == normalized)
 }
 
 pub(super) fn has(adapter_id: &str) -> bool {
-    RUNNER_ADAPTERS
+    crate::core::agent_plugin_bundle::bundles()
         .iter()
+        .map(|bundle| bundle.runner)
         .any(|adapter| adapter.id == adapter_id)
 }
 
 pub(super) fn by_id(adapter_id: &str) -> Option<&'static AgentTaskRunnerAdapter> {
-    RUNNER_ADAPTERS
+    crate::core::agent_plugin_bundle::bundles()
         .iter()
+        .map(|bundle| bundle.runner)
         .find(|adapter| adapter.id == adapter_id)
 }
 
@@ -156,9 +162,9 @@ mod tests {
     #[test]
     fn resolves_every_compiled_runner_without_unknown_fallback() {
         assert_eq!(
-            RUNNER_ADAPTERS
+            crate::core::agent_plugin_bundle::bundles()
                 .iter()
-                .map(|adapter| adapter.id)
+                .map(|bundle| bundle.runner.id)
                 .collect::<Vec<_>>(),
             vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]
         );

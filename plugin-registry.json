@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "plugins": [
     { "id": "flowlet.models.builtin", "kind": "model-catalog", "source": "model-catalog.json" },
     { "id": "flowlet.channel.longcat", "kind": "channel", "channelId": "longcat", "adapterId": "longcat" },
@@ -20,8 +20,12 @@
         "sessionAdapterId": "claude-code",
         "identityAdapterId": "claude-code",
         "runnerAdapterId": "claude-code",
-        "sessionTypes": [{ "id": "claude-code", "name": "Claude Code" }],
+        "sessionTypes": [{ "id": "claude-code", "name": "Claude Code", "clientId": "claude-code" }],
         "taskProfile": { "name": "Claude Code", "sessionType": "claude-code" },
+        "configCapabilities": [
+          { "id": "primary-long-context", "name": "主模型 1M 长上下文", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
+          { "id": "fast-long-context", "name": "快速模型 1M 长上下文", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
+        ],
         "endpointSuffix": "/anthropic",
         "npmPackage": "@anthropic-ai/claude-code",
         "surfaces": ["cli"],
@@ -51,8 +55,9 @@
         "sessionAdapterId": "opencode",
         "identityAdapterId": "opencode",
         "runnerAdapterId": "opencode",
-        "sessionTypes": [{ "id": "opencode", "name": "OpenCode" }],
+        "sessionTypes": [{ "id": "opencode", "name": "OpenCode", "clientId": "opencode" }],
         "taskProfile": { "name": "OpenCode", "sessionType": "opencode" },
+        "configCapabilities": [],
         "endpointSuffix": "/v1",
         "npmPackage": "opencode-ai",
         "surfaces": ["cli", "desktop"],
@@ -81,8 +86,11 @@
         "sessionAdapterId": "pi",
         "identityAdapterId": "pi",
         "runnerAdapterId": "pi",
-        "sessionTypes": [{ "id": "pi", "name": "Pi" }],
+        "sessionTypes": [{ "id": "pi", "name": "Pi", "clientId": "pi" }],
         "taskProfile": { "name": "Pi", "sessionType": "pi" },
+        "configCapabilities": [
+          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": true, "requiresRestart": true }
+        ],
         "endpointSuffix": "/v1",
         "npmPackage": "@earendil-works/pi-coding-agent",
         "surfaces": ["cli"],
@@ -112,10 +120,11 @@
         "identityAdapterId": "codex",
         "runnerAdapterId": "codex",
         "sessionTypes": [
-          { "id": "codex-desktop", "name": "Codex Desktop" },
-          { "id": "codex-cli", "name": "Codex CLI" }
+          { "id": "codex-desktop", "name": "Codex Desktop", "clientId": "codex-desktop" },
+          { "id": "codex-cli", "name": "Codex CLI", "clientId": "codex" }
         ],
         "taskProfile": { "name": "Codex", "sessionType": "codex-cli" },
+        "configCapabilities": [],
         "endpointSuffix": "/v1",
         "npmPackage": "@openai/codex",
         "surfaces": ["cli", "desktop"],
@@ -144,8 +153,11 @@
         "sessionAdapterId": "deepseek-harness",
         "identityAdapterId": "deepseek-harness",
         "runnerAdapterId": "deepseek-harness",
-        "sessionTypes": [{ "id": "deepseek-harness", "name": "DeepSeek Harness" }],
+        "sessionTypes": [{ "id": "deepseek-harness", "name": "DeepSeek Harness", "clientId": "deepseek-harness" }],
         "taskProfile": { "name": "DeepSeek Harness", "sessionType": "deepseek-harness" },
+        "configCapabilities": [
+          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
+        ],
         "endpointSuffix": "/v1",
         "npmPackage": "@deepseek-ai/dsh",
         "surfaces": ["web"],

@@ -7,6 +7,7 @@ import {
   detectAgentEnvironment,
   inspectAgentGlobalConfig,
   listCachedCodexAccounts,
+  listAgentCapabilities,
   queryCodexAccount,
   restoreAgentGlobalConfig,
 } from "../../domains/agent/commands";
@@ -24,6 +25,14 @@ export function useAgentEnvironments() {
     })),
   });
   return new Map(AGENT_PLUGINS.map((agent, index) => [agent.id, queries[index]]));
+}
+
+export function useAgentCapabilities() {
+  return useQuery({
+    queryKey: queryKeys.agent.capabilities(),
+    queryFn: listAgentCapabilities,
+    staleTime: Infinity,
+  });
 }
 
 // Agent 最新版本提示：概览页卡片 Badge dot 与接入抽屉共用。npm 版本不会高频变化，

@@ -162,6 +162,10 @@ pub(crate) fn save_recurring_task(
     if task.agent_profile.trim().is_empty() {
         return Err("Agent Profile 不能为空".to_string());
     }
+    crate::core::agent_task_runner::validate_session_policy(
+        &task.agent_profile,
+        &task.session_policy,
+    )?;
     if state
         .storage
         .get_project(&task.project_id)

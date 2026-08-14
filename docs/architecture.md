@@ -127,8 +127,8 @@ Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、Web
 `model-catalog` 和 `agent`。它统一控制内置渠道顺序、模型目录来源，以及 Agent 的身份、
 展示元数据、环境检测适配器 ID、全局配置适配器 ID、协议端点和 npm 版本来源。渠道贡献也
 显式声明预设适配器 ID，不再假设贡献 ID 必须等于底层实现 ID。Rust 与前端分别加载同一
-清单；当前适配器化清单为 schema v2，启动时校验插件 ID、贡献 ID、必填适配器及编译期
-适配器白名单。
+清单；当前适配器化清单为 schema v4，启动时校验插件 ID、贡献 ID、必填适配器、会话客户端
+归属、可选配置能力及编译期实现。
 
 注册表只声明能力，具体渠道同步、余额查询、Agent 安装检测和全局配置写入仍由编译进应用的
 受控适配器实现；同一适配器可以被多个声明式贡献复用，但未知适配器会在注册表加载时明确失败。
@@ -137,8 +137,13 @@ SQLite 或运行时配置快照直接修改代理状态。修改内置注册表�
 
 `core::plugin_contract` 提供跨文件契约测试：对账注册渠道、`config.json` 预设与预设工厂，
 校验模型同步、余额和控制台抓取的声明/实现一致性，验证抓取 mode 的实际配置，并确保模型目录
-官方归属指向已注册渠道、Agent 的四类编译期 Adapter 与 Surface 全部有效。新增扩展遗漏任一环节
+官方归属指向已注册渠道、Agent 的五类编译期 Adapter 与 Surface 全部有效。新增扩展遗漏任一环节
 会在 Rust 测试阶段失败，不延迟到运行时静默降级。
+
+Rust 的 `AgentPluginBundle` 是五类 Agent 实现的唯一编译期 roster：Environment、Global Config、
+Session、Identity 与 Runner 在同一条 Bundle 中组合，各能力模块只提供实现，不再各自维护 Agent
+数组。`plugin-registry.json` 负责产品声明，Bundle 负责类型化实现；两者在启动校验中严格对账，
+未知或遗漏能力不允许回退到其它 Agent。
 
 前端 Agent 概览使用 `useQueries` 按注册表一次性创建环境探测 Query，并通过统一的
 `useAgentGlobalConfig(agentId)` 处理配置检查、写入和恢复；领域 command 只保留带 `agentId`
@@ -169,6 +174,9 @@ Rust 全局配置入口通过统一 `AgentGlobalConfigAdapter` 的 `inspect / ap
 插件注册表校验直接查询该 Adapter registry，不再维护另一份全局配置适配器白名单；设备同步也先
 按 Agent 插件声明解析 `globalConfigAdapterId`，不假设公开 Agent ID 与实现 ID 相同。Adapter 不存在时
 在注册表加载或调用入口明确失败，不做静默回退。
+每个包含结构化文件改写的 Global Config Adapter 都应提供基于真实上游初始文件的生命周期契约：
+`inspect -> apply -> reapply -> disable optional capability -> restore`，并在每一步重新用上游格式解析器
+验证语义有效、幂等与原字节恢复。DSH 当前固定了官方 `PROFILE_PATCH_TEMPLATE` 作为回归 fixture。
 
 DeepSeek Harness 的 `settings.yaml` / `.credentials.yaml` 会热加载。Flowlet Global Config
 Adapter 解析其 Flowlet Provider、Client Token、当前默认 provider/model 与环境覆盖；一键接入
@@ -204,6 +212,9 @@ Claude Code、OpenCode、Pi、Codex 与 DeepSeek Harness 执行器分别负责�
 项目队列与任务状态机不感知具体 Agent。执行器位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
 位于 `agent_task_runner/process.rs`；父模块只保留项目执行槽、队列调度和任务状态流转。
 历史空 Profile 仍显式映射 Claude Code，未知 Profile 与未知 Runner Adapter 均明确失败，不回退执行。
+`list_agent_capabilities` 从已经对账的声明与 Bundle 生成类型化能力报告，向前端公开 Surface、会话类型、
+客户端归属、配置开关与 Runner 的 resume 合同。重复任务 UI 据此禁用不支持的会话策略，保存 command
+仍会二次校验，避免旧前端或直接调用绕过 Runner 能力边界。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 

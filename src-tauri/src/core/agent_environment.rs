@@ -5,7 +5,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
-mod adapters;
+pub(crate) mod adapters;
 mod process;
 
 #[cfg(all(test, windows))]

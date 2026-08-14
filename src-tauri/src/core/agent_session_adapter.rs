@@ -2,9 +2,7 @@ use super::agent_session_metadata::NativeAgentSourceWatch;
 use super::config::{AgentSessionRow, AgentSessionTimeline, AgentUsageEvent};
 use std::path::PathBuf;
 
-mod adapters;
-
-use adapters::ADAPTERS;
+pub(crate) mod adapters;
 
 pub(crate) trait AgentSessionAdapter: Sync {
     fn id(&self) -> &'static str;
@@ -31,24 +29,22 @@ pub(crate) trait AgentSessionAdapter: Sync {
     }
 }
 
-pub(crate) fn session_adapters() -> &'static [&'static dyn AgentSessionAdapter] {
-    &ADAPTERS
+pub(crate) fn session_adapters() -> impl Iterator<Item = &'static dyn AgentSessionAdapter> {
+    super::agent_plugin_bundle::bundles()
+        .iter()
+        .map(|bundle| bundle.session)
 }
 
 pub(crate) fn adapter_for_agent_type(agent_type: &str) -> Option<&'static dyn AgentSessionAdapter> {
-    ADAPTERS
-        .iter()
-        .copied()
-        .find(|adapter| adapter.agent_types().contains(&agent_type))
+    session_adapters().find(|adapter| adapter.agent_types().contains(&agent_type))
 }
 
 pub(crate) fn has_session_adapter(adapter_id: &str) -> bool {
-    ADAPTERS.iter().any(|adapter| adapter.id() == adapter_id)
+    session_adapters().any(|adapter| adapter.id() == adapter_id)
 }
 
 pub(crate) fn session_types_for_adapter(adapter_id: &str) -> Option<&'static [&'static str]> {
-    ADAPTERS
-        .iter()
+    session_adapters()
         .find(|adapter| adapter.id() == adapter_id)
         .map(|adapter| adapter.agent_types())
 }
@@ -60,8 +56,7 @@ mod tests {
     #[test]
     fn registers_stable_adapters_and_runtime_agent_types() {
         assert_eq!(
-            ADAPTERS
-                .iter()
+            session_adapters()
                 .map(|adapter| adapter.id())
                 .collect::<Vec<_>>(),
             vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]

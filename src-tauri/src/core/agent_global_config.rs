@@ -11,7 +11,7 @@ use super::agent_environment::display_path;
 use super::codex_account::codex_home;
 use super::codex_model_catalog;
 
-mod adapters;
+pub(crate) mod adapters;
 
 const BACKUP_VERSION: u32 = 1;
 const FLOWLET_DIR: &str = ".flowlet";

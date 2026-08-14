@@ -334,6 +334,10 @@ fn profile_bridge_matches(root: &Path, expected_base_url: &str) -> bool {
 
 fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
+    inspect_dsh_at(&home, expected_base_url)
+}
+
+fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
     let backup_available = backup_path(&home).is_file();
@@ -836,6 +840,15 @@ fn apply_dsh(
     session_extension: bool,
 ) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
+    apply_dsh_at(&home, expected_base_url, client_token, session_extension)
+}
+
+fn apply_dsh_at(
+    home: &Path,
+    expected_base_url: &str,
+    client_token: &str,
+    session_extension: bool,
+) -> Result<AgentGlobalConfigReport, String> {
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
     let backup = backup_path(&home);
@@ -936,11 +949,15 @@ fn apply_dsh(
         }
         return Err(error.message);
     }
-    inspect_dsh(expected_base_url)
+    inspect_dsh_at(home, expected_base_url)
 }
 
 fn restore_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
+    restore_dsh_at(&home, expected_base_url)
+}
+
+fn restore_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
     let backup_path = backup_path(&home);
@@ -1007,7 +1024,7 @@ fn restore_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
         .map_err(|error| error.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("删除 DSH 配置备份失败：{error}"))?;
-    inspect_dsh(expected_base_url)
+    inspect_dsh_at(home, expected_base_url)
 }
 
 #[cfg(test)]
@@ -1151,28 +1168,121 @@ mod tests {
             String::from_utf8(patch_session_bridge(before, "http://127.0.0.1:18640/v1").unwrap())
                 .unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
-        assert!(parsed.as_sequence().is_some_and(|entries| entries.len() == 1));
+        assert!(parsed
+            .as_sequence()
+            .is_some_and(|entries| entries.len() == 1));
         assert!(output.contains("# keep this comment"));
         assert!(!output.lines().any(|line| line.trim() == "[]"));
     }
 
     #[test]
-    fn session_bridge_patch_repairs_the_previous_empty_array_plus_managed_block() {
-        let broken = format!("# user patch layer\n[]\n\n{}", session_bridge_block("http://127.0.0.1:18640/v1"));
-        let output = String::from_utf8(
-            patch_session_bridge(&broken, "http://127.0.0.1:28640/v1").unwrap(),
+    fn real_upstream_profile_fixture_passes_apply_reapply_disable_restore_contract() {
+        const UPSTREAM_PATCH: &str =
+            include_str!("../../../../tests/fixtures/deepseek-harness/web/cordis.patch.yml");
+        let home = std::env::temp_dir().join(format!(
+            "flowlet-dsh-global-config-contract-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = home.join("profiles").join("web");
+        std::fs::create_dir_all(&profile).unwrap();
+        let settings = "# keep user settings\nllm-pi-ai:\n  providers:\n    existing:\n      baseURL: https://example.com/v1\nagent-default-model:\n  provider: existing\n  model: existing-model\n";
+        let credentials = "# keep user credentials\nEXISTING_TOKEN: keep-me\n";
+        std::fs::write(home.join("settings.yaml"), settings).unwrap();
+        std::fs::write(home.join(".credentials.yaml"), credentials).unwrap();
+        std::fs::write(
+            profile.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}"#,
         )
         .unwrap();
+        std::fs::write(profile.join("cordis.patch.yml"), UPSTREAM_PATCH).unwrap();
+
+        let report = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+        )
+        .unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
+        assert!(report.session_extension);
+        let managed_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&managed_patch).unwrap();
+        assert!(parsed
+            .as_sequence()
+            .is_some_and(|entries| entries.len() == 1));
+        assert!(profile
+            .join(SESSION_BRIDGE_DIR)
+            .join(SESSION_BRIDGE_FILE)
+            .is_file());
+
+        apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+            managed_patch,
+            "reapply must be idempotent"
+        );
+
+        let disabled = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            false,
+        )
+        .unwrap();
+        assert!(!disabled.session_extension);
+        let disabled_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&disabled_patch).unwrap();
+        assert!(parsed.as_sequence().is_some_and(Vec::is_empty));
+        assert!(!profile
+            .join(SESSION_BRIDGE_DIR)
+            .join(SESSION_BRIDGE_FILE)
+            .is_file());
+
+        let restored = restore_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+        assert_eq!(
+            std::fs::read_to_string(home.join("settings.yaml")).unwrap(),
+            settings
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
+            credentials
+        );
+        assert_eq!(
+            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+            UPSTREAM_PATCH
+        );
+        assert!(!backup_path(&home).exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn session_bridge_patch_repairs_the_previous_empty_array_plus_managed_block() {
+        let broken = format!(
+            "# user patch layer\n[]\n\n{}",
+            session_bridge_block("http://127.0.0.1:18640/v1")
+        );
+        let output =
+            String::from_utf8(patch_session_bridge(&broken, "http://127.0.0.1:28640/v1").unwrap())
+                .unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
-        assert!(parsed.as_sequence().is_some_and(|entries| entries.len() == 1));
+        assert!(parsed
+            .as_sequence()
+            .is_some_and(|entries| entries.len() == 1));
         assert!(output.contains("baseURL: http://127.0.0.1:28640/v1"));
         assert_eq!(output.matches(SESSION_BRIDGE_START).count(), 1);
     }
 
     #[test]
     fn session_bridge_patch_refuses_nonempty_flow_style_array() {
-        let error = patch_session_bridge("[{ id: custom }]\n", "http://127.0.0.1:18640/v1")
-            .unwrap_err();
+        let error =
+            patch_session_bridge("[{ id: custom }]\n", "http://127.0.0.1:18640/v1").unwrap_err();
         assert!(error.contains("行内数组"));
     }
 
@@ -1212,9 +1322,10 @@ mod tests {
 
     #[test]
     fn session_bridge_removal_restores_an_empty_array_document() {
-        let managed =
-            String::from_utf8(patch_session_bridge("# user patch layer\n[]\n", "http://127.0.0.1:18640/v1").unwrap())
-                .unwrap();
+        let managed = String::from_utf8(
+            patch_session_bridge("# user patch layer\n[]\n", "http://127.0.0.1:18640/v1").unwrap(),
+        )
+        .unwrap();
         let removed = String::from_utf8(remove_session_bridge(&managed).unwrap()).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&removed).unwrap();
         assert!(

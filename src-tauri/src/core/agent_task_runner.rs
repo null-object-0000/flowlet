@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-mod adapters;
+pub(crate) mod adapters;
 mod process;
 
 use process::{
@@ -718,6 +718,34 @@ pub(crate) fn runner_contract(
             adapter.supports_resume,
         )
     })
+}
+
+pub(crate) fn validate_session_policy(
+    agent_profile: &str,
+    session_policy: &str,
+) -> Result<(), String> {
+    let adapter = adapters::for_profile(agent_profile)
+        .ok_or_else(|| format!("不支持的 Agent Profile：{agent_profile}"))?;
+    if session_policy == "continue" && !adapter.supports_resume {
+        return Err(adapter.resume_unsupported_message.to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod runner_contract_tests {
+    use super::*;
+
+    #[test]
+    fn session_policy_validation_uses_the_selected_runner_contract() {
+        assert!(validate_session_policy("Claude Code", "continue").is_ok());
+        let error = validate_session_policy("DeepSeek Harness", "continue").unwrap_err();
+        assert!(error.contains("resume"));
+        assert!(validate_session_policy("DeepSeek Harness", "fresh").is_ok());
+        assert!(validate_session_policy("missing", "fresh")
+            .unwrap_err()
+            .contains("不支持"));
+    }
 }
 
 /// 读取项目并校验本机目录绑定，返回项目目录（所有执行器共用的前置校验）。

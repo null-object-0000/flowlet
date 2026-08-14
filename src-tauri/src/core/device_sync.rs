@@ -411,10 +411,16 @@ fn agent_install_method_name(method: &AgentInstallMethod) -> &'static str {
 }
 
 fn session_matches_agent(agent_type: &str, agent_id: &str) -> bool {
-    match agent_id {
-        "chatgpt-desktop" => matches!(agent_type, "codex-cli" | "codex-desktop"),
-        _ => agent_type == agent_id,
-    }
+    let registry = crate::core::plugin_registry::plugin_registry();
+    registry
+        .agent(agent_id)
+        .or_else(|| registry.agent_for_environment_adapter(agent_id))
+        .is_some_and(|agent| {
+            agent
+                .session_types
+                .iter()
+                .any(|session| session.id == agent_type)
+        })
 }
 
 fn sanitize_session_text(value: Option<String>, max_chars: usize) -> Option<String> {
@@ -1816,6 +1822,18 @@ pub fn save_status(storage: &Storage, status: &S3SyncStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_environment_matching_comes_from_the_agent_registry() {
+        assert!(session_matches_agent("codex-cli", "chatgpt-desktop"));
+        assert!(session_matches_agent("codex-desktop", "chatgpt-desktop"));
+        assert!(session_matches_agent(
+            "deepseek-harness",
+            "deepseek-harness"
+        ));
+        assert!(!session_matches_agent("pi", "chatgpt-desktop"));
+        assert!(!session_matches_agent("unknown", "unknown"));
+    }
 
     fn input(endpoint: &str) -> S3SyncConfigInput {
         S3SyncConfigInput {

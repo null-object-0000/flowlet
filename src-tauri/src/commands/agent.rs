@@ -1,5 +1,11 @@
 use crate::AppState;
 
+#[tauri::command]
+pub(crate) fn list_agent_capabilities(
+) -> Result<crate::core::agent_plugin_bundle::AgentCapabilitiesReport, String> {
+    Ok(crate::core::agent_plugin_bundle::capabilities())
+}
+
 // Claude Code 走 Anthropic-compatible 端点，其余已支持一键接入的 Agent
 // （OpenCode、Pi）走 OpenAI-compatible 端点。
 fn agent_endpoint_suffix(agent_id: &str) -> Result<&'static str, String> {

@@ -60,6 +60,11 @@ FLOWLET_CLIENT_TOKEN: <Client Token>
 若现有受管父路径使用无法安全定点改写的行内/复杂 YAML，Flowlet 会明确报错而不会猜测重写。
 该能力不依赖 DSH Web 正在运行：运行中由 DSH 热加载，未运行时在下次启动读取。
 
+回归测试直接固定上游提交 `47f943859bef60e4160492346772ded9b24f765a` 中
+`packages/boot/app-boot/src/profile.ts` 的 `PROFILE_PATCH_TEMPLATE`。契约测试覆盖官方以 `[]` 初始化的
+`cordis.patch.yml` 从接入、重复接入、关闭高级能力到恢复的完整生命周期；每个中间产物都重新解析为
+YAML 顶层数组，防止再次生成 `[]` 后直接追加 `- insert` 这类原子写入成功但语义无效的文件。
+
 只有用户显式开启“精确会话关联（高级）”后，一键接入才会通过 DSH 官方 Cordis Profile
 配置，在每个已经初始化的 Profile 中部署受管的
 `flowlet-session-bridge.mjs`。插件监听官方 `llm/stream` 瀑布取得当前原生 `sessionId`，并使用

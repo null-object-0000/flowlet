@@ -11,6 +11,39 @@ export type AgentInstallMethod =
 
 export type AgentSurface = "cli" | "desktop" | "web";
 
+export type AgentSessionCapability = {
+  id: string;
+  name: string;
+  clientId: string;
+};
+
+export type AgentTaskCapability = {
+  profile: string;
+  sessionType: string;
+  requiredSurface: AgentSurface;
+  supportsResume: boolean;
+  resumeUnsupportedMessage: string;
+};
+
+export type AgentConfigCapability = {
+  id: string;
+  name: string;
+  kind: "boolean";
+  defaultEnabled: boolean;
+  requiresRestart: boolean;
+};
+
+export type AgentCapability = {
+  id: string;
+  name: string;
+  surfaces: AgentSurface[];
+  sessionTypes: AgentSessionCapability[];
+  task: AgentTaskCapability;
+  configCapabilities: AgentConfigCapability[];
+};
+
+export type AgentCapabilitiesReport = { agents: AgentCapability[] };
+
 export type AgentInstallation = {
   surface?: AgentSurface;
   executable_path: string;

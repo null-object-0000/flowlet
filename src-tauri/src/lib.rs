@@ -942,6 +942,7 @@ fn run_desktop() {
             commands::import_device_usage_bundle,
             commands::list_request_logs,
             commands::list_agent_sessions,
+            commands::list_agent_capabilities,
             commands::list_projects,
             commands::get_project,
             commands::save_project,

@@ -6,6 +6,7 @@ import {
   detectAgentEnvironment,
   inspectAgentGlobalConfig,
   listCachedCodexAccounts,
+  listAgentCapabilities,
   queryCodexAccounts,
   restoreAgentGlobalConfig,
 } from "./commands";
@@ -14,6 +15,14 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 describe("agent commands", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("reads the compiled Agent capability list through the typed boundary", async () => {
+    vi.mocked(invoke).mockResolvedValue({ agents: [] });
+
+    await listAgentCapabilities();
+
+    expect(invoke).toHaveBeenCalledWith("list_agent_capabilities", undefined);
+  });
 
   it.each(["claude-code", "opencode", "pi", "codex"])("uses the typed environment boundary for %s", async (agentId) => {
     vi.mocked(invoke).mockResolvedValue({

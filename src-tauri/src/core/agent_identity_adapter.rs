@@ -2,7 +2,7 @@ use super::agent_session_identity::{AgentSessionIdentity, AGENT_CLIENT_HEADER};
 use super::config::UaClientRule;
 use axum::http::{header, HeaderMap};
 
-mod adapters;
+pub(crate) mod adapters;
 
 pub(crate) type HeaderLookup<'a> = dyn Fn(&str) -> Option<String> + 'a;
 
@@ -20,20 +20,16 @@ pub(crate) trait AgentIdentityAdapter: Sync {
 }
 
 pub(crate) fn extract_session(header: &HeaderLookup<'_>) -> Option<AgentSessionIdentity> {
-    adapters::all()
-        .iter()
+    super::agent_plugin_bundle::identity_adapters()
         .find_map(|adapter| adapter.extract_session(header))
 }
 
 pub(crate) fn has_identity_adapter(adapter_id: &str) -> bool {
-    adapters::all()
-        .iter()
-        .any(|adapter| adapter.id() == adapter_id)
+    super::agent_plugin_bundle::identity_adapters().any(|adapter| adapter.id() == adapter_id)
 }
 
 pub(crate) fn builtin_ua_rules() -> Vec<UaClientRule> {
-    adapters::all()
-        .iter()
+    super::agent_plugin_bundle::identity_adapters()
         .flat_map(|adapter| adapter.ua_rules())
         .map(|rule| UaClientRule {
             id: rule.id.to_string(),

@@ -8,8 +8,15 @@ export type AgentIdentityAdapterId = "claude-code" | "opencode" | "pi" | "codex"
 export type AgentRunnerAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
 export type AgentPluginSurface = "cli" | "desktop" | "web";
 
-export type AgentSessionTypeDescriptor = { id: string; name: string };
+export type AgentSessionTypeDescriptor = { id: string; name: string; clientId: string };
 export type AgentTaskProfileDescriptor = { name: string; sessionType: string };
+export type AgentConfigCapabilityDescriptor = {
+  id: string;
+  name: string;
+  kind: "boolean";
+  defaultEnabled: boolean;
+  requiresRestart: boolean;
+};
 
 export type AgentPluginDescriptor = {
   id: AgentPluginId;
@@ -21,6 +28,7 @@ export type AgentPluginDescriptor = {
   runnerAdapterId: AgentRunnerAdapterId;
   sessionTypes: AgentSessionTypeDescriptor[];
   taskProfile: AgentTaskProfileDescriptor;
+  configCapabilities: AgentConfigCapabilityDescriptor[];
   endpointSuffix: "/anthropic" | "/v1";
   npmPackage: string;
   surfaces: AgentPluginSurface[];
@@ -48,7 +56,7 @@ type PluginRegistry = { schemaVersion: number; plugins: PluginDescriptor[] };
 const registry = registryJson as PluginRegistry;
 
 function validateRegistry(value: PluginRegistry): void {
-  if (value.schemaVersion !== 3) throw new Error(`Unsupported plugin registry schema: ${value.schemaVersion}`);
+  if (value.schemaVersion !== 4) throw new Error(`Unsupported plugin registry schema: ${value.schemaVersion}`);
   const pluginIds = new Set<string>();
   const contributionIds = new Set<string>();
   const sessionTypeIds = new Set<string>();
@@ -76,11 +84,18 @@ function validateRegistry(value: PluginRegistry): void {
       throw new Error(`Agent task session type is not registered: ${plugin.agent.id}/${plugin.agent.taskProfile.sessionType}`);
     }
     if (plugin.kind === "agent") {
+      const capabilityIds = new Set<string>();
       for (const session of plugin.agent.sessionTypes) {
-        if (!session.id.trim() || !session.name.trim() || sessionTypeIds.has(session.id)) {
+        if (!session.id.trim() || !session.name.trim() || !session.clientId.trim() || sessionTypeIds.has(session.id)) {
           throw new Error(`Duplicate or blank Agent session type: ${session.id}`);
         }
         sessionTypeIds.add(session.id);
+      }
+      for (const capability of plugin.agent.configCapabilities) {
+        if (!capability.id.trim() || !capability.name.trim() || capability.kind !== "boolean" || capabilityIds.has(capability.id)) {
+          throw new Error(`Duplicate or invalid Agent config capability: ${plugin.agent.id}/${capability.id}`);
+        }
+        capabilityIds.add(capability.id);
       }
       if (taskProfileNames.has(plugin.agent.taskProfile.name)) {
         throw new Error(`Duplicate Agent task profile: ${plugin.agent.taskProfile.name}`);

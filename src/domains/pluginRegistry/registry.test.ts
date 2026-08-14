@@ -19,9 +19,13 @@ describe("plugin registry", () => {
     expect(agentPlugin("opencode").surfaces).toEqual(["cli", "desktop"]);
     expect(agentPlugin("deepseek-harness").surfaces).toEqual(["web"]);
     expect(agentPlugin("deepseek-harness").supportsManagedConfig).toBe(true);
+    expect(agentPlugin("deepseek-harness").configCapabilities).toEqual([
+      expect.objectContaining({ id: "session-extension", defaultEnabled: false, requiresRestart: true }),
+    ]);
     expect(AGENT_SESSION_OPTIONS.map((session) => session.id)).toEqual([
       "claude-code", "opencode", "pi", "codex-desktop", "codex-cli", "deepseek-harness",
     ]);
+    expect(AGENT_SESSION_OPTIONS.find((session) => session.id === "codex-cli")?.clientId).toBe("codex");
     expect(AGENT_TASK_PROFILE_OPTIONS.map((profile) => profile.value)).toEqual([
       "Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness",
     ]);

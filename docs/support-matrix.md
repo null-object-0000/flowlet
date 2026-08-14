@@ -170,7 +170,7 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 | OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置 |
 | Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可部署原生扩展注入 `x-flowlet-session` |
 | Codex | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | 账号发现/授权/套餐用量/credits 查询与单账号删除（承载于渠道账号卡片伪账号行的详情抽屉；删除只移除 Flowlet 本地凭据与观测快照，不影响 Codex 端登录态） |
-| DeepSeek Harness | ✅ Web + Harness 目录 + 启动入口 | ✅，直接安全合并官方 YAML，不依赖 Web 运行 | OpenAI Chat Completions | ✅ `x-flowlet-client: deepseek-harness` | ✅，DSH v0 原生会话 | `dsh --profile headless` fresh task；暂不支持 resume |
+| DeepSeek Harness | ✅ Web + Harness 目录 + 启动入口 | ✅，安全合并官方 YAML 并部署受管 Cordis 会话插件 | OpenAI Chat Completions | ✅ 官方 User-Agent | ✅，DSH v0 原生会话；插件注入原生 session id 精确合并代理请求 | `dsh --profile headless` fresh task；暂不支持 resume |
 
 Codex 账号的新增/重新授权通过独立 Codex CLI 的 `codex app-server` 完成。Desktop 仍参与
 安装探测、全局配置和原生会话读取，但 Microsoft Store 应用包内部的 `codex.exe` 不视为

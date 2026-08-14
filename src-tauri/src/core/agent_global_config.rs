@@ -57,8 +57,8 @@ pub struct AgentGlobalConfigReport {
     pub backup_available: bool,
     pub external_environment_overrides: Vec<String>,
     pub error: Option<String>,
-    /// 仅 Pi：Flowlet 会话扩展（`~/.pi/agent/extensions/flowlet.ts`）是否在位。
-    /// 该扩展为 Pi 请求注入 x-flowlet-session 头，使 Flowlet 能按会话归并请求。
+    /// Pi / DeepSeek Harness：Flowlet 会话扩展是否在位。
+    /// 扩展为 Agent 请求注入 x-flowlet-session 头，使 Flowlet 能按会话归并请求。
     #[serde(default)]
     pub session_extension: bool,
     /// 仅 OpenCode：Flowlet 权限事件插件是否在位。插件用于发现 Desktop 动态端口实例。

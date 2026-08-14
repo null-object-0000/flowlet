@@ -9,8 +9,7 @@ function settingsSnippet(endpoint: string) {
     "      apiKeyEnv: FLOWLET_CLIENT_TOKEN",
     "      api: openai-completions",
     `      baseURL: ${endpoint}`,
-    "      headers:",
-    "        x-flowlet-client: deepseek-harness",
+    "      sessionIdHeader: x-flowlet-session",
     "      models:",
     "        - id: flowlet-pro",
     "        - id: flowlet-flash",
@@ -24,7 +23,10 @@ function settingsSnippet(endpoint: string) {
 export const deepSeekHarnessAdapter: AgentAccessAdapter = {
   id: "deepseek-harness",
   installationName: () => "DeepSeek Harness Web",
-  configStatuses: () => [],
+  configStatuses: ({ globalConfig, t }) => [{
+    label: t("会话插件"),
+    value: t(globalConfig?.session_extension ? "已配置" : "需安装或更新"),
+  }],
   configControls: () => [],
   applyOptions: () => undefined,
   manualSnippets: ({ endpoint, token, displayedToken, t }) => {

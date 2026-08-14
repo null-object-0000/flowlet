@@ -13,6 +13,12 @@ const TOKEN_REF: &str = "FLOWLET_CLIENT_TOKEN";
 const LLM_NAMESPACE: &str = "llm-pi-ai";
 const DEFAULT_MODEL_NAMESPACE: &str = "agent-default-model";
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+const SESSION_BRIDGE_SOURCE: &str =
+    include_str!("../../../../resources/agent-plugins/deepseek-harness/flowlet-session-bridge.mjs");
+const SESSION_BRIDGE_DIR: &str = ".flowlet";
+const SESSION_BRIDGE_FILE: &str = "flowlet-session-bridge.mjs";
+const SESSION_BRIDGE_START: &str = "# flowlet-managed:start deepseek-harness-session-bridge";
+const SESSION_BRIDGE_END: &str = "# flowlet-managed:end deepseek-harness-session-bridge";
 
 pub(super) struct DeepSeekHarnessAdapter;
 
@@ -47,6 +53,21 @@ struct DshConfigBackup {
     default_provider: BackedUpValue,
     default_model: BackedUpValue,
     credential: BackedUpValue,
+    #[serde(default)]
+    profiles: Vec<DshProfileBackup>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct DshProfileBackup {
+    profile: String,
+    patch: BackedUpText,
+    plugin: BackedUpText,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct BackedUpText {
+    present: bool,
+    content: String,
 }
 
 #[derive(Clone, Debug)]
@@ -119,11 +140,122 @@ fn backup_path(home: &Path) -> PathBuf {
         .join("deepseek-harness-global-config-backup.json")
 }
 
+fn dsh_profiles(home: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+    let root = home.join("profiles");
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut profiles = std::fs::read_dir(&root)
+        .map_err(|error| format!("读取 DSH Profile 目录 {} 失败：{error}", root.display()))?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_type()
+                .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink())
+                && profile_uses_base_bundle(&entry.path())
+        })
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| (name.to_string(), entry.path()))
+        })
+        .collect::<Vec<_>>();
+    profiles.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(profiles)
+}
+
+fn profile_uses_base_bundle(root: &Path) -> bool {
+    std::fs::read_to_string(root.join("package.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| {
+            value
+                .pointer("/dsh/profile/bundles")
+                .and_then(Value::as_array)
+                .cloned()
+        })
+        .is_some_and(|bundles| {
+            bundles
+                .iter()
+                .any(|bundle| bundle.as_str() == Some("@deepseek-ai/dsh-base"))
+        })
+}
+
+fn backed_up_text(path: &Path) -> Result<BackedUpText, String> {
+    if !path.is_file() {
+        return Ok(BackedUpText::default());
+    }
+    Ok(BackedUpText {
+        present: true,
+        content: std::fs::read_to_string(path)
+            .map_err(|error| format!("读取 DSH 插件配置 {} 失败：{error}", path.display()))?,
+    })
+}
+
+fn profile_paths(root: &Path) -> (PathBuf, PathBuf) {
+    (
+        root.join("cordis.patch.yml"),
+        root.join(SESSION_BRIDGE_DIR).join(SESSION_BRIDGE_FILE),
+    )
+}
+
+fn session_bridge_block(expected_base_url: &str) -> String {
+    format!(
+        "{SESSION_BRIDGE_START}\n- insert:\n    - id: flowlet-session-bridge\n      name: ./.flowlet/{SESSION_BRIDGE_FILE}\n      config:\n        provider: flowlet\n        baseURL: {}\n{SESSION_BRIDGE_END}\n",
+        normalize_url(expected_base_url)
+    )
+}
+
+fn patch_session_bridge(text: &str, expected_base_url: &str) -> Result<Vec<u8>, String> {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let normalized = text.replace("\r\n", "\n");
+    let start = normalized.find(SESSION_BRIDGE_START);
+    let end = normalized.find(SESSION_BRIDGE_END);
+    let mut unmanaged = match (start, end) {
+        (None, None) => normalized.trim_end_matches(['\r', '\n']).to_string(),
+        (Some(start), Some(end)) if end >= start => {
+            let end = end + SESSION_BRIDGE_END.len();
+            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
+            while value.contains("\n\n\n") {
+                value = value.replace("\n\n\n", "\n\n");
+            }
+            value.trim_end_matches(['\r', '\n']).to_string()
+        }
+        _ => {
+            return Err(
+                "DSH cordis.patch.yml 中的 Flowlet 会话桥接标记不完整，拒绝覆盖".to_string(),
+            )
+        }
+    };
+    if !unmanaged.is_empty() {
+        unmanaged.push_str("\n\n");
+    }
+    unmanaged.push_str(&session_bridge_block(expected_base_url));
+    Ok(unmanaged.replace('\n', newline).into_bytes())
+}
+
+fn profile_bridge_matches(root: &Path, expected_base_url: &str) -> bool {
+    let (patch, plugin) = profile_paths(root);
+    plugin.is_file()
+        && std::fs::read_to_string(&plugin).ok().as_deref() == Some(SESSION_BRIDGE_SOURCE)
+        && std::fs::read_to_string(patch).ok().is_some_and(|text| {
+            text.contains(SESSION_BRIDGE_START)
+                && text.contains(SESSION_BRIDGE_END)
+                && text.contains(&format!("baseURL: {}", normalize_url(expected_base_url)))
+        })
+}
+
 fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
     let backup_available = backup_path(&home).is_file();
+    let profiles = dsh_profiles(&home)?;
+    let session_extension = !profiles.is_empty()
+        && profiles
+            .iter()
+            .all(|(_, root)| profile_bridge_matches(root, expected_base_url));
     let report = |state, base_url, token, model, error| AgentGlobalConfigReport {
         agent_id: "deepseek-harness".to_string(),
         settings_path: display_path(&settings_path),
@@ -146,7 +278,7 @@ fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
             .map(|_| vec![TOKEN_REF.to_string()])
             .unwrap_or_default(),
         error,
-        session_extension: false,
+        session_extension,
         opencode_permission_bridge: false,
     };
     if !settings_path.is_file() {
@@ -183,11 +315,10 @@ fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
         .and_then(|value| value.get("api"))
         .and_then(serde_yaml::Value::as_str)
         == Some("openai-completions");
-    let marker_matches = provider
-        .and_then(|value| value.get("headers"))
-        .and_then(|value| value.get("x-flowlet-client"))
+    let session_header_matches = provider
+        .and_then(|value| value.get("sessionIdHeader"))
         .and_then(serde_yaml::Value::as_str)
-        == Some("deepseek-harness");
+        == Some("x-flowlet-session");
     let model = yaml_at(&settings, &[DEFAULT_MODEL_NAMESPACE, "model"])
         .and_then(serde_yaml::Value::as_str)
         .map(str::to_string);
@@ -200,7 +331,8 @@ fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
     let state = if base_matches
         && key_ref_matches
         && api_matches
-        && marker_matches
+        && session_header_matches
+        && session_extension
         && token
         && default_provider == Some(PROVIDER_ID)
         && model.as_deref() == Some("flowlet-pro")
@@ -528,7 +660,7 @@ fn provider_profile(expected_base_url: &str) -> Value {
         "apiKeyEnv": TOKEN_REF,
         "api": "openai-completions",
         "baseURL": normalize_url(expected_base_url),
-        "headers": { "x-flowlet-client": "deepseek-harness" },
+        "sessionIdHeader": "x-flowlet-session",
         "models": [{ "id": "flowlet-pro" }, { "id": "flowlet-flash" }],
     })
 }
@@ -628,26 +760,69 @@ fn apply_dsh(
     let current = capture_snapshot(&settings_path, &credentials_path)?;
     let settings_output = apply_settings_text(&settings_text, expected_base_url)?;
     let credentials_output = apply_credentials_text(&credentials_text, client_token)?;
-    let created_backup = !backup.is_file();
-    if created_backup {
-        write_json_file(
-            &backup,
-            &serde_json::to_value(DshConfigBackup {
-                version: BACKUP_VERSION,
-                agent_id: "deepseek-harness".to_string(),
-                provider: current.provider.clone(),
-                default_provider: current.default_provider.clone(),
-                default_model: current.default_model.clone(),
-                credential: current.credential.clone(),
-            })
-            .map_err(|error| format!("序列化 DSH 配置备份失败：{error}"))?,
-        )?;
+    let profiles = dsh_profiles(&home)?;
+    if profiles.is_empty() {
+        return Err(
+            "尚未发现可安装 Flowlet 会话插件的 DSH Profile；请先启动一次 DeepSeek Harness"
+                .to_string(),
+        );
     }
-    let writes = vec![
+    let created_backup = !backup.is_file();
+    let mut backup_value = if created_backup {
+        DshConfigBackup {
+            version: BACKUP_VERSION,
+            agent_id: "deepseek-harness".to_string(),
+            provider: current.provider.clone(),
+            default_provider: current.default_provider.clone(),
+            default_model: current.default_model.clone(),
+            credential: current.credential.clone(),
+            profiles: Vec::new(),
+        }
+    } else {
+        serde_json::from_value(read_settings(&backup)?)
+            .map_err(|error| format!("解析 DSH 配置备份失败：{error}"))?
+    };
+    if backup_value.version != BACKUP_VERSION || backup_value.agent_id != "deepseek-harness" {
+        return Err("DeepSeek Harness 配置备份版本不受支持".to_string());
+    }
+    for (profile, root) in &profiles {
+        if backup_value
+            .profiles
+            .iter()
+            .any(|item| item.profile == *profile)
+        {
+            continue;
+        }
+        let (patch, plugin) = profile_paths(root);
+        backup_value.profiles.push(DshProfileBackup {
+            profile: profile.clone(),
+            patch: backed_up_text(&patch)?,
+            plugin: backed_up_text(&plugin)?,
+        });
+    }
+    let mut writes = vec![
         (settings_path, Some(settings_output)),
         (credentials_path, Some(credentials_output)),
     ];
-    if let Err(error) = write_files_transactionally("DeepSeek Harness 配置", &writes) {
+    for (_, root) in &profiles {
+        let (patch, plugin) = profile_paths(root);
+        writes.push((
+            patch.clone(),
+            Some(patch_session_bridge(
+                &read_yaml_text(&patch)?,
+                expected_base_url,
+            )?),
+        ));
+        writes.push((plugin, Some(text_file_bytes(SESSION_BRIDGE_SOURCE))));
+    }
+    write_json_file(
+        &backup,
+        &serde_json::to_value(&backup_value)
+            .map_err(|error| format!("序列化 DSH 配置备份失败：{error}"))?,
+    )?;
+    if let Err(error) =
+        write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话插件", &writes)
+    {
         if created_backup && error.rolled_back {
             let _ = std::fs::remove_file(&backup);
         }
@@ -677,7 +852,7 @@ fn restore_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
     };
     let _settings_lock = DshFileLock::acquire(&settings_path)?;
     let _credentials_lock = DshFileLock::acquire(&credentials_path)?;
-    let writes = vec![
+    let mut writes = vec![
         (
             settings_path.clone(),
             Some(restore_settings_text(
@@ -693,7 +868,35 @@ fn restore_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
             )?),
         ),
     ];
-    write_files_transactionally("DeepSeek Harness 配置", &writes).map_err(|error| error.message)?;
+    let profiles_root = home.join("profiles");
+    for profile in &backup.profiles {
+        if profile.profile.is_empty()
+            || profile.profile.contains('/')
+            || profile.profile.contains('\\')
+            || profile.profile == "."
+            || profile.profile == ".."
+        {
+            return Err("DeepSeek Harness 配置备份包含无效 Profile 名称".to_string());
+        }
+        let root = profiles_root.join(&profile.profile);
+        let (patch, plugin) = profile_paths(&root);
+        writes.push((
+            patch,
+            profile
+                .patch
+                .present
+                .then(|| text_file_bytes(&profile.patch.content)),
+        ));
+        writes.push((
+            plugin,
+            profile
+                .plugin
+                .present
+                .then(|| text_file_bytes(&profile.plugin.content)),
+        ));
+    }
+    write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话插件", &writes)
+        .map_err(|error| error.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("删除 DSH 配置备份失败：{error}"))?;
     inspect_dsh(expected_base_url)
@@ -712,7 +915,7 @@ mod tests {
                 "apiKeyEnv": "FLOWLET_CLIENT_TOKEN",
                 "api": "openai-completions",
                 "baseURL": "http://127.0.0.1:18640/v1",
-                "headers": { "x-flowlet-client": "deepseek-harness" },
+                "sessionIdHeader": "x-flowlet-session",
                 "models": [{ "id": "flowlet-pro" }, { "id": "flowlet-flash" }],
             })
         );
@@ -811,5 +1014,78 @@ mod tests {
             Some("http://127.0.0.1:18640/v1")
         );
         assert_eq!(output.matches("flowlet:").count(), 1);
+    }
+
+    #[test]
+    fn session_bridge_patch_preserves_user_plugins_and_is_idempotent() {
+        let before = "# user plugin\n- insert:\n    - id: custom\n      name: custom-package\n";
+        let once =
+            String::from_utf8(patch_session_bridge(before, "http://127.0.0.1:18640/v1/").unwrap())
+                .unwrap();
+        assert!(once.contains("id: custom"));
+        assert!(once.contains("id: flowlet-session-bridge"));
+        assert!(once.contains("baseURL: http://127.0.0.1:18640/v1"));
+        assert_eq!(once.matches(SESSION_BRIDGE_START).count(), 1);
+
+        let twice =
+            String::from_utf8(patch_session_bridge(&once, "http://127.0.0.1:28640/v1").unwrap())
+                .unwrap();
+        assert!(twice.contains("id: custom"));
+        assert!(twice.contains("baseURL: http://127.0.0.1:28640/v1"));
+        assert!(!twice.contains("baseURL: http://127.0.0.1:18640/v1"));
+        assert_eq!(twice.matches(SESSION_BRIDGE_START).count(), 1);
+    }
+
+    #[test]
+    fn session_bridge_patch_refuses_broken_managed_markers() {
+        let error =
+            patch_session_bridge(SESSION_BRIDGE_START, "http://127.0.0.1:18640/v1").unwrap_err();
+        assert!(error.contains("标记不完整"));
+    }
+
+    #[test]
+    fn session_bridge_patch_preserves_crlf() {
+        let output = patch_session_bridge(
+            "# user\r\n- insert:\r\n    - id: custom\r\n",
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("\r\n"));
+        assert!(!output.replace("\r\n", "").contains('\n'));
+    }
+
+    #[test]
+    fn only_profiles_with_the_base_bundle_receive_the_bridge() {
+        let root =
+            std::env::temp_dir().join(format!("flowlet-dsh-profile-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","custom"]}}}"#,
+        )
+        .unwrap();
+        assert!(profile_uses_base_bundle(&root));
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":["custom"]}}}"#,
+        )
+        .unwrap();
+        assert!(!profile_uses_base_bundle(&root));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn old_backup_without_profiles_remains_readable() {
+        let backup: DshConfigBackup = serde_json::from_value(json!({
+            "version": 1,
+            "agent_id": "deepseek-harness",
+            "provider": { "present": false, "value": null },
+            "default_provider": { "present": false, "value": null },
+            "default_model": { "present": false, "value": null },
+            "credential": { "present": false, "value": null }
+        }))
+        .unwrap();
+        assert!(backup.profiles.is_empty());
     }
 }

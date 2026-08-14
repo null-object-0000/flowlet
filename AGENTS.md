@@ -446,6 +446,15 @@ Pi 官方的 `before_provider_headers` 事件），在每次 LLM 请求的 heade
 对应分支（以该 Agent 的标记头为门控）；在 `apply_request_headers` 剥离该头；在一键写入
 与手动配置片段中同时部署注入该头的原生扩展/配置。
 
+DeepSeek Harness 使用其强制携带的 `deepseek-harness/` User-Agent 识别来源，不注入
+`x-flowlet-client`。一键接入通过 DSH 官方 Cordis Profile 配置部署受管
+`flowlet-session-bridge.mjs`：插件从 `llm/stream` 读取当前 `GenerateOptions.sessionId`，使用
+`AsyncLocalStorage` 只为当前 Flowlet Provider 发往本地 Base URL 的请求注入
+`x-flowlet-session`。插件必须随 Profile 配置一同备份、原子写入和恢复，不得修改 DSH npm 包或
+缓存；写入后需重启正在运行的 DSH。Provider 仍声明 `sessionIdHeader` 作为未来 DSH 原生能力的
+同值兜底，但当前接入不得依赖尚未发布的实现。代理以 DSH UA 为门控读取并在转发上游前剥离
+该头；静态 Provider Header、文件更新时间或最近活跃会话均不得用于猜测请求所属 session。
+
 ### Codex 系一键接入
 
 Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent（`AgentKind = "codex"`），

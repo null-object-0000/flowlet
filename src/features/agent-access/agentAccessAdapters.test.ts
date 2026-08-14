@@ -67,9 +67,12 @@ describe("agent access adapters", () => {
 
     expect(adapter.installationName("web")).toBe("DeepSeek Harness Web");
     expect(snippets[0].copyValue).toContain("api: openai-completions");
-    expect(snippets[0].copyValue).toContain("x-flowlet-client: deepseek-harness");
+    expect(snippets[0].copyValue).toContain("sessionIdHeader: x-flowlet-session");
+    expect(snippets[0].copyValue).not.toContain("x-flowlet-client");
     expect(snippets[0].copyValue).toContain("agent-default-model:");
     expect(snippets[0].copyValue).toContain("model: flowlet-pro");
     expect(snippets[1].copyValue).toContain("FLOWLET_CLIENT_TOKEN: real-token");
+    expect(adapter.configStatuses(context({ session_extension: false }))[0].value)
+      .toBe("需安装或更新");
   });
 });

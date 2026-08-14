@@ -89,6 +89,19 @@ fn parse_with(header: impl Fn(&str) -> Option<String>) -> Option<AgentSessionIde
         }
     }
 
+    // DeepSeek Harness 使用稳定的官方 UA 作为产品门控，并通过受管 Provider
+    // 将当前 DSH session id 写入本地代理专用头。
+    let user_agent_is_deepseek_harness = header("user-agent")
+        .is_some_and(|value| value.to_ascii_lowercase().contains("deepseek-harness/"));
+    if user_agent_is_deepseek_harness {
+        let session_id = header(AGENT_SESSION_HEADER)?;
+        return Some(AgentSessionIdentity {
+            agent_type: "deepseek-harness".to_string(),
+            session_id,
+            parent_session_id: None,
+        });
+    }
+
     // Codex Desktop：以 UA 子串为门控，避免误读其他客户端的同名 `session-id` 头。
     let user_agent_is_codex_desktop = header("user-agent")
         .is_some_and(|value| value.to_ascii_lowercase().contains("codex desktop/"));
@@ -201,6 +214,37 @@ mod tests {
             from_header_json(r#"{"X-Flowlet-Client":"pi","X-Flowlet-Session":"pi-session"}"#,),
             Some(expected),
         );
+    }
+
+    #[test]
+    fn deepseek_harness_session_uses_official_ua_gate_on_both_paths() {
+        let ua = "deepseek-harness/0.1.0-rc.6 (+https://github.com/deepseek-ai/deepseek-harness)";
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static(ua));
+        headers.insert(
+            AGENT_SESSION_HEADER,
+            HeaderValue::from_static("dsh-session"),
+        );
+        let expected = AgentSessionIdentity {
+            agent_type: "deepseek-harness".to_string(),
+            session_id: "dsh-session".to_string(),
+            parent_session_id: None,
+        };
+
+        assert_eq!(from_http_headers(&headers), Some(expected.clone()));
+        assert_eq!(
+            from_header_json(
+                &serde_json::json!({
+                    "User-Agent": ua,
+                    "X-Flowlet-Session": "dsh-session",
+                })
+                .to_string(),
+            ),
+            Some(expected),
+        );
+
+        headers.insert("user-agent", HeaderValue::from_static("other-agent/1.0"));
+        assert_eq!(from_http_headers(&headers), None);
     }
 
     #[test]

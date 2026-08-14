@@ -16,7 +16,7 @@ Desktop：用户主要通过 `dsh web` 打开的本地浏览器界面使用它�
 | Adapter | 当前能力 | 明确边界 |
 |---|---|---|
 | Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本 | 可只读识别无歧义的 `_npx/<hash>` 包版本，但不把临时缓存当作稳定安装；已安装不等于 Web 正在运行 |
-| Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型和 Client Token | 不依赖 DSH Web 运行；复用 DSH 的文件锁协议，保留非受管配置和注释 |
+| Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型、Client Token 和 Flowlet 会话插件 | 不依赖 DSH Web 运行；复用 DSH 的文件锁协议，保留非受管配置和注释 |
 | Session | 读取 `sessions/**/session.jsonl(.zstd)` v0，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；其它版本明确拒绝；打包 delta chunk 不作为最终消息展示 |
 | Runner | 通过稳定全局命令执行 `dsh --profile headless <task>` | 仅 fresh session；DSH 没有稳定 resume 参数时明确失败 |
 
@@ -32,8 +32,7 @@ llm-pi-ai:
       apiKeyEnv: FLOWLET_CLIENT_TOKEN
       api: openai-completions
       baseURL: http://127.0.0.1:18640/v1
-      headers:
-        x-flowlet-client: deepseek-harness
+      sessionIdHeader: x-flowlet-session
       models:
         - id: flowlet-pro
         - id: flowlet-flash
@@ -60,14 +59,19 @@ FLOWLET_CLIENT_TOKEN: <Client Token>
 若现有受管父路径使用无法安全定点改写的行内/复杂 YAML，Flowlet 会明确报错而不会猜测重写。
 该能力不依赖 DSH Web 正在运行：运行中由 DSH 热加载，未运行时在下次启动读取。
 
-该链路不会向 DSH 安装插件、扩展或 Hook，也不修改 DSH 包和运行时代码。环境探测与原生
-Session Adapter 均为只读；Headless Runner 只调用 DSH 官方命令。Provider 中的
-`x-flowlet-client` 是普通静态请求 Header，仅用于日志归属，并会在 Flowlet 转发上游前剥离。
+一键接入还会通过 DSH 官方 Cordis Profile 配置，在每个已经初始化的 Profile 中部署受管的
+`flowlet-session-bridge.mjs`。插件监听官方 `llm/stream` 瀑布取得当前原生 `sessionId`，并使用
+`AsyncLocalStorage` 将它限定到当前异步请求；只有 Provider 为 `flowlet` 且目标 URL 位于配置的
+Flowlet Base URL 下时才注入 `x-flowlet-session`。并发会话、其他 Provider 和其他 URL 不受影响。
+插件文件与 `cordis.patch.yml` 的原始内容均纳入同一备份和事务，恢复接入时原样还原；DSH npm
+包及其缓存文件不会被修改。
 
-两份文件均由 DSH 热加载；若 DSH 未运行，则下次启动直接生效。静态 `x-flowlet-client` 仅用于请求归属，
-代理识别后会在转发上游前剥离。DSH 当前没有适合静态配置的动态 session header 注入点，
-因此 Flowlet 可以准确识别客户端，但不能仅凭代理请求把每次调用精确关联到 DSH 原生 session；
-原生 Session Adapter 仍可独立展示 DSH 会话。
+Provider 配置与凭据可热加载。Profile 插件属于运行时组合能力，写入后应重启正在运行的 DSH；
+之后无论通过 `npx`、全局 `dsh` 还是其他官方入口启动同一 Profile，插件都会自动加载。未来
+DSH 原生支持 `sessionIdHeader` 后，Provider 字段会形成同值兜底，但当前 npm `0.1.0-rc.6` 不以
+该未发布能力为前提。请求来源仍由强制携带的 `User-Agent: deepseek-harness/...` 识别，不额外
+注入 `x-flowlet-client`。Flowlet 捕获 session id 后按 DSH UA 门控归属，并在转发上游前剥离该
+Header；请求日志由此可与原生 `session.jsonl(.zstd)` 精确合并，不按时间猜测。
 
 会话运行状态按最新一组 `turn/start` / `turn/end` 判断：新的 turn 已开始但尚未结束、且会话文件
 仍在活跃更新时显示为运行中；`turn/end` 只代表单轮结束，不能用历史任意一条 completed 事件

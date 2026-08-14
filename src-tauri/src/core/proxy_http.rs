@@ -662,7 +662,7 @@ pub(super) fn apply_request_headers(
             || name.as_str() == "x-api-key"
             // 客户端归属标记头仅用于本地识别，识别后不再透传上游，避免泄露受管信息。
             || name.as_str() == AGENT_CLIENT_HEADER
-            // Pi 会话标识头仅用于本地会话归属，识别后不再透传上游。
+            // Agent 会话标识头仅用于本地会话归属，识别后不再透传上游。
             || name.as_str() == AGENT_SESSION_HEADER
         {
             continue;
@@ -1286,13 +1286,17 @@ mod tests {
     }
 
     #[test]
-    fn apply_request_headers_strips_agent_client_marker_before_forwarding() {
+    fn apply_request_headers_strips_local_agent_identity_before_forwarding() {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::USER_AGENT,
             HeaderValue::from_static("OpenAI/JS 6.26.0"),
         );
         headers.insert(AGENT_CLIENT_HEADER, HeaderValue::from_static("pi"));
+        headers.insert(
+            AGENT_SESSION_HEADER,
+            HeaderValue::from_static("local-session"),
+        );
 
         let request = apply_request_headers(
             reqwest::Client::new().post("http://127.0.0.1/test"),
@@ -1307,6 +1311,7 @@ mod tests {
 
         // 标记头仅用于本地归属，转发上游前必须剥离。
         assert!(!request.headers().contains_key(AGENT_CLIENT_HEADER));
+        assert!(!request.headers().contains_key(AGENT_SESSION_HEADER));
         // 其余普通头（含 UA）照常透传。
         assert!(request.headers().contains_key(header::USER_AGENT));
     }

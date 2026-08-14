@@ -405,10 +405,6 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         .and_then(|value| value.get("api"))
         .and_then(serde_yaml::Value::as_str)
         == Some("openai-completions");
-    let session_header_matches = provider
-        .and_then(|value| value.get("sessionIdHeader"))
-        .and_then(serde_yaml::Value::as_str)
-        == Some("x-flowlet-session");
     let model = yaml_at(&settings, &[DEFAULT_MODEL_NAMESPACE, "model"])
         .and_then(serde_yaml::Value::as_str)
         .map(str::to_string);
@@ -418,11 +414,7 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         || read_credential_value(&credentials_path)?.is_some();
     let base_matches = base_url.as_deref().map(normalize_url).as_deref()
         == Some(normalize_url(expected_base_url).as_str());
-    let state = if base_matches
-        && key_ref_matches
-        && api_matches
-        && session_header_matches
-        && token
+    let state = if base_matches && key_ref_matches && api_matches && token
         && default_provider == Some(PROVIDER_ID)
         && model.as_deref() == Some("flowlet-pro")
     {
@@ -749,7 +741,6 @@ fn provider_profile(expected_base_url: &str) -> Value {
         "apiKeyEnv": TOKEN_REF,
         "api": "openai-completions",
         "baseURL": normalize_url(expected_base_url),
-        "sessionIdHeader": "x-flowlet-session",
         "models": [{ "id": "flowlet-pro" }, { "id": "flowlet-flash" }],
     })
 }
@@ -1040,7 +1031,6 @@ mod tests {
                 "apiKeyEnv": "FLOWLET_CLIENT_TOKEN",
                 "api": "openai-completions",
                 "baseURL": "http://127.0.0.1:18640/v1",
-                "sessionIdHeader": "x-flowlet-session",
                 "models": [{ "id": "flowlet-pro" }, { "id": "flowlet-flash" }],
             })
         );

@@ -67,7 +67,7 @@ describe("agent access adapters", () => {
 
     expect(adapter.installationName("web")).toBe("DeepSeek Harness Web");
     expect(snippets[0].copyValue).toContain("api: openai-completions");
-    expect(snippets[0].copyValue).toContain("sessionIdHeader: x-flowlet-session");
+    expect(snippets[0].copyValue).not.toContain("sessionIdHeader");
     expect(snippets[0].copyValue).not.toContain("x-flowlet-client");
     expect(snippets[0].copyValue).toContain("agent-default-model:");
     expect(snippets[0].copyValue).toContain("model: flowlet-pro");

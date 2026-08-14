@@ -9,7 +9,6 @@ function settingsSnippet(endpoint: string) {
     "      apiKeyEnv: FLOWLET_CLIENT_TOKEN",
     "      api: openai-completions",
     `      baseURL: ${endpoint}`,
-    "      sessionIdHeader: x-flowlet-session",
     "      models:",
     "        - id: flowlet-pro",
     "        - id: flowlet-flash",

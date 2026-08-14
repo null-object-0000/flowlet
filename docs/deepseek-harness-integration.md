@@ -33,7 +33,6 @@ llm-pi-ai:
       apiKeyEnv: FLOWLET_CLIENT_TOKEN
       api: openai-completions
       baseURL: http://127.0.0.1:18640/v1
-      sessionIdHeader: x-flowlet-session
       models:
         - id: flowlet-pro
         - id: flowlet-flash
@@ -77,11 +76,10 @@ Flowlet Base URL 下时才注入 `x-flowlet-session`。并发会话、其他 Pro
 代理请求精确合并到原生 session。关闭高级能力会移除受管 Cordis 块并恢复/删除受管插件文件。
 
 Provider 配置与凭据可热加载。Profile 插件属于运行时组合能力，启用或关闭后应重启正在运行的 DSH；
-之后无论通过 `npx`、全局 `dsh` 还是其他官方入口启动同一 Profile，插件都会自动加载。未来
-DSH 原生支持 `sessionIdHeader` 后，Provider 字段会形成同值兜底，但当前 npm `0.1.0-rc.6` 不以
-该未发布能力为前提。请求来源仍由强制携带的 `User-Agent: deepseek-harness/...` 识别，不额外
-注入 `x-flowlet-client`。Flowlet 捕获 session id 后按 DSH UA 门控归属，并在转发上游前剥离该
-Header；请求日志由此可与原生 `session.jsonl(.zstd)` 精确合并，不按时间猜测。
+之后无论通过 `npx`、全局 `dsh` 还是其他官方入口启动同一 Profile，插件都会自动加载。请求来源仍由
+强制携带的 `User-Agent: deepseek-harness/...` 识别，不额外注入 `x-flowlet-client`。Flowlet 捕获
+session id 后按 DSH UA 门控归属，并在转发上游前剥离该 Header；请求日志由此可与原生
+`session.jsonl(.zstd)` 精确合并，不按时间猜测。
 
 会话运行状态按最新一组 `turn/start` / `turn/end` 判断：新的 turn 已开始但尚未结束、且会话文件
 仍在活跃更新时显示为运行中；`turn/end` 只代表单轮结束，不能用历史任意一条 completed 事件

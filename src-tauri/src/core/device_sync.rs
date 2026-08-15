@@ -138,9 +138,10 @@ pub async fn build_synced_agent_session(
         return Err("Agent 类型和会话 ID 不能为空".to_string());
     }
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
+    let dsh_pending_sessions = crate::core::dsh_control::pending_session_ids().await;
     tauri::async_runtime::spawn_blocking(move || {
         let Some(row) = storage
-            .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
+            .list_agent_sessions_for_device_sync(&opencode_pending_sessions, &dsh_pending_sessions)
             .map_err(|error| error.to_string())?
             .into_iter()
             .find(|row| row.agent_type == agent_type && row.session_id == session_id)
@@ -182,9 +183,10 @@ pub async fn build_device_snapshot(
     identity: DeviceIdentity,
 ) -> Result<DeviceUsageSnapshot, String> {
     let snapshot_storage = storage.clone();
-    // 与 PC 列表页同一入口合并 OpenCode 实时待确认权限，否则移动端快照会把
+    // 与 PC 列表页同一入口合并 OpenCode 与 DSH 实时待确认权限，否则移动端快照会把
     // “等待确认”的会话固化为 SQLite 推断出的“自动运行中”。
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
+    let dsh_pending_sessions = crate::core::dsh_control::pending_session_ids().await;
     let (days, hours, sessions) = tauri::async_runtime::spawn_blocking(move || {
         // 快照携带「代理 + Agent 原生」合并口径，其他设备/移动端才能看到
         // 本机未经过 Flowlet 的 Token（schema v6 的日/小时 native_* 字段）。
@@ -195,7 +197,7 @@ pub async fn build_device_snapshot(
             .local_hourly_usage_totals_with_native()
             .map_err(|error| error.to_string())?;
         let sessions = snapshot_storage
-            .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
+            .list_agent_sessions_for_device_sync(&opencode_pending_sessions, &dsh_pending_sessions)
             .map_err(|error| error.to_string())?
             .into_iter()
             .map(synced_agent_session_from_row)

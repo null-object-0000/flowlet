@@ -78,6 +78,7 @@ fn dsh_cli_candidates() -> Vec<Candidate> {
 fn classify_dsh_method(path: &Path) -> AgentInstallMethod {
     let normalized = normalized_path_key(path);
     if normalized.contains("/node_modules/@deepseek-ai/dsh/")
+        || normalized.contains("/node_modules/.bin/dsh")
         || normalized.ends_with("/npm/dsh.cmd")
         || normalized.ends_with("/npm/dsh.ps1")
         || normalized.ends_with("/npm/dsh")
@@ -92,6 +93,15 @@ fn classify_dsh_method(path: &Path) -> AgentInstallMethod {
 
 fn resolve_dsh_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBuf {
     if matches!(method, AgentInstallMethod::Npm) {
+        // npx / pnpm 等 `node_modules/.bin` 垫片：包目录是 `node_modules/@deepseek-ai/dsh`。
+        if normalized_path_key(path).contains("/node_modules/.bin/") {
+            if let Some(node_modules) = path.parent().and_then(Path::parent) {
+                let package_dir = node_modules.join("@deepseek-ai").join("dsh");
+                if package_dir.is_dir() {
+                    return package_dir;
+                }
+            }
+        }
         if let Some(bin_dir) = path.parent() {
             let package_dir = bin_dir
                 .join("node_modules")
@@ -115,6 +125,12 @@ pub struct AgentInstallation {
     pub version_output: Option<String>,
     pub available_on_path: bool,
     pub error: Option<String>,
+    /// 不经 PATH 即可由任务 Runner 直接调用的执行入口（如 npx 临时缓存包的
+    /// bin JS）。缺省时 Runner 使用 `executable_path`。DeepSeek Harness 在
+    /// npm 缓存中只存在唯一版本时会填入包入口，由 Runner 以 `node` 解释执行；
+    /// 多版本共存或未解析到入口时保持缺省并使用 `error` 说明原因。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_executable: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -903,6 +919,44 @@ mod tests {
         );
         assert!(is_windows_store_codex_executable(path));
         assert!(!is_external_codex_cli_candidate(path));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn classifies_dsh_npm_bin_shims_as_npm_packages() {
+        // npx 临时缓存与全局 npm 的 node_modules/.bin 垫片。
+        assert_eq!(
+            classify_dsh_method(Path::new(
+                "C:/Users/test/AppData/Local/npm-cache/_npx/1e7f6d9597241db0/node_modules/.bin/dsh.cmd"
+            )),
+            AgentInstallMethod::Npm
+        );
+        assert_eq!(
+            classify_dsh_method(Path::new(
+                "C:/Users/test/AppData/Roaming/npm/node_modules/.bin/dsh.cmd"
+            )),
+            AgentInstallMethod::Npm
+        );
+        assert_eq!(
+            classify_dsh_method(Path::new("C:/tools/bin/dsh")),
+            AgentInstallMethod::Unknown
+        );
+        // 从 .bin 垫片向上解析到 @deepseek-ai/dsh 包目录。
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-dsh-bin-resolve-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let shim = root
+            .join("node_modules")
+            .join(".bin")
+            .join("dsh.cmd");
+        let package_dir = root.join("node_modules").join("@deepseek-ai").join("dsh");
+        std::fs::create_dir_all(&package_dir).unwrap();
+        assert_eq!(
+            resolve_dsh_install_dir(&shim, &AgentInstallMethod::Npm),
+            package_dir
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]

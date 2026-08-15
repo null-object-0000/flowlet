@@ -967,6 +967,8 @@ fn run_desktop() {
             commands::list_agent_session_children,
             commands::list_opencode_session_permissions,
             commands::reply_opencode_permission,
+            commands::list_dsh_session_permissions,
+            commands::reply_dsh_permission,
             commands::get_agent_session_native_summary,
             commands::get_agent_session_last_interaction,
             commands::get_agent_session_timeline,

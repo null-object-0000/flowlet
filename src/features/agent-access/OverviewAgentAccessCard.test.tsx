@@ -90,6 +90,8 @@ describe("OverviewAgentAccessCard", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
     fireEvent.click(screen.getByRole("button", { name: "配置 Claude Code" }));
+    // 可选能力统一收纳在折叠的「高级配置」区，需先展开。
+    fireEvent.click(screen.getByRole("button", { name: "高级配置（可选能力）" }));
     const primarySwitch = screen.getByRole("switch", { name: "flowlet-pro 1M 长上下文" });
     const fastSwitch = screen.getByRole("switch", { name: "flowlet-flash 1M 长上下文" });
     expect(primarySwitch).not.toBeChecked();
@@ -195,10 +197,17 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("C:\\Users\\test\\.dsh\\settings.yaml")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.dsh\\.credentials.yaml")).toBeInTheDocument();
     expect(screen.getByText("未启用（可选）")).toBeInTheDocument();
+    // 精确会话关联与模型规格声明都收纳在折叠的「高级配置」区，默认全部未启用。
+    expect(screen.getByText("全部未启用（默认）")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "高级配置（可选能力）" }));
     const sessionSwitch = screen.getByRole("switch", { name: "启用精确会话关联（高级）" });
     expect(sessionSwitch).not.toBeChecked();
     fireEvent.click(sessionSwitch);
-    expect(mutateAsync).toHaveBeenLastCalledWith({ sessionExtension: true });
+    expect(mutateAsync).toHaveBeenLastCalledWith({ sessionExtension: true, modelSpecs: false });
+    const specsSwitch = screen.getByRole("switch", { name: "声明聚合模型规格（高级）" });
+    expect(specsSwitch).not.toBeChecked();
+    fireEvent.click(specsSwitch);
+    expect(mutateAsync).toHaveBeenLastCalledWith({ sessionExtension: false, modelSpecs: true });
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
   });

@@ -268,7 +268,8 @@ fn flush_text(storage: &Storage, job_id: &str, text_buffer: &mut String) -> Resu
 }
 
 /// 构建启动 Agent 的命令。Windows 下 .cmd / .bat / .ps1 垫片需要
-/// 通过宿主解释器启动（与 agent_environment 的版本探测一致）。
+/// 通过宿主解释器启动（与 agent_environment 的版本探测一致）；
+/// .js / .mjs / .cjs 脚本统一由 `node` 解释执行（npx 缓存包的 bin 入口即这种形态）。
 #[cfg(windows)]
 fn build_agent_command(executable: &str) -> tokio::process::Command {
     let path = std::path::Path::new(executable);
@@ -293,6 +294,10 @@ fn build_agent_command(executable: &str) -> tokio::process::Command {
             executable,
         ]);
         command
+    } else if extension == "js" || extension == "mjs" || extension == "cjs" {
+        let mut command = tokio::process::Command::new("node");
+        command.arg(executable);
+        command
     } else {
         tokio::process::Command::new(executable)
     }
@@ -300,5 +305,32 @@ fn build_agent_command(executable: &str) -> tokio::process::Command {
 
 #[cfg(not(windows))]
 fn build_agent_command(executable: &str) -> tokio::process::Command {
-    tokio::process::Command::new(executable)
+    let path = std::path::Path::new(executable);
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if extension == "js" || extension == "mjs" || extension == "cjs" {
+        let mut command = tokio::process::Command::new("node");
+        command.arg(executable);
+        command
+    } else {
+        tokio::process::Command::new(executable)
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_scripts_spawn_through_node_interpreter() {
+        let script = build_agent_command(r"C:\npm-cache\_npx\x\node_modules\@deepseek-ai\dsh\lib\bin.js");
+        assert_eq!(script.as_std().get_program(), "node");
+        let shim = build_agent_command(r"C:\npm-cache\_npx\x\node_modules\.bin\dsh.cmd");
+        assert_eq!(shim.as_std().get_program(), "cmd.exe");
+        let native = build_agent_command(r"C:\tools\dsh.exe");
+        assert_eq!(native.as_std().get_program(), r"C:\tools\dsh.exe");
+    }
 }

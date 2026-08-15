@@ -8,7 +8,7 @@
 //! 执行过程中的模型请求会经过 Flowlet 本地代理，自动进入请求日志与用量账本。
 //! Agent 退出后由 Rust 自动把任务状态回写 `review`（等待人工审核）。
 
-use crate::core::agent_environment::AgentSurface;
+use crate::core::agent_environment::{AgentInstallation, AgentSurface};
 use crate::core::job_runtime::{JobLease, JobRuntime, PROJECT_TASK_RUN, RECURRING_TASK_RUN};
 use crate::core::storage::{ProjectTask, Storage};
 use serde::Serialize;
@@ -651,26 +651,36 @@ async fn resolve_agent_executable(agent_profile: &str) -> Result<String, String>
     }
     // Runner Adapter 声明任务所需 Surface。探测可能同时返回多种 Surface；primary
     // 不满足合同时回退到安装列表中的匹配项，仍无可执行入口则使用 Adapter 的错误提示。
+    // 可执行入口要求：surface 契约匹配、无安装错误，且位于 PATH（`available_on_path`）
+    // 或携带不经 PATH 的直接入口（`runner_executable`，如 npx 缓存包的 bin JS）。
     let required_surface = &adapter.required_surface;
     match report.primary {
-        Some(primary)
-            if &primary.surface == required_surface
-                && primary.available_on_path
-                && primary.error.is_none() =>
-        {
-            Ok(primary.executable_path)
+        Some(primary) if runner_usable(&primary, required_surface) => {
+            Ok(effective_executable(&primary))
         }
         _ => report
             .installations
             .iter()
-            .find(|installation| {
-                &installation.surface == required_surface
-                    && installation.available_on_path
-                    && installation.error.is_none()
-            })
-            .map(|installation| installation.executable_path.clone())
+            .find(|installation| runner_usable(installation, required_surface))
+            .map(effective_executable)
             .ok_or_else(|| adapter.missing_executable_message.to_string()),
     }
+}
+
+/// 安装项是否可作为指定 Surface 的任务执行入口。
+fn runner_usable(installation: &AgentInstallation, required_surface: &AgentSurface) -> bool {
+    &installation.surface == required_surface
+        && installation.error.is_none()
+        && (installation.available_on_path || installation.runner_executable.is_some())
+}
+
+/// 任务 Runner 实际使用的启动入口：优先 `runner_executable`（不经 PATH 的直接
+/// 入口，如 node 可解释的 JS），否则回退 `executable_path`（PATH 命令/垫片）。
+fn effective_executable(installation: &AgentInstallation) -> String {
+    installation
+        .runner_executable
+        .clone()
+        .unwrap_or_else(|| installation.executable_path.clone())
 }
 
 /// 任务执行分派：按任务的 agent_profile 选择执行器。
@@ -736,6 +746,20 @@ pub(crate) fn validate_session_policy(
 mod runner_contract_tests {
     use super::*;
 
+    fn web_installation(runner_executable: Option<&str>) -> AgentInstallation {
+        AgentInstallation {
+            surface: AgentSurface::Web,
+            executable_path: "http://127.0.0.1:3080".to_string(),
+            install_dir: r"C:\Users\test\.dsh".to_string(),
+            install_method: crate::core::agent_environment::AgentInstallMethod::Npm,
+            version: Some("0.1.0-rc.6".to_string()),
+            version_output: None,
+            available_on_path: false,
+            runner_executable: runner_executable.map(str::to_string),
+            error: None,
+        }
+    }
+
     #[test]
     fn session_policy_validation_uses_the_selected_runner_contract() {
         assert!(validate_session_policy("Claude Code", "continue").is_ok());
@@ -745,6 +769,35 @@ mod runner_contract_tests {
         assert!(validate_session_policy("missing", "fresh")
             .unwrap_err()
             .contains("不支持"));
+    }
+
+    #[test]
+    fn runner_gate_accepts_direct_entry_without_path() {
+        // 无 PATH、无直接入口：不可用于任务执行。
+        let mut installation = web_installation(None);
+        assert!(!runner_usable(&installation, &AgentSurface::Web));
+        // 有报错时即使带直接入口也不可用。
+        installation = web_installation(Some(r"C:\pkg\lib\bin.js"));
+        installation.error = Some("无法解析入口".to_string());
+        assert!(!runner_usable(&installation, &AgentSurface::Web));
+        // 唯一版本的 npx 缓存包入口：不依赖 PATH 即可执行。
+        installation.error = None;
+        assert!(runner_usable(&installation, &AgentSurface::Web));
+        assert_eq!(
+            effective_executable(&installation),
+            r"C:\pkg\lib\bin.js"
+        );
+        // Surface 契约不满足时仍拒绝。
+        assert!(!runner_usable(&installation, &AgentSurface::Cli));
+    }
+
+    #[test]
+    fn effective_executable_falls_back_to_path_executable() {
+        let mut installation = web_installation(None);
+        installation.available_on_path = true;
+        installation.executable_path = r"C:\npm\dsh.cmd".to_string();
+        assert!(runner_usable(&installation, &AgentSurface::Web));
+        assert_eq!(effective_executable(&installation), r"C:\npm\dsh.cmd");
     }
 }
 

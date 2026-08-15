@@ -87,7 +87,7 @@ pub(crate) static DEEPSEEK_HARNESS: AgentTaskRunnerAdapter = AgentTaskRunnerAdap
         display_name: "DeepSeek Harness",
         required_surface: AgentSurface::Web,
         supports_resume: false,
-        missing_executable_message: "检测到 DeepSeek Harness 数据目录或 Web，但 PATH 中没有稳定的 dsh 启动命令；请先全局安装 @deepseek-ai/dsh。Flowlet 不会使用 npx 临时缓存执行任务。",
+        missing_executable_message: "未检测到可执行的 DeepSeek Harness：PATH 中没有 dsh，npm 缓存中也无法确认唯一的 @deepseek-ai/dsh 安装。请全局安装（npm install -g @deepseek-ai/dsh）或重新执行 npx @deepseek-ai/dsh web 后重试。",
         resume_unsupported_message: "DeepSeek Harness headless 当前不提供稳定的 resume 参数；Flowlet 不会把续跑伪装成新会话。请将任务会话策略改为 fresh。",
         execute: execute_deepseek_harness_boxed,
     };

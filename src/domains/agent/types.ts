@@ -52,6 +52,8 @@ export type AgentInstallation = {
   version?: string | null;
   version_output?: string | null;
   available_on_path: boolean;
+  /** 不经 PATH 即可由任务 Runner 直接调用的执行入口（如 npx 缓存包的 bin JS）。 */
+  runner_executable?: string | null;
   error?: string | null;
 };
 
@@ -153,6 +155,10 @@ export type AgentGlobalConfigReport = {
   error?: string | null;
   /** Pi / DeepSeek Harness：可选的 Flowlet 会话扩展是否在位。 */
   session_extension?: boolean;
+  /** 仅 DeepSeek Harness：模型条目是否已声明聚合模型规格（1M contextWindow）。 */
+  model_specs?: boolean;
+  /** 仅 DeepSeek Harness：Flowlet 交互确认桥（approval bridge）是否在位。 */
+  approval_bridge?: boolean;
   /** 仅 OpenCode：用于发现 CLI/Desktop 进程内权限事件的全局插件是否在位。 */
   opencode_permission_bridge?: boolean;
 };
@@ -167,6 +173,10 @@ export type AgentGlobalConfigOptions = {
   fastLongContext?: boolean;
   /** Pi / DeepSeek Harness：是否安装可选会话扩展。安装后可按会话归并请求。 */
   sessionExtension?: boolean;
+  /** 仅 DeepSeek Harness：是否向 settings.yaml 声明聚合模型规格（1M contextWindow）。 */
+  modelSpecs?: boolean;
+  /** 仅 DeepSeek Harness：是否部署受管交互确认桥（approval bridge）。 */
+  approvalBridge?: boolean;
 };
 
 /** Agent 最新版本查询结果（来自 npm registry，仅提示用，不执行升级）。 */

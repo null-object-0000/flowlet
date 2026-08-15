@@ -435,12 +435,14 @@ Agent 默认只做非侵入接入，禁止照搬已有 Agent 的特殊扩展路�
 ### Pi 会话标识头
 
 部分 Agent（如 Pi）走 OpenAI 兼容 SDK，原生请求不携带任何会话/对话标识，无法像
-Claude Code（`x-claude-code-session-id`）那样直接读取。对这类 Agent，Flowlet 在写入
-其全局配置时同步部署一个原生扩展（Pi 写在 `~/.pi/agent/extensions/flowlet.ts`，利用
-Pi 官方的 `before_provider_headers` 事件），在每次 LLM 请求的 headers 组装完成后
-注入 `x-flowlet-session: <session_uuid>`（值来自 `ctx.sessionManager.getSessionId()`，
-与 Pi 原生会话文件头行的 `id` 一致），并以已存在的 `x-flowlet-client: pi` 标记头为门控，
-确保只污染该 Agent 发往 Flowlet 渠道的请求。
+Claude Code（`x-claude-code-session-id`）那样直接读取。对这类 Agent，Flowlet 在接入侧提供
+可选“会话扩展”高级能力（默认不部署，由用户显式开启后随全局配置写入部署；Pi 写在
+`~/.pi/agent/extensions/flowlet.ts`，利用 Pi 官方的 `before_provider_headers` 事件），在每次 LLM
+请求的 headers 组装完成后注入 `x-flowlet-session: <session_uuid>`（值来自
+`ctx.sessionManager.getSessionId()`，与 Pi 原生会话文件头行的 `id` 一致），并以已存在的
+`x-flowlet-client: pi` 标记头为门控，确保只污染该 Agent 发往 Flowlet 渠道的请求。高级能力统一
+收纳在接入抽屉折叠的“高级配置”区，默认全部不开启；关闭或未开启时可保留已有扩展文件，
+恢复接入时按备份完整还原。基础 Provider 接入不依赖该扩展。
 
 代理侧由 Pi 的独立 Identity Adapter 以 `x-flowlet-client: pi` 为门控读取
 `x-flowlet-session`；实时请求和历史日志修复复用同一套 Identity Adapter。识别后、转发
@@ -456,12 +458,29 @@ Agent ID 分支。`apply_request_headers` 仅负责统一剥离 Flowlet 保留�
 
 DeepSeek Harness 使用其强制携带的 `deepseek-harness/` User-Agent 识别来源，不注入
 `x-flowlet-client`。基础一键接入只写入官方 Provider、默认模型与 Token，不依赖插件。
-用户显式开启“精确会话关联”高级选项后，才通过 DSH 官方 Cordis Profile 配置部署受管
+可选高级能力统一收纳在接入抽屉折叠的“高级配置”区，默认不启用，全部由用户显式开启：
+用户开启“精确会话关联”后，才通过 DSH 官方 Cordis Profile 配置部署受管
 `flowlet-session-bridge.mjs`：插件从 `llm/stream` 读取当前 `GenerateOptions.sessionId`，使用
 `AsyncLocalStorage` 只为当前 Flowlet Provider 发往本地 Base URL 的请求注入
 `x-flowlet-session`。插件必须随 Profile 配置一同备份、原子写入和恢复，不得修改 DSH npm 包或
-缓存；关闭选项会移除受管桥接，启用或关闭后需重启正在运行的 DSH。代理以 DSH UA 为门控读取并
-在转发上游前剥离该头；静态 Provider Header、文件更新时间或最近活跃会话均不得用于猜测请求所属 session。
+缓存；关闭选项会移除受管桥接，启用或关闭后需重启正在运行的 DSH。用户开启“模型规格声明”后，
+Flowlet 在 Provider 的 `models` 条目写入 `contextWindow: 1048576`（仅当 `flowlet-pro` /
+`flowlet-flash` 的所有启用路由都支持 1M 上下文时可开启），不声明 `maxTokens`——DSH 会把模型
+条目 `maxTokens` 变成每请求自动携带的输出上限，聚合路由各上游上限不同，声明单一值会把能力
+锁死在最低值；该项随 settings.yaml 热加载，无需重启。代理以 DSH UA 为门控读取并在转发上游前
+剥离该头；静态 Provider Header、文件更新时间或最近活跃会话均不得用于猜测请求所属 session。
+headless 任务执行兼容 npx 官方启动方式：npm 缓存中只存在唯一版本时，Flowlet 直接解析包入口
+（`node <包 bin>`）执行 `dsh --profile headless`，无需全局安装；多版本共存时要求全局安装，
+确保版本确定性。
+用户开启“交互确认桥”（approval bridge）后，Flowlet 在每个已初始化的 DSH Profile 中部署受管
+`flowlet-approval-bridge.mjs`：插件作为 DSH `approval/request` 瀑布的 answerer，把 headless 会话
+的权限请求（toolName / callId / reason / 会话 id）经文件桥写入
+`~/.flowlet/dsh-control/request-<uuid>.json`（等待期间每秒心跳），桌面端在会话详情侧滑确认或否决后
+写回 `reply-<uuid>.json`，插件换算为 DSH 的 `allowed-once` / `rejected` 结束瀑布；取消返回
+`cancelled`、超时返回 `unavailable`。桥接目录与 OpenCode 权限桥同构；`waiting_user` 运行态与
+OpenCode 共用同一套会话状态推断。插件随 Profile 配置一同备份、原子写入和恢复，旧备份
+（无 approval 字段）在 apply 时自动补录，关闭选项移除受管桥接；启用或关闭后需重启正在运行的
+DSH。该能力独立于精确会话关联与模型规格声明，三者的开关互不影响。
 
 ### Codex 系一键接入
 

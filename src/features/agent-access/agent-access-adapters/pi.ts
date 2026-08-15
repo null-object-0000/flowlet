@@ -27,10 +27,10 @@ export const piAdapter: AgentAccessAdapter = {
     id: "session-extension",
     label: t("会话扩展"),
     descriptions: [t("安装后可为请求注入会话标识，Flowlet 按会话归并请求；未安装则无法做会话维度串联。"), t("Pi 仍可作为 Flowlet 客户端使用，仅会话维度数据不可用。")],
-    checked: globalConfig?.session_extension ?? true,
+    checked: globalConfig?.session_extension ?? false,
     applyOptions: (checked) => ({ sessionExtension: checked }),
   }],
-  applyOptions: ({ globalConfig }) => ({ sessionExtension: globalConfig?.session_extension ?? true }),
+  applyOptions: ({ globalConfig }) => ({ sessionExtension: globalConfig?.session_extension ?? false }),
   manualSnippets: ({ endpoint, token, displayedToken, t }) => {
     const models = JSON.stringify({ providers: { flowlet: { baseUrl: endpoint, api: "openai-completions", headers: { "x-flowlet-client": "pi" }, models: [{ id: "flowlet-pro", name: "flowlet-pro" }, { id: "flowlet-flash", name: "flowlet-flash" }] } } }, null, 2);
     const defaults = JSON.stringify({ defaultProvider: "flowlet", defaultModel: "flowlet-pro" }, null, 2);

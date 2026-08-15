@@ -467,7 +467,7 @@ mod tests {
                 .iter()
                 .map(|capability| capability.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["session-extension"]
+            vec!["session-extension", "model-specs"]
         );
     }
 

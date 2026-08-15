@@ -166,3 +166,22 @@ export type OpenCodePermissionReport = {
 };
 
 export type OpenCodePermissionDecision = "allow_once" | "reject";
+
+export type DshApprovalRequest = {
+  approvalId: string;
+  sessionId: string;
+  toolName: string;
+  callId: string | null;
+  reason: string | null;
+  requestedAt: number;
+  heartbeatAt: number;
+  bridgeVersion: number;
+};
+
+export type DshApprovalReport = {
+  available: boolean;
+  permissions: DshApprovalRequest[];
+  error: string | null;
+};
+
+export type DshApprovalDecision = "allow_once" | "reject";

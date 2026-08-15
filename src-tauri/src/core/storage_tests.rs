@@ -555,6 +555,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 project_path: String::new(),
             },
             &std::collections::HashSet::new(),
+            &std::collections::HashSet::new(),
         )
         .unwrap();
     assert_eq!(page.total, 1);
@@ -605,6 +606,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 project_path: String::new(),
             },
             &pending,
+            &std::collections::HashSet::new(),
         )
         .unwrap();
     assert_eq!(waiting.total, 1);
@@ -621,6 +623,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 project_path: String::new(),
             },
             &pending,
+            &std::collections::HashSet::new(),
         )
         .unwrap();
     assert_eq!(idle.total, 0);
@@ -635,6 +638,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 runtime_status: String::new(),
                 project_path: String::new(),
             },
+            &std::collections::HashSet::new(),
             &std::collections::HashSet::new(),
         )
         .unwrap();
@@ -651,6 +655,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
                 project_path: String::new(),
             },
             &std::collections::HashSet::new(),
+            &std::collections::HashSet::new(),
         )
         .unwrap();
     assert!(out_of_range.rows.is_empty());
@@ -658,7 +663,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
 
     // 设备同步快照与列表页共用同一实时待确认合并入口，两端状态必须一致。
     let sync_pending = storage
-        .list_agent_sessions_for_device_sync(&pending)
+        .list_agent_sessions_for_device_sync(&pending, &std::collections::HashSet::new())
         .unwrap();
     assert_eq!(
         sync_pending
@@ -668,7 +673,10 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
         Some("waiting_user")
     );
     let sync_default = storage
-        .list_agent_sessions_for_device_sync(&std::collections::HashSet::new())
+        .list_agent_sessions_for_device_sync(
+            &std::collections::HashSet::new(),
+            &std::collections::HashSet::new(),
+        )
         .unwrap();
     assert_ne!(
         sync_default
@@ -703,6 +711,7 @@ fn groups_claude_code_requests_by_official_session_header_attribution() {
                 runtime_status: String::new(),
                 project_path: String::new(),
             },
+            &std::collections::HashSet::new(),
             &std::collections::HashSet::new(),
         )
         .unwrap();

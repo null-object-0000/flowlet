@@ -23,6 +23,7 @@ async fn detect() -> AgentEnvironmentReport {
             version,
             version_output,
             available_on_path: candidate.available_on_path,
+            runner_executable: None,
             error,
         });
     }
@@ -35,6 +36,7 @@ async fn detect() -> AgentEnvironmentReport {
             version: desktop_version(&candidate.path),
             version_output: None,
             available_on_path: false,
+            runner_executable: None,
             error: None,
         });
     }

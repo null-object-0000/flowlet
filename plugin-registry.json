@@ -89,7 +89,7 @@
         "sessionTypes": [{ "id": "pi", "name": "Pi", "clientId": "pi" }],
         "taskProfile": { "name": "Pi", "sessionType": "pi" },
         "configCapabilities": [
-          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": true, "requiresRestart": true }
+          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
         ],
         "endpointSuffix": "/v1",
         "npmPackage": "@earendil-works/pi-coding-agent",
@@ -156,7 +156,8 @@
         "sessionTypes": [{ "id": "deepseek-harness", "name": "DeepSeek Harness", "clientId": "deepseek-harness" }],
         "taskProfile": { "name": "DeepSeek Harness", "sessionType": "deepseek-harness" },
         "configCapabilities": [
-          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
+          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
+          { "id": "model-specs", "name": "模型规格声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": false }
         ],
         "endpointSuffix": "/v1",
         "npmPackage": "@deepseek-ai/dsh",

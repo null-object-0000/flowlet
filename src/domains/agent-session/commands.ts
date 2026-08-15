@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { AgentSessionClient, AgentSessionFilter, AgentSessionFlowletUsage, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionRow, AgentSessionsPage, AgentSessionTimeline, OpenCodePermissionDecision, OpenCodePermissionReport } from "./types";
+import type { AgentSessionClient, AgentSessionFilter, AgentSessionFlowletUsage, AgentSessionLastInteraction, AgentSessionNativeSummary, AgentSessionRow, AgentSessionsPage, AgentSessionTimeline, DshApprovalDecision, DshApprovalReport, OpenCodePermissionDecision, OpenCodePermissionReport } from "./types";
 
 export type AgentSessionTimelineRange = {
   startedAt: string;
@@ -52,6 +52,14 @@ export const agentSessionCommands = {
   replyOpenCodePermission: (permissionId: string, decision: OpenCodePermissionDecision): Promise<void> =>
     invokeCommand<void>("reply_opencode_permission", { permissionId, decision }).catch((error: unknown) => {
       throw toAppError(error, "opencode_permission_reply_failed");
+    }),
+  dshPermissions: (sessionId: string): Promise<DshApprovalReport> =>
+    invokeCommand<DshApprovalReport>("list_dsh_session_permissions", { sessionId }).catch((error: unknown) => {
+      throw toAppError(error, "dsh_permission_list_failed");
+    }),
+  replyDshPermission: (permissionId: string, decision: DshApprovalDecision): Promise<void> =>
+    invokeCommand<void>("reply_dsh_permission", { permissionId, decision }).catch((error: unknown) => {
+      throw toAppError(error, "dsh_permission_reply_failed");
     }),
   clients: (): Promise<AgentSessionClient[]> =>
     invokeCommand<AgentSessionClient[]>("list_agent_session_clients").catch((error: unknown) => {

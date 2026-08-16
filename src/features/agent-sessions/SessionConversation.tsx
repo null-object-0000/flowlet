@@ -77,6 +77,7 @@ type OutputItem =
   | { type: "think"; event: AgentSessionInteractionEvent }
   | { type: "message"; event: AgentSessionInteractionEvent }
   | { type: "retry"; event: AgentSessionInteractionEvent }
+  | { type: "approval"; event: AgentSessionInteractionEvent }
   | { type: "tools"; events: AgentSessionInteractionEvent[] };
 
 function buildOutputItems(events: AgentSessionInteractionEvent[]): OutputItem[] {
@@ -96,6 +97,7 @@ function buildOutputItems(events: AgentSessionInteractionEvent[]): OutputItem[] 
     flush();
     if (event.kind === "reasoning") items.push({ type: "think", event });
     else if (event.kind === "model-retry") items.push({ type: "retry", event });
+    else if (event.kind === "approval") items.push({ type: "approval", event });
     else if (event.kind === "assistant-message" || event.kind === "error") items.push({ type: "message", event });
   }
   flush();
@@ -191,6 +193,8 @@ function TurnUnit({
             <ThinkRow key={item.event.id} event={item.event} />
           ) : item.type === "retry" ? (
             <ModelRetryRow key={item.event.id} event={item.event} />
+          ) : item.type === "approval" ? (
+            <ApprovalRow key={item.event.id} event={item.event} />
           ) : item.type === "message" ? (
             <InteractionOutputEvent key={item.event.id} event={item.event} language={language} />
           ) : (
@@ -241,6 +245,29 @@ function ModelRetryRow({ event }: { event: AgentSessionInteractionEvent }) {
       {event.content ? <pre className={styles.retryBody}>{event.content}</pre> : null}
     </details>
   );
+}
+
+/** 审批历史行：asked 时 pending，decided 回写 outcome（allowed-once/rejected/cancelled/unavailable）。 */
+function ApprovalRow({ event }: { event: AgentSessionInteractionEvent }) {
+  const { t } = useAppPreferences();
+  const label = approvalStatusLabel(event.status, t);
+  return (
+    <div className={styles.approvalRow} data-approval={event.status ?? undefined} role="status">
+      <i aria-hidden />
+      <span>{event.title ?? t("审批请求")}</span>
+      {event.content ? <small>{event.content}</small> : null}
+      <b>{label}</b>
+    </div>
+  );
+}
+
+function approvalStatusLabel(status: string | null, t: (key: string) => string) {
+  if (status === "pending" || status == null) return t("等待审批");
+  if (status === "allowed-once") return t("已允许一次");
+  if (status === "rejected") return t("已拒绝");
+  if (status === "cancelled") return t("已取消");
+  if (status === "unavailable") return t("不可用");
+  return status;
 }
 
 /** Think 折叠行（对齐官方）：默认收起，标题固定 "Think"，摘要取首行。 */

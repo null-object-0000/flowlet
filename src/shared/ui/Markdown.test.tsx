@@ -85,4 +85,20 @@ describe("Markdown", () => {
     expect(footnote?.textContent).toContain("脚注内容");
     expect(container.querySelector('a[href="#user-content-fnref-1"]')?.textContent).toBe("↩");
   });
+
+  it("supports CJK-friendly strong emphasis without whitespace", () => {
+    render(<Markdown content={"**加粗**接着中文续写"} />);
+    expect(screen.getByText("加粗").tagName).toBe("STRONG");
+  });
+
+  it("supports TeX backslash math delimiters (mathCompatibility)", () => {
+    const { container } = render(<Markdown content={"行内 \\(E_x\\) 与\n\n\\[\n\\frac{a}{b}\n\\]"} />);
+    expect(container.querySelector(".math-inline")).not.toBeNull();
+    expect(container.querySelector(".math-display")).not.toBeNull();
+  });
+
+  it("supports same-line display dollar math", () => {
+    const { container } = render(<Markdown content={"$$\\frac{a}{b}$$"} />);
+    expect(container.querySelector(".math-display")).not.toBeNull();
+  });
 });

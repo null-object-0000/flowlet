@@ -151,8 +151,15 @@ v0 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajectory` �
   （shadowed 事件已在各自时点计费）。
 - 撕裂尾部容忍：与 `dsh-session-persistence-jsonl` 的 scanLog/scanZstdFrames 语义一致——只读
   前缀的完整记录；zstd 分帧按官方结构遍历（`blockSize = header >>> 3` 不掩码），损坏或未落盘
-  完整的尾帧保留此前已解码内容，不因一个坏帧隐藏整个会话。`llm/retry`、`approval/*`、
-  `agent/inbox/spliced`（steering 分类）等事件当前不生成可见行，属后续对齐项。
+  完整的尾帧保留此前已解码内容，不因一个坏帧隐藏整个会话。`agent/inbox/spliced` 仅用于
+  next-step 采纳判定（steering 标记），其余 transport 语义不生成可见行。
+- `tool/code-dispatch-start` + `tool/code-dispatch`：子工具（code dispatch）投影为
+  `parentCallId` 关联的 subtool call/result 行（arguments 为对象时 JSON 化），前端轨迹按
+  `parentCallId` 归入子工具行。
+- `approval/asked` + `approval/decided`：投影为 `approval` 事件（toolName + reason），
+  decided 按 `id` 回写同一行的 outcome（allowed-once / rejected / cancelled / unavailable），
+  对话渲染审批历史行。
+- `llm/retry`：投影为 `model-retry` 事件（次数/延迟/失败原因）。
 
 对话视图的节点投影与上游 `ui-conversation` 对齐：轮次由 `turn` 事件开合（不再按 user/message
 切分），非 user 来源的 `user/message` 渲染为可展开的「上下文注入 / 跨会话召回」折叠行（首行
@@ -173,7 +180,27 @@ v0 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajectory` �
 Markdown 渲染器补齐上游 `ui-primitives` 的富文本能力：shiki 4.x 代码高亮（JS 正则引擎 +
 css-variables 主题，boot 语法 ts/bash/json，常用语言按需加载，未知语言回退纯文本）、KaTeX
 数学公式（micromark math 扩展 + 官方三臂降级渲染）、GFM 脚注（`user-content-fn-*` id +
-`↩` 回链，DOM 契约与官方 fixtures 一致）。
+`↩` 回链，DOM 契约与官方 fixtures 一致）。额外移植了上游的两个 micromark 语法扩展：
+`cjkFriendlyStrong`（让 `**强调**` 在无空格 CJK 续排时正常闭合）和 `mathCompatibility`
+（`\(...\)` 行内 TeX 与 `\[...\]` 多行显示数学，以及同行 `$$...$$` 显示公式）。
+
+## 已知取舍与未完成项
+
+以下为与官方服务端/客户端差距，经评估后决定暂不实现或属于产品方向差异：
+
+- **轨迹虚拟化**：7,000+ 事件会话的性能由尾窗分页（400 条 + 「加载更早」）保障，未引入
+  `@tanstack/react-virtual`，不影响桌面端可用性。
+- **流式增量 Markdown 解析**：Flowlet 是历史会话查看器，无需 `IncrementalMarkdownParser`
+  的流式增量解析（`animation-frame` 发布节奏），使用一次完整解析即可。
+- **`tool-call-chunks` 内容投影**：打包的 `tool-call-chunks` 存储行仅用于流式工具调用重建，
+  历史文件中已有完整 `tool/call` 事件（含 name/arguments）。
+- `tool/code-dispatch` 的 arguments 内含时间戳等元数据，不参与内容展示。
+- `mathCompatibility` 的 `$$...$$` 同行显示公式与 `micromark-extension-math` 默认行为略有
+  重叠（后者默认 `$...$` 行内，`$$...$$` 单行在无 `mathCompatibility` 时解析为行内公式），
+  两者同时注册时 `mathCompatibility` 的 `sameLineDollarMathFlow` 优先（concrete: true），
+  将一行 `$$...$$` 解析为显示公式。
+- `cjkFriendlyStrong` 的闭合条件严格遵循官方实现：仅当 `**` 序列前一字符为 Unicode 标点符号
+  且后一字符为 CJK 时额外闭合；其他无空格续排场景沿用 CommonMark 默认行为。
 
 - DSH headless 提供稳定 resume/session-id 参数后，再开放 continuation task。
 - DSH 提升 `SESSION_FORMAT_VERSION` 时，先按新版本语义补迁移/解析测试，再扩大接受范围。

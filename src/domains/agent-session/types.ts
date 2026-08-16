@@ -91,6 +91,7 @@ export type AgentSessionInteractionEventKind =
   | "context"
   | "compacted"
   | "model-retry"
+  | "approval"
   | "user-message"
   | "assistant-message"
   | "reasoning"

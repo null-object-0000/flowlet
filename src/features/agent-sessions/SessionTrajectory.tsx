@@ -129,14 +129,20 @@ export function SessionTrajectory({
   const turns = useMemo(() => [...new Set(rows.map((row) => row.turn).filter((turn): turn is number => turn != null && turn > 0))], [rows]);
   const betweenRows = rows.filter((row) => row.turn === null);
   const normalizedQuery = query.trim().toLocaleLowerCase();
+  const matchesQuery = (row: TrajectoryRow) => `${row.label} ${row.preview} ${row.outputEvent?.content ?? ""} ${row.event.model ?? ""} ${row.event.trace?.callId ?? ""}`
+    .toLocaleLowerCase()
+    .includes(normalizedQuery);
+  const matchedIds = useMemo(() => {
+    if (!normalizedQuery) return null;
+    return new Set(rows.filter(matchesQuery).map((row) => row.id));
+  }, [rows, normalizedQuery]);
+  const dimmedIds = matchedIds;
   const visibleRows = rows.filter((row) => {
     if (row.turn != null && collapsedTurns.has(row.turn)) return false;
     if (collapseCalls && (row.kind === "tool" || row.kind === "subtool")) return false;
     if (range && (row.index < range[0] || row.index > range[1])) return false;
     if (!normalizedQuery) return true;
-    return `${row.label} ${row.preview} ${row.outputEvent?.content ?? ""} ${row.event.model ?? ""} ${row.event.trace?.callId ?? ""}`
-      .toLocaleLowerCase()
-      .includes(normalizedQuery);
+    return matchesQuery(row);
   });
   // 分页：锚定尾部窗口，向上加载更早历史。
   const windowedRows = visibleRows.slice(Math.max(0, visibleRows.length - visibleLimit));
@@ -185,8 +191,10 @@ export function SessionTrajectory({
           />
         </label>
       </div>
+      <TrajectoryOverview rows={rows} />
       <TrajectoryTimeline
-        rows={windowedRows}
+        rows={rows}
+        dimmedIds={dimmedIds}
         selectedId={selectedId}
         actualDuration={actualDuration}
         range={range}
@@ -268,6 +276,46 @@ export function SessionTrajectory({
 
 const DEFAULT_PAGE_SIZE = 400;
 
+/** 时间投影概览：真实起止时刻 + 总耗时 + 按轮次分段的标尺（对齐官方 Overview 区）。 */
+function TrajectoryOverview({ rows }: { rows: TrajectoryRow[] }) {
+  const { language } = useAppPreferences();
+  const times = rows
+    .map((row) => row.event.timestamp ? Date.parse(row.event.timestamp) : Number.NaN)
+    .filter((value) => Number.isFinite(value));
+  if (times.length < 2) return null;
+  const start = Math.min(...times);
+  const end = Math.max(...times);
+  const total = Math.max(1, end - start);
+  const segments: Array<{ turn: number; start: number; end: number }> = [];
+  for (const row of rows) {
+    const time = row.event.timestamp ? Date.parse(row.event.timestamp) : Number.NaN;
+    if (!Number.isFinite(time) || row.turn == null) continue;
+    const last = segments[segments.length - 1];
+    if (last && last.turn === row.turn) last.end = Math.max(last.end, time);
+    else segments.push({ turn: row.turn, start: time, end: time });
+  }
+  return (
+    <div className={styles.timeOverview} aria-label="Time overview">
+      <span className={styles.timeOverviewClock}>{formatFullTimestamp(new Date(start).toISOString(), language)}</span>
+      <div className={styles.timeOverviewRail}>
+        {segments.map((segment) => (
+          <i
+            key={segment.turn}
+            className={styles.timeOverviewSeg}
+            style={{
+              left: `${((segment.start - start) / total) * 100}%`,
+              width: `${Math.max(0.5, ((segment.end - segment.start) / total) * 100)}%`,
+            }}
+            title={`Turn ${segment.turn} · ${new Date(segment.start).toLocaleTimeString(language)} → ${new Date(segment.end).toLocaleTimeString(language)}`}
+          />
+        ))}
+      </div>
+      <span className={styles.timeOverviewClock}>{formatFullTimestamp(new Date(end).toISOString(), language)}</span>
+      <span className={styles.timeOverviewDuration}>{formatDuration(total)}</span>
+    </div>
+  );
+}
+
 function turnSummaryText(steps: number, tools: number, t: (key: string, params?: Record<string, string | number>) => string) {
   // 官方折叠文案：`{n} step(s) · {m} tool call(s)`
   return t("已折叠 {count} 条事件", { count: steps + tools }) + " · " + `${steps} step(s) · ${tools} tool call(s)`;
@@ -310,6 +358,7 @@ function TrajectoryTableRow({
 
 function TrajectoryTimeline({
   rows,
+  dimmedIds,
   selectedId,
   actualDuration,
   range,
@@ -317,6 +366,7 @@ function TrajectoryTimeline({
   onRangeChange,
 }: {
   rows: TrajectoryRow[];
+  dimmedIds: Set<string> | null;
   selectedId: string | null;
   actualDuration: boolean;
   range: [number, number] | null;
@@ -368,6 +418,7 @@ function TrajectoryTimeline({
             const duration = row.outputEvent?.durationMs ?? row.event.durationMs ?? 0;
             const scale = actualDuration ? Math.max(1, Math.min(4, (duration / maxDuration) * 4)) : 1;
             const inRange = range ? row.index >= range[0] && row.index <= range[1] : true;
+            const dimmed = dimmedIds != null && !dimmedIds.has(row.id);
             const stylesForBlock: CSSProperties = { gridColumn: index + 1, gridRow: lane(row.kind), "--duration-scale": scale } as CSSProperties;
             const ttft = row.outputEvent?.timeToFirstTokenMs ?? row.event.timeToFirstTokenMs;
             if (row.kind === "message" && ttft != null && duration > ttft) {
@@ -380,6 +431,7 @@ function TrajectoryTimeline({
                 className={`${styles.timelineBlock} ${styles[`timeline_${row.kind}`]}`}
                 data-selected={row.id === selectedId || undefined}
                 data-timeline-in-range={inRange || undefined}
+                data-timeline-dimmed={dimmed || undefined}
                 style={stylesForBlock}
                 title={`${row.label} · ${row.preview}`}
                 onClick={() => onSelect(row.id)}

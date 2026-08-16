@@ -662,6 +662,66 @@ fn read_timeline_records(records: &[Value]) -> Result<AgentSessionTimeline, Stri
         if kind == "compaction/end" || kind == "compaction/prune" {
             continue;
         }
+        // 审批历史：asked 投影为 approval 事件（status=pending），decided 回写结果。
+        if kind == "approval/asked" {
+            let approval_id = data.get("id").and_then(Value::as_str).map(str::to_string);
+            let mut trace = trace_from(seq, "approval/asked", data);
+            trace.turn = current_turn;
+            trace.step = current_step;
+            trace.request_reason = approval_id;
+            push_event(
+                &mut timeline,
+                seq,
+                "approval",
+                timestamp,
+                data.get("toolName").and_then(Value::as_str).map(str::to_string),
+                data.get("reason").and_then(Value::as_str).map(str::to_string),
+                None,
+                None,
+                None,
+                None,
+                Some(trace),
+                Some("pending".to_string()),
+            );
+            continue;
+        }
+        if kind == "approval/decided" {
+            let outcome = data
+                .get("outcome")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let approval_id = data.get("id").and_then(Value::as_str);
+            if let Some(id) = approval_id {
+                if let Some(event) = timeline.events.iter_mut().find(|event| {
+                    event.kind == "approval"
+                        && event.trace.as_ref().and_then(|t| t.request_reason.as_deref()) == Some(id)
+                }) {
+                    event.status = Some(outcome);
+                    continue;
+                }
+            }
+            // 无对应 asked（如窗口外/老化）：单独投影一行。
+            let mut trace = trace_from(seq, "approval/decided", data);
+            trace.turn = current_turn;
+            trace.step = current_step;
+            trace.request_reason = data.get("id").and_then(Value::as_str).map(str::to_string);
+            push_event(
+                &mut timeline,
+                seq,
+                "approval",
+                timestamp,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(trace),
+                Some(outcome),
+            );
+            continue;
+        }
         // 模型重试：投影为 model-retry 事件（官方 model-retry 行：次数/延迟/失败原因）。
         if kind == "llm/retry" {
             let retry = data.get("retry").and_then(Value::as_i64).unwrap_or_default();
@@ -898,6 +958,88 @@ fn read_timeline_records(records: &[Value]) -> Result<AgentSessionTimeline, Stri
                     None,
                     Some(trace),
                     None,
+                );
+            }
+            "tool/code-dispatch-start" => {
+                // 官方子工具（code dispatch）：callId=subCallId，parentCallId=父调用，
+                // arguments 是对象（官方 JSON.stringify 后入树）。
+                let call_id = data.get("subCallId").and_then(Value::as_str).map(str::to_string);
+                let parent_call_id = data.get("parentCallId").and_then(Value::as_str).map(str::to_string);
+                let input = data.get("arguments").and_then(json_text);
+                if let Some(call_id) = &call_id {
+                    if let Some(name) = data.get("name").and_then(Value::as_str) {
+                        tool_names.insert(call_id.clone(), name.to_string());
+                        if let Some(coordinate) = trace.turn.zip(trace.step).or(Some((0, 0))) {
+                            open_tools.insert(call_id.clone(), coordinate);
+                        }
+                    }
+                    if let Some(started) = event_time {
+                        tool_started_at.insert(call_id.clone(), started);
+                    }
+                }
+                trace.call_id = call_id;
+                trace.parent_call_id = parent_call_id;
+                trace.input = input.clone();
+                push_event(
+                    &mut timeline,
+                    seq,
+                    "tool-call",
+                    timestamp,
+                    data.get("name").and_then(Value::as_str).map(str::to_string),
+                    input,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(trace),
+                    None,
+                );
+            }
+            "tool/code-dispatch" => {
+                // 子工具结果：content 为 ContentBlock[]；isError 投影为 error 状态。
+                let call_id = data.get("subCallId").and_then(Value::as_str).map(str::to_string);
+                let parent_call_id = data.get("parentCallId").and_then(Value::as_str).map(str::to_string);
+                let output = data
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .map(|blocks| {
+                        blocks
+                            .iter()
+                            .filter_map(content_block_text)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .filter(|text| !text.is_empty());
+                let is_error = data.get("isError").and_then(Value::as_bool).unwrap_or(false);
+                if let Some(call_id) = &call_id {
+                    open_tools.remove(call_id);
+                }
+                let duration_ms = call_id
+                    .as_ref()
+                    .and_then(|call_id| tool_started_at.get(call_id).copied())
+                    .zip(event_time)
+                    .map(|(started, ended)| ended.saturating_sub(started))
+                    .or(fallback_duration_ms);
+                let title = call_id
+                    .as_ref()
+                    .and_then(|call_id| tool_names.get(call_id))
+                    .cloned();
+                trace.call_id = call_id;
+                trace.parent_call_id = parent_call_id;
+                trace.output = output.clone();
+                push_event(
+                    &mut timeline,
+                    seq,
+                    "tool-result",
+                    timestamp,
+                    title,
+                    output,
+                    None,
+                    None,
+                    duration_ms,
+                    None,
+                    Some(trace),
+                    is_error.then(|| "error".to_string()),
                 );
             }
             "request/header" => {
@@ -1545,6 +1687,73 @@ mod tests {
             positions,
             vec!["turn", "model-retry", "assistant-message"]
         );
+    }
+
+    #[test]
+    fn approval_asked_decided_project_history_rows() {
+        let records = vec![
+            serde_json::json!({"type":"session","version":0,"id":"session-approval","createdAt":1_700_000_000_000i64}),
+            serde_json::json!({"type":"turn/start","seq":1,"time":1_700_000_000_010i64,"data":{"turn":1}}),
+            serde_json::json!({"type":"approval/asked","seq":2,"time":1_700_000_000_020i64,"data":{"id":"ap-1","toolName":"bash","callId":"call-9","reason":"run chmod +x deploy.sh"}}),
+            serde_json::json!({"type":"approval/decided","seq":3,"time":1_700_000_000_030i64,"data":{"id":"ap-1","outcome":"allowed-once"}}),
+            serde_json::json!({"type":"turn/end","seq":4,"time":1_700_000_000_040i64,"data":{"turn":1,"reason":{"kind":"completed"}}}),
+        ];
+
+        let timeline = read_timeline_records(&records).unwrap();
+        let approvals: Vec<_> = timeline
+            .events
+            .iter()
+            .filter(|event| event.kind == "approval")
+            .collect();
+        assert_eq!(approvals.len(), 1, "decided 应回写同一行而不是新增");
+        let approval = approvals[0];
+        assert_eq!(approval.title.as_deref(), Some("bash"));
+        assert_eq!(approval.content.as_deref(), Some("run chmod +x deploy.sh"));
+        assert_eq!(approval.status.as_deref(), Some("allowed-once"));
+        assert_eq!(
+            approval.trace.as_ref().and_then(|t| t.request_reason.as_deref()),
+            Some("ap-1")
+        );
+    }
+
+    #[test]
+    fn code_dispatch_projects_subtool_rows() {
+        let records = vec![
+            serde_json::json!({"type":"session","version":0,"id":"session-dispatch","createdAt":1_700_000_000_000i64}),
+            serde_json::json!({"type":"turn/start","seq":1,"time":1_700_000_000_010i64,"data":{"turn":1}}),
+            serde_json::json!({"type":"step/start","seq":2,"time":1_700_000_000_020i64,"data":{"turn":1,"step":1}}),
+            serde_json::json!({"type":"tool/call","seq":3,"time":1_700_000_000_030i64,"data":{"turn":1,"step":1,"callId":"call-1","name":"apply_patch","arguments":"{\"patch\":\"diff\"}"}}),
+            serde_json::json!({"type":"tool/code-dispatch-start","seq":4,"time":1_700_000_000_040i64,"data":{"rootCallId":"call-1","parentCallId":"call-1","subCallId":"sub-1","name":"write_file","arguments":{"path":"a.txt","content":"x"}}}),
+            serde_json::json!({"type":"tool/code-dispatch","seq":5,"time":1_700_000_000_060i64,"data":{"rootCallId":"call-1","parentCallId":"call-1","subCallId":"sub-1","name":"write_file","isError":false,"content":[{"type":"text","text":"wrote a.txt"}]}}),
+            serde_json::json!({"type":"tool/result","seq":6,"time":1_700_000_000_070i64,"data":{"turn":1,"step":1,"message":{"source":{"kind":"tool","callId":"call-1"},"content":[{"type":"tool-result","toolCallId":"call-1","content":[{"type":"text","text":"done"}]}]}}}),
+            serde_json::json!({"type":"step/end","seq":7,"time":1_700_000_000_080i64,"data":{"turn":1,"step":1}}),
+            serde_json::json!({"type":"turn/end","seq":8,"time":1_700_000_000_090i64,"data":{"turn":1,"reason":{"kind":"completed"}}}),
+        ];
+
+        let timeline = read_timeline_records(&records).unwrap();
+        let sub_call = timeline
+            .events
+            .iter()
+            .find(|event| event.trace.as_ref().and_then(|t| t.call_id.as_deref()) == Some("sub-1"))
+            .expect("应有子工具 call");
+        assert_eq!(sub_call.kind, "tool-call");
+        assert_eq!(sub_call.title.as_deref(), Some("write_file"));
+        assert_eq!(
+            sub_call.trace.as_ref().and_then(|t| t.parent_call_id.as_deref()),
+            Some("call-1")
+        );
+        assert!(sub_call.content.as_deref().unwrap().contains("\"path\""), "arguments 应 JSON 化: {:?}", sub_call.content);
+        let sub_result = timeline
+            .events
+            .iter()
+            .find(|event| {
+                event.kind == "tool-result"
+                    && event.trace.as_ref().and_then(|t| t.call_id.as_deref()) == Some("sub-1")
+            })
+            .expect("应有子工具 result");
+        assert_eq!(sub_result.content.as_deref(), Some("wrote a.txt"));
+        assert_eq!(sub_result.duration_ms, Some(20));
+        assert_eq!(sub_result.status, None);
     }
 
     #[test]

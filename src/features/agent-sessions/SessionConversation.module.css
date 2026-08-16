@@ -77,6 +77,14 @@
 .retryHeader i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--flowlet-color-warning-strong); }
 .retryHeader > span { flex: none; font-size: var(--flowlet-font-size-caption); font-weight: 500; font-family: var(--flowlet-font-family-mono); }
 .retryBody { max-height: 141px; margin: 6px 0 2px; padding: 8px 12px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: var(--flowlet-font-family-mono); font-size: var(--flowlet-font-size-code); line-height: var(--flowlet-line-height-code); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 审批历史行。 */
+.approvalRow { min-width: 0; margin-top: 2px; padding: 6px 10px; display: flex; align-items: baseline; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
+.approvalRow i { flex: none; width: 6px; height: 6px; align-self: center; border-radius: 50%; background: var(--flowlet-color-warning-strong); }
+.approvalRow[data-approval="allowed-once"] i { background: var(--flowlet-color-success); }
+.approvalRow[data-approval="rejected"] i { background: var(--semi-color-danger); }
+.approvalRow > span { flex: none; color: var(--flowlet-color-text-secondary); font-weight: 500; }
+.approvalRow > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); text-overflow: ellipsis; white-space: nowrap; }
+.approvalRow > b { flex: none; margin-left: auto; color: var(--flowlet-color-text-secondary); font-weight: 500; }
 /* 轮次状态行。 */
 .turnError { min-width: 0; padding: 8px 12px; display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--semi-color-danger-light-active); border-radius: 8px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .turnError b { font-weight: 600; }

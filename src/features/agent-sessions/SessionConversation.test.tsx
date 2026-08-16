@@ -93,6 +93,19 @@ describe("SessionConversation", () => {
     expect(screen.getByText("RATE_LIMIT")).toBeInTheDocument();
   });
 
+  it("审批历史行展示工具、理由与最终结果", () => {
+    renderConversation([
+      event({ id: "turn-1", kind: "turn", status: "completed", durationMs: null }),
+      event({ id: "approval-1", kind: "approval", title: "bash", content: "run deploy.sh", status: "allowed-once" }),
+      event({ id: "approval-2", kind: "approval", title: "fs_write", status: "rejected" }),
+    ]);
+
+    expect(screen.getByText("bash")).toBeInTheDocument();
+    expect(screen.getByText("run deploy.sh")).toBeInTheDocument();
+    expect(screen.getByText("Allowed once")).toBeInTheDocument();
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+  });
+
   it("推理块渲染为 Think 折叠行，摘要取首行", () => {
     renderConversation([
       event({ id: "turn-1", kind: "turn", status: "completed", durationMs: null }),

@@ -12,6 +12,7 @@ import { normalizeUri } from "micromark-util-sanitize-uri";
 
 import styles from "./Markdown.module.css";
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
+import { cjkFriendlyStrong, mathCompatibility } from "./micromarkExtensions";
 
 type ReferenceTargets = Map<string, Md.Definition>;
 type FootnoteDefinitionNode = {
@@ -174,7 +175,7 @@ function renderNode(node: Md.RootContent, key: Key, definitions: ReferenceTarget
 
 function renderMarkdown(content: string): ReactNode[] {
   const root = fromMarkdown(content, {
-    extensions: [gfm(), math()],
+    extensions: [gfm(), cjkFriendlyStrong(), mathCompatibility(), math()],
     mdastExtensions: [gfmFromMarkdown(), mathFromMarkdown()],
   });
   const definitions: ReferenceTargets = new Map();

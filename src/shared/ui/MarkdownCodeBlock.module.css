@@ -1,0 +1,12 @@
+.block { position: relative; margin: 16px 0; overflow: visible; color: var(--flowlet-color-text); background: var(--flowlet-color-surface-muted); border-radius: 12px; }
+.block:not(:last-child) { margin-bottom: 11px; }
+.bannerWrap { position: sticky; top: 0; z-index: 1; border-radius: 12px 12px 0 0; background: var(--flowlet-color-surface); }
+.banner { min-height: 36px; padding: 9px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 12px 12px 0 0; background: var(--flowlet-color-surface-strong); box-sizing: border-box; }
+.language { min-width: 0; overflow: hidden; color: var(--flowlet-color-text); font: 400 12px/18px var(--flowlet-font-family-mono); text-overflow: ellipsis; white-space: nowrap; }
+.copyButton { flex: none; margin: 0; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; font: 400 13px/18px var(--flowlet-font-family); }
+.copyButton:hover { color: var(--flowlet-color-primary); }
+.block pre, .block .highlight pre { margin: 0 !important; padding: 16px; overflow-x: auto; border-radius: 0 0 12px 12px; background: var(--flowlet-color-surface-muted); font: 400 13px/22px var(--flowlet-font-family-mono); white-space: pre-wrap; word-break: break-all; }
+.block pre code { padding: 0; background: none; font: inherit; }
+/* shiki 高亮输出的 token 层：透明背景、继承前景色，行内样式只保留颜色变量。 */
+.block .highlight pre.shiki { background: transparent !important; color: var(--flowlet-color-text); }
+.block .highlight code { font: inherit; }

@@ -1674,6 +1674,36 @@ pub struct AgentSessionTimelineEvent {
     pub duration_ms: Option<i64>,
     pub time_to_first_token_ms: Option<i64>,
     pub usage: Option<AgentSessionNativeUsage>,
+    /// Optional structured facts used by the read-only trajectory viewer.
+    /// Ordinary adapters may omit it; the DSH adapter preserves the stable v0
+    /// event coordinates and payload boundaries required to reconstruct its
+    /// Conversation / Trajectory presentation without exposing the raw file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace: Option<AgentSessionTrace>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionTrace {
+    pub sequence: i64,
+    pub event_type: String,
+    pub turn: Option<i64>,
+    pub step: Option<i64>,
+    pub call_id: Option<String>,
+    pub parent_call_id: Option<String>,
+    pub provider: Option<String>,
+    pub request_reason: Option<String>,
+    pub input: Option<String>,
+    pub output: Option<String>,
+    pub system_prompt: Option<String>,
+    pub tools: Option<String>,
+    /// 消息来源分类原始值（user / plugin / model / tool / agent-instructions 等，
+    /// 官方 MessageSourceMap 合并可扩展）。仅 user/message 派生事件携带。
+    pub source_kind: Option<String>,
+    /// ContextForm（instructions / catalog / snapshot / notice / relay / recall）。
+    pub source_form: Option<String>,
+    /// 生产者名：instructions → changes[].path 连接；plugin → 插件名；recall → 会话引用。
+    pub producer: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

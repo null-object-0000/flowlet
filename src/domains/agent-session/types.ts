@@ -87,6 +87,10 @@ export type AgentSessionNativeUsage = {
 
 export type AgentSessionInteractionEventKind =
   | "turn"
+  | "request"
+  | "context"
+  | "compacted"
+  | "model-retry"
   | "user-message"
   | "assistant-message"
   | "reasoning"
@@ -106,6 +110,30 @@ export type AgentSessionInteractionEvent = {
   durationMs: number | null;
   timeToFirstTokenMs: number | null;
   usage: AgentSessionNativeUsage | null;
+  trace?: AgentSessionTrace | null;
+};
+
+/** Stable, normalized trace coordinates. DSH v0 supplies the complete set;
+ * other Agent adapters can progressively opt in without leaking raw logs. */
+export type AgentSessionTrace = {
+  sequence: number;
+  eventType: string;
+  turn: number | null;
+  step: number | null;
+  callId: string | null;
+  parentCallId: string | null;
+  provider: string | null;
+  requestReason: string | null;
+  input: string | null;
+  output: string | null;
+  systemPrompt: string | null;
+  tools: string | null;
+  /** 消息来源分类原始值（user / plugin / model / tool / agent-instructions 等）。 */
+  sourceKind?: string | null;
+  /** ContextForm：instructions / catalog / snapshot / notice / relay / recall。 */
+  sourceForm?: string | null;
+  /** 生产者名：instructions → 文件路径列表；plugin → 插件名。 */
+  producer?: string | null;
 };
 
 export type AgentSessionLastInteraction = {

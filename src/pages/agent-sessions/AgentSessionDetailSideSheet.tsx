@@ -3,11 +3,12 @@ import { IconAlertTriangle, IconCopy, IconExternalOpen } from "@douyinfe/semi-ic
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { agentSessionLabel, type AgentSessionLastInteraction, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type DshApprovalRequest, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
-import { groupInteractionEvents, InteractionOutputEvent, InteractionProcessGroup } from "../../features/agent-sessions/SessionConversation";
-import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useDshSessionPermissions, useOpenCodeSessionPermissions, useReplyDshPermission, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
+import { groupInteractionEvents, InteractionOutputEvent, InteractionProcessGroup, SessionConversation } from "../../features/agent-sessions/SessionConversation";
+import { SessionTrajectory } from "../../features/agent-sessions/SessionTrajectory";
+import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useAgentSessionTimeline, useDshSessionPermissions, useOpenCodeSessionPermissions, useReplyDshPermission, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { interactionEventsVersion, useSessionScrollFollow } from "../../features/agent-sessions/useSessionScrollFollow";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
-import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
+import { SESSION_DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { ScrollBottomControl } from "../../shared/ui/ScrollBottomControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
@@ -31,7 +32,7 @@ export function AgentSessionDetailSideSheet({
   onRefreshOverview?: () => Promise<unknown> | void;
 }) {
   const { language, t } = useAppPreferences();
-  const [activeTab, setActiveTab] = useState<"overview" | "usage" | "session" | "child-sessions">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "conversation" | "trajectory" | "usage" | "info" | "child-sessions">("overview");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | undefined>(undefined);
   // 抽屉右上角使用页面公共的自动刷新控件：开关控制抽屉内 5 秒自动刷新。
   const refreshControl = useRefreshControl({ intervalMs: SESSION_AUTO_REFRESH_MS });
@@ -39,6 +40,11 @@ export function AgentSessionDetailSideSheet({
   const children = useAgentSessionChildren(session);
   const nativeSummary = useAgentSessionNativeSummary(session);
   const lastInteraction = useAgentSessionLastInteraction(session, activeTab === "overview");
+  const timeline = useAgentSessionTimeline(
+    session.agentType,
+    session.sessionId,
+    activeTab === "conversation" || activeTab === "trajectory",
+  );
   const openCodePermissions = useOpenCodeSessionPermissions(session, activeTab === "overview");
   const dshPermissions = useDshSessionPermissions(session, activeTab === "overview");
   const pendingApprovalCount = session.agentType === "opencode" && openCodePermissions.data?.available
@@ -73,6 +79,9 @@ export function AgentSessionDetailSideSheet({
       if (activeTab === "usage") {
         return Promise.all([nativeSummary.refetch(), children.refetch()]);
       }
+      if (activeTab === "conversation" || activeTab === "trajectory") {
+        return timeline.refetch();
+      }
       if (activeTab === "child-sessions") {
         return children.refetch();
       }
@@ -101,7 +110,7 @@ export function AgentSessionDetailSideSheet({
     <SideSheet
       visible
       motion={false}
-      width={DETAIL_SHEET_WIDTH}
+      width={SESSION_DETAIL_SHEET_WIDTH}
       title={<SessionHeader session={session} language={language} />}
       onCancel={onClose}
       footer={null}
@@ -120,7 +129,7 @@ export function AgentSessionDetailSideSheet({
           <RefreshControl
             autoRefresh={refreshControl.autoRefresh}
             onToggleAutoRefresh={refreshControl.toggleAutoRefresh}
-            isFetching={lastInteraction.isFetching || children.isFetching || nativeSummary.isFetching || openCodePermissions.isFetching || dshPermissions.isFetching}
+            isFetching={lastInteraction.isFetching || timeline.isFetching || children.isFetching || nativeSummary.isFetching || openCodePermissions.isFetching || dshPermissions.isFetching}
             lastUpdatedAt={lastUpdatedAt}
             intervalMs={refreshControl.intervalMs}
             onRefresh={() => void refetchActiveTab()}
@@ -133,7 +142,7 @@ export function AgentSessionDetailSideSheet({
           type="line"
           activeKey={activeTab}
           tabPaneMotion={false}
-          onChange={(key) => setActiveTab(key as "overview" | "usage" | "session" | "child-sessions")}
+          onChange={(key) => setActiveTab(key as "overview" | "conversation" | "trajectory" | "usage" | "info" | "child-sessions")}
         >
           <Tabs.TabPane tab={t("概览")} itemKey="overview">
             <div className={styles.tabFrame}>
@@ -171,6 +180,32 @@ export function AgentSessionDetailSideSheet({
               ) : null}
             </div>
           </Tabs.TabPane>
+          <Tabs.TabPane tab={t("对话")} itemKey="conversation">
+            <div className={styles.tabFrame}>
+              <div className={styles.tabScroll}>
+                <div className={styles.conversationBody}>
+                  <SessionConversation
+                    events={timeline.data?.events ?? []}
+                    truncated={timeline.data?.truncated ?? false}
+                    loading={timeline.isLoading}
+                    error={timeline.isError ? timeline.error.message : null}
+                    language={language}
+                    onRetry={() => void timeline.refetch()}
+                  />
+                </div>
+              </div>
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={t("轨迹")} itemKey="trajectory">
+            <div className={styles.trajectoryFrame}>
+              <SessionTrajectory
+                events={timeline.data?.events ?? []}
+                loading={timeline.isLoading}
+                error={timeline.isError ? timeline.error.message : null}
+                onRetry={() => void timeline.refetch()}
+              />
+            </div>
+          </Tabs.TabPane>
           <Tabs.TabPane tab={t("用量")} itemKey="usage">
             <div className={styles.tabFrame}>
               <div className={styles.tabScroll}>
@@ -197,7 +232,7 @@ export function AgentSessionDetailSideSheet({
               </div>
             </div>
           </Tabs.TabPane>
-          <Tabs.TabPane tab={t("会话")} itemKey="session">
+          <Tabs.TabPane tab={t("信息")} itemKey="info">
             <div className={styles.tabFrame}>
               <div className={styles.tabScroll}>
                 <div className={styles.body}>

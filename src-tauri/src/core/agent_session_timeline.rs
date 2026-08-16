@@ -911,6 +911,7 @@ fn push_event(
         duration_ms: None,
         time_to_first_token_ms: None,
         usage: None,
+        trace: None,
     });
 }
 

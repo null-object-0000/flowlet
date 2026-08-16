@@ -196,18 +196,26 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("Flowlet 直接写入 Provider、默认模型与 Client Token")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.dsh\\settings.yaml")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.dsh\\.credentials.yaml")).toBeInTheDocument();
-    expect(screen.getByText("未启用（可选）")).toBeInTheDocument();
-    // 精确会话关联与模型规格声明都收纳在折叠的「高级配置」区，默认全部未启用。
+    expect(screen.getAllByText("未启用（可选）")).toHaveLength(2);
+    // 精确会话关联、模型规格声明与交互确认桥都收纳在折叠的「高级配置」区，默认全部未启用。
     expect(screen.getByText("全部未启用（默认）")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "高级配置（可选能力）" }));
     const sessionSwitch = screen.getByRole("switch", { name: "启用精确会话关联（高级）" });
     expect(sessionSwitch).not.toBeChecked();
     fireEvent.click(sessionSwitch);
-    expect(mutateAsync).toHaveBeenLastCalledWith({ sessionExtension: true, modelSpecs: false });
+    expect(mutateAsync).toHaveBeenLastCalledWith({
+      sessionExtension: true,
+      modelSpecs: false,
+      approvalBridge: false,
+    });
     const specsSwitch = screen.getByRole("switch", { name: "声明聚合模型规格（高级）" });
     expect(specsSwitch).not.toBeChecked();
     fireEvent.click(specsSwitch);
-    expect(mutateAsync).toHaveBeenLastCalledWith({ sessionExtension: false, modelSpecs: true });
+    expect(mutateAsync).toHaveBeenLastCalledWith({
+      sessionExtension: false,
+      modelSpecs: true,
+      approvalBridge: false,
+    });
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
   });

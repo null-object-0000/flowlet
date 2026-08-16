@@ -160,6 +160,29 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
     error: null,
     refetch: lastInteractionRefetchMock,
   }),
+  useAgentSessionTimeline: () => ({
+    data: {
+      sourceAvailable: true,
+      truncated: false,
+      turnCount: 1,
+      usage: null,
+      models: ["native-model"],
+      events: [],
+    },
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(() => Promise.resolve()),
+  }),
+  useDshSessionPermissions: () => ({
+    data: { available: false, permissions: [], error: null },
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+  }),
+  useReplyDshPermission: () => ({ mutateAsync: vi.fn(), isPending: false, variables: undefined }),
   useAgentSessionClients: () => ({ data: [], isLoading: false }),
 }));
 
@@ -362,9 +385,9 @@ describe("AgentSessionsPage", () => {
     expect(sessionListRefetchMock).not.toHaveBeenCalled();
     [childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
 
-    // 会话 Tab：会话信息与活动时间
-    fireEvent.click(screen.getByRole("tab", { name: "会话" }));
-    const sessionPane = screen.getByRole("tabpanel", { name: "会话" });
+    // 信息 Tab：会话信息与活动时间
+    fireEvent.click(screen.getByRole("tab", { name: "信息" }));
+    const sessionPane = screen.getByRole("tabpanel", { name: "信息" });
     expect(within(sessionPane).getByText("ses_native_test")).toBeInTheDocument();
     expect(within(sessionPane).getByText("D:\\GitHub\\flowlet")).toBeInTheDocument();
 
@@ -411,7 +434,7 @@ describe("AgentSessionsPage", () => {
     );
 
     fireEvent.click(screen.getByText("Native session title").closest("button")!);
-    fireEvent.click(screen.getByRole("tab", { name: "会话" }));
+    fireEvent.click(screen.getByRole("tab", { name: "信息" }));
     fireEvent.click(screen.getByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" }));
 
     expect(screen.getByTestId("location")).toHaveTextContent("/logs?search=ses_native_test");
@@ -449,9 +472,9 @@ describe("AgentSessionsPage", () => {
     expect(within(overview).queryByText("Codex Desktop")).not.toBeInTheDocument();
     expect(within(overview).getByText("Agent 原生")).toBeInTheDocument();
 
-    // 会话 Tab：显示 Agent 来源，无请求日志入口
-    fireEvent.click(screen.getByRole("tab", { name: "会话" }));
-    const sessionPane = screen.getByRole("tabpanel", { name: "会话" });
+    // 信息 Tab：显示 Agent 来源，无请求日志入口
+    fireEvent.click(screen.getByRole("tab", { name: "信息" }));
+    const sessionPane = screen.getByRole("tabpanel", { name: "信息" });
     expect(within(sessionPane).getByText("Agent 来源")).toBeInTheDocument();
     expect(within(sessionPane).queryByText("未知客户端")).not.toBeInTheDocument();
     expect(within(sessionPane).queryByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).not.toBeInTheDocument();

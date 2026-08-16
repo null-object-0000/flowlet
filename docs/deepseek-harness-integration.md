@@ -126,6 +126,55 @@ callId、reason、DSH 会话 id）经文件桥写入 `~/.flowlet/dsh-control/req
 
 ## 仍保留的能力边界
 
+Flowlet 的会话详情使用与上游同版式的“对话 / 轨迹”双视图。轨迹读取 Session Adapter
+输出的类型化 trace facts（seq、turn、step、callId、Provider、System Prompt、Tools 与输入/输出），
+不在前端直接读取 DSH 文件，也不依赖 DSH Web 正在运行。视图与投影参考上游提交
+`47f943859bef60e4160492346772ded9b24f765a` 的 `ui-conversation` / `ui-trajectory`，许可证记录见
+仓库根目录 `THIRD_PARTY_NOTICES.md`。会话标题取最后一条原生 `session/title`；非用户来源的
+`user/message` 投影为 Context（`source.plugin == "compact"` 的压缩检查点除外，它随
+`compaction/summary` 折叠为 compacted 行），inbox/request transport 事件不生成可见行，工具
+call/result 按 `callId` 合并，Turn 数按原生 turn 坐标去重而不是按 assistant step 计数。
+
+v0 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajectory` 消费的集合一致）：
+
+- `turn/start` + `turn/end`：每个轮次投影为一条 turn 事件，状态按 `reason.kind` 映射
+  （`completed` → completed、`error` → error、`aborted*` / `blocked` / `interrupted` → cancelled、
+  文件内无 `turn/end` → running），并携带轮次时长（turn/end − turn/start）。
+- `step/start` / `step/end` / `assistant/chunk`：步骤时长按 assistant/message − step/start 计算；
+  首个携带内容的 chunk（text/reasoning/tool-call delta，含官方默认打包的
+  `text-chunks` / `reasoning-chunks` / `tool-call-chunks` 存储行——取其 `time0`）到
+  step/start 的间隔投影为 `timeToFirstTokenMs`。步骤或轮次关闭时仍未收到 result 的
+  `tool/call`，按官方行为合成一条 `status = "error"`、`requestReason = "interrupted"` 的
+  tool-result（异常退出会话同理在文件收尾处闭合）。
+- `compaction/start|summary|end`：投影为 `compacted` 事件，正文为 `summary` 的 text 块拼接，
+  归入 compaction/start 声明的轮次；压缩用量（`usage`）记录在事件上但不计入会话总用量
+  （shadowed 事件已在各自时点计费）。
+- 撕裂尾部容忍：与 `dsh-session-persistence-jsonl` 的 scanLog/scanZstdFrames 语义一致——只读
+  前缀的完整记录；zstd 分帧按官方结构遍历（`blockSize = header >>> 3` 不掩码），损坏或未落盘
+  完整的尾帧保留此前已解码内容，不因一个坏帧隐藏整个会话。`llm/retry`、`approval/*`、
+  `agent/inbox/spliced`（steering 分类）等事件当前不生成可见行，属后续对齐项。
+
+对话视图的节点投影与上游 `ui-conversation` 对齐：轮次由 `turn` 事件开合（不再按 user/message
+切分），非 user 来源的 `user/message` 渲染为可展开的「上下文注入 / 跨会话召回」折叠行（首行
+摘要 + 生产者/文件路径 + 141px 正文滚动），reasoning 渲染为「Think」折叠行（标题保留官方未
+本地化的 "Think"，摘要取首行），`compacted` 渲染为「上下文已压缩」标记，`llm/retry` 投影为
+模型重试行（次数/延迟/失败原因），轮次状态按 `turn` 事件 status 渲染（运行中脉冲 / 本轮运行
+失败 + 失败消息 / 输出 token 上限提示 / 已停止 / 本轮已中断），已完成轮次的尾部展示用时 +
+首 token + 解码吞吐（tok/s，输出 tokens ÷（时长 − 首 token））。`user/message` 的
+来源 provenance（kind/form/生产者、next-step inbox 采纳的 steering）随 trace 透传，
+由对话与轨迹共用。
+
+轨迹视图与上游 `ui-trajectory` 对齐：主记录表为「事件 + 内容」两列（token/耗时等进入选中后
+的详情检查器），隐藏的 prologue 并入首个可见轮次，`turn` 为空的记录进入「Between turns」区，
+折叠摘要使用官方口径（`N step(s) · M tool call(s)`），时间轴条带对助手消息按 TTFT/解码分段
+渐变（--ttft-frac），支持拖选时间区间过滤（右键/双击清除），长列表锚定尾部窗口并提供
+「加载更早」分页。
+
+Markdown 渲染器补齐上游 `ui-primitives` 的富文本能力：shiki 4.x 代码高亮（JS 正则引擎 +
+css-variables 主题，boot 语法 ts/bash/json，常用语言按需加载，未知语言回退纯文本）、KaTeX
+数学公式（micromark math 扩展 + 官方三臂降级渲染）、GFM 脚注（`user-content-fn-*` id +
+`↩` 回链，DOM 契约与官方 fixtures 一致）。
+
 - DSH headless 提供稳定 resume/session-id 参数后，再开放 continuation task。
 - DSH 提升 `SESSION_FORMAT_VERSION` 时，先按新版本语义补迁移/解析测试，再扩大接受范围。
 - 思考模式（`reasoningEfforts` / `compat.thinkingFormat` 声明）未在本次提供：Flowlet 聚合路由

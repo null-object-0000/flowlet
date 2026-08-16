@@ -83,13 +83,21 @@ describe("agent access adapters", () => {
     // 会话关联控件默认关闭，开关只改自身、保留规格声明状态。
     expect(adapter.configControls(base)[0].checked).toBe(false);
     expect(adapter.configControls(base)[0].applyOptions(true))
-      .toEqual({ sessionExtension: true, modelSpecs: false });
+      .toEqual({ sessionExtension: true, modelSpecs: false, approvalBridge: false });
     // 模型规格控件默认不填写，与会话关联互相独立。
     expect(adapter.configControls(base)[1].checked).toBe(false);
     expect(adapter.configControls(base)[1].applyOptions(true))
-      .toEqual({ sessionExtension: false, modelSpecs: true });
+      .toEqual({ sessionExtension: false, modelSpecs: true, approvalBridge: false });
     // 重新写入按钮保留当前报告状态，默认全关。
-    expect(adapter.applyOptions(base)).toEqual({ sessionExtension: false, modelSpecs: false });
-    expect(adapter.applyOptions(context())).toEqual({ sessionExtension: false, modelSpecs: false });
+    expect(adapter.applyOptions(base)).toEqual({
+      sessionExtension: false,
+      modelSpecs: false,
+      approvalBridge: false,
+    });
+    expect(adapter.applyOptions(context())).toEqual({
+      sessionExtension: false,
+      modelSpecs: false,
+      approvalBridge: false,
+    });
   });
 });

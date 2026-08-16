@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { AgentSessionInteractionEvent, AgentSessionNativeUsage } from "../../domains/agent-session/types";
 import { formatCompactNumber } from "../../shared/formatters/number";
@@ -42,26 +43,69 @@ function matchesInteractionKind(
   return candidates.includes(kind);
 }
 
-/** 把完整会话事件按「用户消息」边界切分为多次交互（每次 = 一条用户消息 + 后续输出）。 */
-function splitInteractions(events: AgentSessionInteractionEvent[]): AgentSessionInteractionEvent[][] {
-  const interactions: AgentSessionInteractionEvent[][] = [];
+/** 按轮次分组：与官方一致，轮次由 `turn` 事件开合（user/message 不切开轮次）。 */
+type TurnUnitModel = {
+  turn: number | null;
+  status: string | null;
+  durationMs: number | null;
+  errorMessage: string | null;
+  events: AgentSessionInteractionEvent[];
+};
+
+function buildTurnGroups(events: AgentSessionInteractionEvent[]): TurnUnitModel[] {
+  const groups: TurnUnitModel[] = [];
   for (const event of events) {
-    if (event.kind === "user-message") {
-      interactions.push([event]);
-    } else if (interactions.length > 0) {
-      interactions[interactions.length - 1].push(event);
+    if (event.kind === "turn") {
+      groups.push({
+        turn: event.trace?.turn ?? null,
+        status: event.status,
+        durationMs: event.durationMs,
+        errorMessage: event.content,
+        events: [],
+      });
     } else {
-      // 会话可能从一段输出中间开始（如首条事件就是工具结果/续跑会话）：
-      // 开一条没有用户消息的交互承接这些输出，避免把开头的会话内容整段丢掉。
-      interactions.push([event]);
+      if (groups.length === 0) {
+        groups.push({ turn: null, status: null, durationMs: null, errorMessage: null, events: [] });
+      }
+      groups[groups.length - 1].events.push(event);
     }
   }
-  return interactions;
+  return groups;
+}
+
+type OutputItem =
+  | { type: "think"; event: AgentSessionInteractionEvent }
+  | { type: "message"; event: AgentSessionInteractionEvent }
+  | { type: "retry"; event: AgentSessionInteractionEvent }
+  | { type: "tools"; events: AgentSessionInteractionEvent[] };
+
+function buildOutputItems(events: AgentSessionInteractionEvent[]): OutputItem[] {
+  const items: OutputItem[] = [];
+  let tools: AgentSessionInteractionEvent[] = [];
+  const flush = () => {
+    if (tools.length > 0) {
+      items.push({ type: "tools", events: tools });
+      tools = [];
+    }
+  };
+  for (const event of events) {
+    if (event.kind === "tool-call" || event.kind === "tool-result") {
+      tools.push(event);
+      continue;
+    }
+    flush();
+    if (event.kind === "reasoning") items.push({ type: "think", event });
+    else if (event.kind === "model-retry") items.push({ type: "retry", event });
+    else if (event.kind === "assistant-message" || event.kind === "error") items.push({ type: "message", event });
+  }
+  flush();
+  return items;
 }
 
 /**
- * 完整会话对话视图：把会话时间线的全部事件按轮次渲染为用户消息气泡 + 助手回复 +
- * 折叠的思考/工具调用组。与「会话详情抽屉」的最近一轮渲染一致，但展示全部交互。
+ * 完整会话对话视图：按轮次渲染为用户消息气泡 + 上下文折叠行 + 助手回复（含 Think
+ * 折叠行与工具/推理组）+ 压缩标记 + 轮次状态/尾部统计。与上游 `ui-conversation` 的
+ * 节点语义对齐：turn/start 开轮、turn/end.reason 决定状态、非 user 来源投影为 context。
  */
 export function SessionConversation({
   events,
@@ -94,64 +138,209 @@ export function SessionConversation({
       </div>
     );
   }
-  const interactions = splitInteractions(events);
-  if (interactions.length === 0) {
+  const groups = useMemo(() => buildTurnGroups(events), [events]);
+  if (groups.every((group) => group.events.length === 0)) {
     return <div className={styles.empty}>{t("未找到可读取的会话内容")}</div>;
   }
   return (
     <div className={styles.conversation}>
       {truncated ? <div className={styles.truncated}>{t("会话较长，以下仅展示最近部分内容")}</div> : null}
-      {interactions.map((interaction, index) => (
-        <InteractionUnit key={interaction[0].id} events={interaction} language={language} index={index} />
+      {groups.map((model, index) => (
+        <TurnUnit key={model.turn != null ? `turn-${model.turn}` : `prologue-${index}`} model={model} language={language} index={index} />
       ))}
     </div>
   );
 }
 
-function InteractionUnit({
-  events,
+function TurnUnit({
+  model,
   language,
   index,
 }: {
-  events: AgentSessionInteractionEvent[];
+  model: TurnUnitModel;
   language: "zh-CN" | "en-US";
   index: number;
 }) {
   const { t } = useAppPreferences();
-  const turnEvent = events.find((event) => event.kind === "turn") ?? null;
-  const nonTurnEvents = events.filter((event) => event.kind !== "turn");
-  const userEventIndex = nonTurnEvents.findIndex((event) => event.kind === "user-message");
-  const userEvent = userEventIndex >= 0 ? nonTurnEvents[userEventIndex] : null;
-  const outputEvents = userEventIndex >= 0 ? nonTurnEvents.slice(userEventIndex + 1) : nonTurnEvents;
-  const outputItems = groupInteractionEvents(outputEvents);
-  const hasAssistantMessage = outputEvents.some((event) => event.kind === "assistant-message");
+  const users = model.events.filter((event) => event.kind === "user-message");
+  const contexts = model.events.filter((event) => event.kind === "context");
+  const compactions = model.events.filter((event) => event.kind === "compacted");
+  const outputs = model.events.filter((event) =>
+    event.kind !== "user-message" &&
+    event.kind !== "context" &&
+    event.kind !== "compacted" &&
+    event.kind !== "request" &&
+    event.kind !== "turn",
+  );
+  const outputItems = useMemo(() => buildOutputItems(outputs), [outputs]);
+  const messages = outputs.filter((event) => event.kind === "assistant-message");
+  const hasOutput = messages.length > 0;
   return (
     <section className={styles.unit} aria-label={t("第 {n} 轮", { n: index + 1 })}>
       {index > 0 ? <div className={styles.unitDivider}>{t("第 {n} 轮", { n: index + 1 })}</div> : null}
-      {userEvent ? (
-        <article className={styles.userRow} aria-label={t("用户消息")}>
-          {userEvent.content ? <pre className={styles.userBubble}>{userEvent.content}</pre> : null}
+      {users.map((event) => (
+        <article key={event.id} className={styles.userRow} aria-label={t("用户消息")}>
+          {event.content ? <pre className={styles.userBubble}>{event.content}</pre> : null}
         </article>
-      ) : null}
+      ))}
+      {contexts.map((event) => <ContextDisclosure key={event.id} event={event} />)}
+      {compactions.map((event) => <CompactionRow key={event.id} event={event} language={language} />)}
       {outputItems.length > 0 ? (
         <div className={styles.outputStream}>
-          {outputItems.map((item) => item.kind === "event" ? (
+          {outputItems.map((item, index) => item.type === "think" ? (
+            <ThinkRow key={item.event.id} event={item.event} />
+          ) : item.type === "retry" ? (
+            <ModelRetryRow key={item.event.id} event={item.event} />
+          ) : item.type === "message" ? (
             <InteractionOutputEvent key={item.event.id} event={item.event} language={language} />
           ) : (
-            <InteractionProcessGroup key={item.id} events={item.events} language={language} />
+            <InteractionProcessGroup key={`${item.events[0]?.id ?? index}:group`} events={item.events} language={language} />
           ))}
         </div>
       ) : null}
-      {turnEvent?.status === "running" ? (
-        <div className={styles.progress} role="status"><i />{t("正在处理")}</div>
-      ) : null}
-      {turnEvent?.status === "cancelled" && !hasAssistantMessage ? (
-        <div className={styles.notice}>{t("本轮已中断，未生成回复")}</div>
-      ) : null}
-      {turnEvent?.status === "completed" && !hasAssistantMessage ? (
-        <div className={styles.notice}>{t("本轮未生成可展示的回复")}</div>
-      ) : null}
+      <TurnStatusNotice model={model} hasOutput={hasOutput} />
+      <TurnFooter model={model} messages={messages} language={language} />
     </section>
+  );
+}
+
+/** 上下文注入折叠行（对齐官方 DisclosureRow）：默认收起，正文 141px 内滚动。
+ *  来源 provenance：instructions → 「上下文注入」+ 消化的文件路径；recall →
+ *  「跨会话召回」+ 生产者。 */
+function ContextDisclosure({ event }: { event: AgentSessionInteractionEvent }) {
+  const { t } = useAppPreferences();
+  const trace = event.trace;
+  const isRecall = trace?.sourceKind === "session-reference" || trace?.sourceForm === "recall";
+  const label = isRecall ? t("跨会话召回") : t("上下文注入");
+  const summary = firstLine(event.content);
+  return (
+    <details className={styles.contextRow} data-context-form={trace?.sourceForm ?? undefined}>
+      <summary className={styles.contextHeader}>
+        <i aria-hidden />
+        <span>{label}</span>
+        {trace?.producer ? <b className={styles.contextProducer}>{trace.producer}</b> : null}
+        {summary ? <small>{summary}</small> : null}
+      </summary>
+      {event.content ? (
+        <div className={styles.contextBody}>
+          <Markdown content={event.content} density="compact" />
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+/** 模型重试行（对齐官方 model-retry）：稳定单行，展示次数/延迟/失败原因。 */
+function ModelRetryRow({ event }: { event: AgentSessionInteractionEvent }) {
+  return (
+    <details className={styles.retryRow}>
+      <summary className={styles.retryHeader}>
+        <i aria-hidden />
+        <span>{event.title ?? "Retry"}</span>
+      </summary>
+      {event.content ? <pre className={styles.retryBody}>{event.content}</pre> : null}
+    </details>
+  );
+}
+
+/** Think 折叠行（对齐官方）：默认收起，标题固定 "Think"，摘要取首行。 */
+function ThinkRow({ event }: { event: AgentSessionInteractionEvent }) {
+  const summary = firstLine(event.content);
+  return (
+    <details className={styles.thinkRow}>
+      <summary className={styles.thinkHeader}>
+        <span>Think</span>
+        {summary ? <small>{summary}</small> : null}
+      </summary>
+      {event.content ? <div className={styles.thinkBody}>{event.content}</div> : null}
+    </details>
+  );
+}
+
+/** 压缩标记（compacted 事件）：默认收起，正文为压缩总结。 */
+function CompactionRow({
+  event,
+  language,
+}: {
+  event: AgentSessionInteractionEvent;
+  language: "zh-CN" | "en-US";
+}) {
+  const { t } = useAppPreferences();
+  return (
+    <details className={styles.compactionRow}>
+      <summary className={styles.compactionHeader}>
+        <i aria-hidden />
+        <span>{t("上下文已压缩")}</span>
+        {event.durationMs != null ? <small>{t("耗时 {duration}", { duration: formatDuration(event.durationMs, language) })}</small> : null}
+      </summary>
+      {event.content ? (
+        <div className={styles.compactionBody}>
+          <Markdown content={event.content} density="compact" />
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+function TurnStatusNotice({ model, hasOutput }: { model: TurnUnitModel; hasOutput: boolean }) {
+  const { t } = useAppPreferences();
+  if (model.status === "running") {
+    return (
+      <div className={styles.progress} role="status"><i />{t("正在处理")}</div>
+    );
+  }
+  if (model.status === "error") {
+    return (
+      <div className={styles.turnError} role="status">
+        <b>{t("本轮运行失败")}</b>
+        {model.errorMessage ? <span>{model.errorMessage}</span> : null}
+      </div>
+    );
+  }
+  if (model.status === "max-tokens") {
+    return <div className={styles.turnMaxTokens} role="status">{t("已达到输出 token 上限")}</div>;
+  }
+  if (model.status === "cancelled") {
+    return <div className={styles.notice}>{hasOutput ? t("已停止") : t("本轮已中断，未生成回复")}</div>;
+  }
+  if (model.status === "completed" && !hasOutput) {
+    return <div className={styles.notice}>{t("本轮未生成可展示的回复")}</div>;
+  }
+  return null;
+}
+
+/** 已完成轮次的尾部统计：用时 + 首 token + 解码吞吐（对齐官方 turn-tail）。 */
+function TurnFooter({
+  model,
+  messages,
+  language,
+}: {
+  model: TurnUnitModel;
+  messages: AgentSessionInteractionEvent[];
+  language: "zh-CN" | "en-US";
+}) {
+  const { t } = useAppPreferences();
+  if (model.status !== "completed" || model.durationMs == null) return null;
+  const firstMessage = messages.find((event) => event.timeToFirstTokenMs != null);
+  let outputTokens = 0;
+  let decodeMs = 0;
+  for (const message of messages) {
+    if (message.durationMs == null || message.timeToFirstTokenMs == null || !message.usage) continue;
+    const tokens = message.usage.outputTokens ?? 0;
+    const decode = Math.max(0, message.durationMs - message.timeToFirstTokenMs);
+    if (tokens > 0 && decode > 0) {
+      outputTokens += tokens;
+      decodeMs += decode;
+    }
+  }
+  return (
+    <div className={styles.turnFooter}>
+      <span>{t("耗时 {duration}", { duration: formatDuration(model.durationMs, language) })}</span>
+      {firstMessage?.timeToFirstTokenMs != null ? (
+        <span>{t("首 Token {duration}", { duration: formatDuration(firstMessage.timeToFirstTokenMs, language) })}</span>
+      ) : null}
+      {outputTokens > 0 && decodeMs > 0 ? <span>{formatTokensPerSecond(outputTokens, decodeMs)} tok/s</span> : null}
+    </div>
   );
 }
 
@@ -340,11 +529,21 @@ function interactionStatusLabel(status: string, t: (key: string) => string) {
   return status;
 }
 
+function firstLine(content: string | null | undefined): string {
+  if (!content) return "";
+  return content.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
+}
+
 function formatDuration(milliseconds: number, language: "zh-CN" | "en-US") {
   if (milliseconds < 1_000) return `${milliseconds} ms`;
   const seconds = milliseconds / 1_000;
   if (seconds < 60) return `${new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(seconds)} s`;
   return `${new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(seconds / 60)} min`;
+}
+
+function formatTokensPerSecond(outputTokens: number, decodeMs: number) {
+  const value = (outputTokens * 1_000) / decodeMs;
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value);
 }
 
 function formatCacheHitRate(usage: AgentSessionNativeUsage, language: "zh-CN" | "en-US") {

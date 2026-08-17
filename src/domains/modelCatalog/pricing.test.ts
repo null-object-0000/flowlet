@@ -459,6 +459,44 @@ describe("aggregateMaxStandardPrice", () => {
     expect(result?.output).toBe(50);
     expect(result?.inputCached).toBe(0.5);
   });
+
+  it("uses only the standard price active at the requested time", () => {
+    const subs = [
+      makeResolved({
+        allPrices: [
+          {
+            market: "china",
+            currency: "CNY",
+            unit: "1M_tokens",
+            rateType: "standard",
+            input: { standard: 1 },
+            output: 2,
+            effectiveTo: "2026-08-17T00:00:00+08:00",
+            sourceUrl: "u",
+          },
+          {
+            market: "china",
+            currency: "CNY",
+            unit: "1M_tokens",
+            rateType: "standard",
+            input: { standard: 3 },
+            output: 9,
+            effectiveFrom: "2026-08-17T00:00:00+08:00",
+            dailyTimeRange: {
+              label: "高峰时段",
+              timeZone: "Asia/Shanghai",
+              intervals: [{ start: "09:00", end: "12:00" }],
+            },
+            sourceUrl: "u",
+          },
+        ],
+      }),
+    ];
+
+    expect(aggregateMaxStandardPrice(subs, new Date("2026-08-16T15:59:59Z"))?.output).toBe(2);
+    expect(aggregateMaxStandardPrice(subs, new Date("2026-08-17T01:00:00Z"))?.output).toBe(9);
+    expect(aggregateMaxStandardPrice(subs, new Date("2026-08-17T04:00:00Z"))).toBeNull();
+  });
 });
 
 describe("findModelByAlias", () => {

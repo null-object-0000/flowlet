@@ -4169,7 +4169,9 @@ mod agent_session_filter_tests {
 #[cfg(test)]
 mod estimate_cost_tests {
     use super::*;
-    use crate::core::config::ModelPriceTier;
+    use crate::core::config::{
+        ModelPriceDailyInterval, ModelPriceDailyTimeRange, ModelPriceSchedule, ModelPriceTier,
+    };
 
     fn flat_price() -> ModelPrice {
         ModelPrice {
@@ -4254,6 +4256,84 @@ mod estimate_cost_tests {
         .unwrap();
         // 1M uncached * 1.2 + 1M output * 7.2 = 1.2 + 7.2
         approx(cost.total, 8.4);
+    }
+
+    #[test]
+    fn prices_usage_by_request_time_across_daily_schedule_boundaries() {
+        let price = ModelPrice {
+            channel_id: "deepseek".to_string(),
+            upstream_model: "deepseek-v4-flash".to_string(),
+            schedules: vec![
+                ModelPriceSchedule {
+                    rate_type: "standard".to_string(),
+                    effective_to: Some("2026-08-17T00:00:00+08:00".to_string()),
+                    input_uncached_price: 1.0,
+                    input_cached_price: 0.02,
+                    output_price: 2.0,
+                    ..Default::default()
+                },
+                ModelPriceSchedule {
+                    rate_type: "standard".to_string(),
+                    effective_from: Some("2026-08-17T00:00:00+08:00".to_string()),
+                    daily_time_range: Some(ModelPriceDailyTimeRange {
+                        label: "高峰时段".to_string(),
+                        time_zone: "Asia/Shanghai".to_string(),
+                        intervals: vec![ModelPriceDailyInterval {
+                            start: "09:00".to_string(),
+                            end: "12:00".to_string(),
+                        }],
+                    }),
+                    input_uncached_price: 3.0,
+                    input_cached_price: 0.1,
+                    output_price: 9.0,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let at = |value: &str| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        };
+        let old = estimate_cost_at(
+            std::slice::from_ref(&price),
+            Some("deepseek"),
+            Some("deepseek-v4-flash"),
+            Some(1_000_000),
+            Some(0),
+            Some(1_000_000),
+            None,
+            Some(1_000_000),
+            at("2026-08-16T15:59:59Z"),
+        )
+        .unwrap();
+        approx(old.total, 3.0);
+        let peak = estimate_cost_at(
+            std::slice::from_ref(&price),
+            Some("deepseek"),
+            Some("deepseek-v4-flash"),
+            Some(1_000_000),
+            Some(0),
+            Some(1_000_000),
+            None,
+            Some(1_000_000),
+            at("2026-08-17T01:00:00Z"),
+        )
+        .unwrap();
+        approx(peak.total, 12.0);
+        assert!(estimate_cost_at(
+            &[price],
+            Some("deepseek"),
+            Some("deepseek-v4-flash"),
+            Some(1),
+            Some(0),
+            Some(1),
+            None,
+            Some(0),
+            at("2026-08-17T04:00:00Z"),
+        )
+        .is_none());
     }
 
     #[test]

@@ -581,7 +581,7 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
       if (resolvedSub) subModels.push(resolvedSub);
     }
     if (subModels.length === 0) return null;
-    return aggregateMaxStandardPrice(subModels);
+    return aggregateMaxStandardPrice(subModels, pricingNow);
   }, [catalog, model, pricingNow, resolved?.officialPrice]);
 
   // 基础信息：优先 models-cn 官方值，缺失降级到渠道同步。
@@ -856,8 +856,7 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
     ? buildPricingStrategyRows(upcomingPrices, price.market, price.currency)
     : [];
   const hasDailyTimeRanges = strategyRows.some((row) => row.current.dailyTimeRange != null);
-  // 仅「按输入长度分段计价」时使用策略卡片布局（每档一行）。单档模型即使带显式
-  // 缓存价格也走下方扁平 configRow 布局，与 LongCat / DeepSeek / Kimi 保持一致。
+  // 输入分档、峰谷时段或即将生效价格使用策略卡片；普通单档价格仍走扁平布局。
   const showDetailedStrategy = hasInputLengthTiers(strategyRows)
     || hasDailyTimeRanges
     || upcomingStrategyRows.length > 0;

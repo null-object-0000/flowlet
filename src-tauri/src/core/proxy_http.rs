@@ -328,11 +328,11 @@ fn models_cn_price_applies_at(
     }
     match price.get("dailyTimeRange").cloned() {
         None => true,
-        Some(value) => serde_json::from_value::<
-            crate::core::config::ModelPriceDailyTimeRange,
-        >(value)
-        .ok()
-        .is_some_and(|range| range.contains(at)),
+        Some(value) => {
+            serde_json::from_value::<crate::core::config::ModelPriceDailyTimeRange>(value)
+                .ok()
+                .is_some_and(|range| range.contains(at))
+        }
     }
 }
 

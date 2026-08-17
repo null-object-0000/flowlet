@@ -204,7 +204,7 @@
         "anthropic_base_url": "https://open.bigmodel.cn/api/anthropic",
         "openai_auth": "bearer",
         "anthropic_auth": "x_api_key",
-        "default_model": "glm-5.2",
+        "default_model": "glm-5.3",
         "small_model": null,
         "supports_model_list": true,
         "supports_model_detail": false,
@@ -248,7 +248,7 @@
       "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
       "kimi": ["kimi-k3", "kimi-k2.7-code"],
       "qwen": ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
-      "zhipu": ["glm-5.2", "glm-4.7", "glm-4.5-air"]
+      "zhipu": ["glm-5.3", "glm-5.2", "glm-4.7", "glm-4.5-air"]
     }
   }
 }

@@ -441,7 +441,7 @@ impl ChannelPreset {
             anthropic_base_url: "https://open.bigmodel.cn/api/anthropic".to_string(),
             openai_auth: AuthStrategy::Bearer,
             anthropic_auth: AuthStrategy::XApiKey,
-            default_model: "glm-5.2".to_string(),
+            default_model: "glm-5.3".to_string(),
             small_model: None,
             supports_model_list: true,
             supports_model_detail: false,

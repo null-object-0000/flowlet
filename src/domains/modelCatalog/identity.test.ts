@@ -9,9 +9,10 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(14);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(14);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(15);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(15);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
+    expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-5.3");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-4.5-air");
   });
 
@@ -20,6 +21,13 @@ describe("model identity catalog", () => {
       "deepseek-v4-flash",
       "deepseek-v4-pro",
     ]);
+    expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.zhipu).toEqual([
+      "glm-5.3",
+      "glm-5.2",
+      "glm-4.7",
+      "glm-4.5-air",
+    ]);
+    expect(officialChannelIdForModel("z-ai/glm-5.3")).toBe("zhipu");
     expect(officialChannelIdForModel("z-ai/glm-5.2")).toBe("zhipu");
     expect(modelsCnProviderIdForModel("kimi-k3")).toBe("moonshot-cn");
   });

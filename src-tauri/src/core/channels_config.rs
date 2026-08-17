@@ -931,6 +931,8 @@ mod tests {
 
     #[test]
     fn official_channel_id_resolves_zhipu_glm() {
+        assert_eq!(official_channel_id_for_model("glm-5.3"), Some("zhipu"));
+        assert_eq!(official_channel_id_for_model("GLM-5.3"), Some("zhipu"));
         assert_eq!(official_channel_id_for_model("glm-5.2"), Some("zhipu"));
         assert_eq!(official_channel_id_for_model("GLM-5.2"), Some("zhipu"));
         assert_eq!(official_channel_id_for_model("glm-4.7"), Some("zhipu"));
@@ -1262,14 +1264,14 @@ mod tests {
                     "anthropic_base_url": "https://open.bigmodel.cn/api/anthropic"
                 }],
                 "default_exposed_models": {
-                    "zhipu": ["glm-5.2", "glm-4.7", "glm-4.5-air"]
+                    "zhipu": ["glm-5.3", "glm-5.2", "glm-4.7", "glm-4.5-air"]
                 }
             }
         });
         let config = ChannelsConfig::from_config_json(&json).unwrap();
         let supported: std::collections::HashSet<String> =
             config.supported_models().into_iter().collect();
-        for expected in ["glm-5.2", "glm-4.7", "glm-4.5-air"] {
+        for expected in ["glm-5.3", "glm-5.2", "glm-4.7", "glm-4.5-air"] {
             assert!(supported.contains(expected), "缺少支持的模型: {expected}");
         }
         // 智谱 models 端点不以 /v1 结尾，显式 endpoints 覆盖优先。

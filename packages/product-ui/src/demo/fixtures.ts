@@ -382,7 +382,7 @@ export function createModelsServiceFixture(zh: boolean): {
 } {
   return {
     stats: [
-      { key: "models", label: zh ? "对外模型" : "Models", value: "15" },
+      { key: "models", label: zh ? "对外模型" : "Models", value: "16" },
       { key: "enabled", label: zh ? "已启用" : "Enabled", value: "2", tone: "success" },
       { key: "channels", label: zh ? "已接入渠道" : "Channels", value: "7" },
     ],
@@ -396,6 +396,7 @@ export function createModelsServiceFixture(zh: boolean): {
         { id: "deepseek-v4-pro", kind: "direct", name: "deepseek-v4-pro", typeLabel: "DeepSeek · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/deepseek-color.svg" },
         { id: "glm-4.5-air", kind: "direct", name: "glm-4.5-air", typeLabel: "Z.AI · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
         { id: "glm-4.7", kind: "direct", name: "glm-4.7", typeLabel: "Z.AI · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
+        { id: "glm-5.3", kind: "direct", name: "glm-5.3", typeLabel: "Z.AI · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
         { id: "glm-5.2", kind: "direct", name: "glm-5.2", typeLabel: "Z.AI · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
         { id: "longcat-2.0", kind: "direct", name: "longcat-2.0", typeLabel: "LongCat · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/longcat-color.svg" },
         { id: "kimi-k3", kind: "direct", name: "kimi-k3", typeLabel: "Kimi · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/kimi-color.svg" },
@@ -412,7 +413,7 @@ export function createModelsServiceFixture(zh: boolean): {
       aggregateGroup: zh ? "聚合模型" : "Aggregate",
       directGroup: zh ? "渠道模型" : "Direct",
       statsAria: zh ? "模型服务统计" : "Model service summary",
-      currentVisible: zh ? "当前显示 15 / 共 15 个模型" : "Showing 15 of 15 models",
+      currentVisible: zh ? "当前显示 16 / 共 16 个模型" : "Showing 16 of 16 models",
       hint: zh ? "选择模型后在右侧查看详情" : "Select a model to view details",
       ready: zh ? "可用" : "Ready",
       off: zh ? "关闭" : "Off",

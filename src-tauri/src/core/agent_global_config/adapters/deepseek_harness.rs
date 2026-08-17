@@ -349,8 +349,9 @@ fn remove_session_bridge(text: &str) -> Result<Vec<u8>, String> {
 
 fn profile_bridge_matches(root: &Path, expected_base_url: &str) -> bool {
     let (patch, plugin) = profile_paths(root);
+    // 插件文件用容错比较（容忍尾部换行与 CRLF），与 managed_text_file_matches 语义一致。
     plugin.is_file()
-        && std::fs::read_to_string(&plugin).ok().as_deref() == Some(SESSION_BRIDGE_SOURCE)
+        && managed_text_file_matches(&plugin, SESSION_BRIDGE_SOURCE)
         && std::fs::read_to_string(patch).ok().is_some_and(|text| {
             text.contains(SESSION_BRIDGE_START)
                 && text.contains(SESSION_BRIDGE_END)
@@ -418,8 +419,10 @@ fn remove_approval_bridge(text: &str) -> Result<Vec<u8>, String> {
 fn profile_approval_bridge_matches(root: &Path) -> bool {
     let plugin = approval_plugin_path(root);
     let patch = root.join("cordis.patch.yml");
+    // 插件文件用容错比较（容忍 text_file_bytes 补的尾换行与 CRLF），
+    // 与 managed_text_file_matches 语义一致；patch 只要求受管标记在位。
     plugin.is_file()
-        && std::fs::read_to_string(&plugin).ok().as_deref() == Some(APPROVAL_BRIDGE_SOURCE)
+        && managed_text_file_matches(&plugin, APPROVAL_BRIDGE_SOURCE)
         && std::fs::read_to_string(patch).ok().is_some_and(|text| {
             text.contains(APPROVAL_BRIDGE_START) && text.contains(APPROVAL_BRIDGE_END)
         })
@@ -1082,7 +1085,7 @@ fn apply_dsh_at(
                         .present
                         .then(|| text_file_bytes(&item.plugin.content))
                 });
-            if std::fs::read_to_string(&plugin).ok().as_deref() == Some(SESSION_BRIDGE_SOURCE) {
+            if managed_text_file_matches(&plugin, SESSION_BRIDGE_SOURCE) {
                 writes.push((plugin, previous_plugin));
             }
         }
@@ -1110,11 +1113,7 @@ fn apply_dsh_at(
                         .as_ref()
                         .and_then(|backup| backup.present.then(|| text_file_bytes(&backup.content)))
                 });
-            if std::fs::read_to_string(&approval_plugin)
-                .ok()
-                .as_deref()
-                == Some(APPROVAL_BRIDGE_SOURCE)
-            {
+            if managed_text_file_matches(&approval_plugin, APPROVAL_BRIDGE_SOURCE) {
                 writes.push((approval_plugin, previous_approval_plugin));
             }
         }
@@ -1518,6 +1517,110 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
             UPSTREAM_PATCH
+        );
+        assert!(!backup_path(&home).exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn real_upstream_approval_bridge_passes_apply_reapply_disable_restore_contract() {
+        const UPSTREAM_PATCH: &str =
+            include_str!("../../../../tests/fixtures/deepseek-harness/web/cordis.patch.yml");
+        let home = std::env::temp_dir().join(format!(
+            "flowlet-dsh-approval-bridge-contract-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = home.join("profiles").join("web");
+        std::fs::create_dir_all(&profile).unwrap();
+        let settings = "# keep user settings\nllm-pi-ai:\n  providers:\n    existing:\n      baseURL: https://example.com/v1\nagent-default-model:\n  provider: existing\n  model: existing-model\n";
+        let credentials = "# keep user credentials\nEXISTING_TOKEN: keep-me\n";
+        std::fs::write(home.join("settings.yaml"), settings).unwrap();
+        std::fs::write(home.join(".credentials.yaml"), credentials).unwrap();
+        std::fs::write(
+            profile.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}"#,
+        )
+        .unwrap();
+        std::fs::write(profile.join("cordis.patch.yml"), UPSTREAM_PATCH).unwrap();
+
+        // apply：同时启用精确会话关联与交互确认桥。
+        let report = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
+        assert!(report.session_extension);
+        assert!(report.approval_bridge, "apply 后 report 必须报告确认桥在位");
+        let plugin = approval_plugin_path(&profile);
+        assert!(plugin.is_file());
+        // 部署文件由 text_file_bytes 补尾换行（源文件不以 \n 结尾），
+        // 容错比较仍必须识别为受管文件（回归：曾因精确 == 比较导致 toggle 恒为关闭）。
+        assert!(profile_approval_bridge_matches(&profile));
+        let deployed = std::fs::read_to_string(&plugin).unwrap();
+        assert!(
+            deployed == APPROVAL_BRIDGE_SOURCE
+                || deployed == format!("{}\n", APPROVAL_BRIDGE_SOURCE),
+            "部署文件要么与源一致、要么只多一个尾换行"
+        );
+        let managed_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&managed_patch).unwrap();
+        assert!(parsed
+            .as_sequence()
+            .is_some_and(|entries| entries.len() == 2));
+
+        // reapply：幂等，patch 与插件文件均不变。
+        apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+            managed_patch,
+            "reapply must be idempotent"
+        );
+        assert!(profile_approval_bridge_matches(&profile));
+
+        // disable：只关确认桥、保留会话桥，插件文件移除、patch 标记清除。
+        let disabled = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(!disabled.approval_bridge);
+        assert!(disabled.session_extension);
+        assert!(!profile_approval_bridge_matches(&profile));
+        assert!(!plugin.exists(), "关闭后受管确认桥插件文件应被移除");
+        let disabled_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
+        assert!(!disabled_patch.contains(APPROVAL_BRIDGE_START));
+
+        // restore：恢复原始 patch 与受管文件。
+        let restored = restore_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+        assert_eq!(
+            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+            UPSTREAM_PATCH
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join("settings.yaml")).unwrap(),
+            settings
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
+            credentials
         );
         assert!(!backup_path(&home).exists());
         std::fs::remove_dir_all(home).unwrap();

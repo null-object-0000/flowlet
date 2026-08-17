@@ -418,17 +418,20 @@ export function aggregateMaxPrice(subModels: ResolvedModel[]): ResolvedPrice | n
 
 /** 聚合模型的 standard 价格（用于划价展示）。同 aggregateMaxPrice 取 max，但从
  *  各子模型的 standard 价格中聚合。币种混杂返回 null。 */
-export function aggregateMaxStandardPrice(subModels: ResolvedModel[]): ResolvedPrice | null {
+export function aggregateMaxStandardPrice(subModels: ResolvedModel[], at = new Date()): ResolvedPrice | null {
   const stdPrices = subModels
-    .map((m) => (m.allPrices ?? []).find((p) => p.rateType === "standard"))
-    .filter((p): p is NonNullable<typeof p> => p != null);
+    .map((model) => selectOfficialPrice(
+      (model.allPrices ?? []).filter((price) => price.rateType === "standard"),
+      at,
+    ))
+    .filter((price): price is ResolvedPrice => price != null);
   if (stdPrices.length === 0) return null;
   const firstCurrency = stdPrices[0].currency;
-  if (!stdPrices.every((p) => p.currency === firstCurrency)) return null;
-  const maxInputUncached = Math.max(...stdPrices.map((p) => p.input.standard));
-  const maxOutput = Math.max(...stdPrices.map((p) => p.output));
-  const allCacheHit = stdPrices.every((p) => p.input.cacheHit != null);
-  const maxCacheHit = allCacheHit ? Math.max(...stdPrices.map((p) => p.input.cacheHit as number)) : null;
+  if (!stdPrices.every((price) => price.currency === firstCurrency)) return null;
+  const maxInputUncached = Math.max(...stdPrices.map((price) => price.inputUncached));
+  const maxOutput = Math.max(...stdPrices.map((price) => price.output));
+  const allCacheHit = stdPrices.every((price) => price.inputCached != null);
+  const maxCacheHit = allCacheHit ? Math.max(...stdPrices.map((price) => price.inputCached as number)) : null;
   const sample = stdPrices[0];
   return {
     market: sample.market,

@@ -1729,7 +1729,8 @@ fn provider_id_to_channel_id(provider_id: &str) -> Option<&'static str> {
 }
 
 /// 从 models-cn 目录 JSON 解析出 ModelPrice 列表，用于成本估算。
-/// 仅提取中国大陆官方价（market=china, currency=CNY, rateType=standard）。
+/// 优先提取中国大陆官方价（market=china, currency=CNY），并保留促销、输入分档、
+/// 绝对生效窗口及每日峰谷时段。
 #[cfg(desktop)]
 pub fn build_prices_from_models_cn_catalog(
     catalog_json: &str,
@@ -1937,8 +1938,7 @@ fn build_price_schedules(
     };
     let has_scheduling = prices.iter().any(|price| {
         price.get("market").and_then(|v| v.as_str()) == Some(best.market.as_str())
-            && price.get("currency").and_then(|v| v.as_str())
-                == Some(best.currency.as_str())
+            && price.get("currency").and_then(|v| v.as_str()) == Some(best.currency.as_str())
             && (price.get("effectiveFrom").is_some()
                 || price.get("effectiveTo").is_some()
                 || price.get("dailyTimeRange").is_some())
@@ -1950,8 +1950,7 @@ fn build_price_schedules(
     let mut groups = std::collections::BTreeMap::<String, Vec<&serde_json::Value>>::new();
     for price in prices {
         if price.get("market").and_then(|v| v.as_str()) != Some(best.market.as_str())
-            || price.get("currency").and_then(|v| v.as_str())
-                != Some(best.currency.as_str())
+            || price.get("currency").and_then(|v| v.as_str()) != Some(best.currency.as_str())
         {
             continue;
         }
@@ -2029,9 +2028,7 @@ fn build_price_tiers_from_rows(
             .get("cacheHit")
             .and_then(|v| v.as_f64())
             .unwrap_or(standard);
-        let cache_write = input
-            .get("explicitCacheCreation")
-            .and_then(|v| v.as_f64());
+        let cache_write = input.get("explicitCacheCreation").and_then(|v| v.as_f64());
         ranged.push((
             min_exclusive,
             max_inclusive,
@@ -2081,9 +2078,9 @@ fn build_price_tiers(
     let matching = prices
         .iter()
         .filter(|price| {
-        let market = price.get("market").and_then(|v| v.as_str()).unwrap_or("");
-        let currency = price.get("currency").and_then(|v| v.as_str()).unwrap_or("");
-        let rate_type = price.get("rateType").and_then(|v| v.as_str()).unwrap_or("");
+            let market = price.get("market").and_then(|v| v.as_str()).unwrap_or("");
+            let currency = price.get("currency").and_then(|v| v.as_str()).unwrap_or("");
+            let rate_type = price.get("rateType").and_then(|v| v.as_str()).unwrap_or("");
             market == best.market && currency == best.currency && rate_type == best.rate_type
         })
         .collect::<Vec<_>>();

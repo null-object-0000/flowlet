@@ -895,8 +895,8 @@ impl ModelPriceDailyTimeRange {
             return false;
         };
         let local = at.with_timezone(&time_zone);
-        let minute = chrono::Timelike::hour(&local) as i32 * 60
-            + chrono::Timelike::minute(&local) as i32;
+        let minute =
+            chrono::Timelike::hour(&local) as i32 * 60 + chrono::Timelike::minute(&local) as i32;
         self.intervals.iter().any(|interval| {
             let Some(start) = parse_price_time(&interval.start, false) else {
                 return false;
@@ -1024,11 +1024,11 @@ impl ModelPrice {
     pub fn resolve_prices(&self, input_tokens: Option<i64>) -> (f64, f64, Option<f64>, f64) {
         self.resolve_prices_at(input_tokens, chrono::Utc::now())
             .unwrap_or((
-            self.input_uncached_price,
-            self.input_cached_price,
-            self.input_cache_write_price,
-            self.output_price,
-        ))
+                self.input_uncached_price,
+                self.input_cached_price,
+                self.input_cache_write_price,
+                self.output_price,
+            ))
     }
 }
 

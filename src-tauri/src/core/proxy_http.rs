@@ -253,12 +253,12 @@ fn resolve_candidate_detail(
                 catalog_model
                     .and_then(|model| select_models_cn_price(model, chrono::Utc::now()))
                     .map(|price| {
-                    pricing_json(
-                        route,
-                        price,
-                        catalog_match.and_then(|found| found.retrieved_at),
-                    )
-                })
+                        pricing_json(
+                            route,
+                            price,
+                            catalog_match.and_then(|found| found.retrieved_at),
+                        )
+                    })
             }),
     }
 }
@@ -282,22 +282,22 @@ pub(super) fn select_models_cn_price(
         .iter()
         .filter(|price| models_cn_price_applies_at(price, at))
         .max_by_key(|price| {
-        let market = price
-            .get("market")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let currency = price
-            .get("currency")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let rate_type = price
-            .get("rateType")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        i32::from(market == "china") * 4
-            + i32::from(currency == "CNY") * 2
-            + i32::from(rate_type == "promotional")
-    })
+            let market = price
+                .get("market")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let currency = price
+                .get("currency")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let rate_type = price
+                .get("rateType")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            i32::from(market == "china") * 4
+                + i32::from(currency == "CNY") * 2
+                + i32::from(rate_type == "promotional")
+        })
 }
 
 fn models_cn_price_applies_at(
@@ -328,11 +328,11 @@ fn models_cn_price_applies_at(
     }
     match price.get("dailyTimeRange").cloned() {
         None => true,
-        Some(value) => serde_json::from_value::<
-            crate::core::config::ModelPriceDailyTimeRange,
-        >(value)
-        .ok()
-        .is_some_and(|range| range.contains(at)),
+        Some(value) => {
+            serde_json::from_value::<crate::core::config::ModelPriceDailyTimeRange>(value)
+                .ok()
+                .is_some_and(|range| range.contains(at))
+        }
     }
 }
 

@@ -67,18 +67,15 @@ fn model_detail_price_selection_respects_effective_and_daily_ranges() {
             .with_timezone(&chrono::Utc)
     };
     assert_eq!(
-        proxy_http::select_models_cn_price(&model, at("2026-08-16T15:59:59Z"))
-            .unwrap()["output"],
+        proxy_http::select_models_cn_price(&model, at("2026-08-16T15:59:59Z")).unwrap()["output"],
         2
     );
     assert_eq!(
-        proxy_http::select_models_cn_price(&model, at("2026-08-17T00:59:59Z"))
-            .unwrap()["output"],
+        proxy_http::select_models_cn_price(&model, at("2026-08-17T00:59:59Z")).unwrap()["output"],
         4.5
     );
     assert_eq!(
-        proxy_http::select_models_cn_price(&model, at("2026-08-17T01:00:00Z"))
-            .unwrap()["output"],
+        proxy_http::select_models_cn_price(&model, at("2026-08-17T01:00:00Z")).unwrap()["output"],
         9
     );
 }

@@ -1,6 +1,60 @@
-.markdown { min-width: 0; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); line-height: 1.7; overflow-wrap: anywhere; }
-.markdown > :first-child { margin-top: 0; }
-.markdown > :last-child { margin-bottom: 0; }
-.markdown :global(.semi-typography) { color: inherit; }
-.markdown a { color: var(--flowlet-color-primary); }
-.markdown :global(.semi-codeHighlight) { max-width: 100%; }
+/* Geometry and type scale follow DeepSeek Harness MarkdownText. Colors are
+ * mapped to Flowlet semantic tokens so the renderer remains theme-safe. */
+.markdown { min-width: 0; overflow-wrap: anywhere; color: var(--flowlet-color-text); font: 400 16px/28px var(--flowlet-font-family); }
+.markdown strong { font-weight: 600; }
+.markdown h1 { margin: 32px 0 16px; font: 700 24px/34px var(--flowlet-font-family); }
+.markdown h2 { margin: 32px 0 16px; font: 700 22px/32px var(--flowlet-font-family); }
+.markdown h3 { margin: 32px 0 16px; font: 700 20px/30px var(--flowlet-font-family); }
+.markdown h4 { margin: 16px 0; font: 600 16px/28px var(--flowlet-font-family); }
+.markdown :where(h5, h6) { margin: 16px 0; font: 600 16px/28px var(--flowlet-font-family); }
+.markdown :where(h1, h2, h3, h4, h5, h6) strong { font-weight: inherit; }
+.markdown p { margin: 16px 0; }
+.markdown :where(h4, h5, h6) + :where(ul, ol) { margin-top: 8px; }
+.markdown :where(h4, h5, h6):has(+ :where(ul, ol)) { margin-bottom: 8px; }
+.markdown a { position: relative; margin-inline: -3px; border: solid transparent; border-width: 2px 3px; color: var(--flowlet-color-primary); text-decoration: none; }
+.markdown a:hover, .markdown a:focus { outline: none; text-decoration: underline; }
+.markdown a:focus-visible { box-shadow: 0 0 0 2px var(--flowlet-color-primary); }
+.markdown :where(ul, ol) { margin: 16px 0; padding-left: 18px; }
+.markdown li:not(:first-child) { margin-top: 6px; }
+.markdown li > :where(ul, ol) { margin-top: 4px; }
+.markdown li::marker { line-height: 28px; color: var(--flowlet-color-text-secondary); }
+.markdown :where(ul, ol) ol { padding-left: 0; list-style-position: inside; }
+.markdown :where(ul, ol) ol li p { display: inline; }
+.markdown li > p { margin: 8px 0; }
+.markdown li > *:first-child { margin-top: 0; }
+.markdown li > *:last-child { margin-bottom: 0; }
+.markdown hr { height: 1px; margin: 32px 0; border: 0; background: var(--flowlet-color-border); }
+.markdown blockquote { margin: 16px 0 0; padding-left: 14px; border-left: 2px solid var(--flowlet-color-text-tertiary); }
+.markdown pre { margin: 16px 0; overflow: auto; font-family: var(--flowlet-font-family-mono); }
+.markdown :not(pre) > code { display: inline-flex; align-items: center; box-sizing: border-box; padding: 0 5px; border-radius: 6px; background: var(--flowlet-color-surface-muted); font: 400 0.875em/22px var(--flowlet-font-family-mono); }
+.markdown :where(h1, h2, h3, h4, h5, h6) code { font: inherit; font-family: var(--flowlet-font-family-mono); }
+.markdown input[type="checkbox"] { margin: 0 8px 0 0; accent-color: var(--flowlet-color-text-secondary); }
+.tableScroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.tableScroll table { width: max-content; max-width: max-content; border-collapse: collapse; }
+.tableScroll th, .tableScroll td { min-width: 100px; max-width: min(30vw, 320px); padding: 10px 16px; }
+.tableScroll th { border-bottom: 1px solid var(--flowlet-color-border-strong); text-align: start; font: 500 15px/25px var(--flowlet-font-family); }
+.tableScroll td { border-bottom: 1px solid var(--flowlet-color-border); font: 400 15px/25px var(--flowlet-font-family); }
+.tableScroll :where(th, td):first-child { padding-left: 0; }
+.tableScroll :where(th, td):last-child { padding-right: 0; }
+.tableScroll table code { font-size: 13px; }
+.markdown > *:first-child, .markdown p:first-child { margin-top: 0 !important; }
+.markdown > *:last-child, .markdown p:last-child { margin-bottom: 0 !important; }
+.imageAlt { color: var(--flowlet-color-text-tertiary); font-style: italic; }
+.image { display: block; width: auto; max-width: 100%; height: auto; margin: 0; border-radius: 8px; object-fit: contain; }
+.taskList { padding-left: 0 !important; list-style: none; }
+.taskListItem { list-style: none; }
+.compact { font-size: 13px; line-height: 20px; }
+.compact h1 { margin: 20px 0 10px; font-size: 20px; line-height: 28px; }
+.compact h2 { margin: 20px 0 10px; font-size: 18px; line-height: 26px; }
+.compact h3 { margin: 18px 0 8px; font-size: 16px; line-height: 24px; }
+.compact :where(h4, h5, h6) { margin: 12px 0 6px; font-size: 14px; line-height: 22px; }
+.compact p, .compact :where(ul, ol) { margin-block: 8px; }
+/* 脚注（官方 DOM 契约：footnotes section + user-content-fn-* id + ↩ 回链）。 */
+:global(.footnotes) { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--flowlet-color-border); font-size: .875em; }
+:global(.footnotes ol) { padding-left: 20px; }
+:global(.footnotes li) { margin: 6px 0; }
+:global(.footnotes li > a) { margin-left: 6px; }
+:global(.sr-only) { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* 数学公式：交出行内高度；KaTeX 自身样式由 katex.min.css 提供。 */
+:global(.math-inline) { display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: middle; }
+:global(.math-display) { display: block; margin: 8px 0; overflow-x: auto; }

@@ -164,6 +164,8 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
             external_environment_overrides,
             error: None,
             session_extension: false,
+            model_specs: false,
+            approval_bridge: false,
             opencode_permission_bridge: permission_bridge,
         });
     }
@@ -192,6 +194,8 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
                 external_environment_overrides,
                 error: Some(error),
                 session_extension: false,
+                model_specs: false,
+                approval_bridge: false,
                 opencode_permission_bridge: permission_bridge,
             });
         }
@@ -220,6 +224,8 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
                 external_environment_overrides,
                 error: Some(error),
                 session_extension: false,
+                model_specs: false,
+                approval_bridge: false,
                 opencode_permission_bridge: permission_bridge,
             });
         }
@@ -306,6 +312,8 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
         external_environment_overrides,
         error: None,
         session_extension: false,
+        model_specs: false,
+        approval_bridge: false,
         opencode_permission_bridge: permission_bridge,
     })
 }

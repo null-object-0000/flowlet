@@ -1,16 +1,14 @@
-//! Agent 任务执行核心：按任务 `agent_profile` 驱动 Claude Code / Codex / OpenCode / Pi
+//! Agent 任务执行核心：按任务 `agent_profile` 分派到注册的 Runner Adapter。
 //! CLI 在项目目录内执行项目任务。
 //!
 //! 按项目隔离的执行槽：每个项目同一时刻至多一个任务在执行，其余在该项目内排队；
 //! 不同项目互不影响，可并行执行。并发安全由 Rust 端按项目作用域保证。
-//! 四种 Agent 都以非交互模式执行（Claude Code `-p --output-format stream-json`、
-//! OpenCode `run --format json`、Pi `-p`、Codex `exec --json`），权限走各 CLI 的非交互
-//! 放行参数（`--dangerously-skip-permissions` / `--auto` / `--approve` /
-//! `--dangerously-bypass-approvals-and-sandbox`）。
+//! 各 Runner Adapter 以非交互模式执行，并自行声明所需 Surface、resume 能力、
+//! 缺少执行入口时的提示与具体执行函数。
 //! 执行过程中的模型请求会经过 Flowlet 本地代理，自动进入请求日志与用量账本。
 //! Agent 退出后由 Rust 自动把任务状态回写 `review`（等待人工审核）。
 
-use crate::core::agent_environment::AgentSurface;
+use crate::core::agent_environment::{AgentInstallation, AgentSurface};
 use crate::core::job_runtime::{JobLease, JobRuntime, PROJECT_TASK_RUN, RECURRING_TASK_RUN};
 use crate::core::storage::{ProjectTask, Storage};
 use serde::Serialize;
@@ -18,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-mod adapters;
+pub(crate) mod adapters;
 mod process;
 
 use process::{
@@ -640,54 +638,53 @@ fn session_from_job(storage: &Storage, job_id: Option<&str>) -> Result<Option<St
         .map(str::to_string))
 }
 
-/// 任务 Agent Profile 对应的 `agent_environment` agent_id 与展示名。
-/// 与前端 `AGENT_PROFILES`（ProjectsPage.tsx）保持一致；空串视为 Claude Code
-/// （历史任务在 `agent_profile` 列引入前的默认值），未知 Profile 返回 None，
-/// 由调用方给出明确错误。
-fn agent_profile_meta(agent_profile: &str) -> Option<(&'static str, &'static str)> {
-    adapters::for_profile(agent_profile)
-        .map(|adapter| (adapter.environment_adapter_id, adapter.display_name))
-}
-
 /// 解析任务指定 Agent 的可执行路径。未安装或 Profile 未知返回明确错误。
 async fn resolve_agent_executable(agent_profile: &str) -> Result<String, String> {
-    let Some((agent_id, agent_name)) = agent_profile_meta(agent_profile) else {
-        return Err(format!("不支持的 Agent Profile：{agent_profile}"));
-    };
-    let report = crate::core::agent_environment::detect_agent_environment(agent_id)
-        .await
-        .map_err(|error| format!("检测 {agent_name} 失败：{error}"))?;
+    let adapter = adapters::for_profile(agent_profile)
+        .ok_or_else(|| format!("不支持的 Agent Profile：{agent_profile}"))?;
+    let report =
+        crate::core::agent_environment::detect_agent_environment(adapter.environment_adapter_id)
+            .await
+            .map_err(|error| format!("检测 {} 失败：{error}", adapter.display_name))?;
     if !report.installed {
-        // 区分「未安装 CLI」与「已接入但可执行文件不可用」：接入写的是全局配置文件，
-        // 不安装 CLI 二进制；任务执行需要真正的 CLI 进程，缺失时给出明确指引。
-        return Err(format!(
-            "未检测到 {agent_name} CLI 可执行文件（接入配置不包含 CLI），请先安装 {agent_name} 后重试。"
-        ));
+        return Err(adapter.missing_executable_message.to_string());
     }
-    // 任务执行需要 CLI 进程：OpenCode / Codex 的探测会同时返回桌面应用安装，而桌面
-    // 应用没有 run / exec 接口，不能作为任务执行器。primary 已是 CLI 时直接使用
-    // （保留探测的优先级逻辑：PATH + 有版本优先）；primary 是桌面应用时回退到
-    // 列表里第一个 CLI 安装，仍无则给出明确错误。
-    let required_surface = if agent_profile == "DeepSeek Harness" {
-        AgentSurface::Web
-    } else {
-        AgentSurface::Cli
-    };
+    // Runner Adapter 声明任务所需 Surface。探测可能同时返回多种 Surface；primary
+    // 不满足合同时回退到安装列表中的匹配项，仍无可执行入口则使用 Adapter 的错误提示。
+    // 可执行入口要求：surface 契约匹配、无安装错误，且位于 PATH（`available_on_path`）
+    // 或携带不经 PATH 的直接入口（`runner_executable`，如 npx 缓存包的 bin JS）。
+    let required_surface = &adapter.required_surface;
     match report.primary {
-        Some(primary) if primary.surface == required_surface && primary.available_on_path && primary.error.is_none() => Ok(primary.executable_path),
+        Some(primary) if runner_usable(&primary, required_surface) => {
+            Ok(effective_executable(&primary))
+        }
         _ => report
             .installations
             .iter()
-            .find(|installation| installation.surface == required_surface && installation.available_on_path && installation.error.is_none())
-            .map(|installation| installation.executable_path.clone())
-            .ok_or_else(|| if agent_profile == "DeepSeek Harness" {
-                "检测到 DeepSeek Harness 数据目录或 Web，但 PATH 中没有稳定的 dsh 启动命令；请先全局安装 @deepseek-ai/dsh。Flowlet 不会使用 npx 临时缓存执行任务。".to_string()
-            } else { format!("未检测到 {agent_name} CLI 可执行文件") }),
+            .find(|installation| runner_usable(installation, required_surface))
+            .map(effective_executable)
+            .ok_or_else(|| adapter.missing_executable_message.to_string()),
     }
 }
 
+/// 安装项是否可作为指定 Surface 的任务执行入口。
+fn runner_usable(installation: &AgentInstallation, required_surface: &AgentSurface) -> bool {
+    &installation.surface == required_surface
+        && installation.error.is_none()
+        && (installation.available_on_path || installation.runner_executable.is_some())
+}
+
+/// 任务 Runner 实际使用的启动入口：优先 `runner_executable`（不经 PATH 的直接
+/// 入口，如 node 可解释的 JS），否则回退 `executable_path`（PATH 命令/垫片）。
+fn effective_executable(installation: &AgentInstallation) -> String {
+    installation
+        .runner_executable
+        .clone()
+        .unwrap_or_else(|| installation.executable_path.clone())
+}
+
 /// 任务执行分派：按任务的 agent_profile 选择执行器。
-/// 历史任务默认 profile 为 Claude Code，未知 Profile 也回退 Claude Code，避免破坏存量任务。
+/// 历史任务的空 profile 由 Adapter 注册表兼容为 Claude Code；未知 Profile 明确报错。
 async fn execute_agent(
     storage: &Storage,
     executable: &str,
@@ -700,6 +697,10 @@ async fn execute_agent(
 ) -> Result<ExecutionOutcome, String> {
     let adapter = adapters::for_profile(&task.agent_profile)
         .ok_or_else(|| format!("不支持的 Agent Profile：{}", task.agent_profile))?;
+    if !adapter.supports_resume && resume_session.is_some_and(|session| !session.trim().is_empty())
+    {
+        return Err(adapter.resume_unsupported_message.to_string());
+    }
     (adapter.execute)(
         storage,
         executable,
@@ -715,6 +716,89 @@ async fn execute_agent(
 
 pub(crate) fn has_runner_adapter(adapter_id: &str) -> bool {
     adapters::has(adapter_id)
+}
+
+pub(crate) fn runner_contract(
+    adapter_id: &str,
+) -> Option<(&'static str, &'static AgentSurface, bool)> {
+    adapters::by_id(adapter_id).map(|adapter| {
+        (
+            adapter.profile,
+            &adapter.required_surface,
+            adapter.supports_resume,
+        )
+    })
+}
+
+pub(crate) fn validate_session_policy(
+    agent_profile: &str,
+    session_policy: &str,
+) -> Result<(), String> {
+    let adapter = adapters::for_profile(agent_profile)
+        .ok_or_else(|| format!("不支持的 Agent Profile：{agent_profile}"))?;
+    if session_policy == "continue" && !adapter.supports_resume {
+        return Err(adapter.resume_unsupported_message.to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod runner_contract_tests {
+    use super::*;
+
+    fn web_installation(runner_executable: Option<&str>) -> AgentInstallation {
+        AgentInstallation {
+            surface: AgentSurface::Web,
+            executable_path: "http://127.0.0.1:3080".to_string(),
+            install_dir: r"C:\Users\test\.dsh".to_string(),
+            install_method: crate::core::agent_environment::AgentInstallMethod::Npm,
+            version: Some("0.1.0-rc.6".to_string()),
+            version_output: None,
+            available_on_path: false,
+            runner_executable: runner_executable.map(str::to_string),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn session_policy_validation_uses_the_selected_runner_contract() {
+        assert!(validate_session_policy("Claude Code", "continue").is_ok());
+        let error = validate_session_policy("DeepSeek Harness", "continue").unwrap_err();
+        assert!(error.contains("resume"));
+        assert!(validate_session_policy("DeepSeek Harness", "fresh").is_ok());
+        assert!(validate_session_policy("missing", "fresh")
+            .unwrap_err()
+            .contains("不支持"));
+    }
+
+    #[test]
+    fn runner_gate_accepts_direct_entry_without_path() {
+        // 无 PATH、无直接入口：不可用于任务执行。
+        let mut installation = web_installation(None);
+        assert!(!runner_usable(&installation, &AgentSurface::Web));
+        // 有报错时即使带直接入口也不可用。
+        installation = web_installation(Some(r"C:\pkg\lib\bin.js"));
+        installation.error = Some("无法解析入口".to_string());
+        assert!(!runner_usable(&installation, &AgentSurface::Web));
+        // 唯一版本的 npx 缓存包入口：不依赖 PATH 即可执行。
+        installation.error = None;
+        assert!(runner_usable(&installation, &AgentSurface::Web));
+        assert_eq!(
+            effective_executable(&installation),
+            r"C:\pkg\lib\bin.js"
+        );
+        // Surface 契约不满足时仍拒绝。
+        assert!(!runner_usable(&installation, &AgentSurface::Cli));
+    }
+
+    #[test]
+    fn effective_executable_falls_back_to_path_executable() {
+        let mut installation = web_installation(None);
+        installation.available_on_path = true;
+        installation.executable_path = r"C:\npm\dsh.cmd".to_string();
+        assert!(runner_usable(&installation, &AgentSurface::Web));
+        assert_eq!(effective_executable(&installation), r"C:\npm\dsh.cmd");
+    }
 }
 
 /// 读取项目并校验本机目录绑定，返回项目目录（所有执行器共用的前置校验）。

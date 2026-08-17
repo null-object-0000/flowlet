@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { agentSessionCommands } from "../../domains/agent-session/commands";
 import type { AgentSessionTimelineRange } from "../../domains/agent-session/commands";
 import type { AgentSessionFilter, AgentSessionRow } from "../../domains/agent-session/types";
-import type { OpenCodePermissionDecision } from "../../domains/agent-session/types";
+import type { DshApprovalDecision, OpenCodePermissionDecision } from "../../domains/agent-session/types";
 import { queryKeys } from "../../shared/query-keys";
 
 export function useAgentSessions(filter: AgentSessionFilter, autoRefresh: boolean) {
@@ -47,6 +47,29 @@ export function useReplyOpenCodePermission(session: AgentSessionRow) {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.openCodePermissions(session.sessionId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.all }),
+      ]);
+    },
+  });
+}
+
+export function useDshSessionPermissions(session: AgentSessionRow, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.agentSession.dshPermissions(session.sessionId),
+    queryFn: () => agentSessionCommands.dshPermissions(session.sessionId),
+    enabled: enabled && session.agentType === "deepseek-harness",
+    refetchInterval: 2_000,
+  });
+}
+
+export function useReplyDshPermission(session: AgentSessionRow) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ permissionId, decision }: { permissionId: string; decision: DshApprovalDecision }) =>
+      agentSessionCommands.replyDshPermission(permissionId, decision),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.dshPermissions(session.sessionId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.agentSession.all }),
       ]);
     },

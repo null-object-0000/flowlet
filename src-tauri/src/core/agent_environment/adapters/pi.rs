@@ -29,6 +29,7 @@ async fn detect() -> AgentEnvironmentReport {
             version,
             version_output,
             available_on_path: candidate.available_on_path,
+            runner_executable: None,
             error,
         });
     }

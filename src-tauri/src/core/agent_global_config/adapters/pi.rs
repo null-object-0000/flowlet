@@ -90,7 +90,9 @@ impl AgentGlobalConfigAdapter for PiAdapter {
             &pi_extension_path()?,
             expected_base_url,
             client_token,
-            options.map_or(true, |options| options.session_extension),
+            options
+                .and_then(|options| options.session_extension)
+                .unwrap_or(false),
         )
     }
 
@@ -142,6 +144,8 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
             external_environment_overrides: Vec::new(),
             error,
             session_extension,
+            model_specs: false,
+            approval_bridge: false,
             opencode_permission_bridge: false,
         }
     };

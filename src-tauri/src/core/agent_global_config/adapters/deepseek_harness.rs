@@ -20,6 +20,12 @@ const SESSION_BRIDGE_FILE: &str = "flowlet-session-bridge.mjs";
 const SESSION_BRIDGE_START: &str = "# flowlet-managed:start deepseek-harness-session-bridge";
 const SESSION_BRIDGE_END: &str = "# flowlet-managed:end deepseek-harness-session-bridge";
 
+const APPROVAL_BRIDGE_SOURCE: &str =
+    include_str!("../../../../resources/agent-plugins/deepseek-harness/flowlet-approval-bridge.mjs");
+const APPROVAL_BRIDGE_FILE: &str = "flowlet-approval-bridge.mjs";
+const APPROVAL_BRIDGE_START: &str = "# flowlet-managed:start deepseek-harness-approval-bridge";
+const APPROVAL_BRIDGE_END: &str = "# flowlet-managed:end deepseek-harness-approval-bridge";
+
 pub(super) struct DeepSeekHarnessAdapter;
 
 impl AgentGlobalConfigAdapter for DeepSeekHarnessAdapter {
@@ -35,9 +41,21 @@ impl AgentGlobalConfigAdapter for DeepSeekHarnessAdapter {
         &self,
         expected_base_url: &str,
         client_token: &str,
-        _options: Option<&AgentGlobalConfigOptions>,
+        options: Option<&AgentGlobalConfigOptions>,
     ) -> Result<AgentGlobalConfigReport, String> {
-        apply_dsh(expected_base_url, client_token)
+        apply_dsh(
+            expected_base_url,
+            client_token,
+            options
+                .and_then(|options| options.session_extension)
+                .unwrap_or(false),
+            options
+                .and_then(|options| options.model_specs)
+                .unwrap_or(false),
+            options
+                .and_then(|options| options.approval_bridge)
+                .unwrap_or(false),
+        )
     }
 
     fn restore(&self, expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
@@ -62,6 +80,10 @@ struct DshProfileBackup {
     profile: String,
     patch: BackedUpText,
     plugin: BackedUpText,
+    /// 接入前受管 approval bridge 插件文件的原文。None 表示旧版备份未记录该
+    /// 字段（apply 时会按当前文件补录，保证恢复能还原到 Flowlet 触碰前的状态）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    approval_plugin: Option<BackedUpText>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -200,11 +222,72 @@ fn profile_paths(root: &Path) -> (PathBuf, PathBuf) {
     )
 }
 
+fn approval_plugin_path(root: &Path) -> PathBuf {
+    root.join(SESSION_BRIDGE_DIR).join(APPROVAL_BRIDGE_FILE)
+}
+
+fn approval_bridge_block() -> String {
+    format!(
+        "{APPROVAL_BRIDGE_START}\n- insert:\n    - id: flowlet-approval-bridge\n      name: ./.flowlet/{APPROVAL_BRIDGE_FILE}\n      config:\n        provider: flowlet\n{APPROVAL_BRIDGE_END}\n"
+    )
+}
+
 fn session_bridge_block(expected_base_url: &str) -> String {
     format!(
         "{SESSION_BRIDGE_START}\n- insert:\n    - id: flowlet-session-bridge\n      name: ./.flowlet/{SESSION_BRIDGE_FILE}\n      config:\n        provider: flowlet\n        baseURL: {}\n{SESSION_BRIDGE_END}\n",
         normalize_url(expected_base_url)
     )
+}
+
+fn prepare_patch_list_for_append(text: &str) -> Result<String, String> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let content = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let trimmed = line.trim();
+            (!trimmed.is_empty() && !trimmed.starts_with('#') && trimmed != "---")
+                .then_some((index, trimmed))
+        })
+        .collect::<Vec<_>>();
+
+    if content.len() == 1 && content[0].1 == "[]" {
+        return Ok(lines
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, line)| (index != content[0].0).then_some(line))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end_matches(['\r', '\n'])
+            .to_string());
+    }
+    if content
+        .first()
+        .is_some_and(|(_, line)| line.starts_with('['))
+        || content.iter().any(|(_, line)| *line == "...")
+    {
+        return Err(
+            "DSH cordis.patch.yml 使用了无法安全追加的行内数组或文档结束标记，请先改为块级 YAML 数组"
+                .to_string(),
+        );
+    }
+    Ok(text.trim_end_matches(['\r', '\n']).to_string())
+}
+
+fn ensure_patch_list_after_removal(text: &str) -> String {
+    let has_entry = text.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty() && !trimmed.starts_with('#') && trimmed != "---"
+    });
+    if has_entry {
+        return text.trim_end_matches(['\r', '\n']).to_string();
+    }
+    let comments = text.trim_end_matches(['\r', '\n']);
+    if comments.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("{comments}\n[]")
+    }
 }
 
 fn patch_session_bridge(text: &str, expected_base_url: &str) -> Result<Vec<u8>, String> {
@@ -228,11 +311,40 @@ fn patch_session_bridge(text: &str, expected_base_url: &str) -> Result<Vec<u8>, 
             )
         }
     };
+    unmanaged = prepare_patch_list_for_append(&unmanaged)?;
     if !unmanaged.is_empty() {
         unmanaged.push_str("\n\n");
     }
     unmanaged.push_str(&session_bridge_block(expected_base_url));
     Ok(unmanaged.replace('\n', newline).into_bytes())
+}
+
+fn remove_session_bridge(text: &str) -> Result<Vec<u8>, String> {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let normalized = text.replace("\r\n", "\n");
+    let start = normalized.find(SESSION_BRIDGE_START);
+    let end = normalized.find(SESSION_BRIDGE_END);
+    let output = match (start, end) {
+        (None, None) => return Ok(text.as_bytes().to_vec()),
+        (Some(start), Some(end)) if end >= start => {
+            let end = end + SESSION_BRIDGE_END.len();
+            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
+            while value.contains("\n\n\n") {
+                value = value.replace("\n\n\n", "\n\n");
+            }
+            ensure_patch_list_after_removal(&value)
+        }
+        _ => {
+            return Err(
+                "DSH cordis.patch.yml 中的 Flowlet 会话桥接标记不完整，拒绝覆盖".to_string(),
+            )
+        }
+    };
+    Ok(if output.is_empty() {
+        Vec::new()
+    } else {
+        format!("{}{}", output.replace('\n', newline), newline).into_bytes()
+    })
 }
 
 fn profile_bridge_matches(root: &Path, expected_base_url: &str) -> bool {
@@ -246,8 +358,79 @@ fn profile_bridge_matches(root: &Path, expected_base_url: &str) -> bool {
         })
 }
 
+fn patch_approval_bridge(text: &str) -> Result<Vec<u8>, String> {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let normalized = text.replace("\r\n", "\n");
+    let start = normalized.find(APPROVAL_BRIDGE_START);
+    let end = normalized.find(APPROVAL_BRIDGE_END);
+    let mut unmanaged = match (start, end) {
+        (None, None) => normalized.trim_end_matches(['\r', '\n']).to_string(),
+        (Some(start), Some(end)) if end >= start => {
+            let end = end + APPROVAL_BRIDGE_END.len();
+            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
+            while value.contains("\n\n\n") {
+                value = value.replace("\n\n\n", "\n\n");
+            }
+            value.trim_end_matches(['\r', '\n']).to_string()
+        }
+        _ => {
+            return Err(
+                "DSH cordis.patch.yml 中的 Flowlet 交互确认桥标记不完整，拒绝覆盖".to_string(),
+            )
+        }
+    };
+    unmanaged = prepare_patch_list_for_append(&unmanaged)?;
+    if !unmanaged.is_empty() {
+        unmanaged.push_str("\n\n");
+    }
+    unmanaged.push_str(&approval_bridge_block());
+    Ok(unmanaged.replace('\n', newline).into_bytes())
+}
+
+fn remove_approval_bridge(text: &str) -> Result<Vec<u8>, String> {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let normalized = text.replace("\r\n", "\n");
+    let start = normalized.find(APPROVAL_BRIDGE_START);
+    let end = normalized.find(APPROVAL_BRIDGE_END);
+    let output = match (start, end) {
+        (None, None) => return Ok(text.as_bytes().to_vec()),
+        (Some(start), Some(end)) if end >= start => {
+            let end = end + APPROVAL_BRIDGE_END.len();
+            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
+            while value.contains("\n\n\n") {
+                value = value.replace("\n\n\n", "\n\n");
+            }
+            ensure_patch_list_after_removal(&value)
+        }
+        _ => {
+            return Err(
+                "DSH cordis.patch.yml 中的 Flowlet 交互确认桥标记不完整，拒绝覆盖".to_string(),
+            )
+        }
+    };
+    Ok(if output.is_empty() {
+        Vec::new()
+    } else {
+        format!("{}{}", output.replace('\n', newline), newline).into_bytes()
+    })
+}
+
+fn profile_approval_bridge_matches(root: &Path) -> bool {
+    let plugin = approval_plugin_path(root);
+    let patch = root.join("cordis.patch.yml");
+    plugin.is_file()
+        && std::fs::read_to_string(&plugin).ok().as_deref() == Some(APPROVAL_BRIDGE_SOURCE)
+        && std::fs::read_to_string(patch).ok().is_some_and(|text| {
+            text.contains(APPROVAL_BRIDGE_START) && text.contains(APPROVAL_BRIDGE_END)
+        })
+}
+
 fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
+    inspect_dsh_at(&home, expected_base_url)
+}
+
+fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
     let backup_available = backup_path(&home).is_file();
@@ -256,6 +439,23 @@ fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
         && profiles
             .iter()
             .all(|(_, root)| profile_bridge_matches(root, expected_base_url));
+    // 交互确认桥：所有 base-bundle Profile 都部署了 Flowlet approval bridge。
+    let approval_bridge = !profiles.is_empty()
+        && profiles
+            .iter()
+            .all(|(_, root)| profile_approval_bridge_matches(root));
+    // 聚合模型规格声明：settings.yaml 中 flowlet-pro 模型条目携带 contextWindow。
+    let model_specs = yaml_at(
+        &read_yaml_value(&settings_path).unwrap_or_else(|_| serde_yaml::Value::Null),
+        &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models"],
+    )
+    .and_then(serde_yaml::Value::as_sequence)
+    .is_some_and(|models| {
+        models.iter().any(|entry| {
+            entry.get("id").and_then(serde_yaml::Value::as_str) == Some("flowlet-pro")
+                && entry.get("contextWindow").is_some()
+        })
+    });
     let report = |state, base_url, token, model, error| AgentGlobalConfigReport {
         agent_id: "deepseek-harness".to_string(),
         settings_path: display_path(&settings_path),
@@ -279,6 +479,8 @@ fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
             .unwrap_or_default(),
         error,
         session_extension,
+        model_specs,
+        approval_bridge,
         opencode_permission_bridge: false,
     };
     if !settings_path.is_file() {
@@ -315,10 +517,6 @@ fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
         .and_then(|value| value.get("api"))
         .and_then(serde_yaml::Value::as_str)
         == Some("openai-completions");
-    let session_header_matches = provider
-        .and_then(|value| value.get("sessionIdHeader"))
-        .and_then(serde_yaml::Value::as_str)
-        == Some("x-flowlet-session");
     let model = yaml_at(&settings, &[DEFAULT_MODEL_NAMESPACE, "model"])
         .and_then(serde_yaml::Value::as_str)
         .map(str::to_string);
@@ -328,12 +526,7 @@ fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
         || read_credential_value(&credentials_path)?.is_some();
     let base_matches = base_url.as_deref().map(normalize_url).as_deref()
         == Some(normalize_url(expected_base_url).as_str());
-    let state = if base_matches
-        && key_ref_matches
-        && api_matches
-        && session_header_matches
-        && session_extension
-        && token
+    let state = if base_matches && key_ref_matches && api_matches && token
         && default_provider == Some(PROVIDER_ID)
         && model.as_deref() == Some("flowlet-pro")
     {
@@ -386,7 +579,17 @@ fn read_credential_value(path: &Path) -> Result<Option<String>, String> {
 fn yaml_at<'a>(root: &'a serde_yaml::Value, path: &[&str]) -> Option<&'a serde_yaml::Value> {
     let mut current = Some(root);
     for segment in path {
-        current = current.and_then(|value| value.get(*segment));
+        current = current.and_then(|value| {
+            // 先尝试按映射键查找
+            if let Some(result) = value.get(*segment) {
+                return Some(result);
+            }
+            // 再尝试作为序列索引（数字字符串 → usize）
+            if let Ok(index) = segment.parse::<usize>() {
+                return value.get(index);
+            }
+            None
+        });
     }
     current
 }
@@ -654,19 +857,32 @@ fn patch_yaml_entry(
     Ok(output.into_bytes())
 }
 
-fn provider_profile(expected_base_url: &str) -> Value {
+fn provider_profile(expected_base_url: &str, model_specs: bool) -> Value {
+    let pro = if model_specs {
+        json!({ "id": "flowlet-pro", "contextWindow": 1048576 })
+    } else {
+        json!({ "id": "flowlet-pro" })
+    };
+    let flash = if model_specs {
+        json!({ "id": "flowlet-flash", "contextWindow": 1048576 })
+    } else {
+        json!({ "id": "flowlet-flash" })
+    };
     json!({
         "displayName": "Flowlet",
         "apiKeyEnv": TOKEN_REF,
         "api": "openai-completions",
         "baseURL": normalize_url(expected_base_url),
-        "sessionIdHeader": "x-flowlet-session",
-        "models": [{ "id": "flowlet-pro" }, { "id": "flowlet-flash" }],
+        "models": [pro, flash],
     })
 }
 
-fn apply_settings_text(text: &str, expected_base_url: &str) -> Result<Vec<u8>, String> {
-    let provider = provider_profile(expected_base_url);
+fn apply_settings_text(
+    text: &str,
+    expected_base_url: &str,
+    model_specs: bool,
+) -> Result<Vec<u8>, String> {
+    let provider = provider_profile(expected_base_url, model_specs);
     let text = String::from_utf8(patch_yaml_entry(
         text,
         "settings.yaml",
@@ -748,8 +964,29 @@ fn restore_credentials_text(text: &str, snapshot: &ManagedSnapshot) -> Result<Ve
 fn apply_dsh(
     expected_base_url: &str,
     client_token: &str,
+    session_extension: bool,
+    model_specs: bool,
+    approval_bridge: bool,
 ) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
+    apply_dsh_at(
+        &home,
+        expected_base_url,
+        client_token,
+        session_extension,
+        model_specs,
+        approval_bridge,
+    )
+}
+
+fn apply_dsh_at(
+    home: &Path,
+    expected_base_url: &str,
+    client_token: &str,
+    session_extension: bool,
+    model_specs: bool,
+    approval_bridge: bool,
+) -> Result<AgentGlobalConfigReport, String> {
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
     let backup = backup_path(&home);
@@ -758,12 +995,12 @@ fn apply_dsh(
     let settings_text = read_yaml_text(&settings_path)?;
     let credentials_text = read_yaml_text(&credentials_path)?;
     let current = capture_snapshot(&settings_path, &credentials_path)?;
-    let settings_output = apply_settings_text(&settings_text, expected_base_url)?;
+    let settings_output = apply_settings_text(&settings_text, expected_base_url, model_specs)?;
     let credentials_output = apply_credentials_text(&credentials_text, client_token)?;
     let profiles = dsh_profiles(&home)?;
-    if profiles.is_empty() {
+    if session_extension && profiles.is_empty() {
         return Err(
-            "尚未发现可安装 Flowlet 会话插件的 DSH Profile；请先启动一次 DeepSeek Harness"
+            "尚未发现可安装 Flowlet 会话插件的 DSH Profile；请先启动一次 DeepSeek Harness，或关闭可选的精确会话关联"
                 .to_string(),
         );
     }
@@ -798,22 +1035,92 @@ fn apply_dsh(
             profile: profile.clone(),
             patch: backed_up_text(&patch)?,
             plugin: backed_up_text(&plugin)?,
+            approval_plugin: Some(backed_up_text(&approval_plugin_path(root))?),
         });
+    }
+    // 旧版备份无 approval_plugin 字段，补录当前文件原文，保证恢复时能完整还原。
+    for item in &mut backup_value.profiles {
+        if item.approval_plugin.is_none() {
+            if let Some(root) = profiles
+                .iter()
+                .find(|(p, _)| p == &item.profile)
+                .map(|(_, r)| r)
+            {
+                item.approval_plugin = Some(backed_up_text(&approval_plugin_path(root))?);
+            }
+        }
     }
     let mut writes = vec![
         (settings_path, Some(settings_output)),
         (credentials_path, Some(credentials_output)),
     ];
-    for (_, root) in &profiles {
+    for (profile, root) in &profiles {
         let (patch, plugin) = profile_paths(root);
-        writes.push((
-            patch.clone(),
-            Some(patch_session_bridge(
-                &read_yaml_text(&patch)?,
-                expected_base_url,
-            )?),
-        ));
-        writes.push((plugin, Some(text_file_bytes(SESSION_BRIDGE_SOURCE))));
+        let approval_plugin = approval_plugin_path(root);
+        // 会话桥接与交互确认桥共用同一份 patch 文本，按序叠加各自的受管块，
+        // 最终只提交一次 patch 写入（write_files_transactionally 不做去重，后写覆盖先写）。
+        let mut patch_text = read_yaml_text(&patch)?;
+        let mut patch_changed = false;
+        if session_extension {
+            patch_text = String::from_utf8(patch_session_bridge(&patch_text, expected_base_url)?)
+                .map_err(|_| "DSH 会话桥接输出不是合法 UTF-8".to_string())?;
+            patch_changed = true;
+            writes.push((plugin, Some(text_file_bytes(SESSION_BRIDGE_SOURCE))));
+        } else {
+            let patch_output = remove_session_bridge(&patch_text)?;
+            if patch_output != patch_text.as_bytes() {
+                patch_text = String::from_utf8(patch_output)
+                    .map_err(|_| "DSH 会话桥接输出不是合法 UTF-8".to_string())?;
+                patch_changed = true;
+            }
+            let previous_plugin = backup_value
+                .profiles
+                .iter()
+                .find(|item| item.profile == *profile)
+                .and_then(|item| {
+                    item.plugin
+                        .present
+                        .then(|| text_file_bytes(&item.plugin.content))
+                });
+            if std::fs::read_to_string(&plugin).ok().as_deref() == Some(SESSION_BRIDGE_SOURCE) {
+                writes.push((plugin, previous_plugin));
+            }
+        }
+        if approval_bridge {
+            patch_text = String::from_utf8(patch_approval_bridge(&patch_text)?)
+                .map_err(|_| "DSH 交互确认桥输出不是合法 UTF-8".to_string())?;
+            patch_changed = true;
+            writes.push((
+                approval_plugin,
+                Some(text_file_bytes(APPROVAL_BRIDGE_SOURCE)),
+            ));
+        } else {
+            let patch_output = remove_approval_bridge(&patch_text)?;
+            if patch_output != patch_text.as_bytes() {
+                patch_text = String::from_utf8(patch_output)
+                    .map_err(|_| "DSH 交互确认桥输出不是合法 UTF-8".to_string())?;
+                patch_changed = true;
+            }
+            let previous_approval_plugin = backup_value
+                .profiles
+                .iter()
+                .find(|item| item.profile == *profile)
+                .and_then(|item| {
+                    item.approval_plugin
+                        .as_ref()
+                        .and_then(|backup| backup.present.then(|| text_file_bytes(&backup.content)))
+                });
+            if std::fs::read_to_string(&approval_plugin)
+                .ok()
+                .as_deref()
+                == Some(APPROVAL_BRIDGE_SOURCE)
+            {
+                writes.push((approval_plugin, previous_approval_plugin));
+            }
+        }
+        if patch_changed {
+            writes.push((patch, Some(patch_text.into_bytes())));
+        }
     }
     write_json_file(
         &backup,
@@ -821,18 +1128,22 @@ fn apply_dsh(
             .map_err(|error| format!("序列化 DSH 配置备份失败：{error}"))?,
     )?;
     if let Err(error) =
-        write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话插件", &writes)
+        write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话/确认插件", &writes)
     {
         if created_backup && error.rolled_back {
             let _ = std::fs::remove_file(&backup);
         }
         return Err(error.message);
     }
-    inspect_dsh(expected_base_url)
+    inspect_dsh_at(home, expected_base_url)
 }
 
 fn restore_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
+    restore_dsh_at(&home, expected_base_url)
+}
+
+fn restore_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
     let backup_path = backup_path(&home);
@@ -894,12 +1205,19 @@ fn restore_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, Strin
                 .present
                 .then(|| text_file_bytes(&profile.plugin.content)),
         ));
+        writes.push((
+            approval_plugin_path(&root),
+            profile
+                .approval_plugin
+                .as_ref()
+                .and_then(|backup| backup.present.then(|| text_file_bytes(&backup.content))),
+        ));
     }
-    write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话插件", &writes)
+    write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话/确认插件", &writes)
         .map_err(|error| error.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("删除 DSH 配置备份失败：{error}"))?;
-    inspect_dsh(expected_base_url)
+    inspect_dsh_at(home, expected_base_url)
 }
 
 #[cfg(test)]
@@ -909,23 +1227,83 @@ mod tests {
     #[test]
     fn builds_the_documented_flowlet_custom_provider() {
         assert_eq!(
-            provider_profile("http://127.0.0.1:18640/v1/"),
+            provider_profile("http://127.0.0.1:18640/v1/", false),
             json!({
                 "displayName": "Flowlet",
                 "apiKeyEnv": "FLOWLET_CLIENT_TOKEN",
                 "api": "openai-completions",
                 "baseURL": "http://127.0.0.1:18640/v1",
-                "sessionIdHeader": "x-flowlet-session",
                 "models": [{ "id": "flowlet-pro" }, { "id": "flowlet-flash" }],
             })
         );
     }
 
     #[test]
+    fn model_specs_declares_context_window_on_both_aggregate_models() {
+        let value = provider_profile("http://127.0.0.1:18640/v1", true);
+        let models = value["models"].as_array().unwrap();
+        assert_eq!(models.len(), 2);
+        for entry in models {
+            assert_eq!(
+                entry["contextWindow"].as_i64(),
+                Some(1_048_576),
+                "每个聚合模型条目都应声明 1M 上下文窗口：{entry}"
+            );
+        }
+        let text = String::from_utf8(
+            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", true).unwrap(),
+        )
+        .unwrap();
+        let text = String::from_utf8(
+            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", true).unwrap(),
+        )
+        .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
+        assert_eq!(
+            yaml_at(
+                &parsed,
+                &[
+                    LLM_NAMESPACE,
+                    "providers",
+                    PROVIDER_ID,
+                    "models",
+                    "0",
+                    "contextWindow"
+                ]
+            )
+            .and_then(serde_yaml::Value::as_i64),
+            Some(1_048_576)
+        );
+        // 关闭规格声明后重新写入应移除 contextWindow（不残留旧声明）。
+        let disabled = String::from_utf8(
+            apply_settings_text(&text, "http://127.0.0.1:18640/v1", false).unwrap(),
+        )
+        .unwrap();
+        let reparsed: serde_yaml::Value = serde_yaml::from_str(&disabled).unwrap();
+        for index in ["0", "1"] {
+            assert!(
+                yaml_at(
+                    &reparsed,
+                    &[
+                        LLM_NAMESPACE,
+                        "providers",
+                        PROVIDER_ID,
+                        "models",
+                        index,
+                        "contextWindow"
+                    ]
+                )
+                .is_none(),
+                "关闭后模型条目 {index} 不应残留 contextWindow"
+            );
+        }
+    }
+
+    #[test]
     fn lossless_edit_preserves_unmanaged_yaml_and_comments() {
         let before = "# keep root\nui-theme:\n  mode: dark # keep inline\nllm-pi-ai:\n  providers:\n    other:\n      baseURL: https://other.example/v1\n";
         let output =
-            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1").unwrap())
+            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1", false).unwrap())
                 .unwrap();
         assert!(output.contains("# keep root"));
         assert!(output.contains("mode: dark # keep inline"));
@@ -965,7 +1343,7 @@ mod tests {
             credential: BackedUpValue::default(),
         };
         let managed = String::from_utf8(
-            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1").unwrap(),
+            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", false).unwrap(),
         )
         .unwrap();
         let restored =
@@ -992,6 +1370,7 @@ mod tests {
         let error = apply_settings_text(
             "llm-pi-ai: { providers: { other: { baseURL: https://other.example/v1 } } }\n",
             "http://127.0.0.1:18640/v1",
+            false,
         )
         .unwrap_err();
         assert!(error.contains("行内或复杂 YAML"));
@@ -1002,7 +1381,7 @@ mod tests {
         let before =
             "llm-pi-ai:\n  providers:\n    'flowlet':\n      baseURL: https://old.example/v1\n";
         let output =
-            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1").unwrap())
+            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1", false).unwrap())
                 .unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
         assert_eq!(
@@ -1037,6 +1416,246 @@ mod tests {
     }
 
     #[test]
+    fn session_bridge_patch_replaces_scaffolded_empty_array_document() {
+        let before = "# user patch layer\n# keep this comment\n[]\n";
+        let output =
+            String::from_utf8(patch_session_bridge(before, "http://127.0.0.1:18640/v1").unwrap())
+                .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
+        assert!(parsed
+            .as_sequence()
+            .is_some_and(|entries| entries.len() == 1));
+        assert!(output.contains("# keep this comment"));
+        assert!(!output.lines().any(|line| line.trim() == "[]"));
+    }
+
+    #[test]
+    fn real_upstream_profile_fixture_passes_apply_reapply_disable_restore_contract() {
+        const UPSTREAM_PATCH: &str =
+            include_str!("../../../../tests/fixtures/deepseek-harness/web/cordis.patch.yml");
+        let home = std::env::temp_dir().join(format!(
+            "flowlet-dsh-global-config-contract-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = home.join("profiles").join("web");
+        std::fs::create_dir_all(&profile).unwrap();
+        let settings = "# keep user settings\nllm-pi-ai:\n  providers:\n    existing:\n      baseURL: https://example.com/v1\nagent-default-model:\n  provider: existing\n  model: existing-model\n";
+        let credentials = "# keep user credentials\nEXISTING_TOKEN: keep-me\n";
+        std::fs::write(home.join("settings.yaml"), settings).unwrap();
+        std::fs::write(home.join(".credentials.yaml"), credentials).unwrap();
+        std::fs::write(
+            profile.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}"#,
+        )
+        .unwrap();
+        std::fs::write(profile.join("cordis.patch.yml"), UPSTREAM_PATCH).unwrap();
+
+        let report = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
+        assert!(report.session_extension);
+        assert!(!report.model_specs);
+        let managed_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&managed_patch).unwrap();
+        assert!(parsed
+            .as_sequence()
+            .is_some_and(|entries| entries.len() == 1));
+        assert!(profile
+            .join(SESSION_BRIDGE_DIR)
+            .join(SESSION_BRIDGE_FILE)
+            .is_file());
+
+        apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+            managed_patch,
+            "reapply must be idempotent"
+        );
+
+        let disabled = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(!disabled.session_extension);
+        let disabled_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&disabled_patch).unwrap();
+        assert!(parsed.as_sequence().is_some_and(Vec::is_empty));
+        assert!(!profile
+            .join(SESSION_BRIDGE_DIR)
+            .join(SESSION_BRIDGE_FILE)
+            .is_file());
+
+        let restored = restore_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+        assert_eq!(
+            std::fs::read_to_string(home.join("settings.yaml")).unwrap(),
+            settings
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
+            credentials
+        );
+        assert_eq!(
+            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+            UPSTREAM_PATCH
+        );
+        assert!(!backup_path(&home).exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn real_upstream_fixture_model_specs_passes_apply_disable_restore_contract() {
+        const UPSTREAM_PATCH: &str =
+            include_str!("../../../../tests/fixtures/deepseek-harness/web/cordis.patch.yml");
+        let home = std::env::temp_dir().join(format!(
+            "flowlet-dsh-model-specs-contract-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let settings = "# keep user settings\nllm-pi-ai:\n  providers:\n    existing:\n      baseURL: https://example.com/v1\nagent-default-model:\n  provider: existing\n  model: existing-model\n";
+        let credentials = "# keep user credentials\nEXISTING_TOKEN: keep-me\n";
+        std::fs::create_dir_all(home.join("profiles").join("web")).unwrap();
+        std::fs::write(home.join("settings.yaml"), settings).unwrap();
+        std::fs::write(home.join(".credentials.yaml"), credentials).unwrap();
+        std::fs::write(
+            home.join("profiles").join("web").join("cordis.patch.yml"),
+            UPSTREAM_PATCH,
+        )
+        .unwrap();
+
+        let report = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
+        assert!(report.model_specs);
+        assert!(!report.session_extension);
+        let managed = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&managed).unwrap();
+        let models = yaml_at(
+            &parsed,
+            &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models"],
+        )
+        .and_then(serde_yaml::Value::as_sequence)
+        .unwrap();
+        assert_eq!(models.len(), 2);
+        for entry in models {
+            assert_eq!(
+                entry["contextWindow"].as_i64(),
+                Some(1_048_576),
+                "每个聚合模型条目都应声明 1M 上下文窗口：{entry:?}"
+            );
+        }
+        // 非受管 Provider 原样保留。
+        assert_eq!(
+            yaml_at(
+                &parsed,
+                &[LLM_NAMESPACE, "providers", "existing", "baseURL"]
+            )
+            .and_then(serde_yaml::Value::as_str),
+            Some("https://example.com/v1")
+        );
+
+        let reapplied = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(reapplied.model_specs, "reapply must preserve model specs");
+
+        let disabled = apply_dsh_at(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(!disabled.model_specs, "disable must clear model specs");
+        let disabled_text = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
+        let reparsed: serde_yaml::Value = serde_yaml::from_str(&disabled_text).unwrap();
+        let disabled_models = yaml_at(
+            &reparsed,
+            &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models"],
+        )
+        .and_then(serde_yaml::Value::as_sequence)
+        .unwrap();
+        for entry in disabled_models {
+            assert!(
+                entry.get("contextWindow").is_none(),
+                "关闭后模型条目不应残留 contextWindow：{entry:?}"
+            );
+        }
+
+        let restored = restore_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+        assert!(!restored.model_specs);
+        assert_eq!(
+            std::fs::read_to_string(home.join("settings.yaml")).unwrap(),
+            settings
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
+            credentials
+        );
+        assert!(!backup_path(&home).exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn session_bridge_patch_repairs_the_previous_empty_array_plus_managed_block() {
+        let broken = format!(
+            "# user patch layer\n[]\n\n{}",
+            session_bridge_block("http://127.0.0.1:18640/v1")
+        );
+        let output =
+            String::from_utf8(patch_session_bridge(&broken, "http://127.0.0.1:28640/v1").unwrap())
+                .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
+        assert!(parsed
+            .as_sequence()
+            .is_some_and(|entries| entries.len() == 1));
+        assert!(output.contains("baseURL: http://127.0.0.1:28640/v1"));
+        assert_eq!(output.matches(SESSION_BRIDGE_START).count(), 1);
+    }
+
+    #[test]
+    fn session_bridge_patch_refuses_nonempty_flow_style_array() {
+        let error =
+            patch_session_bridge("[{ id: custom }]\n", "http://127.0.0.1:18640/v1").unwrap_err();
+        assert!(error.contains("行内数组"));
+    }
+
+    #[test]
     fn session_bridge_patch_refuses_broken_managed_markers() {
         let error =
             patch_session_bridge(SESSION_BRIDGE_START, "http://127.0.0.1:18640/v1").unwrap_err();
@@ -1053,6 +1672,43 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         assert!(output.contains("\r\n"));
         assert!(!output.replace("\r\n", "").contains('\n'));
+    }
+
+    #[test]
+    fn session_bridge_removal_preserves_user_plugins_and_is_idempotent() {
+        let before = "# user plugin\n- insert:\n    - id: custom\n      name: custom-package\n";
+        let managed =
+            String::from_utf8(patch_session_bridge(before, "http://127.0.0.1:18640/v1").unwrap())
+                .unwrap();
+        let once = String::from_utf8(remove_session_bridge(&managed).unwrap()).unwrap();
+        assert!(once.contains("id: custom"));
+        assert!(!once.contains(SESSION_BRIDGE_START));
+        assert!(!once.contains("flowlet-session-bridge"));
+
+        let twice = String::from_utf8(remove_session_bridge(&once).unwrap()).unwrap();
+        assert_eq!(twice, once);
+    }
+
+    #[test]
+    fn session_bridge_removal_restores_an_empty_array_document() {
+        let managed = String::from_utf8(
+            patch_session_bridge("# user patch layer\n[]\n", "http://127.0.0.1:18640/v1").unwrap(),
+        )
+        .unwrap();
+        let removed = String::from_utf8(remove_session_bridge(&managed).unwrap()).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&removed).unwrap();
+        assert!(
+            parsed.as_sequence().is_some_and(Vec::is_empty),
+            "removed patch was: {removed:?}"
+        );
+        assert!(removed.contains("# user patch layer"));
+        assert!(removed.lines().any(|line| line.trim() == "[]"));
+    }
+
+    #[test]
+    fn session_bridge_removal_refuses_broken_managed_markers() {
+        let error = remove_session_bridge(SESSION_BRIDGE_END).unwrap_err();
+        assert!(error.contains("标记不完整"));
     }
 
     #[test]

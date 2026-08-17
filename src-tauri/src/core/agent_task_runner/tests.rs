@@ -278,34 +278,50 @@ fn resume_returns_none_without_sessions() {
 }
 
 #[test]
-fn agent_profile_meta_maps_supported_profiles() {
+fn runner_adapters_define_profile_environment_surface_and_resume_capability() {
     assert_eq!(
-        agent_profile_meta("Claude Code"),
-        Some(("claude-code", "Claude Code"))
+        adapters::for_profile("Claude Code").map(|adapter| (
+            adapter.environment_adapter_id,
+            adapter.display_name,
+            &adapter.required_surface,
+            adapter.supports_resume,
+        )),
+        Some(("claude-code", "Claude Code", &AgentSurface::Cli, true))
     );
     // Codex 复用 chatgpt-desktop 的探测（含 Codex CLI 与 ChatGPT Desktop），
     // 执行时 resolve_agent_executable 会优先选 CLI 表面的安装。
     assert_eq!(
-        agent_profile_meta("Codex"),
-        Some(("chatgpt-desktop", "Codex"))
+        adapters::for_profile("Codex").map(|adapter| adapter.environment_adapter_id),
+        Some("chatgpt-desktop")
     );
     assert_eq!(
-        agent_profile_meta("OpenCode"),
-        Some(("opencode", "OpenCode"))
-    );
-    assert_eq!(agent_profile_meta("Pi"), Some(("pi", "Pi")));
-    assert_eq!(agent_profile_meta("Unknown Agent"), None);
-    // 空串是历史任务在 agent_profile 列引入前的默认值，视为 Claude Code。
-    assert_eq!(agent_profile_meta(""), Some(("claude-code", "Claude Code")));
-    assert_eq!(
-        agent_profile_meta("   "),
-        Some(("claude-code", "Claude Code"))
+        adapters::for_profile("OpenCode").map(|adapter| adapter.environment_adapter_id),
+        Some("opencode")
     );
     assert_eq!(
-        adapters::for_profile("Codex").map(|adapter| adapter.id),
-        Some("codex")
+        adapters::for_profile("Pi").map(|adapter| adapter.environment_adapter_id),
+        Some("pi")
     );
     assert!(adapters::for_profile("Unknown Agent").is_none());
+    // 空串是历史任务在 agent_profile 列引入前的默认值，视为 Claude Code。
+    assert_eq!(
+        adapters::for_profile("").map(|adapter| adapter.id),
+        Some("claude-code")
+    );
+    assert_eq!(
+        adapters::for_profile("   ").map(|adapter| adapter.id),
+        Some("claude-code")
+    );
+    let dsh = adapters::for_profile("DeepSeek Harness").unwrap();
+    assert_eq!(dsh.required_surface, AgentSurface::Web);
+    assert!(!dsh.supports_resume);
+    assert!(dsh.missing_executable_message.contains("@deepseek-ai/dsh"));
+    assert!(dsh.resume_unsupported_message.contains("fresh"));
+    for profile in ["Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness"] {
+        let adapter = adapters::for_profile(profile).unwrap();
+        assert!(!adapter.missing_executable_message.is_empty());
+        assert!(!adapter.resume_unsupported_message.is_empty());
+    }
     assert!(adapters::has("pi"));
     assert!(!adapters::has("Unknown Agent"));
 }

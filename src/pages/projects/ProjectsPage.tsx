@@ -9,7 +9,8 @@ import { DesktopSearchFieldView, ProjectsBoardTaskCardView, ProjectsBoardView } 
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { BackgroundJobEvent } from "../../domains/background-task/types";
 import { agentSessionCommands } from "../../domains/agent-session/commands";
-import type { AgentSessionFlowletUsage, AgentSessionNativeUsage } from "../../domains/agent-session/types";
+import type { AgentSessionFlowletUsage, AgentSessionNativeUsage, AgentSessionType } from "../../domains/agent-session/types";
+import { agentTaskSessionType } from "../../domains/pluginRegistry";
 import { deviceSyncCommands } from "../../domains/device-sync/commands";
 import type { Project, ProjectTask, ProjectTaskMutableStatus, ProjectTaskQueueBlocker, ProjectTaskRunnerState, ProjectTaskStatus, ProjectTaskType, TaskExecutionRecord } from "../../domains/project/types";
 import { taskExecutionHistory, taskExecutionRound, taskHasExecution, taskIsRevisionDraft, taskLatestExecutionDuration, taskRecordExecutionDuration, taskRecordWaitingDuration, taskTotalExecutionDuration, taskTotalWaitingDuration, taskWaitingDuration } from "../../domains/project/types";
@@ -1292,7 +1293,7 @@ function TaskSessionView({ task, visible, autoRefresh, onRefreshed }: { task: Pr
 function TaskSessionRound({ record, endedAt, agentType, roundIndex, autoRefresh, onRefreshed }: {
   record: TaskExecutionRecord;
   endedAt: string | null;
-  agentType: "claude-code" | "opencode" | "pi" | "codex-cli" | null;
+  agentType: AgentSessionType | null;
   roundIndex: number;
   autoRefresh: boolean;
   onRefreshed?: () => void;
@@ -1444,12 +1445,8 @@ function parseSessionIdFromEvents(events: BackgroundJobEvent[]): string | null {
 }
 
 /** 任务 Agent Profile → 会话读取用的 agent_type。 */
-function projectAgentType(agentProfile: string): "claude-code" | "opencode" | "pi" | "codex-cli" | null {
-  if (agentProfile === "Claude Code") return "claude-code";
-  if (agentProfile === "Codex") return "codex-cli";
-  if (agentProfile === "OpenCode") return "opencode";
-  if (agentProfile === "Pi") return "pi";
-  return null;
+function projectAgentType(agentProfile: string): AgentSessionType | null {
+  return (agentTaskSessionType(agentProfile) as AgentSessionType | undefined) ?? null;
 }
 
 function TaskReadonlyHeader({ task, remoteOrigin }: { task: ProjectTask; remoteOrigin: RemoteTaskOrigin | null }) {

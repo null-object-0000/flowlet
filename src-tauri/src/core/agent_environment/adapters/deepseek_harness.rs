@@ -33,6 +33,7 @@ async fn detect() -> AgentEnvironmentReport {
             version,
             version_output,
             available_on_path: candidate.available_on_path,
+            runner_executable: None,
             error,
         });
     }
@@ -47,14 +48,37 @@ async fn detect() -> AgentEnvironmentReport {
         let data_home = dsh_home.as_ref().filter(|path| path.is_dir());
         if web_running || data_home.is_some() {
             let npx_package = unambiguous_npx_package(&dsh_npx_cache_roots());
+            let bin_entry = npx_package
+                .as_ref()
+                .and_then(|(package_dir, _)| npx_bin_entry(package_dir));
+            let (executable_path, install_dir) = match (&npx_package, &bin_entry) {
+                (Some((package_dir, _)), Some(entry)) => {
+                    (display_path(entry), display_path(package_dir))
+                }
+                (Some((package_dir, _)), None) => (DEFAULT_WEB_URL.to_string(), display_path(package_dir)),
+                (None, _) => (
+                    DEFAULT_WEB_URL.to_string(),
+                    data_home
+                        .map(|path| display_path(path))
+                        .unwrap_or_else(|| DEFAULT_WEB_URL.to_string()),
+                ),
+            };
+            let error = match (&npx_package, &bin_entry) {
+                (Some(_), Some(_)) => None,
+                (Some(_), None) => Some(
+                    "在 npm 缓存中找到 @deepseek-ai/dsh，但无法解析包的可执行入口；建议全局安装后重试"
+                        .to_string(),
+                ),
+                (None, _) => Some(if web_running {
+                    "Web 正在运行，但 npm 缓存中没有唯一版本的 @deepseek-ai/dsh；无法据此执行 headless 任务，请全局安装后重试。当前接入与会话观测不受影响。".to_string()
+                } else {
+                    "检测到 Harness 数据目录，但没有可用于执行任务的 @deepseek-ai/dsh；请全局安装后重试。".to_string()
+                }),
+            };
             installations.push(AgentInstallation {
                 surface: AgentSurface::Web,
-                executable_path: DEFAULT_WEB_URL.to_string(),
-                install_dir: npx_package
-                    .as_ref()
-                    .map(|(path, _)| display_path(path))
-                    .or_else(|| data_home.map(|path| display_path(path)))
-                    .unwrap_or_else(|| DEFAULT_WEB_URL.to_string()),
+                executable_path,
+                install_dir,
                 install_method: if npx_package.is_some() {
                     AgentInstallMethod::Npm
                 } else {
@@ -63,11 +87,8 @@ async fn detect() -> AgentEnvironmentReport {
                 version: npx_package.map(|(_, version)| version),
                 version_output: None,
                 available_on_path: false,
-                error: Some(if web_running {
-                    "Web 正在运行，但当前 PATH 没有稳定的 dsh 启动命令；Flowlet 不会依赖 npx 临时缓存执行任务。".to_string()
-                } else {
-                    "检测到 Harness 数据目录，但当前 PATH 没有稳定的 dsh 启动命令。".to_string()
-                }),
+                runner_executable: bin_entry.map(|entry| display_path(&entry)),
+                error,
             });
         }
     }
@@ -135,6 +156,30 @@ fn unambiguous_npx_package(cache_roots: &[PathBuf]) -> Option<(PathBuf, String)>
         .flatten()
 }
 
+/// 解析 npx 缓存包的真实 bin 入口 JS（`bin` 为字符串或键值表，如
+/// `{"dsh": "lib/bin.js"}`）。存在的文件才返回，供 Runner 以 `node` 直接解释执行，
+/// 不依赖 PATH 或 npm 垫片。
+fn npx_bin_entry(package_dir: &Path) -> Option<std::path::PathBuf> {
+    let content = std::fs::read_to_string(package_dir.join("package.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let bin = value.get("bin")?;
+    let entry = match bin {
+        serde_json::Value::String(path) => path.clone(),
+        serde_json::Value::Object(map) => map
+            .get("dsh")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| {
+                map.values()
+                    .find_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })?,
+        _ => return None,
+    };
+    let path = package_dir.join(entry);
+    path.is_file().then_some(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +212,28 @@ mod tests {
         write_package(&root, "other-version", "0.1.0-rc.7");
         assert_eq!(unambiguous_npx_package(&[root.clone()]), None);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolves_npx_package_bin_entry_for_runner() {
+        let package =
+            std::env::temp_dir().join(format!("flowlet-dsh-bin-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(package.join("lib")).unwrap();
+        std::fs::write(
+            package.join("package.json"),
+            r#"{"name":"@deepseek-ai/dsh","version":"0.1.0-rc.6","bin":{"dsh":"lib/bin.js"}}"#,
+        )
+        .unwrap();
+        std::fs::write(package.join("lib/bin.js"), "#!/usr/bin/env node\n").unwrap();
+        assert_eq!(npx_bin_entry(&package), Some(package.join("lib/bin.js")));
+
+        // bin 为字符串形态且文件缺失时返回 None，不产出可执行入口。
+        std::fs::write(
+            package.join("package.json"),
+            r#"{"name":"@deepseek-ai/dsh","version":"0.1.0-rc.6","bin":"lib/missing.js"}"#,
+        )
+        .unwrap();
+        assert_eq!(npx_bin_entry(&package), None);
+        std::fs::remove_dir_all(package).unwrap();
     }
 }

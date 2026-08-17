@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Select, SideSheet, Switch, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconRefresh } from "@douyinfe/semi-icons";
+import { Button, Collapsible, Select, SideSheet, Switch, Tabs, Tag, Typography } from "@douyinfe/semi-ui-19";
+import { IconChevronDown, IconCopy, IconRefresh } from "@douyinfe/semi-icons";
 import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
@@ -371,6 +371,9 @@ function AgentConfigControls({
   disabled: boolean;
   onApplyGlobalConfig: (options?: AgentGlobalConfigOptions) => Promise<void>;
 }) {
+  const { t } = useAppPreferences();
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  if (controls.length === 0) return null;
   const rows = controls.map((control) => (
     <div className={styles.longContextRow} key={control.id}>
       <div>
@@ -386,7 +389,32 @@ function AgentConfigControls({
       />
     </div>
   ));
-  return controls.length > 1 ? <div className={styles.longContextGroup}>{rows}</div> : rows;
+  const enabled = controls.filter((control) => control.checked).map((control) => control.label);
+  return (
+    <div className={styles.advancedSection}>
+      <div className={styles.advancedHeader}>
+        <button
+          type="button"
+          className={styles.advancedToggle}
+          aria-expanded={advancedOpen}
+          aria-label={t("高级配置（可选能力）")}
+          onClick={() => setAdvancedOpen((open) => !open)}
+        >
+          <IconChevronDown size="small" className={advancedOpen ? styles.chevronExpanded : undefined} />
+          <strong>{t("高级配置（可选能力）")}</strong>
+        </button>
+        {enabled.length > 0 ? (
+          <Tag color="blue" size="small">{t("已启用：{list}", { list: enabled.join("、") })}</Tag>
+        ) : (
+          <span className={styles.advancedNone}>{t("全部未启用（默认）")}</span>
+        )}
+      </div>
+      <Collapsible isOpen={advancedOpen} motion={false} keepDOM lazyRender>
+        <div className={styles.longContextGroup}>{rows}</div>
+        <small className={styles.advancedNote}>{t("可选能力默认不开启，按需启用；开关会在点击后立即写入。")}</small>
+      </Collapsible>
+    </div>
+  );
 }
 
 function InstallationPathRow({

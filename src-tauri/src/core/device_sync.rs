@@ -138,9 +138,10 @@ pub async fn build_synced_agent_session(
         return Err("Agent 类型和会话 ID 不能为空".to_string());
     }
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
+    let dsh_pending_sessions = crate::core::dsh_control::pending_session_ids().await;
     tauri::async_runtime::spawn_blocking(move || {
         let Some(row) = storage
-            .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
+            .list_agent_sessions_for_device_sync(&opencode_pending_sessions, &dsh_pending_sessions)
             .map_err(|error| error.to_string())?
             .into_iter()
             .find(|row| row.agent_type == agent_type && row.session_id == session_id)
@@ -182,9 +183,10 @@ pub async fn build_device_snapshot(
     identity: DeviceIdentity,
 ) -> Result<DeviceUsageSnapshot, String> {
     let snapshot_storage = storage.clone();
-    // 与 PC 列表页同一入口合并 OpenCode 实时待确认权限，否则移动端快照会把
+    // 与 PC 列表页同一入口合并 OpenCode 与 DSH 实时待确认权限，否则移动端快照会把
     // “等待确认”的会话固化为 SQLite 推断出的“自动运行中”。
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
+    let dsh_pending_sessions = crate::core::dsh_control::pending_session_ids().await;
     let (days, hours, sessions) = tauri::async_runtime::spawn_blocking(move || {
         // 快照携带「代理 + Agent 原生」合并口径，其他设备/移动端才能看到
         // 本机未经过 Flowlet 的 Token（schema v6 的日/小时 native_* 字段）。
@@ -195,7 +197,7 @@ pub async fn build_device_snapshot(
             .local_hourly_usage_totals_with_native()
             .map_err(|error| error.to_string())?;
         let sessions = snapshot_storage
-            .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
+            .list_agent_sessions_for_device_sync(&opencode_pending_sessions, &dsh_pending_sessions)
             .map_err(|error| error.to_string())?
             .into_iter()
             .map(synced_agent_session_from_row)
@@ -411,10 +413,16 @@ fn agent_install_method_name(method: &AgentInstallMethod) -> &'static str {
 }
 
 fn session_matches_agent(agent_type: &str, agent_id: &str) -> bool {
-    match agent_id {
-        "chatgpt-desktop" => matches!(agent_type, "codex-cli" | "codex-desktop"),
-        _ => agent_type == agent_id,
-    }
+    let registry = crate::core::plugin_registry::plugin_registry();
+    registry
+        .agent(agent_id)
+        .or_else(|| registry.agent_for_environment_adapter(agent_id))
+        .is_some_and(|agent| {
+            agent
+                .session_types
+                .iter()
+                .any(|session| session.id == agent_type)
+        })
 }
 
 fn sanitize_session_text(value: Option<String>, max_chars: usize) -> Option<String> {
@@ -1816,6 +1824,18 @@ pub fn save_status(storage: &Storage, status: &S3SyncStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_environment_matching_comes_from_the_agent_registry() {
+        assert!(session_matches_agent("codex-cli", "chatgpt-desktop"));
+        assert!(session_matches_agent("codex-desktop", "chatgpt-desktop"));
+        assert!(session_matches_agent(
+            "deepseek-harness",
+            "deepseek-harness"
+        ));
+        assert!(!session_matches_agent("pi", "chatgpt-desktop"));
+        assert!(!session_matches_agent("unknown", "unknown"));
+    }
 
     fn input(endpoint: &str) -> S3SyncConfigInput {
         S3SyncConfigInput {

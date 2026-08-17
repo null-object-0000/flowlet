@@ -14,7 +14,7 @@ pub(crate) struct AgentSessionIdentity {
 
 /// 从代理收到的实时 HTTP Header 识别 Agent 会话。
 pub(crate) fn from_http_headers(headers: &HeaderMap) -> Option<AgentSessionIdentity> {
-    parse_with(|name| {
+    super::agent_identity_adapter::extract_session(&|name| {
         headers
             .get(name)
             .and_then(|value| value.to_str().ok())
@@ -29,7 +29,7 @@ pub(crate) fn from_http_headers(headers: &HeaderMap) -> Option<AgentSessionIdent
 pub(crate) fn from_header_json(headers_json: &str) -> Option<AgentSessionIdentity> {
     let parsed = serde_json::from_str::<serde_json::Value>(headers_json).ok()?;
     let headers = parsed.as_object()?;
-    parse_with(|name| {
+    super::agent_identity_adapter::extract_session(&|name| {
         headers
             .iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
@@ -66,89 +66,10 @@ pub(crate) fn header_map_from_json(headers_json: &str) -> Option<HeaderMap> {
     Some(headers)
 }
 
-fn parse_with(header: impl Fn(&str) -> Option<String>) -> Option<AgentSessionIdentity> {
-    if let Some(session_id) = header("x-claude-code-session-id") {
-        return Some(AgentSessionIdentity {
-            agent_type: "claude-code".to_string(),
-            session_id,
-            parent_session_id: None,
-        });
-    }
-
-    // Pi 使用通用 OpenAI SDK，必须以 Flowlet 写入的客户端标记为门控，
-    // 避免把其他客户端的同名 Session Header 错归为 Pi。
-    let is_flowlet_pi =
-        header(AGENT_CLIENT_HEADER).is_some_and(|value| value.eq_ignore_ascii_case("pi"));
-    if is_flowlet_pi {
-        if let Some(session_id) = header(AGENT_SESSION_HEADER) {
-            return Some(AgentSessionIdentity {
-                agent_type: "pi".to_string(),
-                session_id,
-                parent_session_id: None,
-            });
-        }
-    }
-
-    // DeepSeek Harness 使用稳定的官方 UA 作为产品门控，并通过受管 Provider
-    // 将当前 DSH session id 写入本地代理专用头。
-    let user_agent_is_deepseek_harness = header("user-agent")
-        .is_some_and(|value| value.to_ascii_lowercase().contains("deepseek-harness/"));
-    if user_agent_is_deepseek_harness {
-        let session_id = header(AGENT_SESSION_HEADER)?;
-        return Some(AgentSessionIdentity {
-            agent_type: "deepseek-harness".to_string(),
-            session_id,
-            parent_session_id: None,
-        });
-    }
-
-    // Codex Desktop：以 UA 子串为门控，避免误读其他客户端的同名 `session-id` 头。
-    let user_agent_is_codex_desktop = header("user-agent")
-        .is_some_and(|value| value.to_ascii_lowercase().contains("codex desktop/"));
-    if user_agent_is_codex_desktop {
-        let session_id = header("session-id")
-            .or_else(|| header("x-session-id"))
-            .or_else(|| codex_turn_metadata_session_id(&header))?;
-        return Some(AgentSessionIdentity {
-            agent_type: "codex-desktop".to_string(),
-            session_id,
-            parent_session_id: None,
-        });
-    }
-
-    let opencode_session = header("x-opencode-session");
-    let user_agent_is_opencode =
-        header("user-agent").is_some_and(|value| value.to_ascii_lowercase().contains("opencode/"));
-    if !user_agent_is_opencode && opencode_session.is_none() {
-        return None;
-    }
-
-    let session_id = opencode_session
-        .or_else(|| header("x-session-id"))
-        .or_else(|| header("x-session-affinity"))?;
-    Some(AgentSessionIdentity {
-        agent_type: "opencode".to_string(),
-        session_id,
-        parent_session_id: header("x-parent-session-id"),
-    })
-}
-
-fn valid_header_value(value: &str) -> Option<String> {
+pub(crate) fn valid_header_value(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty() && value != "[redacted]" && value.len() <= MAX_AGENT_SESSION_ID_BYTES)
         .then(|| value.to_string())
-}
-
-/// 从 Codex Desktop 的 `x-codex-turn-metadata` JSON 头解析会话 id（`session_id` 字段）。
-/// 该头是 JSON 元数据而非会话 id，可能远超会话 id 的 512 字节上限，
-/// 读取时放行（见 `session_header_value`），解析出的 `session_id` 仍按会话 id 校验。
-fn codex_turn_metadata_session_id(header: &impl Fn(&str) -> Option<String>) -> Option<String> {
-    let metadata = header("x-codex-turn-metadata")?;
-    let value = serde_json::from_str::<serde_json::Value>(&metadata).ok()?;
-    let session_id = value
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)?;
-    valid_header_value(session_id)
 }
 
 /// 读取单个会话相关头的值。`x-codex-turn-metadata` 是 JSON 元数据而非会话 id，

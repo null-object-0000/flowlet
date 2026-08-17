@@ -267,14 +267,15 @@ fn matches_agent_session_runtime_status(row: &AgentSessionRow, runtime_status: &
     runtime_status.is_empty() || row.runtime_status == runtime_status
 }
 
-/// OpenCode 的 pending permission 是进程内实时状态，优先级高于 SQLite 中
-/// “末条 assistant 尚未完成”的运行态推断。PC 列表页（过滤分页前）与设备
+/// OpenCode 与 DeepSeek Harness 的待确认请求是进程内实时状态，优先级高于 SQLite
+/// 中“末条 assistant 尚未完成”的运行态推断。PC 列表页（过滤分页前）与设备
 /// 同步快照（状态筛选与传输前）必须走同一入口合并，两端运行状态才一致。
 fn apply_opencode_pending_sessions(
     catalog: &mut [AgentSessionRow],
     opencode_pending_sessions: &HashSet<String>,
+    dsh_pending_sessions: &HashSet<String>,
 ) {
-    if opencode_pending_sessions.is_empty() {
+    if opencode_pending_sessions.is_empty() && dsh_pending_sessions.is_empty() {
         return;
     }
     for row in catalog.iter_mut() {
@@ -283,6 +284,12 @@ fn apply_opencode_pending_sessions(
             &row.session_id,
             &row.runtime_status,
             opencode_pending_sessions,
+        );
+        row.runtime_status = crate::core::dsh_control::merge_runtime_status(
+            &row.agent_type,
+            &row.session_id,
+            &row.runtime_status,
+            dsh_pending_sessions,
         );
     }
     crate::core::agent_session_metadata::aggregate_descendant_runtime_status(catalog);
@@ -533,25 +540,15 @@ fn estimate_native_public_cost(
 }
 
 fn native_agent_client_id(agent_type: &str) -> &str {
-    match agent_type {
-        // Codex Desktop 保持与 UA 归属（client_id = "codex-desktop"）一致；
-        // Codex CLI 仍归 "codex"（与 UA 规则 id 一致）。
-        "codex-desktop" => "codex-desktop",
-        "codex-cli" => "codex",
-        other => other,
-    }
+    crate::core::plugin_registry::plugin_registry()
+        .session_type_client_id(agent_type)
+        .unwrap_or(agent_type)
 }
 
 fn native_agent_display_name(agent_type: &str) -> &str {
-    match agent_type {
-        "claude-code" => "Claude Code",
-        "codex-desktop" => "Codex Desktop",
-        "codex-cli" => "Codex CLI",
-        "opencode" => "OpenCode",
-        "pi" => "Pi",
-        "deepseek-harness" => "DeepSeek Harness",
-        other => other,
-    }
+    crate::core::plugin_registry::plugin_registry()
+        .session_type_name(agent_type)
+        .unwrap_or(agent_type)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1105,6 +1102,7 @@ impl Storage {
         &self,
         filter: AgentSessionsFilter,
         opencode_pending_sessions: &std::collections::HashSet<String>,
+        dsh_pending_sessions: &std::collections::HashSet<String>,
     ) -> Result<AgentSessionsPageResult, StorageError> {
         let page = filter.page.max(1);
         let page_size = filter.page_size.clamp(1, 500);
@@ -1119,7 +1117,11 @@ impl Storage {
         );
         // 实时待确认权限必须在过滤和分页前合并，否则运行状态筛选、总数和分页
         // 都会与实时状态不一致。
-        apply_opencode_pending_sessions(&mut catalog, opencode_pending_sessions);
+        apply_opencode_pending_sessions(
+            &mut catalog,
+            opencode_pending_sessions,
+            dsh_pending_sessions,
+        );
         let matching_roots = matching_root_session_keys(&catalog, &search);
         let project_matching_roots = matching_root_session_keys_by(&catalog, |row| {
             session_matches_project_path(row, project_path)
@@ -1161,12 +1163,13 @@ impl Storage {
     pub fn list_agent_sessions_for_device_sync(
         &self,
         opencode_pending_sessions: &std::collections::HashSet<String>,
+        dsh_pending_sessions: &std::collections::HashSet<String>,
     ) -> Result<Vec<AgentSessionRow>, StorageError> {
         let mut catalog = crate::core::agent_session_metadata::merge_agent_session_catalog(
             self.list_observed_agent_sessions()?,
             self.list_native_agent_sessions(),
         );
-        apply_opencode_pending_sessions(&mut catalog, opencode_pending_sessions);
+        apply_opencode_pending_sessions(&mut catalog, opencode_pending_sessions, dsh_pending_sessions);
         catalog.retain(|row| row.parent_session_id.is_none());
         catalog.sort_by(|left, right| {
             crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
@@ -1188,7 +1191,10 @@ impl Storage {
     ) -> Result<Vec<AgentNativeUsageSummaryRow>, StorageError> {
         // 用量汇总不区分运行状态，无需实时待确认权限集合。
         Ok(build_agent_native_usage_summary(
-            self.list_agent_sessions_for_device_sync(&std::collections::HashSet::new())?,
+            self.list_agent_sessions_for_device_sync(
+                &std::collections::HashSet::new(),
+                &std::collections::HashSet::new(),
+            )?,
         ))
     }
 

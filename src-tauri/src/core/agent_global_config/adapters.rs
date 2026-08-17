@@ -6,7 +6,7 @@ pub(super) mod deepseek_harness;
 pub(super) mod opencode;
 pub(super) mod pi;
 
-pub(super) trait AgentGlobalConfigAdapter: Sync {
+pub(crate) trait AgentGlobalConfigAdapter: Sync {
     fn id(&self) -> &'static str;
     fn inspect(&self, expected_base_url: &str) -> Result<AgentGlobalConfigReport, String>;
     fn apply(
@@ -18,19 +18,23 @@ pub(super) trait AgentGlobalConfigAdapter: Sync {
     fn restore(&self, expected_base_url: &str) -> Result<AgentGlobalConfigReport, String>;
 }
 
-static CLAUDE_CODE: claude_code::ClaudeCodeAdapter = claude_code::ClaudeCodeAdapter;
-static OPENCODE: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
-static PI: pi::PiAdapter = pi::PiAdapter;
-static CODEX: codex::CodexAdapter = codex::CodexAdapter;
-static DEEPSEEK_HARNESS: deepseek_harness::DeepSeekHarnessAdapter =
+static CLAUDE_CODE_VALUE: claude_code::ClaudeCodeAdapter = claude_code::ClaudeCodeAdapter;
+static OPENCODE_VALUE: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
+static PI_VALUE: pi::PiAdapter = pi::PiAdapter;
+static CODEX_VALUE: codex::CodexAdapter = codex::CodexAdapter;
+static DEEPSEEK_HARNESS_VALUE: deepseek_harness::DeepSeekHarnessAdapter =
     deepseek_harness::DeepSeekHarnessAdapter;
-static ADAPTERS: [&'static dyn AgentGlobalConfigAdapter; 5] =
-    [&CLAUDE_CODE, &OPENCODE, &PI, &CODEX, &DEEPSEEK_HARNESS];
+
+pub(crate) static CLAUDE_CODE: &dyn AgentGlobalConfigAdapter = &CLAUDE_CODE_VALUE;
+pub(crate) static OPENCODE: &dyn AgentGlobalConfigAdapter = &OPENCODE_VALUE;
+pub(crate) static PI: &dyn AgentGlobalConfigAdapter = &PI_VALUE;
+pub(crate) static CODEX: &dyn AgentGlobalConfigAdapter = &CODEX_VALUE;
+pub(crate) static DEEPSEEK_HARNESS: &dyn AgentGlobalConfigAdapter = &DEEPSEEK_HARNESS_VALUE;
 
 fn find(adapter_id: &str) -> Option<&'static dyn AgentGlobalConfigAdapter> {
-    ADAPTERS
+    crate::core::agent_plugin_bundle::bundles()
         .iter()
-        .copied()
+        .map(|bundle| bundle.global_config)
         .find(|adapter| adapter.id() == adapter_id)
 }
 
@@ -49,9 +53,9 @@ mod tests {
     #[test]
     fn resolves_every_compiled_adapter() {
         assert_eq!(
-            ADAPTERS
+            crate::core::agent_plugin_bundle::bundles()
                 .iter()
-                .map(|adapter| adapter.id())
+                .map(|bundle| bundle.global_config.id())
                 .collect::<Vec<_>>(),
             vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]
         );

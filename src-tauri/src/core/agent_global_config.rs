@@ -11,7 +11,7 @@ use super::agent_environment::display_path;
 use super::codex_account::codex_home;
 use super::codex_model_catalog;
 
-mod adapters;
+pub(crate) mod adapters;
 
 const BACKUP_VERSION: u32 = 1;
 const FLOWLET_DIR: &str = ".flowlet";
@@ -61,6 +61,14 @@ pub struct AgentGlobalConfigReport {
     /// 扩展为 Agent 请求注入 x-flowlet-session 头，使 Flowlet 能按会话归并请求。
     #[serde(default)]
     pub session_extension: bool,
+    /// 仅 DeepSeek Harness：是否已声明聚合模型规格（models 条目携带 contextWindow）。
+    /// 其他 Agent 恒为 false。
+    #[serde(default)]
+    pub model_specs: bool,
+    /// 仅 DeepSeek Harness：Flowlet 交互确认桥（approval bridge）是否在位。
+    /// 桥接把 DSH headless 会话的 approval/request 转交 Flowlet 桌面端确认或否决。
+    #[serde(default)]
+    pub approval_bridge: bool,
     /// 仅 OpenCode：Flowlet 权限事件插件是否在位。插件用于发现 Desktop 动态端口实例。
     #[serde(default)]
     pub opencode_permission_bridge: bool,
@@ -79,16 +87,20 @@ pub struct AgentGlobalConfigOptions {
     /// 仅 Claude Code：为快速模型和子 Agent 模型附加 `[1m]` 后缀。
     #[serde(default)]
     pub fast_long_context: Option<bool>,
-    /// 仅 Pi：是否为 Pi 安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。
-    /// 安装后可为发往 Flowlet 渠道的请求注入 x-flowlet-session 头，使 Flowlet 能按会话
-    /// 归并请求；关闭则不安装（Pi 仍可作为 Flowlet 客户端使用，但无法做会话维度串联）。
-    /// 默认开启。
-    #[serde(default = "true_bool")]
-    pub session_extension: bool,
-}
-
-fn true_bool() -> bool {
-    true
+    /// Pi / DeepSeek Harness：是否安装可选会话扩展。安装后可为发往 Flowlet 渠道的
+    /// 请求注入 x-flowlet-session，使 Flowlet 能按会话归并请求。两个 Adapter 在未传
+    /// 选项时均默认不安装（不改变已有扩展文件）。
+    #[serde(default)]
+    pub session_extension: Option<bool>,
+    /// 仅 DeepSeek Harness：是否向 settings.yaml 声明聚合模型规格
+    /// （flowlet-pro / flowlet-flash 模型条目的 contextWindow）。未传选项时不填写。
+    #[serde(default)]
+    pub model_specs: Option<bool>,
+    /// 仅 DeepSeek Harness：是否部署受管交互确认桥（approval bridge）。
+    /// 部署后 DSH headless 会话的 approval/request 会经文件桥转交 Flowlet
+    /// 桌面端确认或否决。未传选项时保持已有状态不变。
+    #[serde(default)]
+    pub approval_bridge: Option<bool>,
 }
 
 impl AgentGlobalConfigOptions {

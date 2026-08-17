@@ -1,6 +1,7 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import type {
   AgentEnvironmentReport,
+  AgentCapabilitiesReport,
   AgentGlobalConfigOptions,
   AgentGlobalConfigReport,
   AgentLatestVersionsReport,
@@ -8,6 +9,12 @@ import type {
   CodexAccountReport,
   CodexAccountsReport,
 } from "./types";
+
+export function listAgentCapabilities(): Promise<AgentCapabilitiesReport> {
+  return invokeCommand<AgentCapabilitiesReport>("list_agent_capabilities").catch((error) => {
+    throw toAppError(error, "agent_capabilities_read_failed");
+  });
+}
 
 export function detectAgentEnvironment(agentId: string): Promise<AgentEnvironmentReport> {
   return invokeCommand<AgentEnvironmentReport>("detect_agent_environment", { agentId }, 10_000).catch((error) => {

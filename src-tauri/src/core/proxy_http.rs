@@ -882,6 +882,9 @@ pub fn extract_log_capture(value: &serde_json::Value) -> crate::core::config::Lo
     LogCaptureConfig::default()
 }
 
+pub(super) use crate::core::agent_identity_adapter::identify_client_agent;
+#[cfg(test)]
+pub(super) use crate::core::agent_identity_adapter::identify_client_by_ua;
 /// Flowlet 与受管 Agent 约定的客户端标记头。
 ///
 /// 部分 Agent（如 Pi）复用通用 SDK 的 User-Agent（例如 `OpenAI/JS`），无法靠 UA
@@ -901,55 +904,6 @@ pub(super) use crate::core::agent_session_identity::{AGENT_CLIENT_HEADER, AGENT_
 /// 剥离，不向上游泄露。识别时以 `x-flowlet-client: pi` 标记头为门控，避免误读其他
 /// 客户端的同名头。
 
-/// 标记头值 → 展示名。仅收录 UA 无法区分、需要靠标记头识别的 Agent。
-fn agent_client_marker_name(value: &str) -> Option<&'static str> {
-    match value {
-        "pi" => Some("Pi"),
-        "deepseek-harness" => Some("DeepSeek Harness"),
-        _ => None,
-    }
-}
-
-/// 识别客户端身份：优先读取 Flowlet 标记头，再回退 UA 子串规则。
-///
-/// 与鉴权 token 无关，仅决定日志/用量中的客户端归属。返回 (id, name)；
-/// 标记头与 UA 规则均无命中时返回 None。
-pub(super) fn identify_client_agent(
-    headers: &HeaderMap,
-    rules: &[UaClientRule],
-) -> Option<(String, String)> {
-    if let Some(value) = headers
-        .get(AGENT_CLIENT_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        let id = value.to_ascii_lowercase();
-        let name = agent_client_marker_name(&id)
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| value.to_string());
-        return Some((id, name));
-    }
-    identify_client_by_ua(headers, rules)
-}
-
-/// 通过请求 User-Agent 子串匹配独立的客户端身份规则。
-///
-/// 与鉴权 token 无关，仅决定日志/用量中的客户端归属。返回命中的
-/// UaClientRule 的 (id, name)；无任何命中时返回 None。
-pub(super) fn identify_client_by_ua(
-    headers: &HeaderMap,
-    rules: &[UaClientRule],
-) -> Option<(String, String)> {
-    let ua = headers
-        .get(header::USER_AGENT)
-        .and_then(|v| v.to_str().ok())?;
-    rules
-        .iter()
-        .find(|r| r.enabled && !r.pattern.is_empty() && ua.contains(&r.pattern))
-        .map(|r| (r.id.clone(), r.name.clone()))
-}
-
 /// 确保运行时 config.json 存在；缺失时写入编译时内置的完整默认配置。
 pub(super) fn ensure_config_file(path: &std::path::Path) {
     if path.exists() {
@@ -966,26 +920,7 @@ pub(super) fn ensure_config_file(path: &std::path::Path) {
 ///（config.json 早于新规则）无需手动改配置即可获得新 Agent 的客户端归属；
 /// 新安装则从 config.json 默认集中直接获得同样的规则。
 fn builtin_ua_rules() -> Vec<UaClientRule> {
-    vec![
-        UaClientRule {
-            id: "codex".to_string(),
-            pattern: "codex_cli_rs/".to_string(),
-            name: "Codex".to_string(),
-            enabled: true,
-        },
-        UaClientRule {
-            id: "deepseek-harness".to_string(),
-            pattern: "deepseek-harness/".to_string(),
-            name: "DeepSeek Harness".to_string(),
-            enabled: true,
-        },
-        UaClientRule {
-            id: "codex-desktop".to_string(),
-            pattern: "Codex Desktop/".to_string(),
-            name: "Codex Desktop".to_string(),
-            enabled: true,
-        },
-    ]
+    crate::core::agent_identity_adapter::builtin_ua_rules()
 }
 
 /// 从本地 config.json 文件加载 UA 客户端规则。文件不存在或解析失败时返回空列表。

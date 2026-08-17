@@ -7,12 +7,9 @@ pub(in crate::core::agent_task_runner) async fn execute_deepseek_harness(
     project_id: &str,
     job_id: &str,
     prompt: &str,
-    resume_session: Option<&str>,
+    _resume_session: Option<&str>,
     manage_task_state: bool,
 ) -> Result<ExecutionOutcome, String> {
-    if resume_session.is_some_and(|value| !value.trim().is_empty()) {
-        return Err("DeepSeek Harness headless 当前不提供稳定的 resume 参数；Flowlet 不会把续跑伪装成新会话。请将任务会话策略改为 fresh。".to_string());
-    }
     let project_dir = required_project_dir(storage, project_id)?;
     let agent = spawn_agent(
         executable,

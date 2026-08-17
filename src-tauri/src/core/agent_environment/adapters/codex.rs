@@ -56,6 +56,7 @@ async fn codex_cli_installations() -> Vec<AgentInstallation> {
             version,
             version_output,
             available_on_path: candidate.available_on_path,
+            runner_executable: None,
             error,
         });
     }
@@ -117,6 +118,7 @@ pub(in crate::core::agent_environment) fn parse_chatgpt_windows_package_output(
         version: Some(version.to_string()),
         version_output: None,
         available_on_path: false,
+        runner_executable: None,
         error: None,
     })
 }
@@ -148,6 +150,7 @@ async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
                 version,
                 version_output: None,
                 available_on_path: false,
+                runner_executable: None,
                 error: None,
             }
         })

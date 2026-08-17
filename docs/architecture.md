@@ -127,8 +127,8 @@ Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、Web
 `model-catalog` 和 `agent`。它统一控制内置渠道顺序、模型目录来源，以及 Agent 的身份、
 展示元数据、环境检测适配器 ID、全局配置适配器 ID、协议端点和 npm 版本来源。渠道贡献也
 显式声明预设适配器 ID，不再假设贡献 ID 必须等于底层实现 ID。Rust 与前端分别加载同一
-清单；当前适配器化清单为 schema v2，启动时校验插件 ID、贡献 ID、必填适配器及编译期
-适配器白名单。
+清单；当前适配器化清单为 schema v4，启动时校验插件 ID、贡献 ID、必填适配器、会话客户端
+归属、可选配置能力及编译期实现。
 
 注册表只声明能力，具体渠道同步、余额查询、Agent 安装检测和全局配置写入仍由编译进应用的
 受控适配器实现；同一适配器可以被多个声明式贡献复用，但未知适配器会在注册表加载时明确失败。
@@ -137,8 +137,13 @@ SQLite 或运行时配置快照直接修改代理状态。修改内置注册表�
 
 `core::plugin_contract` 提供跨文件契约测试：对账注册渠道、`config.json` 预设与预设工厂，
 校验模型同步、余额和控制台抓取的声明/实现一致性，验证抓取 mode 的实际配置，并确保模型目录
-官方归属指向已注册渠道、Agent 的四类编译期 Adapter 与 Surface 全部有效。新增扩展遗漏任一环节
+官方归属指向已注册渠道、Agent 的五类编译期 Adapter 与 Surface 全部有效。新增扩展遗漏任一环节
 会在 Rust 测试阶段失败，不延迟到运行时静默降级。
+
+Rust 的 `AgentPluginBundle` 是五类 Agent 实现的唯一编译期 roster：Environment、Global Config、
+Session、Identity 与 Runner 在同一条 Bundle 中组合，各能力模块只提供实现，不再各自维护 Agent
+数组。`plugin-registry.json` 负责产品声明，Bundle 负责类型化实现；两者在启动校验中严格对账，
+未知或遗漏能力不允许回退到其它 Agent。
 
 前端 Agent 概览使用 `useQueries` 按注册表一次性创建环境探测 Query，并通过统一的
 `useAgentGlobalConfig(agentId)` 处理配置检查、写入和恢复；领域 command 只保留带 `agentId`
@@ -169,6 +174,9 @@ Rust 全局配置入口通过统一 `AgentGlobalConfigAdapter` 的 `inspect / ap
 插件注册表校验直接查询该 Adapter registry，不再维护另一份全局配置适配器白名单；设备同步也先
 按 Agent 插件声明解析 `globalConfigAdapterId`，不假设公开 Agent ID 与实现 ID 相同。Adapter 不存在时
 在注册表加载或调用入口明确失败，不做静默回退。
+每个包含结构化文件改写的 Global Config Adapter 都应提供基于真实上游初始文件的生命周期契约：
+`inspect -> apply -> reapply -> disable optional capability -> restore`，并在每一步重新用上游格式解析器
+验证语义有效、幂等与原字节恢复。DSH 当前固定了官方 `PROFILE_PATCH_TEMPLATE` 作为回归 fixture。
 
 DeepSeek Harness 的 `settings.yaml` / `.credentials.yaml` 会热加载。Flowlet Global Config
 Adapter 解析其 Flowlet Provider、Client Token、当前默认 provider/model 与环境覆盖；一键接入
@@ -177,11 +185,13 @@ Adapter 解析其 Flowlet Provider、Client Token、当前默认 provider/model 
 `llm-pi-ai.providers.flowlet`、`agent-default-model.provider/model` 与专用凭据；恢复只还原这些
 受管路径。复杂行内 YAML 无法定点修改时明确失败，不做整文件猜测重写。DSH 运行中会热加载，
 未运行时在下次启动读取配置。
-DSH 接入不安装插件、扩展或 Hook，不修改其包与运行时代码；环境和原生会话读取保持只读，
-任务执行仅调用官方 headless 命令。内部 Plugin Registry 只是 Flowlet 的受控能力声明，
-不代表向第三方 Agent 部署插件。
+DSH 基础接入不安装插件、扩展或 Hook，不修改其包与运行时代码；环境和原生会话读取保持只读，
+任务执行仅调用官方 headless 命令。精确会话关联是默认关闭的高级选项，只有用户显式启用时才
+向已初始化 Profile 部署可恢复的受管 Cordis 桥。内部 Plugin Registry 只是 Flowlet 的受控能力声明。
 
-Agent 插件同时声明 `sessionAdapterId`。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
+Agent 插件同时声明 `sessionAdapterId`、`identityAdapterId`、`sessionTypes` 与 `taskProfile`。
+前端会话筛选、会话名称、桌面/移动任务 Agent 选项和任务 Profile → session type 映射均由
+注册表生成，不再维护页面级枚举。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
 可用运行时会话类型、会话目录枚举、Timeline、最后交互和增量解析来源；Claude Code、OpenCode、
 Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显式承载 `codex-cli` 与
 `codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。会话合并与用量账本
@@ -193,12 +203,18 @@ usage；遇到其它格式版本明确拒绝。打包的增量 chunk 行不参�
 Codex、OpenCode 与 Pi 的文件/SQLite 定位和时间线解析进一步下沉到
 `agent_session_timeline/adapters/`，公共时间线模块保留增量游标、摘要合并、切片、计价与事件工具。
 
+`AgentIdentityAdapter` 独立承载客户端 UA 规则、受管标记头身份与 Session Header 提取；实时 HTTP
+请求和历史 Header JSON 修复均委托同一 registry，代理主流程不再按 Agent ID 分支。
+
 Agent 插件还声明 `runnerAdapterId`。Rust 任务调度通过编译期 Runner Adapter registry 统一解析
-任务 `agent_profile`、环境探测适配器、展示名和异步执行函数；Claude Code、OpenCode、Pi、Codex
-既有执行器继续负责各自的命令参数、输出事件和会话恢复，项目队列与任务状态机不感知具体 Agent。
-与 DeepSeek Harness 执行器分别位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
+任务 `agent_profile`、环境探测适配器、展示名、所需 Surface、resume 能力、缺失执行入口提示和异步执行函数。
+Claude Code、OpenCode、Pi、Codex 与 DeepSeek Harness 执行器分别负责各自的命令参数、输出事件和会话恢复，
+项目队列与任务状态机不感知具体 Agent。执行器位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
 位于 `agent_task_runner/process.rs`；父模块只保留项目执行槽、队列调度和任务状态流转。
 历史空 Profile 仍显式映射 Claude Code，未知 Profile 与未知 Runner Adapter 均明确失败，不回退执行。
+`list_agent_capabilities` 从已经对账的声明与 Bundle 生成类型化能力报告，向前端公开 Surface、会话类型、
+客户端归属、配置开关与 Runner 的 resume 合同。重复任务 UI 据此禁用不支持的会话策略，保存 command
+仍会二次校验，避免旧前端或直接调用绕过 Runner 能力边界。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 

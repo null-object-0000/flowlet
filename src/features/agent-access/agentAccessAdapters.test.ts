@@ -37,11 +37,15 @@ describe("agent access adapters", () => {
 
   it("keeps Pi attribution and session integration in manual snippets", () => {
     const snippets = agentAccessAdapter("pi").manualSnippets(context());
+    const pi = agentAccessAdapter("pi");
 
     expect(snippets[0].copyValue).toContain('"x-flowlet-client": "pi"');
     expect(snippets[3].copyValue).toContain('event.headers["x-flowlet-session"] = sessionId');
-    expect(agentAccessAdapter("pi").applyOptions(context({ session_extension: false })))
+    expect(pi.applyOptions(context({ session_extension: false })))
       .toEqual({ sessionExtension: false });
+    // 未检测到扩展时默认不开启（高级可选能力默认关闭）。
+    expect(pi.applyOptions(context())).toEqual({ sessionExtension: false });
+    expect(pi.configControls(context())[0].checked).toBe(false);
   });
 
   it("uses the root Codex catalog as the manual snippet source", () => {
@@ -64,15 +68,36 @@ describe("agent access adapters", () => {
   it("keeps DeepSeek Harness managed YAML snippets in sync", () => {
     const adapter = agentAccessAdapter("deepseek-harness");
     const snippets = adapter.manualSnippets(context());
+    const base = context({ session_extension: false, model_specs: false });
 
     expect(adapter.installationName("web")).toBe("DeepSeek Harness Web");
     expect(snippets[0].copyValue).toContain("api: openai-completions");
-    expect(snippets[0].copyValue).toContain("sessionIdHeader: x-flowlet-session");
+    expect(snippets[0].copyValue).not.toContain("sessionIdHeader");
     expect(snippets[0].copyValue).not.toContain("x-flowlet-client");
     expect(snippets[0].copyValue).toContain("agent-default-model:");
     expect(snippets[0].copyValue).toContain("model: flowlet-pro");
     expect(snippets[1].copyValue).toContain("FLOWLET_CLIENT_TOKEN: real-token");
-    expect(adapter.configStatuses(context({ session_extension: false }))[0].value)
-      .toBe("需安装或更新");
+    expect(adapter.configStatuses(base)[0].value).toBe("未启用（可选）");
+    expect(adapter.configStatuses(base)[1].value).toBe("未声明（可选）");
+    expect(adapter.configStatuses(context({ model_specs: true }))[1].value).toBe("已声明");
+    // 会话关联控件默认关闭，开关只改自身、保留规格声明状态。
+    expect(adapter.configControls(base)[0].checked).toBe(false);
+    expect(adapter.configControls(base)[0].applyOptions(true))
+      .toEqual({ sessionExtension: true, modelSpecs: false, approvalBridge: false });
+    // 模型规格控件默认不填写，与会话关联互相独立。
+    expect(adapter.configControls(base)[1].checked).toBe(false);
+    expect(adapter.configControls(base)[1].applyOptions(true))
+      .toEqual({ sessionExtension: false, modelSpecs: true, approvalBridge: false });
+    // 重新写入按钮保留当前报告状态，默认全关。
+    expect(adapter.applyOptions(base)).toEqual({
+      sessionExtension: false,
+      modelSpecs: false,
+      approvalBridge: false,
+    });
+    expect(adapter.applyOptions(context())).toEqual({
+      sessionExtension: false,
+      modelSpecs: false,
+      approvalBridge: false,
+    });
   });
 });

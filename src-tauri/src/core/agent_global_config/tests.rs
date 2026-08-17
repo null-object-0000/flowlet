@@ -55,6 +55,12 @@ fn legacy_long_context_option_enables_both_model_groups() {
 }
 
 #[test]
+fn omitted_session_extension_preserves_adapter_specific_defaults() {
+    let options: AgentGlobalConfigOptions = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert_eq!(options.session_extension, None);
+}
+
+#[test]
 fn applies_and_restores_only_managed_fields() {
     let path = test_settings_path();
     std::fs::write(

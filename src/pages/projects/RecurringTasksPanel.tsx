@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Empty, Input, Modal, Select, SideSheet, Switch, Tag, Toast } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconPlus, IconPlay } from "@douyinfe/semi-icons";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import type { Project, RecurringTask, RecurringTaskRun } from "../../domains/project/types";
 import { useBackgroundTaskDetail } from "../../features/background-tasks/useBackgroundTasks";
+import { useAgentCapabilities } from "../../features/agent-access/useAgentEnvironment";
 import { useRecurringTaskActions, useRecurringTaskRuns, useRecurringTasks } from "../../features/projects/useProjects";
 import { errorMessage } from "../../shared/errors/AppError";
 import { formatTimestamp } from "../../shared/formatters/datetime";
@@ -17,12 +18,24 @@ export function RecurringTasksPanel({ project, autoRefresh }: { project: Project
   const { language, t } = useAppPreferences();
   const tasks = useRecurringTasks(project.id, autoRefresh);
   const actions = useRecurringTaskActions(project.id);
+  const agentCapabilities = useAgentCapabilities();
   const [editing, setEditing] = useState<RecurringTask | "new" | null>(null);
   const [viewing, setViewing] = useState<RecurringTask | null>(null);
   const [selectedRun, setSelectedRun] = useState<RecurringTaskRun | null>(null);
   const runs = useRecurringTaskRuns(viewing?.id ?? null, autoRefresh);
   const detail = useBackgroundTaskDetail(selectedRun?.jobId ?? null);
   const [draft, setDraft] = useState(() => newRecurringTask(project.id));
+  const selectedAgentCapability = agentCapabilities.data?.agents.find((agent) => agent.task.profile === draft.agentProfile);
+  const resumeDisabledReason = selectedAgentCapability && !selectedAgentCapability.task.supportsResume
+    ? selectedAgentCapability.task.resumeUnsupportedMessage
+    : null;
+
+  useEffect(() => {
+    if (!resumeDisabledReason) return;
+    setDraft((current) => current.sessionPolicy === "continue"
+      ? { ...current, sessionPolicy: "fresh" }
+      : current);
+  }, [resumeDisabledReason]);
 
   const openEditor = (task: RecurringTask | "new") => { setEditing(task); setDraft(task === "new" ? newRecurringTask(project.id) : { ...task }); };
   const save = async () => {
@@ -49,10 +62,16 @@ export function RecurringTasksPanel({ project, autoRefresh }: { project: Project
 
     <SideSheet visible={editing != null} width={DETAIL_SHEET_WIDTH} motion={false} title={editing === "new" ? t("新建重复任务") : t("编辑重复任务")} onCancel={() => setEditing(null)} zIndex={APP_OVERLAY_Z_INDEX.sideSheet} footer={<div className={styles.taskSheetFooter}><span/><span className={styles.taskSheetFooterActions}><Button onClick={() => setEditing(null)}>{t("取消")}</Button><Button onClick={() => void runNow(draft, true)} disabled={editing === "new"}>{t("测试运行")}</Button><Button type="primary" theme="solid" loading={actions.save.isPending} disabled={!draft.title.trim()} onClick={() => void save()}>{t("保存")}</Button></span></div>}>
       <div className={styles.form}>
-        <ProjectTaskEditorFields value={draft} onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))} descriptionOptional={false} />
+        <ProjectTaskEditorFields value={draft} onChange={(patch) => setDraft((current) => {
+          const next = { ...current, ...patch };
+          const capability = agentCapabilities.data?.agents.find((agent) => agent.task.profile === next.agentProfile);
+          return capability && !capability.task.supportsResume && next.sessionPolicy === "continue"
+            ? { ...next, sessionPolicy: "fresh" }
+            : next;
+        })} descriptionOptional={false} />
         <div className={styles.formGrid}>
           <label><span>{t("运行方式")}</span><Select value={draft.scheduleKind} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={[{value:"manual",label:t("手动多次运行")},{value:"daily",label:t("每天定时运行")}]} onChange={(value) => setDraft((current) => ({...current,scheduleKind:String(value) as "manual"|"daily",enabled:value === "daily" ? current.enabled : false}))}/></label>
-          <label><span>{t("会话策略")}</span><Select value={draft.sessionPolicy} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={[{value:"fresh",label:t("每次新建会话（推荐）")},{value:"continue",label:t("延续上次成功会话")}]} onChange={(value) => setDraft((current) => ({...current,sessionPolicy:String(value) as "fresh"|"continue"}))}/><small>{t("中断恢复始终继续同一次运行的会话。")}</small></label>
+          <label><span>{t("会话策略")}</span><Select value={draft.sessionPolicy} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={[{value:"fresh",label:t("每次新建会话（推荐）")},{value:"continue",label:t("延续上次成功会话"),disabled:Boolean(resumeDisabledReason)}]} onChange={(value) => setDraft((current) => ({...current,sessionPolicy:String(value) as "fresh"|"continue"}))}/><small>{resumeDisabledReason ?? t("中断恢复始终继续同一次运行的会话。")}</small></label>
         </div>
         {draft.scheduleKind === "daily" ? <><div className={styles.formGrid}><label><span>{t("每日时间")}</span><Input value={draft.dailyTime ?? "09:00"} placeholder="09:00" onChange={(dailyTime) => setDraft((current) => ({...current,dailyTime}))}/></label><span/></div><label className={styles.switchRow}><span><strong>{t("启用自动运行")}</strong><small>{t("Flowlet 在托盘运行且电脑处于唤醒状态时生效。")}</small></span><Switch checked={draft.enabled} onChange={(enabled) => setDraft((current) => ({...current,enabled}))}/></label></> : null}
       </div>

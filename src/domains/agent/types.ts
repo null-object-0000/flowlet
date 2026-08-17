@@ -11,6 +11,39 @@ export type AgentInstallMethod =
 
 export type AgentSurface = "cli" | "desktop" | "web";
 
+export type AgentSessionCapability = {
+  id: string;
+  name: string;
+  clientId: string;
+};
+
+export type AgentTaskCapability = {
+  profile: string;
+  sessionType: string;
+  requiredSurface: AgentSurface;
+  supportsResume: boolean;
+  resumeUnsupportedMessage: string;
+};
+
+export type AgentConfigCapability = {
+  id: string;
+  name: string;
+  kind: "boolean";
+  defaultEnabled: boolean;
+  requiresRestart: boolean;
+};
+
+export type AgentCapability = {
+  id: string;
+  name: string;
+  surfaces: AgentSurface[];
+  sessionTypes: AgentSessionCapability[];
+  task: AgentTaskCapability;
+  configCapabilities: AgentConfigCapability[];
+};
+
+export type AgentCapabilitiesReport = { agents: AgentCapability[] };
+
 export type AgentInstallation = {
   surface?: AgentSurface;
   executable_path: string;
@@ -19,6 +52,8 @@ export type AgentInstallation = {
   version?: string | null;
   version_output?: string | null;
   available_on_path: boolean;
+  /** 不经 PATH 即可由任务 Runner 直接调用的执行入口（如 npx 缓存包的 bin JS）。 */
+  runner_executable?: string | null;
   error?: string | null;
 };
 
@@ -118,8 +153,12 @@ export type AgentGlobalConfigReport = {
   backup_available: boolean;
   external_environment_overrides: string[];
   error?: string | null;
-  /** 仅 Pi：Flowlet 会话扩展（`~/.pi/agent/extensions/flowlet.ts`）是否在位。 */
+  /** Pi / DeepSeek Harness：可选的 Flowlet 会话扩展是否在位。 */
   session_extension?: boolean;
+  /** 仅 DeepSeek Harness：模型条目是否已声明聚合模型规格（1M contextWindow）。 */
+  model_specs?: boolean;
+  /** 仅 DeepSeek Harness：Flowlet 交互确认桥（approval bridge）是否在位。 */
+  approval_bridge?: boolean;
   /** 仅 OpenCode：用于发现 CLI/Desktop 进程内权限事件的全局插件是否在位。 */
   opencode_permission_bridge?: boolean;
 };
@@ -132,8 +171,12 @@ export type AgentGlobalConfigOptions = {
   primaryLongContext?: boolean;
   /** 仅 Claude Code：快速模型和子 Agent 模型环境变量附加 `[1m]` 后缀。 */
   fastLongContext?: boolean;
-  /** 仅 Pi：是否安装会话扩展（`~/.pi/agent/extensions/flowlet.ts`）。安装后可按会话归并请求。 */
+  /** Pi / DeepSeek Harness：是否安装可选会话扩展。安装后可按会话归并请求。 */
   sessionExtension?: boolean;
+  /** 仅 DeepSeek Harness：是否向 settings.yaml 声明聚合模型规格（1M contextWindow）。 */
+  modelSpecs?: boolean;
+  /** 仅 DeepSeek Harness：是否部署受管交互确认桥（approval bridge）。 */
+  approvalBridge?: boolean;
 };
 
 /** Agent 最新版本查询结果（来自 npm registry，仅提示用，不执行升级）。 */

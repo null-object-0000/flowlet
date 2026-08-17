@@ -1,18 +1,11 @@
+import { registeredAgentSessionLabel } from "../pluginRegistry";
+
 export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi" | "deepseek-harness";
 export type AgentSessionRuntimeStatus = "idle" | "running" | "waiting_user" | "unknown";
 
-const AGENT_SESSION_LABELS: Record<AgentSessionType, string> = {
-  "claude-code": "Claude Code",
-  "codex-desktop": "Codex Desktop",
-  "codex-cli": "Codex CLI",
-  opencode: "OpenCode",
-  pi: "Pi",
-  "deepseek-harness": "DeepSeek Harness",
-};
-
 /** 未登记的新类型显示原始 id，禁止静默回退成另一个 Agent。 */
 export function agentSessionLabel(agentType: AgentSessionType | string) {
-  return AGENT_SESSION_LABELS[agentType as AgentSessionType] ?? agentType;
+  return registeredAgentSessionLabel(agentType) ?? agentType;
 }
 
 export type AgentSessionFilter = {
@@ -94,6 +87,11 @@ export type AgentSessionNativeUsage = {
 
 export type AgentSessionInteractionEventKind =
   | "turn"
+  | "request"
+  | "context"
+  | "compacted"
+  | "model-retry"
+  | "approval"
   | "user-message"
   | "assistant-message"
   | "reasoning"
@@ -113,6 +111,30 @@ export type AgentSessionInteractionEvent = {
   durationMs: number | null;
   timeToFirstTokenMs: number | null;
   usage: AgentSessionNativeUsage | null;
+  trace?: AgentSessionTrace | null;
+};
+
+/** Stable, normalized trace coordinates. DSH v0 supplies the complete set;
+ * other Agent adapters can progressively opt in without leaking raw logs. */
+export type AgentSessionTrace = {
+  sequence: number;
+  eventType: string;
+  turn: number | null;
+  step: number | null;
+  callId: string | null;
+  parentCallId: string | null;
+  provider: string | null;
+  requestReason: string | null;
+  input: string | null;
+  output: string | null;
+  systemPrompt: string | null;
+  tools: string | null;
+  /** 消息来源分类原始值（user / plugin / model / tool / agent-instructions 等）。 */
+  sourceKind?: string | null;
+  /** ContextForm：instructions / catalog / snapshot / notice / relay / recall。 */
+  sourceForm?: string | null;
+  /** 生产者名：instructions → 文件路径列表；plugin → 插件名。 */
+  producer?: string | null;
 };
 
 export type AgentSessionLastInteraction = {
@@ -173,3 +195,22 @@ export type OpenCodePermissionReport = {
 };
 
 export type OpenCodePermissionDecision = "allow_once" | "reject";
+
+export type DshApprovalRequest = {
+  approvalId: string;
+  sessionId: string;
+  toolName: string;
+  callId: string | null;
+  reason: string | null;
+  requestedAt: number;
+  heartbeatAt: number;
+  bridgeVersion: number;
+};
+
+export type DshApprovalReport = {
+  available: boolean;
+  permissions: DshApprovalRequest[];
+  error: string | null;
+};
+
+export type DshApprovalDecision = "allow_once" | "reject";

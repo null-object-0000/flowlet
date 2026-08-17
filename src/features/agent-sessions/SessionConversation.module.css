@@ -6,7 +6,7 @@
 .userRow { min-width: 0; display: flex; justify-content: flex-end; }
 .userBubble { width: fit-content; max-width: 82%; margin: 0; padding: 10px 13px; border-radius: 12px 12px 3px 12px; color: var(--flowlet-color-text); background: var(--semi-color-fill-0); font-family: inherit; font-size: var(--flowlet-font-size-body); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .outputStream { min-width: 0; display: grid; gap: 17px; }
-.outputMessage { min-width: 0; max-width: 96%; }
+.outputMessage { min-width: 0; width: 100%; }
 .errorContent { margin: 0; color: var(--flowlet-color-text); font-family: inherit; font-size: var(--flowlet-font-size-body); line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
 .assistantError { padding: 10px 12px; border: 1px solid var(--semi-color-danger-light-active); border-radius: 8px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); }
 .assistantError > pre { color: var(--semi-color-danger); }
@@ -34,6 +34,63 @@
 .eventUsage span { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .progress, .notice { width: fit-content; display: flex; align-items: center; gap: 7px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
 .progress i { width: 6px; height: 6px; border-radius: 50%; background: var(--flowlet-color-primary); box-shadow: 0 0 0 3px var(--semi-color-primary-light-default); animation: interactionPulse 1.2s ease-in-out infinite alternate; }
+/* 上下文注入折叠行：与官方 DisclosureRow 同构，正文上限 141px 内滚动。 */
+.contextRow { min-width: 0; margin-top: 2px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface-muted); }
+.contextHeader { min-height: 30px; padding: 5px 10px; display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; list-style: none; }
+.contextHeader::before { content: "›"; flex: none; color: var(--flowlet-color-text-tertiary); font-size: 14px; line-height: 1; transition: transform 120ms ease; }
+.contextRow[open] > .contextHeader::before { transform: rotate(90deg); }
+.contextHeader::marker { content: ""; }
+.contextHeader::-webkit-details-marker { display: none; }
+.contextHeader i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--flowlet-color-success); }
+.contextHeader > span { flex: none; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); font-weight: 500; }
+.contextProducer { flex: none; max-width: 220px; overflow: hidden; color: var(--flowlet-color-primary); font-size: var(--flowlet-font-size-caption); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.contextHeader > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); text-overflow: ellipsis; white-space: nowrap; }
+.contextBody { max-height: 141px; margin: 0 6px 6px; padding: 8px 12px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); }
+/* Think 折叠行：标题固定 "Think"，摘要取首行，正文 pre-wrap。 */
+.thinkRow { min-width: 0; margin-top: 2px; border-left: 2px solid var(--flowlet-color-border-strong); padding-left: 12px; }
+.thinkHeader { min-height: 26px; display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; list-style: none; color: var(--flowlet-color-text-secondary); }
+.thinkHeader::before { content: "›"; flex: none; color: var(--flowlet-color-text-tertiary); font-size: 14px; line-height: 1; transition: transform 120ms ease; }
+.thinkRow[open] > .thinkHeader::before { transform: rotate(90deg); }
+.thinkHeader::marker { content: ""; }
+.thinkHeader::-webkit-details-marker { display: none; }
+.thinkHeader > span { flex: none; font-size: var(--flowlet-font-size-caption); font-weight: 600; }
+.thinkHeader > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); font-family: var(--flowlet-font-family-mono); line-height: var(--flowlet-line-height-caption); text-overflow: ellipsis; white-space: nowrap; }
+.thinkBody { margin-top: 6px; padding: 8px 12px; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 压缩标记行。 */
+.compactionRow { min-width: 0; margin-top: 2px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; background: var(--flowlet-color-surface-muted); }
+.compactionHeader { min-height: 30px; padding: 5px 10px; display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; list-style: none; }
+.compactionHeader::before { content: "›"; flex: none; color: var(--flowlet-color-text-tertiary); font-size: 14px; line-height: 1; transition: transform 120ms ease; }
+.compactionRow[open] > .compactionHeader::before { transform: rotate(90deg); }
+.compactionHeader::marker { content: ""; }
+.compactionHeader::-webkit-details-marker { display: none; }
+.compactionHeader i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--flowlet-color-warning-strong); }
+.compactionHeader > span { flex: none; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); font-weight: 500; }
+.compactionHeader > small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); }
+.compactionBody { max-height: 141px; margin: 0 6px 6px; padding: 8px 12px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface); }
+/* 模型重试行。 */
+.retryRow { min-width: 0; margin-top: 2px; border-left: 2px solid var(--flowlet-color-warning-strong); padding-left: 12px; }
+.retryHeader { min-height: 26px; display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; list-style: none; color: var(--flowlet-color-text-secondary); }
+.retryHeader::before { content: "›"; flex: none; color: var(--flowlet-color-text-tertiary); font-size: 14px; line-height: 1; transition: transform 120ms ease; }
+.retryRow[open] > .retryHeader::before { transform: rotate(90deg); }
+.retryHeader::marker { content: ""; }
+.retryHeader::-webkit-details-marker { display: none; }
+.retryHeader i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--flowlet-color-warning-strong); }
+.retryHeader > span { flex: none; font-size: var(--flowlet-font-size-caption); font-weight: 500; font-family: var(--flowlet-font-family-mono); }
+.retryBody { max-height: 141px; margin: 6px 0 2px; padding: 8px 12px; overflow: auto; border-radius: 6px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: var(--flowlet-font-family-mono); font-size: var(--flowlet-font-size-code); line-height: var(--flowlet-line-height-code); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 审批历史行。 */
+.approvalRow { min-width: 0; margin-top: 2px; padding: 6px 10px; display: flex; align-items: baseline; gap: 8px; border: 1px solid var(--flowlet-color-border); border-radius: 8px; background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
+.approvalRow i { flex: none; width: 6px; height: 6px; align-self: center; border-radius: 50%; background: var(--flowlet-color-warning-strong); }
+.approvalRow[data-approval="allowed-once"] i { background: var(--flowlet-color-success); }
+.approvalRow[data-approval="rejected"] i { background: var(--semi-color-danger); }
+.approvalRow > span { flex: none; color: var(--flowlet-color-text-secondary); font-weight: 500; }
+.approvalRow > small { min-width: 0; overflow: hidden; color: var(--flowlet-color-text-tertiary); text-overflow: ellipsis; white-space: nowrap; }
+.approvalRow > b { flex: none; margin-left: auto; color: var(--flowlet-color-text-secondary); font-weight: 500; }
+/* 轮次状态行。 */
+.turnError { min-width: 0; padding: 8px 12px; display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--semi-color-danger-light-active); border-radius: 8px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
+.turnError b { font-weight: 600; }
+.turnError span { color: var(--flowlet-color-text-secondary); overflow-wrap: anywhere; }
+.turnMaxTokens { width: fit-content; padding: 6px 10px; border-radius: 8px; color: var(--flowlet-color-warning-strong); background: var(--flowlet-color-warning-surface); font-size: var(--flowlet-font-size-caption); }
+.turnFooter { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }
 .loading { display: grid; gap: 8px; }
 .loading span { height: 76px; border-radius: 8px; background: var(--flowlet-color-surface-strong); animation: pulse 1.2s ease-in-out infinite alternate; }
 .errorBox { min-height: 64px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--semi-color-danger-light-active); border-radius: 8px; color: var(--semi-color-danger); background: var(--semi-color-danger-light-default); font-size: var(--flowlet-font-size-caption); }

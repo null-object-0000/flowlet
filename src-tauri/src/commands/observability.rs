@@ -20,13 +20,14 @@ pub(crate) async fn list_agent_sessions(
     state: tauri::State<'_, AppState>,
     filter: crate::core::config::AgentSessionsFilter,
 ) -> Result<crate::core::config::AgentSessionsPageResult, String> {
-    // OpenCode 的 pending permission 是进程内实时状态，优先级高于
+    // OpenCode 与 DeepSeek Harness 的待确认请求是进程内实时状态，优先级高于
     // SQLite 中“末条 assistant 尚未完成”的运行态推断；必须在过滤和分页前合并，
-    // 否则按运行状态筛选时，实时等待中的 OpenCode 会话会被 SQLite 中旧的状态误筛掉。
-    let waiting_sessions = crate::core::opencode_control::pending_session_ids().await;
+    // 否则按运行状态筛选时，实时等待中的会话会被 SQLite 中旧的状态误筛掉。
+    let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
+    let dsh_pending_sessions = crate::core::dsh_control::pending_session_ids().await;
     state
         .storage
-        .list_agent_sessions(filter, &waiting_sessions)
+        .list_agent_sessions(filter, &opencode_pending_sessions, &dsh_pending_sessions)
         .map_err(|err| err.to_string())
 }
 
@@ -55,6 +56,21 @@ pub(crate) async fn reply_opencode_permission(
     decision: crate::core::opencode_control::OpenCodePermissionDecision,
 ) -> Result<(), String> {
     crate::core::opencode_control::reply_permission(&permission_id, decision).await
+}
+
+#[tauri::command]
+pub(crate) async fn list_dsh_session_permissions(
+    session_id: String,
+) -> Result<crate::core::dsh_control::DshApprovalReport, String> {
+    Ok(crate::core::dsh_control::list_session_approvals(&session_id).await)
+}
+
+#[tauri::command]
+pub(crate) async fn reply_dsh_permission(
+    permission_id: String,
+    decision: crate::core::dsh_control::DshApprovalDecision,
+) -> Result<(), String> {
+    crate::core::dsh_control::reply_approval(&permission_id, decision).await
 }
 
 #[tauri::command]

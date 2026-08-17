@@ -8,6 +8,7 @@ import {
   generateTaskTitle,
 } from "../../domains/project/generateTaskTitle";
 import type { ProjectTaskType } from "../../domains/project/types";
+import { AGENT_TASK_PROFILE_OPTIONS } from "../../domains/pluginRegistry";
 import { proxyCommands } from "../../domains/proxy/commands";
 import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
 import { errorMessage } from "../../shared/errors/AppError";
@@ -18,8 +19,6 @@ const TASK_TYPES: Array<{ value: ProjectTaskType; label: string }> = [
   { value: "code", label: "代码修改" },
   { value: "readonly", label: "只读分析" },
 ];
-
-const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness"];
 
 export interface ProjectTaskEditorValue {
   title: string;
@@ -107,7 +106,7 @@ export function ProjectTaskEditorFields({
       </label>
       <label>
         <span>{t("Agent Profile")}</span>
-        <Select value={value.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_PROFILES.map((agentProfile) => ({ value: agentProfile, label: agentProfile }))} onChange={(agentProfile) => onChange({ agentProfile: String(agentProfile) })} />
+        <Select value={value.agentProfile} style={{ width: "100%" }} zIndex={APP_OVERLAY_Z_INDEX.modal} optionList={AGENT_TASK_PROFILE_OPTIONS} onChange={(agentProfile) => onChange({ agentProfile: String(agentProfile) })} />
       </label>
     </div>
   </>;

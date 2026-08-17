@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
 import type { SharedDeviceProject, SyncedProjectTask } from "../domains/device-sync/types";
+import { AGENT_TASK_PROFILE_OPTIONS } from "../domains/pluginRegistry";
 import { useMobileEditTask, useMobileSubmitTask } from "../features/device-sync/useMobileDeviceSync";
 import { errorMessage } from "../shared/errors/AppError";
 import { APP_OVERLAY_Z_INDEX } from "../shared/ui/overlayLayers";
@@ -13,9 +14,6 @@ const CLOSE_ANIMATION_MS = 200;
 const EXPAND_GESTURE_PX = 28;
 const COLLAPSE_GESTURE_PX = 48;
 const CLOSE_GESTURE_PX = 64;
-
-/** 与 PC 看板一致的 Agent Profile 选项（任务执行驱动目标 Agent）。 */
-const AGENT_PROFILES = ["Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness"];
 
 /**
  * 添加任务底部弹窗：与任务详情抽屉（MobileTaskDetailSheet）一致的二段展开交互。
@@ -281,7 +279,7 @@ export function MobileTaskComposeSheet({
                   <label>{t("任务描述")}<TextArea value={description} placeholder={t("补充上下文与期望结果（可选）")} autosize onChange={(value) => setDescription(value)} /></label>
                   <div className={styles.formGrid}>
                     <label>{t("任务类型")}<Select value={taskType} optionList={[{ value: "code", label: t("代码修改") }, { value: "readonly", label: t("只读分析") }]} zIndex={APP_OVERLAY_Z_INDEX.modal + 1} onChange={(value) => setTaskType(String(value) as "code" | "readonly")} /></label>
-                    <label>{t("Agent Profile")}<Select value={agentProfile} optionList={AGENT_PROFILES.map((profile) => ({ value: profile, label: profile }))} zIndex={APP_OVERLAY_Z_INDEX.modal + 1} onChange={(value) => setAgentProfile(String(value))} /></label>
+                    <label>{t("Agent Profile")}<Select value={agentProfile} optionList={AGENT_TASK_PROFILE_OPTIONS} zIndex={APP_OVERLAY_Z_INDEX.modal + 1} onChange={(value) => setAgentProfile(String(value))} /></label>
                   </div>
                   <div className={styles.permissions}>
                     <strong>{t("执行说明")}</strong>

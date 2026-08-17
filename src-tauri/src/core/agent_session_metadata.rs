@@ -50,7 +50,6 @@ pub struct NativeAgentSourceWatch {
 
 pub fn native_agent_source_watches() -> Vec<NativeAgentSourceWatch> {
     super::agent_session_adapter::session_adapters()
-        .iter()
         .flat_map(|adapter| adapter.source_watches())
         .collect()
 }
@@ -150,7 +149,6 @@ pub(crate) fn codex_source_watches() -> Vec<NativeAgentSourceWatch> {
 
 pub fn available_native_agent_types() -> HashSet<String> {
     super::agent_session_adapter::session_adapters()
-        .iter()
         .filter(|adapter| !adapter.source_watches().is_empty())
         .flat_map(|adapter| {
             adapter

@@ -1353,6 +1353,7 @@ mod tests {
             version: Some("1.0.0".to_string()),
             version_output: Some("codex-cli 1.0.0".to_string()),
             available_on_path: true,
+            runner_executable: None,
             error: None,
         };
         assert!(is_runnable_codex_cli(&runnable));

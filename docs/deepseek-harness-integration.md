@@ -61,6 +61,24 @@ settings.yaml 热加载、无需重启。
 FLOWLET_CLIENT_TOKEN: <Client Token>
 ```
 
+### reasoning_content 回传补全（代理层）
+
+DeepSeek 推理（thinking）模型要求多轮会话中每条 `assistant` 消息都携带
+`reasoning_content` 字段（允许空串），缺失时上游直接返回 400：`The reasoning_content
+in the thinking mode must be passed back to the API.`。DSH 的 `llm-pi-ai` 适配器（pi-ai）
+只在识别到 `api.deepseek.com` 类端点时才自动补该字段（`requiresReasoningContentOnAssistantMessages`
+由 URL 探测决定，且 DSH 的 Provider 配置 schema 无法透传该开关）；经 Flowlet 本地端点
+`http://127.0.0.1:18640/v1` 转发时识别不到，多轮会话就会被 DeepSeek 拒绝。
+
+Flowlet 在代理层处理：`ensure_reasoning_content_passback`（`proxy_http.rs`，由
+`proxy.rs` 在 `rewrite_model` 后调用）为转发到 DeepSeek 推理模型（按
+`canonical_model_key` 归一后的 `deepseek-v4-flash` / `deepseek-v4-pro`，覆盖千问 Token Plan
+等渠道承载的 DeepSeek 模型）的 OpenAI chat/completions 请求中，缺失该字段的
+`assistant` 消息补空串——仅追加、不改写已有值，与客户端直连 DeepSeek 时的行为一致，
+对所有客户端生效。该行为是「不随意改写请求结构」的受控例外：按上游模型门控、仅
+OpenAI chat/completions 生效，其余请求与协议原样透传。修改该行为须同步 `AGENTS.md`
+第 5 节与本说明。
+
 一键接入直接修改 DSH 官方配置文件。Flowlet 使用与 DSH 相同的相邻 `<file>.lock` 独占锁协议，
 按叶子路径合并 `llm-pi-ai.providers.flowlet`、`agent-default-model.provider`、
 `agent-default-model.model` 与专用凭据，再通过临时文件替换完成原子写入；两份文件任一写入失败时
@@ -208,5 +226,7 @@ css-variables 主题，boot 语法 ts/bash/json，常用语言按需加载，未
   横跨多种上游思考格式（deepseek 的 `thinking` + `reasoning_effort`、qwen 的 `enable_thinking` 等），
   仅在 DSH 侧声明一种格式仍无法覆盖全部上游，且代理层按上游转换思考参数涉及请求/响应改写，
   与当前“不做跨协议转换”的协议原则冲突；待代理层具备按上游能力转换思考参数的阶段再提供。
+  思考参数的**回传**侧已由代理层 `ensure_reasoning_content_passback` 处理（见上文），
+  仅缺失字段补全、不转换思考参数。
 - 模型规格当前只声明 `contextWindow`，不声明 `maxTokens` 与 `input` 模态，理由见上文。
 - 交互确认桥的移动端远程确认未在 MVP 覆盖，后续通过泛化 `lan_sync` 的权限端点加入。

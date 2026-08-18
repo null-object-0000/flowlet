@@ -38,6 +38,38 @@ export function useDeviceHourlyUsage(deviceId: string | null, enabled = true, au
   });
 }
 
+/** 桌面端会话管理页读取指定共享设备的 Agent 会话快照。 */
+export function useSharedDeviceSessions(deviceId: string | null, enabled = true, autoRefresh = false) {
+  return useQuery({
+    queryKey: queryKeys.deviceSync.sharedSessions(deviceId),
+    queryFn: () => deviceSyncCommands.sharedSessions(deviceId),
+    networkMode: "always",
+    staleTime: 15_000,
+    retry: false,
+    enabled: enabled && deviceId != null,
+    refetchOnWindowFocus: false,
+    refetchInterval: autoRefresh ? 15_000 : false,
+  });
+}
+
+/** 桌面端指定设备刷新：LAN 直连优先，失败时读该设备唯一 S3 对象。 */
+export function useRefreshSharedDevice(deviceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!deviceId) throw new Error("未选择设备");
+      return deviceSyncCommands.refreshSharedDevice(deviceId);
+    },
+    onSettled: async () => {
+      if (!deviceId) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.deviceSync.sharedSessions(deviceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.deviceSync.devices() }),
+      ]);
+    },
+  });
+}
+
 export function useS3SyncSettings() {
   return useQuery({
     queryKey: queryKeys.deviceSync.s3Settings(),

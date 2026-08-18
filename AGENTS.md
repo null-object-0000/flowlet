@@ -195,6 +195,13 @@ Flowlet 当前支持：
 * 不随意改写响应结构；
 * 不把 Anthropic 请求转换成 OpenAI 请求；
 * 不把 OpenAI 请求转换成 Anthropic 请求；
+* DeepSeek 推理上游强制 thinking 会话的 assistant 消息回传 `reasoning_content`（缺失即
+  400）。部分客户端（如 DSH/pi-ai）只在识别到 `api.deepseek.com` 类端点时才自动补该字段，
+  经本地端点转发时识别不到。`ensure_reasoning_content_passback` 在转发到 DeepSeek 推理模型
+  前为缺失该字段的 assistant 消息补空串（仅追加、不改写已有值），是「不随意改写请求结构」
+  的受控例外：按上游模型（canonical_model_key 归一后的 DeepSeek 推理模型）门控，仅对
+  OpenAI chat/completions 生效，其余请求与协议原样透传；新增/删除该行为须同步本说明与
+  `docs/deepseek-harness-integration.md`；
 * Responses 是独立的第三协议（`supported_protocols` 中的 `"responses"`），
   入站 `POST /v1/responses`（兼容裸根路径 `/responses`）按协议独立匹配路由，
   上游端点从渠道 OpenAI Base URL 派生、复用 OpenAI 鉴权；

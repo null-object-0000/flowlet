@@ -923,6 +923,8 @@ fn run_desktop() {
             commands::device_hourly_usage,
             commands::shared_device_daily_usage,
             commands::shared_device_hourly_usage,
+            commands::list_shared_device_sessions,
+            commands::refresh_shared_device,
             commands::rename_current_device,
             commands::get_s3_sync_settings,
             commands::export_s3_connection_config,

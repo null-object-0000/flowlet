@@ -408,6 +408,76 @@ fn rewrite_model_replaces_public_model_name() {
 }
 
 #[test]
+fn ensure_reasoning_content_passback_injects_empty_for_deepseek_reasoning() {
+    let body = br#"{
+        "model": "flowlet-pro",
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "previous reply"},
+            {"role": "assistant", "content": "with thinking", "reasoning_content": "thought"},
+            {"role": "tool", "tool_call_id": "t1", "content": "out"}
+        ]
+    }"#;
+    let rewritten =
+        ensure_reasoning_content_passback(body, "deepseek-v4-flash", &ProtocolType::OpenAi);
+    let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+    let messages = value["messages"].as_array().unwrap();
+    // 缺失字段的 assistant 消息补空串
+    assert_eq!(messages[2]["reasoning_content"], "");
+    // 已存在的 reasoning_content 不被改写
+    assert_eq!(messages[3]["reasoning_content"], "thought");
+    // system / user / tool 消息不触碰
+    assert!(messages[0].get("reasoning_content").is_none());
+    assert!(messages[1].get("reasoning_content").is_none());
+    assert!(messages[4].get("reasoning_content").is_none());
+    // 本变换不动 model 字段
+    assert_eq!(value["model"], "flowlet-pro");
+}
+
+#[test]
+fn ensure_reasoning_content_passback_skips_non_deepseek_and_other_protocols() {
+    let body = br#"{"model":"m","messages":[{"role":"assistant","content":"hi"}]}"#;
+    // 非 DeepSeek 模型：原样透传
+    for model in ["qwen3.7-max", "LongCat-2.0", "kimi-k3", "glm-5.2"] {
+        let unchanged =
+            ensure_reasoning_content_passback(body, model, &ProtocolType::OpenAi);
+        assert_eq!(unchanged, body.to_vec(), "model {model} 不应触发补全");
+    }
+    // 非 OpenAI 协议：即使模型是 DeepSeek 也原样透传
+    let unchanged =
+        ensure_reasoning_content_passback(body, "deepseek-v4-flash", &ProtocolType::Anthropic);
+    assert_eq!(unchanged, body.to_vec());
+    // 所有 assistant 已带字段：原样透传
+    let complete = br#"{"model":"m","messages":[{"role":"assistant","content":"hi","reasoning_content":""}]}"#;
+    let unchanged =
+        ensure_reasoning_content_passback(complete, "deepseek-v4-flash", &ProtocolType::OpenAi);
+    assert_eq!(unchanged, complete.to_vec());
+    // 空 messages / 无 messages / 非法 JSON：原样透传
+    let cases: &[&[u8]] = &[
+        br#"{"model":"m","messages":[]}"#,
+        br#"{"model":"m","input":"text"}"#,
+        b"not json",
+    ];
+    for case in cases {
+        let unchanged =
+            ensure_reasoning_content_passback(case, "deepseek-v4-flash", &ProtocolType::OpenAi);
+        assert_eq!(unchanged, *case);
+    }
+    // 变体 / 带厂商前缀的上游模型 ID：canonical 归一后命中
+    for variant in ["deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash", "deepseek-v4-pro"] {
+        let rewritten =
+            ensure_reasoning_content_passback(body, variant, &ProtocolType::OpenAi);
+        let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+        assert_eq!(
+            value["messages"][0]["reasoning_content"],
+            "",
+            "variant {variant} 应触发补全"
+        );
+    }
+}
+
+#[test]
 fn should_try_next_status_handles_deepseek_402() {
     assert!(should_try_next_status(
         reqwest::StatusCode::PAYMENT_REQUIRED,
@@ -1218,6 +1288,122 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
         logs[0].req_body_b64.as_deref(),
         Some(encode_body_base64(br#"{"model":"gpt-test","messages":[]}"#).as_str())
     );
+}
+
+#[tokio::test]
+async fn deepseek_reasoning_route_injects_reasoning_content_passback() {
+    let captured_body = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let captured_body_state = captured_body.clone();
+    let upstream = Router::new().route(
+        "/v1/chat/completions",
+        post(move |body: Bytes| async move {
+            *captured_body_state.lock().unwrap() = body.to_vec();
+            (
+                StatusCode::OK,
+                [("content-type", "application/json")],
+                r#"{"id":"x","object":"chat.completion","model":"deepseek-v4-flash","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#,
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+
+    let channel = dual_protocol_channel("deepseek", "DeepSeek", &format!("http://{addr}"));
+    let state = build_test_state(
+        vec![channel],
+        vec![test_account("account", "deepseek", "key", 0)],
+        vec![test_route(
+            "route",
+            "flowlet-pro",
+            "deepseek",
+            "account",
+            "deepseek-v4-flash",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"flowlet-pro","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"prev"}]}"#,
+        ))
+        .unwrap();
+
+    let response = forward_request(state, request, ProtocolType::OpenAi).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    // 消费响应体，避免资源悬挂。
+    let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    let captured = captured_body.lock().unwrap().clone();
+    let value: serde_json::Value = serde_json::from_slice(&captured).unwrap();
+    assert_eq!(value["model"], "deepseek-v4-flash");
+    assert!(value["messages"][0].get("reasoning_content").is_none(), "user 消息不应被补字段");
+    assert_eq!(value["messages"][1]["reasoning_content"], "", "assistant 消息应补空串");
+}
+
+#[tokio::test]
+async fn non_deepseek_route_leaves_assistant_messages_untouched() {
+    let captured_body = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let captured_body_state = captured_body.clone();
+    let upstream = Router::new().route(
+        "/v1/chat/completions",
+        post(move |body: Bytes| async move {
+            *captured_body_state.lock().unwrap() = body.to_vec();
+            (
+                StatusCode::OK,
+                [("content-type", "application/json")],
+                r#"{"id":"x","object":"chat.completion","model":"LongCat-2.0","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#,
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+
+    let channel = dual_protocol_channel("longcat", "LongCat", &format!("http://{addr}"));
+    let state = build_test_state(
+        vec![channel],
+        vec![test_account("account", "longcat", "key", 0)],
+        vec![test_route(
+            "route",
+            "flowlet-pro",
+            "longcat",
+            "account",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"flowlet-pro","messages":[{"role":"assistant","content":"prev"}]}"#,
+        ))
+        .unwrap();
+
+    let response = forward_request(state, request, ProtocolType::OpenAi).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    let captured = captured_body.lock().unwrap().clone();
+    let value: serde_json::Value = serde_json::from_slice(&captured).unwrap();
+    assert_eq!(value["model"], "LongCat-2.0");
+    assert!(value["messages"][0].get("reasoning_content").is_none(), "非 DeepSeek 路由不应补字段");
 }
 
 #[test]

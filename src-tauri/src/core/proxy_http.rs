@@ -1411,3 +1411,68 @@ pub(super) fn rewrite_model(
     }
     serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
 }
+
+// ─── DeepSeek 推理模型 reasoning_content 回传补全 ────────────────────────────────
+
+/// DeepSeek 推理（thinking）模型要求多轮会话中每条 `assistant` 消息都必须携带
+/// `reasoning_content` 字段（缺失时允许空串）；否则上游直接返回 400：
+/// `The reasoning_content in the thinking mode must be passed back to the API.`
+///
+/// 部分客户端（如 DeepSeek Harness / pi-ai）只在识别到 `api.deepseek.com` 类端点时
+/// 才自动补该字段（`requiresReasoningContentOnAssistantMessages` 由 URL 探测决定）。
+/// 经 Flowlet 本地端点转发时识别不到，多轮会话就被上游拒绝。
+///
+/// 这里在转发到 DeepSeek 推理上游前，为缺失该字段的 `assistant` 消息补空串
+/// （仅追加、不改写已有值），与客户端直连 DeepSeek 时的行为一致，对所有客户端生效。
+///
+/// 仅在确有修改时返回新 body；其余请求原样透传。注：有修改时会对整个请求体重序列化，
+/// JSON 对象 key 会按字典序重排（语义等价，不影响上游解析与前缀缓存——消息文本顺序不变）。
+pub(super) fn ensure_reasoning_content_passback(
+    body: &[u8],
+    upstream_model: &str,
+    protocol: &ProtocolType,
+) -> Vec<u8> {
+    if *protocol != ProtocolType::OpenAi || !is_deepseek_reasoning_model(upstream_model) {
+        return body.to_vec();
+    }
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return body.to_vec();
+    };
+    let Some(messages) = value.get_mut("messages").and_then(|v| v.as_array_mut()) else {
+        return body.to_vec();
+    };
+    let mut changed = false;
+    for message in messages.iter_mut() {
+        let Some(message) = message.as_object_mut() else {
+            continue;
+        };
+        if message.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+            continue;
+        }
+        if message.contains_key("reasoning_content") {
+            continue;
+        }
+        message.insert(
+            "reasoning_content".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+        changed = true;
+    }
+    if !changed {
+        return body.to_vec();
+    }
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+}
+
+/// 判定上游模型是否为 DeepSeek 推理（thinking）模型。
+///
+/// 以 model-catalog.json 的规范模型 ID 为准；上游变体（如 `deepseek-v4-flash-0731`、
+/// `deepseek/deepseek-v4-flash`）经 `canonical_model_key` 归一后同样命中。
+/// 按模型判定（而非按渠道）是为了覆盖千问 Token Plan 等渠道承载的 DeepSeek 模型——
+/// 这些端点的 thinking 回传要求与 DeepSeek 官方一致。当前目录内 DeepSeek 模型均为
+/// 推理模型；若未来新增非推理 DeepSeek 模型（如 deepseek-chat），需在此同步收窄。
+fn is_deepseek_reasoning_model(model: &str) -> bool {
+    const DEEPSEEK_REASONING_MODELS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
+    let canonical = crate::core::model_catalog::canonical_model_key(model);
+    DEEPSEEK_REASONING_MODELS.contains(&canonical.as_str())
+}

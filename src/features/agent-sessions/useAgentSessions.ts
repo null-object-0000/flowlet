@@ -5,12 +5,13 @@ import type { AgentSessionFilter, AgentSessionRow } from "../../domains/agent-se
 import type { DshApprovalDecision, OpenCodePermissionDecision } from "../../domains/agent-session/types";
 import { queryKeys } from "../../shared/query-keys";
 
-export function useAgentSessions(filter: AgentSessionFilter, autoRefresh: boolean) {
+export function useAgentSessions(filter: AgentSessionFilter, autoRefresh: boolean, enabled = true) {
   return useQuery({
     queryKey: queryKeys.agentSession.list(filter),
     queryFn: () => agentSessionCommands.list(filter),
     placeholderData: keepPreviousData,
     refetchInterval: autoRefresh ? 15_000 : false,
+    enabled,
   });
 }
 
@@ -22,11 +23,12 @@ export function useAgentSessionClients() {
   });
 }
 
-export function useAgentSessionChildren(session: AgentSessionRow) {
+export function useAgentSessionChildren(session: AgentSessionRow, enabled = true) {
   return useQuery({
     queryKey: queryKeys.agentSession.children(session.agentType, session.sessionId),
     queryFn: () => agentSessionCommands.children(session.agentType, session.sessionId),
     refetchInterval: 15_000,
+    enabled,
   });
 }
 

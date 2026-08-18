@@ -168,8 +168,9 @@ use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_detail_response,
     build_model_list_response, build_upstream_url, build_upstream_url_without_openai_v1,
     copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
-    extract_model, identify_client, identify_client_agent, is_model_list_request,
-    is_streaming_response, load_ua_rules, model_detail_request_id, rewrite_model, sanitize_headers,
+    ensure_reasoning_content_passback, extract_model, identify_client, identify_client_agent,
+    is_model_list_request, is_streaming_response, load_ua_rules, model_detail_request_id,
+    rewrite_model, sanitize_headers,
 };
 // 仅测试（proxy_tests）需要直接调用 UA 子串匹配；非测试构建不应引入以免告警。
 #[cfg(test)]
@@ -756,6 +757,10 @@ async fn forward_request(
         // 小模型路由判断：简单短聊天请求使用渠道配置的小模型
         let effective_model = resolve_small_model(&candidate.upstream_model);
         let routed_body = rewrite_model(&body_bytes, &effective_model, &detected_protocol);
+        // DeepSeek 推理上游强制 thinking 会话的 assistant 消息回传 reasoning_content；
+        // 客户端（如 DSH/pi-ai）经本地端点无法按 URL 识别并自动补全，这里在转发前补缺失字段。
+        let routed_body =
+            ensure_reasoning_content_passback(&routed_body, &effective_model, &detected_protocol);
 
         // 账号级 Base URL 按协议分别覆盖，未配置时回退到渠道默认地址。
         // Responses 复用 OpenAI 的覆盖地址（两者共享上游 Base URL）。

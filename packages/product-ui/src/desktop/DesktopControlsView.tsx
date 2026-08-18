@@ -144,8 +144,8 @@ export function DesktopTimeRangeNavigatorView({ label, previousLabel, nextLabel,
   return <div className={styles.navigator}><Button theme="borderless" size="small" icon={<IconChevronLeft />} aria-label={previousLabel} onClick={onPrevious} /><strong>{label}</strong><Button theme="borderless" size="small" icon={<IconChevronRight />} aria-label={nextLabel} disabled={nextDisabled} onClick={onNext} /></div>;
 }
 
-export function DesktopDeviceTitlePickerView({ title, selectedValue, selectedLabel, allLabel, options, ariaLabel, onChange }: { title: ReactNode; selectedValue: string | null; selectedLabel?: ReactNode; allLabel: ReactNode; options: DesktopDeviceOption[]; ariaLabel: string; onChange: (value: string | null) => void }) {
-  return <Dropdown position="bottomLeft" trigger="click" clickToHide render={<Dropdown.Menu><Dropdown.Item active={selectedValue == null} onClick={() => onChange(null)}>{allLabel}</Dropdown.Item>{options.map((option) => <Dropdown.Item key={option.value} active={option.value === selectedValue} onClick={() => onChange(option.value)}>{option.label}</Dropdown.Item>)}</Dropdown.Menu>}>
+export function DesktopDeviceTitlePickerView({ title, selectedValue, selectedLabel, allLabel, options, ariaLabel, onChange, allowAll = true }: { title: ReactNode; selectedValue: string | null; selectedLabel?: ReactNode; allLabel: ReactNode; options: DesktopDeviceOption[]; ariaLabel: string; onChange: (value: string | null) => void; allowAll?: boolean }) {
+  return <Dropdown position="bottomLeft" trigger="click" clickToHide render={<Dropdown.Menu>{allowAll ? <Dropdown.Item active={selectedValue == null} onClick={() => onChange(null)}>{allLabel}</Dropdown.Item> : null}{options.map((option) => <Dropdown.Item key={option.value} active={option.value === selectedValue} onClick={() => onChange(option.value)}>{option.label}</Dropdown.Item>)}</Dropdown.Menu>}>
     <button type="button" className={styles.deviceTrigger} aria-label={ariaLabel}><span>{selectedValue != null && selectedLabel ? <>{selectedLabel} · {title}</> : title}</span><IconChevronDown /></button>
   </Dropdown>;
 }

@@ -111,6 +111,7 @@ export const queryKeys = {
     projects: (deviceId: string | null) => [...queryKeys.deviceSync.all, "projects", deviceId ?? "all"] as const,
     dailyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "daily-usage", deviceId ?? "all"] as const,
     hourlyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "hourly-usage", deviceId ?? "all"] as const,
+    sharedSessions: (deviceId: string | null) => [...queryKeys.deviceSync.all, "shared-sessions", deviceId ?? "all"] as const,
     s3Settings: () => [...queryKeys.deviceSync.all, "s3-settings"] as const,
     lanServerStatus: () => [...queryKeys.deviceSync.all, "lan-server-status"] as const,
     lanProbes: () => [...queryKeys.deviceSync.all, "lan-probes"] as const,

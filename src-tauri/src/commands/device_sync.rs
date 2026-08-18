@@ -1,6 +1,6 @@
 use crate::core::device_identity::{
     DailyUsageTotal, DeviceUsageBundle, DeviceUsageImportPreview, DeviceUsageImportResult,
-    DeviceUsageSnapshot, HourlyUsageTotal, KnownDevice, SharedDeviceProject,
+    DeviceUsageSnapshot, HourlyUsageTotal, KnownDevice, SharedAgentSession, SharedDeviceProject,
 };
 use crate::AppState;
 
@@ -194,6 +194,32 @@ pub(crate) async fn shared_device_hourly_usage(
     })
     .await
     .map_err(|error| format!("读取共享设备小时用量任务失败：{error}"))?
+}
+
+/// 读取指定共享设备的 Agent 会话快照（桌面端会话管理页切换设备时使用）。
+/// `device_id` 为 `None` 时返回全部设备；会话管理页始终传入具体设备。
+#[tauri::command]
+pub(crate) async fn list_shared_device_sessions(
+    state: tauri::State<'_, AppState>,
+    device_id: Option<String>,
+) -> Result<Vec<SharedAgentSession>, String> {
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .imported_device_sessions(device_id.as_deref())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取共享设备会话任务失败：{error}"))?
+}
+
+/// 桌面端指定设备刷新：先直连请求该设备 LAN 快照，失败时读取该设备唯一 S3 对象。
+#[tauri::command]
+pub(crate) async fn refresh_shared_device(
+    state: tauri::State<'_, AppState>,
+    device_id: String,
+) -> Result<crate::core::device_sync::DeviceRefreshResult, String> {
+    crate::core::device_sync::refresh_device(state.storage.clone(), &state.jobs, &device_id).await
 }
 
 #[tauri::command]

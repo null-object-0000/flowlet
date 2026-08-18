@@ -25,11 +25,14 @@ export function AgentSessionDetailSideSheet({
   onClose,
   onViewRequestLogs,
   onRefreshOverview,
+  remote = false,
 }: {
   session: AgentSessionRow;
   onClose: () => void;
   onViewRequestLogs: (sessionId: string) => void;
   onRefreshOverview?: () => Promise<unknown> | void;
+  /** 远端设备会话：只读同步快照，本地没有原生文件、请求日志与实时权限控制。 */
+  remote?: boolean;
 }) {
   const { language, t } = useAppPreferences();
   const [activeTab, setActiveTab] = useState<"overview" | "conversation" | "trajectory" | "usage" | "info" | "child-sessions">("overview");
@@ -37,16 +40,16 @@ export function AgentSessionDetailSideSheet({
   // 抽屉右上角使用页面公共的自动刷新控件：开关控制抽屉内 5 秒自动刷新。
   const refreshControl = useRefreshControl({ intervalMs: SESSION_AUTO_REFRESH_MS });
   const title = sessionDisplayTitle(session);
-  const children = useAgentSessionChildren(session);
+  const children = useAgentSessionChildren(session, !remote);
   const nativeSummary = useAgentSessionNativeSummary(session);
-  const lastInteraction = useAgentSessionLastInteraction(session, activeTab === "overview");
+  const lastInteraction = useAgentSessionLastInteraction(session, activeTab === "overview" && !remote);
   const timeline = useAgentSessionTimeline(
     session.agentType,
     session.sessionId,
-    activeTab === "conversation" || activeTab === "trajectory",
+    (activeTab === "conversation" || activeTab === "trajectory") && !remote,
   );
-  const openCodePermissions = useOpenCodeSessionPermissions(session, activeTab === "overview");
-  const dshPermissions = useDshSessionPermissions(session, activeTab === "overview");
+  const openCodePermissions = useOpenCodeSessionPermissions(session, activeTab === "overview" && !remote);
+  const dshPermissions = useDshSessionPermissions(session, activeTab === "overview" && !remote);
   const pendingApprovalCount = session.agentType === "opencode" && openCodePermissions.data?.available
     ? openCodePermissions.data.permissions.length
     : session.agentType === "deepseek-harness" && dshPermissions.data?.available
@@ -68,6 +71,8 @@ export function AgentSessionDetailSideSheet({
    *  拉取成功后记录本次刷新时间，供右上角「最后刷新」指示展示。 */
   const refetchActiveTab = () => {
     const run = () => {
+      // 远端设备会话只刷新同步快照（由页面负责 refetch 共享会话列表）。
+      if (remote) return Promise.resolve(onRefreshOverview?.());
       if (activeTab === "overview") {
         return Promise.all([
           lastInteraction.refetch(),
@@ -111,7 +116,7 @@ export function AgentSessionDetailSideSheet({
       visible
       motion={false}
       width={SESSION_DETAIL_SHEET_WIDTH}
-      title={<SessionHeader session={session} language={language} />}
+      title={<SessionHeader session={session} language={language} remote={remote} />}
       onCancel={onClose}
       footer={null}
       bodyStyle={{
@@ -129,7 +134,7 @@ export function AgentSessionDetailSideSheet({
           <RefreshControl
             autoRefresh={refreshControl.autoRefresh}
             onToggleAutoRefresh={refreshControl.toggleAutoRefresh}
-            isFetching={lastInteraction.isFetching || timeline.isFetching || children.isFetching || nativeSummary.isFetching || openCodePermissions.isFetching || dshPermissions.isFetching}
+            isFetching={remote ? false : lastInteraction.isFetching || timeline.isFetching || children.isFetching || nativeSummary.isFetching || openCodePermissions.isFetching || dshPermissions.isFetching}
             lastUpdatedAt={lastUpdatedAt}
             intervalMs={refreshControl.intervalMs}
             onRefresh={() => void refetchActiveTab()}
@@ -153,22 +158,28 @@ export function AgentSessionDetailSideSheet({
               >
                 <div className={styles.body}>
                   <OverviewStats metrics={overviewMetrics} language={language} />
-                  <div className={styles.sectionHeading}>
-                    <h3 className={styles.sectionLabel}>{t("最近一轮")}</h3>
-                  </div>
-                  <LastInteractionSection
-                    data={lastInteraction.data}
-                    loading={lastInteraction.isLoading}
-                    error={lastInteraction.isError ? lastInteraction.error.message : null}
-                    language={language}
-                    onRetry={() => void lastInteraction.refetch()}
-                    turnBlocked={pendingApprovalCount > 0}
-                    approvalSection={session.agentType === "opencode" ? (
-                      <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
-                    ) : session.agentType === "deepseek-harness" ? (
-                      <DshApprovalSection session={session} permissions={dshPermissions} />
-                    ) : null}
-                  />
+                  {remote ? (
+                    <RemoteSnapshotNotice session={session} />
+                  ) : (
+                    <>
+                      <div className={styles.sectionHeading}>
+                        <h3 className={styles.sectionLabel}>{t("最近一轮")}</h3>
+                      </div>
+                      <LastInteractionSection
+                        data={lastInteraction.data}
+                        loading={lastInteraction.isLoading}
+                        error={lastInteraction.isError ? lastInteraction.error.message : null}
+                        language={language}
+                        onRetry={() => void lastInteraction.refetch()}
+                        turnBlocked={pendingApprovalCount > 0}
+                        approvalSection={session.agentType === "opencode" ? (
+                          <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
+                        ) : session.agentType === "deepseek-harness" ? (
+                          <DshApprovalSection session={session} permissions={dshPermissions} />
+                        ) : null}
+                      />
+                    </>
+                  )}
                 </div>
               </div>
               {!overviewScroll.atBottom ? (
@@ -180,6 +191,40 @@ export function AgentSessionDetailSideSheet({
               ) : null}
             </div>
           </Tabs.TabPane>
+          <Tabs.TabPane tab={t("信息")} itemKey="info">
+            <div className={styles.tabFrame}>
+              <div className={styles.tabScroll}>
+                <div className={styles.body}>
+                  <DetailSection title={t("会话信息")}>
+                    <div className={styles.detailGrid}>
+                      <DetailItem label={t("会话标题")} value={title} wide />
+                      <DetailItem label={t("会话 ID")} value={session.sessionId} copyable wide onOpen={session.flowletObserved && !remote ? () => onViewRequestLogs(session.sessionId) : undefined} />
+                      {session.parentSessionId ? <DetailItem label={t("父会话 ID")} value={session.parentSessionId} copyable wide /> : null}
+                      <DetailItem
+                        label={session.flowletObserved ? t("客户端") : t("Agent 来源")}
+                        value={session.flowletObserved
+                          ? session.clientName ?? session.clientId ?? t("未知客户端")
+                          : agentSessionLabel(session.agentType)}
+                      />
+                      {remote ? <DetailItem label={t("来源设备")} value={session.remoteDeviceName ?? session.remoteDeviceId ?? "—"} wide /> : null}
+                      <DetailItem label={t("项目目录")} value={session.projectPath ?? "—"} />
+                    </div>
+                  </DetailSection>
+
+                  <DetailSection title={t("活动时间")}>
+                    <div className={styles.detailGrid}>
+                      {session.flowletObserved ? <DetailItem label={t("Flowlet 首次观测")} value={formatDate(session.startedAt, language)} /> : null}
+                      {session.flowletObserved ? <DetailItem label={t("Flowlet 最近观测")} value={formatDate(session.updatedAt, language)} /> : null}
+                      {session.nativeStartedAt ? <DetailItem label={t("Agent 创建时间")} value={formatDate(session.nativeStartedAt, language)} /> : null}
+                      {session.nativeUpdatedAt ? <DetailItem label={t("Agent 更新时间")} value={formatDate(session.nativeUpdatedAt, language)} /> : null}
+                    </div>
+                  </DetailSection>
+                </div>
+              </div>
+            </div>
+          </Tabs.TabPane>
+          {!remote ? (
+            <>
           <Tabs.TabPane tab={t("对话")} itemKey="conversation">
             <div className={styles.tabFrame}>
               <div className={styles.tabScroll}>
@@ -232,37 +277,6 @@ export function AgentSessionDetailSideSheet({
               </div>
             </div>
           </Tabs.TabPane>
-          <Tabs.TabPane tab={t("信息")} itemKey="info">
-            <div className={styles.tabFrame}>
-              <div className={styles.tabScroll}>
-                <div className={styles.body}>
-                  <DetailSection title={t("会话信息")}>
-                    <div className={styles.detailGrid}>
-                      <DetailItem label={t("会话标题")} value={title} wide />
-                      <DetailItem label={t("会话 ID")} value={session.sessionId} copyable wide onOpen={session.flowletObserved ? () => onViewRequestLogs(session.sessionId) : undefined} />
-                      {session.parentSessionId ? <DetailItem label={t("父会话 ID")} value={session.parentSessionId} copyable wide /> : null}
-                      <DetailItem
-                        label={session.flowletObserved ? t("客户端") : t("Agent 来源")}
-                        value={session.flowletObserved
-                          ? session.clientName ?? session.clientId ?? t("未知客户端")
-                          : agentSessionLabel(session.agentType)}
-                      />
-                      <DetailItem label={t("项目目录")} value={session.projectPath ?? "—"} />
-                    </div>
-                  </DetailSection>
-
-                  <DetailSection title={t("活动时间")}>
-                    <div className={styles.detailGrid}>
-                      {session.flowletObserved ? <DetailItem label={t("Flowlet 首次观测")} value={formatDate(session.startedAt, language)} /> : null}
-                      {session.flowletObserved ? <DetailItem label={t("Flowlet 最近观测")} value={formatDate(session.updatedAt, language)} /> : null}
-                      {session.nativeStartedAt ? <DetailItem label={t("Agent 创建时间")} value={formatDate(session.nativeStartedAt, language)} /> : null}
-                      {session.nativeUpdatedAt ? <DetailItem label={t("Agent 更新时间")} value={formatDate(session.nativeUpdatedAt, language)} /> : null}
-                    </div>
-                  </DetailSection>
-                </div>
-              </div>
-            </div>
-          </Tabs.TabPane>
           {children.data && children.data.length > 0 ? (
             <Tabs.TabPane tab={t("子会话（{count}）", { count: children.data.length })} itemKey="child-sessions">
               <div className={styles.tabFrame}>
@@ -280,6 +294,8 @@ export function AgentSessionDetailSideSheet({
                 </div>
               </div>
             </Tabs.TabPane>
+          ) : null}
+            </>
           ) : null}
         </Tabs>
       </div>
@@ -706,7 +722,7 @@ function runtimeLabel(status: AgentSessionRow["runtimeStatus"], t: (key: string,
   return t("状态未知");
 }
 
-function SessionHeader({ session, language }: { session: AgentSessionRow; language: "zh-CN" | "en-US" }) {
+function SessionHeader({ session, language, remote = false }: { session: AgentSessionRow; language: "zh-CN" | "en-US"; remote?: boolean }) {
   const { t } = useAppPreferences();
   const title = sessionDisplayTitle(session);
   return (
@@ -717,9 +733,22 @@ function SessionHeader({ session, language }: { session: AgentSessionRow; langua
       </div>
       <div className={styles.meta}>
         <span className={styles.state} data-state={session.runtimeStatus}><i />{runtimeLabel(session.runtimeStatus, t)}</span>
+        {remote ? <Tag size="small" color="blue">{t("远端设备")}</Tag> : null}
         {!session.flowletObserved && session.nativeSummary?.sourceAvailable === false ? <Tag size="small" color="grey">{t("源文件已删除")}</Tag> : null}
+        {remote ? <span>{t("来自 {device}", { device: session.remoteDeviceName ?? session.remoteDeviceId ?? "—" })}</span> : null}
         <span>{t("最近活跃：{time}", { time: formatFullTimestamp(session.activityAt, language) })}</span>
       </div>
+    </div>
+  );
+}
+
+/** 远端设备会话的概览占位：展示来源设备，并说明快照只读属性。 */
+function RemoteSnapshotNotice({ session }: { session: AgentSessionRow }) {
+  const { t } = useAppPreferences();
+  return (
+    <div className={styles.remoteNotice}>
+      <strong>{t("远端设备会话快照")}</strong>
+      <span>{t("该会话来自设备「{device}」，展示的是最近一次同步的数据；完整对话、Token 拆解与请求日志保存在对方设备上。", { device: session.remoteDeviceName ?? session.remoteDeviceId ?? "—" })}</span>
     </div>
   );
 }

@@ -59,6 +59,8 @@
 .approvalNotice { padding: 10px 12px; display: grid; gap: 3px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
 .approvalNotice strong { color: var(--flowlet-color-text); }
 .emptyState { padding: 12px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
+.remoteNotice { padding: 12px 14px; display: grid; gap: 4px; border: 1px dashed var(--flowlet-color-border-strong); border-radius: 8px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-size: var(--flowlet-font-size-caption); }
+.remoteNotice strong { color: var(--flowlet-color-text); }
 .interactionFlow { padding: 4px 2px 16px; }
 .interactionFlow > * + * { margin-top: 24px; }
 .userMessageRow { min-width: 0; display: flex; justify-content: flex-end; }

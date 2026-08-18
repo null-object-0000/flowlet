@@ -42,6 +42,14 @@ export const deviceSyncCommands = {
   hourlyUsage: (deviceId: string | null): Promise<HourlyUsageTotal[]> =>
     invokeCommand<HourlyUsageTotal[]>("device_hourly_usage", { deviceId })
       .catch(toDeviceSyncError("device_hourly_usage_failed")),
+  /** 读取指定共享设备的 Agent 会话快照（桌面端会话管理页切换设备用）。 */
+  sharedSessions: (deviceId: string | null): Promise<SharedAgentSession[]> =>
+    invokeCommand<SharedAgentSession[]>("list_shared_device_sessions", { deviceId })
+      .catch(toDeviceSyncError("shared_device_sessions_failed")),
+  /** 桌面端指定设备刷新：先 LAN 直连，失败时读该设备唯一 S3 对象。 */
+  refreshSharedDevice: (deviceId: string): Promise<DeviceRefreshResult> =>
+    invokeCommand<DeviceRefreshResult>("refresh_shared_device", { deviceId }, Number.POSITIVE_INFINITY)
+      .catch(toDeviceSyncError("shared_device_refresh_failed")),
   renameCurrentDevice: (displayName: string): Promise<void> =>
     invokeCommand<void>("rename_current_device", { displayName })
       .catch(toDeviceSyncError("device_rename_failed")),

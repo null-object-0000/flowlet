@@ -49,6 +49,10 @@ export type AgentSessionRow = {
   estimatedOutputCost: number;
   nativeSummary?: AgentSessionNativeSummary | null;
   nativeSyncedAt?: string | null;
+  /** 远端设备会话：来自设备同步快照（`list_shared_device_sessions`），
+   *  本地没有原生会话文件与 Flowlet 请求日志，只能展示快照内的轻量数据。 */
+  remoteDeviceId?: string;
+  remoteDeviceName?: string;
 };
 
 export type AgentSessionClient = { id: string; name: string };

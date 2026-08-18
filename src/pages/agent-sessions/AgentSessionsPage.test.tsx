@@ -13,6 +13,48 @@ vi.mock("../../features/background-tasks/useBackgroundTasks", () => ({
   useAgentSyncSchedule: () => null,
 }));
 
+const remoteSession = {
+  deviceId: "remote-device",
+  deviceDisplayName: "办公室电脑",
+  devicePlatform: "windows",
+  agentType: "claude-code",
+  sessionId: "remote-session-1",
+  parentSessionId: null,
+  runtimeStatus: "running",
+  title: "Remote session title",
+  clientName: "Claude Code",
+  activityAt: "2026-07-19T10:00:00Z",
+  flowletObserved: true,
+  requestCount: 6,
+  errorCount: 1,
+  knownTokens: 5000,
+  nativeTurnCount: null,
+  nativeTotalTokens: null,
+  nativeTruncated: false,
+  lastInteraction: null,
+};
+
+const refreshSharedDeviceMock = vi.fn(() => Promise.resolve({ source: "lan", refreshedDevices: 1 }));
+
+vi.mock("../../features/device-sync/useDeviceSync", () => ({
+  useKnownDevices: () => ({
+    data: [
+      { deviceId: "current-device", displayName: "本机", isCurrent: true },
+      { deviceId: "remote-device", displayName: "办公室电脑", isCurrent: false },
+    ],
+  }),
+  useSharedDeviceSessions: (deviceId: string | null) => ({
+    data: deviceId === "remote-device" ? [remoteSession] : [],
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    error: null,
+    refetch: vi.fn(() => Promise.resolve({ data: [] })),
+    dataUpdatedAt: undefined,
+  }),
+  useRefreshSharedDevice: () => ({ isPending: false, mutateAsync: refreshSharedDeviceMock }),
+}));
+
 const session: AgentSessionRow = {
   agentType: "opencode",
   sessionId: "ses_native_test",
@@ -496,6 +538,44 @@ describe("AgentSessionsPage", () => {
     fireEvent.click(within(approval).getByRole("button", { name: "同意本次" }));
 
     await waitFor(() => expect(permissionReplyMock).toHaveBeenCalledWith({ permissionId: "per_test", decision: "allow_once" }));
+  });
+
+  it("switches devices from the page title and shows only that device's sessions", async () => {
+    render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
+
+    // 默认当前设备：展示本地会话与「同步数据」按钮。
+    expect(screen.getByText("Native session title")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "同步数据" })).toBeInTheDocument();
+    expect(screen.queryByText("Remote session title")).not.toBeInTheDocument();
+
+    // 主标题设备切换器没有「全部设备」选项，只能指定具体设备。
+    fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
+    expect(screen.queryByText("全部设备")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByText("办公室电脑"));
+
+    // 远端设备：展示该设备同步的会话与「刷新设备数据」，不展示本地会话。
+    expect(await screen.findByText("Remote session title")).toBeInTheDocument();
+    expect(screen.getByText("Claude Code · 办公室电脑")).toBeInTheDocument();
+    expect(screen.queryByText("Native session title")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新设备数据" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "同步数据" })).not.toBeInTheDocument();
+  });
+
+  it("opens a remote session as a read-only snapshot without local-only tabs", async () => {
+    render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
+    fireEvent.click(await screen.findByText("办公室电脑"));
+    fireEvent.click((await screen.findByText("Remote session title")).closest("button")!);
+
+    expect(screen.getByText("远端设备会话快照")).toBeInTheDocument();
+    expect(screen.getByText(/来自 办公室电脑/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "概览" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "信息" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "对话" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "轨迹" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "用量" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /子会话/ })).not.toBeInTheDocument();
   });
 });
 

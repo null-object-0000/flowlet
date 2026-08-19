@@ -3,7 +3,7 @@ import { Button, Pagination, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconRefresh } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { agentSessionLabel, DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type AgentSessionsPage, type AgentSessionType } from "../../domains/agent-session/types";
+import { agentSessionLabel, DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionInteractionEvent, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type AgentSessionsPage, type AgentSessionType } from "../../domains/agent-session/types";
 import { AGENT_SESSION_OPTIONS } from "../../domains/pluginRegistry";
 import type { SharedAgentSession } from "../../domains/device-sync/types";
 import { useAgentSessionNativeSummary, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
@@ -549,7 +549,27 @@ function sharedToAgentSessionRow(shared: SharedAgentSession, deviceId: string, d
       : null,
     remoteDeviceId: deviceId,
     remoteDeviceName: deviceName,
+    remoteEvents: toRemoteInteractionEvents(shared),
   };
+}
+
+/** 把快照携带的最近一次交互事件映射为图表可渲染的交互事件（kind 与本地时间线同源）。 */
+function toRemoteInteractionEvents(shared: SharedAgentSession): AgentSessionInteractionEvent[] | undefined {
+  const events = shared.lastInteraction?.events;
+  if (!events || events.length === 0) return undefined;
+  return events.map((event) => ({
+    id: event.id,
+    kind: event.kind as AgentSessionInteractionEvent["kind"],
+    source: "agent-native",
+    timestamp: event.timestamp,
+    title: event.title,
+    content: event.content,
+    model: event.model,
+    status: event.status,
+    durationMs: null,
+    timeToFirstTokenMs: null,
+    usage: null,
+  }));
 }
 
 /** 远端会话的搜索 / 客户端 / 运行状态筛选在本地完成（快照为全量列表）。 */

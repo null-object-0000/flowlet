@@ -53,6 +53,9 @@ export type AgentSessionRow = {
    *  本地没有原生会话文件与 Flowlet 请求日志，只能展示快照内的轻量数据。 */
   remoteDeviceId?: string;
   remoteDeviceName?: string;
+  /** 远端设备快照携带的最近一次交互事件（`SharedAgentSession.lastInteraction`），
+   *  映射为本地图表可渲染的交互事件，供会话详情「对话 / 轨迹」Tab 展示。 */
+  remoteEvents?: AgentSessionInteractionEvent[];
 };
 
 export type AgentSessionClient = { id: string; name: string };

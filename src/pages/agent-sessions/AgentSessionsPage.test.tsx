@@ -561,7 +561,7 @@ describe("AgentSessionsPage", () => {
     expect(screen.queryByRole("button", { name: "同步数据" })).not.toBeInTheDocument();
   });
 
-  it("opens a remote session as a read-only snapshot without local-only tabs", async () => {
+  it("opens a remote session as a read-only snapshot but keeps all detail tabs", async () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
@@ -571,11 +571,10 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByText("远端设备会话快照")).toBeInTheDocument();
     expect(screen.getByText(/来自 办公室电脑/)).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "概览" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "对话" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "轨迹" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "信息" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "对话" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "轨迹" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "用量" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /子会话/ })).not.toBeInTheDocument();
   });
 });
 

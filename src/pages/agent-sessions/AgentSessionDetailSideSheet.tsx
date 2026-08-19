@@ -57,6 +57,22 @@ export function AgentSessionDetailSideSheet({
       : 0;
   const nativeUsage = session.nativeSummary ?? nativeSummary.data;
   const overviewMetrics = overviewSessionMetrics(session, nativeUsage);
+  // 远端设备会话用快照携带的最近一次交互作为时间线；本地会话走本地时间线命令。
+  const timelineEvents = remote ? (session.remoteEvents ?? []) : (timeline.data?.events ?? []);
+  const timelineTruncated = remote ? (session.nativeSummary?.truncated ?? false) : (timeline.data?.truncated ?? false);
+  const timelineLoading = remote ? false : timeline.isLoading;
+  const timelineError = remote ? null : (timeline.isError ? timeline.error.message : null);
+  // 远端会话概览「最近一轮」直接使用快照携带的交互事件。
+  const remoteLastInteraction = remote && session.remoteEvents && session.remoteEvents.length > 0
+    ? {
+        sourceAvailable: true,
+        truncated: false,
+        turnCount: session.nativeSummary?.turnCount ?? 0,
+        usage: session.nativeSummary?.usage ?? null,
+        models: session.nativeSummary?.models ?? [],
+        events: session.remoteEvents,
+      } satisfies AgentSessionLastInteraction
+    : null;
   // 概览 Tab「最近一轮」的滚动跟随：在底部时新内容自动滚到底，离开底部时右下角出现
   // 滚动按钮并用红点提示新内容（与移动端会话弹窗一致）。
   const overviewScroll = useSessionScrollFollow<HTMLDivElement>();
@@ -159,7 +175,24 @@ export function AgentSessionDetailSideSheet({
                 <div className={styles.body}>
                   <OverviewStats metrics={overviewMetrics} language={language} />
                   {remote ? (
-                    <RemoteSnapshotNotice session={session} />
+                    <>
+                      <RemoteSnapshotNotice session={session} />
+                      {remoteLastInteraction ? (
+                        <>
+                          <div className={styles.sectionHeading}>
+                            <h3 className={styles.sectionLabel}>{t("最近一轮")}</h3>
+                          </div>
+                          <LastInteractionSection
+                            data={remoteLastInteraction}
+                            loading={false}
+                            error={null}
+                            language={language}
+                            onRetry={() => undefined}
+                            turnBlocked={false}
+                          />
+                        </>
+                      ) : null}
+                    </>
                   ) : (
                     <>
                       <div className={styles.sectionHeading}>
@@ -223,17 +256,15 @@ export function AgentSessionDetailSideSheet({
               </div>
             </div>
           </Tabs.TabPane>
-          {!remote ? (
-            <>
           <Tabs.TabPane tab={t("对话")} itemKey="conversation">
             <div className={styles.tabFrame}>
               <div className={styles.tabScroll}>
                 <div className={styles.conversationBody}>
                   <SessionConversation
-                    events={timeline.data?.events ?? []}
-                    truncated={timeline.data?.truncated ?? false}
-                    loading={timeline.isLoading}
-                    error={timeline.isError ? timeline.error.message : null}
+                    events={timelineEvents}
+                    truncated={timelineTruncated}
+                    loading={timelineLoading}
+                    error={timelineError}
                     language={language}
                     onRetry={() => void timeline.refetch()}
                   />
@@ -244,9 +275,9 @@ export function AgentSessionDetailSideSheet({
           <Tabs.TabPane tab={t("轨迹")} itemKey="trajectory">
             <div className={styles.trajectoryFrame}>
               <SessionTrajectory
-                events={timeline.data?.events ?? []}
-                loading={timeline.isLoading}
-                error={timeline.isError ? timeline.error.message : null}
+                events={timelineEvents}
+                loading={timelineLoading}
+                error={timelineError}
                 onRetry={() => void timeline.refetch()}
               />
             </div>
@@ -294,8 +325,6 @@ export function AgentSessionDetailSideSheet({
                 </div>
               </div>
             </Tabs.TabPane>
-          ) : null}
-            </>
           ) : null}
         </Tabs>
       </div>
@@ -748,7 +777,7 @@ function RemoteSnapshotNotice({ session }: { session: AgentSessionRow }) {
   return (
     <div className={styles.remoteNotice}>
       <strong>{t("远端设备会话快照")}</strong>
-      <span>{t("该会话来自设备「{device}」，展示的是最近一次同步的数据；完整对话、Token 拆解与请求日志保存在对方设备上。", { device: session.remoteDeviceName ?? session.remoteDeviceId ?? "—" })}</span>
+      <span>{t("该会话来自设备「{device}」，展示的是最近一次同步的数据，仅包含最近一轮对话；完整记录与请求日志保存在对方设备上。", { device: session.remoteDeviceName ?? session.remoteDeviceId ?? "—" })}</span>
     </div>
   );
 }

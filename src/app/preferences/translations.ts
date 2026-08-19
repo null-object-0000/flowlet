@@ -312,7 +312,7 @@ const english: Record<string, string> = {
   "远端设备": "Remote device",
   "来自 {device}": "From {device}",
   "远端设备会话快照": "Remote device session snapshot",
-  "该会话来自设备「{device}」，展示的是最近一次同步的数据；完整对话、Token 拆解与请求日志保存在对方设备上。": "This session is a snapshot synced from \"{device}\". The full conversation, token breakdown and request logs live on that device.",
+  "该会话来自设备「{device}」，展示的是最近一次同步的数据，仅包含最近一轮对话；完整记录与请求日志保存在对方设备上。": "This session is a snapshot synced from \"{device}\", showing only the latest turn; the full record and request logs live on that device.",
   "统一查看 Agent 会话与 Flowlet 请求观测": "Review Agent sessions and Flowlet request observations together.",
   "文件变化": "File change",
   "正在同步 Agent 数据…": "Syncing Agent data…",

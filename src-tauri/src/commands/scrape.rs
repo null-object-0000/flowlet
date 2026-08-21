@@ -956,6 +956,33 @@ mod scrape_capture_tests {
     }
 
     #[test]
+    fn qwen_authentication_errors_do_not_count_as_complete_capture() {
+        let config = default_channels_config();
+        let mode =
+            crate::core::scrape_console::resolve_scrape_mode(&config, "qwen", Some("token_plan"))
+                .expect("qwen token plan scrape mode");
+        let error = r#"{"code":"UNAUTHORIZED","message":"login required"}"#.to_string();
+        let responses = vec![
+            (
+                "https://platform.qianwenai.com/tokenplan/personal/api/v2/subscription".to_string(),
+                error.clone(),
+            ),
+            (
+                "https://platform.qianwenai.com/tokenplan/personal/api/v2/quota-config".to_string(),
+                error.clone(),
+            ),
+            (
+                "https://platform.qianwenai.com/tokenplan/personal/api/v2/usage".to_string(),
+                error,
+            ),
+        ];
+
+        // probe 会继续走 console_action_required，并把隐藏窗口展示出来，不能进入
+        // extractor 后只留下一条“返回空结果”的错误。
+        assert!(!scrape_responses_complete(&responses, &mode));
+    }
+
+    #[test]
     fn capture_timeout_is_not_login_evidence() {
         assert!(!is_explicit_login_url(
             "qwen",
@@ -1448,6 +1475,34 @@ fn set_scrape_interaction_required(
     Ok(())
 }
 
+fn scrape_interactive_session_active(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+) -> Result<bool, String> {
+    let guard = state
+        .scrape_interactive_sessions
+        .lock()
+        .map_err(|_| "锁定控制台人工刷新状态失败".to_string())?;
+    Ok(guard.contains(account_id))
+}
+
+fn set_scrape_interactive_session_active(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+    active: bool,
+) -> Result<(), String> {
+    let mut guard = state
+        .scrape_interactive_sessions
+        .lock()
+        .map_err(|_| "锁定控制台人工刷新状态失败".to_string())?;
+    if active {
+        guard.insert(account_id.to_string());
+    } else {
+        guard.remove(account_id);
+    }
+    Ok(())
+}
+
 fn current_scrape_page_url(
     state: &tauri::State<'_, AppState>,
     account_id: &str,
@@ -1495,6 +1550,9 @@ pub(crate) async fn probe_scrape_login(
         (account.channel_id.clone(), mode)
     };
     if interactive {
+        // 必须在创建/复用 WebView 之前声明人工刷新所有权。否则已经运行的后台同步
+        // 可能在这个间隙结束，并把前端随后需要显示的同账号窗口关闭。
+        set_scrape_interactive_session_active(&state, &account_id, true)?;
         set_scrape_interaction_required(&state, &account_id, true)?;
     } else if scrape_interaction_required(&state, &account_id)? {
         return Ok(ScrapeLoginStatus {
@@ -2033,6 +2091,7 @@ pub(crate) async fn scrape_balance(
     // renderer / GPU / network 等 WebView2 子进程。
     if interactive {
         set_scrape_interaction_required(&state, &account_id, false)?;
+        set_scrape_interactive_session_active(&state, &account_id, false)?;
     }
     if let Err(error) = close_scrape_console(state.clone(), account_id.clone()).await {
         tracing::warn!(
@@ -2244,11 +2303,20 @@ pub(crate) async fn sync_scrape_balances(
                 // 后台任务逐账号串行执行。无论成功、登录失效还是抓取超时，本轮使用的
                 // 隐藏 WebView 都应在切换到下一个账号前关闭；需要人工登录的状态由
                 // scrape_interaction_required 单独记录，不依赖浏览器进程常驻。
-                if let Err(error) = close_scrape_console(state.clone(), account_id.clone()).await {
-                    tracing::warn!(
+                if !scrape_interactive_session_active(&state, account_id)? {
+                    if let Err(error) =
+                        close_scrape_console(state.clone(), account_id.clone()).await
+                    {
+                        tracing::warn!(
+                            account_id = %account_id,
+                            error = %error,
+                            "后台抓取结束后关闭 WebView 失败"
+                        );
+                    }
+                } else {
+                    tracing::info!(
                         account_id = %account_id,
-                        error = %error,
-                        "后台抓取结束后关闭 WebView 失败"
+                        "后台抓取结束时账号已由人工刷新接管，保留控制台 WebView"
                     );
                 }
                 result

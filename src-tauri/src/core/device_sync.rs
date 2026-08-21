@@ -403,6 +403,7 @@ fn agent_install_method_name(method: &AgentInstallMethod) -> &'static str {
         AgentInstallMethod::Native => "native",
         AgentInstallMethod::Winget => "winget",
         AgentInstallMethod::Npm => "npm",
+        AgentInstallMethod::Npx => "npx",
         AgentInstallMethod::Bun => "bun",
         AgentInstallMethod::LegacyNpm => "legacy_npm",
         AgentInstallMethod::Homebrew => "homebrew",

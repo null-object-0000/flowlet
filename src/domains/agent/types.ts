@@ -2,6 +2,7 @@ export type AgentInstallMethod =
   | "native"
   | "winget"
   | "npm"
+  | "npx"
   | "bun"
   | "legacy_npm"
   | "homebrew"

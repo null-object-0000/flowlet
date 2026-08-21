@@ -806,6 +806,7 @@ const english: Record<string, string> = {
   ".credentials.yaml 凭据片段": ".credentials.yaml credential snippet",
   "原生安装": "Native install",
   "npm 全局安装": "Global npm install",
+  "npx 缓存": "npx cache",
   "旧版 npm 安装": "Legacy npm install",
   "系统包管理器": "System package manager",
   "未知方式": "Unknown method",

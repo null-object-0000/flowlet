@@ -50,5 +50,97 @@ fn scrape_response_satisfies(kind: &str, body: &str) -> Option<bool> {
         kind,
         "subscription" | "quota_config" | "reset_card_list" | "usage"
     )
-    .then(|| serde_json::from_str::<serde_json::Value>(body).is_ok())
+    .then(|| {
+        let Ok(root) = serde_json::from_str::<serde_json::Value>(body) else {
+            return false;
+        };
+        let Some(payload) = root
+            .get("data")
+            .and_then(|value| value.get("DataV2"))
+            .and_then(|value| value.get("data"))
+            .and_then(|value| value.get("data"))
+        else {
+            return false;
+        };
+
+        // 千问在登录失效时也可能让这些接口返回合法 JSON。仅验证 JSON 语法会把
+        // 登录错误响应误记为“已抓全”，随后 extractor 返回 null，而隐藏 WebView
+        // 又不会被展示给用户。这里按 extractor 真正依赖的业务结构判定槽位完成，
+        // 让 probe 在内容不可用时进入 console_action_required 并拉起控制台。
+        match kind {
+            "subscription" => payload.is_object(),
+            "quota_config" => payload.as_object().is_some_and(|tiers| {
+                tiers.values().any(|tier| {
+                    tier.get("weekly")
+                        .and_then(serde_json::Value::as_f64)
+                        .is_some()
+                })
+            }),
+            "usage" => payload
+                .get("per1WeekPercentage")
+                .and_then(serde_json::Value::as_f64)
+                .is_some(),
+            "reset_card_list" => payload.is_array() || payload.is_object(),
+            _ => false,
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scrape_response_satisfies;
+
+    fn response(payload: serde_json::Value) -> String {
+        serde_json::json!({
+            "data": { "DataV2": { "data": { "data": payload } } }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn accepts_qwen_token_plan_business_payloads() {
+        assert_eq!(
+            scrape_response_satisfies(
+                "subscription",
+                &response(serde_json::json!({ "specCode": "standard" }))
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            scrape_response_satisfies(
+                "quota_config",
+                &response(serde_json::json!({ "standard": { "weekly": 10_000 } }))
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            scrape_response_satisfies(
+                "usage",
+                &response(serde_json::json!({ "per1WeekPercentage": 0.304 }))
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn rejects_valid_json_without_token_plan_data() {
+        for kind in ["subscription", "quota_config", "usage"] {
+            assert_eq!(
+                scrape_response_satisfies(
+                    kind,
+                    r#"{"code":"UNAUTHORIZED","message":"login required"}"#
+                ),
+                Some(false),
+                "{kind} must not complete from an authentication error"
+            );
+        }
+        assert_eq!(
+            scrape_response_satisfies("quota_config", &response(serde_json::json!({}))),
+            Some(false)
+        );
+        assert_eq!(
+            scrape_response_satisfies("usage", &response(serde_json::json!({}))),
+            Some(false)
+        );
+    }
 }

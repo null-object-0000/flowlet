@@ -48,6 +48,10 @@ struct AppState {
     /// 只有一次交互式抓取完整成功后才移除；后台同步必须跳过这些账号，
     /// 避免在用户登录过程中重新导航同一个 WebView。
     scrape_interaction_required: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// 当前由前端“立即刷新”占用的控制台抓取会话。与 interaction_required 分开记录，
+    /// 因为后台轮次也会在发现登录失效后设置 interaction_required，但它仍应关闭自己
+    /// 创建的隐藏窗口；已经开始的后台轮次则不得关闭前端正在等待登录的窗口。
+    scrape_interactive_sessions: Arc<Mutex<std::collections::HashSet<String>>>,
     /// 已打开的「项目详情独立窗口」的 project_id 记录，用于应用重启后自动恢复。
     detail_windows: Arc<core::detail_windows::DetailWindowRegistry>,
     /// 应用是否正在退出。退出时窗口销毁事件不应再清空上面的独立窗口记录。
@@ -225,6 +229,7 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         scrape_ready: Arc::new(Mutex::new(std::collections::HashMap::new())),
         scrape_native_ready: Arc::new(Mutex::new(std::collections::HashSet::new())),
         scrape_interaction_required: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        scrape_interactive_sessions: Arc::new(Mutex::new(std::collections::HashSet::new())),
         detail_windows: Arc::new(core::detail_windows::DetailWindowRegistry::new(
             db_path
                 .parent()

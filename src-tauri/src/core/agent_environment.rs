@@ -39,6 +39,7 @@ pub enum AgentInstallMethod {
     Native,
     Winget,
     Npm,
+    Npx,
     Bun,
     LegacyNpm,
     Homebrew,
@@ -77,7 +78,9 @@ fn dsh_cli_candidates() -> Vec<Candidate> {
 
 fn classify_dsh_method(path: &Path) -> AgentInstallMethod {
     let normalized = normalized_path_key(path);
-    if normalized.contains("/node_modules/@deepseek-ai/dsh/")
+    if normalized.contains("/_npx/") {
+        AgentInstallMethod::Npx
+    } else if normalized.contains("/node_modules/@deepseek-ai/dsh/")
         || normalized.contains("/node_modules/.bin/dsh")
         || normalized.ends_with("/npm/dsh.cmd")
         || normalized.ends_with("/npm/dsh.ps1")
@@ -92,7 +95,7 @@ fn classify_dsh_method(path: &Path) -> AgentInstallMethod {
 }
 
 fn resolve_dsh_install_dir(path: &Path, method: &AgentInstallMethod) -> PathBuf {
-    if matches!(method, AgentInstallMethod::Npm) {
+    if matches!(method, AgentInstallMethod::Npm | AgentInstallMethod::Npx) {
         // npx / pnpm 等 `node_modules/.bin` 垫片：包目录是 `node_modules/@deepseek-ai/dsh`。
         if normalized_path_key(path).contains("/node_modules/.bin/") {
             if let Some(node_modules) = path.parent().and_then(Path::parent) {
@@ -995,13 +998,13 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn classifies_dsh_npm_bin_shims_as_npm_packages() {
-        // npx 临时缓存与全局 npm 的 node_modules/.bin 垫片。
+    fn distinguishes_dsh_npx_cache_from_global_npm_installations() {
+        // npx 临时缓存不是全局 npm 安装，即使两者都包含 node_modules/.bin 垫片。
         assert_eq!(
             classify_dsh_method(Path::new(
                 "C:/Users/test/AppData/Local/npm-cache/_npx/1e7f6d9597241db0/node_modules/.bin/dsh.cmd"
             )),
-            AgentInstallMethod::Npm
+            AgentInstallMethod::Npx
         );
         assert_eq!(
             classify_dsh_method(Path::new(
@@ -1026,6 +1029,10 @@ mod tests {
         std::fs::create_dir_all(&package_dir).unwrap();
         assert_eq!(
             resolve_dsh_install_dir(&shim, &AgentInstallMethod::Npm),
+            package_dir
+        );
+        assert_eq!(
+            resolve_dsh_install_dir(&shim, &AgentInstallMethod::Npx),
             package_dir
         );
         std::fs::remove_dir_all(root).unwrap();

@@ -80,7 +80,7 @@ async fn detect() -> AgentEnvironmentReport {
                 executable_path,
                 install_dir,
                 install_method: if npx_package.is_some() {
-                    AgentInstallMethod::Npm
+                    AgentInstallMethod::Npx
                 } else {
                     AgentInstallMethod::Unknown
                 },

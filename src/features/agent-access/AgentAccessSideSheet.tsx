@@ -343,6 +343,7 @@ function installMethodLabel(method: AgentInstallMethod, t: (source: string) => s
     native: "原生安装",
     winget: "WinGet",
     npm: "npm 全局安装",
+    npx: "npx 缓存",
     bun: "Bun 安装",
     legacy_npm: "旧版 npm 安装",
     homebrew: "Homebrew",

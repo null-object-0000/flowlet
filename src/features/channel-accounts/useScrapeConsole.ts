@@ -36,9 +36,9 @@ export function useScrapeConsole(runScrape?: (accountId: string) => Promise<Scra
     setConsoleActionMessage(null);
     setState("opening");
     try {
-      // 先打开后台 webview(隐藏)
-      await accountCommands.openScrapeConsole(accountId);
       setState("collecting");
+      // probe 会先在 Rust 侧声明人工刷新所有权，再创建后台 WebView。不能在这里
+      // 提前 open，否则可能撞上尚未结束的后台同步，被其清理逻辑关闭窗口。
       // 只有明确进入登录页才断言需要登录；监听已就绪后的捕获超时则提示用户
       // 在已展示的控制台中处理登录、验证码或页面加载，再主动重试。
       const status = await accountCommands.probeScrapeLogin(accountId);

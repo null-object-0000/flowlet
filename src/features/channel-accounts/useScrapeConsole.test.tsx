@@ -43,6 +43,7 @@ describe("useScrapeConsole", () => {
     expect(result.current.state).toBe("need-console-action");
     expect(result.current.error).toBeNull();
     expect(result.current.consoleActionMessage).toBe("未捕获到套餐接口响应，已打开控制台窗口。请重新抓取。");
+    expect(commandMocks.openScrapeConsole).not.toHaveBeenCalled();
     expect(commandMocks.scrapeBalance).not.toHaveBeenCalled();
     expect(commandMocks.closeScrapeConsole).not.toHaveBeenCalled();
   });

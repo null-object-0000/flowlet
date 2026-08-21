@@ -257,6 +257,23 @@ fn app_database_path(_app: &tauri::App) -> std::path::PathBuf {
     db_path
 }
 
+/// 桌面配置路径：
+/// - 便携版使用可执行文件同目录的 config.json，保证配置随目录迁移；
+/// - 安装版继续使用 Tauri 资源目录中的 config.json。
+#[cfg(desktop)]
+fn desktop_config_path(
+    resource_dir: &std::path::Path,
+    executable_dir: Option<&std::path::Path>,
+    portable: bool,
+) -> std::path::PathBuf {
+    if portable {
+        if let Some(executable_dir) = executable_dir {
+            return executable_dir.join("config.json");
+        }
+    }
+    resource_dir.join("config.json")
+}
+
 #[cfg(desktop)]
 fn migrate_legacy_database(db_path: &std::path::Path) {
     if db_path.exists() {
@@ -324,14 +341,17 @@ fn run_desktop() {
             let setup_t0 = std::time::Instant::now();
             tracing::info!("tauri setup 开始");
 
-            let config_path = app.path().resource_dir()?.join("config.json");
-
             // 首次启动：把随包打包的模型目录文件从资源目录复制到 exe 旁，
             // 让用户开箱即用，无需手动触发同步。
             let resource_dir = app.path().resource_dir()?;
             let exe_dir = std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            let config_path = desktop_config_path(
+                &resource_dir,
+                exe_dir.as_deref(),
+                core::webview_profile::is_portable(),
+            );
             if let Some(exe_dir) = exe_dir {
                 for file_name in ["models-cn.json", "models-dev.json"] {
                     let bundled = resource_dir.join(file_name);
@@ -1261,4 +1281,30 @@ fn migrate_channel_presets_from_config(
         "渠道预设同步完成"
     );
     Ok(())
+}
+
+#[cfg(all(test, desktop))]
+mod desktop_config_path_tests {
+    use super::desktop_config_path;
+    use std::path::Path;
+
+    #[test]
+    fn portable_config_lives_beside_the_executable() {
+        let path = desktop_config_path(
+            Path::new("/usr/lib/Flowlet"),
+            Some(Path::new("/opt/Flowlet")),
+            true,
+        );
+        assert_eq!(path, Path::new("/opt/Flowlet/config.json"));
+    }
+
+    #[test]
+    fn installed_config_stays_in_the_resource_directory() {
+        let path = desktop_config_path(
+            Path::new("/usr/lib/Flowlet"),
+            Some(Path::new("/opt/Flowlet")),
+            false,
+        );
+        assert_eq!(path, Path::new("/usr/lib/Flowlet/config.json"));
+    }
 }

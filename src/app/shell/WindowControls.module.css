@@ -2,7 +2,7 @@
   position: fixed;
   inset: 0 184px auto 188px;
   height: 40px;
-  z-index: 1000;
+  z-index: 1001;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -17,7 +17,7 @@
   position: fixed;
   top: 0;
   right: 0;
-  z-index: 1001;
+  z-index: 1002;
   display: flex;
   gap: 0;
 }

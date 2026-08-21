@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@douyinfe/semi-ui-19";
 import { IconClose, IconExternalOpen, IconMaximize2, IconMinus, IconRestore } from "@douyinfe/semi-icons";
 import { windowCommands } from "../../platform/tauri/window";
+import { WindowResizeHandles } from "./WindowResizeHandles";
 import styles from "./WindowControls.module.css";
 import { useAppPreferences } from "../preferences/AppPreferences";
 
@@ -54,6 +55,7 @@ export function WindowControls({ standalone = false, openDetailWindow }: { stand
 
   return (
     <>
+      <WindowResizeHandles />
       <div
         className={`${styles.dragRegion}${standalone ? ` ${styles.dragRegionStandalone}` : ""}`}
         onMouseDown={onDragRegionMouseDown}

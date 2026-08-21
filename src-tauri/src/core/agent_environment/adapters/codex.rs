@@ -171,5 +171,40 @@ fn parse_plist_string(content: &str, key: &str) -> Option<String> {
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 async fn chatgpt_desktop_installations() -> Vec<AgentInstallation> {
-    Vec::new()
+    // ChatGPT Desktop 的 Linux 发行以 .deb 安装在 /usr/lib/chatgpt/ChatGPT，
+    // 版本号写在同目录的 version 文件里；同时兼容 ~/.local 与 AppImage 布局。
+    let mut candidates = vec![PathBuf::from("/usr/lib/chatgpt/ChatGPT")];
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".local/bin/chatgpt"));
+        candidates.push(home.join("Applications/ChatGPT.AppImage"));
+    }
+    candidates
+        .into_iter()
+        .filter(|executable| executable.is_file())
+        .map(|executable| {
+            let install_dir = executable.parent().unwrap_or(&executable).to_path_buf();
+            let version = chatgpt_desktop_linux_version(&install_dir);
+            AgentInstallation {
+                surface: AgentSurface::Desktop,
+                executable_path: display_path(&executable),
+                install_dir: display_path(&install_dir),
+                install_method: AgentInstallMethod::Desktop,
+                version,
+                version_output: None,
+                available_on_path: false,
+                runner_executable: None,
+                error: None,
+            }
+        })
+        .collect()
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+pub(in crate::core::agent_environment) fn chatgpt_desktop_linux_version(
+    install_dir: &Path,
+) -> Option<String> {
+    std::fs::read_to_string(install_dir.join("version"))
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }

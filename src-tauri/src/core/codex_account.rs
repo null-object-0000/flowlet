@@ -942,6 +942,7 @@ fn parse_oauth_usage(
         account_id: usage
             .get("account_id")
             .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
             .or(auth_account_id)
             .map(str::to_owned)
             .unwrap_or_else(|| account_identity(None, email.as_deref())),
@@ -1538,6 +1539,22 @@ mod tests {
                 .and_then(|credits| credits.first().and_then(|credit| credit.expires_at)),
             Some(1784246400)
         );
+    }
+
+    #[test]
+    fn falls_back_to_auth_account_id_when_usage_account_id_is_empty() {
+        let report = parse_oauth_usage(
+            &json!({
+                "account_id": "",
+                "email": "nichangen@icloud.com",
+                "plan_type": "plus"
+            }),
+            Some("17089202-3250-41e3-b69c-6e63687248b6"),
+        )
+        .expect("parse OAuth usage");
+
+        assert_eq!(report.account_id, "17089202-3250-41e3-b69c-6e63687248b6");
+        assert_eq!(report.email.as_deref(), Some("nichangen@icloud.com"));
     }
 
     #[test]

@@ -63,7 +63,7 @@ export function OverviewPage() {
   };
 
   const deleteCodexAccount = async () => {
-    if (!focusedCodexAccount) return;
+    if (focusedCodexAccount == null) return;
     try {
       await codexAccountDeletion.mutateAsync(focusedCodexAccount);
       Toast.success(t("Codex 账号已删除"));
@@ -119,7 +119,7 @@ export function OverviewPage() {
           onToggleAccount={(accountId, enabled) => void toggleAccount(accountId, enabled)}
           accountActionBusy={accountActions.saveAll.isPending}
           onOpenCodexAgent={(accountId) => {
-            setFocusedCodexAccount(accountId || undefined);
+            setFocusedCodexAccount(accountId ?? "");
             setCodexSheetVisible(true);
           }}
         />
@@ -158,14 +158,14 @@ export function OverviewPage() {
         authorizationBusy={codexAccountAuthorization.isPending}
       />
 
-      {focusedCodexAccount ? (
+      {codexSheetVisible ? (
         <CodexAccountSideSheet
           visible={codexSheetVisible}
           accounts={codexAccounts.data}
-          accountId={focusedCodexAccount}
+          accountId={focusedCodexAccount ?? ""}
           accountLoading={codexAccountRefreshOne.isPending}
           accountError={codexAccountRefreshOne.error?.message}
-          onRefreshAccount={() => void codexAccountRefreshOne.mutate(focusedCodexAccount)}
+          onRefreshAccount={() => void codexAccountRefreshOne.mutate(focusedCodexAccount ?? "")}
           accountAuthorizationBusy={codexAccountAuthorization.isPending}
           onAuthorizeAccount={() => void authorizeCodexAccount()}
           onDeleteAccount={() => void deleteCodexAccount()}

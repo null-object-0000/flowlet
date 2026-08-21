@@ -1,0 +1,80 @@
+.handle {
+  position: fixed;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 边缘热区：位于标题栏拖拽区与窗口控制按钮之下，避免拦截拖拽/按钮点击。 */
+.north {
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 1000;
+}
+
+.south {
+  bottom: 0;
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 1000;
+}
+
+.east {
+  right: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 1000;
+}
+
+.west {
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 1000;
+}
+
+/* 四角热区：高于窗口控制按钮，保证最角落始终可抓取缩放。 */
+.northWest {
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  z-index: 1003;
+}
+
+.northEast {
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+  z-index: 1003;
+}
+
+.southWest {
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+  z-index: 1003;
+}
+
+.southEast {
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  z-index: 1003;
+}

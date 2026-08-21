@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const windowApi = vi.hoisted(() => ({
   startDragging: vi.fn<() => Promise<void>>(),
+  startResizeDragging: vi.fn<(direction: string) => Promise<void>>(),
   minimize: vi.fn<() => Promise<void>>(),
   isMaximized: vi.fn<() => Promise<boolean>>(),
   onResized: vi.fn<(handler: () => void) => Promise<() => void>>(),
@@ -29,6 +30,11 @@ describe("windowCommands", () => {
   it("starts native window dragging", async () => {
     await windowCommands.startDragging();
     expect(windowApi.startDragging).toHaveBeenCalledOnce();
+  });
+
+  it("starts native resize dragging with the requested direction", async () => {
+    await windowCommands.startResizeDragging("SouthEast");
+    expect(windowApi.startResizeDragging).toHaveBeenCalledWith("SouthEast");
   });
 
   it("minimizes the native window", async () => {

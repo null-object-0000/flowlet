@@ -244,6 +244,19 @@ fn codex_cli_candidates() -> Vec<Candidate> {
         for relative in known_codex_cli_locations() {
             push_codex_cli_candidate(&mut candidates, &mut seen, home.join(relative), false);
         }
+        // npm 全局安装的 codex 不一定在桌面启动进程的 PATH 中（nvm 等版本管理器
+        // 只在 shell rc 里注入 bin 目录）。桌面图标启动的 Flowlet 拿不到这些目录，
+        // 因此额外枚举常见 npm / nvm / pnpm / bun 全局 bin 位置。
+        for directory in npm_global_codex_bin_dirs(&home) {
+            for file_name in executable_names("codex") {
+                push_codex_cli_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    directory.join(file_name),
+                    false,
+                );
+            }
+        }
     }
     #[cfg(windows)]
     if let Some(app_data) = std::env::var_os("APPDATA") {
@@ -481,6 +494,24 @@ fn known_codex_cli_locations() -> &'static [&'static str] {
 #[cfg(not(windows))]
 fn known_codex_cli_locations() -> &'static [&'static str] {
     &[".local/bin/codex"]
+}
+
+/// 常见的 npm / 版本管理器全局 bin 目录，用于补充桌面启动进程 PATH 里缺失的
+/// codex 安装位置。目录本身可以不存在，`push_candidate` 会做 `is_file` 校验。
+fn npm_global_codex_bin_dirs(home: &Path) -> Vec<PathBuf> {
+    let mut directories = vec![
+        home.join(".npm-global").join("bin"),
+        home.join("node_modules").join(".bin"),
+        home.join(".local").join("share").join("pnpm"),
+        home.join(".bun").join("bin"),
+    ];
+    // nvm：~/.nvm/versions/node/<version>/bin
+    if let Ok(versions) = std::fs::read_dir(home.join(".nvm").join("versions").join("node")) {
+        for entry in versions.flatten() {
+            directories.push(entry.path().join("bin"));
+        }
+    }
+    directories
 }
 
 // Pi 官方安装脚本优先使用 npm 全局前缀，不可写时回退到 `$HOME/.local`，
@@ -817,6 +848,8 @@ fn is_windows_store_codex_executable(path: &Path) -> bool {
 mod tests {
     #[cfg(windows)]
     use super::adapters::codex::parse_chatgpt_windows_package_output;
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    use super::adapters::codex::chatgpt_desktop_linux_version;
     use super::*;
 
     #[test]
@@ -909,6 +942,45 @@ mod tests {
             )),
             AgentInstallMethod::Npm
         );
+    }
+
+    #[test]
+    fn enumerates_nvm_and_npm_global_codex_bin_dirs() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-codex-bin-dirs-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let nvm_bin = root
+            .join(".nvm")
+            .join("versions")
+            .join("node")
+            .join("v24.19.0")
+            .join("bin");
+        std::fs::create_dir_all(&nvm_bin).unwrap();
+
+        let directories = npm_global_codex_bin_dirs(&root);
+        assert!(directories.contains(&nvm_bin));
+        assert!(directories.contains(&root.join(".npm-global").join("bin")));
+        assert!(directories.contains(&root.join("node_modules").join(".bin")));
+        assert!(directories.contains(&root.join(".bun").join("bin")));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    #[test]
+    fn reads_chatgpt_desktop_linux_version_file() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-chatgpt-version-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("version"), "42.3.0\n").unwrap();
+        assert_eq!(
+            chatgpt_desktop_linux_version(&root),
+            Some("42.3.0".to_string())
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]

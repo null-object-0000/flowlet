@@ -144,8 +144,20 @@ pub struct AgentEnvironmentReport {
     /// 仅适用于需要常驻本机运行时的 Surface；CLI/Desktop Agent 返回 None。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_running: Option<bool>,
+    /// Web Runtime 是否由当前 Flowlet 进程启动并可安全停止。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_managed: Option<bool>,
+    /// 当前安装方式对应的可读启动命令。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_command: Option<String>,
     pub primary: Option<AgentInstallation>,
     pub installations: Vec<AgentInstallation>,
+}
+
+pub(crate) fn runtime_adapter(
+    adapter_id: &str,
+) -> Option<&'static crate::core::agent_runtime::AgentRuntimeAdapter> {
+    adapters::get(adapter_id).and_then(|adapter| adapter.runtime)
 }
 
 pub async fn detect_agent_environment(agent_id: &str) -> Result<AgentEnvironmentReport, String> {

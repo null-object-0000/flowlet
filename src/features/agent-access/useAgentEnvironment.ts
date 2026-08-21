@@ -10,6 +10,8 @@ import {
   listAgentCapabilities,
   queryCodexAccount,
   restoreAgentGlobalConfig,
+  startAgentRuntime,
+  stopAgentRuntime,
 } from "../../domains/agent/commands";
 import type { AgentGlobalConfigOptions, CodexAccountsReport } from "../../domains/agent/types";
 import { AGENT_PLUGINS, type AgentPluginId } from "../../domains/pluginRegistry";
@@ -33,6 +35,29 @@ export function useAgentCapabilities() {
     queryFn: listAgentCapabilities,
     staleTime: Infinity,
   });
+}
+
+export function useAgentRuntimeActions(agentId: AgentPluginId | null) {
+  const queryClient = useQueryClient();
+  const environmentKey = queryKeys.agent.environment(agentId ?? "inactive");
+  const updateEnvironment = (report: Awaited<ReturnType<typeof startAgentRuntime>>) => {
+    queryClient.setQueryData(environmentKey, report);
+  };
+  const start = useMutation({
+    mutationFn: () => {
+      if (!agentId) return Promise.reject(new Error("未选择 Agent"));
+      return startAgentRuntime(agentId);
+    },
+    onSuccess: updateEnvironment,
+  });
+  const stop = useMutation({
+    mutationFn: () => {
+      if (!agentId) return Promise.reject(new Error("未选择 Agent"));
+      return stopAgentRuntime(agentId);
+    },
+    onSuccess: updateEnvironment,
+  });
+  return { start, stop };
 }
 
 // Agent 最新版本提示：概览页卡片 Badge dot 与接入抽屉共用。npm 版本不会高频变化，

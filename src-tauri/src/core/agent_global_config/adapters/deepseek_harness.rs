@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 const PROVIDER_ID: &str = "flowlet";
 const TOKEN_REF: &str = "FLOWLET_CLIENT_TOKEN";
+const CREDENTIAL_REFS: &str = "refs";
 const LLM_NAMESPACE: &str = "llm-pi-ai";
 const DEFAULT_MODEL_NAMESPACE: &str = "agent-default-model";
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -573,7 +574,9 @@ fn read_yaml_value(path: &Path) -> Result<serde_yaml::Value, String> {
 }
 
 fn read_credential_value(path: &Path) -> Result<Option<String>, String> {
-    Ok(yaml_at(&read_yaml_value(path)?, &[TOKEN_REF])
+    let credentials = read_yaml_value(path)?;
+    Ok(yaml_at(&credentials, &[CREDENTIAL_REFS, TOKEN_REF])
+        .or_else(|| yaml_at(&credentials, &[TOKEN_REF]))
         .and_then(serde_yaml::Value::as_str)
         .filter(|value| !value.is_empty())
         .map(str::to_string))
@@ -619,7 +622,11 @@ fn capture_snapshot(
         provider: backed_up_yaml_value(&settings, &[LLM_NAMESPACE, "providers", PROVIDER_ID])?,
         default_provider: backed_up_yaml_value(&settings, &[DEFAULT_MODEL_NAMESPACE, "provider"])?,
         default_model: backed_up_yaml_value(&settings, &[DEFAULT_MODEL_NAMESPACE, "model"])?,
-        credential: backed_up_yaml_value(&credentials, &[TOKEN_REF])?,
+        credential: if yaml_at(&credentials, &[CREDENTIAL_REFS, TOKEN_REF]).is_some() {
+            backed_up_yaml_value(&credentials, &[CREDENTIAL_REFS, TOKEN_REF])?
+        } else {
+            backed_up_yaml_value(&credentials, &[TOKEN_REF])?
+        },
     })
 }
 
@@ -915,7 +922,39 @@ fn apply_settings_text(
 
 fn apply_credentials_text(text: &str, client_token: &str) -> Result<Vec<u8>, String> {
     let token = Value::String(client_token.to_string());
-    patch_yaml_entry(text, ".credentials.yaml", &[], TOKEN_REF, Some(&token))
+    patch_credential_value(text, Some(&token))
+}
+
+fn patch_credential_value(text: &str, value: Option<&Value>) -> Result<Vec<u8>, String> {
+    let parsed: serde_yaml::Value = if text.trim().is_empty() {
+        serde_yaml::Value::Mapping(Default::default())
+    } else {
+        serde_yaml::from_str(text)
+            .map_err(|error| format!("解析 .credentials.yaml 失败：{error}"))?
+    };
+    if !parsed.is_mapping() {
+        return Err(".credentials.yaml 的根节点必须是 YAML 对象".to_string());
+    }
+
+    // DSH 0.1.1 起使用 `version: 1` + `refs:`；旧预发布版本使用根级扁平映射。
+    // 已出现 version/refs/records 任一字段即按新版写入，并删除 Flowlet 旧版曾误写的
+    // 根级同名键，从而自动修复新旧布局混合、导致 DSH 无法启动的文件。
+    let versioned = ["version", CREDENTIAL_REFS, "records"]
+        .iter()
+        .any(|key| yaml_at(&parsed, &[*key]).is_some());
+    if versioned {
+        let nested = String::from_utf8(patch_yaml_entry(
+            text,
+            ".credentials.yaml",
+            &[CREDENTIAL_REFS],
+            TOKEN_REF,
+            value,
+        )?)
+        .map_err(|error| format!("生成 .credentials.yaml 失败：{error}"))?;
+        patch_yaml_entry(&nested, ".credentials.yaml", &[], TOKEN_REF, None)
+    } else {
+        patch_yaml_entry(text, ".credentials.yaml", &[], TOKEN_REF, value)
+    }
 }
 
 fn restore_settings_text(text: &str, snapshot: &ManagedSnapshot) -> Result<Vec<u8>, String> {
@@ -961,7 +1000,7 @@ fn restore_credentials_text(text: &str, snapshot: &ManagedSnapshot) -> Result<Ve
         .credential
         .present
         .then_some(&snapshot.credential.value);
-    patch_yaml_entry(text, ".credentials.yaml", &[], TOKEN_REF, credential)
+    patch_credential_value(text, credential)
 }
 
 fn apply_dsh(
@@ -1253,10 +1292,6 @@ mod tests {
             apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", true).unwrap(),
         )
         .unwrap();
-        let text = String::from_utf8(
-            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", true).unwrap(),
-        )
-        .unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
         assert_eq!(
             yaml_at(
@@ -1428,10 +1463,60 @@ mod tests {
         assert!(!output.lines().any(|line| line.trim() == "[]"));
     }
 
+    fn assert_versioned_credentials(text: &str, flowlet_token: Option<&str>) {
+        let parsed: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
+        assert_eq!(
+            parsed.get("version").and_then(serde_yaml::Value::as_i64),
+            Some(1)
+        );
+        assert!(parsed
+            .get(CREDENTIAL_REFS)
+            .is_some_and(serde_yaml::Value::is_mapping));
+        assert!(
+            parsed.get(TOKEN_REF).is_none(),
+            "凭据不能落在新版文档根节点"
+        );
+        assert_eq!(
+            yaml_at(&parsed, &[CREDENTIAL_REFS, TOKEN_REF])
+                .and_then(serde_yaml::Value::as_str),
+            flowlet_token
+        );
+        assert_eq!(
+            yaml_at(&parsed, &[CREDENTIAL_REFS, "EXISTING_TOKEN"])
+                .and_then(serde_yaml::Value::as_str),
+            Some("keep-me")
+        );
+    }
+
+    #[test]
+    fn repairs_mixed_versioned_credentials_created_by_legacy_flowlet_writer() {
+        let before = "version: 1\nrefs:\n  EXISTING_TOKEN: keep-me\nFLOWLET_CLIENT_TOKEN: stale-token\n";
+        let applied =
+            String::from_utf8(apply_credentials_text(before, "fresh-token").unwrap()).unwrap();
+        assert_versioned_credentials(&applied, Some("fresh-token"));
+
+        let restored = String::from_utf8(
+            restore_credentials_text(
+                &applied,
+                &ManagedSnapshot {
+                    provider: BackedUpValue::default(),
+                    default_provider: BackedUpValue::default(),
+                    default_model: BackedUpValue::default(),
+                    credential: BackedUpValue::default(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_versioned_credentials(&restored, None);
+    }
+
     #[test]
     fn real_upstream_profile_fixture_passes_apply_reapply_disable_restore_contract() {
         const UPSTREAM_PATCH: &str =
             include_str!("../../../../tests/fixtures/deepseek-harness/web/cordis.patch.yml");
+        const UPSTREAM_CREDENTIALS: &str =
+            include_str!("../../../../tests/fixtures/deepseek-harness/credentials.v1.yaml");
         let home = std::env::temp_dir().join(format!(
             "flowlet-dsh-global-config-contract-{}",
             uuid::Uuid::new_v4()
@@ -1439,7 +1524,7 @@ mod tests {
         let profile = home.join("profiles").join("web");
         std::fs::create_dir_all(&profile).unwrap();
         let settings = "# keep user settings\nllm-pi-ai:\n  providers:\n    existing:\n      baseURL: https://example.com/v1\nagent-default-model:\n  provider: existing\n  model: existing-model\n";
-        let credentials = "# keep user credentials\nEXISTING_TOKEN: keep-me\n";
+        let credentials = UPSTREAM_CREDENTIALS;
         std::fs::write(home.join("settings.yaml"), settings).unwrap();
         std::fs::write(home.join(".credentials.yaml"), credentials).unwrap();
         std::fs::write(
@@ -1448,6 +1533,10 @@ mod tests {
         )
         .unwrap();
         std::fs::write(profile.join("cordis.patch.yml"), UPSTREAM_PATCH).unwrap();
+
+        let inspected = inspect_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
+        assert_eq!(inspected.state, AgentGlobalConfigState::NotConfigured);
+        assert_versioned_credentials(credentials, None);
 
         let report = apply_dsh_at(
             &home,
@@ -1461,6 +1550,10 @@ mod tests {
         assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
         assert!(report.session_extension);
         assert!(!report.model_specs);
+        assert_versioned_credentials(
+            &std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
+            Some("flowlet-client-token"),
+        );
         let managed_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&managed_patch).unwrap();
         assert!(parsed
@@ -1480,6 +1573,10 @@ mod tests {
             false,
         )
         .unwrap();
+        assert_versioned_credentials(
+            &std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
+            Some("flowlet-client-token"),
+        );
         assert_eq!(
             std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
             managed_patch,
@@ -1496,6 +1593,10 @@ mod tests {
         )
         .unwrap();
         assert!(!disabled.session_extension);
+        assert_versioned_credentials(
+            &std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
+            Some("flowlet-client-token"),
+        );
         let disabled_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&disabled_patch).unwrap();
         assert!(parsed.as_sequence().is_some_and(Vec::is_empty));
@@ -1514,6 +1615,7 @@ mod tests {
             std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
             credentials
         );
+        assert_versioned_credentials(credentials, None);
         assert_eq!(
             std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
             UPSTREAM_PATCH

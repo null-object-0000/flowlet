@@ -28,6 +28,10 @@ vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
     apply: { isPending: false, mutateAsync: vi.fn() },
     restore: { isPending: false, mutateAsync: vi.fn() },
   }),
+  useAgentRuntimeActions: () => ({
+    start: { isPending: false, error: null, mutateAsync: vi.fn() },
+    stop: { isPending: false, error: null, mutateAsync: vi.fn() },
+  }),
 }));
 
 function makeAccount(overrides: Partial<ChannelAccount> = {}): ChannelAccount {

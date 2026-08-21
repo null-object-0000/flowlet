@@ -64,6 +64,10 @@ export type AgentEnvironmentReport = {
   installed: boolean;
   /** 仅 Web 等需要常驻本机运行时的 Surface 返回；普通 CLI/Desktop 省略。 */
   runtime_running?: boolean | null;
+  /** Web Runtime 是否由当前 Flowlet 启动并可安全停止。 */
+  runtime_managed?: boolean | null;
+  /** 当前安装方式对应的可读启动命令。 */
+  runtime_command?: string | null;
   primary?: AgentInstallation | null;
   installations: AgentInstallation[];
 };

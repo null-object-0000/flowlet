@@ -31,6 +31,8 @@ struct AppState {
     tray: Arc<Mutex<Option<TrayIcon>>>,
     codex_accounts_dir: std::path::PathBuf,
     agent_source_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    /// 由 Flowlet 启动并可安全停止的 Agent Web Runtime 子进程。
+    agent_runtimes: core::agent_runtime::AgentRuntimeManager,
     /// LAN 直连服务的运行状态与最近入站请求，供「局域网直连」卡片展示。
     lan_status: Arc<Mutex<core::lan_sync::LanServerStatus>>,
     lan_inbound: Arc<Mutex<std::collections::VecDeque<core::lan_sync::LanInboundEvent>>>,
@@ -222,6 +224,7 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         tray: Arc::new(Mutex::new(None)),
         codex_accounts_dir,
         agent_source_watcher: Arc::new(Mutex::new(None)),
+        agent_runtimes: core::agent_runtime::AgentRuntimeManager::default(),
         lan_status: Arc::new(Mutex::new(core::lan_sync::LanServerStatus::default())),
         lan_inbound: Arc::new(Mutex::new(std::collections::VecDeque::new())),
         scrape_webviews: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -611,7 +614,9 @@ fn run_desktop() {
                     }
                     "quit" => {
                         let app_clone = app.clone();
-                        let proxy = app.try_state::<AppState>().map(|state| state.proxy.clone());
+                        let managed = app.try_state::<AppState>().map(|state| {
+                            (state.proxy.clone(), state.agent_runtimes.clone())
+                        });
                         tauri::async_runtime::spawn(async move {
                             // 标记正在退出：随后的窗口销毁事件不应再清空
                             // 「项目详情独立窗口」记录，否则下次启动无法恢复。
@@ -620,8 +625,9 @@ fn run_desktop() {
                                     *exiting = true;
                                 }
                             }
-                            if let Some(proxy) = proxy {
+                            if let Some((proxy, agent_runtimes)) = managed {
                                 let _ = proxy.stop().await;
+                                agent_runtimes.stop_all().await;
                             }
                             app_clone.exit(0);
                         });
@@ -902,6 +908,8 @@ fn run_desktop() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::detect_agent_environment,
+            commands::start_agent_runtime,
+            commands::stop_agent_runtime,
             commands::check_agent_latest_versions,
             commands::list_cached_codex_accounts,
             commands::query_codex_account,

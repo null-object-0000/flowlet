@@ -24,9 +24,31 @@ fn agent_global_config_adapter(agent_id: &str) -> Result<&'static str, String> {
 
 #[tauri::command]
 pub(crate) async fn detect_agent_environment(
+    state: tauri::State<'_, AppState>,
     agent_id: String,
 ) -> Result<crate::core::agent_environment::AgentEnvironmentReport, String> {
-    crate::core::agent_environment::detect_agent_environment(&agent_id).await
+    let mut report = crate::core::agent_environment::detect_agent_environment(&agent_id).await?;
+    state
+        .agent_runtimes
+        .enrich_report(&agent_id, &mut report)
+        .await;
+    Ok(report)
+}
+
+#[tauri::command]
+pub(crate) async fn start_agent_runtime(
+    state: tauri::State<'_, AppState>,
+    agent_id: String,
+) -> Result<crate::core::agent_environment::AgentEnvironmentReport, String> {
+    state.agent_runtimes.start(&agent_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn stop_agent_runtime(
+    state: tauri::State<'_, AppState>,
+    agent_id: String,
+) -> Result<crate::core::agent_environment::AgentEnvironmentReport, String> {
+    state.agent_runtimes.stop(&agent_id).await
 }
 
 /// 检查所有受支持 Agent 的最新发布版本（npm registry），用于版本更新提示。

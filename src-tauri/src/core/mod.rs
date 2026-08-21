@@ -2,6 +2,7 @@ pub mod account_resource_sync;
 pub mod account_workspace_sync;
 pub mod agent_environment;
 pub mod agent_global_config;
+pub(crate) mod agent_runtime;
 pub(crate) mod agent_identity_adapter;
 pub(crate) mod agent_plugin_bundle;
 pub(crate) mod agent_session_adapter;

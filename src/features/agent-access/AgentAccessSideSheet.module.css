@@ -326,6 +326,80 @@
   margin-top: 10px;
 }
 
+.runtimePanel {
+  margin-top: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 9px;
+  background: var(--flowlet-color-surface-muted);
+}
+
+.runtimeSummary {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.runtimeSummary > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.runtimeSummary small,
+.runtimeCommandRow > span {
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.runtimeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--flowlet-color-text-tertiary);
+}
+
+.runtimeDotRunning {
+  background: var(--semi-color-success);
+  box-shadow: 0 0 0 4px var(--semi-color-success-light-default);
+}
+
+.runtimeCommandRow {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.runtimeCommandRow code {
+  min-width: 0;
+  padding: 6px 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  color: var(--flowlet-color-code-text);
+  background: var(--flowlet-color-code-bg);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.runtimeError {
+  display: block;
+  line-height: 18px;
+}
+
 .globalConfig {
   margin-top: 14px;
 }
@@ -361,40 +435,57 @@
   white-space: nowrap;
 }
 
-.longContextGroup {
-  margin-top: 12px;
-  display: grid;
-  gap: 8px;
-}
-
 .advancedSection {
   margin-top: 14px;
-  padding: 12px;
-  border: 1px dashed var(--flowlet-color-border);
-  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 9px;
   background: var(--flowlet-color-surface);
 }
 
-.advancedHeader {
+.advancedToggle {
+  width: 100%;
+  min-height: 58px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-}
-
-.advancedToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0;
+  gap: 12px;
   border: 0;
   background: transparent;
   cursor: pointer;
   color: var(--flowlet-color-text);
+  text-align: left;
 }
 
-.advancedToggle strong {
-  font-size: 13px;
+.advancedToggle:hover {
+  background: var(--flowlet-color-surface-muted);
+}
+
+.advancedTitle {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.advancedTitle strong {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.advancedTitle small,
+.advancedNote,
+.capabilityContent small {
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.advancedSummary {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .advancedToggle svg {
@@ -405,45 +496,47 @@
   transform: rotate(180deg);
 }
 
-.advancedNone {
-  color: var(--flowlet-color-text-tertiary);
-  font-size: 12px;
-}
-
 .advancedNote {
   display: block;
-  margin-top: 10px;
-  color: var(--flowlet-color-text-tertiary);
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--flowlet-color-border);
 }
 
-.longContextRow {
+.capabilityList {
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.capabilityRow {
+  min-height: 76px;
   padding: 10px 12px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--flowlet-color-border);
-  border-radius: 8px;
-  background: var(--flowlet-color-surface-muted);
+  gap: 16px;
 }
 
-.longContextRow > div {
+.capabilityRow + .capabilityRow {
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.capabilityContent {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 
-.longContextRow strong {
+.capabilityTitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.capabilityTitle strong {
   color: var(--flowlet-color-text);
   font-size: 13px;
-}
-
-.longContextRow small {
-  color: var(--flowlet-color-text-tertiary);
-  font-size: 12px;
-  line-height: 1.5;
+  line-height: 18px;
 }
 
 .configWarning,

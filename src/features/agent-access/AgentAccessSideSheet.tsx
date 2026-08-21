@@ -31,6 +31,10 @@ type Props = {
   environmentLoading?: boolean;
   environmentError?: string;
   onRefreshEnvironment: () => void;
+  runtimeBusy?: boolean;
+  runtimeError?: string;
+  onStartRuntime: () => Promise<void>;
+  onStopRuntime: () => Promise<void>;
   latestVersion?: string | null;
   latestVersionLoading?: boolean;
   latestVersionError?: string;
@@ -55,6 +59,10 @@ export function AgentAccessSideSheet({
   environmentLoading = false,
   environmentError,
   onRefreshEnvironment,
+  runtimeBusy = false,
+  runtimeError,
+  onStartRuntime,
+  onStopRuntime,
   latestVersion,
   latestVersionLoading = false,
   latestVersionError,
@@ -194,6 +202,15 @@ export function AgentAccessSideSheet({
                   </Text>
                 ) : null}
               </div>
+            ) : null}
+            {surface === "web" && environment?.runtime_running != null && surfaceInstallations?.length ? (
+              <AgentRuntimeControl
+                environment={environment}
+                busy={runtimeBusy}
+                error={runtimeError}
+                onStart={onStartRuntime}
+                onStop={onStopRuntime}
+              />
             ) : null}
             {surfaceInstallations?.map((installation, index) => {
               const duplicateSurface = surfaceInstallations
@@ -338,6 +355,72 @@ export function AgentAccessSideSheet({
     </SideSheet>
   );
 }
+
+function AgentRuntimeControl({
+  environment,
+  busy,
+  error,
+  onStart,
+  onStop,
+}: {
+  environment: AgentEnvironmentReport;
+  busy: boolean;
+  error?: string;
+  onStart: () => Promise<void>;
+  onStop: () => Promise<void>;
+}) {
+  const { t } = useAppPreferences();
+  const running = environment.runtime_running === true;
+  const managed = environment.runtime_managed === true;
+  return (
+    <div className={styles.runtimePanel}>
+      <div className={styles.runtimeSummary}>
+        <span className={`${styles.runtimeDot} ${running ? styles.runtimeDotRunning : ""}`} />
+        <div>
+          <strong>{t("DSH Web 服务")}</strong>
+          <small>
+            {t(running ? managed ? "由 Flowlet 启动并管理" : "已在 Flowlet 外部运行" : "当前未运行")}
+          </small>
+        </div>
+        <Tag color={running ? "green" : "grey"}>{t(running ? "运行中" : "已停止")}</Tag>
+      </div>
+      <div className={styles.runtimeCommandRow}>
+        <span>{t("启动命令")}</span>
+        <code>{environment.runtime_command || "-"}</code>
+      </div>
+      <div className={styles.runtimeActions}>
+        {running ? (
+          <>
+            <a className={styles.officialLink} href="http://127.0.0.1:3080" target="_blank" rel="noreferrer">
+              {t("打开 DSH Web")}
+            </a>
+            <Button
+              type="danger"
+              theme="light"
+              loading={busy}
+              disabled={!managed}
+              onClick={() => void onStop()}
+            >
+              {t(managed ? "停止服务" : "外部进程不可停止")}
+            </Button>
+          </>
+        ) : (
+          <Button
+            type="primary"
+            theme="solid"
+            loading={busy}
+            disabled={!environment.runtime_command}
+            onClick={() => void onStart()}
+          >
+            {t("启动服务")}
+          </Button>
+        )}
+      </div>
+      {error ? <Text className={styles.runtimeError} type="danger">{error}</Text> : null}
+    </div>
+  );
+}
+
 function installMethodLabel(method: AgentInstallMethod, t: (source: string) => string) {
   const labels: Record<AgentInstallMethod, string> = {
     native: "原生安装",
@@ -376,9 +459,13 @@ function AgentConfigControls({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   if (controls.length === 0) return null;
   const rows = controls.map((control) => (
-    <div className={styles.longContextRow} key={control.id}>
-      <div>
-        <strong>{control.label}</strong>
+    <div className={styles.capabilityRow} key={control.id}>
+      <div className={styles.capabilityContent}>
+        <div className={styles.capabilityTitle}>
+          <strong>{control.label}</strong>
+          <Tag size="small" color={control.checked ? "green" : "grey"}>{t(control.checked ? "已启用" : "未启用")}</Tag>
+          {control.requiresRestart ? <Tag size="small">{t("需重启 DSH")}</Tag> : null}
+        </div>
         {control.descriptions.map((description) => <small key={description}>{description}</small>)}
       </div>
       <Switch
@@ -390,29 +477,30 @@ function AgentConfigControls({
       />
     </div>
   ));
-  const enabled = controls.filter((control) => control.checked).map((control) => control.label);
+  const enabledCount = controls.filter((control) => control.checked).length;
   return (
     <div className={styles.advancedSection}>
-      <div className={styles.advancedHeader}>
-        <button
-          type="button"
-          className={styles.advancedToggle}
-          aria-expanded={advancedOpen}
-          aria-label={t("高级配置（可选能力）")}
-          onClick={() => setAdvancedOpen((open) => !open)}
-        >
+      <button
+        type="button"
+        className={styles.advancedToggle}
+        aria-expanded={advancedOpen}
+        aria-label={t("高级配置（可选能力）")}
+        onClick={() => setAdvancedOpen((open) => !open)}
+      >
+        <span className={styles.advancedTitle}>
+          <strong>{t("高级配置")}</strong>
+          <small>{t("可选增强能力，不影响基础 Provider 接入")}</small>
+        </span>
+        <span className={styles.advancedSummary}>
+          <Tag color={enabledCount > 0 ? "blue" : "grey"} size="small">
+            {enabledCount > 0 ? t("已启用 {count} 项", { count: enabledCount }) : t("均未启用")}
+          </Tag>
           <IconChevronDown size="small" className={advancedOpen ? styles.chevronExpanded : undefined} />
-          <strong>{t("高级配置（可选能力）")}</strong>
-        </button>
-        {enabled.length > 0 ? (
-          <Tag color="blue" size="small">{t("已启用：{list}", { list: enabled.join("、") })}</Tag>
-        ) : (
-          <span className={styles.advancedNone}>{t("全部未启用（默认）")}</span>
-        )}
-      </div>
+        </span>
+      </button>
       <Collapsible isOpen={advancedOpen} motion={false} keepDOM lazyRender>
-        <div className={styles.longContextGroup}>{rows}</div>
-        <small className={styles.advancedNote}>{t("可选能力默认不开启，按需启用；开关会在点击后立即写入。")}</small>
+        <div className={styles.capabilityList}>{rows}</div>
+        <small className={styles.advancedNote}>{t("开关会立即写入配置；标记为需重启的能力将在下次启动 DSH 后生效。")}</small>
       </Collapsible>
     </div>
   );

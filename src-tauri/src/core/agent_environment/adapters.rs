@@ -14,27 +14,33 @@ pub(crate) type DetectEnvironment = fn() -> DetectionFuture;
 pub(crate) struct AgentEnvironmentAdapter {
     pub(crate) id: &'static str,
     pub(crate) detect: DetectEnvironment,
+    pub(crate) runtime: Option<&'static crate::core::agent_runtime::AgentRuntimeAdapter>,
 }
 
 pub(crate) static CLAUDE_CODE: AgentEnvironmentAdapter = AgentEnvironmentAdapter {
     id: "claude-code",
     detect: claude_code::detect_boxed,
+    runtime: None,
 };
 pub(crate) static OPENCODE: AgentEnvironmentAdapter = AgentEnvironmentAdapter {
     id: "opencode",
     detect: opencode::detect_boxed,
+    runtime: None,
 };
 pub(crate) static PI: AgentEnvironmentAdapter = AgentEnvironmentAdapter {
     id: "pi",
     detect: pi::detect_boxed,
+    runtime: None,
 };
 pub(crate) static CODEX: AgentEnvironmentAdapter = AgentEnvironmentAdapter {
     id: "chatgpt-desktop",
     detect: codex::detect_boxed,
+    runtime: None,
 };
 pub(crate) static DEEPSEEK_HARNESS: AgentEnvironmentAdapter = AgentEnvironmentAdapter {
     id: "deepseek-harness",
     detect: deepseek_harness::detect_boxed,
+    runtime: Some(&deepseek_harness::RUNTIME),
 };
 
 pub(super) fn get(adapter_id: &str) -> Option<&'static AgentEnvironmentAdapter> {

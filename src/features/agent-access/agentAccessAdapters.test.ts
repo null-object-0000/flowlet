@@ -76,18 +76,20 @@ describe("agent access adapters", () => {
     expect(snippets[0].copyValue).not.toContain("x-flowlet-client");
     expect(snippets[0].copyValue).toContain("agent-default-model:");
     expect(snippets[0].copyValue).toContain("model: flowlet-pro");
-    expect(snippets[1].copyValue).toContain("FLOWLET_CLIENT_TOKEN: real-token");
-    expect(adapter.configStatuses(base)[0].value).toBe("未启用（可选）");
-    expect(adapter.configStatuses(base)[1].value).toBe("未声明（可选）");
-    expect(adapter.configStatuses(context({ model_specs: true }))[1].value).toBe("已声明");
+    expect(snippets[1].copyValue).toContain("version: 1");
+    expect(snippets[1].copyValue).toContain("refs:\n  FLOWLET_CLIENT_TOKEN: real-token");
+    expect(adapter.configStatuses(base)).toEqual([]);
     // 会话关联控件默认关闭，开关只改自身、保留规格声明状态。
     expect(adapter.configControls(base)[0].checked).toBe(false);
+    expect(adapter.configControls(base)[0].requiresRestart).toBe(true);
     expect(adapter.configControls(base)[0].applyOptions(true))
       .toEqual({ sessionExtension: true, modelSpecs: false, approvalBridge: false });
     // 模型规格控件默认不填写，与会话关联互相独立。
     expect(adapter.configControls(base)[1].checked).toBe(false);
+    expect(adapter.configControls(base)[1].requiresRestart).toBeUndefined();
     expect(adapter.configControls(base)[1].applyOptions(true))
       .toEqual({ sessionExtension: false, modelSpecs: true, approvalBridge: false });
+    expect(adapter.configControls(base)[2].requiresRestart).toBe(true);
     // 重新写入按钮保留当前报告状态，默认全关。
     expect(adapter.applyOptions(base)).toEqual({
       sessionExtension: false,

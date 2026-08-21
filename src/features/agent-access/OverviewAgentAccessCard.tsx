@@ -12,6 +12,7 @@ import {
   useAgentEnvironments,
   useAgentGlobalConfig,
   useAgentLatestVersions,
+  useAgentRuntimeActions,
 } from "./useAgentEnvironment";
 
 type Props = {
@@ -25,6 +26,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
   const environments = useAgentEnvironments();
   const latestVersions = useAgentLatestVersions();
   const activeGlobalConfig = useAgentGlobalConfig(selectedAgent);
+  const activeRuntime = useAgentRuntimeActions(selectedAgent);
 
   const latestByAgent = new Map<string, AgentLatestVersionReport>();
   for (const report of latestVersions.data?.agents ?? []) {
@@ -58,6 +60,24 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
       Toast.success(t("{name} 全局配置已恢复", { name: activeAgentName }));
     } catch (error) {
       Toast.error(t("恢复 {name} 全局配置失败：{message}", { name: activeAgentName, message: errorMessage(error) }));
+    }
+  };
+
+  const startRuntime = async () => {
+    try {
+      await activeRuntime.start.mutateAsync();
+      Toast.success(t("{name} 已启动", { name: activeAgentName }));
+    } catch (error) {
+      Toast.error(t("启动 {name} 失败：{message}", { name: activeAgentName, message: errorMessage(error) }));
+    }
+  };
+
+  const stopRuntime = async () => {
+    try {
+      await activeRuntime.stop.mutateAsync();
+      Toast.success(t("{name} 已停止", { name: activeAgentName }));
+    } catch (error) {
+      Toast.error(t("停止 {name} 失败：{message}", { name: activeAgentName, message: errorMessage(error) }));
     }
   };
 
@@ -106,6 +126,10 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
           void activeEnvironment?.refetch();
           void latestVersions.refetch();
         }}
+        runtimeBusy={activeRuntime.start.isPending || activeRuntime.stop.isPending}
+        runtimeError={activeRuntime.start.error?.message || activeRuntime.stop.error?.message}
+        onStartRuntime={startRuntime}
+        onStopRuntime={stopRuntime}
         latestVersion={selectedAgent ? latestByAgent.get(selectedAgent)?.latest_version ?? null : null}
         latestVersionLoading={latestVersions.isFetching}
         latestVersionError={selectedAgent

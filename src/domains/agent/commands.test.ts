@@ -9,6 +9,8 @@ import {
   listAgentCapabilities,
   queryCodexAccounts,
   restoreAgentGlobalConfig,
+  startAgentRuntime,
+  stopAgentRuntime,
 } from "./commands";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -36,6 +38,15 @@ describe("agent commands", () => {
     await detectAgentEnvironment(agentId);
 
     expect(invoke).toHaveBeenCalledWith("detect_agent_environment", { agentId });
+  });
+
+  it.each([
+    [() => startAgentRuntime("deepseek-harness"), "start_agent_runtime"],
+    [() => stopAgentRuntime("deepseek-harness"), "stop_agent_runtime"],
+  ] as const)("uses the typed Agent runtime boundary", async (call, command) => {
+    vi.mocked(invoke).mockResolvedValue({});
+    await call();
+    expect(invoke).toHaveBeenCalledWith(command, { agentId: "deepseek-harness" });
   });
 
   it("queries Codex account data through the typed Tauri boundary", async () => {

@@ -11,15 +11,16 @@ Desktop：用户主要通过 `dsh web` 打开的本地浏览器界面使用它�
 `0.1.0-rc.5`，用户实际通过 npm 运行的是 `0.1.0-rc.6`；因此 Flowlet 只依赖已由源码和
 已安装包共同确认的稳定边界，不推断未发布内部 API。
 
-## 五类 Adapter
+## 五类接入 Adapter 与可选 Runtime 能力
 
 | Adapter | 当前能力 | 明确边界 |
 |---|---|---|
-| Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本 | 可只读识别无歧义的 `_npx/<hash>` 包版本并解析 bin 入口供任务执行；多版本共存时要求全局安装。已安装不等于 Web 正在运行 |
+| Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本，并挂载可选 Runtime 能力 | 可只读识别无歧义的 `_npx/<hash>` 包版本并解析 bin 入口供任务执行；多版本共存时要求全局安装。已安装不等于 Web 正在运行 |
 | Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型和 Client Token；精确会话插件、模型规格声明与交互确认桥均为默认关闭的高级能力 | 基础接入不依赖 DSH Web 或 Profile；复用 DSH 的文件锁协议，保留非受管配置和注释 |
 | Session | 读取 `sessions/**/session.jsonl(.zstd)` v0，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；其它版本明确拒绝；打包 delta chunk 不作为最终消息展示 |
 | Identity | 使用官方 User-Agent 识别客户端；可选会话桥启用时读取并剥离 `x-flowlet-session` | 与其他 Agent 共用编译期 Identity Adapter registry，实时请求与历史修复规则一致 |
 | Runner | 通过稳定全局 `dsh` 命令或 npx 缓存包入口（`node <包 bin>`）执行 `dsh --profile headless <task>` | 仅 fresh session；DSH 没有稳定 resume 参数时明确失败 |
+| Runtime（Environment 可选能力） | 在接入抽屉内启动、停止并展示 DSH Web 状态；全局 npm 安装执行 `dsh web --no-open`，npx 缓存安装执行 `npx @deepseek-ai/dsh web --no-open` | 只停止当前 Flowlet 启动并记录的子进程；手动或其他程序启动的 3080 进程仅显示为外部运行，不接管、不强杀 |
 
 ## Flowlet Provider
 
@@ -58,8 +59,14 @@ settings.yaml 热加载、无需重启。
 凭据单独写入 `$DSH_HOME/.credentials.yaml`：
 
 ```yaml
-FLOWLET_CLIENT_TOKEN: <Client Token>
+version: 1
+refs:
+  FLOWLET_CLIENT_TOKEN: <Client Token>
 ```
+
+DSH 0.1.1 使用上述 versioned credentials 文档。Flowlet 仍可读取旧预发布版的根级扁平凭据；
+检测到 `version` / `refs` / `records` 任一新版字段时，只会在 `refs` 下写入受管 Token，并自动移除
+旧版 Flowlet 曾误写的同名根级键，避免 DSH 因未知顶层字段拒绝启动。
 
 ### reasoning_content 回传补全（代理层）
 

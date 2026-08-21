@@ -29,6 +29,7 @@ export type AgentConfigControl = {
   label: string;
   descriptions: string[];
   checked: boolean;
+  requiresRestart?: boolean;
   applyOptions: (checked: boolean) => AgentGlobalConfigOptions;
 };
 

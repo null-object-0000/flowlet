@@ -22,6 +22,18 @@ export function detectAgentEnvironment(agentId: string): Promise<AgentEnvironmen
   });
 }
 
+export function startAgentRuntime(agentId: string): Promise<AgentEnvironmentReport> {
+  return invokeCommand<AgentEnvironmentReport>("start_agent_runtime", { agentId }, 30_000).catch((error) => {
+    throw toAppError(error, "agent_runtime_start_failed");
+  });
+}
+
+export function stopAgentRuntime(agentId: string): Promise<AgentEnvironmentReport> {
+  return invokeCommand<AgentEnvironmentReport>("stop_agent_runtime", { agentId }, 15_000).catch((error) => {
+    throw toAppError(error, "agent_runtime_stop_failed");
+  });
+}
+
 /** 检查所有受支持 Agent 的最新发布版本（npm registry），用于版本更新提示。 */
 export function checkAgentLatestVersions(): Promise<AgentLatestVersionsReport> {
   return invokeCommand<AgentLatestVersionsReport>("check_agent_latest_versions", undefined, 30_000).catch((error) => {

@@ -5,6 +5,57 @@ use std::path::PathBuf;
 
 const DEFAULT_WEB_URL: &str = "http://127.0.0.1:3080";
 
+pub(super) static RUNTIME: crate::core::agent_runtime::AgentRuntimeAdapter =
+    crate::core::agent_runtime::AgentRuntimeAdapter {
+        launch: runtime_launch,
+        health_addr: "127.0.0.1:3080",
+    };
+
+fn runtime_launch(
+    report: &AgentEnvironmentReport,
+) -> Result<crate::core::agent_runtime::AgentRuntimeLaunch, String> {
+    let installation = report
+        .primary
+        .as_ref()
+        .filter(|installation| installation.error.is_none())
+        .ok_or_else(|| "未找到可用于启动 DSH Web 的安装".to_string())?;
+    let args = vec!["web".to_string(), "--no-open".to_string()];
+    match &installation.install_method {
+        AgentInstallMethod::Npx => Ok(crate::core::agent_runtime::AgentRuntimeLaunch {
+            program: npx_executable(),
+            args: std::iter::once("@deepseek-ai/dsh".to_string())
+                .chain(args)
+                .collect(),
+            display_command: "npx @deepseek-ai/dsh web --no-open".to_string(),
+        }),
+        AgentInstallMethod::Npm
+        | AgentInstallMethod::Native
+        | AgentInstallMethod::SystemPackage => Ok(crate::core::agent_runtime::AgentRuntimeLaunch {
+            program: PathBuf::from(&installation.executable_path),
+            args,
+            display_command: "dsh web --no-open".to_string(),
+        }),
+        _ => Err(format!(
+            "当前安装方式 {:?} 不支持由 Flowlet 启动 DSH Web",
+            installation.install_method
+        )),
+    }
+}
+
+fn npx_executable() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        let candidate = PathBuf::from(app_data).join("npm").join("npx.cmd");
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    #[cfg(windows)]
+    return PathBuf::from("npx.cmd");
+    #[cfg(not(windows))]
+    PathBuf::from("npx")
+}
+
 pub(super) fn detect_boxed() -> DetectionFuture {
     Box::pin(detect())
 }
@@ -55,7 +106,9 @@ async fn detect() -> AgentEnvironmentReport {
                 (Some((package_dir, _)), Some(entry)) => {
                     (display_path(entry), display_path(package_dir))
                 }
-                (Some((package_dir, _)), None) => (DEFAULT_WEB_URL.to_string(), display_path(package_dir)),
+                (Some((package_dir, _)), None) => {
+                    (DEFAULT_WEB_URL.to_string(), display_path(package_dir))
+                }
                 (None, _) => (
                     DEFAULT_WEB_URL.to_string(),
                     data_home
@@ -103,6 +156,8 @@ async fn detect() -> AgentEnvironmentReport {
         agent_name: "DeepSeek Harness".to_string(),
         installed: !installations.is_empty(),
         runtime_running: Some(web_running),
+        runtime_managed: None,
+        runtime_command: None,
         primary,
         installations,
     }
@@ -183,6 +238,49 @@ fn npx_bin_entry(package_dir: &Path) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn report_with_method(method: AgentInstallMethod) -> AgentEnvironmentReport {
+        let installation = AgentInstallation {
+            surface: AgentSurface::Web,
+            executable_path: "C:\\Program Files\\nodejs\\dsh.cmd".to_string(),
+            install_dir: "C:\\Program Files\\nodejs".to_string(),
+            install_method: method,
+            version: Some("0.1.1-rc.2".to_string()),
+            version_output: None,
+            available_on_path: true,
+            error: None,
+            runner_executable: None,
+        };
+        AgentEnvironmentReport {
+            agent_id: "deepseek-harness".to_string(),
+            agent_name: "DeepSeek Harness".to_string(),
+            installed: true,
+            runtime_running: Some(false),
+            runtime_managed: None,
+            runtime_command: None,
+            primary: Some(installation.clone()),
+            installations: vec![installation],
+        }
+    }
+
+    #[test]
+    fn starts_npx_installations_through_the_official_npx_command() {
+        let launch = runtime_launch(&report_with_method(AgentInstallMethod::Npx)).unwrap();
+        assert_eq!(launch.args, ["@deepseek-ai/dsh", "web", "--no-open"]);
+        assert_eq!(launch.display_command, "npx @deepseek-ai/dsh web --no-open");
+        assert!(launch.program.to_string_lossy().contains("npx"));
+    }
+
+    #[test]
+    fn starts_global_npm_installations_through_the_dsh_shim() {
+        let launch = runtime_launch(&report_with_method(AgentInstallMethod::Npm)).unwrap();
+        assert_eq!(
+            launch.program,
+            PathBuf::from("C:\\Program Files\\nodejs\\dsh.cmd")
+        );
+        assert_eq!(launch.args, ["web", "--no-open"]);
+        assert_eq!(launch.display_command, "dsh web --no-open");
+    }
 
     fn write_package(cache: &std::path::Path, hash: &str, version: &str) -> PathBuf {
         let package = cache

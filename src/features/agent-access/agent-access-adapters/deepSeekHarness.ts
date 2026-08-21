@@ -22,20 +22,7 @@ function settingsSnippet(endpoint: string) {
 export const deepSeekHarnessAdapter: AgentAccessAdapter = {
   id: "deepseek-harness",
   installationName: () => "DeepSeek Harness Web",
-  configStatuses: ({ globalConfig, t }) => [
-    {
-      label: t("精确会话关联"),
-      value: t(globalConfig?.session_extension ? "已启用" : "未启用（可选）"),
-    },
-    {
-      label: t("模型规格声明"),
-      value: t(globalConfig?.model_specs ? "已声明" : "未声明（可选）"),
-    },
-    {
-      label: t("交互确认桥"),
-      value: t(globalConfig?.approval_bridge ? "已启用" : "未启用（可选）"),
-    },
-  ],
+  configStatuses: () => [],
   configControls: ({ globalConfig, t }) => {
     const sessionExtension = globalConfig?.session_extension ?? false;
     const modelSpecs = globalConfig?.model_specs ?? false;
@@ -43,17 +30,18 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
     return [
       {
         id: "session-extension",
-        label: t("启用精确会话关联（高级）"),
+        label: t("精确会话关联"),
         descriptions: [
           t("启用后会向已初始化的 DSH Profile 安装受管 Cordis 插件，把代理请求与原生会话精确关联。"),
           t("基础 Provider、默认模型和 Token 接入不依赖此插件；启用或关闭后需重启正在运行的 DSH。"),
         ],
         checked: sessionExtension,
+        requiresRestart: true,
         applyOptions: (checked) => ({ sessionExtension: checked, modelSpecs, approvalBridge }),
       },
       {
         id: "model-specs",
-        label: t("声明聚合模型规格（高级）"),
+        label: t("聚合模型规格"),
         descriptions: [
           t("开启后向 settings.yaml 的 flowlet-pro / flowlet-flash 模型条目写入 1M 上下文窗口声明，使 DSH 按真实聚合规格做上下文预算。"),
           t("仅当两个聚合模型的所有启用路由都支持 1M 上下文时开启；不声明最大输出上限，保持 DSH 默认的保守值。"),
@@ -63,12 +51,13 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
       },
       {
         id: "approval-bridge",
-        label: t("启用交互确认桥（高级）"),
+        label: t("交互确认桥"),
         descriptions: [
           t("启用后会向已初始化的 DSH Profile 安装受管确认桥插件，把 headless 会话的权限请求经文件桥转交 Flowlet 桌面端确认或否决。"),
           t("启用后需要重启正在运行的 DSH；关闭后移除受管插件，确认请求恢复为无人应答（fail-closed）。"),
         ],
         checked: approvalBridge,
+        requiresRestart: true,
         applyOptions: (checked) => ({ sessionExtension, modelSpecs, approvalBridge: checked }),
       },
     ];
@@ -84,8 +73,8 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
       { label: t("settings.yaml Provider 片段"), displayValue: settings, copyValue: settings },
       {
         label: t(".credentials.yaml 凭据片段"),
-        displayValue: `FLOWLET_CLIENT_TOKEN: ${displayedToken}\n`,
-        copyValue: `FLOWLET_CLIENT_TOKEN: ${token}\n`,
+        displayValue: `version: 1\nrefs:\n  FLOWLET_CLIENT_TOKEN: ${displayedToken}\n`,
+        copyValue: `version: 1\nrefs:\n  FLOWLET_CLIENT_TOKEN: ${token}\n`,
       },
     ];
   },

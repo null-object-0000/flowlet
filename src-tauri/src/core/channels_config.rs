@@ -374,8 +374,7 @@ impl ChannelsConfig {
     /// 仅用于渠道预设的配置漂移检测（preset-sync），不再作为开放模型的白名单。
     /// 白名单请使用 supported_models()（所有渠道的并集）。
     /// 开放哪些模型由用户在账号编辑器中显式勾选，不在此维护默认勾选；
-    /// OpenRouter 聚合渠道不写静态默认列表（config.json 的 default_exposed_models
-    /// 不含 openrouter），未来白名单新增模型时由用户按需勾选。
+    /// OpenRouter 条目仅登记其独占模型的目录归属，不代表账号默认勾选。
     pub fn default_exposed_models(&self, channel_id: &str) -> Vec<String> {
         self.default_exposed_models
             .get(channel_id)
@@ -1539,6 +1538,7 @@ mod tests {
         );
         assert_eq!(canonical_model_key("qwen/qwen3.7-max"), "qwen3.7-max");
         assert_eq!(canonical_model_key("z-ai/glm-5.2"), "glm-5.2");
+        assert_eq!(canonical_model_key("stealth/ox-alpha"), "ox-alpha");
         // 别名变体在剥离 vendor 前缀后仍按规范映射
         assert_eq!(
             canonical_model_key("deepseek/deepseek-v4-flash-0731"),
@@ -1552,13 +1552,14 @@ mod tests {
     }
 
     #[test]
-    fn openrouter_has_no_static_default_exposed_models() {
-        // OpenRouter 不写静态默认开放模型：config.json 的 default_exposed_models
-        // 不含 openrouter，开放哪些模型由用户显式勾选。
+    fn openrouter_catalog_default_only_lists_owned_models() {
+        // 这里只登记 OpenRouter 独占模型的目录归属；账号开放哪些模型仍由用户显式勾选。
         let json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
         let config = ChannelsConfig::from_config_json(&json).unwrap();
-        assert!(config.default_exposed_models("openrouter").is_empty());
-        assert!(!config.default_exposed_models.contains_key("openrouter"));
+        assert_eq!(
+            config.default_exposed_models("openrouter"),
+            vec!["ox-alpha".to_string()]
+        );
     }
 
     #[test]
@@ -1573,10 +1574,12 @@ mod tests {
             exposed_models: Some(vec![
                 "deepseek/deepseek-v4-flash".to_string(),
                 "qwen/qwen3.7-max".to_string(),
+                "stealth/ox-alpha".to_string(),
             ]),
             synced_models: Some(vec![
                 "deepseek/deepseek-v4-flash".to_string(),
                 "qwen/qwen3.7-max".to_string(),
+                "stealth/ox-alpha".to_string(),
             ]),
             ..Default::default()
         };
@@ -1597,10 +1600,13 @@ mod tests {
             vec![
                 ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
                 ("qwen3.7-max", "qwen/qwen3.7-max"),
+                ("ox-alpha", "stealth/ox-alpha"),
                 ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
                 ("qwen3.7-max", "qwen/qwen3.7-max"),
+                ("ox-alpha", "stealth/ox-alpha"),
                 ("deepseek-v4-flash", "deepseek/deepseek-v4-flash"),
                 ("qwen3.7-max", "qwen/qwen3.7-max"),
+                ("ox-alpha", "stealth/ox-alpha"),
             ]
         );
         // responses 协议确实生成路由，且协议集合覆盖三个声明的协议。

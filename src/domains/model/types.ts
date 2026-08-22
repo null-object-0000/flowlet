@@ -13,7 +13,7 @@ export type ChannelModel = {
   supported_protocols: ProtocolType[];
   context_window: number | null;
   max_output_tokens: number | null;
-  pricing?: Record<string, unknown> | null;
+  pricing?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   supports_stream: boolean;
   enabled: boolean;
   source: string;

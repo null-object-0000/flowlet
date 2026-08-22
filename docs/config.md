@@ -321,7 +321,10 @@ Key 一样包含在端到端加密的账号目录中。
 上游原始 ID 用于转发。由于 OpenRouter `/models` 返回全部主流模型，其账号天然
 **可以**勾选开放任意 Flowlet 白名单模型——未来白名单新增模型时，只要 `/models`
 返回即可由用户勾选开放；开放哪些模型由用户在账号编辑器中显式勾选，不默认全勾选
-（`config.json` 不为 `openrouter` 声明 `default_exposed_models`）。
+（`default_exposed_models.openrouter` 只登记 OpenRouter 独占模型的目录归属）。同步时还会
+保存 `/models` 返回的原始 `pricing`：账号编辑器仅在输入、输出及响应中所有已声明计费项
+都明确为 0 时标记“免费”，并按“免费且支持 → 付费且支持 → 免费但不支持 → 付费或价格未知
+且不支持”排序；价格缺失或无法解析时不推测为免费。
 
 **Responses 协议端点解析**：
 
@@ -422,7 +425,8 @@ Key 一样包含在端到端加密的账号目录中。
   "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
   "kimi": ["kimi-k3", "kimi-k2.7-code"],
   "qwen": ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
-  "zhipu": ["glm-5.3", "glm-5.2", "glm-4.7", "glm-4.5-air"]
+  "zhipu": ["glm-5.3", "glm-5.2", "glm-4.7", "glm-4.5-air"],
+  "openrouter": ["ox-alpha"]
 }
 ```
 
@@ -435,6 +439,8 @@ Key 一样包含在端到端加密的账号目录中。
   `FLOWLET_SUPPORTED_MODELS` 均读取该目录，不需要双写同步。
 - 白名单**不按渠道区分**：任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放。
   例如千问套餐端点也会返回 `deepseek-v4-pro`，该模型在全局白名单内，故可勾选。
+  OpenRouter 返回的 `stealth/ox-alpha` 会规范化为对外模型 `ox-alpha`，路由仍保留完整上游 ID；
+  `default_exposed_models.openrouter` 只登记该 OpenRouter 独占模型的目录归属，账号仍需用户显式勾选。
 - 一个账号开放哪些模型由**用户显式选择**：在账号编辑器里手动「拉取模型列表」
   （底层 `/models`，Rust command `fetch_channel_models`），编辑器展示全量上游模型、
   白名单之外的模型展示但禁用勾选，用户勾选后将上游返回的原始模型 ID 保存到

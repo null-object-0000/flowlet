@@ -1698,6 +1698,44 @@ async fn model_list_response_exposes_enabled_route_models() {
 }
 
 #[tokio::test]
+async fn model_list_response_exposes_canonical_openrouter_model() {
+    let routes = vec![RouteCandidate {
+        id: "route-ox-alpha".to_string(),
+        virtual_model_id: "ox-alpha".to_string(),
+        channel_id: "openrouter".to_string(),
+        account_id: "acc-openrouter".to_string(),
+        upstream_model: "stealth/ox-alpha".to_string(),
+        client_protocol: ProtocolType::OpenAi,
+        priority: 0,
+        enabled: true,
+        created_at: String::new(),
+        updated_at: String::new(),
+    }];
+    let accounts = vec![ChannelAccount {
+        id: "acc-openrouter".to_string(),
+        channel_id: "openrouter".to_string(),
+        api_key: "sk-or-test".to_string(),
+        enabled: true,
+        ..Default::default()
+    }];
+    let channels = vec![ChannelPreset {
+        id: "openrouter".to_string(),
+        vendor: "openrouter".to_string(),
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        ..Default::default()
+    }];
+
+    let response = build_model_list_response(&routes, &accounts, &channels, &ProtocolType::OpenAi);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(value["data"][0]["id"], "ox-alpha");
+    assert_eq!(value["data"][0]["owned_by"], "openrouter");
+}
+
+#[tokio::test]
 async fn model_list_response_anthropic_uses_anthropic_schema() {
     let routes = vec![
         RouteCandidate {

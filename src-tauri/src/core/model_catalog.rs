@@ -152,13 +152,17 @@ mod tests {
     #[test]
     fn embedded_catalog_is_valid_and_has_expected_models() {
         let catalog = model_catalog();
-        assert_eq!(catalog.supported_models().len(), 15);
+        assert_eq!(catalog.supported_models().len(), 16);
         assert_eq!(
             catalog.find("LongCat-2.0").unwrap().owner_channel_id,
             "longcat"
         );
         assert_eq!(catalog.find("GLM-5.3").unwrap().owner_channel_id, "zhipu");
         assert_eq!(catalog.find("GLM-5.2").unwrap().owner_channel_id, "zhipu");
+        assert_eq!(
+            catalog.find("stealth/ox-alpha").unwrap().owner_channel_id,
+            "openrouter"
+        );
         assert_eq!(
             catalog.owner_channel_for_models_cn_provider("moonshot-cn"),
             Some("kimi")

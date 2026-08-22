@@ -29,9 +29,9 @@ export const CUSTOM_CHANNEL_ID = "custom";
 
 /** OpenRouter 聚合渠道 ID。OpenRouter 的 `/models` 返回全部主流模型（带
  *  `vendor/` 前缀），因此其账号天然可以勾选开放任意 Flowlet 白名单模型——
- *  未来白名单新增模型时，只要 OpenRouter `/models` 返回即可由用户勾选开放，
- *  无需在 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL` 中维护静态列表。开放哪些模型
- *  与其他渠道一致，由用户在账号编辑器中显式勾选。 */
+ *  未来白名单新增模型时，只要 OpenRouter `/models` 返回即可由用户勾选开放。
+ *  `DEFAULT_EXPOSED_MODELS_BY_CHANNEL.openrouter` 仅登记 OpenRouter 独占模型的
+ *  官方归属，不代表账号默认勾选；开放哪些模型仍由用户显式选择。 */
 export const OPENROUTER_CHANNEL_ID = "openrouter";
 
 /** ChatGPT (Codex) 伪装渠道 ID。Codex 账号由 Rust 端自动发现和同步，
@@ -96,6 +96,8 @@ export const QWEN_TOKEN_PLAN_DEFAULT_MODELS = ["qwen3.8-max", "qwen3.6-flash"];
 
 /** 渠道预设模型从 model-catalog.json 按官方归属派生；未知渠道回退到预设默认模型。 */
 export function defaultExposedModels(channel: ChannelPreset): string[] {
+  // OpenRouter 的目录归属条目只描述其独占模型，不改变聚合渠道的显式选择语义。
+  if (channel.id === OPENROUTER_CHANNEL_ID) return [channel.default_model].filter(Boolean);
   return DEFAULT_EXPOSED_MODELS_BY_CHANNEL[channel.id] ?? [channel.default_model].filter(Boolean);
 }
 

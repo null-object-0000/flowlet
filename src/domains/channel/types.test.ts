@@ -26,7 +26,9 @@ describe("canonicalModelKey with aggregate vendor prefix", () => {
     expect(canonicalModelKey("deepseek/deepseek-v4-flash")).toBe("deepseek-v4-flash");
     expect(canonicalModelKey("qwen/qwen3.7-max")).toBe("qwen3.7-max");
     expect(canonicalModelKey("z-ai/glm-5.2")).toBe("glm-5.2");
+    expect(canonicalModelKey("stealth/ox-alpha")).toBe("ox-alpha");
     expect(canonicalModelId("deepseek/deepseek-v4-flash")).toBe("deepseek-v4-flash");
+    expect(canonicalModelId("stealth/ox-alpha")).toBe("ox-alpha");
     expect(canonicalModelId("openai/gpt-5.5")).toBeNull();
   });
 

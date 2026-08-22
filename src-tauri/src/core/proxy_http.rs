@@ -471,7 +471,7 @@ struct ModelEntry {
 
 /// 从 routes 中按 protocol+enabled+healthy 过滤后，收集对外模型集合。
 /// 同时包含聚合模型（flowlet-pro/flash）与直接底层模型。
-/// 直接模型：virtual_model_id === upstream_model，以渠道 vendor 为 owned_by；
+/// 直接模型：virtual_model_id 与 upstream_model 归一后身份相同，以渠道 vendor 为 owned_by；
 /// 聚合模型：owned_by = "flowlet"。
 fn collect_model_entries(
     routes: &[RouteCandidate],
@@ -524,8 +524,11 @@ fn collect_model_entries(
         if is_aggregate && !dual_protocol_channels.contains(route.channel_id.as_str()) {
             continue;
         }
-        // 直接模型：对外模型名必须与上游模型名一致（不允许同名非直接路由混入）。
-        if !is_aggregate && route.virtual_model_id != route.upstream_model {
+        // 直接模型允许上游保留 vendor 前缀或别名，但规范身份必须与对外模型一致。
+        if !is_aggregate
+            && crate::core::model_catalog::canonical_model_key(&route.virtual_model_id)
+                != crate::core::model_catalog::canonical_model_key(&route.upstream_model)
+        {
             continue;
         }
         let id = route.virtual_model_id.trim();

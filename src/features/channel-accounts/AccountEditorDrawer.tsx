@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Checkbox, Input, Pagination, Progress, Select, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { toAppError } from "../../platform/tauri/client";
 import { accountCommands } from "../../domains/account/commands";
+import { modelCommands } from "../../domains/model/commands";
 import { effectiveOpenAiBaseUrl, type AccountBalanceResult, type AccountBalanceSnapshot, type AccountResourceMode, type AccountResourceSyncMode, type ChannelAccount, type ModelSyncResult } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import {
@@ -43,6 +45,8 @@ import {
 } from "./accountName";
 import { ScrapeSyncFeedback } from "./ScrapeSyncFeedback";
 import { errorMessage } from "../../shared/errors/AppError";
+import { queryKeys } from "../../shared/query-keys";
+import { isFreeModelPricing, modelCandidateSortRank } from "./openRouterModelPricing";
 
 const { Text } = Typography;
 
@@ -70,6 +74,7 @@ type Props = {
 
 export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance, onScrape, onAuthorizeChatGpt, authorizationBusy = false }: Props) {
   const { language, t } = useAppPreferences();
+  const queryClient = useQueryClient();
   const [draft, setDraft] = useState<ChannelAccount>(() => createDraft(mode, accounts, presets, language));
   const [resource, setResource] = useState<ResourceDraft>(() => resourceDraft(snapshot));
   const [advancedOpen, setAdvancedOpen] = useState(
@@ -102,6 +107,14 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const isEdit = mode.kind === "edit";
   const isChatGptCreate = !isEdit && draft?.channel_id === CHATGPT_CHANNEL_ID;
   const isOpenRouter = draft?.channel_id === OPENROUTER_CHANNEL_ID;
+  const cachedChannelModels = useQuery({
+    queryKey: queryKeys.model.channelModels(),
+    queryFn: () => modelCommands.listChannelModels(),
+    enabled: mode.kind === "edit" && mode.account.synced_models != null,
+    networkMode: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
   const hasManagementKey = Boolean(draft?.management_key?.trim());
   const managementKeyChanged = isOpenRouter
     && isEdit
@@ -256,6 +269,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       // 开放哪些模型一律由用户显式勾选（含 OpenRouter），不默认勾选。
       const syncedModelIds = models.map((item) => item.model);
       setCandidates(models);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.model.channelModels() });
       setModelPage(1);
       update({
         synced_models: syncedModelIds,
@@ -278,9 +292,26 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   }
 
   const selectedModels = currentDraft.exposed_models ?? [];
+  const enrichedCandidates = useMemo(() => {
+    if (candidates == null) return null;
+    const cachedById = new Map(
+      (cachedChannelModels.data ?? [])
+        .filter((model) => model.channel_id === currentDraft.channel_id)
+        .map((model) => [model.model.trim().toLowerCase(), model] as const),
+    );
+    return candidates.map((candidate) => {
+      const cached = cachedById.get(candidate.model.trim().toLowerCase());
+      if (!cached) return candidate;
+      return {
+        ...candidate,
+        display_name: candidate.display_name ?? cached.display_name,
+        pricing: candidate.pricing ?? cached.pricing,
+      };
+    });
+  }, [cachedChannelModels.data, candidates, currentDraft.channel_id]);
   const candidateModelIds = useMemo(
-    () => (candidates ?? []).map((candidate) => candidate.model),
-    [candidates],
+    () => (enrichedCandidates ?? []).map((candidate) => candidate.model),
+    [enrichedCandidates],
   );
   const selectedSet = useMemo(
     () => new Set(
@@ -599,10 +630,10 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             ) : (
               <>
                 {(() => {
-                  const sorted = [...candidates].sort((a, b) => {
+                  const sorted = [...(enrichedCandidates ?? [])].sort((a, b) => {
                     const aSupported = whitelistSet.has(canonicalModelKey(a.model));
                     const bSupported = whitelistSet.has(canonicalModelKey(b.model));
-                    return Number(bSupported) - Number(aSupported);
+                    return modelCandidateSortRank(a, aSupported) - modelCandidateSortRank(b, bSupported);
                   });
                   const startIndex = (modelPage - 1) * MODELS_PER_PAGE;
                   const paged = sorted.slice(startIndex, startIndex + MODELS_PER_PAGE);
@@ -615,6 +646,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                           // 同一规范模型下的独立额度资源分别开启。
                           const key = canonicalModelKey(candidate.model);
                           const supported = whitelistSet.has(key);
+                          const free = isOpenRouter && isFreeModelPricing(candidate.pricing);
                           const checked = selectedSet.has(candidate.model.trim().toLowerCase());
                           const canonical = canonicalModelId(candidate.model);
                           const isAliasVariant = supported
@@ -630,14 +662,26 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                                 disabled={!supported}
                                 onChange={(event) => toggleExposedModel(candidate.model, event.target.checked === true)}
                               />
-                              <span className={styles.modelName}>{candidate.model}</span>
-                              {isAliasVariant && canonical ? (
-                                <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }}>{t("开放为 {model}", { model: canonical })}</Text>
-                              ) : null}
-                              {candidate.display_name && candidate.display_name.trim() && candidate.display_name !== candidate.model ? (
-                                <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }}>{candidate.display_name}</Text>
-                              ) : null}
-                              {supported ? null : <Tag size="small" color="grey">{t("不支持")}</Tag>}
+                              <span className={styles.modelIdentity}>
+                                <span className={styles.modelName}>{candidate.model}</span>
+                                {free ? <Tag className={styles.modelTag} size="small" color="green">{t("免费")}</Tag> : null}
+                                {supported ? null : <Tag className={styles.modelTag} size="small" color="grey">{t("不支持")}</Tag>}
+                              </span>
+                              <span className={styles.modelMeta}>
+                                {isAliasVariant && canonical ? (
+                                  <Text className={styles.modelMapping} type="tertiary" size="small" ellipsis={{ showTooltip: true }}>
+                                    {t("开放为 {model}", { model: canonical })}
+                                  </Text>
+                                ) : null}
+                                {candidate.display_name && candidate.display_name.trim() && candidate.display_name !== candidate.model ? (
+                                  <>
+                                    {isAliasVariant && canonical ? <span className={styles.modelMetaDivider}>·</span> : null}
+                                    <Text className={styles.modelDisplayName} type="tertiary" size="small" ellipsis={{ showTooltip: true }}>
+                                      {candidate.display_name}
+                                    </Text>
+                                  </>
+                                ) : null}
+                              </span>
                             </label>
                           );
                         })}

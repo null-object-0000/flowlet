@@ -9,11 +9,12 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(15);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(15);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(16);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(16);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-5.3");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-4.5-air");
+    expect(FLOWLET_SUPPORTED_MODELS).toContain("ox-alpha");
   });
 
   it("derives owner defaults and models-cn providers from the same identity", () => {
@@ -30,10 +31,13 @@ describe("model identity catalog", () => {
     expect(officialChannelIdForModel("z-ai/glm-5.3")).toBe("zhipu");
     expect(officialChannelIdForModel("z-ai/glm-5.2")).toBe("zhipu");
     expect(modelsCnProviderIdForModel("kimi-k3")).toBe("moonshot-cn");
+    expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.openrouter).toEqual(["ox-alpha"]);
+    expect(officialChannelIdForModel("stealth/ox-alpha")).toBe("openrouter");
   });
 
   it("normalizes aliases while preserving the canonical display ID", () => {
     expect(canonicalModelId("deepseek/deepseek-v4-flash-0731")).toBe("deepseek-v4-flash");
+    expect(canonicalModelId("stealth/ox-alpha")).toBe("ox-alpha");
     expect(canonicalModelId("unknown/model")).toBeNull();
   });
 });

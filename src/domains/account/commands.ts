@@ -42,7 +42,7 @@ export const accountCommands = {
     api_key: string;
     base_url_override?: string | null;
   }): Promise<ModelSyncResult> =>
-    invokeCommand<{ models_synced: number; models: { model: string; display_name?: string | null; created_at?: string | null }[]; errors: string[] }>(
+    invokeCommand<ModelSyncResult>(
       "fetch_channel_models",
       {
         channelId: input.channel_id,

@@ -121,10 +121,17 @@
 .modelHeading > span { display: grid; gap: 4px; }
 .modelHeading > button { flex-shrink: 0; margin-top: 2px; }
 .modelList { padding: 4px 0; display: grid; gap: 2px; align-content: start; }
-.modelItem { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 34px; padding: 0 10px; border-radius: 6px; cursor: pointer; }
+.modelItem { display: grid; grid-template-columns: auto minmax(0, 1.15fr) minmax(0, 1fr); align-items: center; column-gap: 12px; min-width: 0; min-height: 36px; padding: 0 10px; border-radius: 6px; cursor: pointer; }
 .modelItem:hover { background: var(--semi-color-fill-0); }
-.modelName { flex-shrink: 0; max-width: 55%; overflow: hidden; color: var(--semi-color-text-0); font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
-.modelItem > :global(.semi-typography) { flex: 1; min-width: 0; }
+.modelIdentity, .modelMeta { display: flex; align-items: center; min-width: 0; }
+.modelIdentity { gap: 6px; }
+.modelMeta { gap: 6px; color: var(--semi-color-text-2); }
+.modelName { min-width: 0; overflow: hidden; color: var(--semi-color-text-0); font-size: 13px; line-height: 18px; white-space: nowrap; text-overflow: ellipsis; }
+.modelTag { flex: none; }
+.modelMapping, .modelDisplayName { min-width: 0; overflow: hidden; white-space: nowrap; }
+.modelMapping { flex: none; max-width: 58%; }
+.modelDisplayName { flex: 1; }
+.modelMetaDivider { flex: none; color: var(--semi-color-text-3); }
 .modelUnsupported { opacity: 0.6; cursor: not-allowed; }
 .modelUnsupported:hover { background: transparent; }
 .modelUnsupported .modelName { color: var(--semi-color-text-2); }
@@ -133,6 +140,8 @@
 .footer button { height: 40px; }
 @media (max-width: 620px) {
   .channelRow, .modeOptions, .resourceGrid, .basicFields, .urlGrid { grid-template-columns: 1fr; }
+  .modelItem { grid-template-columns: auto minmax(0, 1fr); row-gap: 2px; padding-top: 5px; padding-bottom: 5px; }
+  .modelMeta { grid-column: 2; }
   .resourceModeHeading, .resourceModeMeta { align-items: flex-start; flex-direction: column; }
   .longCatSummaryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 14px; }
   .longCatSummaryGrid > div { padding: 0 10px; }

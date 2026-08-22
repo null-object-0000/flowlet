@@ -23,6 +23,41 @@ pub(crate) struct OpenAiModelEntry {
     pub(crate) created: Option<u64>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct OpenAiModelMetadataResponse {
+    #[serde(default)]
+    data: Vec<OpenAiModelMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModelMetadata {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    context_length: Option<i64>,
+    #[serde(default)]
+    pricing: Option<serde_json::Value>,
+    #[serde(default)]
+    top_provider: Option<OpenAiTopProviderMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiTopProviderMetadata {
+    #[serde(default)]
+    max_completion_tokens: Option<i64>,
+}
+
+fn model_metadata_by_id(body: &str) -> std::collections::HashMap<String, OpenAiModelMetadata> {
+    serde_json::from_str::<OpenAiModelMetadataResponse>(body)
+        .unwrap_or_default()
+        .data
+        .into_iter()
+        .filter(|entry| !entry.id.trim().is_empty())
+        .map(|entry| (entry.id.to_lowercase(), entry))
+        .collect()
+}
+
 /// 按上游模型创建时间倒序排列（新模型在前）；缺失 created 的排在最后，
 /// 稳定排序保证无时间戳的模型之间保持接口返回的原始顺序。
 pub(crate) fn sort_by_created_desc<T>(entries: &mut [T], created: impl Fn(&T) -> Option<u64>) {
@@ -329,6 +364,10 @@ pub async fn sync_openai_compatible_models(
 
     match serde_json::from_str::<OpenAiModelsResponse>(&body) {
         Ok(data) => {
+            // OpenRouter 等兼容端点会在 /models 同时返回名称、规格和原始 pricing。
+            // ChannelModel 已有对应持久化字段；缺失元数据的普通 OpenAI-compatible
+            // 端点继续保持原有的空值降级语义。
+            let metadata_by_id = model_metadata_by_id(&body);
             let mut entries: Vec<OpenAiModelEntry> = data
                 .data
                 .into_iter()
@@ -339,21 +378,28 @@ pub async fn sync_openai_compatible_models(
             let protocols = preset.supported_protocols.clone();
             let models = entries
                 .into_iter()
-                .map(|entry| ChannelModel {
-                    id: format!("{}-{}", account.channel_id, entry.id),
-                    channel_id: account.channel_id.clone(),
-                    model: entry.id.clone(),
-                    display_name: Some(entry.id),
-                    supported_protocols: protocols.clone(),
-                    context_window: None,
-                    max_output_tokens: None,
-                    pricing: None,
-                    supports_stream: true,
-                    enabled: true,
-                    source: "synced".to_string(),
-                    synced_at: Some(synced_at.clone()),
-                    created_at: synced_at.clone(),
-                    updated_at: synced_at.clone(),
+                .map(|entry| {
+                    let metadata = metadata_by_id.get(&entry.id.to_lowercase());
+                    ChannelModel {
+                        id: format!("{}-{}", account.channel_id, entry.id),
+                        channel_id: account.channel_id.clone(),
+                        model: entry.id.clone(),
+                        display_name: metadata
+                            .and_then(|value| value.name.clone())
+                            .or_else(|| Some(entry.id)),
+                        supported_protocols: protocols.clone(),
+                        context_window: metadata.and_then(|value| value.context_length),
+                        max_output_tokens: metadata
+                            .and_then(|value| value.top_provider.as_ref())
+                            .and_then(|value| value.max_completion_tokens),
+                        pricing: metadata.and_then(|value| value.pricing.clone()),
+                        supports_stream: true,
+                        enabled: true,
+                        source: "synced".to_string(),
+                        synced_at: Some(synced_at.clone()),
+                        created_at: synced_at.clone(),
+                        updated_at: synced_at.clone(),
+                    }
                 })
                 .collect::<Vec<_>>();
             ModelSyncResult {
@@ -533,6 +579,37 @@ mod tests {
         assert_eq!(data.data[0].created, Some(1700000000));
         // 上游不返回 created 时为 None，不报错。
         assert_eq!(data.data[1].created, None);
+    }
+
+    #[test]
+    fn parses_openrouter_model_pricing_and_limits_metadata() {
+        let json = r#"{
+            "data": [{
+                "id": "stealth/ox-alpha",
+                "name": "Ox Alpha",
+                "context_length": 1048576,
+                "pricing": {
+                    "prompt": "0",
+                    "completion": "0",
+                    "request": "0",
+                    "image": "0"
+                },
+                "top_provider": { "max_completion_tokens": 131072 }
+            }]
+        }"#;
+
+        let metadata = model_metadata_by_id(json);
+        let ox = metadata.get("stealth/ox-alpha").unwrap();
+        assert_eq!(ox.name.as_deref(), Some("Ox Alpha"));
+        assert_eq!(ox.context_length, Some(1_048_576));
+        assert_eq!(
+            ox.top_provider
+                .as_ref()
+                .and_then(|provider| provider.max_completion_tokens),
+            Some(131_072)
+        );
+        assert_eq!(ox.pricing.as_ref().unwrap()["prompt"], "0");
+        assert_eq!(ox.pricing.as_ref().unwrap()["completion"], "0");
     }
 
     #[test]

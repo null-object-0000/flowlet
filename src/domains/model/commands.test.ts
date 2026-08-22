@@ -443,24 +443,27 @@ describe("OpenRouter aggregate channel (vendor/model IDs)", () => {
     channel_id: "openrouter",
     api_key: "sk-or-test",
     enabled: true,
-    exposed_models: ["deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "z-ai/glm-5.2"],
-    synced_models: ["deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "z-ai/glm-5.2"],
+    exposed_models: ["deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "z-ai/glm-5.2", "stealth/ox-alpha"],
+    synced_models: ["deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "z-ai/glm-5.2", "stealth/ox-alpha"],
   } as ChannelAccount;
 
   it("maps vendor-prefixed upstream IDs to canonical whitelist models", () => {
     const routes = mergeDefaultRoutes([], [account], [openrouterPreset]);
     const pairs = routes.map((route) => [route.virtual_model_id, route.upstream_model] as const);
-    // 每个声明的协议（openai / anthropic / responses）各生成三个直连路由，按勾选顺序排列。
+    // 每个声明的协议（openai / anthropic / responses）各生成四个直连路由，按勾选顺序排列。
     expect(pairs).toEqual([
       ["deepseek-v4-flash", "deepseek/deepseek-v4-flash"],
       ["qwen3.7-max", "qwen/qwen3.7-max"],
       ["glm-5.2", "z-ai/glm-5.2"],
+      ["ox-alpha", "stealth/ox-alpha"],
       ["deepseek-v4-flash", "deepseek/deepseek-v4-flash"],
       ["qwen3.7-max", "qwen/qwen3.7-max"],
       ["glm-5.2", "z-ai/glm-5.2"],
+      ["ox-alpha", "stealth/ox-alpha"],
       ["deepseek-v4-flash", "deepseek/deepseek-v4-flash"],
       ["qwen3.7-max", "qwen/qwen3.7-max"],
       ["glm-5.2", "z-ai/glm-5.2"],
+      ["ox-alpha", "stealth/ox-alpha"],
     ]);
     expect(routes.every((route) => route.channel_id === "openrouter")).toBe(true);
     // responses 协议确实生成路由。

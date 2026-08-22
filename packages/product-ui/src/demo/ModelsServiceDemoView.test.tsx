@@ -6,7 +6,7 @@ describe("ModelsServiceDemoView", () => {
   it("matches the real split workspace and keeps its main interactions live", () => {
     render(<ModelsServiceDemoView zh={false} />);
 
-    expect(screen.getByText("15")).toBeTruthy();
+    expect(screen.getByText("16")).toBeTruthy();
     expect(screen.getByText("2 aggregate · 13 direct")).toBeTruthy();
     const kimiLogo = document.querySelector('img[src="/icons/lobe/kimi-color.svg"]');
     expect(kimiLogo?.parentElement?.tagName).toBe("SPAN");

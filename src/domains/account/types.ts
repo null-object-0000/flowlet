@@ -68,7 +68,13 @@ export type AccountBalanceSnapshot = {
 
 export type ModelSyncResult = {
   models_synced: number;
-  models: { model: string; display_name?: string | null; created_at?: string | null }[];
+  models: {
+    model: string;
+    display_name?: string | null;
+    created_at?: string | null;
+    /** 上游 /models 返回的原始价格对象；OpenRouter 用它标识免费模型。 */
+    pricing?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+  }[];
   errors: string[];
 };
 

@@ -263,6 +263,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - glm-5.2
 - glm-4.7
 - glm-4.5-air
+- ox-alpha
 ```
 
 这是 Flowlet **总共支持哪些模型**，单一事实源为仓库根目录 `model-catalog.json`；

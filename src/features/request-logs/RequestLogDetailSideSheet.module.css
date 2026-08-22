@@ -32,10 +32,14 @@
 .errorBox span { line-height: 1.5; word-break: break-word; }
 .attemptHeader { display: flex; align-items: center; justify-content: space-between; }
 .attemptHeader > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
-.attempts { display: grid; gap: 7px; }
-.attempt { width: 100%; min-height: 54px; padding: 8px 10px; border: 1px solid var(--flowlet-color-border); border-radius: 7px; background: var(--flowlet-color-surface); display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 9px; color: var(--flowlet-color-text); text-align: left; cursor: pointer; }
+.attempts { display: grid; gap: 8px; }
+.attempt { position: relative; width: 100%; min-height: 54px; padding: 8px 10px; border: 1px solid var(--flowlet-color-border); border-radius: 7px; background: var(--flowlet-color-surface); display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 9px; color: var(--flowlet-color-text); text-align: left; cursor: pointer; }
+.attempt:not(:last-child)::after { position: absolute; left: 21px; bottom: -9px; width: 1px; height: 8px; background: var(--flowlet-color-border); content: ""; pointer-events: none; }
 .attempt:hover, .attempt.selected { border-color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); }
+.attempt.skipped { border-color: var(--flowlet-color-warning-border); background: var(--flowlet-color-warning-surface); }
+.attempt.skipped:hover, .attempt.skipped.selected { border-color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); }
 .attempt > i { width: 23px; height: 23px; border-radius: 50%; display: grid; place-items: center; color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-size: var(--flowlet-font-size-caption); font-style: normal; font-weight: 650; }
+.attempt.skipped > i { color: var(--flowlet-color-warning-strong); background: var(--semi-color-warning-light-default); }
 .attempt > span { min-width: 0; display: grid; gap: 2px; }
 .attempt strong, .attempt small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attempt strong { font-size: var(--flowlet-font-size-body); }

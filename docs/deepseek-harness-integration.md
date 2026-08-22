@@ -54,7 +54,8 @@ agent-default-model:
 代理不会只信任可能滞后的客户端声明：OpenAI Chat 的 `image_url`、Responses 的 `input_image`
 以及 Anthropic 的 `image` 内容块都会触发候选过滤，只保留目录明确支持图片输入的上游。若原本
 存在路由、但没有图片候选，代理返回 `400 model_input_modality_unsupported`；目录能力未知时按
-仅文本处理。文本请求不改变现有候选顺序与降级逻辑。
+仅文本处理。被过滤的候选会以“已跳过 · 不支持图像输入”的本地降级节点写入请求日志，不伪造
+上游请求；实际命中的候选继续显示在其后。文本请求不改变现有候选顺序与降级逻辑。
 
 模型规格声明同样是默认关闭的高级能力：开启后，Flowlet 会在模型的 `models` 条目写入上述
 `input` 以及 `contextWindow: 1048576`（1M），使 DSH 按聚合模型能力做请求前校验和上下文预算；不声明

@@ -540,6 +540,7 @@ API Key 登录态（`auth_mode=apiKey`）没有订阅数据，会在前端被过
 * `redact_sensitive_headers = false` 时，SQLite 原样保存，UI 原样展示并复制 Header、Body 和错误信息，包括 API Key、Authorization、x-api-key、Cookie、Token 等字段；
 * `redact_sensitive_headers = true` 时，捕获层在落库前将受支持的敏感 Header 替换为 `[redacted]`，UI 直接展示并复制落库内容，不再二次脱敏；
 * 有路由候选时，每条 attempt 的请求日志必须从完成 URL、模型和鉴权改写后的最终上游 Request 捕获，并与同一次第三方调用的响应对应；不得用客户端入站报文代替上游请求报文；
+* 因输入模态不支持而在发起第三方请求前被过滤的候选，作为 `input_modality_*_unsupported` 非终态降级节点记录；必须保留候选渠道、账号和模型，但不得伪造 HTTP 状态、上游 URL 或上游请求/响应捕获；请求详情以“已跳过”区别于真实失败 attempt；
 * 请求和响应 Body 捕获必须明确受配置控制；
 * 新增日志字段时，要考虑存储体积；
 * 错误应对用户可读，同时保留详细底层日志；

@@ -134,6 +134,53 @@ describe("RequestLogsPage", () => {
     expect(screen.getByText(/secret-key/)).toBeInTheDocument();
   });
 
+  it("shows input-modality skips as local fallback nodes before the successful route", async () => {
+    const user = userEvent.setup();
+    const skipped: RequestLogRow = {
+      ...row,
+      id: "log-skipped",
+      channel_id: "zhipu",
+      channel_name: "Z.AI",
+      account_id: "account-text",
+      account_name: "文本账号",
+      upstream_model: "glm-5.2",
+      upstream_url: null,
+      status: null,
+      latency_ms: 0,
+      duration_ms: 0,
+      error_message: null,
+      fallback_count: 1,
+      route_reason: "input_modality_image_unsupported",
+      attempt_seq: 0,
+      req_headers_json: null,
+      req_body_b64: null,
+      res_headers_json: null,
+      res_body_b64: null,
+      is_last_attempt: false,
+    };
+    mocks.useDetail.mockReturnValue({
+      data: [skipped, { ...row, route_reason: "fallback_success", fallback_count: 1, attempt_seq: 1 }],
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: mocks.refetch,
+    });
+
+    render(<RequestLogsPage />);
+    await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
+
+    expect(await screen.findByText("已跳过")).toBeInTheDocument();
+    expect(screen.getByText("未请求上游")).toBeInTheDocument();
+    expect(screen.getByText("flowlet-pro → glm-5.2 · 不支持图像输入，已跳过")).toBeInTheDocument();
+    expect(screen.getByText("flowlet-pro → LongCat-2.0 · 回退成功")).toBeInTheDocument();
+    expect(screen.getAllByText("成功").length).toBeGreaterThanOrEqual(1);
+
+    await user.click(screen.getByText("flowlet-pro → glm-5.2 · 不支持图像输入，已跳过").closest("button")!);
+    expect(screen.getByText("未请求上游（能力不匹配）")).toBeInTheDocument();
+    expect(screen.getByText("未请求")).toBeInTheDocument();
+    expect(screen.queryByText("旧日志未记录")).not.toBeInTheDocument();
+  });
+
   it("distinguishes the inbound URL from a missing upstream route", async () => {
     const user = userEvent.setup();
     mocks.useDetail.mockReturnValue({

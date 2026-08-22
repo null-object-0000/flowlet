@@ -172,13 +172,13 @@ pub(crate) async fn apply_agent_global_config(
     let adapter_id = agent_global_config_adapter(&agent_id)?;
     let expected_base_url = format!("http://127.0.0.1:{}{suffix}", bind.port);
     let client_token = bind.default_client_token;
-    if adapter_id == "deepseek-harness"
+    if matches!(adapter_id, "deepseek-harness" | "opencode" | "pi")
         && options
             .as_ref()
             .and_then(|value| value.model_specs)
             .unwrap_or(false)
     {
-        let modalities = crate::core::model_input_capabilities::deepseek_harness_model_inputs(
+        let modalities = crate::core::model_input_capabilities::aggregate_model_inputs(
             &state.runtime_config.snapshot(),
         );
         options

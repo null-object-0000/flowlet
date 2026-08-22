@@ -2766,6 +2766,91 @@ async fn e2e_cross_model_fallback() {
 }
 
 #[tokio::test]
+async fn e2e_image_request_logs_modality_skip_before_supported_route() {
+    // glm-5.2 仅文本，OpenRouter ox-alpha 由 models.dev 声明支持图片。
+    // 图片请求不应调用第一个候选，但详情链路必须保留这个本地降级节点。
+    let (addr, seen) = spawn_spy_upstream(status_map(&[("vision-key", StatusCode::OK)])).await;
+    let channels = vec![
+        dual_protocol_channel("zhipu", "Z.AI", &addr),
+        dual_protocol_channel("openrouter", "OpenRouter", &addr),
+    ];
+    let accounts = vec![
+        test_account("text", "zhipu", "text-key", 0),
+        test_account("vision", "openrouter", "vision-key", 0),
+    ];
+    let routes = vec![
+        test_route(
+            "text-route",
+            "flowlet-pro",
+            "zhipu",
+            "text",
+            "glm-5.2",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "vision-route",
+            "flowlet-pro",
+            "openrouter",
+            "vision",
+            "stealth/ox-alpha",
+            ProtocolType::OpenAi,
+            1,
+        ),
+    ];
+    let state = build_test_state(channels, accounts, routes);
+    let storage = state.storage.clone();
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"flowlet-pro","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,eA=="}}]}]}"#,
+        ))
+        .unwrap();
+    let response = forward_request(state, request, ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(*seen.lock().unwrap(), vec!["vision-key".to_string()]);
+
+    let attempts = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let final_rows = storage.list_request_logs().unwrap();
+            if let Some(final_row) = final_rows.first() {
+                let rows = storage
+                    .list_request_logs_by_request_id(&final_row.request_id)
+                    .unwrap();
+                if rows.len() == 2 {
+                    break rows;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(attempts[0].upstream_model.as_deref(), Some("glm-5.2"));
+    assert_eq!(
+        attempts[0].route_reason.as_deref(),
+        Some("input_modality_image_unsupported")
+    );
+    assert_eq!(attempts[0].status, None);
+    assert_eq!(attempts[0].upstream_url, None);
+    assert!(!attempts[0].is_last_attempt);
+    assert_eq!(
+        attempts[1].upstream_model.as_deref(),
+        Some("stealth/ox-alpha")
+    );
+    assert_eq!(attempts[1].route_reason.as_deref(), Some("fallback_success"));
+    assert_eq!(attempts[1].fallback_count, 1);
+    assert!(attempts[1].is_last_attempt);
+}
+
+#[tokio::test]
 async fn e2e_product_not_activated_falls_back_to_next_model() {
     let seen = Arc::new(Mutex::new(Vec::<String>::new()));
     let seen_by_upstream = seen.clone();

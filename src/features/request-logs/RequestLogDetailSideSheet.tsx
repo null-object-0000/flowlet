@@ -34,6 +34,7 @@ export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { 
   const rows = detail.data ?? [];
   const finalRow = rows.length ? rows[rows.length - 1] : undefined;
   const selectedRow = rows.find((row) => row.id === selectedAttemptId) ?? finalRow;
+  const selectedRowIsLocalSkip = selectedRow ? isInputModalitySkip(selectedRow) : false;
   const sessionId = finalRow?.agent_session_id ?? null;
 
   return (
@@ -68,7 +69,11 @@ export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { 
                   <DetailItem label={t("入口请求地址")} value={formatEntryRequestUrl(selectedRow)} wide copyable />
                   <DetailItem
                     label={t("底层接口地址")}
-                    value={selectedRow.upstream_url || (isPreRoutingFailure(selectedRow) ? t("未发往上游（路由前失败）") : t("旧日志未记录"))}
+                    value={selectedRow.upstream_url || (selectedRowIsLocalSkip
+                      ? t("未请求上游（能力不匹配）")
+                      : isPreRoutingFailure(selectedRow)
+                        ? t("未发往上游（路由前失败）")
+                        : t("旧日志未记录"))}
                     wide
                     copyable={Boolean(selectedRow.upstream_url)}
                   />
@@ -76,7 +81,7 @@ export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { 
                     <MetaItem label={t("请求方法")} value={selectedRow.method || "-"} />
                     <MetaItem label={t("客户端")} value={selectedRow.client_name || selectedRow.client_id || t("未知客户端")} />
                     <MetaItem label={t("客户端协议")} value={selectedRow.client_protocol || "-"} />
-                    <MetaItem label={t("HTTP 状态")} value={selectedRow.status?.toString() || t("失败")} />
+                    <MetaItem label={t("HTTP 状态")} value={selectedRowIsLocalSkip ? t("未请求") : selectedRow.status?.toString() || t("失败")} />
                   </div>
                   <DetailItem
                     label={t("会话 ID")}
@@ -217,13 +222,13 @@ function AttemptSelector({ rows, selectedRow, onSelect, compact = false }: { row
       <div className={styles.attemptHeader}><strong className={styles.sectionTitle}>{t("尝试链路")}</strong><span>{t("共 {count} 次", { count: rows.length })}</span></div>
       <div className={styles.attempts}>
         {rows.map((row, index) => (
-          <button key={row.id} type="button" className={`${styles.attempt} ${selectedRow.id === row.id ? styles.selected : ""}`} onClick={() => onSelect(row.id)}>
+          <button key={row.id} type="button" className={`${styles.attempt} ${isInputModalitySkip(row) ? styles.skipped : ""} ${selectedRow.id === row.id ? styles.selected : ""}`} onClick={() => onSelect(row.id)}>
             <i>{index + 1}</i>
             <span>
               <strong>{row.channel_name || row.channel_id || t("未路由")} · {row.account_name || row.account_id || "-"}</strong>
               <small title={attemptDetail(row, t)}>{attemptDetail(row, t)}</small>
             </span>
-            <span className={styles.attemptMeta}><StatusTag row={row} /><small>{formatDuration(row.duration_ms ?? row.latency_ms)}</small></span>
+            <span className={styles.attemptMeta}><StatusTag row={row} /><small>{isInputModalitySkip(row) ? t("未请求上游") : formatDuration(row.duration_ms ?? row.latency_ms)}</small></span>
           </button>
         ))}
       </div>
@@ -233,7 +238,12 @@ function AttemptSelector({ rows, selectedRow, onSelect, compact = false }: { row
 
 function StatusTag({ row }: { row: RequestLogRow }) {
   const { t } = useAppPreferences();
+  if (isInputModalitySkip(row)) return <Tag size="small" color="orange">{t("已跳过")}</Tag>;
   return isSuccessfulLog(row) ? <Tag size="small" color="green">{t("成功")}</Tag> : <Tag size="small" color="red">{t("失败")}</Tag>;
+}
+
+function isInputModalitySkip(row: RequestLogRow) {
+  return row.route_reason === "input_modality_image_unsupported";
 }
 
 function CapturedSection({ title, value }: { title: string; value: string }) {
@@ -323,6 +333,8 @@ function routeReasonLabel(reason: string | null, t: Translate) {
     network_connect: "上游连接失败",
     network_request: "上游请求失败",
     network_error: "上游网络错误",
+    input_modality_image_unsupported: "不支持图像输入，已跳过",
+    model_input_modality_unsupported: "没有支持图像输入的可用路由",
   };
   if (!reason) return t("请求完成");
   const fallbackBase = reason.endsWith("_fallback") ? reason.slice(0, -"_fallback".length) : null;

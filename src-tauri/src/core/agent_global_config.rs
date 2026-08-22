@@ -61,10 +61,12 @@ pub struct AgentGlobalConfigReport {
     /// 扩展为 Agent 请求注入 x-flowlet-session 头，使 Flowlet 能按会话归并请求。
     #[serde(default)]
     pub session_extension: bool,
-    /// 仅 DeepSeek Harness：是否已声明聚合模型规格（models 条目携带 contextWindow）。
-    /// 其他 Agent 恒为 false。
+    /// 支持模型能力声明的 Agent：是否已在受管模型条目中声明聚合模型规格。
     #[serde(default)]
     pub model_specs: bool,
+    /// 从受管配置中解析出的聚合模型输入模态，供状态展示与手动片段保持一致。
+    #[serde(default)]
+    pub model_input_modalities: BTreeMap<String, Vec<String>>,
     /// 仅 DeepSeek Harness：Flowlet 交互确认桥（approval bridge）是否在位。
     /// 桥接把 DSH headless 会话的 approval/request 转交 Flowlet 桌面端确认或否决。
     #[serde(default)]
@@ -92,8 +94,8 @@ pub struct AgentGlobalConfigOptions {
     /// 选项时均默认不安装（不改变已有扩展文件）。
     #[serde(default)]
     pub session_extension: Option<bool>,
-    /// 仅 DeepSeek Harness：是否向 settings.yaml 声明聚合模型规格
-    /// （flowlet-pro / flowlet-flash 模型条目的 contextWindow 与 input）。未传选项时不填写。
+    /// 是否声明聚合模型规格。DSH 写入 contextWindow 与 input；OpenCode / Pi
+    /// 写入各自官方模型格式的输入模态字段。未传选项时不填写。
     #[serde(default)]
     pub model_specs: Option<bool>,
     /// 由 Rust command 根据当前路由与本地模型目录注入，拒绝前端直接提供，确保与代理
@@ -118,6 +120,16 @@ impl AgentGlobalConfigOptions {
                 .unwrap_or(false),
         )
     }
+}
+
+fn declared_model_inputs(
+    model_input_modalities: Option<&BTreeMap<String, Vec<String>>>,
+    model: &str,
+) -> Vec<String> {
+    model_input_modalities
+        .and_then(|inputs| inputs.get(model).cloned())
+        .filter(|inputs| !inputs.is_empty())
+        .unwrap_or_else(|| vec!["text".to_string()])
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

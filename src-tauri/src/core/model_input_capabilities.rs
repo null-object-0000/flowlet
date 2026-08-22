@@ -129,11 +129,19 @@ fn current_index() -> ModelInputCapabilityIndex {
     if let Some(index) = cache.as_ref().cloned() {
         return index;
     }
-    let models_cn = super::storage::storage_tasks::read_models_cn_file();
+    let mut models_cn = super::storage::storage_tasks::read_models_cn_file();
     #[cfg(desktop)]
-    let models_dev = super::storage::storage_tasks::read_models_dev_file();
+    let mut models_dev = super::storage::storage_tasks::read_models_dev_file();
     #[cfg(not(desktop))]
-    let models_dev: Option<String> = None;
+    let mut models_dev: Option<String> = None;
+    // 开发与测试二进制位于 target 目录，模型文件尚未复制到 exe 同级；使用仓库内
+    // 随包资源作为同语义后备。发布构建仍只读取 exe 同级的可同步目录。
+    #[cfg(debug_assertions)]
+    {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        models_cn = models_cn.or_else(|| std::fs::read_to_string(manifest.join("models-cn.json")).ok());
+        models_dev = models_dev.or_else(|| std::fs::read_to_string(manifest.join("models-dev.json")).ok());
+    }
     let index =
         ModelInputCapabilityIndex::from_catalogs(models_cn.as_deref(), models_dev.as_deref());
     *cache = Some(index.clone());
@@ -227,9 +235,9 @@ fn route_is_usable_for_aggregate(
         })
 }
 
-/// DSH 仅接受 text / image。文本始终声明；只要聚合模型存在一个可用图片候选，
-/// 就声明 image，代理会在实际图片请求时再次按候选能力过滤。
-pub(crate) fn deepseek_harness_model_inputs(
+/// Agent 模型配置只声明 Flowlet 当前支持的 text / image。文本始终声明；只要聚合模型
+/// 存在一个可用图片候选，就声明 image，代理会在实际图片请求时再次按候选能力过滤。
+pub(crate) fn aggregate_model_inputs(
     snapshot: &RuntimeConfigSnapshot,
 ) -> BTreeMap<String, Vec<String>> {
     let index = current_index();

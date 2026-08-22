@@ -30,6 +30,13 @@ describe("backgroundTaskCommands contract", () => {
     expect(invokeMock).toHaveBeenCalledWith("get_agent_sync_status", undefined, undefined);
   });
 
+  it("reads both local model catalog documents through separate commands", async () => {
+    await backgroundTaskCommands.getModelsCnCatalog();
+    await backgroundTaskCommands.getModelsDevProviderCatalog("openrouter");
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "get_models_cn_catalog", undefined, undefined);
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "get_models_dev_provider_catalog", { providerId: "openrouter" }, undefined);
+  });
+
   it("opens one persisted task detail", async () => {
     await backgroundTaskCommands.detail("job-1");
     expect(invokeMock).toHaveBeenCalledWith("get_background_job_detail", { jobId: "job-1" }, undefined);

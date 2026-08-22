@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { IconInfoCircle } from "@douyinfe/semi-icons";
+import { Button } from "@douyinfe/semi-ui-19";
+import { IconCopy, IconInfoCircle } from "@douyinfe/semi-icons";
 import { ChannelBrandLogoView } from "../desktop/ChannelBrandLogoView";
 import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView, type ModelsServiceItemModel, type ModelsServiceRouteModel } from "../desktop/ModelsServiceView";
 import { createModelsServiceFixture } from "./fixtures";
@@ -31,6 +32,7 @@ export function ModelsServiceDemoView({ zh, density = "default" }: { zh: boolean
     logo={modelLogo(selectedModel)}
     title={selectedModel.name}
     subtitle={`${selectedModel.kind === "aggregate" ? (zh ? "聚合模型" : "Aggregate model") : (zh ? "渠道模型" : "Direct model")} · ${selectedModel.kind === "aggregate" ? (zh ? "2 个可用账号" : "2 available accounts") : selectedModel.typeLabel.split(" · ")[0]}`}
+    headerAction={<Button aria-label={zh ? "复制模型名称" : "Copy model name"} title={zh ? "复制模型名称" : "Copy model name"} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void navigator.clipboard?.writeText(selectedModel.name)} />}
     activeKey={activeTab}
     onTabChange={setActiveTab}
     tabs={[
@@ -87,14 +89,16 @@ function modelChannelId(model: ModelsServiceItemModel) {
 function BasicDetail({ zh, model }: { zh: boolean; model: ModelsServiceItemModel }) {
   const aggregate = model.kind === "aggregate";
   return <ModelsServiceTabContentView>
-    {aggregate ? <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>{zh ? "聚合模型参数与能力按当前已启用路由中的最低能力计算。" : "Aggregate limits and capabilities use the lowest enabled route capability."}</ModelsServiceInfoBannerView> : null}
+    {aggregate ? <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>{zh ? "参数与能力按当前已启用路由的最低值计算。" : "Specifications and capabilities use the lowest values among currently enabled routes."}</ModelsServiceInfoBannerView> : null}
     <ModelsServiceSectionView title={zh ? "模型参数" : "Model parameters"}><ModelsServiceMetricGridView items={[
       { key: "context", label: zh ? "上下文窗口" : "Context window", value: aggregate ? "1M" : "128K" },
       { key: "output", label: zh ? "最大输出" : "Max output", value: "128K" },
-      { key: "type", label: zh ? "模型类型" : "Model type", value: aggregate ? (zh ? "Flowlet 聚合" : "Flowlet aggregate") : (zh ? "渠道模型" : "Direct model") },
-      { key: "owner", label: zh ? "官方归属" : "Owner", value: aggregate ? (zh ? "多渠道聚合" : "Multi-channel") : modelOwner(model) },
+      { key: "owner", label: zh ? "官方归属" : "Owner", value: aggregate ? "Flowlet" : modelOwner(model) },
+      { key: "source", label: zh ? "规格来源" : "Specification source", value: aggregate ? (zh ? "聚合计算" : "Aggregate calculation") : "models-cn" },
     ]} /></ModelsServiceSectionView>
     <ModelsServiceSectionView title={zh ? "模型能力" : "Capabilities"}><ModelsServiceCapabilityListView items={[
+      { key: "input-modalities", label: zh ? "输入模态" : "Input modalities", value: zh ? "文本 · 图像 · 视频" : "Text · Image · Video" },
+      { key: "output-modalities", label: zh ? "输出模态" : "Output modalities", value: zh ? "文本" : "Text" },
       { key: "reasoning", label: zh ? "推理" : "Reasoning", value: zh ? "支持" : "Yes", supported: true },
       { key: "tools", label: zh ? "工具调用" : "Tool use", value: zh ? "支持" : "Yes", supported: true },
     ]} /></ModelsServiceSectionView>

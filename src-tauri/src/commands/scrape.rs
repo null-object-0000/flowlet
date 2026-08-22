@@ -56,6 +56,52 @@ pub(crate) fn get_models_cn_catalog(
     Ok(crate::core::storage::storage_tasks::read_models_cn_file())
 }
 
+/// 读取本地 models.dev 的单个 provider 子目录。避免把数 MB 的完整目录经 IPC
+/// 传给前端；仅供模型规格回退，不直接请求远程。
+#[tauri::command]
+pub(crate) fn get_models_dev_provider_catalog(
+    _state: tauri::State<'_, AppState>,
+    provider_id: String,
+) -> Result<Option<String>, String> {
+    let Some(raw) = crate::core::storage::storage_tasks::read_models_dev_file() else {
+        return Ok(None);
+    };
+    models_dev_provider_subset(&raw, &provider_id)
+}
+
+fn models_dev_provider_subset(raw: &str, provider_id: &str) -> Result<Option<String>, String> {
+    let catalog: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("解析 models.dev 目录失败：{error}"))?;
+    let Some(provider) = catalog.get(provider_id) else {
+        return Ok(None);
+    };
+    let mut subset = serde_json::Map::new();
+    subset.insert(provider_id.to_string(), provider.clone());
+    serde_json::to_string(&serde_json::Value::Object(subset))
+        .map(Some)
+        .map_err(|error| format!("序列化 models.dev provider 失败：{error}"))
+}
+
+#[cfg(test)]
+mod model_catalog_read_tests {
+    use super::models_dev_provider_subset;
+
+    #[test]
+    fn returns_only_the_requested_models_dev_provider() {
+        let raw = r#"{
+            "openrouter":{"id":"openrouter","models":{"stealth/ox-alpha":{"id":"stealth/ox-alpha"}}},
+            "deepseek":{"id":"deepseek","models":{"deepseek-v4-flash":{"id":"deepseek-v4-flash"}}}
+        }"#;
+        let subset = models_dev_provider_subset(raw, "openrouter")
+            .unwrap()
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&subset).unwrap();
+        assert!(value.get("openrouter").is_some());
+        assert!(value.get("deepseek").is_none());
+        assert!(models_dev_provider_subset(raw, "missing").unwrap().is_none());
+    }
+}
+
 /// 从本地 models-cn 目录提取 channel_id:upstream_model → currency 映射。
 #[tauri::command]
 pub(crate) fn get_models_cn_currencies(

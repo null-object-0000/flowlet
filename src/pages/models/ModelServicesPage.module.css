@@ -57,6 +57,7 @@
 .configRow:last-child { border-bottom: 0; }
 .configRow > span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); }
 .configRow > strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--flowlet-font-size-body-strong); }
+.modelDescription { margin: 0; padding: 10px; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); line-height: var(--flowlet-line-height-body); }
 .configRow > strong.priceCell { overflow: visible; white-space: normal; display: grid; justify-items: start; gap: 2px; }
 .priceCell small { color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-caption); font-weight: 500; }
 .capYes { color: var(--flowlet-color-success); }

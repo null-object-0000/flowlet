@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Modal, Select } from "@douyinfe/semi-ui-19";
-import { IconInfoCircle } from "@douyinfe/semi-icons";
+import { Button, Modal, Select, Toast } from "@douyinfe/semi-ui-19";
+import { IconCopy, IconInfoCircle } from "@douyinfe/semi-icons";
 import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView, type ModelsServiceItemModel, type ModelsServiceRouteModel } from "@flowlet/product-ui";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useAccounts, useChannelPresets } from "../../features/channel-accounts";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
 import { useModelActions } from "../../features/exposed-models/useModelActions";
-import { useChannelModels, useModelPrices, useRouteCandidates } from "../../features/exposed-models/useModels";
+import { useRouteCandidates } from "../../features/exposed-models/useModels";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import {
@@ -16,7 +16,6 @@ import {
   type ModelRouteGroup,
   type ModelServiceItem,
 } from "./modelServiceView";
-import { buildModelBasicInfo, type ModelBasicInfo } from "./modelBasicInfo";
 import {
   addAggregateRouteGroup,
   buildAggregateRouteOptions,
@@ -27,16 +26,18 @@ import {
 } from "./modelServiceInteractions";
 import type { ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
-import type { ChannelModel, RouteCandidate } from "../../domains/model/types";
-import type { ModelPriceInfo } from "../../domains/settings/types";
+import type { RouteCandidate } from "../../domains/model/types";
 import { formatTokenCapacity, type NumberLanguage } from "../../shared/formatters/number";
 import { formatCostAmount } from "../../shared/formatters/cost";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import {
   useLocalModelsCnCatalog,
+  useLocalModelsDevCatalog,
   resolveChannelModel,
+  resolveModelSpecification,
   parseCatalogJson,
+  parseModelsDevCatalogJson,
   aggregateMinLimits,
   aggregateCapabilitiesIntersection,
   aggregateMaxPrice,
@@ -160,11 +161,10 @@ export function ModelServicesPage() {
   const accounts = useAccounts();
   const channels = useChannelPresets();
   const routes = useRouteCandidates();
-  const channelModels = useChannelModels();
   // 定价仅用于详情展示，加载失败降级为“—”，不参与页面级 loading/error 聚合。
-  const prices = useModelPrices();
   // models-cn 目录：只读本地（由后台定时任务拉取）。本地无数据时 catalog 为 null。
   const catalogEntry = useLocalModelsCnCatalog();
+  const modelsDevCatalogEntry = useLocalModelsDevCatalog();
   const syncModelCatalogs = useModelCatalogsSync();
   const actions = useModelActions();
   const [search, setSearch] = useState("");
@@ -204,14 +204,14 @@ export function ModelServicesPage() {
     () => new Set((accounts.data ?? []).map((account) => account.channel_id)).size,
     [accounts.data],
   );
-  const loading = accounts.isLoading || channels.isLoading || routes.isLoading || channelModels.isLoading;
-  const error = accounts.error ?? channels.error ?? routes.error ?? channelModels.error;
+  const loading = accounts.isLoading || channels.isLoading || routes.isLoading;
+  const error = accounts.error ?? channels.error ?? routes.error;
 
   const [syncPreview, setSyncPreview] = useState<PresetSyncPreview | null>(null);
   const [syncPending, setSyncPending] = useState(false);
   const [syncApplying, setSyncApplying] = useState(false);
 
-  const refresh = () => void Promise.all([accounts.refetch(), routes.refetch(), channelModels.refetch(), prices.refetch(), catalogEntry.refetch()]);
+  const refresh = () => void Promise.all([accounts.refetch(), routes.refetch(), catalogEntry.refetch()]);
   const syncCatalogs = () => syncModelCatalogs.mutate({ modelsCnUrl: "https://null-object-0000.github.io/models-cn/api.json", modelsDevUrl: "https://models.dev/api.json", triggerSource: "manual" });
   const openSyncPresets = async () => {
     setSyncPending(true);
@@ -363,9 +363,9 @@ export function ModelServicesPage() {
           accounts={accounts.data ?? []}
           channels={channels.data ?? []}
           allRoutes={routes.data ?? []}
-          channelModels={channelModels.data ?? []}
-          prices={prices.data ?? []}
           catalogJson={catalogEntry.data ?? null}
+          modelsDevCatalogJson={modelsDevCatalogEntry.data ?? null}
+          modelsDevCatalogLoading={modelsDevCatalogEntry.isLoading}
           catalogLoading={catalogEntry.isLoading}
           syncCatalogsPending={syncModelCatalogs.isPending}
           onSyncCatalogs={syncCatalogs}
@@ -493,16 +493,16 @@ function ModelLogo({ model }: { model: ModelServiceItem }) {
   return <FlowletLogo variant="model" />;
 }
 
-function ModelDetail({ model, relations, accounts, channels, allRoutes, channelModels, prices, catalogJson, catalogLoading, syncCatalogsPending, onSyncCatalogs, language, pendingModel, onToggleRoute, onReorderRoute, onAddAggregateRoute, onRemoveAggregateRoute, t }: {
+function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJson, modelsDevCatalogJson, catalogLoading, modelsDevCatalogLoading, syncCatalogsPending, onSyncCatalogs, language, pendingModel, onToggleRoute, onReorderRoute, onAddAggregateRoute, onRemoveAggregateRoute, t }: {
   model: ModelServiceItem | null;
   relations: Map<string, ModelAggregateRelation[]>;
   accounts: ChannelAccount[];
   channels: ChannelPreset[];
   allRoutes: RouteCandidate[];
-  channelModels: ChannelModel[];
-  prices: ModelPriceInfo[];
   catalogJson: string | null;
+  modelsDevCatalogJson: string | null;
   catalogLoading: boolean;
+  modelsDevCatalogLoading: boolean;
   syncCatalogsPending: boolean;
   onSyncCatalogs: () => void;
   language: NumberLanguage;
@@ -528,36 +528,68 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
   // 解析本地 models-cn.json 文件内容。必须放在所有提前返回之前，
   // 保证每次渲染 hook 调用顺序一致（Rules of Hooks）。
   const catalog = useMemo(() => (catalogJson ? parseCatalogJson(catalogJson) : null), [catalogJson]);
+  const modelsDevCatalog = useMemo(
+    () => (modelsDevCatalogJson ? parseModelsDevCatalogJson(modelsDevCatalogJson) : null),
+    [modelsDevCatalogJson],
+  );
 
-  // 直接渠道模型的 models-cn 官方数据。
+  // 直接模型规格按 models-cn → models.dev 回退。
   const directResolved: ResolvedModel | null = useMemo(() => {
-    if (!model || model.kind !== "direct" || !catalog) return null;
-    const channelId = model.channelId ?? model.routeGroups[0]?.channelId;
-    const upstream = model.routeGroups[0]?.upstreamModel ?? model.publicModel;
-    if (!channelId) return null;
-    return resolveChannelModel(catalog, channelId, upstream, pricingNow);
-  }, [catalog, model, pricingNow]);
+    if (!model || model.kind !== "direct") return null;
+    for (const route of model.routeGroups) {
+      const resolved = resolveModelSpecification(
+        catalog,
+        modelsDevCatalog,
+        route.channelId,
+        route.upstreamModel,
+        pricingNow,
+        !catalogLoading && !modelsDevCatalogLoading,
+      );
+      if (resolved) return resolved;
+    }
+    return model.channelId
+      ? resolveModelSpecification(
+        catalog,
+        modelsDevCatalog,
+        model.channelId,
+        model.publicModel,
+        pricingNow,
+        !catalogLoading && !modelsDevCatalogLoading,
+      )
+      : null;
+  }, [catalog, catalogLoading, model, modelsDevCatalog, modelsDevCatalogLoading, pricingNow]);
 
   // 聚合模型（flowlet-pro/flowlet-flash）：只汇总已启用子路由的 limits/caps/prices。
   // limits 取最小值（木桶效应）、caps 取交集（只承诺所有子模型都支持的能力）、
   // prices 取最大值（展示最坏情况下的成本上限）。
   const aggregateResolved: ResolvedModel | null = useMemo(() => {
-    if (!model || model.kind !== "aggregate" || !catalog) return null;
+    if (!model || model.kind !== "aggregate") return null;
     const subModels: ResolvedModel[] = [];
     for (const route of model.routeGroups) {
       if (!route.enabled) continue;
-      const resolved = resolveChannelModel(catalog, route.channelId, route.upstreamModel, pricingNow);
+      const resolved = resolveModelSpecification(
+        catalog,
+        modelsDevCatalog,
+        route.channelId,
+        route.upstreamModel,
+        pricingNow,
+        !catalogLoading && !modelsDevCatalogLoading,
+      );
       if (resolved) subModels.push(resolved);
     }
     if (subModels.length === 0) return null;
     const officialPrice = aggregateMaxPrice(subModels);
     const limits = aggregateMinLimits(subModels);
     const capabilities = aggregateCapabilitiesIntersection(subModels);
+    const sources = new Set(subModels.map((subModel) => subModel.specificationSource));
     return {
       providerId: "flowlet",
       providerName: "Flowlet",
       modelId: model.publicModel,
       modelName: model.publicModel,
+      description: null,
+      tokenizer: null,
+      specificationSource: sources.size === 1 ? subModels[0].specificationSource : "mixed",
       limits,
       capabilities,
       aliases: [],
@@ -566,7 +598,7 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
       supplementedFromModelsDev: false,
       modelsDevReferenceUrl: null,
     };
-  }, [catalog, model, pricingNow]);
+  }, [catalog, catalogLoading, model, modelsDevCatalog, modelsDevCatalogLoading, pricingNow]);
 
   // 当前模型实际使用的 resolved 数据源。
   const resolved = model?.kind === "aggregate" ? aggregateResolved : directResolved;
@@ -585,11 +617,6 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
   }, [catalog, model, pricingNow, resolved?.officialPrice]);
 
   // 基础信息：优先 models-cn 官方值，缺失降级到渠道同步。
-  const basicInfo: ModelBasicInfo | null = useMemo(
-    () => (model ? buildModelBasicInfo(model, channelModels, prices) : null),
-    [model, channelModels, prices],
-  );
-
   if (!model) return <ModelsServiceDetailView empty={t("选择一个模型查看路由配置")} />;
 
   const busy = pendingModel != null;
@@ -635,16 +662,25 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, channelM
 
   // 聚合模型（flowlet-pro/flowlet-flash）没有厂商官方价格，不展示"立即同步"。
   const showPricingSync = model.kind === "direct";
+  const copyModelName = async () => {
+    try {
+      await navigator.clipboard.writeText(model.publicModel);
+      Toast.success(t("已复制"));
+    } catch {
+      Toast.error(t("复制失败"));
+    }
+  };
 
   return <ModelsServiceDetailView
     logo={<ModelLogo model={model} />}
     title={model.publicModel}
     subtitle={`${kindLabel} · ${accountLabel}`}
+    headerAction={<Button aria-label={t("复制模型名称")} title={t("复制模型名称")} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copyModelName()} />}
     activeKey={activeTab}
     onTabChange={setActiveTab}
     tabs={[
       { key: "basic", label: t("基础信息"), content: <>
-          <ModelBasicInfoTab basicInfo={basicInfo} resolved={resolved} isAggregate={model.kind === "aggregate"} channelName={model.channelName} language={language} t={t} />
+          <ModelBasicInfoTab resolved={resolved} isAggregate={model.kind === "aggregate"} channelName={model.channelName} language={language} t={t} />
         </> },
       { key: "pricing", label: t("价格信息"), content: <>
           <ModelPricingTab
@@ -750,40 +786,81 @@ function DetailSection({ title, note, children }: { title: string; note?: string
   return <section className={styles.detailSection}><header><strong>{title}</strong>{note ? <span>{note}</span> : null}</header><div className={styles.configBox}>{children}</div></section>;
 }
 
+const MODEL_MODALITY_LABELS: Record<string, string> = {
+  text: "文本",
+  image: "图像",
+  video: "视频",
+  audio: "音频",
+  file: "文件",
+};
+
+function formatModelModalities(
+  modalities: string[],
+  t: (source: string, values?: Record<string, string | number>) => string,
+): string {
+  if (modalities.length === 0) return "—";
+  return modalities.map((modality) => t(MODEL_MODALITY_LABELS[modality] ?? modality)).join(" · ");
+}
+
+function modelSpecificationSourceLabel(
+  resolved: ResolvedModel | null,
+  isAggregate: boolean,
+  t: (source: string, values?: Record<string, string | number>) => string,
+): string {
+  if (isAggregate) return t("聚合计算");
+  if (resolved?.specificationSource === "models-cn") return "models-cn";
+  if (resolved?.specificationSource === "models.dev") return "models.dev";
+  return "—";
+}
+
+function modelSpecificationDescription(
+  resolved: ResolvedModel | null,
+  isAggregate: boolean,
+  t: (source: string, values?: Record<string, string | number>) => string,
+): string {
+  if (isAggregate) return t("参数与能力按当前已启用路由的最低值计算。");
+  if (resolved?.specificationSource === "models-cn") return t("当前展示 models-cn 收录的模型规格。");
+  if (resolved?.specificationSource === "models.dev") return t("models-cn 暂未收录，当前展示 models.dev 的模型规格。");
+  return t("暂无可用的模型规格。");
+}
+
 /** 基础信息 Tab：顶部说明 banner + 2×2 参数网格 + 能力清单。优先展示 models-cn 官方值。
  *  聚合模型（flowlet-pro/flowlet-flash）：limits 取已启用子模型最小值（木桶效应），
  *  capabilities 取交集（只承诺所有子模型都支持的能力）。 */
-function ModelBasicInfoTab({ basicInfo, resolved, isAggregate, channelName, language, t }: {
-  basicInfo: ModelBasicInfo | null;
+function ModelBasicInfoTab({ resolved, isAggregate, channelName, language, t }: {
   resolved: ResolvedModel | null;
   isAggregate: boolean;
   channelName?: string;
   language: NumberLanguage;
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
-  // 聚合模型不参与 basicInfo（仅 direct 使用）。
-  const contextTokens = resolved?.limits.contextTokens ?? (isAggregate ? null : basicInfo?.contextWindow) ?? null;
-  const maxOutputTokens = resolved?.limits.maxOutputTokens ?? (isAggregate ? null : basicInfo?.maxOutputTokens) ?? null;
+  const contextTokens = resolved?.limits.contextTokens ?? null;
+  const maxOutputTokens = resolved?.limits.maxOutputTokens ?? null;
   const caps = resolved?.capabilities;
   return (
     <ModelsServiceTabContentView>
       <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>
-        {isAggregate
-          ? t("聚合模型参数与能力按当前已启用路由中的最低能力计算。")
-          : t("渠道模型参数来自供应商公开信息与最近一次同步结果。")}
+        {modelSpecificationDescription(resolved, isAggregate, t)}
       </ModelsServiceInfoBannerView>
       <ModelsServiceSectionView title={t("模型参数")}><ModelsServiceMetricGridView items={[
         { key: "context", label: t("上下文窗口"), value: formatTokenCapacity(contextTokens, language) },
         { key: "output", label: t("最大输出"), value: formatTokenCapacity(maxOutputTokens, language) },
-        { key: "type", label: t("模型类型"), value: isAggregate ? t("Flowlet 聚合") : t("渠道原始模型") },
-        { key: "owner", label: t("官方归属"), value: isAggregate ? t("多渠道聚合") : channelName ?? "—" },
+        { key: "owner", label: t("官方归属"), value: isAggregate ? "Flowlet" : resolved?.providerName ?? channelName ?? "—" },
+        { key: "source", label: t("规格来源"), value: modelSpecificationSourceLabel(resolved, isAggregate, t) },
       ]} /></ModelsServiceSectionView>
       {caps ? (
         <ModelsServiceSectionView title={t("模型能力")}><ModelsServiceCapabilityListView items={[
+          { key: "input-modalities", label: t("输入模态"), value: formatModelModalities(caps.inputModalities, t) },
+          { key: "output-modalities", label: t("输出模态"), value: formatModelModalities(caps.outputModalities, t) },
           { key: "thinking", label: t("推理"), value: caps.thinking ? t("支持") : t("不支持"), supported: caps.thinking },
           { key: "tools", label: t("工具调用"), value: caps.toolCalls ? t("支持") : t("不支持"), supported: caps.toolCalls },
           { key: "json", label: t("JSON 输出"), value: caps.jsonOutput ? t("支持") : t("不支持"), supported: caps.jsonOutput },
         ]} /></ModelsServiceSectionView>
+      ) : null}
+      {resolved?.description ? (
+        <DetailSection title={t("模型说明")}>
+          <p className={styles.modelDescription}>{resolved.description}</p>
+        </DetailSection>
       ) : null}
       {resolved?.aliases?.length ? (
         <DetailSection title={t("模型别名")}>

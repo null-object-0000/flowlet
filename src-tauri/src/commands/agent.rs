@@ -160,7 +160,7 @@ pub(crate) fn inspect_agent_global_config(
 pub(crate) async fn apply_agent_global_config(
     state: tauri::State<'_, AppState>,
     agent_id: String,
-    options: Option<crate::core::agent_global_config::AgentGlobalConfigOptions>,
+    mut options: Option<crate::core::agent_global_config::AgentGlobalConfigOptions>,
 ) -> Result<crate::core::agent_global_config::AgentGlobalConfigReport, String> {
     let bind = state
         .bind_config
@@ -172,6 +172,19 @@ pub(crate) async fn apply_agent_global_config(
     let adapter_id = agent_global_config_adapter(&agent_id)?;
     let expected_base_url = format!("http://127.0.0.1:{}{suffix}", bind.port);
     let client_token = bind.default_client_token;
+    if adapter_id == "deepseek-harness"
+        && options
+            .as_ref()
+            .and_then(|value| value.model_specs)
+            .unwrap_or(false)
+    {
+        let modalities = crate::core::model_input_capabilities::deepseek_harness_model_inputs(
+            &state.runtime_config.snapshot(),
+        );
+        options
+            .get_or_insert_with(Default::default)
+            .model_input_modalities = Some(modalities);
+    }
     let mut report = tauri::async_runtime::spawn_blocking(move || {
         crate::core::agent_global_config::apply_agent_global_config(
             adapter_id,

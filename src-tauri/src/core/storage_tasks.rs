@@ -1610,6 +1610,7 @@ async fn sync_catalog_file(
         let _ = storage.fail_job(&job_id, &error_string);
         return Err(error_string);
     }
+    crate::core::model_input_capabilities::invalidate_cache();
 
     storage
         .update_job_progress(&job_id, 1, 1)

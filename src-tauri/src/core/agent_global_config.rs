@@ -93,9 +93,13 @@ pub struct AgentGlobalConfigOptions {
     #[serde(default)]
     pub session_extension: Option<bool>,
     /// 仅 DeepSeek Harness：是否向 settings.yaml 声明聚合模型规格
-    /// （flowlet-pro / flowlet-flash 模型条目的 contextWindow）。未传选项时不填写。
+    /// （flowlet-pro / flowlet-flash 模型条目的 contextWindow 与 input）。未传选项时不填写。
     #[serde(default)]
     pub model_specs: Option<bool>,
+    /// 由 Rust command 根据当前路由与本地模型目录注入，拒绝前端直接提供，确保与代理
+    /// 的图片候选过滤使用同一份能力事实源。
+    #[serde(skip)]
+    pub(crate) model_input_modalities: Option<BTreeMap<String, Vec<String>>>,
     /// 仅 DeepSeek Harness：是否部署受管交互确认桥（approval bridge）。
     /// 部署后 DSH headless 会话的 approval/request 会经文件桥转交 Flowlet
     /// 桌面端确认或否决。未传选项时保持已有状态不变。

@@ -7,4 +7,10 @@ describe("queryKeys", () => {
       queryKeys.modelCatalog.currencies(),
     );
   });
+
+  it("keeps models-cn and models.dev documents in separate caches", () => {
+    expect(queryKeys.modelCatalog.catalog()).not.toEqual(
+      queryKeys.modelCatalog.modelsDevCatalog(),
+    );
+  });
 });

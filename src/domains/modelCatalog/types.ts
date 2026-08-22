@@ -111,6 +111,26 @@ export interface ModelsCnCatalog {
   calibration: { modelsDev: { models: ModelsCnCalibrationModel[] } };
 }
 
+export interface ModelsDevModel {
+  id: string;
+  name: string;
+  description?: string;
+  reasoning?: boolean;
+  tool_call?: boolean;
+  structured_output?: boolean;
+  modalities?: { input?: string[]; output?: string[] };
+  limit?: { context?: number; output?: number };
+}
+
+export interface ModelsDevProvider {
+  id: string;
+  name: string;
+  models?: Record<string, ModelsDevModel>;
+}
+
+export type ModelsDevCatalog = Record<string, ModelsDevProvider>;
+export type ModelSpecificationSource = "models-cn" | "models.dev" | "mixed";
+
 /** 解析后的标准化模型详情（跨 provider 归一化）。 */
 export interface ResolvedModelLimits {
   contextTokens: number | null;
@@ -121,6 +141,10 @@ export interface ResolvedModelCapabilities {
   thinking: boolean;
   toolCalls: boolean;
   jsonOutput: boolean;
+  /** 模型可接受的输入模态，使用 models-cn 的规范小写值（如 text/image/video）。 */
+  inputModalities: string[];
+  /** 模型可生成的输出模态，使用 models-cn 的规范小写值。 */
+  outputModalities: string[];
 }
 
 /** 单条已选价格（已按 docs/agent-integration-prompt.md §2 规则选取）。 */
@@ -151,6 +175,9 @@ export interface ResolvedModel {
   providerName: string;
   modelId: string;
   modelName: string;
+  description: string | null;
+  tokenizer: string | null;
+  specificationSource: ModelSpecificationSource;
   limits: ResolvedModelLimits;
   capabilities: ResolvedModelCapabilities;
   aliases: ModelsCnAlias[];

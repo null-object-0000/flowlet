@@ -53,6 +53,7 @@ impl AgentGlobalConfigAdapter for DeepSeekHarnessAdapter {
             options
                 .and_then(|options| options.model_specs)
                 .unwrap_or(false),
+            options.and_then(|options| options.model_input_modalities.as_ref()),
             options
                 .and_then(|options| options.approval_bridge)
                 .unwrap_or(false),
@@ -867,14 +868,34 @@ fn patch_yaml_entry(
     Ok(output.into_bytes())
 }
 
+#[cfg(test)]
 fn provider_profile(expected_base_url: &str, model_specs: bool) -> Value {
+    provider_profile_with_inputs(expected_base_url, model_specs, None)
+}
+
+fn provider_profile_with_inputs(
+    expected_base_url: &str,
+    model_specs: bool,
+    model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
+) -> Value {
+    let input_for = |model: &str| {
+        let requested = model_inputs
+            .and_then(|inputs| inputs.get(model))
+            .cloned()
+            .unwrap_or_default();
+        let mut normalized = vec!["text".to_string()];
+        if requested.iter().any(|value| value == "image") {
+            normalized.push("image".to_string());
+        }
+        normalized
+    };
     let pro = if model_specs {
-        json!({ "id": "flowlet-pro", "contextWindow": 1048576 })
+        json!({ "id": "flowlet-pro", "contextWindow": 1048576, "input": input_for("flowlet-pro") })
     } else {
         json!({ "id": "flowlet-pro" })
     };
     let flash = if model_specs {
-        json!({ "id": "flowlet-flash", "contextWindow": 1048576 })
+        json!({ "id": "flowlet-flash", "contextWindow": 1048576, "input": input_for("flowlet-flash") })
     } else {
         json!({ "id": "flowlet-flash" })
     };
@@ -891,8 +912,9 @@ fn apply_settings_text(
     text: &str,
     expected_base_url: &str,
     model_specs: bool,
+    model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
 ) -> Result<Vec<u8>, String> {
-    let provider = provider_profile(expected_base_url, model_specs);
+    let provider = provider_profile_with_inputs(expected_base_url, model_specs, model_inputs);
     let text = String::from_utf8(patch_yaml_entry(
         text,
         "settings.yaml",
@@ -1008,19 +1030,22 @@ fn apply_dsh(
     client_token: &str,
     session_extension: bool,
     model_specs: bool,
+    model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
     approval_bridge: bool,
 ) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
-    apply_dsh_at(
+    apply_dsh_at_with_inputs(
         &home,
         expected_base_url,
         client_token,
         session_extension,
         model_specs,
         approval_bridge,
+        model_inputs,
     )
 }
 
+#[cfg(test)]
 fn apply_dsh_at(
     home: &Path,
     expected_base_url: &str,
@@ -1028,6 +1053,26 @@ fn apply_dsh_at(
     session_extension: bool,
     model_specs: bool,
     approval_bridge: bool,
+) -> Result<AgentGlobalConfigReport, String> {
+    apply_dsh_at_with_inputs(
+        home,
+        expected_base_url,
+        client_token,
+        session_extension,
+        model_specs,
+        approval_bridge,
+        None,
+    )
+}
+
+fn apply_dsh_at_with_inputs(
+    home: &Path,
+    expected_base_url: &str,
+    client_token: &str,
+    session_extension: bool,
+    model_specs: bool,
+    approval_bridge: bool,
+    model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
 ) -> Result<AgentGlobalConfigReport, String> {
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
@@ -1037,7 +1082,12 @@ fn apply_dsh_at(
     let settings_text = read_yaml_text(&settings_path)?;
     let credentials_text = read_yaml_text(&credentials_path)?;
     let current = capture_snapshot(&settings_path, &credentials_path)?;
-    let settings_output = apply_settings_text(&settings_text, expected_base_url, model_specs)?;
+    let settings_output = apply_settings_text(
+        &settings_text,
+        expected_base_url,
+        model_specs,
+        model_inputs,
+    )?;
     let credentials_output = apply_credentials_text(&credentials_text, client_token)?;
     let profiles = dsh_profiles(&home)?;
     if session_extension && profiles.is_empty() {
@@ -1278,7 +1328,18 @@ mod tests {
 
     #[test]
     fn model_specs_declares_context_window_on_both_aggregate_models() {
-        let value = provider_profile("http://127.0.0.1:18640/v1", true);
+        let model_inputs = std::collections::BTreeMap::from([
+            (
+                "flowlet-pro".to_string(),
+                vec!["text".to_string(), "image".to_string()],
+            ),
+            ("flowlet-flash".to_string(), vec!["text".to_string()]),
+        ]);
+        let value = provider_profile_with_inputs(
+            "http://127.0.0.1:18640/v1",
+            true,
+            Some(&model_inputs),
+        );
         let models = value["models"].as_array().unwrap();
         assert_eq!(models.len(), 2);
         for entry in models {
@@ -1288,8 +1349,16 @@ mod tests {
                 "每个聚合模型条目都应声明 1M 上下文窗口：{entry}"
             );
         }
+        assert_eq!(models[0]["input"], json!(["text", "image"]));
+        assert_eq!(models[1]["input"], json!(["text"]));
         let text = String::from_utf8(
-            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", true).unwrap(),
+            apply_settings_text(
+                "unrelated: keep\n",
+                "http://127.0.0.1:18640/v1",
+                true,
+                Some(&model_inputs),
+            )
+            .unwrap(),
         )
         .unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
@@ -1308,9 +1377,18 @@ mod tests {
             .and_then(serde_yaml::Value::as_i64),
             Some(1_048_576)
         );
+        assert_eq!(
+            yaml_at(
+                &parsed,
+                &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models", "0", "input"]
+            )
+            .and_then(serde_yaml::Value::as_sequence)
+            .map(Vec::len),
+            Some(2)
+        );
         // 关闭规格声明后重新写入应移除 contextWindow（不残留旧声明）。
         let disabled = String::from_utf8(
-            apply_settings_text(&text, "http://127.0.0.1:18640/v1", false).unwrap(),
+            apply_settings_text(&text, "http://127.0.0.1:18640/v1", false, None).unwrap(),
         )
         .unwrap();
         let reparsed: serde_yaml::Value = serde_yaml::from_str(&disabled).unwrap();
@@ -1330,6 +1408,14 @@ mod tests {
                 .is_none(),
                 "关闭后模型条目 {index} 不应残留 contextWindow"
             );
+            assert!(
+                yaml_at(
+                    &reparsed,
+                    &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models", index, "input"]
+                )
+                .is_none(),
+                "关闭后模型条目 {index} 不应残留 input"
+            );
         }
     }
 
@@ -1337,7 +1423,7 @@ mod tests {
     fn lossless_edit_preserves_unmanaged_yaml_and_comments() {
         let before = "# keep root\nui-theme:\n  mode: dark # keep inline\nllm-pi-ai:\n  providers:\n    other:\n      baseURL: https://other.example/v1\n";
         let output =
-            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1", false).unwrap())
+            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1", false, None).unwrap())
                 .unwrap();
         assert!(output.contains("# keep root"));
         assert!(output.contains("mode: dark # keep inline"));
@@ -1377,7 +1463,7 @@ mod tests {
             credential: BackedUpValue::default(),
         };
         let managed = String::from_utf8(
-            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", false).unwrap(),
+            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", false, None).unwrap(),
         )
         .unwrap();
         let restored =
@@ -1405,6 +1491,7 @@ mod tests {
             "llm-pi-ai: { providers: { other: { baseURL: https://other.example/v1 } } }\n",
             "http://127.0.0.1:18640/v1",
             false,
+            None,
         )
         .unwrap_err();
         assert!(error.contains("行内或复杂 YAML"));
@@ -1415,7 +1502,7 @@ mod tests {
         let before =
             "llm-pi-ai:\n  providers:\n    'flowlet':\n      baseURL: https://old.example/v1\n";
         let output =
-            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1", false).unwrap())
+            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1", false, None).unwrap())
                 .unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
         assert_eq!(
@@ -1747,13 +1834,22 @@ mod tests {
         )
         .unwrap();
 
-        let report = apply_dsh_at(
+        let model_inputs = std::collections::BTreeMap::from([
+            (
+                "flowlet-pro".to_string(),
+                vec!["text".to_string(), "image".to_string()],
+            ),
+            ("flowlet-flash".to_string(), vec!["text".to_string()]),
+        ]);
+
+        let report = apply_dsh_at_with_inputs(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             false,
             true,
             false,
+            Some(&model_inputs),
         )
         .unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
@@ -1775,6 +1871,8 @@ mod tests {
                 "每个聚合模型条目都应声明 1M 上下文窗口：{entry:?}"
             );
         }
+        assert_eq!(models[0]["input"], serde_yaml::to_value(["text", "image"]).unwrap());
+        assert_eq!(models[1]["input"], serde_yaml::to_value(["text"]).unwrap());
         // 非受管 Provider 原样保留。
         assert_eq!(
             yaml_at(
@@ -1785,13 +1883,14 @@ mod tests {
             Some("https://example.com/v1")
         );
 
-        let reapplied = apply_dsh_at(
+        let reapplied = apply_dsh_at_with_inputs(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             false,
             true,
             false,
+            Some(&model_inputs),
         )
         .unwrap();
         assert!(reapplied.model_specs, "reapply must preserve model specs");
@@ -1818,6 +1917,10 @@ mod tests {
             assert!(
                 entry.get("contextWindow").is_none(),
                 "关闭后模型条目不应残留 contextWindow：{entry:?}"
+            );
+            assert!(
+                entry.get("input").is_none(),
+                "关闭后模型条目不应残留 input：{entry:?}"
             );
         }
 

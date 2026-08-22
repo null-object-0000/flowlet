@@ -221,12 +221,24 @@ export function hasInputLengthTiers(rows: readonly PricingStrategyRow[]): boolea
   return rows.some((row) => row.inputTokenRange != null);
 }
 
-/** 解析模型能力。缺失字段默认 false（保守降级）。 */
+function normalizeModalities(modalities: string[] | undefined): string[] {
+  const seen = new Set<string>();
+  return (modalities ?? []).flatMap((modality) => {
+    const normalized = modality.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return [];
+    seen.add(normalized);
+    return [normalized];
+  });
+}
+
+/** 解析模型能力。布尔能力缺失时默认 false；模态缺失时保留为空数组。 */
 export function resolveCapabilities(capabilities: ModelsCnModel["capabilities"]): ResolvedModelCapabilities {
   return {
     thinking: capabilities?.thinking ?? false,
     toolCalls: capabilities?.toolCalls ?? false,
     jsonOutput: capabilities?.jsonOutput ?? false,
+    inputModalities: normalizeModalities(capabilities?.inputModalities),
+    outputModalities: normalizeModalities(capabilities?.outputModalities),
   };
 }
 
@@ -263,6 +275,9 @@ export function resolveModel(
     providerName: provider.displayNames?.["zh-CN"] ?? provider.name,
     modelId: model.id,
     modelName: model.name,
+    description: null,
+    tokenizer: model.tokenizer ?? null,
+    specificationSource: "models-cn",
     limits: resolveLimits(model.limits),
     capabilities: resolveCapabilities(model.capabilities),
     aliases: model.aliases ?? [],
@@ -369,10 +384,17 @@ export function aggregateMinLimits(subModels: ResolvedModel[]): ResolvedModelLim
 /** 聚合模型的能力：取旗下所有已启用子模型的交集——只有全部子模型都支持的能力
  *  才会对外展示为"支持"（聚合模型不能承诺任何单一子模型做不到的事）。 */
 export function aggregateCapabilitiesIntersection(subModels: ResolvedModel[]): ResolvedModelCapabilities {
+  const intersectModalities = (select: (model: ResolvedModel) => string[]) => {
+    if (subModels.length === 0) return [];
+    const remaining = subModels.slice(1).map((model) => new Set(select(model)));
+    return select(subModels[0]).filter((modality) => remaining.every((values) => values.has(modality)));
+  };
   return {
     thinking: subModels.length > 0 && subModels.every((m) => m.capabilities.thinking),
     toolCalls: subModels.length > 0 && subModels.every((m) => m.capabilities.toolCalls),
     jsonOutput: subModels.length > 0 && subModels.every((m) => m.capabilities.jsonOutput),
+    inputModalities: intersectModalities((model) => model.capabilities.inputModalities),
+    outputModalities: intersectModalities((model) => model.capabilities.outputModalities),
   };
 }
 

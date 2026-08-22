@@ -32,3 +32,28 @@ export function useLocalModelsCnCatalog(): {
     refetch: () => void query.refetch(),
   };
 }
+
+/** 读取本地 models.dev 目录，供 models-cn 缺失模型时补充规格。 */
+export function useLocalModelsDevCatalog(): {
+  data: string | null | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+  refetch: () => void;
+} {
+  const query = useQuery({
+    queryKey: queryKeys.modelCatalog.modelsDevCatalog(),
+    queryFn: () => backgroundTaskCommands.getModelsDevProviderCatalog("openrouter"),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 60_1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    error: query.error instanceof Error ? query.error : null,
+    refetch: () => void query.refetch(),
+  };
+}

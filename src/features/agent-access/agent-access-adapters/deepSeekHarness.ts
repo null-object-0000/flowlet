@@ -43,8 +43,8 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
         id: "model-specs",
         label: t("聚合模型规格"),
         descriptions: [
-          t("开启后向 settings.yaml 的 flowlet-pro / flowlet-flash 模型条目写入 1M 上下文窗口声明，使 DSH 按真实聚合规格做上下文预算。"),
-          t("仅当两个聚合模型的所有启用路由都支持 1M 上下文时开启；不声明最大输出上限，保持 DSH 默认的保守值。"),
+          t("开启后向 settings.yaml 写入 1M 上下文窗口，并按当前可用路由分别声明文本或图像输入能力。"),
+          t("图像请求会由 Flowlet 再次筛选支持图像的上游；不声明最大输出上限，保持 DSH 默认的保守值。"),
         ],
         checked: modelSpecs,
         applyOptions: (checked) => ({ sessionExtension, modelSpecs: checked, approvalBridge }),

@@ -50,7 +50,8 @@ pub(super) fn match_candidates(
     let dual_protocol_channels: std::collections::HashSet<&str> = channels
         .iter()
         .filter(|channel| {
-            channel.supported_protocols.contains(&ProtocolType::OpenAi)
+            channel.enabled
+                && channel.supported_protocols.contains(&ProtocolType::OpenAi)
                 && channel
                     .supported_protocols
                     .contains(&ProtocolType::Anthropic)

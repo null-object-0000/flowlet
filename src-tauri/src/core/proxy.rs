@@ -623,7 +623,7 @@ async fn forward_request(
     }
 
     // 匹配路由候选（用 token 身份，保证现有多 UA 共用一 token 的规则不破坏）
-    let candidates = {
+    let mut candidates = {
         let mut round_robin = state.shared.round_robin.lock().unwrap();
         match_candidates(
             &routes,
@@ -638,8 +638,68 @@ async fn forward_request(
         )
     };
 
+    // 图片请求只保留模型目录明确声明支持 image 输入的候选。未知能力不冒险放行；
+    // 文本请求不受影响。DSH 的 input 声明与这里复用同一份能力索引。
+    let skipped_for_input_modality = if crate::core::model_input_capabilities::request_uses_image(
+        &body_bytes,
+        &detected_protocol,
+    ) && !candidates.is_empty()
+    {
+        crate::core::model_input_capabilities::partition_image_capable_candidates(&mut candidates)
+    } else {
+        Vec::new()
+    };
+    let image_input_unsupported = !skipped_for_input_modality.is_empty() && candidates.is_empty();
+
     // 识别请求类型
     let request_type = classify_request(&body_bytes, &detected_protocol);
+
+    // 能力不匹配属于路由降级节点，但没有真正发起第三方请求。单独落一条非终态日志，
+    // 让尝试链路能解释为什么跳过候选，同时不伪造 HTTP 状态、上游 URL 或请求报文。
+    for (index, candidate) in skipped_for_input_modality.iter().enumerate() {
+        let account = accounts.iter().find(|account| account.id == candidate.account_id);
+        let channel = channels.iter().find(|channel| channel.id == candidate.channel_id);
+        record_request_log(
+            state.storage.clone(),
+            RequestLogInput {
+                request_id: request_id.clone(),
+                agent_type: agent_session.as_ref().map(|value| value.agent_type.clone()),
+                agent_session_id: agent_session.as_ref().map(|value| value.session_id.clone()),
+                parent_agent_session_id: agent_session
+                    .as_ref()
+                    .and_then(|value| value.parent_session_id.clone()),
+                client_id: client_id.clone(),
+                client_name: client_name.clone(),
+                channel_id: Some(candidate.channel_id.clone()),
+                channel_name: channel.map(|value| value.name.clone()),
+                account_id: Some(candidate.account_id.clone()),
+                account_name: account.map(|value| value.name.clone()),
+                client_protocol: detected_protocol.as_str().to_string(),
+                upstream_protocol: detected_protocol.as_str().to_string(),
+                virtual_model: public_model.clone(),
+                public_model: public_model.clone(),
+                upstream_model: Some(candidate.upstream_model.clone()),
+                request_type: request_type.as_str().to_string(),
+                method: method.clone(),
+                path: path.clone(),
+                upstream_url: None,
+                status: None,
+                latency_ms: Some(0),
+                is_stream: false,
+                error_message: None,
+                fallback_count: index as i64 + 1,
+                route_reason: Some("input_modality_image_unsupported".to_string()),
+                ttfb_ms: None,
+                duration_ms: Some(0),
+                attempt_seq: index as i64,
+                req_headers_json: None,
+                req_body_b64: None,
+                res_headers_json: None,
+                res_body_b64: None,
+                is_last_attempt: false,
+            },
+        );
+    }
 
     if candidates.is_empty() {
         let has_available_account = accounts
@@ -653,20 +713,29 @@ async fn forward_request(
                         && !account.api_key.trim().is_empty()
                 })
         });
-        let (error_code, error_message) = if !has_available_account {
+        let (error_code, error_message, error_status) = if image_input_unsupported {
+            (
+                "model_input_modality_unsupported",
+                "No enabled route for the requested model supports image input",
+                StatusCode::BAD_REQUEST,
+            )
+        } else if !has_available_account {
             (
                 "no_available_account",
                 "No enabled account with a configured API key is available",
+                StatusCode::NOT_FOUND,
             )
         } else if !has_exposed_model {
             (
                 "no_available_model",
                 "No model is currently exposed by Flowlet",
+                StatusCode::NOT_FOUND,
             )
         } else {
             (
                 "model_not_exposed",
                 "The requested model is not exposed by Flowlet",
+                StatusCode::NOT_FOUND,
             )
         };
         let payload = match detected_protocol {
@@ -680,7 +749,7 @@ async fn forward_request(
         };
         let payload_bytes = payload.to_string().into_bytes();
         let mut response = Response::new(Body::from(payload_bytes.clone()));
-        *response.status_mut() = StatusCode::NOT_FOUND;
+        *response.status_mut() = error_status;
         response.headers_mut().insert(
             axum::http::header::CONTENT_TYPE,
             "application/json".parse().unwrap(),
@@ -708,15 +777,15 @@ async fn forward_request(
             method,
             path,
             upstream_url: None,
-            status: Some(404),
+            status: Some(error_status.as_u16() as i64),
             latency_ms: Some(0),
             is_stream: false,
             error_message: Some(format!("{error_code}: {error_message}")),
-            fallback_count: 0,
+            fallback_count: skipped_for_input_modality.len() as i64,
             route_reason: Some(error_code.to_string()),
             ttfb_ms: None,
             duration_ms: None,
-            attempt_seq: 0,
+            attempt_seq: skipped_for_input_modality.len() as i64,
             req_headers_json: capture_headers(&parts.headers, &state.capture, true),
             req_body_b64: capture_body(&body_bytes, &state.capture, true),
             res_headers_json: capture_headers(response.headers(), &state.capture, false),
@@ -733,7 +802,7 @@ async fn forward_request(
     let activity_permit = state.activity.track();
 
     let mut last_network_error: Option<ProxyForwardError> = None;
-    let mut fallback_count = 0;
+    let mut fallback_count = skipped_for_input_modality.len() as i64;
 
     // accounts / channels 已在上面从共享锁 clone，直接复用
     let storage = state.storage.clone();

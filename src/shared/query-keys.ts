@@ -37,7 +37,8 @@ export const queryKeys = {
   },
   modelCatalog: {
     all: ["model-catalog"] as const,
-    catalog: () => [...queryKeys.modelCatalog.all, "catalog"] as const,
+    catalog: () => [...queryKeys.modelCatalog.all, "models-cn"] as const,
+    modelsDevCatalog: () => [...queryKeys.modelCatalog.all, "models-dev"] as const,
     currencies: () => [...queryKeys.modelCatalog.all, "currencies"] as const,
   },
   route: {

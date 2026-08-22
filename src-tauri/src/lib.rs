@@ -1017,6 +1017,7 @@ fn run_desktop() {
             commands::sync_models_cn_catalog,
             commands::sync_models_dev_catalog,
             commands::get_models_cn_catalog,
+            commands::get_models_dev_provider_catalog,
             commands::get_models_cn_currencies,
             commands::preview_sync_channel_presets,
             commands::apply_sync_channel_presets,

@@ -474,7 +474,9 @@ DeepSeek Harness 使用其强制携带的 `deepseek-harness/` User-Agent 识别�
 `x-flowlet-session`。插件必须随 Profile 配置一同备份、原子写入和恢复，不得修改 DSH npm 包或
 缓存；关闭选项会移除受管桥接，启用或关闭后需重启正在运行的 DSH。用户开启“模型规格声明”后，
 Flowlet 在 Provider 的 `models` 条目写入 `contextWindow: 1048576`（仅当 `flowlet-pro` /
-`flowlet-flash` 的所有启用路由都支持 1M 上下文时可开启），不声明 `maxTokens`——DSH 会把模型
+`flowlet-flash` 的所有启用路由都支持 1M 上下文时可开启），并按当前可用路由分别写入
+`input: [text]` 或 `input: [text, image]`；图片请求进入代理后必须再次按模型目录能力过滤候选，
+无图片候选时返回 `model_input_modality_unsupported`，未知能力不得冒险放行。不声明 `maxTokens`——DSH 会把模型
 条目 `maxTokens` 变成每请求自动携带的输出上限，聚合路由各上游上限不同，声明单一值会把能力
 锁死在最低值；该项随 settings.yaml 热加载，无需重启。代理以 DSH UA 为门控读取并在转发上游前
 剥离该头；静态 Provider Header、文件更新时间或最近活跃会话均不得用于猜测请求所属 session。

@@ -282,11 +282,29 @@ describe("estimateCost", () => {
 
 describe("resolveCapabilities", () => {
   it("defaults to false when capabilities missing", () => {
-    expect(resolveCapabilities(undefined)).toEqual({ thinking: false, toolCalls: false, jsonOutput: false });
+    expect(resolveCapabilities(undefined)).toEqual({
+      thinking: false,
+      toolCalls: false,
+      jsonOutput: false,
+      inputModalities: [],
+      outputModalities: [],
+    });
   });
 
-  it("preserves true values", () => {
-    expect(resolveCapabilities({ thinking: true, toolCalls: true, jsonOutput: true })).toEqual({ thinking: true, toolCalls: true, jsonOutput: true });
+  it("preserves boolean capabilities and normalizes modalities", () => {
+    expect(resolveCapabilities({
+      thinking: true,
+      toolCalls: true,
+      jsonOutput: true,
+      inputModalities: ["Text", " image ", "text", "video"],
+      outputModalities: ["TEXT"],
+    })).toEqual({
+      thinking: true,
+      toolCalls: true,
+      jsonOutput: true,
+      inputModalities: ["text", "image", "video"],
+      outputModalities: ["text"],
+    });
   });
 });
 
@@ -348,8 +366,11 @@ function makeResolved(overrides: Partial<ResolvedModel> = {}): ResolvedModel {
     providerName: "P",
     modelId: "m",
     modelName: "M",
+    description: null,
+    tokenizer: null,
+    specificationSource: "models-cn",
     limits: { contextTokens: null, maxOutputTokens: null },
-    capabilities: { thinking: false, toolCalls: false, jsonOutput: false },
+    capabilities: { thinking: false, toolCalls: false, jsonOutput: false, inputModalities: [], outputModalities: [] },
     aliases: [],
     officialPrice: null,
     allPrices: [],
@@ -401,14 +422,26 @@ describe("aggregateMinLimits", () => {
 describe("aggregateCapabilitiesIntersection", () => {
   it("returns true only when every sub-model supports the capability", () => {
     const subs = [
-      makeResolved({ capabilities: { thinking: true, toolCalls: true, jsonOutput: true } }),
-      makeResolved({ capabilities: { thinking: true, toolCalls: false, jsonOutput: true } }),
+      makeResolved({ capabilities: { thinking: true, toolCalls: true, jsonOutput: true, inputModalities: ["text", "image", "video"], outputModalities: ["text", "image"] } }),
+      makeResolved({ capabilities: { thinking: true, toolCalls: false, jsonOutput: true, inputModalities: ["text", "image"], outputModalities: ["text"] } }),
     ];
-    expect(aggregateCapabilitiesIntersection(subs)).toEqual({ thinking: true, toolCalls: false, jsonOutput: true });
+    expect(aggregateCapabilitiesIntersection(subs)).toEqual({
+      thinking: true,
+      toolCalls: false,
+      jsonOutput: true,
+      inputModalities: ["text", "image"],
+      outputModalities: ["text"],
+    });
   });
 
   it("returns all-false for empty sub-models", () => {
-    expect(aggregateCapabilitiesIntersection([])).toEqual({ thinking: false, toolCalls: false, jsonOutput: false });
+    expect(aggregateCapabilitiesIntersection([])).toEqual({
+      thinking: false,
+      toolCalls: false,
+      jsonOutput: false,
+      inputModalities: [],
+      outputModalities: [],
+    });
   });
 });
 

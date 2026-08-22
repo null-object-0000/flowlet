@@ -42,18 +42,27 @@ agent-default-model:
   model: flowlet-pro
 ```
 
-当前不为 `flowlet-pro` / `flowlet-flash` 声明 `input: [text, image]`。Flowlet 的聚合路由尚未按
-输入模态筛选候选，且内置聚合模型目录当前只承诺文本输入；若在 DSH 中宣称支持图片，图片会
-通过本地校验后落到不一定支持视觉的上游，形成随机失败。后续只有在聚合路由具备稳定的视觉
-能力声明与候选筛选后，才应为对应模型增加 `input: [text, image]`。
+模型规格声明开启后，Flowlet 会按 `models-cn` 优先、`models.dev` 仅补 OpenRouter 缺失模型的
+目录语义，为 `flowlet-pro` / `flowlet-flash` 分别写入 `input: [text]` 或
+`input: [text, image]`。DSH 官方目前只接受 `text` / `image` 两种输入模态；Flowlet 不把目录中的
+音频、视频能力写入 DSH。只要聚合模型存在至少一个当前可用的图片候选，就声明 `image`。
+字段约束核对自 DSH 官方
+[`providers.md`](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.md)
+与 [`config-catalog.md`](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/config-catalog.md)，
+对应本地上游提交 `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`。
 
-模型规格声明同样是默认关闭的高级能力：开启后，Flowlet 会在模型的 `models` 条目写入
-`contextWindow: 1048576`（1M），使 DSH 按聚合模型的真实上下文规模做上下文预算；不声明
+代理不会只信任可能滞后的客户端声明：OpenAI Chat 的 `image_url`、Responses 的 `input_image`
+以及 Anthropic 的 `image` 内容块都会触发候选过滤，只保留目录明确支持图片输入的上游。若原本
+存在路由、但没有图片候选，代理返回 `400 model_input_modality_unsupported`；目录能力未知时按
+仅文本处理。文本请求不改变现有候选顺序与降级逻辑。
+
+模型规格声明同样是默认关闭的高级能力：开启后，Flowlet 会在模型的 `models` 条目写入上述
+`input` 以及 `contextWindow: 1048576`（1M），使 DSH 按聚合模型能力做请求前校验和上下文预算；不声明
 `maxTokens`——DSH 一旦在模型条目声明 `maxTokens` 就会把它变成每次请求自动携带的输出上限，
 而 Flowlet 聚合路由各上游的上限不同，声明单一值会把能力锁死在最低值甚至触发低上限上游报错，
 因此保持 DSH 默认的 32768 保守能力值，由后续代理层能力感知统一处理。该开关与 Codex 的
 1M 语义一致：仅当 `flowlet-pro` / `flowlet-flash` 的所有启用路由都支持 1M 上下文时开启。
-`contextWindow` 与 Provider 其余字段同属受管路径，随同一事务备份和恢复；关闭选项即移除声明，
+`contextWindow`、`input` 与 Provider 其余字段同属受管路径，随同一事务备份和恢复；关闭选项即移除声明，
 settings.yaml 热加载、无需重启。
 
 凭据单独写入 `$DSH_HOME/.credentials.yaml`：
@@ -98,7 +107,7 @@ OpenAI chat/completions 生效，其余请求与协议原样透传。修改该�
 `cordis.patch.yml` 从接入、重复接入、关闭高级能力到恢复的完整生命周期；每个中间产物都重新解析为
 YAML 顶层数组，防止再次生成 `[]` 后直接追加 `- insert` 这类原子写入成功但语义无效的文件。
 模型规格声明同样有基于真实上游 fixture 的生命周期契约：写入、重复写入、关闭、恢复每一步都重新
-解析 `settings.yaml`，断言 `contextWindow` 出现在两个模型条目、关闭后不残留、恢复后逐字节还原。
+解析 `settings.yaml`，断言 `contextWindow` 与各模型的 `input` 出现在模型条目、关闭后不残留、恢复后逐字节还原。
 
 任何可选高级能力（精确会话关联、模型规格声明、交互确认桥）都由用户显式开启，默认不启用；未开启时基础
 接入不依赖 DSH Web 或 Profile。开关与主操作“重新写入 Flowlet 配置”互为独立：按钮按当前报告
@@ -235,5 +244,5 @@ css-variables 主题，boot 语法 ts/bash/json，常用语言按需加载，未
   与当前“不做跨协议转换”的协议原则冲突；待代理层具备按上游能力转换思考参数的阶段再提供。
   思考参数的**回传**侧已由代理层 `ensure_reasoning_content_passback` 处理（见上文），
   仅缺失字段补全、不转换思考参数。
-- 模型规格当前只声明 `contextWindow`，不声明 `maxTokens` 与 `input` 模态，理由见上文。
+- 模型规格声明 `contextWindow` 与按当前可用路由计算的 `input`，仍不声明 `maxTokens`，理由见上文。
 - 交互确认桥的移动端远程确认未在 MVP 覆盖，后续通过泛化 `lan_sync` 的权限端点加入。

@@ -133,10 +133,11 @@ export function ModelsServiceView({ stats, groups, labels, density = "default", 
   );
 }
 
-export function ModelsServiceDetailView({ logo, title, subtitle, tabs, activeKey, onTabChange, footer, empty }: {
+export function ModelsServiceDetailView({ logo, title, subtitle, headerAction, tabs, activeKey, onTabChange, footer, empty }: {
   logo?: ReactNode;
   title?: ReactNode;
   subtitle?: ReactNode;
+  headerAction?: ReactNode;
   tabs?: ModelsServiceDetailTabModel[];
   activeKey?: string;
   onTabChange?: (key: string) => void;
@@ -146,7 +147,7 @@ export function ModelsServiceDetailView({ logo, title, subtitle, tabs, activeKey
   if (empty) return <section className={`${styles.detailCard} ${styles.detailEmpty}`}>{empty}</section>;
   return (
     <section className={styles.detailCard}>
-      <header className={styles.detailHeader}>{logo}<span className={styles.detailTitle}><strong>{title}</strong><small>{subtitle}</small></span></header>
+      <header className={styles.detailHeader}>{logo}<span className={styles.detailTitle}><strong>{title}</strong><small>{subtitle}</small></span>{headerAction ? <span className={styles.detailHeaderAction}>{headerAction}</span> : null}</header>
       <div className={styles.detailBody}>
         <Tabs className={styles.detailTabs} type="line" activeKey={activeKey} onChange={(key) => onTabChange?.(String(key))} tabPaneMotion={false}>
           {(tabs ?? []).map((tab) => <Tabs.TabPane tab={tab.label} itemKey={tab.key} key={tab.key}>{tab.content}</Tabs.TabPane>)}

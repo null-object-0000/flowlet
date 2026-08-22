@@ -1,7 +1,7 @@
 /** 将 Flowlet 的 channel_id + upstream_model 映射到 models-cn  provider + model，
  *  并解析为 ResolvedModel。纯逻辑，便于测试。*/
 
-import type { ModelsCnCatalog } from "./types";
+import type { ModelsCnCatalog, ModelsDevCatalog, ModelsDevModel, ResolvedModel } from "./types";
 import { findModelInCatalog, resolveModel } from "./pricing";
 import { canonicalModelId, modelsCnProviderIdForModel } from "./identity";
 
@@ -12,6 +12,86 @@ export function parseCatalogJson(json: string): ModelsCnCatalog | null {
   } catch {
     return null;
   }
+}
+
+export function parseModelsDevCatalogJson(json: string): ModelsDevCatalog | null {
+  try {
+    return JSON.parse(json) as ModelsDevCatalog;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeValues(values: string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean))];
+}
+
+function resolvedFromModelsDev(providerName: string, model: ModelsDevModel): ResolvedModel {
+  return {
+    providerId: "openrouter",
+    providerName,
+    modelId: model.id,
+    modelName: model.name,
+    description: model.description?.trim() || null,
+    tokenizer: null,
+    specificationSource: "models.dev",
+    limits: {
+      contextTokens: model.limit?.context ?? null,
+      maxOutputTokens: model.limit?.output ?? null,
+    },
+    capabilities: {
+      thinking: model.reasoning ?? false,
+      toolCalls: model.tool_call ?? false,
+      jsonOutput: model.structured_output ?? false,
+      inputModalities: normalizeValues(model.modalities?.input),
+      outputModalities: normalizeValues(model.modalities?.output),
+    },
+    aliases: [],
+    officialPrice: null,
+    allPrices: [],
+    supplementedFromModelsDev: false,
+    modelsDevReferenceUrl: null,
+  };
+}
+
+/** OpenRouter 模型在 models-cn 缺失时，优先读取 models.dev 的 OpenRouter 目录。 */
+export function resolveOpenRouterModelsDevModel(
+  catalog: ModelsDevCatalog,
+  upstreamModel: string,
+): ResolvedModel | null {
+  const provider = catalog.openrouter;
+  if (!provider?.models) return null;
+  const normalized = upstreamModel.trim().toLowerCase();
+  const canonical = (canonicalModelId(upstreamModel) ?? upstreamModel).trim().toLowerCase();
+  let fallback: ModelsDevModel | null = null;
+  for (const [key, model] of Object.entries(provider.models)) {
+    const ids = [key, model.id].map((value) => value.trim().toLowerCase());
+    if (ids.includes(normalized)) return resolvedFromModelsDev(provider.name, model);
+    if (ids.some((value) => value === canonical || value.endsWith(`/${canonical}`))) {
+      fallback ??= model;
+    }
+  }
+  return fallback ? resolvedFromModelsDev(provider.name, fallback) : null;
+}
+
+/** 规格优先级：models-cn → models.dev。 */
+export function resolveModelSpecification(
+  modelsCnCatalog: ModelsCnCatalog | null,
+  modelsDevCatalog: ModelsDevCatalog | null,
+  channelId: string,
+  upstreamModel: string,
+  at?: Date,
+  allowModelsDevFallback = true,
+): ResolvedModel | null {
+  const fromModelsCn = modelsCnCatalog
+    ? resolveChannelModel(modelsCnCatalog, channelId, upstreamModel, at)
+    : null;
+  if (fromModelsCn) return fromModelsCn;
+  if (!allowModelsDevFallback) return null;
+  if (channelId !== "openrouter") return null;
+  return modelsDevCatalog
+    ? resolveOpenRouterModelsDevModel(modelsDevCatalog, upstreamModel)
+    : null;
 }
 
 /** Flowlet channel_id → models-cn providerId 映射。
@@ -48,7 +128,13 @@ export function resolveChannelModel(
   const limitsMissing =
     officialLimits == null ||
     (officialLimits.contextTokens == null && officialLimits.maxOutputTokens == null);
-  const capsMissing = officialCaps == null || (!officialCaps.thinking && !officialCaps.toolCalls && !officialCaps.jsonOutput);
+  const capsMissing = officialCaps == null || (
+    officialCaps.thinking == null
+    && officialCaps.toolCalls == null
+    && officialCaps.jsonOutput == null
+    && officialCaps.inputModalities == null
+    && officialCaps.outputModalities == null
+  );
   const supplemented = Boolean(limitsMissing || capsMissing);
   const referenceUrl = supplemented ? findModelsDevReference(catalog, providerId, canonicalModel) : null;
 

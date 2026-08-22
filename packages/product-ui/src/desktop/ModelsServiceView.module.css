@@ -43,9 +43,10 @@
 .detailCard { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 .detailEmpty { place-items: center; color: var(--flowlet-color-text-tertiary); font-size: var(--flowlet-font-size-body, 14px); }
 .detailHeader { min-height: 64px; padding: 10px 13px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--flowlet-color-border); }
-.detailTitle { min-width: 0; display: grid; gap: 3px; }
+.detailTitle { min-width: 0; flex: 1; display: grid; gap: 3px; }
 .detailTitle strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; }
 .detailTitle small { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body, 14px); }
+.detailHeaderAction { flex: none; margin-left: auto; }
 .detailBody { min-height: 0; overflow: auto; padding: 0; }
 .detailTabs { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .detailTabs :global(.semi-tabs-bar) { padding-left: 13px; padding-right: 13px; }

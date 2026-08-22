@@ -120,6 +120,8 @@ Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、Web
 `config.json.channels_config.default_exposed_models` 仍用于渠道预设漂移检测，不决定全局
 白名单。运行时同步的 `models-cn.json` / `models-dev.json` 只补充规格与价格，不能动态扩大
 可开放模型范围。修改内置模型目录需要重新构建应用；同步规格和价格无需重启。
+模型服务中的 OpenRouter 模型规格按 `models-cn → models.dev` 解析；
+Rust 只向前端返回 models.dev 的 `openrouter` provider 子目录。两份目录都未收录时不展示推测规格。
 
 ### 插件注册边界
 

@@ -64,7 +64,7 @@
 ## 6. 前端接入方式
 
 - **后台定时任务拉取**：Rust 后端启动后 1 小时触发第一次同步，之后每 1 小时顺序拉取 `https://null-object-0000.github.io/models-cn/api.json` 与 `https://models.dev/api.json`，分别保存为 exe 旁 `models-cn.json` / `models-dev.json` 文件（**不是 SQLite 表**）。每次同步独立写入 `background_jobs` 任务日志，并在任一同步成功后用两份目录 + `config.json` 的 `model_prices` 重建运行时价格表。
-- **前端只读本地**：前端通过 `get_models_cn_catalog` 命令读取本地最新 models-cn 目录，不发起远程请求。本地无数据时，不展示 models-cn 相关内容（基础信息 Tab 仅展示渠道同步数据，价格信息 Tab 展示空状态 + 「立即同步」按钮）。models.dev 目录仅 Rust 侧用于成本估算，前端不直接消费。
+- **前端只读本地**：前端通过 `get_models_cn_catalog` 命令读取本地最新 models-cn 目录，不发起远程请求。本地无数据时，不展示 models-cn 相关内容（价格信息 Tab 展示空状态 + 「立即同步」按钮）。模型服务还会通过 `get_models_dev_provider_catalog("openrouter")` 只读取 models.dev 的 OpenRouter provider 子目录，避免把完整大文件经 IPC 传给前端；OpenRouter 模型规格按 `models-cn → models.dev` 回退，两份目录都未收录时不展示推测规格。
 - **手动同步**：用户可点击「立即同步」按钮，前端并发触发 `sync_models_cn_catalog` + `sync_models_dev_catalog` 两个命令；单个源失败不影响另一个。
 - **内容去重**：同步前计算 SHA-256 hash，与本地最新数据比较，内容未变化则跳过保存（返回 `skipped: true`）。
 - 解析后建立 `(providerId, modelId)` → 模型详情 + 官方价格的索引。
@@ -75,7 +75,7 @@
 
 | Tab | 内容 | 数据来源 |
 |-----|------|----------|
-| 基础信息 | 上下文窗口、最大输出、能力（thinking/toolCalls 等）、别名 | models-cn `limits` + `capabilities`，缺失降级到渠道同步 |
+| 基础信息 | 上下文窗口、最大输出、输入/输出模态、能力（thinking/toolCalls 等）、别名 | models-cn `limits` + `capabilities`，缺失降级到渠道同步 |
 | 价格信息 | 官方完整价格策略（按输入区间合并标准价与促销价）、隐式缓存、显式缓存创建/命中、输出价、来源、抓取时间 | models-cn `prices[]` |
 | 渠道路由 | 已有路由账号、优先级、启用状态 | 本项目路由配置（不变） |
 

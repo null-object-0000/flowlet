@@ -12,5 +12,6 @@ export const backgroundTaskCommands = {
   syncModelsCnCatalog: (sourceUrl: string, triggerSource: string) => invokeCommand<CatalogSyncResult>("sync_models_cn_catalog", { sourceUrl, triggerSource }, 60_000).catch((error) => { throw toAppError(error, "models_cn_sync_failed"); }),
   syncModelsDevCatalog: (sourceUrl: string, triggerSource: string) => invokeCommand<CatalogSyncResult>("sync_models_dev_catalog", { sourceUrl, triggerSource }, 60_000).catch((error) => { throw toAppError(error, "models_dev_sync_failed"); }),
   getModelsCnCatalog: () => invokeCommand<string | null>("get_models_cn_catalog").catch((error) => { throw toAppError(error, "models_cn_catalog_read_failed"); }),
+  getModelsDevProviderCatalog: (providerId: string) => invokeCommand<string | null>("get_models_dev_provider_catalog", { providerId }).catch((error) => { throw toAppError(error, "models_dev_catalog_read_failed"); }),
   getModelsCnCurrencies: () => invokeCommand<Array<[string, string]>>("get_models_cn_currencies").catch((error) => { throw toAppError(error, "models_cn_currencies_failed"); }),
 };

@@ -107,7 +107,7 @@ Flowlet 当前有七种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI、
 
 ## 4. 模型支持
 
-Flowlet 当前总共支持 15 个规范化模型。这个列表是全局白名单，不是按渠道切分的
+Flowlet 当前总共支持 20 个规范化模型。这个列表是全局白名单，不是按渠道切分的
 固定路由表。
 
 | 官方归属 | 规范化模型 ID | Responses 说明 |
@@ -115,6 +115,7 @@ Flowlet 当前总共支持 15 个规范化模型。这个列表是全局白名�
 | LongCat | `LongCat-2.0` | ✅ 上游确认 |
 | DeepSeek | `deepseek-v4-pro` | ◐ Flowlet 会生成候选；上游模型级可用性需实测 |
 | DeepSeek | `deepseek-v4-flash` | ✅ 上游确认 |
+| DeepSeek | `deepseek-v4-flash-vision-exp` | ◐ 视觉实验模型；上游模型级可用性需实测 |
 | Kimi | `kimi-k3` | — 上游暂不支持 |
 | Kimi | `kimi-k2.7-code` | — 上游暂不支持 |
 | Qwen | `qwen3.8-max` | ✅ 上游确认 |
@@ -127,6 +128,10 @@ Flowlet 当前总共支持 15 个规范化模型。这个列表是全局白名�
 | Z.AI | `glm-5.2` | — 上游文档未确认支持 |
 | Z.AI | `glm-4.7` | — 上游文档未确认支持 |
 | Z.AI | `glm-4.5-air` | — 上游文档未确认支持 |
+| OpenRouter | `ox-alpha` | — 上游文档未确认支持 |
+| OpenRouter | `nemotron-3.5-lightning` | — 上游文档未确认支持 |
+| OpenRouter | `nemotron-3-super-120b-a12b` | — 上游文档未确认支持 |
+| OpenRouter | `nemotron-3-ultra-550b-a55b` | — 上游文档未确认支持 |
 
 `flowlet-pro` 与 `flowlet-flash` 没有固定档位对应关系；用户可把上述任意已有渠道模型加入任一聚合模型。
 

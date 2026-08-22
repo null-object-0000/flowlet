@@ -89,7 +89,8 @@ in the thinking mode must be passed back to the API.`。DSH 的 `llm-pi-ai` 适�
 
 Flowlet 在代理层处理：`ensure_reasoning_content_passback`（`proxy_http.rs`，由
 `proxy.rs` 在 `rewrite_model` 后调用）为转发到 DeepSeek 推理模型（按
-`canonical_model_key` 归一后的 `deepseek-v4-flash` / `deepseek-v4-pro`，覆盖千问 Token Plan
+`canonical_model_key` 归一后的 `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` /
+`deepseek-v4-pro`，覆盖千问 Token Plan
 等渠道承载的 DeepSeek 模型）的 OpenAI chat/completions 请求中，缺失该字段的
 `assistant` 消息补空串——仅追加、不改写已有值，与客户端直连 DeepSeek 时的行为一致，
 对所有客户端生效。该行为是「不随意改写请求结构」的受控例外：按上游模型门控、仅

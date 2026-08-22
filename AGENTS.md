@@ -250,6 +250,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 ```text
 - LongCat-2.0
 - deepseek-v4-flash
+- deepseek-v4-flash-vision-exp
 - deepseek-v4-pro
 - kimi-k3
 - kimi-k2.7-code

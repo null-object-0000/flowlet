@@ -1475,7 +1475,11 @@ pub(super) fn ensure_reasoning_content_passback(
 /// 这些端点的 thinking 回传要求与 DeepSeek 官方一致。当前目录内 DeepSeek 模型均为
 /// 推理模型；若未来新增非推理 DeepSeek 模型（如 deepseek-chat），需在此同步收窄。
 fn is_deepseek_reasoning_model(model: &str) -> bool {
-    const DEEPSEEK_REASONING_MODELS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
+    const DEEPSEEK_REASONING_MODELS: &[&str] = &[
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "deepseek-v4-pro",
+    ];
     let canonical = crate::core::model_catalog::canonical_model_key(model);
     DEEPSEEK_REASONING_MODELS.contains(&canonical.as_str())
 }

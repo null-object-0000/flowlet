@@ -465,7 +465,12 @@ fn ensure_reasoning_content_passback_skips_non_deepseek_and_other_protocols() {
         assert_eq!(unchanged, *case);
     }
     // 变体 / 带厂商前缀的上游模型 ID：canonical 归一后命中
-    for variant in ["deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash", "deepseek-v4-pro"] {
+    for variant in [
+        "deepseek-v4-flash-0731",
+        "deepseek/deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+        "deepseek-v4-pro",
+    ] {
         let rewritten =
             ensure_reasoning_content_passback(body, variant, &ProtocolType::OpenAi);
         let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();

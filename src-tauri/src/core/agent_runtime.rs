@@ -29,6 +29,14 @@ pub(crate) struct AgentRuntimeAdapter {
 struct ManagedRuntime {
     child: Child,
     output: Arc<StdMutex<String>>,
+    /// Windows Job Object（KILL_ON_JOB_CLOSE）：Flowlet 无论正常还是异常退出
+    /// （崩溃、被强杀等），内核都会关闭 Job 句柄并终止整棵托管进程树，
+    /// 子进程不再因非托盘退出路径变成占用端口的孤儿。绑定失败时为 None，
+    /// 行为退回原有的“仅在托盘退出路径清理”。
+    /// 该字段刻意从不读取：它的全部作用就是被持有到 Drop。
+    #[cfg(windows)]
+    #[allow(dead_code)]
+    job: Option<crate::core::win_process_job::ManagedProcessJob>,
 }
 
 #[derive(Clone, Default)]
@@ -90,10 +98,17 @@ impl AgentRuntimeManager {
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(capture_output(stderr, output.clone()));
         }
-        self.processes
-            .lock()
-            .await
-            .insert(agent_id.to_string(), ManagedRuntime { child, output });
+        #[cfg(windows)]
+        let job = bind_runtime_job(&child, &launch.display_command);
+        self.processes.lock().await.insert(
+            agent_id.to_string(),
+            ManagedRuntime {
+                child,
+                output,
+                #[cfg(windows)]
+                job,
+            },
+        );
 
         let started_at = tokio::time::Instant::now();
         while started_at.elapsed() < START_TIMEOUT {
@@ -270,4 +285,29 @@ async fn terminate_process(mut child: Child) {
     }
     let _ = child.start_kill();
     let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
+}
+
+/// 把刚启动的运行时子进程绑入 KILL_ON_JOB_CLOSE 的 Job Object（见
+/// [`crate::core::win_process_job`]）。绑定失败不阻断启动，只降级为原有
+/// 的生命周期管理，并在日志中留痕便于排查。
+#[cfg(windows)]
+fn bind_runtime_job(
+    child: &Child,
+    display_command: &str,
+) -> Option<crate::core::win_process_job::ManagedProcessJob> {
+    use crate::core::win_process_job::ManagedProcessJob;
+
+    let Some(process_handle) = child.raw_handle() else {
+        tracing::warn!("`{display_command}` 无法获取进程句柄，Job Object 未绑定");
+        return None;
+    };
+    match ManagedProcessJob::bind(process_handle) {
+        Ok(job) => Some(job),
+        Err(error) => {
+            tracing::warn!(
+                "`{display_command}` 绑定 Job Object 失败，Flowlet 异常退出时可能遗留子进程：{error}"
+            );
+            None
+        }
+    }
 }

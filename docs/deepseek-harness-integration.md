@@ -20,7 +20,7 @@ Desktop：用户主要通过 `dsh web` 打开的本地浏览器界面使用它�
 | Session | 读取 `sessions/**/session.jsonl(.zstd)` v0，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；其它版本明确拒绝；打包 delta chunk 不作为最终消息展示 |
 | Identity | 使用官方 User-Agent 识别客户端；可选会话桥启用时读取并剥离 `x-flowlet-session` | 与其他 Agent 共用编译期 Identity Adapter registry，实时请求与历史修复规则一致 |
 | Runner | 通过稳定全局 `dsh` 命令或 npx 缓存包入口（`node <包 bin>`）执行 `dsh --profile headless <task>` | 仅 fresh session；DSH 没有稳定 resume 参数时明确失败 |
-| Runtime（Environment 可选能力） | 在接入抽屉内启动、停止并展示 DSH Web 状态；全局 npm 安装执行 `dsh web --no-open`，npx 缓存安装执行 `npx @deepseek-ai/dsh web --no-open` | 只停止当前 Flowlet 启动并记录的子进程；手动或其他程序启动的 3080 进程仅显示为外部运行，不接管、不强杀 |
+| Runtime（Environment 可选能力） | 在接入抽屉内启动、停止并展示 DSH Web 状态；全局 npm 安装执行 `dsh web --no-open`，npx 缓存安装执行 `npx @deepseek-ai/dsh web --no-open`；Windows 下托管子进程绑定 Job Object（KILL_ON_JOB_CLOSE），Flowlet 异常退出时由内核回收整棵进程树 | 只停止当前 Flowlet 启动并记录的子进程；手动或其他程序启动的 3080 进程仅显示为外部运行，不接管、不强杀；Job Object 只覆盖 Flowlet 自己启动的进程，孤儿进程仍需在原启动位置停止 |
 
 ## Flowlet Provider
 

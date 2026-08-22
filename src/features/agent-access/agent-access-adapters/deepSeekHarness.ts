@@ -1,6 +1,24 @@
 import type { AgentAccessAdapter } from "../agentAccessAdapters";
 
-function settingsSnippet(endpoint: string) {
+/// 与 Rust 写入端 `provider_profile_with_inputs` 保持一致：
+/// 「聚合模型规格」关闭时模型条目只有 id；开启后写入 1M 上下文窗口，并按
+/// 当前可用路由声明输入能力（text 恒在，image 仅在路由支持时出现）。
+function settingsSnippet(
+  endpoint: string,
+  modelSpecs: boolean,
+  modelInputs?: Record<string, string[]>,
+) {
+  const model = (id: "flowlet-pro" | "flowlet-flash"): string[] => {
+    if (!modelSpecs) return [`        - id: ${id}`];
+    const declared = modelInputs?.[id] ?? [];
+    const input = declared.includes("image") ? ["text", "image"] : ["text"];
+    return [
+      `        - id: ${id}`,
+      "          contextWindow: 1048576",
+      "          input:",
+      ...input.map((value) => `            - ${value}`),
+    ];
+  };
   return [
     "llm-pi-ai:",
     "  providers:",
@@ -10,8 +28,8 @@ function settingsSnippet(endpoint: string) {
     "      api: openai-completions",
     `      baseURL: ${endpoint}`,
     "      models:",
-    "        - id: flowlet-pro",
-    "        - id: flowlet-flash",
+    ...model("flowlet-pro"),
+    ...model("flowlet-flash"),
     "agent-default-model:",
     "  provider: flowlet",
     "  model: flowlet-pro",
@@ -67,8 +85,12 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
     modelSpecs: globalConfig?.model_specs ?? false,
     approvalBridge: globalConfig?.approval_bridge ?? false,
   }),
-  manualSnippets: ({ endpoint, token, displayedToken, t }) => {
-    const settings = settingsSnippet(endpoint);
+  manualSnippets: ({ endpoint, token, displayedToken, globalConfig, t }) => {
+    const settings = settingsSnippet(
+      endpoint,
+      globalConfig?.model_specs ?? false,
+      globalConfig?.model_input_modalities,
+    );
     return [
       { label: t("settings.yaml Provider 片段"), displayValue: settings, copyValue: settings },
       {

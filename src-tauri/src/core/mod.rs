@@ -49,6 +49,8 @@ pub mod sync;
 pub mod usage;
 pub mod web;
 pub mod webview_profile;
+#[cfg(windows)]
+pub(crate) mod win_process_job;
 pub(crate) mod window_size;
 pub(crate) mod window_visibility;
 

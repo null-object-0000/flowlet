@@ -93,6 +93,9 @@ describe("agent access adapters", () => {
     expect(snippets[0].copyValue).toContain("api: openai-completions");
     expect(snippets[0].copyValue).not.toContain("sessionIdHeader");
     expect(snippets[0].copyValue).not.toContain("x-flowlet-client");
+    // 聚合模型规格默认关闭：片段与基础写入一致，不携带任何规格声明。
+    expect(snippets[0].copyValue).not.toContain("contextWindow");
+    expect(snippets[0].copyValue).not.toContain("input:");
     expect(snippets[0].copyValue).toContain("agent-default-model:");
     expect(snippets[0].copyValue).toContain("model: flowlet-pro");
     expect(snippets[1].copyValue).toContain("version: 1");
@@ -120,5 +123,22 @@ describe("agent access adapters", () => {
       modelSpecs: false,
       approvalBridge: false,
     });
+
+    // 开启聚合模型规格后，片段必须与一键写入的 settings.yaml 一致：
+    // 每个模型条目带 1M 上下文窗口，并按当前可用路由声明输入能力。
+    const declared = context({
+      model_specs: true,
+      model_input_modalities: { "flowlet-pro": ["text", "image"], "flowlet-flash": ["text"] },
+    });
+    const declaredSettings = adapter.manualSnippets(declared)[0].copyValue;
+    expect(declaredSettings).toContain("- id: flowlet-pro\n          contextWindow: 1048576");
+    expect(declaredSettings).toContain("- id: flowlet-flash\n          contextWindow: 1048576");
+    expect(declaredSettings).toMatch(/- id: flowlet-pro[\s\S]*?input:\n            - text\n            - image/);
+    expect(declaredSettings).toMatch(/- id: flowlet-flash[\s\S]*?input:\n            - text\n/);
+    // 未上报图像能力时回退为纯文本，与写入端 input_for 的归一化一致。
+    const fallback = context({ model_specs: true });
+    const fallbackModels = adapter.manualSnippets(fallback)[0].copyValue;
+    expect(fallbackModels.match(/input:\n            - text/g)?.length).toBe(2);
+    expect(fallbackModels).not.toContain("image");
   });
 });

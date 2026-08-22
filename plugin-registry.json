@@ -57,7 +57,9 @@
         "runnerAdapterId": "opencode",
         "sessionTypes": [{ "id": "opencode", "name": "OpenCode", "clientId": "opencode" }],
         "taskProfile": { "name": "OpenCode", "sessionType": "opencode" },
-        "configCapabilities": [],
+        "configCapabilities": [
+          { "id": "model-specs", "name": "输入模态声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
+        ],
         "endpointSuffix": "/v1",
         "npmPackage": "opencode-ai",
         "surfaces": ["cli", "desktop"],
@@ -89,7 +91,8 @@
         "sessionTypes": [{ "id": "pi", "name": "Pi", "clientId": "pi" }],
         "taskProfile": { "name": "Pi", "sessionType": "pi" },
         "configCapabilities": [
-          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
+          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
+          { "id": "model-specs", "name": "输入模态声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": false }
         ],
         "endpointSuffix": "/v1",
         "npmPackage": "@earendil-works/pi-coding-agent",

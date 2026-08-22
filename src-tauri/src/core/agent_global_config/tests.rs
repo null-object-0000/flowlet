@@ -7,12 +7,13 @@ use super::adapters::codex::{
     CODEX_MODEL_CATALOG_REF,
 };
 use super::adapters::opencode::{
-    apply_opencode, inspect_opencode, opencode_backup_path, read_jsonc_settings, restore_opencode,
-    upgrade_opencode_backup_with_server, OPENCODE_FAST_MODEL, OPENCODE_PRIMARY_MODEL,
+    apply_opencode, apply_opencode_with_model_specs, inspect_opencode, opencode_backup_path,
+    read_jsonc_settings, restore_opencode, upgrade_opencode_backup_with_server,
+    OPENCODE_FAST_MODEL, OPENCODE_PRIMARY_MODEL,
 };
 use super::adapters::pi::{
-    apply_pi, inspect_pi, restore_pi, PI_FAST_MODEL, PI_PRIMARY_MODEL, PI_PROVIDER_ID,
-    PI_SESSION_EXTENSION_SOURCE,
+    apply_pi, apply_pi_with_model_specs, inspect_pi, restore_pi, PI_FAST_MODEL, PI_PRIMARY_MODEL,
+    PI_PROVIDER_ID, PI_SESSION_EXTENSION_SOURCE,
 };
 use super::*;
 
@@ -546,6 +547,106 @@ fn applies_and_restores_opencode_config_and_credentials() {
 }
 
 #[test]
+fn upstream_opencode_fixture_model_inputs_pass_apply_disable_restore_contract() {
+    let (settings_path, auth_path) = test_opencode_paths();
+    let permission_plugin_path = settings_path.parent().unwrap().join("plugins/flowlet.ts");
+    std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(auth_path.parent().unwrap()).unwrap();
+    let original_settings = include_str!("../../../tests/fixtures/opencode/opencode.jsonc");
+    let original_auth = include_str!("../../../tests/fixtures/opencode/auth.json");
+    std::fs::write(&settings_path, original_settings).unwrap();
+    std::fs::write(&auth_path, original_auth).unwrap();
+    let initial = read_jsonc_settings(&settings_path).unwrap();
+    let initial_auth = read_settings(&auth_path).unwrap();
+    assert_eq!(
+        inspect_opencode(
+            &settings_path,
+            &auth_path,
+            &permission_plugin_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap()
+        .state,
+        AgentGlobalConfigState::NotConfigured
+    );
+
+    let inputs = BTreeMap::from([
+        (
+            "flowlet-pro".to_string(),
+            vec!["text".to_string(), "image".to_string()],
+        ),
+        ("flowlet-flash".to_string(), vec!["text".to_string()]),
+    ]);
+    let applied = apply_opencode_with_model_specs(
+        &settings_path,
+        &auth_path,
+        &permission_plugin_path,
+        "http://127.0.0.1:18640/v1",
+        "flowlet-token",
+        true,
+        Some(&inputs),
+    )
+    .unwrap();
+    assert!(applied.model_specs);
+    let applied_json = read_jsonc_settings(&settings_path).unwrap();
+    assert_eq!(
+        applied_json["provider"]["flowlet"]["models"]["flowlet-pro"]["modalities"]["input"],
+        serde_json::json!(["text", "image"])
+    );
+    assert_eq!(
+        applied_json["provider"]["flowlet"]["models"]["flowlet-flash"]["modalities"]["input"],
+        serde_json::json!(["text"])
+    );
+
+    let reapplied = apply_opencode_with_model_specs(
+        &settings_path,
+        &auth_path,
+        &permission_plugin_path,
+        "http://127.0.0.1:18640/v1",
+        "flowlet-token",
+        true,
+        Some(&inputs),
+    )
+    .unwrap();
+    assert!(reapplied.model_specs);
+    read_jsonc_settings(&settings_path).unwrap();
+
+    let disabled = apply_opencode_with_model_specs(
+        &settings_path,
+        &auth_path,
+        &permission_plugin_path,
+        "http://127.0.0.1:18640/v1",
+        "flowlet-token",
+        false,
+        None,
+    )
+    .unwrap();
+    assert!(!disabled.model_specs);
+    let disabled_json = read_jsonc_settings(&settings_path).unwrap();
+    assert!(
+        disabled_json["provider"]["flowlet"]["models"]["flowlet-pro"]
+            .get("modalities")
+            .is_none()
+    );
+
+    restore_opencode(
+        &settings_path,
+        &auth_path,
+        &permission_plugin_path,
+        "http://127.0.0.1:18640/v1",
+    )
+    .unwrap();
+    let restored = read_jsonc_settings(&settings_path).unwrap();
+    assert_eq!(restored, initial);
+    assert_eq!(read_settings(&auth_path).unwrap(), initial_auth);
+    assert!(std::fs::read_to_string(&settings_path)
+        .unwrap()
+        .contains("Representative upstream user setting"));
+
+    let _ = std::fs::remove_dir_all(settings_path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
 fn upgrades_legacy_opencode_backup_without_overwriting_the_original_server() {
     let directory = std::env::temp_dir().join(format!(
         "flowlet-opencode-backup-upgrade-{}",
@@ -702,6 +803,111 @@ fn applies_and_restores_pi_models_auth_and_settings() {
     let settings = read_settings(&settings_path).unwrap();
     assert_eq!(settings["defaultProvider"], "anthropic");
     assert_eq!(settings["defaultModel"], "claude-sonnet-4-5");
+
+    let _ = std::fs::remove_dir_all(settings_path.parent().unwrap());
+}
+
+#[test]
+fn upstream_pi_fixture_model_inputs_pass_apply_disable_restore_contract() {
+    let (settings_path, models_path, auth_path, extension_path) = test_pi_paths();
+    let original_settings = include_str!("../../../tests/fixtures/pi/settings.json");
+    let original_models = include_str!("../../../tests/fixtures/pi/models.json");
+    let original_auth = include_str!("../../../tests/fixtures/pi/auth.json");
+    std::fs::write(&settings_path, original_settings).unwrap();
+    std::fs::write(&models_path, original_models).unwrap();
+    std::fs::write(&auth_path, original_auth).unwrap();
+    let initial_settings = read_settings(&settings_path).unwrap();
+    let initial_models = read_settings(&models_path).unwrap();
+    let initial_auth = read_settings(&auth_path).unwrap();
+    assert_eq!(
+        inspect_pi(
+            &settings_path,
+            &models_path,
+            &auth_path,
+            &extension_path,
+            "http://127.0.0.1:18640/v1",
+        )
+        .unwrap()
+        .state,
+        AgentGlobalConfigState::NotConfigured
+    );
+
+    let inputs = BTreeMap::from([
+        (
+            "flowlet-pro".to_string(),
+            vec!["text".to_string(), "image".to_string()],
+        ),
+        ("flowlet-flash".to_string(), vec!["text".to_string()]),
+    ]);
+    let applied = apply_pi_with_model_specs(
+        &settings_path,
+        &models_path,
+        &auth_path,
+        &extension_path,
+        "http://127.0.0.1:18640/v1",
+        "flowlet-token",
+        false,
+        true,
+        Some(&inputs),
+    )
+    .unwrap();
+    assert!(applied.model_specs);
+    let applied_models = read_settings(&models_path).unwrap();
+    assert_eq!(
+        applied_models["providers"]["flowlet"]["models"][0]["input"],
+        serde_json::json!(["text", "image"])
+    );
+    assert_eq!(
+        applied_models["providers"]["flowlet"]["models"][1]["input"],
+        serde_json::json!(["text"])
+    );
+    read_settings(&settings_path).unwrap();
+    read_settings(&auth_path).unwrap();
+
+    let reapplied = apply_pi_with_model_specs(
+        &settings_path,
+        &models_path,
+        &auth_path,
+        &extension_path,
+        "http://127.0.0.1:18640/v1",
+        "flowlet-token",
+        false,
+        true,
+        Some(&inputs),
+    )
+    .unwrap();
+    assert!(reapplied.model_specs);
+    read_settings(&models_path).unwrap();
+
+    let disabled = apply_pi_with_model_specs(
+        &settings_path,
+        &models_path,
+        &auth_path,
+        &extension_path,
+        "http://127.0.0.1:18640/v1",
+        "flowlet-token",
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+    assert!(!disabled.model_specs);
+    let disabled_models = read_settings(&models_path).unwrap();
+    assert!(disabled_models["providers"]["flowlet"]["models"][0]
+        .get("input")
+        .is_none());
+
+    restore_pi(
+        &settings_path,
+        &models_path,
+        &auth_path,
+        &extension_path,
+        "http://127.0.0.1:18640/v1",
+    )
+    .unwrap();
+    assert_eq!(read_settings(&settings_path).unwrap(), initial_settings);
+    assert_eq!(read_settings(&models_path).unwrap(), initial_models);
+    assert_eq!(read_settings(&auth_path).unwrap(), initial_auth);
 
     let _ = std::fs::remove_dir_all(settings_path.parent().unwrap());
 }

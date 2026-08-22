@@ -102,14 +102,34 @@ export const openCodeAdapter: AgentAccessAdapter = {
     label: t("权限插件"),
     value: t(globalConfig?.opencode_permission_bridge ? "已安装" : "需安装或更新"),
   }],
-  configControls: () => [],
-  applyOptions: () => undefined,
-  manualSnippets: ({ endpoint, token, displayedToken, t }) => {
+  configControls: ({ globalConfig, t }) => [{
+    id: "model-specs",
+    label: t("输入模态声明"),
+    descriptions: [
+      t("开启后按当前可用路由为两个聚合模型声明文本或图像输入能力，避免 OpenCode 在发送前丢弃图片。"),
+      t("OpenCode 在启动时建立模型能力缓存，启用或关闭后需要重启 CLI 与 Desktop。"),
+    ],
+    checked: globalConfig?.model_specs ?? false,
+    requiresRestart: true,
+    applyOptions: (checked) => ({ modelSpecs: checked }),
+  }],
+  applyOptions: ({ globalConfig }) => ({ modelSpecs: globalConfig?.model_specs ?? false }),
+  manualSnippets: ({ endpoint, token, displayedToken, globalConfig, t }) => {
+    const model = (id: "flowlet-pro" | "flowlet-flash") => {
+      const value: Record<string, unknown> = { name: id };
+      if (globalConfig?.model_specs) {
+        value.modalities = {
+          input: globalConfig.model_input_modalities?.[id] ?? ["text"],
+          output: ["text"],
+        };
+      }
+      return value;
+    };
     const provider = JSON.stringify({
       $schema: "https://opencode.ai/config.json",
       model: "flowlet/flowlet-pro",
       small_model: "flowlet/flowlet-flash",
-      provider: { flowlet: { name: "Flowlet", npm: "@ai-sdk/openai-compatible", options: { baseURL: endpoint }, models: { "flowlet-pro": { name: "flowlet-pro" }, "flowlet-flash": { name: "flowlet-flash" } } } },
+      provider: { flowlet: { name: "Flowlet", npm: "@ai-sdk/openai-compatible", options: { baseURL: endpoint }, models: { "flowlet-pro": model("flowlet-pro"), "flowlet-flash": model("flowlet-flash") } } },
     }, null, 2);
     return [
       { label: t("opencode.jsonc 配置片段"), displayValue: provider, copyValue: provider },

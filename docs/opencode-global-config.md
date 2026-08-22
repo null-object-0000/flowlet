@@ -27,8 +27,14 @@ Windows 下 `~` 对应 `%USERPROFILE%`。
         "baseURL": "http://127.0.0.1:18640/v1"
       },
       "models": {
-        "flowlet-pro": { "name": "flowlet-pro" },
-        "flowlet-flash": { "name": "flowlet-flash" }
+        "flowlet-pro": {
+          "name": "flowlet-pro",
+          "modalities": { "input": ["text", "image"], "output": ["text"] }
+        },
+        "flowlet-flash": {
+          "name": "flowlet-flash",
+          "modalities": { "input": ["text"], "output": ["text"] }
+        }
       }
     }
   }
@@ -47,6 +53,9 @@ Windows 下 `~` 对应 `%USERPROFILE%`。
 ```
 
 状态接口只返回凭据是否存在，不返回 Token 内容。
+
+`modalities` 仅在用户开启“输入模态声明”时写入；上例表示当前 `flowlet-pro` 存在图片候选、
+`flowlet-flash` 仅有文本候选。能力来自 Flowlet 本地模型目录与当前启用路由，不由前端猜测。
 
 ## 合并、备份与恢复
 

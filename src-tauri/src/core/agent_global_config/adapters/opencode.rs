@@ -104,14 +104,18 @@ impl AgentGlobalConfigAdapter for OpenCodeAdapter {
         &self,
         expected_base_url: &str,
         client_token: &str,
-        _options: Option<&AgentGlobalConfigOptions>,
+        options: Option<&AgentGlobalConfigOptions>,
     ) -> Result<AgentGlobalConfigReport, String> {
-        apply_opencode(
+        apply_opencode_with_model_specs(
             &opencode_settings_path()?,
             &opencode_auth_path()?,
             &opencode_permission_plugin_path()?,
             expected_base_url,
             client_token,
+            options
+                .and_then(|options| options.model_specs)
+                .unwrap_or(false),
+            options.and_then(|options| options.model_input_modalities.as_ref()),
         )
     }
 
@@ -165,6 +169,7 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
             error: None,
             session_extension: false,
             model_specs: false,
+            model_input_modalities: BTreeMap::new(),
             approval_bridge: false,
             opencode_permission_bridge: permission_bridge,
         });
@@ -195,6 +200,7 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
                 error: Some(error),
                 session_extension: false,
                 model_specs: false,
+                model_input_modalities: BTreeMap::new(),
                 approval_bridge: false,
                 opencode_permission_bridge: permission_bridge,
             });
@@ -225,6 +231,7 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
                 error: Some(error),
                 session_extension: false,
                 model_specs: false,
+                model_input_modalities: BTreeMap::new(),
                 approval_bridge: false,
                 opencode_permission_bridge: permission_bridge,
             });
@@ -254,6 +261,36 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
             && provider.pointer("/models/flowlet-pro").is_some()
             && provider.pointer("/models/flowlet-flash").is_some()
     });
+    let model_specs = ["flowlet-pro", "flowlet-flash"].into_iter().all(|model| {
+        provider
+            .and_then(|provider| provider.pointer(&format!("/models/{model}/modalities/input")))
+            .and_then(Value::as_array)
+            .is_some_and(|inputs| inputs.iter().any(|input| input.as_str() == Some("text")))
+            && provider
+                .and_then(|provider| {
+                    provider.pointer(&format!("/models/{model}/modalities/output"))
+                })
+                .and_then(Value::as_array)
+                .is_some_and(|outputs| outputs.iter().any(|output| output.as_str() == Some("text")))
+    });
+    let model_input_modalities = ["flowlet-pro", "flowlet-flash"]
+        .into_iter()
+        .filter_map(|model| {
+            provider
+                .and_then(|provider| provider.pointer(&format!("/models/{model}/modalities/input")))
+                .and_then(Value::as_array)
+                .map(|inputs| {
+                    (
+                        model.to_string(),
+                        inputs
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(ToOwned::to_owned)
+                            .collect(),
+                    )
+                })
+        })
+        .collect();
     let disabled = string_array_contains(settings.get("disabled_providers"), OPENCODE_PROVIDER_ID);
     let enabled = settings.get("enabled_providers").is_none()
         || string_array_contains(settings.get("enabled_providers"), OPENCODE_PROVIDER_ID);
@@ -312,18 +349,40 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
         external_environment_overrides,
         error: None,
         session_extension: false,
-        model_specs: false,
+        model_specs,
+        model_input_modalities,
         approval_bridge: false,
         opencode_permission_bridge: permission_bridge,
     })
 }
 
+#[cfg(test)]
 pub(in crate::core::agent_global_config) fn apply_opencode(
     settings_path: &Path,
     auth_path: &Path,
     permission_plugin_path: &Path,
     expected_base_url: &str,
     client_token: &str,
+) -> Result<AgentGlobalConfigReport, String> {
+    apply_opencode_with_model_specs(
+        settings_path,
+        auth_path,
+        permission_plugin_path,
+        expected_base_url,
+        client_token,
+        false,
+        None,
+    )
+}
+
+pub(in crate::core::agent_global_config) fn apply_opencode_with_model_specs(
+    settings_path: &Path,
+    auth_path: &Path,
+    permission_plugin_path: &Path,
+    expected_base_url: &str,
+    client_token: &str,
+    model_specs: bool,
+    model_input_modalities: Option<&BTreeMap<String, Vec<String>>>,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
         return Err("Flowlet 默认 Client Token 未配置，无法写入 OpenCode".to_string());
@@ -435,20 +494,35 @@ pub(in crate::core::agent_global_config) fn apply_opencode(
             .append("provider", CstInputValue::Object(Vec::new()))
             .object_value_or_set(),
     };
-    set_cst_property(
-        &provider_object,
-        OPENCODE_PROVIDER_ID,
-        jsonc_parser::json!({
+    let provider = if model_specs {
+        let pro_inputs = declared_model_inputs(model_input_modalities, "flowlet-pro");
+        let flash_inputs = declared_model_inputs(model_input_modalities, "flowlet-flash");
+        serde_json::json!({
             "name": "Flowlet",
             "npm": "@ai-sdk/openai-compatible",
             "options": {
                 "baseURL": expected_base_url
             },
             "models": {
+                "flowlet-pro": { "name": "flowlet-pro", "modalities": { "input": pro_inputs, "output": ["text"] } },
+                "flowlet-flash": { "name": "flowlet-flash", "modalities": { "input": flash_inputs, "output": ["text"] } }
+            }
+        })
+    } else {
+        serde_json::json!({
+            "name": "Flowlet",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": { "baseURL": expected_base_url },
+            "models": {
                 "flowlet-pro": { "name": "flowlet-pro" },
                 "flowlet-flash": { "name": "flowlet-flash" }
             }
-        }),
+        })
+    };
+    set_cst_property(
+        &provider_object,
+        OPENCODE_PROVIDER_ID,
+        serde_to_cst(&provider),
     );
     auth.as_object_mut().unwrap().insert(
         OPENCODE_PROVIDER_ID.to_string(),

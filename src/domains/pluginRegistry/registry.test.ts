@@ -25,6 +25,10 @@ describe("plugin registry", () => {
     ]);
     expect(agentPlugin("pi").configCapabilities).toEqual([
       expect.objectContaining({ id: "session-extension", defaultEnabled: false, requiresRestart: true }),
+      expect.objectContaining({ id: "model-specs", defaultEnabled: false, requiresRestart: false }),
+    ]);
+    expect(agentPlugin("opencode").configCapabilities).toEqual([
+      expect.objectContaining({ id: "model-specs", defaultEnabled: false, requiresRestart: true }),
     ]);
     expect(AGENT_SESSION_OPTIONS.map((session) => session.id)).toEqual([
       "claude-code", "opencode", "pi", "codex-desktop", "codex-cli", "deepseek-harness",

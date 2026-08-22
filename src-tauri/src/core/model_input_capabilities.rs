@@ -139,8 +139,10 @@ fn current_index() -> ModelInputCapabilityIndex {
     #[cfg(debug_assertions)]
     {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        models_cn = models_cn.or_else(|| std::fs::read_to_string(manifest.join("models-cn.json")).ok());
-        models_dev = models_dev.or_else(|| std::fs::read_to_string(manifest.join("models-dev.json")).ok());
+        models_cn =
+            models_cn.or_else(|| std::fs::read_to_string(manifest.join("models-cn.json")).ok());
+        models_dev =
+            models_dev.or_else(|| std::fs::read_to_string(manifest.join("models-dev.json")).ok());
     }
     let index =
         ModelInputCapabilityIndex::from_catalogs(models_cn.as_deref(), models_dev.as_deref());

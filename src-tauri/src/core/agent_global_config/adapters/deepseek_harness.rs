@@ -485,6 +485,7 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         error,
         session_extension,
         model_specs,
+        model_input_modalities: BTreeMap::new(),
         approval_bridge,
         opencode_permission_bridge: false,
     };

@@ -41,11 +41,21 @@ describe("agent access adapters", () => {
 
     expect(snippets[0].copyValue).toContain('"x-flowlet-client": "pi"');
     expect(snippets[3].copyValue).toContain('event.headers["x-flowlet-session"] = sessionId');
-    expect(pi.applyOptions(context({ session_extension: false })))
-      .toEqual({ sessionExtension: false });
+    expect(pi.applyOptions(context({ session_extension: false, model_specs: false })))
+      .toEqual({ sessionExtension: false, modelSpecs: false });
     // 未检测到扩展时默认不开启（高级可选能力默认关闭）。
-    expect(pi.applyOptions(context())).toEqual({ sessionExtension: false });
+    expect(pi.applyOptions(context())).toEqual({ sessionExtension: false, modelSpecs: false });
     expect(pi.configControls(context())[0].checked).toBe(false);
+    expect(pi.configControls(context())[1].checked).toBe(false);
+
+    const declared = context({
+      model_specs: true,
+      model_input_modalities: { "flowlet-pro": ["text", "image"], "flowlet-flash": ["text"] },
+    });
+    const declaredModels = JSON.parse(pi.manualSnippets(declared)[0].copyValue);
+    expect(declaredModels.providers.flowlet.models[0].input).toEqual(["text", "image"]);
+    expect(declaredModels.providers.flowlet.models[1].input).toEqual(["text"]);
+    expect(pi.configControls(declared)[1].applyOptions(false)).toEqual({ sessionExtension: false, modelSpecs: false });
   });
 
   it("uses the root Codex catalog as the manual snippet source", () => {
@@ -63,6 +73,15 @@ describe("agent access adapters", () => {
 
     expect(adapter.configStatuses(context({ opencode_permission_bridge: false }))[0].value).toBe("需安装或更新");
     expect(snippets[2].copyValue).toContain("FlowletPermissionBridge");
+    expect(adapter.configControls(context())[0].requiresRestart).toBe(true);
+    expect(adapter.applyOptions(context())).toEqual({ modelSpecs: false });
+
+    const declared = context({
+      model_specs: true,
+      model_input_modalities: { "flowlet-pro": ["text", "image"], "flowlet-flash": ["text"] },
+    });
+    expect(adapter.manualSnippets(declared)[0].copyValue).toContain('"modalities"');
+    expect(adapter.manualSnippets(declared)[0].copyValue).toContain('"image"');
   });
 
   it("keeps DeepSeek Harness managed YAML snippets in sync", () => {

@@ -441,6 +441,15 @@ Agent 默认只做非侵入接入，禁止照搬已有 Agent 的特殊扩展路�
 `identify_client_from_json` 复用实时识别逻辑），已有归属的记录不会被覆盖。用户在
 “设置 → 维护 → 数据完整性检查”点击”开始检查”即可触发修复。
 
+### OpenCode / Pi 输入模态声明
+
+OpenCode 与 Pi 的模型输入模态声明是默认关闭的可选能力：开启后，Flowlet 必须按当前启用路由
+与本地模型目录计算 `flowlet-pro` / `flowlet-flash` 的真实聚合输入能力；OpenCode 写入模型级
+`modalities.input` / `modalities.output`，Pi 写入模型级 `input`，只声明客户端官方支持的
+`text` / `image`。没有图片候选时只声明 `text`，不得为了放开客户端附件入口而固定写死
+`image`；代理仍需在实际图片请求时再次按候选能力过滤。关闭能力时必须移除受管声明，恢复时
+还原接入前 Provider；OpenCode 需重启刷新能力缓存，Pi 打开模型选择器会重读 `models.json`。
+
 ### Pi 会话标识头
 
 部分 Agent（如 Pi）走 OpenAI 兼容 SDK，原生请求不携带任何会话/对话标识，无法像

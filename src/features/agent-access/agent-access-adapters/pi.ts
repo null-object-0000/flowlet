@@ -23,16 +23,34 @@ export const piAdapter: AgentAccessAdapter = {
   id: "pi",
   installationName: () => "Pi CLI",
   configStatuses: () => [],
-  configControls: ({ globalConfig, t }) => [{
-    id: "session-extension",
-    label: t("会话扩展"),
-    descriptions: [t("安装后可为请求注入会话标识，Flowlet 按会话归并请求；未安装则无法做会话维度串联。"), t("Pi 仍可作为 Flowlet 客户端使用，仅会话维度数据不可用。")],
-    checked: globalConfig?.session_extension ?? false,
-    applyOptions: (checked) => ({ sessionExtension: checked }),
-  }],
-  applyOptions: ({ globalConfig }) => ({ sessionExtension: globalConfig?.session_extension ?? false }),
-  manualSnippets: ({ endpoint, token, displayedToken, t }) => {
-    const models = JSON.stringify({ providers: { flowlet: { baseUrl: endpoint, api: "openai-completions", headers: { "x-flowlet-client": "pi" }, models: [{ id: "flowlet-pro", name: "flowlet-pro" }, { id: "flowlet-flash", name: "flowlet-flash" }] } } }, null, 2);
+  configControls: ({ globalConfig, t }) => {
+    const sessionExtension = globalConfig?.session_extension ?? false;
+    const modelSpecs = globalConfig?.model_specs ?? false;
+    return [{
+      id: "session-extension",
+      label: t("会话扩展"),
+      descriptions: [t("安装后可为请求注入会话标识，Flowlet 按会话归并请求；未安装则无法做会话维度串联。"), t("Pi 仍可作为 Flowlet 客户端使用，仅会话维度数据不可用。")],
+      checked: sessionExtension,
+      applyOptions: (checked) => ({ sessionExtension: checked, modelSpecs }),
+    }, {
+      id: "model-specs",
+      label: t("输入模态声明"),
+      descriptions: [
+        t("开启后按当前可用路由为两个聚合模型声明文本或图像输入能力，避免 Pi 在发送前拒绝图片。"),
+        t("Pi 会在打开模型选择器时重新读取 models.json，无需重启。"),
+      ],
+      checked: modelSpecs,
+      applyOptions: (checked) => ({ sessionExtension, modelSpecs: checked }),
+    }];
+  },
+  applyOptions: ({ globalConfig }) => ({ sessionExtension: globalConfig?.session_extension ?? false, modelSpecs: globalConfig?.model_specs ?? false }),
+  manualSnippets: ({ endpoint, token, displayedToken, globalConfig, t }) => {
+    const model = (id: "flowlet-pro" | "flowlet-flash") => ({
+      id,
+      name: id,
+      ...(globalConfig?.model_specs ? { input: globalConfig.model_input_modalities?.[id] ?? ["text"] } : {}),
+    });
+    const models = JSON.stringify({ providers: { flowlet: { baseUrl: endpoint, api: "openai-completions", headers: { "x-flowlet-client": "pi" }, models: [model("flowlet-pro"), model("flowlet-flash")] } } }, null, 2);
     const defaults = JSON.stringify({ defaultProvider: "flowlet", defaultModel: "flowlet-pro" }, null, 2);
     return [
       { label: t("models.json Provider 片段"), displayValue: models, copyValue: models },

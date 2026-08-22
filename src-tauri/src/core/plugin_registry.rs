@@ -469,6 +469,26 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["session-extension", "model-specs"]
         );
+        assert_eq!(
+            registry
+                .agent("opencode")
+                .unwrap()
+                .config_capabilities
+                .iter()
+                .map(|capability| capability.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["model-specs"]
+        );
+        assert_eq!(
+            registry
+                .agent("pi")
+                .unwrap()
+                .config_capabilities
+                .iter()
+                .map(|capability| capability.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["session-extension", "model-specs"]
+        );
     }
 
     #[test]

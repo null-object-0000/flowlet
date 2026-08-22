@@ -1,0 +1,5 @@
+{
+  "theme": "dark",
+  "defaultProvider": "ollama",
+  "defaultModel": "qwen2.5-coder:7b"
+}

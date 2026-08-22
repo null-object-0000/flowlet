@@ -47,6 +47,7 @@ import {
   hasInputLengthTiers,
   isPromotionalDiscount,
   nextEffectivePricesAt,
+  officialOwnerNameForModel,
 } from "../../domains/modelCatalog";
 import type { ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
 import { useModelCatalogsSync } from "../../features/background-tasks/useBackgroundTasks";
@@ -680,7 +681,14 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
     onTabChange={setActiveTab}
     tabs={[
       { key: "basic", label: t("基础信息"), content: <>
-          <ModelBasicInfoTab resolved={resolved} isAggregate={model.kind === "aggregate"} channelName={model.channelName} language={language} t={t} />
+          <ModelBasicInfoTab
+            resolved={resolved}
+            isAggregate={model.kind === "aggregate"}
+            channelName={model.channelName}
+            officialOwnerName={officialOwnerNameForModel(model.publicModel)}
+            language={language}
+            t={t}
+          />
         </> },
       { key: "pricing", label: t("价格信息"), content: <>
           <ModelPricingTab
@@ -827,10 +835,11 @@ function modelSpecificationDescription(
 /** 基础信息 Tab：顶部说明 banner + 2×2 参数网格 + 能力清单。优先展示 models-cn 官方值。
  *  聚合模型（flowlet-pro/flowlet-flash）：limits 取已启用子模型最小值（木桶效应），
  *  capabilities 取交集（只承诺所有子模型都支持的能力）。 */
-function ModelBasicInfoTab({ resolved, isAggregate, channelName, language, t }: {
+function ModelBasicInfoTab({ resolved, isAggregate, channelName, officialOwnerName, language, t }: {
   resolved: ResolvedModel | null;
   isAggregate: boolean;
   channelName?: string;
+  officialOwnerName?: string | null;
   language: NumberLanguage;
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
@@ -845,7 +854,7 @@ function ModelBasicInfoTab({ resolved, isAggregate, channelName, language, t }: 
       <ModelsServiceSectionView title={t("模型参数")}><ModelsServiceMetricGridView items={[
         { key: "context", label: t("上下文窗口"), value: formatTokenCapacity(contextTokens, language) },
         { key: "output", label: t("最大输出"), value: formatTokenCapacity(maxOutputTokens, language) },
-        { key: "owner", label: t("官方归属"), value: isAggregate ? "Flowlet" : resolved?.providerName ?? channelName ?? "—" },
+        { key: "owner", label: t("官方归属"), value: isAggregate ? "Flowlet" : officialOwnerName ?? resolved?.providerName ?? channelName ?? "—" },
         { key: "source", label: t("规格来源"), value: modelSpecificationSourceLabel(resolved, isAggregate, t) },
       ]} /></ModelsServiceSectionView>
       {caps ? (

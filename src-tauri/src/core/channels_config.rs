@@ -1539,6 +1539,18 @@ mod tests {
         assert_eq!(canonical_model_key("qwen/qwen3.7-max"), "qwen3.7-max");
         assert_eq!(canonical_model_key("z-ai/glm-5.2"), "glm-5.2");
         assert_eq!(canonical_model_key("stealth/ox-alpha"), "ox-alpha");
+        assert_eq!(
+            canonical_model_key("nvidia/nemotron-3.5-lightning:free"),
+            "nemotron-3.5-lightning"
+        );
+        assert_eq!(
+            canonical_model_key("nvidia/nemotron-3-super-120b-a12b:free"),
+            "nemotron-3-super-120b-a12b"
+        );
+        assert_eq!(
+            canonical_model_key("nvidia/nemotron-3-ultra-550b-a55b:free"),
+            "nemotron-3-ultra-550b-a55b"
+        );
         // 别名变体在剥离 vendor 前缀后仍按规范映射
         assert_eq!(
             canonical_model_key("deepseek/deepseek-v4-flash-0731"),
@@ -1558,7 +1570,12 @@ mod tests {
         let config = ChannelsConfig::from_config_json(&json).unwrap();
         assert_eq!(
             config.default_exposed_models("openrouter"),
-            vec!["ox-alpha".to_string()]
+            vec![
+                "ox-alpha".to_string(),
+                "nemotron-3.5-lightning".to_string(),
+                "nemotron-3-super-120b-a12b".to_string(),
+                "nemotron-3-ultra-550b-a55b".to_string(),
+            ]
         );
     }
 

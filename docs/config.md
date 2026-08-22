@@ -39,9 +39,9 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 > OpenRouter（`openrouter`）是聚合渠道：其 `/models` 返回全部主流模型（带
 > `vendor/` 前缀），因此天然可以勾选开放任意 Flowlet 白名单模型；开放哪些模型
-> 由用户在账号编辑器中**显式勾选**，与普通渠道一致，**不进入**
-> `default_exposed_models` / `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`（不维护静态默认
-> 开放列表，也不默认全勾选）。
+> 由用户在账号编辑器中**显式勾选**，与普通渠道一致。只有 OpenRouter 独占资源
+> 会登记到 `default_exposed_models.openrouter` / `DEFAULT_EXPOSED_MODELS_BY_CHANNEL.openrouter`
+> 作为目录归属，但仍不会自动勾选。
 
 新增渠道或修改模型支持范围时，务必同步更新对应位置；前端和 Rust 均从
 `model-catalog.json` 读取模型身份，不再维护两份白名单或别名表。
@@ -426,7 +426,7 @@ Key 一样包含在端到端加密的账号目录中。
   "kimi": ["kimi-k3", "kimi-k2.7-code"],
   "qwen": ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
   "zhipu": ["glm-5.3", "glm-5.2", "glm-4.7", "glm-4.5-air"],
-  "openrouter": ["ox-alpha"]
+  "openrouter": ["ox-alpha", "nemotron-3.5-lightning", "nemotron-3-super-120b-a12b", "nemotron-3-ultra-550b-a55b"]
 }
 ```
 
@@ -439,8 +439,10 @@ Key 一样包含在端到端加密的账号目录中。
   `FLOWLET_SUPPORTED_MODELS` 均读取该目录，不需要双写同步。
 - 白名单**不按渠道区分**：任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放。
   例如千问套餐端点也会返回 `deepseek-v4-pro`，该模型在全局白名单内，故可勾选。
-  OpenRouter 返回的 `stealth/ox-alpha` 会规范化为对外模型 `ox-alpha`，路由仍保留完整上游 ID；
-  `default_exposed_models.openrouter` 只登记该 OpenRouter 独占模型的目录归属，账号仍需用户显式勾选。
+  OpenRouter 返回的 `stealth/ox-alpha` 会规范化为对外模型 `ox-alpha`；三款 NVIDIA 免费模型的
+  `nvidia/nemotron-*:free` 原始 ID 也会规范化为不带命名空间和 `:free` 后缀的对外模型 ID。
+  路由始终保留完整上游 ID；`default_exposed_models.openrouter` 只登记这些 OpenRouter 资源的
+  目录归属，账号仍需用户显式勾选。
 - 一个账号开放哪些模型由**用户显式选择**：在账号编辑器里手动「拉取模型列表」
   （底层 `/models`，Rust command `fetch_channel_models`），编辑器展示全量上游模型、
   白名单之外的模型展示但禁用勾选，用户勾选后将上游返回的原始模型 ID 保存到
@@ -468,10 +470,10 @@ Key 一样包含在端到端加密的账号目录中。
 - `openrouter` 是聚合渠道：`/models` 返回全部主流模型（带 `vendor/` 前缀，按
   `canonicalModelKey` 剥前缀映射白名单），因此其账号**可以**勾选开放任意白名单
   模型——未来白名单新增模型时，只要 OpenRouter `/models` 返回即可由用户勾选开放。
-  开放哪些模型由用户在账号编辑器中显式勾选（与其他渠道一致），不默认全勾选，也
-  不进入 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`（避免官方归属映射
-  `official_channel_id_for_model` 被聚合渠道污染），无需在 `config.json` /
-  `DEFAULT_EXPOSED_MODELS_BY_CHANNEL` 同步维护静态列表。
+  开放哪些模型由用户在账号编辑器中显式勾选（与其他渠道一致），不默认全勾选。
+  其他厂商已有官方渠道归属的模型不会重复登记到 OpenRouter；仅通过 OpenRouter 接入的
+  独占资源需在 `model-catalog.json` 中以 `ownerChannelId: "openrouter"` 登记，并由共享目录
+  自动派生对应的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL.openrouter`。
 
 `flowlet-pro` 与 `flowlet-flash` 的候选关系不属于 `config.json`。用户在模型服务页从已有
 渠道模型中显式添加；添加时复用该渠道模型已经存在的协议路由，保存后立即热更新。

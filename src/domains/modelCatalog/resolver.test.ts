@@ -74,6 +74,15 @@ function makeModelsDevCatalog(): ModelsDevCatalog {
           modalities: { input: ["text", "image"], output: ["text"] },
           limit: { context: 900_000, output: 120_000 },
         },
+        "nvidia/nemotron-3.5-lightning:free": {
+          id: "nvidia/nemotron-3.5-lightning:free",
+          name: "Nemotron 3.5 Lightning (free)",
+          reasoning: true,
+          tool_call: true,
+          structured_output: false,
+          modalities: { input: ["text"], output: ["text"] },
+          limit: { context: 1_000_000, output: 65_536 },
+        },
       },
     },
   };
@@ -148,6 +157,27 @@ describe("resolveModelSpecification", () => {
     expect(resolved?.specificationSource).toBe("models.dev");
     expect(resolved?.modelName).toBe("Ox Alpha from models.dev");
     expect(resolved?.limits.contextTokens).toBe(900_000);
+  });
+
+  it("resolves NVIDIA free model capabilities from the OpenRouter models.dev catalog", () => {
+    const resolved = resolveModelSpecification(
+      makeCatalog(),
+      makeModelsDevCatalog(),
+      "openrouter",
+      "nvidia/nemotron-3.5-lightning:free",
+    );
+    expect(resolved).toMatchObject({
+      specificationSource: "models.dev",
+      modelId: "nvidia/nemotron-3.5-lightning:free",
+      limits: { contextTokens: 1_000_000, maxOutputTokens: 65_536 },
+      capabilities: {
+        thinking: true,
+        toolCalls: true,
+        jsonOutput: false,
+        inputModalities: ["text"],
+        outputModalities: ["text"],
+      },
+    });
   });
 
   it("returns null when neither catalog contains the model", () => {

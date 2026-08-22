@@ -264,6 +264,9 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - glm-4.7
 - glm-4.5-air
 - ox-alpha
+- nemotron-3.5-lightning
+- nemotron-3-super-120b-a12b
+- nemotron-3-ultra-550b-a55b
 ```
 
 这是 Flowlet **总共支持哪些模型**，单一事实源为仓库根目录 `model-catalog.json`；

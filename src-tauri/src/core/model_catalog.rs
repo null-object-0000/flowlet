@@ -19,6 +19,8 @@ struct ModelCatalogJson {
 pub struct ModelIdentity {
     pub id: String,
     pub owner_channel_id: String,
+    #[serde(default)]
+    pub official_owner_name: Option<String>,
     pub models_cn_provider_id: String,
     #[serde(default)]
     pub aliases: Vec<String>,
@@ -152,7 +154,7 @@ mod tests {
     #[test]
     fn embedded_catalog_is_valid_and_has_expected_models() {
         let catalog = model_catalog();
-        assert_eq!(catalog.supported_models().len(), 16);
+        assert_eq!(catalog.supported_models().len(), 19);
         assert_eq!(
             catalog.find("LongCat-2.0").unwrap().owner_channel_id,
             "longcat"
@@ -162,6 +164,35 @@ mod tests {
         assert_eq!(
             catalog.find("stealth/ox-alpha").unwrap().owner_channel_id,
             "openrouter"
+        );
+        assert_eq!(
+            catalog
+                .find("nvidia/nemotron-3.5-lightning:free")
+                .unwrap()
+                .id,
+            "nemotron-3.5-lightning"
+        );
+        assert_eq!(
+            catalog
+                .find("nvidia/nemotron-3.5-lightning:free")
+                .unwrap()
+                .official_owner_name
+                .as_deref(),
+            Some("NVIDIA")
+        );
+        assert_eq!(
+            catalog
+                .find("nvidia/nemotron-3-super-120b-a12b:free")
+                .unwrap()
+                .id,
+            "nemotron-3-super-120b-a12b"
+        );
+        assert_eq!(
+            catalog
+                .find("nvidia/nemotron-3-ultra-550b-a55b:free")
+                .unwrap()
+                .id,
+            "nemotron-3-ultra-550b-a55b"
         );
         assert_eq!(
             catalog.owner_channel_for_models_cn_provider("moonshot-cn"),

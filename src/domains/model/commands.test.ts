@@ -483,6 +483,27 @@ describe("OpenRouter aggregate channel (vendor/model IDs)", () => {
     expect(upstreams).toEqual(new Set(["deepseek/deepseek-v4-flash"]));
   });
 
+  it("maps NVIDIA free resource IDs to stable public model IDs", () => {
+    const nvidiaModels = [
+      "nvidia/nemotron-3.5-lightning:free",
+      "nvidia/nemotron-3-super-120b-a12b:free",
+      "nvidia/nemotron-3-ultra-550b-a55b:free",
+    ];
+    const nvidiaAccount = {
+      ...account,
+      exposed_models: nvidiaModels,
+      synced_models: nvidiaModels,
+    } as ChannelAccount;
+    const routes = mergeDefaultRoutes([], [nvidiaAccount], [openrouterPreset]);
+    expect(new Set(routes.map((route) => route.virtual_model_id))).toEqual(new Set([
+      "nemotron-3.5-lightning",
+      "nemotron-3-super-120b-a12b",
+      "nemotron-3-ultra-550b-a55b",
+    ]));
+    expect(new Set(routes.map((route) => route.upstream_model))).toEqual(new Set(nvidiaModels));
+    expect(routes).toHaveLength(9);
+  });
+
   it("keeps vendor-prefixed routes through reconciliation while selected and synced", () => {
     const existing: RouteCandidate = {
       id: "route-account-openrouter-deepseek/deepseek-v4-flash-openai-0-0",

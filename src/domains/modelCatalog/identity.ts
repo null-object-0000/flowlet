@@ -4,6 +4,7 @@ import { MODEL_CATALOG_PLUGIN_SOURCE } from "../pluginRegistry";
 export type ModelIdentity = {
   id: string;
   ownerChannelId: string;
+  officialOwnerName?: string;
   modelsCnProviderId: string;
   aliases: string[];
 };
@@ -69,6 +70,10 @@ export function canonicalModelId(modelId: string | null | undefined): string | n
 
 export function officialChannelIdForModel(modelId: string | null | undefined): string | null {
   return modelIdentityFor(modelId)?.ownerChannelId ?? null;
+}
+
+export function officialOwnerNameForModel(modelId: string | null | undefined): string | null {
+  return modelIdentityFor(modelId)?.officialOwnerName?.trim() || null;
 }
 
 export function modelsCnProviderIdForModel(modelId: string | null | undefined): string | null {

@@ -16,6 +16,9 @@
     { "id": "glm-5.2", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
     { "id": "glm-4.7", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
     { "id": "glm-4.5-air", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
-    { "id": "ox-alpha", "ownerChannelId": "openrouter", "modelsCnProviderId": "openrouter", "aliases": [] }
+    { "id": "ox-alpha", "ownerChannelId": "openrouter", "modelsCnProviderId": "openrouter", "aliases": [] },
+    { "id": "nemotron-3.5-lightning", "ownerChannelId": "openrouter", "officialOwnerName": "NVIDIA", "modelsCnProviderId": "openrouter", "aliases": ["nemotron-3.5-lightning:free"] },
+    { "id": "nemotron-3-super-120b-a12b", "ownerChannelId": "openrouter", "officialOwnerName": "NVIDIA", "modelsCnProviderId": "openrouter", "aliases": ["nemotron-3-super-120b-a12b:free"] },
+    { "id": "nemotron-3-ultra-550b-a55b", "ownerChannelId": "openrouter", "officialOwnerName": "NVIDIA", "modelsCnProviderId": "openrouter", "aliases": ["nemotron-3-ultra-550b-a55b:free"] }
   ]
 }

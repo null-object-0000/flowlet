@@ -27,6 +27,9 @@ describe("canonicalModelKey with aggregate vendor prefix", () => {
     expect(canonicalModelKey("qwen/qwen3.7-max")).toBe("qwen3.7-max");
     expect(canonicalModelKey("z-ai/glm-5.2")).toBe("glm-5.2");
     expect(canonicalModelKey("stealth/ox-alpha")).toBe("ox-alpha");
+    expect(canonicalModelKey("nvidia/nemotron-3.5-lightning:free")).toBe("nemotron-3.5-lightning");
+    expect(canonicalModelKey("nvidia/nemotron-3-super-120b-a12b:free")).toBe("nemotron-3-super-120b-a12b");
+    expect(canonicalModelKey("nvidia/nemotron-3-ultra-550b-a55b:free")).toBe("nemotron-3-ultra-550b-a55b");
     expect(canonicalModelId("deepseek/deepseek-v4-flash")).toBe("deepseek-v4-flash");
     expect(canonicalModelId("stealth/ox-alpha")).toBe("ox-alpha");
     expect(canonicalModelId("openai/gpt-5.5")).toBeNull();

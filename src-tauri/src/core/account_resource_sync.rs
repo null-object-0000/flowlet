@@ -206,6 +206,35 @@ fn parse_qwen_freetier_details(raw: &str) -> Option<QwenFreetierDetails> {
 fn parse_qwen_details(raw: &str) -> Option<QwenDetails> {
     let bundle: Value = serde_json::from_str(raw).ok()?;
     let subscription = response_data(bundle.get("subscription")?)?;
+    // 套餐过期/未订阅：不产出额度窗口，plan 直接标注状态，避免远端展示假百分比。
+    // 判定口径与 config.json 的 token_plan extractor 一致：
+    // - status 明确非 VALID（EXPIRED 等）→ 无效；
+    // - status 与 specCode 都缺失（接口返回空对象）→ 未订阅；
+    // - 仅 status 缺失但有 specCode → 旧快照，按有效处理（向后兼容）。
+    let status = subscription
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_uppercase());
+    let has_spec_code = subscription
+        .get("specCode")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    let invalid = match status.as_deref() {
+        Some(value) => value != "VALID",
+        None => !has_spec_code,
+    };
+    if invalid {
+        let label = if status.as_deref() == Some("EXPIRED") {
+            "Token Plan 已过期"
+        } else {
+            "Token Plan 未订阅"
+        };
+        return Some(QwenDetails {
+            plan: Some(label.to_string()),
+            expires_at: timestamp_string(subscription.get("endTime")),
+            windows: Vec::new(),
+        });
+    }
     let quota = response_data(bundle.get("quota_config")?)?;
     let usage = response_data(bundle.get("usage")?)?;
     let plan = subscription
@@ -345,5 +374,40 @@ mod tests {
             &serde_json::json!({ "fq_instance": {"data": {"Data": []}} }).to_string()
         )
         .is_none());
+    }
+
+    #[test]
+    fn qwen_expired_or_missing_subscription_yields_no_quota_windows() {
+        // 套餐过期：保留 plan 标注与到期时间，但绝不产出额度窗口。
+        let expired = serde_json::json!({
+            "subscription": {"data":{"DataV2":{"data":{"data":{
+                "specCode":"standard","status":"EXPIRED","endTime":1767225600000_i64}}}}},
+            "quota_config": {"data":{"DataV2":{"data":{"data":{"standard":{"five_hour":3000,"weekly":10000}}}}}},
+            "usage": {"data":{"DataV2":{"data":{"data":{"per1WeekPercentage":0.5,"per1WeekResetTime":1780000000000_i64}}}}}
+        }).to_string();
+        let details = parse_qwen_details(&expired).expect("expired details");
+        assert_eq!(details.plan.as_deref(), Some("Token Plan 已过期"));
+        assert_eq!(details.expires_at.as_deref(), Some("2026-01-01T00:00:00+00:00"));
+        assert!(details.windows.is_empty());
+
+        // 未订阅（接口返回空对象）：plan 标注未订阅，无窗口。
+        let missing = serde_json::json!({
+            "subscription": {"data":{"DataV2":{"data":{"data":{}}}}},
+            "quota_config": {"data":{"DataV2":{"data":{"data":{"standard":{"weekly":10000}}}}}},
+            "usage": {"data":{"DataV2":{"data":{"data":{"per1WeekPercentage":0.2}}}}}
+        }).to_string();
+        let details = parse_qwen_details(&missing).expect("missing details");
+        assert_eq!(details.plan.as_deref(), Some("Token Plan 未订阅"));
+        assert!(details.windows.is_empty());
+
+        // 旧快照没有 status 字段：按有效处理，正常产出窗口（向后兼容）。
+        let legacy = serde_json::json!({
+            "subscription": {"data":{"DataV2":{"data":{"data":{"specCode":"pro","endTime":1780000000000_i64}}}}},
+            "quota_config": {"data":{"DataV2":{"data":{"data":{"pro":{"five_hour":3000,"weekly":10000}}}}}},
+            "usage": {"data":{"DataV2":{"data":{"data":{"per5HourPercentage":10,"per1WeekPercentage":40}}}}}
+        }).to_string();
+        let details = parse_qwen_details(&legacy).expect("legacy details");
+        assert_eq!(details.plan.as_deref(), Some("pro"));
+        assert_eq!(details.windows.len(), 2);
     }
 }

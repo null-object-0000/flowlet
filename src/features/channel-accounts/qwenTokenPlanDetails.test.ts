@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
+import {
+  isQwenSubscriptionActive,
+  parseQwenTokenPlanDetails,
+  qwenSubscriptionInactiveKind,
+} from "./qwenTokenPlanDetails";
 
 describe("parseQwenTokenPlanDetails", () => {
   it("builds the subscription and both official quota windows", () => {
@@ -49,6 +53,33 @@ describe("parseQwenTokenPlanDetails", () => {
 
   it("returns null for legacy summary-only snapshots", () => {
     expect(parseQwenTokenPlanDetails('{"token_total":10000}')).toBeNull();
+  });
+
+  it("treats expired subscriptions as inactive and legacy snapshots as active", () => {
+    const build = (subscription: Record<string, unknown>) => JSON.stringify({
+      subscription: response({ specCode: "standard", ...subscription }),
+      quota_config: response({ standard: { five_hour: 3000, weekly: 10000 } }),
+      usage: response({ per1WeekPercentage: 0.5 }),
+    });
+
+    // 明确过期：无效。
+    const expired = parseQwenTokenPlanDetails(build({ status: "EXPIRED", endTime: 1767225600000 }));
+    expect(expired?.status).toBe("EXPIRED");
+    expect(isQwenSubscriptionActive(expired)).toBe(false);
+    expect(qwenSubscriptionInactiveKind(expired)).toBe("expired");
+
+    // 未订阅（接口返回空对象，specCode 兜底 standard、status 缺失）：向后兼容视为有效。
+    // 状态判定以接口明确返回为准；这里验证 null status 的兼容语义。
+    const noStatus = parseQwenTokenPlanDetails(build({}));
+    expect(noStatus?.status).toBeNull();
+    expect(isQwenSubscriptionActive(noStatus)).toBe(true);
+
+    // 明确有效。
+    const valid = parseQwenTokenPlanDetails(build({ status: "VALID" }));
+    expect(isQwenSubscriptionActive(valid)).toBe(true);
+
+    // 无快照：无效。
+    expect(isQwenSubscriptionActive(null)).toBe(false);
   });
 
   it("parses active reset cards into the Codex-aligned structure", () => {

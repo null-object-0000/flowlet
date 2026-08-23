@@ -5,7 +5,7 @@ import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/accou
 import { CHATGPT_CHANNEL_ID, OPENROUTER_CHANNEL_ID, isQwenTokenPlanAccount, isQwenPayAsYouGoAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
-import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
+import { parseQwenTokenPlanDetails, isQwenSubscriptionActive, qwenSubscriptionInactiveKind } from "./qwenTokenPlanDetails";
 import { parseQwenFreeTierDetails } from "./qwenFreetierDetails";
 import {
   codexAccountToPseudoChannelAccount,
@@ -236,6 +236,15 @@ function formatBalance(value: number, currency: string | null | undefined, langu
 function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapshot | undefined, t: (source: string, variables?: Record<string, string | number>) => string, language: "zh-CN" | "en-US"): ResourceSummaryColumn {
   if (isQwenTokenPlanAccount(account)) {
     const details = parseQwenTokenPlanDetails(snapshot?.raw_scraped_json);
+    // 套餐过期/未订阅：显示真实状态，绝不展示剩余额度。
+    if (details && !isQwenSubscriptionActive(details)) {
+      const inactiveKind = qwenSubscriptionInactiveKind(details);
+      return {
+        label: "",
+        value: t(inactiveKind === "expired" ? "套餐已过期" : "未订阅套餐"),
+        secondary: details.expireAt ? t("有效期至 {date}", { date: details.expireAt.slice(0, 10) }) : "",
+      };
+    }
     const sevenDay = details?.sevenDay ? t("7天剩余 {percent}%", { percent: details.sevenDay.remainingPercent.toFixed(1) }) : "";
     const resetAt = details?.sevenDay?.resetAt
       ? formatFullTimestamp(details.sevenDay.resetAt, language)
@@ -289,7 +298,7 @@ function nameLineSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
   // Qwen Token Plan 名称行展示具体套餐；7 天重置时间与剩余额度放在资源行。
   if (isQwenTokenPlanAccount(account)) {
     const details = parseQwenTokenPlanDetails(snapshot?.raw_scraped_json);
-    if (!details) return "";
+    if (!details || !isQwenSubscriptionActive(details)) return "";
     const planName = `${details.specCode.charAt(0).toUpperCase()}${details.specCode.slice(1)}`;
     return t("个人版 {name} 套餐", { name: planName });
   }

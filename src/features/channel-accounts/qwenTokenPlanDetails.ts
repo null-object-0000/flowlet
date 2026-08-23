@@ -62,6 +62,21 @@ export function parseQwenTokenPlanDetails(raw?: string | null): QwenTokenPlanDet
   };
 }
 
+/** 订阅是否有效：接口明确返回非 VALID（EXPIRED 等）时为无效。
+ *  旧快照/接口未返回 status 时按有效处理（向后兼容）。 */
+export function isQwenSubscriptionActive(details: QwenTokenPlanDetails | null | undefined): boolean {
+  if (!details) return false;
+  const status = details.status?.trim().toUpperCase();
+  return status == null || status === "" || status === "VALID";
+}
+
+/** 无效订阅的展示口径："expired" = 套餐已过期；"missing" = 未订阅（含未知状态）。 */
+export function qwenSubscriptionInactiveKind(
+  details: QwenTokenPlanDetails | null | undefined,
+): "expired" | "missing" {
+  return details?.status?.trim().toUpperCase() === "EXPIRED" ? "expired" : "missing";
+}
+
 /** 重置卡列表是可选项槽位：`/tokenplan/personal/api/v2/reset-card/list` 有响应时
  *  进入数据 bundle，无卡/无响应时返回 null 且不阻断订阅同步。只保留生效中的卡
  *  （now >= effectiveAt && now < expiresAt），字段结构与 Codex 重置机会对齐：

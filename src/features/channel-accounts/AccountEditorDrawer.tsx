@@ -36,6 +36,8 @@ import { formatFullTimestamp, parseTimestamp } from "../../shared/formatters/dat
 import { formatCompactNumber } from "../../shared/formatters/number";
 import {
   parseQwenTokenPlanDetails,
+  isQwenSubscriptionActive,
+  qwenSubscriptionInactiveKind,
   type QwenQuotaWindow,
 } from "./qwenTokenPlanDetails";
 import {
@@ -1279,9 +1281,12 @@ function QwenTokenPlanPanel({
   const planName = details
     ? `${details.specCode.charAt(0).toUpperCase()}${details.specCode.slice(1)}`
     : "";
-  const fiveHour = details?.fiveHour;
-  const sevenDay = details?.sevenDay;
-  const resetCards = details?.resetCards;
+  // 套餐过期/未订阅：显示真实状态占位，不渲染额度进度条与重置卡。
+  const subscriptionActive = isQwenSubscriptionActive(details);
+  const inactiveKind = qwenSubscriptionInactiveKind(details);
+  const fiveHour = subscriptionActive ? details?.fiveHour : null;
+  const sevenDay = subscriptionActive ? details?.sevenDay : null;
+  const resetCards = subscriptionActive ? details?.resetCards : null;
 
   async function handleScrape() {
     await startScrape(account.id);
@@ -1296,11 +1301,26 @@ function QwenTokenPlanPanel({
       <div className={styles.longCatSummaryCard}>
         <div className={styles.longCatSummaryHeading}>
           <strong>{details ? t("个人版 {name} 套餐", { name: planName }) : t("Token Plan 订阅信息")}</strong>
-          <Tag size="small" color="green">{t("自动同步")}</Tag>
+          {subscriptionActive ? (
+            <Tag size="small" color="green">{t("自动同步")}</Tag>
+          ) : (
+            <Tag size="small" color="red">{t(inactiveKind === "expired" ? "套餐已过期" : "未订阅套餐")}</Tag>
+          )}
         </div>
         <div className={`${styles.longCatSummaryGrid} ${styles.qwenSummaryGrid}`}>
-          <QwenQuotaProgress period={t("5 小时")} quota={fiveHour} language={language} t={t} />
-          <QwenQuotaProgress period={t("7 天")} quota={sevenDay} language={language} t={t} />
+          {subscriptionActive ? (
+            <>
+              <QwenQuotaProgress period={t("5 小时")} quota={fiveHour} language={language} t={t} />
+              <QwenQuotaProgress period={t("7 天")} quota={sevenDay} language={language} t={t} />
+            </>
+          ) : (
+            <div className={styles.qwenTimeSummary}>
+              <span>
+                <small>{t("订阅状态")}</small>
+                <strong>{t(inactiveKind === "expired" ? "套餐已过期" : "未订阅套餐")}</strong>
+              </span>
+            </div>
+          )}
           <div className={styles.qwenTimeSummary}>
             <span>
               <small>{t("套餐到期")}</small>

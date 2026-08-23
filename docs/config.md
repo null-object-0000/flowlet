@@ -410,8 +410,10 @@ Key 一样包含在端到端加密的账号目录中。
   SQLite 不保存 `model_prices` 表。
 - `models-cn` 目录中的 `effectiveFrom` / `effectiveTo` 与 `dailyTimeRange` 会保留在
   运行时价格表中：费用按请求原始发生时间及声明的 IANA 时区选择价格，生效边界采用
-  `[effectiveFrom, effectiveTo)` 和每日 `[start, end)`；目录同步后立即热更新，跨峰谷
-  时段无需重启。升级到支持分时价格的版本时会一次性按请求时间重算历史预估费用。
+  `[effectiveFrom, effectiveTo)` 和每日 `[start, end)`；区间可声明可选 `days`
+  （models-cn 规范小写值 `mon`–`sun`，大小写不敏感，缺失表示每天均适用），用于表达
+  「高峰仅周一至周五、周末全天空闲」等按星期区分的分时价格。目录同步后立即热更新，
+  跨峰谷时段无需重启。升级到支持分时价格的版本时会一次性按请求时间重算历史预估费用。
 - 用于离线成本估算（`estimated_cost`），不进入主请求链路。
 - `channel_id = "openai-api"` 是标准 OpenAI API 公开价格的保留命名空间，用于计算 Codex 原生会话的 API 等价价值；数据来自 `models-dev.json` 的 `openai` provider，结果保留价格表原币种，不做汇率转换。
 - 不生成或使用 `codex-native`、套餐 credits 等派生价格；旧配置中残留的 `channel_id = "codex-native"` 会被运行时价格表忽略。Codex 套餐周额度没有公开的绝对 credits 容量，Flowlet 不作换算。

@@ -873,6 +873,23 @@ pub struct ModelPriceDailyTimeRange {
 pub struct ModelPriceDailyInterval {
     pub start: String,
     pub end: String,
+    /// 适用星期（models-cn 规范小写值 mon…sun，大小写不敏感）。
+    /// 空表示每天均适用（兼容尚未声明星期的旧数据）。
+    #[serde(default)]
+    pub days: Vec<String>,
+}
+
+/// chrono::Weekday → models-cn 约定的三段小写缩写（mon…sun）。
+fn weekday_name(weekday: chrono::Weekday) -> &'static str {
+    match weekday {
+        chrono::Weekday::Mon => "mon",
+        chrono::Weekday::Tue => "tue",
+        chrono::Weekday::Wed => "wed",
+        chrono::Weekday::Thu => "thu",
+        chrono::Weekday::Fri => "fri",
+        chrono::Weekday::Sat => "sat",
+        chrono::Weekday::Sun => "sun",
+    }
 }
 
 type ResolvedModelPrice = (f64, f64, Option<f64>, f64);
@@ -897,7 +914,16 @@ impl ModelPriceDailyTimeRange {
         let local = at.with_timezone(&time_zone);
         let minute =
             chrono::Timelike::hour(&local) as i32 * 60 + chrono::Timelike::minute(&local) as i32;
+        let day = weekday_name(chrono::Datelike::weekday(&local));
         self.intervals.iter().any(|interval| {
+            if !interval.days.is_empty()
+                && !interval
+                    .days
+                    .iter()
+                    .any(|declared| declared.eq_ignore_ascii_case(day))
+            {
+                return false;
+            }
             let Some(start) = parse_price_time(&interval.start, false) else {
                 return false;
             };
@@ -1414,6 +1440,85 @@ mod tests {
         let body = b"not json";
         let result = classify_request(body, &ProtocolType::OpenAi);
         assert_eq!(result, RequestType::Unknown);
+    }
+
+    fn at_rfc3339(value: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    #[test]
+    fn daily_time_range_respects_weekday_days() {
+        let range = ModelPriceDailyTimeRange {
+            label: "高峰时段".to_string(),
+            time_zone: "Asia/Shanghai".to_string(),
+            intervals: vec![ModelPriceDailyInterval {
+                start: "09:00".to_string(),
+                end: "12:00".to_string(),
+                days: vec![
+                    "mon".to_string(),
+                    "tue".to_string(),
+                    "wed".to_string(),
+                    "thu".to_string(),
+                    "fri".to_string(),
+                ],
+            }],
+        };
+        // 2026-08-17 是周一（北京时间 10:00 = UTC 02:00）→ 命中高峰
+        assert!(range.contains(at_rfc3339("2026-08-17T02:00:00Z")));
+        // 2026-08-22 是周六，同一时段不再是高峰
+        assert!(!range.contains(at_rfc3339("2026-08-22T02:00:00Z")));
+    }
+
+    #[test]
+    fn daily_time_range_weekend_all_day_via_midnight_convention() {
+        let range = ModelPriceDailyTimeRange {
+            label: "空闲时段".to_string(),
+            time_zone: "Asia/Shanghai".to_string(),
+            intervals: vec![ModelPriceDailyInterval {
+                start: "00:00".to_string(),
+                end: "00:00".to_string(),
+                days: vec!["sat".to_string(), "sun".to_string()],
+            }],
+        };
+        // 周六、周日任何时刻都命中空闲
+        assert!(range.contains(at_rfc3339("2026-08-22T00:00:00Z")));
+        assert!(range.contains(at_rfc3339("2026-08-23T15:30:00Z")));
+        // 周一不受周末区间影响
+        assert!(!range.contains(at_rfc3339("2026-08-17T00:00:00Z")));
+    }
+
+    #[test]
+    fn daily_time_range_legacy_intervals_apply_every_day() {
+        let range = ModelPriceDailyTimeRange {
+            label: "空闲时段".to_string(),
+            time_zone: "Asia/Shanghai".to_string(),
+            intervals: vec![ModelPriceDailyInterval {
+                start: "18:00".to_string(),
+                end: "00:00".to_string(),
+                ..Default::default()
+            }],
+        };
+        assert!(range.contains(at_rfc3339("2026-08-17T10:00:00Z"))); // 周一 18:00
+        assert!(range.contains(at_rfc3339("2026-08-22T10:00:00Z"))); // 周六 18:00
+        assert!(!range.contains(at_rfc3339("2026-08-17T09:00:00Z"))); // 周一 17:00 尚未进入空闲窗口
+    }
+
+    #[test]
+    fn daily_time_range_days_are_case_insensitive() {
+        let range = ModelPriceDailyTimeRange {
+            label: "高峰时段".to_string(),
+            time_zone: "Asia/Shanghai".to_string(),
+            intervals: vec![ModelPriceDailyInterval {
+                start: "09:00".to_string(),
+                end: "12:00".to_string(),
+                days: vec!["Mon".to_string(), "Sat".to_string()],
+            }],
+        };
+        assert!(range.contains(at_rfc3339("2026-08-17T02:00:00Z"))); // 周一
+        assert!(range.contains(at_rfc3339("2026-08-22T02:00:00Z"))); // 周六
+        assert!(!range.contains(at_rfc3339("2026-08-18T02:00:00Z"))); // 周二
     }
 }
 

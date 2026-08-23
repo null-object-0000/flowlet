@@ -44,12 +44,15 @@ import {
   aggregateMaxStandardPrice,
   buildPricingStrategyRows,
   effectiveWindowPricesAt,
+  groupDailyTimeRangeIntervals,
   hasInputLengthTiers,
   isPromotionalDiscount,
+  MODEL_CN_DAY_ORDER,
   nextEffectivePricesAt,
   officialOwnerNameForModel,
+  weekdayRunGroups,
 } from "../../domains/modelCatalog";
-import type { ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
+import type { ModelsCnDailyTimeRangeInterval, ModelsCnDayOfWeek, ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
 import { useModelCatalogsSync } from "../../features/background-tasks/useBackgroundTasks";
 import { channelCommands, type PresetSyncPreview } from "../../domains/channel/commands";
 import styles from "./ModelServicesPage.module.css";
@@ -76,14 +79,47 @@ function priceFromResolvedStandard(p: ResolvedPrice): ModelsCnPrice {
   };
 }
 
+/** 单条区间的时间段文本：整日区间显示「全天」，end=00:00 按次日午夜显示 24:00。 */
+function formatTimeInterval(interval: ModelsCnDailyTimeRangeInterval): string {
+  if (interval.start === "00:00" && interval.end === "00:00") return "全天";
+  return `${interval.start}–${interval.end === "00:00" ? "24:00" : interval.end}`;
+}
+
+const DAY_LABELS: Record<ModelsCnDayOfWeek, string> = {
+  mon: "周一",
+  tue: "周二",
+  wed: "周三",
+  thu: "周四",
+  fri: "周五",
+  sat: "周六",
+  sun: "周日",
+};
+
+/** 把星期压缩为「周一至周五」这类标签；0 天或 7 天（每天）返回空串。 */
+function weekdaysLabel(days: readonly ModelsCnDayOfWeek[]): string {
+  if (days.length === 0 || days.length === MODEL_CN_DAY_ORDER.length) return "";
+  return weekdayRunGroups(days)
+    .map((run) => {
+      const first = run[0]!;
+      const lastOfRun = run[run.length - 1]!;
+      return run.length === 1
+        ? DAY_LABELS[first]
+        : `${DAY_LABELS[first]}至${DAY_LABELS[lastOfRun]}`;
+    })
+    .join("、");
+}
+
 function formatDailyPriceRange(price: ModelsCnPrice, t: (source: string) => string): string | null {
   const range = price.dailyTimeRange;
   if (!range) return null;
   const zone = range.timeZone === "Asia/Shanghai" ? t("北京时间") : range.timeZone;
-  const intervals = range.intervals
-    .map(({ start, end }) => `${start}–${end === "00:00" ? "24:00" : end}`)
-    .join("、");
-  return `${range.label} · ${zone} ${intervals}`;
+  const hasDayRestrictions = range.intervals.some((interval) => (interval.days?.length ?? 0) > 0);
+  const parts = groupDailyTimeRangeIntervals(range).map(({ days, intervals }) => {
+    const rawLabel = days.length === 0 ? t("每天") : weekdaysLabel(days);
+    const label = hasDayRestrictions && rawLabel ? `${rawLabel} ` : "";
+    return `${label}${intervals.map(formatTimeInterval).join(t("、"))}`;
+  });
+  return `${range.label} · ${zone} ${parts.join(t("；"))}`;
 }
 
 function StrategyPriceValue({ current, standard, rateType, currency }: {

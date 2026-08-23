@@ -9,7 +9,9 @@ import {
   estimateCost,
   findModelByAlias,
   findModelInCatalog,
+  groupDailyTimeRangeIntervals,
   hasInputLengthTiers,
+  isDailyTimeRangeActiveAt,
   isPromotionalDiscount,
   nextEffectivePricesAt,
   resolveCapabilities,
@@ -17,6 +19,7 @@ import {
   resolveModel,
   resolvePrice,
   selectOfficialPrice,
+  weekdayRunGroups,
 } from "./pricing";
 import type { ModelsCnModel, ModelsCnPrice, ModelsCnProvider, ResolvedModel, ResolvedPrice } from "./types";
 import type { PricingStrategyRow } from "./pricing";
@@ -116,6 +119,123 @@ describe("selectOfficialPrice", () => {
     expect(selectOfficialPrice(prices, new Date("2026-08-17T04:00:00Z"))?.sourceUrl).toBe("off-peak");
     expect(effectiveWindowPricesAt(prices, new Date("2026-08-16T12:00:00Z"))).toHaveLength(1);
     expect(nextEffectivePricesAt(prices, new Date("2026-08-16T12:00:00Z"))).toHaveLength(2);
+  });
+});
+
+describe("isDailyTimeRangeActiveAt (weekday-aware)", () => {
+  // 2026-08-17 北京时间周一；2026-08-22 周六；2026-08-23 周日。
+  const beijing = "Asia/Shanghai";
+
+  it("matches weekday-restricted intervals only on declared days", () => {
+    const range: NonNullable<ModelsCnPrice["dailyTimeRange"]> = {
+      label: "高峰时段",
+      timeZone: beijing,
+      intervals: [{ start: "09:00", end: "12:00", days: ["mon", "tue", "wed", "thu", "fri"] }],
+    };
+    // 周一 10:00 北京时间
+    expect(isDailyTimeRangeActiveAt(range, new Date("2026-08-17T02:00:00Z"))).toBe(true);
+    // 周六 10:00 北京时间（休息日，不再是高峰）
+    expect(isDailyTimeRangeActiveAt(range, new Date("2026-08-22T02:00:00Z"))).toBe(false);
+  });
+
+  it("matches weekend all-day interval via 00:00-00:00 convention", () => {
+    const range: NonNullable<ModelsCnPrice["dailyTimeRange"]> = {
+      label: "空闲时段",
+      timeZone: beijing,
+      intervals: [{ start: "00:00", end: "00:00", days: ["sat", "sun"] }],
+    };
+    // 周六 08:00 与周日 10:00 北京时间均为空闲
+    expect(isDailyTimeRangeActiveAt(range, new Date("2026-08-22T00:00:00Z"))).toBe(true);
+    expect(isDailyTimeRangeActiveAt(range, new Date("2026-08-23T02:00:00Z"))).toBe(true);
+    // 周一 08:00 北京时间不属于周末
+    expect(isDailyTimeRangeActiveAt(range, new Date("2026-08-17T00:00:00Z"))).toBe(false);
+  });
+
+  it("keeps legacy intervals without days applying every day", () => {
+    const range: NonNullable<ModelsCnPrice["dailyTimeRange"]> = {
+      label: "空闲时段",
+      timeZone: beijing,
+      intervals: [{ start: "18:00", end: "00:00" }],
+    };
+    expect(isDailyTimeRangeActiveAt(range, new Date("2026-08-17T10:00:00Z"))).toBe(true); // 周一 18:00
+    expect(isDailyTimeRangeActiveAt(range, new Date("2026-08-22T10:00:00Z"))).toBe(true); // 周六 18:00
+  });
+});
+
+describe("selectOfficialPrice with weekday pricing", () => {
+  // 与线上 models-cn 一致的 DeepSeek 新约定：高峰仅工作日，空闲含周末全天。
+  const prices: ModelsCnPrice[] = [
+    {
+      market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard",
+      input: { standard: 1.5 }, output: 4.5,
+      effectiveFrom: "2026-08-17T00:00:00+08:00",
+      dailyTimeRange: {
+        label: "空闲时段", timeZone: "Asia/Shanghai",
+        intervals: [
+          { start: "00:00", end: "09:00", days: ["mon", "tue", "wed", "thu", "fri"] },
+          { start: "12:00", end: "14:00", days: ["mon", "tue", "wed", "thu", "fri"] },
+          { start: "18:00", end: "00:00", days: ["mon", "tue", "wed", "thu", "fri"] },
+          { start: "00:00", end: "00:00", days: ["sat", "sun"] },
+        ],
+      },
+      sourceUrl: "off-peak",
+    },
+    {
+      market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard",
+      input: { standard: 3 }, output: 9,
+      effectiveFrom: "2026-08-17T00:00:00+08:00",
+      dailyTimeRange: {
+        label: "高峰时段", timeZone: "Asia/Shanghai",
+        intervals: [
+          { start: "09:00", end: "12:00", days: ["mon", "tue", "wed", "thu", "fri"] },
+          { start: "14:00", end: "18:00", days: ["mon", "tue", "wed", "thu", "fri"] },
+        ],
+      },
+      sourceUrl: "peak",
+    },
+  ];
+
+  it("charges peak price only on weekdays", () => {
+    // 周一 10:00 北京时间 → 高峰
+    expect(selectOfficialPrice(prices, new Date("2026-08-17T02:00:00Z"))?.sourceUrl).toBe("peak");
+  });
+
+  it("charges idle price on weekends all day", () => {
+    // 周六 10:00 北京时间 → 空闲（周末全天）
+    expect(selectOfficialPrice(prices, new Date("2026-08-22T02:00:00Z"))?.sourceUrl).toBe("off-peak");
+    // 周日 10:00 北京时间 → 空闲
+    expect(selectOfficialPrice(prices, new Date("2026-08-23T02:00:00Z"))?.sourceUrl).toBe("off-peak");
+  });
+
+  it("charges idle price on weekday off-peak hours", () => {
+    // 周一 20:00 北京时间 → 空闲（工作日 18:00–24:00）
+    expect(selectOfficialPrice(prices, new Date("2026-08-17T12:00:00Z"))?.sourceUrl).toBe("off-peak");
+  });
+});
+
+describe("daily time range display grouping", () => {
+  it("groups intervals by declared days preserving source order", () => {
+    const groups = groupDailyTimeRangeIntervals({
+      label: "空闲时段",
+      timeZone: "Asia/Shanghai",
+      intervals: [
+        { start: "00:00", end: "09:00", days: ["fri", "mon", "wed", "thu", "tue"] },
+        { start: "12:00", end: "14:00", days: ["fri", "mon", "wed", "thu", "tue"] },
+        { start: "18:00", end: "00:00", days: ["fri", "mon", "wed", "thu", "tue"] },
+        { start: "00:00", end: "00:00", days: ["sun", "sat"] },
+      ],
+    });
+    expect(groups).toHaveLength(2);
+    expect(groups[0].days).toEqual(["mon", "tue", "wed", "thu", "fri"]);
+    expect(groups[0].intervals).toHaveLength(3);
+    expect(groups[1].days).toEqual(["sat", "sun"]);
+    expect(groups[1].intervals).toEqual([{ start: "00:00", end: "00:00", days: ["sun", "sat"] }]);
+  });
+
+  it("compresses consecutive weekday runs", () => {
+    expect(weekdayRunGroups(["mon", "tue", "wed", "thu", "fri"])).toEqual([["mon", "tue", "wed", "thu", "fri"]]);
+    expect(weekdayRunGroups(["sat", "sun"])).toEqual([["sat", "sun"]]);
+    expect(weekdayRunGroups(["sun", "mon", "wed"])).toEqual([["mon"], ["wed"], ["sun"]]);
   });
 });
 

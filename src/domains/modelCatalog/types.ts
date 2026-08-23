@@ -16,10 +16,19 @@ export interface ModelsCnInputPrice {
   explicitCacheHit?: number;
 }
 
+/** 每日时段适用的星期（models-cn 规范小写值，缺失表示每天均适用）。 */
+export type ModelsCnDayOfWeek = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+export interface ModelsCnDailyTimeRangeInterval {
+  start: string;
+  end: string;
+  days?: ModelsCnDayOfWeek[];
+}
+
 export interface ModelsCnDailyTimeRange {
   label: string;
   timeZone: string;
-  intervals: Array<{ start: string; end: string }>;
+  intervals: ModelsCnDailyTimeRangeInterval[];
 }
 
 export interface ModelsCnPrice {

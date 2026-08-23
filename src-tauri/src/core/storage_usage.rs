@@ -4281,6 +4281,7 @@ mod estimate_cost_tests {
                         intervals: vec![ModelPriceDailyInterval {
                             start: "09:00".to_string(),
                             end: "12:00".to_string(),
+                            ..Default::default()
                         }],
                     }),
                     input_uncached_price: 3.0,
@@ -4334,6 +4335,123 @@ mod estimate_cost_tests {
             at("2026-08-17T04:00:00Z"),
         )
         .is_none());
+    }
+
+    #[test]
+    fn prices_usage_switches_by_weekday_in_daily_schedule() {
+        // 与线上 models-cn 新约定一致：高峰仅周一至周五，空闲含周末全天。
+        let price = ModelPrice {
+            channel_id: "deepseek".to_string(),
+            upstream_model: "deepseek-v4-flash".to_string(),
+            schedules: vec![
+                ModelPriceSchedule {
+                    rate_type: "standard".to_string(),
+                    effective_from: Some("2026-08-17T00:00:00+08:00".to_string()),
+                    daily_time_range: Some(ModelPriceDailyTimeRange {
+                        label: "空闲时段".to_string(),
+                        time_zone: "Asia/Shanghai".to_string(),
+                        intervals: vec![
+                            ModelPriceDailyInterval {
+                                start: "00:00".to_string(),
+                                end: "09:00".to_string(),
+                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                            },
+                            ModelPriceDailyInterval {
+                                start: "12:00".to_string(),
+                                end: "14:00".to_string(),
+                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                            },
+                            ModelPriceDailyInterval {
+                                start: "18:00".to_string(),
+                                end: "00:00".to_string(),
+                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                            },
+                            ModelPriceDailyInterval {
+                                start: "00:00".to_string(),
+                                end: "00:00".to_string(),
+                                days: vec!["sat".into(), "sun".into()],
+                            },
+                        ],
+                    }),
+                    input_uncached_price: 1.5,
+                    input_cached_price: 0.075,
+                    output_price: 4.5,
+                    ..Default::default()
+                },
+                ModelPriceSchedule {
+                    rate_type: "standard".to_string(),
+                    effective_from: Some("2026-08-17T00:00:00+08:00".to_string()),
+                    daily_time_range: Some(ModelPriceDailyTimeRange {
+                        label: "高峰时段".to_string(),
+                        time_zone: "Asia/Shanghai".to_string(),
+                        intervals: vec![
+                            ModelPriceDailyInterval {
+                                start: "09:00".to_string(),
+                                end: "12:00".to_string(),
+                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                            },
+                            ModelPriceDailyInterval {
+                                start: "14:00".to_string(),
+                                end: "18:00".to_string(),
+                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                            },
+                        ],
+                    }),
+                    input_uncached_price: 3.0,
+                    input_cached_price: 0.15,
+                    output_price: 9.0,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let at = |value: &str| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        };
+        // 周一 10:00 北京时间 → 高峰
+        let monday_peak = estimate_cost_at(
+            std::slice::from_ref(&price),
+            Some("deepseek"),
+            Some("deepseek-v4-flash"),
+            Some(1_000_000),
+            Some(0),
+            Some(1_000_000),
+            None,
+            Some(1_000_000),
+            at("2026-08-17T02:00:00Z"),
+        )
+        .unwrap();
+        approx(monday_peak.total, 12.0);
+        // 周六 10:00 北京时间 → 周末全天空闲
+        let saturday_idle = estimate_cost_at(
+            std::slice::from_ref(&price),
+            Some("deepseek"),
+            Some("deepseek-v4-flash"),
+            Some(1_000_000),
+            Some(0),
+            Some(1_000_000),
+            None,
+            Some(1_000_000),
+            at("2026-08-22T02:00:00Z"),
+        )
+        .unwrap();
+        approx(saturday_idle.total, 6.0);
+        // 周日 23:30 北京时间 → 仍为空闲
+        let sunday_late = estimate_cost_at(
+            std::slice::from_ref(&price),
+            Some("deepseek"),
+            Some("deepseek-v4-flash"),
+            Some(1_000_000),
+            Some(0),
+            Some(1_000_000),
+            None,
+            Some(1_000_000),
+            at("2026-08-23T15:30:00Z"),
+        )
+        .unwrap();
+        approx(sunday_late.total, 6.0);
     }
 
     #[test]

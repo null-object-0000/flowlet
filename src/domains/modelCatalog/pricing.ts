@@ -3,6 +3,8 @@
  *  规则见 docs/agent-integration-prompt.md。*/
 
 import type {
+  ModelsCnDailyTimeRangeInterval,
+  ModelsCnDayOfWeek,
   ModelsCnModel,
   ModelsCnPrice,
   ModelsCnProvider,
@@ -11,6 +13,75 @@ import type {
   ResolvedModelLimits,
   ResolvedPrice,
 } from "./types";
+
+/** 星期规范顺序（mon 周一 … sun 周日），用于排序与连续区间压缩。 */
+export const MODEL_CN_DAY_ORDER: readonly ModelsCnDayOfWeek[] = [
+  "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+] as const;
+
+function parseClockMinute(value: string, allowEndOfDay: boolean): number | null {
+  if (allowEndOfDay && value === "24:00") return 24 * 60;
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour < 24 && minute < 60 ? hour * 60 + minute : null;
+}
+
+/** 将 UTC 时刻投影到价格声明的 IANA 时区，返回本地星期（mon…sun）。 */
+function localDayOfWeek(range: { timeZone: string }, at: Date): ModelsCnDayOfWeek | null {
+  let weekday: string | undefined;
+  try {
+    weekday = new Intl.DateTimeFormat("en-CA", {
+      timeZone: range.timeZone,
+      weekday: "short",
+    }).format(at);
+  } catch {
+    return null;
+  }
+  const normalized = (weekday ?? "").trim().toLowerCase();
+  return (MODEL_CN_DAY_ORDER as readonly string[]).includes(normalized)
+    ? (normalized as ModelsCnDayOfWeek)
+    : null;
+}
+
+/** 单个区间是否在给定星期生效：days 缺失或为空表示每天均适用。 */
+function intervalAppliesOn(interval: ModelsCnDailyTimeRangeInterval, day: ModelsCnDayOfWeek | null): boolean {
+  return interval.days == null || interval.days.length === 0 || (day != null && interval.days.includes(day));
+}
+
+/** 将 UTC 时刻投影到价格声明的 IANA 时区，判断是否位于任一 [start, end) 区间
+ *  （区间声明了 days 时还需命中对应星期）。 */
+export function isDailyTimeRangeActiveAt(
+  range: NonNullable<ModelsCnPrice["dailyTimeRange"]>,
+  at: Date,
+): boolean {
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: range.timeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(at);
+  } catch {
+    return false;
+  }
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+  const current = hour * 60 + minute;
+  const day = localDayOfWeek(range, at);
+  return range.intervals.some((interval) => {
+    if (!intervalAppliesOn(interval, day)) return false;
+    const start = parseClockMinute(interval.start, false);
+    const end = parseClockMinute(interval.end, true);
+    if (start == null || end == null) return false;
+    return end > start
+      ? current >= start && current < end
+      : current >= start || current < end;
+  });
+}
 
 /** 价格选取优先级评分。分数越高越优先。
  *  规则：china > international，CNY > USD，promotional > standard。
@@ -39,43 +110,48 @@ export function isPriceEffectiveAt(price: ModelsCnPrice, at: Date): boolean {
   return (from == null || timestamp >= from) && (to == null || timestamp < to);
 }
 
-function parseClockMinute(value: string, allowEndOfDay: boolean): number | null {
-  if (allowEndOfDay && value === "24:00") return 24 * 60;
-  const match = /^(\d{2}):(\d{2})$/.exec(value);
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  return hour < 24 && minute < 60 ? hour * 60 + minute : null;
+/** 将每日区间按生效星期分组（组内区间保持声明顺序，组序按首次出现顺序）。
+ *  纯函数，供 UI 按「周一至周五 …；周六至周日 …」分组展示。 */
+export function groupDailyTimeRangeIntervals(
+  range: NonNullable<ModelsCnPrice["dailyTimeRange"]>,
+): Array<{ days: ModelsCnDayOfWeek[]; intervals: ModelsCnDailyTimeRangeInterval[] }> {
+  const groups: Array<{ days: ModelsCnDayOfWeek[]; intervals: ModelsCnDailyTimeRangeInterval[] }> = [];
+  const index = new Map<string, number>();
+  for (const interval of range.intervals) {
+    const days = (interval.days ?? []).slice().sort(
+      (a, b) => MODEL_CN_DAY_ORDER.indexOf(a) - MODEL_CN_DAY_ORDER.indexOf(b),
+    );
+    const key = days.join(",");
+    const existing = index.get(key);
+    if (existing != null) {
+      groups[existing]!.intervals.push(interval);
+    } else {
+      index.set(key, groups.length);
+      groups.push({ days, intervals: [interval] });
+    }
+  }
+  return groups;
 }
 
-/** 将 UTC 时刻投影到价格声明的 IANA 时区，判断是否位于任一 [start, end) 区间。 */
-export function isDailyTimeRangeActiveAt(
-  range: NonNullable<ModelsCnPrice["dailyTimeRange"]>,
-  at: Date,
-): boolean {
-  let parts: Intl.DateTimeFormatPart[];
-  try {
-    parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: range.timeZone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(at);
-  } catch {
-    return false;
+/** 把星期列表压缩为连续区间段（如 [mon…fri] → [[mon…fri]]，[mon,wed] → [[mon],[wed]]）。
+ *  纯函数，供 UI 生成「周一至周五」这类标签。 */
+export function weekdayRunGroups(days: readonly ModelsCnDayOfWeek[]): ModelsCnDayOfWeek[][] {
+  const sorted = days.slice().sort(
+    (a, b) => MODEL_CN_DAY_ORDER.indexOf(a) - MODEL_CN_DAY_ORDER.indexOf(b),
+  );
+  const runs: ModelsCnDayOfWeek[][] = [];
+  for (const day of sorted) {
+    const last = runs[runs.length - 1];
+    if (
+      last
+      && MODEL_CN_DAY_ORDER.indexOf(last[last.length - 1]!) + 1 === MODEL_CN_DAY_ORDER.indexOf(day)
+    ) {
+      last.push(day);
+    } else {
+      runs.push([day]);
+    }
   }
-  const hour = Number(parts.find((part) => part.type === "hour")?.value);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
-  const current = hour * 60 + minute;
-  return range.intervals.some((interval) => {
-    const start = parseClockMinute(interval.start, false);
-    const end = parseClockMinute(interval.end, true);
-    if (start == null || end == null) return false;
-    return end > start
-      ? current >= start && current < end
-      : current >= start || current < end;
-  });
+  return runs;
 }
 
 /** 当前时刻真正可用于计价的一条价格，绝对生效窗口与每日时段必须同时命中。 */

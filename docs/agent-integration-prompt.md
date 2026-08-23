@@ -45,7 +45,27 @@
 - 若 `input.cacheHit` 不存在，视该模型**无官方缓存价**，不得用 `standard` 或其它字段伪造。
 - 缓存写入价（`explicitCacheCreation`）仅在字段存在且用户场景涉及显式缓存写入时才使用。
 
-## 4. 币种、市场、优惠价展示
+## 4. 分时价格（每日时段与星期）
+
+`prices[].dailyTimeRange` 描述该条价格适用的每日时段（如 DeepSeek 空闲/高峰）：
+
+- `timeZone`：IANA 时区；时段按该时区的本地时间判断。
+- `intervals[]`：`[start, end)` 分钟区间，`end = "00:00"` 按次日午夜理解（即 24:00）；
+  `start = "00:00"` 且 `end = "00:00"` 表示全天。
+- `intervals[].days`（**可选**）：models-cn 规范小写值 `mon`–`sun`，大小写不敏感；
+  **缺失或为空表示每天均适用**。用于表达「高峰仅周一至周五、周末全天空闲」等
+  按星期区分的分时价格（DeepSeek 2026-08 起的官方措辞）。
+
+规则：
+
+- 价格生效 = 绝对窗口 `[effectiveFrom, effectiveTo)` 命中 **且** 每日时段（含星期）命中；
+  两者都按请求原始发生时间与声明时区判断，不得用本地机器时区替代。
+- 峰/闲是同市场同币种下的并列变体，UI 必须完整展示全部时段并标注各自适用星期
+  （如「空闲时段 · 北京时间 周一至周五 00:00–09:00…；周六至周日 全天」），
+  不得只取其中一条作为唯一价格。
+- 旧数据没有 `days` 时保持原有每天生效的行为，不得要求上游补齐。
+
+## 5. 币种、市场、优惠价展示
 
 - 币种直接展示 `currency` 字段（CNY / USD），不自动换算。
 - 市场价（`market = "china"`）优先于国际价。
@@ -55,13 +75,13 @@
 - 所有价格展示必须附带来源（`source_url`）与抓取时间（`retrievedAt` / `price_version`）。
 - `retrievedAt` 是 UTC 时间点，界面展示时必须转换为操作系统本地时区。
 
-## 5. 可测试性要求
+## 6. 可测试性要求
 
 - 价格选取、费用估算、模型解析必须实现为**纯函数**（无副作用、无网络请求、无 `Date.now()`），并配套 Vitest 单元测试。
 - 网络请求（fetch models-cn）必须与纯逻辑分离，通过注入或 Query 层 mock。
 - 纯函数签名必须覆盖：正常路径、字段缺失、多市场价、优惠价、缓存价存在/不存在。
 
-## 6. 前端接入方式
+## 7. 前端接入方式
 
 - **后台定时任务拉取**：Rust 后端启动后 1 小时触发第一次同步，之后每 1 小时顺序拉取 `https://null-object-0000.github.io/models-cn/api.json` 与 `https://models.dev/api.json`，分别保存为 exe 旁 `models-cn.json` / `models-dev.json` 文件（**不是 SQLite 表**）。每次同步独立写入 `background_jobs` 任务日志，并在任一同步成功后用两份目录 + `config.json` 的 `model_prices` 重建运行时价格表。
 - **前端只读本地**：前端通过 `get_models_cn_catalog` 命令读取本地最新 models-cn 目录，不发起远程请求。本地无数据时，不展示 models-cn 相关内容（价格信息 Tab 展示空状态 + 「立即同步」按钮）。模型服务还会通过 `get_models_dev_provider_catalog("openrouter")` 只读取 models.dev 的 OpenRouter provider 子目录，避免把完整大文件经 IPC 传给前端；OpenRouter 模型规格按 `models-cn → models.dev` 回退，两份目录都未收录时不展示推测规格。
@@ -69,7 +89,7 @@
 - **内容去重**：同步前计算 SHA-256 hash，与本地最新数据比较，内容未变化则跳过保存（返回 `skipped: true`）。
 - 解析后建立 `(providerId, modelId)` → 模型详情 + 官方价格的索引。
 
-## 7. 直接渠道模型详情 Tab 结构
+## 8. 直接渠道模型详情 Tab 结构
 
 直接渠道模型（`kind === "direct"`）的详情使用 Tab 隔离三个板块：
 
@@ -81,7 +101,7 @@
 
 聚合模型（`flowlet-pro` / `flowlet-flash`）保持原有「渠道路由」面板，不强制 Tab。
 
-## 8. 禁止事项
+## 9. 禁止事项
 
 - 禁止硬编码任何模型价格。
 - 禁止用汇率把美元价换算为人民币「官方价」。

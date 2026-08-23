@@ -926,6 +926,10 @@ mod tests {
             official_channel_id_for_model("deepseek-v4-flash"),
             Some("deepseek")
         );
+        assert_eq!(
+            official_channel_id_for_model("deepseek-v4-pro-0813"),
+            Some("deepseek")
+        );
     }
 
     #[test]
@@ -986,6 +990,36 @@ mod tests {
             })
             .collect();
         assert_eq!(pairs, vec![("deepseek-v4-flash", "deepseek-v4-flash-0731")]);
+    }
+
+    #[test]
+    fn merge_default_routes_maps_pro_0813_alias_on_qwen_to_canonical() {
+        // 千问 Token Plan 端点 /models 返回 deepseek-v4-pro-0813：
+        // 用户勾选规范名 deepseek-v4-pro 即可命中，virtual_model_id 用规范名，
+        // upstream_model 保留上游原名用于转发。
+        let config = qwen_alias_test_config();
+        let account = ChannelAccount {
+            id: "qwen-token-plan".to_string(),
+            channel_id: "qwen".to_string(),
+            api_key: String::new(),
+            enabled: true,
+            resource_mode: Some("token_plan".to_string()),
+            exposed_models: Some(vec!["deepseek-v4-pro".to_string()]),
+            synced_models: Some(vec!["deepseek-v4-pro-0813".to_string()]),
+            ..Default::default()
+        };
+
+        let routes = config.merge_default_routes(&[], &[account], &config.presets);
+        let pairs: Vec<(&str, &str)> = routes
+            .iter()
+            .map(|route| {
+                (
+                    route.virtual_model_id.as_str(),
+                    route.upstream_model.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(pairs, vec![("deepseek-v4-pro", "deepseek-v4-pro-0813")]);
     }
 
     #[test]

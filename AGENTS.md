@@ -316,7 +316,8 @@ DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即�
 
 部分渠道端点的 `/models` 会返回与白名单规范名不同、但属于同一规范模型身份的日期
 快照或别名。它们可能是独立计费、独立额度或不同有效期的上游资源；例如千问端点可同时
-返回 `deepseek-v4-flash` 与 `deepseek-v4-flash-0731`，两者必须允许分别选择和路由。
+返回 `deepseek-v4-flash` 与 `deepseek-v4-flash-0731`，或返回 `deepseek-v4-pro-0813`
+（即 DeepSeek 官方 `deepseek-v4-pro` 的日期快照），两者必须允许分别选择和路由。
 Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映射，前端和 Rust
 读取同一目录，不得重新引入两份别名表。变体按规范 ID 命中白名单、参与用量合并与
 品牌/档位/基准价格解析；编辑器勾选、`synced_models`、`exposed_models` 与路由的

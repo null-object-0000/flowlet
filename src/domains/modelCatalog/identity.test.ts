@@ -50,6 +50,8 @@ describe("model identity catalog", () => {
 
   it("normalizes aliases while preserving the canonical display ID", () => {
     expect(canonicalModelId("deepseek/deepseek-v4-flash-0731")).toBe("deepseek-v4-flash");
+    expect(canonicalModelId("qwen/deepseek-v4-pro-0813")).toBe("deepseek-v4-pro");
+    expect(canonicalModelId("deepseek-v4-pro-0813")).toBe("deepseek-v4-pro");
     expect(canonicalModelId("stealth/ox-alpha")).toBe("ox-alpha");
     expect(canonicalModelId("nvidia/nemotron-3.5-lightning:free")).toBe("nemotron-3.5-lightning");
     expect(canonicalModelId("nvidia/nemotron-3-super-120b-a12b:free")).toBe("nemotron-3-super-120b-a12b");

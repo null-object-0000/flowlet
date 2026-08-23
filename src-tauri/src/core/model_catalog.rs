@@ -239,6 +239,18 @@ mod tests {
         let alias = catalog.find("deepseek/deepseek-v4-flash-0731").unwrap();
         assert_eq!(direct.id, alias.id);
         assert_eq!(alias.models_cn_provider_id, "deepseek");
+        // 千问端点返回的 deepseek-v4-pro-0813 是 deepseek-v4-pro 的日期快照变体。
+        let pro = catalog.find("deepseek-v4-pro").unwrap();
+        let pro_alias = catalog.find("qwen/deepseek-v4-pro-0813").unwrap();
+        assert_eq!(pro.id, pro_alias.id);
+        assert_eq!(
+            canonical_model_key("deepseek-v4-pro-0813"),
+            "deepseek-v4-pro"
+        );
+        assert_eq!(
+            canonical_model_key("qwen/deepseek-v4-pro-0813"),
+            "deepseek-v4-pro"
+        );
     }
 
     #[test]

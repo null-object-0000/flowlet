@@ -217,6 +217,7 @@ describe("OverviewAgentAccessCard", () => {
       sessionExtension: true,
       modelSpecs: false,
       approvalBridge: false,
+      mcpServers: [],
     });
     const specsSwitch = screen.getByRole("switch", { name: "聚合模型规格" });
     expect(specsSwitch).not.toBeChecked();
@@ -225,9 +226,41 @@ describe("OverviewAgentAccessCard", () => {
       sessionExtension: false,
       modelSpecs: true,
       approvalBridge: false,
+      mcpServers: [],
     });
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
+  });
+
+  it("manages DeepSeek Harness MCP servers from the dedicated tab", () => {
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 DeepSeek Harness" }));
+    // 独立 Tab 承载 MCP 服务器管理，高级配置区不重复渲染。
+    fireEvent.click(screen.getByRole("tab", { name: "MCP 服务器" }));
+    expect(screen.getByText("尚未添加 MCP 服务器。从下方预设开始，或填写自定义配置。")).toBeInTheDocument();
+    expect(screen.queryByText("精确会话关联")).not.toBeInTheDocument();
+
+    // 从预设添加 Chrome DevTools（默认无头 + 隔离临时 Profile），再整块写回。
+    fireEvent.click(screen.getByRole("button", { name: "Chrome DevTools" }));
+    // Semi 带图标按钮的可访问名包含图标 label，用正则匹配文本部分。
+    fireEvent.click(screen.getByRole("button", { name: /添加/ }));
+    expect(screen.getByText("chrome")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "写回 Flowlet" }));
+    expect(mutateAsync).toHaveBeenLastCalledWith({
+      sessionExtension: false,
+      modelSpecs: false,
+      approvalBridge: false,
+      mcpServers: [
+        {
+          id: "chrome",
+          serverName: "chrome",
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"],
+        },
+      ],
+    });
   });
 
   it("allows managed DeepSeek Harness writes while DSH Web is stopped", () => {

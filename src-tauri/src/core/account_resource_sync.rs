@@ -62,7 +62,10 @@ fn has_automatic_resource_sync(account: &ChannelAccount, preset: &ChannelPreset)
     let console = account.resource_sync_mode == "auto"
         && (account.channel_id == "longcat"
             || (account.channel_id == "qwen"
-                && account.resource_mode.as_deref() == Some("token_plan")));
+                && matches!(
+                    account.resource_mode.as_deref(),
+                    Some("token_plan") | Some("pay_as_you_go")
+                )));
     official_api || console
 }
 
@@ -84,6 +87,17 @@ fn channel_resource(
             plan = details.plan.or(plan);
             expires_at = details.expires_at.or(expires_at);
             quota_windows = details.windows;
+        }
+    }
+    if account.channel_id == "qwen"
+        && account.resource_mode.as_deref() == Some("pay_as_you_go")
+    {
+        if let Some(details) = snapshot
+            .raw_scraped_json
+            .as_deref()
+            .and_then(parse_qwen_freetier_details)
+        {
+            plan = details.plan.or(plan);
         }
     }
     let observed_at = snapshot
@@ -169,6 +183,24 @@ struct QwenDetails {
     plan: Option<String>,
     expires_at: Option<String>,
     windows: Vec<SyncedAccountQuotaWindow>,
+}
+
+/// 千问 API 按量付费福利页抓取摘要：只取账单余额证明数据到位，套餐名固定为
+/// 按量付费；免费额度实例明细留在 raw_scraped_json 由桌面端解析展示。
+struct QwenFreetierDetails {
+    plan: Option<String>,
+}
+
+fn parse_qwen_freetier_details(raw: &str) -> Option<QwenFreetierDetails> {
+    let bundle: Value = serde_json::from_str(raw).ok()?;
+    let billing = bundle.get("billing_amount")?.get("data")?;
+    billing
+        .get("AvailableAmount")
+        .and_then(Value::as_f64)
+        .is_some()
+        .then(|| QwenFreetierDetails {
+            plan: Some("API 按量付费".to_string()),
+        })
 }
 
 fn parse_qwen_details(raw: &str) -> Option<QwenDetails> {
@@ -296,5 +328,22 @@ mod tests {
         assert!(!serde_json::to_string(&details.windows)
             .unwrap()
             .contains("DataV2"));
+    }
+
+    #[test]
+    fn qwen_freetier_payload_exposes_pay_as_you_go_plan() {
+        let raw = serde_json::json!({
+            "billing_amount": {"data": {"AvailableAmount": 106.13, "Currency": "CNY"}},
+            "fq_instance": {"data": {"Data": []}}
+        })
+        .to_string();
+        let details = parse_qwen_freetier_details(&raw).expect("qwen freetier details");
+        assert_eq!(details.plan.as_deref(), Some("API 按量付费"));
+        // 缺少账单余额数据时视为未抓全。
+        assert!(parse_qwen_freetier_details(r#"{"code":"UNAUTHORIZED"}"#).is_none());
+        assert!(parse_qwen_freetier_details(
+            &serde_json::json!({ "fq_instance": {"data": {"Data": []}} }).to_string()
+        )
+        .is_none());
     }
 }

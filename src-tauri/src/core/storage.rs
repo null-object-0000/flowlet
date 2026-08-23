@@ -1530,6 +1530,12 @@ impl Storage {
             "UPDATE channel_accounts SET resource_sync_mode = 'auto' WHERE channel_id = 'qwen' AND resource_mode = 'token_plan'",
             [],
         )?;
+        // Qwen API 按量付费：福利页（权益）抓取上线后有了官方余额与免费额度来源，
+        // 存量账号统一切到自动同步（此前只有手动维护，无自动数据可丢）。
+        connection.execute(
+            "UPDATE channel_accounts SET resource_sync_mode = 'auto' WHERE channel_id = 'qwen' AND resource_mode = 'pay_as_you_go'",
+            [],
+        )?;
 
         // 旧版本 request_logs 只记录了少量字段；后续索引和日志页面依赖这些基础列。
         add_column_if_missing(

@@ -47,4 +47,13 @@ describe("OpenRouter model pricing", () => {
       "paid-unsupported",
     ]);
   });
+
+  it("honors the free override from scraped quota (Qwen pay-as-you-go)", () => {
+    const paidPricing = { prompt: "0.1", completion: "0.2" };
+    expect(modelCandidateSortRank({ model: "x", pricing: paidPricing } as ModelCandidate, true, true)).toBe(0);
+    expect(modelCandidateSortRank({ model: "x", pricing: paidPricing } as ModelCandidate, false, true)).toBe(2);
+    expect(modelCandidateSortRank({ model: "x", pricing: paidPricing } as ModelCandidate, true, false)).toBe(1);
+    // 未提供 override 时回退到 pricing 判断。
+    expect(modelCandidateSortRank({ model: "x", pricing: paidPricing } as ModelCandidate, true)).toBe(1);
+  });
 });

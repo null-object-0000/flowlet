@@ -42,8 +42,8 @@ pub struct ScrapeInterceptorReady {
 /// 根据账号的 resource_mode / 渠道,解析出本次抓取的模式配置。
 /// LongCat 统一走 hybrid 模式(同时抓取 token 资源包与按量余额),不再按
 /// resource_mode 区分 token_pack / pay_as_you_go。
-/// Qwen 仅 Token Plan 订阅账号使用控制台抓取；API 按量付费账号没有官方
-/// 余额接口也没有可用的抓取模式，走手动维护，不参与自动同步。
+/// Qwen 双资源模式均有控制台抓取：Token Plan 订阅抓套餐专属端点；
+/// API 按量付费账号抓福利页（权益）免费额度与账单余额（scrape 中按 mode_key 配置）。
 pub fn resolve_scrape_mode(
     channels_config: &ChannelsConfig,
     channel_id: &str,
@@ -514,6 +514,38 @@ mod tests {
         );
         assert_eq!(
             classify_response_url(
+                "https://platform-home.qianwenai.com/data/api.json?product=freetier&action=ListBailianFreetier"
+            ),
+            "freetier_list"
+        );
+        assert_eq!(
+            classify_response_url(
+                "https://platform-home.qianwenai.com/data/api.json?product=BssOpenAPI-V3&action=DescribeFqInstance&params=%7B%22PageSize%22%3A80%7D"
+            ),
+            "fq_instance"
+        );
+        assert_eq!(
+            classify_response_url(
+                "https://platform-home.qianwenai.com/data/api.json?product=BssOpenAPI-V3&action=GetBillingAccountAvailableAmount"
+            ),
+            "billing_amount"
+        );
+        assert_eq!(
+            classify_response_url(
+                "https://platform-home.qianwenai.com/data/api.json?product=BssOpenAPI-V3&action=ListSettleBillTotalSummary"
+            ),
+            "settle_bill"
+        );
+        assert_eq!(
+            classify_response_url("https://account.qianwenai.com/cert/aliyuncert/queryCurrentCertInfo"),
+            "cert_info"
+        );
+        assert_eq!(
+            classify_response_url("https://platform-home.qianwenai.com/tool/user/info.json"),
+            "session_info"
+        );
+        assert_eq!(
+            classify_response_url(
                 "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Freset-card%2Fdetail"
             ),
             "unknown"
@@ -693,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_scrape_mode_qwen_only_for_token_plan() {
+    fn resolve_scrape_mode_qwen_selects_mode_by_resource_mode() {
         use crate::core::channels_config::{ChannelsConfig, ScrapeModeConfig};
         use crate::core::config::ChannelPreset;
         use std::collections::HashMap;
@@ -716,6 +748,22 @@ mod tests {
                 ],
             },
         );
+        modes.insert(
+            "freetier".to_string(),
+            ScrapeModeConfig {
+                console_url: "https://platform.qianwenai.com/home/benefits".to_string(),
+                console_url_secondary: None,
+                console_url_tertiary: None,
+                interceptor_js: String::new(),
+                extractor_js: String::new(),
+                aggregate: true,
+                required_slots: vec![
+                    "freetier_list".to_string(),
+                    "fq_instance".to_string(),
+                    "billing_amount".to_string(),
+                ],
+            },
+        );
         let mut scrape = HashMap::new();
         scrape.insert("qwen".to_string(), modes);
         let config = ChannelsConfig {
@@ -725,16 +773,21 @@ mod tests {
             endpoints: HashMap::new(),
             scrape,
         };
-        // Token Plan 订阅账号使用控制台抓取。
+        // Token Plan 订阅账号走套餐控制台抓取。
         let mode = resolve_scrape_mode(&config, "qwen", Some("token_plan")).unwrap();
         assert!(mode.aggregate);
         assert_eq!(
             mode.required_slots,
             vec!["subscription", "quota_config", "usage"]
         );
-        // API 按量付费账号没有可用的抓取模式，即使配置了 token_plan scrape 也不返回。
-        assert!(resolve_scrape_mode(&config, "qwen", Some("pay_as_you_go")).is_none());
+        // API 按量付费账号走福利页抓取。
+        let mode = resolve_scrape_mode(&config, "qwen", Some("pay_as_you_go")).unwrap();
+        assert_eq!(
+            mode.required_slots,
+            vec!["freetier_list", "fq_instance", "billing_amount"]
+        );
         assert!(resolve_scrape_mode(&config, "qwen", None).is_none());
+        assert!(resolve_scrape_mode(&config, "qwen", Some("unknown_mode")).is_none());
     }
 
     #[test]

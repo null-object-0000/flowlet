@@ -13,7 +13,8 @@ export type AgentTaskProfileDescriptor = { name: string; sessionType: string };
 export type AgentConfigCapabilityDescriptor = {
   id: string;
   name: string;
-  kind: "boolean";
+  /** boolean = 布尔开关；list = 受管列表（当前仅 DeepSeek Harness 的 MCP 服务器）。 */
+  kind: "boolean" | "list";
   defaultEnabled: boolean;
   requiresRestart: boolean;
 };
@@ -92,7 +93,7 @@ function validateRegistry(value: PluginRegistry): void {
         sessionTypeIds.add(session.id);
       }
       for (const capability of plugin.agent.configCapabilities) {
-        if (!capability.id.trim() || !capability.name.trim() || capability.kind !== "boolean" || capabilityIds.has(capability.id)) {
+        if (!capability.id.trim() || !capability.name.trim() || (capability.kind !== "boolean" && capability.kind !== "list") || capabilityIds.has(capability.id)) {
           throw new Error(`Duplicate or invalid Agent config capability: ${plugin.agent.id}/${capability.id}`);
         }
         capabilityIds.add(capability.id);

@@ -1,0 +1,125 @@
+.panel {
+  display: grid;
+  gap: 14px;
+  padding: 4px 0;
+}
+
+.empty {
+  padding: 18px;
+  text-align: center;
+  border: 1px dashed var(--flowlet-color-border);
+  border-radius: 8px;
+}
+
+.list {
+  display: grid;
+  gap: 8px;
+}
+
+.row {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: 8px;
+  background: var(--flowlet-color-surface);
+}
+
+.rowContent {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rowTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rowTitle strong {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--flowlet-color-text);
+}
+
+.rowContent small {
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowActions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.formSection {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.formHeader {
+  display: grid;
+  gap: 8px;
+}
+
+.formHeader strong {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--flowlet-color-text);
+}
+
+.presetRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fields {
+  display: grid;
+  gap: 10px;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: 12px;
+}
+
+.fieldLabel {
+  display: grid;
+  gap: 4px;
+  color: var(--flowlet-color-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.formError {
+  white-space: pre-line;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.commitRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--flowlet-color-border);
+}

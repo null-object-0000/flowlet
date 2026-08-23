@@ -16,6 +16,7 @@ import type {
 } from "../../domains/agent/types";
 import { agentPlugin, type AgentPluginId } from "../../domains/pluginRegistry";
 import { agentAccessAdapter, type AgentConfigControl } from "./agentAccessAdapters";
+import { McpServersPanel } from "./McpServersPanel";
 
 const { Text, Title } = Typography;
 const MASKED_TOKEN = "••••••••••••••••••••";
@@ -78,7 +79,10 @@ export function AgentAccessSideSheet({
   onCopy,
 }: Props) {
   const { t } = useAppPreferences();
-  const [surface, setSurface] = useState<AgentSurface>("cli");
+  /** 当前激活 Tab：Agent Surface（cli/desktop/web）或 DSH 专属的 "mcp"。 */
+  const [surface, setSurface] = useState<AgentSurface | "mcp">("cli");
+  /** 仅 DeepSeek Harness 提供受管 MCP 服务器 Tab。 */
+  const supportsMcp = agent === "deepseek-harness";
 
   const meta = agentPlugin(agent);
   const adapter = agentAccessAdapter(meta.globalConfigAdapterId);
@@ -93,6 +97,8 @@ export function AgentAccessSideSheet({
   );
   const configStatuses = adapter.configStatuses(adapterContext);
   const configControls = adapter.configControls(adapterContext);
+  // 稳定引用：避免每次渲染生成新数组导致 MCP 面板草稿被意外重置。
+  const mcpServers = useMemo(() => globalConfig?.mcp_servers ?? [], [globalConfig]);
 
   useEffect(() => {
     setSurface(meta.surfaces[0]);
@@ -120,7 +126,7 @@ export function AgentAccessSideSheet({
           type="line"
           activeKey={surface}
           tabPaneMotion={false}
-          onChange={(key) => setSurface(key as AgentSurface)}
+          onChange={(key) => setSurface(key as AgentSurface | "mcp")}
         >
           {meta.surfaces.includes("cli") ? <Tabs.TabPane tab={t("{name} CLI 接入", { name })} itemKey="cli" /> : null}
           {meta.surfaces.includes("desktop") ? (
@@ -129,6 +135,7 @@ export function AgentAccessSideSheet({
           {meta.surfaces.includes("web") ? (
             <Tabs.TabPane tab={t("{name} Web 接入", { name })} itemKey="web" />
           ) : null}
+          {supportsMcp ? <Tabs.TabPane tab={t("MCP 服务器")} itemKey="mcp" /> : null}
         </Tabs>
       }
       headerStyle={{ paddingBottom: 0 }}
@@ -138,6 +145,31 @@ export function AgentAccessSideSheet({
       onCancel={onClose}
     >
       <div className={styles.body}>
+        {surface === "mcp" ? (
+          <section className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <div>
+                <Title heading={5}>{t("MCP 服务器")}</Title>
+                <Text type="tertiary" size="small">
+                  {t("管理 DeepSeek Harness 桥接的外部 MCP 服务器；工具会注册为 mcp__服务器名__工具名。")}
+                </Text>
+              </div>
+            </div>
+            {globalConfigLoading && !globalConfig ? (
+              <Text type="tertiary" size="small">{t("读取全局配置中…")}</Text>
+            ) : (
+              <McpServersPanel
+                busy={globalConfigBusy}
+                disabled={globalConfig?.state === "invalid" || !clientToken}
+                servers={mcpServers}
+                onSave={(mcps) => {
+                  void onApplyGlobalConfig({ ...adapter.applyOptions(adapterContext), mcpServers: mcps });
+                }}
+              />
+            )}
+          </section>
+        ) : (
+        <>
         <section className={styles.section}>
             <div className={styles.sectionHeader}>
               <div>
@@ -351,6 +383,8 @@ export function AgentAccessSideSheet({
             {!clientToken ? <li>{t("当前未配置默认 Client Token，请先在客户端设置中完成配置。")}</li> : null}
           </ul>
         </section>
+        </>
+        )}
       </div>
     </SideSheet>
   );

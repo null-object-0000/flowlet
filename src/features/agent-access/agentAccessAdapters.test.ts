@@ -105,23 +105,46 @@ describe("agent access adapters", () => {
     expect(adapter.configControls(base)[0].checked).toBe(false);
     expect(adapter.configControls(base)[0].requiresRestart).toBe(true);
     expect(adapter.configControls(base)[0].applyOptions(true))
-      .toEqual({ sessionExtension: true, modelSpecs: false, approvalBridge: false });
+      .toEqual({ sessionExtension: true, modelSpecs: false, approvalBridge: false, mcpServers: [] });
     // 模型规格控件默认不填写，与会话关联互相独立。
     expect(adapter.configControls(base)[1].checked).toBe(false);
     expect(adapter.configControls(base)[1].requiresRestart).toBeUndefined();
     expect(adapter.configControls(base)[1].applyOptions(true))
-      .toEqual({ sessionExtension: false, modelSpecs: true, approvalBridge: false });
+      .toEqual({ sessionExtension: false, modelSpecs: true, approvalBridge: false, mcpServers: [] });
     expect(adapter.configControls(base)[2].requiresRestart).toBe(true);
-    // 重新写入按钮保留当前报告状态，默认全关。
+    // 重新写入按钮保留当前报告状态（含 MCP 服务器列表），默认全关。
     expect(adapter.applyOptions(base)).toEqual({
       sessionExtension: false,
       modelSpecs: false,
       approvalBridge: false,
+      mcpServers: [],
     });
     expect(adapter.applyOptions(context())).toEqual({
       sessionExtension: false,
       modelSpecs: false,
       approvalBridge: false,
+      mcpServers: [],
+    });
+
+    // 「重新写入」会保留报告中的受管 MCP 服务器列表，不会被默认值清空。
+    const withMcp = context({
+      session_extension: true,
+      approval_bridge: true,
+      mcp_servers: [
+        {
+          id: "chrome",
+          serverName: "chrome",
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"],
+        },
+      ],
+    });
+    expect(adapter.applyOptions(withMcp)).toEqual({
+      sessionExtension: true,
+      modelSpecs: false,
+      approvalBridge: true,
+      mcpServers: withMcp.globalConfig?.mcp_servers ?? [],
     });
 
     // 开启聚合模型规格后，片段必须与一键写入的 settings.yaml 一致：

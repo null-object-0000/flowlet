@@ -160,7 +160,8 @@
         "taskProfile": { "name": "DeepSeek Harness", "sessionType": "deepseek-harness" },
         "configCapabilities": [
           { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
-          { "id": "model-specs", "name": "模型规格声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": false }
+          { "id": "model-specs", "name": "模型规格声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": false },
+          { "id": "mcp-servers", "name": "MCP 服务器", "kind": "list", "defaultEnabled": false, "requiresRestart": false }
         ],
         "endpointSuffix": "/v1",
         "npmPackage": "@deepseek-ai/dsh",

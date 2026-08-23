@@ -402,6 +402,7 @@ describe("AccountActionOverlay", () => {
       name: "Qwen",
       openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
       anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic",
+      supports_scrape_balance: true,
     } as ChannelPreset;
 
     render(
@@ -431,11 +432,11 @@ describe("AccountActionOverlay", () => {
       channel_id: "qwen",
       api_key: "sk-test",
       resource_mode: "pay_as_you_go",
-      resource_sync_mode: "manual",
+      resource_sync_mode: "auto",
       base_url_override: null,
       anthropic_base_url_override: null,
     })]);
-    // API 按量付费账号没有订阅快照，不触发余额快照保存。
+    // API 按量付费由福利页控制台自动同步（余额 + 免费额度），不保存本地资源快照。
     expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
   });
 

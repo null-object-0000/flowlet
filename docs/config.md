@@ -257,7 +257,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
     "model_detail": "https://api.longcat.chat/openai/v1/models/{id}"
   },
   "scrape": {                              // 控制台抓取配置(可选)
-    "hybrid": {                            // 模式 key(longcat: hybrid;qwen: token_plan)
+    "hybrid": {                            // 模式 key(longcat: hybrid; qwen: token_plan / freetier)
       "console_url": "https://longcat.chat/platform/usage?tab=token",
       "console_url_secondary": "https://longcat.chat/platform/usage?tab=api",
       "console_url_tertiary": "https://longcat.chat/platform/fuel_pack",
@@ -293,7 +293,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `supports_usage_query` | `bool` | 否 | `false` | 是否支持查询用量 |
 | `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"`；OpenRouter 额外使用 `"credits"` |
-| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"`），value 可包含 `console_url`、可选的 `console_url_secondary`、可选的 `console_url_tertiary`（第三阶段导航 URL，用于 LongCat 加载 `/platform/fuel_pack` 补全已用尽/已过期的历史资源包）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组（活跃包来自第一阶段 `token-packs/summary`，历史包来自第三阶段 `token-packs/list`，按 `lotId=resourceId` 去重合并，历史包以 `_fromList: true` 标记），原始接口 payload 单独写入 `raw_scraped_json`。Qwen `token_plan` 模式额外拦截 `/tokenplan/personal/api/v2/reset-card/list`（页面加载时自动请求的可选槽位：有重置卡时进入 `raw_scraped_json` bundle，无卡不阻断同步，不进入 `required_slots`）。页面始终自行生成 Cookie、签名和 Header；Windows/Linux 优先从原生 WebView 网络层读取精确匹配的目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。 |
+| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"` 与 `"freetier"`），value 可包含 `console_url`、可选的 `console_url_secondary`、可选的 `console_url_tertiary`（第三阶段导航 URL，用于 LongCat 加载 `/platform/fuel_pack` 补全已用尽/已过期的历史资源包）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组（活跃包来自第一阶段 `token-packs/summary`，历史包来自第三阶段 `token-packs/list`，按 `lotId=resourceId` 去重合并，历史包以 `_fromList: true` 标记），原始接口 payload 单独写入 `raw_scraped_json`。Qwen `token_plan` 模式额外拦截 `/tokenplan/personal/api/v2/reset-card/list`（页面加载时自动请求的可选槽位：有重置卡时进入 `raw_scraped_json` bundle，无卡不阻断同步，不进入 `required_slots`）。Qwen `freetier` 模式拦截福利页接口：`ListBailianFreetier`（槽位 `freetier_list`）、`DescribeFqInstance`（槽位 `fq_instance`，页面按 40 个模板一批连续发多批，Rust 侧按 `Template.Code` 跨批合并并裁剪字段，`required_slots` 只列一个槽位）、`GetBillingAccountAvailableAmount`（槽位 `billing_amount`，余额写入快照 `balance`）、`ListSettleBillTotalSummary`（槽位 `settle_bill`，可选），以及可选的 `queryCurrentCertInfo`（`cert_info`）与 `tool/user/info.json`（`session_info`，页面会话探针）。页面始终自行生成 Cookie、签名和 Header（`sec_token` 由 `tool/user/info.json` 下发，Flowlet 不伪造请求）；Windows/Linux 优先从原生 WebView 网络层读取精确匹配的目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。 |
 
 内置 `custom` 模板用于中转站等完全自定义账号。渠道级 Base URL 保持为空，
 真实地址保存在账号的 `base_url_override` / `anthropic_base_url_override`；至少填写
@@ -360,9 +360,10 @@ Key 一样包含在端到端加密的账号目录中。
   （通用 `sk-` 前缀 Key，`resource_mode = "pay_as_you_go"`，默认）；Token Plan 订阅账号
   （`sk-sp-` 前缀 Key，`resource_mode = "token_plan"`）通过账号级 `base_url_override` /
   `anthropic_base_url_override` 指向 `https://token-plan.cn-beijing.maas.aliyuncs.com`
-  下的专属端点，由账号编辑器在选择 Token Plan 模式时自动写入。API 按量付费账号
-  没有官方余额接口也没有可用的控制台抓取模式，走手动维护余额，不参与自动同步；
-  Token Plan 订阅额度由官方控制台抓取并固定自动同步。
+  下的专属端点，由账号编辑器在选择 Token Plan 模式时自动写入。两种资源模式都由
+  官方控制台抓取固定自动同步（见第 8 节 `scrape`）：Token Plan 抓套餐订阅端点；
+  API 按量付费账号抓福利页 `/home/benefits` 的免费额度实例与账单余额，存量账号
+  启动时统一迁移为 `resource_sync_mode = "auto"`。
 
 ### 6.2 `model_prices` — 模型价格预设
 

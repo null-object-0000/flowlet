@@ -160,6 +160,51 @@ callId、reason、DSH 会话 id）经文件桥写入 `~/.flowlet/dsh-control/req
 会在 apply 时自动补录。关闭选项会移除受管块并恢复/删除受管插件文件。该能力独立于精确会话关联
 和模型规格声明，三者的开关互不影响。
 
+### MCP 服务器管理（dsh-mcp-client）
+
+DSH 通过官方 `@deepseek-ai/dsh-mcp-client` 桥接外部 MCP 服务器，把工具注册为
+`mcp__<serverName>__<rawName>` 的原生工具（命名规范化到 64 字符，超长追加确定性 hash；
+`serverName` 不变时工具名不变）。该能力默认关闭，由用户显式开启后，Flowlet 在**每个已初始化的
+base-bundle Profile** 的 `cordis.patch.yml` 中部署一个受管 `deepseek-harness-mcp-servers`
+块：块内每个服务器对应一个 `- insert:` 的 dsh-mcp-client 插件实例，增删改全部整块重写，
+关闭/恢复时整块移除。插件包由 DSH 自带的 `profiles/node_modules/@deepseek-ai/dsh-mcp-client`
+解析，Flowlet 不写入任何插件文件、不修改 DSH npm 包（`dsh-mcp-client` 本身也只桥接
+工具，Resources/Prompts 官方暂不消费）。
+
+受管配置模型（`McpServerSpec`，Rust 与前端类型同步，字段 camelCase）：
+
+- `id`：Flowlet 内部稳定 id（`[A-Za-z0-9_-]`），同时决定插件条目 id `mcp-<id>`；
+- `serverName`：DSH 工具命名空间，`[A-Za-z0-9_-]{1,32}`，存活实例中唯一；
+- `transport`：`stdio`（本地命令）或 `streamable-http`（远程服务）；
+- stdio：`command`（必填）、`args`、`cwd`、`env`；
+- http：`url`（必填）、`headers`。
+
+Flowlet 只写入普通字符串值，不生成 DSH 的 `!!js process.env.X` 运行时注入表达式
+（env/headers 如需引用外部环境，请在 DSH 侧手动补充）。写入端执行与 DSH 一致的校验：
+serverName 语法与长度、同列表唯一、stdio 必须有 command、http 必须有 url；整个列表
+先校验后落盘，任一服务器非法则整次 apply 失败并返回可读错误。未初始化任何 Profile 时
+部署非空列表会明确报错（与精确会话关联一致）。
+
+生效方式与两个插件桥不同：dsh-mcp-client 官方支持 HMR 热替换——修改配置项触发断开并
+重连，无需重启 DSH。开关关闭移除受管块后，已注册工具注销、已有连接断开。
+
+前端在接入抽屉提供独立的「MCP 服务器」Tab（仅 DeepSeek Harness 显示，高级配置区不再
+重复渲染该能力）：面板内置预置 Chrome DevTools
+（`npx -y chrome-devtools-mcp@latest --headless --isolated`；Windows 下 npx 偶尔起不来，
+可改用 `command: cmd`、`args: ['/c', 'npx', ...]`）、GitHub（需 `GITHUB_TOKEN`）、
+Sequential Thinking，以及自定义模式（逐字段填写 transport / command / args / env / cwd /
+url / headers）。面板本地维护草稿列表，点「写回 Flowlet」一次性提交；inspect 从受管块按 id
+跨 Profile 合并回读当前列表并展示。
+
+隐私注意：MCP 工具是真实环境能力（浏览器导航/截图等），连接后 DSH 可执行这些操作；
+chrome 预设默认使用 `--isolated` 临时 Profile 与无头模式，正式账号请勿在暴露登录态的
+会话中使用。
+
+契约测试：真实上游 `cordis.patch.yml` fixture 走 inspect → apply（含 stdio 与
+streamable-http 服务器）→ reapply（幂等）→ disable（空列表只移除 MCP 块，保留会话桥
+与确认桥）→ restore（逐字节还原）全生命周期；每步重新解析 YAML 顶层数组，并验证受管块
+能无损解析回原列表。
+
 ## 仍保留的能力边界
 
 Flowlet 的会话详情使用与上游同版式的“对话 / 轨迹”双视图。轨迹读取 Session Adapter

@@ -163,6 +163,11 @@ export function isQwenTokenPlanAccount(account: { channel_id: string; resource_m
   return account.channel_id === QWEN_CHANNEL_ID && account.resource_mode === "token_plan";
 }
 
+/** 判断账号是否为千问 API 按量付费模式（福利页免费额度抓取）。 */
+export function isQwenPayAsYouGoAccount(account: { channel_id: string; resource_mode: string | null }): boolean {
+  return account.channel_id === QWEN_CHANNEL_ID && account.resource_mode === "pay_as_you_go";
+}
+
 /** 判断是否为 ChatGPT (Codex) 伪账号。Codex 账号由 Rust 端同步，
  *  前端不可编辑、不参与路由，仅在概览页底部作为非交互展示项。 */
 export function isChatGptAccount(account: { channel_id: string; resource_mode: string | null }): boolean {

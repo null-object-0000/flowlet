@@ -143,7 +143,7 @@ fn usage_summary_uses_workspace_account_identity_without_rewriting_history() {
 }
 
 #[test]
-fn migration_forces_qwen_token_plan_resource_sync_to_auto() {
+fn migration_forces_qwen_resource_sync_to_auto_for_both_modes() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     connection
         .execute_batch(
@@ -168,20 +168,30 @@ fn migration_forces_qwen_token_plan_resource_sync_to_auto() {
             );
             INSERT INTO channel_accounts (
                 id, channel_id, name, api_key, resource_mode, resource_sync_mode, created_at, updated_at
-            ) VALUES (
-                'account-qwen-plan', 'qwen', 'Qwen Token Plan', 'sk-sp-test',
-                'token_plan', 'manual', '2026-07-27T00:00:00Z', '2026-07-27T00:00:00Z'
-            );
+            ) VALUES
+                ('account-qwen-plan', 'qwen', 'Qwen Token Plan', 'sk-sp-test',
+                 'token_plan', 'manual', '2026-07-27T00:00:00Z', '2026-07-27T00:00:00Z'),
+                ('account-qwen-paygo', 'qwen', 'Qwen API', 'sk-test',
+                 'pay_as_you_go', 'manual', '2026-07-27T00:00:00Z', '2026-07-27T00:00:00Z');
             "#,
         )
-        .expect("seed legacy qwen account");
+        .expect("seed legacy qwen accounts");
     let storage = Storage::from_connection_for_test(connection);
 
     storage.migrate().expect("migrate account schema");
 
     let accounts = storage.list_channel_accounts().expect("list accounts");
-    assert_eq!(accounts[0].resource_sync_mode, "auto");
-    assert_eq!(accounts[0].management_key, None);
+    let plan = accounts
+        .iter()
+        .find(|account| account.id == "account-qwen-plan")
+        .expect("token plan account");
+    assert_eq!(plan.resource_sync_mode, "auto");
+    let paygo = accounts
+        .iter()
+        .find(|account| account.id == "account-qwen-paygo")
+        .expect("pay as you go account");
+    assert_eq!(paygo.resource_sync_mode, "auto");
+    assert_eq!(paygo.management_key, None);
 }
 
 #[test]

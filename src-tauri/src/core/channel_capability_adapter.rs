@@ -26,10 +26,9 @@ struct ScrapeResponseAdapter {
 enum ConsoleScrapeAdapter {
     None,
     Fixed(&'static str),
-    ResourceMode {
-        resource_mode: &'static str,
-        mode_key: &'static str,
-    },
+    /// 按账号 resource_mode 选择抓取模式键。Qwen 双资源模式：token_plan 抓订阅
+    /// 套餐端点，pay_as_you_go 抓福利页免费额度与余额。
+    ResourceModes(&'static [(&'static str, &'static str)]),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,8 +103,10 @@ pub(crate) fn has_model_sync(channel_id: &str) -> bool {
 #[cfg(test)]
 pub(crate) fn configured_console_scrape_mode_key(channel_id: &str) -> Option<&'static str> {
     match channel_adapter(channel_id).map(|adapter| adapter.console_scrape) {
-        Some(ConsoleScrapeAdapter::Fixed(mode_key))
-        | Some(ConsoleScrapeAdapter::ResourceMode { mode_key, .. }) => Some(mode_key),
+        Some(ConsoleScrapeAdapter::Fixed(mode_key)) => Some(mode_key),
+        Some(ConsoleScrapeAdapter::ResourceModes(modes)) => {
+            modes.first().map(|(_, mode_key)| *mode_key)
+        }
         _ => None,
     }
 }
@@ -141,10 +142,10 @@ pub(crate) fn console_scrape_mode_key(
     match channel_adapter(channel_id)?.console_scrape {
         ConsoleScrapeAdapter::None => None,
         ConsoleScrapeAdapter::Fixed(mode_key) => Some(mode_key),
-        ConsoleScrapeAdapter::ResourceMode {
-            resource_mode: required,
-            mode_key,
-        } => (resource_mode == Some(required)).then_some(mode_key),
+        ConsoleScrapeAdapter::ResourceModes(modes) => modes
+            .iter()
+            .find(|(required, _)| Some(*required) == resource_mode)
+            .map(|(_, mode_key)| *mode_key),
     }
 }
 
@@ -256,7 +257,11 @@ mod tests {
             console_scrape_mode_key("qwen", Some("token_plan")),
             Some("token_plan")
         );
-        assert_eq!(console_scrape_mode_key("qwen", Some("pay_as_you_go")), None);
+        assert_eq!(
+            console_scrape_mode_key("qwen", Some("pay_as_you_go")),
+            Some("freetier")
+        );
+        assert_eq!(console_scrape_mode_key("qwen", None), None);
         assert_eq!(console_scrape_mode_key("deepseek", None), None);
     }
 

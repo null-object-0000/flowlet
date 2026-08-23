@@ -25,6 +25,35 @@ pub enum AgentGlobalConfigState {
     Invalid,
 }
 
+/// DeepSeek Harness 受管 MCP 服务器的可见配置（写入 cordis.patch.yml 的
+/// dsh-mcp-client 插件实例，见 docs/deepseek-harness-integration.md）。
+/// 字段按命名空间与传输分层：stdio 用 command/args/env/cwd，
+/// streamable-http 用 url/headers。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerSpec {
+    /// Flowlet 内部稳定 id（`[A-Za-z0-9_-]`），同时决定 DSH 插件条目 id `mcp-<id>`。
+    pub id: String,
+    /// DSH 工具命名空间 `[A-Za-z0-9_-]{1,32}`，公开工具名为 mcp__<serverName>__<rawName>。
+    pub server_name: String,
+    /// `"stdio"` 或 `"streamable-http"`。
+    pub transport: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+    /// 额外环境变量。Flowlet 只写入普通字符串值，不生成 DSH 的 `!!js` 运行时注入表达式。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// 额外请求头（如 Authorization）。与 env 一样只写入普通字符串值。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<BTreeMap<String, String>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AgentGlobalConfigReport {
     pub agent_id: String,
@@ -70,6 +99,10 @@ pub struct AgentGlobalConfigReport {
     /// 桥接把 DSH headless 会话的 approval/request 转交 Flowlet 桌面端确认或否决。
     #[serde(default)]
     pub approval_bridge: bool,
+    /// 仅 DeepSeek Harness：从各 base Profile 受管块回读的 MCP 服务器列表
+    /// （按 id 合并，首个出现的 Profile 优先）。
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerSpec>,
     /// 仅 OpenCode：Flowlet 权限事件插件是否在位。插件用于发现 Desktop 动态端口实例。
     #[serde(default)]
     pub opencode_permission_bridge: bool,
@@ -106,6 +139,11 @@ pub struct AgentGlobalConfigOptions {
     /// 桌面端确认或否决。未传选项时保持已有状态不变。
     #[serde(default)]
     pub approval_bridge: Option<bool>,
+    /// 仅 DeepSeek Harness：受管 MCP 服务器列表。`Some(非空)` 把列表整块写入
+    /// 每个 base Profile 的 cordis.patch.yml；`Some(空)` 移除全部受管 MCP 块；
+    /// `None` 表示不触碰 MCP 配置（兼容旧前端）。
+    #[serde(default)]
+    pub mcp_servers: Option<Vec<McpServerSpec>>,
 }
 
 impl AgentGlobalConfigOptions {

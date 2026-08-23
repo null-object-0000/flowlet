@@ -45,6 +45,7 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
     const sessionExtension = globalConfig?.session_extension ?? false;
     const modelSpecs = globalConfig?.model_specs ?? false;
     const approvalBridge = globalConfig?.approval_bridge ?? false;
+    const mcpServers = globalConfig?.mcp_servers ?? [];
     return [
       {
         id: "session-extension",
@@ -55,7 +56,7 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
         ],
         checked: sessionExtension,
         requiresRestart: true,
-        applyOptions: (checked) => ({ sessionExtension: checked, modelSpecs, approvalBridge }),
+        applyOptions: (checked) => ({ sessionExtension: checked, modelSpecs, approvalBridge, mcpServers }),
       },
       {
         id: "model-specs",
@@ -65,7 +66,7 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
           t("图像请求会由 Flowlet 再次筛选支持图像的上游；不声明最大输出上限，保持 DSH 默认的保守值。"),
         ],
         checked: modelSpecs,
-        applyOptions: (checked) => ({ sessionExtension, modelSpecs: checked, approvalBridge }),
+        applyOptions: (checked) => ({ sessionExtension, modelSpecs: checked, approvalBridge, mcpServers }),
       },
       {
         id: "approval-bridge",
@@ -76,7 +77,7 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
         ],
         checked: approvalBridge,
         requiresRestart: true,
-        applyOptions: (checked) => ({ sessionExtension, modelSpecs, approvalBridge: checked }),
+        applyOptions: (checked) => ({ sessionExtension, modelSpecs, approvalBridge: checked, mcpServers }),
       },
     ];
   },
@@ -84,6 +85,7 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
     sessionExtension: globalConfig?.session_extension ?? false,
     modelSpecs: globalConfig?.model_specs ?? false,
     approvalBridge: globalConfig?.approval_bridge ?? false,
+    mcpServers: globalConfig?.mcp_servers ?? [],
   }),
   manualSnippets: ({ endpoint, token, displayedToken, globalConfig, t }) => {
     const settings = settingsSnippet(

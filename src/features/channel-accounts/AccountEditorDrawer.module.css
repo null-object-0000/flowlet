@@ -116,6 +116,8 @@
 .qwenResetCard { min-height: 28px; padding-top: 6px; border-top: 1px solid var(--semi-color-primary-light-active); }
 .qwenResetCard > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qwenResetCard > :last-child { flex: none; white-space: nowrap; }
+.qwenFreetierSummaryGrid { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr); }
+.modelQuota { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .scrapeHint { color: var(--semi-color-text-2); font-size: 12px; line-height: 1.5; }
 .modelHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .modelHeading > span { display: grid; gap: 4px; }

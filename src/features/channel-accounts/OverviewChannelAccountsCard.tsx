@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Dropdown, Switch, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconMore, IconPlay, IconPlus, IconStop } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
-import { CHATGPT_CHANNEL_ID, OPENROUTER_CHANNEL_ID, isQwenTokenPlanAccount, isChatGptAccount } from "../../domains/channel/types";
+import { CHATGPT_CHANNEL_ID, OPENROUTER_CHANNEL_ID, isQwenTokenPlanAccount, isQwenPayAsYouGoAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails } from "./qwenTokenPlanDetails";
+import { parseQwenFreeTierDetails } from "./qwenFreetierDetails";
 import {
   codexAccountToPseudoChannelAccount,
   getCodexUsageDisplay,
@@ -246,6 +247,18 @@ function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
     const balanceText = snapshot?.balance == null ? "" : `${formatBalance(snapshot.balance, snapshot.currency, language)}${snapshot.currency ? ` ${snapshot.currency}` : ""}`;
     const packs = snapshot?.token_pack_remaining == null ? "" : t("资源包 {value} Tokens", { value: formatCompactNumber(snapshot?.token_pack_remaining, language, { fallback: "-" }) });
     return { label: t("余额"), value: balanceText, secondary: packs };
+  }
+  // Qwen API 按量付费：余额来自福利页抓取（¥ 可用余额），副列展示可用免费额度模型数。
+  if (isQwenPayAsYouGoAccount(account)) {
+    const details = parseQwenFreeTierDetails(snapshot?.raw_scraped_json);
+    const balanceText = snapshot?.balance == null ? "" : `${formatBalance(snapshot.balance, snapshot.currency, language)}${snapshot.currency ? ` ${snapshot.currency}` : ""}`;
+    const freeCount = details?.validInstances.length ?? 0;
+    const secondary = freeCount > 0
+      ? t("免费额度 {count} 个模型", { count: freeCount })
+      : details?.unsettledAmount != null
+        ? t("未结清 {amount}", { amount: formatBalance(details.unsettledAmount, details.currency, language) })
+        : "";
+    return { label: snapshot?.balance == null ? "" : t("余额"), value: balanceText, secondary };
   }
   if (
     account.channel_id === OPENROUTER_CHANNEL_ID

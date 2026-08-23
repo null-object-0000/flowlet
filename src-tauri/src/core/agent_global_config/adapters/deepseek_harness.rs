@@ -27,6 +27,14 @@ const APPROVAL_BRIDGE_FILE: &str = "flowlet-approval-bridge.mjs";
 const APPROVAL_BRIDGE_START: &str = "# flowlet-managed:start deepseek-harness-approval-bridge";
 const APPROVAL_BRIDGE_END: &str = "# flowlet-managed:end deepseek-harness-approval-bridge";
 
+/// MCP 服务器受管块：块内每个服务器是一个 `- insert:` 的 dsh-mcp-client 插件实例。
+/// 增删改都整块重写（patch_mcp_servers），restore/关闭时整块移除。
+const MCP_SERVERS_START: &str = "# flowlet-managed:start deepseek-harness-mcp-servers";
+const MCP_SERVERS_END: &str = "# flowlet-managed:end deepseek-harness-mcp-servers";
+/// DSH 官方 MCP 桥接插件包名（profile 内可从 node_modules 解析）。
+const MCP_CLIENT_PACKAGE: &str = "@deepseek-ai/dsh-mcp-client";
+const MCP_MAX_SERVER_NAME: usize = 32;
+
 pub(super) struct DeepSeekHarnessAdapter;
 
 impl AgentGlobalConfigAdapter for DeepSeekHarnessAdapter {
@@ -57,6 +65,7 @@ impl AgentGlobalConfigAdapter for DeepSeekHarnessAdapter {
             options
                 .and_then(|options| options.approval_bridge)
                 .unwrap_or(false),
+            options.and_then(|options| options.mcp_servers.as_deref()),
         )
     }
 
@@ -430,6 +439,312 @@ fn profile_approval_bridge_matches(root: &Path) -> bool {
         })
 }
 
+fn is_valid_token(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// 保守的 YAML 纯量安全判定：不满足时用单引号包裹（单引号按 YAML 规则翻倍转义）。
+/// 覆盖 DSH 解析器与 serde_yaml 的常见歧义：行首指示符、`#`/`: `、数字与布尔字面量。
+fn yaml_plain_safe(value: &str) -> bool {
+    if value.is_empty() || value.trim() != value {
+        return false;
+    }
+    let first = value.as_bytes()[0];
+    if !(first.is_ascii_alphabetic() || first == b'_' || first == b'.') {
+        return false;
+    }
+    if value.contains(": ") || value.contains(" #") || value.ends_with(':') {
+        return false;
+    }
+    if value
+        .chars()
+        .any(|c| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | ':' | '\\' | '@' | '+' | '=' | '%' | '~' | '^' | '(' | ')')))
+    {
+        return false;
+    }
+    let lower = value.to_ascii_lowercase();
+    if matches!(lower.as_str(), "true" | "false" | "null" | "yes" | "no" | "on" | "off" | "~")
+    {
+        return false;
+    }
+    if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
+        return false;
+    }
+    true
+}
+
+fn yaml_quote(value: &str) -> String {
+    if yaml_plain_safe(value) {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "''"))
+    }
+}
+
+fn validate_mcp_servers(servers: &[McpServerSpec]) -> Result<(), String> {
+    let mut ids = std::collections::HashSet::new();
+    let mut server_names = std::collections::HashSet::new();
+    for server in servers {
+        if !is_valid_token(&server.id) {
+            return Err(format!(
+                "MCP 服务器 id 只能包含字母、数字、下划线和连字符：{}",
+                server.id
+            ));
+        }
+        if !ids.insert(server.id.as_str()) {
+            return Err(format!("MCP 服务器 id 重复：{}", server.id));
+        }
+        if server.server_name.is_empty()
+            || server.server_name.len() > MCP_MAX_SERVER_NAME
+            || !is_valid_token(&server.server_name)
+        {
+            return Err(format!(
+                "MCP serverName 必须是 1-{MCP_MAX_SERVER_NAME} 位字母、数字、下划线或连字符：{}",
+                server.server_name
+            ));
+        }
+        if !server_names.insert(server.server_name.as_str()) {
+            return Err(format!("MCP serverName 重复：{}", server.server_name));
+        }
+        match server.transport.as_str() {
+            "stdio" => {
+                if server.command.as_deref().map_or(true, str::is_empty) {
+                    return Err(format!(
+                        "MCP 服务器 {} 使用 stdio 传输时必须提供 command",
+                        server.id
+                    ));
+                }
+            }
+            "streamable-http" => {
+                if server.url.as_deref().map_or(true, str::is_empty) {
+                    return Err(format!(
+                        "MCP 服务器 {} 使用 streamable-http 传输时必须提供 url",
+                        server.id
+                    ));
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "MCP 服务器 {} 的 transport 必须是 stdio 或 streamable-http",
+                    server.id
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 生成受管块的完整文本：一个 MCP 服务器对应一个 `- insert:` 插件实例，
+/// 全部包在单一 flowlet-managed 标记内，供整块重写与移除。
+fn mcp_servers_block(servers: &[McpServerSpec]) -> String {
+    let mut block = String::from(MCP_SERVERS_START);
+    for server in servers {
+        block.push_str("\n- insert:\n");
+        block.push_str(&format!("    - id: mcp-{}\n", server.id));
+        block.push_str(&format!("      name: '{MCP_CLIENT_PACKAGE}'\n"));
+        block.push_str("      config:\n");
+        block.push_str(&format!("        serverName: {}\n", server.server_name));
+        block.push_str(&format!("        transport: {}\n", server.transport));
+        if server.transport == "stdio" {
+            if let Some(command) = &server.command {
+                block.push_str(&format!("        command: {}\n", yaml_quote(command)));
+            }
+            if let Some(args) = &server.args {
+                if !args.is_empty() {
+                    block.push_str(&format!(
+                        "        args: [{}]\n",
+                        args.iter().map(|arg| yaml_quote(arg)).collect::<Vec<_>>().join(", ")
+                    ));
+                }
+            }
+            if let Some(cwd) = &server.cwd {
+                block.push_str(&format!("        cwd: {}\n", yaml_quote(cwd)));
+            }
+            if let Some(env) = &server.env {
+                if !env.is_empty() {
+                    block.push_str("        env:\n");
+                    for (key, value) in env {
+                        block.push_str(&format!("          {}: {}\n", yaml_quote(key), yaml_quote(value)));
+                    }
+                }
+            }
+        } else {
+            if let Some(url) = &server.url {
+                block.push_str(&format!("        url: {}\n", yaml_quote(url)));
+            }
+            if let Some(headers) = &server.headers {
+                if !headers.is_empty() {
+                    block.push_str("        headers:\n");
+                    for (key, value) in headers {
+                        block.push_str(&format!("          {}: {}\n", yaml_quote(key), yaml_quote(value)));
+                    }
+                }
+            }
+        }
+    }
+    block.push_str(MCP_SERVERS_END);
+    block
+}
+
+/// 从 patch 文本中移除旧的 MCP 受管块并以新列表重写；调方需保证列表非空。
+fn patch_mcp_servers(text: &str, servers: &[McpServerSpec]) -> Result<Vec<u8>, String> {
+    debug_assert!(!servers.is_empty(), "空列表应走 remove_mcp_servers");
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let normalized = text.replace("\r\n", "\n");
+    let start = normalized.find(MCP_SERVERS_START);
+    let end = normalized.find(MCP_SERVERS_END);
+    let mut unmanaged = match (start, end) {
+        (None, None) => normalized.trim_end_matches(['\r', '\n']).to_string(),
+        (Some(start), Some(end)) if end >= start => {
+            let end = end + MCP_SERVERS_END.len();
+            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
+            while value.contains("\n\n\n") {
+                value = value.replace("\n\n\n", "\n\n");
+            }
+            value.trim_end_matches(['\r', '\n']).to_string()
+        }
+        _ => {
+            return Err(
+                "DSH cordis.patch.yml 中的 Flowlet MCP 受管标记不完整，拒绝覆盖".to_string(),
+            )
+        }
+    };
+    unmanaged = prepare_patch_list_for_append(&unmanaged)?;
+    if !unmanaged.is_empty() {
+        unmanaged.push_str("\n\n");
+    }
+    unmanaged.push_str(&mcp_servers_block(servers));
+    Ok(unmanaged.replace('\n', newline).into_bytes())
+}
+
+fn remove_mcp_servers(text: &str) -> Result<Vec<u8>, String> {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let normalized = text.replace("\r\n", "\n");
+    let start = normalized.find(MCP_SERVERS_START);
+    let end = normalized.find(MCP_SERVERS_END);
+    let output = match (start, end) {
+        (None, None) => return Ok(text.as_bytes().to_vec()),
+        (Some(start), Some(end)) if end >= start => {
+            let end = end + MCP_SERVERS_END.len();
+            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
+            while value.contains("\n\n\n") {
+                value = value.replace("\n\n\n", "\n\n");
+            }
+            ensure_patch_list_after_removal(&value)
+        }
+        _ => {
+            return Err(
+                "DSH cordis.patch.yml 中的 Flowlet MCP 受管标记不完整，拒绝覆盖".to_string(),
+            )
+        }
+    };
+    Ok(if output.is_empty() {
+        Vec::new()
+    } else {
+        format!("{}{}", output.replace('\n', newline), newline).into_bytes()
+    })
+}
+
+fn string_map_from(mapping: &serde_yaml::Mapping) -> BTreeMap<String, String> {
+    mapping
+        .iter()
+        .filter_map(|(key, value)| {
+            Some((key.as_str()?.to_string(), value.as_str()?.to_string()))
+        })
+        .collect()
+}
+
+/// 从单个 dsh-mcp-client 插件条目解析回 McpServerSpec；未知/无法解析的条目跳过。
+/// 只接受我们生成的受管块结构（id 以 `mcp-` 开头），用户手写的其他条目不受影响。
+fn parse_mcp_plugin(value: &serde_yaml::Value) -> Option<McpServerSpec> {
+    let id = value.get("id")?.as_str()?.strip_prefix("mcp-")?.to_string();
+    let config = value.get("config")?;
+    let server_name = config.get("serverName")?.as_str()?.to_string();
+    let transport = config.get("transport")?.as_str()?.to_string();
+    let string_field = |key: &str| {
+        config
+            .get(key)
+            .and_then(serde_yaml::Value::as_str)
+            .map(str::to_string)
+    };
+    let spec = McpServerSpec {
+        id,
+        server_name,
+        transport,
+        command: string_field("command"),
+        args: config
+            .get("args")
+            .and_then(serde_yaml::Value::as_sequence)
+            .map(|sequence| {
+                sequence
+                    .iter()
+                    .filter_map(serde_yaml::Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            }),
+        env: config
+            .get("env")
+            .and_then(serde_yaml::Value::as_mapping)
+            .map(string_map_from),
+        cwd: string_field("cwd"),
+        url: string_field("url"),
+        headers: config
+            .get("headers")
+            .and_then(serde_yaml::Value::as_mapping)
+            .map(string_map_from),
+    };
+    Some(spec)
+}
+
+/// 解析单个 profile 的 cordis.patch.yml 中 Flowlet MCP 受管块。
+fn parse_mcp_servers(text: &str) -> Result<Vec<McpServerSpec>, String> {
+    let normalized = text.replace("\r\n", "\n");
+    let Some(start) = normalized.find(MCP_SERVERS_START) else {
+        return Ok(Vec::new());
+    };
+    let Some(end) = normalized.find(MCP_SERVERS_END) else {
+        return Err("DSH cordis.patch.yml 中的 Flowlet MCP 受管标记不完整".to_string());
+    };
+    if end < start {
+        return Err("DSH cordis.patch.yml 中的 Flowlet MCP 受管标记顺序错误".to_string());
+    }
+    let body_start = normalized[start..]
+        .find('\n')
+        .map(|offset| start + offset + 1)
+        .unwrap_or(end);
+    let body = normalized[body_start..end].trim();
+    if body.is_empty() {
+        return Ok(Vec::new());
+    }
+    let entries: Vec<serde_yaml::Value> = serde_yaml::from_str(body)
+        .map_err(|error| format!("解析 DSH MCP 受管块失败：{error}"))?;
+    Ok(entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .get("insert")
+                .and_then(serde_yaml::Value::as_sequence)
+                .and_then(|sequence| sequence.first())
+                .and_then(parse_mcp_plugin)
+        })
+        .collect())
+}
+
+/// 跨全部 base Profile 合并受管 MCP 服务器（按 id 去重，首个出现的 Profile 优先）。
+fn collect_mcp_servers(profiles: &[(String, PathBuf)]) -> Result<Vec<McpServerSpec>, String> {
+    let mut by_id = BTreeMap::new();
+    for (_, root) in profiles {
+        let patch = read_yaml_text(&root.join("cordis.patch.yml"))?;
+        for server in parse_mcp_servers(&patch)? {
+            by_id.entry(server.id.clone()).or_insert(server);
+        }
+    }
+    Ok(by_id.into_values().collect())
+}
+
 fn inspect_dsh(expected_base_url: &str) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
     inspect_dsh_at(&home, expected_base_url)
@@ -449,6 +764,8 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         && profiles
             .iter()
             .all(|(_, root)| profile_approval_bridge_matches(root));
+    // MCP 服务器：跨全部 base Profile 合并受管列表（按 id 去重）。
+    let mcp_servers = collect_mcp_servers(&profiles)?;
     // 聚合模型规格声明：settings.yaml 中 flowlet-pro 模型条目携带 contextWindow。
     let model_specs = yaml_at(
         &read_yaml_value(&settings_path).unwrap_or_else(|_| serde_yaml::Value::Null),
@@ -487,6 +804,7 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         model_specs,
         model_input_modalities: BTreeMap::new(),
         approval_bridge,
+        mcp_servers: mcp_servers.clone(),
         opencode_permission_bridge: false,
     };
     if !settings_path.is_file() {
@@ -1033,6 +1351,7 @@ fn apply_dsh(
     model_specs: bool,
     model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
     approval_bridge: bool,
+    mcp_servers: Option<&[McpServerSpec]>,
 ) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
     apply_dsh_at_with_inputs(
@@ -1043,6 +1362,7 @@ fn apply_dsh(
         model_specs,
         approval_bridge,
         model_inputs,
+        mcp_servers,
     )
 }
 
@@ -1063,6 +1383,7 @@ fn apply_dsh_at(
         model_specs,
         approval_bridge,
         None,
+        None,
     )
 }
 
@@ -1074,7 +1395,14 @@ fn apply_dsh_at_with_inputs(
     model_specs: bool,
     approval_bridge: bool,
     model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
+    mcp_servers: Option<&[McpServerSpec]>,
 ) -> Result<AgentGlobalConfigReport, String> {
+    // 服务器列表校验是纯函数，先于任何锁与文件操作执行。
+    if let Some(servers) = mcp_servers {
+        if !servers.is_empty() {
+            validate_mcp_servers(servers)?;
+        }
+    }
     let settings_path = home.join("settings.yaml");
     let credentials_path = home.join(".credentials.yaml");
     let backup = backup_path(&home);
@@ -1094,6 +1422,12 @@ fn apply_dsh_at_with_inputs(
     if session_extension && profiles.is_empty() {
         return Err(
             "尚未发现可安装 Flowlet 会话插件的 DSH Profile；请先启动一次 DeepSeek Harness，或关闭可选的精确会话关联"
+                .to_string(),
+        );
+    }
+    if mcp_servers.is_some_and(|servers| !servers.is_empty()) && profiles.is_empty() {
+        return Err(
+            "尚未发现可部署 MCP 服务器的 DSH Profile；请先启动一次 DeepSeek Harness，或移除 MCP 服务器"
                 .to_string(),
         );
     }
@@ -1205,6 +1539,21 @@ fn apply_dsh_at_with_inputs(
                 });
             if managed_text_file_matches(&approval_plugin, APPROVAL_BRIDGE_SOURCE) {
                 writes.push((approval_plugin, previous_approval_plugin));
+            }
+        }
+        // MCP 服务器受管块：`Some(非空)` 整块重写，`Some(空)` 移除，`None` 不触碰。
+        if let Some(servers) = mcp_servers {
+            if servers.is_empty() {
+                let patch_output = remove_mcp_servers(&patch_text)?;
+                if patch_output != patch_text.as_bytes() {
+                    patch_text = String::from_utf8(patch_output)
+                        .map_err(|_| "DSH MCP 服务器输出不是合法 UTF-8".to_string())?;
+                    patch_changed = true;
+                }
+            } else {
+                patch_text = String::from_utf8(patch_mcp_servers(&patch_text, servers)?)
+                    .map_err(|_| "DSH MCP 服务器输出不是合法 UTF-8".to_string())?;
+                patch_changed = true;
             }
         }
         if patch_changed {
@@ -1851,6 +2200,7 @@ mod tests {
             true,
             false,
             Some(&model_inputs),
+            None,
         )
         .unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
@@ -1892,6 +2242,7 @@ mod tests {
             true,
             false,
             Some(&model_inputs),
+            None,
         )
         .unwrap();
         assert!(reapplied.model_specs, "reapply must preserve model specs");
@@ -2052,5 +2403,329 @@ mod tests {
         }))
         .unwrap();
         assert!(backup.profiles.is_empty());
+    }
+
+    fn mcp_chrome(args: &[&str]) -> McpServerSpec {
+        McpServerSpec {
+            id: "chrome".to_string(),
+            server_name: "chrome".to_string(),
+            transport: "stdio".to_string(),
+            command: Some("npx".to_string()),
+            args: Some(args.iter().map(|arg| arg.to_string()).collect()),
+            ..McpServerSpec::default()
+        }
+    }
+
+    fn mcp_web_api() -> McpServerSpec {
+        McpServerSpec {
+            id: "webapi".to_string(),
+            server_name: "webapi".to_string(),
+            transport: "streamable-http".to_string(),
+            url: Some("http://127.0.0.1:9222/mcp".to_string()),
+            headers: Some(
+                [("Authorization".to_string(), "Bearer secret token".to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+            ..McpServerSpec::default()
+        }
+    }
+
+    #[test]
+    fn mcp_servers_block_round_trips_stdio_and_http_specs() {
+        let servers = vec![
+            mcp_chrome(&["-y", "chrome-devtools-mcp@latest", "--headless"]),
+            mcp_web_api(),
+        ];
+        let text = mcp_servers_block(&servers);
+        assert!(text.starts_with(MCP_SERVERS_START));
+        assert!(text.ends_with(MCP_SERVERS_END));
+        assert_eq!(text.matches("- insert:").count(), 2);
+        assert!(text.contains("name: '@deepseek-ai/dsh-mcp-client'"));
+        assert!(
+            text.contains("args: ['-y', chrome-devtools-mcp@latest, '--headless']"),
+            "actual block:\n{text}"
+        );
+        assert!(text.contains("Authorization: 'Bearer secret token'"));
+        // 生成文本必须是合法 YAML，且能无损解析回原列表。
+        let parsed = parse_mcp_servers(&text).unwrap();
+        assert_eq!(parsed, servers);
+    }
+
+    #[test]
+    fn yaml_quote_quotes_ambiguous_scalars_only() {
+        assert_eq!(yaml_quote("npx"), "npx");
+        assert_eq!(yaml_quote("--headless"), "'--headless'");
+        assert_eq!(
+            yaml_quote("C:\\Program Files\\node\\npx.cmd"),
+            "'C:\\Program Files\\node\\npx.cmd'"
+        );
+        assert_eq!(yaml_quote("@modelcontextprotocol/server-github"), "'@modelcontextprotocol/server-github'");
+        assert_eq!(yaml_quote("true"), "'true'");
+        assert_eq!(yaml_quote("42"), "'42'");
+        assert_eq!(yaml_quote("it's"), "'it''s'");
+        assert_eq!(yaml_quote("a: b"), "'a: b'");
+    }
+
+    #[test]
+    fn mcp_patch_preserves_user_plugins_and_is_idempotent() {
+        let before = "# user plugin\n- insert:\n    - id: custom\n      name: custom-package\n";
+        let once =
+            String::from_utf8(patch_mcp_servers(before, &[mcp_chrome(&["-y", "x@1"])]).unwrap())
+                .unwrap();
+        assert!(once.contains("id: custom"));
+        assert!(once.contains("serverName: chrome"));
+        assert_eq!(once.matches(MCP_SERVERS_START).count(), 1);
+
+        // 修改列表：整块替换，不留旧条目。
+        let twice = String::from_utf8(
+            patch_mcp_servers(&once, &[mcp_chrome(&["-y", "x@2"]), mcp_web_api()]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(twice.matches(MCP_SERVERS_START).count(), 1);
+        assert!(!twice.contains("x@1"));
+        let parsed = parse_mcp_servers(&twice).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert!(twice.contains("id: custom"), "用户插件必须保留");
+
+        // 幂等：同一列表重复写入不改变文本。
+        let thrice = String::from_utf8(
+            patch_mcp_servers(&twice, &[mcp_chrome(&["-y", "x@2"]), mcp_web_api()]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(thrice, twice);
+    }
+
+    #[test]
+    fn mcp_patch_replaces_scaffolded_empty_array_document() {
+        let before = "# user patch layer\n# keep this comment\n[]\n";
+        let output = String::from_utf8(
+            patch_mcp_servers(before, &[mcp_chrome(&["-y", "chrome-devtools-mcp@latest"])])
+                .unwrap(),
+        )
+        .unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
+        assert!(parsed
+            .as_sequence()
+            .is_some_and(|entries| entries.len() == 1));
+        assert!(output.contains("# keep this comment"));
+        assert!(!output.lines().any(|line| line.trim() == "[]"));
+
+        // 移除后回退为合法的空数组文档。
+        let removed =
+            String::from_utf8(remove_mcp_servers(&output).unwrap()).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&removed).unwrap();
+        assert!(parsed.as_sequence().is_some_and(Vec::is_empty));
+        assert!(removed.contains("# keep this comment"));
+        assert!(removed.lines().any(|line| line.trim() == "[]"));
+        let twice = String::from_utf8(remove_mcp_servers(&removed).unwrap()).unwrap();
+        assert_eq!(twice, removed);
+    }
+
+    #[test]
+    fn mcp_patch_and_parse_refuse_broken_managed_markers() {
+        let error =
+            patch_mcp_servers(MCP_SERVERS_START, &[mcp_chrome(&["-y", "x"])]).unwrap_err();
+        assert!(error.contains("标记不完整"));
+        let parse_error = parse_mcp_servers(MCP_SERVERS_START).unwrap_err();
+        assert!(parse_error.contains("标记不完整"));
+        let remove_error = remove_mcp_servers(MCP_SERVERS_END).unwrap_err();
+        assert!(remove_error.contains("标记不完整"));
+    }
+
+    #[test]
+    fn mcp_patch_preserves_crlf() {
+        let output = String::from_utf8(
+            patch_mcp_servers(
+                "# user\r\n- insert:\r\n    - id: custom\r\n",
+                &[mcp_chrome(&["-y", "chrome-devtools-mcp@latest"])],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(output.contains("\r\n"));
+        assert!(!output.replace("\r\n", "").contains('\n'));
+    }
+
+    #[test]
+    fn mcp_validate_rejects_bad_specs() {
+        validate_mcp_servers(&[mcp_chrome(&["-y", "x"]), mcp_web_api()]).unwrap();
+
+        let long_name = "a".repeat(33);
+        for (label, server) in [
+            ("bad-id", McpServerSpec { id: "has space".to_string(), ..mcp_chrome(&[]) }),
+            ("long-name", McpServerSpec { server_name: long_name, ..mcp_chrome(&[]) }),
+            ("no-command", McpServerSpec { command: None, ..mcp_chrome(&[]) }),
+            ("empty-command", McpServerSpec { command: Some(String::new()), ..mcp_chrome(&[]) }),
+            ("bad-transport", McpServerSpec { transport: "websocket".to_string(), ..mcp_chrome(&[]) }),
+            ("http-without-url", McpServerSpec { url: None, ..mcp_web_api() }),
+        ] {
+            let error = validate_mcp_servers(std::slice::from_ref(&server)).unwrap_err();
+            assert!(!error.is_empty(), "{label} 应当被拒绝");
+        }
+        // 同列表内 serverName 重复（不同 id）必须拒绝。
+        let duplicated = vec![
+            mcp_chrome(&[]),
+            McpServerSpec { id: "alias".to_string(), ..mcp_chrome(&[]) },
+        ];
+        assert!(validate_mcp_servers(&duplicated).is_err());
+    }
+
+    #[test]
+    fn mcp_apply_requires_an_initialized_profile_for_nonempty_lists() {
+        let home =
+            std::env::temp_dir().join(format!("flowlet-dsh-mcp-noprofile-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("settings.yaml"), "unrelated: keep\n").unwrap();
+        std::fs::write(home.join(".credentials.yaml"), "EXISTING_TOKEN: keep-me\n").unwrap();
+
+        let servers = [mcp_chrome(&["-y", "chrome-devtools-mcp@latest"])];
+        let error = apply_dsh_at_with_inputs(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "token",
+            false,
+            false,
+            false,
+            None,
+            Some(&servers),
+        )
+        .unwrap_err();
+        assert!(error.contains("尚未发现可部署 MCP 服务器的 DSH Profile"));
+
+        // 空列表只是移除受管块，不应因没有 Profile 而失败。
+        apply_dsh_at_with_inputs(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "token",
+            false,
+            false,
+            false,
+            None,
+            Some(&[]),
+        )
+        .unwrap();
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[test]
+    fn real_upstream_fixture_mcp_servers_passes_apply_reapply_disable_restore_contract() {
+        const UPSTREAM_PATCH: &str =
+            include_str!("../../../../tests/fixtures/deepseek-harness/web/cordis.patch.yml");
+        let home = std::env::temp_dir().join(format!(
+            "flowlet-dsh-mcp-servers-contract-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let profile = home.join("profiles").join("web");
+        std::fs::create_dir_all(&profile).unwrap();
+        let settings = "# keep user settings\nllm-pi-ai:\n  providers:\n    existing:\n      baseURL: https://example.com/v1\nagent-default-model:\n  provider: existing\n  model: existing-model\n";
+        let credentials = "# keep user credentials\nEXISTING_TOKEN: keep-me\n";
+        std::fs::write(home.join("settings.yaml"), settings).unwrap();
+        std::fs::write(home.join(".credentials.yaml"), credentials).unwrap();
+        std::fs::write(
+            profile.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}"#,
+        )
+        .unwrap();
+        std::fs::write(profile.join("cordis.patch.yml"), UPSTREAM_PATCH).unwrap();
+
+        let inspected = inspect_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
+        assert!(inspected.mcp_servers.is_empty());
+
+        // apply：同时部署会话桥与两个 MCP 服务器（stdio + streamable-http）。
+        let servers = vec![
+            mcp_chrome(&["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"]),
+            mcp_web_api(),
+        ];
+        let report = apply_dsh_at_with_inputs(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+            false,
+            true,
+            None,
+            Some(&servers),
+        )
+        .unwrap();
+        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
+        assert_eq!(report.mcp_servers, servers);
+        assert!(report.session_extension);
+        assert!(report.approval_bridge);
+
+        let managed_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&managed_patch).unwrap();
+        let entries = parsed.as_sequence().unwrap();
+        let mcp_entries = entries
+            .iter()
+            .filter(|entry| {
+                entry
+                    .get("insert")
+                    .and_then(|insert| insert.get(0))
+                    .and_then(|plugin| plugin.get("name"))
+                    .and_then(serde_yaml::Value::as_str)
+                    == Some("@deepseek-ai/dsh-mcp-client")
+            })
+            .count();
+        assert_eq!(mcp_entries, 2, "每个服务器一个 dsh-mcp-client 插件实例");
+        // 受管块必须能重新解析回完整规格。
+        assert_eq!(parse_mcp_servers(&managed_patch).unwrap(), servers);
+
+        // reapply：幂等。
+        apply_dsh_at_with_inputs(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+            false,
+            true,
+            None,
+            Some(&servers),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+            managed_patch,
+            "reapply must be idempotent"
+        );
+
+        // disable：Some(空) 只移除 MCP 块，保留会话桥与确认桥。
+        let disabled = apply_dsh_at_with_inputs(
+            &home,
+            "http://127.0.0.1:18640/v1",
+            "flowlet-client-token",
+            true,
+            false,
+            true,
+            None,
+            Some(&[]),
+        )
+        .unwrap();
+        assert!(disabled.mcp_servers.is_empty());
+        assert!(disabled.session_extension);
+        assert!(disabled.approval_bridge);
+        let disabled_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
+        assert!(!disabled_patch.contains(MCP_SERVERS_START));
+        assert!(!disabled_patch.contains("dsh-mcp-client"));
+        assert!(disabled_patch.contains(SESSION_BRIDGE_START));
+        assert!(disabled_patch.contains(APPROVAL_BRIDGE_START));
+
+        // restore：恢复原始 patch（逐字节），备份删除。
+        let restored = restore_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
+        assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+        assert_eq!(
+            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
+            UPSTREAM_PATCH
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join("settings.yaml")).unwrap(),
+            settings
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
+            credentials
+        );
+        assert!(!backup_path(&home).exists());
+        std::fs::remove_dir_all(home).unwrap();
     }
 }

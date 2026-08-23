@@ -39,6 +39,12 @@ import {
   type QwenQuotaWindow,
 } from "./qwenTokenPlanDetails";
 import {
+  formatQwenFreeQuotaValue,
+  parseQwenFreeTierDetails,
+  qwenFreeQuotaByModel,
+  type QwenFreeQuotaInstance,
+} from "./qwenFreetierDetails";
+import {
   ACCOUNT_NAME_MAX_DISPLAY_UNITS,
   getAccountNameDisplayUnits,
   truncateAccountName,
@@ -136,11 +142,12 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const isLongCatHybrid = draft.channel_id === "longcat" && resourceMode === "hybrid";
   // Qwen Token Plan 的额度只来自官方控制台，也固定为自动同步，不再提供手动维护路径。
   const isQwenTokenPlan = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "token_plan";
-  // Qwen API 按量付费账号没有官方余额接口，也没有可用的控制台抓取模式
-  // （scrape 配置只针对 Token Plan 订阅端点），因此不提供自动同步，走手动维护。
+  // Qwen API 按量付费：福利页（权益）提供官方余额与免费额度抓取，同样固定自动同步。
   const isQwenPayAsYouGo = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "pay_as_you_go";
-  const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance && !isQwenPayAsYouGo;
-  const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan ? "auto" : (draft.resource_sync_mode ?? "manual");
+  const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
+  const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan || isQwenPayAsYouGo
+    ? "auto"
+    : (draft.resource_sync_mode ?? "manual");
   const isResourceAutoSync = supportsScrape && resourceSyncMode === "auto";
   const tokenRemaining = useMemo(() => {
     const total = optionalNumber(resource.tokenTotal);
@@ -159,15 +166,15 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     const next = presets.find((item) => item.id === channelId);
     const count = accounts.filter((item) => item.channel_id === channelId).length;
     // 千问默认 API 按量付费（渠道级 dashscope 端点），切到 Token Plan 时由
-    // selectResourceMode 写入套餐专属端点。
-    const nextIsQwenTokenPlan = channelId === QWEN_CHANNEL_ID && defaultResourceMode(channelId) === "token_plan";
+    // selectResourceMode 写入套餐专属端点。千问两种资源模式都走控制台自动同步。
+    const nextIsQwen = channelId === QWEN_CHANNEL_ID;
     update({
       channel_id: channelId,
       name: count === 0 ? t("{name} 主账号", { name: next?.name ?? t("渠道") }) : t("{name} 账号 {count}", { name: next?.name ?? t("渠道"), count: count + 1 }),
       resource_mode: defaultResourceMode(channelId),
-      resource_sync_mode: channelId === "longcat" || nextIsQwenTokenPlan ? "auto" : "manual",
-      base_url_override: nextIsQwenTokenPlan ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
-      anthropic_base_url_override: nextIsQwenTokenPlan ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
+      resource_sync_mode: channelId === "longcat" || nextIsQwen ? "auto" : "manual",
+      base_url_override: nextIsQwen && defaultResourceMode(channelId) === "token_plan" ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
+      anthropic_base_url_override: nextIsQwen && defaultResourceMode(channelId) === "token_plan" ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
       management_key: channelId === OPENROUTER_CHANNEL_ID ? currentDraft.management_key ?? null : null,
     });
     if (channelId === CUSTOM_CHANNEL_ID) setAdvancedOpen(true);
@@ -175,9 +182,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   }
 
   /** 切换资源模式。千问支持双资源模式：Token Plan 需要配套专属端点——选入时
-   *  自动写入账号级 Base URL 覆盖并强制自动同步；切回 API 按量付费时清除仍
-   *  是 Token Plan 地址的覆盖（保留用户在高级设置中自定义的地址，如团队版
-   *  专属 URL），并回到手动维护。 */
+   *  自动写入账号级 Base URL 覆盖并强制自动同步；API 按量付费由福利页（权益）
+   *  控制台自动同步余额与免费额度，同样固定为自动同步。切回按量付费时清除仍是
+   *  Token Plan 地址的覆盖（保留用户在高级设置中自定义的地址，如团队版专属 URL）。 */
   function selectResourceMode(nextMode: AccountResourceMode) {
     // 账号保存后资源模式不允许切换（避免与已维护的资源数据/订阅端点冲突）。
     if (isEdit) return;
@@ -196,7 +203,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     }
     update({
       resource_mode: nextMode,
-      resource_sync_mode: "manual",
+      resource_sync_mode: "auto",
       base_url_override: currentDraft.base_url_override?.trim() === QWEN_TOKEN_PLAN_OPENAI_BASE_URL ? null : currentDraft.base_url_override,
       anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() === QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL ? null : currentDraft.anthropic_base_url_override,
     });
@@ -320,6 +327,15 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     ),
     [candidateModelIds, currentDraft.exposed_models],
   );
+  // 千问按量付费：免费额度实例（valid 且有剩余）驱动模型勾选列表的免费优先排序与标注。
+  const qwenFreeQuotaDetails = useMemo(
+    () => (isQwenPayAsYouGo ? parseQwenFreeTierDetails(snapshot?.raw_scraped_json) : null),
+    [isQwenPayAsYouGo, snapshot?.raw_scraped_json],
+  );
+  const qwenFreeQuotaSet = useMemo(
+    () => qwenFreeQuotaByModel(qwenFreeQuotaDetails),
+    [qwenFreeQuotaDetails],
+  );
 
   /** 勾选保留 /models 返回的上游原始 ID。别名变体与规范名可能是独立额度资源，
    *  必须允许分别选择；是否受支持仍通过 canonicalModelId 按规范模型判断。 */
@@ -362,7 +378,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           name: normalizedName,
           api_key: currentDraft.api_key.trim(),
           management_key: currentDraft.management_key?.trim() || null,
-          resource_sync_mode: isQwenTokenPlan || isLongCatHybrid ? "auto" : currentDraft.resource_sync_mode,
+          resource_sync_mode: isQwenTokenPlan || isLongCatHybrid || isQwenPayAsYouGo ? "auto" : currentDraft.resource_sync_mode,
           base_url_override: currentDraft.base_url_override?.trim() || null,
           anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
         },
@@ -563,6 +579,15 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   language={language}
                   t={t}
                 />
+              ) : isQwenPayAsYouGo ? (
+                <QwenFreeTierPanel
+                  account={draft}
+                  enabled={isEdit}
+                  snapshot={snapshot}
+                  onScrape={onScrape}
+                  language={language}
+                  t={t}
+                />
               ) : (
                 <div className={styles.resourcePanel}>
                 <div className={styles.resourceHeading}>
@@ -633,7 +658,20 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   const sorted = [...(enrichedCandidates ?? [])].sort((a, b) => {
                     const aSupported = whitelistSet.has(canonicalModelKey(a.model));
                     const bSupported = whitelistSet.has(canonicalModelKey(b.model));
-                    return modelCandidateSortRank(a, aSupported) - modelCandidateSortRank(b, bSupported);
+                    const aFree = isOpenRouter
+                      ? isFreeModelPricing(a.pricing)
+                      : isQwenPayAsYouGo
+                        ? qwenFreeQuotaSet.has(a.model.trim().toLowerCase())
+                        : false;
+                    const bFree = isOpenRouter
+                      ? isFreeModelPricing(b.pricing)
+                      : isQwenPayAsYouGo
+                        ? qwenFreeQuotaSet.has(b.model.trim().toLowerCase())
+                        : false;
+                    return (
+                      modelCandidateSortRank(a, aSupported, aFree)
+                      - modelCandidateSortRank(b, bSupported, bFree)
+                    );
                   });
                   const startIndex = (modelPage - 1) * MODELS_PER_PAGE;
                   const paged = sorted.slice(startIndex, startIndex + MODELS_PER_PAGE);
@@ -646,7 +684,14 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                           // 同一规范模型下的独立额度资源分别开启。
                           const key = canonicalModelKey(candidate.model);
                           const supported = whitelistSet.has(key);
-                          const free = isOpenRouter && isFreeModelPricing(candidate.pricing);
+                          // 千问按量付费：免费额度实例（valid 且有剩余）优先展示；
+                          // 免费仅提示与排序，不改变白名单可勾选约束。
+                          const qwenQuota = isQwenPayAsYouGo
+                            ? qwenFreeQuotaSet.get(candidate.model.trim().toLowerCase())
+                            : undefined;
+                          const free = isOpenRouter
+                            ? isFreeModelPricing(candidate.pricing)
+                            : qwenQuota !== undefined;
                           const checked = selectedSet.has(candidate.model.trim().toLowerCase());
                           const canonical = canonicalModelId(candidate.model);
                           const isAliasVariant = supported
@@ -680,6 +725,14 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                                       {candidate.display_name}
                                     </Text>
                                   </>
+                                ) : null}
+                                {qwenQuota ? (
+                                  <Text className={styles.modelQuota} type="tertiary" size="small">
+                                    {t("免费剩余 {value} · 周期至 {date}", {
+                                      value: formatQwenFreeQuotaValue(qwenQuota, language),
+                                      date: qwenQuota.cycleEndAt?.slice(0, 10) ?? "-",
+                                    })}
+                                  </Text>
                                 ) : null}
                               </span>
                             </label>
@@ -824,17 +877,19 @@ function resourceSyncModeOptions(): { value: AccountResourceSyncMode; title: str
 
 function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPreset[], language: "zh-CN" | "en-US"): ChannelAccount {
   if (mode.kind === "edit") {
+    // 千问双资源模式（按量付费 / Token Plan）都由官方控制台自动同步。
     const forceAutoSync = mode.account.channel_id === "longcat"
-      || (mode.account.channel_id === QWEN_CHANNEL_ID && mode.account.resource_mode === "token_plan");
+      || mode.account.channel_id === QWEN_CHANNEL_ID;
     return { ...mode.account, resource_sync_mode: forceAutoSync ? "auto" : mode.account.resource_sync_mode };
   }
   const channel = presets.find((item) => item.id === mode.channelId);
   const count = accounts.filter((item) => item.channel_id === mode.channelId).length;
   const now = new Date().toISOString();
   const nextQwenMode = defaultResourceMode(mode.channelId);
-  // 只有默认资源模式为 Token Plan 时才预填套餐专属端点（当前默认 API 按量付费，
-  // 新建账号走渠道级端点；用户切到 Token Plan 时由 selectResourceMode 补端点）。
+  // 千问默认 API 按量付费：新建账号走渠道级端点、福利页控制台自动同步；
+  // 仅当默认资源模式是 Token Plan 时才预填套餐专属端点。
   const qwenTokenPlanDefault = mode.channelId === QWEN_CHANNEL_ID && nextQwenMode === "token_plan";
+  const qwenAnyMode = mode.channelId === QWEN_CHANNEL_ID;
   return {
     id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     workspace_account_id: null,
@@ -846,7 +901,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     priority: accounts.length,
     remark: "",
     resource_mode: nextQwenMode,
-    resource_sync_mode: mode.channelId === "longcat" || qwenTokenPlanDefault ? "auto" : "manual",
+    resource_sync_mode: mode.channelId === "longcat" || qwenAnyMode ? "auto" : "manual",
     base_url_override: qwenTokenPlanDefault ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
     anthropic_base_url_override: qwenTokenPlanDefault ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
     workspace_default_base_url: null,
@@ -1286,6 +1341,100 @@ function QwenTokenPlanPanel({
           ) : null}
         </div>
       ) : null}
+
+      <div className={styles.longCatSyncSection}>
+        <div className={styles.longCatSyncControls}>
+          <Button
+            icon={<IconRefresh />}
+            loading={isScraping}
+            disabled={!enabled}
+            onClick={() => void handleScrape()}
+          >
+            {t("立即刷新")}
+          </Button>
+          <ScrapeSyncFeedback
+            isScraping={isScraping}
+            statusText={statusText}
+            needLogin={needLogin}
+            consoleActionMessage={consoleActionMessage}
+            error={error}
+            onRetry={() => void handleRetry()}
+            showIdleHint={!details}
+            t={t}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 千问 API 按量付费：福利页（权益）抓取结果面板——官方余额、本月账单与
+ *  免费额度模型明细（仅展示；路由开放仍受全局白名单约束）。 */
+function QwenFreeTierPanel({
+  account,
+  enabled,
+  snapshot,
+  onScrape,
+  language,
+  t,
+}: {
+  account: ChannelAccount;
+  enabled: boolean;
+  snapshot?: AccountBalanceSnapshot;
+  onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
+  language: "zh-CN" | "en-US";
+  t: (k: string, params?: Record<string, string | number> | undefined) => string;
+}) {
+  const {
+    startScrape,
+    retryScrape,
+    lastResult,
+    isScraping,
+    needLogin,
+    consoleActionMessage,
+    error,
+    statusText,
+  } = useScrapeConsole(onScrape);
+  const details = parseQwenFreeTierDetails(lastResult?.raw_scraped_json ?? snapshot?.raw_scraped_json);
+  const syncedAt = lastResult?.synced_at ?? snapshot?.synced_at;
+
+  async function handleScrape() {
+    await startScrape(account.id);
+  }
+
+  async function handleRetry() {
+    await retryScrape(account.id);
+  }
+
+  return (
+    <div className={styles.longCatResourcePanel}>
+      <div className={styles.longCatSummaryCard}>
+        <div className={styles.longCatSummaryHeading}>
+          <strong>{t("API 按量付费 · 免费额度")}</strong>
+          <Tag size="small" color="green">{t("自动同步")}</Tag>
+        </div>
+        <div className={`${styles.longCatSummaryGrid} ${styles.qwenFreetierSummaryGrid}`}>
+          <div>
+            <small>{t("账户余额")}</small>
+            <strong>{details?.balance == null ? "-" : `${details.balance.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${details.currency ?? ""}`}</strong>
+          </div>
+          <div>
+            <small>{t("未结清")}</small>
+            <strong>{details?.unsettledAmount == null ? "-" : details.unsettledAmount.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+          </div>
+          <div>
+            <small>{details?.settleBillCycle ? t("账单 {cycle}", { cycle: details.settleBillCycle }) : t("本月账单")}</small>
+            <strong>{details?.settleBillTotal == null ? "-" : details.settleBillTotal.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { maximumFractionDigits: 2 })}</strong>
+          </div>
+          <div className={styles.qwenTimeSummary}>
+            <span>
+              <small>{t("最近同步")}</small>
+              <strong>{syncedAt ? formatFullTimestamp(syncedAt, language) : "-"}</strong>
+            </span>
+            <Text type="tertiary" size="small">{t("免费模型见下方开放模型列表")}</Text>
+          </div>
+        </div>
+      </div>
 
       <div className={styles.longCatSyncSection}>
         <div className={styles.longCatSyncControls}>

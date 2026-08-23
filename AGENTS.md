@@ -506,6 +506,19 @@ headless 任务执行兼容 npx 官方启动方式：npm 缓存中只存在唯�
 OpenCode 共用同一套会话状态推断。插件随 Profile 配置一同备份、原子写入和恢复，旧备份
 （无 approval 字段）在 apply 时自动补录，关闭选项移除受管桥接；启用或关闭后需重启正在运行的
 DSH。该能力独立于精确会话关联与模型规格声明，三者的开关互不影响。
+用户开启“MCP 服务器”（`configCapabilities` 中 kind 为 `list`）后，Flowlet 在每个已初始化的
+base-bundle DSH Profile 的 `cordis.patch.yml` 部署受管 `deepseek-harness-mcp-servers` 块：块内每个
+服务器一个 `- insert:` 的 `@deepseek-ai/dsh-mcp-client` 插件实例（stdio 或 streamable-http），
+把 MCP 工具注册为 `mcp__<serverName>__<工具名>`；增删改整块重写、随 Profile 配置一同备份和恢复，
+不写入插件文件、不修改 DSH npm 包。受管模型 `McpServerSpec`（id / serverName / transport /
+command / args / env / cwd / url / headers，camelCase）在 Rust 与前端同步；写入端执行与 DSH
+一致的校验（serverName `[A-Za-z0-9_-]{1,32}` 且唯一、stdio 必须有 command、http 必须有 url），
+先校验后落盘。配置修改由 DSH 热替换生效（断开 + 重连），无需重启；关闭移除受管块，inspect 从
+受管块按 id 跨 Profile 合并回读当前列表。管理界面位于接入抽屉的独立「MCP 服务器」Tab
+（仅 DeepSeek Harness 显示，高级配置区不重复渲染），面板本地维护草稿、点「写回 Flowlet」
+一次性提交。env/headers 只写普通字符串，不生成 `!!js` 运行时注入表达式。该能力独立于
+精确会话关联、模型规格声明与交互确认桥，四者开关互不影响；预设（Chrome DevTools / GitHub /
+Sequential Thinking / 自定义）与字段约束见 `docs/deepseek-harness-integration.md`。
 
 ### Codex 系一键接入
 

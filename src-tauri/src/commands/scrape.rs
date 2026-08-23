@@ -1125,7 +1125,7 @@ mod scrape_capture_tests {
     }
 
     #[test]
-    fn qwen_console_sync_only_for_token_plan_subscription() {
+    fn qwen_console_sync_covers_both_resource_modes() {
         let config = default_channels_config();
         let token_plan = ChannelAccount {
             channel_id: "qwen".to_string(),
@@ -1143,6 +1143,10 @@ mod scrape_capture_tests {
             resource_sync_mode: "auto".to_string(),
             ..Default::default()
         };
+        let pay_as_you_go_manual = ChannelAccount {
+            resource_sync_mode: "manual".to_string(),
+            ..pay_as_you_go.clone()
+        };
 
         assert_eq!(
             channel_resource_sync_method(&config, &token_plan),
@@ -1152,9 +1156,15 @@ mod scrape_capture_tests {
             channel_resource_sync_method(&config, &token_plan_manual),
             None
         );
-        // API 按量付费账号没有官方余额接口也没有可用的控制台抓取模式，
-        // 即使标记 auto 也不参与自动同步。
-        assert_eq!(channel_resource_sync_method(&config, &pay_as_you_go), None);
+        // API 按量付费走福利页（权益）抓取：自动同步余额与免费额度。
+        assert_eq!(
+            channel_resource_sync_method(&config, &pay_as_you_go),
+            Some(ChannelResourceSyncMethod::ConsoleScrape)
+        );
+        assert_eq!(
+            channel_resource_sync_method(&config, &pay_as_you_go_manual),
+            None
+        );
     }
 
     #[test]

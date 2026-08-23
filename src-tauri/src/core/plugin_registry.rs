@@ -210,7 +210,7 @@ impl PluginRegistry {
                     for capability in &agent.config_capabilities {
                         if capability.id.trim().is_empty()
                             || capability.name.trim().is_empty()
-                            || capability.kind != "boolean"
+                            || !matches!(capability.kind.as_str(), "boolean" | "list")
                             || !capability_ids.insert(capability.id.as_str())
                         {
                             return Err(format!(
@@ -467,7 +467,7 @@ mod tests {
                 .iter()
                 .map(|capability| capability.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["session-extension", "model-specs"]
+            vec!["session-extension", "model-specs", "mcp-servers"]
         );
         assert_eq!(
             registry

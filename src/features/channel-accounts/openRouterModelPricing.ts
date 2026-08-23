@@ -36,9 +36,11 @@ function isZeroPrice(value: unknown): boolean {
   return Number.isFinite(parsed) && parsed === 0;
 }
 
-/** 排序优先级：免费且支持 > 付费且支持 > 免费但不支持 > 付费/未知且不支持。 */
-export function modelCandidateSortRank(candidate: ModelCandidate, supported: boolean): number {
-  const free = isFreeModelPricing(candidate.pricing);
+/** 排序优先级：免费且支持 > 付费且支持 > 免费但不支持 > 付费/未知且不支持。
+ *  `freeOverride` 用于非 OpenRouter 渠道（如千问按量付费福利页）按抓取的免费额度
+ *  覆盖价格判断；缺省时仍按 /models 返回的 pricing 判定。 */
+export function modelCandidateSortRank(candidate: ModelCandidate, supported: boolean, freeOverride?: boolean): number {
+  const free = freeOverride ?? isFreeModelPricing(candidate.pricing);
   if (supported) return free ? 0 : 1;
   return free ? 2 : 3;
 }

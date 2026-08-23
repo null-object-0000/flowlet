@@ -29,7 +29,8 @@ export type AgentTaskCapability = {
 export type AgentConfigCapability = {
   id: string;
   name: string;
-  kind: "boolean";
+  /** boolean = 布尔开关；list = 受管列表（当前仅 DeepSeek Harness 的 MCP 服务器）。 */
+  kind: "boolean" | "list";
   defaultEnabled: boolean;
   requiresRestart: boolean;
 };
@@ -126,6 +127,22 @@ export type CodexAccountDeletionResult = {
   email?: string | null;
 };
 
+/** DeepSeek Harness 受管 MCP 服务器配置（与 Rust `McpServerSpec` 一致，字段 camelCase）。 */
+export type McpServerSpec = {
+  /** Flowlet 内部稳定 id，同时决定 DSH 插件条目 id `mcp-<id>`。 */
+  id: string;
+  /** DSH 工具命名空间 `[A-Za-z0-9_-]{1,32}`，公开工具名为 mcp__<serverName>__<rawName>。 */
+  serverName: string;
+  transport: "stdio" | "streamable-http";
+  command?: string;
+  args?: string[];
+  /** 额外环境变量；Flowlet 只写普通字符串值。 */
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+};
+
 export type AgentGlobalConfigState =
   | "not_configured"
   | "flowlet"
@@ -166,6 +183,8 @@ export type AgentGlobalConfigReport = {
   model_input_modalities?: Record<string, string[]>;
   /** 仅 DeepSeek Harness：Flowlet 交互确认桥（approval bridge）是否在位。 */
   approval_bridge?: boolean;
+  /** 仅 DeepSeek Harness：从各 base Profile 受管块回读的 MCP 服务器列表。 */
+  mcp_servers?: McpServerSpec[];
   /** 仅 OpenCode：用于发现 CLI/Desktop 进程内权限事件的全局插件是否在位。 */
   opencode_permission_bridge?: boolean;
 };
@@ -184,6 +203,8 @@ export type AgentGlobalConfigOptions = {
   modelSpecs?: boolean;
   /** 仅 DeepSeek Harness：是否部署受管交互确认桥（approval bridge）。 */
   approvalBridge?: boolean;
+  /** 仅 DeepSeek Harness：受管 MCP 服务器列表；空数组移除全部受管 MCP 块。 */
+  mcpServers?: McpServerSpec[];
 };
 
 /** Agent 最新版本查询结果（来自 npm registry，仅提示用，不执行升级）。 */

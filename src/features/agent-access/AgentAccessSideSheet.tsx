@@ -315,6 +315,7 @@ export function AgentAccessSideSheet({
                 {meta.showsSubagentModel ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}
                 <AgentConfigControls
                   controls={configControls}
+                  agentName={meta.name}
                   busy={globalConfigBusy}
                   disabled={globalConfig.state === "invalid" || !clientToken}
                   onApplyGlobalConfig={onApplyGlobalConfig}
@@ -345,7 +346,7 @@ export function AgentAccessSideSheet({
                   {globalConfig.backup_available ? (
                     <Button disabled={globalConfigBusy} onClick={() => void onRestoreGlobalConfig()}>{t("恢复接入前配置")}</Button>
                   ) : null}
-                </div> : <Text className={styles.configNotice} type="tertiary">{t("当前版本请使用下方片段手动配置；DSH 会热加载这两个 YAML 文件，无需重启 DSH Web。")}</Text>}
+                </div> : <Text className={styles.configNotice} type="tertiary">{t("当前版本请使用下方片段手动配置；")}{t(meta.restartTip)}</Text>}
               </div>
             ) : null}
         </section>
@@ -480,11 +481,14 @@ function installationTitle(
 
 function AgentConfigControls({
   controls,
+  agentName,
   busy,
   disabled,
   onApplyGlobalConfig,
 }: {
   controls: AgentConfigControl[];
+  /** 当前 Agent 展示名，用于「需重启」标签与提示中的重启对象（Claude Code / OpenCode / DSH…）。 */
+  agentName: string;
   busy: boolean;
   disabled: boolean;
   onApplyGlobalConfig: (options?: AgentGlobalConfigOptions) => Promise<void>;
@@ -498,7 +502,7 @@ function AgentConfigControls({
         <div className={styles.capabilityTitle}>
           <strong>{control.label}</strong>
           <Tag size="small" color={control.checked ? "green" : "grey"}>{t(control.checked ? "已启用" : "未启用")}</Tag>
-          {control.requiresRestart ? <Tag size="small">{t("需重启 DSH")}</Tag> : null}
+          {control.requiresRestart ? <Tag size="small">{t("需重启 {name}", { name: agentName })}</Tag> : null}
         </div>
         {control.descriptions.map((description) => <small key={description}>{description}</small>)}
       </div>
@@ -534,7 +538,7 @@ function AgentConfigControls({
       </button>
       <Collapsible isOpen={advancedOpen} motion={false} keepDOM lazyRender>
         <div className={styles.capabilityList}>{rows}</div>
-        <small className={styles.advancedNote}>{t("开关会立即写入配置；标记为需重启的能力将在下次启动 DSH 后生效。")}</small>
+        <small className={styles.advancedNote}>{t("开关会立即写入配置；标记为需重启的能力将在下次启动 {name} 后生效。", { name: agentName })}</small>
       </Collapsible>
     </div>
   );

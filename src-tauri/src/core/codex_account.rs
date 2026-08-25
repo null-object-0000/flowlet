@@ -707,6 +707,14 @@ async fn start_codex_rpc(home_override: Option<&Path>) -> Result<CodexRpc, Strin
     if let Some(home) = home_override {
         command.env("CODEX_HOME", home);
     }
+    // Codex CLI 的 OAuth token exchange 在 app-server 子进程内完成，不受 Flowlet
+    // 自身 reqwest 客户端的影响。这里把上游代理配置注入子进程环境，使登录的
+    // token 交换也走用户配置的代理（enabled=false 时为空，保留父进程 env 继承）。
+    for (key, value) in
+        crate::core::upstream_proxy::command_env_overrides(&crate::core::upstream_proxy::current())
+    {
+        command.env(key, value);
+    }
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

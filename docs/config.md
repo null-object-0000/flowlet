@@ -112,11 +112,15 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 **行为**：
 
-- 只作用于 **Flowlet 自身发起的对外 HTTP 请求**：Codex 官方用量
+- 作用于 **Flowlet 自身发起的对外 HTTP 请求**：Codex 官方用量
   （`https://chatgpt.com/backend-api/wham/usage`）、渠道模型同步/余额查询、
-  Agent 版本检查、远程数据拉取（`storage_tasks`）。**不作用于**本地代理的
-  上游模型转发（`proxy.rs` 的 `Client` 仍直连各渠道上游），也不作用于局域网
-  设备直连（`lan_sync`）。
+  Agent 版本检查、远程数据拉取（`storage_tasks`）。
+- 也作用于 **Codex 登录的 OAuth token exchange**：该步骤在 Flowlet 启动的
+  Codex CLI `app-server` 子进程内完成，启动子进程时会把配置注入其
+  `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 环境变量。浏览器里的
+  登录页（`auth.openai.com`）仍走系统浏览器的代理设置，不受此配置控制。
+- **不作用于**本地代理的上游模型转发（`proxy.rs` 的 `Client` 仍直连各渠道
+  上游），也不作用于局域网设备直连（`lan_sync`）。
 - 桌面进程不会继承 shell 里 export 的 `HTTPS_PROXY` 等环境变量，因此需要在
   这里显式配置；未启用时 Flowlet 走直连。
 - 配置进程内热更新：设置页保存后立即生效（`set_upstream_proxy_config` 同时

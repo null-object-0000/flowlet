@@ -154,6 +154,35 @@ pub fn build_client() -> Result<reqwest::Client, String> {
         .map_err(|error| format!("创建 HTTP 客户端失败：{error}"))
 }
 
+/// 返回需要注入到子进程环境的代理变量。
+///
+/// Flowlet 自身用 reqwest 的 `apply_to` 走代理，但某些流程由 Flowlet 启动的子进程
+/// 完成（例如 Codex CLI app-server 的 OAuth token exchange）。这些子进程不会读取
+/// Flowlet 的内存配置，只能通过环境变量继承代理。`enabled=false` 时返回空列表，
+/// 保留子进程对父进程环境变量的继承（与未配置代理时的行为一致）。
+pub fn command_env_overrides(config: &UpstreamProxyConfig) -> Vec<(String, String)> {
+    if !config.is_active() {
+        return Vec::new();
+    }
+    let url = config.url.trim().to_string();
+    let no_proxy = config.no_proxy.trim().to_string();
+    let mut entries = Vec::with_capacity(8);
+    for key in [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        entries.push((key.to_string(), url.clone()));
+    }
+    for key in ["NO_PROXY", "no_proxy"] {
+        entries.push((key.to_string(), no_proxy.clone()));
+    }
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,5 +273,24 @@ mod tests {
         )
         .expect_err("socks must be rejected");
         assert!(error.contains("仅支持 http/https"));
+    }
+
+    #[test]
+    fn command_env_overrides_inject_proxy_when_enabled_and_empty_when_disabled() {
+        let overrides = command_env_overrides(&UpstreamProxyConfig {
+            enabled: true,
+            url: "http://127.0.0.1:7890".to_string(),
+            no_proxy: "localhost".to_string(),
+        });
+        let map: std::collections::HashMap<&str, &str> = overrides
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        assert_eq!(map.get("HTTPS_PROXY"), Some(&"http://127.0.0.1:7890"));
+        assert_eq!(map.get("HTTP_PROXY"), Some(&"http://127.0.0.1:7890"));
+        assert_eq!(map.get("ALL_PROXY"), Some(&"http://127.0.0.1:7890"));
+        assert_eq!(map.get("NO_PROXY"), Some(&"localhost"));
+
+        assert!(command_env_overrides(&UpstreamProxyConfig::default()).is_empty());
     }
 }
